@@ -7,34 +7,46 @@
 //! screen, shaped like it, the window's own desktop ringed and inert, a
 //! click sending the window there; Close, in orange, with its key.
 //!
+//! Built with the shell's widget kit ([`crate::ui`]), its parts pinned
+//! where [`layout`] places them.
+//!
 //! The compositor knows the window's states and the screens: the shell
 //! asks it as the right click comes (`window-menu ID`), and opens the menu
 //! when it answers, at once. A switch flips at once and stays; the other
 //! actions close the menu. `Tab` and the arrows go through it, `Enter` or
 //! `Space` acts, `Esc` closes it.
 
+use hocus_words::shell::popover_window_menu as txt;
 use std::sync::{Mutex, PoisonError};
 
+use hocus_a11y::Role;
 use hocus_link::{ToCompositor, WindowAction, WindowMenu};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Element, Length, Padding, Point, Rectangle, Size,
+    alignment::Vertical,
+    keyboard,
     widget::{
-        canvas::{self, Frame, Geometry, Path, Stroke},
-        text::Alignment,
+        Space, button,
+        canvas::{self, Frame, Path, Stroke},
+        container, pin, row, space,
     },
     window,
 };
 
-use super::{
-    Effect, Event as Seen, Item, Pressed, event,
-    kit::{self, Input, Pointer, text, text_in},
-};
+use super::{Effect, Event as Seen, Item, Pressed, event, kit};
 use crate::{
     clock::time::Lang,
-    levels::draw::{ACCENT, DIM, FAINT, HOVER, MANROPE_BOLD, TEXT, ring},
+    levels::draw::{ACCENT, DIM, FAINT, HOVER, MANROPE, MANROPE_BOLD, TEXT},
     theme::Ink,
+    ui::{
+        self, Around, control,
+        parts::{self, drawn, drawn_out},
+        style::{self, said as text_of},
+    },
     windows::draw::{CLOSE_HOVER, CLOSE_INK},
 };
+
+type El<'a> = Element<'a, Msg>;
 
 pub const WIDTH: u32 = 240;
 const BORDER: f32 = 1.0;
@@ -88,6 +100,13 @@ pub enum Target {
     Close,
 }
 
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("window_menu:{self:?}").replace(' ', "")
+    }
+}
+
 /// The menu's words, French or English.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
@@ -101,19 +120,23 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.french { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.french {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn name(self, target: Target, maximized: bool) -> &'static str {
         match target {
-            Target::Maximize if maximized => self.pick("Restaurer", "Restore"),
-            Target::Maximize => self.pick("Agrandir", "Maximise"),
-            Target::Minimize => self.pick("Réduire", "Minimise"),
-            Target::Above => self.pick("Au premier plan", "Always on top"),
-            Target::AllDesktops => self.pick("Sur tous les bureaux", "On all desktops"),
+            Target::Maximize if maximized => self.pick(txt::RESTORE),
+            Target::Maximize => self.pick(txt::MAXIMISE),
+            Target::Minimize => self.pick(txt::MINIMISE),
+            Target::Above => self.pick(txt::ALWAYS_ON_TOP),
+            Target::AllDesktops => self.pick(txt::ON_ALL_DESKTOPS),
             Target::Tile { .. } => "",
-            Target::Close => self.pick("Fermer", "Close"),
+            Target::Close => self.pick(txt::CLOSE),
         }
     }
 
@@ -128,13 +151,13 @@ impl Words {
     }
 
     pub fn send_to(self) -> &'static str {
-        self.pick("ENVOYER SUR", "SEND TO")
+        self.pick(txt::SEND_TO)
     }
 
     /// A screen's caption: the built-in one is "this laptop".
     pub fn screen(self, screen: &hocus_link::MenuScreen) -> String {
         if screen.internal {
-            self.pick("ce portable", "this laptop").to_owned()
+            self.pick(txt::THIS_LAPTOP).to_owned()
         } else {
             screen.name.clone()
         }
@@ -246,7 +269,7 @@ pub struct Layout {
 }
 
 /// A row across the content from `top`.
-fn row(top: f32) -> Rectangle {
+fn row_rect(top: f32) -> Rectangle {
     Rectangle::new(Point::new(SIDE, top), Size::new(INNER, ROW))
 }
 
@@ -280,13 +303,13 @@ pub fn layout(menu: &WindowMenu) -> Layout {
     let mut rules = Vec::new();
     let mut y = BORDER + PAD + HEADER;
     for target in [Target::Maximize, Target::Minimize] {
-        targets.push((target, row(y)));
+        targets.push((target, row_rect(y)));
         y += ROW;
     }
     rules.push(y + GAP / 2.0);
     y += GAP;
     for target in [Target::Above, Target::AllDesktops] {
-        targets.push((target, row(y)));
+        targets.push((target, row_rect(y)));
         y += ROW;
     }
     rules.push(y + GAP / 2.0);
@@ -312,7 +335,7 @@ pub fn layout(menu: &WindowMenu) -> Layout {
     }
     rules.push(y + GAP / 2.0);
     y += GAP;
-    targets.push((Target::Close, row(y)));
+    targets.push((Target::Close, row_rect(y)));
     y += ROW;
     Layout {
         targets,
@@ -382,454 +405,417 @@ pub struct Panel {
 }
 
 #[derive(Debug, Default)]
-pub struct State {
-    pointer: Pointer<Target>,
+struct Ui {
     focus: Option<Target>,
+    /// What its content was built from.
+    built: Option<Shown>,
     said: Option<String>,
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(_) => {
-                for pressed in kit::keys(self.id) {
-                    let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-                }
-                self.say(state);
-                None
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// The menu opens: nothing holds the ring.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A row, a switch or a tile pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A press anywhere on the menu.
+    Pressed,
+    /// What it shows changed under the view.
+    Stale,
+}
+
+/// The menu on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (window, words) = (panel.window, panel.words);
+    Around::new(
+        panel.id,
+        build(window, words),
+        move |m| handle(m, window),
+        Msg::Stale,
+    )
+    .rebuild(move || build(window, words))
+    .stale_when(move || {
+        let now = shown(window);
+        ui(|ui| ui.built != now)
+    })
+    .keys(move |pressed| arrows(pressed, window))
+    .press(Msg::Pressed)
+    .subtitle(shown(window).map(|s| s.title))
+    .on_glass(panel.glass)
+}
+
+/// The arrows go through what acts, round: down and right forward.
+fn arrows(pressed: &Pressed, window: u64) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    let forward = match &pressed.key {
+        Key::Named(Named::ArrowDown | Named::ArrowRight) => true,
+        Key::Named(Named::ArrowUp | Named::ArrowLeft) => false,
+        _ => return None,
+    };
+    let shown = shown(window)?;
+    let order: Vec<Target> = layout(&shown.menu)
+        .targets
+        .into_iter()
+        .map(|(t, _)| t)
+        .filter(|t| acts(&shown.menu, *t))
+        .collect();
+    let next = match ui(|ui| ui.focus) {
+        Some(focus) => kit::cycle(&order, focus, forward),
+        None => kit::step(&order, None, !forward),
+    };
+    next.map(Msg::Focus)
+}
+
+/// `content` with its top left corner at `point` in the menu.
+fn at<'a>(content: impl Into<El<'a>>, point: Point) -> El<'a> {
+    pin(content).x(point.x).y(point.y).into()
+}
+
+/// A line of text from `x`, its middle at `middle`.
+fn middled<'a>(content: impl Into<El<'a>>, x: f32, middle: f32) -> El<'a> {
+    const ROOM: f32 = 30.0;
+    at(
+        container(content).height(ROOM).align_y(Vertical::Center),
+        Point::new(x, middle - ROOM / 2.0),
+    )
+}
+
+/// Its content, from what the compositor said of the window.
+fn build<'a>(window: u64, words: Words) -> El<'a> {
+    let shown = shown(window);
+    let focus = ui(|ui| {
+        ui.built.clone_from(&shown);
+        if let Some(shown) = &shown {
+            say(words, shown, ui);
+        }
+        ui.focus
+    });
+    let Some(shown) = shown else {
+        return Space::new().into();
+    };
+    let menu = &shown.menu;
+    let layout = layout(menu);
+    let mut layers: Vec<El<'a>> = vec![
+        Space::new()
+            .width(Length::Fill)
+            .height(layout.height)
+            .into(),
+    ];
+    // The header: the application's icon and the window's title.
+    let middle = BORDER + PAD + HEADER / 2.0;
+    let icon = Rectangle::new(
+        Point::new(SIDE + ROW_IN - 2.0, middle - HEADER_ICON / 2.0),
+        Size::new(HEADER_ICON, HEADER_ICON),
+    );
+    let found = crate::desktops::icons::of(&shown.app);
+    let name = shown
+        .app
+        .rsplit('.')
+        .next()
+        .filter(|n| !n.is_empty())
+        .unwrap_or(&shown.title)
+        .to_owned();
+    layers.push(at(
+        drawn(HEADER_ICON, HEADER_ICON, move |f, s| {
+            kit::app_tile(
+                f,
+                Rectangle::new(Point::ORIGIN, s),
+                (found.as_ref(), &name),
+                (4.0, 10.0),
+                1.0,
+            );
+        }),
+        icon.position(),
+    ));
+    let x = icon.x + HEADER_ICON + ICON_GAP;
+    let room = WIDTH as f32 - SIDE - ROW_IN - x;
+    let title = kit::elide(&shown.title, room, |t| {
+        kit::measure(t, HEADER_TEXT, MANROPE_BOLD)
+    });
+    layers.push(middled(
+        text_of(title, HEADER_TEXT, MANROPE_BOLD, TEXT.get()),
+        x,
+        middle,
+    ));
+    for y in &layout.rules {
+        layers.push(at(
+            container(Space::new().width(INNER - 2.0 * ROW_IN).height(1.0))
+                .style(|_| style::boxed(Color::from_rgba8(255, 255, 255, 0.08), 0.0)),
+            Point::new(SIDE + ROW_IN, y.round()),
+        ));
+    }
+    // "ENVOYER SUR", spaced capitals, and each screen's caption.
+    layers.push(middled(
+        ui::line(
+            parts::spaced(words.send_to(), CAPTION_TEXT, DIM.get(), f32::INFINITY),
+            words.send_to(),
+        ),
+        SIDE + ROW_IN,
+        layout.send_to,
+    ));
+    for (screen, y) in menu.screens.iter().zip(&layout.captions) {
+        layers.push(middled(
+            text_of(words.screen(screen), CAPTION_TEXT, MANROPE, FAINT.get()),
+            SIDE + 4.0,
+            *y,
+        ));
+    }
+    for (target, rect) in &layout.targets {
+        let focused = focus == Some(*target);
+        let shown_target = match target {
+            Target::Tile { screen, desktop } => {
+                let Some(s) = menu.screens.get(*screen) else {
+                    continue;
+                };
+                tile(words, menu, s, *target, *desktop, *rect, focused)
             }
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
+            _ => row_of(words, menu, *target, *rect, focused),
+        };
+        layers.push(at(shown_target, rect.position()));
     }
+    iced::widget::Stack::with_children(layers).into()
+}
 
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        if let Some(shown) = shown(self.window) {
-            self.draw_menu(&mut frame, state, &shown);
+/// A row: lit under the pointer (Close in orange), its icon, its words,
+/// its key or its switch.
+fn row_of<'a>(
+    words: Words,
+    menu: &WindowMenu,
+    target: Target,
+    rect: Rectangle,
+    focused: bool,
+) -> El<'a> {
+    let close = target == Target::Close;
+    let ink = if close { CLOSE_INK.get() } else { TEXT.get() };
+    let mut line = row![
+        drawn(ROW_ICON, ROW_ICON, move |f, s| {
+            row_icon(f, target, Rectangle::new(Point::ORIGIN, s), ink);
+        }),
+        Space::new().width(ICON_GAP),
+        text_of(words.name(target, menu.maximized), ROW_TEXT, MANROPE, ink),
+        space::horizontal(),
+    ]
+    .align_y(Vertical::Center);
+    let switch = match target {
+        Target::Above => Some(menu.above),
+        Target::AllDesktops => Some(menu.all_desktops),
+        _ => None,
+    };
+    line = match switch {
+        Some(on) => line.push(drawn(SWITCH.width, SWITCH.height, move |f, s| {
+            draw_switch(f, Rectangle::new(Point::ORIGIN, s), on);
+        })),
+        None => line.push(text_of(
+            Words::key(target, menu.maximized),
+            KEY_TEXT,
+            MONO,
+            FAINT.get(),
+        )),
+    };
+    let pressed = button(container(line).center_y(Length::Fill))
+        .padding(Padding {
+            left: ROW_IN,
+            right: ROW_IN,
+            ..Padding::ZERO
+        })
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, status| {
+            if style::lit(status) {
+                let ground = if close { CLOSE_HOVER } else { HOVER };
+                style::hovered(ground.get(), ROW_RADIUS)
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(target));
+    let role = if switch.is_some() {
+        Role::ToggleButton
+    } else {
+        Role::Button
+    };
+    control(
+        pressed,
+        target.id(),
+        role,
+        words.name(target, menu.maximized),
+    )
+    .node(|n| match switch {
+        Some(on) => n.checked(on),
+        None => n,
+    })
+    .focus(focused, Msg::Focus(target), ROW_RADIUS)
+    .activate(Msg::Act(target))
+    .into()
+}
+
+/// A switch at `at`, on or off.
+fn draw_switch(f: &mut Frame, at: Rectangle, on: bool) {
+    let track = if on { ACCENT.get() } else { SWITCH_OFF.get() };
+    f.fill(&kit::rounded(at, SWITCH.height / 2.0), track);
+    let knob = SWITCH.height - 4.0;
+    let x = if on {
+        at.x + at.width - 2.0 - knob / 2.0
+    } else {
+        at.x + 2.0 + knob / 2.0
+    };
+    f.fill(
+        &Path::circle(Point::new(x, at.center_y()), knob / 2.0),
+        TEXT.get(),
+    );
+}
+
+/// A desktop's tile, shaped like its screen: lit as the one showing,
+/// ringed as the window's own (inert), lit under the pointer.
+fn tile<'a>(
+    words: Words,
+    menu: &WindowMenu,
+    screen: &hocus_link::MenuScreen,
+    target: Target,
+    desktop: u8,
+    rect: Rectangle,
+    focused: bool,
+) -> El<'a> {
+    let here = screen.here == Some(desktop);
+    let shown_now = screen.current == desktop;
+    let acts = !here;
+    let face = drawn_out(rect.width, rect.height, 1.0, move |f, s| {
+        let at = Rectangle::new(Point::ORIGIN, s);
+        if here {
+            f.stroke(
+                &kit::rounded(at, TILE_RADIUS),
+                Stroke::default().with_color(ACCENT.get()).with_width(1.5),
+            );
         }
-        vec![frame.into_geometry()]
+        f.fill_text(kit::text_in(
+            MONO,
+            kit::text(
+                (desktop + 1).to_string(),
+                at.center(),
+                KEY_TEXT,
+                DIM.get(),
+                iced::widget::text::Alignment::Center,
+            ),
+        ));
+    });
+    let pressed = button(face)
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, status| {
+            let fill = if acts && style::lit(status) {
+                TILE_HOVER
+            } else if shown_now {
+                TILE_SHOWN
+            } else {
+                TILE
+            };
+            style::filled(fill.get(), TILE_RADIUS, TEXT.get())
+        })
+        .on_press_maybe(acts.then_some(Msg::Act(target)));
+    let mut name = if words.french {
+        format!("Envoyer sur le bureau {}", desktop + 1)
+    } else {
+        format!("Send to desktop {}", desktop + 1)
+    };
+    if menu.screens.len() > 1 {
+        name.push_str(&format!(", {}", words.screen(screen)));
     }
+    let mut declared = control(pressed, target.id(), Role::RadioButton, name).node(|n| {
+        n.checked(here)
+            .set(usize::from(desktop) + 1, usize::from(screen.count))
+    });
+    if acts {
+        declared = declared
+            .focus(focused, Msg::Focus(target), TILE_RADIUS)
+            .activate(Msg::Act(target));
+    }
+    declared.into()
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
+/// What it shows, said once a change (the tests read it).
+fn say(words: Words, shown: &Shown, ui: &mut Ui) {
+    let said_now = format!(
+        "window={} shows={}",
+        shown.menu.id,
+        said(words, &shown.menu)
+    );
+    if ui.said.as_ref() != Some(&said_now) {
+        tracing::debug!("the window's menu shows it: {said_now}");
+        ui.said = Some(said_now);
     }
 }
 
-impl Panel {
-    fn draw_menu(&self, f: &mut Frame, state: &State, shown: &Shown) {
-        let menu = &shown.menu;
-        let layout = layout(menu);
-        // The header: the application's icon and the window's title.
-        let middle = BORDER + PAD + HEADER / 2.0;
-        let icon = Rectangle::new(
-            Point::new(SIDE + ROW_IN - 2.0, middle - HEADER_ICON / 2.0),
-            Size::new(HEADER_ICON, HEADER_ICON),
-        );
-        let found = crate::desktops::icons::of(&shown.app);
-        let name = shown
-            .app
-            .rsplit('.')
-            .next()
-            .filter(|n| !n.is_empty())
-            .unwrap_or(&shown.title);
-        kit::app_tile(f, icon, (found.as_ref(), name), (4.0, 10.0), 1.0);
-        let x = icon.x + HEADER_ICON + ICON_GAP;
-        let room = WIDTH as f32 - SIDE - ROW_IN - x;
-        let title = kit::elide(&shown.title, room, |t| {
-            kit::measure(t, HEADER_TEXT, MANROPE_BOLD)
-        });
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                title,
-                Point::new(x, middle),
-                HEADER_TEXT,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        for y in &layout.rules {
-            f.fill_rectangle(
-                Point::new(SIDE + ROW_IN, y.round()),
-                Size::new(INNER - 2.0 * ROW_IN, 1.0),
-                Color::from_rgba8(255, 255, 255, 0.08),
-            );
-        }
-        // "ENVOYER SUR", spaced capitals, and each screen's caption.
-        let mut x = SIDE + ROW_IN;
-        for ch in self.words.send_to().chars() {
-            let s = ch.to_string();
-            f.fill_text(text_in(
-                MANROPE_BOLD,
-                text(
-                    s.clone(),
-                    Point::new(x, layout.send_to),
-                    CAPTION_TEXT,
-                    DIM.get(),
-                    Alignment::Left,
-                ),
-            ));
-            x += kit::measure(&s, CAPTION_TEXT, MANROPE_BOLD) + 0.9;
-        }
-        for (screen, y) in menu.screens.iter().zip(&layout.captions) {
-            f.fill_text(text(
-                self.words.screen(screen),
-                Point::new(SIDE + 4.0, *y),
-                CAPTION_TEXT,
-                FAINT.get(),
-                Alignment::Left,
-            ));
-        }
-        for (target, rect) in &layout.targets {
-            let hover = state.pointer.hover == Some(*target) && acts(menu, *target);
-            match target {
-                Target::Tile { screen, desktop } => {
-                    let Some(s) = menu.screens.get(*screen) else {
-                        continue;
-                    };
-                    let fill = if hover {
-                        TILE_HOVER
-                    } else if s.current == *desktop {
-                        TILE_SHOWN
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg, window: u64) {
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Act(target) => act(window, target),
+    }
+}
+
+/// `target` acted on: a switch flips and stays, the rest closes the menu.
+fn act(window: u64, target: Target) {
+    let Some(shown) = shown(window) else {
+        return;
+    };
+    let menu = &shown.menu;
+    if !acts(menu, target) {
+        return;
+    }
+    let id = menu.id;
+    let tell = |message| super::send(vec![Effect::Tell(message)]);
+    let action = |action| ToCompositor::WindowAction { id, action };
+    match target {
+        Target::Maximize => tell(action(WindowAction::Maximize)),
+        Target::Minimize => tell(action(WindowAction::Minimize)),
+        Target::Close => tell(action(WindowAction::Close)),
+        Target::Above | Target::AllDesktops => {
+            with(|m| {
+                if let Some(s) = m.shown.as_mut().filter(|s| s.menu.id == id) {
+                    if target == Target::Above {
+                        s.menu.above = !s.menu.above;
                     } else {
-                        TILE
-                    };
-                    f.fill(&kit::rounded(*rect, TILE_RADIUS), fill.get());
-                    if s.here == Some(*desktop) {
-                        f.stroke(
-                            &kit::rounded(*rect, TILE_RADIUS),
-                            Stroke::default().with_color(ACCENT.get()).with_width(1.5),
-                        );
+                        s.menu.all_desktops = !s.menu.all_desktops;
                     }
-                    f.fill_text(text_in(
-                        MONO,
-                        text(
-                            (desktop + 1).to_string(),
-                            rect.center(),
-                            KEY_TEXT,
-                            DIM.get(),
-                            Alignment::Center,
-                        ),
-                    ));
                 }
-                _ => self.draw_row(f, *target, *rect, menu, hover),
-            }
-        }
-        if let Some((target, rect)) = state
-            .focus
-            .and_then(|focus| layout.targets.iter().find(|(t, _)| *t == focus))
-        {
-            let radius = if matches!(target, Target::Tile { .. }) {
-                TILE_RADIUS
+            });
+            tell(action(if target == Target::Above {
+                WindowAction::Above
             } else {
-                ROW_RADIUS
-            };
-            ring(f, *rect, radius);
-        }
-    }
-
-    /// A row: lit under the pointer (Close in orange), its icon, its
-    /// words, its key or its switch.
-    fn draw_row(
-        &self,
-        f: &mut Frame,
-        target: Target,
-        rect: Rectangle,
-        menu: &WindowMenu,
-        hover: bool,
-    ) {
-        let close = target == Target::Close;
-        if hover {
-            let ground = if close { CLOSE_HOVER } else { HOVER };
-            f.fill(&kit::rounded(rect, ROW_RADIUS), ground.get());
-        }
-        let ink = if close { CLOSE_INK.get() } else { TEXT.get() };
-        let icon = Rectangle::new(
-            Point::new(rect.x + ROW_IN, rect.center_y() - ROW_ICON / 2.0),
-            Size::new(ROW_ICON, ROW_ICON),
-        );
-        row_icon(f, target, icon, ink);
-        f.fill_text(text(
-            self.words.name(target, menu.maximized).to_owned(),
-            Point::new(icon.x + ROW_ICON + ICON_GAP, rect.center_y()),
-            ROW_TEXT,
-            ink,
-            Alignment::Left,
-        ));
-        let right = rect.x + rect.width - ROW_IN;
-        match target {
-            Target::Above | Target::AllDesktops => {
-                let on = if target == Target::Above {
-                    menu.above
-                } else {
-                    menu.all_desktops
-                };
-                let at = Rectangle::new(
-                    Point::new(right - SWITCH.width, rect.center_y() - SWITCH.height / 2.0),
-                    SWITCH,
-                );
-                let track = if on { ACCENT.get() } else { SWITCH_OFF.get() };
-                f.fill(&kit::rounded(at, SWITCH.height / 2.0), track);
-                let knob = SWITCH.height - 4.0;
-                let x = if on {
-                    at.x + at.width - 2.0 - knob / 2.0
-                } else {
-                    at.x + 2.0 + knob / 2.0
-                };
-                f.fill(
-                    &Path::circle(Point::new(x, at.center_y()), knob / 2.0),
-                    TEXT.get(),
-                );
-            }
-            _ => {
-                f.fill_text(text_in(
-                    MONO,
-                    text(
-                        Words::key(target, menu.maximized).to_owned(),
-                        Point::new(right, rect.center_y()),
-                        KEY_TEXT,
-                        FAINT.get(),
-                        Alignment::Right,
-                    ),
-                ));
-            }
-        }
-    }
-
-    /// What it shows, said once a change: its words, and where its
-    /// targets' middles are in its frame (tests click them).
-    fn say(&self, state: &mut State) {
-        let Some(shown) = shown(self.window) else {
-            return;
-        };
-        let layout = layout(&shown.menu);
-        let at: Vec<String> = layout
-            .targets
-            .iter()
-            .map(|(t, r)| {
-                let c = r.center();
-                format!("{t:?}@{:.0},{:.0}", c.x, c.y).replace(' ', "")
-            })
-            .collect();
-        let said = format!(
-            "window={} shows={} targets={}",
-            shown.menu.id,
-            said(self.words, &shown.menu),
-            at.join(" ")
-        );
-        if state.said.as_ref() != Some(&said) {
-            tracing::debug!("the window's menu shows it: {said}");
-            state.said = Some(said);
-        }
-        // For screen readers (crate::a11y::rows): the actions, the switches,
-        // each screen's desktops as radio buttons, then closing.
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let menu = &shown.menu;
-        let fr = self.words.french;
-        let mut nodes = Vec::new();
-        for (target, rect) in &layout.targets {
-            let node = match *target {
-                Target::Above | Target::AllDesktops => rows::act(
-                    *target,
-                    Role::ToggleButton,
-                    self.words.name(*target, menu.maximized),
-                    *rect,
-                )
-                .checked(if *target == Target::Above {
-                    menu.above
-                } else {
-                    menu.all_desktops
-                }),
-                Target::Tile { screen, desktop } => {
-                    let Some(s) = menu.screens.get(screen) else {
-                        continue;
-                    };
-                    let mut name = if fr {
-                        format!("Envoyer sur le bureau {}", desktop + 1)
-                    } else {
-                        format!("Send to desktop {}", desktop + 1)
-                    };
-                    if menu.screens.len() > 1 {
-                        name.push_str(&format!(", {}", self.words.screen(s)));
-                    }
-                    rows::act(*target, Role::RadioButton, name, *rect)
-                        .checked(s.here == Some(desktop))
-                        .set(usize::from(desktop) + 1, usize::from(s.count))
-                }
-                _ => rows::act(
-                    *target,
-                    Role::Button,
-                    self.words.name(*target, menu.maximized),
-                    *rect,
-                ),
-            };
-            nodes.push(node);
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: Some(shown.title.clone()),
-                nodes,
-                order: rows::order(layout.targets.iter().map(|(t, _)| *t)),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    /// `target` acted on: a switch flips and stays, the rest closes the
-    /// menu.
-    fn act(&self, state: &mut State, target: Target) {
-        let Some(shown) = shown(self.window) else {
-            return;
-        };
-        let menu = &shown.menu;
-        if !acts(menu, target) {
+                WindowAction::AllDesktops
+            }));
             return;
         }
-        let id = menu.id;
-        let tell = |message| super::send(vec![Effect::Tell(message)]);
-        let action = |action| ToCompositor::WindowAction { id, action };
-        match target {
-            Target::Maximize => tell(action(WindowAction::Maximize)),
-            Target::Minimize => tell(action(WindowAction::Minimize)),
-            Target::Close => tell(action(WindowAction::Close)),
-            Target::Above | Target::AllDesktops => {
-                with(|m| {
-                    if let Some(s) = m.shown.as_mut().filter(|s| s.menu.id == id) {
-                        if target == Target::Above {
-                            s.menu.above = !s.menu.above;
-                        } else {
-                            s.menu.all_desktops = !s.menu.all_desktops;
-                        }
-                    }
-                });
-                tell(action(if target == Target::Above {
-                    WindowAction::Above
-                } else {
-                    WindowAction::AllDesktops
-                }));
-                self.say(state);
+        Target::Tile { screen, desktop } => {
+            let Some(s) = menu.screens.get(screen) else {
                 return;
-            }
-            Target::Tile { screen, desktop } => {
-                let Some(s) = menu.screens.get(screen) else {
-                    return;
-                };
-                tell(ToCompositor::SendTo {
-                    id,
-                    output: s.output.clone(),
-                    desktop,
-                });
-            }
-        }
-        tracing::debug!(window = id, ?target, "the window's menu acts");
-        event(Seen::Chosen);
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let shown = shown(self.window)?;
-        let layout = layout(&shown.menu);
-        let target = at.and_then(|at| {
-            layout
-                .targets
-                .iter()
-                .find(|(t, r)| r.contains(at) && acts(&shown.menu, *t))
-                .map(|(t, _)| *t)
-        });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    self.act(state, target);
-                }
-                redraw
-            }
-            _ => None,
+            };
+            tell(ToCompositor::SendTo {
+                id,
+                output: s.output.clone(),
+                desktop,
+            });
         }
     }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let shown = shown(self.window)?;
-        let order: Vec<Target> = layout(&shown.menu)
-            .targets
-            .into_iter()
-            .map(|(t, _)| t)
-            .filter(|t| acts(&shown.menu, *t))
-            .collect();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(
-                arrow @ (Named::ArrowDown | Named::ArrowUp | Named::ArrowLeft | Named::ArrowRight),
-            ) => {
-                let forward = matches!(arrow, Named::ArrowDown | Named::ArrowRight);
-                state.focus = match state.focus {
-                    Some(focus) => kit::cycle(&order, focus, forward),
-                    None => kit::step(&order, None, !forward),
-                };
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(target) = state.focus {
-                    self.act(state, target);
-                }
-            }
-            _ => return None,
-        }
-        Some(canvas::Action::request_redraw().and_capture())
-    }
+    tracing::debug!(window = id, target = target.id(), "the window's menu acts");
+    event(Seen::Chosen);
 }
 
 /// A row's icon, the radial menu's, in `rect`.

@@ -6,8 +6,8 @@
 //! line for each other screen plugged in: it is set with its own buttons
 //! (variant B: the panel sets only the laptop's screen and its keyboard).
 //!
-//! One canvas draws it, as the sound's: what changes draws this surface
-//! alone. The slider sends each brightness as it moves; the system bus's
+//! Built with the shell's widget kit ([`crate::ui`]), as the sound's:
+//! what changes draws this surface alone. The slider sends each brightness as it moves; the system bus's
 //! thread asks logind only the last one each time logind is ready. It
 //! shows what was asked until the backlight says it, a second at most.
 //!
@@ -17,31 +17,45 @@
 //! chooses; the wheel over the brightness's row moves it by 5 %; `Esc`
 //! closes.
 
-use std::time::{Duration, Instant};
+use hocus_words::shell::popover_brightness as txt;
+use std::{
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
+use hocus_a11y::Role;
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Element, Length, Point, Size,
+    alignment::Vertical,
+    keyboard, mouse,
     widget::{
-        canvas::{self, Frame, Geometry, Path},
-        text::Alignment,
+        button,
+        canvas::{Frame, Path},
+        column, container, mouse_area, row,
+        text::LineHeight,
     },
     window,
 };
 
 use super::{
-    Event as Seen, Pressed, event,
-    kit::{
-        self, HEADER, HEADER_TOP, ICON, Input, LEFT, MANROPE_SEMIBOLD, Pointer, RIGHT, Track,
-        Wheel, rounded, text,
-    },
+    Pressed,
+    kit::{self, ASIDE, HEADER, HEADER_TOP, ICON, LEFT, MANROPE_SEMIBOLD, RIGHT, Wheel},
 };
 use crate::levels::{
     self,
-    draw::{DIM, FAINT, LIGHT_GAUGE, MANROPE, TEXT, ring, sun},
-    model::{BRIGHTNESS_FLOOR, Keyboard, STEP, Words},
+    draw::{DIM, FAINT, LIGHT_GAUGE, MANROPE, TEXT, sun},
+    model::{BRIGHTNESS_FLOOR, Keyboard, STEP, Snapshot, Words},
     power::Ask,
 };
 use crate::theme::Ink;
+use crate::ui::{
+    Around, control,
+    parts::{self, drawn, gap},
+    slider::Slider,
+    style::{self, said as said_in},
+};
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
@@ -125,8 +139,10 @@ impl Layout {
     }
 }
 
-/// The popover opens: nothing to start.
-pub fn opening() {}
+/// The popover opens: nothing said yet, nothing asked.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
 
 /// Its height for what it shows now.
 pub fn height() -> u32 {
@@ -135,24 +151,32 @@ pub fn height() -> u32 {
     Layout::of(keyboard, notes(words, &levels::screens())).height()
 }
 
-/// The brightness's popover on its surface.
-#[derive(Debug, Clone)]
-pub struct Panel {
-    /// Its surface: it reacts only while open, not while it fades out.
-    pub id: window::Id,
-    pub words: Words,
-    /// On the compositor's glass (else opaque).
-    pub glass: bool,
+/// The brightness's share of its slider's travel: 5 % at its left end.
+fn light_share(percent: f32) -> f32 {
+    ((percent - BRIGHTNESS_FLOOR) / (100.0 - BRIGHTNESS_FLOOR)).clamp(0.0, 1.0)
 }
 
-/// What can be pointed at, or hold the keyboard's focus.
+fn light_at(share: f32) -> f32 {
+    (BRIGHTNESS_FLOOR + share * (100.0 - BRIGHTNESS_FLOOR)).round()
+}
+
+// --- What it keeps while it is open ---------------------------------------------
+
+/// What can hold the keyboard's ring, and be acted on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub enum Target {
     Light,
     /// One of the keyboard's levels, from off.
     Level(u32),
     /// The keyboard's slider, past four levels.
     Keys,
+}
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("brightness:{self:?}")
+    }
 }
 
 /// What a slider asked, until it is said.
@@ -164,48 +188,38 @@ enum Asked {
     Keys(u32),
 }
 
-/// What the surface keeps between draws.
 #[derive(Debug, Default)]
-pub struct State {
-    brightness: Option<f32>,
-    keyboard: Option<Keyboard>,
-    layout: Option<Layout>,
-    /// What it was laid out for: the keyboard there, the screens.
-    made_for: Option<(bool, Vec<String>)>,
-    /// The `0`'s advance of the value's font, for tabular figures.
-    zero: Option<f32>,
-    pointer: Pointer<Target>,
+struct Ui {
+    focus: Option<Target>,
+    /// The slider dragged.
     dragging: Option<Target>,
     asked: [Option<(Asked, Instant)>; 2],
-    focus: Option<Target>,
     wheel: Wheel,
+    /// What was last said in the log: the keyboard, the screens.
+    said: Option<(Option<Keyboard>, Vec<String>)>,
 }
 
-impl State {
-    /// What can hold the keyboard, in `Tab`'s order.
-    fn targets(&self) -> Vec<Target> {
-        let mut order = vec![Target::Light];
-        match self.keyboard {
-            Some(k) if k.segmented() => order.extend((0..=k.max).map(Target::Level)),
-            Some(_) => order.push(Target::Keys),
-            None => {}
-        }
-        order
-    }
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+impl Ui {
     /// The brightness shown: the one asked, else the backlight's.
-    fn light(&self) -> f32 {
+    fn light(&self, levels: &Snapshot) -> f32 {
         match self.asked[0] {
             Some((Asked::Light(percent), _)) => percent,
-            _ => self.brightness.unwrap_or(0.0),
+            _ => levels.brightness.unwrap_or(0.0),
         }
     }
 
     /// The keyboard's level shown: the one asked, else UPower's.
-    fn level(&self) -> u32 {
+    fn level(&self, levels: &Snapshot) -> u32 {
         match self.asked[1] {
             Some((Asked::Keys(level), _)) => level,
-            _ => self.keyboard.map_or(0, |k| k.level),
+            _ => levels.keyboard.map_or(0, |k| k.level),
         }
     }
 
@@ -219,453 +233,329 @@ impl State {
         }
         self.asked[slot] = Some((asked, Instant::now()));
     }
+
+    /// Until when what was asked still shows, if it does, out of a drag.
+    fn until(&self) -> Option<Instant> {
+        self.asked
+            .iter()
+            .flatten()
+            .filter(|(asked, _)| !self.dragged(*asked))
+            .map(|(_, since)| *since + ASKED_FOR)
+            .min()
+    }
+
+    fn dragged(&self, asked: Asked) -> bool {
+        matches!(
+            (asked, self.dragging),
+            (Asked::Light(_), Some(Target::Light)) | (Asked::Keys(_), Some(Target::Keys))
+        )
+    }
 }
 
-/// The brightness's slider: from the icon's slot to the value.
-fn track(top: f32) -> Track {
-    Track {
-        left: LEFT + SLOT + BESIDE,
-        right: RIGHT - VALUE_BOX - BESIDE,
-        middle: top + ROW / 2.0,
-        height: TRACK,
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A level pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A slider dragged to a share of its travel; let go.
+    Slide(Target, f32),
+    Release,
+    /// An arrow on what holds the ring: up (or right), or down.
+    Step(bool),
+    /// The wheel over the brightness's row.
+    Wheel(mouse::ScrollDelta),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The levels changed under the view.
+    Stale,
+}
+
+/// The brightness's popover on its surface.
+pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
+    let levels = levels::snapshot();
+    let screens = levels::screens();
+    let built = ui(|ui| content(words, &levels, screens, ui));
+    // Asked and not said: the surface wakes when it stops showing.
+    Around::new(id, built, handle, Msg::Stale)
+        .rebuild(move || {
+            let (levels, screens) = (levels::snapshot(), levels::screens());
+            ui(|ui| content(words, &levels, screens, ui))
+        })
+        .stale_when(|| ui(|ui| ui.until().is_some_and(|until| Instant::now() >= until)))
+        .wake_at(|| ui(|ui| ui.until()))
+        .keys(arrows)
+        .press(Msg::Pressed)
+        .subtitle(Some(words.built_in().to_owned()))
+        .on_glass(glass)
+}
+
+/// An arrow on what holds the ring moves it.
+fn arrows(pressed: &Pressed) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    let up = match &pressed.key {
+        Key::Named(Named::ArrowRight | Named::ArrowUp) => true,
+        Key::Named(Named::ArrowLeft | Named::ArrowDown) => false,
+        _ => return None,
+    };
+    ui(|ui| ui.focus.is_some()).then_some(Msg::Step(up))
+}
+
+fn content<'a>(words: Words, levels: &Snapshot, screens: Vec<String>, ui: &mut Ui) -> El<'a> {
+    let layout = Layout::of(levels.keyboard.is_some(), notes(words, &screens));
+    let said = (levels.keyboard, screens);
+    if ui.said.as_ref().map(|(k, _)| k) != Some(&said.0) {
+        tracing::debug!(keyboard = ?levels.keyboard, "the brightness's popover");
+    }
+    if ui.said.as_ref().map(|(_, s)| s) != Some(&said.1) {
+        tracing::debug!(
+            screens = ?layout.notes.iter().map(|(_, l)| l.join(" ")).collect::<Vec<_>>(),
+            "the brightness's popover"
+        );
+    }
+    ui.said = Some(said);
+    let a11y = crate::a11y::Words::new(words.lang());
+    let mut all: Vec<El<'a>> = vec![parts::header(
+        words.brightness(),
+        Some(said_in(words.built_in(), ASIDE, MANROPE, FAINT.get()).into()),
+    )];
+    // The panel's brightness.
+    let light = ui.light(levels);
+    let slider = Slider {
+        share: light_share(light),
+        fill: Some(LIGHT_GAUGE),
+        track: TRACK,
         knob: KNOB,
+        on_change: Box::new(|share| Msg::Slide(Target::Light, share)),
+        on_release: Msg::Release,
     }
-}
-
-/// The brightness's share of its slider's travel: 5 % at its left end.
-fn light_share(percent: f32) -> f32 {
-    ((percent - BRIGHTNESS_FLOOR) / (100.0 - BRIGHTNESS_FLOOR)).clamp(0.0, 1.0)
-}
-
-fn light_at(share: f32) -> f32 {
-    (BRIGHTNESS_FLOOR + share * (100.0 - BRIGHTNESS_FLOOR)).round()
-}
-
-/// The keyboard's levels' strip, and level `i`'s button in it.
-fn strip() -> Rectangle {
-    let left = LEFT + SLOT + BESIDE;
-    let height = SEGMENT + 2.0 * STRIP_PAD;
-    Rectangle::new(
-        Point::new(left, KEYBOARD_TOP + (ROW - height) / 2.0),
-        Size::new(RIGHT - left, height),
-    )
-}
-
-fn segment(i: u32, levels: u32) -> Rectangle {
-    let strip = strip();
-    let n = levels.max(1) as f32;
-    let width = (strip.width - 2.0 * STRIP_PAD - (n - 1.0) * SEGMENT_GAP) / n;
-    Rectangle::new(
-        Point::new(
-            strip.x + STRIP_PAD + i as f32 * (width + SEGMENT_GAP),
-            strip.y + STRIP_PAD,
-        ),
-        Size::new(width, SEGMENT),
-    )
-}
-
-impl Target {
-    /// Where it is, and its corners' radius.
-    fn shape(self, keyboard: Option<Keyboard>) -> (Rectangle, f32) {
-        match self {
-            Self::Light => (track(LIGHT_TOP).rect(SLIDER), SLIDER / 2.0),
-            Self::Keys => (track(KEYBOARD_TOP).rect(SLIDER), SLIDER / 2.0),
-            Self::Level(i) => (
-                segment(i, keyboard.map_or(1, Keyboard::levels)),
-                SEGMENT_RADIUS,
-            ),
-        }
-    }
-}
-
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(event, at) => self.mouse(state, event, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
-    }
-
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let Some(layout) = &state.layout else {
-            return vec![frame.into_geometry()];
-        };
-        kit::title(&mut frame, self.words.brightness());
-        kit::title_aside(&mut frame, self.words.built_in().to_owned());
-        // The panel's brightness.
-        let middle = LIGHT_TOP + ROW / 2.0;
-        sun(
-            &mut frame,
-            Point::new(LEFT + (SLOT - ICON) / 2.0, middle - ICON / 2.0),
+    .view(SLIDER);
+    let slider = control(slider, Target::Light.id(), Role::Slider, words.brightness())
+        .node(|n| {
+            n.value(a11y.percent(light))
+                .range(f64::from(light), 0.0, 100.0, Some(f64::from(STEP)))
+        })
+        .focus(
+            ui.focus == Some(Target::Light),
+            Msg::Focus(Target::Light),
+            SLIDER / 2.0,
         );
-        let light = state.light();
-        kit::slider(
-            &mut frame,
-            track(LIGHT_TOP),
-            light_share(light),
-            Some(LIGHT_GAUGE),
-        );
-        let zero = state.zero.unwrap_or(kit::ZERO);
-        if state.brightness.is_some() {
+    let value = levels.brightness.map(|_| light);
+    let row = mouse_area(slider_row(sun_icon(), slider.into(), value)).on_scroll(Msg::Wheel);
+    all.push(parts::block(GAP, Some(row.into())));
+    if let Some(keyboard) = levels.keyboard {
+        all.push(parts::block(
+            GAP,
+            Some(keyboard_row(words, levels, keyboard, ui)),
+        ));
+    }
+    for (_, lines) in &layout.notes {
+        let mut said_lines = column![];
+        for line in lines {
+            said_lines = said_lines.push(
+                said_in(line.clone(), NOTE, MANROPE, FAINT.get())
+                    .line_height(LineHeight::Relative(NOTE_LINE)),
+            );
+        }
+        let note = crate::ui::line(parts::inset(said_lines), lines.join(" "));
+        all.push(parts::block(GAP + NOTE_PAD, Some(note.into())));
+    }
+    parts::content(all)
+}
+
+/// The sun, in its slot.
+fn sun_icon<'a>() -> El<'a> {
+    drawn(SLOT, ROW, |f, _| {
+        sun(f, Point::new((SLOT - ICON) / 2.0, (ROW - ICON) / 2.0));
+    })
+}
+
+/// A row: its icon in its slot, `control` beside it, and its `value` (in
+/// tabular figures, on the right) when there is one.
+fn slider_row<'a>(icon: El<'a>, control: El<'a>, value: Option<f32>) -> El<'a> {
+    let figures = drawn(VALUE_BOX, ROW, move |f, s| {
+        if let Some(value) = value {
             kit::figures(
-                &mut frame,
-                Point::new(RIGHT, middle),
-                light,
-                zero,
+                f,
+                Point::new(s.width, s.height / 2.0),
+                value,
+                kit::zero_once(),
                 DIM.get(),
             );
         }
-        if let Some(keyboard) = state.keyboard.filter(|_| layout.keyboard) {
-            self.keyboard(&mut frame, state, keyboard, zero);
-        }
-        for (top, lines) in &layout.notes {
-            for note in kit::lines(lines, (LEFT, *top), NOTE, NOTE_LINE, FAINT.get()) {
-                frame.fill_text(note);
-            }
-        }
-        if let Some(focus) = state.focus {
-            let (rect, radius) = focus.shape(state.keyboard);
-            ring(&mut frame, rect, radius);
-        }
-        self.say(state, layout);
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(state.dragging.is_some())
-    }
+    });
+    let line = row![icon, gap(BESIDE), control, gap(BESIDE), figures].align_y(Vertical::Center);
+    parts::inset(container(line).height(ROW).align_y(Vertical::Center))
 }
 
-impl Panel {
-    /// What it shows, read afresh: the brightness, the keyboard's
-    /// backlight, the other screens.
-    fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
+/// The keyboard's row: its icon, then its levels or its slider.
+fn keyboard_row<'a>(words: Words, levels: &Snapshot, keyboard: Keyboard, ui: &Ui) -> El<'a> {
+    let a11y = crate::a11y::Words::new(words.lang());
+    let icon = drawn(SLOT, ROW, |f, _| {
+        keys(f, Point::new((SLOT - ICON) / 2.0, (ROW - ICON) / 2.0));
+    });
+    let name = txt::KEYBOARD_BACKLIGHT.get(words.lang());
+    let level = ui.level(levels).min(keyboard.max);
+    if !keyboard.segmented() {
+        let share = level as f32 / keyboard.max.max(1) as f32;
+        let max = keyboard.max;
+        let slider = Slider {
+            share,
+            fill: Some(LIGHT_GAUGE),
+            track: TRACK,
+            knob: KNOB,
+            on_change: Box::new(move |share| Msg::Slide(Target::Keys, share * max as f32)),
+            on_release: Msg::Release,
         }
-        let snapshot = levels::snapshot();
-        if state.layout.is_none() || state.keyboard != snapshot.keyboard {
-            tracing::debug!(keyboard = ?snapshot.keyboard, "the brightness's popover");
-        }
-        state.brightness = snapshot.brightness;
-        state.keyboard = snapshot.keyboard;
-        let made_for = (snapshot.keyboard.is_some(), levels::screens());
-        if state.made_for.as_ref() != Some(&made_for) || state.layout.is_none() {
-            let layout = Layout::of(made_for.0, notes(self.words, &made_for.1));
-            tracing::debug!(
-                screens = ?layout.notes.iter().map(|(_, l)| l.join(" ")).collect::<Vec<_>>(),
-                "the brightness's popover"
+        .view(SLIDER);
+        let slider = control(slider, Target::Keys.id(), Role::Slider, name)
+            .node(|n| {
+                n.value(a11y.percent(share * 100.0)).range(
+                    f64::from(share * 100.0),
+                    0.0,
+                    100.0,
+                    Some(100.0 / f64::from(keyboard.max.max(1))),
+                )
+            })
+            .focus(
+                ui.focus == Some(Target::Keys),
+                Msg::Focus(Target::Keys),
+                SLIDER / 2.0,
             );
-            state.layout = Some(layout);
-            state.made_for = Some(made_for);
-            // A change of size reaches the controller, which resizes the
-            // surface (without waking it again).
-            super::refit(super::Item::Brightness);
+        return slider_row(icon, slider.into(), Some(share * 100.0));
+    }
+    let names = words.keyboard_levels(keyboard.levels());
+    let mut segments = row![].spacing(SEGMENT_GAP);
+    for i in 0..keyboard.levels() {
+        let chosen = i == level;
+        let word = names.get(i as usize).copied().unwrap_or_default();
+        let target = Target::Level(i);
+        let segment = button(
+            container(said_in(
+                word,
+                SEGMENT_TEXT,
+                MANROPE_SEMIBOLD,
+                if chosen { TEXT } else { DIM }.get(),
+            ))
+            .center(Length::Fill),
+        )
+        .padding(0)
+        .width(Length::Fill)
+        .height(SEGMENT)
+        .style(move |_, status| {
+            if chosen {
+                style::filled(CHOSEN.get(), SEGMENT_RADIUS, TEXT.get())
+            } else if style::lit(status) {
+                style::hovered(SEGMENT_HOVER.get(), SEGMENT_RADIUS)
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(target));
+        let segment = control(segment, target.id(), Role::RadioButton, word)
+            .node(|n| {
+                n.checked(chosen)
+                    .set(i as usize + 1, keyboard.levels() as usize)
+            })
+            .focus(ui.focus == Some(target), Msg::Focus(target), SEGMENT_RADIUS)
+            .activate(Msg::Act(target));
+        segments = segments.push(segment);
+    }
+    let strip = container(segments)
+        .padding(STRIP_PAD)
+        .width(Length::Fill)
+        .style(|_| style::boxed(STRIP.get(), STRIP_RADIUS));
+    let line = row![icon, gap(BESIDE), crate::ui::line(strip, name)].align_y(Vertical::Center);
+    parts::inset(container(line).height(ROW).align_y(Vertical::Center))
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    let levels = levels::snapshot();
+    let max = levels.keyboard.map_or(0, |k| k.max);
+    ui(|ui| match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui.focus = None,
+        Msg::Focus(target) => ui.focus = Some(target),
+        Msg::Act(Target::Level(i)) => ui.ask(Asked::Keys(i)),
+        Msg::Act(_) => {}
+        Msg::Slide(target, value) => {
+            ui.dragging = Some(target);
+            match target {
+                Target::Light => ui.ask(Asked::Light(light_at(value))),
+                Target::Keys => ui.ask(Asked::Keys(value.round() as u32)),
+                Target::Level(_) => {}
+            }
         }
-        if state.zero.is_none()
-            && let Ok(mut system) = iced::advanced::graphics::text::font_system().write()
-        {
-            state.zero = kit::zero(system.raw());
+        Msg::Release => {
+            ui.dragging = None;
+            for (_, since) in ui.asked.iter_mut().flatten() {
+                *since = Instant::now();
+            }
         }
-        if state
-            .focus
-            .is_some_and(|focus| !state.targets().contains(&focus))
-        {
-            state.focus = None;
+        Msg::Wheel(delta) => {
+            let notches = ui.wheel.notches(&delta, kit::popover_scale());
+            if notches != 0 {
+                let light =
+                    (ui.light(&levels) + notches as f32 * STEP).clamp(BRIGHTNESS_FLOOR, 100.0);
+                ui.ask(Asked::Light(light));
+            }
         }
-        // What was asked stays shown until it is said, or a while.
-        let said = [
-            state
-                .brightness
-                .map(|b| Asked::Light(b.round().max(BRIGHTNESS_FLOOR))),
-            state.keyboard.map(|k| Asked::Keys(k.level)),
-        ];
-        let mut until = None;
-        for (asked, said) in state.asked.iter_mut().zip(said) {
+        Msg::Step(up) => match ui.focus {
+            Some(Target::Light) => {
+                let by = if up { STEP } else { -STEP };
+                let light = (ui.light(&levels) + by).clamp(BRIGHTNESS_FLOOR, 100.0);
+                ui.ask(Asked::Light(light));
+            }
+            Some(Target::Keys) => {
+                let level = ui.level(&levels);
+                let level = if up {
+                    (level + 1).min(max)
+                } else {
+                    level.saturating_sub(1)
+                };
+                ui.ask(Asked::Keys(level));
+            }
+            // Through the levels, choosing as it goes (a radio group's
+            // way).
+            Some(Target::Level(i)) => {
+                let next = if up {
+                    (i + 1).min(max)
+                } else {
+                    i.saturating_sub(1)
+                };
+                ui.focus = Some(Target::Level(next));
+                ui.ask(Asked::Keys(next));
+            }
+            None => {}
+        },
+    });
+    // What was asked stays shown until it is said, or a while.
+    let said = [
+        levels
+            .brightness
+            .map(|b| Asked::Light(b.round().max(BRIGHTNESS_FLOOR))),
+        levels.keyboard.map(|k| Asked::Keys(k.level)),
+    ];
+    let now = Instant::now();
+    ui(|ui| {
+        let dragging = ui.dragging;
+        for (asked, said) in ui.asked.iter_mut().zip(said) {
             let Some((what, _)) = *asked else {
                 continue;
             };
             let dragged = matches!(
-                (what, state.dragging),
+                (what, dragging),
                 (Asked::Light(_), Some(Target::Light)) | (Asked::Keys(_), Some(Target::Keys))
             );
-            if dragged {
-                continue;
-            }
-            if let Some(at) = kit::awaited(asked, said == Some(what), now, ASKED_FOR) {
-                until = Some(until.map_or(at, |u: Instant| u.min(at)));
+            if !dragged {
+                kit::awaited(asked, said == Some(what), now, ASKED_FOR);
             }
         }
-        until.map(canvas::Action::request_redraw_at)
-    }
-
-    /// What it shows, for screen readers (crate::a11y::rows).
-    fn say(&self, state: &State, layout: &Layout) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let shape = |t: Target| t.shape(state.keyboard).0;
-        let mut nodes = vec![rows::slider(
-            Target::Light,
-            self.words.brightness(),
-            state.light(),
-            5.0,
-            shape(Target::Light),
-        )];
-        if let Some(keyboard) = state.keyboard.filter(|_| layout.keyboard) {
-            let name = if self.words.fr() {
-                "Rétroéclairage du clavier"
-            } else {
-                "Keyboard backlight"
-            };
-            if keyboard.segmented() {
-                let names = self.words.keyboard_levels(keyboard.levels());
-                let level = state.level().min(keyboard.max);
-                nodes.push(rows::line(name));
-                for i in 0..keyboard.levels() {
-                    nodes.push(
-                        rows::act(
-                            Target::Level(i),
-                            Role::RadioButton,
-                            names.get(i as usize).copied().unwrap_or_default(),
-                            shape(Target::Level(i)),
-                        )
-                        .checked(i == level)
-                        .set(i as usize + 1, keyboard.levels() as usize),
-                    );
-                }
-            } else {
-                let share = state.level().min(keyboard.max) as f32 / keyboard.max.max(1) as f32;
-                nodes.push(rows::slider(
-                    Target::Keys,
-                    name,
-                    share * 100.0,
-                    100.0 / keyboard.max.max(1) as f32,
-                    shape(Target::Keys),
-                ));
-            }
-        }
-        for (_, lines) in &layout.notes {
-            nodes.push(rows::line(lines.join(" ")));
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: Some(self.words.built_in().to_owned()),
-                nodes,
-                order: rows::order(state.targets()),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    /// The keyboard's row: its icon, then its levels or its slider.
-    fn keyboard(&self, f: &mut Frame, state: &State, keyboard: Keyboard, zero: f32) {
-        let middle = KEYBOARD_TOP + ROW / 2.0;
-        keys(
-            f,
-            Point::new(LEFT + (SLOT - ICON) / 2.0, middle - ICON / 2.0),
-        );
-        let level = state.level().min(keyboard.max);
-        if !keyboard.segmented() {
-            let share = level as f32 / keyboard.max as f32;
-            kit::slider(f, track(KEYBOARD_TOP), share, Some(LIGHT_GAUGE));
-            kit::figures(f, Point::new(RIGHT, middle), share * 100.0, zero, DIM.get());
-            return;
-        }
-        f.fill(&rounded(strip(), STRIP_RADIUS), STRIP.get());
-        let names = self.words.keyboard_levels(keyboard.levels());
-        for i in 0..keyboard.levels() {
-            let rect = segment(i, keyboard.levels());
-            let chosen = i == level;
-            if chosen {
-                f.fill(&rounded(rect, SEGMENT_RADIUS), CHOSEN.get());
-            } else if state.pointer.hover == Some(Target::Level(i)) {
-                crate::theme::hover(f, &rounded(rect, SEGMENT_RADIUS), SEGMENT_HOVER.get());
-            }
-            f.fill_text(kit::text_in(
-                MANROPE_SEMIBOLD,
-                text(
-                    names
-                        .get(i as usize)
-                        .copied()
-                        .unwrap_or_default()
-                        .to_owned(),
-                    rect.center(),
-                    SEGMENT_TEXT,
-                    if chosen { TEXT.get() } else { DIM.get() },
-                    Alignment::Center,
-                ),
-            ));
-        }
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| {
-            state
-                .targets()
-                .into_iter()
-                .find(|t| t.shape(state.keyboard).0.contains(at))
-        });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                if let (Some(slider), Some(at)) = (state.dragging, at) {
-                    self.slide(state, slider, at.x);
-                    return redraw;
-                }
-                if state.pointer.over(target) {
-                    return redraw;
-                }
-                None
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                if let (Some(slider @ (Target::Light | Target::Keys)), Some(at)) = (target, at) {
-                    state.dragging = Some(slider);
-                    self.slide(state, slider, at.x);
-                }
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                let clicked = state.pointer.release(target);
-                if state.dragging.take().is_some() {
-                    for (_, since) in state.asked.iter_mut().flatten() {
-                        *since = Instant::now();
-                    }
-                } else if let Some(Target::Level(i)) = clicked {
-                    state.ask(Asked::Keys(i));
-                }
-                redraw
-            }
-            // The wheel over the brightness's row: 5 % a notch.
-            mouse::Event::WheelScrolled { delta } => {
-                let row = Rectangle::new(Point::new(LEFT, LIGHT_TOP), Size::new(RIGHT - LEFT, ROW));
-                if !at.is_some_and(|at| row.contains(at)) {
-                    return None;
-                }
-                let notches = state.wheel.notches(delta, kit::popover_scale());
-                if notches != 0 {
-                    let light =
-                        (state.light() + notches as f32 * STEP).clamp(BRIGHTNESS_FLOOR, 100.0);
-                    state.ask(Asked::Light(light));
-                }
-                redraw
-            }
-            _ => None,
-        }
-    }
-
-    /// A slider moved to `x`: that value, asked at once.
-    fn slide(&self, state: &mut State, slider: Target, x: f32) {
-        match slider {
-            Target::Light => {
-                let share = track(LIGHT_TOP).share_at(x);
-                state.ask(Asked::Light(light_at(share)));
-            }
-            Target::Keys => {
-                let Some(keyboard) = state.keyboard else {
-                    return;
-                };
-                let share = track(KEYBOARD_TOP).share_at(x);
-                state.ask(Asked::Keys((share * keyboard.max as f32).round() as u32));
-            }
-            Target::Level(_) => {}
-        }
-    }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&state.targets(), state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(Target::Level(i)) = state.focus {
-                    state.ask(Asked::Keys(i));
-                }
-            }
-            Key::Named(
-                arrow @ (Named::ArrowLeft | Named::ArrowRight | Named::ArrowUp | Named::ArrowDown),
-            ) => {
-                let up = matches!(arrow, Named::ArrowRight | Named::ArrowUp);
-                let max = state.keyboard.map_or(0, |k| k.max);
-                match state.focus {
-                    Some(Target::Light) => {
-                        let by = if up { STEP } else { -STEP };
-                        let light = (state.light() + by).clamp(BRIGHTNESS_FLOOR, 100.0);
-                        state.ask(Asked::Light(light));
-                    }
-                    Some(Target::Keys) => {
-                        let level = state.level();
-                        let level = if up {
-                            (level + 1).min(max)
-                        } else {
-                            level.saturating_sub(1)
-                        };
-                        state.ask(Asked::Keys(level));
-                    }
-                    // Through the levels, choosing as it goes (a radio
-                    // group's way).
-                    Some(Target::Level(i)) => {
-                        let next = if up {
-                            (i + 1).min(max)
-                        } else {
-                            i.saturating_sub(1)
-                        };
-                        state.focus = Some(Target::Level(next));
-                        state.ask(Asked::Keys(next));
-                    }
-                    None => return None,
-                }
-            }
-            _ => return None,
-        }
-        Some(canvas::Action::request_redraw().and_capture())
-    }
+    });
+    super::refit(super::Item::Brightness);
 }
 
 /// The keyboard, 18 px: `rect x2 y6 w20 h12 rx2`, its keys' dots and its
@@ -704,39 +594,11 @@ mod tests {
 
     #[test]
     fn the_slider_goes_from_5_to_100() {
-        let t = track(LIGHT_TOP);
-        assert_eq!(light_at(t.share_at(t.left)), 5.0);
-        assert_eq!(light_at(t.share_at(t.right)), 100.0);
+        assert_eq!(light_at(0.0), 5.0);
+        assert_eq!(light_at(1.0), 100.0);
         assert_eq!(light_share(5.0), 0.0);
         assert_eq!(light_share(2.0), 0.0);
         assert_eq!(light_share(100.0), 1.0);
         assert!((light_at(light_share(70.0)) - 70.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn the_keyboards_levels_share_its_strip() {
-        let strip = strip();
-        for levels in [2, 3, 4] {
-            let first = segment(0, levels);
-            let last = segment(levels - 1, levels);
-            assert_eq!(first.x, strip.x + STRIP_PAD);
-            assert!((last.x + last.width - (strip.x + strip.width - STRIP_PAD)).abs() < 0.01);
-            assert!(first.width > 40.0, "{levels}: {}", first.width);
-        }
-        let keyboard = |max| State {
-            keyboard: Some(Keyboard { level: 0, max }),
-            ..State::default()
-        };
-        assert_eq!(
-            keyboard(2).targets(),
-            [
-                Target::Light,
-                Target::Level(0),
-                Target::Level(1),
-                Target::Level(2)
-            ]
-        );
-        assert_eq!(keyboard(5).targets(), [Target::Light, Target::Keys]);
-        assert_eq!(State::default().targets(), [Target::Light]);
     }
 }

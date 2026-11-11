@@ -72,8 +72,7 @@ fn ready() -> Option<PathBuf> {
         .status()
         .is_ok_and(|s| s.success());
     if !daemon {
-        eprintln!("no dbus-daemon: skipped");
-        return None;
+        common::missing("dbus-daemon");
     }
     Some(shell)
 }
@@ -442,7 +441,7 @@ impl Bed {
         self.idle(Duration::from_millis(100))?;
         self.click(bell)?;
         let shows = self.logged_since(mark, "the history shows")?;
-        self.logged_since(mark, "the history's items")?;
+        self.logged_since(mark, "\"history:Switch\"")?;
         // Drawn at its place: its place and size before, 0 × 0.
         let open = self
             .hp
@@ -456,44 +455,50 @@ impl Bed {
         self.hp.popover_surfaces()[0].1
     }
 
+    /// Where the history's controls are on it, as the kit's dump last
+    /// placed them: name (`Clear`, `Switch`, `Item(3)`, `Close(3)`,
+    /// `Action(3,0)`) → middle, top first.
+    fn history_places(&self) -> Vec<(String, (f64, f64))> {
+        let mut found = Vec::new();
+        if let Some(serde_json::Value::Object(dump)) = common::last_json(&self.log, " shows {") {
+            for (id, place) in dump {
+                let Some(name) = id.strip_prefix("history:") else {
+                    continue;
+                };
+                let at = place.get("at").and_then(serde_json::Value::as_array);
+                let n = |i: usize| {
+                    at.and_then(|a| a.get(i))
+                        .and_then(serde_json::Value::as_f64)
+                };
+                if let (Some(x), Some(y), Some(w), Some(h)) = (n(0), n(1), n(2), n(3)) {
+                    found.push((name.to_owned(), (x + w / 2.0, y + h / 2.0)));
+                }
+            }
+        }
+        found.sort_by(|a, b| a.1.1.total_cmp(&b.1.1));
+        found
+    }
+
     /// Where `name` (`Clear`, `Switch`, `Item(3)`, `Close(3)`…) is on the
-    /// screen, as the history last logged its items.
+    /// screen, as the kit's dump last placed it.
     fn history_item(&self, name: &str) -> anyhow::Result<(f64, f64)> {
-        let log = self.log();
-        let line = log
-            .lines()
-            .rev()
-            .find(|l| l.contains("the history's items"))
-            .ok_or_else(|| anyhow::anyhow!("no items logged"))?;
-        let at = line
-            .split_whitespace()
-            .find_map(|word| {
-                let word = word.strip_prefix("items=").unwrap_or(word);
-                let (who, xy) = word.rsplit_once('@')?;
-                let (x, y) = xy.split_once(',')?;
-                (who == name).then(|| (x.parse::<f64>().ok(), y.parse::<f64>().ok()))
-            })
-            .and_then(|(x, y)| Some((x?, y?)))
-            .ok_or_else(|| anyhow::anyhow!("no {name} in {line}"))?;
+        let at = self
+            .history_places()
+            .into_iter()
+            .find(|(who, _)| who == name)
+            .map(|(_, at)| at)
+            .ok_or_else(|| anyhow::anyhow!("no {name} in the kit's dump"))?;
         let popover = self.history();
         Ok((f64::from(popover.x) + at.0, f64::from(popover.y) + at.1))
     }
 
-    /// The items the history lists, by their names in its last line of
-    /// items (`Item(3)`…), top first.
+    /// The items the history lists, by their names in the kit's dump
+    /// (`Item(3)`…), top first.
     fn history_items(&self) -> Vec<String> {
-        let log = self.log();
-        let Some(line) = log
-            .lines()
-            .rev()
-            .find(|l| l.contains("the history's items"))
-        else {
-            return Vec::new();
-        };
-        line.split_whitespace()
-            .filter_map(|w| w.strip_prefix("items=").or(Some(w)))
-            .filter(|w| w.starts_with("Item("))
-            .filter_map(|w| w.split_once('@').map(|(who, _)| who.to_owned()))
+        self.history_places()
+            .into_iter()
+            .map(|(who, _)| who)
+            .filter(|who| who.starts_with("Item("))
             .collect()
     }
 
@@ -976,8 +981,11 @@ fn its_close_removes_one_and_clear_all_empties_it() -> anyhow::Result<()> {
     bed.click(clear)?;
     let shows = bed.logged_since(mark, "the history shows")?;
     assert!(shows.contains("history=Rien de neuf"), "{shows}");
-    let items = bed.logged_since(mark, "the history's items")?;
-    assert!(items.ends_with("items=Switch@313,82"), "{items}");
+    bed.logged_since(mark, "\"history:Switch\"")?;
+    let places = bed.history_places();
+    let names: Vec<&str> = places.iter().map(|(who, _)| who.as_str()).collect();
+    assert_eq!(names, ["Switch"], "{places:?}");
+    assert_eq!(places[0].1, (313.0, 82.0), "{places:?}");
     // Its file holds nothing then.
     bed.logged_since(mark, "the history written count=0")?;
     Ok(())
@@ -1156,18 +1164,12 @@ fn an_expired_bubbles_action_is_invoked_from_the_history() -> anyhow::Result<()>
     bed.expires(id)?;
     let shows = bed.open_history()?;
     assert!(shows.contains("[1 actions]"), "{shows}");
-    let log = bed.log();
-    let action = log
-        .lines()
-        .rev()
-        .find(|l| l.contains("the history's items"))
-        .and_then(|l| {
-            l.split_whitespace()
-                .map(|w| w.trim_start_matches("items="))
-                .filter_map(|w| w.split_once('@').map(|(who, _)| who.to_owned()))
-                .find(|who| who.starts_with("Action("))
-        })
-        .ok_or_else(|| anyhow::anyhow!("no action listed:\n{log}"))?;
+    let action = bed
+        .history_places()
+        .into_iter()
+        .map(|(who, _)| who)
+        .find(|who| who.starts_with("Action("))
+        .ok_or_else(|| anyhow::anyhow!("no action listed:\n{}", bed.log()))?;
     let at = bed.history_item(&action)?;
     common::point(&mut bed.hp, at)?;
     bed.idle(Duration::from_millis(100))?;
@@ -1333,4 +1335,53 @@ fn a_bubble_never_drawn_is_said_as_it_goes() -> anyhow::Result<()> {
 
 fn journal_has(journal: &Journal, what: &str) -> bool {
     journal.text().contains(what)
+}
+
+/// The history in its main state (four, by sections), shot under
+/// `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let history = kept("Logiciels", "12 mises à jour disponibles", 26 * 60, false)
+        + &kept("Firefox", "Téléchargement terminé", 70, false)
+        + &kept("Calendrier", "Point produit", 40, false);
+    let mut bed = start_with(&shell, |_, _| {}, &history)?;
+    bed.logged("the history read back kept=3")?;
+    bed.notify(Notice {
+        summary: "Camille dans #design",
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    bed.logged("a notification to the history")?;
+    bed.open_history()?;
+    bed.hp.pointer_move(400.0, 300.0);
+    common::popover_shot(&mut bed.hp, "history")
+}
+
+/// A bubble in its main state (its actions, no countdown: what it draws
+/// at rest), shot under `HOCUS_KIT_SHOTS` (#772's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bubble_kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    bed.notify(Notice {
+        actions: &["reply", "Répondre", "later", "Plus tard"],
+        timeout: 0,
+        ..Notice::default()
+    })?;
+    bed.shows(1)?;
+    bed.hp.pointer_move(400.0, 600.0);
+    let namespace = bed
+        .hp
+        .bubble_surfaces()
+        .first()
+        .map(|(namespace, _, _)| namespace.clone())
+        .ok_or_else(|| anyhow::anyhow!("no bubble"))?;
+    common::layer_shot(&mut bed.hp, &namespace, "bubble")
 }

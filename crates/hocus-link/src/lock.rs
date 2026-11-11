@@ -13,9 +13,9 @@
 //!   field|button|layout` (one of them clicked), `lock now` (the session
 //!   menu's "Verrouiller", 7.4). The layout's button sends `next-layout`.
 
-use std::{fmt, time::Duration};
+use std::time::Duration;
 
-use crate::{BadLine, flag, word};
+use serde::{Deserialize, Serialize};
 
 /// The namespace of the lock's layer surfaces, one on each screen, over
 /// everything. The compositor draws them, from the shell's own connection
@@ -35,7 +35,8 @@ pub const LOCK_SHAKE: Duration = Duration::from_millis(360);
 pub const LOCK_WAIT: Duration = Duration::from_secs(30);
 
 /// Where the lock's form is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LockPhase {
     /// Nothing typed.
     Idle,
@@ -52,37 +53,6 @@ pub enum LockPhase {
 }
 
 impl LockPhase {
-    fn write(self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Idle => f.write_str("idle"),
-            Self::Typing => f.write_str("typing"),
-            Self::Checking => f.write_str("checking"),
-            Self::Wrong => f.write_str("wrong"),
-            Self::Waiting(seconds) => write!(f, "waiting:{seconds}"),
-            Self::Opening => f.write_str("opening"),
-        }
-    }
-
-    fn read(word: &str) -> Result<Self, BadLine> {
-        Ok(match word {
-            "idle" => Self::Idle,
-            "typing" => Self::Typing,
-            "checking" => Self::Checking,
-            "wrong" => Self::Wrong,
-            "opening" => Self::Opening,
-            other => {
-                let seconds = other
-                    .strip_prefix("waiting:")
-                    .ok_or_else(|| BadLine(format!("no lock phase {other:?}")))?;
-                Self::Waiting(
-                    seconds
-                        .parse()
-                        .map_err(|e| BadLine(format!("waiting: {e}")))?,
-                )
-            }
-        })
-    }
-
     /// Whether the field takes what is typed.
     pub const fn takes_keys(self) -> bool {
         matches!(self, Self::Idle | Self::Typing | Self::Wrong)
@@ -91,7 +61,8 @@ impl LockPhase {
 
 /// What has the keyboard on the lock: `Tab` goes from the field to the
 /// button, then to the layout's button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LockFocus {
     #[default]
     Field,
@@ -105,15 +76,6 @@ impl LockFocus {
             Self::Field => "field",
             Self::Button => "button",
             Self::Layout => "layout",
-        }
-    }
-
-    fn read(word: &str) -> Result<Self, BadLine> {
-        match word {
-            "field" => Ok(Self::Field),
-            "button" => Ok(Self::Button),
-            "layout" => Ok(Self::Layout),
-            other => Err(BadLine(format!("no lock focus {other:?}"))),
         }
     }
 
@@ -132,7 +94,7 @@ impl LockFocus {
 }
 
 /// The lock as the shell draws it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockShown {
     pub phase: LockPhase,
     /// The characters typed, drawn as dots; never the characters.
@@ -153,57 +115,9 @@ pub struct LockShown {
     pub output: String,
 }
 
-impl LockShown {
-    pub(crate) fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("lock ")?;
-        self.phase.write(f)?;
-        write!(
-            f,
-            " {} {} {} {} {} {} {} {}",
-            self.chars,
-            if self.caps { "caps" } else { "nocaps" },
-            self.shake,
-            self.focus.name(),
-            self.agents,
-            if self.wallpaper { "wallpaper" } else { "plain" },
-            if self.motion { "motion" } else { "still" },
-            crate::screen_name(&self.output),
-        )
-    }
-
-    pub(crate) fn read<'a>(words: &mut impl Iterator<Item = &'a str>) -> Result<Self, BadLine> {
-        let number = |w: &str, what: &str| {
-            w.parse::<u32>()
-                .map_err(|e| BadLine(format!("{what}: {e}")))
-        };
-        let phase = LockPhase::read(word(words, "lock phase")?)?;
-        let chars = number(word(words, "characters")?, "characters")?;
-        let caps = flag(words.next(), "caps", "nocaps")?;
-        let shake = number(word(words, "shake")?, "shake")?;
-        let focus = LockFocus::read(word(words, "focus")?)?;
-        let agents = number(word(words, "agents")?, "agents")?;
-        let wallpaper = flag(words.next(), "wallpaper", "plain")?;
-        let motion = flag(words.next(), "motion", "still")?;
-        let output = word(words, "output")?.to_owned();
-        if words.next().is_some() {
-            return Err(BadLine("a lock line too long".to_owned()));
-        }
-        Ok(Self {
-            phase,
-            chars,
-            caps,
-            shake,
-            focus,
-            agents,
-            wallpaper,
-            motion,
-            output,
-        })
-    }
-}
-
 /// What the shell asks of the lock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LockAsk {
     /// The arrow was clicked: what was typed is checked.
     Submit,
@@ -211,29 +125,6 @@ pub enum LockAsk {
     Focus(LockFocus),
     /// The session menu's "Verrouiller" (7.4): lock now.
     Now,
-}
-
-impl LockAsk {
-    pub(crate) fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Submit => f.write_str("lock submit"),
-            Self::Focus(focus) => write!(f, "lock focus {}", focus.name()),
-            Self::Now => f.write_str("lock now"),
-        }
-    }
-
-    pub(crate) fn read<'a>(words: &mut impl Iterator<Item = &'a str>) -> Result<Self, BadLine> {
-        let ask = match word(words, "lock's ask")? {
-            "submit" => Self::Submit,
-            "focus" => Self::Focus(LockFocus::read(word(words, "focus")?)?),
-            "now" => Self::Now,
-            other => return Err(BadLine(format!("no lock ask {other:?}"))),
-        };
-        if words.next().is_some() {
-            return Err(BadLine("a lock ask too long".to_owned()));
-        }
-        Ok(ask)
-    }
 }
 
 #[cfg(test)]

@@ -58,10 +58,10 @@ const RIM: Color = Color::from_rgba8(255, 255, 255, 0.12);
 const COUNTDOWN: Color = Color::from_rgba8(143, 179, 255, 0.75);
 const Z: Color = rgb(0x8C96A8);
 
-/// The pill on surface `id`.
+/// The pill, on its surface.
 #[derive(Debug, Clone)]
 pub struct View {
-    pub id: window::Id,
+    pub pill: Pill,
     pub words: Words,
     pub glass: bool,
 }
@@ -80,10 +80,8 @@ impl<Message> canvas::Program<Message> for View {
             return None;
         };
         // The countdown, a tenth of a second on, until its end.
-        let next = super::with(|p| {
-            let p = p.as_ref().filter(|p| p.surface == self.id)?;
-            (p.elapsed(*now) < p.length()).then(|| *now + CURTAIN_FRAME)
-        })?;
+        let pill = &self.pill;
+        let next = (pill.elapsed(*now) < pill.length()).then(|| *now + CURTAIN_FRAME)?;
         Some(canvas::Action::request_redraw_at(next))
     }
 
@@ -96,9 +94,13 @@ impl<Message> canvas::Program<Message> for View {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if let Some(pill) = super::with(|p| p.clone().filter(|p| p.surface == self.id)) {
-            draw(&mut frame, &pill, self.words, self.glass, Instant::now());
-        }
+        draw(
+            &mut frame,
+            &self.pill,
+            self.words,
+            self.glass,
+            Instant::now(),
+        );
         vec![frame.into_geometry()]
     }
 }

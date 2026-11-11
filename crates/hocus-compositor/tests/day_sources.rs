@@ -33,6 +33,8 @@ use hocus_link::{POPOVER_NAMESPACE, TASKS_NAMESPACE};
 
 const KEY_ENTER: u32 = 28;
 const KEY_V: u32 = 47;
+const KEY_A: u32 = 30;
+const KEY_BACKSPACE: u32 = 14;
 const GOOD: &str = "tok-good";
 /// The good token as the browser's tools copy it, with another cookie.
 const PASTED: &str = "accessToken=tok-good; lang=fr\n";
@@ -276,19 +278,30 @@ impl Bed {
     /// Where the popover's `target` is on the screen, as last logged, once
     /// the popover is drawn at its size.
     fn target(&mut self, target: &str) -> anyhow::Result<(f64, f64)> {
-        let wanted = format!(" {target}@");
+        let id = format!("setup:{target}");
         let log = self.log.clone();
-        let found = |text: &str| {
-            text.lines()
-                .rev()
-                .find(|l| l.contains("the sources' popover's targets"))
-                .and_then(|l| at_of(&l.replace("targets=", "targets= "), &wanted))
+        let found = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
         };
-        let done = self
-            .hp
-            .dispatch_until(WAIT, |_| found(&plain(&log)).is_some())?;
+        // The dump said after what the popover last showed: its places
+        // are the tree's that shows it (a while at most, as a tree that
+        // shows the same places says nothing new).
+        let fresh = |log: &Path| {
+            let text = plain(log);
+            let shown = text.rfind("the sources' popover shows it");
+            let dumped = text.rfind(" shows {");
+            dumped >= shown
+        };
+        self.hp
+            .dispatch_until(Duration::from_secs(3), |_| fresh(&log))?;
+        let done = self.hp.dispatch_until(WAIT, |_| found(&log).is_some())?;
         anyhow::ensure!(done, "no {target} in the popover: {}", plain(&log));
-        let (x, y) = found(&plain(&log)).unwrap_or_default();
+        let (x, y) = found(&log).unwrap_or_default();
         let pop = self.popover()?;
         Ok((f64::from(pop.x) + x, f64::from(pop.y) + y))
     }
@@ -336,14 +349,16 @@ impl Bed {
     fn sign_in(&mut self, address: &str, token: &str) -> anyhow::Result<String> {
         self.click_target("Field(Address)")?;
         self.shows(&["focus=Field(Address)"])?;
-        // Ctrl+Backspace clears what was there.
-        common::chord(&mut self.hp, &[KEY_LEFTCTRL, 14]);
+        // It all selected, Backspace clears what was there.
+        common::chord(&mut self.hp, &[KEY_LEFTCTRL, KEY_A]);
+        self.press(KEY_BACKSPACE);
         self.shows(&["address=«»"])?;
         self.type_text(address);
         self.shows(&[&format!("address=«{address}»")])?;
         self.press(KEY_TAB);
         self.shows(&["focus=Field(Token)"])?;
-        common::chord(&mut self.hp, &[KEY_LEFTCTRL, 14]);
+        // A secret is one word: Ctrl+Backspace takes it all.
+        common::chord(&mut self.hp, &[KEY_LEFTCTRL, KEY_BACKSPACE]);
         self.shows(&["token=none"])?;
         self.type_text(token);
         self.shows(&["token=typed"])?;
@@ -655,13 +670,13 @@ fn choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disable
         "title=«Ajouter un compte»",
     ])?;
     assert!(line.contains("buttons=«Fermer»"), "{line}");
-    let targets = bed.lines_since(0, "the sources' popover's targets");
-    let last = targets.last().cloned().unwrap_or_default();
+    bed.target("Planka")?;
+    let dump = common::last_json(&bed.log, " shows {").unwrap_or_default();
+    let last = dump.to_string();
     assert!(
-        !last.contains("Online@") && !last.contains("Account("),
+        !last.contains("\"setup:Online\"") && !last.contains("\"setup:Account("),
         "{last}"
     );
-    assert!(last.contains("Planka@"), "{last}");
     // The card's "Choisir…" lit while it shows.
     bed.shot("step-1-no-online-accounts")?;
     // ✕ closes it.
@@ -918,7 +933,8 @@ fn the_planka_step_takes_a_pasted_token_and_says_a_refused_one_no_server_or_a_bo
     // cards counted.
     let from = bed.mark();
     bed.click_target("Field(Address)")?;
-    common::chord(&mut bed.hp, &[KEY_LEFTCTRL, 14]);
+    common::chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_A]);
+    bed.press(KEY_BACKSPACE);
     bed.type_text(&board);
     bed.press(KEY_TAB);
     bed.shows(&["focus=Field(Token)"])?;
@@ -1085,4 +1101,17 @@ fn at_rest_the_card_and_the_popover_draw_nothing() -> anyhow::Result<()> {
     bed.closed()?;
     let _ = BTN_LEFT;
     Ok(())
+}
+
+/// The popover in its main state (step 1, without Online Accounts), shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("kit", "1920x1080", "", With::default())? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.hp.pointer_move(400.0, 300.0);
+    common::popover_shot(&mut bed.hp, "setup")
 }

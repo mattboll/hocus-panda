@@ -139,7 +139,7 @@ impl Bed {
         config.keyboard.layouts = vec!["us".to_owned()];
         config.file = Some(file.clone());
         config.plain_background = true;
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         let mut hp = Headless::start_with_shell(
             HeadlessConfig {
                 outputs: outputs
@@ -750,8 +750,7 @@ impl Portal {
             .status()
             .is_ok_and(|s| s.success());
         if !has {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let file = dir.path().join("config.toml");

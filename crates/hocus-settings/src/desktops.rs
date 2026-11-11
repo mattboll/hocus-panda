@@ -12,31 +12,32 @@
 //! that nothing moves twice. "Annuler" puts it back with them
 //! (`desktop-restore N ID…`), then writes.
 
+use hocus_words::settings::desktops as words;
 use std::sync::OnceLock;
 
 use crate::{
-    lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::{Lang, Words},
+    model::{Choice, Codec, Kind, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const DESKTOPS: RowGroup = RowGroup {
-    label: w("BUREAUX", "DESKTOPS"),
+    label: words::DESKTOPS,
     per_source: false,
 };
 pub const MOVE: RowGroup = RowGroup {
-    label: w("DÉPLACER ET ANCRER", "MOVE AND SNAP"),
+    label: words::MOVE_AND_SNAP,
     per_source: false,
 };
 pub const ALT_TAB: RowGroup = RowGroup {
-    label: w("ALT+TAB", "ALT+TAB"),
+    label: words::ALT_TAB,
     per_source: false,
 };
 pub const OVERVIEW: RowGroup = RowGroup {
-    label: w("VUE D’ENSEMBLE", "OVERVIEW"),
+    label: words::OVERVIEW,
     per_source: false,
 };
 pub const DRAW: RowGroup = RowGroup {
-    label: w("DESSINER SUR L’ÉCRAN", "DRAW ON THE SCREEN"),
+    label: words::DRAW_ON_THE_SCREEN,
     per_source: false,
 };
 
@@ -56,7 +57,7 @@ pub const INK: &str = "ink.enabled";
 /// The rules per application, a row of the page's own (6.14).
 pub const RULES: &str = "desktops.rules";
 pub const RULES_GROUP: RowGroup = RowGroup {
-    label: w("RÈGLES PAR APPLICATION", "RULES PER APPLICATION"),
+    label: words::RULES_PER_APPLICATION,
     per_source: false,
 };
 /// Keyboard's "Raccourcis du bureau", the page's link lights it.
@@ -82,10 +83,7 @@ pub fn name_of(names: &[String], index: usize, lang: Lang) -> String {
 
 /// "Bureau 3" / "Desktop 3", for desktop `index` (from 0).
 pub fn placeholder(index: usize, lang: Lang) -> String {
-    match lang {
-        Lang::French => format!("Bureau {}", index + 1),
-        Lang::English => format!("Desktop {}", index + 1),
-    }
+    words::desktop(lang, index + 1)
 }
 
 /// `names` as the file holds them for `count` desktops: those past the
@@ -133,28 +131,23 @@ pub fn toml_list(names: &[String]) -> String {
 
 /// "3 fenêtres", "1 fenêtre", "aucune fenêtre".
 pub fn windows_said(n: usize, lang: Lang) -> String {
-    match (lang, n) {
-        (Lang::French, 0) => "aucune fenêtre".to_owned(),
-        (Lang::French, 1) => "1 fenêtre".to_owned(),
-        (Lang::French, n) => format!("{n} fenêtres"),
-        (Lang::English, 0) => "no windows".to_owned(),
-        (Lang::English, 1) => "1 window".to_owned(),
-        (Lang::English, n) => format!("{n} windows"),
+    match n {
+        0 => words::NO_WINDOWS.get(lang).to_owned(),
+        1 => words::N_1_WINDOW.get(lang).to_owned(),
+        n => words::windows(lang, n),
     }
 }
 
 /// The toast of desktop `name` taken out, its `moved` windows going to
 /// `to`.
 pub fn removed_said(name: &str, moved: usize, to: &str, lang: Lang) -> String {
-    match (lang, moved) {
-        (Lang::French, 0) => format!("« {name} » retiré"),
-        (Lang::French, 1) => format!("« {name} » retiré : sa fenêtre passe sur « {to} »"),
-        (Lang::French, n) => {
-            format!("« {name} » retiré : ses {n} fenêtres passent sur « {to} »")
-        }
-        (Lang::English, 0) => format!("“{name}” removed"),
-        (Lang::English, 1) => format!("“{name}” removed: its window goes to “{to}”"),
-        (Lang::English, n) => format!("“{name}” removed: its {n} windows go to “{to}”"),
+    match moved {
+        0 => words::removed(lang, name),
+        1 => words::removed_its_window_goes_to(lang, words::RemovedItsWindowGoesTo { name, to }),
+        n => words::removed_its_windows_go_to(
+            lang,
+            words::RemovedItsWindowsGoTo { name, to, x_n: n },
+        ),
     }
 }
 
@@ -176,11 +169,11 @@ pub struct Rules(pub Vec<Rule>);
 
 /// The sizes a rule may give, as written, and said.
 pub const SIZES: [(&str, Words); 5] = [
-    ("last", w("Sa dernière taille", "Its last size")),
-    ("maximized", w("Maximisée", "Maximised")),
-    ("left", w("Moitié gauche", "Left half")),
-    ("right", w("Moitié droite", "Right half")),
-    ("fullscreen", w("Plein écran", "Full screen")),
+    ("last", words::ITS_LAST_SIZE),
+    ("maximized", words::MAXIMISED),
+    ("left", words::LEFT_HALF),
+    ("right", words::RIGHT_HALF),
+    ("fullscreen", words::FULL_SCREEN),
 ];
 
 /// The rules the file holds, in its order (those without an app id left
@@ -271,34 +264,19 @@ pub fn rule_said(rule: &Rule, names: &[String], lang: Lang) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(d) = rule.desktop.and_then(|d| usize::try_from(d - 1).ok()) {
         let name = name_of(names, d, lang);
-        parts.push(match lang {
-            Lang::French => format!("Toujours sur « {name} »"),
-            Lang::English => format!("Always on “{name}”"),
-        });
+        parts.push(words::always_on(lang, &name));
     }
     if let Some(size) = &rule.size
         && let Some((_, said)) = SIZES.iter().find(|(word, _)| word == size)
     {
         let said = said.get(lang);
-        parts.push(match lang {
-            Lang::French => format!("s’ouvre {}", said.to_lowercase()),
-            Lang::English => format!("opens {}", said.to_lowercase()),
-        });
+        parts.push(words::opens(lang, said.to_lowercase()));
     }
     if rule.above {
-        parts.push(
-            w("au-dessus des autres", "above the others")
-                .get(lang)
-                .to_owned(),
-        );
+        parts.push(words::ABOVE_THE_OTHERS.get(lang).to_owned());
     }
     if parts.is_empty() {
-        return w(
-            "Aucune règle encore : elle s’ouvre comme les autres.",
-            "No rule yet: it opens like the others.",
-        )
-        .get(lang)
-        .to_owned();
+        return words::NO_RULE_YET_IT_OPENS_LIKE.get(lang).to_owned();
     }
     let said = parts.join(" · ");
     let mut chars = said.chars();
@@ -314,7 +292,7 @@ pub fn outside() -> &'static [crate::model::Outside] {
         id: RULES,
         section: SectionId::Desktops,
         group: RULES_GROUP.label,
-        name: w("Règles par application", "Rules per application"),
+        name: words::RULES_PER_APPLICATION_2,
         keywords: (
             &[
                 "règle",
@@ -330,17 +308,9 @@ pub fn outside() -> &'static [crate::model::Outside] {
     &ALL
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -368,19 +338,17 @@ fn setting(
 }
 
 /// The page's settings, in its order.
+// Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
-        let switch = |key| one(key, Codec::Bool, Value::Bool(true));
+        let switch = |key| one(key, Codec::Bool);
         vec![
             setting(
                 COUNT,
                 DESKTOPS,
-                w("Nombre de bureaux", "Number of desktops"),
-                w(
-                    "Sur chaque écran, de 1 à 9 ; chacun change les siens.",
-                    "On every screen, 1 to 9; each switches its own.",
-                ),
+                words::NUMBER_OF_DESKTOPS,
+                words::ON_EVERY_SCREEN_1_TO_9,
                 (
                     &["bureaux virtuels", "espaces de travail", "combien"],
                     &["virtual desktops", "workspaces", "how many"],
@@ -397,82 +365,57 @@ pub fn settings() -> &'static [Setting] {
                         min: 1,
                         max: MOST as i64,
                     },
-                    Value::Int(DEFAULT as i64),
                 ),
             ),
             setting(
                 NAMES,
                 DESKTOPS,
-                w("Leurs noms", "Their names"),
-                w(
-                    "Clique sur un nom pour le changer. Il se lit au survol de sa vignette dans la barre et dans Alt+Tab ; sans nom, « Bureau 3 ».",
-                    "Click a name to change it. It shows when hovering its tile in the bar and in Alt+Tab; with no name, “Desktop 3”.",
-                ),
+                words::THEIR_NAMES,
+                words::CLICK_A_NAME_TO_CHANGE_IT,
                 (
                     &["nommer", "renommer", "étiquette", "espaces de travail"],
                     &["name", "rename", "label", "workspaces"],
                 ),
                 Kind::Text,
-                one(&["desktops", "names"], Codec::Texts, Value::List(Vec::new())),
+                one(&["desktops", "names"], Codec::Texts),
             ),
             setting(
                 MOVE_KEY,
                 MOVE,
-                w("Déplacer de n’importe où", "Move from anywhere"),
-                w(
-                    "Tiens la touche et glisse n’importe où dans la fenêtre ; sa barre de titre marche toujours.",
-                    "Hold the key and drag anywhere in the window; its title bar always works.",
-                ),
+                words::MOVE_FROM_ANYWHERE,
+                words::HOLD_THE_KEY_AND_DRAG_ANYWHERE,
                 (
                     &["déplacer", "glisser", "saisir", "alt", "super", "fenêtre"],
                     &["move", "drag", "grab", "alt", "super", "window"],
                 ),
                 Kind::Menu(vec![
-                    word("Alt + glisser", "Alt + drag", "alt"),
-                    word("Super + glisser", "Super + drag", "super"),
-                    word("Aucune touche", "No key", "none"),
+                    word(words::ALT_DRAG, "alt"),
+                    word(words::SUPER_DRAG, "super"),
+                    word(words::NO_KEY, "none"),
                 ]),
-                one(
-                    &["windows", "move-modifier"],
-                    Codec::Word(DRAG_KEYS),
-                    Value::Word("alt"),
-                ),
+                one(&["windows", "move-modifier"], Codec::Word(DRAG_KEYS)),
             ),
             setting(
                 RESIZE_KEY,
                 MOVE,
-                w("Redimensionner de n’importe où", "Resize from anywhere"),
-                w(
-                    "Le bord le plus proche du pointeur suit.",
-                    "The edge nearest the pointer follows.",
-                ),
+                words::RESIZE_FROM_ANYWHERE,
+                words::THE_EDGE_NEAREST_THE_POINTER_FOLLOWS,
                 (
                     &["redimensionner", "taille", "clic droit", "agrandir"],
                     &["resize", "size", "right click", "enlarge"],
                 ),
                 Kind::Menu(vec![
-                    word(
-                        "Super + clic droit glissé",
-                        "Super + right-drag",
-                        "super",
-                    ),
-                    word("Alt + clic droit glissé", "Alt + right-drag", "alt"),
-                    word("Aucune touche", "No key", "none"),
+                    word(words::SUPER_RIGHT_DRAG, "super"),
+                    word(words::ALT_RIGHT_DRAG, "alt"),
+                    word(words::NO_KEY, "none"),
                 ]),
-                one(
-                    &["windows", "resize-modifier"],
-                    Codec::Word(DRAG_KEYS),
-                    Value::Word("super"),
-                ),
+                one(&["windows", "resize-modifier"], Codec::Word(DRAG_KEYS)),
             ),
             setting(
                 MAGNET,
                 MOVE,
-                w("Bords aimantés", "Magnetic edges"),
-                w(
-                    "À 12 px d’une autre fenêtre ou d’un bord, elle s’y colle, à 8 px ; continue de glisser pour la décoller.",
-                    "Within 12 px of another window or an edge, it sticks there, 8 px away; drag on to free it.",
-                ),
+                words::MAGNETIC_EDGES,
+                words::WITHIN_12_PX_OF_ANOTHER_WINDOW,
                 (&["aimant", "coller", "bord"], &["magnet", "stick", "edge"]),
                 Kind::Switch,
                 switch(&["windows", "magnet"]),
@@ -480,14 +423,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SNAP,
                 MOVE,
-                w(
-                    "Ancrer en glissant contre un bord",
-                    "Snap by dragging to an edge",
-                ),
-                w(
-                    "Contre un côté, une moitié ; dans un coin, un quart ; en haut, tout l’écran. Super + flèches ancrent toujours.",
-                    "Against a side, a half; in a corner, a quarter; at the top, the whole screen. Super + arrows always snap.",
-                ),
+                words::SNAP_BY_DRAGGING_TO_AN_EDGE,
+                words::AGAINST_A_SIDE_A_HALF_IN,
                 (
                     &["ancrer", "moitié", "quart", "maximiser", "pavage"],
                     &["snap", "half", "quarter", "maximise", "tiling"],
@@ -498,11 +435,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 WOBBLE,
                 MOVE,
-                w("Fenêtres ondulantes", "Wobbly windows"),
-                w(
-                    "Une fenêtre déplacée ondule, puis se pose en 400 ms.",
-                    "A moved window wobbles, then settles in 400 ms.",
-                ),
+                words::WOBBLY_WINDOWS,
+                words::A_MOVED_WINDOW_WOBBLES_THEN_SETTLES,
                 (
                     &["ondule", "ondulantes", "gelée", "animation"],
                     &["wobbly", "wobble", "jelly", "animation"],
@@ -513,59 +447,39 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 ANIMATION,
                 MOVE,
-                w("Ouvrir et fermer", "Open and close"),
-                w(
-                    "Pluie : des colonnes de caractères tombent dans la fenêtre qui s’ouvre (360 ms) et l’emportent quand elle se ferme (300 ms). Givre : la fenêtre apparaît à travers une vitre de glace qui dégèle.",
-                    "Rain: columns of glyphs fall through a window as it opens (360 ms) and carry it away as it closes (300 ms). Frost: the window shows through a sheet of ice that thaws to clear glass.",
-                ),
+                words::OPEN_AND_CLOSE,
+                words::RAIN_COLUMNS_OF_GLYPHS_FALL_THROUGH,
                 (
                     &["ouvrir", "fermer", "animation", "pluie", "matrix", "givre"],
                     &["open", "close", "animation", "rain", "matrix", "frost"],
                 ),
                 Kind::Menu(vec![
-                    word("Standard", "Standard", "standard"),
-                    word("Pluie", "Rain", "rain"),
-                    word("Givre", "Frost", "frost"),
+                    word(words::STANDARD, "standard"),
+                    word(words::RAIN, "rain"),
+                    word(words::FROST, "frost"),
                 ]),
-                one(
-                    &["windows", "animation"],
-                    Codec::Word(ANIMATIONS),
-                    Value::Word("standard"),
-                ),
+                one(&["windows", "animation"], Codec::Word(ANIMATIONS)),
             ),
             setting(
                 ALT_TAB_ROW,
                 ALT_TAB,
-                w("Alt+Tab montre", "Alt+Tab shows"),
-                w(
-                    "Tous : ce bureau d’abord, puis les autres après un trait, grisés.",
-                    "All: this desktop first, then the others after a line, dimmed.",
-                ),
+                words::ALT_TAB_SHOWS,
+                words::ALL_THIS_DESKTOP_FIRST_THEN_THE,
                 (
                     &["alt+tab", "passer", "fenêtres", "bureau"],
                     &["alt+tab", "switcher", "windows", "desktop"],
                 ),
                 Kind::Menu(vec![
-                    word("Tous les bureaux", "All desktops", "all"),
-                    word("Ce bureau seulement", "This desktop only", "desktop"),
+                    word(words::ALL_DESKTOPS, "all"),
+                    word(words::THIS_DESKTOP_ONLY, "desktop"),
                 ]),
-                one(
-                    &["windows", "alt-tab"],
-                    Codec::Word(ALT_TAB_WORDS),
-                    Value::Word("all"),
-                ),
+                one(&["windows", "alt-tab"], Codec::Word(ALT_TAB_WORDS)),
             ),
             setting(
                 HOT_CORNER,
                 OVERVIEW,
-                w(
-                    "Coin en haut à gauche : vue d’ensemble",
-                    "Top-left corner: overview",
-                ),
-                w(
-                    "Le pointeur poussé un instant dans le coin en haut à gauche d’un écran ouvre la vue d’ensemble, comme Super+W ; encore, il la ferme.",
-                    "The pointer pushed for a moment into a screen’s top-left corner opens the overview, as Super+W does; again, it closes it.",
-                ),
+                words::TOP_LEFT_CORNER_OVERVIEW,
+                words::THE_POINTER_PUSHED_FOR_A_MOMENT,
                 (
                     &["coin actif", "coin", "vue d’ensemble", "aperçu", "bureaux"],
                     &["hot corner", "corner", "overview", "activities", "desktops"],
@@ -576,11 +490,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 INK,
                 DRAW,
-                w("Dessiner sur l’écran", "Draw on the screen"),
-                w(
-                    "Super + glisser trace un trait, Super + Maj + glisser une flèche ; Super + Alt tenues, un laser. Échap efface tout.",
-                    "Super+drag draws a stroke, Super+Shift+drag an arrow; Super+Alt held, a laser. Esc clears everything.",
-                ),
+                words::DRAW_ON_THE_SCREEN_2,
+                words::SUPER_DRAG_DRAWS_A_STROKE_SUPER,
                 (
                     &["encre", "laser", "flèche", "annoter", "trait"],
                     &["ink", "laser", "arrow", "annotate", "stroke"],

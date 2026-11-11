@@ -33,6 +33,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::windows as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -607,19 +608,17 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The windows' words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    pub(crate) lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     /// "+ 2 autres", "+ 1 autre".
     pub fn more(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "+ 1 autre".to_owned(),
             (true, n) => format!("+ {n} autres"),
             (false, n) => format!("+ {n} more"),
@@ -628,20 +627,15 @@ impl Words {
 
     /// The ✕'s name: "Fermer Terminal".
     pub fn close(self, title: &str) -> String {
-        if self.fr {
-            format!("Fermer {title}")
-        } else {
-            format!("Close {title}")
-        }
+        txt::close(self.lang, title)
     }
 
     /// A line's name for screen readers: its title, and whether it is
     /// the focused window or minimised.
     pub fn name(self, line: &Line) -> String {
-        let state = match (line.focused, line.minimized, self.fr) {
-            (true, _, _) => ", active",
-            (_, true, true) => ", réduite",
-            (_, true, false) => ", minimised",
+        let state = match (line.focused, line.minimized) {
+            (true, _) => ", active",
+            (_, true) => txt::MINIMISED.get(self.lang),
             _ => "",
         };
         format!("{}{state}", line.title)
@@ -649,11 +643,7 @@ impl Words {
 
     /// The mini form's item's name: "Fenêtres du bureau : 4".
     pub fn item(self, count: usize) -> String {
-        if self.fr {
-            format!("Fenêtres du bureau : {count}")
-        } else {
-            format!("This desktop's windows: {count}")
-        }
+        txt::this_desktop_s_windows(self.lang, count)
     }
 
     /// What the rows say, for the log (and tests): each title in «», the

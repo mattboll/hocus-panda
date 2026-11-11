@@ -307,10 +307,11 @@ impl PointerGrab<State> for MoveGrab {
 
     fn unset(&mut self, state: &mut State) {
         state.moving = None;
-        state.frame_cursor = None;
+        state.pointer.frame_cursor = None;
         state.bar_front_dropped();
         let now = state.now();
         let zone = state
+            .snap
             .preview
             .as_ref()
             .filter(|p| p.shown(now))
@@ -570,7 +571,7 @@ impl PointerGrab<State> for ResizeGrab {
     }
 
     fn unset(&mut self, state: &mut State) {
-        state.frame_cursor = None;
+        state.pointer.frame_cursor = None;
         let ids: Vec<WindowId> = std::iter::once(self.id)
             .chain(self.partners.iter().map(|(id, _, _)| *id))
             .collect();
@@ -685,7 +686,7 @@ impl State {
             start: self.placed_now(id),
         };
         self.moving = Some(id);
-        self.frame_cursor = Some(CursorIcon::Grabbing);
+        self.pointer.frame_cursor = Some(CursorIcon::Grabbing);
         pointer.set_grab(self, grab, serial, Focus::Clear);
         self.redraw = true;
     }
@@ -755,7 +756,7 @@ impl State {
         } else {
             floats = matches!(mode, Mode::Snapped(_));
             // The handle goes with the pair.
-            self.seam_handle = None;
+            self.snap.seam_handle = None;
         }
         let (min, max) = crate::windows::size_limits(&window);
         let min = (min.0.max(MIN_SIZE.0), min.1.max(MIN_SIZE.1));
@@ -797,7 +798,7 @@ impl State {
             floats,
             last: initial,
         };
-        self.frame_cursor = Some(edges.cursor());
+        self.pointer.frame_cursor = Some(edges.cursor());
         pointer.set_grab(self, grab, serial, Focus::Clear);
         self.redraw = true;
     }

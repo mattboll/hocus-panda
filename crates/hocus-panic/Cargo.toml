@@ -1,0 +1,14 @@
+[package]
+name = "hocus-panic"
+description = "What Hocuspanda's programs do when they panic: a line in their log, with where and on which thread, before they end"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing.workspace = true

@@ -29,6 +29,8 @@
 pub mod cameras;
 pub mod draw;
 
+use hocus_words::Lang;
+use hocus_words::shell::in_use as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError, mpsc},
@@ -141,6 +143,39 @@ impl Uses {
 
     pub fn any(&self) -> bool {
         !self.kinds().is_empty()
+    }
+
+    /// What is in use and by whom, as screen readers say it: each kind
+    /// still on, with its applications.
+    pub fn used(&self) -> Vec<(Kind, Vec<String>)> {
+        let apps = |media: &[Seen<Media>]| -> Vec<String> {
+            media
+                .iter()
+                .filter(|m| m.live())
+                .map(|m| m.what.app.clone())
+                .collect()
+        };
+        let mut used = Vec::new();
+        for (kind, apps) in [
+            (Kind::Microphone, apps(&self.microphone)),
+            (Kind::Camera, apps(&self.camera)),
+            (
+                Kind::Screen,
+                self.shares
+                    .iter()
+                    .filter(|s| s.live())
+                    .map(|s| s.what.app.clone())
+                    .collect(),
+            ),
+        ] {
+            if !apps.is_empty() {
+                used.push((kind, apps));
+            }
+        }
+        if self.recording.as_ref().is_some_and(|r| r.live()) {
+            used.push((Kind::Recording, Vec::new()));
+        }
+        used
     }
 
     /// The shares still on (not lingering).
@@ -562,60 +597,61 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The words of the sign's popover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    pub(crate) lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: crate::clock::time::Lang) -> Self {
-        Self {
-            fr: lang == crate::clock::time::Lang::French,
-        }
+        Self { lang }
     }
 
     /// The words to pause or resume the recording, for screen readers.
     pub fn pause_recording(self, paused: bool) -> &'static str {
         if paused {
-            self.pick("Reprendre l'enregistrement", "Resume the recording")
+            self.pick(txt::RESUME_THE_RECORDING)
         } else {
-            self.pick("Mettre l'enregistrement en pause", "Pause the recording")
+            self.pick(txt::PAUSE_THE_RECORDING)
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     /// The popover's title.
     pub fn right_now(self) -> &'static str {
-        self.pick("En ce moment", "Right now")
+        self.pick(txt::RIGHT_NOW)
     }
 
     /// What is used, as a use's line starts.
     pub fn kind(self, kind: Kind, muted: bool) -> &'static str {
         match kind {
-            Kind::Microphone if muted => self.pick("Micro coupé", "Microphone muted"),
-            Kind::Microphone => self.pick("Micro", "Microphone"),
-            Kind::Camera => self.pick("Caméra", "Camera"),
-            Kind::Recording | Kind::Screen => self.pick("Écran", "Screen"),
+            Kind::Microphone if muted => self.pick(txt::MICROPHONE_MUTED),
+            Kind::Microphone => self.pick(txt::MICROPHONE),
+            Kind::Camera => self.pick(txt::CAMERA),
+            Kind::Recording | Kind::Screen => self.pick(txt::SCREEN),
         }
     }
 
     /// The recording's tile's time while it is paused (5.10).
     pub fn paused(self) -> &'static str {
-        self.pick("pause", "paused")
+        self.pick(txt::PAUSED)
     }
 
     /// "depuis 12 min": how long it has been used.
     pub fn since(self, time: Duration) -> String {
         let s = time.as_secs();
         let (m, h) = (s / 60, s / 3600);
-        match (self.fr, h, m) {
-            (true, 0, 0) => format!("depuis {s} s"),
-            (false, 0, 0) => format!("for {s} s"),
-            (true, 0, m) => format!("depuis {m} min"),
-            (false, 0, m) => format!("for {m} min"),
-            (true, h, _) => format!("depuis {h} h {:02}", m % 60),
-            (false, h, _) => format!("for {h} h {} min", m % 60),
+        match (h, m) {
+            (0, 0) => txt::for_s(self.lang, s),
+            (0, m) => txt::for_min(self.lang, m),
+            (h, _) => txt::for_h_min(
+                self.lang,
+                txt::ForHMin {
+                    h: &h,
+                    m_60: m % 60,
+                },
+            ),
         }
     }
 
@@ -633,40 +669,31 @@ impl Words {
 
     /// A share's detail: "partage la fenêtre « … »", or the screen.
     pub fn shares(self, thing: &SharedThing) -> String {
-        match (thing, self.fr) {
-            (SharedThing::Window(title), true) => format!("partage la fenêtre « {title} »"),
-            (SharedThing::Window(title), false) => {
-                format!("sharing the window \u{201c}{title}\u{201d}")
+        match thing {
+            SharedThing::Window(title) => txt::sharing_the_window(self.lang, title),
+            SharedThing::Screen(name) if name.is_empty() => {
+                txt::SHARING_THE_LAPTOP_SCREEN.get(self.lang).to_owned()
             }
-            (SharedThing::Screen(name), true) if name.is_empty() => {
-                "partage l'écran du portable".to_owned()
-            }
-            (SharedThing::Screen(name), false) if name.is_empty() => {
-                "sharing the laptop screen".to_owned()
-            }
-            (SharedThing::Screen(name), true) => format!("partage l'écran « {name} »"),
-            (SharedThing::Screen(name), false) => {
-                format!("sharing the screen \u{201c}{name}\u{201d}")
-            }
+            SharedThing::Screen(name) => txt::sharing_the_screen(self.lang, name),
         }
     }
 
     /// An application not known by name.
     pub fn an_app(self) -> &'static str {
-        self.pick("Une application", "An application")
+        self.pick(txt::AN_APPLICATION)
     }
 
     /// The recording's line's name (5.10).
     pub fn recording(self) -> &'static str {
-        self.pick("Enregistrement d'écran", "Screen recording")
+        self.pick(txt::SCREEN_RECORDING)
     }
 
     /// The recording's line: "Écran · enregistrement · 0:12".
     pub fn recording_line(self, paused: bool, elapsed: Duration) -> String {
         let state = if paused {
-            self.pick("en pause", "paused")
+            self.pick(txt::PAUSED_2)
         } else {
-            self.pick("enregistrement", "recording")
+            self.pick(txt::RECORDING)
         };
         format!(
             "{} · {state} · {}",
@@ -677,37 +704,34 @@ impl Words {
 
     /// How many notifications wait for the end of the sharing.
     pub fn held(self, n: usize) -> String {
-        match (n, self.fr) {
-            (0, true) => "Les notifications attendent la fin".to_owned(),
-            (0, false) => "Notifications wait until the end".to_owned(),
-            (1, true) => "1 notification en attente".to_owned(),
-            (1, false) => "1 notification held".to_owned(),
-            (n, true) => format!("{n} notifications en attente"),
-            (n, false) => format!("{n} notifications held"),
+        match n {
+            0 => txt::NOTIFICATIONS_WAIT_UNTIL_THE_END
+                .get(self.lang)
+                .to_owned(),
+            1 => txt::N_1_NOTIFICATION_HELD.get(self.lang).to_owned(),
+            n => txt::notifications_held(self.lang, n),
         }
     }
 
     /// The microphone's button: muting the default source, or not.
     pub fn mute(self, muted: bool) -> &'static str {
         if muted {
-            self.pick("Rétablir le micro", "Unmute")
+            self.pick(txt::UNMUTE)
         } else {
-            self.pick("Couper le micro", "Mute the microphone")
+            self.pick(txt::MUTE_THE_MICROPHONE)
         }
     }
 
     /// A share's button; with several, each names its application.
     pub fn stop(self, app: Option<&str>) -> String {
-        match (app, self.fr) {
-            (None, true) => "Arrêter le partage".to_owned(),
-            (None, false) => "Stop sharing".to_owned(),
-            (Some(app), true) => format!("Arrêter le partage avec {app}"),
-            (Some(app), false) => format!("Stop sharing with {app}"),
+        match app {
+            None => txt::STOP_SHARING.get(self.lang).to_owned(),
+            Some(app) => txt::stop_sharing_with(self.lang, app),
         }
     }
 
     pub fn stop_recording(self) -> &'static str {
-        self.pick("Arrêter l'enregistrement", "Stop recording")
+        self.pick(txt::STOP_RECORDING)
     }
 }
 

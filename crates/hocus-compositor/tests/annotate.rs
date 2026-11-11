@@ -87,8 +87,7 @@ fn ready() -> Option<PathBuf> {
         .status()
         .is_ok_and(|s| s.success());
     if !daemon {
-        eprintln!("no dbus-daemon: skipped");
-        return None;
+        common::missing("dbus-daemon");
     }
     Some(shell)
 }
@@ -142,7 +141,7 @@ impl Bed {
         config.plain_background = true;
         config.pictures = Some(root.join("Images"));
         config.state_dir = Some(root.join("state/hocuspanda"));
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         let mut hp = Headless::start_on_bus(
             HeadlessConfig {
                 outputs: vec!["1920x1080".parse()?],
@@ -244,6 +243,16 @@ impl Bed {
         }
         self.hp.button(BTN_LEFT, false);
         self.idle(Duration::from_millis(80))
+    }
+
+    /// A mark drawn by a drag on the image, once the editor has it: the
+    /// next tool or colour chosen cannot reach it before its release does,
+    /// however late the shell is.
+    fn draw(&mut self, from: (f64, f64), to: (f64, f64)) -> anyhow::Result<()> {
+        let mark = self.mark();
+        self.drag(from, to)?;
+        self.logged_since(mark, "a mark on the capture")?;
+        Ok(())
     }
 
     fn key(&mut self, keys: &[u32]) -> anyhow::Result<()> {
@@ -511,17 +520,19 @@ fn after_6_s_the_capture_goes_to_the_history() -> anyhow::Result<()> {
         "{shows}"
     );
     // Its first action, "Annoter".
-    let items = bed.logged_since(mark, "the history's items")?;
+    let items = bed.logged_since(mark, "\"history:Action(")?;
     let popover = bed.hp.popover_surfaces()[0].1;
     let at = items
-        .split_whitespace()
-        .find_map(|w| {
-            let w = w.strip_prefix("items=").unwrap_or(w);
-            let (who, xy) = w.rsplit_once('@')?;
-            who.starts_with("Action(").then_some(())?;
-            who.ends_with(",0)").then_some(())?;
-            let (x, y) = xy.split_once(',')?;
-            Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))
+        .find(" shows {")
+        .and_then(|i| serde_json::from_str::<serde_json::Value>(&items[i + 7..]).ok())
+        .and_then(|dump| {
+            let (_, place) = dump
+                .as_object()?
+                .iter()
+                .find(|(id, _)| id.starts_with("history:Action(") && id.ends_with(",0)"))?;
+            let at = place.get("at")?;
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
         })
         .context("no action")?;
     let mark = bed.mark();
@@ -563,21 +574,23 @@ fn the_marks_are_in_the_saved_image_where_they_were_drawn() -> anyhow::Result<()
     let (file, before, thumb) = bed.capture()?;
     let places = bed.edit(thumb)?;
     // An arrow in red, the colour it starts with.
-    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    bed.draw(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
     // A box in green.
     bed.click(places.at("box"))?;
     bed.click(places.at("colour2"))?;
-    bed.drag(places.image(320.0, 30.0), places.image(560.0, 150.0))?;
+    bed.draw(places.image(320.0, 30.0), places.image(560.0, 150.0))?;
     // A text in white.
     bed.click(places.at("text"))?;
     bed.click(places.at("colour4"))?;
     bed.click(places.image(40.0, 300.0))?;
     bed.key(&[KEY_O])?;
     bed.key(&[KEY_K])?;
+    let typed = bed.mark();
     bed.key(&[KEY_ENTER])?;
+    bed.logged_since(typed, "a mark on the capture")?;
     // A blur.
     bed.click(places.at("blur"))?;
-    bed.drag(places.image(320.0, 200.0), places.image(560.0, 340.0))?;
+    bed.draw(places.image(320.0, 200.0), places.image(560.0, 340.0))?;
     let mark = bed.mark();
     bed.click(places.at("copy"))?;
     bed.logged_since(mark, "the annotated capture is written")?;
@@ -1013,12 +1026,66 @@ fn the_picture_stays_while_an_arrow_is_drawn_on_the_cpu() -> anyhow::Result<()> 
 }
 
 /// The same with iced's GPU renderer, wgpu, on Mesa's software Vulkan
-/// driver: the one that lost the picture (#594). Skipped without it.
+/// driver: the one that lost the picture (#594). Fails without it.
 #[test]
 fn the_picture_stays_while_an_arrow_is_drawn_on_wgpu() -> anyhow::Result<()> {
     let Some(manifest) = lavapipe() else {
-        eprintln!("no software Vulkan driver (Mesa's lavapipe): skipped");
-        return Ok(());
+        common::missing("Mesa's software Vulkan driver, lavapipe (mesa-vulkan-drivers)");
     };
     the_picture_stays_while_an_arrow_is_drawn(Draws::SoftwareVulkan(manifest))
+}
+
+/// The toolbar, the thumbnail and the editor (a mark drawn, then a text
+/// being typed), saved under `HOCUS_KIT_SHOTS` for the widget kit's
+/// side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell)?;
+    bed.hp.pointer_move(300.0, 150.0);
+    chord(&mut bed.hp, &[KEY_PRINT]);
+    bed.idle(Duration::from_millis(100))?;
+    let (x, y, w, h) = AREA;
+    bed.drag((x, y), (x + w, y + h))?;
+    bed.hp.pointer_move(100.0, 100.0);
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(
+        &mut bed.hp,
+        hocus_link::CAPTURE_TOOLBAR_NAMESPACE,
+        "toolbar",
+    )?;
+    chord(&mut bed.hp, &[KEY_ENTER]);
+    let shown = bed.hp.dispatch_until(Duration::from_secs(10), |hp| {
+        hp.capture_thumb_surfaces()
+            .first()
+            .is_some_and(|(_, r)| r.height > 0)
+    })?;
+    anyhow::ensure!(shown, "no thumbnail");
+    let thumb = bed.hp.capture_thumb_surfaces()[0].1;
+    // On its image: its countdown held.
+    let image = (
+        f64::from(thumb.x + thumb.width / 2),
+        f64::from(thumb.y + 100),
+    );
+    bed.over(image, hocus_link::CAPTURE_THUMB_NAMESPACE)?;
+    common::layer_shot(&mut bed.hp, hocus_link::CAPTURE_THUMB_NAMESPACE, "thumb")?;
+    let places = bed.edit(thumb)?;
+    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    bed.hp.pointer_move(5.0, 5.0);
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(&mut bed.hp, hocus_link::CAPTURE_EDITOR_NAMESPACE, "editor")?;
+    bed.click(places.at("text"))?;
+    bed.click(places.image(40.0, 300.0))?;
+    bed.key(&[KEY_O])?;
+    bed.key(&[KEY_K])?;
+    bed.hp.pointer_move(5.0, 5.0);
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(
+        &mut bed.hp,
+        hocus_link::CAPTURE_EDITOR_NAMESPACE,
+        "editor-text",
+    )
 }

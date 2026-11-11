@@ -15,9 +15,9 @@
 //! - `curtain-end`: it was lifted, or it ended (locked, or the screens
 //!   went off): the pill's surface goes.
 
-use std::{fmt, time::Duration};
+use std::time::Duration;
 
-use crate::{BadLine, flag, word};
+use serde::{Deserialize, Serialize};
 
 /// The pill's surface: the pill alone, 300 × 64, centred across its
 /// screen, in the overlay layer, taking neither the pointer nor the keys.
@@ -45,7 +45,7 @@ pub const PILL_IN: Duration = Duration::from_millis(250);
 pub const PILL_RISE: f64 = 10.0;
 
 /// The curtain as the shell draws its pill.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CurtainShown {
     /// How long it has been up, in milliseconds.
     pub elapsed: u32,
@@ -57,42 +57,4 @@ pub struct CurtainShown {
     pub motion: bool,
     /// The screen the pill shows on.
     pub output: String,
-}
-
-impl CurtainShown {
-    pub(crate) fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "curtain {} {} {} {} {}",
-            self.elapsed,
-            self.length,
-            self.top,
-            if self.motion { "motion" } else { "still" },
-            crate::screen_name(&self.output),
-        )
-    }
-
-    pub(crate) fn read<'a>(words: &mut impl Iterator<Item = &'a str>) -> Result<Self, BadLine> {
-        let number = |w: &str, what: &str| {
-            w.parse::<u32>()
-                .map_err(|e| BadLine(format!("{what}: {e}")))
-        };
-        let elapsed = number(word(words, "elapsed")?, "elapsed")?;
-        let length = number(word(words, "length")?, "length")?;
-        let top = word(words, "top")?
-            .parse::<i32>()
-            .map_err(|e| BadLine(format!("top: {e}")))?;
-        let motion = flag(words.next(), "motion", "still")?;
-        let output = word(words, "output")?.to_owned();
-        if words.next().is_some() {
-            return Err(BadLine("a curtain line too long".to_owned()));
-        }
-        Ok(Self {
-            elapsed,
-            length,
-            top,
-            motion,
-            output,
-        })
-    }
 }

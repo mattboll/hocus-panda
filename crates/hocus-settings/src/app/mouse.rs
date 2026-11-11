@@ -16,6 +16,7 @@
 //! ([`crate::mouse`]); this module only lays them out and keeps the test
 //! area's state.
 
+use hocus_words::settings::app_mouse as words;
 use std::time::{Duration, Instant};
 
 use hocus_link::input::{DeviceKind, InputDevice};
@@ -34,7 +35,6 @@ use super::{
 };
 use crate::theme::Ink;
 use crate::{
-    lang::{Lang, w},
     model::{Icon, SectionId, Setting, Value, settings_of},
     mouse as model,
     store::Slot,
@@ -177,23 +177,14 @@ impl App {
         }
         if setting.group == model::GESTURES {
             return Some(self.say(match self.fingers() {
-                Some(2) => w(
-                    "Pas sur ce pavé tactile : il ne sent que deux doigts.",
-                    "Not on this touchpad: it senses only two fingers.",
-                ),
-                Some(1) => w(
-                    "Pas sur ce pavé tactile : il ne sent qu’un doigt.",
-                    "Not on this touchpad: it senses only one finger.",
-                ),
-                _ => w(
-                    "Pas sur ce pavé tactile : il ne sent que trois doigts.",
-                    "Not on this touchpad: it senses only three fingers.",
-                ),
+                Some(2) => words::NOT_ON_THIS_TOUCHPAD_IT_SENSES,
+                Some(1) => words::NOT_ON_THIS_TOUCHPAD_IT_SENSES_2,
+                _ => words::NOT_ON_THIS_TOUCHPAD_IT_SENSES_3,
             }));
         }
         Some(match model::kind_of(setting.id) {
-            Some(DeviceKind::Pointer) => self.say(w("Pas sur cette souris", "Not on this mouse")),
-            _ => self.say(w("Pas sur ce pavé tactile", "Not on this touchpad")),
+            Some(DeviceKind::Pointer) => self.say(words::NOT_ON_THIS_MOUSE),
+            _ => self.say(words::NOT_ON_THIS_TOUCHPAD),
         })
     }
 
@@ -224,20 +215,11 @@ impl App {
             row![
                 icon(Icon::Arrow, 14.0, FAINT.get()),
                 t(
-                    w(
-                        "Le thème et la taille du curseur se règlent dans",
-                        "The cursor's theme and size are set in"
-                    )
-                    .get(lang),
+                    words::THE_CURSOR_S_THEME_AND_SIZE.get(lang),
                     13.0,
                     FAINT.get()
                 ),
-                t(
-                    w("Apparence et langue ›", "Appearance and language ›").get(lang),
-                    13.0,
-                    MINT.get()
-                )
-                .font(SEMIBOLD),
+                t(words::APPEARANCE_AND_LANGUAGE.get(lang), 13.0, MINT.get()).font(SEMIBOLD),
             ]
             .spacing(5)
             .align_y(Alignment::Center),
@@ -259,11 +241,7 @@ impl App {
         let pad_head: Option<El<'_>> = if self.touchpad_off() {
             Some(device_tag(
                 Icon::Mouse,
-                self.say(w(
-                    "Coupé : une souris est branchée",
-                    "Off: a mouse is plugged in",
-                ))
-                .to_owned(),
+                self.say(words::OFF_A_MOUSE_IS_PLUGGED_IN).to_owned(),
                 AMBER.get(),
                 AMBER.get(),
             ))
@@ -271,7 +249,7 @@ impl App {
             self.mouse.devices.as_ref().map(|_| {
                 device_tag(
                     Icon::Mouse,
-                    self.say(w("Aucun", "None")).to_owned(),
+                    self.say(words::NONE).to_owned(),
                     FAINT.get(),
                     FAINT.get(),
                 )
@@ -292,7 +270,7 @@ impl App {
                 &controls,
                 self.mouse
                     .none(DeviceKind::Touchpad)
-                    .then(|| (self.say(w("Aucun pavé tactile", "No touchpad")), None)),
+                    .then(|| (self.say(words::NO_TOUCHPAD), None)),
             ),
         );
         // Souris.
@@ -301,7 +279,7 @@ impl App {
             self.mouse.devices.as_ref().map(|_| {
                 device_tag(
                     Icon::Mouse,
-                    self.say(w("Aucune", "None")).to_owned(),
+                    self.say(words::NONE_2).to_owned(),
                     FAINT.get(),
                     FAINT.get(),
                 )
@@ -321,22 +299,15 @@ impl App {
             &controls,
             self.mouse.none(DeviceKind::Pointer).then(|| {
                 (
-                    self.say(w("Aucune souris branchée", "No mouse plugged in")),
-                    Some(self.say(w(
-                        "Ses réglages restent dans le fichier et reviennent avec elle, ou avec toute autre souris.",
-                        "Its settings stay in the file and come back with it, or with any other mouse.",
-                    ))),
+                    self.say(words::NO_MOUSE_PLUGGED_IN),
+                    Some(self.say(words::ITS_SETTINGS_STAY_IN_THE_FILE)),
                 )
             }),
         ));
         // Gestes: hidden with no touchpad.
         if !self.mouse.none(DeviceKind::Touchpad) {
             let head: Option<El<'_>> = self.fingers().map(|n| {
-                let said = if lang.fr() {
-                    format!("Sur ce pavé : jusqu’à {n} doigts")
-                } else {
-                    format!("On this touchpad: up to {n} fingers")
-                };
+                let said = words::on_this_touchpad_up_to_fingers(lang, n);
                 t(said, 12.0, FAINT.get()).into()
             });
             let group = self.mouse_group(
@@ -348,11 +319,7 @@ impl App {
                 None,
             );
             let note = t(
-                w(
-                    "Le geste suit toujours tes doigts, que le défilement naturel soit mis ou non. Avec les mouvements réduits, rien ne suit les doigts : le bureau change, ou le lanceur s’ouvre, au lâcher.",
-                    "The gesture always follows your fingers, whether natural scrolling is on or not. With reduced motion nothing follows the fingers: the desktop changes, or the launcher opens, on release.",
-                )
-                .get(lang),
+                words::THE_GESTURE_ALWAYS_FOLLOWS_YOUR_FINGERS.get(lang),
                 12.0,
                 FAINT.get(),
             );
@@ -426,15 +393,9 @@ impl App {
     /// What the test area recognised, on its label line.
     fn recognised(&self) -> &'static str {
         match self.mouse.scrolled {
-            Some(Scrolled::Finger) => self.say(w("Reconnu : pavé tactile", "Recognised: touchpad")),
-            Some(Scrolled::Wheel) => self.say(w(
-                "Reconnu : molette de la souris",
-                "Recognised: the mouse's wheel",
-            )),
-            None => self.say(w(
-                "Ce que tu fais ici n’est pas écrit",
-                "Nothing done here is written",
-            )),
+            Some(Scrolled::Finger) => self.say(words::RECOGNISED_TOUCHPAD),
+            Some(Scrolled::Wheel) => self.say(words::RECOGNISED_THE_MOUSE_S_WHEEL),
+            None => self.say(words::NOTHING_DONE_HERE_IS_WRITTEN),
         }
     }
 
@@ -452,22 +413,10 @@ impl App {
             "pointer.natural-scroll"
         });
         self.say(match (finger, natural) {
-            (true, true) => w(
-                "Deux doigts · sens naturel : le contenu suit tes doigts.",
-                "Two fingers · natural: content follows your fingers.",
-            ),
-            (true, false) => w(
-                "Deux doigts · sens classique : le contenu monte quand tes doigts descendent.",
-                "Two fingers · classic: content goes up as your fingers go down.",
-            ),
-            (false, true) => w(
-                "Molette · sens naturel : le contenu suit la molette.",
-                "Wheel · natural: content follows the wheel.",
-            ),
-            (false, false) => w(
-                "Molette · sens classique : le contenu monte quand tu tournes la molette vers toi.",
-                "Wheel · classic: content goes up as you roll the wheel towards you.",
-            ),
+            (true, true) => words::TWO_FINGERS_NATURAL_CONTENT_FOLLOWS_YOUR,
+            (true, false) => words::TWO_FINGERS_CLASSIC_CONTENT_GOES_UP,
+            (false, true) => words::WHEEL_NATURAL_CONTENT_FOLLOWS_THE_WHEEL,
+            (false, false) => words::WHEEL_CLASSIC_CONTENT_GOES_UP_AS,
         })
     }
 
@@ -477,30 +426,19 @@ impl App {
         let swapped = self.switch_on("pointer.left-handed");
         let said = match self.mouse.press {
             None => {
-                return w(
-                    "Clique ici, avec chaque bouton.",
-                    "Click here, with each button.",
-                )
-                .get(lang)
-                .to_owned();
+                return words::CLICK_HERE_WITH_EACH_BUTTON.get(lang).to_owned();
             }
             Some(Press::Double) => {
-                return w(
-                    "Double clic : le rond s’allume.",
-                    "Double click: the dot lights up.",
-                )
-                .get(lang)
-                .to_owned();
+                return words::DOUBLE_CLICK_THE_DOT_LIGHTS_UP.get(lang).to_owned();
             }
-            Some(Press::Left) => w("Clic gauche", "Left click"),
-            Some(Press::Right) => w("Clic droit", "Right click"),
-            Some(Press::Middle) => w("Clic du milieu", "Middle click"),
+            Some(Press::Left) => words::LEFT_CLICK,
+            Some(Press::Right) => words::RIGHT_CLICK,
+            Some(Press::Middle) => words::MIDDLE_CLICK,
         };
         let said = said.get(lang);
-        match (swapped, lang) {
-            (false, _) => said.to_owned(),
-            (true, Lang::French) => format!("{said} : boutons inversés pour un gaucher"),
-            (true, Lang::English) => format!("{said}: buttons swapped for a left-hander"),
+        match swapped {
+            false => said.to_owned(),
+            true => words::buttons_swapped_for_a_left_hander(lang, said),
         }
     }
 
@@ -519,7 +457,7 @@ impl App {
         let lang = self.lang;
         let focused = |part| matches!(self.focus, super::Focus::Control(i) if controls.get(i) == Some(&super::Control::Try(part)));
         let head = row![
-            label(w("ESSAYER ICI", "TRY IT HERE").get(lang)),
+            label(words::TRY_IT_HERE.get(lang)),
             Space::new().width(Length::Fill),
             container(t(self.recognised(), 12.0, FAINT.get())).id("try:recognised".to_owned()),
         ]
@@ -531,14 +469,7 @@ impl App {
                 container(
                     row![
                         text(format!("{n:02}")).size(11).font(MONO).color(FAINT),
-                        t(
-                            match lang {
-                                Lang::French => format!("Ligne {n} de la liste"),
-                                Lang::English => format!("Line {n} of the list"),
-                            },
-                            13.0,
-                            SOFT.get(),
-                        ),
+                        t(words::line_of_the_list(lang, n), 13.0, SOFT.get(),),
                     ]
                     .spacing(10)
                     .align_y(Alignment::Center),
@@ -569,7 +500,7 @@ impl App {
             .on_enter(Message::Mouse(Msg::Over(true)))
             .on_exit(Message::Mouse(Msg::Over(false)));
         let scroll = column![
-            t(w("Fais défiler", "Scroll").get(lang), 12.5, DIM.get()).font(SEMIBOLD),
+            t(words::SCROLL.get(lang), 12.5, DIM.get()).font(SEMIBOLD),
             container(list).id("try:list".to_owned()),
             container(t(self.direction(), 12.0, FAINT.get())).id("try:direction".to_owned()),
         ]
@@ -613,7 +544,7 @@ impl App {
             .on_right_press(Message::Mouse(Msg::Press(Press::Right)))
             .on_middle_press(Message::Mouse(Msg::Press(Press::Middle)));
         let click = column![
-            t(w("Clique", "Click").get(lang), 12.5, DIM.get()).font(SEMIBOLD),
+            t(words::CLICK.get(lang), 12.5, DIM.get()).font(SEMIBOLD),
             container(target).id("try:target".to_owned()),
             container(t(self.pressed(), 12.0, FAINT.get())).id("try:pressed".to_owned()),
         ]
@@ -628,11 +559,7 @@ impl App {
             head,
             card,
             t(
-                w(
-                    "La vitesse et l’accélération s’appliquent au pointeur lui-même : bouge-le pour les sentir.",
-                    "Speed and acceleration apply to the pointer itself: move it to feel them.",
-                )
-                .get(lang),
+                words::SPEED_AND_ACCELERATION_APPLY_TO_THE.get(lang),
                 12.0,
                 FAINT.get(),
             ),
@@ -716,13 +643,9 @@ impl App {
         .height(16);
         let lang = self.lang;
         row![
-            t(w("Lente", "Slow").get(lang), 11.5, fade(FAINT.get(), alpha)),
+            t(words::SLOW.get(lang), 11.5, fade(FAINT.get(), alpha)),
             drawn,
-            t(
-                w("Rapide", "Fast").get(lang),
-                11.5,
-                fade(FAINT.get(), alpha)
-            ),
+            t(words::FAST.get(lang), 11.5, fade(FAINT.get(), alpha)),
         ]
         .spacing(8)
         .align_y(Alignment::Center)

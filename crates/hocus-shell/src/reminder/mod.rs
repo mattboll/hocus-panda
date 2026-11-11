@@ -36,6 +36,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::reminder as txt;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -48,7 +49,7 @@ use hocus_day::{
     reminders::{self, Settings},
 };
 use hocus_link::{BUBBLE_OUT, EDGE, Form, ToCompositor};
-use iced::{Element, Length, Rectangle, widget::canvas, window};
+use iced::{Element, Rectangle, window};
 use iced_layershell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
 };
@@ -394,40 +395,36 @@ pub enum Acted {
 /// The tab's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     pub fn now() -> Self {
         Self::new(Lang::of_messages())
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     /// "dans 5 min", "maintenant", "a commencé il y a 4 min".
     pub fn when(self, left: i64) -> String {
         let minutes = |m: i64| meeting::Words::minutes(m);
-        match (left, self.fr) {
-            (1.., true) => format!("dans {}", minutes(left)),
-            (1.., false) => format!("in {}", minutes(left)),
-            (0, _) => self.pick("maintenant", "now").to_owned(),
-            (_, true) => format!("a commencé il y a {}", minutes(-left)),
-            (_, false) => format!("started {} ago", minutes(-left)),
+        match left {
+            1.. => txt::in_text(self.lang, minutes(left)),
+            0 => self.pick(txt::NOW).to_owned(),
+            _ => txt::started_ago(self.lang, minutes(-left)),
         }
     }
 
     /// What the line says of where: "visio", else its place.
     fn place(self, m: &Meeting) -> Option<String> {
         match (&m.video, &m.place) {
-            (Some(_), _) => Some(self.pick("visio", "video").to_owned()),
+            (Some(_), _) => Some(self.pick(txt::VIDEO).to_owned()),
             (None, Some(place)) => Some(place.clone()),
             (None, None) => None,
         }
@@ -446,31 +443,31 @@ impl Words {
     /// The title, or "Réunion" on a screen shared.
     pub fn title(self, tab: &Tab, shared: bool) -> String {
         if shared {
-            self.pick("Réunion", "Meeting").to_owned()
+            self.pick(txt::MEETING).to_owned()
         } else {
             tab.meeting.title.clone()
         }
     }
 
     pub fn join(self) -> &'static str {
-        self.pick("Rejoindre", "Join")
+        self.pick(txt::JOIN)
     }
 
     pub fn open(self) -> &'static str {
-        self.pick("Voir", "Open")
+        self.pick(txt::OPEN)
     }
 
     /// Later's name, `left` minutes before the start.
     pub fn later(self, left: i64) -> &'static str {
         if left > 1 {
-            self.pick("Me le redire 1 min avant", "Remind me 1 min before")
+            self.pick(txt::REMIND_ME_1_MIN_BEFORE)
         } else {
-            self.pick("Me le redire à l'heure", "Remind me when it starts")
+            self.pick(txt::REMIND_ME_WHEN_IT_STARTS)
         }
     }
 
     pub fn dismiss(self) -> &'static str {
-        self.pick("Ignorer ce rappel", "Dismiss this reminder")
+        self.pick(txt::DISMISS_THIS_REMINDER)
     }
 
     /// For screen readers, said once as it comes: "Revue de sprint, dans 5
@@ -490,16 +487,14 @@ impl Words {
                 format!("{m} minutes")
             }
         };
-        let when = match (tab.left, self.fr) {
-            (1.., true) => format!("dans {}", long(tab.left)),
-            (1.., false) => format!("in {}", long(tab.left)),
-            (0, _) => self.pick("maintenant", "now").to_owned(),
-            (_, true) => format!("a commencé il y a {}", long(-tab.left)),
-            (_, false) => format!("started {} ago", long(-tab.left)),
+        let when = match tab.left {
+            1.. => txt::in_text_2(self.lang, long(tab.left)),
+            0 => self.pick(txt::NOW).to_owned(),
+            _ => txt::started_ago_2(self.lang, long(-tab.left)),
         };
         let mut name = format!("{}, {when}", self.title(tab, shared));
         match (&tab.meeting.video, &tab.meeting.place) {
-            (Some(_), _) => name.push_str(self.pick(", visio", ", video call")),
+            (Some(_), _) => name.push_str(self.pick(txt::VIDEO_CALL)),
             (None, Some(place)) => {
                 name.push_str(", ");
                 name.push_str(place);
@@ -511,16 +506,18 @@ impl Words {
 
     /// The history's line: "Revue de sprint · a commencé à 10:00".
     pub fn started(self, m: &Meeting) -> String {
-        if self.fr {
-            format!("{} · a commencé à {}", m.title, m.hhmm)
-        } else {
-            format!("{} · started at {}", m.title, m.hhmm)
-        }
+        txt::started_at(
+            self.lang,
+            txt::StartedAt {
+                m_hhmm: &m.hhmm,
+                m_title: &m.title,
+            },
+        )
     }
 
     /// The history's application.
     pub fn calendar(self) -> &'static str {
-        self.pick("Agenda", "Calendar")
+        self.pick(txt::CALENDAR)
     }
 }
 
@@ -963,6 +960,7 @@ fn show(tabs: Vec<Tab>) {
         let mut messages = s.settle();
         for serial in changed {
             if s.opened.keys().any(|(_, sr)| *sr == serial) {
+                crate::ui::touch();
                 crate::popover::tell(ToCompositor::Wake(hocus_link::reminder_namespace(serial)));
             }
         }
@@ -1091,6 +1089,7 @@ fn places_changed(change: impl FnOnce(&mut Places)) {
     });
     out(messages);
     for serial in woken {
+        crate::ui::touch();
         crate::popover::tell(ToCompositor::Wake(hocus_link::reminder_namespace(serial)));
     }
     // The thread's leaving surfaces, timed.
@@ -1200,16 +1199,7 @@ pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
     if !is_tab(id) {
         return None;
     }
-    Some(
-        canvas(draw::View {
-            id,
-            glass,
-            words: Words::now(),
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into(),
-    )
+    Some(draw::view(id, glass, Words::now()))
 }
 
 #[cfg(test)]

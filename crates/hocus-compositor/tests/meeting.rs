@@ -149,7 +149,7 @@ fn start(shell: &Path, clock: &str, fixture: &str, form: FormChoice) -> anyhow::
     let mut settings = Config {
         file: Some(file),
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         ..Config::default()
     };
     settings.keyboard.layouts = vec!["us".to_owned()];
@@ -820,4 +820,58 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         shoot(&mut bed, &format!("none-{suffix}"), crop, None)?;
     }
     Ok(())
+}
+
+/// The mini form's popover in its main state (a meeting in 8 min, a call,
+/// what comes next), shot under `HOCUS_KIT_SHOTS` (#772's side-by-sides;
+/// see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        "14:00:00",
+        &day("now+8m", "now+38m"),
+        FormChoice::Mini,
+    )?;
+    bed.card_since(0, &["look=Soon", "form=Some(Mini)"])?;
+    let from = bed.mark();
+    common::over(&mut bed.hp, (1884.0, 84.0), MEETING_NAMESPACE)?;
+    bed.logged_since(from, "the meeting's popover shows it", &[])?;
+    bed.hp
+        .dispatch_until(common::WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+    common::popover_shot(&mut bed.hp, "meeting")
+}
+
+/// The next meeting's card at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        "14:00:00",
+        &day("now+8m", "now+38m"),
+        FormChoice::Full,
+    )?;
+    bed.card_since(0, &["look=Soon"])?;
+    let card = bed.card_surface()?;
+    let at = (
+        f64::from(card.x + card.width / 3),
+        f64::from(card.y + card.height / 2),
+    );
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (MEETING_NAMESPACE, "meeting"),
+        at,
+        "Meeting",
+    )
 }

@@ -3,6 +3,7 @@
 //! the account's type, the password's row and its sheet, the link to the
 //! automatic locking, what comes later.
 
+use hocus_words::settings::app_account_view as words;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock, PoisonError},
@@ -24,7 +25,7 @@ use crate::{
         style::*,
         view::{El, card_box, divided, label, t},
     },
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::SectionId,
     theme::Ink,
 };
@@ -50,7 +51,7 @@ impl App {
     pub(in crate::app) fn account_page<'a>(&'a self, mut page: Column<'a, Message>) -> El<'a> {
         let lang = self.lang;
         page = page.push(group(
-            w("PROFIL", "PROFILE").get(lang),
+            words::PROFILE.get(lang),
             column![
                 self.account_avatar_row(),
                 divided(true, self.account_name_row()),
@@ -60,14 +61,14 @@ impl App {
             .into(),
         ));
         page = page.push(group(
-            w("SÉCURITÉ", "SECURITY").get(lang),
+            words::SECURITY.get(lang),
             column![
                 self.account_password_row(),
                 divided(true, self.account_lock_row()),
             ]
             .into(),
         ));
-        page = page.push(group(w("PLUS TARD", "LATER").get(lang), later_row(lang)));
+        page = page.push(group(words::LATER.get(lang), later_row(lang)));
         container(page)
             .id(format!("page:{}", SectionId::Account.section().slug))
             .into()
@@ -109,12 +110,7 @@ impl App {
         let mut change = button(
             row![
                 stroke(IMAGE, DIM.get(), 14.0),
-                t(
-                    w("Changer l’avatar…", "Change avatar…").get(lang),
-                    13.0,
-                    TEXT.get()
-                )
-                .font(SEMIBOLD),
+                t(words::CHANGE_AVATAR.get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
             ]
             .spacing(7)
             .height(Length::Fill)
@@ -136,11 +132,7 @@ impl App {
                         .font(BOLD)
                         .color(TEXT),
                     t(
-                        w(
-                            "Sur l’écran de verrouillage, à l’ouverture de session et dans la barre.",
-                            "On the lock screen, at login and in the bar.",
-                        )
-                        .get(lang),
+                        words::ON_THE_LOCK_SCREEN_AT_LOGIN.get(lang),
                         12.5,
                         DIM.get(),
                     ),
@@ -198,13 +190,8 @@ impl App {
         ];
         self.simple_row(
             model::NAME,
-            w("Nom affiché", "Display name"),
-            w(
-                "Ton nom complet, tel que le bureau te salue.",
-                "Your full name, as the desktop greets you.",
-            )
-            .get(lang)
-            .to_owned(),
+            words::DISPLAY_NAME,
+            words::YOUR_FULL_NAME_AS_THE_DESKTOP.get(lang).to_owned(),
             DIM.get(),
             container(field).id(format!("box:{NAME_FIELD}")).into(),
         )
@@ -218,13 +205,8 @@ impl App {
             .unwrap_or_default();
         self.simple_row(
             model::LOGIN,
-            w("Identifiant", "Login name"),
-            w(
-                "Le nom de connexion ; il ne se change pas ici.",
-                "The login name; it is not changed here.",
-            )
-            .get(self.lang)
-            .to_owned(),
+            words::LOGIN_NAME,
+            words::THE_LOGIN_NAME_IT_IS_NOT.get(self.lang).to_owned(),
             DIM.get(),
             text(login).size(12.5).font(MONO).color(SOFT).into(),
         )
@@ -235,19 +217,13 @@ impl App {
         let admin = self.account.account().is_some_and(|a| a.admin);
         let (value, line) = if admin {
             (
-                w("Administrateur", "Administrator"),
-                w(
-                    "Peut installer des logiciels et changer les réglages du système.",
-                    "Can install software and change system settings.",
-                ),
+                words::ADMINISTRATOR,
+                words::CAN_INSTALL_SOFTWARE_AND_CHANGE_SYSTEM,
             )
         } else {
             (
-                w("Standard", "Standard"),
-                w(
-                    "Les réglages du système demandent le mot de passe d’un administrateur.",
-                    "System settings ask for an administrator’s password.",
-                ),
+                words::STANDARD,
+                words::SYSTEM_SETTINGS_ASK_FOR_AN_ADMINISTRATOR,
             )
         };
         let value = if self.account.account().is_some() {
@@ -257,7 +233,7 @@ impl App {
         };
         self.simple_row(
             model::KIND,
-            w("Type de compte", "Account type"),
+            words::ACCOUNT_TYPE,
             line.get(lang).to_owned(),
             DIM.get(),
             t(value, 13.5, SOFT.get()).into(),
@@ -271,7 +247,7 @@ impl App {
         let mut change = button(
             row![
                 stroke(KEY, DIM.get(), 14.0),
-                t(w("Changer…", "Change…").get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
+                t(words::CHANGE.get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
             ]
             .spacing(7)
             .height(Length::Fill)
@@ -284,19 +260,13 @@ impl App {
             change = change.on_press(Message::Account(Msg::Sheet(true)));
         }
         let line = if can {
-            w(
-                "Il ouvre la session, la déverrouille et confirme les actions d’administrateur.",
-                "It opens the session, unlocks it and confirms administrator actions.",
-            )
+            words::IT_OPENS_THE_SESSION_UNLOCKS_IT
         } else {
-            w(
-                "Le mot de passe se change avec les outils du système.",
-                "The password is changed with the system’s tools.",
-            )
+            words::THE_PASSWORD_IS_CHANGED_WITH_THE
         };
         self.simple_row(
             model::PASSWORD,
-            w("Mot de passe", "Password"),
+            words::PASSWORD,
             line.get(lang).to_owned(),
             DIM.get(),
             container(change)
@@ -320,13 +290,8 @@ impl App {
             ));
         self.simple_row(
             model::LOCK,
-            w("Verrouillage automatique", "Automatic locking"),
-            w(
-                "Quand la session se verrouille d’elle-même.",
-                "When the session locks by itself.",
-            )
-            .get(lang)
-            .to_owned(),
+            words::AUTOMATIC_LOCKING,
+            words::WHEN_THE_SESSION_LOCKS_BY_ITSELF.get(lang).to_owned(),
             DIM.get(),
             container(link).id(format!("link:{}", model::LOCK)).into(),
         )
@@ -440,7 +405,7 @@ impl App {
         let mut remove = button(
             container(
                 t(
-                    w("Retirer", "Remove").get(lang),
+                    words::REMOVE.get(lang),
                     13.0,
                     fade(TEXT.get(), if removable { 1.0 } else { INERT }),
                 )
@@ -458,12 +423,7 @@ impl App {
         let choose = button(
             row![
                 stroke(IMAGE, DIM.get(), 14.0),
-                t(
-                    w("Choisir une image…", "Choose a picture…").get(lang),
-                    13.0,
-                    TEXT.get()
-                )
-                .font(SEMIBOLD),
+                t(words::CHOOSE_A_PICTURE.get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
             ]
             .spacing(7)
             .height(Length::Fill)
@@ -475,7 +435,7 @@ impl App {
         .style(|_: &Theme, status| secondary(status, false, false, false));
         let panel = container(
             column![
-                label(w("LES PANDAS", "THE PANDAS").get(lang)),
+                label(words::THE_PANDAS.get(lang)),
                 grid,
                 container(Space::new().width(Length::Fill).height(1)).style(boxed(
                     LINE.get(),
@@ -488,11 +448,7 @@ impl App {
                 ]
                 .spacing(8),
                 t(
-                    w(
-                        "Une image est recadrée en carré au centre ; « Retirer » remet l’initiale.",
-                        "A picture is cropped to a centred square; “Remove” brings the initial back.",
-                    )
-                    .get(lang),
+                    words::A_PICTURE_IS_CROPPED_TO_A.get(lang),
                     12.0,
                     FAINT.get(),
                 )
@@ -526,9 +482,9 @@ impl App {
         let sheet = self.account.sheet.as_ref()?;
         let lang = self.lang;
         let names = [
-            w("Mot de passe actuel", "Current password"),
-            w("Nouveau mot de passe", "New password"),
-            w("Encore une fois", "Once more"),
+            words::CURRENT_PASSWORD,
+            words::NEW_PASSWORD,
+            words::ONCE_MORE,
         ];
         let mut fields = column![].spacing(12);
         for (i, name) in names.iter().enumerate() {
@@ -540,30 +496,15 @@ impl App {
             .spacing(6);
             let under: Option<(String, Color)> = match i {
                 0 if sheet.wrong_current => Some((
-                    w(
-                        "Ce n’est pas le mot de passe actuel. Vérifie-le et réessaie.",
-                        "That is not the current password. Check it and try again.",
-                    )
-                    .get(lang)
-                    .to_owned(),
+                    words::THAT_IS_NOT_THE_CURRENT_PASSWORD.get(lang).to_owned(),
                     REFUSED.get(),
                 )),
                 1 => sheet.refused.clone().map(|why| (why, REFUSED.get())),
                 2 => sheet.matching().map(|same| {
                     if same {
-                        (
-                            w("Les deux sont identiques.", "Both match.")
-                                .get(lang)
-                                .to_owned(),
-                            MINT.get(),
-                        )
+                        (words::BOTH_MATCH.get(lang).to_owned(), MINT.get())
                     } else {
-                        (
-                            w("Les deux ne sont pas identiques.", "They do not match.")
-                                .get(lang)
-                                .to_owned(),
-                            PEACH.get(),
-                        )
+                        (words::THEY_DO_NOT_MATCH.get(lang).to_owned(), PEACH.get())
                     }
                 }),
                 _ => None,
@@ -577,9 +518,9 @@ impl App {
         let ready = sheet.ready();
         let mut change = button(
             text(if sheet.running {
-                w("Changement…", "Changing…").get(lang)
+                words::CHANGING.get(lang)
             } else {
-                w("Changer", "Change").get(lang)
+                words::CHANGE_2.get(lang)
             })
             .size(13)
             .font(BOLD)
@@ -604,24 +545,23 @@ impl App {
         if ready {
             change = change.on_press(Message::Account(Msg::Change));
         }
-        let mut cancel =
-            button(t(w("Annuler", "Cancel").get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
-                .height(32)
-                .padding([7, 14])
-                .style(|_: &Theme, status| {
-                    solid(
-                        crate::theme::ink(rgba(255, 255, 255, 0.08)),
-                        TEXT.get(),
-                        status,
-                    )
-                });
+        let mut cancel = button(t(words::CANCEL.get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
+            .height(32)
+            .padding([7, 14])
+            .style(|_: &Theme, status| {
+                solid(
+                    crate::theme::ink(rgba(255, 255, 255, 0.08)),
+                    TEXT.get(),
+                    status,
+                )
+            });
         if !sheet.running {
             cancel = cancel.on_press(Message::Account(Msg::Sheet(false)));
         }
         let mut body = column![
             row![
                 stroke(KEY, TEXT.get(), 18.0),
-                text(w("Changer le mot de passe", "Change the password").get(lang))
+                text(words::CHANGE_THE_PASSWORD.get(lang))
                     .size(17)
                     .font(BOLD)
                     .color(TEXT),
@@ -629,22 +569,14 @@ impl App {
             .spacing(10)
             .align_y(Alignment::Center),
             t(
-                w(
-                    "Celui qui ouvre ta session, la déverrouille et confirme les actions d’administrateur.",
-                    "The one that opens your session, unlocks it and confirms administrator actions.",
-                )
-                .get(lang),
+                words::THE_ONE_THAT_OPENS_YOUR_SESSION.get(lang),
                 13.0,
                 SOFT.get(),
             )
             .line_height(1.45),
             fields,
             t(
-                w(
-                    "Le système peut refuser un mot de passe trop court ou trop simple : sa raison s’affiche ici.",
-                    "The system may refuse a password that is too short or too simple: its reason shows here.",
-                )
-                .get(lang),
+                words::THE_SYSTEM_MAY_REFUSE_A_PASSWORD.get(lang),
                 12.0,
                 FAINT.get(),
             )
@@ -850,7 +782,7 @@ fn group<'a>(name: &'static str, body: El<'a>) -> El<'a> {
 /// "Comptes en ligne": later, inert.
 fn later_row<'a>(lang: Lang) -> El<'a> {
     let chip = container(
-        text(w("Plus tard", "Later").get(lang))
+        text(words::LATER_2.get(lang))
             .size(10.5)
             .font(BOLD)
             .color(rgb(0xF5B44A)),
@@ -867,10 +799,14 @@ fn later_row<'a>(lang: Lang) -> El<'a> {
                 .width(32)
                 .height(32)
                 .center(32)
-                .style(boxed(crate::theme::ink(rgba(255, 255, 255, 0.04)), 16.0, None)),
+                .style(boxed(
+                    crate::theme::ink(rgba(255, 255, 255, 0.04)),
+                    16.0,
+                    None
+                )),
             column![
                 row![
-                    text(w("Comptes en ligne", "Online accounts").get(lang))
+                    text(words::ONLINE_ACCOUNTS.get(lang))
                         .size(14)
                         .font(SEMIBOLD)
                         .color(fade(TEXT.get(), INERT)),
@@ -879,11 +815,7 @@ fn later_row<'a>(lang: Lang) -> El<'a> {
                 .spacing(8)
                 .align_y(Alignment::Center),
                 t(
-                    w(
-                        "Google, Nextcloud… partagés par l’agenda et les fichiers. Les agendas se branchent déjà dans « Agenda et tâches ».",
-                        "Google, Nextcloud… shared by the calendar and the files. Calendars already plug in under “Agenda and tasks”.",
-                    )
-                    .get(lang),
+                    words::GOOGLE_NEXTCLOUD_SHARED_BY_THE_CALENDAR.get(lang),
                     12.5,
                     fade(DIM.get(), INERT),
                 ),

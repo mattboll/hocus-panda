@@ -33,9 +33,10 @@ use std::{
     sync::{Mutex, PoisonError},
 };
 
+use hocus_a11y::{Node, Role};
 use hocus_link::{EDGE, Form, TASKS_NAMESPACE};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Vector, keyboard, mouse,
     widget::{
         canvas::{self, Frame, Geometry, Path, Stroke},
         text::Alignment,
@@ -51,10 +52,10 @@ use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
-    levels::draw::{
-        DIM, FAINT, HOVER, MANROPE, MANROPE_BOLD, OPEN, TEXT, faded, pointer, rgb, ring,
-    },
+    field::{self, view::Style},
+    levels::draw::{DIM, FAINT, HOVER, MANROPE, MANROPE_BOLD, OPEN, TEXT, faded, rgb},
     popover::{self, Item, Pressed, kit},
+    ui::items::{Control, Controls, Items},
 };
 
 /// The surfaces' widths: the bar inside its rim.
@@ -731,12 +732,12 @@ pub fn unsaved(f: &mut Frame, words: Words, at: Point, alpha: f32) {
     ));
 }
 
-/// The field at `rect`: what was typed (its end when it is too long) and
-/// the caret while it holds the keyboard, else the placeholder.
+/// The field at `rect`, open at `at`: what was typed, its selection and
+/// its caret while it holds the keyboard, else the placeholder.
 pub fn field(
     f: &mut Frame,
+    at: &super::At,
     rect: Rectangle,
-    (text, focused): (&str, bool),
     (size, radius, pad): (f32, f32, f32),
     words: Words,
     alpha: f32,
@@ -756,45 +757,20 @@ pub fn field(
                 .with_width(1.0),
         );
     });
-    let room = rect.width - 2.0 * pad;
-    let left = rect.x + pad;
-    let middle = rect.center_y();
-    if text.is_empty() {
-        f.fill_text(kit::text(
-            words.placeholder().to_owned(),
-            Point::new(left, middle),
-            size,
-            faded(FAINT.get(), alpha),
-            Alignment::Left,
-        ));
-    }
-    let width = if text.is_empty() {
-        0.0
-    } else {
-        kit::measure(text, size, MANROPE)
-    };
-    // Its end shows: the text slides left past the field's room.
-    let x = left + (room - width - 1.0).min(0.0);
-    let inner = Rectangle::new(Point::new(left, rect.y), Size::new(room, rect.height));
-    f.with_clip(inner, |f| {
-        if !text.is_empty() {
-            f.fill_text(kit::text(
-                text.to_owned(),
-                Point::new(x, middle),
-                size,
-                faded(TEXT.get(), alpha),
-                Alignment::Left,
-            ));
-        }
-        if focused {
-            let caret = size + 1.0;
-            f.fill_rectangle(
-                Point::new(x + width, middle - caret / 2.0),
-                Size::new(1.0, caret),
-                faded(TEXT.get(), alpha),
-            );
-        }
-    });
+    let mut look = field::view::Look::of(faded(TEXT.get(), alpha), faded(FAINT.get(), alpha));
+    look.selection = faded(look.selection, alpha);
+    super::draw_field(
+        at,
+        f,
+        field::Place {
+            left: rect.x + pad,
+            middle: rect.center_y(),
+            width: rect.width - 2.0 * pad,
+            style: Style::one(size, MANROPE),
+        },
+        words.placeholder(),
+        &look,
+    );
 }
 
 /// The mini form's box: a 16 px rounded square and its check, `text.dim`.
@@ -844,10 +820,7 @@ enum Over {
 /// What the surface keeps between draws.
 #[derive(Debug, Default)]
 pub struct State {
-    pointer: Option<Point>,
-    hover: Option<Item>,
     title: Option<String>,
-    last: Option<Point>,
     lines: Lines,
     laid: Laid,
     /// What it last said it shows.
@@ -880,13 +853,9 @@ impl Group {
         )
     }
 
-    /// A point of the surface (`size`) in the bar's frame.
-    fn in_bar(&self, at: Point, size: Size) -> Point {
-        Point::new(at.x - size.width - 1.0, top_of(&self.bar) + at.y)
-    }
-
-    fn in_bar_rect(&self, r: Rectangle, size: Size) -> Rectangle {
-        Rectangle::new(self.in_bar(r.position(), size), r.size())
+    /// From the surface (`size`) to the bar's frame.
+    fn to_bar(&self, size: Size) -> Vector {
+        Vector::new(-size.width - 1.0, top_of(&self.bar))
     }
 
     /// Its items and where they are on the surface, in a form alone, once
@@ -1016,27 +985,19 @@ impl Group {
         state.said = Some(said);
     }
 
-    fn mini(&self, f: &mut Frame, laid: &Laid, o: Point, state: &State, alpha: f32) {
+    fn mini(&self, f: &mut Frame, laid: &Laid, o: Point, hover: Option<Item>, alpha: f32) {
         let Some(count) = laid.mini else {
             return;
         };
         let rect = Rectangle::new(o, MINI);
-        let (open, focused) = popover::with(|c| {
-            (
-                c.shows(&self.bar, Item::Tasks),
-                c.focused(&self.bar, Item::Tasks),
-            )
-        });
-        let lit = match (open, state.hover == Some(Item::Tasks)) {
+        let open = popover::with(|c| c.shows(&self.bar, Item::Tasks));
+        let lit = match (open, hover == Some(Item::Tasks)) {
             (true, _) => Some(OPEN),
             (false, true) => Some(HOVER),
             (false, false) => None,
         };
         if let Some(lit) = lit {
             f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit.get(), alpha));
-        }
-        if focused {
-            ring(f, rect, MINI_RADIUS);
         }
         let said = (count > 0).then(|| count.to_string());
         let text_width = said
@@ -1062,16 +1023,13 @@ impl Group {
         }
     }
 
-    fn group(&self, f: &mut Frame, laid: &Laid, o: Point, state: &State, alpha: f32) {
+    fn group(&self, f: &mut Frame, laid: &Laid, o: Point, hover: Option<Item>, alpha: f32) {
         let at = |r: Rectangle| Rectangle::new(Point::new(o.x + r.x, o.y + r.y), r.size());
-        let focused = |item| popover::with(|c| c.focused(&self.bar, item));
         if let Some(card) = &laid.card {
             let open = popover::with(|c| c.shows(&self.bar, Item::DayChoose));
             let lit = crate::setup::card::Lit {
-                choose: open || state.hover == Some(Item::DayChoose),
-                later: state.hover == Some(Item::DayLater),
-                choose_ring: focused(Item::DayChoose),
-                later_ring: focused(Item::DayLater),
+                choose: open || hover == Some(Item::DayChoose),
+                later: hover == Some(Item::DayLater),
             };
             let words = crate::setup::Words::new(crate::clock::time::Lang::of_messages());
             crate::setup::card::draw(f, card, words, o, lit, alpha);
@@ -1094,15 +1052,12 @@ impl Group {
             x += kit::measure(&ch, LABEL, MANROPE_BOLD) + LABEL_SPACING;
         }
         let add = at(add_rect());
-        plus(f, add, state.hover == Some(Item::TaskAdd), alpha);
-        if focused(Item::TaskAdd) {
-            ring(f, add, ADD_RADIUS);
-        }
-        if let (Some(rect), Some(open)) = (laid.field, super::field()) {
+        plus(f, add, hover == Some(Item::TaskAdd), alpha);
+        if let Some(rect) = laid.field {
             field(
                 f,
+                &At::Group(self.bar.clone()),
                 at(rect),
-                (&open.text, open.focused),
                 (TITLE, FIELD_RADIUS, FIELD_PAD),
                 self.words,
                 alpha,
@@ -1130,11 +1085,8 @@ impl Group {
                 let button = at(button_rect(row.top));
                 let item = Item::Task(slot);
                 let mine = row.acts();
-                let lit = mine && state.hover == Some(item);
+                let lit = mine && hover == Some(item);
                 tick_box(f, button, row.look.ticked(), lit, a);
-                if mine && popover::with(|c| c.focused(&self.bar, item)) {
-                    ring(f, button, BUTTON_RADIUS);
-                }
                 let middle = Point::new(o.x + title_x(), o.y + row.top + LINE / 2.0);
                 match row.look {
                     Look::Unsaved { .. } => unsaved(f, self.words, middle, a),
@@ -1154,16 +1106,13 @@ impl Group {
         }
         if let Some((said, rect)) = &laid.more {
             let rect = at(*rect);
-            let lit = state.hover == Some(Item::TasksMore)
+            let lit = hover == Some(Item::TasksMore)
                 || popover::with(|c| c.shows(&self.bar, Item::TasksMore));
             if lit {
                 f.fill(
                     &kit::rounded(rect, BUTTON_RADIUS),
                     faded(HOVER.get(), alpha),
                 );
-            }
-            if focused(Item::TasksMore) {
-                ring(f, rect, BUTTON_RADIUS);
             }
             f.fill_text(kit::text(
                 said.clone(),
@@ -1172,97 +1121,6 @@ impl Group {
                 faded(FAINT.get(), alpha),
                 Alignment::Left,
             ));
-        }
-    }
-
-    fn mouse<M>(
-        &self,
-        state: &mut State,
-        event: &mouse::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<M>> {
-        let size = bounds.size();
-        let at = pointer(event, bounds, cursor, state.pointer);
-        state.pointer = at;
-        let over = at.and_then(|at| self.over(&state.laid, at, size));
-        let item = over.as_ref().and_then(|(o, r)| match o {
-            Over::Item(item) => Some((*item, *r)),
-            _ => None,
-        });
-        match event {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                let at = at?;
-                let bar_at = self.in_bar(at, size);
-                state.last = Some(bar_at);
-                // A cut title: shown whole after a rest.
-                let title = over.as_ref().and_then(|(o, _)| match o {
-                    Over::Title(text, rect) => Some((text.clone(), *rect)),
-                    _ => None,
-                });
-                match &title {
-                    Some((text, rect)) if state.title.as_ref() != Some(text) => {
-                        crate::tray::tip::hover_text(
-                            &self.bar,
-                            self.in_bar_rect(*rect, size),
-                            TIP,
-                            text.clone(),
-                            String::new(),
-                        );
-                    }
-                    None if state.title.is_some() => crate::tray::tip::leave(),
-                    _ => {}
-                }
-                state.title = title.map(|(t, _)| t);
-                let now = item.map(|(i, _)| i);
-                if now == state.hover {
-                    if now.is_none() {
-                        popover::event(popover::Event::Pointer { at: bar_at });
-                    }
-                    return None;
-                }
-                if state.hover.take().is_some() {
-                    popover::event(popover::Event::ItemLeave { at: bar_at });
-                }
-                state.hover = now;
-                if let Some((item, r)) = item {
-                    popover::event(popover::Event::ItemEnter {
-                        bar: self.bar.clone(),
-                        item,
-                        rect: self.in_bar_rect(r, size),
-                    });
-                }
-                Some(canvas::Action::request_redraw())
-            }
-            mouse::Event::CursorLeft => {
-                if state.title.take().is_some() {
-                    crate::tray::tip::leave();
-                }
-                state.hover.take()?;
-                let at = state.last.unwrap_or_default();
-                popover::event(popover::Event::ItemLeave { at });
-                Some(canvas::Action::request_redraw())
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                if state.title.take().is_some() {
-                    crate::tray::tip::leave();
-                }
-                match over {
-                    Some((Over::Item(item), r)) => {
-                        tracing::debug!(?item, "a press on the tasks' group");
-                        popover::event(popover::Event::ItemPress {
-                            bar: self.bar.clone(),
-                            item,
-                            rect: self.in_bar_rect(r, size),
-                        });
-                    }
-                    // In the field: it takes the keyboard again.
-                    Some((Over::Field, _)) => super::open_field(At::Group(self.bar.clone())),
-                    _ => popover::event(popover::Event::PressElsewhere),
-                }
-                Some(canvas::Action::request_redraw().and_capture())
-            }
-            _ => None,
         }
     }
 }
@@ -1275,15 +1133,161 @@ impl Row {
     }
 }
 
-impl canvas::Program<Message> for Group {
+impl Items for Group {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        TASKS_NAMESPACE
+    }
+
+    fn controls(&self, state: &State, size: Size) -> Controls {
+        let said = crate::a11y::Words::new(self.words.lang);
+        let open = state.lines.open();
+        let boxes: Vec<&Row> = state.laid.rows.iter().filter(|r| r.acts()).collect();
+        let controls: Vec<Control> = self
+            .items(&state.laid, size)
+            .into_iter()
+            .map(|(item, rect)| match item {
+                Item::Task(slot) => {
+                    let row = boxes.get(usize::from(slot));
+                    let title = row.map(|r| r.title.clone()).unwrap_or_default();
+                    let ticked = row.is_some_and(|r| r.look.ticked());
+                    Control::new(item, rect, Role::CheckBox, title, BUTTON_RADIUS)
+                        .node(|n| n.checked(ticked))
+                }
+                Item::Tasks => {
+                    Control::new(item, rect, Role::Button, said.tasks(open), MINI_RADIUS)
+                }
+                Item::TasksMore => Control::new(
+                    item,
+                    rect,
+                    Role::Button,
+                    said.more_tasks(open.saturating_sub(boxes.len())),
+                    BUTTON_RADIUS,
+                ),
+                Item::DayChoose => Control::new(
+                    item,
+                    rect,
+                    Role::Button,
+                    said.choose_sources(),
+                    crate::setup::card::CHOOSE_RADIUS,
+                ),
+                Item::DayLater => Control::new(
+                    item,
+                    rect,
+                    Role::Button,
+                    said.later(),
+                    crate::setup::card::LATER_RADIUS,
+                ),
+                _ => Control::new(item, rect, Role::Button, said.add_task(), ADD_RADIUS),
+            })
+            .collect();
+        Controls {
+            to_bar: self.to_bar(size),
+            group: (controls.len() > 1).then(|| Node::new("tasks", Role::List, said.tasks(open))),
+            controls,
+        }
+    }
+
+    /// The field's keys and its drag, before the kit; a cut title's
+    /// tooltip as the pointer goes; a press in the field puts its caret
+    /// there.
+    fn before(
+        &self,
+        state: &mut State,
+        event: &iced::Event,
+        bounds: Rectangle,
+        at: Option<Point>,
+    ) -> Option<canvas::Action<Message>> {
+        let size = bounds.size();
+        match event {
+            // A press held in the field selects as it drags.
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. })
+                if super::field_drag(None).is_some() =>
+            {
+                Some(if super::field_drag(at).unwrap_or(false) {
+                    canvas::Action::request_redraw()
+                } else {
+                    canvas::Action::capture()
+                })
+            }
+            iced::Event::Mouse(mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. }) => {
+                // A cut title: shown whole after a rest.
+                let title =
+                    at.and_then(|at| self.over(&state.laid, at, size))
+                        .and_then(|(o, _)| match o {
+                            Over::Title(text, rect) => Some((text, rect)),
+                            _ => None,
+                        });
+                match &title {
+                    Some((text, rect)) if state.title.as_ref() != Some(text) => {
+                        crate::tray::tip::hover_text(
+                            &self.bar,
+                            *rect + self.to_bar(size),
+                            TIP,
+                            text.clone(),
+                            String::new(),
+                        );
+                    }
+                    None if state.title.is_some() => crate::tray::tip::leave(),
+                    _ => {}
+                }
+                state.title = title.map(|(t, _)| t);
+                None
+            }
+            iced::Event::Mouse(mouse::Event::CursorLeft) => {
+                if state.title.take().is_some() {
+                    crate::tray::tip::leave();
+                }
+                None
+            }
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if state.title.take().is_some() {
+                    crate::tray::tip::leave();
+                }
+                // In the field: it takes the keyboard again, its caret
+                // where the press is.
+                let at = at?;
+                let Some((Over::Field, _)) = self.over(&state.laid, at, size) else {
+                    return None;
+                };
+                let field = At::Group(self.bar.clone());
+                super::open_field(field.clone());
+                super::field_press(&field, at);
+                Some(canvas::Action::request_redraw().and_capture())
+            }
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                text,
+                ..
+            }) => {
+                let pressed = Pressed {
+                    key: key.clone(),
+                    modifiers: *modifiers,
+                    text: text.as_deref().map(str::to_owned),
+                };
+                super::field_key(&At::Group(self.bar.clone()), &pressed)
+                    .then(|| canvas::Action::request_redraw().and_capture())
+            }
+            iced::Event::InputMethod(event) => {
+                super::field_input_method(&At::Group(self.bar.clone()), event)
+                    .then(|| canvas::Action::request_redraw().and_capture())
+            }
+            _ => None,
+        }
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(_)) => {
@@ -1335,21 +1339,9 @@ impl canvas::Program<Message> for Group {
                 self.say(state);
                 moving.then(canvas::Action::request_redraw)
             }
-            iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => {
-                let pressed = Pressed {
-                    key: key.clone(),
-                    modifiers: *modifiers,
-                    text: text.as_deref().map(str::to_owned),
-                };
-                let mine = super::field_key(&At::Group(self.bar.clone()), &pressed)
-                    || popover::key(key, *modifiers, text.as_deref());
-                mine.then(|| canvas::Action::request_redraw().and_capture())
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                super::field_release();
+                None
             }
             _ => None,
         }
@@ -1359,9 +1351,8 @@ impl canvas::Program<Message> for Group {
         &self,
         state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let colour = self.backdrop.map(|backdrop| {
@@ -1377,13 +1368,13 @@ impl canvas::Program<Message> for Group {
         let under = crate::backdrop::under(renderer, bounds.size(), colour);
         let size = bounds.size();
         let laid = &state.laid;
+        let to_bar = self.to_bar(size);
         let in_bar: Vec<(Item, Rectangle)> = self
             .items(laid, size)
             .into_iter()
-            .map(|(item, r)| (item, self.in_bar_rect(r, size)))
+            .map(|(item, r)| (item, r + to_bar))
             .collect();
         log_items(&in_bar);
-        popover::with(|c| c.set_items(&self.bar, TASKS_NAMESPACE, in_bar));
         if laid.height <= 0.0 {
             return crate::backdrop::over(under, frame);
         }
@@ -1396,25 +1387,12 @@ impl canvas::Program<Message> for Group {
         frame.with_clip(column, |f| {
             for &(form, alpha) in &self.forms {
                 match form {
-                    Form::Full => self.group(f, laid, self.origin(size), state, alpha),
-                    Form::Mini => self.mini(f, laid, self.mini_origin(size), state, alpha),
+                    Form::Full => self.group(f, laid, self.origin(size), lit, alpha),
+                    Form::Mini => self.mini(f, laid, self.mini_origin(size), lit, alpha),
                 }
             }
         });
         crate::backdrop::over(under, frame)
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 
@@ -1473,14 +1451,16 @@ mod tests {
         };
         let colour = Color::from_rgb8(0x1b, 0x1d, 0x22);
         let drawn = crate::backdrop::tests::drawn(
-            |backdrop| Group {
-                forms: vec![(Form::Full, 1.0)],
-                bar_width: Form::Full.width() as f32,
-                words: Words::new(crate::clock::time::Lang::French),
-                backdrop: backdrop.map(|c| crate::agents::draw::Backdrop { top: c, bottom: c }),
-                bar: "eDP-1".to_owned(),
+            |backdrop| {
+                crate::ui::items::surface(Group {
+                    forms: vec![(Form::Full, 1.0)],
+                    bar_width: Form::Full.width() as f32,
+                    words: Words::new(crate::clock::time::Lang::French),
+                    backdrop: backdrop.map(|c| crate::agents::draw::Backdrop { top: c, bottom: c }),
+                    bar: "eDP-1".to_owned(),
+                })
             },
-            &state,
+            &crate::ui::items::State::of(state),
             Size::new(Form::Full.width().unsigned_abs(), 120),
             colour,
         );

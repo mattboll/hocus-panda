@@ -462,11 +462,6 @@ impl Nm {
         })
     }
 
-    /// Connections take `takes` from now on (the Wi-Fi spike's shots).
-    pub fn set_takes(&self, takes: Duration) {
-        state(&self.shared, |s| s.takes = takes);
-    }
-
     /// A cable plugged in or out.
     pub fn set_wired(&self, wired: bool) -> anyhow::Result<()> {
         let shared = self.shared.clone();

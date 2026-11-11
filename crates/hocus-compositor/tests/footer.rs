@@ -444,3 +444,22 @@ fn the_mini_forms_bell_sits_over_the_users_avatar_last_of_all() -> anyhow::Resul
     bed.logged("the session's popover shows it")?;
     Ok(())
 }
+
+/// The footer at rest, hovered and ringed, shot under `HOCUS_KIT_SHOTS`
+/// (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start((1920, 1080))? else {
+        return Ok(());
+    };
+    let at = bed.button(2);
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::FOOTER_NAMESPACE, "footer"),
+        at,
+        "Clipboard",
+    )
+}

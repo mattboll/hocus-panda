@@ -47,12 +47,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_a11y::{Node, Role};
 use hocus_link::{
     DESKTOPS_NAMESPACE, DeskScreen, DeskTile, DeskWindow, DesktopTo, Desktops, EDGE, Form, Look,
     SHARE, ToCompositor,
 };
 use iced::{
-    Color, Pixels, Point, Rectangle, Renderer, Size, Theme, alignment, keyboard, mouse,
+    Color, Pixels, Point, Rectangle, Renderer, Size, Vector, alignment, mouse,
     widget::{
         canvas::{self, Frame, Geometry, Path, Stroke, Style},
         text::{Alignment, LineHeight, Shaping},
@@ -62,12 +63,14 @@ use iced::{
 
 use crate::theme::Ink;
 use crate::{
+    Message,
     clock::motion::bezier,
     levels::{
-        draw::{ACCENT, FAINT, LINE, SIDE, faded, pointer, ring},
+        draw::{ACCENT, FAINT, LINE, SIDE, faded},
         model::Words,
     },
     popover::{self, Item, kit},
+    ui::items::{Control, Controls, Items},
 };
 
 /// The surfaces' widths: the bar inside its rim.
@@ -563,10 +566,6 @@ pub struct State {
     /// was in each form (full, mini), since then, by the screen's name.
     rings: HashMap<String, ([Rectangle; 2], Instant)>,
     now: Option<Instant>,
-    pointer: Option<Point>,
-    /// The tile under the pointer: its row and its desktop.
-    hover: Option<(u8, u8)>,
-    last: Option<Point>,
     wheel: kit::Wheel,
 }
 
@@ -589,29 +588,61 @@ impl State {
     }
 }
 
-impl<Message> canvas::Program<Message> for Tiles {
+impl Items for Tiles {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        DESKTOPS_NAMESPACE
+    }
+
+    fn controls(&self, state: &State, size: Size) -> Controls {
+        let radius = match self.forms.first() {
+            Some((Form::Mini, _)) => DOT_RADIUS,
+            _ => TILE_RADIUS,
+        };
+        let said = crate::a11y::Words::new(self.words.lang);
+        let controls = self
+            .items(state, size)
+            .into_iter()
+            .map(|(item, rect)| {
+                let node = node(&self.bar, said, item);
+                let name = node.as_ref().map(|n| n.name.clone()).unwrap_or_default();
+                Control::new(item, rect, Role::RadioButton, name, radius).node(|n| match node {
+                    Some(node) => node,
+                    None => n,
+                })
+            })
+            .collect();
+        Controls {
+            to_bar: self.to_bar(size),
+            controls,
+            group: Some(Node::new("desktops", Role::RadioGroup, said.desktops())),
+        }
+    }
+
+    fn live(&self) -> Option<crate::ui::ring::Live> {
+        Some(node)
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
         bounds: Rectangle,
-        cursor: mouse::Cursor,
+        at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(now)) => {
                 self.refresh(state, bounds.size(), *now);
                 (!state.rings.is_empty()).then(canvas::Action::request_redraw)
             }
-            iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => popover::key(key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
+            iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                self.wheel(state, *delta, bounds.size(), at?)
+            }
             _ => None,
         }
     }
@@ -620,24 +651,13 @@ impl<Message> canvas::Program<Message> for Tiles {
         &self,
         state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let size = bounds.size();
         let items = self.items(state, size);
-        let in_bar = items
-            .iter()
-            .map(|(item, r)| {
-                (
-                    *item,
-                    Rectangle::new(self.in_bar(r.position(), size), r.size()),
-                )
-            })
-            .collect();
-        popover::with(|c| c.set_items(&self.bar, DESKTOPS_NAMESPACE, in_bar));
         // While the bar switches forms there are none to let a window go on.
         tell_tiles(&self.bar, &items, &state.shown);
         if !state.any() {
@@ -659,7 +679,11 @@ impl<Message> canvas::Program<Message> for Tiles {
                     let moving = state.rings.contains_key(&desktops.output);
                     for index in 0..usize::from(desktops.count) {
                         let rect = self.rect(form, size, (row, index), &groups);
-                        let hover = state.hover == Some((row as u8, index as u8));
+                        let hover = lit
+                            == Some(Item::Desktop {
+                                row: row as u8,
+                                index: index as u8,
+                            });
                         match form {
                             Form::Full => full(f, rect, desktops, index, hover, !moving, alpha),
                             Form::Mini => mini(f, rect, desktops, index, !moving, alpha),
@@ -711,29 +735,7 @@ impl<Message> canvas::Program<Message> for Tiles {
                 }
             }
         });
-        for (item, rect) in items {
-            if popover::with(|c| c.focused(&self.bar, item)) {
-                let radius = match self.forms.first() {
-                    Some((Form::Mini, _)) => DOT_RADIUS,
-                    _ => TILE_RADIUS,
-                };
-                ring(&mut frame, rect, radius);
-            }
-        }
         crate::backdrop::over(under, frame)
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 
@@ -950,13 +952,13 @@ impl Tiles {
             .collect()
     }
 
-    /// A point of the surface (`size`) in the bar's frame.
-    fn in_bar(&self, at: Point, size: Size) -> Point {
+    /// From the surface (`size`) to the bar's frame.
+    fn to_bar(&self, size: Size) -> Vector {
         let (bottom, _) = where_is(&self.bar);
         let above = crate::levels::draw::BOTTOM as f32 + bottom;
-        Point::new(
-            at.x - size.width - 1.0,
-            popover::with(|c| c.bar_height(&self.bar)) - above - size.height + at.y,
+        Vector::new(
+            -size.width - 1.0,
+            popover::with(|c| c.bar_height(&self.bar)) - above - size.height,
         )
     }
 
@@ -1032,114 +1034,92 @@ impl Tiles {
             state.names = names;
         }
         state.now = Some(now);
-        if state.hover.is_some_and(|(row, index)| {
-            state
-                .shown
-                .get(usize::from(row))
-                .and_then(|s| s.desktops.as_ref())
-                .is_none_or(|d| index >= d.count)
-        }) {
-            state.hover = None;
-        }
         takes_pointer(&self.bar, state.any());
     }
 
-    fn mouse<Message>(
+    /// The wheel over a screen's tiles and the gaps between them: that
+    /// screen's desktops, a notch each.
+    fn wheel(
         &self,
         state: &mut State,
-        event: &mouse::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        delta: mouse::ScrollDelta,
+        size: Size,
+        at: Point,
     ) -> Option<canvas::Action<Message>> {
-        let size = bounds.size();
         let items = self.items(state, size);
-        let at = pointer(event, bounds, cursor, state.pointer);
-        state.pointer = at;
-        let over = at.and_then(|at| items.iter().find(|(_, r)| r.contains(at)).copied());
-        let rect =
-            |item: Rectangle| Rectangle::new(self.in_bar(item.position(), size), item.size());
         let tile = |item: Item| match item {
             Item::Desktop { row, index } => Some((row, index)),
             _ => None,
         };
-        match event {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                let at = at?;
-                let bar_at = self.in_bar(at, size);
-                state.last = Some(bar_at);
-                let now = over.and_then(|(item, _)| tile(item));
-                if now == state.hover {
-                    if now.is_none() {
-                        popover::event(popover::Event::Pointer { at: bar_at });
-                    }
-                    return None;
-                }
-                if state.hover.take().is_some() {
-                    popover::event(popover::Event::ItemLeave { at: bar_at });
-                }
-                state.hover = now;
-                if let Some((item, r)) = over {
-                    popover::event(popover::Event::ItemEnter {
-                        bar: self.bar.clone(),
-                        item,
-                        rect: rect(r),
-                    });
-                }
-                Some(canvas::Action::request_redraw())
-            }
-            mouse::Event::CursorLeft => {
-                state.hover.take()?;
-                let at = state.last.unwrap_or_default();
-                popover::event(popover::Event::ItemLeave { at });
-                Some(canvas::Action::request_redraw())
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                let event = match over {
-                    Some((item, r)) => popover::Event::ItemPress {
-                        bar: self.bar.clone(),
-                        item,
-                        rect: rect(r),
-                    },
-                    None => popover::Event::PressElsewhere,
-                };
-                popover::event(event);
-                Some(canvas::Action::request_redraw().and_capture())
-            }
-            mouse::Event::WheelScrolled { delta } => {
-                // Over a screen's tiles and the gaps between them: that
-                // screen's desktops.
-                let at = at?;
-                let row = (0..state.shown.len()).find(|row| {
-                    items
-                        .iter()
-                        .filter(|(item, _)| {
-                            tile(*item).is_some_and(|(r, _)| usize::from(r) == *row)
-                        })
-                        .map(|(_, r)| *r)
-                        .reduce(|a, b| a.union(&b))
-                        .is_some_and(|group| group.contains(at))
-                })?;
-                let output = state.shown[row].screen.output.clone();
-                let notches = state.wheel.notches(delta, kit::scale(&self.bar));
-                let to = if notches > 0 {
-                    DesktopTo::Previous
-                } else {
-                    DesktopTo::Next
-                };
-                let effects = (0..notches.unsigned_abs())
-                    .map(|_| popover::Effect::Desktop {
-                        bar: output.clone(),
-                        to,
-                    })
-                    .collect::<Vec<_>>();
-                if !effects.is_empty() {
-                    popover::send(effects);
-                }
-                Some(canvas::Action::capture())
-            }
-            _ => None,
+        let row = (0..state.shown.len()).find(|row| {
+            items
+                .iter()
+                .filter(|(item, _)| tile(*item).is_some_and(|(r, _)| usize::from(r) == *row))
+                .map(|(_, r)| *r)
+                .reduce(|a, b| a.union(&b))
+                .is_some_and(|group| group.contains(at))
+        })?;
+        let output = state.shown[row].screen.output.clone();
+        let notches = state.wheel.notches(&delta, kit::scale(&self.bar));
+        let to = if notches > 0 {
+            DesktopTo::Previous
+        } else {
+            DesktopTo::Next
+        };
+        let effects = (0..notches.unsigned_abs())
+            .map(|_| popover::Effect::Desktop {
+                bar: output.clone(),
+                to,
+            })
+            .collect::<Vec<_>>();
+        if !effects.is_empty() {
+            popover::send(effects);
         }
+        Some(canvas::Action::capture())
     }
+}
+
+/// Desktop `item` of bar `bar` as screen readers read it, as it is now: a
+/// radio button named with its title, whether it is the current one, its
+/// windows' titles (which its tile does not show: read as it is read) and,
+/// on another screen's row, that screen's name; one of its screen's.
+pub fn node(bar: &str, words: crate::a11y::Words, item: Item) -> Option<Node> {
+    use hocus_a11y::Act;
+    let Item::Desktop { row, index } = item else {
+        return None;
+    };
+    let screen = super::screens(bar).into_iter().nth(usize::from(row))?;
+    let desktops = super::snapshot(&screen.output)?;
+    let titles = super::titles(&screen.output).unwrap_or_default();
+    let levels = Words::new(words.lang());
+    let i = usize::from(index);
+    let title = levels.desktop_title(i + 1, super::name(i).as_deref());
+    let current = usize::from(desktops.current) == i;
+    let windows: Vec<String> = desktops
+        .windows
+        .iter()
+        .filter(|w| usize::from(w.desktop) == i && w.look != Look::Minimized)
+        .filter_map(|w| {
+            titles
+                .titles
+                .iter()
+                .find(|(id, _)| *id == w.id)
+                .map(|(_, t)| t.clone())
+        })
+        .collect();
+    let mut name = words.desktop(&title, current, &windows);
+    if row > 0 {
+        name = format!(
+            "{}, {name}",
+            levels.screen(screen.built_in, screen.inches, screen.number)
+        );
+    }
+    Some(
+        Node::new(crate::ui::items::key(item), Role::RadioButton, name)
+            .checked(current)
+            .set(i + 1, usize::from(desktops.count))
+            .act(Act::Click),
+    )
 }
 
 #[cfg(test)]

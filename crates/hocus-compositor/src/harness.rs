@@ -173,7 +173,7 @@ impl Headless {
 
     /// XWayland's display number, once it is ready.
     pub fn xdisplay(&self) -> Option<u32> {
-        self.app.state.xdisplay
+        self.app.state.xwayland.display
     }
 
     /// The Wayland socket, for `WAYLAND_DISPLAY` or a client to connect to.
@@ -207,6 +207,7 @@ impl Headless {
     pub fn wall_ticks(&self, name: &str) -> u64 {
         self.app
             .state
+            .graphics
             .walls
             .borrow()
             .ticks
@@ -217,12 +218,12 @@ impl Headless {
 
     /// The times a moving wallpaper asked the loop to wake it.
     pub fn wall_wakes(&self) -> u64 {
-        self.app.state.walls.borrow().wakes
+        self.app.state.graphics.walls.borrow().wakes
     }
 
     /// Whether output `name`'s moving wallpaper runs now.
     pub fn wall_running(&self, name: &str) -> bool {
-        self.app.state.walls.borrow().running(name)
+        self.app.state.graphics.walls.borrow().running(name)
     }
 
     /// How much of output `name` the windows cover, from 0 to 1.
@@ -237,7 +238,7 @@ impl Headless {
 
     /// Times a pane of glass was blurred so far.
     pub fn glass_blurs(&self) -> u64 {
-        self.app.state.panes.borrow().1
+        self.app.state.graphics.panes.borrow().1
     }
 
     /// The windows' rains under way, opening and closing (#432).
@@ -555,21 +556,21 @@ impl Headless {
     /// Going to an agent (4.3): its streak as the last frame drew it.
     pub fn streak(&self) -> Option<crate::going::Streak> {
         let state = &self.app.state;
-        state.streak_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+        state.streak_at(state.frames.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
     /// The halo (4.4) as the last frame drew it: `None` when it showed
     /// nothing (or is not drawn: on Pixman, without a bar).
     pub fn halo(&self) -> Option<crate::halo::Shown> {
         let state = &self.app.state;
-        state.halo_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+        state.halo_at(state.frames.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
     /// The panda peeking out (4.5) as the last frame drew it: how opaque,
     /// and how far toward the bar; `None` when it showed none.
     pub fn peek(&self) -> Option<crate::peek::Look> {
         let state = &self.app.state;
-        state.peek_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+        state.peek_at(state.frames.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
     /// Which agent's panda is out, and why, drawn or not; and whether it
@@ -621,7 +622,7 @@ impl Headless {
         let managed = state.windows.values().find(|m| {
             m.pulse.is_some() && crate::windows::app_id(&m.window).as_deref() == Some(app_id)
         })?;
-        let pulse = managed.pulse_look(state.drawn_at.get().unwrap_or_else(|| state.now()));
+        let pulse = managed.pulse_look(state.frames.drawn_at.get().unwrap_or_else(|| state.now()));
         Some((pulse.rim, pulse.ring.map(|(width, _)| width)))
     }
 
@@ -677,7 +678,7 @@ impl Headless {
     /// late that comes on a loaded machine.
     pub fn launcher_at_rest(&self) -> bool {
         let state = &self.app.state;
-        let drawn = state.drawn_at.get();
+        let drawn = state.frames.drawn_at.get();
         drawn.is_some_and(|at| state.panel.launchers.at_rest(at))
     }
 
@@ -965,7 +966,11 @@ impl Headless {
     /// The cursor the compositor shows over a frame, a grip or the
     /// capture, by its name (`crosshair`, `move`, `nwse-resize`…).
     pub fn frame_cursor(&self) -> Option<String> {
-        self.app.state.frame_cursor.map(|c| c.name().to_owned())
+        self.app
+            .state
+            .pointer
+            .frame_cursor
+            .map(|c| c.name().to_owned())
     }
 
     /// The keyboard's active layout (XKB's group).
@@ -1087,8 +1092,8 @@ impl Headless {
     /// clients get stay on the real clock.
     pub fn hold_clock(&mut self) {
         let state = &mut self.app.state;
-        if state.held_clock.is_none() {
-            state.held_clock = Some(state.now());
+        if state.frames.held_clock.is_none() {
+            state.frames.held_clock = Some(state.now());
         }
     }
 
@@ -1096,9 +1101,9 @@ impl Headless {
     /// is ahead of the real one: it never goes back.
     pub fn release_clock(&mut self) {
         let state = &mut self.app.state;
-        if let Some(held) = state.held_clock.take() {
+        if let Some(held) = state.frames.held_clock.take() {
             let real = Duration::from(state.clock.now());
-            state.clock_ahead = held.saturating_sub(real);
+            state.frames.clock_ahead = held.saturating_sub(real);
         }
     }
 
@@ -1108,8 +1113,8 @@ impl Headless {
     pub fn step(&mut self, by: Duration) -> anyhow::Result<()> {
         self.hold_clock();
         let state = &mut self.app.state;
-        let at = state.held_clock.map(|t| t + by);
-        state.held_clock = at;
+        let at = state.frames.held_clock.map(|t| t + by);
+        state.frames.held_clock = at;
         // What falls due on the way: the idle countdown runs on this
         // clock, its timer on the real one.
         state.idle_check();
@@ -1127,11 +1132,19 @@ impl Headless {
         state.peek_due();
         state.redraw = true;
         // Drawn at that time: the frame counts only when something changed
-        // on the screen, but each frame drawn notes its time.
-        let drawn = self.dispatch_until(Duration::from_secs(30), |hp| {
-            hp.app.state.drawn_at.get() == at
-        })?;
-        anyhow::ensure!(drawn, "no frame drawn at {at:?}");
+        // on the screen, but each frame drawn notes its time. Its timer is
+        // set as a turn ends, and fires on the real clock: a turn at once
+        // sets it, then the loop sleeps until something wakes it. Polled
+        // every 5 ms instead, a step took three turns or four as the
+        // machine was fast or loaded, and what a frame costs on the loop
+        // with them (its allocations, tests/rain.rs).
+        self.dispatch(Duration::ZERO)?;
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        while self.app.state.frames.drawn_at.get() != at {
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            anyhow::ensure!(!left.is_zero(), "no frame drawn at {at:?}");
+            self.dispatch(left)?;
+        }
         Ok(())
     }
 
@@ -1347,12 +1360,12 @@ impl Headless {
     /// When a frame is asked for after a pause, if one is: a wakeup to
     /// come.
     pub fn wake(&self) -> Option<Duration> {
-        self.app.state.wake
+        self.app.state.frames.wake
     }
 
     /// Whether nothing moved as of the last frame drawn (`tick`'s word).
     pub fn still(&self) -> bool {
-        self.app.state.still
+        self.app.state.frames.still
     }
 
     /// The motions' time now (held, or running).
@@ -1369,10 +1382,10 @@ impl Headless {
     /// this holds.
     pub fn at_rest(&self) -> bool {
         let state = &self.app.state;
-        state.still
+        state.frames.still
             && !state.redraw
-            && state.drawn_at.get().is_some()
-            && state.wake.is_none_or(|at| at > state.now())
+            && state.frames.drawn_at.get().is_some()
+            && state.frames.wake.is_none_or(|at| at > state.now())
     }
 
     /// The layer surfaces of `namespace` that show what was asked of them:
@@ -1527,7 +1540,7 @@ impl Headless {
     }
 
     pub fn pointer_move(&mut self, x: f64, y: f64) {
-        self.app.state.pointer_placed = true;
+        self.app.state.pointer.placed = true;
         let from = self
             .app
             .state
@@ -1739,7 +1752,7 @@ impl Headless {
     /// centre, the sector lit, whether Close is armed.
     pub fn radial(&self) -> Option<crate::radial::Seen> {
         let state = &self.app.state;
-        let radial = state.radial.as_ref()?;
+        let radial = state.radial_menu.open.as_ref()?;
         Some(crate::radial::Seen {
             window: radial.window,
             centre: radial.centre,
@@ -1843,7 +1856,7 @@ impl Headless {
 
     /// Whether the radial menu is still drawn going.
     pub fn radial_going(&self) -> bool {
-        self.app.state.radial_out.is_some()
+        self.app.state.radial_menu.out.is_some()
     }
 
     /// The windows on all desktops (#723).
@@ -1890,7 +1903,7 @@ impl Headless {
     /// whether its panel shows.
     pub fn switcher(&self) -> Option<(Vec<WindowId>, usize, bool)> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         Some((
             switcher.items.iter().map(|i| i.0).collect(),
             switcher.selected,
@@ -1901,7 +1914,7 @@ impl Headless {
     /// The centre of Alt+Tab's item `at`, global, once its panel shows.
     pub fn switcher_item(&self, at: usize) -> Option<(f64, f64)> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         let origin = state.space.output_geometry(&switcher.output)?.loc;
         let (_, items) = state.switcher_layout(switcher)?;
         let (x, y) = items.get(at)?.item.centre();
@@ -1912,7 +1925,7 @@ impl Headless {
     /// once its panel shows.
     pub fn switcher_thumb(&self, at: usize) -> Option<(f64, f64, f64, f64)> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         let origin = state.space.output_geometry(&switcher.output)?.loc;
         let (_, items) = state.switcher_layout(switcher)?;
         let thumb = items.get(at)?.thumb;
@@ -1928,7 +1941,7 @@ impl Headless {
     /// (x, y, width, height), once its panel shows.
     pub fn switcher_label(&self, at: usize) -> Option<[(f64, f64, f64, f64); 2]> {
         let state = &self.app.state;
-        let switcher = state.switcher.as_ref()?;
+        let switcher = state.switching.open.as_ref()?;
         let origin = state.space.output_geometry(&switcher.output)?.loc;
         let (panel, items) = state.switcher_layout(switcher)?;
         let global = |a: crate::switcher::Area| {
@@ -1992,7 +2005,7 @@ impl Headless {
     /// Swipes given to clients so far (the desktop took none of them), and
     /// their moves (6.13).
     pub fn swipes_given(&self) -> (u64, u64) {
-        self.app.state.swipes_given
+        self.app.state.gestures.swipes_given
     }
 
     /// How the launcher shows now, if it shows: its opacity and its
@@ -2152,7 +2165,7 @@ impl Headless {
     /// The pointer as a session finds it at its start, never moved by the
     /// user: screens lit from now on bring it to the primary's middle.
     pub fn pointer_unplaced(&mut self) {
-        self.app.state.pointer_placed = false;
+        self.app.state.pointer.placed = false;
     }
 
     /// The window a pointer's move is moving, if any.
@@ -2276,6 +2289,6 @@ impl Headless {
 
     /// Whether the backend made the linux-dmabuf global.
     pub fn has_dmabuf(&self) -> bool {
-        self.app.state.dmabuf_global.is_some()
+        self.app.state.protocols.dmabuf_global.is_some()
     }
 }

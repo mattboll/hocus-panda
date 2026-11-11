@@ -275,8 +275,8 @@ impl State {
             Some(Rect::new(x, y, size.0, size.1))
         });
         self.displays.outputs.retain(|o| o != output);
-        self.backgrounds.get_mut().forget(&name);
-        self.walls.get_mut().forget(&name);
+        self.graphics.backgrounds.get_mut().forget(&name);
+        self.graphics.walls.get_mut().forget(&name);
         self.displays.off.remove(&name);
         self.displays.vrr_on.remove(&name);
         if let Some(rect) = rect {
@@ -1130,7 +1130,7 @@ pub fn arranged(rects: &[Rect]) -> bool {
             || ((a.y + a.height == b.y || b.y + b.height == a.y) && along_x)
     };
     for (i, a) in rects.iter().enumerate() {
-        if rects[i + 1..].iter().any(|b| overlap(a, b)) {
+        if rects.iter().skip(i + 1).any(|b| overlap(a, b)) {
             return false;
         }
     }
@@ -1139,10 +1139,10 @@ pub fn arranged(rects: &[Rect]) -> bool {
     if let Some(first) = reached.first_mut() {
         *first = true;
     }
-    while let Some(i) = next.pop() {
-        for (j, b) in rects.iter().enumerate() {
-            if !reached[j] && touch(&rects[i], b) {
-                reached[j] = true;
+    while let Some(a) = next.pop().and_then(|i| rects.get(i)) {
+        for (j, (b, reached)) in rects.iter().zip(&mut reached).enumerate() {
+            if !*reached && touch(a, b) {
+                *reached = true;
                 next.push(j);
             }
         }

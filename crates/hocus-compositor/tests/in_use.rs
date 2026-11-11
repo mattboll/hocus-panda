@@ -54,8 +54,7 @@ fn ready() -> Option<PathBuf> {
     let shell = shell_program();
     let tools = ["pw-cli", "pw-link"].iter().all(|p| has(p));
     if !fakes::available() || !tools {
-        eprintln!("dbus-daemon, pipewire or its tools missing: skipped");
-        return None;
+        common::missing("dbus-daemon, pipewire, pw-dump, wpctl, pw-metadata, pw-cli and pw-link");
     }
     Some(shell)
 }
@@ -126,7 +125,7 @@ impl Bed {
         )?;
         let mut config = Config {
             plain_background: true,
-            french: true,
+            lang: hocus_words::Lang::French,
             pipewire_remote: Some(fakes.pw_socket()),
             videos: Some(dir.join("videos")),
             ..Config::default()
@@ -872,8 +871,7 @@ fn its_buttons_stop_the_share_and_the_recording() -> anyhow::Result<()> {
     assert!(stopped, "still shared:\n{}", bed.log());
     bed.logged("the in-use sign goes", |_| true)?;
     if !has("ffmpeg") {
-        eprintln!("ffmpeg missing: the recording's part skipped");
-        return Ok(());
+        common::missing("ffmpeg");
     }
     let mark = bed.mark();
     // A recording of the screen: its line and its buttons.
@@ -996,8 +994,7 @@ fn while_recording_its_red_tile_says_its_time_amber_and_pause_while_paused() -> 
         return Ok(());
     };
     if !has("ffmpeg") {
-        eprintln!("ffmpeg missing: skipped");
-        return Ok(());
+        common::missing("ffmpeg");
     }
     let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
     let mark = bed.mark();
@@ -1070,8 +1067,7 @@ fn with_a_share_and_a_recording_both_tiles_the_recordings_first() -> anyhow::Res
         return Ok(());
     };
     if !has("ffmpeg") {
-        eprintln!("ffmpeg missing: skipped");
-        return Ok(());
+        common::missing("ffmpeg");
     }
     let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
     bed.share_screen()?;
@@ -1103,8 +1099,7 @@ fn in_the_full_form_the_recordings_tile_is_in_the_row() -> anyhow::Result<()> {
         return Ok(());
     };
     if !has("ffmpeg") {
-        eprintln!("ffmpeg missing: skipped");
-        return Ok(());
+        common::missing("ffmpeg");
     }
     let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Full)?;
     bed.speak("hocus-test-meet", "Firefox", "firefox", "")?;
@@ -1136,8 +1131,7 @@ fn paused_or_gone_the_recording_draws_nothing_at_rest() -> anyhow::Result<()> {
         return Ok(());
     };
     if !has("ffmpeg") {
-        eprintln!("ffmpeg missing: skipped");
-        return Ok(());
+        common::missing("ffmpeg");
     }
     let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
     bed.share_screen()?;
@@ -1328,4 +1322,54 @@ fn screenshots_of_the_recording_for_the_pull_request() -> anyhow::Result<()> {
         drop(window);
     }
     Ok(())
+}
+
+/// The popover in its main state (two applications on the microphone),
+/// shot under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see
+/// `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
+    let (_, firefox) = common::open_with(&mut bed.hp, "firefox", (600, 400), false)?;
+    firefox
+        .commands
+        .send(common::Command::Title("Réunion d'équipe — Meet"))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    bed.speak("hocus-test-meet", "Firefox", "firefox", "AudioStream")?;
+    bed.speak("hocus-test-call", "Discord", "discord", "Appel vocal")?;
+    let sign = bed.sign("Microphone")?;
+    bed.hp.pointer_move(400.0, 300.0);
+    bed.popover(sign)?;
+    common::popover_shot(&mut bed.hp, "in-use")?;
+    drop(firefox);
+    Ok(())
+}
+
+/// The in-use sign at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Full)?;
+    bed.speak("hocus-test-call", "Discord", "discord", "Appel vocal")?;
+    let sign = bed.sign("Microphone")?;
+    let at = (
+        f64::from(sign.x + sign.width / 2),
+        f64::from(sign.y + sign.height / 2),
+    );
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::IN_USE_NAMESPACE, "in-use"),
+        at,
+        "InUse",
+    )
 }

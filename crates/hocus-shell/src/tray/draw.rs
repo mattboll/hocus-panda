@@ -24,9 +24,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_a11y::{Act, Node, Role};
 use hocus_link::{EDGE, Form, TRAY_NAMESPACE};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Vector, mouse,
     widget::canvas::{self, Frame, Geometry},
     window,
 };
@@ -39,9 +40,9 @@ use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
-    levels::draw::pointer,
     notifications::bell,
     popover::{self, Item, kit},
+    ui::items::{Control, Controls, Items, Press},
 };
 
 /// The cells, in the full form and in the mini, and the gaps between them.
@@ -249,7 +250,7 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
             (Some(id), 0) => {
                 place.id = None;
                 messages.push(Message::RemoveWindow(id));
-                crate::popover::with(|c| c.set_items(bar, TRAY_NAMESPACE, Vec::new()));
+                crate::popover::with(|c| c.ring.forget(bar, TRAY_NAMESPACE, false));
             }
             (None, 0) => {}
             (None, _) => {
@@ -349,6 +350,8 @@ fn region(id: window::Id, form: Form, switching: bool, n: usize) -> Message {
 #[derive(Debug, Clone)]
 pub struct Tray {
     pub id: window::Id,
+    /// Its bar's screen's name.
+    pub bar: String,
     /// The forms to draw and their opacity (two while the bar switches).
     pub forms: Vec<(Form, f32)>,
     pub bar_width: f32,
@@ -360,8 +363,6 @@ pub struct Tray {
 /// What the surface keeps between draws.
 #[derive(Debug, Default)]
 pub struct State {
-    pointer: Option<Point>,
-    hover: Option<u32>,
     /// A wheel's notches not yet whole.
     scroll: (f32, f32),
     /// What it last said it shows.
@@ -395,17 +396,10 @@ impl Tray {
             .collect()
     }
 
-    /// A point of the surface (`size`) in the bar's frame.
-    fn in_bar(&self, bar: &str, at: Point, size: Size, n: usize) -> Point {
+    /// From the surface (`size`) to the bar's frame.
+    fn to_bar(&self, bar: &str, size: Size, n: usize) -> Vector {
         let height = popover::with(|c| c.bar_height(bar));
-        Point::new(
-            at.x - size.width - 1.0,
-            height - self.bottom(n) - size.height + at.y,
-        )
-    }
-
-    fn in_bar_rect(&self, bar: &str, rect: Rectangle, size: Size, n: usize) -> Rectangle {
-        Rectangle::new(self.in_bar(bar, rect.position(), size, n), rect.size())
+        Vector::new(-size.width - 1.0, height - self.bottom(n) - size.height)
     }
 
     /// What it shows changed: said, by the icons' names and places.
@@ -417,7 +411,7 @@ impl Tray {
             .iter()
             .zip(self.cells(shown, size))
             .map(|(s, (_, r))| {
-                let r = self.in_bar_rect(bar, r, size, shown.len());
+                let r = r + self.to_bar(bar, size, shown.len());
                 format!("{}@{:.0},{:.0}", s.name, r.center_x(), r.center_y())
             })
             .collect();
@@ -431,95 +425,35 @@ impl Tray {
         }
     }
 
-    fn mouse(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        let (bar, place) = self.place()?;
-        let size = bounds.size();
-        let shown = super::shown();
-        let n = shown.len();
-        // Placed for other icons: until it is placed again.
-        if n != place.n {
-            return None;
+    /// The wheel on icon `key`: its item scrolls, a notch at a time.
+    fn wheel(&self, state: &mut State, key: u32, bar: &str, delta: mouse::ScrollDelta) {
+        let (x, y) = match delta {
+            mouse::ScrollDelta::Lines { x, y } => (x, y),
+            mouse::ScrollDelta::Pixels { x, y } => {
+                // A notch each 15 px, as the levels count them.
+                state.scroll.0 += x / 15.0;
+                state.scroll.1 += y / 15.0;
+                let whole = (state.scroll.0.trunc(), state.scroll.1.trunc());
+                state.scroll.0 -= whole.0;
+                state.scroll.1 -= whole.1;
+                whole
+            }
+        };
+        let scale = kit::scale(bar).max(1.0);
+        let notches = |v: f32| (v / scale).round() as i32;
+        if notches(y) != 0 {
+            super::ask(Ask::Scroll {
+                key,
+                delta: notches(y) * 120,
+                horizontal: false,
+            });
         }
-        let at = pointer(seen, bounds, cursor, state.pointer);
-        state.pointer = at;
-        let under = at.and_then(|at| {
-            self.cells(&shown, size)
-                .into_iter()
-                .find(|(_, r)| r.contains(at))
-        });
-        let in_bar = |r: Rectangle| self.in_bar_rect(&bar, r, size, n);
-        match seen {
-            mouse::Event::CursorEntered
-            | mouse::Event::CursorMoved { .. }
-            | mouse::Event::CursorLeft => {
-                let over = under.map(|(key, _)| key);
-                if over == state.hover {
-                    return None;
-                }
-                state.hover = over;
-                match under {
-                    Some((key, rect)) => super::tip::hover(&bar, key, in_bar(rect)),
-                    None => super::tip::leave(),
-                }
-                Some(canvas::Action::request_redraw())
-            }
-            mouse::Event::ButtonPressed(button) => {
-                let (key, rect) = under?;
-                super::tip::leave();
-                let rect = in_bar(rect);
-                match button {
-                    mouse::Button::Left => super::ask(Ask::Activate { key, bar, rect }),
-                    mouse::Button::Middle => super::ask(Ask::Secondary { key }),
-                    mouse::Button::Right => {
-                        if popover::with(|c| c.shows(&bar, Item::Tray(key))) {
-                            popover::event(popover::Event::Chosen);
-                        } else {
-                            super::ask(Ask::Menu { key, bar, rect });
-                        }
-                    }
-                    _ => return None,
-                }
-                Some(canvas::Action::request_redraw().and_capture())
-            }
-            mouse::Event::WheelScrolled { delta } => {
-                let (key, _) = under?;
-                let (x, y) = match *delta {
-                    mouse::ScrollDelta::Lines { x, y } => (x, y),
-                    mouse::ScrollDelta::Pixels { x, y } => {
-                        // A notch each 15 px, as the levels count them.
-                        state.scroll.0 += x / 15.0;
-                        state.scroll.1 += y / 15.0;
-                        let whole = (state.scroll.0.trunc(), state.scroll.1.trunc());
-                        state.scroll.0 -= whole.0;
-                        state.scroll.1 -= whole.1;
-                        whole
-                    }
-                };
-                let scale = kit::scale(&bar).max(1.0);
-                let notches = |v: f32| (v / scale).round() as i32;
-                if notches(y) != 0 {
-                    super::ask(Ask::Scroll {
-                        key,
-                        delta: notches(y) * 120,
-                        horizontal: false,
-                    });
-                }
-                if notches(x) != 0 {
-                    super::ask(Ask::Scroll {
-                        key,
-                        delta: notches(x) * 120,
-                        horizontal: true,
-                    });
-                }
-                Some(canvas::Action::capture())
-            }
-            _ => None,
+        if notches(x) != 0 {
+            super::ask(Ask::Scroll {
+                key,
+                delta: notches(x) * 120,
+                horizontal: true,
+            });
         }
     }
 }
@@ -533,54 +467,140 @@ fn popped(since: Instant, now: Instant, motion: bool) -> f32 {
     if t >= 1.0 { 1.0 } else { bezier(EASE_OUT, t) }
 }
 
-impl canvas::Program<Message> for Tray {
+impl Items for Tray {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        TRAY_NAMESPACE
+    }
+
+    fn controls(&self, _state: &State, size: Size) -> Controls {
+        let shown = super::shown();
+        let n = shown.len();
+        let to_bar = self.to_bar(&self.bar, size, n);
+        // Placed for other icons: none until it is placed again.
+        if self.place().is_none_or(|(_, place)| place.n != n) {
+            return Controls {
+                to_bar,
+                ..Controls::default()
+            };
+        }
+        let controls = shown
+            .iter()
+            .zip(self.cells(&shown, size))
+            .map(|(s, (key, rect))| {
+                Control::new(
+                    Item::Tray(key),
+                    rect,
+                    Role::Button,
+                    s.name.clone(),
+                    bell::RADIUS,
+                )
+                .node(|n| n.act(Act::Menu))
+            })
+            .collect();
+        Controls {
+            to_bar,
+            controls,
+            group: Some(Node::new(
+                "tray",
+                Role::Toolbar,
+                crate::a11y::Words::new(crate::clock::time::Lang::of_messages()).tray(),
+            )),
+        }
+    }
+
+    fn live(&self) -> Option<crate::ui::ring::Live> {
+        Some(|_, _, item| {
+            let Item::Tray(key) = item else {
+                return None;
+            };
+            let name = super::shown().into_iter().find(|s| s.key == key)?.name;
+            Some(
+                Node::new(crate::ui::items::key(item), Role::Button, name)
+                    .act(Act::Click)
+                    .act(Act::Menu),
+            )
+        })
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
         bounds: Rectangle,
-        cursor: mouse::Cursor,
+        at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(now)) => {
                 let (bar, _) = self.place()?;
                 let shown = super::shown();
                 self.say(state, &bar, &shown, bounds.size());
-                // A tooltip shows for an icon still there only.
-                if state
-                    .hover
-                    .is_some_and(|key| !shown.iter().any(|s| s.key == key))
-                {
-                    state.hover = None;
-                    super::tip::leave();
-                }
                 let moving = self.motion
                     && shown
                         .iter()
                         .any(|s| now.saturating_duration_since(s.since) < POP);
                 moving.then(canvas::Action::request_redraw)
             }
-            iced::Event::Mouse(seen) => self.mouse(state, seen, bounds, cursor),
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => popover::key(key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
+            iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                let shown = super::shown();
+                let (key, _) = self
+                    .cells(&shown, bounds.size())
+                    .into_iter()
+                    .find(|(_, r)| at.is_some_and(|at| r.contains(at)))?;
+                self.wheel(state, key, &self.bar, *delta);
+                Some(canvas::Action::capture())
+            }
             _ => None,
         }
     }
 
+    /// An icon under the pointer shows its tooltip.
+    fn hovered(&self, _state: &mut State, on: Option<(Item, Rectangle)>) {
+        match on {
+            Some((Item::Tray(key), rect)) => super::tip::hover(&self.bar, key, rect),
+            _ => super::tip::leave(),
+        }
+    }
+
+    /// A left click activates the icon's item, the middle one its
+    /// secondary action, a right click shows its menu (or closes it).
+    fn pressed(
+        &self,
+        _state: &mut State,
+        button: mouse::Button,
+        on: Option<(Item, Rectangle)>,
+    ) -> Press {
+        let Some((Item::Tray(key), rect)) = on else {
+            return Press::Passed;
+        };
+        super::tip::leave();
+        let bar = self.bar.clone();
+        match button {
+            mouse::Button::Left => super::ask(Ask::Activate { key, bar, rect }),
+            mouse::Button::Middle => super::ask(Ask::Secondary { key }),
+            mouse::Button::Right => {
+                if popover::with(|c| c.shows(&bar, Item::Tray(key))) {
+                    popover::event(popover::Event::Chosen);
+                } else {
+                    super::ask(Ask::Menu { key, bar, rect });
+                }
+            }
+            _ => return Press::Passed,
+        }
+        Press::Taken
+    }
+
     fn draw(
         &self,
-        state: &State,
+        _state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
@@ -593,12 +613,6 @@ impl canvas::Program<Message> for Tray {
         if n != place.n {
             return crate::backdrop::over(under, frame);
         }
-        let in_bar: Vec<(Item, Rectangle)> = self
-            .cells(&shown, size)
-            .into_iter()
-            .map(|(key, r)| (Item::Tray(key), self.in_bar_rect(&bar, r, size, n)))
-            .collect();
-        popover::with(|c| c.set_items(&bar, TRAY_NAMESPACE, in_bar));
         let now = Instant::now();
         let still = self.forms.len() == 1;
         let bottom = self.bottom(n);
@@ -613,18 +627,9 @@ impl canvas::Program<Message> for Tray {
                 f.fill_rectangle(line.position(), line.size(), LINE_COLOUR.scale_alpha(alpha));
                 for (i, item) in shown.iter().enumerate() {
                     let cell = rect(form, i, n, size, bottom, self.bar_width);
-                    let (open, focused) = if still {
-                        popover::with(|c| {
-                            (
-                                c.shows(&bar, Item::Tray(item.key)),
-                                c.focused(&bar, Item::Tray(item.key)),
-                            )
-                        })
-                    } else {
-                        (false, false)
-                    };
-                    let hover = still && state.hover == Some(item.key);
-                    bell::lit(f, cell, open, hover, focused);
+                    let open = still && popover::with(|c| c.shows(&bar, Item::Tray(item.key)));
+                    let hover = still && lit == Some(Item::Tray(item.key));
+                    bell::lit(f, cell, open, hover);
                     let p = popped(item.since, now, self.motion);
                     let side = ICON * (POP_FROM + (1.0 - POP_FROM) * p);
                     let centre = cell.center();
@@ -657,19 +662,6 @@ impl canvas::Program<Message> for Tray {
             }
         });
         crate::backdrop::over(under, frame)
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 

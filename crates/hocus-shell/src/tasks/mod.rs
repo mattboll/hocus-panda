@@ -20,6 +20,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::tasks as txt;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -34,6 +35,7 @@ use hocus_link::{POPOVER_NAMESPACE, TASKS_NAMESPACE};
 
 use crate::{
     clock::time::Lang,
+    field::{self, Entry, Place, Took, view::Look as FieldLook},
     popover::{self, Effect, Item, Pressed},
 };
 
@@ -161,13 +163,32 @@ pub enum At {
     Popover,
 }
 
-/// The field to add a task.
+/// The field to add a task, as it is: where, what is typed in it, and
+/// whether it holds the keyboard.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     pub at: At,
     pub text: String,
     /// It holds the keyboard (else it waits, its text kept, for a click).
     pub focused: bool,
+}
+
+/// The field open: the shell's text field (#771), on one line.
+#[derive(Debug)]
+struct Open {
+    at: At,
+    focused: bool,
+    entry: Entry,
+}
+
+impl Open {
+    fn said(&self) -> Field {
+        Field {
+            at: self.at.clone(),
+            text: self.entry.text().to_owned(),
+            focused: self.focused,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -177,7 +198,7 @@ struct Ui {
     adds_unsaved: HashMap<ChangeId, Instant>,
     /// The refusals already said.
     seen: HashSet<ChangeId>,
-    field: Option<Field>,
+    field: Option<Open>,
     /// A paste awaited (its number), and how many were asked.
     paste: Option<u64>,
     pastes: u64,
@@ -514,7 +535,7 @@ fn settle(ui: &mut Ui, day: &Day, now: Instant, motion: bool) {
 
 /// Logged when what shows changes, for tests.
 fn say(ui: &mut Ui, lines: &Lines) {
-    let said = Some((lines.clone(), ui.field.clone()));
+    let said = Some((lines.clone(), ui.field.as_ref().map(Open::said)));
     if ui.said == said {
         return;
     }
@@ -541,7 +562,7 @@ fn say(ui: &mut Ui, lines: &Lines) {
     let field = ui
         .field
         .as_ref()
-        .map(|f| format!("{:?} «{}» focused={}", f.at, f.text, f.focused));
+        .map(|f| format!("{:?} «{}» focused={}", f.at, f.entry.text(), f.focused));
     tracing::debug!(
         shows = lines.shows,
         open = lines.open(),
@@ -624,7 +645,61 @@ pub fn toggle(key: &Key) {
 
 /// The field to add a task, as it is.
 pub fn field() -> Option<Field> {
-    ui(|ui| ui.field.clone())
+    ui(|ui| ui.field.as_ref().map(Open::said))
+}
+
+/// The field at `at` drawn at `place`: what is typed, its selection, and
+/// its caret while it holds the keyboard; else its placeholder.
+pub fn draw_field(
+    at: &At,
+    f: &mut iced::widget::canvas::Frame,
+    place: Place,
+    placeholder: &str,
+    look: &FieldLook,
+) {
+    ui(|ui| {
+        if let Some(open) = ui.field.as_ref().filter(|open| open.at == *at) {
+            open.entry.draw(f, place, placeholder, look, open.focused);
+        }
+    });
+}
+
+/// `with` the popover's field, if it is open there (the kit's field,
+/// [`crate::ui::field::Field`]).
+pub fn popover_entry(with: &mut dyn FnMut(&mut Entry)) {
+    ui(|ui| {
+        if let Some(open) = ui.field.as_mut().filter(|open| open.at == At::Popover) {
+            with(&mut open.entry);
+        }
+    });
+}
+
+/// A press at `p` in the field at `at`, as it was drawn: its caret goes
+/// there.
+pub fn field_press(at: &At, p: iced::Point) {
+    ui(|ui| {
+        if let Some(open) = ui.field.as_mut().filter(|open| open.at == *at) {
+            open.entry.press(p);
+        }
+    });
+}
+
+/// The press held in the field dragged to `p`: `None` if none is held,
+/// else whether its selection changed.
+pub fn field_drag(p: Option<iced::Point>) -> Option<bool> {
+    ui(|ui| {
+        let open = ui.field.as_mut().filter(|open| open.entry.pressed())?;
+        Some(p.is_some_and(|p| open.entry.drag(p)))
+    })
+}
+
+/// The press in the field let go.
+pub fn field_release() {
+    ui(|ui| {
+        if let Some(open) = &mut ui.field {
+            open.entry.release();
+        }
+    });
 }
 
 /// The field opens at `at`, empty, holding the keyboard; open there
@@ -632,14 +707,14 @@ pub fn field() -> Option<Field> {
 /// closes.
 pub fn open_field(at: At) {
     let before = ui(|ui| {
-        let before = ui.field.clone();
+        let before = ui.field.as_ref().map(Open::said);
         match &mut ui.field {
             Some(field) if field.at == at => field.focused = true,
             _ => {
-                ui.field = Some(Field {
+                ui.field = Some(Open {
                     at: at.clone(),
-                    text: String::new(),
                     focused: true,
+                    entry: Entry::new(field::Kind::Line, LONGEST),
                 });
                 ui.paste = None;
             }
@@ -751,56 +826,46 @@ pub fn field_key(at: &At, pressed: &Pressed) -> bool {
             }
             close_field("Enter");
         }
-        K::Named(Named::Backspace) => {
-            ui(|ui| {
-                if let Some(f) = &mut ui.field {
-                    if modifiers.control() {
-                        f.text.clear();
-                    } else {
-                        f.text.pop();
-                    }
-                }
-            });
-            wake();
-        }
         // The keyboard stays in the field.
         K::Named(Named::Tab) => {}
-        _ if crate::paste::asks(&pressed.key, modifiers) => paste(),
-        _ if !(modifiers.control() || modifiers.logo() || modifiers.alt()) => {
-            let Some(text) = pressed
-                .text
-                .as_deref()
-                .filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()))
-            else {
-                return false;
-            };
-            if push(text) {
-                wake();
+        _ => {
+            let took = ui(|ui| {
+                ui.field.as_mut().map_or(Took::No, |f| {
+                    f.entry
+                        .key(&pressed.key, modifiers, pressed.text.as_deref())
+                })
+            });
+            match took {
+                Took::No => return false,
+                Took::Same => {}
+                Took::Moved | Took::Edited => wake(),
+                Took::Paste => paste(),
             }
         }
-        _ => return false,
     }
     true
 }
 
-/// `text` at the field's end, whole if it fits: whether it did.
-fn push(text: &str) -> bool {
+/// An input method's preedit or commit in the field at `at`, while it
+/// holds the keyboard: whether it draws again.
+pub fn field_input_method(at: &At, event: &iced::advanced::input_method::Event) -> bool {
     ui(|ui| {
-        let Some(f) = &mut ui.field else {
-            return false;
-        };
-        if f.text.chars().count() + text.chars().count() > LONGEST {
-            return false;
-        }
-        f.text.push_str(text);
-        true
+        ui.field
+            .as_mut()
+            .filter(|f| f.at == *at && f.focused)
+            .is_some_and(|f| f.entry.input_method(event).draws())
     })
 }
 
-/// The clipboard's text at the field's end on one line (Day.4b): its line
-/// breaks and runs of white space one space, its ends trimmed, whole if it
-/// fits or not at all; it
-/// lands only in the field that asked, open and holding the keyboard.
+/// `text` in the field at its caret, whole if it fits: whether it did.
+fn pasted(text: &str) -> bool {
+    ui(|ui| ui.field.as_mut().is_some_and(|f| f.entry.paste(text)))
+}
+
+/// The clipboard's text at the field's caret on one line (Day.4b): its
+/// line breaks and runs of white space one space, its ends trimmed, whole
+/// if it fits or not at all; it lands only in the field that asked, open
+/// and holding the keyboard.
 fn paste() {
     let (n, at) = match ui(|ui| {
         if ui.paste.is_some() {
@@ -829,7 +894,7 @@ fn paste() {
         if !awaited {
             return;
         }
-        if push(text) {
+        if pasted(text) {
             tracing::debug!("the clipboard's text pasted into the field to add a task");
             wake();
         } else {
@@ -920,54 +985,40 @@ pub fn tick(now: Instant) -> Vec<Effect> {
 /// The list's words, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    pub(crate) lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     /// The group's header.
     pub fn header(self) -> &'static str {
-        if self.fr { "À FAIRE" } else { "TO DO" }
+        txt::TO_DO.get(self.lang)
     }
 
     /// The popover's title.
     pub fn title(self) -> &'static str {
-        if self.fr { "À faire" } else { "To do" }
+        txt::TO_DO_2.get(self.lang)
     }
 
     /// The `+`'s name.
     pub fn add(self) -> &'static str {
-        if self.fr {
-            "Ajouter une tâche"
-        } else {
-            "Add a task"
-        }
+        txt::ADD_A_TASK.get(self.lang)
     }
 
     pub fn placeholder(self) -> &'static str {
-        if self.fr {
-            "Nouvelle tâche…"
-        } else {
-            "New task…"
-        }
+        txt::NEW_TASK.get(self.lang)
     }
 
     pub fn nothing(self) -> &'static str {
-        if self.fr {
-            "Rien à faire."
-        } else {
-            "Nothing to do."
-        }
+        txt::NOTHING_TO_DO.get(self.lang)
     }
 
     /// "+ 4 autres", "+ 1 autre".
     pub fn more(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "+ 1 autre".to_owned(),
             (true, n) => format!("+ {n} autres"),
             (false, n) => format!("+ {n} more"),
@@ -976,29 +1027,21 @@ impl Words {
 
     /// A box's name: what a click does.
     pub fn tick(self, title: &str, ticked: bool) -> String {
-        match (self.fr, ticked) {
-            (true, false) => format!("Cocher « {title} »"),
-            (true, true) => format!("Décocher « {title} »"),
-            (false, false) => format!("Tick \"{title}\""),
-            (false, true) => format!("Untick \"{title}\""),
+        match ticked {
+            false => txt::tick(self.lang, title),
+            true => txt::untick(self.lang, title),
         }
     }
 
     pub fn unsaved(self) -> &'static str {
-        if self.fr {
-            "Pas enregistré"
-        } else {
-            "Not saved"
-        }
+        txt::NOT_SAVED.get(self.lang)
     }
 
     /// The mini item's name: how many tasks are open.
     pub fn count(self, n: usize) -> String {
-        match (self.fr, n) {
-            (true, 1) => "À faire : 1 tâche".to_owned(),
-            (true, n) => format!("À faire : {n} tâches"),
-            (false, 1) => "To do: 1 task".to_owned(),
-            (false, n) => format!("To do: {n} tasks"),
+        match n {
+            1 => txt::TO_DO_1_TASK.get(self.lang).to_owned(),
+            n => txt::to_do_tasks(self.lang, n),
         }
     }
 }
@@ -1009,8 +1052,12 @@ mod tests {
 
     #[test]
     fn its_words_in_french_and_english() {
-        let fr = Words { fr: true };
-        let en = Words { fr: false };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(fr.header(), "À FAIRE");
         assert_eq!(en.header(), "TO DO");
         assert_eq!(fr.more(4), "+ 4 autres");

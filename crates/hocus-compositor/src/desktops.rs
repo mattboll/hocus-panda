@@ -1260,12 +1260,12 @@ impl crate::State {
         };
         let mut strip = self.strip(&output);
         strip.swipe_begin(self.now(), self.reduced_motion());
-        self.swiping = Some(output.clone());
+        self.gestures.swiping = Some(output.clone());
         self.set_strip(&output, strip);
     }
 
     pub fn desktop_swipe_update(&mut self, dx: f64, dy: f64, time: u32) {
-        let Some(output) = self.swiping.clone() else {
+        let Some(output) = self.gestures.swiping.clone() else {
             return;
         };
         let mut strip = self.strip(&output);
@@ -1280,7 +1280,7 @@ impl crate::State {
     }
 
     pub fn desktop_swipe_end(&mut self, cancelled: bool) {
-        let Some(output) = self.swiping.take() else {
+        let Some(output) = self.gestures.swiping.take() else {
             return;
         };
         let mut strip = self.strip(&output);

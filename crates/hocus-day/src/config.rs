@@ -168,25 +168,58 @@ impl TaskEntry {
 
 /// The configuration file's `[day]`, read from its text; the rest of the
 /// file is the compositor's.
-pub fn from_toml(text: &str) -> Result<Config, String> {
+pub fn from_toml(text: &str) -> Result<Config, toml::de::Error> {
     #[derive(Deserialize)]
     struct File {
         #[serde(default)]
         day: Config,
     }
-    toml::from_str::<File>(text)
-        .map(|f| f.day)
-        .map_err(|err| err.to_string())
+    toml::from_str::<File>(text).map(|f| f.day)
+}
+
+/// Why a section of the configuration file was not read.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    /// The file is there and could not be read.
+    #[error("{}: {source}", path.display())]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    /// Its text does not read as the section's.
+    #[error("{}: {source}", path.display())]
+    Syntax {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
+}
+
+impl ReadError {
+    /// `path`'s text, and `default` when there is no file.
+    pub(crate) fn text_or<T>(
+        path: &Path,
+        default: impl FnOnce() -> T,
+        read: impl FnOnce(&str) -> Result<T, toml::de::Error>,
+    ) -> Result<T, Self> {
+        let path_of = || path.to_path_buf();
+        match std::fs::read_to_string(path) {
+            Ok(text) => read(&text).map_err(|source| Self::Syntax {
+                path: path_of(),
+                source,
+            }),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(default()),
+            Err(source) => Err(Self::Io {
+                path: path_of(),
+                source,
+            }),
+        }
+    }
 }
 
 /// `[day]` of the configuration file at `path`: none when there is no
 /// file; an error (to log) when it does not read.
-pub fn read(path: &Path) -> Result<Config, String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => from_toml(&text).map_err(|err| format!("{}: {err}", path.display())),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
-        Err(err) => Err(format!("{}: {err}", path.display())),
-    }
+pub fn read(path: &Path) -> Result<Config, ReadError> {
+    ReadError::text_or(path, Config::default, from_toml)
 }
 
 impl Config {
@@ -326,6 +359,21 @@ fn account(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `[day]` and `[calendar]` have the defaults the shipped file lists
+    /// (`hocus_config::defaults`), as the compositor's sections do.
+    #[test]
+    fn the_shipped_example_is_the_defaults() -> anyhow::Result<()> {
+        use hocus_config::defaults;
+        let uncommented = defaults::uncomment(defaults::SHIPPED);
+        assert!(uncommented.contains("[calendar]"), "{uncommented}");
+        assert_eq!(from_toml(&uncommented)?, Config::default());
+        assert_eq!(
+            crate::reminders::from_toml(&uncommented)?,
+            crate::reminders::Settings::default()
+        );
+        Ok(())
+    }
 
     #[test]
     fn day_reads_its_accounts_and_lets_the_rest_through() -> anyhow::Result<()> {

@@ -161,10 +161,13 @@ fn is_fresh(program: &Path, name: &str) -> anyhow::Result<()> {
     // `target: source source…`, spaces in names escaped.
     let (_, sources) = text.split_once(": ").context("an unreadable list")?;
     let sources = sources.trim().replace("\\ ", "\0");
+    // What a build script generated (hocus-words' catalogue) is in the
+    // program's own target directory, beside its profile's.
+    let target = program.parent().and_then(Path::parent);
     for source in sources.split_whitespace() {
         let source = std::path::PathBuf::from(source.replace('\0', " "));
         anyhow::ensure!(
-            source.starts_with(workspace),
+            source.starts_with(workspace) || target.is_some_and(|t| source.starts_with(t)),
             "{name} was built from another checkout ({})",
             source.display()
         );
@@ -307,16 +310,26 @@ pub fn render_node() -> Option<std::path::PathBuf> {
 
 /// A compositor drawing with GLES, for the tests of its shaders (the
 /// streak, the halo, the glass, the rim's ring): on the GPU
-/// `HOCUS_TEST_GPU` names, else on Mesa's software device; with pixman
-/// without that, which those tests see in `renderer()` and skip.
+/// `HOCUS_TEST_GPU` names, else on Mesa's software device. Without that
+/// either, the test fails: on pixman none of them would draw.
 pub fn gles() -> HeadlessConfig {
     let config = hocus_compositor::test_gpu::gles();
     match (config.renderer, &config.render_node) {
         (_, Some(node)) => eprintln!("GLES on the GPU {}", node.display()),
         (RendererChoice::GlesSoftware, _) => eprintln!("GLES on Mesa's software device"),
-        _ => eprintln!("no GLES here, not even Mesa's software device: pixman"),
+        _ => missing("GLES on Mesa's software device (libegl-mesa0, libgles2)"),
     }
     config
+}
+
+/// Fails the test: it needs `what` (system programs, a driver), which this
+/// machine lacks. A test never passes without what it tests with: it said
+/// "skipped" where nobody reads, and passed (#765, #769). CI installs them
+/// (`.github/workflows/ci.yml`); the tests of what it does not install are
+/// left out there by name (`[profile.ci]` in `.config/nextest.toml`).
+#[track_caller]
+pub fn missing(what: &str) -> ! {
+    panic!("this test needs {what}, which this machine lacks: install it")
 }
 
 pub fn compositor() -> anyhow::Result<Headless> {
@@ -1738,6 +1751,22 @@ pub fn wait(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Waits, if need be, until the machine's clock is clear of a minute's
+/// change for the `look` to come: from 2 s past a minute to 2 s before the
+/// next. For the tests that count what a program showing the real time
+/// draws at rest: it draws at the minute, whenever the test happens to
+/// run, and a look that crosses it counts that draw.
+pub fn clear_of_the_minute(hp: &mut Headless, look: Duration) -> anyhow::Result<()> {
+    let second = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs_f64()
+        % 60.0;
+    if !(2.0..58.0 - look.as_secs_f64()).contains(&second) {
+        wait(hp, Duration::from_secs_f64((62.0 - second) % 60.0))?;
+    }
+    Ok(())
+}
+
 /// The pointer at `at`, once the shell's surface of `namespace` takes it
 /// there. A layer surface maps (and has its place) before the shell has
 /// drawn it, and until it has a buffer it takes no pointer: a press then
@@ -1816,6 +1845,108 @@ pub fn drawn_popovers(hp: &Headless) -> Vec<Rect> {
         .into_iter()
         .map(|(_, r)| r)
         .collect()
+}
+
+/// The shell's popover as the first screen shows it, saved as a PNG under
+/// `HOCUS_KIT_SHOTS` as `name.png` (the kit's side-by-sides, #770); nothing
+/// without the variable.
+pub fn popover_shot(hp: &mut Headless, name: &str) -> anyhow::Result<()> {
+    layer_shot(hp, hocus_link::POPOVER_NAMESPACE, name)
+}
+
+/// The keyboard's ring onto the bar's item `item`, as the shell logs it
+/// (`Clipboard`, `Desktop { row: 0, index: 1 }`; ending in `(`, the first
+/// of its kind, `Tray(`): `Super+B`, then `Tab` until the shell's log at
+/// `log` says the keyboard is on it.
+pub fn ring_on(hp: &mut Headless, log: &Path, item: &str) -> anyhow::Result<()> {
+    const KEY_B: u32 = 48;
+    let on = |text: &str| -> Option<bool> {
+        let line = text.lines().rev().find(|l| {
+            l.contains("the keyboard on an item") || l.contains("the keyboard into the bar")
+        })?;
+        let value = line.rsplit("item=").next()?.trim_end();
+        Some(value == item || (item.ends_with('(') && value.starts_with(item)))
+    };
+    let mark = logged(log).len();
+    chord(hp, &[KEY_LEFTMETA, KEY_B]);
+    for _ in 0..80 {
+        wait(hp, Duration::from_millis(150))?;
+        let text = logged(log);
+        match on(text.get(mark..).unwrap_or_default()) {
+            Some(true) => return Ok(()),
+            Some(false) => {
+                hp.key(KEY_TAB, true);
+                hp.key(KEY_TAB, false);
+            }
+            None => {}
+        }
+    }
+    anyhow::bail!("the keyboard never reached {item}")
+}
+
+/// A bar's surface `namespace` shot as [`layer_shot`] does, at rest
+/// (`name-rest`), the pointer on `at` (`name-hover`), and the keyboard's
+/// ring on `item` ([`ring_on`], `name-ring`): the side-by-sides of its
+/// items on the widget kit (#785).
+pub fn bar_shots(
+    hp: &mut Headless,
+    log: &Path,
+    (namespace, name): (&str, &str),
+    at: (f64, f64),
+    item: &str,
+) -> anyhow::Result<()> {
+    let away = (400.0, 300.0);
+    hp.pointer_move(away.0, away.1);
+    layer_shot(hp, namespace, &format!("{name}-rest"))?;
+    over(hp, at, namespace)?;
+    layer_shot(hp, namespace, &format!("{name}-hover"))?;
+    hp.pointer_move(away.0, away.1);
+    wait(hp, Duration::from_millis(500))?;
+    ring_on(hp, log, item)?;
+    layer_shot(hp, namespace, &format!("{name}-ring"))?;
+    for _ in 0..2 {
+        hp.key(KEY_ESC, true);
+        hp.key(KEY_ESC, false);
+    }
+    Ok(())
+}
+
+/// The shell's surface `namespace` as the first screen shows it, saved as
+/// [`popover_shot`] saves a popover.
+pub fn layer_shot(hp: &mut Headless, namespace: &str, name: &str) -> anyhow::Result<()> {
+    let Ok(dir) = std::env::var("HOCUS_KIT_SHOTS") else {
+        eprintln!("HOCUS_KIT_SHOTS is not set: no shot");
+        return Ok(());
+    };
+    // Its hover, its spinners and its fades at rest.
+    wait(hp, Duration::from_millis(800))?;
+    let rect = hp
+        .drawn_layers(namespace)
+        .first()
+        .map(|(_, r)| *r)
+        .ok_or_else(|| anyhow::anyhow!("{name}: no {namespace}"))?;
+    let (width, height, bytes) = hp.screenshot(0)?;
+    let w = rect.width.min(width - rect.x);
+    let h = rect.height.min(height - rect.y);
+    let mut out = image::RgbaImage::new(u32::try_from(w)?, u32::try_from(h)?);
+    for y in 0..h {
+        for x in 0..w {
+            let at = usize::try_from((rect.y + y) * width + rect.x + x)? * 4;
+            if let Some([b, g, r, _]) = bytes
+                .get(at..at + 4)
+                .and_then(|p| <[u8; 4]>::try_from(p).ok())
+            {
+                out.put_pixel(
+                    u32::try_from(x)?,
+                    u32::try_from(y)?,
+                    image::Rgba([r, g, b, 255]),
+                );
+            }
+        }
+    }
+    std::fs::create_dir_all(&dir)?;
+    out.save(Path::new(&dir).join(format!("{name}.png")))?;
+    Ok(())
 }
 
 /// A screen's refresh, as the tests step the held clock: 60 Hz.

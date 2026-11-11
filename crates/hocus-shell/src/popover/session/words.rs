@@ -2,171 +2,166 @@
 //! table gives them.
 
 use hocus_link::LeaveAction;
+use hocus_words::Lang;
+use hocus_words::shell::popover_session_words as txt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: crate::clock::time::Lang) -> Self {
-        Self {
-            fr: lang == crate::clock::time::Lang::French,
-        }
+        Self { lang }
     }
 
     #[cfg(test)]
     pub(crate) const fn french() -> Self {
-        Self { fr: true }
+        Self { lang: Lang::French }
     }
 
     #[cfg(test)]
     pub(crate) const fn english() -> Self {
-        Self { fr: false }
+        Self {
+            lang: Lang::English,
+        }
     }
 
-    const fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    const fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     pub fn settings(self) -> &'static str {
-        self.pick("Réglages", "Settings")
+        self.pick(txt::SETTINGS)
     }
 
     pub fn lock(self) -> &'static str {
-        self.pick("Verrouiller", "Lock")
+        self.pick(txt::LOCK)
     }
 
     pub fn suspend(self) -> &'static str {
-        self.pick("Mettre en veille", "Suspend")
+        self.pick(txt::SUSPEND)
     }
 
     pub fn row(self, action: LeaveAction) -> &'static str {
         match action {
-            LeaveAction::LogOut => self.pick("Se déconnecter", "Log out"),
-            LeaveAction::Restart => self.pick("Redémarrer", "Restart"),
-            LeaveAction::ShutDown => self.pick("Éteindre", "Shut down"),
+            LeaveAction::LogOut => self.pick(txt::LOG_OUT),
+            LeaveAction::Restart => self.pick(txt::RESTART),
+            LeaveAction::ShutDown => self.pick(txt::SHUT_DOWN),
         }
     }
 
     /// The confirmation's title.
     pub fn title(self, action: LeaveAction) -> &'static str {
         match action {
-            LeaveAction::LogOut => self.pick("Se déconnecter ?", "Log out?"),
-            LeaveAction::Restart => self.pick("Redémarrer ?", "Restart?"),
-            LeaveAction::ShutDown => self.pick("Éteindre ?", "Shut down?"),
+            LeaveAction::LogOut => self.pick(txt::LOG_OUT_2),
+            LeaveAction::Restart => self.pick(txt::RESTART_2),
+            LeaveAction::ShutDown => self.pick(txt::SHUT_DOWN_2),
         }
     }
 
     /// The countdown's sentence, `seconds` left.
     pub fn counting(self, action: LeaveAction, seconds: u32) -> String {
-        match (action, self.fr) {
-            (LeaveAction::LogOut, true) => format!("La session se ferme dans {seconds} s."),
-            (LeaveAction::LogOut, false) => format!("The session ends in {seconds} s."),
-            (LeaveAction::Restart, true) => format!("L’ordinateur redémarre dans {seconds} s."),
-            (LeaveAction::Restart, false) => format!("The computer restarts in {seconds} s."),
-            (LeaveAction::ShutDown, true) => format!("L’ordinateur s’éteint dans {seconds} s."),
-            (LeaveAction::ShutDown, false) => {
-                format!("The computer shuts down in {seconds} s.")
-            }
+        match action {
+            LeaveAction::LogOut => txt::the_session_ends_in_s(self.lang, seconds),
+            LeaveAction::Restart => txt::the_computer_restarts_in_s(self.lang, seconds),
+            LeaveAction::ShutDown => txt::the_computer_shuts_down_in_s(self.lang, seconds),
         }
     }
 
     pub fn now(self, action: LeaveAction) -> &'static str {
         match action {
-            LeaveAction::LogOut => self.pick("Se déconnecter maintenant", "Log out now"),
-            LeaveAction::Restart => self.pick("Redémarrer maintenant", "Restart now"),
-            LeaveAction::ShutDown => self.pick("Éteindre maintenant", "Shut down now"),
+            LeaveAction::LogOut => self.pick(txt::LOG_OUT_NOW),
+            LeaveAction::Restart => self.pick(txt::RESTART_NOW),
+            LeaveAction::ShutDown => self.pick(txt::SHUT_DOWN_NOW),
         }
     }
 
     pub fn anyway(self, action: LeaveAction) -> &'static str {
         match action {
-            LeaveAction::LogOut => self.pick("Se déconnecter quand même", "Log out anyway"),
-            LeaveAction::Restart => self.pick("Redémarrer quand même", "Restart anyway"),
-            LeaveAction::ShutDown => self.pick("Éteindre quand même", "Shut down anyway"),
+            LeaveAction::LogOut => self.pick(txt::LOG_OUT_ANYWAY),
+            LeaveAction::Restart => self.pick(txt::RESTART_ANYWAY),
+            LeaveAction::ShutDown => self.pick(txt::SHUT_DOWN_ANYWAY),
         }
     }
 
     pub fn cancel(self) -> &'static str {
-        self.pick("Annuler", "Cancel")
+        self.pick(txt::CANCEL)
     }
 
     /// What is held back, after "retient" / "is holding back".
     fn held_what(self, action: LeaveAction) -> &'static str {
         match action {
-            LeaveAction::LogOut => self.pick("la déconnexion", "logging out"),
-            LeaveAction::Restart => self.pick("le redémarrage", "restarting"),
-            LeaveAction::ShutDown => self.pick("l’arrêt", "shutting down"),
+            LeaveAction::LogOut => self.pick(txt::LOGGING_OUT),
+            LeaveAction::Restart => self.pick(txt::RESTARTING),
+            LeaveAction::ShutDown => self.pick(txt::SHUTTING_DOWN),
         }
     }
 
     /// The list's title: `app` alone, or `count` applications.
     pub fn held(self, action: LeaveAction, app: &str, count: usize) -> String {
         let what = self.held_what(action);
-        match (count, self.fr) {
-            (1, true) => format!("{app} retient {what}"),
-            (1, false) => format!("{app} is holding back {what}"),
-            (n, true) => format!("{n} applications retiennent {what}"),
-            (n, false) => format!("{n} applications are holding back {what}"),
+        match count {
+            1 => txt::is_holding_back(
+                self.lang,
+                txt::IsHoldingBack {
+                    app: &app,
+                    what: &what,
+                },
+            ),
+            n => txt::applications_are_holding_back(
+                self.lang,
+                txt::ApplicationsAreHoldingBack {
+                    what: &what,
+                    x_n: &n,
+                },
+            ),
         }
     }
 
     pub fn held_sentence(self) -> &'static str {
-        self.pick(
-            "Rien ne compte tant qu’il retient. Reviens-y, ou passe outre : ce qui n’est pas envoyé sera perdu.",
-            "Nothing counts down while it holds back. Go back to it, or override it: what was not sent will be lost.",
-        )
+        self.pick(txt::NOTHING_COUNTS_DOWN_WHILE_IT_HOLDS)
     }
 
     pub fn back_to(self, app: &str) -> String {
-        if self.fr {
-            format!("Revenir à {app}")
-        } else {
-            format!("Go back to {app}")
-        }
+        txt::go_back_to(self.lang, app)
     }
 
     /// A window's button, when it does not close.
     pub fn close_anyway(self) -> &'static str {
-        self.pick("Fermer quand même", "Close anyway")
+        self.pick(txt::CLOSE_ANYWAY)
     }
 
     /// What a window that did not close says, its title `title`.
     pub fn window_open(self, title: &str) -> String {
-        match (title.trim().is_empty(), self.fr) {
-            (true, true) => "Sa fenêtre ne s’est pas fermée.".to_owned(),
-            (true, false) => "Its window did not close.".to_owned(),
-            (false, true) => format!("« {title} » ne s’est pas fermée."),
-            (false, false) => format!("“{title}” did not close."),
+        match title.trim().is_empty() {
+            true => txt::ITS_WINDOW_DID_NOT_CLOSE.get(self.lang).to_owned(),
+            false => txt::did_not_close(self.lang, title),
         }
     }
 
     /// While polkit asks for the password.
     pub fn authorizing(self) -> &'static str {
-        self.pick(
-            "Ton mot de passe est demandé.",
-            "Your password is asked for.",
-        )
+        self.pick(txt::YOUR_PASSWORD_IS_ASKED_FOR)
     }
 
     /// While the windows close.
     pub fn closing(self) -> &'static str {
-        self.pick("Fermeture des applications…", "Closing the applications…")
+        self.pick(txt::CLOSING_THE_APPLICATIONS)
     }
 
     /// As it happens.
     pub fn acting(self, action: LeaveAction) -> &'static str {
         match action {
-            LeaveAction::LogOut => self.pick("Fermeture de la session…", "Logging out…"),
-            LeaveAction::Restart => self.pick("Redémarrage…", "Restarting…"),
-            LeaveAction::ShutDown => self.pick("Extinction…", "Shutting down…"),
+            LeaveAction::LogOut => self.pick(txt::LOGGING_OUT_2),
+            LeaveAction::Restart => self.pick(txt::RESTARTING_2),
+            LeaveAction::ShutDown => self.pick(txt::SHUTTING_DOWN_2),
         }
     }
 
     /// An application without a name.
     pub fn an_app(self) -> &'static str {
-        self.pick("Une application", "An application")
+        self.pick(txt::AN_APPLICATION)
     }
 }
 

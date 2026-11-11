@@ -519,8 +519,7 @@ fn between<T: Copy>(
     if share <= first.0 {
         return Some(first.1);
     }
-    for pair in keys.windows(2) {
-        let ((a, va), (b, vb)) = (pair[0], pair[1]);
+    for (&(a, va), &(b, vb)) in keys.iter().zip(keys.iter().skip(1)) {
         if share <= b {
             let k = if b > a { (share - a) / (b - a) } else { 1.0 };
             return Some(mix(&va, &vb, ease.at(k)));

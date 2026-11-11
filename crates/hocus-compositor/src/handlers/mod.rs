@@ -38,11 +38,11 @@ impl SeatHandler for State {
     type TouchFocus = WlSurface;
 
     fn seat_state(&mut self) -> &mut SeatState<State> {
-        &mut self.seat_state
+        &mut self.protocols.seat_state
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
-        self.cursor = image;
+        self.pointer.cursor = image;
         self.redraw = true;
     }
 
@@ -83,7 +83,7 @@ impl SelectionHandler for State {
         {
             self.selection_taken(types.clone(), crate::clipboard::Source::Wayland);
         }
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.new_selection(ty, types)
         {
             tracing::warn!(?err, "could not offer the selection to X11");
@@ -112,7 +112,7 @@ impl SelectionHandler for State {
             });
             return;
         }
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone())
         {
             tracing::warn!(?err, "could not read the X11 selection");
@@ -122,7 +122,7 @@ impl SelectionHandler for State {
 
 impl DataDeviceHandler for State {
     fn data_device_state(&self) -> &DataDeviceState {
-        &self.data_device_state
+        &self.protocols.data_device_state
     }
 }
 impl ClientDndGrabHandler for State {}
@@ -144,7 +144,7 @@ delegate_data_device!(State);
 
 impl PrimarySelectionHandler for State {
     fn primary_selection_state(&self) -> &PrimarySelectionState {
-        &self.primary_selection_state
+        &self.protocols.primary_selection_state
     }
 }
 delegate_primary_selection!(State);

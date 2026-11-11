@@ -136,8 +136,7 @@ fn union_area(rects: &[(f64, f64, f64, f64)]) -> f64 {
     xs.dedup();
     let mut area = 0.0;
     let mut spans: Vec<(f64, f64)> = Vec::with_capacity(rects.len());
-    for pair in xs.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
+    for (&a, &b) in xs.iter().zip(xs.iter().skip(1)) {
         spans.clear();
         spans.extend(
             rects
@@ -162,7 +161,7 @@ fn union_area(rects: &[(f64, f64, f64, f64)]) -> f64 {
 impl State {
     /// The moving wallpaper `output` shows, where the compositor draws one.
     fn moving_on(&self, output: &Output) -> Option<Moving> {
-        if !self.blur || self.config.plain_background {
+        if !self.graphics.blur || self.config.plain_background {
             return None;
         }
         match self.wallpaper_look(&output.name()).picture {
@@ -231,8 +230,8 @@ impl State {
     /// frame); the day's recorder hears when one starts or stops moving.
     pub(crate) fn tick_walls(&mut self) {
         let now = self.now();
-        if self.walls.get_mut().by_output.is_empty() {
-            self.walls.get_mut().pace = None;
+        if self.graphics.walls.get_mut().by_output.is_empty() {
+            self.graphics.walls.get_mut().pace = None;
             return;
         }
         let outputs: Vec<Output> = self.space.outputs().cloned().collect();
@@ -241,7 +240,7 @@ impl State {
             let pace = self.wall_pace(&output, now);
             let glass = glassy(&output);
             let name = output.name();
-            let walls = self.walls.get_mut();
+            let walls = self.graphics.walls.get_mut();
             let Some(wall) = walls.by_output.get_mut(&name) else {
                 continue;
             };
@@ -286,7 +285,7 @@ impl State {
                 self.redraw = true;
             }
         }
-        let walls = self.walls.get_mut();
+        let walls = self.graphics.walls.get_mut();
         walls.pace = fastest;
         if let Some(pace) = fastest
             && walls.timer.is_none()
@@ -296,7 +295,7 @@ impl State {
                 .loop_handle
                 .insert_source(timer, |_, _, app| app.state.wall_timer_fired());
             match inserted {
-                Ok(token) => self.walls.get_mut().timer = Some(token),
+                Ok(token) => self.graphics.walls.get_mut().timer = Some(token),
                 Err(err) => tracing::warn!(%err.error, "no timer for the moving wallpaper"),
             }
         }
@@ -305,7 +304,7 @@ impl State {
     /// The wallpapers' timer: a frame is drawn, and it comes again at the
     /// fastest's pace while one runs.
     fn wall_timer_fired(&mut self) -> calloop::timer::TimeoutAction {
-        let walls = self.walls.get_mut();
+        let walls = self.graphics.walls.get_mut();
         walls.wakes += 1;
         self.redraw = true;
         match walls.pace {
@@ -333,7 +332,7 @@ impl State {
         let size = output.current_transform().transform_size(mode.size);
         let size = (size.w, size.h);
         let scale = output.current_scale().fractional_scale();
-        let mut walls = self.walls.borrow_mut();
+        let mut walls = self.graphics.walls.borrow_mut();
         let wall = walls
             .by_output
             .entry(output.name())

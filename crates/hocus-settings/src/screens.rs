@@ -18,6 +18,7 @@
 //!   by aligned edges or middles within 120 px), the places of a size
 //!   changed, and how a place is said.
 
+use hocus_words::settings::screens as words;
 use std::{
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
@@ -26,8 +27,8 @@ use std::{
 };
 
 use crate::{
-    lang::{Lang, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::Lang,
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 /// A mode: width, height (pixels), refresh (mHz).
@@ -128,24 +129,19 @@ impl Screen {
 
     /// "Écran du portable", "Écran externe 34 pouces", "Écran 2".
     pub fn title(&self, lang: Lang) -> String {
-        match (self.built_in, self.inches(), lang) {
-            (true, _, Lang::French) => "Écran du portable".to_owned(),
-            (true, _, Lang::English) => "Laptop screen".to_owned(),
-            (false, Some(i), Lang::French) => format!("Écran externe {i} pouces"),
-            (false, Some(i), Lang::English) => format!("{i}-inch external screen"),
-            (false, None, Lang::French) => format!("Écran {}", self.number),
-            (false, None, Lang::English) => format!("Screen {}", self.number),
+        match (self.built_in, self.inches()) {
+            (true, _) => words::LAPTOP_SCREEN.get(lang).to_owned(),
+            (false, Some(i)) => words::inch_external_screen(lang, i),
+            (false, None) => words::screen(lang, self.number),
         }
     }
 
     /// The name in a small rectangle: "Portable", "Écran externe".
     pub fn short(&self, lang: Lang) -> String {
-        match (self.built_in, self.inches(), lang) {
-            (true, _, Lang::French) => "Portable".to_owned(),
-            (true, _, Lang::English) => "Laptop".to_owned(),
-            (false, Some(_), Lang::French) => "Écran externe".to_owned(),
-            (false, Some(_), Lang::English) => "External".to_owned(),
-            (false, None, _) => self.title(lang),
+        match (self.built_in, self.inches()) {
+            (true, _) => words::LAPTOP.get(lang).to_owned(),
+            (false, Some(_)) => words::EXTERNAL.get(lang).to_owned(),
+            (false, None) => self.title(lang),
         }
     }
 
@@ -207,13 +203,10 @@ impl SetScreen {
 
     /// "portable", "écran 27 pouces", "écran externe".
     fn named(&self, lang: Lang) -> String {
-        match (self.built_in, self.inches(), lang) {
-            (true, _, Lang::French) => "portable".to_owned(),
-            (true, _, Lang::English) => "laptop".to_owned(),
-            (false, Some(i), Lang::French) => format!("écran {i} pouces"),
-            (false, Some(i), Lang::English) => format!("{i}-inch screen"),
-            (false, None, Lang::French) => "écran externe".to_owned(),
-            (false, None, Lang::English) => "external screen".to_owned(),
+        match (self.built_in, self.inches()) {
+            (true, _) => words::LAPTOP_2.get(lang).to_owned(),
+            (false, Some(i)) => words::inch_screen(lang, i),
+            (false, None) => words::EXTERNAL_SCREEN.get(lang).to_owned(),
         }
     }
 }
@@ -231,10 +224,9 @@ impl KnownSet {
     /// seul"; the laptop first, then the largest.
     pub fn title(&self, lang: Lang) -> String {
         let names: Vec<String> = self.in_order().iter().map(|s| s.named(lang)).collect();
-        let text = match (names.as_slice(), lang) {
-            ([one], Lang::French) => format!("{one} seul"),
-            ([one], Lang::English) => format!("{one} alone"),
-            (many, _) => many.join(" + "),
+        let text = match names.as_slice() {
+            [one] => words::alone(lang, one),
+            many => many.join(" + "),
         };
         upper_first(&text)
     }
@@ -243,29 +235,19 @@ impl KnownSet {
     /// gardée", "Hier, 18:04 · 2 fenêtres l’attendent", "Lundi"; `now`
     /// and the user's time zone `zone` for the day.
     pub fn line(&self, lang: Lang, now: i64, zone: &jiff::tz::TimeZone) -> String {
-        let fr = lang == Lang::French;
         let mut parts: Vec<String> = Vec::new();
         if self.current {
-            parts.push(if fr { "Maintenant" } else { "Now" }.to_owned());
+            parts.push(words::NOW.get(lang).to_owned());
             if !self.in_file {
-                parts.push(
-                    if fr {
-                        "nouveau, sa disposition sera gardée"
-                    } else {
-                        "new, its arrangement will be kept"
-                    }
-                    .to_owned(),
-                );
+                parts.push(words::NEW_ITS_ARRANGEMENT_WILL_BE_KEPT.get(lang).to_owned());
             }
         } else if let Some(seen) = self.seen {
             parts.push(when(seen, now, lang, zone));
         }
-        match (self.waiting, fr) {
-            (0, _) => {}
-            (1, true) => parts.push("1 fenêtre l’attend".to_owned()),
-            (1, false) => parts.push("1 window waits for it".to_owned()),
-            (n, true) => parts.push(format!("{n} fenêtres l’attendent")),
-            (n, false) => parts.push(format!("{n} windows wait for it")),
+        match self.waiting {
+            0 => {}
+            1 => parts.push(words::N_1_WINDOW_WAITS_FOR_IT.get(lang).to_owned()),
+            n => parts.push(words::windows_wait_for_it(lang, n)),
         }
         parts.join(" · ")
     }
@@ -274,7 +256,6 @@ impl KnownSet {
 /// When a set was last in use, as its row says it: "Aujourd’hui, 09:12",
 /// "Hier, 18:04", the weekday within a week, else the date.
 pub fn when(at: i64, now: i64, lang: Lang, zone: &jiff::tz::TimeZone) -> String {
-    let fr = lang == Lang::French;
     let (Ok(at), Ok(now)) = (
         jiff::Timestamp::from_second(at),
         jiff::Timestamp::from_second(now),
@@ -285,28 +266,18 @@ pub fn when(at: i64, now: i64, lang: Lang, zone: &jiff::tz::TimeZone) -> String 
     let now = now.to_zoned(zone.clone());
     let days = (now.date() - at.date()).get_days();
     let time = at.strftime("%H:%M").to_string();
-    const JOURS: [&str; 7] = [
-        "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche",
-    ];
-    const DAYS: [&str; 7] = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ];
     let weekday = usize::try_from(at.weekday().to_monday_zero_offset()).unwrap_or(0);
-    match (days, fr) {
-        (..=0, true) => format!("Aujourd’hui, {time}"),
-        (..=0, false) => format!("Today, {time}"),
-        (1, true) => format!("Hier, {time}"),
-        (1, false) => format!("Yesterday, {time}"),
-        (2..=6, true) => JOURS[weekday].to_owned(),
-        (2..=6, false) => DAYS[weekday].to_owned(),
-        (_, true) => at.strftime("%d/%m/%Y").to_string(),
-        (_, false) => at.strftime("%Y-%m-%d").to_string(),
+    match days {
+        ..=0 => words::today_at(lang, &time),
+        1 => words::yesterday_at(lang, &time),
+        2..=6 => upper_first(
+            hocus_words::date::WEEKDAYS
+                .get(lang)
+                .get(weekday)
+                .copied()
+                .unwrap_or_default(),
+        ),
+        _ => at.strftime(words::NUMERIC_DATE.get(lang)).to_string(),
     }
 }
 
@@ -886,40 +857,21 @@ pub fn normalised(places: &[(String, (i32, i32))]) -> Vec<(String, (i32, i32))> 
 pub fn say_place(side: Side, align: Align, other: &str, lang: Lang) -> String {
     let other = lower_first(other);
     let beside = matches!(side, Side::Left | Side::Right);
-    let (where_, how) = match lang {
-        Lang::French => (
-            match side {
-                Side::Left => format!("à gauche de l’{other}"),
-                Side::Right => format!("à droite de l’{other}"),
-                Side::Above => format!("au-dessus de l’{other}"),
-                Side::Below => format!("au-dessous de l’{other}"),
-            },
-            match (align, beside) {
-                (Align::Start, true) => Some("hauts alignés"),
-                (Align::End, true) => Some("bas alignés"),
-                (Align::Start, false) => Some("gauches alignées"),
-                (Align::End, false) => Some("droites alignées"),
-                (Align::Middle, _) => Some("centrés"),
-                (Align::Off(_), _) => None,
-            },
-        ),
-        Lang::English => (
-            match side {
-                Side::Left => format!("to the left of the {other}"),
-                Side::Right => format!("to the right of the {other}"),
-                Side::Above => format!("above the {other}"),
-                Side::Below => format!("below the {other}"),
-            },
-            match (align, beside) {
-                (Align::Start, true) => Some("tops aligned"),
-                (Align::End, true) => Some("bottoms aligned"),
-                (Align::Start, false) => Some("lefts aligned"),
-                (Align::End, false) => Some("rights aligned"),
-                (Align::Middle, _) => Some("centred"),
-                (Align::Off(_), _) => None,
-            },
-        ),
+    let where_ = match side {
+        Side::Left => words::left_of(lang, &other),
+        Side::Right => words::right_of(lang, &other),
+        Side::Above => words::above(lang, &other),
+        Side::Below => words::below(lang, &other),
     };
+    let how = match (align, beside) {
+        (Align::Start, true) => Some(words::TOPS_ALIGNED),
+        (Align::End, true) => Some(words::BOTTOMS_ALIGNED),
+        (Align::Start, false) => Some(words::LEFTS_ALIGNED),
+        (Align::End, false) => Some(words::RIGHTS_ALIGNED),
+        (Align::Middle, _) => Some(words::CENTRED),
+        (Align::Off(_), _) => None,
+    }
+    .map(|how| how.get(lang));
     match how {
         Some(how) => format!("{where_}, {how}"),
         None => where_,
@@ -952,7 +904,7 @@ pub fn say_rate(mhz: i32, lang: Lang) -> String {
     } else {
         let hz = format!("{:.2}", f64::from(mhz) / 1000.0);
         let hz = hz.trim_end_matches('0').trim_end_matches('.').to_owned();
-        if lang.fr() { hz.replace('.', ",") } else { hz }
+        hz.replace('.', hocus_words::number::DECIMAL.get(lang))
     };
     format!("{hz} Hz")
 }
@@ -973,24 +925,24 @@ pub const SCALES: [f64; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 // --- The page's settings, for the search ------------------------------------------------
 
 const ARRANGEMENT: RowGroup = RowGroup {
-    label: w("DISPOSITION", "ARRANGEMENT"),
+    label: words::ARRANGEMENT,
     per_source: false,
 };
 /// The selected screen's group: its label is the screen's name.
 pub const SCREEN: RowGroup = RowGroup {
-    label: w("CET ÉCRAN", "THIS SCREEN"),
+    label: words::THIS_SCREEN,
     per_source: false,
 };
 const ALL: RowGroup = RowGroup {
-    label: w("TOUS LES ÉCRANS", "ALL SCREENS"),
+    label: words::ALL_SCREENS,
     per_source: false,
 };
 const SETS_GROUP: RowGroup = RowGroup {
-    label: w("ENSEMBLES D’ÉCRANS", "SCREEN SETS"),
+    label: words::SCREEN_SETS,
     per_source: false,
 };
 const NIGHT: RowGroup = RowGroup {
-    label: w("ÉCLAIRAGE NOCTURNE", "NIGHT LIGHT"),
+    label: words::NIGHT_LIGHT,
     per_source: false,
 };
 
@@ -1033,24 +985,18 @@ fn hours(list: &'static [&'static str]) -> Kind {
     Kind::Menu(
         list.iter()
             .map(|h| Choice {
-                label: w(h, h),
+                label: hocus_words::Text::same(h),
                 value: Value::Word(h),
             })
             .collect(),
     )
 }
 
-fn night(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
 /// The sets of screens known (windows.md §12).
 pub const SETS: &str = "screens.sets";
 
 /// The page's settings: what the search finds; the page draws them itself.
+// Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
@@ -1069,7 +1015,7 @@ pub fn settings() -> &'static [Setting] {
             s(
                 ARRANGE,
                 ARRANGEMENT,
-                w("Disposition des écrans", "Screens' arrangement"),
+                words::SCREENS_ARRANGEMENT,
                 (
                     &["position", "placer", "gauche", "au-dessus", "glisser"],
                     &["layout", "arrange", "place", "left", "above", "drag"],
@@ -1079,35 +1025,35 @@ pub fn settings() -> &'static [Setting] {
             s(
                 IDENTIFY,
                 ARRANGEMENT,
-                w("Identifier les écrans", "Identify the screens"),
+                words::IDENTIFY_THE_SCREENS,
                 (&["numéro"], &["identify", "number"]),
                 &["outputs", "NAME"],
             ),
             s(
                 USE,
                 SCREEN,
-                w("Utiliser cet écran", "Use this screen"),
+                words::USE_THIS_SCREEN,
                 (&["éteindre", "allumer"], &["enable", "disable", "turn off"]),
                 &["outputs", "NAME", "enabled"],
             ),
             s(
                 RESOLUTION,
                 SCREEN,
-                w("Résolution", "Resolution"),
+                words::RESOLUTION,
                 (&["définition", "pixels", "taille"], &["mode", "size"]),
                 &["outputs", "NAME", "mode"],
             ),
             s(
                 RATE,
                 SCREEN,
-                w("Fréquence", "Refresh rate"),
+                words::REFRESH_RATE,
                 (&["hz", "rafraîchissement"], &["hz", "refresh"]),
                 &["outputs", "NAME", "mode"],
             ),
             s(
                 SCALE,
                 SCREEN,
-                w("Échelle", "Scale"),
+                words::SCALE,
                 (
                     &[
                         "hidpi",
@@ -1124,7 +1070,7 @@ pub fn settings() -> &'static [Setting] {
             s(
                 VRR,
                 SCREEN,
-                w("Fréquence variable (VRR)", "Variable refresh rate (VRR)"),
+                words::VARIABLE_REFRESH_RATE_VRR,
                 (
                     &["saccades", "jeux"],
                     &[
@@ -1140,21 +1086,21 @@ pub fn settings() -> &'static [Setting] {
             s(
                 ROTATION,
                 SCREEN,
-                w("Rotation", "Rotation"),
+                words::ROTATION,
                 (&["pivoter", "portrait"], &["rotate", "orientation"]),
                 &["outputs", "NAME", "transform"],
             ),
             s(
                 PRIMARY,
                 ALL,
-                w("Écran principal", "Primary screen"),
+                words::PRIMARY_SCREEN,
                 (&["primaire", "barre"], &["primary", "main display", "bar"]),
                 &["panel", "output"],
             ),
             s(
                 MIRROR,
                 ALL,
-                w("Recopie", "Mirroring"),
+                words::MIRRORING,
                 (
                     &["miroir", "dupliquer", "projecteur", "cloner"],
                     &["mirror", "duplicate", "projector", "clone"],
@@ -1164,7 +1110,7 @@ pub fn settings() -> &'static [Setting] {
             s(
                 SETS,
                 SETS_GROUP,
-                w("Ensembles d’écrans", "Screen sets"),
+                words::SCREEN_SETS_2,
                 (
                     &["oublier", "brancher", "bureau", "maison", "disposition"],
                     &["forget", "dock", "office", "home", "arrangement", "profile"],
@@ -1175,70 +1121,50 @@ pub fn settings() -> &'static [Setting] {
                 id: NIGHT_LIGHT,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w("Éclairage nocturne", "Night light"),
-                line: Some(w(
-                    "Des couleurs plus chaudes le soir, moins de lumière bleue.",
-                    "Warmer colours in the evening, less blue light.",
-                )),
+                name: words::NIGHT_LIGHT_2,
+                line: Some(words::WARMER_COLOURS_IN_THE_EVENING_LESS),
                 keywords: (
                     &["nuit", "lumière bleue", "chaud", "soir", "yeux"],
                     &["night light", "blue light", "warm", "evening", "eyes"],
                 ),
                 kind: Kind::Switch,
-                places: night(&["night-light", "enabled"], Codec::Bool, Value::Bool(false)),
+                places: one(&["night-light", "enabled"], Codec::Bool),
                 needs: None,
             },
             Setting {
                 id: NIGHT_FROM,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w("À partir de", "From"),
-                line: Some(w(
-                    "Les couleurs se réchauffent en 30 min.",
-                    "The colours warm up over 30 min.",
-                )),
+                name: words::FROM,
+                line: Some(words::THE_COLOURS_WARM_UP_OVER_30),
                 keywords: (
                     &["nuit", "horaires", "heure", "soir"],
                     &["night light", "schedule", "time", "evening"],
                 ),
                 kind: hours(EVENINGS),
-                places: night(
-                    &["night-light", "from"],
-                    Codec::Word(EVENINGS),
-                    Value::Word("21:00"),
-                ),
+                places: one(&["night-light", "from"], Codec::Word(EVENINGS)),
                 needs: Some(NIGHT_LIGHT),
             },
             Setting {
                 id: NIGHT_TO,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w("Jusqu’à", "Until"),
-                line: Some(w(
-                    "Puis elles reviennent en 30 min.",
-                    "Then they come back over 30 min.",
-                )),
+                name: words::UNTIL,
+                line: Some(words::THEN_THEY_COME_BACK_OVER_30),
                 keywords: (
                     &["nuit", "horaires", "heure", "matin"],
                     &["night light", "schedule", "time", "morning"],
                 ),
                 kind: hours(MORNINGS),
-                places: night(
-                    &["night-light", "to"],
-                    Codec::Word(MORNINGS),
-                    Value::Word("07:00"),
-                ),
+                places: one(&["night-light", "to"], Codec::Word(MORNINGS)),
                 needs: Some(NIGHT_LIGHT),
             },
             Setting {
                 id: NIGHT_TEMPERATURE,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w("Température", "Temperature"),
-                line: Some(w(
-                    "Plus bas, plus chaud. 6500 K : les couleurs de l’écran.",
-                    "Lower is warmer. 6500 K: the screen's own colours.",
-                )),
+                name: words::TEMPERATURE,
+                line: Some(words::LOWER_IS_WARMER_6500_K_THE),
                 keywords: (
                     &["nuit", "chaud", "kelvin", "couleur"],
                     &["night light", "warm", "kelvin", "colour"],
@@ -1249,13 +1175,12 @@ pub fn settings() -> &'static [Setting] {
                     step: 100,
                     unit: " K",
                 },
-                places: night(
+                places: one(
                     &["night-light", "temperature"],
                     Codec::Int {
                         min: 1500,
                         max: 6500,
                     },
-                    Value::Int(4000),
                 ),
                 needs: Some(NIGHT_LIGHT),
             },

@@ -30,6 +30,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::meeting as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -327,6 +328,9 @@ pub fn linked() {
         s.told = Some(near);
         near
     });
+    // Said as `halo` says it: linked before the day is read, the card that
+    // comes with nothing near changes nothing, and nothing else says so.
+    tracing::debug!(?near, "the next meeting's halo");
     popover::tell(ToCompositor::Meeting(near));
 }
 
@@ -521,22 +525,23 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The card's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
+}
+
+impl Words {
+    /// The language its words are said in.
+    pub(crate) fn lang(self) -> Lang {
+        self.lang
+    }
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
-    }
-
-    pub(crate) fn fr(self) -> bool {
-        self.fr
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     /// "25 min", "1 h 05".
@@ -550,37 +555,35 @@ impl Words {
 
     /// "dans 25 min", "fin dans 18 min": the time line's after the start.
     pub fn relative(self, phase: Phase) -> String {
-        match (phase, self.fr) {
-            (Phase::Ahead { minutes }, true) => format!("dans {}", Self::minutes(minutes)),
-            (Phase::Ahead { minutes }, false) => format!("in {}", Self::minutes(minutes)),
-            (Phase::Under { left, .. }, true) => format!("fin dans {}", Self::minutes(left)),
-            (Phase::Under { left, .. }, false) => format!("ends in {}", Self::minutes(left)),
+        match phase {
+            Phase::Ahead { minutes } => txt::in_text(self.lang, Self::minutes(minutes)),
+            Phase::Under { left, .. } => txt::ends_in(self.lang, Self::minutes(left)),
         }
     }
 
     /// The join button's name.
     pub fn join_call(self) -> &'static str {
-        self.pick("Rejoindre la visio", "Join the video call")
+        self.pick(txt::JOIN_THE_VIDEO_CALL)
     }
 
     /// The mini popover's label.
     pub fn heading(self, phase: Phase) -> &'static str {
         match phase {
-            Phase::Ahead { .. } => self.pick("PROCHAINE RÉUNION", "NEXT MEETING"),
-            Phase::Under { .. } => self.pick("EN COURS", "NOW"),
+            Phase::Ahead { .. } => self.pick(txt::NEXT_MEETING),
+            Phase::Under { .. } => self.pick(txt::NOW),
         }
     }
 
     pub fn then(self) -> &'static str {
-        self.pick("ENSUITE", "NEXT")
+        self.pick(txt::NEXT)
     }
 
     pub fn join(self) -> &'static str {
-        self.pick("Rejoindre", "Join")
+        self.pick(txt::JOIN)
     }
 
     pub fn show_in_calendar(self) -> &'static str {
-        self.pick("Voir dans le calendrier", "Show in the calendar")
+        self.pick(txt::SHOW_IN_THE_CALENDAR)
     }
 
     /// The card's name for screen readers: "Prochaine réunion : Point
@@ -589,32 +592,28 @@ impl Words {
         let long = |minutes: i64| {
             if minutes >= 60 {
                 let (h, m) = (minutes / 60, minutes % 60);
-                match (self.fr, m) {
-                    (true, 0) => format!("{h} h"),
-                    (false, 0) => format!("{h} h"),
-                    (true, m) => format!("{h} h {m:02}"),
-                    (false, m) => format!("{h} h {m:02}"),
+                match m {
+                    0 => txt::h(self.lang, h),
+                    m => txt::h_2(self.lang, txt::H2 { h: &h, m: &m }),
                 }
             } else if minutes == 1 {
-                self.pick("1 minute", "1 minute").to_owned()
+                self.pick(txt::N_1_MINUTE).to_owned()
             } else {
                 format!("{minutes} minutes")
             }
         };
-        let when = match (card.phase, self.fr) {
-            (Phase::Ahead { minutes }, true) => format!("dans {}", long(minutes)),
-            (Phase::Ahead { minutes }, false) => format!("in {}", long(minutes)),
-            (Phase::Under { left, .. }, true) => format!("fin dans {}", long(left)),
-            (Phase::Under { left, .. }, false) => format!("ends in {}", long(left)),
+        let when = match card.phase {
+            Phase::Ahead { minutes } => txt::in_text_2(self.lang, long(minutes)),
+            Phase::Under { left, .. } => txt::ends_in_2(self.lang, long(left)),
         };
         let heading = match card.phase {
-            Phase::Ahead { .. } => self.pick("Prochaine réunion", "Next meeting"),
-            Phase::Under { .. } => self.pick("Réunion en cours", "Meeting now"),
+            Phase::Ahead { .. } => self.pick(txt::NEXT_MEETING_2),
+            Phase::Under { .. } => self.pick(txt::MEETING_NOW),
         };
-        let colon = if self.fr { " :" } else { ":" };
+        let colon = txt::TEXT.get(self.lang);
         let mut name = format!("{heading}{colon} {}, {}, {when}", card.title, card.start);
         if card.video.is_some() {
-            name.push_str(self.pick(", visio", ", video call"));
+            name.push_str(self.pick(txt::VIDEO_CALL));
         } else if let Some(place) = &card.place {
             name.push_str(", ");
             name.push_str(place);

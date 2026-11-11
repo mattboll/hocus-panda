@@ -36,6 +36,7 @@
 
 mod after;
 mod draw;
+pub(crate) use draw::ToolbarGlass;
 pub mod geometry;
 pub(crate) mod save;
 pub mod shoot;
@@ -487,7 +488,10 @@ impl State {
                     .iter()
                     .position(|d| *d == self.capture.delay)
                     .unwrap_or(0);
-                self.capture.delay = CAPTURE_DELAYS[(at + 1) % CAPTURE_DELAYS.len()];
+                // The next one, around.
+                if let Some(next) = CAPTURE_DELAYS.iter().cycle().nth(at + 1) {
+                    self.capture.delay = *next;
+                }
             }
             CaptureAsk::Pointer => self.capture.pointer = !self.capture.pointer,
             CaptureAsk::Video(video) => {
@@ -742,7 +746,7 @@ impl State {
             Phase::Choosing(_) => self.tell_shell(ToShell::CaptureEnd),
         }
         self.keep_area();
-        self.frame_cursor = None;
+        self.pointer.frame_cursor = None;
         self.redraw = true;
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
@@ -832,7 +836,7 @@ impl State {
             Some(_) => None,
             None => Some(self.capture_follow(at)),
         };
-        self.frame_cursor = cursor;
+        self.pointer.frame_cursor = cursor;
         pointer.motion(
             self,
             toolbar,
@@ -1025,7 +1029,7 @@ impl State {
             None => {}
         }
         let cursor = Some(self.capture_follow(at));
-        self.frame_cursor = cursor;
+        self.pointer.frame_cursor = cursor;
         self.redraw = true;
     }
 

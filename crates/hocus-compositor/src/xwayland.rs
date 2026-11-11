@@ -14,7 +14,7 @@ use crate::{App, State};
 /// Spawns XWayland on the next free display. Without the `Xwayland`
 /// program, X11 applications just do not start.
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
-    let choice = state.cursor_images.choice().clone();
+    let choice = state.pointer.cursor_images.choice().clone();
     let spawned = XWayland::spawn(
         &state.display_handle,
         None,
@@ -47,8 +47,8 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
             } => match X11Wm::start_wm(app.state.loop_handle.clone(), x11_socket, client.clone()) {
                 Ok(wm) => {
                     tracing::info!(display = display_number, "XWayland ready");
-                    app.state.xwm = Some(wm);
-                    app.state.xdisplay = Some(display_number);
+                    app.state.xwayland.wm = Some(wm);
+                    app.state.xwayland.display = Some(display_number);
                 }
                 Err(err) => tracing::warn!(%err, "could not start the X11 window manager"),
             },

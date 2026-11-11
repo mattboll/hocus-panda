@@ -165,11 +165,16 @@ fn with_a_shell_on_the_cpu_the_space_and_the_windows_switch_at_once() -> anyhow:
     open(&mut hp, "beside", (600, 400))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
     wait(&mut hp, Duration::from_millis(300))?;
-    // A shell that says it draws on the CPU.
+    // A shell that says it draws on the CPU, after its hello.
     let mut socket = hp.socket().as_os_str().to_owned();
     socket.push(".shell");
     let mut shell = std::os::unix::net::UnixStream::connect(socket)?;
-    shell.write_all(b"software\n")?;
+    let said = format!(
+        "{}\n{}\n",
+        hocus_link::wire::hello(),
+        hocus_link::ToCompositor::Software.line()
+    );
+    shell.write_all(said.as_bytes())?;
     let told = hp.dispatch_until(WAIT, Headless::shell_on_cpu)?;
     assert!(told, "the compositor did not read the shell's line");
     click(&mut hp, 1919.0, 500.0);

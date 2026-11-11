@@ -16,6 +16,7 @@
 
 mod view;
 
+use hocus_words::settings::app_sound as words;
 use std::{
     collections::HashMap,
     sync::{Arc, mpsc},
@@ -31,7 +32,7 @@ use iced::{
 
 use super::{App, Message, Page, TOAST, ToastAction, UNDONE};
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::SectionId,
     sound::{self as model, Graph},
 };
@@ -319,9 +320,7 @@ impl Sound {
             inputs.push(Input {
                 pick: Pick::Headset { card, profile },
                 sink: None,
-                name: w("Micro du casque", "Headset microphone")
-                    .get(lang)
-                    .to_owned(),
+                name: words::HEADSET_MICROPHONE.get(lang).to_owned(),
             });
         }
         inputs
@@ -624,16 +623,13 @@ impl App {
         if let Some(gone) = gone
             && let Some(to) = now.output()
         {
-            let text = match lang {
-                Lang::French => format!(
-                    "{} déconnecté : le son passe par {}.",
-                    gone.description, to.description
-                ),
-                Lang::English => format!(
-                    "{} disconnected: sound goes to {}.",
-                    gone.description, to.description
-                ),
-            };
+            let text = words::disconnected_sound_goes_to(
+                lang,
+                words::DisconnectedSoundGoesTo {
+                    gone_description: &gone.description,
+                    to_description: &to.description,
+                },
+            );
             return self.toast(text, ToastAction::None, TOAST);
         }
         let came = now
@@ -645,28 +641,16 @@ impl App {
             return Task::none();
         };
         if came.default {
-            let text = match lang {
-                Lang::French => format!(
-                    "{} connecté : le son repasse par lui, comme tu l’avais choisi.",
-                    came.description
-                ),
-                Lang::English => format!(
-                    "{} connected: sound goes back to it, as you chose.",
-                    came.description
-                ),
-            };
+            let text = words::connected_sound_goes_back_to_it(lang, &came.description);
             self.toast(text, ToastAction::Sound(Act::Default(was.id)), TOAST)
         } else {
-            let text = match lang {
-                Lang::French => format!(
-                    "{} connecté ; le son reste sur {}.",
-                    came.description, was.description
-                ),
-                Lang::English => format!(
-                    "{} connected; sound stays on {}.",
-                    came.description, was.description
-                ),
-            };
+            let text = words::connected_sound_stays_on(
+                lang,
+                words::ConnectedSoundStaysOn {
+                    came_description: &came.description,
+                    was_description: &was.description,
+                },
+            );
             self.toast(text, ToastAction::Sound(Act::Default(came.id)), TOAST)
         }
     }
@@ -686,11 +670,9 @@ impl App {
                 .toast
                 .as_ref()
                 .is_some_and(|t| t.text.contains(&format!("{name} connect")));
-        match (self.lang, came) {
-            (Lang::French, true) => format!("Passer à {name}"),
-            (Lang::English, true) => format!("Switch to {name}"),
-            (Lang::French, false) => format!("Garder {name}"),
-            (Lang::English, false) => format!("Keep {name}"),
+        match came {
+            true => words::switch_to(self.lang, &name),
+            false => words::keep(self.lang, &name),
         }
     }
 
@@ -740,11 +722,9 @@ impl App {
         };
         self.go(Page::Section(SectionId::Sound));
         self.light = Some((row, Instant::now()));
-        let text = match (self.lang, redo) {
-            (Lang::French, false) => format!("Annulé : {said}."),
-            (Lang::English, false) => format!("Undone: {said}."),
-            (Lang::French, true) => format!("Rétabli : {said}."),
-            (Lang::English, true) => format!("Redone: {said}."),
+        let text = match redo {
+            false => words::undone(self.lang, &said),
+            true => words::redone(self.lang, &said),
         };
         self.toast(text, ToastAction::None, UNDONE)
     }
@@ -758,11 +738,9 @@ impl App {
             Choice::Output { after, .. } => {
                 let sink = graph.sinks.iter().find(|s| s.name == *after)?;
                 self.sound.ask(Ask::Default(sink.id));
-                Some(match (lang, back) {
-                    (Lang::French, false) => format!("Sortie : {}", sink.description),
-                    (Lang::English, false) => format!("Output: {}", sink.description),
-                    (Lang::French, true) => format!("la sortie revient à {}", sink.description),
-                    (Lang::English, true) => format!("the output is back to {}", sink.description),
+                Some(match back {
+                    false => words::output(lang, &sink.description),
+                    true => words::the_output_is_back_to(lang, &sink.description),
                 })
             }
             Choice::Input { after, .. } => match after {
@@ -781,15 +759,9 @@ impl App {
                         });
                     }
                     self.sound.awaited = None;
-                    Some(match (lang, back) {
-                        (Lang::French, false) => format!("Entrée : {}", source.description),
-                        (Lang::English, false) => format!("Input: {}", source.description),
-                        (Lang::French, true) => {
-                            format!("l’entrée revient à {}", source.description)
-                        }
-                        (Lang::English, true) => {
-                            format!("the input is back to {}", source.description)
-                        }
+                    Some(match back {
+                        false => words::input(lang, &source.description),
+                        true => words::the_input_is_back_to(lang, &source.description),
                     })
                 }
                 Pick::Headset { card, profile } => {
@@ -801,11 +773,9 @@ impl App {
                         index: *profile,
                     });
                     Some(
-                        match lang {
-                            Lang::French => "Entrée : Micro du casque · le casque passe en mode appel (HFP)",
-                            Lang::English => "Input: Headset microphone · the headset switches to call mode (HFP)",
-                        }
-                        .to_owned(),
+                        words::INPUT_HEADSET_MICROPHONE_THE_HEADSET_SWITCHES
+                            .get(lang)
+                            .to_owned(),
                     )
                 }
             },
@@ -816,17 +786,15 @@ impl App {
                     device: card.id,
                     index: *after,
                 });
-                Some(match (lang, back) {
-                    (Lang::French, false) => {
-                        format!("Profil de {} : {}", card.description, profile.description)
-                    }
-                    (Lang::English, false) => {
-                        format!("{}'s profile: {}", card.description, profile.description)
-                    }
-                    (Lang::French, true) => format!("le profil revient à {}", profile.description),
-                    (Lang::English, true) => {
-                        format!("the profile is back to {}", profile.description)
-                    }
+                Some(match back {
+                    false => words::s_profile(
+                        lang,
+                        words::SProfile {
+                            card_description: &card.description,
+                            profile_description: &profile.description,
+                        },
+                    ),
+                    true => words::the_profile_is_back_to(lang, &profile.description),
                 })
             }
             Choice::Target { app, after, .. } => {
@@ -841,11 +809,15 @@ impl App {
                         to: sink.and_then(|s| s.serial),
                     });
                 }
-                Some(match (lang, sink) {
-                    (Lang::French, Some(s)) => format!("{} joue sur {}", row.name, s.description),
-                    (Lang::English, Some(s)) => format!("{} plays on {}", row.name, s.description),
-                    (Lang::French, None) => format!("{} suit la sortie", row.name),
-                    (Lang::English, None) => format!("{} follows the output", row.name),
+                Some(match sink {
+                    Some(s) => words::plays_on(
+                        lang,
+                        words::PlaysOn {
+                            row_name: &row.name,
+                            s_description: &s.description,
+                        },
+                    ),
+                    None => words::follows_the_output_2(lang, &row.name),
                 })
             }
         }
@@ -1018,9 +990,7 @@ impl App {
                 };
                 let chosen = self.sound_target_name(&row);
                 let mut options = vec![(
-                    w("Suit la sortie", "Follows the output")
-                        .get(self.lang)
-                        .to_owned(),
+                    words::FOLLOWS_THE_OUTPUT.get(self.lang).to_owned(),
                     graph.output().map(|s| s.description.clone()),
                     chosen.is_none(),
                     Msg::Target(key.clone(), None),
@@ -1189,10 +1159,7 @@ impl App {
                 };
                 (model::card_name(sink, graph), kept)
             }
-            _ => (
-                w("Aucune sortie", "No output").get(self.lang).to_owned(),
-                String::new(),
-            ),
+            _ => (words::NO_OUTPUT.get(self.lang).to_owned(), String::new()),
         }
     }
 }

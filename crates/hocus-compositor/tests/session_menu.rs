@@ -664,11 +664,9 @@ fn an_inhibitors_reason_shows_and_holds_the_countdown() -> anyhow::Result<()> {
     bed.hp.hold_clock();
     let mark = bed.mark();
     bed.click(Bed::row(menu, SHUT_DOWN))?;
-    let line = bed.logged_after(mark, "Firefox retient l’arrêt")?;
-    assert!(
-        line.contains("Firefox: Un téléchargement est en cours"),
-        "{line}"
-    );
+    // The popover's own line: the kit's dump says the same words too.
+    let line = bed.logged_after(mark, "Firefox: Un téléchargement est en cours")?;
+    assert!(line.contains("Firefox retient l’arrêt"), "{line}");
     assert!(!line.contains("Mises à jour"), "{line}");
     let shown = bed.hp.leave_shown().expect("a confirmation");
     let LeaveStep::Held(holders) = &shown.step else {
@@ -714,18 +712,16 @@ fn a_window_that_does_not_close_is_listed_and_fermer_quand_meme_closes_it() -> a
         Some(LeaveStep::Closing)
     ));
     bed.step(Duration::from_millis(200))?;
-    let line = bed.logged_after(mark, "Notes retient la déconnexion")?;
-    assert!(
-        line.contains("Notes: Sa fenêtre ne s’est pas fermée."),
-        "{line}"
-    );
+    // The popover's own line: the kit's dump says the same words too.
+    let line = bed.logged_after(mark, "Notes: Sa fenêtre ne s’est pas fermée.")?;
+    assert!(line.contains("Notes retient la déconnexion"), "{line}");
     assert_eq!(bed.hp.ending(), None);
     // The keyboard on "Annuler"; round to "Revenir à Notes", then
     // "Fermer quand même".
     let mark = bed.mark();
     bed.press(KEY_TAB);
     bed.press(KEY_TAB);
-    bed.logged_after(mark, "focus=Some(Force(0))")?;
+    bed.logged_after(mark, "\"focus\":\"session:Force(0)\"")?;
     bed.press(KEY_ENTER);
     let ended = bed.hp.dispatch_until(WAIT, |hp| hp.ending().is_some())?;
     anyhow::ensure!(ended, "the session did not end");
@@ -793,8 +789,8 @@ fn the_keyboard_lands_on_maintenant() -> anyhow::Result<()> {
     };
     let mark = bed.mark();
     common::chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_E]);
-    let line = bed.logged_after(mark, "Se déconnecter ?")?;
-    assert!(line.contains("focus=Some(Now)"), "{line}");
+    bed.logged_after(mark, "Se déconnecter ?")?;
+    bed.logged_after(mark, "\"focus\":\"session:Now\"")?;
     bed.popover_of(CONFIRM_HEIGHT)?;
     // Enter logs out at once, without waiting out the count.
     bed.press(KEY_ENTER);
@@ -946,4 +942,17 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         shoot(&mut bed, &out, "held-window")?;
     }
     Ok(())
+}
+
+/// The menu, then a confirmation, shot under `HOCUS_KIT_SHOTS` (#772's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Logind::default())? else {
+        return Ok(());
+    };
+    bed.open_menu()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "session")
 }

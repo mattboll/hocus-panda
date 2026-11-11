@@ -189,9 +189,8 @@ impl Watch {
     /// `kind` holds from `from` to `to`: extended if it held, else raised.
     /// Whether it is new.
     fn hold(&mut self, kind: SignalKind, from: i64, to: i64, value: f64, who: Option<Who>) -> bool {
-        match self.open_of(kind, who) {
-            Some(i) => {
-                let s = &mut self.open[i];
+        match self.open_of(kind, who).and_then(|i| self.open.get_mut(i)) {
+            Some(s) => {
                 s.to = to;
                 s.value = s.value.max(value);
                 false
@@ -293,7 +292,7 @@ impl Watch {
                 continue;
             }
             let i = who.index();
-            let growth = match self.growth[i].take() {
+            let growth = match self.growth.get_mut(i).and_then(Option::take) {
                 Some(mut g) if f64::from(kb) >= f64::from(g.highest) * (1.0 - GROWTH_BACK) => {
                     g.note(s.t, kb);
                     g
@@ -309,7 +308,9 @@ impl Watch {
             let rising =
                 growth.rising() || self.open_of(SignalKind::MemoryGrowing, Some(who)).is_some();
             let (from, from_kb) = (growth.from, growth.from_kb);
-            self.growth[i] = Some(growth);
+            if let Some(kept) = self.growth.get_mut(i) {
+                *kept = Some(growth);
+            }
             let hours = (s.t - from) as f64 / 3600.0;
             let slope = (f64::from(kb) - f64::from(from_kb)) / hours.max(f64::EPSILON);
             if s.t - from >= GROWTH_OVER_S && slope > GROWTH_KB_PER_H && rising {
@@ -320,8 +321,11 @@ impl Watch {
                     slope / 1024.0,
                     Some(who),
                 );
-                if let Some(at) = self.open_of(SignalKind::MemoryGrowing, Some(who)) {
-                    self.open[at].kb = Some([from_kb, kb]);
+                if let Some(open) = self
+                    .open_of(SignalKind::MemoryGrowing, Some(who))
+                    .and_then(|at| self.open.get_mut(at))
+                {
+                    open.kb = Some([from_kb, kb]);
                 }
                 raise(new, SignalKind::MemoryGrowing);
             } else {

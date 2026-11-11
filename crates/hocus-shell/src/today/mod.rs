@@ -28,6 +28,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::today as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -410,23 +411,21 @@ pub fn open_more(bar: &str) -> Option<Effect> {
 /// Today's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    pub(crate) lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     pub fn header(self) -> &'static str {
-        if self.fr { "AUJOURD'HUI" } else { "TODAY" }
+        txt::TODAY.get(self.lang)
     }
 
     /// "+ 5 autres aujourd'hui", "+ 1 autre aujourd'hui".
     pub fn more(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "+ 1 autre aujourd'hui".to_owned(),
             (true, n) => format!("+ {n} autres aujourd'hui"),
             (false, n) => format!("+ {n} more today"),
@@ -437,7 +436,7 @@ impl Words {
     pub fn name(self, line: &Line) -> String {
         let mut name = format!("{}, {}", line.start, line.title);
         if line.video.is_some() {
-            name.push_str(if self.fr { ", visio" } else { ", video call" });
+            name.push_str(txt::VIDEO_CALL.get(self.lang));
         }
         name
     }

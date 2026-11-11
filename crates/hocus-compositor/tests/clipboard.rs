@@ -389,18 +389,35 @@ impl Bed {
         Ok(history(&line))
     }
 
+    /// Where the popover's controls are, once the kit's dump places as
+    /// many rows as the history `line` says.
+    fn placed(&mut self, line: &str) -> anyhow::Result<HashMap<String, (f64, f64)>> {
+        let rows_said = history(line).matches("] «").count();
+        let log = self.log.clone();
+        let count = |log: &Path| {
+            targets(log)
+                .keys()
+                .filter(|name| name.starts_with("Row("))
+                .count()
+        };
+        let done = self.hp.dispatch_until(WAIT, |_| count(&log) == rows_said)?;
+        anyhow::ensure!(done, "{} rows placed, not {rows_said}", count(&log));
+        Ok(targets(&log))
+    }
+
     /// Pins the history's row holding `text`.
     fn pin(&mut self, text: &str) -> anyhow::Result<()> {
         let (popover, line) = self.super_v()?;
         let said = history(&line);
         // The rows' keys from the top; the history's rows in that order.
-        let keys = rows(&line);
+        let targets = self.placed(&line)?;
+        let keys = rows(&targets);
         let words: Vec<&str> = said.split(" [").skip(1).collect();
         let index = words
             .iter()
             .position(|w| w.contains(text))
             .with_context(|| format!("no {text:?} in {said}"))?;
-        let pin = on_screen(popover, targets(&line)[&format!("Pin({})", keys[index])]);
+        let pin = on_screen(popover, targets[&format!("Pin({})", keys[index])]);
         let mark = self.mark();
         self.click(pin)?;
         self.history_after(mark, "(pinned)")?;
@@ -493,28 +510,34 @@ fn history(line: &str) -> String {
     rest[..rest.find(" items=").unwrap_or(rest.len())].to_owned()
 }
 
-/// Where a line's targets are, on the popover: name → centre.
-fn targets(line: &str) -> HashMap<String, (f64, f64)> {
+/// Where the popover's controls are, on it, as the kit's dump in `log`
+/// last placed them: name (`Row(3)`, `Pin(3)`, `Clear`) → centre.
+fn targets(log: &Path) -> HashMap<String, (f64, f64)> {
     let mut found = HashMap::new();
-    if let Some(at) = line.find("items=") {
-        for word in line[at + 6..].split_whitespace() {
-            if let Some((name, xy)) = word.rsplit_once('@')
-                && let Some((x, y)) = xy.split_once(',')
-                && let (Ok(x), Ok(y)) = (x.parse(), y.parse())
-            {
-                found.insert(name.to_owned(), (x, y));
+    if let Some(serde_json::Value::Object(dump)) = common::last_json(log, " shows {") {
+        for (id, place) in dump {
+            let Some(name) = id.strip_prefix("clipboard:") else {
+                continue;
+            };
+            let at = place.get("at").and_then(serde_json::Value::as_array);
+            let n = |i: usize| {
+                at.and_then(|a| a.get(i))
+                    .and_then(serde_json::Value::as_f64)
+            };
+            if let (Some(x), Some(y), Some(w), Some(h)) = (n(0), n(1), n(2), n(3)) {
+                found.insert(name.to_owned(), (x + w / 2.0, y + h / 2.0));
             }
         }
     }
     found
 }
 
-/// The rows' keys, from the top, as a line places them.
-fn rows(line: &str) -> Vec<String> {
-    let mut rows: Vec<(f64, String)> = targets(line)
-        .into_iter()
+/// The rows' keys, from the top, as `targets` places them.
+fn rows(targets: &HashMap<String, (f64, f64)>) -> Vec<String> {
+    let mut rows: Vec<(f64, String)> = targets
+        .iter()
         .filter(|(name, _)| name.starts_with("Row("))
-        .map(|(name, (_, y))| (y, name[4..name.len() - 1].to_owned()))
+        .map(|(name, (_, y))| (*y, name[4..name.len() - 1].to_owned()))
         .collect();
     rows.sort_by(|a, b| a.0.total_cmp(&b.0));
     rows.into_iter().map(|(_, key)| key).collect()
@@ -641,8 +664,9 @@ fn enter_pastes_into_the_window_ctrl_shift_v_into_a_terminal() -> anyhow::Result
     bed.hp.pointer_move(x, y);
     let popover = bed.popover()?;
     let line = bed.logged_after(mark, "the clipboard's history shows it")?;
-    let second = rows(&line)[1].clone();
-    let at = on_screen(popover, targets(&line)[&format!("Row({second})")]);
+    let placed = bed.placed(&line)?;
+    let second = rows(&placed)[1].clone();
+    let at = on_screen(popover, placed[&format!("Row({second})")]);
     let mark = bed.mark();
     bed.hp.pointer_move(at.0, at.1);
     bed.history_after(
@@ -739,8 +763,9 @@ fn a_pin_stays_through_clear_all() -> anyhow::Result<()> {
     bed.copy(&editor, "une copie de passage")?;
     let (popover, line) = bed.super_v()?;
     // The older one's pin, under the pointer: pinned, amber, first.
-    let older = rows(&line)[1].clone();
-    let pin = on_screen(popover, targets(&line)[&format!("Pin({older})")]);
+    let placed = bed.placed(&line)?;
+    let older = rows(&placed)[1].clone();
+    let pin = on_screen(popover, placed[&format!("Pin({older})")]);
     let mark = bed.mark();
     bed.click(pin)?;
     let line = bed.history_after(mark, "(pinned)")?;
@@ -750,7 +775,7 @@ fn a_pin_stays_through_clear_all() -> anyhow::Result<()> {
         "{line}"
     );
     // Clear all: the pinned one alone stays.
-    let clear = on_screen(popover, targets(&line)["Clear"]);
+    let clear = on_screen(popover, bed.placed(&line)?["Clear"]);
     let mark = bed.mark();
     bed.click(clear)?;
     let line = bed.history_after(mark, "ÉPINGLÉS")?;
@@ -854,7 +879,8 @@ fn an_image_copy_shows_its_thumbnail() -> anyhow::Result<()> {
     );
     // Its thumbnail in its tile: the row's first, 9 px in, 30 px; the
     // image 3 px inside it.
-    let row = targets(&line)
+    let row = bed
+        .placed(&line)?
         .into_iter()
         .find(|(name, _)| name.starts_with("Row("))
         .map(|(_, at)| at)
@@ -1142,4 +1168,22 @@ fn the_settings_line_hears_the_count_and_clears_all_but_the_pinned() -> anyhow::
     let shown = bed.shows("gardee", "passage")?;
     assert!(!shown.contains("RÉCENTS"), "{shown}");
     Ok(())
+}
+
+/// The history in its main state (two copies, the first selected), shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    let terminal = bed.window("test.terminal", (640, 420))?;
+    bed.copy(&terminal, "cargo build --release")?;
+    let editor = bed.window("test.editor", (320, 200))?;
+    bed.copy(&editor, "Réunion à la Pépinière")?;
+    bed.super_v()?;
+    bed.hp.pointer_move(100.0, 100.0);
+    common::popover_shot(&mut bed.hp, "clipboard")
 }

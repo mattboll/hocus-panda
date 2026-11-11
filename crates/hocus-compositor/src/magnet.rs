@@ -1,5 +1,5 @@
 //! Magnetic edges (docs/design/windows.md §6, §8): while a window moves,
-//! or an edge of it is dragged, an edge that comes within [`MAGNET`] of a
+//! or an edge of it is dragged, an edge that comes within [`MAGNET`](hocus_geometry::MAGNET) of a
 //! neighbour's sticks at the gap snapped windows keep, or in line with
 //! the neighbour's edge on the same side, and an edge near the work
 //! area's sticks flush with it. The pull is worked out afresh from where

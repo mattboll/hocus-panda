@@ -1,30 +1,36 @@
-//! The Hocuspanda shell: the bar (docs/design/bar.md), drawn with iced as a
-//! wlr-layer-shell client of the compositor, which starts it and restarts
-//! it when it ends.
+//! The Hocuspanda shell (docs/architecture.md): every surface the desktop
+//! draws itself, as wlr-layer-shell surfaces of a client of the
+//! compositor's, drawn with iced. The compositor starts it, hands it its
+//! Wayland connection and its line ([`hocus_link`]), and starts it again
+//! when it ends; the windows stay.
 //!
-//! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5),
-//! the day's groups and its agents' group under it in their order (§4
-//! groups 2 to 5, [`column`], [`agents`]), its desktops (§4 group 8, §5), its connections (§4 group 9, §5) and its
-//! levels (§4 group 10, §5): a glass tint and a rim against the right edge
-//! of each output the compositor names, in its full or its mini form, the
-//! time at its top, the screen's desktops ([`desktops`]) over the Wi-Fi
-//! ([`network`]), Bluetooth ([`bluetooth`]) and the keyboard's layout
-//! ([`layouts`]), above the sound, the brightness and the battery near its
-//! bottom ([`levels`]).
-//! The compositor blurs what is behind it; the shell draws the tint over
-//! that blur, or an opaque background when there is no blur. The line
-//! between the two is `hocus-link`.
+//! The bar (docs/design/bar.md) is a column against each screen's edge in
+//! its full or its mini form ([`column`](mod@column)), with surfaces of its own for
+//! what draws often: the clock ([`clock`]), the levels ([`levels`]), the
+//! connections ([`network`], [`bluetooth`], [`layouts`]), the desktops
+//! ([`desktops`]), the footer ([`footer`]), and the popovers opened from
+//! its items ([`popover`]); the day's and the agents' groups ([`day`],
+//! [`agents`], the panda peeking out of the bar's edge). Beside it: the
+//! launcher, the actions palette, the emoji picker, the clipboard's
+//! history, the notifications' bubbles and their server, the tray, the
+//! music, captures' and sharing's surfaces, the lock screen's and the
+//! authentication dialog's interface, the session menu.
 //!
-//! Each bar's surface is the bar itself, 8 px from the screen's edges: as
-//! wide as its form, and as the full form while a switch is under way, so
-//! that the bar has room to move. The compositor takes the clicks on the
-//! bar's edge, which switch the form. The clock has a small surface of its
-//! own over the bar's top ([`clock`]): it draws every second, and iced
-//! presents a surface whole, so that only its region is drawn again. The
-//! levels have theirs, for the same reason, the connections and the
-//! desktops theirs, the footer along its bottom ([`footer`]), and so has a
-//! popover beside the bar ([`popover`]), opened from an item, and the panda
-//! peeking out of the bar's edge ([`agents::peek`]).
+//! Each surface's state is a value of its own, changed by messages and
+//! viewed as a function of it ([`surfaces`]); surfaces are built from
+//! iced's widgets and the shell's kit ([`ui`], decision 0005), canvases
+//! only where the look draws. Talking to the system (D-Bus, PipeWire, the
+//! day's accounts) runs on workers that send owned results back; the view
+//! never waits. The compositor blurs behind the bar; the shell draws the
+//! tint over that blur, or an opaque background when there is none.
+
+// What is left of #778 here: 197 indexed places, most in drawing code
+// (pixels, glyphs, fixed tables). A panic ends the bar, which the
+// compositor starts again; the lint is on everywhere else.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "#778: the shell's 197 sites are still to be gone through"
+)]
 
 mod a11y;
 mod actions;
@@ -41,9 +47,6 @@ mod day;
 mod desktops;
 mod emoji;
 mod ending;
-// Its first user, the secretary's drawer, is gone: the shell's other
-// fields move onto it with #771.
-#[allow(dead_code)]
 mod field;
 mod footer;
 mod foreign;
@@ -68,11 +71,14 @@ mod renderer;
 mod setup;
 mod share;
 mod side;
+mod surfaces;
 mod tasks;
 mod theme;
 mod today;
 mod tray;
+mod ui;
 mod user;
+mod views;
 mod wayland;
 mod windows;
 
@@ -139,10 +145,16 @@ fn main() -> ExitCode {
         Ok(quiet) => filter.add_directive(quiet),
         Err(_) => filter,
     };
+    let filter = match hocus_panic::LOG.parse() {
+        Ok(panics) => filter.add_directive(panics),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(filter)
         .init();
+    // A panic is in the log the compositor keeps of the shell (#778).
+    hocus_panic::install();
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose(handed);
     // From here, SIGTERM ends it once what it keeps is written.
@@ -275,14 +287,7 @@ fn clock_shift() -> Option<String> {
     Some(at)
 }
 
-/// How bars look, as the compositor says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Look {
-    /// The compositor blurs behind: the bar is a tint over it.
-    glass: bool,
-    /// The form switch animates.
-    motion: bool,
-}
+use surfaces::{Look, Surface};
 
 /// A bar on an output.
 #[derive(Debug, Clone)]
@@ -401,13 +406,25 @@ struct Shell {
     wall: clock::time::Wall,
     lang: clock::time::Lang,
     words: levels::model::Words,
+    /// The curtain's pill before the lock (7.2).
+    curtain: curtain::Curtain,
+    /// The share's chooser (5.11).
+    share: surfaces::Lent<share::Share>,
+    /// The lock (7.1).
+    lock: surfaces::Lent<lock::Locked>,
+    /// The system's authentication dialog (7.5).
+    auth: surfaces::Lent<auth::Auth>,
+    /// The actions palette (#736).
+    actions: surfaces::Lent<actions::Palette>,
+    /// The emoji picker (5.7).
+    emoji: surfaces::Lent<emoji::Picker>,
 }
 
 #[to_layer_message(multi)]
 #[derive(Debug, Clone)]
 enum Message {
     Linked(mpsc::UnboundedSender<String>),
-    FromCompositor(String),
+    FromCompositor(Box<ToShell>),
     Unlinked,
     Frame,
     /// The system's time zone changed.
@@ -431,6 +448,8 @@ enum Message {
     Music,
     /// The music tile was pressed.
     MusicTile(music::tile::Press),
+    /// Asked of a surface from another thread (a screen reader's click).
+    Surface(surfaces::Asked),
 }
 
 impl Shell {
@@ -459,8 +478,14 @@ impl Shell {
             clock: clock_style(&ClockLook::default()),
             clock_look: ClockLook::default(),
             wall: clock::time::Wall { zone, shift },
-            lang: clock::time::Lang::from_env(),
+            lang: clock::time::Lang::of_time(),
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
+            curtain: curtain::Curtain::default(),
+            share: surfaces::Lent::default(),
+            lock: surfaces::Lent::default(),
+            auth: surfaces::Lent::default(),
+            actions: surfaces::Lent::default(),
+            emoji: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -489,6 +514,7 @@ impl Shell {
         subscriptions.push(Subscription::run(outputs::changes).map(|()| Message::Screens));
         subscriptions.push(Subscription::run(zone_changes));
         subscriptions.push(Subscription::run(popover::effects));
+        subscriptions.push(Subscription::run(surfaces::inbox));
         subscriptions.push(Subscription::run(notifications::effects));
         subscriptions.push(Subscription::run(tray::effects));
         subscriptions.push(Subscription::run(music::effects));
@@ -502,7 +528,7 @@ impl Shell {
         match message {
             Message::Linked(sender) => {
                 if self.software {
-                    let _ = sender.unbounded_send(ToCompositor::Software.to_string());
+                    let _ = sender.unbounded_send(ToCompositor::Software.line());
                 }
                 popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
@@ -510,13 +536,7 @@ impl Shell {
                 clipboard::linked();
                 Task::none()
             }
-            Message::FromCompositor(line) => match line.parse::<ToShell>() {
-                Ok(message) => self.compositor_says(message),
-                Err(err) => {
-                    tracing::warn!(%err, "a line from the compositor that does not read");
-                    Task::none()
-                }
-            },
+            Message::FromCompositor(message) => self.compositor_says(*message),
             Message::Unlinked => {
                 tracing::info!("the compositor went: the shell ends");
                 iced::exit()
@@ -566,6 +586,17 @@ impl Shell {
                 music::tile::pressed(press);
                 Task::none()
             }
+            Message::Surface(asked) => match asked {
+                surfaces::Asked::Share(act) => {
+                    let effects = self
+                        .share
+                        .update(share::Said::Act { on: None, act }, self.now);
+                    Task::batch(popover::messages(effects).into_iter().map(Task::done))
+                }
+                surfaces::Asked::Auth(come) => self.auth_told(auth::Told::Come(come)),
+                surfaces::Asked::Actions(come) => self.actions_told(come),
+                surfaces::Asked::Emoji(come) => self.emoji_told(come),
+            },
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -580,6 +611,7 @@ impl Shell {
         }
     }
 
+    // Over 200 lines: one arm per kind of message from the compositor.
     fn compositor_says(&mut self, message: ToShell) -> Task<Message> {
         match message {
             ToShell::Look {
@@ -622,7 +654,7 @@ impl Shell {
             // The words and the formats: every surface draws again in them.
             ToShell::Locale(locale) => {
                 locale::set(locale);
-                self.lang = clock::time::Lang::from_env();
+                self.lang = clock::time::Lang::of_time();
                 self.words = levels::model::Words::new(clock::time::Lang::of_messages());
                 let lang = clock::time::Lang::of_messages();
                 tracing::info!(%locale, ?lang, "the language and formats");
@@ -817,26 +849,18 @@ impl Shell {
             }
             ToShell::Emoji {
                 output,
-                scale,
+                scale: _,
                 width,
                 height,
                 at,
-            } => {
-                emoji::toggle(output, scale, (width, height), at);
-                Task::none()
-            }
-            ToShell::EmojiInserted => {
-                emoji::inserted();
-                Task::none()
-            }
-            ToShell::Actions(shown) => {
-                actions::toggle(shown);
-                Task::none()
-            }
-            ToShell::ActionsEnd => {
-                actions::close();
-                Task::none()
-            }
+            } => self.emoji_told(emoji::Come::Toggle {
+                output,
+                screen: (width, height),
+                at,
+            }),
+            ToShell::EmojiInserted => self.emoji_told(emoji::Come::Inserted),
+            ToShell::Actions(shown) => self.actions_told(actions::Come::Toggle(shown)),
+            ToShell::ActionsEnd => self.actions_told(actions::Come::Close),
             ToShell::Capture(bar) => {
                 capture::set(bar);
                 Task::none()
@@ -849,22 +873,18 @@ impl Shell {
                 capture::captured(captured);
                 Task::none()
             }
+            // A message (every surface's view built again): the chooser
+            // opens a surface, which is one.
             ToShell::ShareChoose(choose) => {
-                share::set(choose);
-                Task::none()
+                let effects = self.share.update(share::Said::Choose(choose), self.now);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::ShareChooseEnd(request) => {
-                share::end(request);
-                Task::none()
+                let effects = self.share.update(share::Said::End(request), self.now);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
-            ToShell::AuthAt(at) => {
-                auth::placed(at);
-                Task::none()
-            }
-            ToShell::CapsLock(on) => {
-                auth::caps(on);
-                Task::none()
-            }
+            ToShell::AuthAt(at) => self.auth_told(auth::Told::Placed(at)),
+            ToShell::CapsLock(on) => self.auth_told(auth::Told::Caps(on)),
             ToShell::TrayToken { ask, token } => {
                 tray::token(ask, token);
                 Task::none()
@@ -914,7 +934,9 @@ impl Shell {
             }
             ToShell::Lock(shown) => {
                 let screens = outputs::step();
-                let effects = lock::set(shown, &screens);
+                let effects = self
+                    .lock
+                    .update(lock::Told::Shown(shown, screens), self.now);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::A11y => {
@@ -922,15 +944,17 @@ impl Shell {
                 Task::none()
             }
             ToShell::Unlocked => {
-                let effects = lock::end();
+                let effects = self.lock.update(lock::Told::End, self.now);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::Curtain(shown) => {
-                let effects = curtain::set(shown);
+                let effects = self
+                    .curtain
+                    .update(curtain::Said::Shown(shown), Instant::now());
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::CurtainEnd => {
-                let effects = curtain::end();
+                let effects = self.curtain.update(curtain::Said::End, Instant::now());
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             // Taken by the link itself, without a message.
@@ -983,9 +1007,12 @@ impl Shell {
         let known = outputs::step();
         // Locked (7.1): a screen plugged in gets the clock.
         let lock = Task::batch(
-            popover::messages(lock::screens_known(&known))
-                .into_iter()
-                .map(Task::done),
+            popover::messages(
+                self.lock
+                    .update(lock::Told::Screens(known.clone()), self.now),
+            )
+            .into_iter()
+            .map(Task::done),
         );
         if self.waiting.is_empty() {
             return lock;
@@ -1314,861 +1341,6 @@ impl Shell {
         reminder::form(&output, form);
         Task::batch(tasks)
     }
-
-    /// The clock of the bar whose clock's surface is `id`.
-    fn clock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.clock == id)?;
-        let at = self.now + AHEAD;
-        let forms = bar.forms(at);
-        let (width, height) = bar.clock_surface;
-        let backdrop = (!self.look.glass).then(|| {
-            // The bar's gradient where the clock is, which changes by less
-            // than a level over the clock's height.
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = clock::SURFACE_TOP as f32 + height as f32 / 2.0;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = clock::Clock {
-            bar: bar.output.clone(),
-            style: self.clock,
-            motion: self.look.motion,
-            wall: self.wall.clone(),
-            lang: self.lang,
-            forms,
-            bar_width: bar.width(at),
-            surface_width: width as f32,
-            backdrop,
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The levels of the bar whose levels' surface is `id`.
-    fn levels_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.levels == id)?;
-        let at = self.now + AHEAD;
-        let (_, height) = bar.levels_surface;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = bar_height - levels::draw::BOTTOM as f32 - height as f32 / 2.0;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = levels::draw::Levels {
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            motion: self.look.motion,
-            words: self.words,
-            backdrop,
-            bar: bar.output.clone(),
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The connections of the bar whose connections' surface is `id`.
-    fn connections_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.connections == id)?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = bar_height - levels::draw::BOTTOM as f32 - 160.0;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = network::draw::Connections {
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            words: self.words,
-            backdrop,
-            bar: bar.output.clone(),
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The desktops of the bar whose desktops' surface is `id`.
-    fn desktops_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.desktops == id)?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle =
-                bar_height - levels::draw::BOTTOM as f32 - desktops::draw::middle(&bar.output);
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = desktops::draw::Tiles {
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            motion: self.look.motion,
-            words: self.words,
-            backdrop,
-            bar: bar.output.clone(),
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The agents' group of the bar whose agents' surface is `id`.
-    fn agents_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.agents == id)?;
-        let at = self.now + AHEAD;
-        // The bar's colour where the column puts the group, read as it draws.
-        let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
-            top: OPAQUE_TOP.get(),
-            bottom: OPAQUE_BOTTOM.get(),
-        });
-        let program = agents::draw::Group {
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            words: agents::Words::new(clock::time::Lang::of_messages()),
-            backdrop,
-            bar: bar.output.clone(),
-            motion: self.look.motion,
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The to-do list of the bar whose to-do list's surface is `id`.
-    fn tasks_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.tasks == id)?;
-        let at = self.now + AHEAD;
-        // The bar's colour where the column puts the list, read as it draws.
-        let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
-            top: OPAQUE_TOP.get(),
-            bottom: OPAQUE_BOTTOM.get(),
-        });
-        let program = tasks::draw::Group {
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            words: tasks::Words::new(clock::time::Lang::of_messages()),
-            backdrop,
-            bar: bar.output.clone(),
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The footer of the bar whose footer's surface is `id`.
-    fn footer_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.footer == id)?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = bar_height - 40.0;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = footer::Footer {
-            bar: bar.output.clone(),
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            words: footer::Words::new(clock::time::Lang::of_messages()),
-            backdrop,
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The sign of what is in use (5.12), if its surface is `id`.
-    fn in_use_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = in_use::bar_of(id)?;
-        let bar = self.bars.values().find(|b| b.output == output)?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = column::TOP;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = in_use::draw::Sign {
-            bar: bar.output.clone(),
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            backdrop,
-            motion: self.look.motion,
-            words: in_use::Words::new(clock::time::Lang::of_messages()),
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The next meeting (Day.2), if its surface is `id`.
-    fn meeting_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = meeting::bar_of(id)?;
-        let bar = self.bars.values().find(|b| b.output == output)?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = column::TOP;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = meeting::draw::View {
-            bar: bar.output.clone(),
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            backdrop,
-            motion: self.look.motion,
-            words: meeting::Words::new(clock::time::Lang::of_messages()),
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The windows over the desktops (#604), if their surface is `id`.
-    fn windows_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = windows::bar_of(id)?;
-        let bar = self.bars.values().find(|b| b.output == output)?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
-            top: OPAQUE_TOP.get(),
-            bottom: OPAQUE_BOTTOM.get(),
-        });
-        let program = windows::draw::View {
-            bar: bar.output.clone(),
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            words: windows::Words::new(clock::time::Lang::of_messages()),
-            backdrop,
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The music player's tile (s12), if its surface is `id`.
-    fn music_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = music::bar_of(id)?;
-        let bar = self.bars.values().find(|b| b.output == output)?;
-        // The bar's colour behind it, where the column puts it.
-        let backdrop = (!self.look.glass).then(|| {
-            let middle = music::placed(&output).map_or(0.0, |(top, _)| top + music::TILE / 2.0);
-            agents::draw::Backdrop {
-                top: OPAQUE_TOP.get(),
-                bottom: OPAQUE_BOTTOM.get(),
-            }
-            .at(middle, bar.height)
-        });
-        Some(music::tile::view(&output, self.look.motion, backdrop))
-    }
-
-    /// Today (Day.3), if its surface is `id`.
-    fn today_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = today::bar_of(id)?;
-        let bar = self.bars.values().find(|b| b.output == output)?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = today::shown(&output).1 + 40.0;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = today::draw::View {
-            bar: bar.output.clone(),
-            forms: bar.forms(at),
-            backdrop,
-            motion: self.look.motion,
-            words: today::Words::new(clock::time::Lang::of_messages()),
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The tray of the bar whose tray's surface is `id` (5.14).
-    fn tray_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self
-            .bars
-            .values()
-            .find(|b| tray::draw::surface(&b.output) == Some(id))?;
-        let at = self.now + AHEAD;
-        let backdrop = (!self.look.glass).then(|| {
-            let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = bar_height - 100.0;
-            mix(
-                OPAQUE_TOP.get(),
-                OPAQUE_BOTTOM.get(),
-                (middle / bar_height).clamp(0.0, 1.0),
-            )
-        });
-        let program = tray::draw::Tray {
-            id,
-            forms: bar.forms(at),
-            bar_width: bar.width(at),
-            motion: self.look.motion,
-            backdrop,
-        };
-        Some(in_bar(
-            bar,
-            at,
-            canvas(program)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        ))
-    }
-
-    /// The lock (7.1), if its surface is `id`.
-    fn lock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = lock::output_of(id)?;
-        let layer = |layer| {
-            canvas(lock::draw::View {
-                layer,
-                id,
-                output: output.clone(),
-                wall: self.wall.clone(),
-                lang: self.lang,
-                words: lock::words(),
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-        };
-        use lock::draw::Layer;
-        Some(stack![layer(Layer::Back), layer(Layer::Front)].into())
-    }
-
-    /// The curtain's pill (7.2), if its surface is `id`.
-    fn curtain_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !curtain::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(curtain::draw::View {
-                id,
-                words: curtain::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
-    /// The authentication dialog (7.5), if its surface is `id`.
-    fn auth_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !auth::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(auth::draw::View {
-                id,
-                words: auth::words(),
-                glass: self.look.glass,
-                motion: self.look.motion,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
-    /// The share's chooser (5.11), if its surface is `id`.
-    fn share_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !share::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(share::draw::View {
-                id,
-                words: share::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
-    /// The panda peeking out (4.5), if its surface is `id`.
-    fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = agents::peek::bar_of(id)?;
-        Some(
-            canvas(agents::peek::View { bar })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        )
-    }
-
-    /// The launcher, or its toast, if its surface is `id`.
-    fn launcher_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if launcher::toast::is_surface(id) {
-            return Some(
-                canvas(launcher::toast::View {
-                    id,
-                    software: self.software,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            );
-        }
-        if !launcher::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(launcher::draw::View {
-                id,
-                words: launcher::Words::new(clock::time::Lang::of_messages()),
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
-    /// The actions palette, if its surface is `id`.
-    fn actions_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !actions::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(actions::draw::View {
-                id,
-                words: actions::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
-    /// The emoji picker, if its surface is `id`.
-    fn emoji_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !emoji::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(emoji::draw::View {
-                id,
-                words: emoji::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
-    /// The capture's toolbar (5.8), its thumbnail or its editor (5.9), if
-    /// its surface is `id`.
-    fn capture_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if capture::thumb::is_surface(id) {
-            return Some(
-                canvas(capture::thumb::View {
-                    id,
-                    words: capture::words(),
-                    software: self.software,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            );
-        }
-        if capture::editor::is_surface(id) {
-            let layer = |layer| {
-                canvas(capture::editor::draw::View {
-                    id,
-                    words: capture::words(),
-                    glass: self.look.glass,
-                    layer,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-            };
-            use capture::editor::draw::Layer;
-            return Some(stack![layer(Layer::Panel), layer(Layer::Over)].into());
-        }
-        if !capture::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(capture::draw::View {
-                id,
-                words: capture::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
-    /// The popover whose surface is `id`.
-    fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let item = popover::with(|c| c.item_of(id))?;
-        let panel: Element<'_, Message> = match item {
-            popover::Item::Sound => canvas(popover::sound::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Wifi if popover::wifi::widgets::on() => {
-                popover::wifi::widgets::view(&popover::wifi::Panel {
-                    id,
-                    words: self.words,
-                    glass: self.look.glass,
-                    motion: self.look.motion,
-                    software: self.software,
-                })
-            }
-            popover::Item::Music => popover::music::view(id, self.look.glass),
-            popover::Item::Wifi => canvas(popover::wifi::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-                motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Bluetooth => canvas(popover::bluetooth::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-                motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Brightness => canvas(popover::brightness::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Battery => canvas(popover::battery::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Windows => canvas(popover::windows::Panel {
-                id,
-                words: windows::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::WindowMenu(window) => canvas(popover::window_menu::Panel {
-                id,
-                window,
-                words: popover::window_menu::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Desktop { .. } | popover::Item::WindowsMore => {
-                canvas(popover::desktop::Panel {
-                    id,
-                    words: self.words,
-                    glass: self.look.glass,
-                    software: self.software,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-            }
-            popover::Item::Sources | popover::Item::AnotherTool | popover::Item::Plug(_) => {
-                canvas(popover::agents::Panel {
-                    id,
-                    words: agents::Words::new(clock::time::Lang::of_messages()),
-                    glass: self.look.glass,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-            }
-            popover::Item::Secretary => canvas(popover::briefing::Panel {
-                id,
-                words: agents::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Notifications => canvas(popover::history::Panel {
-                id,
-                glass: self.look.glass,
-                motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Clipboard => canvas(popover::clipboard::Panel {
-                id,
-                words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::InUse => canvas(popover::in_use::Panel {
-                id,
-                words: in_use::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Tasks | popover::Item::TasksMore => canvas(popover::tasks::Panel {
-                id,
-                words: tasks::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::DayChoose => canvas(popover::setup::Panel {
-                id,
-                words: setup::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-                motion: self.look.motion && !self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::MeetingMark => canvas(popover::meeting::Panel {
-                id,
-                words: meeting::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::User => canvas(popover::session::Panel {
-                id,
-                words: popover::session::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-                motion: self.look.motion && !self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Calendar => canvas(popover::calendar::Panel {
-                id,
-                glass: self.look.glass,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            // They open none.
-            popover::Item::Tray(key) => canvas(popover::tray::Panel {
-                id,
-                key,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Keyboard
-            | popover::Item::Decline
-            | popover::Item::Agent(_)
-            | popover::Item::Menu
-            | popover::Item::Meeting
-            | popover::Item::Join
-            | popover::Item::TodayLine(_)
-            | popover::Item::TodayMore
-            | popover::Item::TaskAdd
-            | popover::Item::Task(_)
-            | popover::Item::DayLater
-            | popover::Item::Window(_)
-            | popover::Item::WindowClose(_) => {
-                return None;
-            }
-        };
-        Some(panel)
-    }
-
-    /// A surface's widgets, whose pointer's shape is set again each time
-    /// the pointer enters it ([`pointer`]), and which get the keys the
-    /// compositor gives their surface ([`keys`]).
-    fn view(&self, id: window::Id) -> Element<'_, Message> {
-        keys::Held::new(
-            id,
-            pointer::Entered::new(self.surface_view(id)),
-            Message::Keys,
-        )
-        .into()
-    }
-
-    fn surface_view(&self, id: window::Id) -> Element<'_, Message> {
-        let Some(bar) = self.bars.get(&id) else {
-            return self
-                .clock_view(id)
-                .or_else(|| self.levels_view(id))
-                .or_else(|| self.connections_view(id))
-                .or_else(|| self.desktops_view(id))
-                .or_else(|| self.agents_view(id))
-                .or_else(|| self.tasks_view(id))
-                .or_else(|| self.footer_view(id))
-                .or_else(|| self.tray_view(id))
-                .or_else(|| tray::tip::view(id))
-                .or_else(|| self.peek_view(id))
-                .or_else(|| self.launcher_view(id))
-                .or_else(|| self.emoji_view(id))
-                .or_else(|| self.actions_view(id))
-                .or_else(|| self.capture_view(id))
-                .or_else(|| self.auth_view(id))
-                .or_else(|| self.share_view(id))
-                .or_else(|| self.lock_view(id))
-                .or_else(|| self.curtain_view(id))
-                .or_else(|| self.in_use_view(id))
-                .or_else(|| self.meeting_view(id))
-                .or_else(|| self.today_view(id))
-                .or_else(|| self.windows_view(id))
-                .or_else(|| self.music_view(id))
-                .or_else(|| self.popover_view(id))
-                .or_else(|| notifications::view(id, self.look.glass))
-                .or_else(|| reminder::view(id, self.look.glass))
-                .unwrap_or_else(|| Space::new().into());
-        };
-        let width = bar.width(self.now + AHEAD);
-        let output = bar.output.clone();
-        let (top, bottom) = if self.look.glass {
-            (GLASS_TOP, GLASS_BOTTOM)
-        } else {
-            (OPAQUE_TOP, OPAQUE_BOTTOM)
-        };
-        let marks = canvas(theme::BarMarks)
-            .width(Length::Fill)
-            .height(Length::Fill);
-        let column = container(marks)
-            .width(width)
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(Background::Gradient(
-                    gradient::Linear::new(iced::Degrees(180.0))
-                        .add_stop(0.0, top.get())
-                        .add_stop(1.0, bottom.get())
-                        .into(),
-                )),
-                border: Border {
-                    color: RIM.get(),
-                    width: theme::border(),
-                    radius: (RADIUS as f32).into(),
-                },
-                ..container::Style::default()
-            });
-        let bar = container(if side::left() {
-            row![column, space::horizontal()]
-        } else {
-            row![space::horizontal(), column]
-        })
-        .width(Length::Fill)
-        .height(Length::Fill);
-        let pointer = canvas(popover::BarPointer { bar: output })
-            .width(Length::Fill)
-            .height(Length::Fill);
-        stack![bar, pointer].into()
-    }
 }
 
 /// `content`, one of `bar`'s surfaces in its column. While the bar
@@ -2260,6 +1432,12 @@ fn bar_sizes() -> Subscription<Message> {
     iced::event::listen_with(|event, _, id| match event {
         iced::Event::Window(window::Event::Opened { size, .. }) if is_bar(id) => {
             popover::with(|c| c.height(id, size.height));
+            // The column's room is the bar's height less its groups': what
+            // was fit before the bar had its size is fit again. The day
+            // read before the bar opened, Today kept the rows of a bar as
+            // tall as the default, over the desktops on a short screen
+            // (#769).
+            column::moved();
             None
         }
         iced::Event::Window(window::Event::Resized(size)) if is_bar(id) => {
@@ -2340,6 +1518,8 @@ fn instant_of(monotonic_us: u64) -> Instant {
 /// shell says goes through the sender handed over first.
 // `Subscription::run_with` hands its data back as given: a `&String`.
 #[allow(clippy::ptr_arg)]
+// Over 200 lines: its loop dispatches each kind of line the compositor
+// says outside of iced's messages.
 fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
     let socket = socket.clone();
     iced::stream::channel(16, async move |mut output| {
@@ -2352,6 +1532,42 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
             }
         };
         let (read, mut write) = stream.into_split();
+        let mut lines = BufReader::new(read).lines();
+        // The hello (`hocus_link::wire`): this shell's version, then the
+        // compositor's. On another version (a package upgraded under the
+        // session) nothing more is said nor read: its messages would be
+        // misread. The compositor ends this shell, or the session does.
+        let hello = format!("{}\n", hocus_link::wire::hello());
+        if let Err(err) = write.write_all(hello.as_bytes()).await {
+            tracing::warn!(%err, "could not write to the compositor");
+            let _ = output.send(Message::Unlinked).await;
+            return;
+        }
+        match lines.next_line().await {
+            Ok(Some(first)) => {
+                let theirs = hocus_link::wire::said_version(&first);
+                if theirs != Some(hocus_link::VERSION) {
+                    tracing::error!(
+                        compositor = ?theirs,
+                        shell = hocus_link::VERSION,
+                        "the compositor speaks another version of the line: \
+                         nothing is read from it nor said to it"
+                    );
+                    while let Ok(Some(_)) = lines.next_line().await {}
+                    let _ = output.send(Message::Unlinked).await;
+                    return;
+                }
+            }
+            Ok(None) => {
+                let _ = output.send(Message::Unlinked).await;
+                return;
+            }
+            Err(err) => {
+                tracing::warn!(%err, "could not read from the compositor");
+                let _ = output.send(Message::Unlinked).await;
+                return;
+            }
+        }
         let (sender, mut outgoing) = mpsc::unbounded::<String>();
         // A change of level wakes the levels' surfaces through the
         // compositor, without a message that would draw every surface.
@@ -2361,7 +1577,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
             popover::changed(popover::Item::Brightness);
             popover::changed(popover::Item::Battery);
             let wake = ToCompositor::Wake(LEVELS_NAMESPACE.to_owned());
-            waker.unbounded_send(wake.to_string()).is_ok()
+            waker.unbounded_send(wake.line()).is_ok()
         });
         // A change of network wakes the connections' surface when the row
         // changes (resized when it comes or goes), and the Wi-Fi's popover
@@ -2376,7 +1592,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                 return true;
             }
             let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
-            waker.unbounded_send(wake.to_string()).is_ok()
+            waker.unbounded_send(wake.line()).is_ok()
         });
         let waker = sender.clone();
         bluetooth::on_change(move |change| {
@@ -2388,7 +1604,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                 return true;
             }
             let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
-            waker.unbounded_send(wake.to_string()).is_ok()
+            waker.unbounded_send(wake.line()).is_ok()
         });
         let _ = output.send(Message::Linked(sender)).await;
         tokio::spawn(async move {
@@ -2399,20 +1615,28 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                 }
             }
         });
-        let mut lines = BufReader::new(read).lines();
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
                     // A level key goes to its service: no message, no
                     // drawing; the gauge shows what the service then reads.
-                    match line.parse() {
-                        Ok(ToShell::Level(key)) => {
+                    let message = match ToShell::read(&line) {
+                        Ok(message) => message,
+                        // A kind this shell does not know, or a line that
+                        // does not read: said and skipped.
+                        Err(err) => {
+                            tracing::warn!(%err, "a line from the compositor is skipped");
+                            continue;
+                        }
+                    };
+                    match message {
+                        ToShell::Level(key) => {
                             levels::key(key);
                             continue;
                         }
                         // A press outside closes the popover: no message
                         // either, the controller draws what changes.
-                        Ok(ToShell::Outside) => {
+                        ToShell::Outside => {
                             popover::event(popover::Event::Outside);
                             launcher::outside();
                             emoji::outside();
@@ -2420,20 +1644,20 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
-                        Ok(ToShell::Launcher { output, scale }) => {
+                        ToShell::Launcher { output, scale } => {
                             launcher::toggle(output, scale);
                             continue;
                         }
                         // The other screens: only an open brightness's
                         // popover draws for them.
-                        Ok(ToShell::Screens(names)) => {
+                        ToShell::Screens(names) => {
                             screens(names);
                             continue;
                         }
                         // The layouts' names in the bar's language, read
                         // from XKB's catalog off the loop; then a message,
                         // once a connection: the surfaces take their sizes.
-                        Ok(ToShell::Layouts(list)) => {
+                        ToShell::Layouts(list) => {
                             let lang = clock::time::Lang::of_messages();
                             let made =
                                 tokio::task::spawn_blocking(move || layouts::made(&list, lang))
@@ -2443,218 +1667,175 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             continue;
                         }
                         // The active layout: only the row draws.
-                        Ok(ToShell::Layout(index)) => {
+                        ToShell::Layout(index) => {
                             layouts::activate(index);
                             continue;
                         }
                         // A screen's desktops: only their surface draws
                         // (resized when their rows change).
-                        Ok(ToShell::Desktops(screen)) => {
+                        ToShell::Desktops(screen) => {
                             desktops::set(screen);
                             continue;
                         }
                         // Its windows' titles: only an open list draws,
                         // and the windows over the tiles if they list it.
-                        Ok(ToShell::Titles(titles)) => {
+                        ToShell::Titles(titles) => {
                             desktops::set_titles(titles);
                             continue;
                         }
                         // Its windows' order, and whether the bar shows
                         // them (#604): only their surface draws.
-                        Ok(ToShell::Recent(recent)) => {
+                        ToShell::Recent(recent) => {
                             desktops::set_recent(recent);
                             continue;
                         }
                         // The screens a bar shows the desktops of (8.4):
                         // only their surface draws, resized to their rows.
-                        Ok(ToShell::DeskScreens { bar, screens }) => {
+                        ToShell::DeskScreens { bar, screens } => {
                             desktops::set_screens(bar, screens);
                             continue;
                         }
                         // A window moved over a tile (8.5 B): only the
                         // tiles draw, that one lit.
-                        Ok(ToShell::DropOver { bar, over }) => {
+                        ToShell::DropOver { bar, over } => {
                             desktops::set_drop(bar, over);
                             continue;
                         }
-                        Ok(ToShell::BarWindows(shown)) => {
+                        ToShell::BarWindows(shown) => {
                             windows::set_shown(shown);
                             continue;
                         }
                         // The desktops' names (6.14): the tiles and an
                         // open list draw.
-                        Ok(ToShell::DesktopNames(names)) => {
+                        ToShell::DesktopNames(names) => {
                             desktops::set_names(names);
                             continue;
                         }
                         // What the column shows (6.4): only its parts draw.
-                        Ok(ToShell::BarGroups(groups)) => {
+                        ToShell::BarGroups(groups) => {
                             column::set_groups(groups);
                             continue;
                         }
                         // The agents' tools and the agents: only their
                         // group draws (resized when its height changes),
                         // and an open Sources or consent popover.
-                        Ok(ToShell::AgentTools(tools)) => {
+                        ToShell::AgentTools(tools) => {
                             agents::set_tools(tools);
                             continue;
                         }
-                        Ok(ToShell::Agents(list)) => {
+                        ToShell::Agents(list) => {
                             agents::set_agents(list);
                             continue;
                         }
                         // The panda peeking out: its own surfaces only.
-                        Ok(ToShell::Peek(peek)) => {
+                        ToShell::Peek(peek) => {
                             agents::peek::peek(peek);
                             continue;
                         }
-                        Ok(ToShell::NoPeek) => {
+                        ToShell::NoPeek => {
                             agents::peek::back();
                             continue;
                         }
                         // A developer's program let go of: a bubble, the
                         // notifications' own surface.
-                        Ok(ToShell::FellBack { which, program }) => {
+                        ToShell::FellBack { which, program } => {
                             notifications::fell_back(which, &program);
                             continue;
                         }
-                        Ok(ToShell::ScreensMoved(moved)) => {
+                        ToShell::ScreensMoved(moved) => {
                             agents::peek::screens(moved);
                             continue;
                         }
                         // The rows' pandas or dots (6.16): their group
                         // alone draws.
-                        Ok(ToShell::AgentPandas(pandas)) => {
+                        ToShell::AgentPandas(pandas) => {
                             agents::set_pandas(pandas);
                             continue;
                         }
                         // The bubbles' screen: their stack alone.
-                        Ok(ToShell::Focus(screen)) => {
+                        ToShell::Focus(screen) => {
                             notifications::focus(screen);
                             continue;
                         }
                         // A copy for the clipboard's history, kept off
                         // this task; `Super+V`: the history's surface.
-                        Ok(ToShell::Copied { app, clip }) => {
+                        ToShell::Copied { app, clip } => {
                             clipboard::copied(app, clip);
                             continue;
                         }
-                        Ok(ToShell::CaptureCopied { capture, clip }) => {
+                        ToShell::CaptureCopied { capture, clip } => {
                             clipboard::captured(capture, clip);
                             continue;
                         }
-                        Ok(ToShell::Clipboard { output }) => {
+                        ToShell::Clipboard { output } => {
                             popover::toggle_clipboard(&output);
                             continue;
                         }
                         // What the history keeps (6.17), and the
                         // Settings' clear: on its own thread.
-                        Ok(ToShell::ClipboardRules(rules)) => {
+                        ToShell::ClipboardRules(rules) => {
                             clipboard::rules(rules);
                             continue;
                         }
-                        Ok(ToShell::ClipboardClear) => {
+                        ToShell::ClipboardClear => {
                             clipboard::clear();
-                            continue;
-                        }
-                        // The emoji picker: its own surface.
-                        Ok(ToShell::Emoji {
-                            output,
-                            scale,
-                            width,
-                            height,
-                            at,
-                        }) => {
-                            emoji::toggle(output, scale, (width, height), at);
-                            continue;
-                        }
-                        Ok(ToShell::EmojiInserted) => {
-                            emoji::inserted();
-                            continue;
-                        }
-                        // The actions palette: its own surface (#736).
-                        Ok(ToShell::Actions(shown)) => {
-                            actions::toggle(shown);
-                            continue;
-                        }
-                        Ok(ToShell::ActionsEnd) => {
-                            actions::close();
                             continue;
                         }
                         // The capture's toolbar, and its toast: their own
                         // surfaces (5.8).
-                        Ok(ToShell::Capture(bar)) => {
+                        ToShell::Capture(bar) => {
                             capture::set(bar);
                             continue;
                         }
-                        Ok(ToShell::CaptureEnd) => {
+                        ToShell::CaptureEnd => {
                             capture::end();
                             continue;
                         }
-                        Ok(ToShell::Captured(captured)) => {
+                        ToShell::Captured(captured) => {
                             capture::captured(captured);
                             continue;
                         }
-                        // Sharing (5.11): the chooser's surface, the sign's.
-                        Ok(ToShell::ShareChoose(choose)) => {
-                            share::set(choose);
-                            continue;
-                        }
-                        Ok(ToShell::ShareChooseEnd(request)) => {
-                            share::end(request);
-                            continue;
-                        }
-                        // The authentication dialog (7.5): its place, and
-                        // Caps Lock.
-                        Ok(ToShell::AuthAt(at)) => {
-                            auth::placed(at);
-                            continue;
-                        }
-                        Ok(ToShell::CapsLock(on)) => {
-                            auth::caps(on);
-                            continue;
-                        }
-                        Ok(ToShell::Shares(shares)) => {
+                        ToShell::Shares(shares) => {
                             in_use::set_shares(shares);
                             continue;
                         }
                         // Recording (5.10): the bar's item, the thumbnail.
-                        Ok(ToShell::Recording(shown)) => {
+                        ToShell::Recording(shown) => {
                             in_use::set_recording(Some(shown));
                             continue;
                         }
-                        Ok(ToShell::RecordingEnd) => {
+                        ToShell::RecordingEnd => {
                             in_use::set_recording(None);
                             continue;
                         }
-                        Ok(ToShell::Recorded(recorded)) => {
+                        ToShell::Recorded(recorded) => {
                             capture::recorded(recorded);
                             continue;
                         }
                         // A tray click's token: to the tray's thread.
-                        Ok(ToShell::TrayToken { ask, token }) => {
+                        ToShell::TrayToken { ask, token } => {
                             tray::token(ask, token);
                             continue;
                         }
                         // A portal dialog's parent: to the thread asking.
-                        Ok(ToShell::Exported { ask, handle }) => {
+                        ToShell::Exported { ask, handle } => {
                             foreign::exported(ask, handle);
                             continue;
                         }
                         // The session menu (7.4): its popover alone.
-                        Ok(ToShell::LeaveCan(can)) => {
+                        ToShell::LeaveCan(can) => {
                             popover::session::set_can(can);
                             continue;
                         }
-                        Ok(ToShell::Leave(shown)) => {
+                        ToShell::Leave(shown) => {
                             popover::session::set_shown(Some(shown));
                             continue;
                         }
-                        Ok(ToShell::LeaveEnd) => {
+                        ToShell::LeaveEnd => {
                             popover::session::set_shown(None);
                             continue;
                         }
-                        Ok(ToShell::SessionMenu { output }) => {
+                        ToShell::SessionMenu { output } => {
                             popover::session::open(&output);
                             continue;
                         }
@@ -2663,9 +1844,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // a message (`Super+Shift+B` just before), and the
                         // form, coming after, would take the keyboard back
                         // from the bar. It goes as a message, in its turn.
-                        _ => {}
+                        other => {
+                            let _ = output.send(Message::FromCompositor(Box::new(other))).await;
+                        }
                     }
-                    let _ = output.send(Message::FromCompositor(line)).await;
                 }
                 Ok(None) => break,
                 Err(err) => {

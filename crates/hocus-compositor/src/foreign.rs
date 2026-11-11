@@ -252,7 +252,8 @@ impl Foreign {
         match rustix::rand::getrandom(&mut bytes[..], rustix::rand::GetRandomFlags::empty()) {
             Ok(32) => bytes
                 .iter()
-                .map(|b| char::from(CHARS[usize::from(*b) % CHARS.len()]))
+                .filter_map(|b| CHARS.get(usize::from(*b) % CHARS.len()))
+                .map(|c| char::from(*c))
                 .collect(),
             filled => {
                 // Never seen: unique all the same, from the clock and a count.

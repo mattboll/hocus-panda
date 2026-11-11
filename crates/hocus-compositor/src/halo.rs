@@ -202,7 +202,10 @@ impl Glow {
             alpha: mix(x.alpha, y.alpha).clamp(0.0, 1.0),
         };
         Self {
-            colour: [0, 1, 2].map(|i| mix(a.colour[i], b.colour[i]).clamp(0.0, 1.0)),
+            colour: {
+                let ([r, g, b], [r2, g2, b2]) = (a.colour, b.colour);
+                [mix(r, r2), mix(g, g2), mix(b, b2)].map(|c| c.clamp(0.0, 1.0))
+            },
             border: mix(a.border, b.border).clamp(0.0, 1.0),
             outer: shadow(a.outer, b.outer),
             inner: shadow(a.inner, b.inner),
@@ -586,7 +589,7 @@ impl State {
     /// How the halo moves here: drawn by a shader on GLES under a shell's
     /// bar, with or without motion; not drawn otherwise.
     pub fn halo_motion(&self) -> Motion {
-        if !self.blur || !self.shell_linked() {
+        if !self.graphics.blur || !self.shell_linked() {
             Motion::Still
         } else if self.reduced_motion() {
             Motion::Reduced

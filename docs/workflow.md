@@ -78,6 +78,7 @@ only when the maintainer asks to see a change (CLAUDE.md, "Hard rules").
 | `fmt`, `clippy`, `licenses` (cargo-deny) | yes | yes | |
 | `unused-dependencies` (cargo-machete) | yes | yes | |
 | `vendor` (`scripts/vendor.sh --check`) | yes | yes | |
+| `docs` (`scripts/ci/docs-names.sh`): no crate nor `hocus msg` subcommand the docs name is gone | yes | yes | |
 | `pr-tests`: the tests of what changed | yes | | |
 | `build` and `linux (N/4)`: the whole suite | when asked (below) | yes | |
 | `package`: the release build, the .deb and what it holds | | yes | |
@@ -113,10 +114,72 @@ A fix outside a sprint (one branch, one pull request to `main`) is the one
 case where the whole suite first runs after the merge: give it the
 `full-tests` label when it touches more than its own tests show.
 
+### A test that fails by chance
+
+CI's profile (`[profile.ci]` in `.config/nextest.toml`) runs every test
+whatever fails before it (`fail-fast = false`): one failure used to stop
+its shard, and the next run found the next one. It retries nothing
+(`retries = 0`): a test that passes at its second try has failed once, and
+a suite that hides it gets worse without anyone seeing. So:
+
+- A test that fails on `main` or a sprint branch and passes when run again
+  **is flaky**, whatever the reason looks like. It gets an issue the same
+  day, with the run's link and what the test said.
+- While the issue is open the test is quarantined: a line of
+  `default-filter` in the CI profile, with the issue's number. The default
+  profile still runs it locally.
+- The fix says what made it fail by chance (what it waited for, in what
+  order, on what clock) and takes it out of quarantine; it is run 20 times
+  in a row first (`cargo nextest run --stress-count 20 -E 'test(=NAME)'`,
+  with the tests of its file beside it, so that the machine is loaded as
+  in the suite). "It passed again" closes nothing.
+
+A laptop with many cores hides what CI's four shared ones show. To see a
+chance failure before CI does, run on few CPUs: the suite as CI runs it
+(`NEXTEST_TEST_THREADS=4 taskset -c 0-3 cargo nextest run --workspace
+--profile ci`), or one file's tests harder than CI does
+(`NEXTEST_TEST_THREADS=8 taskset -c 0-1 cargo nextest run --profile ci
+--stress-count 8 -E 'test(/^today::/)'`). A test that fails there and
+nowhere else often shows a race of the program's, not of the test: the
+shell started slowly reads its day before its bar has a size, say (#769).
+
+What made tests fail by chance so far, to look for first:
+
+- **A fixed wait, then a look**: `wait(hp, 2 s)` before reading what
+  another program drew. Wait for what is looked at instead
+  (`Headless::dispatch_until`, `drawn_layers`, `at_rest`), and fail when
+  it never comes.
+- **A count read too late**: "one more commit than now" read after the
+  thing that draws was asked for; the commit came in between, and the
+  wait runs to its end. Read the count first.
+- **A line of a program's log that is not always written**: a line said
+  only when a state changes is never said when it started that way. Wait
+  on the compositor's state where there is one; else on a line said every
+  time.
+- **Two things that come in either order**, looked at in one go after the
+  first came.
+- **The machine**: its uptime (an agent cannot be backdated before boot:
+  hold the compositor's clock and step it, `Headless::step`), its time
+  zone and language (the tests and every program they start get `TZ=UTC`
+  and `LANG=C.UTF-8` from `.cargo/config.toml`; a test of another
+  language gives it to the program it starts), its minute (a program
+  showing the real time draws when it changes, whenever the test runs:
+  `common::clear_of_the_minute`), its speed (times measured on the wall
+  clock: hold the clock).
+- **A whole wait spent to see that nothing comes**: read what is shown
+  once the shell rests instead.
+
+A test never passes without testing: it fails, saying what it needs, when
+a program it runs is missing (`common::missing`), ours (`cargo programs`)
+or the system's (D-Bus, PipeWire and its tools, ffmpeg, Mesa's software
+GLES and Vulkan drivers: CI installs them). The six tests of what CI does
+not install (Xwayland, kitty, foot, AT-SPI's launcher and Python binding)
+are left out of CI's profile by name.
+
 ### The package
 
 `package` builds what the maintainer installs: the release build of the
-five programs with `--locked`, the .deb (`packaging/deb/build.sh`), and
+four programs with `--locked`, the .deb (`packaging/deb/build.sh`), and
 `packaging/deb/check.sh`, which fails when the package holds other files
 than [packaging/README.md](../packaging/README.md) lists. The .deb is kept
 as the run's artifact for a week.

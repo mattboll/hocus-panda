@@ -307,7 +307,7 @@ impl State {
             micro: plan.micro,
             // The GPU the compositor draws on, if it does: ffmpeg may
             // encode there (VA-API).
-            gpu: self.gpu.and_then(|dev| {
+            gpu: self.graphics.gpu.and_then(|dev| {
                 smithay::backend::drm::DrmNode::from_dev_id(dev)
                     .ok()?
                     .node_with_type(smithay::backend::drm::NodeType::Render)?
@@ -317,7 +317,7 @@ impl State {
             pipewire: self.config.pipewire_remote.clone(),
             videos: self.config.videos.clone(),
             chosen: self.config.chosen_folder(&self.config.recording.folder),
-            french: self.config.french,
+            lang: self.config.lang,
             when: SystemTime::now(),
             runtime: self.runtime_dir.clone(),
             ffmpeg: if self.config.ffmpeg.as_os_str().is_empty() {

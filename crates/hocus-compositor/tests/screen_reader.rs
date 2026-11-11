@@ -46,8 +46,7 @@ const ROW: (f64, f64) = (1800.0, (LEVELS.y + 57) as f64);
 fn ready() -> Option<std::path::PathBuf> {
     let shell = shell_program();
     if !fakes::available() {
-        eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
-        return None;
+        common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
     }
     Some(shell)
 }
@@ -158,9 +157,9 @@ fn the_sound_reads_as_a_slider_its_popover_as_a_dialog_and_esc_gives_the_focus_b
 
     // Tab: the mute button, then the volume.
     press(&mut hp, KEY_TAB);
-    until_said(&mut hp, &["window \"Son\" [active] focus=Mute"])?;
+    until_said(&mut hp, &["window \"Son\" [active] focus=sound:Mute"])?;
     press(&mut hp, KEY_TAB);
-    until_said(&mut hp, &["window \"Son\" [active] focus=Slider"])?;
+    until_said(&mut hp, &["window \"Son\" [active] focus=sound:Slider"])?;
 
     // Esc: the popover goes, the bar's sound holds the keyboard.
     press(&mut hp, KEY_ESC);

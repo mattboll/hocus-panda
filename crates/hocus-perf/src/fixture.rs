@@ -136,7 +136,10 @@ pub fn working_day(date: Date, tz: &TimeZone) -> Day {
         }
         // Windows now and then.
         if !locked && i % 17 == 5 {
-            let app = APPS[(dice.next() * APPS.len() as f64) as usize % APPS.len()];
+            let app = APPS
+                .get((dice.next() * APPS.len() as f64) as usize % APPS.len())
+                .copied()
+                .unwrap_or_default();
             let kind = if i % 2 == 0 {
                 EventKind::WindowOpened
             } else {

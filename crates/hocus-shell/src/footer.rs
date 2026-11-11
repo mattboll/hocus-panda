@@ -13,7 +13,9 @@
 //! ([`crate::popover::clipboard`], [`crate::popover::history`],
 //! [`crate::popover::session`]); the menu opens the launcher (5.1) on a
 //! click only. `Tab` and the arrows reach them from the bar's other items,
-//! `Enter` or `Space` acts. Each has its name, said as it is drawn.
+//! `Enter` or `Space` acts. Each has its name, said as it is drawn. The
+//! buttons are the kit's controls ([`crate::ui::items`]): its hit-testing,
+//! its ring, screen readers' toolbar.
 //!
 //! It is a surface of its own over the bar's bottom (it took the bell's of
 //! 5.4), opened after the bar's others so that it is above them, taking
@@ -21,16 +23,17 @@
 //! While the bar switches its form, it is the full form's width and both
 //! forms' height, and the two cross-fade as the other groups do.
 
+use hocus_words::shell::footer as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock, PoisonError},
 };
 
+use hocus_a11y::{Node, Role};
 use hocus_link::{EDGE, FOOTER_NAMESPACE, Form};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme,
+    Color, Point, Rectangle, Renderer, Size, Vector,
     advanced::svg,
-    keyboard, mouse,
     widget::canvas::{self, Frame, Geometry},
     window,
 };
@@ -41,9 +44,9 @@ use iced_layershell::reexport::{
 use crate::{
     Message,
     clock::time::Lang,
-    levels::draw::pointer,
     notifications::bell::{self, INK},
     popover::{self, Item},
+    ui::items::{Control, Controls, Items},
 };
 
 /// The buttons, in the full form and in the mini.
@@ -276,29 +279,23 @@ fn region(id: window::Id, form: Form, switching: bool) -> Message {
 /// The buttons' names, for screen readers, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     /// `item`'s name, `unseen` notifications not seen, the user `user`.
     pub fn name(self, item: Item, unseen: usize, user: &str) -> String {
-        match (item, self.fr) {
-            (Item::Clipboard, true) => "Presse-papiers".to_owned(),
-            (Item::Clipboard, false) => "Clipboard".to_owned(),
-            (Item::Notifications, _) if unseen == 0 => "Notifications".to_owned(),
-            (Item::Notifications, true) => format!("Notifications, {unseen} non vues"),
-            (Item::Notifications, false) => format!("Notifications, {unseen} unseen"),
-            (Item::Menu, true) => "Menu : toutes les applications".to_owned(),
-            (Item::Menu, false) => "Menu: all applications".to_owned(),
-            (Item::User, true) => format!("{user}, menu de session"),
-            (Item::User, false) => format!("{user}, session menu"),
-            (_, _) => String::new(),
+        match item {
+            Item::Clipboard => txt::CLIPBOARD.get(self.lang).to_owned(),
+            Item::Notifications if unseen == 0 => "Notifications".to_owned(),
+            Item::Notifications => txt::notifications_unseen(self.lang, unseen),
+            Item::Menu => txt::MENU_ALL_APPLICATIONS.get(self.lang).to_owned(),
+            Item::User => txt::session_menu(self.lang, user),
+            _ => String::new(),
         }
     }
 }
@@ -369,9 +366,7 @@ pub struct Footer {
 /// What the surface keeps between draws.
 #[derive(Debug, Default)]
 pub struct State {
-    pointer: Option<Point>,
-    hover: Option<Item>,
-    /// What it last said it shows.
+    /// What it last said it shows: its buttons' names.
     said: Option<(Form, Vec<String>)>,
 }
 
@@ -397,18 +392,11 @@ impl Footer {
             .collect()
     }
 
-    /// A point of the surface (`size`) in the bar's frame: from the bar's
-    /// right edge (negative inside it), and from its top.
-    fn in_bar(&self, at: Point, size: Size) -> Point {
+    /// From the surface (`size`) to the bar's frame: from the bar's right
+    /// edge (negative inside it), and from its top.
+    fn to_bar(&self, size: Size) -> Vector {
         let height = popover::with(|c| c.bar_height(&self.bar));
-        Point::new(
-            at.x - size.width - 1.0,
-            height - self.bottom() - size.height + at.y,
-        )
-    }
-
-    fn in_bar_rect(&self, rect: Rectangle, size: Size) -> Rectangle {
-        Rectangle::new(self.in_bar(rect.position(), size), rect.size())
+        Vector::new(-size.width - 1.0, height - self.bottom() - size.height)
     }
 
     /// What it shows changed: said, by the buttons' names.
@@ -433,98 +421,62 @@ impl Footer {
     }
 }
 
-impl canvas::Program<Message> for Footer {
+impl Items for Footer {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        FOOTER_NAMESPACE
+    }
+
+    fn controls(&self, state: &State, size: Size) -> Controls {
+        let names = state.said.as_ref().map(|(_, names)| names.as_slice());
+        let controls = self
+            .items(size)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (item, rect))| {
+                let name = names.and_then(|n| n.get(i)).cloned().unwrap_or_default();
+                Control::new(item, rect, Role::Button, name, bell::RADIUS)
+            })
+            .collect();
+        Controls {
+            to_bar: self.to_bar(size),
+            controls,
+            group: Some(Node::new(
+                "footer",
+                Role::Toolbar,
+                crate::a11y::Words::new(self.words.lang).footer(),
+            )),
+        }
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        let size = bounds.size();
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                self.say(state);
-                None
-            }
-            iced::Event::Mouse(seen) => {
-                let at = pointer(seen, bounds, cursor, state.pointer);
-                state.pointer = at;
-                let under = at.and_then(|at| {
-                    self.items(size)
-                        .into_iter()
-                        .find(|(_, rect)| rect.contains(at))
-                });
-                let over = under.map(|(item, _)| item);
-                match seen {
-                    mouse::Event::CursorEntered
-                    | mouse::Event::CursorMoved { .. }
-                    | mouse::Event::CursorLeft => {
-                        if over == state.hover {
-                            return None;
-                        }
-                        if state.hover.take().is_some() {
-                            let at = at.unwrap_or(Point::new(size.width / 2.0, size.height));
-                            popover::event(popover::Event::ItemLeave {
-                                at: self.in_bar(at, size),
-                            });
-                        }
-                        state.hover = over;
-                        if let Some((item, rect)) = under {
-                            popover::event(popover::Event::ItemEnter {
-                                bar: self.bar.clone(),
-                                item,
-                                rect: self.in_bar_rect(rect, size),
-                            });
-                        }
-                        Some(canvas::Action::request_redraw())
-                    }
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                        let (item, rect) = under?;
-                        tracing::debug!(?item, "a footer's button pressed");
-                        popover::event(popover::Event::ItemPress {
-                            bar: self.bar.clone(),
-                            item,
-                            rect: self.in_bar_rect(rect, size),
-                        });
-                        Some(canvas::Action::request_redraw().and_capture())
-                    }
-                    _ => None,
-                }
-            }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => popover::key(key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
+        if let iced::Event::Window(window::Event::RedrawRequested(_)) = event {
+            self.say(state);
         }
+        None
     }
 
     fn draw(
         &self,
-        state: &State,
+        _state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
         let under = crate::backdrop::under(renderer, size, self.backdrop);
-        // Where they are in the bar, for the keyboard going through the
-        // bar's items (the bar's height read first: not under the same
-        // lock).
-        let in_bar: Vec<(Item, Rectangle)> = self
-            .items(size)
-            .into_iter()
-            .map(|(item, r)| (item, self.in_bar_rect(r, size)))
-            .collect();
-        popover::with(|c| c.set_items(&self.bar, FOOTER_NAMESPACE, in_bar));
         let (count, dnd) = crate::notifications::with(|c| (c.stack.badge(), c.stack.dnd.is_on()));
         let still = self.forms.len() == 1;
         let bottom = self.bottom();
@@ -538,12 +490,8 @@ impl canvas::Program<Message> for Footer {
             for &(form, alpha) in &self.forms {
                 for (i, item) in buttons(form).iter().copied().enumerate() {
                     let button = rect(form, i, size, bottom, self.bar_width);
-                    let (open, focused) = if still {
-                        popover::with(|c| (c.shows(&self.bar, item), c.focused(&self.bar, item)))
-                    } else {
-                        (false, false)
-                    };
-                    let hover = still && state.hover == Some(item);
+                    let open = still && popover::with(|c| c.shows(&self.bar, item));
+                    let hover = still && lit == Some(item);
                     match item {
                         Item::Notifications => bell::draw(
                             f,
@@ -553,16 +501,15 @@ impl canvas::Program<Message> for Footer {
                                 dnd,
                                 open,
                                 hover,
-                                focused,
                             },
                             alpha,
                         ),
                         Item::User => {
-                            bell::lit(f, button, open, hover, focused);
+                            bell::lit(f, button, open, hover);
                             avatar(f, button, alpha);
                         }
                         _ => {
-                            bell::lit(f, button, open, hover, focused);
+                            bell::lit(f, button, open, hover);
                             if let Some(glyph) = glyph(item) {
                                 bell::glyph_in(f, button, glyph, bell::GLYPH_INK, alpha);
                             }
@@ -572,19 +519,6 @@ impl canvas::Program<Message> for Footer {
             }
         });
         crate::backdrop::over(under, frame)
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 
@@ -598,14 +532,16 @@ mod tests {
         for form in [Form::Full, Form::Mini] {
             let ((w, h), _) = placement(form, false);
             let drawn = crate::backdrop::tests::drawn(
-                |backdrop| Footer {
-                    bar: "eDP-1".to_owned(),
-                    forms: vec![(form, 1.0)],
-                    bar_width: form.width() as f32,
-                    words: Words::new(Lang::French),
-                    backdrop,
+                |backdrop| {
+                    crate::ui::items::surface(Footer {
+                        bar: "eDP-1".to_owned(),
+                        forms: vec![(form, 1.0)],
+                        bar_width: form.width() as f32,
+                        words: Words::new(Lang::French),
+                        backdrop,
+                    })
                 },
-                &State::default(),
+                &crate::ui::items::State::default(),
                 Size::new(w, h),
                 colour,
             );
@@ -684,8 +620,12 @@ mod tests {
 
     #[test]
     fn each_button_has_its_name() {
-        let fr = Words { fr: true };
-        let en = Words { fr: false };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(fr.name(Item::Clipboard, 0, "Alex"), "Presse-papiers");
         assert_eq!(
             fr.name(Item::Notifications, 3, "Alex"),

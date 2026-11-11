@@ -211,8 +211,7 @@ impl State {
             return;
         };
         programs::on_a_thread("read the clipboard".to_owned(), move || {
-            let line =
-                read(marks, pipe, kind).map(|clip| ToShell::Copied { app, clip }.to_string());
+            let line = read(marks, pipe, kind).map(|clip| ToShell::Copied { app, clip }.line());
             let _ = done.send(Done::Read { number, line });
         });
     }
@@ -233,7 +232,7 @@ impl State {
                 data_device::request_data_device_client_selection(&self.seat, mime.to_owned(), fd)
                     .map_err(|e| format!("{e:?}"))
             }
-            Source::X11 => match self.xwm.as_mut() {
+            Source::X11 => match self.xwayland.wm.as_mut() {
                 Some(xwm) => xwm
                     .send_selection(
                         SelectionTarget::Clipboard,
@@ -375,7 +374,7 @@ impl State {
             Some(data.clone()),
         );
         // X11 clients see it offered too.
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.new_selection(SelectionTarget::Clipboard, Some(types))
         {
             tracing::warn!(?err, "could not offer the clipboard to X11");
@@ -554,7 +553,7 @@ pub fn capture_line(capture: u64, png: &[u8]) -> Option<String> {
         kind: ClipKind::Png,
         data: png.to_vec(),
     };
-    Some(ToShell::CaptureCopied { capture, clip }.to_string())
+    Some(ToShell::CaptureCopied { capture, clip }.line())
 }
 
 /// What a selection holds, read from `pipe` as `kind`, unless one of its
@@ -624,7 +623,7 @@ pub(crate) fn read_all(
                 if data.len() + n > most {
                     return Err("too large");
                 }
-                data.extend_from_slice(&chunk[..n]);
+                data.extend_from_slice(chunk.get(..n).unwrap_or(&chunk));
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return Err("could not read it"),

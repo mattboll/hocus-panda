@@ -28,6 +28,7 @@
 //!   application came back or failed (or after [`PATIENCE`]), one
 //!   notification names those that did not come back.
 
+use hocus_words::compositor::session_restore as txt;
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
@@ -627,7 +628,7 @@ impl State {
         crate::shell::notify(
             bus,
             "dialog-warning",
-            not_back_said(&names, self.config.french),
+            not_back_said(&names, self.config.lang),
         );
     }
 
@@ -702,6 +703,15 @@ impl State {
         if !self.session_restore.held {
             self.session_save();
         }
+        if !self.session_flush(EXIT_PATIENCE) {
+            tracing::warn!("the session's last save was not written in time");
+        }
+    }
+
+    /// The compositor ends on a panic of its loop (#778): the last save
+    /// asked is written, and no new one is taken of a state the panic
+    /// left half changed.
+    pub(crate) fn session_end_as_saved(&self) {
         if !self.session_flush(EXIT_PATIENCE) {
             tracing::warn!("the session's last save was not written in time");
         }
@@ -811,18 +821,20 @@ impl State {
 
 /// "Slack et Signal n'ont pas pu être rouvertes." / "Slack and Signal
 /// could not be reopened."
-pub fn not_back_said(names: &[String], french: bool) -> String {
-    let and = if french { " et " } else { " and " };
+pub fn not_back_said(names: &[String], lang: hocus_words::Lang) -> String {
+    let and = txt::AND.get(lang);
     let listed = match names {
         [] => String::new(),
         [one] => one.clone(),
         [rest @ .., last] => format!("{}{and}{last}", rest.join(", ")),
     };
-    match (french, names.len()) {
-        (true, 1) => format!("{listed} n’a pas pu être rouverte."),
-        (true, _) => format!("{listed} n’ont pas pu être rouvertes."),
-        (false, _) => format!("{listed} could not be reopened."),
-    }
+    txt::not_reopened(
+        lang,
+        txt::NotReopened {
+            n: names.len(),
+            listed: &listed,
+        },
+    )
 }
 
 /// The saved session in `dir`; none when there is none or it does not
@@ -1062,15 +1074,18 @@ mod tests {
     fn those_not_back_are_named_in_one_line() {
         let names = |n: &[&str]| n.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
         assert_eq!(
-            not_back_said(&names(&["Slack"]), true),
+            not_back_said(&names(&["Slack"]), hocus_words::Lang::French),
             "Slack n’a pas pu être rouverte."
         );
         assert_eq!(
-            not_back_said(&names(&["Slack", "Signal", "Zoom"]), true),
+            not_back_said(
+                &names(&["Slack", "Signal", "Zoom"]),
+                hocus_words::Lang::French
+            ),
             "Slack, Signal et Zoom n’ont pas pu être rouvertes."
         );
         assert_eq!(
-            not_back_said(&names(&["Slack", "Signal"]), false),
+            not_back_said(&names(&["Slack", "Signal"]), hocus_words::Lang::English),
             "Slack and Signal could not be reopened."
         );
     }

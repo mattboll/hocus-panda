@@ -525,10 +525,12 @@ fn queue(live: &Live, pixels: &[u8], size: (u32, u32), stride: u32) -> bool {
         let stride = stride as usize;
         for y in 0..rows {
             let (from, to) = (y * stride, y * out_stride);
-            if from + row > pixels.len() || to + row > memory.len() {
+            let (Some(from), Some(to_row)) =
+                (pixels.get(from..from + row), memory.get_mut(to..to + row))
+            else {
                 break;
-            }
-            memory[to..to + row].copy_from_slice(&pixels[from..from + row]);
+            };
+            to_row.copy_from_slice(from);
             written = to + out_stride;
         }
     }

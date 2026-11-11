@@ -109,7 +109,8 @@ pub fn white(kelvin: u32) -> [f64; 3] {
     }
     let here = fit(f64::from(kelvin.clamp(1000, NEUTRAL)));
     let neutral = fit(f64::from(NEUTRAL));
-    [0, 1, 2].map(|i| (here[i] / neutral[i]).clamp(0.0, 1.0))
+    let ([r, g, b], [nr, ng, nb]) = (here, neutral);
+    [r / nr, g / ng, b / nb].map(|c: f64| c.clamp(0.0, 1.0))
 }
 
 /// A gamma ramp of `size` entries for each of red, green and blue at

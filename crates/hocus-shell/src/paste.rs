@@ -25,7 +25,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use iced::keyboard::{Key, Modifiers, key::Named};
 use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle, event_created_child,
     globals::{GlobalListContents, registry_queue_init},
@@ -46,20 +45,6 @@ const WAIT: Duration = Duration::from_secs(2);
 const ROOM: usize = 4096;
 /// The types kept per offer: a client may offer many.
 const TYPES: usize = 32;
-
-/// Whether `key` with `modifiers` asks to paste: `Ctrl+V` (with Shift too,
-/// as terminals take it) or `Shift+Insert`. The key is the one the layout
-/// types, without the modifiers.
-pub fn asks(key: &Key, modifiers: Modifiers) -> bool {
-    if modifiers.alt() || modifiers.logo() {
-        return false;
-    }
-    match key {
-        Key::Character(c) => modifiers.control() && c.eq_ignore_ascii_case("v"),
-        Key::Named(Named::Insert) => modifiers.shift() && !modifiers.control(),
-        _ => false,
-    }
-}
 
 /// How a field takes the clipboard's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,21 +381,6 @@ impl Dispatch<WlDataOffer, Types> for Offers {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ctrl_v_and_shift_insert_paste_and_nothing_else_does() {
-        let v = Key::Character("v".into());
-        let ctrl = Modifiers::CTRL;
-        assert!(asks(&v, ctrl));
-        assert!(asks(&v, ctrl | Modifiers::SHIFT));
-        assert!(asks(&Key::Named(Named::Insert), Modifiers::SHIFT));
-        assert!(!asks(&v, Modifiers::empty()));
-        assert!(!asks(&v, ctrl | Modifiers::ALT));
-        assert!(!asks(&v, ctrl | Modifiers::LOGO));
-        assert!(!asks(&Key::Character("c".into()), ctrl));
-        assert!(!asks(&Key::Named(Named::Insert), Modifiers::empty()));
-        assert!(!asks(&Key::Named(Named::Insert), ctrl | Modifiers::SHIFT));
-    }
 
     #[test]
     fn line_breaks_and_other_controls_are_dropped() {

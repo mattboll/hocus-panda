@@ -96,7 +96,7 @@ impl Sector {
     pub fn toward(dx: f64, dy: f64) -> Self {
         let degrees = dy.atan2(dx).to_degrees() + 90.0;
         let index = (degrees / 45.0).round().rem_euclid(8.0) as usize;
-        Self::ALL[index % 8]
+        Self::ALL.get(index % 8).copied().unwrap_or(Self::Up)
     }
 
     /// What it does.
@@ -212,11 +212,11 @@ pub struct Radial {
 
 impl Radial {
     fn enabled(&self, sector: Sector) -> bool {
-        self.enabled[sector.index()]
+        self.enabled.get(sector.index()).copied().unwrap_or(false)
     }
 
     pub fn is_on(&self, sector: Sector) -> bool {
-        self.on[sector.index()]
+        self.on.get(sector.index()).copied().unwrap_or(false)
     }
 
     fn relative(&self, at: (f64, f64)) -> (f64, f64) {
@@ -355,7 +355,7 @@ impl Radial {
                     (Some(p), false) => (p + 1) % n,
                     (Some(p), true) => (p + n - 1) % n,
                 };
-                self.light(Some(order[next]), now);
+                self.light(order.get(next).copied(), now);
                 Outcome::Nothing
             }
             Key::Enter => self.lit.map_or(Outcome::Nothing, Outcome::Pick),
@@ -424,7 +424,7 @@ pub struct Going {
 impl State {
     /// Opens window `id`'s menu at the pointer's `at` (global).
     pub fn open_radial(&mut self, id: WindowId, at: Point<f64, Logical>) {
-        if self.radial.is_some() || !self.windows.contains_key(&id) {
+        if self.radial_menu.open.is_some() || !self.windows.contains_key(&id) {
             return;
         }
         let Some(output) = self
@@ -444,13 +444,18 @@ impl State {
         let strip = self.strip(&home);
         let desktop = self.model.desktop(id);
         let other = self.next_screen(&home);
-        let mut enabled = [true; 8];
-        enabled[Sector::Left.index()] = desktop > 0;
-        enabled[Sector::Right.index()] = desktop + 1 < strip.count();
-        enabled[Sector::DownRight.index()] = other.is_some();
-        let mut on = [false; 8];
-        on[Sector::UpRight.index()] = self.model.is_above(id);
-        on[Sector::UpLeft.index()] = self.model.is_everywhere(id);
+        // In the sectors' order, as `Sector::index` reads them.
+        let enabled = Sector::ALL.map(|sector| match sector {
+            Sector::Left => desktop > 0,
+            Sector::Right => desktop + 1 < strip.count(),
+            Sector::DownRight => other.is_some(),
+            _ => true,
+        });
+        let on = Sector::ALL.map(|sector| match sector {
+            Sector::UpRight => self.model.is_above(id),
+            Sector::UpLeft => self.model.is_everywhere(id),
+            _ => false,
+        });
         let agent = self
             .agents_shown()
             .iter()
@@ -465,8 +470,8 @@ impl State {
         let now = self.now();
         tracing::debug!(window = id.0, ?centre, "the radial menu opens");
         self.end_popup_grab();
-        self.radial_out = None;
-        self.radial = Some(Radial {
+        self.radial_menu.out = None;
+        self.radial_menu.open = Some(Radial {
             window: id,
             output,
             centre,
@@ -496,13 +501,13 @@ impl State {
             );
             pointer.frame(self);
         }
-        self.frame_cursor = None;
+        self.pointer.frame_cursor = None;
         self.redraw = true;
     }
 
     /// The menu goes, `picked` flashing; its action runs at once.
     pub fn close_radial(&mut self, picked: Option<Sector>) {
-        let Some(radial) = self.radial.take() else {
+        let Some(radial) = self.radial_menu.open.take() else {
             return;
         };
         let now = self.now();
@@ -511,7 +516,7 @@ impl State {
         } else {
             CLOSE
         };
-        self.radial_out = Some(Going {
+        self.radial_menu.out = Some(Going {
             radial: radial.clone(),
             picked,
             tween: Tween::new(now, duration, Bezier::EASE_IN),
@@ -536,7 +541,7 @@ impl State {
     /// The pointer moved while the menu is open.
     pub(crate) fn radial_motion(&mut self, at: Point<f64, Logical>) {
         let now = self.now();
-        let Some(radial) = &mut self.radial else {
+        let Some(radial) = &mut self.radial_menu.open else {
             return;
         };
         let lit = radial.lit;
@@ -544,7 +549,7 @@ impl State {
             Outcome::Pick(sector) => self.close_radial(Some(sector)),
             Outcome::Close => self.close_radial(None),
             Outcome::Nothing => {
-                if self.radial.as_ref().is_some_and(|r| r.lit != lit) {
+                if self.radial_menu.open.as_ref().is_some_and(|r| r.lit != lit) {
                     self.redraw = true;
                 }
             }
@@ -554,7 +559,7 @@ impl State {
     /// A press while the menu is open.
     pub(crate) fn radial_press(&mut self, at: Point<f64, Logical>) {
         let now = self.now();
-        let Some(radial) = &mut self.radial else {
+        let Some(radial) = &mut self.radial_menu.open else {
             return;
         };
         let outcome = radial.pressed((at.x, at.y), now);
@@ -569,7 +574,7 @@ impl State {
     /// A key while the menu is open.
     pub(crate) fn radial_key(&mut self, key: Key) {
         let now = self.now();
-        let Some(radial) = &mut self.radial else {
+        let Some(radial) = &mut self.radial_menu.open else {
             return;
         };
         let outcome = radial.key(key, now);
@@ -583,11 +588,16 @@ impl State {
 
     /// A window went: its menu goes.
     pub(crate) fn radial_window_gone(&mut self, id: WindowId) {
-        if self.radial.as_ref().is_some_and(|r| r.window == id) {
+        if self
+            .radial_menu
+            .open
+            .as_ref()
+            .is_some_and(|r| r.window == id)
+        {
             self.close_radial(None);
         }
-        if self.radial_press.is_some_and(|p| p.window == id) {
-            self.radial_press = None;
+        if self.radial_menu.press.is_some_and(|p| p.window == id) {
+            self.radial_menu.press = None;
         }
     }
 
@@ -595,7 +605,7 @@ impl State {
     pub fn tick_radial(&mut self, now: Duration) -> bool {
         let mut moving = false;
         let lively = self.pandas_lively();
-        if let Some(radial) = &mut self.radial {
+        if let Some(radial) = &mut self.radial_menu.open {
             moving |= now < radial.opened + OPEN;
             moving |= radial.tick(now);
             // The panda plays its mood as the menu opens; a waiting one
@@ -606,9 +616,9 @@ impl State {
                     state == crate::overview::AgentState::Waiting || now < radial.opened + burst;
             }
         }
-        if let Some(going) = &self.radial_out {
+        if let Some(going) = &self.radial_menu.out {
             if going.tween.done(now) {
-                self.radial_out = None;
+                self.radial_menu.out = None;
             } else {
                 moving = true;
             }
@@ -623,7 +633,7 @@ impl State {
         now: Duration,
     ) -> Option<(&Radial, f32, f64, Option<Sector>)> {
         let reduced = self.reduced_motion();
-        if let Some(radial) = &self.radial {
+        if let Some(radial) = &self.radial_menu.open {
             let t = if radial.opened + OPEN <= now {
                 1.0
             } else {
@@ -636,7 +646,7 @@ impl State {
             };
             return Some((radial, t as f32, scale, None));
         }
-        let going = self.radial_out.as_ref()?;
+        let going = self.radial_menu.out.as_ref()?;
         // The flash first, then the fade.
         let flash = going.picked.map_or(Duration::ZERO, |_| FLASH);
         let since = now.saturating_sub(going.tween.start);
@@ -669,7 +679,8 @@ impl State {
         }
         outputs.sort_by_key(|(_, at)| *at);
         let at = outputs.iter().position(|(o, _)| o == output)?;
-        Some(outputs[(at + 1) % outputs.len()].0.clone())
+        let (next, _) = outputs.get((at + 1) % outputs.len())?;
+        Some(next.clone())
     }
 
     /// Runs `action` on window `id`, from its radial menu or the bar's.

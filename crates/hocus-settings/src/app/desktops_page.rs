@@ -10,6 +10,7 @@
 //! file is written back. Adding one is the count written: the compositor
 //! appends an empty desktop on every screen.
 
+use hocus_words::settings::app_desktops_page as words;
 use std::time::Duration;
 
 use iced::{
@@ -25,7 +26,6 @@ use super::{
 };
 use crate::{
     desktops as model,
-    lang::{Lang, w},
     model::{Icon, SectionId, Setting, Value},
     screens::Said,
     store::{KeyEdit, Raw, Slot},
@@ -288,11 +288,15 @@ impl App {
         let count = self.desktop_count();
         let after = model::trimmed(model::renamed(&names, index, &text), count);
         let lang = self.lang;
-        let said = match (lang, text.is_empty()) {
-            (Lang::French, false) => format!("Nom du bureau {} : {text}", index + 1),
-            (Lang::French, true) => format!("Nom du bureau {} : aucun", index + 1),
-            (Lang::English, false) => format!("Desktop {}’s name: {text}", index + 1),
-            (Lang::English, true) => format!("Desktop {}’s name: none", index + 1),
+        let said = match text.is_empty() {
+            false => words::desktop_s_name(
+                lang,
+                words::DesktopSName {
+                    index_1: index + 1,
+                    text: &text,
+                },
+            ),
+            true => words::desktop_s_name_none(lang, index + 1),
         };
         if self.writable() {
             self.ask(
@@ -324,10 +328,7 @@ impl App {
         let Some(slot) = self.desktops_slot(model::COUNT) else {
             return;
         };
-        let said = match self.lang {
-            Lang::French => format!("Bureau {} ajouté, sur chaque écran", count + 1),
-            Lang::English => format!("Desktop {} added, on every screen", count + 1),
-        };
+        let said = words::desktop_added_on_every_screen(self.lang, count + 1);
         self.ask(
             slot,
             Raw::Set(Value::Int(i64::try_from(count + 1).unwrap_or(4))),
@@ -398,14 +399,8 @@ impl App {
         }
         let said = KeysSaid {
             done: model::removed_said(&name, moved.len(), &to, lang),
-            undone: match lang {
-                Lang::French => format!("Annulé : « {name} » revient."),
-                Lang::English => format!("Undone: “{name}” is back."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : « {name} » retiré."),
-                Lang::English => format!("Redone: “{name}” removed."),
-            },
+            undone: words::undone_is_back(lang, &name),
+            redone: words::redone_removed(lang, &name),
             row: model::COUNT,
         };
         tracing::info!(
@@ -569,29 +564,16 @@ impl App {
         let lang = self.lang;
         match id {
             model::ANIMATION if self.reduced_motion => Some(
-                w(
-                    "Un fondu court tant que Mouvements réduits est activé.",
-                    "A short fade while Reduced motion is on.",
-                )
-                .get(lang)
-                .to_owned(),
+                words::A_SHORT_FADE_WHILE_REDUCED_MOTION
+                    .get(lang)
+                    .to_owned(),
             ),
-            model::WOBBLE if self.reduced_motion => Some(
-                w(
-                    "Coupées tant que Mouvements réduits est activé.",
-                    "Off while Reduced motion is on.",
-                )
-                .get(lang)
-                .to_owned(),
-            ),
-            model::INK if self.desktops_word(model::MOVE_KEY) == Some("super") => Some(
-                w(
-                    "Super + glisser déplace les fenêtres : l’encre ne se lance plus. Choisis Alt pour la retrouver.",
-                    "Super+drag moves windows: the ink no longer starts. Choose Alt to get it back.",
-                )
-                .get(lang)
-                .to_owned(),
-            ),
+            model::WOBBLE if self.reduced_motion => {
+                Some(words::OFF_WHILE_REDUCED_MOTION_IS_ON.get(lang).to_owned())
+            }
+            model::INK if self.desktops_word(model::MOVE_KEY) == Some("super") => {
+                Some(words::SUPER_DRAG_MOVES_WINDOWS_THE_INK.get(lang).to_owned())
+            }
             _ => None,
         }
     }
@@ -602,25 +584,15 @@ impl App {
 
     /// Under the wobble's row with reduced motion: the link to it.
     pub(super) fn desktops_row_extra(&self, setting: &Setting) -> Option<El<'_>> {
-        (setting.id == model::WOBBLE && self.reduced_motion).then(|| {
-            self.desktops_link(
-                REDUCED,
-                w("Accessibilité ›", "Accessibility ›").get(self.lang),
-            )
-        })
+        (setting.id == model::WOBBLE && self.reduced_motion)
+            .then(|| self.desktops_link(REDUCED, words::ACCESSIBILITY.get(self.lang)))
     }
 
     /// A choice's toast, when it says more than its value: Super to move
     /// says the ink no longer starts.
     pub(super) fn desktops_toast(&self, slot: Slot, value: &Value) -> Option<String> {
-        (slot.setting == model::MOVE_KEY && *value == Value::Word("super")).then(|| {
-            w(
-                "Déplacer : Super + glisser · l’encre ne se lance plus",
-                "Move: Super + drag · the ink no longer starts",
-            )
-            .get(self.lang)
-            .to_owned()
-        })
+        (slot.setting == model::MOVE_KEY && *value == Value::Word("super"))
+            .then(|| words::MOVE_SUPER_DRAG_THE_INK_NO.get(self.lang).to_owned())
     }
 
     // --- What it draws ----------------------------------------------------------------
@@ -656,18 +628,11 @@ impl App {
             row![
                 icon(Icon::Keyboard, 15.0, FAINT.get()),
                 t(
-                    w(
-                        "Les raccourcis des fenêtres et des bureaux se règlent dans",
-                        "The windows’ and desktops’ shortcuts are set in",
-                    )
-                    .get(lang),
+                    words::THE_WINDOWS_AND_DESKTOPS_SHORTCUTS_ARE.get(lang),
                     13.0,
                     FAINT.get()
                 ),
-                self.desktops_link(
-                    model::SHORTCUTS,
-                    w("Clavier et raccourcis ›", "Keyboard and shortcuts ›").get(lang),
-                ),
+                self.desktops_link(model::SHORTCUTS, words::KEYBOARD_AND_SHORTCUTS.get(lang),),
             ]
             .spacing(6)
             .align_y(Alignment::Center)
@@ -697,11 +662,9 @@ impl App {
             column![head, card_box(body.into())].spacing(8).into()
         };
         let count = self.desktop_count();
-        let per_screen = match (lang, count) {
-            (Lang::French, 1) => "1 bureau par écran".to_owned(),
-            (Lang::French, n) => format!("{n} bureaux par écran"),
-            (Lang::English, 1) => "1 desktop per screen".to_owned(),
-            (Lang::English, n) => format!("{n} desktops per screen"),
+        let per_screen = match count {
+            1 => words::N_1_DESKTOP_PER_SCREEN.get(lang).to_owned(),
+            n => words::desktops_per_screen(lang, n),
         };
         page = page.push(group(
             head(model::DESKTOPS.label.get(lang), Some(per_screen)),
@@ -724,15 +687,8 @@ impl App {
         page = page.push(
             column![
                 head(
-                    w("ESSAYER ICI", "TRY IT HERE").get(lang),
-                    Some(
-                        w(
-                            "Ce que tu fais ici n’est pas écrit",
-                            "Nothing done here is written",
-                        )
-                        .get(lang)
-                        .to_owned(),
-                    ),
+                    words::TRY_IT_HERE.get(lang),
+                    Some(words::NOTHING_DONE_HERE_IS_WRITTEN.get(lang).to_owned(),),
                 ),
                 card_box(self.trial_card()),
             ]
@@ -885,12 +841,7 @@ impl App {
             let mut add = button(
                 row![
                     t("+", 14.0, MINT.get()).font(SEMIBOLD),
-                    t(
-                        w("Ajouter un bureau", "Add a desktop").get(lang).to_owned(),
-                        13.0,
-                        DIM.get()
-                    )
-                    .font(SEMIBOLD),
+                    t(words::ADD_A_DESKTOP.get(lang).to_owned(), 13.0, DIM.get()).font(SEMIBOLD),
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),

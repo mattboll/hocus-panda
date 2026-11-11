@@ -72,8 +72,7 @@ fn ready(shell: bool) -> bool {
                 .is_ok_and(|s| s.success())
         });
     if !fakes::available() || !tools {
-        eprintln!("pipewire or its tools missing: skipped");
-        return false;
+        common::missing("pipewire, pw-dump, wpctl and pw-metadata");
     }
     true
 }
@@ -148,7 +147,7 @@ impl Bed {
         };
         let mut config = Config {
             plain_background: true,
-            french: true,
+            lang: hocus_words::Lang::French,
             pipewire_remote: Some(fakes.pw_socket()),
             ..Config::default()
         };

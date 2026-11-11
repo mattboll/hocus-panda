@@ -16,6 +16,8 @@ workspace = true
 # The configuration file read and written back in place, as the Settings
 # do.
 hocus-config.workspace = true
+# Its files' errors, by what went wrong (MIT or Apache-2.0).
+thiserror.workspace = true
 # Times: instants, dates and the system's time zones; serde for the cache.
 jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
 serde = { workspace = true, features = ["derive"] }

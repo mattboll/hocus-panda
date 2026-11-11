@@ -153,7 +153,7 @@ impl State {
     /// Whether going to an agent moves: neither reduced motion nor a
     /// compositor on the CPU.
     pub fn going_moves(&self) -> bool {
-        !self.reduced_motion() && self.blur
+        !self.reduced_motion() && self.graphics.blur
     }
 
     /// Goes to window `id` from `from` (global, its row's left edge and

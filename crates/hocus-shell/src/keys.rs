@@ -471,6 +471,10 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        // A press in a field extends its selection with Shift held.
+        if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
+            crate::field::entry::modifiers(*modifiers);
+        }
         let (kept, elsewhere) = arrived(self.id, event);
         for kept in &kept {
             self.content.as_widget_mut().update(

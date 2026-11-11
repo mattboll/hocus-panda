@@ -18,6 +18,7 @@
 //! compositor blurs the desktop behind it and fades it in.
 
 pub mod draw;
+pub mod view;
 
 use std::{
     path::{Path, PathBuf},
@@ -28,11 +29,14 @@ use hocus_link::CaptureAsk;
 use iced::{
     Point, Rectangle,
     advanced::image::{Allocation, Handle},
-    keyboard, window,
+    window,
 };
 
 use super::{Shot, marks, marks::Mark, words};
-use crate::popover::Effect;
+use crate::{
+    field::{self, Entry},
+    popover::Effect,
+};
 
 /// The editor's tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,16 +72,18 @@ pub const LEAST: f32 = 8.0;
 /// The text's field: its text 7 in from where it was clicked.
 pub const TEXT_IN: f32 = 7.0;
 
-/// Something to press in the editor.
+/// The editor's controls (the kit's, [`view`]): what tests and screen
+/// readers know them by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
+pub enum Control {
     Tool(Tool),
     Colour(usize),
     Undo,
+    /// The text being typed.
+    Text,
     Delete,
     SaveAs,
     Copy,
-    Image,
 }
 
 /// A drag on the image, from where to where (the surface's frame).
@@ -87,11 +93,25 @@ pub struct Drag {
     pub to: Point,
 }
 
-/// A text being typed, where it was clicked (the surface's frame).
-#[derive(Debug, Clone, PartialEq)]
+/// A text being typed, where it was clicked (the surface's frame): the
+/// shell's text field (#771), on one line.
+#[derive(Debug, Clone)]
 pub struct Typing {
     pub at: Point,
-    pub text: String,
+    pub text: Entry,
+}
+
+/// The characters a text takes at most.
+const TEXT_MOST: usize = 200;
+
+impl Typing {
+    /// An empty text at `at`.
+    pub fn at(at: Point) -> Self {
+        Self {
+            at,
+            text: Entry::new(field::Kind::Line, TEXT_MOST),
+        }
+    }
 }
 
 /// Where the editor is.
@@ -128,8 +148,10 @@ pub struct Editor {
     pub undone: Vec<Mark>,
     pub drag: Option<Drag>,
     pub typing: Option<Typing>,
-    pub hover: Option<Target>,
-    pub pressed: Option<Target>,
+    /// Where the keyboard's ring is.
+    pub focus: Option<Control>,
+    /// Where its pieces are, as its log last said it (for tests).
+    pub laid: String,
     /// Where "Enregistrer sous…" last wrote it.
     pub saved_as: Option<String>,
 }
@@ -231,8 +253,8 @@ fn shown(shot: Shot, image: Arc<marks::Image>, made: Made, scale: f32) {
             undone: Vec::new(),
             drag: None,
             typing: None,
-            hover: None,
-            pressed: None,
+            focus: None,
+            laid: String::new(),
             saved_as: None,
         });
         true
@@ -294,7 +316,7 @@ impl Editor {
 
     /// The text typed as a mark, if it says something.
     pub fn text_mark(&self, image: Rectangle, typing: &Typing, z: f32) -> Option<Mark> {
-        let text = typing.text.trim();
+        let text = typing.text.text().trim();
         if text.is_empty() {
             return None;
         }
@@ -356,77 +378,24 @@ impl Editor {
     }
 }
 
-/// What a key does in the editor: whether it drew something.
-pub fn key(
-    id: window::Id,
-    key: &keyboard::Key,
-    modifiers: keyboard::Modifiers,
-    text: Option<&str>,
-    image: Rectangle,
-    z: f32,
-) -> bool {
-    use keyboard::key::Named;
-    enum Then {
-        Nothing,
-        Drawn,
-        Close,
-    }
-    let then = with(|editor| {
-        let Some(editor) = editor.as_mut().filter(|e| e.phase == Phase::Shown(id)) else {
-            return Then::Nothing;
+/// The clipboard's text, on one line, into the text being typed at its
+/// caret, read off the loop.
+pub fn paste() {
+    crate::paste::request(crate::paste::Clean::Spaced, move |pasted| {
+        let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+            return;
         };
-        if let Some(typing) = editor.typing.as_mut() {
-            return match key {
-                keyboard::Key::Named(Named::Escape) => {
-                    editor.typing = None;
-                    Then::Drawn
-                }
-                keyboard::Key::Named(Named::Enter) => {
-                    editor.commit_text(image, z);
-                    Then::Drawn
-                }
-                keyboard::Key::Named(Named::Backspace) => {
-                    typing.text.pop();
-                    Then::Drawn
-                }
-                _ if modifiers.control() || modifiers.alt() || modifiers.logo() => Then::Nothing,
-                _ => match text.filter(|t| !t.chars().any(char::is_control)) {
-                    Some(text) => {
-                        typing.text.push_str(text);
-                        Then::Drawn
-                    }
-                    None => Then::Nothing,
-                },
-            };
-        }
-        let z_key = matches!(key, keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z"));
-        match key {
-            _ if z_key && modifiers.control() && modifiers.shift() => {
-                if editor.redo() {
-                    Then::Drawn
-                } else {
-                    Then::Nothing
-                }
-            }
-            _ if z_key && modifiers.control() => {
-                if editor.undo() {
-                    Then::Drawn
-                } else {
-                    Then::Nothing
-                }
-            }
-            keyboard::Key::Named(Named::Escape) => Then::Close,
-            _ => Then::Nothing,
+        let pasted = with(|editor| {
+            editor
+                .as_mut()
+                .and_then(|e| e.typing.as_mut())
+                .is_some_and(|typing| typing.text.paste(pasted))
+        });
+        if pasted {
+            crate::ui::touch();
+            crate::popover::send(vec![Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE)]);
         }
     });
-    match then {
-        Then::Nothing => false,
-        Then::Drawn => true,
-        Then::Close => {
-            close(Closed::Kept);
-            true
-        }
-    }
 }
 
 /// How the editor closes.
@@ -481,9 +450,9 @@ pub fn close(how: Closed) {
 }
 
 /// "Copier et fermer", "Supprimer", "Enregistrer sous…".
-pub fn press(target: Target, image: Rectangle, z: f32) {
-    match target {
-        Target::Copy => {
+pub fn press(control: Control, image: Rectangle, z: f32) {
+    match control {
+        Control::Copy => {
             with(|e| {
                 if let Some(e) = e.as_mut() {
                     e.commit_text(image, z);
@@ -491,8 +460,8 @@ pub fn press(target: Target, image: Rectangle, z: f32) {
             });
             close(Closed::Annotated);
         }
-        Target::Delete => close(Closed::Deleted),
-        Target::SaveAs => save_as(image, z),
+        Control::Delete => close(Closed::Deleted),
+        Control::SaveAs => save_as(image, z),
         _ => {}
     }
 }
@@ -580,14 +549,17 @@ fn back_from_choosing(saved: Option<String>) {
             Phase::Choosing => {
                 let id = window::Id::unique();
                 editor.phase = Phase::Shown(id);
-                editor.hover = None;
-                editor.pressed = None;
+                editor.focus = None;
+                editor.laid.clear();
                 Some(Effect::CaptureEditor {
                     id,
                     output: editor.shot.output.clone(),
                 })
             }
-            Phase::Shown(_) => Some(Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE)),
+            Phase::Shown(_) => {
+                crate::ui::touch();
+                Some(Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE))
+            }
         }
     });
     if let Some(effect) = reopen {
@@ -693,8 +665,8 @@ mod tests {
             undone: Vec::new(),
             drag: None,
             typing: None,
-            hover: None,
-            pressed: None,
+            focus: None,
+            laid: String::new(),
             saved_as: None,
         }
     }
@@ -773,15 +745,10 @@ mod tests {
     fn a_text_says_something_or_is_nothing() {
         let e = editor(1000, 500);
         let image = Rectangle::new(Point::ORIGIN, Size::new(1000.0, 500.0));
-        let typing = Typing {
-            at: Point::new(100.0, 50.0),
-            text: "  ".to_owned(),
-        };
+        let mut typing = Typing::at(Point::new(100.0, 50.0));
+        typing.text.set("  ");
         assert_eq!(e.text_mark(image, &typing, 1.5), None);
-        let typing = Typing {
-            text: " Ici ".to_owned(),
-            ..typing
-        };
+        typing.text.set(" Ici ");
         assert_eq!(
             e.text_mark(image, &typing, 1.5),
             Some(Mark::Text {

@@ -38,7 +38,7 @@ impl State {
         self.windows
             .values()
             .map(|m| &m.window)
-            .chain(self.unmapped.iter())
+            .chain(self.arrivals.unmapped.iter())
             .find(|w| w.x11_surface() == Some(surface))
             .cloned()
     }
@@ -71,7 +71,10 @@ impl XwmHandler for State {
         // The window manager only calls back once it exists: it is the one
         // calling.
         #[allow(clippy::expect_used)]
-        self.xwm.as_mut().expect("an X11 window manager calls back")
+        self.xwayland
+            .wm
+            .as_mut()
+            .expect("an X11 window manager calls back")
     }
 
     fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
@@ -287,7 +290,7 @@ impl XwmHandler for State {
 
 impl XWaylandShellHandler for State {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.xwayland_shell_state
+        &mut self.protocols.xwayland_shell_state
     }
 
     /// An X11 window maps before XWayland gives it a surface: the keyboard
@@ -394,7 +397,7 @@ impl XwmHandler for App {
 
 impl XWaylandShellHandler for App {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.state.xwayland_shell_state
+        &mut self.state.protocols.xwayland_shell_state
     }
 
     fn surface_associated(&mut self, xwm: XwmId, wl_surface: WlSurface, surface: X11Surface) {

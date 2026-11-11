@@ -13,13 +13,37 @@ archive.include = [
     { path = "debug/hocus-settings.d", relative-to = "target", on-missing = "error" },
 ]
 
-# CI's runs. A test that fails by chance is quarantined here while its
-# issue is fixed, so it holds no one; the fix takes it out again. Run
-# locally, the default profile still runs it. To quarantine one:
-#   default-filter = "not (package(CRATE) & test(=MODULE::TEST))"   # its issue
+# CI's runs. A test that fails by chance is quarantined here, in
+# `default-filter` below, while its issue is fixed, so it holds no one; the
+# fix takes it out again (docs/workflow.md, "A test that fails by chance").
+# Run locally, the default profile still runs it. A line of the filter:
+#   | (package(CRATE) & test(=MODULE::TEST))   # its issue
 # (an integration test is named by its file: `settings_sound::the_test`, in
 # its crate's one test binary, `main`.)
 [profile.ci]
 # A test still running after 3 min is stopped and fails: one that hangs once
 # held a pull request's run for more than half an hour (#645).
 slow-timeout = { period = "60s", terminate-after = 3 }
+# Every test runs whatever fails before it: a first failure hid the rest of
+# its shard, and the next run found the next one (#769).
+fail-fast = false
+# No retries: a test that passes at its second try has failed, and is
+# reported as such (docs/workflow.md, "A test that fails by chance").
+retries = 0
+# What CI's machines lack (.github/workflows/ci.yml installs neither
+# Xwayland, nor a terminal, nor AT-SPI's launcher and Python binding): a
+# test fails without the programs it needs, so these are left out there,
+# by name, and run where the programs are (the default profile).
+# Installing them on CI takes them out of this list.
+default-filter = """
+not (
+    (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
+    | (package(hocus-compositor) & (
+        test(=decorations::an_x11_window_gets_the_grip_unless_its_motif_hints_ask_for_no_decorations)
+        | test(=scales::an_x11_window_on_the_screen_at_2_shows_at_its_size_enlarged)
+        | test(=desktop_drop::an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there)
+        | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
+        | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
+    ))
+)
+"""

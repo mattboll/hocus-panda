@@ -21,7 +21,9 @@ pub mod editor;
 pub mod marks;
 pub mod portal;
 pub mod thumb;
+pub mod toolbar;
 
+use hocus_words::shell::capture as txt;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
@@ -41,45 +43,43 @@ use crate::{clock::time::Lang, popover::Effect};
 /// The toolbar's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     pub fn mode(self, mode: CaptureMode) -> &'static str {
         match mode {
-            CaptureMode::Area => self.pick("Zone", "Area"),
-            CaptureMode::Window => self.pick("Fenêtre", "Window"),
-            CaptureMode::Screen => self.pick("Écran", "Screen"),
-            CaptureMode::All => self.pick("Tous les écrans", "All screens"),
+            CaptureMode::Area => self.pick(txt::AREA),
+            CaptureMode::Window => self.pick(txt::WINDOW),
+            CaptureMode::Screen => self.pick(txt::SCREEN),
+            CaptureMode::All => self.pick(txt::ALL_SCREENS),
         }
     }
 
     pub fn delay(self, seconds: u8) -> String {
         if seconds == 0 {
-            self.pick("Tout de suite", "Now").to_owned()
+            self.pick(txt::NOW).to_owned()
         } else {
             format!("{seconds}\u{a0}s")
         }
     }
 
     pub fn shoot(self) -> &'static str {
-        self.pick("Capturer", "Capture")
+        self.pick(txt::CAPTURE)
     }
 
     /// The switch's tabs (5.10).
     pub fn kind(self, video: bool) -> &'static str {
         if video {
-            self.pick("Vidéo", "Video")
+            self.pick(txt::VIDEO)
         } else {
             "Photo"
         }
@@ -87,116 +87,135 @@ impl Words {
 
     /// The computer's sound, and the microphone (5.10).
     pub fn sound(self) -> &'static str {
-        self.pick("Son", "Sound")
+        self.pick(txt::SOUND)
     }
 
     pub fn micro(self) -> &'static str {
-        self.pick("Micro", "Mic")
+        self.pick(txt::MIC)
     }
 
     /// Vidéo's red button.
     pub fn start(self) -> &'static str {
-        self.pick("Démarrer", "Start")
+        self.pick(txt::START)
     }
 
     /// Under the thumbnail (5.9).
     pub fn kept(self) -> &'static str {
-        self.pick("Copiée · enregistrée", "Copied · saved")
+        self.pick(txt::COPIED_SAVED)
     }
 
     pub fn annotate(self) -> &'static str {
-        self.pick("Annoter", "Annotate")
+        self.pick(txt::ANNOTATE)
     }
 
     pub fn open_folder(self) -> &'static str {
-        self.pick("Ouvrir le dossier", "Open folder")
+        self.pick(txt::OPEN_FOLDER)
     }
 
     pub fn delete(self) -> &'static str {
-        self.pick("Supprimer", "Delete")
+        self.pick(txt::DELETE)
     }
 
     /// The editor's tools.
     pub fn tool(self, tool: editor::Tool) -> &'static str {
         match tool {
-            editor::Tool::Arrow => self.pick("Flèche", "Arrow"),
-            editor::Tool::Box => self.pick("Cadre", "Box"),
-            editor::Tool::Text => self.pick("Texte", "Text"),
-            editor::Tool::Blur => self.pick("Flou", "Blur"),
+            editor::Tool::Arrow => self.pick(txt::ARROW),
+            editor::Tool::Box => self.pick(txt::BOX),
+            editor::Tool::Text => self.pick(txt::TEXT),
+            editor::Tool::Blur => self.pick(txt::BLUR),
         }
     }
 
     /// What the text's field shows while empty.
     pub fn text_hint(self) -> &'static str {
-        self.pick("Texte", "Text")
+        self.pick(txt::TEXT)
+    }
+
+    /// The pointer's button, for screen readers.
+    pub fn pointer(self) -> &'static str {
+        self.pick(txt::SHOW_THE_POINTER)
+    }
+
+    /// The toolbar, for screen readers.
+    pub fn toolbar(self) -> &'static str {
+        self.pick(txt::SCREENSHOT)
+    }
+
+    /// The editor's colours, for screen readers.
+    pub fn colour(self, i: usize) -> &'static str {
+        match i {
+            0 => self.pick(txt::RED),
+            1 => self.pick(txt::AMBER),
+            2 => self.pick(txt::GREEN),
+            3 => self.pick(txt::BLUE),
+            _ => self.pick(txt::WHITE),
+        }
+    }
+
+    pub fn undo(self) -> &'static str {
+        self.pick(txt::UNDO)
+    }
+
+    /// The editor, for screen readers.
+    pub fn editor(self) -> &'static str {
+        self.pick(txt::ANNOTATE_THE_CAPTURE)
     }
 
     pub fn save_as(self) -> &'static str {
-        self.pick("Enregistrer sous…", "Save as…")
+        self.pick(txt::SAVE_AS)
     }
 
     pub fn copy_and_close(self) -> &'static str {
-        self.pick("Copier et fermer", "Copy and close")
+        self.pick(txt::COPY_AND_CLOSE)
     }
 
     /// The file chooser's title.
     pub fn save_title(self) -> &'static str {
-        self.pick("Enregistrer la capture", "Save the capture")
+        self.pick(txt::SAVE_THE_CAPTURE)
     }
 
     /// Where "Save as…" wrote it, under the image.
     pub fn saved_as(self, name: &str) -> String {
-        if self.fr {
-            format!("Enregistrée : {name}")
-        } else {
-            format!("Saved: {name}")
-        }
+        txt::saved_2(self.lang, name)
     }
 
     /// The name a copy saved without a file chooser takes, beside the
     /// capture, in its format: "Capture du … (annotée).png".
     pub fn annotated_name(self, stem: &str, extension: &str) -> String {
-        if self.fr {
-            format!("{stem} (annotée).{extension}")
-        } else {
-            format!("{stem} (annotated).{extension}")
-        }
+        txt::annotated(self.lang, txt::Annotated { extension, stem })
     }
 
     /// The capture in the notifications' history: its application's name.
     pub fn screenshot(self) -> &'static str {
-        self.pick("Capture d'écran", "Screenshot")
+        self.pick(txt::SCREENSHOT)
     }
 
     /// A recording (5.10): under its thumbnail, "Enregistrée · MP4".
     pub fn recorded(self, format: RecordFormat) -> String {
-        format!("{} · {}", self.pick("Enregistrée", "Saved"), format.label())
+        format!("{} · {}", self.pick(txt::SAVED), format.label())
     }
 
     /// Its button: the default player.
     pub fn open(self) -> &'static str {
-        self.pick("Ouvrir", "Open")
+        self.pick(txt::OPEN)
     }
 
     /// The recording in the notifications' history: its application's
     /// name.
     pub fn screen_recording(self) -> &'static str {
-        self.pick("Enregistrement d'écran", "Screen recording")
+        self.pick(txt::SCREEN_RECORDING)
     }
 
     /// A recording that could not be saved: its toast.
     pub fn not_recorded(self) -> &'static str {
-        self.pick(
-            "L'enregistrement n'a pas pu être enregistré",
-            "The recording could not be saved",
-        )
+        self.pick(txt::THE_RECORDING_COULD_NOT_BE_SAVED)
     }
 
     /// The toast once taken: what, copied, and where it was saved.
     pub fn captured(self, captured: &Captured) -> String {
         let saved = !captured.folder.is_empty();
         let folder = &captured.folder;
-        if self.fr {
+        if self.lang == Lang::French {
             // Each its agreement: une zone, une fenêtre, un écran.
             let (what, copied, kept) = match captured.mode {
                 CaptureMode::Area => (
@@ -519,9 +538,6 @@ impl Button {
 pub struct Toolbar {
     pub id: window::Id,
     pub bar: CaptureBar,
-    /// The button under the pointer, and the one pressed.
-    pub hover: Option<Button>,
-    pub pressed: Option<Button>,
 }
 
 static TOOLBAR: Mutex<Option<Toolbar>> = Mutex::new(None);
@@ -545,6 +561,8 @@ pub fn set(bar: CaptureBar) {
             let resized = shown.bar.video != bar.video;
             let video = bar.video;
             shown.bar = bar;
+            // Its buttons are built again from it.
+            crate::ui::touch();
             let mut effects = vec![Effect::Wake(CAPTURE_TOOLBAR_NAMESPACE)];
             if resized {
                 let size = draw::Layout::of(words(), video).size;
@@ -569,12 +587,7 @@ pub fn set(bar: CaptureBar) {
                 output: bar.output.clone(),
                 size: (size.width.ceil() as u32, size.height.ceil() as u32),
             });
-            *toolbar = Some(Toolbar {
-                id,
-                bar,
-                hover: None,
-                pressed: None,
-            });
+            *toolbar = Some(Toolbar { id, bar });
             effects
         }
     });
@@ -644,7 +657,7 @@ fn toast(captured: &Captured) {
 }
 
 /// `button` clicked on the toolbar on `id`: the compositor is told.
-fn clicked(id: window::Id, button: Button) {
+pub fn clicked(id: window::Id, button: Button) {
     if !is_surface(id) {
         return;
     }

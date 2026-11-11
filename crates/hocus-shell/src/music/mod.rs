@@ -18,6 +18,7 @@
 mod mpris;
 pub mod tile;
 
+use hocus_words::shell::music as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -362,9 +363,28 @@ fn fit_all() -> bool {
         }
     });
     // The bar's items for the keyboard and the popover's place.
+    let name = Words::new(crate::clock::time::Lang::of_messages()).music();
     popover::with(|c| {
         for (bar, items) in items {
-            c.set_items(&bar, MUSIC_NAMESPACE, items);
+            let spots = items
+                .into_iter()
+                .map(|(item, rect)| crate::ui::ring::Spot {
+                    node: Some(
+                        hocus_a11y::Node::new(
+                            crate::ui::items::key(item),
+                            hocus_a11y::Role::Button,
+                            name,
+                        )
+                        .act(hocus_a11y::Act::Click),
+                    ),
+                    ..crate::ui::ring::Spot::at(item, rect)
+                })
+                .collect();
+            let declared = crate::ui::ring::Declared {
+                spots,
+                ..crate::ui::ring::Declared::default()
+            };
+            c.declare(&bar, MUSIC_NAMESPACE, declared);
         }
     });
     if !effects.is_empty() {
@@ -469,46 +489,65 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The music player's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     pub fn music(self) -> &'static str {
-        self.pick("Musique", "Music")
+        self.pick(txt::MUSIC)
     }
 
     /// The tile's second line while paused.
     pub fn paused_line(self) -> &'static str {
-        self.pick("En pause", "Paused")
+        self.pick(txt::PAUSED)
     }
 
     pub fn paused(self) -> &'static str {
-        self.pick("en pause", "paused")
+        self.pick(txt::PAUSED_2)
     }
 
     pub fn playing(self) -> &'static str {
-        self.pick("en lecture", "playing")
+        self.pick(txt::PLAYING)
     }
 
     pub fn other_player(self, n: usize) -> &'static str {
         match n {
-            1 => self.pick("Autre lecteur", "Other player"),
-            _ => self.pick("Autres lecteurs", "Other players"),
+            1 => self.pick(txt::OTHER_PLAYER),
+            _ => self.pick(txt::OTHER_PLAYERS),
+        }
+    }
+
+    pub fn shuffle(self) -> &'static str {
+        self.pick(txt::SHUFFLE)
+    }
+
+    pub fn previous(self) -> &'static str {
+        self.pick(txt::PREVIOUS_TRACK)
+    }
+
+    pub fn next(self) -> &'static str {
+        self.pick(txt::NEXT_TRACK)
+    }
+
+    /// The play button's name: what it does.
+    pub fn play_pause(self, playing: bool) -> &'static str {
+        if playing {
+            self.pick(txt::PAUSE)
+        } else {
+            self.pick(txt::PLAY)
         }
     }
 
     pub fn open(self, app: &str) -> String {
-        format!("{} {app}", self.pick("Afficher", "Show"))
+        format!("{} {app}", self.pick(txt::SHOW))
     }
 
     /// The source in the popover's header: "Spotify", "Spotify · en pause".

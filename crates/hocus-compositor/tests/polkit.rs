@@ -17,7 +17,7 @@
 //! then the cookie.
 //!
 //! Pixman here, the shell on the CPU, without motion: as in CI. Without
-//! the shell built or dbus-daemon, the tests skip.
+//! the shell built or dbus-daemon, the tests fail.
 
 use crate::common;
 
@@ -57,8 +57,7 @@ fn has(program: &str) -> bool {
 fn ready() -> Option<PathBuf> {
     let shell = common::shell_program();
     if !has("dbus-daemon") {
-        eprintln!("dbus-daemon missing: skipped");
-        return None;
+        common::missing("dbus-daemon");
     }
     Some(shell)
 }
@@ -983,4 +982,21 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.logged_after(from, "( ) Sam Leroy")?;
     save(&mut bed, "accounts")?;
     Ok(())
+}
+
+/// The dialog in its main state (one account, the field empty), for the
+/// widget kit's side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start_on(&shell, &[(1920, 1080)], &[], false)?;
+    let _window = bed.window()?;
+    bed.begin("c-kit", Who::Me, MESSAGE)?;
+    bed.dialog()?;
+    bed.logged("[> Détails]")?;
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(&mut bed.hp, AUTH_NAMESPACE, "auth")
 }

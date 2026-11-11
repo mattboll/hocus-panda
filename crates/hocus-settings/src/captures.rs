@@ -11,26 +11,27 @@
 //! history's count comes from the compositor's line (`msg screens`),
 //! which also clears it (`clipboard-clear`).
 
+use hocus_words::settings::captures as words;
 use std::{
     path::{Path, PathBuf},
     sync::OnceLock,
 };
 
 use crate::{
-    lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::{Lang, Words},
+    model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const CAPTURES: RowGroup = RowGroup {
-    label: w("CAPTURES D’ÉCRAN", "SCREENSHOTS"),
+    label: words::SCREENSHOTS,
     per_source: false,
 };
 pub const RECORDING: RowGroup = RowGroup {
-    label: w("ENREGISTREMENT DE L’ÉCRAN", "SCREEN RECORDING"),
+    label: words::SCREEN_RECORDING,
     per_source: false,
 };
 pub const CLIPBOARD: RowGroup = RowGroup {
-    label: w("HISTORIQUE DU PRESSE-PAPIERS", "CLIPBOARD HISTORY"),
+    label: words::CLIPBOARD_HISTORY,
     per_source: false,
 };
 
@@ -81,11 +82,9 @@ impl Folder {
     /// The default folder's own name, in the pictures' or videos' folder
     /// (the compositor's).
     pub fn default_name(self, lang: Lang) -> &'static str {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => "Captures d'écran",
-            (Self::Captures, Lang::English) => "Screenshots",
-            (Self::Recordings, Lang::French) => "Enregistrements d'écran",
-            (Self::Recordings, Lang::English) => "Screen recordings",
+        match self {
+            Self::Captures => words::SCREENSHOTS_2.get(lang),
+            Self::Recordings => words::SCREEN_RECORDINGS.get(lang),
         }
     }
 
@@ -102,64 +101,58 @@ impl Folder {
     /// as the compositor names it, `stamp` (`2026-11-05`, `14-32-05`) and
     /// `extension` its.
     pub fn sample(self, (day, time): (&str, &str), extension: &str, lang: Lang) -> String {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => {
-                format!("« Capture du {day} à {time}.{extension} »")
-            }
-            (Self::Captures, Lang::English) => {
-                format!("“Screenshot from {day} {time}.{extension}”")
-            }
-            (Self::Recordings, Lang::French) => {
-                format!("« Enregistrement du {day} à {time}.{extension} »")
-            }
-            (Self::Recordings, Lang::English) => {
-                format!("“Screen recording from {day} {time}.{extension}”")
-            }
+        match self {
+            Self::Captures => words::screenshot_from(
+                lang,
+                words::ScreenshotFrom {
+                    day,
+                    extension,
+                    time,
+                },
+            ),
+            Self::Recordings => words::screen_recording_from(
+                lang,
+                words::ScreenRecordingFrom {
+                    day,
+                    extension,
+                    time,
+                },
+            ),
         }
     }
 
     /// "Dossier des captures : Bureau › Captures".
     pub fn toast(self, shown: &str, lang: Lang) -> String {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => format!("Dossier des captures : {shown}"),
-            (Self::Captures, Lang::English) => format!("Screenshots folder: {shown}"),
-            (Self::Recordings, Lang::French) => format!("Dossier des enregistrements : {shown}"),
-            (Self::Recordings, Lang::English) => format!("Recordings folder: {shown}"),
+        match self {
+            Self::Captures => words::screenshots_folder(lang, shown),
+            Self::Recordings => words::recordings_folder(lang, shown),
         }
     }
 
     /// The portal's title.
     pub fn title(self, lang: Lang) -> &'static str {
-        match (self, lang) {
-            (Self::Captures, Lang::French) => "Choisir le dossier des captures",
-            (Self::Captures, Lang::English) => "Choose the screenshots folder",
-            (Self::Recordings, Lang::French) => "Choisir le dossier des enregistrements",
-            (Self::Recordings, Lang::English) => "Choose the recordings folder",
+        match self {
+            Self::Captures => words::CHOOSE_THE_SCREENSHOTS_FOLDER.get(lang),
+            Self::Recordings => words::CHOOSE_THE_RECORDINGS_FOLDER.get(lang),
         }
     }
 
     /// The row's warning when its folder cannot be written, `default` the
     /// one used meanwhile.
     pub fn unwritable(self, gone: bool, default: &str, lang: Lang) -> String {
-        let what = match (self, lang) {
-            (Self::Captures, Lang::French) => "les captures",
-            (Self::Captures, Lang::English) => "screenshots",
-            (Self::Recordings, Lang::French) => "les enregistrements",
-            (Self::Recordings, Lang::English) => "recordings",
+        let what = match self {
+            Self::Captures => words::SCREENSHOTS_3.get(lang),
+            Self::Recordings => words::RECORDINGS.get(lang),
         };
-        match (gone, lang) {
-            (true, Lang::French) => format!(
-                "Ce dossier n’existe plus (clé USB débranchée ?) : {what} vont dans {default}."
+        match gone {
+            true => words::this_folder_no_longer_exists_usb(
+                lang,
+                words::ThisFolderNoLongerExistsUsb { default, what },
             ),
-            (true, Lang::English) => format!(
-                "This folder no longer exists (USB key unplugged?): {what} go to {default}."
+            false => words::this_folder_cannot_be_written_go(
+                lang,
+                words::ThisFolderCannotBeWrittenGo { default, what },
             ),
-            (false, Lang::French) => {
-                format!("Ce dossier ne s’écrit pas : {what} vont dans {default}.")
-            }
-            (false, Lang::English) => {
-                format!("This folder cannot be written: {what} go to {default}.")
-            }
         }
     }
 }
@@ -261,44 +254,34 @@ pub fn writable(dir: &Path) -> Writable {
 
 /// The history's count, as the group's label says it.
 pub fn count_said(items: u32, pinned: u32, lang: Lang) -> String {
-    let items_word = match (items, lang) {
-        (0, Lang::French) => return "Vide".to_owned(),
-        (0, Lang::English) => return "Empty".to_owned(),
-        (1, Lang::French) => "1 élément".to_owned(),
-        (1, Lang::English) => "1 item".to_owned(),
-        (n, Lang::French) => format!("{n} éléments"),
-        (n, Lang::English) => format!("{n} items"),
+    let items_word = match items {
+        0 => return words::EMPTY.get(lang).to_owned(),
+        n => words::item_count(lang, n),
     };
-    match (pinned, lang) {
-        (0, _) => items_word,
-        (1, Lang::French) => format!("{items_word} · 1 épinglé"),
-        (n, Lang::French) => format!("{items_word} · {n} épinglés"),
-        (1, Lang::English) => format!("{items_word} · 1 pinned"),
-        (n, Lang::English) => format!("{items_word} · {n} pinned"),
+    match pinned {
+        0 => items_word,
+        1 => words::n_1_pinned(lang, &items_word),
+        n => words::pinned(
+            lang,
+            words::Pinned {
+                items_word: &items_word,
+                x_n: n,
+            },
+        ),
     }
 }
 
 /// "140 éléments", what "Effacer…" and the history off erase.
 pub fn items_said(n: u32, lang: Lang) -> String {
-    match (n, lang) {
-        (1, Lang::French) => "1 élément".to_owned(),
-        (1, Lang::English) => "1 item".to_owned(),
-        (n, Lang::French) => format!("{n} éléments"),
-        (n, Lang::English) => format!("{n} items"),
+    match n {
+        1 => words::N_1_ITEM.get(lang).to_owned(),
+        n => words::items(lang, n),
     }
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -331,8 +314,8 @@ fn setting(
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
-        let folder = w("Dossier", "Folder");
-        let format = w("Format", "Format");
+        let folder = words::FOLDER;
+        let format = words::FORMAT;
         vec![
             setting(
                 CAPTURE_FOLDER,
@@ -344,7 +327,7 @@ pub fn settings() -> &'static [Setting] {
                     &["screenshot", "print", "image", "folder", "location"],
                 ),
                 Kind::Text,
-                one(&["capture", "folder"], Codec::Text, Value::Text(String::new())),
+                one(&["capture", "folder"], Codec::Text),
                 None,
             ),
             setting(
@@ -356,31 +339,21 @@ pub fn settings() -> &'static [Setting] {
                     &["capture", "png", "jpeg", "jpg", "image"],
                     &["screenshot", "png", "jpeg", "jpg", "image"],
                 ),
-                Kind::Segmented(vec![
-                    word("PNG", "PNG", "png"),
-                    word("JPEG", "JPEG", "jpeg"),
-                ]),
-                one(
-                    &["capture", "format"],
-                    Codec::Word(&["png", "jpeg"]),
-                    Value::Word("png"),
-                ),
+                Kind::Segmented(vec![word(words::PNG, "png"), word(words::JPEG, "jpeg")]),
+                one(&["capture", "format"], Codec::Word(&["png", "jpeg"])),
                 None,
             ),
             setting(
                 SOUND,
                 CAPTURES,
-                w("Son de l’obturateur", "Shutter sound"),
-                Some(w(
-                    "Un déclic discret quand l’image est prise ; jamais quand le son est coupé.",
-                    "A discreet click when the picture is taken; never when the sound is muted.",
-                )),
+                words::SHUTTER_SOUND,
+                Some(words::A_DISCREET_CLICK_WHEN_THE_PICTURE),
                 (
                     &["son", "obturateur", "déclic", "capture"],
                     &["sound", "shutter", "click", "screenshot"],
                 ),
                 Kind::Switch,
-                one(&["capture", "sound"], Codec::Bool, Value::Bool(true)),
+                one(&["capture", "sound"], Codec::Bool),
                 None,
             ),
             setting(
@@ -393,11 +366,7 @@ pub fn settings() -> &'static [Setting] {
                     &["recording", "video", "folder", "location"],
                 ),
                 Kind::Text,
-                one(
-                    &["recording", "folder"],
-                    Codec::Text,
-                    Value::Text(String::new()),
-                ),
+                one(&["recording", "folder"], Codec::Text),
                 None,
             ),
             setting(
@@ -409,89 +378,74 @@ pub fn settings() -> &'static [Setting] {
                     &["enregistrement", "vidéo", "mp4", "webm"],
                     &["recording", "video", "mp4", "webm"],
                 ),
-                Kind::Segmented(vec![
-                    word("MP4", "MP4", "mp4"),
-                    word("WebM", "WebM", "webm"),
-                ]),
-                one(
-                    &["recording", "format"],
-                    Codec::Word(&["mp4", "webm"]),
-                    Value::Word("mp4"),
-                ),
+                Kind::Segmented(vec![word(words::MP4, "mp4"), word(words::WEBM, "webm")]),
+                one(&["recording", "format"], Codec::Word(&["mp4", "webm"])),
                 None,
             ),
             setting(
                 HISTORY,
                 CLIPBOARD,
-                w("Garder ce que je copie", "Keep what I copy"),
-                Some(w(
-                    "Super+V le montre, pour recoller ce que tu as copié avant.",
-                    "Super+V shows it, to paste again what you copied before.",
-                )),
+                words::KEEP_WHAT_I_COPY,
+                Some(words::SUPER_V_SHOWS_IT_TO_PASTE),
                 (
                     &["presse-papiers", "historique", "super+v", "copier"],
                     &["clipboard", "history", "super+v", "copy"],
                 ),
                 Kind::Switch,
-                one(&["clipboard", "history"], Codec::Bool, Value::Bool(true)),
+                one(&["clipboard", "history"], Codec::Bool),
                 None,
             ),
             setting(
                 KEEP,
                 CLIPBOARD,
-                w("Pendant", "Keep for"),
-                Some(w(
-                    "Les épinglés restent toujours ; 200 éléments au plus.",
-                    "Pinned items always stay; 200 items at most.",
-                )),
+                words::KEEP_FOR,
+                Some(words::PINNED_ITEMS_ALWAYS_STAY_200_ITEMS),
                 (
                     &["durée", "garder", "presse-papiers", "historique"],
                     &["duration", "keep", "clipboard", "history"],
                 ),
                 Kind::Menu(vec![
-                    word(
-                        "Jusqu’à la fin de la session",
-                        "Until the session ends",
-                        "session",
-                    ),
-                    word("1 jour", "1 day", "1d"),
-                    word("7 jours", "7 days", "7d"),
-                    word("30 jours", "30 days", "30d"),
+                    word(words::UNTIL_THE_SESSION_ENDS, "session"),
+                    word(words::N_1_DAY, "1d"),
+                    word(words::N_7_DAYS, "7d"),
+                    word(words::N_30_DAYS, "30d"),
                 ]),
                 one(
                     &["clipboard", "keep"],
                     Codec::Word(&["session", "1d", "7d", "30d"]),
-                    Value::Word("30d"),
                 ),
                 Some(HISTORY),
             ),
             setting(
                 SECRETS,
                 CLIPBOARD,
-                w("Laisser de côté les mots de passe", "Leave passwords out"),
-                Some(w(
-                    "Ce qu’un gestionnaire de mots de passe marque secret, et tout ce qui est copié depuis ces applications :",
-                    "What a password manager marks secret, and everything copied from these applications:",
-                )),
+                words::LEAVE_PASSWORDS_OUT,
+                Some(words::WHAT_A_PASSWORD_MANAGER_MARKS_SECRET),
                 (
-                    &["mots de passe", "secret", "keepassxc", "bitwarden", "presse-papiers"],
+                    &[
+                        "mots de passe",
+                        "secret",
+                        "keepassxc",
+                        "bitwarden",
+                        "presse-papiers",
+                    ],
                     &["passwords", "secret", "keepassxc", "bitwarden", "clipboard"],
                 ),
                 Kind::Switch,
-                one(&["clipboard", "skip-secrets"], Codec::Bool, Value::Bool(true)),
+                one(&["clipboard", "skip-secrets"], Codec::Bool),
                 Some(HISTORY),
             ),
             setting(
                 IGNORE,
                 CLIPBOARD,
-                w("Applications laissées de côté", "Applications left out"),
+                words::APPLICATIONS_LEFT_OUT,
                 None,
                 (
                     &["ignorer", "mots de passe", "application"],
                     &["ignore", "passwords", "application"],
                 ),
                 Kind::Text,
-                one(&["clipboard", "ignore"], Codec::Texts, Value::List(Vec::new())),
+                one(&["clipboard", "ignore"], Codec::Texts),
                 Some(HISTORY),
             ),
         ]
@@ -504,7 +458,7 @@ pub fn outside() -> &'static [Outside] {
         id: CLEAR,
         section: SectionId::Captures,
         group: CLIPBOARD.label,
-        name: w("Effacer l’historique", "Clear the history"),
+        name: words::CLEAR_THE_HISTORY,
         keywords: (
             &["effacer", "vider", "presse-papiers", "historique"],
             &["clear", "empty", "clipboard", "history"],

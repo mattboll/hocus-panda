@@ -550,8 +550,7 @@ impl System {
             .output()
             .is_err()
         {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let (daemon, address) = common::private_bus(dir.path())?;

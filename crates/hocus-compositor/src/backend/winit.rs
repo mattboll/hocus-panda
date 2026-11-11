@@ -82,11 +82,14 @@ pub fn init(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::Res
     add_output(state, &output, (0, 0));
 
     let renderer = backend.renderer();
-    state.shm_state.update_formats(renderer.shm_formats());
+    state
+        .protocols
+        .shm_state
+        .update_formats(renderer.shm_formats());
     let formats = renderer.dmabuf_formats();
     let device = render_node_of(renderer.egl_context().display());
     dmabuf_global(state, formats, device);
-    state.blur = true;
+    state.graphics.blur = true;
 
     let damage_tracker = OutputDamageTracker::from_output(&output);
     handle

@@ -2,42 +2,41 @@
 //! player in front, its cover, its progress and its buttons, the other
 //! players, and its window brought forward.
 //!
-//! Built as the Wi-Fi's spike (#770): iced's stock widgets (`container`,
-//! `column`, `row`, `button`, `slider`, `image`, `text`) on the spike's
-//! surface ([`Around`]) and keyboard's ring; a canvas only for the
-//! buttons' glyphs and the second's tick while it plays.
+//! Built with the shell's widget kit ([`crate::ui`]): iced's stock widgets
+//! (`container`, `column`, `row`, `button`, `slider`, `image`, `text`) on
+//! the kit's surface; a canvas only for the buttons' glyphs and the
+//! second's tick while it plays.
 //!
-//! The keyboard: `Tab` goes through the buttons, `Space` plays or pauses,
-//! `←` / `→` move 5 s in the track, `Enter` acts on what holds the ring,
-//! `Esc` closes.
+//! The keyboard: `Tab` goes through the buttons (the kit's), `Space` plays
+//! or pauses, `←` / `→` move 5 s in the track, `Enter` acts on what holds
+//! the ring, `Esc` closes.
 
 use std::{
     sync::{
         Mutex, PoisonError,
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicU32, Ordering},
     },
     time::{Duration, Instant},
 };
 
+use hocus_a11y::Role;
 use iced::{
     Background, Border, Color, Degrees, Element, Font, Length, Point, Rectangle, Renderer, Theme,
-    advanced::widget::{Id, Operation},
+    advanced::widget::Id,
     alignment::Vertical,
     gradient, keyboard, mouse,
     widget::{Space, button, canvas, column, container, image, row, slider, space},
 };
 
-use super::{
-    Event as Seen, Item, Pressed, event, kit,
-    wifi::{
-        custom::{Around, ring},
-        widgets::{boxed, clear, filled, lit, said},
-    },
-};
+use super::{Event as Seen, Item, Pressed, event, kit};
 use crate::{
     levels::draw::{ACCENT, DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT},
     music::{self, Ask, Player, Words},
     theme::Ink,
+    ui::{
+        Around,
+        style::{boxed, clear, filled, lit, said},
+    },
 };
 
 type El<'a> = Element<'a, Msg>;
@@ -114,6 +113,8 @@ pub fn opening() {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
     /// The knob dragged to, seconds; let go.
     Drag(f32),
     Release,
@@ -122,8 +123,7 @@ pub enum Msg {
     Stale,
 }
 
-/// Counts the view's builds; the height it took when last laid out.
-static BUILDS: AtomicU64 = AtomicU64::new(0);
+/// The height it took when last laid out.
 static NATURAL: AtomicU32 = AtomicU32::new(0);
 
 /// Its height, logical pixels: as the widgets took it, else as counted.
@@ -167,36 +167,21 @@ pub fn view<'a>(id: iced::window::Id, glass: bool) -> Element<'a, crate::Message
     let built = second(shown.front.as_ref(), now);
     let bus = shown.front.as_ref().map(|p| p.bus.clone());
     let content = ui(|ui| content(&shown, words, ui, now));
-    let around = Around {
-        id,
-        build: BUILDS.fetch_add(1, Ordering::Relaxed),
-        content,
-        stale: Box::new(move || {
+    Around::new(id, content, handle, Msg::Stale)
+        .stale_when(move || {
             let shown = music::shown();
             shown.front.as_ref().map(|p| p.bus.clone()) != bus
                 || second(shown.front.as_ref(), Instant::now()) != built
-        }),
-        on_stale: Box::new(|| Msg::Stale),
-        on_key: Box::new(taken),
-        on_press: Box::new(|_| Msg::Pressed),
-        handle: Box::new(handle),
-        pending: Box::new(Vec::<Box<dyn Operation>>::new),
-        natural: Box::new(|height| {
+        })
+        .keys(taken)
+        .press(Msg::Pressed)
+        .natural(|height| {
             let was = NATURAL.swap(height.to_bits(), Ordering::Relaxed);
             if (f32::from_bits(was) - height).abs() > 0.5 {
                 crate::popover::refit(Item::Music);
             }
-        }),
-        redraw: Box::new(|| {
-            crate::popover::send(vec![super::Effect::Wake(hocus_link::POPOVER_NAMESPACE)]);
-        }),
-        wake: crate::Message::Keys,
-    };
-    container(around)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_| super::wifi::widgets::background(glass))
-        .into()
+        })
+        .on_glass(glass)
 }
 
 fn content<'a>(shown: &music::Shown, words: Words, ui: &Ui, now: Instant) -> El<'a> {
@@ -208,7 +193,7 @@ fn content<'a>(shown: &music::Shown, words: Words, ui: &Ui, now: Instant) -> El<
     all = all.push(header(words, front));
     all = all.push(now_playing(front));
     all = all.push(progress(front, ui.dragging, now));
-    all = all.push(controls(front, focus));
+    all = all.push(controls(words, front, focus));
     all = all.push(rule());
     if !shown.others.is_empty() {
         all = all.push(label(words.other_player(shown.others.len())));
@@ -338,8 +323,8 @@ fn progress<'a>(front: &Player, dragging: Option<f32>, now: Instant) -> El<'a> {
 }
 
 /// Previous, play or pause (the accent, larger), next.
-fn controls<'a>(front: &Player, focus: Option<Target>) -> El<'a> {
-    let side = |glyph: Glyph, target: Target, can: bool| -> El<'a> {
+fn controls<'a>(words: Words, front: &Player, focus: Option<Target>) -> El<'a> {
+    let side = |glyph: Glyph, target: Target, can: bool, name: &str| -> El<'a> {
         let pressed =
             button(container(canvas(glyph).width(18.0).height(18.0)).center(Length::Fill))
                 .padding(0)
@@ -353,7 +338,7 @@ fn controls<'a>(front: &Player, focus: Option<Target>) -> El<'a> {
                     }
                 })
                 .on_press_maybe(can.then_some(Msg::Act(target)));
-        control(pressed, target, focus, BUTTON / 2.0)
+        control(pressed, target, focus, BUTTON / 2.0, name, can)
     };
     let can = front.can_control;
     let main = button(
@@ -394,6 +379,7 @@ fn controls<'a>(front: &Player, focus: Option<Target>) -> El<'a> {
             Glyph::Shuffle(if on { ACCENT } else { DIM }.get()),
             Target::Shuffle,
             can,
+            words.shuffle(),
         )
     });
     let balance: El<'a> = if shuffle.is_some() {
@@ -412,15 +398,24 @@ fn controls<'a>(front: &Player, focus: Option<Target>) -> El<'a> {
             side(
                 Glyph::Previous(if front.can_previous { TEXT } else { FAINT }.get()),
                 Target::Previous,
-                front.can_previous && can
+                front.can_previous && can,
+                words.previous(),
             ),
             gap(BUTTONS_GAP),
-            control(main, Target::Play, focus, MAIN / 2.0),
+            control(
+                main,
+                Target::Play,
+                focus,
+                MAIN / 2.0,
+                words.play_pause(front.playing()),
+                can
+            ),
             gap(BUTTONS_GAP),
             side(
                 Glyph::Next(if front.can_next { TEXT } else { FAINT }.get()),
                 Target::Next,
-                front.can_next && can
+                front.can_next && can,
+                words.next(),
             ),
             balance,
             space::horizontal(),
@@ -488,7 +483,7 @@ fn other_row<'a>(words: Words, other: &Player, i: usize, focus: Option<Target>) 
             }
         })
         .on_press(Msg::Act(Target::Other(i)));
-    control(pressed, Target::Other(i), focus, 8.0)
+    control(pressed, Target::Other(i), focus, 8.0, &other.title, true)
 }
 
 /// "Ouvrir Spotify ›": the player's window, brought forward.
@@ -522,7 +517,14 @@ fn open<'a>(words: Words, front: &Player, focus: Option<Target>) -> El<'a> {
             )
         })
         .on_press_maybe(can.then_some(Msg::Act(Target::Open)));
-    control(pressed, Target::Open, focus, 8.0)
+    control(
+        pressed,
+        Target::Open,
+        focus,
+        8.0,
+        &words.open(&front.app),
+        can,
+    )
 }
 
 /// A divider across the content.
@@ -538,17 +540,25 @@ fn gap<'a>(width: f32) -> El<'a> {
     Space::new().width(width).into()
 }
 
-/// A control under the keyboard's ring while it holds it, in a container
-/// named after it (tests, and a screen reader's nodes, find it by it).
+/// A button of the kit's, `name`d: the ring goes to it when it `can` be
+/// pressed (tests, and a screen reader's nodes, find it by its id).
 fn control<'a>(
     content: impl Into<El<'a>>,
     target: Target,
     focus: Option<Target>,
     radius: f32,
+    name: &str,
+    can: bool,
 ) -> El<'a> {
-    container(ring(content, focus == Some(target), radius))
-        .id(Id::from(format!("music:{target:?}")))
-        .into()
+    let control = crate::ui::control(content, format!("music:{target:?}"), Role::Button, name);
+    if can {
+        control
+            .focus(focus == Some(target), Msg::Focus(target), radius)
+            .activate(Msg::Act(target))
+            .into()
+    } else {
+        control.into()
+    }
 }
 
 /// A player's cover at `size`, rounded `radius`; drawn without one.
@@ -713,43 +723,13 @@ impl<M> canvas::Program<M> for Tick {
 
 // --- What a message does ---------------------------------------------------------------
 
-/// What can hold the ring, in `Tab`'s order.
-fn order(shown: &music::Shown) -> Vec<Target> {
-    let Some(front) = &shown.front else {
-        return Vec::new();
-    };
-    let mut order = Vec::new();
-    if front.shuffle.is_some() && front.can_control {
-        order.push(Target::Shuffle);
-    }
-    if front.can_previous && front.can_control {
-        order.push(Target::Previous);
-    }
-    if front.can_control {
-        order.push(Target::Play);
-    }
-    if front.can_next && front.can_control {
-        order.push(Target::Next);
-    }
-    order.extend((0..shown.others.len()).map(Target::Other));
-    if front.can_raise {
-        order.push(Target::Open);
-    }
-    order
-}
-
-/// The keys the surface keeps from its widgets.
-fn taken(pressed: Pressed) -> Option<Msg> {
+/// The keys the surface keeps from the kit: `Space` and the arrows.
+fn taken(pressed: &Pressed) -> Option<Msg> {
     use keyboard::{Key, key::Named};
     match &pressed.key {
-        Key::Named(
-            Named::Escape
-            | Named::Tab
-            | Named::Space
-            | Named::Enter
-            | Named::ArrowLeft
-            | Named::ArrowRight,
-        ) => Some(Msg::Key(pressed)),
+        Key::Named(Named::Space | Named::ArrowLeft | Named::ArrowRight) => {
+            Some(Msg::Key(pressed.clone()))
+        }
         _ => None,
     }
 }
@@ -763,6 +743,7 @@ fn handle(message: Msg) {
     match message {
         Msg::Stale => {}
         Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
         Msg::Act(target) => act(target, &front, &shown),
         Msg::Drag(to) => ui(|ui| ui.dragging = Some(to)),
         Msg::Release => {
@@ -775,9 +756,10 @@ fn handle(message: Msg) {
         }
         Msg::Key(pressed) => key(&pressed, &front, &shown),
     }
-    let order = order(&music::shown());
+    // The ring off a player gone.
+    let others = music::shown().others.len();
     ui(|ui| {
-        if ui.focus.is_some_and(|f| !order.contains(&f)) {
+        if matches!(ui.focus, Some(Target::Other(i)) if i >= others) {
             ui.focus = None;
         }
     });
@@ -809,20 +791,10 @@ fn key(pressed: &Pressed, front: &Player, shown: &music::Shown) {
     use keyboard::{Key, key::Named};
     let focus = ui(|ui| ui.focus);
     match &pressed.key {
-        Key::Named(Named::Escape) => event(Seen::Escape),
-        Key::Named(Named::Tab) => {
-            let next = kit::step(&order(shown), focus, pressed.modifiers.shift());
-            ui(|ui| ui.focus = next);
-        }
         Key::Named(Named::Space) => match focus {
             Some(target) if target != Target::Play => act(target, front, shown),
             _ => act(Target::Play, front, shown),
         },
-        Key::Named(Named::Enter) => {
-            if let Some(target) = focus {
-                act(target, front, shown);
-            }
-        }
         Key::Named(Named::ArrowLeft | Named::ArrowRight) if front.can_seek => {
             let at = front.position_at(Instant::now());
             let to = if matches!(pressed.key, Key::Named(Named::ArrowRight)) {

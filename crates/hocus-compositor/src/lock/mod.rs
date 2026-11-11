@@ -443,11 +443,11 @@ impl State {
     fn lock_closes_everything(&mut self) {
         self.end_popup_grab();
         self.bar_keyboard_away();
-        if self.switcher.is_some() {
+        if self.switching.open.is_some() {
             self.end_switcher(false);
         }
         self.close_radial(None);
-        self.radial_press = None;
+        self.radial_menu.press = None;
         self.drop_overview();
         self.capture_away();
         if self.ink.shows() {
@@ -459,10 +459,10 @@ impl State {
             let time = self.input_time();
             pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), time);
         }
-        self.kept_buttons.clear();
-        self.frame_cursor = None;
+        self.pointer.kept_buttons.clear();
+        self.pointer.frame_cursor = None;
         self.moving = None;
-        self.swiping = None;
+        self.gestures.swiping = None;
     }
 
     /// Nobody keeps the keyboard or the pointer: they go to the lock's
@@ -472,7 +472,7 @@ impl State {
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.set_focus(self, None, serial);
         }
-        self.cursor = CursorImageStatus::default_named();
+        self.pointer.cursor = CursorImageStatus::default_named();
         self.lock_keyboard();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
@@ -510,7 +510,7 @@ impl State {
             self.lock_opened();
         }
         // Input back where it was.
-        self.cursor = CursorImageStatus::default_named();
+        self.pointer.cursor = CursorImageStatus::default_named();
         let focused = self.model.focused();
         self.focus(focused);
         self.layer_keyboard();
@@ -799,7 +799,7 @@ impl State {
         }
         let own = self.lock_keeps_keys();
         if !pressed {
-            return Some(if self.kept_keys.remove(&code) || own {
+            return Some(if self.keyboard.kept_keys.remove(&code) || own {
                 FilterResult::Intercept(Kept::Release)
             } else {
                 FilterResult::Forward
@@ -808,7 +808,7 @@ impl State {
         let sym = keysym.modified_sym();
         let raw = sym.raw();
         if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&raw) {
-            self.kept_keys.insert(code);
+            self.keyboard.kept_keys.insert(code);
             let vt = (raw - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
             return Some(FilterResult::Intercept(Kept::Vt(vt)));
         }
@@ -820,13 +820,13 @@ impl State {
             .filter(|(action, _)| matches!(action, crate::Action::Level(_)))
             .or_else(|| self.magnifier_chord(mods, keysym));
         if let Some((action, chord)) = level {
-            self.kept_keys.insert(code);
+            self.keyboard.kept_keys.insert(code);
             return Some(FilterResult::Intercept(Kept::Shortcut(action, chord)));
         }
         if !own {
             return Some(FilterResult::Forward);
         }
-        self.kept_keys.insert(code);
+        self.keyboard.kept_keys.insert(code);
         Some(FilterResult::Intercept(Kept::Lock(
             self.lock_key_of(sym, mods),
         )))
@@ -881,7 +881,7 @@ impl State {
 
     /// A key the lock kept, after the keyboard's filter.
     pub(crate) fn lock_key(&mut self, key: LockKey) {
-        let layouts = self.layout_codes.len() > 1;
+        let layouts = self.keyboard.layout_codes.len() > 1;
         let Some(form) = self.own_form() else {
             return;
         };

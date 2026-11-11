@@ -27,18 +27,13 @@ use iced::{
 };
 
 pub(crate) use app::app_tile;
-pub(crate) use input::{
-    Input, Pointer, awaited, cycle, first_control, input, keys, opened_by_keyboard, step,
-};
-pub(crate) use list::{
-    Aside, Clip, List, SCROLLBAR, Spin, aside, list, name_room, reveal, row_fill, searching,
-    spinner, stack,
-};
+pub(crate) use input::{awaited, cycle, first_control, keys, opened_by_keyboard, step};
+pub(crate) use list::{List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
 pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
-pub(crate) use text::{Widths, elide, measure, measure_in, wrap, wrapped, zero};
+pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero_once};
 
 use crate::levels::{
-    draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, cell, rgb},
+    draw::{ACCENT, FAINT, LINE, MANROPE, TEXT, VALUE, cell, rgb},
     model::Words,
 };
 use crate::theme::Ink;
@@ -59,7 +54,7 @@ pub(crate) const HEADER_TOP: f32 = BORDER + PAD_TOP;
 pub(crate) const HEADER: f32 = 32.0;
 pub(crate) const HEADER_MIDDLE: f32 = HEADER_TOP + HEADER / 2.0;
 pub(crate) const TITLE: f32 = 16.0;
-const ASIDE: f32 = 13.0;
+pub(crate) const ASIDE: f32 = 13.0;
 /// Icons in rows, and the gap after them.
 pub(crate) const ICON: f32 = 18.0;
 pub(crate) const ICON_GAP: f32 = 10.0;
@@ -87,7 +82,6 @@ pub(crate) const SMALL: f32 = 12.0;
 const BLOCK: f32 = 48.0;
 pub(crate) const NAME: f32 = 14.0;
 pub(crate) const STATUS: f32 = 12.5;
-const SMALL_BUTTON: f32 = 28.0;
 pub(crate) const SMALL_PAD: f32 = 9.0;
 pub(crate) const SMALL_RADIUS: f32 = 7.0;
 /// The header's switch, its knob.
@@ -103,8 +97,6 @@ const RIM: Ink = Ink::Token(|t| t.bar_border);
 /// Buttons, and under the pointer.
 pub(crate) const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 pub(crate) const FILL_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const BLOCK_FILL: Ink = Ink::Accent(0.10);
 const SWITCH_OFF: Ink = Ink::Token(|t| t.switch_off);
 const KNOB_SHADOW: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.4));
 /// `gauge.critical`'s light end: failures, a low battery, a sign-in page.
@@ -188,40 +180,6 @@ pub(crate) fn text_in(font: iced::Font, mut text: canvas::Text) -> canvas::Text 
     text
 }
 
-/// The header's title, on its left.
-pub(crate) fn title(f: &mut Frame, title: &str) {
-    f.fill_text(text_in(
-        MANROPE_BOLD,
-        text(
-            title.to_owned(),
-            Point::new(LEFT, HEADER_MIDDLE),
-            TITLE,
-            TEXT.get(),
-            Alignment::Left,
-        ),
-    ));
-}
-
-/// The word on the header's right: what the popover is about.
-pub(crate) fn title_aside(f: &mut Frame, word: String) {
-    f.fill_text(text(
-        word,
-        Point::new(RIGHT, HEADER_MIDDLE),
-        ASIDE,
-        FAINT.get(),
-        Alignment::Right,
-    ));
-}
-
-/// A section's divider: 1 px across the content at `y`.
-pub(crate) fn rule(f: &mut Frame, y: f32) {
-    f.fill_rectangle(
-        Point::new(LEFT, y),
-        Size::new(RIGHT - LEFT, 1.0),
-        RULE.get(),
-    );
-}
-
 /// `word`'s letters and their places from the content's left, spaced as a
 /// label's, `width` measuring each in the label's font.
 pub(crate) fn spaced(word: &str, mut width: impl FnMut(&str) -> f32) -> Vec<(char, f32)> {
@@ -233,65 +191,6 @@ pub(crate) fn spaced(word: &str, mut width: impl FnMut(&str) -> f32) -> Vec<(cha
             (ch, at)
         })
         .collect()
-}
-
-/// A label's letters, spaced, measured in its font.
-pub(crate) fn label_letters(word: &str) -> Vec<(char, f32)> {
-    spaced(word, |ch| measure(ch, LABEL, MANROPE_BOLD))
-}
-
-/// A label's `letters`, their line centred on `middle`.
-pub(crate) fn label(f: &mut Frame, letters: &[(char, f32)], middle: f32) {
-    for (ch, x) in letters {
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                ch.to_string(),
-                Point::new(*x, middle),
-                LABEL,
-                DIM.get(),
-                Alignment::Left,
-            ),
-        ));
-    }
-}
-
-/// The middle of a label's line from `top`, padded.
-pub(crate) fn label_middle(top: f32) -> f32 {
-    top + LABEL_PAD + LABEL * LINE / 2.0
-}
-
-/// A note from `top`, in `text.faint`.
-pub(crate) fn note(said: String, top: f32) -> canvas::Text {
-    text(
-        said,
-        Point::new(LEFT, top + NOTE_TOP + NOTE * LINE / 2.0),
-        NOTE,
-        FAINT.get(),
-        Alignment::Left,
-    )
-}
-
-/// `lines` from `top` at `x`, `size` px on lines `height` em apart, in
-/// `colour`.
-pub(crate) fn lines(
-    lines: &[String],
-    (x, top): (f32, f32),
-    size: f32,
-    height: f32,
-    colour: Color,
-) -> impl Iterator<Item = canvas::Text> {
-    lines.iter().enumerate().map(move |(i, line)| {
-        let mut said = text(
-            line.clone(),
-            Point::new(x, top + (i as f32 + 0.5) * size * height),
-            size,
-            colour,
-            Alignment::Left,
-        );
-        said.line_height = LineHeight::Relative(height);
-        said
-    })
 }
 
 /// `value` rounded, right-aligned on `at`, in tabular figures: each digit
@@ -326,63 +225,6 @@ pub(crate) fn block_room(button: f32) -> f32 {
     RIGHT - button - ICON_GAP - (LEFT + ICON + ICON_GAP)
 }
 
-/// A connected block from `top`, `height` tall, lit green: where it is.
-pub(crate) fn block(f: &mut Frame, top: f32, height: f32) -> Rectangle {
-    let block = Rectangle::new(
-        Point::new(LEFT - ROW_OUT, top),
-        Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, height),
-    );
-    f.fill(&rounded(block, ROW_RADIUS), BLOCK_FILL.get());
-    block
-}
-
-/// A block's name (cut to fit already), in 600, and the middle of its
-/// state's first line: both centred on `middle`, its state `lines` long.
-pub(crate) fn block_name(f: &mut Frame, name: String, middle: f32, lines: f32) -> f32 {
-    let column = NAME * LINE + 1.0 + lines * STATUS * LINE;
-    let name_middle = middle - column / 2.0 + NAME * LINE / 2.0;
-    f.fill_text(text_in(
-        MANROPE_SEMIBOLD,
-        text(
-            name,
-            Point::new(LEFT + ICON + ICON_GAP, name_middle),
-            NAME,
-            TEXT.get(),
-            Alignment::Left,
-        ),
-    ));
-    name_middle + NAME * LINE / 2.0 + 1.0 + STATUS * LINE / 2.0
-}
-
-/// A block's button ("Déconnecter"), `width` wide, on its right: where it
-/// is, the block from `top` and `height` tall.
-pub(crate) fn block_button(top: f32, height: f32, width: f32) -> Rectangle {
-    Rectangle::new(
-        Point::new(RIGHT - width, top + (height - SMALL_BUTTON) / 2.0),
-        Size::new(width, SMALL_BUTTON),
-    )
-}
-
-/// A small button at `rect` saying `word`, lit under the pointer.
-pub(crate) fn small_button(f: &mut Frame, rect: Rectangle, word: &str, hover: bool) {
-    let path = rounded(rect, SMALL_RADIUS);
-    if hover && !crate::theme::contrast() {
-        f.fill(&path, FILL_HOVER);
-    } else {
-        f.fill(&path, FILL);
-        if hover {
-            crate::theme::hover(f, &path, FILL_HOVER);
-        }
-    }
-    f.fill_text(text(
-        word.to_owned(),
-        rect.center(),
-        STATUS,
-        if hover { TEXT.get() } else { DIM.get() },
-        Alignment::Center,
-    ));
-}
-
 // --- The header's switch -----------------------------------------------------------
 
 /// The switch's knob slides over this, `ease-out`.
@@ -391,7 +233,7 @@ const SLIDE: Duration = Duration::from_millis(160);
 const SWITCH_ASKED_FOR: Duration = Duration::from_secs(3);
 
 /// The header's switch: what it asked and when, and its knob's slide.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Switch {
     asked: Option<(bool, Instant)>,
     /// From where (0 off, 1 on), since when.

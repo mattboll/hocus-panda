@@ -13,6 +13,7 @@
 //!   a combination another action holds opens a box under the row,
 //!   "Remplacer" or "Annuler"; "Rétablir" takes the line out of the file.
 
+use hocus_words::settings::app_keyboard_page as words;
 use std::{collections::BTreeSet, sync::mpsc};
 
 use iced::{
@@ -29,7 +30,7 @@ use super::{
 use crate::{
     keyboard as model,
     keys::{self, Chord},
-    lang::{Lang, w},
+    lang::Lang,
     model::{Icon, Kind, SectionId, Setting, Value},
     search::fold,
     store::{Reading, Slot},
@@ -183,15 +184,11 @@ impl App {
     /// A row of the keyboard's page that does not apply now, and why.
     pub(super) fn keyboard_not_here(&self, setting: &Setting) -> Option<&'static str> {
         match setting.id {
-            "keyboard.switch" if self.layouts().len() < 2 => Some(self.say(w(
-                "Une seule disposition : rien à changer.",
-                "One layout only: nothing to switch.",
-            ))),
+            "keyboard.switch" if self.layouts().len() < 2 => {
+                Some(self.say(words::ONE_LAYOUT_ONLY_NOTHING_TO_SWITCH))
+            }
             "keyboard.caps" if self.option_on("keyboard.compose") == Some("compose:caps") => {
-                Some(self.say(w(
-                    "Verr. Maj. sert de touche Compose.",
-                    "Caps Lock is the Compose key.",
-                )))
+                Some(self.say(words::CAPS_LOCK_IS_THE_COMPOSE_KEY))
             }
             _ => None,
         }
@@ -279,20 +276,14 @@ impl App {
                 let mine = self.with_chord(conflict.setting, conflict.index, &conflict.chord);
                 self.serial += 1;
                 let batch = self.serial;
-                let said = match self.lang {
-                    Lang::French => format!(
-                        "{} : {} · « {} » n’en a plus",
-                        self.name_of(conflict.setting),
-                        keys::shown(&conflict.chord, self.lang),
-                        self.name_of(other)
-                    ),
-                    Lang::English => format!(
-                        "{}: {} · “{}” has none left",
-                        self.name_of(conflict.setting),
-                        keys::shown(&conflict.chord, self.lang),
-                        self.name_of(other)
-                    ),
-                };
+                let said = words::has_none_left(
+                    self.lang,
+                    words::HasNoneLeft {
+                        keys_shown_conflict_chor: keys::shown(&conflict.chord, self.lang),
+                        self_name_of_conflict_se: self.name_of(conflict.setting),
+                        self_name_of_other: self.name_of(other),
+                    },
+                );
                 if let (Some(theirs), Some(ours)) = (slot(other), slot(conflict.setting)) {
                     // Its toast is ours: one for both.
                     let other_said = Some(String::new());
@@ -464,42 +455,19 @@ impl App {
             Task::none()
         };
         if chord.fixed() {
-            return refuse(
-                self,
-                match lang {
-                    Lang::French => {
-                        format!("« {shown} » est fixe : il passe à un autre terminal virtuel.")
-                    }
-                    Lang::English => {
-                        format!("“{shown}” is fixed: it switches to another virtual terminal.")
-                    }
-                },
-            );
+            return refuse(self, words::is_fixed_it_switches_to_another(lang, &shown));
         }
         if chord.types() {
             return refuse(
                 self,
-                match lang {
-                    Lang::French => {
-                        format!("« {shown} » irait aux applications : ajoute Super, Ctrl ou Alt.")
-                    }
-                    Lang::English => {
-                        format!("“{shown}” would go to applications: add Super, Ctrl or Alt.")
-                    }
-                },
+                words::would_go_to_applications_add_super(lang, &shown),
             );
         }
         let own = self.chords(recording.setting);
         if own.iter().enumerate().any(|(i, c)| {
             Some(i) != recording.index && Chord::parse(c).is_some_and(|c| c.same(&chord))
         }) {
-            return refuse(
-                self,
-                match lang {
-                    Lang::French => format!("« {shown} » est déjà là."),
-                    Lang::English => format!("“{shown}” is already there."),
-                },
-            );
+            return refuse(self, words::is_already_there(lang, &shown));
         }
         let written = chord.written();
         self.stop_recording();
@@ -525,13 +493,7 @@ impl App {
             return Task::none();
         }
         if grp_space {
-            return refuse(
-                self,
-                match lang {
-                    Lang::French => format!("« {shown} » change de disposition."),
-                    Lang::English => format!("“{shown}” switches the layout."),
-                },
-            );
+            return refuse(self, words::switches_the_layout(lang, &shown));
         }
         let list = self.with_chord(recording.setting, recording.index, &written);
         match slot(recording.setting) {
@@ -562,12 +524,7 @@ impl App {
             button(
                 row![
                     text("+").size(16).font(BOLD).color(MINT),
-                    t(
-                        w("Ajouter une disposition", "Add a layout").get(lang),
-                        13.5,
-                        MINT.get()
-                    )
-                    .font(BOLD),
+                    t(words::ADD_A_LAYOUT.get(lang), 13.5, MINT.get()).font(BOLD),
                 ]
                 .spacing(8)
                 .height(Length::Fill)
@@ -609,7 +566,7 @@ impl App {
             true,
             container(
                 row![
-                    t(w("Essayer ici", "Try it here").get(lang), 14.0, TEXT.get())
+                    t(words::TRY_IT_HERE.get(lang), 14.0, TEXT.get())
                         .font(SEMIBOLD)
                         .width(Length::Fill),
                     container(field).style(boxed(
@@ -645,18 +602,9 @@ impl App {
         // Raccourcis.
         let changed = model::shortcuts().filter(|s| self.changed(s.id)).count();
         let words = column![
+            t(words::DESKTOP_SHORTCUTS.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
             t(
-                w("Raccourcis du bureau", "Desktop shortcuts").get(lang),
-                14.0,
-                TEXT.get()
-            )
-            .font(SEMIBOLD),
-            t(
-                w(
-                    "64 raccourcis : fenêtres, bureaux, captures…",
-                    "64 shortcuts: windows, desktops, captures…"
-                )
-                .get(lang),
+                words::N_64_SHORTCUTS_WINDOWS_DESKTOPS_CAPTURES.get(lang),
                 12.5,
                 DIM.get()
             ),
@@ -665,11 +613,7 @@ impl App {
         .width(Length::Fill);
         let mut line = row![words].spacing(10).align_y(Alignment::Center);
         if changed > 0 {
-            line = line.push(chip(match (lang, changed) {
-                (Lang::French, 1) => "1 modifié".to_owned(),
-                (Lang::French, n) => format!("{n} modifiés"),
-                (Lang::English, n) => format!("{n} changed"),
-            }));
+            line = line.push(chip(words::changed_count(lang, changed)));
         }
         line = line.push(
             container(icon(Icon::Chevron, 14.0, DIM.get()))
@@ -695,10 +639,7 @@ impl App {
             .id(format!("row:{}", crate::desktops::SHORTCUTS)),
         )
         .id("keyboard:shortcuts".to_owned());
-        page = page.push(group(
-            w("RACCOURCIS", "SHORTCUTS").get(lang),
-            card_box(open.into()),
-        ));
+        page = page.push(group(words::SHORTCUTS.get(lang), card_box(open.into())));
         container(page).id("page:keyboard".to_owned()).into()
     }
 
@@ -734,10 +675,7 @@ impl App {
             container(b).id(id).into()
         };
         let line = if i == 0 {
-            match lang {
-                Lang::French => format!("{code} · active à l’ouverture de la session"),
-                Lang::English => format!("{code} · active as the session opens"),
-            }
+            words::active_as_the_session_opens(lang, code)
         } else {
             code.to_owned()
         };
@@ -830,42 +768,37 @@ impl App {
 
     fn add_popover(&self, query: &str, have: &[String]) -> El<'_> {
         let lang = self.lang;
-        let field = text_input(
-            w("Français, bépo, us, dvorak…", "French, bepo, us, dvorak…").get(lang),
-            query,
-        )
-        .id(ADD_SEARCH)
-        .on_input(|s| Message::Keys(Msg::AddQuery(s)))
-        .on_submit(
-            match self
-                .found_layouts(query)
-                .into_iter()
-                .find(|k| !have.contains(&k.code))
-            {
-                Some(k) => Message::Keys(Msg::Pick(k.code.clone())),
-                None => Message::Nothing,
-            },
-        )
-        .size(13.0)
-        .font(MANROPE)
-        .padding([8, 10])
-        .style(super::style::search);
+        let field = text_input(words::FRENCH_BEPO_US_DVORAK.get(lang), query)
+            .id(ADD_SEARCH)
+            .on_input(|s| Message::Keys(Msg::AddQuery(s)))
+            .on_submit(
+                match self
+                    .found_layouts(query)
+                    .into_iter()
+                    .find(|k| !have.contains(&k.code))
+                {
+                    Some(k) => Message::Keys(Msg::Pick(k.code.clone())),
+                    None => Message::Nothing,
+                },
+            )
+            .size(13.0)
+            .font(MANROPE)
+            .padding([8, 10])
+            .style(super::style::search);
         let mut list = column![];
         for (i, known) in self.found_layouts(query).into_iter().enumerate() {
             let there = have.contains(&known.code);
             let ink = if there { 0.55 } else { 1.0 };
-            let kind = match (&known.of, lang) {
-                (None, Lang::French) => "disposition".to_owned(),
-                (None, Lang::English) => "layout".to_owned(),
-                (Some(of), Lang::French) => format!("variante · {of}"),
-                (Some(of), Lang::English) => format!("variant · {of}"),
+            let kind = match &known.of {
+                None => words::LAYOUT.get(lang).to_owned(),
+                Some(of) => words::variant(lang, of),
             };
             let mut line = row![
                 column![
                     t(known.name.clone(), 13.5, fade(TEXT.get(), ink)).font(SEMIBOLD),
                     t(
                         if there {
-                            w("déjà là", "already there").get(lang).to_owned()
+                            words::ALREADY_THERE.get(lang).to_owned()
                         } else {
                             kind
                         },
@@ -893,14 +826,16 @@ impl App {
         }
         container(
             column![
-                container(field).style(boxed(crate::theme::ink(rgba(255, 255, 255, 0.06)), 9.0, Some((1.0, RIM_12.get())))),
-                iced::widget::scrollable(list).height(Length::Shrink).style(super::view::thin),
+                container(field).style(boxed(
+                    crate::theme::ink(rgba(255, 255, 255, 0.06)),
+                    9.0,
+                    Some((1.0, RIM_12.get()))
+                )),
+                iced::widget::scrollable(list)
+                    .height(Length::Shrink)
+                    .style(super::view::thin),
                 t(
-                    w(
-                        "Les dispositions et variantes de XKB. Entrée ajoute la première, Échap ferme.",
-                        "XKB's layouts and variants. Enter adds the first, Esc closes."
-                    )
-                    .get(lang),
+                    words::XKB_S_LAYOUTS_AND_VARIANTS_ENTER.get(lang),
                     11.5,
                     FAINT.get()
                 ),
@@ -927,8 +862,8 @@ impl App {
                 }
                 let mut hay = format!(
                     "{} {} {} {}",
-                    s.name.fr,
-                    s.name.en,
+                    s.name.get(hocus_words::Lang::French),
+                    s.name.get(hocus_words::Lang::English),
                     s.id.trim_start_matches("shortcuts."),
                     s.keywords
                         .0
@@ -954,30 +889,19 @@ impl App {
 
     fn shortcuts_page(&self) -> El<'_> {
         let lang = self.lang;
-        let back = button(
-            t(
-                w("‹ Clavier et raccourcis", "‹ Keyboard and shortcuts").get(lang),
-                13.0,
-                MINT.get(),
-            )
-            .font(SEMIBOLD),
-        )
-        .padding(0)
-        .on_press(Message::Keys(Msg::Sub(false)))
-        .style(|_, _| button::Style::default());
+        let back =
+            button(t(words::KEYBOARD_AND_SHORTCUTS.get(lang), 13.0, MINT.get()).font(SEMIBOLD))
+                .padding(0)
+                .on_press(Message::Keys(Msg::Sub(false)))
+                .style(|_, _| button::Style::default());
         let mut page = column![
             container(back).id("shortcuts:back".to_owned()),
             column![
-                text(w("Raccourcis", "Shortcuts").get(lang)).size(22).font(BOLD).color(TEXT),
-                t(
-                    w(
-                        "Les touches sont lues sur la première disposition latine, quelle que soit celle qui est active.",
-                        "Keys are read on the first Latin layout, whatever the active one.",
-                    )
-                    .get(lang),
-                    13.5,
-                    DIM.get()
-                ),
+                text(words::SHORTCUTS_2.get(lang))
+                    .size(22)
+                    .font(BOLD)
+                    .color(TEXT),
+                t(words::KEYS_ARE_READ_ON_THE_FIRST.get(lang), 13.5, DIM.get()),
             ]
             .spacing(6),
         ]
@@ -986,38 +910,26 @@ impl App {
         let shown = self.shown_shortcuts();
         let changed = model::shortcuts().filter(|s| self.changed(s.id)).count();
         let count = if self.keys.query.trim().is_empty() {
-            match (lang, changed) {
-                (Lang::French, 0) => "64 raccourcis".to_owned(),
-                (Lang::French, 1) => "64 raccourcis · 1 modifié".to_owned(),
-                (Lang::French, n) => format!("64 raccourcis · {n} modifiés"),
-                (Lang::English, 0) => "64 shortcuts".to_owned(),
-                (Lang::English, n) => format!("64 shortcuts · {n} changed"),
+            match changed {
+                0 => words::ALL_SHORTCUTS.get(lang).to_owned(),
+                n => words::all_shortcuts_changed(lang, n),
             }
         } else {
-            match (lang, shown.len()) {
-                (Lang::French, 1) => "1 raccourci".to_owned(),
-                (Lang::French, n) => format!("{n} raccourcis"),
-                (Lang::English, 1) => "1 shortcut".to_owned(),
-                (Lang::English, n) => format!("{n} shortcuts"),
+            match shown.len() {
+                1 => words::N_1_SHORTCUT.get(lang).to_owned(),
+                n => words::shortcuts_3(lang, n),
             }
         };
-        let field = text_input(
-            w(
-                "Rechercher une action ou des touches",
-                "Search actions or keys",
-            )
-            .get(lang),
-            &self.keys.query,
-        )
-        .id(SUB_SEARCH)
-        .on_input(|s| Message::Keys(Msg::Query(s)))
-        .size(13.0)
-        .font(MANROPE)
-        .padding([8, 10])
-        .style(super::style::search);
+        let field = text_input(words::SEARCH_ACTIONS_OR_KEYS.get(lang), &self.keys.query)
+            .id(SUB_SEARCH)
+            .on_input(|s| Message::Keys(Msg::Query(s)))
+            .size(13.0)
+            .font(MANROPE)
+            .padding([8, 10])
+            .style(super::style::search);
         let mut reset_all = button(
             t(
-                w("Tout rétablir", "Reset all").get(lang),
+                words::RESET_ALL.get(lang),
                 12.5,
                 fade(TEXT.get(), if changed > 0 { 1.0 } else { INERT }),
             )
@@ -1126,16 +1038,14 @@ impl App {
             (m.logo(), "Super"),
             (m.control(), "Ctrl"),
             (m.alt(), "Alt"),
-            (m.shift(), if lang.fr() { "Maj" } else { "Shift" }),
+            (m.shift(), words::SHIFT.get(lang)),
         ] {
             if on {
                 held.push(name);
             }
         }
         let said = if held.is_empty() {
-            w("Appuie sur les touches…", "Press the keys…")
-                .get(lang)
-                .to_owned()
+            words::PRESS_THE_KEYS.get(lang).to_owned()
         } else {
             format!("{} + …", held.join(" + "))
         };
@@ -1170,14 +1080,8 @@ impl App {
         let mut words = column![name].spacing(2).width(Length::Fill);
         if let Some(recording) = recording {
             let line = match recording.index {
-                Some(_) => w(
-                    "Échap annule, Retour arrière enlève ce raccourci.",
-                    "Esc cancels, Backspace removes this shortcut.",
-                ),
-                None => w(
-                    "Un raccourci de plus. Échap annule.",
-                    "One more shortcut. Esc cancels.",
-                ),
+                Some(_) => words::ESC_CANCELS_BACKSPACE_REMOVES_THIS_SHORTCUT,
+                None => words::ONE_MORE_SHORTCUT_ESC_CANCELS,
             };
             words = words.push(t(line.get(lang), 12.0, DIM.get()));
             if let Some(refused) = &recording.refused {
@@ -1186,7 +1090,7 @@ impl App {
         } else if changed {
             let defaults = Self::defaults(id);
             let said = if defaults.is_empty() {
-                w("aucun", "none").get(lang).to_owned()
+                words::NONE.get(lang).to_owned()
             } else {
                 defaults
                     .iter()
@@ -1194,19 +1098,12 @@ impl App {
                     .collect::<Vec<_>>()
                     .join(", ")
             };
-            words = words.push(t(
-                match lang {
-                    Lang::French => format!("Par défaut : {said}"),
-                    Lang::English => format!("Default: {said}"),
-                },
-                12.0,
-                FAINT.get(),
-            ));
+            words = words.push(t(words::default(lang, &said), 12.0, FAINT.get()));
         }
         let chords = self.chords(id);
         let mut right = row![].spacing(6).align_y(Alignment::Center);
         if chords.is_empty() && recording.is_none() {
-            right = right.push(t(w("Aucun", "None").get(lang), 12.5, FAINT.get()));
+            right = right.push(t(words::NONE_2.get(lang), 12.5, FAINT.get()));
         }
         for (i, chord) in chords.iter().enumerate() {
             match recording {
@@ -1230,10 +1127,9 @@ impl App {
             }
         }
         if changed {
-            let mut reset =
-                button(t(w("↺ Rétablir", "↺ Reset").get(lang), 12.5, MINT.get()).font(SEMIBOLD))
-                    .padding([4, 6])
-                    .style(flat(None, HOVER.get(), 6.0, false));
+            let mut reset = button(t(words::RESET.get(lang), 12.5, MINT.get()).font(SEMIBOLD))
+                .padding([4, 6])
+                .style(flat(None, HOVER.get(), 6.0, false));
             if self.writable() {
                 reset = reset.on_press(Message::Keys(Msg::Reset(id)));
             }
@@ -1261,12 +1157,13 @@ impl App {
         let lang = self.lang;
         let shown = keys::shown(&conflict.chord, lang);
         let other = self.name_of(conflict.other);
-        let said = match lang {
-            Lang::French => format!("{shown} sert déjà à « {other} ». Le remplacer le lui enlève."),
-            Lang::English => {
-                format!("{shown} is already used by “{other}”. Replacing it takes it away.")
-            }
-        };
+        let said = words::is_already_used_by_replacing_it(
+            lang,
+            words::IsAlreadyUsedByReplacingIt {
+                other,
+                shown: &shown,
+            },
+        );
         let amber = crate::theme::ink(rgb(0xF5B44A));
         container(
             row![
@@ -1274,7 +1171,7 @@ impl App {
                     .width(Length::Fill)
                     .id("conflict:text".to_owned()),
                 container(
-                    button(t(w("Remplacer", "Replace").get(lang), 12.5, DEEP.get()).font(BOLD))
+                    button(t(words::REPLACE.get(lang), 12.5, DEEP.get()).font(BOLD))
                         .padding([6, 12])
                         .on_press(Message::Keys(Msg::Replace))
                         .style(move |_, _| button::Style {
@@ -1286,7 +1183,7 @@ impl App {
                 )
                 .id("conflict:replace".to_owned()),
                 container(
-                    button(t(w("Annuler", "Cancel").get(lang), 12.5, TEXT.get()).font(SEMIBOLD))
+                    button(t(words::CANCEL.get(lang), 12.5, TEXT.get()).font(SEMIBOLD))
                         .padding([6, 12])
                         .on_press(Message::Keys(Msg::Cancel))
                         .style(flat(
@@ -1350,14 +1247,7 @@ impl App {
             .spacing(2)
             .width(Length::Fill);
         if changed > 0 {
-            words = words.push(t(
-                match lang {
-                    Lang::French => format!("{changed} modifiés sur 9"),
-                    Lang::English => format!("{changed} of 9 changed"),
-                },
-                12.0,
-                FAINT.get(),
-            ));
+            words = words.push(t(words::of_9_changed(lang, changed), 12.0, FAINT.get()));
         }
         let keys_said: El<'_> = match self.family_keys(family) {
             Some(said) => {
@@ -1370,23 +1260,13 @@ impl App {
                 }
                 line.into()
             }
-            None => t(
-                w("Propres à chaque bureau", "One for each desktop").get(lang),
-                12.5,
-                DIM.get(),
-            )
-            .into(),
+            None => t(words::ONE_FOR_EACH_DESKTOP.get(lang), 12.5, DIM.get()).into(),
         };
         let open = self.keys.unfolded.contains(family.prefix);
         let fold = container(
             button(
                 t(
-                    if open {
-                        w("Replier", "Fold")
-                    } else {
-                        w("Les 9", "All 9")
-                    }
-                    .get(lang),
+                    if open { words::FOLD } else { words::ALL_9 }.get(lang),
                     12.5,
                     MINT.get(),
                 )
@@ -1410,22 +1290,10 @@ impl App {
     fn fixed_group(&self) -> El<'_> {
         let lang = self.lang;
         let fixed = [
-            (
-                w("Déplacer une fenêtre", "Move a window"),
-                w("Alt + glisser", "Alt + drag"),
-            ),
-            (
-                w("Redimensionner une fenêtre", "Resize a window"),
-                w("Super + clic droit glissé", "Super + right-drag"),
-            ),
-            (
-                w("Transparence d’une fenêtre", "Window opacity"),
-                w("Super + Alt + molette", "Super + Alt + wheel"),
-            ),
-            (
-                w("Changer de terminal virtuel", "Switch virtual terminal"),
-                w("Ctrl + Alt + F1 … F12", "Ctrl + Alt + F1 … F12"),
-            ),
+            (words::MOVE_A_WINDOW, words::ALT_DRAG),
+            (words::RESIZE_A_WINDOW, words::SUPER_RIGHT_DRAG),
+            (words::WINDOW_OPACITY, words::SUPER_ALT_WHEEL),
+            (words::SWITCH_VIRTUAL_TERMINAL, words::CTRL_ALT_F1_F12),
         ];
         let mut rows = column![];
         for (i, (name, said)) in fixed.iter().enumerate() {
@@ -1453,13 +1321,9 @@ impl App {
             ));
         }
         let head = row![
-            label(w("FIXES", "FIXED").get(lang)),
+            label(words::FIXED.get(lang)),
             Space::new().width(Length::Fill),
-            t(
-                w("Ne se changent pas", "Cannot be changed").get(lang),
-                12.0,
-                FAINT.get()
-            ),
+            t(words::CANNOT_BE_CHANGED.get(lang), 12.0, FAINT.get()),
         ]
         .align_y(Alignment::Center)
         .height(28);

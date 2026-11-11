@@ -14,8 +14,9 @@
 use std::{
     fmt,
     path::{Path, PathBuf},
-    str::FromStr,
 };
+
+use serde::{Deserialize, Serialize};
 
 use crate::{
     BadLine,
@@ -26,7 +27,8 @@ use crate::{
 
 /// `[wallpaper] picture`, or a screen's `wallpaper`: a built-in by its
 /// word, `"plain"`, or a picture's path (it holds a `/`; `~/` is the home).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Picture {
     Builtin(Backdrop),
     /// A built-in that moves (#433): the compositor's shader draws it,
@@ -46,7 +48,7 @@ impl Default for Picture {
 
 impl Picture {
     /// What the file's text says; an unknown word is refused.
-    pub fn of(text: &str) -> Result<Self, String> {
+    pub fn of(text: &str) -> Result<Self, BadLine> {
         if text == "plain" {
             return Ok(Self::Plain);
         }
@@ -59,9 +61,9 @@ impl Picture {
         if text.contains('/') && !text.contains(['\t', '\n', '\r']) {
             return Ok(Self::File(text.to_owned()));
         }
-        Err(format!(
+        Err(BadLine(format!(
             "no wallpaper {text:?}: night, mist, dawn, forest, rain, stars, aurora, plain or a picture's path"
-        ))
+        )))
     }
 
     /// As the file writes it.
@@ -108,7 +110,8 @@ pub fn folder() -> Option<PathBuf> {
 }
 
 /// `[wallpaper] fit`: how a picture of one's own fills its screen.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Fit {
     /// Scaled to cover the screen, centred; what overflows is cut.
     #[default]
@@ -136,7 +139,8 @@ impl Fit {
 }
 
 /// `[wallpaper] lock`: what the lock screen shows under its veil.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LockLook {
     /// Each screen's wallpaper, dimmed by the veil (as before 6.3).
     #[default]
@@ -201,7 +205,7 @@ pub struct Look {
 /// The wallpapers as the compositor tells the shell (the lock draws them):
 /// written `wallpaper LOCK\tLOCK-PICTURE\tPICTURE\tFIT\tRRGGBB`, then
 /// for each screen with its own a tab, its name, a tab, its picture.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Wallpapers {
     pub lock: LockLook,
     pub lock_picture: Picture,
@@ -243,6 +247,7 @@ impl Wallpapers {
     }
 }
 
+/// For the log, not the line.
 impl fmt::Display for Wallpapers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let [r, g, b] = self.color;
@@ -258,45 +263,6 @@ impl fmt::Display for Wallpapers {
             write!(f, "\t{}\t{picture}", crate::screen_name(name))?;
         }
         Ok(())
-    }
-}
-
-impl FromStr for Wallpapers {
-    type Err = BadLine;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut fields = s.split('\t');
-        let mut next = |what: &str| {
-            fields
-                .next()
-                .ok_or_else(|| BadLine(format!("the wallpaper without its {what}")))
-        };
-        let lock = next("lock")?;
-        let lock = LockLook::of(lock).ok_or_else(|| BadLine(format!("no lock look {lock:?}")))?;
-        let lock_picture = Picture::of(next("lock's picture")?).map_err(BadLine)?;
-        let picture = Picture::of(next("picture")?).map_err(BadLine)?;
-        let fit = next("fit")?;
-        let fit = Fit::of(fit).ok_or_else(|| BadLine(format!("no fit {fit:?}")))?;
-        let color = next("colour")?;
-        let color = colour_of(&format!("#{color}"))
-            .ok_or_else(|| BadLine(format!("no colour {color:?}")))?;
-        let rest: Vec<&str> = fields.collect();
-        let (pairs, odd) = rest.as_chunks::<2>();
-        if !odd.is_empty() {
-            return Err(BadLine("a screen without its wallpaper".to_owned()));
-        }
-        let outputs = pairs
-            .iter()
-            .map(|[name, picture]| Ok(((*name).to_owned(), Picture::of(picture).map_err(BadLine)?)))
-            .collect::<Result<_, BadLine>>()?;
-        Ok(Self {
-            lock,
-            lock_picture,
-            picture,
-            fit,
-            color,
-            outputs,
-        })
     }
 }
 
@@ -361,7 +327,7 @@ pub fn render_at(look: &Look, size: (i32, i32), scale: f64) -> Rendered {
         }
         Picture::File(text) => match picture(&expand(text), look.fit, look.color, size) {
             Ok(rendered) => rendered,
-            Err(why) => builtin_rendered(Backdrop::Night, size, Some(why)),
+            Err(why) => builtin_rendered(Backdrop::Night, size, Some(why.to_string())),
         },
     }
 }
@@ -377,45 +343,81 @@ fn builtin_rendered(builtin: Backdrop, size: (i32, i32), failed: Option<String>)
     }
 }
 
-/// A picture's file read and decoded, its EXIF orientation applied.
-pub fn decode(path: &Path) -> Result<image::DynamicImage, String> {
-    use image::ImageDecoder;
+/// Why a picture's file did not open; `name` is the file's, without its
+/// folders (it is shown).
+#[derive(Debug, thiserror::Error)]
+pub enum PictureError {
+    /// The file could not be read.
+    #[error("{name}: {source}")]
+    Read {
+        name: String,
+        source: std::io::Error,
+    },
+    /// It was read, and is not a picture the desktop decodes.
+    #[error("{name} does not open as a picture: {source}")]
+    Decode {
+        name: String,
+        source: image::ImageError,
+    },
+}
+
+/// The picture's file opened, its format found from what it holds.
+fn opened(
+    path: &Path,
+) -> Result<
+    (
+        image::ImageReader<std::io::BufReader<std::fs::File>>,
+        String,
+    ),
+    PictureError,
+> {
     let name = path.file_name().map_or_else(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
+    let read = |source| PictureError::Read {
+        name: name.clone(),
+        source,
+    };
     let reader = image::ImageReader::open(path)
-        .map_err(|err| format!("{name}: {err}"))?
+        .map_err(read)?
         .with_guessed_format()
-        .map_err(|err| format!("{name}: {err}"))?;
-    let mut decoder = reader
-        .into_decoder()
-        .map_err(|err| format!("{name} does not open as a picture: {err}"))?;
+        .map_err(read)?;
+    Ok((reader, name))
+}
+
+/// A picture's file read and decoded, its EXIF orientation applied.
+pub fn decode(path: &Path) -> Result<image::DynamicImage, PictureError> {
+    use image::ImageDecoder;
+    let (reader, name) = opened(path)?;
+    let not_one = |source| PictureError::Decode {
+        name: name.clone(),
+        source,
+    };
+    let mut decoder = reader.into_decoder().map_err(not_one)?;
     let orientation = decoder
         .orientation()
         .unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut decoded = image::DynamicImage::from_decoder(decoder)
-        .map_err(|err| format!("{name} does not open as a picture: {err}"))?;
+    let mut decoded = image::DynamicImage::from_decoder(decoder).map_err(not_one)?;
     decoded.apply_orientation(orientation);
     Ok(decoded)
 }
 
 /// A picture's size in pixels as its header says it, without decoding it:
 /// whether it opens as a picture (the Settings check before copying).
-pub fn dimensions(path: &Path) -> Result<(u32, u32), String> {
-    let name = path.file_name().map_or_else(
-        || path.display().to_string(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    image::ImageReader::open(path)
-        .map_err(|err| format!("{name}: {err}"))?
-        .with_guessed_format()
-        .map_err(|err| format!("{name}: {err}"))?
+pub fn dimensions(path: &Path) -> Result<(u32, u32), PictureError> {
+    let (reader, name) = opened(path)?;
+    reader
         .into_dimensions()
-        .map_err(|err| format!("{name} does not open as a picture: {err}"))
+        .map_err(|source| PictureError::Decode { name, source })
 }
 
-fn picture(path: &Path, fit: Fit, color: [u8; 3], size: (i32, i32)) -> Result<Rendered, String> {
+fn picture(
+    path: &Path,
+    fit: Fit,
+    color: [u8; 3],
+    size: (i32, i32),
+) -> Result<Rendered, PictureError> {
     use image::{GenericImageView, imageops::FilterType};
     let decoded = decode(path)?;
     let accent = dominant(&decoded);
@@ -470,7 +472,9 @@ pub fn dominant(picture: &image::DynamicImage) -> AccentColours {
             60.0 * ((r - g) / d + 4.0)
         };
         let weight = (d / max) * max;
-        let bin = &mut bins[((hue / 30.0) as usize).min(11)];
+        let Some(bin) = bins.get_mut(((hue / 30.0) as usize).min(11)) else {
+            continue;
+        };
         bin.0 += weight;
         for (sum, v) in bin.1.iter_mut().zip([r, g, b]) {
             *sum += v * weight;
@@ -560,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wallpapers_go_on_the_line_and_back() {
+    fn a_screen_shows_its_own_wallpaper_or_everyones() {
         let wallpapers = Wallpapers {
             lock: LockLook::Blurred,
             lock_picture: Picture::Builtin(Backdrop::Dawn),
@@ -575,8 +579,6 @@ mod tests {
                 ),
             ],
         };
-        let line = wallpapers.to_string();
-        assert_eq!(line.parse::<Wallpapers>(), Ok(wallpapers.clone()));
         assert_eq!(
             wallpapers.lock_look("DP-2").picture,
             Picture::File("/home/alex/Mes images/Lac au matin.jpg".to_owned())
@@ -628,7 +630,7 @@ mod tests {
         assert!(failed.failed.is_some());
         assert_eq!(failed.accent, Backdrop::Night.accent());
         assert!(dimensions(&bad).is_err());
-        assert_eq!(dimensions(&path), Ok((40, 20)));
+        assert_eq!(dimensions(&path).ok(), Some((40, 20)));
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&bad);
         let _ = std::fs::remove_dir(&dir);

@@ -43,7 +43,7 @@ use crate::{
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.xdg_shell_state
+        &mut self.protocols.xdg_shell_state
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
@@ -63,7 +63,9 @@ impl XdgShellHandler for State {
         add_destruction_hook(surface.wl_surface(), |state: &mut State, surface| {
             state.surface_going(surface);
         });
-        self.unmapped.push(Window::new_wayland_window(surface));
+        self.arrivals
+            .unmapped
+            .push(Window::new_wayland_window(surface));
     }
 
     /// The bar's desktops' list shows titles, and the tiles icons.
@@ -306,7 +308,7 @@ fn set_kde_mode(surface: &WlSurface, mode: Option<KdeMode>) {
 /// is made, as the protocol asks.
 impl KdeDecorationHandler for State {
     fn kde_decoration_state(&self) -> &KdeDecorationState {
-        &self.kde_decoration_state
+        &self.protocols.kde_decoration_state
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
@@ -359,11 +361,13 @@ fn check_grab(
 /// buffer and unmaps it when its client takes its buffer away.
 pub fn handle_commit(state: &mut State, surface: &WlSurface) {
     let waiting = state
+        .arrivals
         .unmapped
         .iter()
-        .position(|w| w.wl_surface().is_some_and(|s| *s == *surface));
-    if let Some(index) = waiting {
-        let window = state.unmapped[index].clone();
+        .enumerate()
+        .find(|(_, w)| w.wl_surface().is_some_and(|s| *s == *surface))
+        .map(|(index, w)| (index, w.clone()));
+    if let Some((index, window)) = waiting {
         if let Some(toplevel) = window.toplevel() {
             if !toplevel.is_initial_configure_sent() {
                 state.rule_size_first(&window, toplevel);
@@ -371,7 +375,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 return;
             }
             if has_buffer(surface) && !window.geometry().size.is_empty() {
-                state.unmapped.remove(index);
+                state.arrivals.unmapped.remove(index);
                 state.map_window(window);
             }
         }
@@ -383,7 +387,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
     {
         // Mapped again, at the centre, when its next buffer comes.
         state.unmap_window(&window);
-        state.unmapped.push(window);
+        state.arrivals.unmapped.push(window);
         return;
     }
     if let Some(id) = state.window_for(surface).and_then(|w| state.id_of(&w)) {
@@ -409,7 +413,8 @@ impl State {
     fn open_as(&mut self, surface: &ToplevelSurface, mode: Option<Mode>) {
         use xdg_toplevel::State as S;
         let wl_surface = surface.wl_surface();
-        self.opens_as
+        self.arrivals
+            .opens_as
             .retain(|(s, _)| s.is_alive() && s != wl_surface);
         let output = self.output_under_pointer();
         let size = match mode {
@@ -425,7 +430,7 @@ impl State {
             Some(Mode::Floating) | None => None,
         };
         if let Some(mode) = mode {
-            self.opens_as.push((wl_surface.clone(), mode));
+            self.arrivals.opens_as.push((wl_surface.clone(), mode));
         }
         surface.with_pending_state(|s| {
             s.size = size;
@@ -449,6 +454,7 @@ impl State {
     /// rules.rs), unless it asked to open as something already.
     fn rule_size_first(&mut self, window: &Window, toplevel: &ToplevelSurface) {
         let asked = self
+            .arrivals
             .opens_as
             .iter()
             .any(|(s, _)| s == toplevel.wl_surface());
@@ -469,6 +475,7 @@ impl State {
     /// A window not mapped yet no longer asks to open as `mode`.
     fn open_as_unless(&mut self, surface: &ToplevelSurface, mode: Mode) {
         let asked = self
+            .arrivals
             .opens_as
             .iter()
             .any(|(s, m)| s == surface.wl_surface() && *m == mode);

@@ -180,7 +180,7 @@ fn start(machine: &Machine) -> anyhow::Result<Option<Bed>> {
     let mut config = Config {
         file: Some(settings),
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         ..Config::default()
     };
     config.keyboard.layouts = vec!["us".to_owned()];
@@ -517,14 +517,19 @@ impl Bed {
     /// `Tile{screen:0,desktop:1}`) is on the screen, once its popover is
     /// drawn.
     fn menu_at(&mut self, target: &str) -> anyhow::Result<(f64, f64)> {
-        let line = self.last_is(MENU, &[&format!("{target}@")])?;
-        let at = line
-            .split(&format!("{target}@"))
-            .nth(1)
-            .and_then(|r| r.split_whitespace().next())
-            .and_then(|r| r.split_once(','))
-            .ok_or_else(|| anyhow::anyhow!("no {target} in {line:?}"))?;
-        let (x, y): (f64, f64) = (at.0.parse()?, at.1.parse()?);
+        let id = format!("window_menu:{target}");
+        let log = self.log.clone();
+        let place = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
+        };
+        let found = self.hp.dispatch_until(WAIT, |_| place(&log).is_some())?;
+        anyhow::ensure!(found, "no {id} in the menu's dump\n{}", self.windows_log());
+        let (x, y) = place(&log).unwrap_or_default();
         let popover = self.menu()?;
         Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
     }
@@ -1090,6 +1095,55 @@ fn nothing_draws_at_rest_and_a_move_draws_nothing() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The pointer on a line lights it, and the windows' surface alone draws
+/// (#785): the bar's items are the kit's controls, but a hover is no
+/// message of the shell's, which would draw every surface again.
+#[test]
+fn a_hover_draws_the_windows_surface_alone() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    let id = bed.id_of(FOOT.0)?;
+    let at = bed.item_at(&format!("Window({id})"), SCREEN.0)?;
+    common::at_rest(&mut bed.hp)?;
+    bed.settle()?;
+    // The clock ticks on a surface of its own: not counted.
+    let others = |hp: &Headless| {
+        [
+            hp.bar_commits(),
+            hp.levels_commits(),
+            hp.connections_commits(),
+            hp.desktops_commits(),
+            hp.agents_commits(),
+            hp.tasks_commits(),
+            hp.today_commits(),
+            hp.meeting_commits(),
+            hp.popover_commits(),
+        ]
+    };
+    for (to, lit) in [
+        (at, format!("lit=Some(Window({id}))")),
+        ((600.0, 400.0), "lit=None".to_owned()),
+    ] {
+        let (before, windows) = (others(&bed.hp), bed.hp.windows_commits());
+        if lit == "lit=None" {
+            bed.hp.pointer_move(to.0, to.1);
+        } else {
+            common::over(&mut bed.hp, to, WINDOWS_NAMESPACE)?;
+        }
+        bed.last_is(AT_REST, &[&lit])?;
+        let drew = bed
+            .hp
+            .dispatch_until(WAIT, |hp| hp.windows_commits() > windows)?;
+        anyhow::ensure!(drew, "the windows never drew {lit}");
+        common::at_rest(&mut bed.hp)?;
+        common::wait(&mut bed.hp, std::time::Duration::from_millis(300))?;
+        assert_eq!(others(&bed.hp), before, "{lit}: another surface drew");
+    }
+    Ok(())
+}
+
 /// A right click on a window's line opens its menu beside the bar (#723):
 /// the radial menu's actions, "Envoyer sur" with the screen's desktops,
 /// the window's own ringed; its Close asks the window to close.
@@ -1270,4 +1324,56 @@ fn the_radial_menu_opens_over_a_window_never_over_the_bar() -> anyhow::Result<()
     chord(&mut bed.hp, &[KEY_ESC]);
     assert!(bed.hp.radial().is_none());
     Ok(())
+}
+
+/// The mini form's popover and a window's menu in their main state, shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine {
+        form: FormChoice::Mini,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    bed.open("org.gnome.Nautilus", "Téléchargements")?;
+    bed.open("org.gnome.TextEditor", "Notes de réunion")?;
+    bed.last_is(AT_REST, &["form=mini", "item=Some(\"Notes de réunion\")"])?;
+    bed.click("Windows")?;
+    bed.last_is(
+        "the windows' popover shows it",
+        &["shows=«Notes de réunion»*"],
+    )?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "windows")?;
+    drop(bed);
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    let id = bed.id_of(FOOT.0)?;
+    bed.right_click(&format!("Window({id})"))?;
+    bed.last_is(MENU, &[&format!("window={id} ")])?;
+    bed.menu()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "window-menu")
+}
+
+/// The windows' lines at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    let id = bed.id_of(FOOT.0)?;
+    let item = format!("Window({id})");
+    let at = bed.item_at(&item, SCREEN.0)?;
+    let log = bed.log.clone();
+    common::bar_shots(&mut bed.hp, &log, (WINDOWS_NAMESPACE, "windows"), at, &item)
 }

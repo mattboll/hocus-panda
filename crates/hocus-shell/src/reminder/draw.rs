@@ -38,7 +38,7 @@ use super::{Act, Seen, Tab, Words};
 use crate::theme::Ink;
 use crate::{
     Message,
-    levels::draw::{FAINT, LINE, MANROPE_BOLD, TEXT, pointer, rgb},
+    levels::draw::{FAINT, LINE, MANROPE_BOLD, TEXT, rgb},
     popover::kit,
 };
 
@@ -153,36 +153,30 @@ pub fn lay(tab: &Tab, words: Words) -> Laid {
 
 const HEIGHT: f32 = super::HEIGHT;
 
-/// The part at `at` (the tab's frame).
-fn part(laid: &Laid, at: Point) -> Option<Part> {
-    let inside = Rectangle::new(Point::ORIGIN, Size::new(super::WIDTH, HEIGHT));
-    if !inside.contains(at) {
-        return None;
-    }
-    if laid.dismiss.contains(at) {
-        Some(Part::Dismiss)
-    } else if laid.later.is_some_and(|l| l.contains(at)) {
-        Some(Part::Later)
-    } else if laid.main.contains(at) {
-        Some(Part::Main)
-    } else {
-        Some(Part::Text)
-    }
-}
-
-/// A tab's surface.
+/// A tab's surface: what nothing holds, the tab as the mockup draws it,
+/// its parts lit as the pointer is on them ([`LIT`]); its controls are
+/// the kit's, over it ([`view`]).
 #[derive(Debug, Clone)]
-pub struct View {
+pub struct Back {
     pub id: window::Id,
     /// The compositor blurs behind the shell (else the opaque colours).
     pub glass: bool,
     pub words: Words,
 }
 
-#[derive(Debug, Default)]
-pub struct State {
-    at: Option<Point>,
-    over: Option<Part>,
+/// The parts each surface has under the pointer: the text's room is under
+/// the buttons, which win.
+static LIT: Mutex<Option<HashMap<window::Id, Vec<Part>>>> = Mutex::new(None);
+
+/// The part lit on surface `id`: a button the pointer is on, else the text.
+fn over(id: window::Id) -> Option<Part> {
+    let lit = LIT.lock().unwrap_or_else(PoisonError::into_inner);
+    let parts = lit.as_ref()?.get(&id)?;
+    parts
+        .iter()
+        .copied()
+        .find(|p| *p != Part::Text)
+        .or_else(|| parts.first().copied())
 }
 
 /// What each surface last said it shows at rest, for the log.
@@ -193,53 +187,17 @@ pub fn forget(id: window::Id) {
     if let Some(said) = SAID.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
         said.remove(&id);
     }
+    if let Some(lit) = LIT.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+        lit.remove(&id);
+    }
 }
 
-impl canvas::Program<Message> for View {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        let iced::Event::Mouse(seen) = event else {
-            return None;
-        };
-        let shown = super::seen(self.id)?;
-        let laid = lay(&shown.tab, self.words);
-        let at = pointer(seen, bounds, cursor, state.at);
-        state.at = at;
-        let over = at
-            .map(|p| Point::new(p.x - shown.at.x, p.y - shown.at.y))
-            .and_then(|p| part(&laid, p));
-        match seen {
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                let over = over?;
-                crate::tray::tip::leave();
-                tracing::debug!(serial = shown.tab.serial, ?over, "a click on the reminder");
-                super::act(shown.tab.serial, over.act(laid.join));
-                Some(canvas::Action::capture())
-            }
-            mouse::Event::CursorEntered
-            | mouse::Event::CursorMoved { .. }
-            | mouse::Event::CursorLeft => {
-                if over == state.over {
-                    return None;
-                }
-                state.over = over;
-                self.tip(&shown, &laid, over);
-                Some(canvas::Action::request_redraw())
-            }
-            _ => None,
-        }
-    }
+impl canvas::Program<Message> for Back {
+    type State = ();
 
     fn draw(
         &self,
-        state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -250,6 +208,7 @@ impl canvas::Program<Message> for View {
             return vec![f.into_geometry()];
         };
         let laid = lay(&shown.tab, self.words);
+        let over = over(self.id);
         if !shown.card {
             f.draw_svg(
                 Rectangle::new(Point::ORIGIN, bounds.size()),
@@ -263,7 +222,7 @@ impl canvas::Program<Message> for View {
                 &shown,
                 &laid,
                 self.words,
-                state.over,
+                over,
                 self.glass && !shown.card,
             );
         });
@@ -276,7 +235,7 @@ impl canvas::Program<Message> for View {
             laid.later
                 .map(|_| self.words.later(shown.tab.left))
                 .unwrap_or("none"),
-            state.over,
+            over,
         );
         let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
         let kept = kept.get_or_insert_with(HashMap::new);
@@ -291,46 +250,156 @@ impl canvas::Program<Message> for View {
         }
         vec![f.into_geometry()]
     }
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.over.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
+// --- Its controls, on the widget kit (#772) ------------------------------------------
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A part pressed: it acts at once.
+    Act(Part),
+    /// The pointer comes on a part, or leaves it.
+    Over(Part, bool),
+    Stale,
+}
+
+/// A part's id: what tests and screen readers know it by.
+fn id_of(part: Part) -> String {
+    format!("reminder:{part:?}")
+}
+
+/// Tab surface `id`: [`Back`] draws it, its parts are the kit's controls
+/// over it, where the tab is on its surface.
+pub fn view<'a>(id: window::Id, glass: bool, words: Words) -> iced::Element<'a, Message> {
+    let back = canvas::Canvas::new(Back { id, glass, words })
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill);
+    crate::ui::Around::new(
+        id,
+        build(id, words),
+        move |m| handle(id, words, m),
+        Msg::Stale,
+    )
+    .own_by(
+        move || {
+            if let Some(shown) = super::seen(id) {
+                crate::popover::tell(hocus_link::ToCompositor::Wake(
+                    hocus_link::reminder_namespace(shown.tab.serial),
+                ));
+            }
+        },
+        move || super::seen(id).is_some(),
+    )
+    .rebuild(move || build(id, words))
+    .on(back)
+}
+
+fn handle(id: window::Id, words: Words, message: Msg) {
+    let Some(shown) = super::seen(id) else {
+        return;
+    };
+    let laid = lay(&shown.tab, words);
+    match message {
+        Msg::Act(part) => {
+            crate::tray::tip::leave();
+            tracing::debug!(serial = shown.tab.serial, over = ?part, "a click on the reminder");
+            super::act(shown.tab.serial, part.act(laid.join));
         }
+        Msg::Over(part, on) => {
+            let before = over(id);
+            {
+                let mut lit = LIT.lock().unwrap_or_else(PoisonError::into_inner);
+                let parts = lit.get_or_insert_with(HashMap::new).entry(id).or_default();
+                parts.retain(|p| *p != part);
+                if on {
+                    parts.push(part);
+                }
+            }
+            let now = over(id);
+            if now != before {
+                tip(words, &shown, &laid, now);
+            }
+        }
+        Msg::Stale => {}
     }
 }
 
-impl View {
-    /// The icon button under the pointer says its name after 500 ms, under
-    /// the tab; elsewhere, no tooltip.
-    fn tip(&self, shown: &Seen, laid: &Laid, over: Option<Part>) {
-        let button = match over {
-            Some(Part::Later) => laid.later.map(|r| (r, self.words.later(shown.tab.left))),
-            Some(Part::Dismiss) => Some((laid.dismiss, self.words.dismiss())),
-            _ => None,
-        };
-        let Some((rect, name)) = button else {
-            crate::tray::tip::leave();
-            return;
-        };
-        let top = shown.margin.0 as f32;
-        let surface_width = shown.at.x + super::WIDTH + if shown.card { 0.0 } else { 8.0 };
-        let centre =
-            crate::side::from_edge(shown.margin, surface_width, shown.at.x + rect.center_x());
-        crate::tray::tip::hover_under(
-            &shown.bar,
-            top + shown.at.y + HEIGHT + TIP_GAP,
-            centre,
-            TIP_DELAY,
-            name.to_owned(),
-        );
+/// The tab's text, its main button, Later and ✕, each a control where the
+/// tab puts it; drawn under them.
+fn build<'a>(id: window::Id, words: Words) -> iced::Element<'a, Msg> {
+    use hocus_a11y::Role;
+    use iced::widget::{Space, Stack, mouse_area, pin};
+    let Some(shown) = super::seen(id) else {
+        return Space::new().into();
+    };
+    let laid = lay(&shown.tab, words);
+    let whole = Rectangle::new(Point::ORIGIN, Size::new(super::WIDTH, HEIGHT));
+    let mut parts = vec![
+        (
+            Part::Text,
+            whole,
+            Role::Button,
+            words.name(&shown.tab, shown.shared),
+        ),
+        (Part::Main, laid.main, Role::Button, laid.label.to_owned()),
+    ];
+    if let Some(later) = laid.later {
+        parts.push((
+            Part::Later,
+            later,
+            Role::Button,
+            words.later(shown.tab.left).to_owned(),
+        ));
     }
+    parts.push((
+        Part::Dismiss,
+        laid.dismiss,
+        Role::Button,
+        words.dismiss().to_owned(),
+    ));
+    let all: Vec<iced::Element<'a, Msg>> = parts
+        .into_iter()
+        .map(|(part, rect, role, name)| {
+            let spot = mouse_area(Space::new().width(rect.width).height(rect.height))
+                .on_press(Msg::Act(part))
+                .on_enter(Msg::Over(part, true))
+                .on_exit(Msg::Over(part, false))
+                .interaction(mouse::Interaction::Pointer);
+            pin(crate::ui::control(spot, id_of(part), role, name))
+                .x(shown.at.x + rect.x)
+                .y(shown.at.y + rect.y)
+                .into()
+        })
+        .collect();
+    Stack::with_children(all)
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
+        .into()
+}
+
+/// The icon button under the pointer says its name after 500 ms, under
+/// the tab; elsewhere, no tooltip.
+fn tip(words: Words, shown: &Seen, laid: &Laid, over: Option<Part>) {
+    let button = match over {
+        Some(Part::Later) => laid.later.map(|r| (r, words.later(shown.tab.left))),
+        Some(Part::Dismiss) => Some((laid.dismiss, words.dismiss())),
+        _ => None,
+    };
+    let Some((rect, name)) = button else {
+        crate::tray::tip::leave();
+        return;
+    };
+    let top = shown.margin.0 as f32;
+    let surface_width = shown.at.x + super::WIDTH + if shown.card { 0.0 } else { 8.0 };
+    let centre = crate::side::from_edge(shown.margin, surface_width, shown.at.x + rect.center_x());
+    crate::tray::tip::hover_under(
+        &shown.bar,
+        top + shown.at.y + HEIGHT + TIP_GAP,
+        centre,
+        TIP_DELAY,
+        name.to_owned(),
+    );
 }
 
 /// The tab, in its frame.
@@ -599,13 +668,6 @@ mod tests {
 
     #[test]
     fn a_click_on_the_text_opens_on_a_button_acts() {
-        let laid = lay(&tab(5, true), Words::new(Lang::French));
-        let at = |r: Rectangle| part(&laid, r.center());
-        assert_eq!(at(laid.dismiss), Some(Part::Dismiss));
-        assert_eq!(laid.later.and_then(at), Some(Part::Later));
-        assert_eq!(at(laid.main), Some(Part::Main));
-        assert_eq!(at(laid.text), Some(Part::Text));
-        assert_eq!(part(&laid, Point::new(-1.0, 20.0)), None);
         assert_eq!(Part::Main.act(true), Act::Join);
         assert_eq!(Part::Main.act(false), Act::Open);
         assert_eq!(Part::Text.act(true), Act::Open);

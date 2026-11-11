@@ -206,7 +206,9 @@ fn draw(outline: &[(f64, f64)], scale: f64) -> MemoryRenderBuffer {
             let i = ((y * px + x) * 4) as usize;
             // Fourcc ARGB8888 is B, G, R, A in memory; opaque, so it is
             // premultiplied as it is.
-            pixels[i..i + 4].copy_from_slice(&[value, value, value, 0xff]);
+            if let Some(pixel) = pixels.get_mut(i..i + 4) {
+                pixel.copy_from_slice(&[value, value, value, 0xff]);
+            }
         }
     }
     MemoryRenderBuffer::from_slice(
@@ -220,7 +222,11 @@ fn draw(outline: &[(f64, f64)], scale: f64) -> MemoryRenderBuffer {
 }
 
 fn edges(outline: &[(f64, f64)]) -> impl Iterator<Item = ((f64, f64), (f64, f64))> + '_ {
-    (0..outline.len()).map(|i| (outline[i], outline[(i + 1) % outline.len()]))
+    // Each point with the next, the last with the first.
+    outline
+        .iter()
+        .copied()
+        .zip(outline.iter().copied().cycle().skip(1))
 }
 
 /// Even-odd rule.

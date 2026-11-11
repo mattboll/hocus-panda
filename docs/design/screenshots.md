@@ -436,7 +436,7 @@ All encoding and writing happen off the loop.
   area of 1250 × 850, shown in more than 2 MiB of pixels) on every frame
   the compositor draws from the editor's opening, through an arrow's
   press, drag and release, to after it, with the shell on the CPU and on
-  wgpu over Mesa's software Vulkan driver (lavapipe; skipped without
+  wgpu over Mesa's software Vulkan driver (lavapipe; failing without
   it), where it went before #594's fix. Unit tests for the
   marks' pixels (an arrow's line and head, a box's frame, a text's colour
   and outline, a blur's variance, a blur over the marks before it), the

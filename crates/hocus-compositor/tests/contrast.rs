@@ -6,9 +6,7 @@
 
 use crate::common;
 
-use std::time::Duration;
-
-use common::{KEY_LEFTMETA, Shows, chord, open_showing, wait};
+use common::{KEY_LEFTMETA, Shows, chord, open_showing};
 use hocus_compositor::{Appearance, Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use hocus_link::theme::Scheme;
 
@@ -83,7 +81,9 @@ fn radial_band(hp: &mut Headless) -> anyhow::Result<(f64, f64)> {
     hp.button(BTN_RIGHT, false);
     hp.key(KEY_LEFTMETA, false);
     anyhow::ensure!(hp.radial().is_some(), "no radial menu");
-    wait(hp, Duration::from_millis(400))?;
+    // Open and drawn so: after a time on the wall clock, a loaded machine
+    // had drawn it half open, and its disc was read through.
+    common::at_rest(hp)?;
     // Between the up and the up-right sectors' labels, in the band.
     let a = (-90.0f64 + 22.5).to_radians();
     Ok((at.0 + BAND * a.cos(), at.1 + BAND * a.sin()))
@@ -131,7 +131,7 @@ fn overview_thumb(hp: &mut Headless) -> anyhow::Result<(f64, f64)> {
     hp.pointer_move(960.0, 540.0);
     chord(hp, &[KEY_LEFTMETA, KEY_W]);
     anyhow::ensure!(hp.overview() == Some(true), "no overview");
-    wait(hp, Duration::from_millis(400))?;
+    common::at_rest(hp)?;
     hp.overview_thumbs()
         .into_iter()
         .find(|(_, desktop, _)| *desktop == 1)

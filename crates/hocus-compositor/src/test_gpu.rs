@@ -121,8 +121,7 @@ fn descendants(root: u32) -> Vec<u32> {
         .collect();
     let mut found = vec![root];
     let mut next = 0;
-    while next < found.len() {
-        let parent = found[next];
+    while let Some(&parent) = found.get(next) {
         found.extend(
             parents
                 .iter()

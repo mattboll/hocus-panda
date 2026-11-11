@@ -4,15 +4,16 @@
 //! AccountsService's ([`crate::accounts`]), the password the system's
 //! (`passwd`, [`crate::passwd`]). The window's side is `app::account`.
 
+use hocus_words::settings::account as words;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    lang::{Words, w},
+    lang::Words,
     model::{Outside, SectionId},
 };
 
-const PROFILE: Words = w("PROFIL", "PROFILE");
-const SECURITY: Words = w("SÉCURITÉ", "SECURITY");
+const PROFILE: Words = words::PROFILE;
+const SECURITY: Words = words::SECURITY;
 
 /// The rows, by their search ids.
 pub const AVATAR: &str = "account.avatar";
@@ -43,35 +44,35 @@ pub fn outside() -> &'static [Outside] {
         o(
             AVATAR,
             PROFILE,
-            w("Avatar", "Avatar"),
+            words::AVATAR,
             &["photo", "image", "panda", "profil"],
             &["picture", "profile", "panda"],
         ),
         o(
             NAME,
             PROFILE,
-            w("Nom affiché", "Display name"),
+            words::DISPLAY_NAME,
             &["nom", "prénom"],
             &["name", "full name"],
         ),
         o(
             LOGIN,
             PROFILE,
-            w("Identifiant", "Login name"),
+            words::LOGIN_NAME,
             &["login", "utilisateur"],
             &["user name", "login"],
         ),
         o(
             PASSWORD,
             SECURITY,
-            w("Mot de passe", "Password"),
+            words::PASSWORD,
             &["changer", "sécurité", "passwd"],
             &["password", "change", "passwd"],
         ),
         o(
             KIND,
             PROFILE,
-            w("Type de compte", "Account type"),
+            words::ACCOUNT_TYPE,
             &["administrateur", "sudo"],
             &["admin", "administrator"],
         ),

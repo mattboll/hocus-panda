@@ -7,24 +7,27 @@
 //! (`share thumbs`); the shell says what was chosen and whether the
 //! pointer shows (`share chosen`), or that it was cancelled.
 //!
-//! As for the launcher, nothing goes through iced's messages: the
-//! chooser's state is here, the pointer and the keys change it and draw
-//! its surface alone.
+//! The chooser's state is [`Share`], the shell's own (#773); its surface
+//! is the widget kit's ([`view`]): what its widgets ask is handled at
+//! once, and it alone draws again.
 
-pub mod draw;
+pub mod view;
 
-use std::{
-    sync::{Mutex, PoisonError},
-    time::{Duration, Instant},
-};
+use hocus_words::shell::share as txt;
+use std::time::{Duration, Instant};
 
 use hocus_link::{
     Rect, SHARE_CHOOSER_NAMESPACE, SHARE_MONITOR, SHARE_WINDOW, ShareAsk, ShareChoose, ShareSource,
     ToCompositor,
 };
-use iced::{keyboard, window};
+use iced::{Element, keyboard, window};
 
-use crate::{clock::time::Lang, launcher::entries::Entry, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    launcher::entries::Entry,
+    popover::Effect,
+    surfaces::{Asked, Context, Lent, Surface},
+};
 
 /// Two clicks on a card this close share it at once.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -32,33 +35,31 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// The chooser's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     /// "Firefox veut voir ton écran", the application's name known or not.
     pub fn asks(self, app: Option<&str>) -> String {
-        match (app, self.fr) {
-            (Some(app), true) => format!("{app} veut voir ton écran"),
-            (Some(app), false) => format!("{app} wants to see your screen"),
-            (None, true) => "Une application veut voir ton écran".to_owned(),
-            (None, false) => "An application wants to see your screen".to_owned(),
+        match app {
+            Some(app) => txt::wants_to_see_your_screen(self.lang, app),
+            None => txt::AN_APPLICATION_WANTS_TO_SEE_YOUR
+                .get(self.lang)
+                .to_owned(),
         }
     }
 
     /// What it says of itself, then "choisis ce que tu partages".
     pub fn choose(self, detail: &str) -> String {
-        let choose = self.pick("choisis ce que tu partages", "choose what to share");
+        let choose = self.pick(txt::CHOOSE_WHAT_TO_SHARE);
         if detail.is_empty() {
             choose.to_owned()
         } else {
@@ -68,17 +69,17 @@ impl Words {
 
     pub fn tab(self, tab: Tab) -> &'static str {
         match tab {
-            Tab::Screens => self.pick("Écrans", "Screens"),
-            Tab::Windows => self.pick("Fenêtres", "Windows"),
+            Tab::Screens => self.pick(txt::SCREENS),
+            Tab::Windows => self.pick(txt::WINDOWS),
         }
     }
 
     /// A screen's name: the laptop's, its model's, or an external one.
     pub fn screen(self, builtin: bool, model: &str) -> String {
         if builtin {
-            self.pick("Écran du portable", "Laptop screen").to_owned()
+            self.pick(txt::LAPTOP_SCREEN).to_owned()
         } else if model.is_empty() {
-            self.pick("Écran externe", "External screen").to_owned()
+            self.pick(txt::EXTERNAL_SCREEN).to_owned()
         } else {
             model.to_owned()
         }
@@ -90,24 +91,22 @@ impl Words {
 
     /// A window's desktop: this one, or its number.
     pub fn desktop(self, here: bool, desktop: u8) -> String {
-        match (here, self.fr) {
-            (true, true) => "ce bureau".to_owned(),
-            (true, false) => "this desktop".to_owned(),
-            (false, true) => format!("bureau {desktop}"),
-            (false, false) => format!("desktop {desktop}"),
+        match here {
+            true => txt::THIS_DESKTOP.get(self.lang).to_owned(),
+            false => txt::desktop(self.lang, desktop),
         }
     }
 
     pub fn pointer(self) -> &'static str {
-        self.pick("Montrer le pointeur", "Show the pointer")
+        self.pick(txt::SHOW_THE_POINTER)
     }
 
     pub fn cancel(self) -> &'static str {
-        self.pick("Annuler", "Cancel")
+        self.pick(txt::CANCEL)
     }
 
     pub fn share(self) -> &'static str {
-        self.pick("Partager", "Share")
+        self.pick(txt::SHARE)
     }
 }
 
@@ -151,16 +150,6 @@ pub enum Tab {
     Windows,
 }
 
-/// What the pointer is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
-    Tab(Tab),
-    Card(usize),
-    Pointer,
-    Cancel,
-    Share,
-}
-
 /// The chooser shown.
 #[derive(Debug, Clone)]
 pub struct Chooser {
@@ -169,8 +158,6 @@ pub struct Chooser {
     pub tab: Tab,
     pub selected: usize,
     pub pointer: bool,
-    pub hover: Option<Target>,
-    pub pressed: Option<Target>,
     /// The first row in view.
     pub scroll: usize,
     last_click: Option<(usize, Instant)>,
@@ -230,8 +217,8 @@ impl Chooser {
     }
 
     fn keep_in_view(&mut self) {
-        let rows = draw::Layout::of(self).rows_shown.max(1);
-        let row = self.selected / draw::COLUMNS;
+        let rows = view::Layout::of(self).rows_shown.max(1);
+        let row = self.selected / view::COLUMNS;
         if row < self.scroll {
             self.scroll = row;
         } else if row >= self.scroll + rows {
@@ -253,32 +240,81 @@ impl Chooser {
     }
 }
 
-static CHOOSER: Mutex<Option<Chooser>> = Mutex::new(None);
-
-/// `with` on the chooser, if one shows.
-pub fn with<T>(with: impl FnOnce(&mut Option<Chooser>) -> T) -> T {
-    with(&mut CHOOSER.lock().unwrap_or_else(PoisonError::into_inner))
+/// The chooser, while one shows, and what its view last said in the log.
+#[derive(Debug, Default)]
+pub struct Share {
+    chooser: Option<Chooser>,
+    said: Option<Vec<String>>,
 }
 
-/// Whether surface `id` is the chooser's.
-pub fn is_surface(id: window::Id) -> bool {
-    with(|c| c.as_ref().is_some_and(|c| c.id == id))
+/// What changes the chooser.
+#[derive(Debug, Clone)]
+pub enum Said {
+    /// The compositor's `share-choose`: the chooser opens for that
+    /// request, or lists its sources anew.
+    Choose(ShareChoose),
+    /// `share-choose-end`: the chooser of that request goes.
+    End(u64),
+    /// Done on the chooser on surface `on` (`None`: the one showing, as a
+    /// screen reader asks).
+    Act { on: Option<window::Id>, act: Act },
+    /// A key on surface `id`.
+    Key(window::Id, keyboard::Key),
 }
 
-/// Its surface draws again (an icon came).
+/// What screen readers are told of the chooser ([`a11y`]).
+#[derive(Debug, Clone)]
+pub struct Seen {
+    id: window::Id,
+    app: String,
+    detail: String,
+    selected: usize,
+    size: (u32, u32),
+}
+
+/// Its surface is built again and draws (an icon came). Nothing shows
+/// when no chooser does.
 pub fn wake() {
-    if with(|c| c.is_some()) {
-        crate::popover::send(vec![Effect::Wake(SHARE_CHOOSER_NAMESPACE)]);
-    }
+    crate::ui::touch();
+    crate::popover::send(vec![Effect::Wake(SHARE_CHOOSER_NAMESPACE)]);
 }
 
-/// The compositor's `share-choose`: the chooser opens for that request,
-/// or lists its sources anew.
-pub fn set(choose: ShareChoose) {
-    let mut opened = false;
-    let effects = with(|chooser| {
+impl Share {
+    /// Whether surface `id` is the chooser's.
+    pub fn is_surface(&self, id: window::Id) -> bool {
+        self.chooser.as_ref().is_some_and(|c| c.id == id)
+    }
+
+    /// The chooser on surface `id`, if it shows there.
+    pub fn chooser_on(&self, id: window::Id) -> Option<&Chooser> {
+        self.chooser.as_ref().filter(|c| c.id == id)
+    }
+
+    fn seen(&self) -> Option<Seen> {
+        self.chooser.as_ref().map(|c| Seen {
+            id: c.id,
+            app: c.choose.app.clone(),
+            detail: c.choose.detail.clone(),
+            selected: c.selected,
+            size: c.size,
+        })
+    }
+
+    /// `said` taken in at `now`: what the shell then does.
+    pub fn update(&mut self, said: Said, now: Instant) -> Vec<Effect> {
+        let effects = match said {
+            Said::Choose(choose) => self.choose(choose),
+            Said::End(request) => self.end(request),
+            Said::Act { on, act } => self.act(on, act, now),
+            Said::Key(id, key) => self.key_on(id, &key).unwrap_or_default(),
+        };
+        crate::a11y::shown(crate::a11y::Shown::Share(self.seen()));
+        effects
+    }
+
+    fn choose(&mut self, choose: ShareChoose) -> Vec<Effect> {
         let mut effects = Vec::new();
-        match chooser {
+        match &mut self.chooser {
             Some(shown) if shown.choose.request == choose.request => {
                 // The same selection, if it is still there.
                 let kept = shown.chosen();
@@ -287,7 +323,7 @@ pub fn set(choose: ShareChoose) {
                     .and_then(|k| shown.sources().iter().position(|s| *s == k))
                     .unwrap_or(0);
                 shown.keep_in_view();
-                let size = draw::Layout::of(shown).surface();
+                let size = view::Layout::of(shown).surface();
                 if size != shown.size {
                     shown.size = size;
                     effects.push(Effect::Resize {
@@ -300,7 +336,7 @@ pub fn set(choose: ShareChoose) {
                 effects.extend(thumbs(shown));
             }
             _ => {
-                if let Some(old) = chooser.take() {
+                if let Some(old) = self.chooser.take() {
                     effects.push(Effect::Remove(old.id));
                 }
                 let tab = if choose.types & SHARE_WINDOW != 0 {
@@ -314,20 +350,18 @@ pub fn set(choose: ShareChoose) {
                     choose,
                     tab,
                     selected: 0,
-                    hover: None,
-                    pressed: None,
                     scroll: 0,
                     last_click: None,
                     told: None,
                     size: (0, 0),
                 };
-                shown.size = draw::Layout::of(&shown).surface();
+                shown.size = view::Layout::of(&shown).surface();
                 let app = shown.choose.app.clone();
                 let icon = entry_of(&app).and_then(|e| e.icon);
                 if let Some(icon) = &icon {
                     crate::launcher::icons::want(
                         [icon.as_str()],
-                        draw::ICON_PX,
+                        view::ICON_PX,
                         shown.choose.scale as f32 / 120.0,
                     );
                 }
@@ -345,41 +379,138 @@ pub fn set(choose: ShareChoose) {
                     size: shown.size,
                 });
                 effects.extend(thumbs(&mut shown));
-                *chooser = Some(shown);
-                opened = true;
+                self.chooser = Some(shown);
+                // One at a time: the bar's popover, the launcher, the
+                // picker close.
+                crate::popover::event(crate::popover::Event::PressElsewhere);
+                crate::launcher::close();
+                crate::emoji::close();
+                crate::actions::close();
             }
         }
         effects
-    });
-    if opened {
-        // One at a time: the bar's popover, the launcher, the picker close.
-        crate::popover::event(crate::popover::Event::PressElsewhere);
-        crate::launcher::close();
-        crate::emoji::close();
-        crate::actions::close();
     }
-    crate::popover::send(effects);
+
+    fn end(&mut self, request: u64) -> Vec<Effect> {
+        match &self.chooser {
+            Some(shown) if shown.choose.request == request => {
+                tracing::debug!(request, "the share's chooser goes");
+                let id = shown.id;
+                self.chooser = None;
+                vec![Effect::Remove(id)]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// What was done on the chooser on surface `on`, at `now`.
+    fn act(&mut self, on: Option<window::Id>, act: Act, now: Instant) -> Vec<Effect> {
+        let Some(chooser) = self
+            .chooser
+            .as_mut()
+            .filter(|c| on.is_none_or(|id| c.id == id))
+        else {
+            return Vec::new();
+        };
+        let mut effects = Vec::new();
+        let mut done = false;
+        match act {
+            Act::Tab(tab) => {
+                chooser.switch(tab);
+                effects.extend(thumbs(chooser));
+            }
+            Act::Card(index) => {
+                let double = chooser.last_click.is_some_and(|(at, when)| {
+                    at == index && now.saturating_duration_since(when) < DOUBLE_CLICK
+                });
+                chooser.selected = index;
+                chooser.last_click = Some((index, now));
+                if double {
+                    effects.extend(share(chooser));
+                    done = true;
+                }
+            }
+            Act::Pointer => chooser.pointer = !chooser.pointer,
+            Act::Cancel => {
+                effects.extend(cancel(chooser));
+                done = true;
+            }
+            Act::Share => {
+                effects.extend(share(chooser));
+                done = true;
+            }
+            Act::Wheel(rows) => {
+                let layout = view::Layout::of(chooser);
+                let most = layout.rows.saturating_sub(layout.rows_shown);
+                let scroll = (chooser.scroll as isize + rows).clamp(0, most as isize) as usize;
+                if scroll == chooser.scroll {
+                    return Vec::new();
+                }
+                chooser.scroll = scroll;
+                effects.extend(thumbs(chooser));
+            }
+        }
+        if done {
+            self.chooser = None;
+        }
+        effects
+    }
+
+    /// `key` on surface `id`: what it does, if the chooser took it.
+    fn key_on(&mut self, id: window::Id, key: &keyboard::Key) -> Option<Vec<Effect>> {
+        use keyboard::{Key, key::Named};
+        let chooser = self.chooser.as_mut().filter(|c| c.id == id)?;
+        let mut effects = Vec::new();
+        let mut done = false;
+        match key {
+            Key::Named(Named::Escape) => {
+                effects.extend(cancel(chooser));
+                done = true;
+            }
+            Key::Named(Named::Enter) => {
+                effects.extend(share(chooser));
+                done = !effects.is_empty();
+            }
+            Key::Named(Named::ArrowLeft) => chooser.step(-1),
+            Key::Named(Named::ArrowRight) => chooser.step(1),
+            Key::Named(Named::ArrowUp) => chooser.step(-(view::COLUMNS as isize)),
+            Key::Named(Named::ArrowDown) => chooser.step(view::COLUMNS as isize),
+            // The other tab.
+            Key::Named(Named::Tab) => {
+                let other = match chooser.tab {
+                    Tab::Screens => Tab::Windows,
+                    Tab::Windows => Tab::Screens,
+                };
+                chooser.switch(other);
+            }
+            Key::Named(Named::Space) => chooser.pointer = !chooser.pointer,
+            _ => return None,
+        }
+        if done {
+            self.chooser = None;
+        } else {
+            effects.extend(thumbs(chooser));
+        }
+        Some(effects)
+    }
 }
 
-/// `share-choose-end`: the chooser of that request goes.
-pub fn end(request: u64) {
-    let effects = with(|chooser| match chooser {
-        Some(shown) if shown.choose.request == request => {
-            let id = shown.id;
-            *chooser = None;
-            vec![Effect::Remove(id)]
-        }
-        _ => Vec::new(),
-    });
-    if !effects.is_empty() {
-        tracing::debug!(request, "the share's chooser goes");
-        crate::popover::send(effects);
+impl Surface for Lent<Share> {
+    type Message = Said;
+
+    fn update(&mut self, said: Said, now: Instant) -> Vec<Effect> {
+        self.get_mut().update(said, now)
+    }
+
+    fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
+        self.read(|s| s.is_surface(id))?
+            .then(|| view::view(self, id, words(), context.look.glass))
     }
 }
 
 /// The thumbnails' places, when they changed: to the compositor.
 fn thumbs(chooser: &mut Chooser) -> Option<Effect> {
-    let layout = draw::Layout::of(chooser);
+    let layout = view::Layout::of(chooser);
     let sources = chooser.sources();
     let rects: Vec<(ShareSource, Rect)> = layout
         .cards
@@ -435,127 +566,57 @@ fn cancel(chooser: &Chooser) -> Vec<Effect> {
     ]
 }
 
-/// What the pointer did on surface `id`, at `now`: whether to draw.
-pub fn pointer(id: window::Id, event: Pointing, now: Instant) -> bool {
-    let effects = with(|slot| {
-        let chooser = slot.as_mut().filter(|c| c.id == id)?;
-        let mut effects = Vec::new();
-        let mut done = false;
-        match event {
-            Pointing::Over(target) => {
-                if chooser.hover == target {
-                    return Some((effects, false, false));
-                }
-                chooser.hover = target;
-            }
-            Pointing::Press(target) => chooser.pressed = target,
-            Pointing::Release(target) => {
-                let clicked = chooser.pressed.take().filter(|p| Some(*p) == target);
-                match clicked {
-                    Some(Target::Tab(tab)) => {
-                        chooser.switch(tab);
-                        effects.extend(thumbs(chooser));
-                    }
-                    Some(Target::Card(index)) => {
-                        let double = chooser.last_click.is_some_and(|(at, when)| {
-                            at == index && now.saturating_duration_since(when) < DOUBLE_CLICK
-                        });
-                        chooser.selected = index;
-                        chooser.last_click = Some((index, now));
-                        if double {
-                            effects.extend(share(chooser));
-                            done = true;
-                        }
-                    }
-                    Some(Target::Pointer) => chooser.pointer = !chooser.pointer,
-                    Some(Target::Cancel) => {
-                        effects.extend(cancel(chooser));
-                        done = true;
-                    }
-                    Some(Target::Share) => {
-                        effects.extend(share(chooser));
-                        done = true;
-                    }
-                    None => {}
-                }
-            }
-            Pointing::Wheel(rows) => {
-                let layout = draw::Layout::of(chooser);
-                let most = layout.rows.saturating_sub(layout.rows_shown);
-                let scroll = (chooser.scroll as isize + rows).clamp(0, most as isize) as usize;
-                if scroll == chooser.scroll {
-                    return Some((effects, false, false));
-                }
-                chooser.scroll = scroll;
-                effects.extend(thumbs(chooser));
-            }
-        }
-        Some((effects, true, done))
-    });
-    let Some((effects, draw, done)) = effects else {
-        return false;
-    };
-    if done {
-        with(|slot| *slot = None);
-    }
-    crate::popover::send(effects);
-    draw
-}
-
-/// What the pointer does on the chooser.
+/// What can be done on the chooser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pointing {
-    Over(Option<Target>),
-    Press(Option<Target>),
-    Release(Option<Target>),
+pub enum Act {
+    Tab(Tab),
+    /// A card clicked: selected, shared on a second click.
+    Card(usize),
+    Pointer,
+    Cancel,
+    Share,
     /// The wheel, by rows.
     Wheel(isize),
 }
 
-/// `key` on surface `id`: whether the chooser took it.
-pub fn key_on(id: window::Id, key: &keyboard::Key) -> bool {
-    use keyboard::{Key, key::Named};
-    let effects = with(|slot| {
-        let chooser = slot.as_mut().filter(|c| c.id == id)?;
-        let mut effects = Vec::new();
-        let mut done = false;
-        match key {
-            Key::Named(Named::Escape) => {
-                effects.extend(cancel(chooser));
-                done = true;
-            }
-            Key::Named(Named::Enter) => {
-                effects.extend(share(chooser));
-                done = !effects.is_empty();
-            }
-            Key::Named(Named::ArrowLeft) => chooser.step(-1),
-            Key::Named(Named::ArrowRight) => chooser.step(1),
-            Key::Named(Named::ArrowUp) => chooser.step(-(draw::COLUMNS as isize)),
-            Key::Named(Named::ArrowDown) => chooser.step(draw::COLUMNS as isize),
-            // The other tab.
-            Key::Named(Named::Tab) => {
-                let other = match chooser.tab {
-                    Tab::Screens => Tab::Windows,
-                    Tab::Windows => Tab::Screens,
-                };
-                chooser.switch(other);
-            }
-            Key::Named(Named::Space) => chooser.pointer = !chooser.pointer,
-            _ => return None,
-        }
-        if !done {
-            effects.extend(thumbs(chooser));
-        }
-        Some((effects, done))
-    });
-    let Some((effects, done)) = effects else {
-        return false;
+/// The chooser for screen readers: a dialog named by what is asked,
+/// holding what its controls declared (the tabs, the cards, the pointer's
+/// box, the buttons), the selected card holding the focus.
+pub fn a11y(seen: &Seen) -> Option<hocus_a11y::Window> {
+    use hocus_a11y::{Node, Role, Window};
+    let words = words();
+    let rows = crate::a11y::rows::of(seen.id)?;
+    let title = words.asks(app_name(&seen.app).as_deref());
+    let dialog = Node::new("dialog", Role::Dialog, title.clone())
+        .describe(words.choose(&seen.detail))
+        .children(rows.nodes);
+    let mut window = Window::new("share", title);
+    window.nodes = vec![dialog];
+    window.active = true;
+    window.focus = Some(format!("share:Card({})", seen.selected));
+    window.size = Some((seen.size.0 as f32, seen.size.1 as f32));
+    Some(window)
+}
+
+/// A screen reader clicks control `key` of the chooser: asked of the
+/// loop, which owns it.
+pub fn a11y_click(key: &str) {
+    let what = match key {
+        "share:Pointer" => Act::Pointer,
+        "share:Cancel" => Act::Cancel,
+        "share:Share" => Act::Share,
+        "share:Tab(Screens)" => Act::Tab(Tab::Screens),
+        "share:Tab(Windows)" => Act::Tab(Tab::Windows),
+        _ => match key
+            .strip_prefix("share:Card(")
+            .and_then(|k| k.strip_suffix(')'))
+            .and_then(|n| n.parse().ok())
+        {
+            Some(index) => Act::Card(index),
+            None => return,
+        },
     };
-    if done {
-        with(|slot| *slot = None);
-    }
-    crate::popover::send(effects);
-    true
+    crate::surfaces::ask(Asked::Share(what));
 }
 
 #[cfg(test)]
@@ -564,7 +625,21 @@ mod tests {
     use hocus_link::{ShareScreen, ShareWindow};
 
     fn chooser(types: u32, windows: usize) -> Chooser {
-        let choose = ShareChoose {
+        Chooser {
+            id: window::Id::unique(),
+            pointer: true,
+            choose: choose(types, windows),
+            tab: Tab::Windows,
+            selected: 0,
+            scroll: 0,
+            last_click: None,
+            told: None,
+            size: (0, 0),
+        }
+    }
+
+    fn choose(types: u32, windows: usize) -> ShareChoose {
+        ShareChoose {
             request: 1,
             output: "eDP-1".into(),
             scale: 120,
@@ -591,19 +666,6 @@ mod tests {
                     title: format!("window {i}"),
                 })
                 .collect(),
-        };
-        Chooser {
-            id: window::Id::unique(),
-            pointer: true,
-            choose,
-            tab: Tab::Windows,
-            selected: 0,
-            hover: None,
-            pressed: None,
-            scroll: 0,
-            last_click: None,
-            told: None,
-            size: (0, 0),
         }
     }
 
@@ -635,7 +697,7 @@ mod tests {
         assert_eq!(c.tabs(), [Tab::Windows]);
         c.step(1);
         assert_eq!(c.selected, 1);
-        c.step(draw::COLUMNS as isize);
+        c.step(view::COLUMNS as isize);
         assert_eq!(c.selected, 4);
         c.step(100);
         assert_eq!(c.selected, 6);
@@ -646,5 +708,54 @@ mod tests {
         both.switch(Tab::Screens);
         assert_eq!(both.tab, Tab::Screens);
         assert_eq!(both.chosen(), Some(ShareSource::Screen("eDP-1".into())));
+    }
+
+    /// The chooser alone (#773): told, it opens its surface; the keys move
+    /// its selection, which its view shows; `Enter` shares it and the
+    /// chooser goes.
+    #[test]
+    fn the_chooser_alone_opens_moves_shares_and_goes() {
+        let mut share = Share::default();
+        let now = Instant::now();
+        let effects = share.update(Said::Choose(choose(SHARE_WINDOW, 4)), now);
+        let Some(Effect::ShareChooser { id, output, .. }) = effects
+            .iter()
+            .find(|e| matches!(e, Effect::ShareChooser { .. }))
+        else {
+            panic!("its surface opened: {effects:?}");
+        };
+        let id = *id;
+        assert_eq!(output, "eDP-1");
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            Effect::Tell(ToCompositor::Share(ShareAsk::Thumbs { request: 1, .. }))
+        )));
+        let words = Words::new(Lang::English);
+        let shows = |share: &Share| view::content(share.chooser_on(id).expect("shown"), words).1;
+        let before = shows(&share);
+        // A key on another surface is not its own.
+        let other = window::Id::unique();
+        let right = keyboard::Key::Named(keyboard::key::Named::ArrowRight);
+        assert!(
+            share
+                .update(Said::Key(other, right.clone()), now)
+                .is_empty()
+        );
+        share.update(Said::Key(id, right), now);
+        assert_eq!(share.chooser_on(id).map(|c| c.selected), Some(1));
+        assert_ne!(shows(&share), before, "its view shows the selection moved");
+        let enter = keyboard::Key::Named(keyboard::key::Named::Enter);
+        let effects = share.update(Said::Key(id, enter), now);
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            Effect::Tell(ToCompositor::Share(ShareAsk::Chosen {
+                source: ShareSource::Window(2),
+                ..
+            }))
+        )));
+        assert!(effects.contains(&Effect::Remove(id)));
+        assert!(!share.is_surface(id));
+        // Ended by the compositor once gone: nothing more.
+        assert!(share.update(Said::End(1), now).is_empty());
     }
 }

@@ -181,7 +181,10 @@ fn pixman_outputs(
     state: &mut State,
 ) -> anyhow::Result<Outputs<PixmanRenderer, pixman::Image<'static, 'static>>> {
     let renderer = PixmanRenderer::new().context("could not create the pixman renderer")?;
-    state.shm_state.update_formats(renderer.shm_formats());
+    state
+        .protocols
+        .shm_state
+        .update_formats(renderer.shm_formats());
     dmabuf_global(state, renderer.dmabuf_formats(), None);
     Outputs::new(renderer, Fourcc::Argb8888, specs, state)
 }
@@ -194,10 +197,13 @@ fn gles_outputs(
     state: &mut State,
 ) -> anyhow::Result<Outputs<GlesRenderer, GlesTexture>> {
     let renderer = gles_renderer(render_node)?;
-    state.shm_state.update_formats(renderer.shm_formats());
+    state
+        .protocols
+        .shm_state
+        .update_formats(renderer.shm_formats());
     let device = render_node_of(renderer.egl_context().display());
     dmabuf_global(state, renderer.dmabuf_formats(), device);
-    state.blur = true;
+    state.graphics.blur = true;
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 
@@ -219,10 +225,13 @@ fn software_outputs(
     // SAFETY: the context was just created and is used on this thread only.
     #[allow(unsafe_code)]
     let renderer = unsafe { GlesRenderer::new(context) }.context("could not start GLES")?;
-    state.shm_state.update_formats(renderer.shm_formats());
+    state
+        .protocols
+        .shm_state
+        .update_formats(renderer.shm_formats());
     dmabuf_global(state, renderer.dmabuf_formats(), None);
     // Its shaders, the glass's and the halo's among them, as on a GPU.
-    state.blur = true;
+    state.graphics.blur = true;
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 
@@ -299,7 +308,7 @@ where
         state: &mut State,
     ) -> anyhow::Result<Self> {
         // Tests put the pointer where they want, from 0, 0.
-        state.pointer_placed = true;
+        state.pointer.placed = true;
         let mut outputs = Self {
             renderer,
             format,

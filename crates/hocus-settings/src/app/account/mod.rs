@@ -11,6 +11,7 @@
 
 mod view;
 
+use hocus_words::settings::app_account as words;
 use std::{path::PathBuf, sync::Arc};
 
 use iced::{
@@ -24,7 +25,7 @@ use super::{App, Doing, Message, Page, TOAST, ToastAction, UNDONE};
 use crate::{
     account as model,
     accounts::{self, Account, Ask, Asks, Heard},
-    lang::{Lang, w},
+    lang::Lang,
     model::SectionId,
     passwd::{self, Outcome},
     secret::Secret,
@@ -261,10 +262,10 @@ impl App {
                 }
                 self.account.choosing = true;
                 let lang = self.lang;
-                let (title, filter) = match lang {
-                    Lang::French => ("Choisir un avatar", "Images (JPEG, PNG, WebP)"),
-                    Lang::English => ("Choose an avatar", "Pictures (JPEG, PNG, WebP)"),
-                };
+                let (title, filter) = (
+                    words::CHOOSE_AN_AVATAR.get(lang),
+                    words::PICTURES_JPEG_PNG_WEBP.get(lang),
+                );
                 let to = self.account.to.clone();
                 let started = std::thread::Builder::new()
                     .name("avatar: file chooser".to_owned())
@@ -432,10 +433,7 @@ impl App {
                 }
                 if let Err(why) = result {
                     tracing::info!(why, ?ask, "AccountsService refused");
-                    let text = match self.lang {
-                        Lang::French => "Le système a refusé.".to_owned(),
-                        Lang::English => "The system refused.".to_owned(),
-                    };
+                    let text = words::THE_SYSTEM_REFUSED.get(self.lang).to_owned();
                     return self.toast(text, ToastAction::None, TOAST);
                 }
                 match asked {
@@ -465,28 +463,23 @@ impl App {
     /// A change of the page made: kept for its undo, and said.
     fn account_done(&mut self, choice: Choice, doing: Doing) -> Task<Message> {
         let lang = self.lang;
-        let (done, undone, redone) = match (&choice, lang) {
-            (Choice::Name { after, .. }, Lang::French) => (
-                format!("Nom affiché : {after}"),
-                format!("Annulé : le nom affiché revient à {after}."),
-                format!("Rétabli : nom affiché : {after}."),
+        let (done, undone, redone) = match &choice {
+            Choice::Name { after, .. } => (
+                words::display_name(lang, after),
+                words::undone_the_display_name_is_back(lang, after),
+                words::redone_display_name(lang, after),
             ),
-            (Choice::Name { after, .. }, Lang::English) => (
-                format!("Display name: {after}"),
-                format!("Undone: the display name is back to {after}."),
-                format!("Redone: display name: {after}."),
-            ),
-            (Choice::Picture { after, .. }, _) => {
+            Choice::Picture { after, .. } => {
                 let removed = after.is_none();
-                let said = |fr: &'static str, en: &'static str| w_owned(fr, en, lang);
+                let said = |text: hocus_words::Text| text.get(lang).to_owned();
                 (
                     if removed {
-                        said("Avatar retiré.", "Avatar removed.")
+                        said(words::AVATAR_REMOVED)
                     } else {
-                        said("Avatar changé.", "Avatar changed.")
+                        said(words::AVATAR_CHANGED)
                     },
-                    said("Annulé : l’avatar revient.", "Undone: the avatar is back."),
-                    said("Rétabli : avatar changé.", "Redone: avatar changed."),
+                    said(words::UNDONE_THE_AVATAR_IS_BACK),
+                    said(words::REDONE_AVATAR_CHANGED),
                 )
             }
         };
@@ -591,7 +584,7 @@ impl App {
                 tracing::info!("the password is changed");
                 sheet.clear();
                 self.account.sheet = None;
-                let text = w_owned("Mot de passe changé.", "Password changed.", lang);
+                let text = w_owned(words::PASSWORD_CHANGED, lang);
                 return self.toast(text, ToastAction::None, TOAST);
             }
             Outcome::WrongCurrent => {
@@ -610,17 +603,10 @@ impl App {
                 return operation::focus(FIELDS[1]);
             }
             Outcome::Failed(why) => {
-                sheet.failed = Some(match lang {
-                    Lang::French => format!("Le mot de passe n’a pas changé : {why}."),
-                    Lang::English => format!("The password has not changed: {why}."),
-                });
+                sheet.failed = Some(words::the_password_has_not_changed(lang, &why));
             }
             Outcome::NoAnswer => {
-                sheet.failed = Some(w_owned(
-                    "Le système ne répond pas.",
-                    "The system does not answer.",
-                    lang,
-                ));
+                sheet.failed = Some(w_owned(words::THE_SYSTEM_DOES_NOT_ANSWER, lang));
             }
         }
         Task::none()
@@ -759,6 +745,6 @@ impl App {
     }
 }
 
-fn w_owned(fr: &'static str, en: &'static str, lang: Lang) -> String {
-    w(fr, en).get(lang).to_owned()
+fn w_owned(text: hocus_words::Text, lang: Lang) -> String {
+    text.get(lang).to_owned()
 }

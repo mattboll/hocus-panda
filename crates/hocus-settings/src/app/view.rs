@@ -2,6 +2,7 @@
 //! with its search, the content's header, the home and the sections'
 //! pages, the menus, the toast and the unreadable file's banner.
 
+use hocus_words::settings::app_view as words;
 use std::time::{Duration, Instant, SystemTime};
 
 use iced::{
@@ -20,7 +21,7 @@ use super::{
     style::{self, *},
 };
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::{Group, Icon, Kind, SectionId, Setting, Source, settings_of},
     search::Target,
     store::{FileState, Reading, Slot},
@@ -169,22 +170,19 @@ impl App {
         .align_y(Alignment::Center)
         .height(HEADER)
         .padding(Padding::default().left(16));
-        let field = text_input(
-            self.say(w("Rechercher un réglage", "Search settings")),
-            &self.query,
-        )
-        .id(SEARCH)
-        .on_input(Message::Query)
-        .on_submit(Message::Submit)
-        .size(13.0)
-        .font(MANROPE)
-        .padding(Padding {
-            top: 8.0,
-            bottom: 8.0,
-            left: 29.0,
-            right: 30.0,
-        })
-        .style(style::search);
+        let field = text_input(self.say(words::SEARCH_SETTINGS), &self.query)
+            .id(SEARCH)
+            .on_input(Message::Query)
+            .on_submit(Message::Submit)
+            .size(13.0)
+            .font(MANROPE)
+            .padding(Padding {
+                top: 8.0,
+                bottom: 8.0,
+                left: 29.0,
+                right: 30.0,
+            })
+            .style(style::search);
         let focused = self.focus == Focus::Search;
         let aside: El<'_> = if self.query.is_empty() {
             container(text("Ctrl F").size(9.0).font(MONO).color(FAINT))
@@ -252,7 +250,7 @@ impl App {
             background: Some(Background::Color(SIDEBAR.get())),
             ..container::Style::default()
         })
-        .id(format!("sidebar:{}", if lang.fr() { "fr" } else { "en" }));
+        .id(format!("sidebar:{}", words::EN.get(lang)));
         // A 1 px line on its right.
         row![
             sidebar,
@@ -307,7 +305,7 @@ impl App {
     fn nav(&self) -> El<'_> {
         let mut list = column![self.nav_row(
             Icon::Home,
-            self.say(w("Accueil", "Home")),
+            self.say(words::HOME),
             self.page == Page::Home,
             self.focus == Focus::Nav(0),
             Message::Home,
@@ -349,22 +347,11 @@ impl App {
         let lang = self.lang;
         let count = self.results.len();
         let head = if count == 0 {
-            match lang {
-                Lang::French => format!(
-                    "Aucun réglage ne répond à « {} ». Essaie un autre mot : écran, veille, clavier…",
-                    self.query.trim()
-                ),
-                Lang::English => format!(
-                    "No setting matches “{}”. Try another word: screen, sleep, keyboard…",
-                    self.query.trim()
-                ),
-            }
+            words::no_setting_matches_try_another_word(lang, self.query.trim())
         } else {
-            match (lang, count) {
-                (Lang::French, 1) => "1 résultat · ↑ ↓ puis Entrée".to_owned(),
-                (Lang::French, n) => format!("{n} résultats · ↑ ↓ puis Entrée"),
-                (Lang::English, 1) => "1 result · ↑ ↓ then Enter".to_owned(),
-                (Lang::English, n) => format!("{n} results · ↑ ↓ then Enter"),
+            match count {
+                1 => words::N_1_RESULT_THEN_ENTER.get(lang).to_owned(),
+                n => words::results_then_enter(lang, n),
             }
         };
         let mut list = column![container(t(head, 11.5, FAINT.get())).padding([4, 10])].spacing(2);
@@ -394,7 +381,7 @@ impl App {
                     .into(),
             };
             let mut path = match found.target {
-                Target::Section(_) => w("Toute la page", "The whole page").get(lang).to_owned(),
+                Target::Section(_) => words::THE_WHOLE_PAGE.get(lang).to_owned(),
                 Target::Outside(outside) => format!(
                     "{} › {}",
                     section.name.get(lang),
@@ -403,7 +390,7 @@ impl App {
                 Target::Setting(setting) if setting.kind == Kind::Shortcut => format!(
                     "{} › {} › {}",
                     section.name.get(lang),
-                    w("Raccourcis", "Shortcuts").get(lang),
+                    words::SHORTCUTS.get(lang),
                     capitalised(setting.group.label.get(lang))
                 ),
                 Target::Setting(setting) => format!(
@@ -413,10 +400,7 @@ impl App {
                 ),
             };
             if let Some(via) = &found.via {
-                path.push_str(&match lang {
-                    Lang::French => format!(" · par « {via} »"),
-                    Lang::English => format!(" · via “{via}”"),
-                });
+                path.push_str(&words::via(lang, via));
             }
             let opened = self.opened.as_deref() == Some(found.target.id().as_str());
             let fill = if opened {
@@ -457,28 +441,25 @@ impl App {
                 "{} › {} › {}",
                 self.title(),
                 SectionId::Keyboard.name(lang),
-                w("Raccourcis", "Shortcuts").get(lang)
+                words::SHORTCUTS.get(lang)
             ),
             Page::Section(SectionId::Network) if self.network.sub => format!(
                 "{} › {} › {}",
                 self.title(),
                 SectionId::Network.name(lang),
-                w("Réseaux enregistrés", "Saved networks").get(lang)
+                words::SAVED_NETWORKS.get(lang)
             ),
             Page::Section(id) => format!("{} › {}", self.title(), id.name(lang)),
         };
         let (dot, state) = match self.snapshot.as_ref().map(|s| &s.state) {
-            _ if self.screens_to_confirm() => (
-                crate::theme::ink(rgb(0xF5B44A)),
-                w("À confirmer", "To confirm"),
-            ),
+            _ if self.screens_to_confirm() => (crate::theme::ink(rgb(0xF5B44A)), words::TO_CONFIRM),
             // The clipboard's history cleared (6.17): said, then saved again.
             Some(FileState::Reads) | None if self.captures_cleared() => {
-                (ACCENT.get(), w("Effacé", "Cleared"))
+                (ACCENT.get(), words::CLEARED)
             }
-            Some(FileState::Reads) | None => (ACCENT.get(), w("Enregistré", "Saved")),
-            Some(FileState::Broken { .. }) => (ORANGE.get(), w("Lecture seule", "Read-only")),
-            Some(FileState::NoFile) => (ORANGE.get(), w("Aucun fichier", "No file")),
+            Some(FileState::Reads) | None => (ACCENT.get(), words::SAVED),
+            Some(FileState::Broken { .. }) => (ORANGE.get(), words::READ_ONLY),
+            Some(FileState::NoFile) => (ORANGE.get(), words::NO_FILE),
         };
         let header = mouse_area(
             row![
@@ -563,22 +544,15 @@ impl App {
         let title = banner_title(*line, lang);
         let restore = self.restore_label();
         let mut buttons = row![
-            button(
-                t(
-                    w("Ouvrir le fichier", "Open the file").get(lang),
-                    12.5,
-                    TEXT.get()
-                )
-                .font(SEMIBOLD)
-            )
-            .height(28)
-            .padding([5, 12])
-            .on_press(Message::OpenFile)
-            .style(|_, status| solid(
-                crate::theme::ink(rgba(255, 255, 255, 0.08)),
-                TEXT.get(),
-                status
-            )),
+            button(t(words::OPEN_THE_FILE.get(lang), 12.5, TEXT.get()).font(SEMIBOLD))
+                .height(28)
+                .padding([5, 12])
+                .on_press(Message::OpenFile)
+                .style(|_, status| solid(
+                    crate::theme::ink(rgba(255, 255, 255, 0.08)),
+                    TEXT.get(),
+                    status
+                )),
         ]
         .spacing(8);
         if let Some(restore) = restore {
@@ -596,16 +570,13 @@ impl App {
         Some(
             container(
                 row![
-                    container(icon(Icon::Warning, 18.0, PEACH.get())).padding(Padding::default().top(1)),
+                    container(icon(Icon::Warning, 18.0, PEACH.get()))
+                        .padding(Padding::default().top(1)),
                     column![
                         t(title, 13.5, PEACH.get()).font(BOLD),
                         t(message.clone(), 12.5, SOFT.get()),
                         t(
-                            w(
-                                "Le bureau garde la dernière configuration lisible, et les Réglages ne changent rien tant que le fichier n’est pas réparé.",
-                                "The desktop keeps the last readable configuration, and Settings changes nothing until the file is fixed.",
-                            )
-                            .get(lang),
+                            words::THE_DESKTOP_KEEPS_THE_LAST_READABLE.get(lang),
                             12.5,
                             SOFT.get(),
                         ),
@@ -630,10 +601,7 @@ impl App {
     pub(super) fn restore_label(&self) -> Option<String> {
         let at = self.last_good?;
         let time = local_time(at)?;
-        Some(match self.lang {
-            Lang::French => format!("Reprendre la version de {time}"),
-            Lang::English => format!("Take back the {time} version"),
-        })
+        Some(words::take_back_the_version(self.lang, &time))
     }
 
     // --- The home ---------------------------------------------------------------------
@@ -659,23 +627,12 @@ impl App {
                 border: border(26.0, 0.0, Color::TRANSPARENT),
                 ..container::Style::default()
             });
-        let hello = match lang {
-            Lang::French => format!("Bonjour {}", self.user),
-            Lang::English => format!("Hello {}", self.user),
-        };
+        let hello = words::hello(lang, &self.user);
         let greeting = row![
             avatar,
             column![
                 text(hello).size(22).font(BOLD).color(TEXT),
-                t(
-                    w(
-                        "Ce que tu règles ici est enregistré aussitôt, sans bouton à presser.",
-                        "What you set here is saved at once, with no button to press.",
-                    )
-                    .get(lang),
-                    13.5,
-                    DIM.get(),
-                ),
+                t(words::WHAT_YOU_SET_HERE_IS_SAVED.get(lang), 13.5, DIM.get(),),
             ]
             .spacing(4),
         ]
@@ -705,7 +662,7 @@ impl App {
             let name = self.slot_name(setting, change.slot);
             let value = setting.say(&change.value, lang);
             let when = if change.by_hand {
-                w("à la main", "by hand").get(lang).to_owned()
+                words::BY_HAND.get(lang).to_owned()
             } else {
                 when(change.at, lang)
             };
@@ -729,32 +686,27 @@ impl App {
         let mut page = column![greeting, grid].spacing(22);
         if !self.recent.is_empty() {
             page = page.push(group_box(
-                label(w("CHANGÉS RÉCEMMENT", "CHANGED RECENTLY").get(lang)),
+                label(words::CHANGED_RECENTLY.get(lang)),
                 card_box(recent.into()),
             ));
         }
         let path = self.file.as_ref().map_or_else(String::new, |p| tilde(p));
         let file = column![
             text(path).size(12).font(MONO).color(TEXT),
-            t(
-                w(
-                    "Tu peux toujours l’éditer à la main : les Réglages le relisent dès qu’il change, n’écrivent que les lignes qu’ils modifient et gardent tes commentaires.",
-                    "You can still edit it by hand: Settings reads it again as soon as it changes, writes only the lines it changes and keeps your comments.",
-                )
-                .get(lang),
-                12.5,
-                DIM.get(),
-            )
-            .line_height(1.5),
-            button(t(w("Ouvrir le fichier", "Open the file").get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
+            t(words::YOU_CAN_STILL_EDIT_IT_BY.get(lang), 12.5, DIM.get(),).line_height(1.5),
+            button(t(words::OPEN_THE_FILE.get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
                 .height(32)
                 .padding([7, 14])
                 .on_press(Message::OpenFile)
-                .style(|_, status| solid(crate::theme::ink(rgba(255, 255, 255, 0.06)), TEXT.get(), status)),
+                .style(|_, status| solid(
+                    crate::theme::ink(rgba(255, 255, 255, 0.06)),
+                    TEXT.get(),
+                    status
+                )),
         ]
         .spacing(8);
         page = page.push(group_box(
-            label(w("LE FICHIER", "THE FILE").get(lang)),
+            label(words::THE_FILE.get(lang)),
             card_box(container(file).padding([14, 16]).into()),
         ));
         container(page).padding(Padding::default().top(14)).into()
@@ -834,26 +786,28 @@ impl App {
                 let slot =
                     crate::model::setting("power.suspend-after").map(|s| Slot::of(s, self.source));
                 let suspend = slot.map(|slot| self.said_value(slot)).unwrap_or_default();
-                let suspend = match lang {
-                    Lang::French if suspend == "Jamais" => "jamais de veille".to_owned(),
-                    Lang::French => format!("veille après {suspend}"),
-                    Lang::English if suspend == "Never" => "never sleeps".to_owned(),
-                    Lang::English => format!("sleeps after {suspend}"),
+                // As the power page's menu says it (power.rs, "Never").
+                let suspend = if suspend == words::NEVER_VALUE.get(lang) {
+                    words::NEVER_SLEEPS.get(lang).to_owned()
+                } else {
+                    words::sleeps_after(lang, &suspend)
                 };
-                match (self.battery, lang) {
-                    (Some(b), Lang::French) => format!("Batterie {b} % · {suspend}"),
-                    (Some(b), Lang::English) => format!("Battery {b} % · {suspend}"),
-                    (None, Lang::French) => format!("Sur secteur · {suspend}"),
-                    (None, Lang::English) => format!("On AC · {suspend}"),
+                match self.battery {
+                    Some(b) => words::battery(
+                        lang,
+                        words::Battery {
+                            b,
+                            suspend: &suspend,
+                        },
+                    ),
+                    None => words::on_ac(lang, &suspend),
                 }
             }
             SectionId::Sound => return self.sound_card(),
             SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
-            SectionId::Appearance => w("Sombre · français", "Dark · English")
-                .get(lang)
-                .to_owned(),
-            _ => w("À venir", "Coming").get(lang).to_owned(),
+            SectionId::Appearance => words::DARK_ENGLISH.get(lang).to_owned(),
+            _ => words::COMING.get(lang).to_owned(),
         };
         (whole, String::new())
     }
@@ -926,13 +880,9 @@ impl App {
             page = page.push(card_box(
                 container(
                     column![
-                        t(w("À venir", "Coming").get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+                        t(words::COMING.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
                         t(
-                            w(
-                                "Les réglages de cette page arrivent bientôt. En attendant, le fichier de configuration les garde.",
-                                "This page's settings come soon. Meanwhile, the configuration file keeps them.",
-                            )
-                            .get(lang),
+                            words::THIS_PAGE_S_SETTINGS_COME_SOON.get(lang),
                             12.5,
                             DIM.get(),
                         ),
@@ -1071,10 +1021,7 @@ impl App {
             words = words.push(t(line, 12.5, colour));
         } else if self.implied(setting) {
             // High contrast holds it on (#423).
-            let said = w(
-                "Comprise dans le contraste élevé.",
-                "Included in high contrast.",
-            );
+            let said = words::INCLUDED_IN_HIGH_CONTRAST;
             words = words.push(t(said.get(lang), 12.5, fade(DIM.get(), ink)));
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
@@ -1139,12 +1086,13 @@ impl App {
             return None;
         };
         let applies = setting.say(&self.default_of(slot)?, self.lang);
-        Some(match self.lang {
-            Lang::French => {
-                format!("Dans le fichier : « {raw} », non compris ; {applies} s’applique.")
-            }
-            Lang::English => format!("In the file: “{raw}”, not understood; {applies} applies."),
-        })
+        Some(words::in_the_file_not_understood_applies(
+            self.lang,
+            words::InTheFileNotUnderstoodApplies {
+                applies: &applies,
+                raw: &raw,
+            },
+        ))
     }
 
     fn control(&self, setting: &'static Setting, slot: Slot, inert: bool, focused: bool) -> El<'_> {
@@ -1493,8 +1441,8 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center);
         let action = match toast.action {
-            ToastAction::Undo => Some(w("Annuler", "Undo").get(lang).to_owned()),
-            ToastAction::Show(_) => Some(w("Voir", "Show").get(lang).to_owned()),
+            ToastAction::Undo => Some(words::UNDO.get(lang).to_owned()),
+            ToastAction::Show(_) => Some(words::SHOW.get(lang).to_owned()),
             ToastAction::Sound(act) => Some(self.sound_act_label(act)),
             ToastAction::None => None,
         };
@@ -1669,11 +1617,9 @@ pub(super) fn ease_out(t: Duration, over: Duration) -> f32 {
 
 /// "config.toml ne se lit plus, ligne 42".
 pub(super) fn banner_title(line: Option<usize>, lang: Lang) -> String {
-    match (line, lang) {
-        (Some(line), Lang::French) => format!("config.toml ne se lit plus, ligne {line}"),
-        (Some(line), Lang::English) => format!("config.toml no longer reads, line {line}"),
-        (None, Lang::French) => "config.toml ne se lit plus".to_owned(),
-        (None, Lang::English) => "config.toml no longer reads".to_owned(),
+    match line {
+        Some(line) => words::config_toml_no_longer_reads_line(lang, line),
+        None => words::CONFIG_TOML_NO_LONGER_READS.get(lang).to_owned(),
     }
 }
 
@@ -1690,17 +1636,12 @@ fn when(at: i64, lang: Lang) -> String {
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     let ago = now.saturating_sub(at);
-    let fr = lang.fr();
     if ago < 60 {
-        return if fr { "à l’instant" } else { "just now" }.to_owned();
+        return words::JUST_NOW.get(lang).to_owned();
     }
     if ago < 3600 {
         let m = ago / 60;
-        return if fr {
-            format!("il y a {m} min")
-        } else {
-            format!("{m} min ago")
-        };
+        return words::min_ago(lang, m);
     }
     let Ok(stamp) = jiff::Timestamp::from_second(at) else {
         return String::new();
@@ -1710,14 +1651,10 @@ fn when(at: i64, lang: Lang) -> String {
     let today = jiff::Timestamp::now().to_zoned(tz).date();
     if then.date() == today {
         let time = then.strftime("%H:%M").to_string();
-        return if fr {
-            format!("à {time}")
-        } else {
-            format!("at {time}")
-        };
+        return words::at(lang, &time);
     }
     if today.yesterday().is_ok_and(|y| y == then.date()) {
-        return if fr { "hier" } else { "yesterday" }.to_owned();
+        return words::YESTERDAY.get(lang).to_owned();
     }
     then.strftime("%d/%m").to_string()
 }
@@ -1855,7 +1792,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "toast_action": action,
         "file": file,
         "theme": crate::theme::now().scheme.word(),
-        "lang": if app.lang == Lang::French { "fr" } else { "en" },
+        "lang": words::EN.get(app.lang),
         "text_scale": app.text_scale,
         "accent": crate::theme::now().accent.word(),
         "banner": banner,

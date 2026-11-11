@@ -210,7 +210,9 @@ fn run(
 impl<F: FnMut(Heard) -> bool> Run<'_, F> {
     fn read_text(&self) -> Result<String, String> {
         match &self.places.file {
-            Some(file) => hocus_config::read(file).map(|r| r.text),
+            Some(file) => hocus_config::read(file)
+                .map(|r| r.text)
+                .map_err(|err| err.to_string()),
             None => Ok(String::new()),
         }
     }
@@ -347,6 +349,7 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
                 self.said(text, Why::Written(id), before, Vec::new())
             }
             Err(why) => {
+                let why = why.to_string();
                 tracing::warn!(slot = slot.word(), why, "not written");
                 (self.heard)(Heard::Failed { id: Some(id), why })
             }
@@ -377,6 +380,7 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
                 self.said(text, Why::Written(id), Vec::new(), before)
             }
             Err(why) => {
+                let why = why.to_string();
                 tracing::warn!(?edits, why, "not written");
                 (self.heard)(Heard::Failed { id: Some(id), why })
             }
@@ -410,7 +414,7 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
             return true;
         };
         let done = (|| -> Result<Restore, String> {
-            let read = hocus_config::read(&file)?;
+            let read = hocus_config::read(&file).map_err(|err| err.to_string())?;
             if hocus_config::parse(&read.text).is_ok() {
                 return Ok(Restore::Reads);
             }

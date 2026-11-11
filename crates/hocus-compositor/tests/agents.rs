@@ -28,8 +28,8 @@
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of the compositor's shaders (the streak, the halo)
 //! run on GLES: on the GPU `HOCUS_TEST_GPU` names, else on Mesa's software
-//! device, and are skipped without it. The tests of the shell's motion run
-//! on that GPU alone, and are skipped without it. The shell runs away from
+//! device, and fail without it. The tests of the shell's motion run on
+//! that GPU alone, and are run on purpose (`#[ignore]`). The shell runs away from
 //! the machine's services (no session bus, no system bus, no PipeWire).
 
 use crate::common;
@@ -436,6 +436,19 @@ impl Bed {
         (f64::from(s.x) + 11.0, f64::from(s.y) + 5.0)
     }
 
+    /// Whether the group's items hold `item`, as the shell last logged
+    /// them: read at once, for what is not there once the shell rests
+    /// ([`Bed::settle`]). Waiting for it to come would take the whole wait
+    /// each time.
+    fn shows_item(&self, item: &str) -> bool {
+        let wanted = format!("{item}@");
+        plain(&self.log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the agents group's items"))
+            .is_some_and(|l| l.contains(&wanted))
+    }
+
     /// Where the group's `item` is (`Sources`, `Plug(ClaudeCode)`,
     /// `Decline`…), global, as the shell last logged its items' middles
     /// in the bar's frame (from its outer right edge, its top).
@@ -505,37 +518,32 @@ impl Bed {
     }
 
     /// Where the briefing's `item` is (`Sources`, `Agent(3)`), global, as
-    /// the shell last logged its items' middles in the popover `popover`.
+    /// the kit's dump last placed it in the popover `popover`.
     fn briefing_item(&mut self, popover: Rect, item: &str) -> anyhow::Result<(f64, f64)> {
-        self.popover_item(popover, "the briefing's items", item)
+        self.popover_item(popover, "briefing", item)
     }
 
-    /// Where `item` of the popover `popover` is, global, as the shell last
-    /// logged its items' middles (on a line saying `items`).
+    /// Where the control `surface:item` of the popover `popover` is,
+    /// global, its middle as the kit's dump last placed it.
     fn popover_item(
         &mut self,
         popover: Rect,
-        items: &str,
+        surface: &str,
         item: &str,
     ) -> anyhow::Result<(f64, f64)> {
-        let wanted = format!("{item}@");
+        let id = format!("{surface}:{item}");
         let log = self.log.clone();
-        let found = |text: &str| {
-            text.lines()
-                .rev()
-                .find(|l| l.contains(items))
-                .and_then(|l| {
-                    let at = l.split(&wanted).nth(1)?;
-                    let at = at.split_whitespace().next()?;
-                    let (x, y) = at.split_once(',')?;
-                    Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))
-                })
+        let found = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
         };
-        let done = self
-            .hp
-            .dispatch_until(WAIT, |_| found(&plain(&log)).is_some())?;
-        anyhow::ensure!(done, "no {item} in {items:?}");
-        let (x, y) = found(&plain(&log)).unwrap_or_default();
+        let done = self.hp.dispatch_until(WAIT, |_| found(&log).is_some())?;
+        anyhow::ensure!(done, "no {id} in the kit's dump");
+        let (x, y) = found(&log).unwrap_or_default();
         Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
     }
 
@@ -549,7 +557,7 @@ impl Bed {
                 .any(|(_, r)| r.width == 320 && r.height > 0)
         })?;
         anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
-        self.logged("the briefing's items")?;
+        self.logged("\"briefing:Sources\"")?;
         let popover = self.hp.popover_surfaces();
         Ok(popover
             .iter()
@@ -1530,8 +1538,7 @@ fn going_to_an_agent_runs_the_streak_then_pulses_its_rim_then_rests() -> anyhow:
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
     bed.hocus(&["agent", "build", "working"], None)?;
@@ -1612,8 +1619,7 @@ fn going_to_an_agent_on_another_desktop_slides_there_first() -> anyhow::Result<(
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
     common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
@@ -1703,8 +1709,7 @@ fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "infra", "waiting"], None)?;
@@ -1769,8 +1774,7 @@ fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "build", "working"], None)?;
@@ -1840,8 +1844,7 @@ fn a_second_click_replaces_the_first_streak_at_once() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "infra", "waiting"], None)?;
@@ -2443,7 +2446,7 @@ impl Bed {
 }
 
 /// A bed on GLES, the GPU's or Mesa's software device (the halo is its
-/// shaders'); `None`, and the test is skipped, without it. Its clock far
+/// shaders'); the test fails without it. Its clock far
 /// from a minute's change: the clock's odometer would draw while nothing
 /// else should.
 fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
@@ -2461,8 +2464,7 @@ fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no halo");
-        return Ok(None);
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     Ok(Some(bed))
 }
@@ -3103,6 +3105,22 @@ fn the_reminder_brings_the_panda_out_once_more() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The peek out and still, saved under `HOCUS_KIT_SHOTS` for the widget
+/// kit's side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot_peek() -> anyhow::Result<()> {
+    let Some(mut bed) = peek_bed(false)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    bed.agent_is("build", "waiting")?;
+    bed.peek_surface()?;
+    bed.peek_out_still()?;
+    common::layer_shot(&mut bed.hp, hocus_link::PEEK_NAMESPACE, "peek")
+}
+
 /// A click on the panda goes to the agent (its window, on another
 /// desktop, gets the keyboard; on a GPU the streak runs from the panda)
 /// and the panda goes back at once; a click on the bubble does too (a
@@ -3654,14 +3672,14 @@ fn sources_opens_from_her_briefing() -> anyhow::Result<()> {
     assert_eq!((sources.width, sources.y), (300, 8 + 62));
     bed.logged_after(from, &["Trouvé, pas branché"])?;
     // "Ne rien brancher" stays the card's, under her (4.7b).
-    bed.logged_after(from, &["the agents' popover's items", "Plug(ClaudeCode)@"])?;
+    bed.logged_after(from, &[" shows {", "\"agents:Plug(ClaudeCode)\""])?;
     let items = plain(&bed.log);
     let items = items
         .lines()
         .rev()
-        .find(|l| l.contains("the agents' popover's items"))
+        .find(|l| l.contains(" shows {"))
         .unwrap_or_default();
-    assert!(!items.contains("Decline@"), "{items}");
+    assert!(!items.contains("\"agents:Decline\""), "{items}");
     Ok(())
 }
 
@@ -3740,7 +3758,7 @@ impl Bed {
                 .any(|(_, r)| r.width == 320 && r.height > 0)
         })?;
         anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
-        self.logged_after(from, &["the briefing's items"])?;
+        self.logged_after(from, &["\"briefing:Sources\""])?;
         Ok(self
             .hp
             .popover_surfaces()
@@ -3918,7 +3936,7 @@ fn the_mini_item_shows_who_waits_the_longest_and_goes_to_it() -> anyhow::Result<
     bed.settle()?;
     // Nobody waits: her alone, the item as tall as without a panda.
     let id = bed.id_of("build")?;
-    assert!(bed.item(&format!("Agent({id})")).is_err());
+    assert!(!bed.shows_item(&format!("Agent({id})")));
     assert_eq!(bed.surface().height, (MINI_HEIGHT + 10.0).ceil() as i32);
     bed.agent_is("build", "waiting")?;
     let (x, y) = bed.item(&format!("Agent({id})"))?;
@@ -4044,8 +4062,8 @@ fn plugging_nothing_in_from_the_mini_forms_sources_hides_the_group_in_both_forms
     let from = bed.mark();
     bed.click(plus)?;
     let sources = bed.popover()?;
-    bed.logged_after(from, &["the agents' popover's items", "Decline@"])?;
-    let decline = bed.popover_item(sources, "the agents' popover's items", "Decline")?;
+    bed.logged_after(from, &[" shows {", "\"agents:Decline\""])?;
+    let decline = bed.popover_item(sources, "agents", "Decline")?;
     let from = bed.mark();
     bed.click(decline)?;
     bed.tool_becomes("claude-code", ToolState::Declined)?;
@@ -4221,4 +4239,54 @@ fn screenshots_of_the_pandas() -> anyhow::Result<()> {
     anyhow::ensure!(back, "the peek stays out");
     pandas_shot(&mut bed, &folder, "mini", 260)?;
     Ok(())
+}
+
+/// The briefing in its main state (one waits, one is stuck, one to see),
+/// and Sources (Claude Code found, not plugged in), shot under
+/// `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            claude: true,
+            ..Machine::default()
+        },
+    )?;
+    bed.claude(
+        "s1",
+        "site-web",
+        "PermissionRequest",
+        ",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm install\",\
+         \"description\":\"Install the dependencies\"}",
+    )?;
+    bed.agent_becomes("site-web", Some("waiting"))?;
+    bed.claude(
+        "s2",
+        "migration",
+        "StopFailure",
+        ",\"error\":\"rate_limit\",\"error_details\":\"429 Too Many Requests\",\
+         \"last_assistant_message\":\"API Error: Rate limit reached\"",
+    )?;
+    bed.agent_becomes("migration", Some("failed"))?;
+    bed.claude("s3", "api", "Stop", ",\"stop_hook_active\":false")?;
+    bed.agent_becomes("api", Some("done"))?;
+    bed.settle()?;
+    let briefing = bed.open_briefing()?;
+    bed.hp.pointer_move(400.0, 600.0);
+    common::popover_shot(&mut bed.hp, "briefing")?;
+    let sources = bed.briefing_item(briefing, "Sources")?;
+    bed.click(sources)?;
+    let shown = bed.hp.dispatch_until(WAIT, |hp| {
+        let popovers = hp.popover_surfaces();
+        popovers.len() == 1 && popovers[0].1.width == 300 && popovers[0].1.height > 0
+    })?;
+    anyhow::ensure!(shown, "no Sources: {:?}", bed.hp.popover_surfaces());
+    bed.hp.pointer_move(400.0, 600.0);
+    common::popover_shot(&mut bed.hp, "agents")
 }

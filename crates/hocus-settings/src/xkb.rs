@@ -111,7 +111,8 @@ fn parse(text: &str) -> Vec<(String, String, Option<String>)> {
 
 /// The catalog for `lang`; none for English, XKB's own.
 fn catalog(lang: Lang) -> Option<Vec<u8>> {
-    if !lang.fr() {
+    // XKB's names are English; another language's are its catalog's.
+    if lang == Lang::English {
         return None;
     }
     let dir = std::env::var_os(LOCALE_ENV)

@@ -601,11 +601,16 @@ fn enter_adds_the_task_at_the_top_and_esc_or_a_click_elsewhere_closes_the_empty_
     bed.field_opens(from)?;
     bed.group_height(18 + 30 + 3 * 22 + 20 + 10)?;
     bed.shot("field-empty")?;
+    // Counted before the keys: the commit that shows them may come before
+    // the shell's line is read, and waiting for one more after it took the
+    // whole wait.
+    let commits = bed.hp.tasks_commits();
     bed.type_text("acheter du pain");
     bed.logged_after(from, &["the tasks show", "«acheter du pain» focused=true"])?;
-    let commits = bed.hp.tasks_commits();
-    bed.hp
+    let drawn = bed
+        .hp
         .dispatch_until(WAIT, |hp| hp.tasks_commits() > commits)?;
+    anyhow::ensure!(drawn, "the field was not drawn again");
     bed.shot("field")?;
     // `Enter`: at the top of the column, no due date; the third goes into
     // "+ N".
@@ -932,4 +937,41 @@ fn the_group_goes_14_px_under_today_when_today_lists_something() -> anyhow::Resu
     );
     bed.shot("under-today")?;
     Ok(())
+}
+
+/// The popover in its main state (seven tasks, from "+ 4 autres"), shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("kit", "1920x1080", WITH_TASKS, SEVEN)? else {
+        return Ok(());
+    };
+    bed.group_after(0, &["form=full", "more=+ 4 autres"])?;
+    let from = bed.mark();
+    bed.click_item("TasksMore")?;
+    bed.popover()?;
+    bed.logged_after(from, &["the tasks' popover shows it", "count=7"])?;
+    bed.hp.pointer_move(400.0, 300.0);
+    common::popover_shot(&mut bed.hp, "tasks")
+}
+
+/// The tasks' group at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("kit", "1920x1080", WITH_TASKS, SEVEN)? else {
+        return Ok(());
+    };
+    bed.group_after(0, &["form=full", "more=+ 4 autres"])?;
+    let at = bed.item("Task(0)")?;
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::TASKS_NAMESPACE, "tasks"),
+        at,
+        "Task(1)",
+    )
 }

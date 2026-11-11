@@ -23,7 +23,7 @@
 //! popover, with its own corners and shadow, the mockup's: it fades in
 //! coming down [`EMOJI_RISE`] rather than sliding from the bar. So is the
 //! actions palette (#736, [`ACTIONS_NAMESPACE`]): in over 140 ms coming
-//! down [`ACTIONS_DROP`], out over 100 ms; with reduced motion or a shell
+//! down [`ACTIONS_DROP`](hocus_link::ACTIONS_DROP), out over 100 ms; with reduced motion or a shell
 //! on the CPU it still fades, without moving.
 
 use std::time::Duration;

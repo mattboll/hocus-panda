@@ -108,7 +108,9 @@ mod tests {
         }
     }
 
-    const FR: Words = Words { fr: true };
+    const FR: Words = Words {
+        lang: hocus_words::Lang::French,
+    };
 
     #[test]
     fn an_agent_that_starts_waiting_is_said_once() {

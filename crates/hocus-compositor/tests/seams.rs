@@ -74,10 +74,10 @@ fn two_floating_windows_stuck_at_the_gap_form_a_pair_whose_handle_resizes_both()
         f64::from(b.y + a.bottom()) / 2.0,
     );
     hp.pointer_move(x, y);
-    let (seam, _) = hp.state().seam_handle.expect("the handle shows");
+    let (seam, _) = hp.state().snap.seam_handle.expect("the handle shows");
     assert!(seam.vertical);
     assert_eq!(seam.centre(), (x, y));
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     // It resizes both, and both still float.
     drag_by(&mut hp, (x, y), 60.0);
     let wider = Rect::new(a.x, a.y, a.width + 60, a.height);
@@ -129,7 +129,7 @@ fn terminals_sized_by_whole_cells_stay_a_pair_after_its_handle() -> anyhow::Resu
     hp.pointer_move(300.0, 900.0);
     wait(&mut hp, Duration::from_millis(700))?;
     hp.pointer_move(f64::from(wider.right() + GAP / 2), centre.1);
-    assert!(hp.state().seam_handle.is_some(), "still a pair");
+    assert!(hp.state().snap.seam_handle.is_some(), "still a pair");
     Ok(())
 }
 
@@ -152,7 +152,7 @@ fn windows_nine_pixels_apart_form_no_pair() -> anyhow::Result<()> {
     drag_to(&mut hp, Rect::new(right, 750, 400, 300), right, 450);
     wait_for_rect(&mut hp, "test.right", Rect::new(right, 450, 400, 300))?;
     hp.pointer_move(f64::from(a.right()) + 4.5, 550.0);
-    assert!(hp.state().seam_handle.is_none(), "no pair, no handle");
+    assert!(hp.state().snap.seam_handle.is_none(), "no pair, no handle");
     Ok(())
 }
 
@@ -186,7 +186,7 @@ fn a_floating_window_over_the_seam_hides_its_handle_and_takes_the_press() -> any
     assert!(over.contains(x, y), "{over:?} covers the handle's place");
     // Near the seam above it: the handle shows, under the window.
     hp.pointer_move(x, f64::from(over.y - 100));
-    assert!(hp.state().seam_handle.is_some(), "the handle shows");
+    assert!(hp.state().snap.seam_handle.is_some(), "the handle shows");
     // The window's opening and the handle's fade over in the frame shown.
     common::at_rest(&mut hp)?;
     let shot = hp.screenshot(0)?;
@@ -197,7 +197,7 @@ fn a_floating_window_over_the_seam_hides_its_handle_and_takes_the_press() -> any
     );
     // A press there is the window's.
     hp.pointer_move(x, y);
-    assert_eq!(hp.state().frame_cursor, None, "the client's cursor");
+    assert_eq!(hp.state().pointer.frame_cursor, None, "the client's cursor");
     drag_by(&mut hp, (x, y), 60.0);
     wait(&mut hp, Duration::from_millis(100))?;
     assert_eq!(rect_of(&hp, "test.left"), Some(Zone::Left.rect(AREA)));
@@ -215,8 +215,8 @@ fn a_window_behind_the_pair_leaves_its_handle() -> anyhow::Result<()> {
     let (x, y) = seam_centre();
     assert!(behind.contains(x, y));
     hp.pointer_move(x, y);
-    assert!(hp.state().seam_handle.is_some(), "the handle shows");
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    assert!(hp.state().snap.seam_handle.is_some(), "the handle shows");
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     drag_by(&mut hp, (x, y), 100.0);
     let left = Zone::Left.rect(AREA);
     wait_for_rect(

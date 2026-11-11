@@ -13,7 +13,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use hocus_perf::{Counters, EventKind, Recorder, Setup, text::Lang};
+use hocus_perf::{Counters, EventKind, Recorder, Setup};
 use smithay::{
     output::Output,
     reexports::calloop::channel::{self, Event, Sender},
@@ -101,11 +101,7 @@ impl State {
         };
         let running = self.shell.running.clone();
         let bus = self.shell.bus.clone();
-        let lang = if self.config.french {
-            Lang::French
-        } else {
-            Lang::English
-        };
+        let lang = self.config.lang;
         let supplies = std::env::var_os("HOCUS_POWER_SUPPLY_DIR")
             .map_or_else(|| "/sys/class/power_supply".into(), Into::into);
         let setup = Setup {
@@ -149,7 +145,7 @@ impl State {
     pub(crate) fn perf_frame(&self, output: &Output) {
         self.perf
             .counters
-            .frame(self.perf.slot(output), !self.still);
+            .frame(self.perf.slot(output), !self.frames.still);
     }
 
     /// A scene of `output` built and drawn (or found unchanged), in

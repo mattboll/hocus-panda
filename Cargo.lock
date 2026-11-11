@@ -1903,6 +1903,7 @@ dependencies = [
  "clap",
  "hocus-agents",
  "hocus-day",
+ "hocus-panic",
  "hocus-perf",
  "jiff",
  "serde_json",
@@ -1924,7 +1925,9 @@ dependencies = [
  "hocus-geometry",
  "hocus-link",
  "hocus-pandas",
+ "hocus-panic",
  "hocus-perf",
+ "hocus-words",
  "hocus-xdg",
  "image",
  "jiff",
@@ -1958,6 +1961,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "tempfile",
+ "thiserror 2.0.21",
  "toml_edit",
 ]
 
@@ -1973,6 +1977,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.21",
  "tokio",
  "toml",
  "toml_edit",
@@ -1990,7 +1995,11 @@ name = "hocus-link"
 version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
+ "hocus-words",
  "image",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2013,9 +2022,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-panic"
+version = "1.0.0"
+dependencies = [
+ "tracing",
+]
+
+[[package]]
 name = "hocus-perf"
 version = "1.0.0"
 dependencies = [
+ "hocus-words",
  "jiff",
  "rustix 1.1.6",
  "serde",
@@ -2036,8 +2053,10 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-pandas",
+ "hocus-panic",
  "hocus-perf",
  "hocus-sound",
+ "hocus-words",
  "hocus-xdg",
  "iced",
  "iced_tiny_skia",
@@ -2070,7 +2089,9 @@ dependencies = [
  "hocus-link",
  "hocus-network",
  "hocus-pandas",
+ "hocus-panic",
  "hocus-sound",
+ "hocus-words",
  "hocus-xdg",
  "iced",
  "iced_layershell",
@@ -2100,6 +2121,13 @@ version = "1.0.0"
 dependencies = [
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "hocus-words"
+version = "1.0.0"
+dependencies = [
+ "toml",
 ]
 
 [[package]]

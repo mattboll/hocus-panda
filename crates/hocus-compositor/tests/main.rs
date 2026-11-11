@@ -8,6 +8,10 @@
 //! children): `cargo test` runs them as threads of one process, and is not
 //! supported.
 
+// A test ends on what it did not expect: its helpers too, which clippy
+// does not take for tests (clippy.toml covers `#[test]` functions only).
+#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+
 mod agents_bed;
 mod common;
 mod settings_page;
@@ -73,6 +77,7 @@ mod ink;
 mod launcher;
 mod layouts;
 mod levels;
+mod link;
 mod live_reload;
 mod lock;
 mod lock_external;
@@ -85,6 +90,7 @@ mod music;
 mod night_light;
 mod notifications;
 mod overview;
+mod panic_hook;
 mod perf;
 mod pointer_focus;
 mod polkit;

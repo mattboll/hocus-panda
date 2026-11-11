@@ -22,19 +22,23 @@
 //! chips and the items (each with its ✕ and its actions), the arrows through
 //! the items, `Enter` or `Space` acts, `Esc` closes.
 
+use hocus_words::shell::popover_history as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
+use hocus_a11y::Role;
 use iced::{
-    Color, Font, Point, Rectangle, Renderer, Size, Theme, Vector,
-    advanced::svg,
+    Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
+    alignment::{Horizontal, Vertical},
     keyboard, mouse,
     widget::{
-        canvas::{self, Frame, Geometry, Path, Stroke},
-        text::Alignment,
+        Id, Space, Stack, button,
+        canvas::{self, Frame, Path, Stroke},
+        column, container, image, mouse_area, pin, row, scrollable, svg,
+        text::LineHeight,
     },
     window,
 };
@@ -42,13 +46,13 @@ use jiff::Zoned;
 
 use super::{
     Event as Seen, Item, Pressed, event,
-    kit::{self, Clip, Input, Pointer, Switch, Wheel, text, text_in},
+    kit::{self, Switch},
 };
 use crate::theme::Ink;
 use crate::{
     clock::{motion::bezier, time::Lang},
     levels::{
-        draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring},
+        draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
         icons::Icon,
     },
     notifications::{
@@ -58,7 +62,15 @@ use crate::{
         stack::Input as Said,
     },
     popover::kit::MANROPE_SEMIBOLD,
+    ui::{
+        self, Around, Later, control,
+        notched::Notched,
+        parts::{drawn, gap, moving, spaced_by},
+        style::{self, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 --------------------------------------------------
 
@@ -106,7 +118,7 @@ const LIST_SIDE: f32 = BORDER + 8.0;
 const LIST_BOTTOM: f32 = 10.0;
 const HEAD_PAD: (f32, f32) = (8.0, 2.0);
 const HEAD: f32 = 11.0;
-const HEAD_SPACING: f32 = 0.08 * HEAD;
+const HEAD_SPACING: f32 = 0.08;
 const GAP: f32 = 2.0;
 /// An item: 8 px in, 30 px on its right; its icon 28 px, 10 px before its
 /// text: the first line 11 px, its title 13 px bold, its body 12 px on 1.4
@@ -190,18 +202,16 @@ const EASE_OUT: (f32, f32, f32, f32) = (0.0, 0.0, 0.58, 1.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     fn title(self) -> &'static str {
@@ -209,18 +219,18 @@ impl Words {
     }
 
     fn clear(self) -> &'static str {
-        self.pick("Tout effacer", "Clear all")
+        self.pick(txt::CLEAR_ALL)
     }
 
     fn dnd(self) -> &'static str {
-        self.pick("Ne pas déranger", "Do not disturb")
+        self.pick(txt::DO_NOT_DISTURB)
     }
 
     fn chip(self, choice: Choice) -> &'static str {
         match choice {
-            Choice::Hour => self.pick("Pendant 1\u{a0}h", "For 1 hour"),
-            Choice::Morning => self.pick("Jusqu’à demain matin", "Until tomorrow morning"),
-            Choice::Always => self.pick("Sans limite", "No limit"),
+            Choice::Hour => self.pick(txt::FOR_1_HOUR),
+            Choice::Morning => self.pick(txt::UNTIL_TOMORROW_MORNING),
+            Choice::Always => self.pick(txt::NO_LIMIT),
         }
     }
 
@@ -228,7 +238,7 @@ impl Words {
     /// "8 AM".
     fn time(self, at: &Zoned) -> String {
         let (h, m) = (at.hour(), at.minute());
-        if self.fr {
+        if self.lang == Lang::French {
             if m == 0 {
                 format!("{h}\u{a0}h")
             } else {
@@ -251,64 +261,47 @@ impl Words {
     /// What do not disturb does now, at `now`.
     fn said(self, dnd: Dnd, now: &Zoned) -> String {
         let Dnd::On { choice, until } = dnd else {
-            return self
-                .pick("Les bulles s’affichent", "Bubbles show")
-                .to_owned();
+            return self.pick(txt::BUBBLES_SHOW).to_owned();
         };
         let until = until.and_then(|u| notifications::dnd::zoned(u.wall, now));
         let when = match (choice, until) {
-            (Choice::Always, _) | (_, None) => self
-                .pick("Jusqu’à ce que tu l’arrêtes", "Until you turn it off")
-                .to_owned(),
+            (Choice::Always, _) | (_, None) => self.pick(txt::UNTIL_YOU_TURN_IT_OFF).to_owned(),
             (_, Some(at)) => {
                 let tomorrow = now.date().tomorrow().ok() == Some(at.date());
-                match (self.fr, tomorrow) {
-                    (true, true) => format!("Jusqu’à demain, {}", self.time(&at)),
-                    (true, false) => format!("Jusqu’à {}", self.time(&at)),
-                    (false, true) => format!("Until tomorrow, {}", self.time(&at)),
-                    (false, false) => format!("Until {}", self.time(&at)),
+                match tomorrow {
+                    true => txt::until_tomorrow(self.lang, self.time(&at)),
+                    false => txt::until(self.lang, self.time(&at)),
                 }
             }
         };
-        format!(
-            "{when} · {}",
-            self.pick(
-                "seules les urgences passent",
-                "only urgent ones come through"
-            )
-        )
+        format!("{when} · {}", self.pick(txt::ONLY_URGENT_ONES_COME_THROUGH))
     }
 
     fn section(self, section: Section) -> &'static str {
         match section {
-            Section::Recent => self.pick("RÉCENTES", "RECENT"),
-            Section::Today => self.pick("PLUS TÔT AUJOURD’HUI", "EARLIER TODAY"),
-            Section::Yesterday => self.pick("HIER", "YESTERDAY"),
-            Section::Older => self.pick("PLUS ANCIENNES", "OLDER"),
+            Section::Recent => self.pick(txt::RECENT),
+            Section::Today => self.pick(txt::EARLIER_TODAY),
+            Section::Yesterday => self.pick(txt::YESTERDAY),
+            Section::Older => self.pick(txt::OLDER),
         }
     }
 
     fn ago(self, ago: Ago) -> String {
-        match (ago, self.fr) {
-            (Ago::Now, true) => "maintenant".to_owned(),
-            (Ago::Now, false) => "now".to_owned(),
-            (Ago::Minutes(n), true) => format!("il y a {n}\u{a0}min"),
-            (Ago::Minutes(n), false) => format!("{n}\u{a0}min ago"),
-            (Ago::Hours(n), true) => format!("il y a {n}\u{a0}h"),
-            (Ago::Hours(n), false) => format!("{n}\u{a0}h ago"),
-            (Ago::Yesterday, true) => "hier".to_owned(),
-            (Ago::Yesterday, false) => "yesterday".to_owned(),
-            (Ago::Days(n), true) => format!("il y a {n}\u{a0}jours"),
-            (Ago::Days(n), false) => format!("{n}\u{a0}days ago"),
+        match ago {
+            Ago::Now => txt::NOW.get(self.lang).to_owned(),
+            Ago::Minutes(n) => txt::min_ago(self.lang, n),
+            Ago::Hours(n) => txt::h_ago(self.lang, n),
+            Ago::Yesterday => txt::YESTERDAY_2.get(self.lang).to_owned(),
+            Ago::Days(n) => txt::days_ago(self.lang, n),
         }
     }
 
     fn nothing(self) -> &'static str {
-        self.pick("Rien de neuf", "Nothing new")
+        self.pick(txt::NOTHING_NEW)
     }
 
     fn all_read(self) -> &'static str {
-        self.pick("Tout est lu.", "All read.")
+        self.pick(txt::ALL_READ)
     }
 }
 
@@ -316,7 +309,7 @@ impl Words {
 
 /// What can be acted on in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub enum Target {
     Clear,
     Switch,
     Chip(Choice),
@@ -326,6 +319,23 @@ enum Target {
 }
 
 impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("history:{self:?}").replace(' ', "")
+    }
+
+    /// The ring's corners on it.
+    fn radius(self) -> f32 {
+        match self {
+            Self::Item(_) => ITEM_RADIUS,
+            Self::Close(_) => CLOSE_RADIUS,
+            Self::Chip(_) => CHIP / 2.0,
+            Self::Switch => SWITCH.height / 2.0,
+            Self::Clear => GHOST_RADIUS,
+            Self::Action(..) => 8.0,
+        }
+    }
+
     /// The item it belongs to, if it is an item's.
     fn key(self) -> Option<u64> {
         match self {
@@ -354,13 +364,13 @@ struct Row {
     letter: String,
     cut: Cut,
     when: String,
-    when_x: f32,
     dot_x: Option<f32>,
     actions: Vec<(String, Rectangle)>,
     section: Section,
 }
 
 impl Row {
+    #[cfg(test)]
     fn close(&self) -> Rectangle {
         Rectangle::new(
             Point::new(
@@ -604,7 +614,6 @@ fn lay_out(
             letter,
             cut,
             when,
-            when_x,
             dot_x,
             actions,
             section: here,
@@ -638,53 +647,6 @@ fn lay_out(
 impl Laid {
     fn most_scroll(&self) -> f32 {
         (self.content - self.view.height).max(0.0)
-    }
-
-    /// Row `row`'s rectangle on the popover, scrolled by `scroll`.
-    fn on_popover(&self, rect: Rectangle, scroll: f32) -> Rectangle {
-        Rectangle::new(
-            Point::new(rect.x, self.view.y + rect.y - scroll),
-            rect.size(),
-        )
-    }
-
-    /// What can be acted on, in the order `Tab` goes, and where (on the
-    /// popover, scrolled by `scroll`).
-    fn targets(&self, scroll: f32) -> Vec<(Target, Rectangle)> {
-        let mut targets = Vec::new();
-        if let Some((rect, _)) = self.clear {
-            targets.push((Target::Clear, rect));
-        }
-        targets.push((Target::Switch, self.switch));
-        targets.extend(self.chips.iter().map(|(c, r)| (Target::Chip(*c), *r)));
-        for row in &self.rows {
-            targets.push((Target::Item(row.key), self.on_popover(row.rect, scroll)));
-            targets.push((Target::Close(row.key), self.on_popover(row.close(), scroll)));
-            for (i, (_, rect)) in row.actions.iter().enumerate() {
-                targets.push((Target::Action(row.key, i), self.on_popover(*rect, scroll)));
-            }
-        }
-        targets
-    }
-
-    /// What is under `at`, scrolled by `scroll`: the ✕ and the actions over
-    /// their item; in the list only within its viewport.
-    fn target_at(&self, at: Point, scroll: f32) -> Option<Target> {
-        let in_list = self.view.contains(at);
-        let mut found = None;
-        for (target, rect) in self.targets(scroll) {
-            if !rect.contains(at) || (target.key().is_some() && !in_list) {
-                continue;
-            }
-            match (found, target) {
-                // The ✕ or an action over its item.
-                (Some(Target::Item(_)), Target::Close(_) | Target::Action(..)) | (None, _) => {
-                    found = Some(target);
-                }
-                _ => {}
-            }
-        }
-        found
     }
 
     /// For the log: the sections and their items, newest first.
@@ -739,20 +701,20 @@ pub struct Panel {
     pub id: window::Id,
     pub glass: bool,
     pub motion: bool,
-    pub software: bool,
 }
 
-/// What its surface keeps between draws.
+/// What it keeps while it is open.
 #[derive(Debug, Default)]
-pub struct State {
+struct Ui {
     laid: Option<Laid>,
     /// What it was laid out from: the history's version, the minute, do not
     /// disturb.
     from: Option<(u64, i64, Dnd)>,
-    pointer: Pointer<Target>,
     focus: Option<Target>,
+    /// The item the pointer is over.
+    over: Option<u64>,
+    /// How far the list is scrolled, as it said or was told.
     scroll: f32,
-    wheel: Wheel,
     switch: Switch,
     /// Items sliding out.
     leaving: Option<Leaving>,
@@ -761,8 +723,23 @@ pub struct State {
     /// The panda breathing as two "z" rise, as it opens empty or empties
     /// (#649).
     dozing: Option<crate::pandas::Burst>,
-    now: Option<Instant>,
 }
+
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+static LATER: Later = Later::new();
+
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// It opens: nothing holds the ring, nothing slides.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
+
+/// The list's scrollable.
+const LIST_ID: &str = "history:list";
 
 /// Items sliding out, in their order, since then; once they are all out,
 /// the stack is told (`sent`), and they stay out until it takes them.
@@ -773,13 +750,7 @@ struct Leaving {
     sent: bool,
 }
 
-impl State {
-    fn targets(&self) -> Vec<(Target, Rectangle)> {
-        self.laid
-            .as_ref()
-            .map_or_else(Vec::new, |l| l.targets(self.scroll))
-    }
-
+impl Ui {
     /// How far item `key` has slid out at `now`, 0 to 1.
     fn gone(&self, key: u64, now: Instant) -> f32 {
         let Some(Leaving { keys, since, .. }) = &self.leaving else {
@@ -799,213 +770,815 @@ impl State {
         let shown = u32::try_from(keys.len().clamp(1, 41) - 1).unwrap_or(40);
         Some(*since + STAGGER * shown + SLIDE)
     }
+
+    /// Whether what it shows moves at `now`: items sliding out, the empty
+    /// state coming in. Built again each frame then.
+    fn moving(&self, now: Instant, motion: bool) -> bool {
+        self.leaving.as_ref().is_some_and(|l| !l.sent)
+            || self
+                .empty_since
+                .is_some_and(|since| motion && now < since + REST_IN + Duration::from_millis(16))
+    }
 }
 
-impl Panel {
-    /// What it shows, for screen readers (crate::a11y::rows): clearing,
-    /// do not disturb and its chips, then each section's notifications,
-    /// their ✕ and their actions.
-    fn tell_readers(&self, state: &State, laid: &Laid, words: Words) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let mut nodes = Vec::new();
-        if let Some((rect, _)) = laid.clear {
-            nodes.push(rows::act(Target::Clear, Role::Button, words.clear(), rect));
-        }
-        nodes.push(
-            rows::act(Target::Switch, Role::ToggleButton, words.dnd(), laid.switch)
-                .checked(laid.dnd.is_on()),
-        );
-        let n = laid.chips.len();
-        for (i, (choice, rect)) in laid.chips.iter().enumerate() {
-            nodes.push(
-                rows::act(
-                    Target::Chip(*choice),
-                    Role::RadioButton,
-                    words.chip(*choice),
-                    *rect,
-                )
-                .checked(laid.dnd.choice() == Some(*choice))
-                .set(i + 1, n),
-            );
-        }
-        if !laid.said.is_empty() {
-            nodes.push(rows::line(laid.said.join(" ")));
-        }
-        if laid.rows.is_empty() {
-            nodes.push(rows::line(words.nothing()));
-        }
-        let fr = words.fr;
-        let mut section = None;
-        for row in &laid.rows {
-            if section != Some(row.section) {
-                let label = words.section(row.section);
-                let mut chars = label.chars();
-                nodes.push(rows::line(chars.next().map_or_else(String::new, |c| {
-                    c.to_string() + &chars.as_str().to_lowercase()
-                })));
-                section = Some(row.section);
-            }
-            let at = |r: Rectangle| laid.on_popover(r, state.scroll);
-            let name = match (row.cut.app.is_empty(), fr) {
-                (true, _) => row.cut.title.clone(),
-                (false, true) => format!("{} : {}", row.cut.app, row.cut.title),
-                (false, false) => format!("{}: {}", row.cut.app, row.cut.title),
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A button pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// The pointer came over an item (`true`), or left it.
+    Over(u64, bool),
+    /// `↓` (`true`) or `↑`: through the items.
+    Arrow(bool),
+    /// The list scrolled to there.
+    Scrolled(f32),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The history changed under the view, or something moves.
+    Stale,
+}
+
+/// The history on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (glass, motion) = (panel.glass, panel.motion);
+    let minute = || notifications::wall().timestamp().as_second() / 60;
+    Around::new(
+        panel.id,
+        build(motion),
+        move |m| handle(motion, m),
+        Msg::Stale,
+    )
+    .rebuild(move || build(motion))
+    .stale_when(move || {
+        ui(|ui| ui.moving(Instant::now(), motion) || ui.from.is_some_and(|f| f.1 != minute()))
+    })
+    .keys(arrows)
+    .later(&LATER)
+    .press(Msg::Pressed)
+    .on(iced::widget::canvas(Tint(glass))
+        .width(Length::Fill)
+        .height(Length::Fill))
+}
+
+/// The arrows go through the items.
+fn arrows(pressed: &Pressed) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    match pressed.key {
+        Key::Named(Named::ArrowDown) => Some(Msg::Arrow(true)),
+        Key::Named(Named::ArrowUp) => Some(Msg::Arrow(false)),
+        _ => None,
+    }
+}
+
+/// Its content, as the history is now.
+fn build<'a>(motion: bool) -> El<'a> {
+    let now = Instant::now();
+    let words = Words::new(Lang::of_messages());
+    ui(|ui| {
+        refresh(ui, now);
+        let Some(laid) = ui.laid.clone() else {
+            return Space::new().into();
+        };
+        content(&laid, words, ui, now, motion)
+    })
+}
+
+/// What it shows, read afresh: laid out again when the history or do not
+/// disturb changed, or the minute did.
+fn refresh(ui: &mut Ui, now: Instant) {
+    let shown = shown();
+    let wall = notifications::wall();
+    let minute = wall.timestamp().as_second() / 60;
+    let from = (shown.version, minute, shown.dnd);
+    if ui.from == Some(from) && ui.laid.is_some() {
+        return;
+    }
+    let words = Words::new(Lang::of_messages());
+    let laid = {
+        let mut cuts = CUTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let cuts = cuts.get_or_insert_with(HashMap::new);
+        // Only what it lists is kept cut.
+        cuts.retain(|(key, _, _), _| shown.items.iter().any(|k| k.key == *key));
+        lay_out(&shown, words, &wall, cuts, &mut kit::measure)
+    };
+    if ui.from.map(|f| (f.0, f.2)) != Some((shown.version, shown.dnd)) || ui.laid.is_none() {
+        tracing::debug!(dnd = ?laid.dnd.choice(), history = %laid.said(words), "the history shows");
+    }
+    let was_empty = ui.laid.as_ref().is_some_and(|l| l.rows.is_empty());
+    if laid.rows.is_empty() && !was_empty && ui.laid.is_some() {
+        ui.empty_since = Some(now);
+    }
+    if laid.rows.is_empty() && !was_empty && crate::pandas::lively() {
+        ui.dozing = Some(crate::pandas::Burst::of(crate::pandas::Mood::Resting, now));
+    }
+    let keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
+    if ui.focus.is_some_and(|f| {
+        f.key().is_some_and(|k| !keys.contains(&k)) || f == Target::Clear && laid.clear.is_none()
+    }) {
+        ui.focus = None;
+    }
+    // What slid out is gone from the list: it is over.
+    if ui
+        .leaving
+        .as_ref()
+        .is_some_and(|l| l.sent && !laid.rows.iter().any(|r| l.keys.contains(&r.key)))
+    {
+        ui.leaving = None;
+    }
+    ui.laid = Some(laid);
+    ui.from = Some(from);
+    ui.switch.settle(shown.dnd.is_on(), now);
+}
+
+/// `content` with its top left corner at `point`.
+fn at<'a>(content: impl Into<El<'a>>, point: Point) -> El<'a> {
+    pin(content).x(point.x).y(point.y).into()
+}
+
+/// A text at `size` in `font`, its lines `line` em apart.
+fn text_of<'a>(content: impl Into<String>, size: f32, line: f32, font: Font, ink: Color) -> El<'a> {
+    said(content.into(), size, font, ink)
+        .line_height(LineHeight::Relative(line))
+        .into()
+}
+
+/// `lines` one under the other, `size` px on lines `line` em apart.
+fn lines<'a>(lines: &[String], size: f32, line: f32, ink: Color) -> El<'a> {
+    let mut all = column![];
+    for said_line in lines {
+        all = all.push(text_of(said_line.clone(), size, line, MANROPE, ink));
+    }
+    all.into()
+}
+
+/// A rounded box of `fill` with a 1 px `rim`, as the canvas stroked it.
+fn rimmed(fill: Color, rim: Color, radius: f32) -> container::Style {
+    container::Style {
+        background: Some(fill.into()),
+        border: iced::Border {
+            color: rim,
+            width: 1.0,
+            radius: radius.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// Control `target`, its ring when it holds it.
+fn declared<'a>(
+    widget: impl Into<El<'a>>,
+    target: Target,
+    role: Role,
+    name: impl Into<String>,
+    focus: Option<Target>,
+) -> ui::control::Control<'a, Msg> {
+    control(widget, target.id(), role, name)
+        .focus(focus == Some(target), Msg::Focus(target), target.radius())
+        .activate(Msg::Act(target))
+}
+
+fn content<'a>(laid: &Laid, words: Words, ui: &Ui, now: Instant, motion: bool) -> El<'a> {
+    let mut layers: Vec<El<'a>> = vec![at(
+        container(said(words.title(), TITLE, MANROPE_BOLD, TEXT.get()))
+            .height(HEADER)
+            .align_y(Vertical::Center),
+        Point::new(BORDER + SIDE, HEADER_TOP),
+    )];
+    if let Some((rect, _)) = laid.clear {
+        let clear = button(
+            container(
+                iced::widget::text(words.clear())
+                    .size(GHOST_TEXT)
+                    .font(MANROPE_SEMIBOLD)
+                    .line_height(LineHeight::Relative(LINE))
+                    .shaping(iced::widget::text::Shaping::Advanced)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .center(Length::Fill),
+        )
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(|_, status| {
+            let lit = style::lit(status);
+            let mut quiet = if lit {
+                style::hovered(GHOST_HOVER.get(), GHOST_RADIUS)
+            } else {
+                style::clear()
             };
-            let mut body = row.cut.body.join(" ");
-            if !row.when.is_empty() {
-                body = format!("{body} {}", row.when).trim().to_owned();
+            quiet.text_color = if lit { TEXT.get() } else { DIM.get() };
+            quiet
+        })
+        .on_press(Msg::Act(Target::Clear));
+        layers.push(at(
+            declared(clear, Target::Clear, Role::Button, words.clear(), ui.focus),
+            rect.position(),
+        ));
+    }
+    card(&mut layers, laid, words, ui, motion);
+    layers.push(at(list(laid, words, ui, now, motion), laid.view.position()));
+    Stack::with_children(layers)
+        .width(W)
+        .height(laid.height)
+        .into()
+}
+
+/// The do not disturb card: its moon, its words, its switch, its chips.
+fn card<'a>(layers: &mut Vec<El<'a>>, laid: &Laid, words: Words, ui: &Ui, motion: bool) {
+    let on = laid.dnd.is_on();
+    let (fill, rim) = if on {
+        CARD_ON
+    } else {
+        (CARD_OFF.0.get(), CARD_OFF.1.get())
+    };
+    layers.push(at(
+        container(Space::new().width(laid.card.width).height(laid.card.height))
+            .style(move |_| rimmed(fill, rim, CARD_RADIUS)),
+        laid.card.position(),
+    ));
+    let inner_left = CARD_LEFT + BORDER + CARD_PAD.1;
+    layers.push(at(
+        svg(moon(on)).width(MOON).height(MOON),
+        Point::new(inner_left, laid.row_middle - MOON / 2.0),
+    ));
+    let column_top = laid.said_top - SAID_GAP - DND_NAME * LINE;
+    layers.push(at(
+        ui::line(
+            column![
+                said(words.dnd(), DND_NAME, MANROPE_SEMIBOLD, TEXT.get()),
+                Space::new().height(SAID_GAP),
+                lines(&laid.said, DND_SAID, LINE, FAINT.get()),
+            ],
+            format!("{}, {}", words.dnd(), laid.said.join(" ")),
+        ),
+        Point::new(inner_left + MOON + CARD_GAP, column_top),
+    ));
+    // The switch, its knob sliding.
+    let switch = ui.switch;
+    let knob = moving(
+        SWITCH.width,
+        SWITCH.height,
+        move |f, s, now| {
+            let shown = switch.shown(on, now);
+            let p = switch.knob_at(shown, now, motion);
+            let rect = Rectangle::new(Point::ORIGIN, s);
+            f.fill(
+                &kit::rounded(rect, SWITCH.height / 2.0),
+                mix(SWITCH_OFF.get(), SWITCH_ON.get(), p),
+            );
+            let centre = Point::new(
+                3.0 + (SWITCH.width - KNOB - 6.0) * p + KNOB / 2.0,
+                rect.center_y(),
+            );
+            f.fill(&Path::circle(centre, KNOB / 2.0), Color::WHITE);
+        },
+        move |now| switch.sliding(now),
+    );
+    let flip = button(knob)
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(Target::Switch));
+    layers.push(at(
+        declared(
+            flip,
+            Target::Switch,
+            Role::ToggleButton,
+            words.dnd(),
+            ui.focus,
+        )
+        .node(|n| n.checked(on)),
+        laid.switch.position(),
+    ));
+    let chosen = laid.dnd.choice();
+    let n = laid.chips.len();
+    for (i, (choice, rect)) in laid.chips.iter().enumerate() {
+        let picked = chosen == Some(*choice);
+        let (fill, rim, ink) = if picked { CHIP_ON } else { CHIP_OFF };
+        let chip = button(
+            container(said(words.chip(*choice), CHIP_TEXT, MANROPE_SEMIBOLD, ink))
+                .center(Length::Fill),
+        )
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, status| {
+            let fill = if style::lit(status) && !picked {
+                ACTION_HOVER.get()
+            } else {
+                fill
+            };
+            let boxed = rimmed(fill, rim, CHIP / 2.0);
+            iced::widget::button::Style {
+                background: boxed.background,
+                border: boxed.border,
+                ..iced::widget::button::Style::default()
             }
-            let mut node = rows::act(Target::Item(row.key), Role::ListItem, name, at(row.rect))
-                .describe(body)
-                .child(rows::act(
-                    Target::Close(row.key),
-                    Role::Button,
-                    if fr { "Retirer" } else { "Dismiss" },
-                    at(row.close()),
-                ));
-            for (i, (label, rect)) in row.actions.iter().enumerate() {
-                node = node.child(rows::act(
-                    Target::Action(row.key, i),
-                    Role::Button,
-                    label.clone(),
-                    at(*rect),
-                ));
-            }
-            nodes.push(node);
+        })
+        .on_press(Msg::Act(Target::Chip(*choice)));
+        layers.push(at(
+            declared(
+                chip,
+                Target::Chip(*choice),
+                Role::RadioButton,
+                words.chip(*choice),
+                ui.focus,
+            )
+            .node(|node| node.checked(picked).set(i + 1, n)),
+            rect.position(),
+        ));
+    }
+}
+
+/// The list: its sections and items, scrolling past its room; empty, the
+/// resting panda.
+fn list<'a>(laid: &Laid, words: Words, ui: &Ui, now: Instant, motion: bool) -> El<'a> {
+    let width = laid.view.width;
+    if laid.rows.is_empty() {
+        return empty(laid, words, ui, now, motion);
+    }
+    let mut all = column![].width(width);
+    let mut end = 0.0;
+    let mut heads = laid.heads.iter().peekable();
+    for shown in &laid.rows {
+        if let Some((section, middle)) = heads.next_if(|(s, _)| *s == shown.section) {
+            let top = middle - HEAD * LINE / 2.0 - HEAD_PAD.0;
+            all = all.push(Space::new().height(top - end));
+            let word = words.section(*section);
+            let mut chars = word.chars();
+            let read = chars.next().map_or_else(String::new, |c| {
+                c.to_string() + &chars.as_str().to_lowercase()
+            });
+            all = all.push(ui::line(
+                container(spaced_by(
+                    word,
+                    HEAD,
+                    MANROPE_BOLD,
+                    QUIET.get(),
+                    HEAD_SPACING,
+                ))
+                .padding(Padding {
+                    top: HEAD_PAD.0,
+                    right: 0.0,
+                    bottom: HEAD_PAD.1,
+                    left: HEAD_PAD.0,
+                }),
+                read,
+            ));
+            end = top + HEAD_PAD.0 + HEAD * LINE + HEAD_PAD.1;
         }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(state.targets().into_iter().map(|(t, _)| t)),
-                focus: state.focus.map(rows::key),
-                arrows: false,
+        all = all.push(Space::new().height(shown.rect.y - end));
+        all = all.push(item(shown, words, ui, now));
+        end = shown.rect.y + shown.rect.height;
+    }
+    let scrolled = scrollable(container(all))
+        .id(Id::new(LIST_ID))
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(kit::SCROLLBAR)
+                .scroller_width(kit::SCROLLBAR)
+                .margin(0)
+                .spacing(0),
+        ))
+        .style(|_, _| style::scrollbar(kit::SCROLLBAR))
+        .on_scroll(|v| Msg::Scrolled(v.absolute_offset().y))
+        .width(width + kit::SCROLLBAR)
+        .height(laid.view.height);
+    Notched::new(scrolled, NOTCH).into()
+}
+
+/// Nothing in it: the resting panda, "Rien de neuf" and "Tout est lu.",
+/// coming in.
+fn empty<'a>(laid: &Laid, words: Words, ui: &Ui, now: Instant, motion: bool) -> El<'a> {
+    let p = match (ui.empty_since, motion) {
+        (Some(since), true) => {
+            let t = now.saturating_duration_since(since).as_secs_f32() / REST_IN.as_secs_f32();
+            bezier(EASE_OUT, t.clamp(0.0, 1.0))
+        }
+        _ => 1.0,
+    };
+    let shift = 8.0 * (1.0 - p);
+    let block = PANDA + EMPTY_GAP + NOTHING * LINE + EMPTY_GAP + ALL_READ * LINE;
+    let top = (laid.view.height - block) / 2.0 + shift;
+    let dozing = ui.dozing;
+    // The panda's own proportions, within its room.
+    let (pw, ph) = (PANDA, PANDA * 120.5 / 126.0);
+    let panda = moving(
+        PANDA,
+        PANDA,
+        move |f, _, at| {
+            f.draw_svg(
+                Rectangle::new(Point::new(0.0, (PANDA - ph) / 2.0), Size::new(pw, ph)),
+                iced::advanced::svg::Svg::new(crate::pandas::drawing(
+                    crate::pandas::Mood::Resting,
+                    dozing,
+                    at,
+                ))
+                .opacity(p),
+            );
+        },
+        move |at| dozing.is_some_and(|d| d.plays(at)),
+    );
+    let said_lines = column![
+        container(panda)
+            .width(Length::Fill)
+            .align_x(Horizontal::Center),
+        Space::new().height(EMPTY_GAP),
+        container(said(
+            words.nothing(),
+            NOTHING,
+            MANROPE_SEMIBOLD,
+            NOTHING_INK.get().scale_alpha(p)
+        ))
+        .width(Length::Fill)
+        .align_x(Horizontal::Center),
+        Space::new().height(EMPTY_GAP),
+        container(said(
+            words.all_read(),
+            ALL_READ,
+            MANROPE,
+            QUIET.get().scale_alpha(p)
+        ))
+        .width(Length::Fill)
+        .align_x(Horizontal::Center),
+    ];
+    container(ui::line(
+        said_lines,
+        format!("{} {}", words.nothing(), words.all_read()),
+    ))
+    .padding(Padding {
+        top,
+        ..Padding::ZERO
+    })
+    .width(W - 2.0 * LIST_SIDE)
+    .height(laid.view.height)
+    .into()
+}
+
+/// An item: its icon, "App · when", its title, its body; under the
+/// pointer or holding the keyboard, lit with its ✕; its actions while its
+/// sender holds it; sliding out as it goes.
+fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
+    let key = shown.key;
+    let gone = ui.gone(key, now);
+    let alpha = 1.0 - gone;
+    let fade = move |c: Color| c.scale_alpha(alpha);
+    let over = ui.over == Some(key) && ui.leaving.is_none();
+    let lit = over || ui.focus == Some(Target::Item(key));
+    let size = shown.rect.size();
+    let fr = words.lang == hocus_words::Lang::French;
+    // The icon, else the application's first letter on a square.
+    let icon: El<'a> = match &shown.icon {
+        Some(Icon::Raster(handle)) => image(handle.clone())
+            .width(ICON)
+            .height(ICON)
+            .opacity(alpha)
+            .into(),
+        Some(Icon::Vector(handle)) => svg(handle.clone())
+            .width(ICON)
+            .height(ICON)
+            .opacity(alpha)
+            .into(),
+        None => {
+            let square = drawn(ICON, ICON, move |f, s| {
+                let rect = Rectangle::new(Point::ORIGIN, s);
+                let fill = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(ICON, ICON))
+                    .add_stop(0.0, fade(NEUTRAL.0))
+                    .add_stop(1.0, fade(NEUTRAL.1));
+                f.fill(
+                    &kit::rounded(rect, (ICON * 0.28).round()),
+                    canvas::Fill::from(fill),
+                );
+            });
+            Stack::with_children([
+                square,
+                container(said(
+                    shown.letter.clone(),
+                    ICON * 0.4,
+                    MANROPE_BOLD,
+                    fade(Color::WHITE),
+                ))
+                .center(ICON)
+                .into(),
+            ])
+            .into()
+        }
+    };
+    let mut meta = row![
+        said(shown.cut.app.clone(), META, MANROPE_BOLD, fade(DIM.get())),
+        gap(META_GAP),
+        said("·", META, MANROPE, fade(QUIET.get())),
+        gap(META_GAP),
+        said(shown.when.clone(), META, MANROPE, fade(QUIET.get())),
+    ]
+    .align_y(Vertical::Center);
+    if shown.dot_x.is_some() {
+        meta = meta.push(gap(META_GAP)).push(drawn(DOT, DOT, move |f, s| {
+            f.fill(
+                &Path::circle(Point::new(s.width / 2.0, s.height / 2.0), DOT / 2.0),
+                fade(UNSEEN.get()),
+            );
+        }));
+    }
+    let mut texts = column![
+        container(meta)
+            .height(META * LINE)
+            .align_y(Vertical::Center),
+        Space::new().height(TEXT_GAP),
+        said(
+            shown.cut.title.clone(),
+            ITEM_TITLE,
+            MANROPE_BOLD,
+            fade(TEXT.get())
+        ),
+    ];
+    if !shown.cut.body.is_empty() {
+        texts = texts.push(Space::new().height(TEXT_GAP)).push(lines(
+            &shown.cut.body,
+            BODY,
+            BODY_LINE,
+            fade(DIM.get()),
+        ));
+    }
+    let pressed = button(Space::new().width(size.width).height(size.height))
+        .padding(0)
+        .style(move |_, _| {
+            if lit {
+                style::hovered(fade(ITEM_HOVER.get()), ITEM_RADIUS)
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(Target::Item(key)));
+    let name = match (shown.cut.app.is_empty(), fr) {
+        (true, _) => shown.cut.title.clone(),
+        (false, true) => format!("{} : {}", shown.cut.app, shown.cut.title),
+        (false, false) => format!("{}: {}", shown.cut.app, shown.cut.title),
+    };
+    let mut body = shown.cut.body.join(" ");
+    if !shown.when.is_empty() {
+        body = format!("{body} {}", shown.when).trim().to_owned();
+    }
+    let x = ITEM_PAD + ICON + ICON_GAP;
+    let mut layers: Vec<El<'a>> = vec![
+        declared(pressed, Target::Item(key), Role::ListItem, name, ui.focus)
+            .node(|n| n.describe(body))
+            .into(),
+        at(icon, Point::new(ITEM_PAD, ITEM_PAD)),
+        at(texts, Point::new(x, ITEM_PAD)),
+    ];
+    // Its ✕, under the pointer or holding the keyboard.
+    let close_target = Target::Close(key);
+    let shows_close = over || ui.focus == Some(close_target);
+    let cross = drawn(CLOSE, CLOSE, move |f, s| {
+        if !shows_close {
+            return;
+        }
+        let c = Point::new(s.width / 2.0, s.height / 2.0);
+        let arm = 3.5;
+        let cross = Path::new(|p| {
+            p.move_to(Point::new(c.x - arm, c.y - arm));
+            p.line_to(Point::new(c.x + arm, c.y + arm));
+            p.move_to(Point::new(c.x + arm, c.y - arm));
+            p.line_to(Point::new(c.x - arm, c.y + arm));
+        });
+        f.stroke(
+            &cross,
+            Stroke {
+                style: canvas::Style::Solid(fade(FAINT.get())),
+                width: 1.4,
+                line_cap: canvas::LineCap::Round,
+                ..Stroke::default()
             },
         );
+    });
+    let close = button(cross)
+        .padding(0)
+        .style(move |_, status| {
+            if shows_close && style::lit(status) {
+                style::hovered(fade(GHOST_HOVER.get()), CLOSE_RADIUS)
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(close_target));
+    layers.push(at(
+        declared(
+            close,
+            close_target,
+            Role::Button,
+            if fr { "Retirer" } else { "Dismiss" },
+            ui.focus,
+        ),
+        Point::new(size.width - CLOSE_IN.0 - CLOSE, CLOSE_IN.1),
+    ));
+    // Its actions.
+    for (i, ((_, rect), (_, label, _))) in shown.actions.iter().zip(&shown.cut.actions).enumerate()
+    {
+        let target = Target::Action(key, i);
+        let action = button(
+            container(said(
+                label.clone(),
+                CHIP_TEXT,
+                MANROPE_SEMIBOLD,
+                fade(TEXT.get()),
+            ))
+            .center(Length::Fill),
+        )
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, status| {
+            let fill = if style::lit(status) {
+                ACTION_HOVER.get()
+            } else {
+                ACTION_FILL.get()
+            };
+            let boxed = rimmed(fade(fill), fade(ACTION_RIM.get()), 8.0);
+            iced::widget::button::Style {
+                background: boxed.background,
+                border: boxed.border,
+                ..iced::widget::button::Style::default()
+            }
+        })
+        .on_press(Msg::Act(target));
+        layers.push(at(
+            declared(action, target, Role::Button, label.clone(), ui.focus),
+            Point::new(rect.x - shown.rect.x, rect.y - shown.rect.y),
+        ));
+    }
+    let whole = Stack::with_children(layers)
+        .width(size.width)
+        .height(size.height);
+    let hovered = mouse_area(whole)
+        .on_enter(Msg::Over(key, true))
+        .on_exit(Msg::Over(key, false));
+    row![gap(SLIDE_BY * gone), hovered].into()
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(motion: bool, message: Msg) {
+    let now = Instant::now();
+    match message {
+        Msg::Stale => {
+            // What slid out is all gone: the stack is told.
+            let out = ui(|ui| {
+                let end = ui.leaving_end()?;
+                let leaving = ui.leaving.as_mut().filter(|l| !l.sent && now >= end)?;
+                leaving.sent = true;
+                Some(leaving.keys.clone())
+            });
+            if let Some(keys) = out {
+                notifications::input(Said::Remove(keys));
+            }
+        }
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| {
+            ui.focus = Some(target);
+            reveal(ui);
+        }),
+        Msg::Over(key, true) => ui(|ui| ui.over = Some(key)),
+        Msg::Over(key, false) => ui(|ui| {
+            if ui.over == Some(key) {
+                ui.over = None;
+            }
+        }),
+        Msg::Scrolled(y) => ui(|ui| ui.scroll = y),
+        Msg::Arrow(down) => ui(|ui| {
+            let items: Vec<Target> = ui
+                .laid
+                .as_ref()
+                .map(|l| l.rows.iter().map(|r| Target::Item(r.key)).collect())
+                .unwrap_or_default();
+            let current = ui.focus.and_then(Target::key).map(Target::Item);
+            ui.focus = match current {
+                Some(item) => kit::cycle(&items, item, down),
+                None => kit::step(&items, None, !down),
+            };
+            reveal(ui);
+        }),
+        Msg::Act(target) => act(target, now, motion),
+    }
+    super::refit(Item::Notifications);
+}
+
+/// The list scrolled so that what holds the keyboard shows.
+fn reveal(ui: &mut Ui) {
+    let (Some(laid), Some(key)) = (&ui.laid, ui.focus.and_then(Target::key)) else {
+        return;
+    };
+    let Some(row) = laid.rows.iter().find(|r| r.key == key) else {
+        return;
+    };
+    let to = kit::reveal(
+        (row.rect.y, row.rect.height),
+        laid.view.height,
+        ui.scroll,
+        laid.most_scroll(),
+    );
+    if (to - ui.scroll).abs() < 0.5 {
+        return;
+    }
+    ui.scroll = to;
+    LATER.push(iced::advanced::widget::operation::scrollable::scroll_to(
+        Id::new(LIST_ID),
+        iced::advanced::widget::operation::scrollable::AbsoluteOffset {
+            x: None,
+            y: Some(to),
+        },
+    ));
+}
+
+/// Items `keys` go: sliding out one after another, or at once without
+/// motion.
+fn take_out(ui: &mut Ui, keys: Vec<u64>, now: Instant, motion: bool) -> Option<Vec<u64>> {
+    if keys.is_empty() || ui.leaving.is_some() {
+        return None;
+    }
+    if motion {
+        ui.leaving = Some(Leaving {
+            keys,
+            since: now,
+            sent: false,
+        });
+        None
+    } else {
+        Some(keys)
     }
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
+fn act(target: Target, now: Instant, motion: bool) {
+    tracing::debug!(?target, "the history");
+    let said: Option<Said> = ui(|ui| {
+        let laid = ui.laid.clone()?;
+        match target {
+            Target::Clear => {
+                // The items in view first, in their order: they slide out.
+                let mut keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
+                let first = laid
+                    .rows
+                    .iter()
+                    .position(|r| r.rect.y + r.rect.height > ui.scroll)
+                    .unwrap_or(0);
+                keys.rotate_left(first);
+                take_out(ui, keys, now, motion).map(Said::Remove)
+            }
+            Target::Switch => {
+                let on = laid.dnd.is_on();
+                ui.switch.flip(on, now, motion);
+                Some(Said::Dnd(if on {
+                    Dnd::Off
+                } else {
+                    Dnd::starting(Choice::Hour, now, &notifications::wall())
+                }))
+            }
+            Target::Chip(choice) => Some(Said::Dnd(Dnd::starting(
+                choice,
+                now,
+                &notifications::wall(),
+            ))),
+            Target::Item(key) => (ui.leaving.is_none()).then_some(Said::Open(key)),
+            Target::Close(key) => take_out(ui, vec![key], now, motion).map(Said::Remove),
+            Target::Action(key, i) => laid
+                .rows
+                .iter()
+                .find(|r| r.key == key)
+                .and_then(|r| r.actions.get(i))
+                .map(|(action, _)| Said::Act {
+                    key,
+                    action: action.clone(),
+                }),
+        }
+    });
+    if let Some(said) = said {
+        let open = matches!(said, Said::Open(_));
+        notifications::input(said);
+        if open {
+            event(Seen::Chosen);
         }
     }
+}
+
+/// Its background: the bubbles' tint (opaque without glass) and its rim.
+#[derive(Debug, Clone, Copy)]
+struct Tint(bool);
+
+impl<M> canvas::Program<M> for Tint {
+    type State = ();
 
     fn draw(
         &self,
-        state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        self.background(&mut frame, bounds.size());
-        let Some(laid) = &state.laid else {
-            return vec![frame.into_geometry()];
-        };
-        let words = Words::new(Lang::of_messages());
-        let now = state.now.unwrap_or_else(Instant::now);
-        let hover = state.pointer.hover;
-        self.header(&mut frame, laid, words, hover);
-        self.card(&mut frame, laid, words, state, now);
-        let mut list = Frame::with_bounds(renderer, laid.view);
-        let clip = Clip::new(self.software, Some(laid.view));
-        if laid.rows.is_empty() {
-            self.empty(&mut list, laid, words, state, now);
-        }
-        for (section, middle) in &laid.heads {
-            let middle = laid.view.y + middle - state.scroll;
-            if middle < laid.view.y - HEAD || middle > laid.view.y + laid.view.height + HEAD {
-                continue;
-            }
-            head(&mut list, clip, words.section(*section), middle);
-        }
-        for row in &laid.rows {
-            let rect = laid.on_popover(row.rect, state.scroll);
-            if rect.y > laid.view.y + laid.view.height || rect.y + rect.height < laid.view.y {
-                continue;
-            }
-            let gone = state.gone(row.key, now);
-            self.row(&mut list, clip, laid, row, state, gone);
-        }
-        if laid.content > laid.view.height + 0.5 {
-            let list = kit::list(laid.view.y, laid.view.height, laid.content);
-            list.scrollbar_at(&mut frame, state.scroll, W - BORDER - kit::SCROLLBAR - 2.0);
-        }
-        if let Some((target, rect)) = state
-            .focus
-            .and_then(|f| state.targets().into_iter().find(|(t, _)| *t == f))
-        {
-            let radius = match target {
-                Target::Item(_) => ITEM_RADIUS,
-                Target::Close(_) => CLOSE_RADIUS,
-                Target::Chip(_) => CHIP / 2.0,
-                Target::Switch => SWITCH.height / 2.0,
-                Target::Clear => GHOST_RADIUS,
-                Target::Action(..) => 8.0,
-            };
-            ring(&mut frame, rect, radius);
-        }
-        self.tell_readers(state, laid, words);
-        vec![frame.into_geometry(), list.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
-}
-
-/// `colour` at `alpha` of its own.
-fn faded(colour: Color, alpha: f32) -> Color {
-    colour.scale_alpha(alpha)
-}
-
-/// A section's label, spaced, its line centred on `middle`.
-fn head(f: &mut Frame, clip: Clip, word: &str, middle: f32) {
-    let mut x = LIST_SIDE + HEAD_PAD.0;
-    for ch in word.chars() {
-        let letter = ch.to_string();
-        let width = kit::measure(&letter, HEAD, MANROPE_BOLD);
-        clip.fill(
-            f,
-            text_in(
-                MANROPE_BOLD,
-                text(
-                    letter,
-                    Point::new(x, middle),
-                    HEAD,
-                    QUIET.get(),
-                    Alignment::Left,
-                ),
-            ),
-        );
-        x += width + HEAD_SPACING;
-    }
-}
-
-impl Panel {
-    fn background(&self, f: &mut Frame, size: Size) {
-        let (top, bottom) = if self.glass {
+    ) -> Vec<canvas::Geometry> {
+        let size = bounds.size();
+        let mut f = Frame::new(renderer, size);
+        let (top, bottom) = if self.0 {
             (GLASS_TOP, GLASS_BOTTOM)
         } else {
             (OPAQUE_TOP, OPAQUE_BOTTOM)
@@ -1027,635 +1600,7 @@ impl Panel {
                 ..Stroke::default()
             },
         );
-    }
-
-    fn header(&self, f: &mut Frame, laid: &Laid, words: Words, hover: Option<Target>) {
-        let middle = HEADER_TOP + HEADER / 2.0;
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                words.title().to_owned(),
-                Point::new(BORDER + SIDE, middle),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        if let Some((rect, _)) = laid.clear {
-            let lit = hover == Some(Target::Clear);
-            if lit {
-                crate::theme::hover(f, &kit::rounded(rect, GHOST_RADIUS), GHOST_HOVER.get());
-            }
-            f.fill_text(text_in(
-                MANROPE_SEMIBOLD,
-                text(
-                    words.clear().to_owned(),
-                    rect.center(),
-                    GHOST_TEXT,
-                    if lit { TEXT.get() } else { DIM.get() },
-                    Alignment::Center,
-                ),
-            ));
-        }
-    }
-
-    fn card(&self, f: &mut Frame, laid: &Laid, words: Words, state: &State, now: Instant) {
-        let on = laid.dnd.is_on();
-        let (fill, rim) = if on {
-            CARD_ON
-        } else {
-            (CARD_OFF.0.get(), CARD_OFF.1.get())
-        };
-        f.fill(&kit::rounded(laid.card, CARD_RADIUS), fill);
-        f.stroke(
-            &Path::rounded_rectangle(
-                Point::new(laid.card.x + 0.5, laid.card.y + 0.5),
-                Size::new(laid.card.width - 1.0, laid.card.height - 1.0),
-                (CARD_RADIUS - 0.5).into(),
-            ),
-            Stroke {
-                style: canvas::Style::Solid(rim),
-                width: BORDER,
-                ..Stroke::default()
-            },
-        );
-        let inner_left = CARD_LEFT + BORDER + CARD_PAD.1;
-        f.draw_svg(
-            Rectangle::new(
-                Point::new(inner_left, laid.row_middle - MOON / 2.0),
-                Size::new(MOON, MOON),
-            ),
-            svg::Svg::new(moon(on)),
-        );
-        let x = inner_left + MOON + CARD_GAP;
-        let column = laid.said_top - SAID_GAP - DND_NAME * LINE;
-        f.fill_text(text_in(
-            MANROPE_SEMIBOLD,
-            text(
-                words.dnd().to_owned(),
-                Point::new(x, column + DND_NAME * LINE / 2.0),
-                DND_NAME,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        for said in kit::lines(&laid.said, (x, laid.said_top), DND_SAID, LINE, FAINT.get()) {
-            f.fill_text(said);
-        }
-        // The switch, its knob sliding.
-        let shown = state.switch.shown(on, now);
-        let p = state.switch.knob_at(shown, now, self.motion);
-        let rect = laid.switch;
-        f.fill(
-            &kit::rounded(rect, SWITCH.height / 2.0),
-            mix(SWITCH_OFF.get(), SWITCH_ON.get(), p),
-        );
-        let centre = Point::new(
-            rect.x + 3.0 + (SWITCH.width - KNOB - 6.0) * p + KNOB / 2.0,
-            rect.center_y(),
-        );
-        f.fill(&Path::circle(centre, KNOB / 2.0), Color::WHITE);
-        let chosen = laid.dnd.choice();
-        for (choice, rect) in &laid.chips {
-            let (fill, rim, ink) = if chosen == Some(*choice) {
-                CHIP_ON
-            } else {
-                CHIP_OFF
-            };
-            let fill =
-                if state.pointer.hover == Some(Target::Chip(*choice)) && chosen != Some(*choice) {
-                    ACTION_HOVER.get()
-                } else {
-                    fill
-                };
-            f.fill(&kit::rounded(*rect, CHIP / 2.0), fill);
-            f.stroke(
-                &Path::rounded_rectangle(
-                    Point::new(rect.x + 0.5, rect.y + 0.5),
-                    Size::new(rect.width - 1.0, rect.height - 1.0),
-                    (CHIP / 2.0 - 0.5).into(),
-                ),
-                Stroke {
-                    style: canvas::Style::Solid(rim),
-                    width: 1.0,
-                    ..Stroke::default()
-                },
-            );
-            f.fill_text(text_in(
-                MANROPE_SEMIBOLD,
-                text(
-                    words.chip(*choice).to_owned(),
-                    rect.center(),
-                    CHIP_TEXT,
-                    ink,
-                    Alignment::Center,
-                ),
-            ));
-        }
-    }
-
-    fn empty(&self, f: &mut Frame, laid: &Laid, words: Words, state: &State, now: Instant) {
-        let p = match (state.empty_since, self.motion) {
-            (Some(since), true) => {
-                let t = now.saturating_duration_since(since).as_secs_f32() / REST_IN.as_secs_f32();
-                bezier(EASE_OUT, t.clamp(0.0, 1.0))
-            }
-            _ => 1.0,
-        };
-        let shift = 8.0 * (1.0 - p);
-        let block = PANDA + EMPTY_GAP + NOTHING * LINE + EMPTY_GAP + ALL_READ * LINE;
-        let top = laid.view.y + (laid.view.height - block) / 2.0 + shift;
-        let centre = W / 2.0;
-        // The panda's own proportions, within 96 px.
-        let (pw, ph) = (PANDA, PANDA * 120.5 / 126.0);
-        f.draw_svg(
-            Rectangle::new(
-                Point::new(centre - pw / 2.0, top + (PANDA - ph) / 2.0),
-                Size::new(pw, ph),
-            ),
-            svg::Svg::new(crate::pandas::drawing(
-                crate::pandas::Mood::Resting,
-                state.dozing,
-                now,
-            ))
-            .opacity(p),
-        );
-        let y = top + PANDA + EMPTY_GAP + NOTHING * LINE / 2.0;
-        f.fill_text(text_in(
-            MANROPE_SEMIBOLD,
-            text(
-                words.nothing().to_owned(),
-                Point::new(centre, y),
-                NOTHING,
-                faded(NOTHING_INK.get(), p),
-                Alignment::Center,
-            ),
-        ));
-        let y = y + NOTHING * LINE / 2.0 + EMPTY_GAP + ALL_READ * LINE / 2.0;
-        f.fill_text(text(
-            words.all_read().to_owned(),
-            Point::new(centre, y),
-            ALL_READ,
-            faded(QUIET.get(), p),
-            Alignment::Center,
-        ));
-    }
-
-    fn row(&self, f: &mut Frame, clip: Clip, laid: &Laid, row: &Row, state: &State, gone: f32) {
-        let alpha = 1.0 - gone;
-        if alpha <= 0.0 {
-            return;
-        }
-        let shift = Vector::new(SLIDE_BY * gone, 0.0);
-        let rect = laid.on_popover(row.rect, state.scroll) + shift;
-        let hover = state.pointer.hover;
-        let over = hover.and_then(Target::key) == Some(row.key) && state.leaving.is_none();
-        if over || state.focus == Some(Target::Item(row.key)) {
-            f.fill(
-                &kit::rounded(rect, ITEM_RADIUS),
-                faded(ITEM_HOVER.get(), alpha),
-            );
-        }
-        // The icon, else the application's first letter on a square.
-        let icon = Rectangle::new(
-            Point::new(rect.x + ITEM_PAD, rect.y + ITEM_PAD),
-            Size::new(ICON, ICON),
-        );
-        match &row.icon {
-            Some(Icon::Raster(handle)) => {
-                f.draw_image(icon, canvas::Image::new(handle.clone()).opacity(alpha));
-            }
-            Some(Icon::Vector(handle)) => {
-                f.draw_svg(icon, svg::Svg::new(handle.clone()).opacity(alpha));
-            }
-            None => {
-                let radius = (ICON * 0.28).round();
-                let fill = canvas::gradient::Linear::new(
-                    icon.position(),
-                    Point::new(icon.x + ICON, icon.y + ICON),
-                )
-                .add_stop(0.0, faded(NEUTRAL.0, alpha))
-                .add_stop(1.0, faded(NEUTRAL.1, alpha));
-                f.fill(&kit::rounded(icon, radius), canvas::Fill::from(fill));
-                clip.fill(
-                    f,
-                    text_in(
-                        MANROPE_BOLD,
-                        text(
-                            row.letter.clone(),
-                            icon.center(),
-                            ICON * 0.4,
-                            faded(Color::WHITE, alpha),
-                            Alignment::Center,
-                        ),
-                    ),
-                );
-            }
-        }
-        let x = rect.x + ITEM_PAD + ICON + ICON_GAP;
-        let dx = rect.x - row.rect.x;
-        let mut y = rect.y + ITEM_PAD;
-        let meta = y + META * LINE / 2.0;
-        clip.fill(
-            f,
-            text_in(
-                MANROPE_BOLD,
-                text(
-                    row.cut.app.clone(),
-                    Point::new(x, meta),
-                    META,
-                    faded(DIM.get(), alpha),
-                    Alignment::Left,
-                ),
-            ),
-        );
-        clip.fill(
-            f,
-            text(
-                "·".to_owned(),
-                Point::new(x + row.cut.app_width + META_GAP, meta),
-                META,
-                faded(QUIET.get(), alpha),
-                Alignment::Left,
-            ),
-        );
-        clip.fill(
-            f,
-            text(
-                row.when.clone(),
-                Point::new(row.when_x + dx, meta),
-                META,
-                faded(QUIET.get(), alpha),
-                Alignment::Left,
-            ),
-        );
-        if let Some(dot_x) = row.dot_x {
-            f.fill(
-                &Path::circle(Point::new(dot_x + dx + DOT / 2.0, meta), DOT / 2.0),
-                faded(UNSEEN.get(), alpha),
-            );
-        }
-        y += META * LINE + TEXT_GAP;
-        clip.fill(
-            f,
-            text_in(
-                MANROPE_BOLD,
-                text(
-                    row.cut.title.clone(),
-                    Point::new(x, y + ITEM_TITLE * LINE / 2.0),
-                    ITEM_TITLE,
-                    faded(TEXT.get(), alpha),
-                    Alignment::Left,
-                ),
-            ),
-        );
-        y += ITEM_TITLE * LINE;
-        if !row.cut.body.is_empty() {
-            y += TEXT_GAP;
-            for line in kit::lines(
-                &row.cut.body,
-                (x, y),
-                BODY,
-                BODY_LINE,
-                faded(DIM.get(), alpha),
-            ) {
-                clip.fill(f, line);
-            }
-        }
-        // Its actions.
-        for (i, ((_, rect), (_, label, _))) in row.actions.iter().zip(&row.cut.actions).enumerate()
-        {
-            let rect = laid.on_popover(*rect, state.scroll) + shift;
-            let lit = hover == Some(Target::Action(row.key, i));
-            f.fill(
-                &kit::rounded(rect, 8.0),
-                faded(
-                    if lit {
-                        ACTION_HOVER.get()
-                    } else {
-                        ACTION_FILL.get()
-                    },
-                    alpha,
-                ),
-            );
-            f.stroke(
-                &Path::rounded_rectangle(
-                    Point::new(rect.x + 0.5, rect.y + 0.5),
-                    Size::new(rect.width - 1.0, rect.height - 1.0),
-                    7.5.into(),
-                ),
-                Stroke {
-                    style: canvas::Style::Solid(faded(ACTION_RIM.get(), alpha)),
-                    width: 1.0,
-                    ..Stroke::default()
-                },
-            );
-            clip.fill(
-                f,
-                text_in(
-                    MANROPE_SEMIBOLD,
-                    text(
-                        label.clone(),
-                        rect.center(),
-                        CHIP_TEXT,
-                        faded(TEXT.get(), alpha),
-                        Alignment::Center,
-                    ),
-                ),
-            );
-        }
-        // Its ✕, under the pointer or holding the keyboard.
-        let focused = state.focus == Some(Target::Close(row.key));
-        if over || focused {
-            let close = laid.on_popover(row.close(), state.scroll) + shift;
-            let lit = hover == Some(Target::Close(row.key));
-            if lit {
-                f.fill(
-                    &kit::rounded(close, CLOSE_RADIUS),
-                    faded(GHOST_HOVER.get(), alpha),
-                );
-            }
-            let c = close.center();
-            let arm = 3.5;
-            let cross = Path::new(|p| {
-                p.move_to(Point::new(c.x - arm, c.y - arm));
-                p.line_to(Point::new(c.x + arm, c.y + arm));
-                p.move_to(Point::new(c.x + arm, c.y - arm));
-                p.line_to(Point::new(c.x - arm, c.y + arm));
-            });
-            f.stroke(
-                &cross,
-                Stroke {
-                    style: canvas::Style::Solid(faded(
-                        if lit { TEXT.get() } else { FAINT.get() },
-                        alpha,
-                    )),
-                    width: 1.4,
-                    line_cap: canvas::LineCap::Round,
-                    ..Stroke::default()
-                },
-            );
-        }
-    }
-
-    /// What it shows, read afresh: laid out again when the history or do not
-    /// disturb changed, or the minute did; what slides out goes at its end.
-    fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-        }
-        state.now = Some(now);
-        if let Some(end) = state.leaving_end()
-            && now >= end
-            && let Some(leaving) = state.leaving.as_mut().filter(|l| !l.sent)
-        {
-            leaving.sent = true;
-            notifications::input(Said::Remove(leaving.keys.clone()));
-        }
-        let shown = shown();
-        let wall = notifications::wall();
-        let minute = wall.timestamp().as_second() / 60;
-        let from = (shown.version, minute, shown.dnd);
-        if state.from != Some(from) || state.laid.is_none() {
-            let words = Words::new(Lang::of_messages());
-            let laid = {
-                let mut cuts = CUTS.lock().unwrap_or_else(PoisonError::into_inner);
-                let cuts = cuts.get_or_insert_with(HashMap::new);
-                // Only what it lists is kept cut.
-                cuts.retain(|(key, _, _), _| shown.items.iter().any(|k| k.key == *key));
-                lay_out(&shown, words, &wall, cuts, &mut kit::measure)
-            };
-            if state.from.map(|f| (f.0, f.2)) != Some((shown.version, shown.dnd))
-                || state.laid.is_none()
-            {
-                tracing::debug!(dnd = ?laid.dnd.choice(), history = %laid.said(words), "the history shows");
-                let items: Vec<String> = laid
-                    .targets(0.0)
-                    .iter()
-                    .map(|(t, r)| {
-                        let name = format!("{t:?}").replace(' ', "");
-                        format!("{name}@{:.0},{:.0}", r.center().x, r.center().y)
-                    })
-                    .collect();
-                tracing::debug!(height = laid.height, items = %items.join(" "), "the history's items");
-            }
-            let was_empty = state.laid.as_ref().is_some_and(|l| l.rows.is_empty());
-            if laid.rows.is_empty() && !was_empty && state.laid.is_some() {
-                state.empty_since = Some(now);
-            }
-            if laid.rows.is_empty() && !was_empty && crate::pandas::lively() {
-                state.dozing = Some(crate::pandas::Burst::of(crate::pandas::Mood::Resting, now));
-            }
-            state.scroll = state.scroll.clamp(0.0, laid.most_scroll());
-            let targets: Vec<Target> = laid
-                .targets(state.scroll)
-                .into_iter()
-                .map(|(t, _)| t)
-                .collect();
-            if state.focus.is_some_and(|f| !targets.contains(&f)) {
-                state.focus = None;
-            }
-            if state.laid.as_ref().map(|l| l.height) != Some(laid.height) {
-                state.pointer.hover = None;
-            }
-            // What slid out is gone from the list: it is over.
-            if state
-                .leaving
-                .as_ref()
-                .is_some_and(|l| l.sent && !laid.rows.iter().any(|r| l.keys.contains(&r.key)))
-            {
-                state.leaving = None;
-            }
-            state.laid = Some(laid);
-            state.from = Some(from);
-            state.switch.settle(shown.dnd.is_on(), now);
-            super::refit(Item::Notifications);
-        }
-        // Frames while something moves.
-        let moving = state.leaving.as_ref().is_some_and(|l| !l.sent)
-            || state.switch.sliding(now)
-            || state
-                .empty_since
-                .is_some_and(|since| self.motion && now < since + REST_IN)
-            || state.dozing.is_some_and(|d| d.plays(now));
-        moving.then(|| canvas::Action::request_redraw_at(now + Duration::from_millis(16)))
-    }
-
-    /// Items `keys` go: sliding out one after another, or at once without
-    /// motion.
-    fn take_out(&self, state: &mut State, keys: Vec<u64>, now: Instant) {
-        if keys.is_empty() || state.leaving.is_some() {
-            return;
-        }
-        if self.motion {
-            state.leaving = Some(Leaving {
-                keys,
-                since: now,
-                sent: false,
-            });
-        } else {
-            notifications::input(Said::Remove(keys));
-        }
-    }
-
-    fn act(&self, state: &mut State, target: Target, now: Instant) {
-        tracing::debug!(?target, "the history");
-        let Some(laid) = &state.laid else {
-            return;
-        };
-        match target {
-            Target::Clear => {
-                // The items in view first, in their order: they slide out.
-                let keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
-                let first = laid
-                    .rows
-                    .iter()
-                    .position(|r| r.rect.y + r.rect.height > state.scroll)
-                    .unwrap_or(0);
-                let mut keys = keys;
-                keys.rotate_left(first);
-                self.take_out(state, keys, now);
-            }
-            Target::Switch => {
-                let on = laid.dnd.is_on();
-                state.switch.flip(on, now, self.motion);
-                let dnd = if on {
-                    Dnd::Off
-                } else {
-                    Dnd::starting(Choice::Hour, now, &notifications::wall())
-                };
-                notifications::input(Said::Dnd(dnd));
-            }
-            Target::Chip(choice) => {
-                notifications::input(Said::Dnd(Dnd::starting(
-                    choice,
-                    now,
-                    &notifications::wall(),
-                )));
-            }
-            Target::Item(key) => {
-                if state.leaving.is_some() {
-                    return;
-                }
-                notifications::input(Said::Open(key));
-                event(Seen::Chosen);
-            }
-            Target::Close(key) => self.take_out(state, vec![key], now),
-            Target::Action(key, i) => {
-                let action = laid
-                    .rows
-                    .iter()
-                    .find(|r| r.key == key)
-                    .and_then(|r| r.actions.get(i))
-                    .map(|(k, _)| k.clone());
-                if let Some(action) = action {
-                    notifications::input(Said::Act { key, action });
-                }
-            }
-        }
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| {
-            state
-                .laid
-                .as_ref()
-                .and_then(|l| l.target_at(at, state.scroll))
-        });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        let now = Instant::now();
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    self.act(state, target, now);
-                }
-                redraw
-            }
-            mouse::Event::WheelScrolled { delta } => {
-                let laid = state.laid.as_ref()?;
-                if !at.is_some_and(|at| laid.view.contains(at)) {
-                    return None;
-                }
-                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
-                state.scroll = (state.scroll + by).clamp(0.0, laid.most_scroll());
-                state.pointer.hover = at.and_then(|at| laid.target_at(at, state.scroll));
-                redraw
-            }
-            _ => None,
-        }
-    }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let order: Vec<Target> = state.targets().into_iter().map(|(t, _)| t).collect();
-        let items: Vec<Target> = order
-            .iter()
-            .copied()
-            .filter(|t| matches!(t, Target::Item(_)))
-            .collect();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(arrow @ (Named::ArrowDown | Named::ArrowUp)) => {
-                let down = *arrow == Named::ArrowDown;
-                let current = state.focus.and_then(Target::key).map(Target::Item);
-                state.focus = match current {
-                    Some(item) => kit::cycle(&items, item, down),
-                    None => kit::step(&items, None, !down),
-                };
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(target) = state.focus.filter(|t| order.contains(t)) {
-                    self.act(state, target, Instant::now());
-                }
-            }
-            _ => return None,
-        }
-        self.reveal(state);
-        Some(canvas::Action::request_redraw().and_capture())
-    }
-
-    /// The list scrolled so that what holds the keyboard shows.
-    fn reveal(&self, state: &mut State) {
-        let (Some(laid), Some(key)) = (&state.laid, state.focus.and_then(Target::key)) else {
-            return;
-        };
-        let Some(row) = laid.rows.iter().find(|r| r.key == key) else {
-            return;
-        };
-        state.scroll = kit::reveal(
-            (row.rect.y, row.rect.height),
-            laid.view.height,
-            state.scroll,
-            laid.most_scroll(),
-        );
+        vec![f.into_geometry()]
     }
 }
 
@@ -1669,10 +1614,11 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 }
 
 /// The moon, in amber while on.
-fn moon(on: bool) -> svg::Handle {
-    static MOONS: std::sync::OnceLock<[svg::Handle; 2]> = std::sync::OnceLock::new();
+fn moon(on: bool) -> iced::advanced::svg::Handle {
+    static MOONS: std::sync::OnceLock<[iced::advanced::svg::Handle; 2]> =
+        std::sync::OnceLock::new();
     let make = |colour: &str| {
-        svg::Handle::from_memory(
+        iced::advanced::svg::Handle::from_memory(
             format!(
                 "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" \
                  height=\"24\"><path d=\"M19 14.5 A7.5 7.5 0 0 1 9.5 5 A7.5 7.5 0 1 0 19 14.5 Z\" \

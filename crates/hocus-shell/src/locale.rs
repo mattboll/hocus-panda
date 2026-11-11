@@ -8,8 +8,9 @@
 use std::sync::{PoisonError, RwLock};
 
 use hocus_link::locale::{DateFormat, Language, Locale, TimeFormat};
+use hocus_words::Lang;
 
-use crate::{clock::time::Lang, popover::calendar::words::Hours};
+use crate::popover::calendar::words::Hours;
 
 static NOW: RwLock<Locale> = RwLock::new(Locale {
     language: Language::System,
@@ -22,20 +23,12 @@ pub fn set(locale: Locale) -> bool {
     let mut now = NOW.write().unwrap_or_else(PoisonError::into_inner);
     let changed = *now != locale;
     *now = locale;
+    Lang::choose(locale.language.lang());
     changed
 }
 
 pub fn now() -> Locale {
     *NOW.read().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// The language the file chooses, if it chooses one.
-pub fn chosen_lang() -> Option<Lang> {
-    match now().language {
-        Language::System => None,
-        Language::French => Some(Lang::French),
-        Language::English => Some(Lang::English),
-    }
 }
 
 /// The hours the file chooses, if it chooses them.

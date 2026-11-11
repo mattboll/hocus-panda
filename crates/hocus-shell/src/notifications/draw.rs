@@ -18,6 +18,7 @@
 //! at a time (30 times a second at most), while it runs: nothing draws at
 //! rest, nor while the countdowns are paused.
 
+use hocus_words::shell::notifications_draw as txt;
 use std::time::{Duration, Instant};
 
 use iced::{
@@ -39,7 +40,7 @@ use crate::theme::Ink;
 use crate::{
     clock::time::Lang,
     levels::{
-        draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, pointer, rgb},
+        draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
         icons::Icon,
     },
     popover::kit::{self, MANROPE_SEMIBOLD},
@@ -59,8 +60,8 @@ const PAD_RIGHT: f32 = 34.0;
 pub const ICON: f32 = 32.0;
 const ICON_GAP: f32 = 11.0;
 /// The text's column.
-const COLUMN_X: f32 = BORDER + PAD_LEFT + ICON + ICON_GAP;
-const COLUMN: f32 = WIDTH - COLUMN_X - PAD_RIGHT - BORDER;
+pub const COLUMN_X: f32 = BORDER + PAD_LEFT + ICON + ICON_GAP;
+pub const COLUMN: f32 = WIDTH - COLUMN_X - PAD_RIGHT - BORDER;
 const COLUMN_GAP: f32 = 3.0;
 /// The first line, 11.5 px; the word after the name 6 px after it,
 /// "Urgent" 4 px more.
@@ -77,7 +78,7 @@ const TITLE_LINES: usize = 2;
 const BODY_LINES: usize = 2;
 /// The progress: 4 px under the body, 5 px high.
 const PROGRESS_TOP: f32 = 4.0;
-const PROGRESS: f32 = 5.0;
+pub const PROGRESS: f32 = 5.0;
 /// The ✕: a 24 px circle, 8 px from the top right inside the rim.
 const CLOSE: f32 = 24.0;
 const CLOSE_IN: f32 = 8.0;
@@ -141,31 +142,32 @@ const CHIP_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.12));
 // --- Words ---------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
-struct Words {
-    fr: bool,
+pub struct Words {
+    lang: Lang,
 }
 
 impl Words {
-    fn now() -> Self {
+    pub fn now() -> Self {
         Self {
-            fr: Lang::of_messages() == Lang::French,
+            lang: Lang::of_messages(),
         }
     }
 
     fn when(self) -> &'static str {
-        if self.fr { "· maintenant" } else { "· now" }
+        txt::NOW.get(self.lang)
     }
 
     fn urgent(self) -> &'static str {
         "Urgent"
     }
 
+    /// The ✕'s name, for screen readers.
+    pub fn close(self) -> &'static str {
+        txt::CLOSE.get(self.lang)
+    }
+
     fn waiting(self, n: usize) -> String {
-        if self.fr {
-            format!("+{n} en attente")
-        } else {
-            format!("+{n} waiting")
-        }
+        txt::waiting(self.lang, n)
     }
 }
 
@@ -184,9 +186,9 @@ pub struct Laid {
     title: Vec<String>,
     body: Vec<String>,
     /// The progress's top.
-    progress: Option<f32>,
+    pub progress: Option<f32>,
     /// The actions: key, label, button.
-    actions: Vec<(String, String, Rectangle)>,
+    pub actions: Vec<(String, String, Rectangle)>,
     /// The card's clickable part, under its rim.
     button: f32,
 }
@@ -318,49 +320,31 @@ pub fn chip_size(n: usize) -> (u32, u32) {
 
 // --- Drawing a bubble ---------------------------------------------------------------
 
-/// Where the pointer is on a bubble.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Spot {
-    #[default]
-    Off,
-    Card,
-    Close,
-    Action(usize),
-}
-
-/// A bubble's surface.
+/// What a bubble's surface draws under its controls ([`super::bubble`]):
+/// its shadow, its card lit while the pointer is on it, its icon, its
+/// words, its progress and its countdown's line, as they are when it
+/// draws.
 #[derive(Debug, Clone)]
-pub struct Bubble {
+pub struct Back {
     pub id: window::Id,
     /// The compositor blurs behind the shell (else the opaque colours).
     pub glass: bool,
     pub card: bool,
 }
 
-/// What its surface keeps between draws.
-#[derive(Debug, Default)]
-pub struct State {
-    pointer: Option<Point>,
-    spot: Spot,
-    /// When its line last drew.
-    drawn: Option<Instant>,
-}
-
 /// What a bubble shows, as the stack has it.
 struct Shown {
-    serial: u64,
     note: Note,
     laid: Laid,
     countdown: Countdown,
     paused: bool,
 }
 
-impl Bubble {
+impl Back {
     fn shown(&self) -> Option<Shown> {
         super::with(|c| {
             let paused = c.stack.paused();
             c.stack.bubble(self.id).map(|b| Shown {
-                serial: b.serial,
                 note: b.note.clone(),
                 laid: b.laid.clone(),
                 countdown: b.countdown(),
@@ -368,97 +352,62 @@ impl Bubble {
             })
         })
     }
+}
 
-    /// The card in the surface.
-    fn card_at(&self, size: Size) -> Rectangle {
-        if self.card {
-            return Rectangle::new(Point::ORIGIN, size);
-        }
-        Rectangle::new(
-            Point::new(ROOM.0, ROOM.1),
-            Size::new(size.width - ROOM.0 - ROOM.2, size.height - ROOM.1 - ROOM.3),
-        )
+/// The card in a surface of `size`: on the CPU the surface; on a GPU,
+/// inside the room its shadow takes.
+pub fn card_at(size: Size, card: bool) -> Rectangle {
+    if card {
+        return Rectangle::new(Point::ORIGIN, size);
+    }
+    Rectangle::new(
+        Point::new(ROOM.0, ROOM.1),
+        Size::new(size.width - ROOM.0 - ROOM.2, size.height - ROOM.1 - ROOM.3),
+    )
+}
+
+/// Where the card is on its surface: on the CPU the surface; on a GPU,
+/// inside the room its shadow takes.
+pub fn card_origin(card: bool) -> Point {
+    if card {
+        Point::ORIGIN
+    } else {
+        Point::new(ROOM.0, ROOM.1)
     }
 }
 
 /// The ✕ in the card's frame.
-fn close_rect() -> Rectangle {
+pub fn close_rect() -> Rectangle {
     Rectangle::new(
         Point::new(WIDTH - BORDER - CLOSE_IN - CLOSE, BORDER + CLOSE_IN),
         Size::new(CLOSE, CLOSE),
     )
 }
 
-fn spot(laid: &Laid, card: Rectangle, at: Option<Point>) -> Spot {
-    let Some(at) = at.filter(|p| card.contains(*p)) else {
-        return Spot::Off;
-    };
-    let at = Point::new(at.x - card.x, at.y - card.y);
-    let close = close_rect();
-    let centre = close.center();
-    if (at.x - centre.x).hypot(at.y - centre.y) <= CLOSE / 2.0 {
-        return Spot::Close;
-    }
-    if let Some(i) = laid.actions.iter().position(|(_, _, r)| r.contains(at)) {
-        return Spot::Action(i);
-    }
-    Spot::Card
-}
-
-impl<Message> canvas::Program<Message> for Bubble {
-    type State = State;
+impl<Message> canvas::Program<Message> for Back {
+    /// When its line last drew.
+    type State = Option<Instant>;
 
     fn update(
         &self,
-        state: &mut State,
+        state: &mut Option<Instant>,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
+        let iced::Event::Window(window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
         let shown = self.shown()?;
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(now)) => {
-                state.drawn = Some(*now);
-                // The line shortens a pixel at a time, at 30 frames a
-                // second at most, while it runs.
-                match shown.countdown {
-                    Countdown::Running { total, .. } if !shown.paused => {
-                        let pixel = total.div_f32(WIDTH - 2.0 * (BORDER + COUNTDOWN_IN));
-                        Some(canvas::Action::request_redraw_at(
-                            *now + pixel.max(COUNTDOWN_STEP),
-                        ))
-                    }
-                    _ => None,
-                }
-            }
-            iced::Event::Mouse(event) => {
-                let card = self.card_at(bounds.size());
-                state.pointer = pointer(event, bounds, cursor, state.pointer);
-                let now = spot(&shown.laid, card, state.pointer);
-                let was = state.spot;
-                if (now != Spot::Off) != (was != Spot::Off) {
-                    super::input(super::Input::Hover {
-                        serial: shown.serial,
-                        on: now != Spot::Off,
-                    });
-                }
-                state.spot = now;
-                match event {
-                    mouse::Event::ButtonPressed(mouse::Button::Left) if now != Spot::Off => {
-                        let serial = shown.serial;
-                        super::input(match now {
-                            Spot::Close => super::Input::Dismiss(serial),
-                            Spot::Action(i) => super::Input::Action {
-                                serial,
-                                key: shown.laid.actions[i].0.clone(),
-                            },
-                            _ => super::Input::Card(serial),
-                        });
-                        Some(canvas::Action::capture())
-                    }
-                    _ if now != was => Some(canvas::Action::request_redraw()),
-                    _ => None,
-                }
+        *state = Some(*now);
+        // The line shortens a pixel at a time, at 30 frames a second at
+        // most, while it runs.
+        match shown.countdown {
+            Countdown::Running { total, .. } if !shown.paused => {
+                let pixel = total.div_f32(WIDTH - 2.0 * (BORDER + COUNTDOWN_IN));
+                Some(canvas::Action::request_redraw_at(
+                    *now + pixel.max(COUNTDOWN_STEP),
+                ))
             }
             _ => None,
         }
@@ -466,7 +415,7 @@ impl<Message> canvas::Program<Message> for Bubble {
 
     fn draw(
         &self,
-        state: &State,
+        state: &Option<Instant>,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -477,7 +426,7 @@ impl<Message> canvas::Program<Message> for Bubble {
             return vec![f.into_geometry()];
         };
         let size = bounds.size();
-        let card = self.card_at(size);
+        let card = card_at(size, self.card);
         let critical = shown.note.urgency == Urgency::Critical;
         if !self.card {
             f.draw_svg(
@@ -485,30 +434,18 @@ impl<Message> canvas::Program<Message> for Bubble {
                 svg::Svg::new(shadow(size, card, critical)),
             );
         }
-        let now = state.drawn.unwrap_or_else(Instant::now);
+        let now = state.unwrap_or_else(Instant::now);
+        let lit = super::bubble::lit(self.id);
         f.with_save(|f| {
             f.translate(iced::Vector::new(card.x, card.y));
-            draw_card(f, &shown, state.spot, self.glass && !self.card, now);
+            draw_card(f, &shown, lit, self.glass && !self.card, now);
         });
         vec![f.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.spot == Spot::Off {
-            mouse::Interaction::default()
-        } else {
-            mouse::Interaction::Pointer
-        }
     }
 }
 
 /// The card, in its frame.
-fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant) {
+fn draw_card(f: &mut Frame, shown: &Shown, lit: bool, glass: bool, now: Instant) {
     let laid = &shown.laid;
     let note = &shown.note;
     let size = laid.size;
@@ -522,7 +459,7 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
         .add_stop(0.0, top.get())
         .add_stop(1.0, bottom.get());
     f.fill(&shape, canvas::Fill::from(tint));
-    if spot != Spot::Off {
+    if lit {
         let button = Rectangle::new(
             Point::new(BORDER, BORDER),
             Size::new(WIDTH - 2.0 * BORDER, laid.button),
@@ -683,65 +620,6 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
             );
         }
     }
-    // The ✕, two strokes.
-    let close = close_rect();
-    if spot == Spot::Close {
-        f.fill(
-            &Path::circle(close.center(), CLOSE / 2.0),
-            CLOSE_HOVER.get(),
-        );
-    }
-    let c = close.center();
-    let arm = 3.75;
-    let cross = Path::new(|p| {
-        p.move_to(Point::new(c.x - arm, c.y - arm));
-        p.line_to(Point::new(c.x + arm, c.y + arm));
-        p.move_to(Point::new(c.x + arm, c.y - arm));
-        p.line_to(Point::new(c.x - arm, c.y + arm));
-    });
-    f.stroke(
-        &cross,
-        Stroke {
-            style: canvas::Style::Solid(if spot == Spot::Close {
-                TEXT.get()
-            } else {
-                FAINT.get()
-            }),
-            width: 1.4,
-            line_cap: canvas::LineCap::Round,
-            ..Stroke::default()
-        },
-    );
-    // The actions.
-    for (i, (_, label, rect)) in laid.actions.iter().enumerate() {
-        let lit = spot == Spot::Action(i);
-        f.fill(
-            &kit::rounded(*rect, ACTION_RADIUS),
-            if lit { ACTION_FILL_HOVER } else { ACTION_FILL },
-        );
-        f.stroke(
-            &Path::rounded_rectangle(
-                Point::new(rect.x + 0.5, rect.y + 0.5),
-                Size::new(rect.width - 1.0, rect.height - 1.0),
-                (ACTION_RADIUS - 0.5).into(),
-            ),
-            Stroke {
-                style: canvas::Style::Solid(ACTION_RIM.get()),
-                width: 1.0,
-                ..Stroke::default()
-            },
-        );
-        f.fill_text(kit::text_in(
-            MANROPE_SEMIBOLD,
-            kit::text(
-                label.clone(),
-                rect.center(),
-                ACTION_TEXT,
-                TEXT.get(),
-                Alignment::Center,
-            ),
-        ));
-    }
     // The countdown.
     if let Some(left) = shown.countdown.left(now) {
         let full = WIDTH - 2.0 * (BORDER + COUNTDOWN_IN);
@@ -758,6 +636,61 @@ fn draw_card(f: &mut Frame, shown: &Shown, spot: Spot, glass: bool, now: Instant
             );
         }
     }
+}
+
+/// The ✕ in its 24 px, lit under the pointer: two strokes.
+pub fn draw_close(f: &mut Frame, lit: bool) {
+    let c = Point::new(CLOSE / 2.0, CLOSE / 2.0);
+    if lit {
+        f.fill(&Path::circle(c, CLOSE / 2.0), CLOSE_HOVER.get());
+    }
+    let arm = 3.75;
+    let cross = Path::new(|p| {
+        p.move_to(Point::new(c.x - arm, c.y - arm));
+        p.line_to(Point::new(c.x + arm, c.y + arm));
+        p.move_to(Point::new(c.x + arm, c.y - arm));
+        p.line_to(Point::new(c.x - arm, c.y + arm));
+    });
+    f.stroke(
+        &cross,
+        Stroke {
+            style: canvas::Style::Solid(if lit { TEXT.get() } else { FAINT.get() }),
+            width: 1.4,
+            line_cap: canvas::LineCap::Round,
+            ..Stroke::default()
+        },
+    );
+}
+
+/// An action's button, `size` large, lit under the pointer.
+pub fn draw_action(f: &mut Frame, size: Size, label: &str, lit: bool) {
+    let rect = Rectangle::new(Point::ORIGIN, size);
+    f.fill(
+        &kit::rounded(rect, ACTION_RADIUS),
+        if lit { ACTION_FILL_HOVER } else { ACTION_FILL },
+    );
+    f.stroke(
+        &Path::rounded_rectangle(
+            Point::new(rect.x + 0.5, rect.y + 0.5),
+            Size::new(rect.width - 1.0, rect.height - 1.0),
+            (ACTION_RADIUS - 0.5).into(),
+        ),
+        Stroke {
+            style: canvas::Style::Solid(ACTION_RIM.get()),
+            width: 1.0,
+            ..Stroke::default()
+        },
+    );
+    f.fill_text(kit::text_in(
+        MANROPE_SEMIBOLD,
+        kit::text(
+            label.to_owned(),
+            rect.center(),
+            ACTION_TEXT,
+            TEXT.get(),
+            Alignment::Center,
+        ),
+    ));
 }
 
 /// The card's shadow on a surface of `size`, the card at `card`, and a

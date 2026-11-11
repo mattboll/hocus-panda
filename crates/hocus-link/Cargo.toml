@@ -11,9 +11,16 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# The desktop's languages.
+hocus-words.workspace = true
 # The clipboard's clips on a line (5.6), text and images alike (MIT or
 # Apache-2.0).
 base64.workspace = true
+# The messages, one JSON object per line (both MIT or Apache-2.0).
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# A picture's errors, by what went wrong (MIT or Apache-2.0).
+thiserror.workspace = true
 # The wallpapers' pictures (6.3), decoded off the loop by the compositor,
 # the shell and the Settings alike: JPEG, PNG and WebP (MIT or Apache-2.0).
 image = { workspace = true, features = ["jpeg", "png", "webp"] }

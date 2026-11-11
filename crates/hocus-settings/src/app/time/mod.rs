@@ -15,6 +15,7 @@
 
 mod view;
 
+use hocus_words::settings::app_time as words;
 use std::time::Duration;
 
 use iced::{
@@ -26,7 +27,6 @@ use iced::{
 
 use super::{App, Doing, Focus, Message, Page, TOAST, ToastAction, UNDONE};
 use crate::{
-    lang::{Lang, w},
     model::SectionId,
     time::{self as model, Found},
     timedate::{self, Ask, Asks, Heard, TimeDate},
@@ -330,10 +330,7 @@ impl App {
                             Task::none()
                         } else {
                             self.time.draft = None;
-                            let text = match self.lang {
-                                Lang::French => format!("Heure réglée : {said}."),
-                                Lang::English => format!("Time set: {said}."),
-                            };
+                            let text = words::time_set(self.lang, &said);
                             return self.toast(text, ToastAction::None, TOAST);
                         }
                     }
@@ -349,9 +346,7 @@ impl App {
                     }
                 };
                 if refused {
-                    let text = self
-                        .say(w("Le système a refusé.", "The system refused."))
-                        .to_owned();
+                    let text = self.say(words::THE_SYSTEM_REFUSED).to_owned();
                     return self.toast(text, ToastAction::None, TOAST);
                 }
                 task
@@ -364,34 +359,20 @@ impl App {
         let lang = self.lang;
         match doing {
             Doing::New => {
-                let text = match lang {
-                    Lang::French => format!("Fuseau horaire : {}.", choice.after_said),
-                    Lang::English => format!("Time zone: {}.", choice.after_said),
-                };
+                let text = words::time_zone(lang, &choice.after_said);
                 self.undo.push(super::Undo::Time(choice));
                 self.redo.clear();
                 self.toast(text, ToastAction::Undo, TOAST)
             }
             Doing::Undo => {
                 // Back to `after`, which was the choice's `before`.
-                let text = match lang {
-                    Lang::French => format!(
-                        "Annulé : le fuseau horaire revient à {}.",
-                        choice.after_said
-                    ),
-                    Lang::English => {
-                        format!("Undone: the time zone is back to {}.", choice.after_said)
-                    }
-                };
+                let text = words::undone_the_time_zone_is_back(lang, &choice.after_said);
                 self.redo.push(super::Undo::Time(reversed(choice)));
                 self.light = Some((model::ZONE, std::time::Instant::now()));
                 self.toast(text, ToastAction::None, UNDONE)
             }
             Doing::Redo => {
-                let text = match lang {
-                    Lang::French => format!("Rétabli : fuseau horaire : {}.", choice.after_said),
-                    Lang::English => format!("Redone: time zone: {}.", choice.after_said),
-                };
+                let text = words::redone_time_zone(lang, &choice.after_said);
                 self.undo.push(super::Undo::Time(choice));
                 self.light = Some((model::ZONE, std::time::Instant::now()));
                 self.toast(text, ToastAction::None, UNDONE)

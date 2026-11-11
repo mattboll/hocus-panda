@@ -6,7 +6,7 @@
 //! the thumbnail run the real shell (on the CPU).
 //!
 //! The files are decoded with ffmpeg and ffprobe, the encoder's own
-//! programs; without them the tests skip. Pixman draws, the encoder runs
+//! programs; without them the tests fail. Pixman draws, the encoder runs
 //! on the CPU (libx264): nothing here touches a GPU. The videos' folder,
 //! the runtime directory and PipeWire (with Son or Micro) are the test's
 //! own, PipeWire stopped by its own process id.
@@ -44,8 +44,7 @@ fn has(program: &str) -> bool {
 /// Whether ffmpeg, ffprobe and the software encoders are here.
 fn ready() -> bool {
     if !has("ffmpeg") || !has("ffprobe") {
-        eprintln!("ffmpeg or ffprobe missing: skipped");
-        return false;
+        common::missing("ffmpeg and ffprobe");
     }
     true
 }
@@ -615,8 +614,7 @@ fn a_window_is_recorded_alone_at_its_size_its_frame_never_in_it() -> anyhow::Res
 #[test]
 fn with_son_or_micro_the_file_has_a_sound_track() -> anyhow::Result<()> {
     if !ready() || !has("pipewire") {
-        eprintln!("no pipewire: skipped");
-        return Ok(());
+        common::missing("pipewire");
     }
     for (sound, micro) in [(true, false), (false, true), (true, true)] {
         let mut bed = Bed::start_on(&["1280x800"], true)?;
@@ -836,7 +834,7 @@ impl ShellBed {
         let mut config = Config::default();
         config.keyboard.layouts = vec!["us".to_owned()];
         config.plain_background = true;
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         config.videos = Some(dir.join("Vidéos"));
         config.pipewire_remote = Some(dir.join("no-pipewire"));
         config.panel.form = form;

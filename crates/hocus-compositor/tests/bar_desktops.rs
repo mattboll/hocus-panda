@@ -74,8 +74,7 @@ struct Bed {
 fn ready() -> Option<PathBuf> {
     let shell = common::shell_program();
     if !fakes::available() {
-        eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
-        return None;
+        common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
     }
     Some(shell)
 }
@@ -1505,4 +1504,47 @@ fn nothing_draws_at_rest_while_the_list_shows() -> anyhow::Result<()> {
     assert_eq!(bed.at_rest()?, [0; 5], "at rest");
     assert!(!bed.hp.popover_surfaces().is_empty(), "the list closed");
     Ok(())
+}
+
+/// A desktop's list in its main state, shot under `HOCUS_KIT_SHOTS`
+/// (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    let _beta = bed.open_titled("test.small", "Beta", (600, 400))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let mark = bed.mark();
+    bed.rest_on(0);
+    bed.list()?;
+    bed.logged_after(mark, "rows=[\"Beta\", \"Alpha\"]")?;
+    common::popover_shot(&mut bed.hp, "desktop")
+}
+
+/// The desktops' tiles at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let at = bed.middle(1);
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::DESKTOPS_NAMESPACE, "desktops"),
+        at,
+        "Desktop { row: 0, index: 2 }",
+    )
 }

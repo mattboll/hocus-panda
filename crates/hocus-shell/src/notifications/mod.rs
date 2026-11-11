@@ -23,6 +23,7 @@
 //! draw every surface again.
 
 pub mod bell;
+pub mod bubble;
 pub mod dnd;
 pub mod draw;
 pub mod history;
@@ -32,7 +33,7 @@ pub mod stack;
 
 use std::{
     path::PathBuf,
-    sync::{Mutex, PoisonError, mpsc},
+    sync::{Condvar, Mutex, PoisonError, mpsc},
     time::{Duration, Instant},
 };
 
@@ -276,6 +277,19 @@ fn keep() {
     }
 }
 
+/// How many times something the restored history's icons wait for came
+/// ([`came`]), and what wakes the thread that waits for it.
+static CAME: (Mutex<u64>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// The launcher's applications were read, or a bar's form is known: the
+/// history being restored looks again whether it has both. Called with
+/// the caller's own locks held: it takes none of theirs.
+pub fn came() {
+    let (count, woken) = &CAME;
+    *count.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+    woken.notify_all();
+}
+
 /// The history in `file`, younger than 7 days, its icons found again (once
 /// the launcher's applications and the bars' scales are known, a few
 /// seconds at most).
@@ -300,9 +314,22 @@ fn read_history(file: Option<&std::path::Path>) -> Vec<(note::Note, history::Sig
         !crate::launcher::apps::catalog().apps.is_empty()
             && !crate::popover::with(|c| c.bar_forms()).is_empty()
     };
-    let start = Instant::now();
-    while !ready() && start.elapsed() < Duration::from_secs(3) {
-        std::thread::sleep(Duration::from_millis(50));
+    // Woken when one of the two comes ([`came`]), not on a timer.
+    let (count, woken) = &CAME;
+    let until = Instant::now() + Duration::from_secs(3);
+    loop {
+        // Read before looking: what comes after the look changes it.
+        let seen = *count.lock().unwrap_or_else(PoisonError::into_inner);
+        let left = until.saturating_duration_since(Instant::now());
+        if ready() || left.is_zero() {
+            break;
+        }
+        let waiting = count.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(
+            woken
+                .wait_timeout_while(waiting, left, |now| *now == seen)
+                .unwrap_or_else(PoisonError::into_inner),
+        );
     }
     let scale = server::screens_scale();
     records
@@ -835,18 +862,12 @@ pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
     use crate::clock::time::Lang;
     use hocus_link::Supervised;
     let program = program.display();
-    let (number, summary, body) = match (which, Lang::of_messages()) {
-        (Supervised::Shell, Lang::French) => (
+    let lang = Lang::of_messages();
+    let (number, summary, body) = match which {
+        Supervised::Shell => (
             0,
-            "Le shell de développement s’est arrêté",
-            format!(
-                "{program} n’a pas démarré ou s’arrêtait sans cesse. Le shell installé a repris."
-            ),
-        ),
-        (Supervised::Shell, Lang::English) => (
-            0,
-            "The development shell stopped",
-            format!("{program} did not start or kept ending. The installed shell runs again."),
+            hocus_words::shell::notifications::DEV_SHELL_STOPPED.get(lang),
+            hocus_words::shell::notifications::dev_shell_stopped_body(lang, &program),
         ),
     };
     tracing::info!(which = which.word(), %program, "a given program was let go of: said");
@@ -888,10 +909,7 @@ pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
         (is, c.card)
     });
     let element: Element<'a, Message> = match is? {
-        Is::Bubble => canvas(draw::Bubble { id, glass, card })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+        Is::Bubble => bubble::view(id, glass, card),
         Is::Chip => canvas(draw::Chip { id, card })
             .width(Length::Fill)
             .height(Length::Fill)

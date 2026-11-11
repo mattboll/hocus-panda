@@ -3,6 +3,7 @@
 
 use hocus_bluetooth::model::Row as BluetoothRow;
 use hocus_network::model::Link;
+use hocus_words::shell::a11y_words as txt;
 
 use crate::{
     clock::time::{Lang, Shown},
@@ -22,18 +23,16 @@ pub fn plain(name: &str) -> String {
 /// The words, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    pub fr: bool,
+    pub lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     /// `a`, `a et b`, `a, b et c`.
@@ -41,19 +40,19 @@ impl Words {
         match names {
             [] => String::new(),
             [one] => (*one).to_owned(),
-            [rest @ .., last] => format!("{} {} {last}", rest.join(", "), self.pick("et", "and")),
+            [rest @ .., last] => format!("{} {} {last}", rest.join(", "), self.pick(txt::AND)),
         }
     }
 
     /// A bar's window: "Barre — Écran du portable".
     pub fn bar(self, screen: &str) -> String {
-        format!("{} — {screen}", self.pick("Barre", "Bar"))
+        format!("{} — {screen}", self.pick(txt::BAR))
     }
 
     /// The time as said: "14 h 32" in French, "2:32 PM" or "14:32" else.
     pub fn time(self, shown: &Shown) -> String {
         let written = shown.time();
-        if !self.fr || shown.half.is_some() {
+        if !(self.lang == Lang::French) || shown.half.is_some() {
             return written;
         }
         match written.split_once(':') {
@@ -78,23 +77,23 @@ impl Words {
     /// The agents' header: "Agents : 3 t'attendent, 10 au travail".
     pub fn agents(self, waiting: usize, stuck: usize, working: usize, to_see: usize) -> String {
         let mut parts = Vec::new();
-        match (waiting, self.fr) {
+        match (waiting, (self.lang == Lang::French)) {
             (0, _) => {}
             (1, true) => parts.push("1 t'attend".to_owned()),
             (n, true) => parts.push(format!("{n} t'attendent")),
             (n, false) => parts.push(format!("{n} waiting")),
         }
-        match (stuck, self.fr) {
+        match (stuck, (self.lang == Lang::French)) {
             (0, _) => {}
             (1, true) => parts.push("1 bloqué".to_owned()),
             (n, true) => parts.push(format!("{n} bloqués")),
             (n, false) => parts.push(format!("{n} stuck")),
         }
         if to_see > 0 {
-            parts.push(format!("{to_see} {}", self.pick("à voir", "to see")));
+            parts.push(format!("{to_see} {}", self.pick(txt::TO_SEE)));
         }
-        parts.push(format!("{working} {}", self.pick("au travail", "working")));
-        let colon = self.pick(" :", ":");
+        parts.push(format!("{working} {}", self.pick(txt::WORKING)));
+        let colon = self.pick(txt::TEXT);
         format!("Agents{colon} {}", parts.join(", "))
     }
 
@@ -102,39 +101,30 @@ impl Words {
     pub fn agent(self, name: &str, look: crate::agents::Look, minutes: u64) -> String {
         use crate::agents::Look;
         let since = self.minutes(minutes);
-        let state = match (look, self.fr) {
-            (Look::Waiting, true) => format!("t'attend depuis {since}"),
-            (Look::Waiting, false) => format!("waiting for {since}"),
-            (Look::Stuck, true) => format!("bloqué depuis {since}"),
-            (Look::Stuck, false) => format!("stuck for {since}"),
-            (Look::ToSee, true) => "a fini, à voir".to_owned(),
-            (Look::ToSee, false) => "done, to see".to_owned(),
-            (Look::Working, true) => format!("au travail depuis {since}"),
-            (Look::Working, false) => format!("working for {since}"),
-            (Look::Resting, true) => "au repos".to_owned(),
-            (Look::Resting, false) => "resting".to_owned(),
+        let state = match look {
+            Look::Waiting => txt::waiting_for(self.lang, &since),
+            Look::Stuck => txt::stuck_for(self.lang, &since),
+            Look::ToSee => txt::DONE_TO_SEE.get(self.lang).to_owned(),
+            Look::Working => txt::working_for(self.lang, &since),
+            Look::Resting => txt::RESTING.get(self.lang).to_owned(),
         };
         format!("{name}, {state}")
     }
 
     /// "+ N autres": "5 autres agents au repos", "5 autres agents".
     pub fn other_agents(self, n: usize, resting: bool) -> String {
-        match (self.fr, n, resting) {
-            (true, 1, true) => "1 autre agent au repos".to_owned(),
-            (true, 1, false) => "1 autre agent".to_owned(),
-            (true, n, true) => format!("{n} autres agents au repos"),
-            (true, n, false) => format!("{n} autres agents"),
-            (false, 1, true) => "1 more agent resting".to_owned(),
-            (false, 1, false) => "1 more agent".to_owned(),
-            (false, n, true) => format!("{n} more agents resting"),
-            (false, n, false) => format!("{n} more agents"),
+        match (n, resting) {
+            (1, true) => txt::N_1_MORE_AGENT_RESTING.get(self.lang).to_owned(),
+            (1, false) => txt::N_1_MORE_AGENT.get(self.lang).to_owned(),
+            (n, true) => txt::more_agents_resting(self.lang, n),
+            (n, false) => txt::more_agents(self.lang, n),
         }
     }
 
     /// "à l'instant", "1 minute", "12 minutes", "1 h 05".
     pub fn minutes(self, minutes: u64) -> String {
         match minutes {
-            0 => self.pick("à l'instant", "a moment").to_owned(),
+            0 => self.pick(txt::A_MOMENT).to_owned(),
             1 => "1 minute".to_owned(),
             m if m < 60 => format!("{m} minutes"),
             m if m % 60 == 0 => format!("{} h", m / 60),
@@ -147,54 +137,44 @@ impl Words {
     /// bloqué.".
     pub fn announce(self, waiting: &[&str], stuck: &[&str]) -> String {
         let mut said = Vec::new();
-        match (waiting.len(), self.fr) {
-            (0, _) => {}
-            (1, true) => said.push(format!("{} t'attend.", waiting[0])),
-            (_, true) => said.push(format!("{} t'attendent.", self.and(waiting))),
-            (1, false) => said.push(format!("{} is waiting.", waiting[0])),
-            (_, false) => said.push(format!("{} are waiting.", self.and(waiting))),
+        match waiting.len() {
+            0 => {}
+            1 => said.push(txt::is_waiting(self.lang, waiting[0])),
+            _ => said.push(txt::are_waiting(self.lang, self.and(waiting))),
         }
-        match (stuck.len(), self.fr) {
-            (0, _) => {}
-            (1, true) => said.push(format!("{} est bloqué.", stuck[0])),
-            (_, true) => said.push(format!("{} sont bloqués.", self.and(stuck))),
-            (1, false) => said.push(format!("{} is stuck.", stuck[0])),
-            (_, false) => said.push(format!("{} are stuck.", self.and(stuck))),
+        match stuck.len() {
+            0 => {}
+            1 => said.push(txt::is_stuck(self.lang, stuck[0])),
+            _ => said.push(txt::are_stuck(self.lang, self.and(stuck))),
         }
         said.join(" ")
     }
 
     /// Today's list: "Aujourd'hui, 3 évènements".
     pub fn today(self, events: usize) -> String {
-        match (self.fr, events) {
-            (true, 0) => "Aujourd'hui, aucun évènement".to_owned(),
-            (true, 1) => "Aujourd'hui, 1 évènement".to_owned(),
-            (true, n) => format!("Aujourd'hui, {n} évènements"),
-            (false, 0) => "Today, no events".to_owned(),
-            (false, 1) => "Today, 1 event".to_owned(),
-            (false, n) => format!("Today, {n} events"),
+        match events {
+            0 => txt::TODAY_NO_EVENTS.get(self.lang).to_owned(),
+            1 => txt::TODAY_1_EVENT.get(self.lang).to_owned(),
+            n => txt::today_events(self.lang, n),
         }
     }
 
     /// The to-do list: "À faire, 5 tâches".
     pub fn tasks(self, open: usize) -> String {
-        match (self.fr, open) {
-            (true, 0) => "À faire, aucune tâche".to_owned(),
-            (true, 1) => "À faire, 1 tâche".to_owned(),
-            (true, n) => format!("À faire, {n} tâches"),
-            (false, 0) => "To do, no tasks".to_owned(),
-            (false, 1) => "To do, 1 task".to_owned(),
-            (false, n) => format!("To do, {n} tasks"),
+        match open {
+            0 => txt::TO_DO_NO_TASKS.get(self.lang).to_owned(),
+            1 => txt::TO_DO_1_TASK.get(self.lang).to_owned(),
+            n => txt::to_do_tasks(self.lang, n),
         }
     }
 
     /// The windows' list: "Fenêtres, 3".
     pub fn windows(self, n: usize) -> String {
-        format!("{}, {n}", self.pick("Fenêtres", "Windows"))
+        format!("{}, {n}", self.pick(txt::WINDOWS))
     }
 
     pub fn desktops(self) -> &'static str {
-        self.pick("Bureaux", "Desktops")
+        self.pick(txt::DESKTOPS)
     }
 
     /// A desktop: "Bureau 2, 1 fenêtre : Firefox", the current one "Bureau
@@ -202,20 +182,17 @@ impl Words {
     pub fn desktop(self, title: &str, current: bool, windows: &[String]) -> String {
         let mut name = title.to_owned();
         if current {
-            name.push_str(self.pick(", actuel", ", current"));
+            name.push_str(self.pick(txt::CURRENT));
         }
-        let count = match (self.fr, windows.len()) {
-            (true, 0) => "aucune fenêtre".to_owned(),
-            (true, 1) => "1 fenêtre".to_owned(),
-            (true, n) => format!("{n} fenêtres"),
-            (false, 0) => "no windows".to_owned(),
-            (false, 1) => "1 window".to_owned(),
-            (false, n) => format!("{n} windows"),
+        let count = match windows.len() {
+            0 => txt::NO_WINDOWS.get(self.lang).to_owned(),
+            1 => txt::N_1_WINDOW.get(self.lang).to_owned(),
+            n => txt::windows_2(self.lang, n),
         };
         name.push_str(", ");
         name.push_str(&count);
         if !windows.is_empty() {
-            name.push_str(self.pick(" : ", ": "));
+            name.push_str(self.pick(txt::TEXT_2));
             name.push_str(&windows.join(", "));
         }
         name
@@ -223,7 +200,7 @@ impl Words {
 
     /// The Wi-Fi's row: "Wi-Fi, connecté à Livebox-A3F2, signal fort".
     pub fn wifi(self, link: &Link) -> String {
-        let state = match (link, self.fr) {
+        let state = match (link, (self.lang == Lang::French)) {
             (Link::Hidden, _) => return String::new(),
             (Link::Wired, true) => return "Réseau, filaire".to_owned(),
             (Link::Wired, false) => return "Network, wired".to_owned(),
@@ -236,21 +213,13 @@ impl Words {
             (Link::Connecting, true) => "connexion…".to_owned(),
             (Link::Connecting, false) => "connecting…".to_owned(),
             (Link::Connected { name, bars }, _) => {
-                let signal = match (bars, self.fr) {
-                    (0 | 1, true) => "signal faible",
-                    (2, true) => "signal moyen",
-                    (3, true) => "bon signal",
-                    (_, true) => "signal fort",
-                    (0 | 1, false) => "weak signal",
-                    (2, false) => "fair signal",
-                    (3, false) => "good signal",
-                    (_, false) => "strong signal",
+                let signal = match bars {
+                    0 | 1 => txt::WEAK_SIGNAL.get(self.lang),
+                    2 => txt::FAIR_SIGNAL.get(self.lang),
+                    3 => txt::GOOD_SIGNAL.get(self.lang),
+                    _ => txt::STRONG_SIGNAL.get(self.lang),
                 };
-                if self.fr {
-                    format!("connecté à {name}, {signal}")
-                } else {
-                    format!("connected to {name}, {signal}")
-                }
+                txt::connected_to(self.lang, txt::ConnectedTo { name, signal })
             }
         };
         format!("Wi-Fi, {state}")
@@ -258,31 +227,22 @@ impl Words {
 
     /// Bluetooth's row: "Bluetooth, Casque, batterie 80 %".
     pub fn bluetooth(self, row: &BluetoothRow) -> String {
-        let state = match (row, self.fr) {
-            (BluetoothRow::Hidden, _) => return String::new(),
-            (BluetoothRow::Off, true) => "désactivé".to_owned(),
-            (BluetoothRow::Off, false) => "off".to_owned(),
-            (BluetoothRow::Nothing, true) => "aucun appareil connecté".to_owned(),
-            (BluetoothRow::Nothing, false) => "no device connected".to_owned(),
-            (BluetoothRow::Connecting, true) => "connexion…".to_owned(),
-            (BluetoothRow::Connecting, false) => "connecting…".to_owned(),
-            (
-                BluetoothRow::Connected {
-                    name,
-                    battery,
-                    more,
-                    ..
-                },
-                _,
-            ) => {
+        let state = match row {
+            BluetoothRow::Hidden => return String::new(),
+            BluetoothRow::Off => txt::OFF.get(self.lang).to_owned(),
+            BluetoothRow::Nothing => txt::NO_DEVICE_CONNECTED.get(self.lang).to_owned(),
+            BluetoothRow::Connecting => txt::CONNECTING.get(self.lang).to_owned(),
+            BluetoothRow::Connected {
+                name,
+                battery,
+                more,
+                ..
+            } => {
                 let mut said = name.clone();
                 if let Some(battery) = battery {
-                    said.push_str(&format!(
-                        ", {} {battery}\u{a0}%",
-                        self.pick("batterie", "battery")
-                    ));
+                    said.push_str(&format!(", {} {battery}\u{a0}%", self.pick(txt::BATTERY)));
                 }
-                match (more, self.fr) {
+                match (more, (self.lang == Lang::French)) {
                     (0, _) => {}
                     (n, true) => said.push_str(&format!(", et {n} autres")),
                     (n, false) => said.push_str(&format!(", and {n} more")),
@@ -295,10 +255,7 @@ impl Words {
 
     /// The keyboard layout's button: "Disposition du clavier, Français".
     pub fn layout(self, name: &str) -> String {
-        format!(
-            "{}, {name}",
-            self.pick("Disposition du clavier", "Keyboard layout")
-        )
+        format!("{}, {name}", self.pick(txt::KEYBOARD_LAYOUT))
     }
 
     pub fn volume(self) -> &'static str {
@@ -311,11 +268,11 @@ impl Words {
     }
 
     pub fn muted(self) -> &'static str {
-        self.pick("muet", "muted")
+        self.pick(txt::MUTED)
     }
 
     pub fn battery(self) -> &'static str {
-        self.pick("Batterie", "Battery")
+        self.pick(txt::BATTERY_2)
     }
 
     /// The battery's value: "82 %, 3 h 10 restantes, équilibré".
@@ -333,7 +290,7 @@ impl Words {
     /// équilibré".
     pub fn power(self, levels: &Snapshot) -> String {
         let words = crate::levels::model::Words::new(self.lang());
-        let mode = self.pick("Mode d'énergie", "Power mode");
+        let mode = self.pick(txt::POWER_MODE);
         match levels.profile {
             Some(profile) => format!("{mode}, {}", words.profile(profile)),
             None => mode.to_owned(),
@@ -341,7 +298,11 @@ impl Words {
     }
 
     pub fn lang(self) -> Lang {
-        if self.fr { Lang::French } else { Lang::English }
+        if self.lang == Lang::French {
+            Lang::French
+        } else {
+            Lang::English
+        }
     }
 
     /// The in-use sign: "Micro utilisé par Firefox, caméra utilisée par
@@ -352,19 +313,12 @@ impl Words {
             .iter()
             .map(|(kind, apps)| {
                 let apps = self.and(&apps.iter().map(String::as_str).collect::<Vec<_>>());
-                match (kind, self.fr) {
-                    (Kind::Microphone, true) if muted => format!("Micro coupé, utilisé par {apps}"),
-                    (Kind::Microphone, true) => format!("Micro utilisé par {apps}"),
-                    (Kind::Microphone, false) if muted => {
-                        format!("Microphone muted, used by {apps}")
-                    }
-                    (Kind::Microphone, false) => format!("Microphone used by {apps}"),
-                    (Kind::Camera, true) => format!("Caméra utilisée par {apps}"),
-                    (Kind::Camera, false) => format!("Camera used by {apps}"),
-                    (Kind::Screen, true) => format!("Écran partagé avec {apps}"),
-                    (Kind::Screen, false) => format!("Screen shared with {apps}"),
-                    (Kind::Recording, true) => "Enregistrement de l'écran".to_owned(),
-                    (Kind::Recording, false) => "Recording the screen".to_owned(),
+                match kind {
+                    Kind::Microphone if muted => txt::microphone_muted_used_by(self.lang, &apps),
+                    Kind::Microphone => txt::microphone_used_by(self.lang, &apps),
+                    Kind::Camera => txt::camera_used_by(self.lang, &apps),
+                    Kind::Screen => txt::screen_shared_with(self.lang, &apps),
+                    Kind::Recording => txt::RECORDING_THE_SCREEN.get(self.lang).to_owned(),
                 }
             })
             .collect();
@@ -372,55 +326,49 @@ impl Words {
     }
 
     pub fn add_task(self) -> &'static str {
-        self.pick("Ajouter une tâche", "Add a task")
+        self.pick(txt::ADD_A_TASK)
     }
 
     /// "+ 4 autres": "4 autres tâches".
     pub fn more_tasks(self, n: usize) -> String {
-        match (self.fr, n) {
-            (true, 1) => "1 autre tâche".to_owned(),
-            (true, n) => format!("{n} autres tâches"),
-            (false, 1) => "1 more task".to_owned(),
-            (false, n) => format!("{n} more tasks"),
+        match n {
+            1 => txt::N_1_MORE_TASK.get(self.lang).to_owned(),
+            n => txt::more_tasks(self.lang, n),
         }
     }
 
     pub fn more_today(self, n: usize) -> String {
-        match (self.fr, n) {
-            (true, 1) => "1 autre évènement aujourd'hui".to_owned(),
-            (true, n) => format!("{n} autres évènements aujourd'hui"),
-            (false, 1) => "1 more event today".to_owned(),
-            (false, n) => format!("{n} more events today"),
+        match n {
+            1 => txt::N_1_MORE_EVENT_TODAY.get(self.lang).to_owned(),
+            n => txt::more_events_today(self.lang, n),
         }
     }
 
     pub fn more_windows(self, n: usize) -> String {
-        match (self.fr, n) {
-            (true, 1) => "1 autre fenêtre".to_owned(),
-            (true, n) => format!("{n} autres fenêtres"),
-            (false, 1) => "1 more window".to_owned(),
-            (false, n) => format!("{n} more windows"),
+        match n {
+            1 => txt::N_1_MORE_WINDOW.get(self.lang).to_owned(),
+            n => txt::more_windows(self.lang, n),
         }
     }
 
     pub fn footer(self) -> &'static str {
-        self.pick("Pied de la barre", "Bar's footer")
+        self.pick(txt::BAR_S_FOOTER)
     }
 
     pub fn tray(self) -> &'static str {
-        self.pick("Icônes des applications", "Applications' icons")
+        self.pick(txt::APPLICATIONS_ICONS)
     }
 
     pub fn calendar(self) -> &'static str {
-        self.pick("Calendrier", "Calendar")
+        self.pick(txt::CALENDAR)
     }
 
     pub fn choose_sources(self) -> &'static str {
-        self.pick("Choisir…", "Choose…")
+        self.pick(txt::CHOOSE)
     }
 
     pub fn later(self) -> &'static str {
-        self.pick("Plus tard", "Later")
+        self.pick(txt::LATER)
     }
 
     /// A notification: "Slack : Léa Martin", ", urgent" when critical.
@@ -428,7 +376,7 @@ impl Words {
         let mut name = match (app.is_empty(), summary.is_empty()) {
             (true, _) => summary.to_owned(),
             (false, true) => app.to_owned(),
-            (false, false) => format!("{app}{} {summary}", self.pick(" :", ":")),
+            (false, false) => format!("{app}{} {summary}", self.pick(txt::TEXT)),
         };
         if urgent {
             name.push_str(", urgent");
@@ -437,36 +385,24 @@ impl Words {
     }
 
     pub fn lock(self) -> &'static str {
-        self.pick("Session verrouillée", "Session locked")
-    }
-
-    pub fn details(self) -> &'static str {
-        self.pick("Détails", "Details")
+        self.pick(txt::SESSION_LOCKED)
     }
 
     pub fn mute(self) -> &'static str {
-        self.pick("Couper le son", "Mute")
+        self.pick(txt::MUTE)
     }
 
     /// An application's tile: "Couper le son de Firefox".
     pub fn mute_app(self, app: &str) -> String {
-        if self.fr {
-            format!("Couper le son de {app}")
-        } else {
-            format!("Mute {app}")
-        }
+        txt::mute_2(self.lang, app)
     }
 
     pub fn mute_microphone(self) -> &'static str {
-        self.pick("Couper le micro", "Mute the microphone")
+        self.pick(txt::MUTE_THE_MICROPHONE)
     }
 
     pub fn microphone(self) -> &'static str {
-        self.pick("Micro", "Microphone")
-    }
-
-    pub fn sound_settings(self) -> &'static str {
-        self.pick("Réglages du son…", "Sound settings…")
+        self.pick(txt::MICROPHONE)
     }
 }
 
@@ -486,14 +422,18 @@ mod tests {
 
     #[test]
     fn the_clock_says_a_sentence() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             fr.clock(&shown("14:32", "jeudi 6 novembre")),
             "14 h 32, jeudi 6 novembre"
         );
         assert_eq!(fr.time(&shown("09:05", "")), "9 h 05");
         assert_eq!(fr.time(&shown("00:00", "")), "0 h");
-        let en = Words { fr: false };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(
             en.clock(&shown("14:32", "Thursday 6 November")),
             "14:32, Thursday 6 November"
@@ -502,7 +442,9 @@ mod tests {
 
     #[test]
     fn announcements_group_names() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(fr.announce(&["site-web"], &[]), "site-web t'attend.");
         assert_eq!(
             fr.announce(&["site-web", "docs"], &[]),
@@ -513,7 +455,9 @@ mod tests {
             fr.announce(&["a"], &["b", "c", "d"]),
             "a t'attend. b, c et d sont bloqués."
         );
-        let en = Words { fr: false };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(
             en.announce(&["site-web", "docs"], &["infra"]),
             "site-web and docs are waiting. infra is stuck."
@@ -522,7 +466,9 @@ mod tests {
 
     #[test]
     fn the_agents_header_counts_who_waits_and_who_works() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             fr.agents(3, 0, 10, 0),
             "Agents : 3 t'attendent, 10 au travail"
@@ -531,13 +477,17 @@ mod tests {
             fr.agents(1, 1, 0, 2),
             "Agents : 1 t'attend, 1 bloqué, 2 à voir, 0 au travail"
         );
-        let en = Words { fr: false };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(en.agents(3, 0, 10, 0), "Agents: 3 waiting, 10 working");
     }
 
     #[test]
     fn rows_say_their_state_in_words() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             fr.wifi(&Link::Connected {
                 name: "Livebox-A3F2".into(),
@@ -566,7 +516,10 @@ mod tests {
             "Slack : Léa Martin"
         );
         assert_eq!(
-            Words { fr: false }.notification("Slack", "Léa Martin", true),
+            Words {
+                lang: hocus_words::Lang::English
+            }
+            .notification("Slack", "Léa Martin", true),
             "Slack: Léa Martin, urgent"
         );
     }

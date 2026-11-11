@@ -12,6 +12,9 @@
 //! screen's pixels (the gradients are smooth: drawn larger, they stay so),
 //! and drawn stretched.
 
+use hocus_words::link::backdrop as txt;
+use serde::{Deserialize, Serialize};
+
 /// The picture is this many times smaller than the screen's pixels.
 pub const SHRINK: i32 = 4;
 
@@ -58,7 +61,8 @@ const GLOWS: [((f64, f64), (f64, f64)); 5] = [
 
 /// A built-in background: `linear-gradient(160deg, …)` at 0 %, 55 % and
 /// 100 %, under the five glows in their colours.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Backdrop {
     /// `#10172a 0%, #0b1020 55%, #090c16 100%`, blue, green and the bar's
     /// amber and green lights: the desktop's background since the bar.
@@ -139,13 +143,14 @@ impl Backdrop {
     }
 
     /// Its name, in French then English.
-    pub const fn names(self) -> (&'static str, &'static str) {
+    pub fn name(self, lang: hocus_words::Lang) -> &'static str {
         match self {
-            Self::Night => ("Nuit", "Night"),
-            Self::Mist => ("Brume", "Mist"),
-            Self::Dawn => ("Aube", "Dawn"),
-            Self::Forest => ("Forêt", "Forest"),
+            Self::Night => txt::NIGHT,
+            Self::Mist => txt::MIST,
+            Self::Dawn => txt::DAWN,
+            Self::Forest => txt::FOREST,
         }
+        .get(lang)
     }
 
     const fn palette(self) -> &'static Palette {
@@ -173,7 +178,11 @@ impl Backdrop {
 const STOPS: [f64; 3] = [0.0, 0.55, 1.0];
 
 fn mix(a: Rgba, b: Rgba, t: f64) -> Rgba {
-    std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
+    let mut out = a;
+    for (out, b) in out.iter_mut().zip(b) {
+        *out += (b - *out) * t;
+    }
+    out
 }
 
 /// `top` painted over `under` (straight alpha, `under` opaque).
@@ -195,15 +204,15 @@ fn colour_at(palette: &Palette, x: f64, y: f64) -> Rgba {
     let (dx, dy) = (angle.sin(), -angle.cos());
     let length = (BOARD.0 * dx).abs() + (BOARD.1 * dy).abs();
     let t = (((x - BOARD.0 / 2.0) * dx + (y - BOARD.1 / 2.0) * dy) / length + 0.5).clamp(0.0, 1.0);
-    let mut colour = palette.stops[0];
-    for i in 0..2 {
-        let (a, b) = (STOPS[i], STOPS[i + 1]);
+    let [top, middle, bottom] = palette.stops;
+    let [at_top, at_middle, at_bottom] = STOPS;
+    let mut colour = top;
+    for ((from, to), (a, b)) in [
+        ((top, middle), (at_top, at_middle)),
+        ((middle, bottom), (at_middle, at_bottom)),
+    ] {
         if t >= a {
-            colour = mix(
-                palette.stops[i],
-                palette.stops[i + 1],
-                ((t - a) / (b - a)).clamp(0.0, 1.0),
-            );
+            colour = mix(from, to, ((t - a) / (b - a)).clamp(0.0, 1.0));
         }
     }
     for (&(at, (rx, ry)), &glow) in GLOWS.iter().zip(&palette.glows) {

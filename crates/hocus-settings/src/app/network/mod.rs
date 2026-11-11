@@ -15,6 +15,7 @@ mod sheet;
 mod view;
 mod vpn;
 
+use hocus_words::settings::app_network as words;
 use std::{
     sync::{Arc, Mutex, PoisonError, mpsc},
     time::{Instant, SystemTime},
@@ -31,11 +32,7 @@ use iced::{
 };
 
 use super::{App, Doing, Focus, Message, Page, TOAST, ToastAction, UNDONE, Undo};
-use crate::{
-    lang::{Lang, w},
-    model::SectionId,
-    network as model,
-};
+use crate::{lang::Lang, model::SectionId, network as model};
 
 /// A saved network's password field's id.
 pub(super) const PASSWORD_FIELD: &str = "network-password";
@@ -562,24 +559,16 @@ impl App {
                 let vpn = kept.vpn;
                 // An import taken back: said, and nothing to redo.
                 if doing == Doing::Undo {
-                    let text = match lang {
-                        Lang::French => format!("Annulé : VPN « {name} » retiré."),
-                        Lang::English => format!("Undone: VPN \u{201c}{name}\u{201d} removed."),
-                    };
+                    let text = words::undone_vpn_removed(lang, &name);
                     return self.toast(text, ToastAction::None, UNDONE);
                 }
                 self.undo.push(Undo::Network(Choice::Forget(Forgot(kept))));
-                let gone = match (lang, vpn) {
-                    (Lang::French, true) => format!("VPN « {name} » supprimé"),
-                    (Lang::English, true) => format!("VPN \u{201c}{name}\u{201d} deleted"),
-                    (Lang::French, false) => format!("« {name} » oublié"),
-                    (Lang::English, false) => format!("\u{201c}{name}\u{201d} forgotten"),
+                let gone = match vpn {
+                    true => words::vpn_deleted(lang, &name),
+                    false => words::forgotten(lang, &name),
                 };
                 if doing == Doing::Redo {
-                    let text = match lang {
-                        Lang::French => format!("Rétabli : {gone}."),
-                        Lang::English => format!("Redone: {gone}."),
-                    };
+                    let text = words::redone(lang, &gone);
                     return self.toast(text, ToastAction::None, UNDONE);
                 }
                 self.redo.clear();
@@ -588,23 +577,20 @@ impl App {
             Reply::Restored(kept) => {
                 let doing = take(&mut self.network.restoring, &kept.uuid).unwrap_or(Doing::Undo);
                 let vpn = if kept.vpn { "VPN " } else { "" };
-                let name = match lang {
-                    Lang::French => format!("{vpn}« {} »", kept.name),
-                    Lang::English => format!("{vpn}\u{201c}{}\u{201d}", kept.name),
-                };
+                let name = words::text(
+                    lang,
+                    words::TextArgs {
+                        kept_name: &kept.name,
+                        vpn,
+                    },
+                );
                 let secrets = kept.secrets;
                 if doing == Doing::Undo {
                     self.redo.push(Undo::Network(Choice::Forget(Forgot(kept))));
                 }
-                let text = match (lang, secrets) {
-                    (Lang::French, true) => format!("Annulé : {name} revient."),
-                    (Lang::English, true) => format!("Undone: {name} is back."),
-                    (Lang::French, false) => {
-                        format!("Annulé : {name} revient, sans son mot de passe.")
-                    }
-                    (Lang::English, false) => {
-                        format!("Undone: {name} comes back, without its password.")
-                    }
+                let text = match secrets {
+                    true => words::undone_is_back(lang, &name),
+                    false => words::undone_comes_back_without_its_password(lang, &name),
                 };
                 self.toast(text, ToastAction::None, UNDONE)
             }
@@ -614,29 +600,24 @@ impl App {
                     name: name.clone(),
                 }));
                 self.redo.clear();
-                let text = match lang {
-                    Lang::French => format!("VPN « {name} » ajouté."),
-                    Lang::English => format!("VPN \u{201c}{name}\u{201d} added."),
-                };
+                let text = words::vpn_added_2(lang, &name);
                 self.toast(text, ToastAction::Undo, TOAST)
             }
             Reply::NotImported { plugin, message } => {
-                let text = match (plugin.as_deref(), lang) {
-                    (Some("openvpn"), Lang::French) => "Le module OpenVPN de NetworkManager n’est pas installé (network-manager-openvpn).".to_owned(),
-                    (Some("openvpn"), Lang::English) => "NetworkManager's OpenVPN plugin is not installed (network-manager-openvpn).".to_owned(),
-                    (_, Lang::French) => format!("NetworkManager n’a pas importé le fichier : {message}"),
-                    (_, Lang::English) => format!("NetworkManager did not import the file: {message}"),
+                let text = match plugin.as_deref() {
+                    Some("openvpn") => words::NETWORKMANAGER_S_OPENVPN_PLUGIN_IS_NOT
+                        .get(lang)
+                        .to_owned(),
+                    _ => words::networkmanager_did_not_import_the_file(lang, &message),
                 };
                 self.toast(text, ToastAction::None, TOAST)
             }
             Reply::Refused { denied, message } => {
                 self.network.forgetting.clear();
                 self.network.restoring.clear();
-                let text = match (lang, denied) {
-                    (Lang::French, true) => format!("Le système a refusé : {message}"),
-                    (Lang::English, true) => format!("The system refused: {message}"),
-                    (Lang::French, false) => format!("NetworkManager n’a rien changé : {message}"),
-                    (Lang::English, false) => format!("NetworkManager changed nothing: {message}"),
+                let text = match denied {
+                    true => words::the_system_refused(lang, &message),
+                    false => words::networkmanager_changed_nothing(lang, &message),
                 };
                 self.toast(text, ToastAction::None, TOAST)
             }
@@ -1088,29 +1069,27 @@ impl App {
 /// What a change's toast says, done, undone or redone.
 fn network_said(choice: &Choice, lang: Lang, doing: Doing) -> String {
     let said = match choice {
-        Choice::Airplane(true) => w("Mode avion activé", "Airplane mode on"),
-        Choice::Airplane(false) => w("Mode avion désactivé", "Airplane mode off"),
-        Choice::Wifi { on: true, .. } => w("Wi-Fi allumé", "Wi-Fi on"),
-        Choice::Wifi { on: false, .. } => w("Wi-Fi coupé", "Wi-Fi off"),
-        Choice::Forget(_) => w("Réseau oublié", "Network forgotten"),
-        Choice::Imported { .. } => w("VPN ajouté", "VPN added"),
+        Choice::Airplane(true) => words::AIRPLANE_MODE_ON,
+        Choice::Airplane(false) => words::AIRPLANE_MODE_OFF,
+        Choice::Wifi { on: true, .. } => words::WI_FI_ON,
+        Choice::Wifi { on: false, .. } => words::WI_FI_OFF,
+        Choice::Forget(_) => words::NETWORK_FORGOTTEN,
+        Choice::Imported { .. } => words::VPN_ADDED,
     }
     .get(lang);
     let back = match choice {
-        Choice::Airplane(true) => w("mode avion désactivé", "airplane mode off"),
-        Choice::Airplane(false) => w("mode avion activé", "airplane mode on"),
-        Choice::Wifi { on: true, .. } => w("Wi-Fi coupé", "Wi-Fi off"),
-        Choice::Wifi { on: false, .. } => w("Wi-Fi allumé", "Wi-Fi on"),
-        Choice::Forget(_) => w("réseau revenu", "network back"),
-        Choice::Imported { .. } => w("VPN retiré", "VPN removed"),
+        Choice::Airplane(true) => words::AIRPLANE_MODE_OFF_2,
+        Choice::Airplane(false) => words::AIRPLANE_MODE_ON_2,
+        Choice::Wifi { on: true, .. } => words::WI_FI_OFF,
+        Choice::Wifi { on: false, .. } => words::WI_FI_ON,
+        Choice::Forget(_) => words::NETWORK_BACK,
+        Choice::Imported { .. } => words::VPN_REMOVED,
     }
     .get(lang);
-    match (doing, lang) {
-        (Doing::New, _) => said.to_owned(),
-        (Doing::Undo, Lang::French) => format!("Annulé : {back}."),
-        (Doing::Undo, Lang::English) => format!("Undone: {back}."),
-        (Doing::Redo, Lang::French) => format!("Rétabli : {}.", said.to_lowercase()),
-        (Doing::Redo, Lang::English) => format!("Redone: {}.", said.to_lowercase()),
+    match doing {
+        Doing::New => said.to_owned(),
+        Doing::Undo => words::undone(lang, back),
+        Doing::Redo => words::redone_2(lang, said.to_lowercase()),
     }
 }
 

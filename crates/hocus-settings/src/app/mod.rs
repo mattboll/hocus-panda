@@ -35,6 +35,7 @@ mod view;
 mod wallpaper_page;
 mod wheels;
 
+use hocus_words::settings::app as words;
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -55,7 +56,7 @@ pub use places::Places;
 
 use crate::{
     activate,
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Kind, SectionId, Setting, Source, Value, settings_of},
     search::{self, Found},
     single::Again,
@@ -576,7 +577,7 @@ impl App {
     }
 
     pub fn title(&self) -> String {
-        w("Réglages", "Settings").get(self.lang).to_owned()
+        words::SETTINGS.get(self.lang).to_owned()
     }
 
     fn say(&self, words: Words) -> &'static str {
@@ -976,10 +977,7 @@ impl App {
                 if let Some(id) = id {
                     self.pending.remove(&id);
                 }
-                let text = format!(
-                    "{} {why}",
-                    self.say(w("Rien n’est écrit :", "Nothing is written:"))
-                );
+                let text = format!("{} {why}", self.say(words::NOTHING_IS_WRITTEN));
                 self.toast(text, ToastAction::None, TOAST)
             }
             Heard::Read {
@@ -1019,10 +1017,7 @@ impl App {
                     Why::ByHand(changed) => self.by_hand(&changed, was_broken),
                     Why::Restored => {
                         let text = self
-                            .say(w(
-                                "Dernière version lisible reprise ; l’autre est gardée dans config.toml.broken.",
-                                "The last readable version is back; the other is kept as config.toml.broken.",
-                            ))
+                            .say(words::THE_LAST_READABLE_VERSION_IS_BACK)
                             .to_owned();
                         self.toast(text, ToastAction::None, TOAST)
                     }
@@ -1087,11 +1082,16 @@ impl App {
             Doing::New => {
                 self.undo.push(Undo::File(change));
                 self.redo.clear();
-                let text = match (pending.say, self.lang) {
-                    (Some(said), _) if said.is_empty() => return Task::none(),
-                    (Some(said), _) => said,
-                    (None, Lang::French) => format!("{name} : {now}"),
-                    (None, Lang::English) => format!("{name}: {now}"),
+                let text = match pending.say {
+                    Some(said) if said.is_empty() => return Task::none(),
+                    Some(said) => said,
+                    None => words::text(
+                        self.lang,
+                        words::TextArgs {
+                            name: &name,
+                            now: &now,
+                        },
+                    ),
                 };
                 self.toast(text, ToastAction::Undo, TOAST)
             }
@@ -1105,15 +1105,21 @@ impl App {
                 if let Some(source) = slot.source {
                     self.source = source;
                 }
-                let text = match self.lang {
-                    Lang::French => format!("Annulé : {name} revient à {now}."),
-                    Lang::English => format!("Undone: {name} is back to {now}."),
-                };
+                let text = words::undone_is_back_to(
+                    self.lang,
+                    words::UndoneIsBackTo {
+                        name: &name,
+                        now: &now,
+                    },
+                );
                 let text = if pending.doing == Doing::Redo {
-                    match self.lang {
-                        Lang::French => format!("Rétabli : {name} : {now}."),
-                        Lang::English => format!("Redone: {name}: {now}."),
-                    }
+                    words::redone(
+                        self.lang,
+                        words::Redone {
+                            name: &name,
+                            now: &now,
+                        },
+                    )
                 } else {
                     text
                 };
@@ -1148,15 +1154,9 @@ impl App {
             _ => ToastAction::None,
         };
         let text = if was_broken {
-            w(
-                "config.toml se relit : modifiable à nouveau.",
-                "config.toml reads again: editable again.",
-            )
+            words::CONFIG_TOML_READS_AGAIN_EDITABLE_AGAIN
         } else {
-            w(
-                "config.toml a changé : relu.",
-                "config.toml changed: read again.",
-            )
+            words::CONFIG_TOML_CHANGED_READ_AGAIN
         };
         self.toast(self.say(text).to_owned(), action, TOAST)
     }
@@ -2341,6 +2341,30 @@ enum TryPart {
 
 /// The places of what the window draws, after it is laid out, with the
 /// wheels it had taken then and the serial of the last "shows" line.
+/// `folder` opened in the user's file manager (`xdg-open`), made first
+/// when `make`: on a thread of its own, which the window never waits for.
+fn open_folder(folder: PathBuf, make: bool) {
+    let started = std::thread::Builder::new()
+        .name("settings: folder".to_owned())
+        .spawn(move || {
+            if make {
+                let _ = std::fs::create_dir_all(&folder);
+            }
+            let opened = std::process::Command::new("xdg-open")
+                .arg(&folder)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if let Err(err) = opened {
+                tracing::warn!(%err, "xdg-open does not run");
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "no thread to open the folder from");
+    }
+}
+
 fn places(wheels: u64, shown: u64) -> Task<Message> {
     iced::advanced::widget::operate(places::Collect::after(wheels, shown)).map(Message::Placed)
 }

@@ -175,7 +175,7 @@ the 7.5 mockup: centred, every screen dimmed. Built since 2026-11-04: see
   another account; ending one closes the helper's input or the socket and
   stops the helper by its own handle (a setuid one ends by itself once its
   input closes), and its thread reaps it.
-- **The password** is typed into a [`Secret`](../../crates/hocus-shell/src/network/secret.rs)
+- **The password** is typed into a [`Secret`](../../crates/hocus-network/src/secret.rs)
   (one buffer that never grows, zeroed as it goes), never logged (the
   dialog's log says how many characters), written to the helper as it is
   and wiped once sent.

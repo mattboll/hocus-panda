@@ -119,7 +119,7 @@ impl State {
     /// application). `grabbed`: a grab holds the pointer, which keeps the
     /// swipes the application's.
     pub(crate) fn take_swipe(&mut self, gesture: Gesture, grabbed: bool) -> bool {
-        match (std::mem::take(&mut self.hold), gesture) {
+        match (std::mem::take(&mut self.gestures.hold), gesture) {
             (Hold::Free, Gesture::SwipeBegin { time, fingers }) => {
                 let touchpad = &self.config.touchpad;
                 let ours = !grabbed
@@ -129,7 +129,7 @@ impl State {
                         _ => false,
                     };
                 if ours {
-                    self.hold = Hold::Deciding {
+                    self.gestures.hold = Hold::Deciding {
                         fingers,
                         time,
                         moves: Vec::new(),
@@ -141,7 +141,7 @@ impl State {
             // A new swipe before the last one lifted (not libinput's way):
             // the last one ends there.
             (hold, Gesture::SwipeBegin { time, .. }) => {
-                self.hold = hold;
+                self.gestures.hold = hold;
                 let end = Gesture::SwipeEnd {
                     time,
                     cancelled: true,
@@ -149,7 +149,7 @@ impl State {
                 if !self.take_swipe(end, grabbed) {
                     self.gesture_to_client(end);
                 }
-                self.hold = Hold::Free;
+                self.gestures.hold = Hold::Free;
                 self.take_swipe(gesture, grabbed)
             }
             (
@@ -165,7 +165,7 @@ impl State {
                     .iter()
                     .fold((0.0, 0.0), |(x, y), (_, d)| (x + d.x, y + d.y));
                 if dx.hypot(dy) < SWIPE_AXIS {
-                    self.hold = Hold::Deciding {
+                    self.gestures.hold = Hold::Deciding {
                         fingers,
                         time: began,
                         moves,
@@ -185,12 +185,12 @@ impl State {
             ) => {
                 // Lifted before it said which way: the application's.
                 self.give_to_application(fingers, began, moves);
-                self.hold = Hold::Free;
+                self.gestures.hold = Hold::Free;
                 false
             }
             (Hold::Desktops, Gesture::SwipeUpdate { time, delta }) => {
                 self.desktop_swipe_update(delta.x, delta.y, time);
-                self.hold = Hold::Desktops;
+                self.gestures.hold = Hold::Desktops;
                 true
             }
             (Hold::Desktops, Gesture::SwipeEnd { cancelled, .. }) => {
@@ -203,7 +203,7 @@ impl State {
                     self.panel.launchers.hold(swipe.presence());
                     self.redraw = true;
                 }
-                self.hold = Hold::Launcher(swipe);
+                self.gestures.hold = Hold::Launcher(swipe);
                 true
             }
             (Hold::Launcher(swipe), Gesture::SwipeEnd { cancelled, .. }) => {
@@ -211,13 +211,13 @@ impl State {
                 true
             }
             (Hold::Overview, Gesture::SwipeUpdate { .. }) => {
-                self.hold = Hold::Overview;
+                self.gestures.hold = Hold::Overview;
                 true
             }
             (Hold::Overview, Gesture::SwipeEnd { .. }) => true,
             // Pinches and holds are never the desktop's.
             (hold, _) => {
-                self.hold = hold;
+                self.gestures.hold = hold;
                 false
             }
         }
@@ -239,14 +239,14 @@ impl State {
             (3, true) => {
                 self.desktop_swipe_begin();
                 self.desktop_swipe_update(dx, dy, time);
-                self.hold = Hold::Desktops;
+                self.gestures.hold = Hold::Desktops;
                 return;
             }
             // Down with no launcher open: the overview, as `Super+W`.
             (4, false) if dy > 0.0 && !self.panel.launchers.open() => {
                 tracing::debug!("four fingers down: the overview");
                 self.toggle_overview();
-                self.hold = Hold::Overview;
+                self.gestures.hold = Hold::Overview;
                 return;
             }
             (4, false) if self.shell_linked() => {
@@ -261,7 +261,7 @@ impl State {
                     }
                     self.panel.launchers.hold(swipe.presence());
                     self.redraw = true;
-                    self.hold = Hold::Launcher(swipe);
+                    self.gestures.hold = Hold::Launcher(swipe);
                     tracing::debug!(opening = !open, "four fingers hold the launcher");
                     return;
                 }
@@ -269,7 +269,7 @@ impl State {
             _ => {}
         }
         self.give_to_application(fingers, began, moves);
-        self.hold = Hold::Free;
+        self.gestures.hold = Hold::Free;
     }
 
     /// The fingers lifted from the launcher: it goes on, or back.

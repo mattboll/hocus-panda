@@ -46,14 +46,28 @@ pub enum Choice {
     Planka(PlankaChoice),
 }
 
+/// Why Day.1's choice was not written.
+#[derive(Debug, thiserror::Error)]
+pub enum EditError {
+    /// The file could not be read, is not TOML, or could not be written.
+    #[error(transparent)]
+    File(#[from] hocus_config::Error),
+    /// `[day]`, or one of its lists, is something else in the user's
+    /// file: which.
+    #[error("{0}")]
+    Shape(String),
+    /// What would be written does not read back as the shell reads
+    /// `[day]`: nothing is written.
+    #[error("the choice written would not read back: {0}")]
+    ReadBack(#[from] toml::de::Error),
+}
+
 /// `text` (a configuration file's) with `choice` in its `[day]`: a Google
 /// account replaces the `[[day.calendars]]` that names it, else comes
 /// after the others; a board replaces the first `[[day.tasks]]` (the only
 /// one used), else is the first. Everything else is kept as it was.
-pub fn apply(text: &str, choice: &Choice) -> Result<String, String> {
-    let mut doc: DocumentMut = text
-        .parse()
-        .map_err(|err| format!("the configuration does not read: {err}"))?;
+pub fn apply(text: &str, choice: &Choice) -> Result<String, EditError> {
+    let mut doc: DocumentMut = hocus_config::parse(text).map_err(hocus_config::Error::Syntax)?;
     let day = doc
         .entry("day")
         .or_insert_with(|| {
@@ -62,7 +76,7 @@ pub fn apply(text: &str, choice: &Choice) -> Result<String, String> {
             Item::Table(table)
         })
         .as_table_mut()
-        .ok_or("[day] is not a table")?;
+        .ok_or_else(|| EditError::Shape("[day] is not a table".to_owned()))?;
     match choice {
         Choice::Google(google) => {
             let calendars = entries(day, "calendars")?;
@@ -100,11 +114,11 @@ pub fn apply(text: &str, choice: &Choice) -> Result<String, String> {
 }
 
 /// `day`'s array of tables `name`, made if it is not there.
-fn entries<'a>(day: &'a mut Table, name: &str) -> Result<&'a mut ArrayOfTables, String> {
+fn entries<'a>(day: &'a mut Table, name: &str) -> Result<&'a mut ArrayOfTables, EditError> {
     day.entry(name)
         .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()))
         .as_array_of_tables_mut()
-        .ok_or_else(|| format!("day.{name} is not a list of [[day.{name}]]"))
+        .ok_or_else(|| EditError::Shape(format!("day.{name} is not a list of [[day.{name}]]")))
 }
 
 fn fill_google(entry: &mut Table, google: &GoogleChoice) {
@@ -135,11 +149,15 @@ fn fill_planka(entry: &mut Table, planka: &PlankaChoice) {
 
 /// `choice` written into the configuration file at `path` (none yet: one
 /// made with it alone), whole or not at all ([`hocus_config::edit`]).
-pub fn write(path: &Path, choice: &Choice) -> Result<String, String> {
+pub fn write(path: &Path, choice: &Choice) -> Result<String, EditError> {
     let read = hocus_config::read(path)?;
     let written = apply(&read.text, choice)?;
-    hocus_config::replace(&read.real, written.as_bytes(), read.mode)
-        .map_err(|err| format!("{}: {err}", read.real.display()))?;
+    hocus_config::replace(&read.real, written.as_bytes(), read.mode).map_err(|source| {
+        hocus_config::Error::Io {
+            path: read.real.clone(),
+            source,
+        }
+    })?;
     Ok(written)
 }
 
@@ -260,9 +278,18 @@ terminal = "Super+Return"
 
     #[test]
     fn a_file_that_does_not_read_is_left_alone() {
-        assert!(apply("[keyboard\n", &google()).is_err());
-        assert!(apply("day = 3\n", &google()).is_err());
-        assert!(apply("[day]\ncalendars = 3\n", &google()).is_err());
+        assert!(matches!(
+            apply("[keyboard\n", &google()),
+            Err(EditError::File(hocus_config::Error::Syntax(_)))
+        ));
+        assert!(matches!(
+            apply("day = 3\n", &google()),
+            Err(EditError::Shape(_))
+        ));
+        assert!(matches!(
+            apply("[day]\ncalendars = 3\n", &google()),
+            Err(EditError::Shape(_))
+        ));
     }
 
     #[test]

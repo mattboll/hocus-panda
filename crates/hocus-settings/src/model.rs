@@ -19,7 +19,8 @@
 //! that one is not understood), writes a change at once with its undo, and
 //! finds settings by their words and their keys.
 
-use crate::lang::{Lang, Words, w};
+use crate::lang::{Lang, Words};
+use hocus_words::settings::model as words;
 
 /// The five groups of the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,11 +43,11 @@ impl Group {
 
     pub fn label(self) -> Words {
         match self {
-            Self::Personalisation => w("PERSONNALISATION", "PERSONALISATION"),
-            Self::Devices => w("APPAREILS", "DEVICES"),
-            Self::Connections => w("CONNEXIONS", "CONNECTIONS"),
-            Self::Work => w("TRAVAIL", "WORK"),
-            Self::System => w("SYSTÈME", "SYSTEM"),
+            Self::Personalisation => words::PERSONALISATION,
+            Self::Devices => words::DEVICES,
+            Self::Connections => words::CONNECTIONS,
+            Self::Work => words::WORK,
+            Self::System => words::SYSTEM,
         }
     }
 }
@@ -114,6 +115,7 @@ impl SectionId {
         Self::Performance,
     ];
 
+    // Over 200 lines: a table, one entry per section.
     pub fn section(self) -> Section {
         let s = |slug, group, name, line, icon, ticket| Section {
             id: self,
@@ -129,209 +131,152 @@ impl SectionId {
             Self::Appearance => s(
                 "appearance",
                 Personalisation,
-                w("Apparence et langue", "Appearance and language"),
-                w(
-                    "Le thème, la couleur d’accent, le texte et la langue de tout le bureau.",
-                    "The theme, the accent colour, the text and the language of the whole desktop.",
-                ),
+                words::APPEARANCE_AND_LANGUAGE,
+                words::THE_THEME_THE_ACCENT_COLOUR_THE,
                 Icon::Appearance,
                 "6.2",
             ),
             Self::Wallpaper => s(
                 "wallpaper",
                 Personalisation,
-                w("Fond d’écran", "Wallpaper"),
-                w(
-                    "Le fond de chaque écran, et celui de l’écran de verrouillage.",
-                    "Each screen’s background, and the lock screen’s.",
-                ),
+                words::WALLPAPER,
+                words::EACH_SCREEN_S_BACKGROUND_AND_THE,
                 Icon::Wallpaper,
                 "6.3",
             ),
             Self::Bar => s(
                 "bar",
                 Personalisation,
-                w("La barre", "The bar"),
-                w(
-                    "Le côté où elle se tient, sa forme sur chaque écran, ce qu’elle montre de haut en bas, et son horloge.",
-                    "The side it stands on, its form on each screen, what it shows from top to bottom, and its clock.",
-                ),
+                words::THE_BAR,
+                words::THE_SIDE_IT_STANDS_ON_ITS,
                 Icon::Bar,
                 "6.4",
             ),
             Self::Accessibility => s(
                 "accessibility",
                 Personalisation,
-                w("Accessibilité", "Accessibility"),
-                w(
-                    "Voir plus grand, voir plus net, tout faire au clavier.",
-                    "See larger, see clearer, do everything from the keyboard.",
-                ),
+                words::ACCESSIBILITY,
+                words::SEE_LARGER_SEE_CLEARER_DO_EVERYTHING,
                 Icon::Accessibility,
                 "A.2–A.4",
             ),
             Self::Agenda => s(
                 "agenda",
                 Personalisation,
-                w("Agenda et tâches", "Calendar and tasks"),
-                w(
-                    "Ce que la barre montre de ta journée : tes réunions, tes rendez-vous et ce qu’il reste à faire.",
-                    "What the bar shows of your day: your meetings, your appointments and what is left to do.",
-                ),
+                words::CALENDAR_AND_TASKS,
+                words::WHAT_THE_BAR_SHOWS_OF_YOUR,
                 Icon::Agenda,
                 "Day.1",
             ),
             Self::Screens => s(
                 "screens",
                 Devices,
-                w("Écrans", "Screens"),
-                w(
-                    "La place de chaque écran, sa résolution, sa fréquence et son échelle ; l’écran où vont la barre et les nouvelles fenêtres.",
-                    "Where each screen sits, its resolution, refresh rate and scale; the screen the bar and new windows go to.",
-                ),
+                words::SCREENS,
+                words::WHERE_EACH_SCREEN_SITS_ITS_RESOLUTION,
                 Icon::Screens,
                 "6.9",
             ),
             Self::Sound => s(
                 "sound",
                 Devices,
-                w("Son", "Sound"),
-                w(
-                    "Les sorties, les entrées et leurs profils ; le volume de chaque application.",
-                    "Outputs, inputs and their profiles; each application's volume.",
-                ),
+                words::SOUND,
+                words::OUTPUTS_INPUTS_AND_THEIR_PROFILES_EACH,
                 Icon::Sound,
                 "6.5",
             ),
             Self::Keyboard => s(
                 "keyboard",
                 Devices,
-                w("Clavier et raccourcis", "Keyboard and shortcuts"),
-                w(
-                    "Les dispositions, la répétition des touches et les raccourcis.",
-                    "The layouts, the keys' repeat and the shortcuts.",
-                ),
+                words::KEYBOARD_AND_SHORTCUTS,
+                words::THE_LAYOUTS_THE_KEYS_REPEAT_AND,
                 Icon::Keyboard,
                 "6.8",
             ),
             Self::Mouse => s(
                 "mouse",
                 Devices,
-                w("Souris et pavé tactile", "Mouse and touchpad"),
-                w(
-                    "Le pointeur, les clics et le défilement de chaque appareil branché, et les gestes du pavé tactile.",
-                    "The pointer, clicks and scrolling of each device plugged in, and the touchpad's gestures.",
-                ),
+                words::MOUSE_AND_TOUCHPAD,
+                words::THE_POINTER_CLICKS_AND_SCROLLING_OF,
                 Icon::Mouse,
                 "6.12",
             ),
             Self::Network => s(
                 "network",
                 Connections,
-                w("Réseau", "Network"),
-                w(
-                    "Le Wi-Fi et ses réseaux enregistrés, les réseaux masqués et d’entreprise, le câble, les VPN et le mode avion.",
-                    "Wi-Fi and its saved networks, hidden and enterprise networks, the cable, VPNs and airplane mode.",
-                ),
+                words::NETWORK,
+                words::WI_FI_AND_ITS_SAVED_NETWORKS,
                 Icon::Network,
                 "6.6",
             ),
             Self::Bluetooth => s(
                 "bluetooth",
                 Connections,
-                w("Bluetooth", "Bluetooth"),
-                w(
-                    "Associer un appareil, avec ou sans code ; le connecter, le renommer, l’oublier.",
-                    "Pair a device, with or without a code; connect it, rename it, forget it.",
-                ),
+                words::BLUETOOTH,
+                words::PAIR_A_DEVICE_WITH_OR_WITHOUT,
                 Icon::Bluetooth,
                 "6.7",
             ),
             Self::Desktops => s(
                 "desktops",
                 Work,
-                w("Bureaux et fenêtres", "Desktops and windows"),
-                w(
-                    "Combien de bureaux et leurs noms, comment une fenêtre se déplace et s’ancre, Alt+Tab, l’encre, et des règles par application.",
-                    "How many desktops and their names, how a window moves and snaps, Alt+Tab, the ink, and rules per application.",
-                ),
+                words::DESKTOPS_AND_WINDOWS,
+                words::HOW_MANY_DESKTOPS_AND_THEIR_NAMES,
                 Icon::Desktops,
                 "6.14",
             ),
             Self::Apps => s(
                 "applications",
                 Work,
-                w("Applications", "Applications"),
-                w(
-                    "Celles qui ouvrent tes liens et tes fichiers, et celles qui démarrent avec la session.",
-                    "Those that open your links and files, and those that start with the session.",
-                ),
+                words::APPLICATIONS,
+                words::THOSE_THAT_OPEN_YOUR_LINKS_AND,
                 Icon::Apps,
                 "6.15",
             ),
             Self::Agents => s(
                 "agents",
                 Work,
-                w("Agents", "Agents"),
-                w(
-                    "D’où viennent les états de tes agents, quels outils suivre, et comment la barre t’appelle : le halo et les pandas.",
-                    "Where your agents’ states come from, which tools to follow, and how the bar calls you: the halo and the pandas.",
-                ),
+                words::AGENTS,
+                words::WHERE_YOUR_AGENTS_STATES_COME_FROM,
                 Icon::Agents,
                 "6.16",
             ),
             Self::Captures => s(
                 "captures",
                 Work,
-                w("Captures et presse-papiers", "Screenshots and clipboard"),
-                w(
-                    "Où vont tes captures et tes enregistrements de l’écran, et ce que garde l’historique du presse-papiers.",
-                    "Where your screenshots and screen recordings go, and what the clipboard’s history keeps.",
-                ),
+                words::SCREENSHOTS_AND_CLIPBOARD,
+                words::WHERE_YOUR_SCREENSHOTS_AND_SCREEN_RECORDINGS,
                 Icon::Captures,
                 "6.17",
             ),
             Self::Power => s(
                 "power",
                 System,
-                w("Énergie", "Power"),
-                w(
-                    "Quand l’écran s’assombrit, se verrouille et s’éteint, quand l’ordinateur se met en veille ; le couvercle, le bouton d’alimentation et l’économie d’énergie.",
-                    "When the screen dims, locks and turns off, when the computer sleeps; the lid, the power button and power saving.",
-                ),
+                words::POWER,
+                words::WHEN_THE_SCREEN_DIMS_LOCKS_AND,
                 Icon::Power,
                 "6.10",
             ),
             Self::Account => s(
                 "account",
                 System,
-                w("Compte", "Account"),
-                w(
-                    "Ton nom, ton avatar et ton mot de passe. Les autres comptes de l’ordinateur se gèrent avec les outils du système.",
-                    "Your name, avatar and password. The computer’s other accounts are managed with the system’s tools.",
-                ),
+                words::ACCOUNT,
+                words::YOUR_NAME_AVATAR_AND_PASSWORD_THE,
                 Icon::Account,
                 "6.11",
             ),
             Self::DateTime => s(
                 "date-and-time",
                 System,
-                w("Date et heure", "Date and time"),
-                w(
-                    "L’heure de l’ordinateur et son fuseau horaire. Leur format se règle dans Apparence et langue.",
-                    "The computer’s time and its time zone. Their format is set in Appearance and language.",
-                ),
+                words::DATE_AND_TIME,
+                words::THE_COMPUTER_S_TIME_AND_ITS,
                 Icon::DateTime,
                 "6.11",
             ),
             Self::Performance => s(
                 "performance",
                 System,
-                w("Performances", "Performance"),
-                w(
-                    "Ce que le bureau — le compositeur et le shell — a coûté à ta machine. Mesuré toutes les 10 s par un fil à part, sans réveiller le bureau ; gardé 14 jours.",
-                    "What the desktop — the compositor and the shell — cost your machine. Measured every 10 s on a thread of its own, without waking the desktop; kept 14 days.",
-                ),
+                words::PERFORMANCE,
+                words::WHAT_THE_DESKTOP_THE_COMPOSITOR_AND,
                 Icon::Performance,
                 "#655",
             ),
@@ -459,16 +404,16 @@ pub enum Source {
 impl Source {
     pub fn name(self) -> Words {
         match self {
-            Self::Battery => w("Sur batterie", "On battery"),
-            Self::Ac => w("Sur secteur", "On AC"),
+            Self::Battery => words::ON_BATTERY,
+            Self::Ac => words::ON_AC,
         }
     }
 
     /// As the toast says it: ", sur batterie".
     pub fn aside(self) -> Words {
         match self {
-            Self::Battery => w(", sur batterie", ", on battery"),
-            Self::Ac => w(", sur secteur", ", on AC"),
+            Self::Battery => words::ON_BATTERY_2,
+            Self::Ac => words::ON_AC_2,
         }
     }
 
@@ -654,6 +599,20 @@ impl Codec {
         }
     }
 
+    /// A value this codec writes, for a key with no default to read.
+    fn neutral(self) -> Value {
+        match self {
+            Self::Bool => Value::Bool(false),
+            Self::Int { min, .. } | Self::Tenths { min, .. } | Self::Hundredths { min, .. } => {
+                Value::Int(min)
+            }
+            Self::IdleSeconds | Self::Delay => Value::Seconds(None),
+            Self::Word(words) | Self::XkbOption(words) => Value::Word(words.first().unwrap_or(&"")),
+            Self::Text | Self::Colour => Value::Text(String::new()),
+            Self::Chords | Self::Texts => Value::List(Vec::new()),
+        }
+    }
+
     /// `value` as the file says it; `None` when this codec cannot say it.
     pub fn write(self, value: &Value) -> Option<toml_edit::Value> {
         Some(match (self, value) {
@@ -727,6 +686,34 @@ pub struct Place {
 }
 
 impl Place {
+    /// The key at `key`, its default the one the configuration's defaults
+    /// list (`hocus_config::defaults`), as the compositor's.
+    pub fn new(key: &'static [&'static str], codec: Codec) -> Self {
+        let default = hocus_config::defaults::value(key)
+            .and_then(|value| codec.read(value))
+            .unwrap_or_else(|| {
+                // A test walks every row: never in a build that passed it.
+                tracing::error!(key = %key.join("."), "no default for this key");
+                codec.neutral()
+            });
+        Self {
+            key,
+            codec,
+            default,
+        }
+    }
+
+    /// A key the file leaves unset by default, the system's value applying
+    /// (`hocus_config::defaults::UNSET`): `shown` is what its row shows
+    /// then.
+    pub fn unset(key: &'static [&'static str], codec: Codec, shown: Value) -> Self {
+        Self {
+            key,
+            codec,
+            default: shown,
+        }
+    }
+
     /// `[power.battery] suspend-after`, as the file shows it.
     pub fn shown(&self) -> String {
         match self.key.split_last() {
@@ -740,6 +727,11 @@ impl Place {
     pub fn dotted(&self) -> String {
         self.key.join(".")
     }
+}
+
+/// The setting with one value at `key`, its default the configuration's.
+pub fn one(key: &'static [&'static str], codec: Codec) -> Places {
+    Places::One(Place::new(key, codec))
 }
 
 /// Where a setting is written.
@@ -867,23 +859,21 @@ impl Setting {
             && let Value::Word(word) = value
             && let Some(accent) = hocus_link::theme::Accent::of(word)
         {
-            let (fr, en) = accent.names();
-            return if lang.fr() { fr } else { en }.to_owned();
+            return accent.name(lang).to_owned();
         }
-        let fr = lang.fr();
         match value {
-            Value::Bool(true) => if fr { "oui" } else { "on" }.to_owned(),
-            Value::Bool(false) => if fr { "non" } else { "off" }.to_owned(),
+            Value::Bool(true) => words::ON.get(lang).to_owned(),
+            Value::Bool(false) => words::OFF.get(lang).to_owned(),
             Value::Int(n) => match &self.kind {
                 Kind::Slider { unit, .. } => format!("{n}{unit}"),
                 Kind::Speed { .. } => say_speed(*n, lang).to_owned(),
                 _ => n.to_string(),
             },
-            Value::Seconds(None) => if fr { "Jamais" } else { "Never" }.to_owned(),
+            Value::Seconds(None) => words::NEVER.get(lang).to_owned(),
             Value::Seconds(Some(s)) => say_seconds(*s, lang),
             Value::Word(word) => (*word).to_owned(),
             Value::Text(text) => text.clone(),
-            Value::List(list) if list.is_empty() => if fr { "aucun" } else { "none" }.to_owned(),
+            Value::List(list) if list.is_empty() => words::NONE.get(lang).to_owned(),
             Value::List(list) => match self.kind {
                 Kind::Shortcut => list
                     .iter()
@@ -898,50 +888,19 @@ impl Setting {
 
 /// A speed in tenths from -10 to 10, as a word: très lente to très rapide.
 pub fn say_speed(tenths: i64, lang: Lang) -> &'static str {
-    let fr = lang.fr();
     match tenths {
-        n if n <= -7 => {
-            if fr {
-                "très lente"
-            } else {
-                "very slow"
-            }
-        }
-        n if n <= -3 => {
-            if fr {
-                "lente"
-            } else {
-                "slow"
-            }
-        }
-        n if n < 3 => {
-            if fr {
-                "moyenne"
-            } else {
-                "medium"
-            }
-        }
-        n if n < 7 => {
-            if fr {
-                "rapide"
-            } else {
-                "fast"
-            }
-        }
-        _ => {
-            if fr {
-                "très rapide"
-            } else {
-                "very fast"
-            }
-        }
+        n if n <= -7 => words::VERY_SLOW.get(lang),
+        n if n <= -3 => words::SLOW.get(lang),
+        n if n < 3 => words::MEDIUM.get(lang),
+        n if n < 7 => words::FAST.get(lang),
+        _ => words::VERY_FAST.get(lang),
     }
 }
 
 /// `90 s`, `7 min`, `1 h 30`.
 pub fn say_seconds(s: u64, lang: Lang) -> String {
     match s {
-        0 => if lang.fr() { "Aussitôt" } else { "At once" }.to_owned(),
+        0 => words::AT_ONCE.get(lang).to_owned(),
         s if s < 60 => format!("{s} s"),
         s if s % 3600 == 0 => format!("{} h", s / 3600),
         s if s < 3600 => format!("{} min", s / 60),
@@ -1061,8 +1020,8 @@ mod tests {
         for (id, (slug, fr, en)) in SectionId::ALL.into_iter().zip(pages) {
             let section = id.section();
             assert_eq!(section.slug, slug);
-            assert_eq!(section.name.fr, fr, "{slug}");
-            assert_eq!(section.name.en, en, "{slug}");
+            assert_eq!(section.name.get(hocus_words::Lang::French), fr, "{slug}");
+            assert_eq!(section.name.get(hocus_words::Lang::English), en, "{slug}");
         }
     }
 
@@ -1182,6 +1141,37 @@ mod tests {
         let written = |n| codec.write(&Value::Int(n)).map(|v| v.to_string());
         assert_eq!(written(110).as_deref(), Some("1.1"));
         assert_eq!(written(100).as_deref(), Some("1.0"));
+    }
+
+    /// Every row's key is one of the configuration's, with the default the
+    /// compositor reads (`hocus_config::defaults`), its codec reading it;
+    /// a key unset by default shows the system's. A page's own keys (a
+    /// screen's, by its name) are its code's.
+    #[test]
+    fn every_row_has_the_configuration_s_key_and_default() {
+        use hocus_config::defaults;
+        let mut rows = 0;
+        for setting in all_settings() {
+            if matches!(setting.places, Places::Page(_)) {
+                continue;
+            }
+            for place in setting.places.all() {
+                rows += 1;
+                let key = place.dotted();
+                assert!(defaults::known(place.key), "{}: {key} unknown", setting.id);
+                if defaults::UNSET.contains(&place.key) {
+                    continue;
+                }
+                let shipped = defaults::value(place.key).and_then(|v| place.codec.read(v));
+                assert_eq!(
+                    shipped.as_ref(),
+                    Some(&place.default),
+                    "{}: {key}'s default",
+                    setting.id
+                );
+            }
+        }
+        assert!(rows > 100, "{rows} rows");
     }
 
     #[test]

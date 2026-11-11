@@ -23,6 +23,9 @@
 //! - `hocus msg outputs`: the screens, their modes, places, scales and
 //!   settings, as one line of JSON (docs/design/settings.md, "Écrans").
 //!
+//! - `hocus msg a11y`: what the shell's surfaces show, as screen readers
+//!   read it, whether one listens or not (docs/design/screen-reader.md).
+//!
 //! - `hocus msg shell status`, `hocus msg shell restart [--program PATH |
 //!   --installed]`: which program the compositor runs as the shell and
 //!   since when, and that program ended and started again at once, from
@@ -165,7 +168,7 @@ enum MsgCommand {
     /// (docs/design/settings.md, "Écrans").
     Outputs,
     /// The mice and touchpads plugged in, and what they were given of
-    /// [pointer] and [touchpad] (docs/design/settings.md).
+    /// `[pointer]` and `[touchpad]` (docs/design/settings.md).
     InputDevices {
         /// Stays, and says each device plugged, changed or unplugged.
         #[arg(long)]
@@ -256,6 +259,8 @@ enum DayCommand {
 }
 
 fn main() -> ExitCode {
+    // `hocus` has no log: a panic is said on stderr, as by default.
+    hocus_panic::install();
     let args = Args::parse();
     match args.command {
         Command::Settings { section, join } => settings(section.as_deref(), join.as_deref()),
@@ -486,7 +491,8 @@ fn follow(socket: Option<PathBuf>, question: Question) -> ExitCode {
             match stream.read(&mut buffer).map_err(place)? {
                 0 => return Ok(()),
                 n => {
-                    out.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
+                    out.write_all(buffer.get(..n).unwrap_or(&buffer))
+                        .map_err(|e| e.to_string())?;
                     out.flush().map_err(|e| e.to_string())?;
                 }
             }

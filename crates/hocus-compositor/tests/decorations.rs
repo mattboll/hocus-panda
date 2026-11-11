@@ -462,8 +462,7 @@ fn an_x11_window_gets_the_grip_unless_its_motif_hints_ask_for_no_decorations() -
         .status()
         .is_ok_and(|s| s.success());
     if !has {
-        eprintln!("no Xwayland: skipped");
-        return Ok(());
+        common::missing("Xwayland");
     }
     let mut hp = Headless::start_with_xwayland(hocus_compositor::HeadlessConfig {
         renderer: hocus_compositor::RendererChoice::Pixman,

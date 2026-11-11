@@ -566,3 +566,18 @@ fn the_launchers_colon_row_inserts_into_the_window_that_had_the_keyboard() -> an
     anyhow::ensure!(closed, "the launcher stayed");
     Ok(())
 }
+
+/// The picker in its main state (the empty search, under a caret), for
+/// the widget kit's side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    let _writer = bed.window("test.writer", Some((100, 40, 2, 20)))?;
+    bed.open()?;
+    bed.hp.pointer_move(1800.0, 900.0);
+    common::layer_shot(&mut bed.hp, hocus_link::EMOJI_NAMESPACE, "emoji")
+}

@@ -90,7 +90,7 @@ pub struct Job {
     /// The folder `[recording] folder` names, if it does (6.17): used when
     /// it can be written, else the videos' folder's own is.
     pub chosen: Option<PathBuf>,
-    pub french: bool,
+    pub lang: hocus_words::Lang,
     pub when: SystemTime,
     /// Where its first frame's picture and its sound's pipe go.
     pub runtime: PathBuf,
@@ -309,13 +309,13 @@ fn record(
                 .clone()
                 .context("no videos' folder to save the recording in")?;
             (
-                videos.join(save::folder_name(job.french)),
-                save::shown_folder(&videos, job.french),
+                videos.join(save::folder_name(job.lang)),
+                save::shown_folder(&videos, job.lang),
             )
         }
     };
     std::fs::create_dir_all(&dir).with_context(|| format!("could not make {}", dir.display()))?;
-    let file = save::unused(&dir, &save::file_name(job.when, job.french, job.format));
+    let file = save::unused(&dir, &save::file_name(job.when, job.lang, job.format));
     // The sound's pipe, in a directory of its own in the runtime one.
     let pipes = tempfile::Builder::new()
         .prefix("hocuspanda-recording-")
@@ -505,7 +505,7 @@ fn collect_errors(child: &mut Child) -> Arc<Mutex<String>> {
                         break;
                     }
                     let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
-                    kept.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    kept.push_str(&String::from_utf8_lossy(buf.get(..n).unwrap_or(&buf)));
                     let extra = kept.len().saturating_sub(2000);
                     if extra > 0 {
                         let at = kept.ceil_char_boundary(extra);
@@ -580,7 +580,7 @@ impl Frames {
         for y in 0..(size.1.min(h) as usize) {
             let from = y * stride as usize;
             let src = pixels.get(from..from + take)?;
-            frame[y * row..y * row + take].copy_from_slice(src);
+            frame.get_mut(y * row..y * row + take)?.copy_from_slice(src);
         }
         Some(frame)
     }

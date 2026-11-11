@@ -79,6 +79,13 @@ pub struct Shell {
     pub desktops: crate::desktops::Told,
     /// Ends in a row that came quickly.
     quick_ends: u32,
+    /// Shells in a row whose hello said another version of the line
+    /// (`hocus_link::wire`): the first is started again from the
+    /// installed program, the second leaves the session without a shell.
+    mismatches: u32,
+    /// The version the shell left out for it said (`None`: it said no
+    /// hello), until a shell is asked for again: the status says it.
+    refused: Option<Option<u32>>,
     ended: Option<Sender<Ended>>,
     /// The shells started and not ended yet.
     pub running: Arc<Running>,
@@ -108,6 +115,9 @@ enum Phase {
     /// Asked to end (`hocus msg shell restart`): started again as soon as
     /// run `run` has ended.
     Ending { run: u64 },
+    /// Run `run` speaks another version of the line, as the one before it
+    /// did: asked to end, and none is started after it.
+    Refused { run: u64 },
 }
 
 /// A run ended, as its thread says it.
@@ -280,6 +290,18 @@ struct Link {
     /// what writes it as the socket takes more.
     unsent: Vec<u8>,
     flushing: Option<RegistrationToken>,
+    greeting: Greeting,
+}
+
+/// Where the line's hello is (`hocus_link::wire`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Greeting {
+    /// The shell's first line is awaited: it is told nothing yet.
+    Awaited,
+    /// It speaks this compositor's version: it is fed, and read.
+    Done,
+    /// It speaks another: it is told nothing, and nothing of it is read.
+    Refused,
 }
 
 /// The shell's socket's path next to the Wayland socket's.
@@ -361,7 +383,7 @@ impl State {
             self.shell_gone();
         }
         let env = programs::Env::of(self);
-        let gpu = self.gpu;
+        let gpu = self.graphics.gpu;
         let bus = self.shell.bus.clone();
         let auth_agent = self.shell.auth_agent;
         // Its Wayland connection, made here: the compositor knows it is the
@@ -468,6 +490,8 @@ impl State {
                     self.start_shell();
                 }
             }
+            // The second of another version: none after it.
+            Phase::Refused { run: asked } if asked == run => {}
             Phase::Running {
                 run: running,
                 program,
@@ -535,34 +559,47 @@ impl State {
             "hocus msg shell restart"
         );
         self.shell.quick_ends = 0;
+        // Asked for again: a shell of another version gets its two tries.
+        self.shell.mismatches = 0;
+        self.shell.refused = None;
         match std::mem::take(&mut self.shell.phase) {
             Phase::Running { run, .. } => {
                 self.shell.phase = Phase::Ending { run };
-                self.shell.running.end(run, rustix::process::Signal::TERM);
-                let kill = self.loop_handle.insert_source(
-                    Timer::from_duration(GRACE),
-                    move |_, _, app| {
-                        if matches!(app.state.shell.phase, Phase::Ending { run: r } if r == run) {
-                            tracing::warn!(run, "the shell did not end: killed");
-                            app.state
-                                .shell
-                                .running
-                                .end(run, rustix::process::Signal::KILL);
-                        }
-                        TimeoutAction::Drop
-                    },
-                );
-                if let Err(err) = kill {
-                    tracing::warn!(%err.error, "no timer for the shell's end");
-                }
+                self.end_shell_run(run);
             }
             // Already asked to end: its end starts the program as it is
             // now.
-            Phase::Ending { run } => self.shell.phase = Phase::Ending { run },
+            Phase::Ending { run } | Phase::Refused { run } => {
+                self.shell.phase = Phase::Ending { run };
+            }
             waiting @ (Phase::Waiting(_) | Phase::Off) => {
                 self.shell.phase = waiting;
                 self.start_shell();
             }
+        }
+    }
+
+    /// Run `run` is asked to end, and killed if it has not after
+    /// [`GRACE`]; what follows its end is its phase's to say.
+    fn end_shell_run(&mut self, run: u64) {
+        self.shell.running.end(run, rustix::process::Signal::TERM);
+        let kill = self
+            .loop_handle
+            .insert_source(Timer::from_duration(GRACE), move |_, _, app| {
+                if matches!(
+                    app.state.shell.phase,
+                    Phase::Ending { run: r } | Phase::Refused { run: r } if r == run
+                ) {
+                    tracing::warn!(run, "the shell did not end: killed");
+                    app.state
+                        .shell
+                        .running
+                        .end(run, rustix::process::Signal::KILL);
+                }
+                TimeoutAction::Drop
+            });
+        if let Err(err) = kill {
+            tracing::warn!(%err.error, "no timer for the shell's end");
         }
     }
 
@@ -583,7 +620,7 @@ impl State {
                 Some((program, started)),
             ),
             Phase::Waiting(_) => ("waiting", None),
-            Phase::Ending { .. } => ("ending", None),
+            Phase::Ending { .. } | Phase::Refused { .. } => ("ending", None),
         };
         let mut said = crate::given::Status {
             state,
@@ -600,6 +637,14 @@ impl State {
             self.bars_drawn(),
             self.panel.bars.len()
         ));
+        // Only when a shell was left out for it: no shell runs.
+        if let Some(theirs) = shell.refused {
+            let theirs = theirs.map_or_else(|| "none".to_owned(), |v| v.to_string());
+            said.push_str(&format!(
+                "mismatch shell {theirs} compositor {}\n",
+                hocus_link::VERSION
+            ));
+        }
         said
     }
 
@@ -623,9 +668,8 @@ impl State {
             .count()
     }
 
-    /// The shell connected (again): it is told how bars and their clock
-    /// look, where bars are, the other screens, the keyboard's layouts and
-    /// the bars' screens' desktops.
+    /// The shell connected (again): its hello is awaited
+    /// ([`State::shell_hello`]).
     fn shell_connected(&mut self, stream: UnixStream) {
         self.shell_gone();
         if let Err(err) = stream.set_nonblocking(true) {
@@ -651,7 +695,7 @@ impl State {
                             app.state.shell_gone();
                             return Ok(PostAction::Remove);
                         }
-                        Ok(n) => pending.extend_from_slice(&buffer[..n]),
+                        Ok(n) => pending.extend_from_slice(buffer.get(..n).unwrap_or(&buffer)),
                         Err(err) if err.kind() == ErrorKind::WouldBlock => break,
                         Err(err) if err.kind() == ErrorKind::Interrupted => {}
                         Err(err) => {
@@ -664,12 +708,7 @@ impl State {
                 while let Some(end) = pending.iter().position(|b| *b == b'\n') {
                     let line: Vec<u8> = pending.drain(..=end).collect();
                     let line = String::from_utf8_lossy(&line);
-                    match line.trim().parse::<ToCompositor>() {
-                        Ok(message) => app.state.shell_says(message),
-                        Err(err) => {
-                            tracing::warn!(%err, "a line from the shell that does not read")
-                        }
-                    }
+                    app.state.shell_line(line.trim());
                 }
                 Ok(PostAction::Continue)
             },
@@ -681,13 +720,102 @@ impl State {
                 return;
             }
         };
-        tracing::info!("the shell is connected");
+        tracing::debug!("the shell's connection: its hello is awaited");
         self.shell.link = Some(Link {
             writer,
             token,
             unsent: Vec::new(),
             flushing: None,
+            greeting: Greeting::Awaited,
         });
+    }
+
+    /// A line from the shell: its hello first, then its messages. One
+    /// that does not read (a kind this compositor does not know) is said
+    /// and skipped.
+    fn shell_line(&mut self, line: &str) {
+        match self.shell.link.as_ref().map(|link| link.greeting) {
+            None | Some(Greeting::Refused) => {}
+            Some(Greeting::Awaited) => self.shell_hello(line),
+            Some(Greeting::Done) => match ToCompositor::read(line) {
+                Ok(message) => self.shell_says(message),
+                Err(err) => tracing::warn!(%err, "a line from the shell is skipped"),
+            },
+        }
+    }
+
+    /// The shell's first line: its hello, answered with the compositor's
+    /// own whatever it says. On the same version it is fed; on another
+    /// (a package upgraded under the session pairs an old program with a
+    /// new one), neither reads the other.
+    fn shell_hello(&mut self, first: &str) {
+        let theirs = hocus_link::wire::said_version(first);
+        self.write_shell(hocus_link::wire::hello());
+        let Some(link) = &mut self.shell.link else {
+            return;
+        };
+        if theirs == Some(hocus_link::VERSION) {
+            link.greeting = Greeting::Done;
+            self.shell.mismatches = 0;
+            self.shell.refused = None;
+            tracing::info!("the shell is connected");
+            self.feed_shell();
+        } else {
+            link.greeting = Greeting::Refused;
+            self.shell_mismatched(theirs);
+        }
+    }
+
+    /// The shell that connected speaks another version of the line. The
+    /// first time, it is started again from the installed program (a
+    /// program given for this session is let go of; an upgrade may have
+    /// just put the right one in place). If that one mismatches too, the
+    /// session runs without a shell, its bars' space kept: the log and
+    /// `hocus msg shell status` say so (a notification is the shell's to
+    /// draw).
+    fn shell_mismatched(&mut self, theirs: Option<u32>) {
+        let ours = hocus_link::VERSION;
+        self.shell.mismatches += 1;
+        let Phase::Running { run, program, .. } = &self.shell.phase else {
+            // Not a shell this compositor started, or one already asked to
+            // end: it is told nothing, and nothing more is done.
+            tracing::warn!(shell = ?theirs, compositor = ours, "a shell of another version of the line: not fed");
+            return;
+        };
+        let (run, program) = (*run, program.clone());
+        if self.shell.mismatches > 1 || self.shell_restartable().is_err() {
+            tracing::error!(
+                shell = ?theirs,
+                compositor = ours,
+                program = %program.display(),
+                "the shell still speaks another version of the line: the session runs without a shell"
+            );
+            self.shell.refused = Some(theirs);
+            self.shell.phase = Phase::Refused { run };
+            self.end_shell_run(run);
+            return;
+        }
+        tracing::warn!(
+            shell = ?theirs,
+            compositor = ours,
+            program = %program.display(),
+            "the shell speaks another version of the line: not fed, started again from the installed program"
+        );
+        if self.shell.given.mismatched(&program) {
+            self.fell_back(
+                hocus_agents::Supervised::Shell,
+                program,
+                crate::given::Why::OtherVersion,
+            );
+        }
+        self.shell.phase = Phase::Ending { run };
+        self.end_shell_run(run);
+    }
+
+    /// What a shell is told as it connects: how bars and their clock
+    /// look, where bars are, the other screens, the keyboard's layouts and
+    /// the bars' screens' desktops.
+    fn feed_shell(&mut self) {
         self.tell_shell(self.bar_look());
         self.wallpaper_accent_now();
         self.tell_shell(ToShell::Theme(self.theme_choice()));
@@ -871,9 +999,10 @@ impl State {
         }
     }
 
-    /// Whether the shell is connected.
+    /// Whether the shell is connected, and speaks this compositor's
+    /// version of the line: it is told, and heard.
     pub fn shell_linked(&self) -> bool {
-        self.shell.link.is_some()
+        matches!(&self.shell.link, Some(link) if link.greeting == Greeting::Done)
     }
 
     /// How bars look now.
@@ -889,7 +1018,7 @@ impl State {
     /// is not reduced (high contrast reduces it too, #423), and the shell
     /// draws on a GPU.
     pub fn glass_on(&self) -> bool {
-        self.blur
+        self.graphics.blur
             && !self.config.appearance.reduce_transparency
             && !self.config.appearance.high_contrast
             && !self.shell.software
@@ -898,7 +1027,7 @@ impl State {
     /// `hocus msg a11y`: the shell is asked what it shows for screen
     /// readers; `reply` hears it once the shell said it all (or went).
     pub(crate) fn ask_a11y(&mut self, reply: std::sync::mpsc::Sender<String>) {
-        if self.shell.link.is_none() {
+        if !self.shell_linked() {
             let _ = reply.send("no shell\n".to_owned());
             return;
         }
@@ -922,13 +1051,25 @@ impl State {
     /// Tells the shell, if it is there; a shell that does not read loses
     /// its connection rather than holding the loop.
     pub fn tell_shell(&mut self, message: ToShell) {
-        self.tell_shell_line(message.to_string());
+        // Not made for a shell that is not there: the desktops' go at
+        // every frame they change.
+        if self.shell_linked() {
+            self.write_shell(message.line());
+        }
     }
 
-    /// Tells the shell a line made already (off the loop: a clipboard's
-    /// copy, 5.6). What the socket does not take at once is written as it
+    /// Tells the shell a message's line made already (off the loop: a
+    /// clipboard's copy, 5.6), if it is there.
+    pub fn tell_shell_line(&mut self, line: String) {
+        if self.shell_linked() {
+            self.write_shell(line);
+        }
+    }
+
+    /// Writes a line on the shell's connection, its hello's answer
+    /// included. What the socket does not take at once is written as it
     /// takes more, never waited for.
-    pub fn tell_shell_line(&mut self, mut line: String) {
+    fn write_shell(&mut self, mut line: String) {
         let Some(link) = &mut self.shell.link else {
             return;
         };
@@ -953,7 +1094,8 @@ impl State {
         if written == line.len() {
             return;
         }
-        link.unsent.extend_from_slice(&line.as_bytes()[written..]);
+        link.unsent
+            .extend_from_slice(line.as_bytes().get(written..).unwrap_or_default());
         let flushing = link.writer.try_clone().map(|writer| {
             self.loop_handle.insert_source(
                 Generic::new(writer, Interest::WRITE, Mode::Level),
@@ -1028,7 +1170,7 @@ fn hand_socket(command: &mut std::process::Command, socket: &UnixStream) {
 fn write_some(writer: &UnixStream, bytes: &[u8]) -> std::io::Result<usize> {
     let mut written = 0;
     while written < bytes.len() {
-        match (&*writer).write(&bytes[written..]) {
+        match (&*writer).write(bytes.get(written..).unwrap_or_default()) {
             Ok(0) => return Err(ErrorKind::WriteZero.into()),
             Ok(n) => written += n,
             Err(err) if err.kind() == ErrorKind::WouldBlock => break,

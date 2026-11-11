@@ -342,8 +342,7 @@ impl Bed {
             .status()
             .is_ok_and(|s| s.success());
         if !daemon {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let root = dir.path();
@@ -1142,4 +1141,42 @@ fn an_application_hidden_in_the_tray_opens_its_window_focused() -> anyhow::Resul
     assert!(common::rect_of(&scene.bed.hp, APP).is_none());
     scene.click()?;
     scene.forward()
+}
+
+/// Its menu in its main state, shot under `HOCUS_KIT_SHOTS` (#772's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FormChoice::Full)? else {
+        return Ok(());
+    };
+    let _item = bed.item("Active", pixmap(MAGENTA, None))?;
+    let tray = bed.tray()?;
+    bed.over_icon(tray)?;
+    let from = bed.plain().len();
+    bed.press(BTN_RIGHT);
+    bed.logged_after(from, "the tray's menu shows it")?;
+    common::popover_shot(&mut bed.hp, "tray")
+}
+
+/// The tray's icons at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FormChoice::Full)? else {
+        return Ok(());
+    };
+    let _item = bed.item("Active", pixmap(MAGENTA, None))?;
+    let tray = bed.tray()?;
+    let (x, y) = bed.icon(tray);
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::TRAY_NAMESPACE, "tray"),
+        (f64::from(x), f64::from(y)),
+        "Tray(",
+    )
 }

@@ -1,0 +1,1476 @@
+//! The dialog on its surface, the 7.5 mockup's sizes (logical pixels): the
+//! asking application's tile with the system's padlock, its name over
+//! "Autorisation nécessaire"; polkit's message; the account (and the
+//! others to choose from); the password's field, the line under it; the
+//! details, folded; the requests waiting, Annuler and Autoriser. Its glass
+//! is drawn here; the compositor draws its shadow, the dim and its motion.
+//!
+//! On the widget kit (#772): Changer, the accounts, the field, Details and
+//! the buttons are the kit's controls, placed where the layout puts them,
+//! each drawing its look; the field is the shared one, masked. What
+//! nothing holds is drawn under them ([`Back`]).
+
+use std::time::Instant;
+
+use hocus_a11y::Role;
+use hocus_link::{AUTH_NAMESPACE, AUTH_RADIUS, AUTH_WIDTH};
+use iced::{
+    Color, Element, Font, Length, Point, Radians, Rectangle, Renderer, Size, Theme, Vector, mouse,
+    widget::{
+        Space, Stack, button,
+        canvas::{self, Frame, Geometry, Path, Stroke, gradient, path::arc::Elliptical},
+        pin,
+        text::Alignment,
+    },
+    window,
+};
+
+use super::{Auth, Dialog, Phase, Target, Words};
+use crate::theme::Ink;
+use crate::{
+    Message,
+    field::{
+        Entry, Took,
+        view::{Look, Style},
+    },
+    levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, stroke},
+    popover::{
+        Pressed,
+        kit::{self, MANROPE_SEMIBOLD},
+    },
+    surfaces::Lent,
+    ui::{
+        self, Around, control,
+        field::Field,
+        moved,
+        parts::{drawn_lit, drawn_out, moving_lit},
+        style,
+    },
+};
+
+type El<'a> = Element<'a, Msg>;
+
+const WIDTH: f32 = AUTH_WIDTH as f32;
+const RADIUS: f32 = AUTH_RADIUS as f32;
+const BORDER: f32 = 1.0;
+const PAD_TOP: f32 = 20.0;
+const PAD_SIDE: f32 = 20.0;
+const PAD_BOTTOM: f32 = 18.0;
+const LEFT: f32 = BORDER + PAD_SIDE;
+const RIGHT: f32 = WIDTH - BORDER - PAD_SIDE;
+/// The header: the 44 px tile (radius 12) and its 20 px badge 5 px past
+/// it, ringed 2 px; 12 px after it the application's name (13 px 600)
+/// over the title (17 px 700), 2 px apart.
+const TILE: f32 = 44.0;
+pub const ICON_PX: u32 = 32;
+const TILE_RADIUS: f32 = 12.0;
+const BADGE: f32 = 20.0;
+const BADGE_OUT: f32 = 5.0;
+const BADGE_RING: f32 = 2.0;
+const TILE_GAP: f32 = 12.0;
+const APP: f32 = 13.0;
+const TITLE: f32 = 17.0;
+const TITLE_GAP: f32 = 2.0;
+/// polkit's message, 14 px under: 14.5 px on 1.5 lines.
+const MESSAGE_GAP: f32 = 14.0;
+const MESSAGE: f32 = 14.5;
+const MESSAGE_LINE: f32 = 1.5;
+/// The account, 16 px under: a 40 px avatar (#649), 10 px before the
+/// name (14.5 px 700) over "administrateur" (12.5 px).
+const ACCOUNT_GAP: f32 = 16.0;
+const AVATAR: f32 = 40.0;
+const AVATAR_GAP: f32 = 10.0;
+const NAME: f32 = 14.5;
+const ROLE: f32 = 12.5;
+/// "Changer": 30 px, 10 px in, radius 8, 12.5 px 600, a 12 px chevron 6 px
+/// after it.
+const CHANGE: f32 = 30.0;
+const CHANGE_PAD: f32 = 10.0;
+const CHANGE_RADIUS: f32 = 8.0;
+const CHANGE_TEXT: f32 = 12.5;
+const CHEVRON: f32 = 12.0;
+const CHEVRON_GAP: f32 = 6.0;
+/// The accounts' list, 8 px under: 4 px in, radius 10, a 1 px rim; rows
+/// 34 px, radius 7, 10 px in, 13.5 px 600, a 14 px check.
+const LIST_GAP: f32 = 8.0;
+const LIST_PAD: f32 = 4.0;
+const LIST_RADIUS: f32 = 10.0;
+const PERSON: f32 = 34.0;
+const PERSON_RADIUS: f32 = 7.0;
+const PERSON_PAD: f32 = 10.0;
+const PERSON_TEXT: f32 = 13.5;
+const CHECK: f32 = 14.0;
+/// The field, 14 px under: 44 px, radius 12, 14 px in on the left, 10 on
+/// the right; a dot per character; Caps Lock's 22 px sign.
+const FIELD_GAP: f32 = 14.0;
+const FIELD: f32 = 44.0;
+const FIELD_RADIUS: f32 = 12.0;
+const FIELD_LEFT: f32 = 14.0;
+const FIELD_RIGHT: f32 = 10.0;
+const FIELD_TEXT: f32 = 16.0;
+const CAPS: f32 = 22.0;
+const CAPS_RADIUS: f32 = 6.0;
+/// The line under it, 6 px under: 13 px on 1.45 lines, 19 px kept.
+const NOTE_GAP: f32 = 6.0;
+const NOTE: f32 = 13.0;
+const NOTE_LINE: f32 = 1.45;
+const NOTE_ROOM: f32 = 19.0;
+/// "Détails", 2 px under, 6 px to the left: 28 px, 4 px in on the left and
+/// 8 on the right, its 14 px chevron 4 px before its word (13 px 600).
+const DETAILS_GAP: f32 = 2.0;
+const DETAILS: f32 = 28.0;
+const DETAILS_OUT: f32 = 6.0;
+const DETAILS_RADIUS: f32 = 7.0;
+const DETAILS_TEXT: f32 = 13.0;
+const DETAILS_CHEVRON: f32 = 14.0;
+/// The facts, 6 px under: 10 / 12 px in, radius 8, 6 px between them; the
+/// label 12 px in a 74 px column, 10 px before the value, Martian Mono
+/// 11 px on 1.5 lines.
+const FACTS_GAP: f32 = 6.0;
+const FACTS_PAD_Y: f32 = 10.0;
+const FACTS_PAD_X: f32 = 12.0;
+const FACTS_RADIUS: f32 = 8.0;
+const FACT_GAP: f32 = 6.0;
+const LABEL: f32 = 12.0;
+const LABEL_COLUMN: f32 = 74.0;
+const LABEL_GAP: f32 = 10.0;
+const VALUE: f32 = 11.0;
+const VALUE_LINE: f32 = 1.5;
+/// The footer, 16 px under: buttons 38 px, radius 10, 16 px in, 8 apart.
+const FOOTER_GAP: f32 = 16.0;
+const BUTTON: f32 = 38.0;
+const BUTTON_RADIUS: f32 = 10.0;
+const BUTTON_PAD: f32 = 16.0;
+const BUTTON_GAP: f32 = 8.0;
+const BUTTON_TEXT: f32 = 14.0;
+const WAITING: f32 = 12.5;
+const SPINNER: f32 = 14.0;
+/// The field's shake: 360 ms, 10, 9, 6, 4 px from side to side.
+const SHAKE_MS: f32 = 360.0;
+const TURN_MS: f32 = 150.0;
+
+const GLASS: (Ink, Ink) = (
+    Ink::Dark(Color::from_rgba8(22, 27, 42, 0.96)),
+    Ink::Dark(Color::from_rgba8(14, 17, 28, 0.97)),
+);
+const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
+const RIM: Ink = Ink::Rim(Color::from_rgba8(255, 255, 255, 0.10));
+const BADGE_FILL: Ink = Ink::Dark(rgb(0x0B1020));
+const BADGE_RING_COLOUR: Ink = Ink::Dark(rgb(0x161B2A));
+const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const LIST_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.04));
+const LIST_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const FIELD_ON: Ink = Ink::Accent(0.60);
+const FIELD_WRONG: Ink = Ink::Dark(rgb(0xF2945B));
+const FIELD_CHECKING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
+const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
+const AMBER_FILL: Ink = Ink::Dark(Color::from_rgba8(245, 196, 110, 0.16));
+const PEACH: Ink = Ink::Dark(rgb(0xF7B98A));
+const VALUE_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
+const INK: Ink = Ink::Dark(rgb(0x0B1020));
+const READY_OFF: Ink = Ink::Accent(0.18);
+const CHECKING_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const AVATAR_FROM: Ink = Ink::Accent(1.0);
+const AVATAR_TO: Ink = Ink::Dark(rgb(0x3E8FBF));
+const OTHER_FROM: Ink = Ink::Dark(rgb(0xC792EA));
+const OTHER_TO: Ink = Ink::Dark(rgb(0x6F9BFF));
+const GEAR_FROM: Ink = Ink::Dark(rgb(0x5C6576));
+const GEAR_TO: Ink = Ink::Dark(rgb(0x9AA3B4));
+const PANDA_DARK: Ink = Ink::Fixed(rgb(0x1D2230));
+const PANDA_LIGHT: Ink = Ink::Fixed(rgb(0xF2F4F7));
+
+const MARTIAN: Font = Font::with_name("Martian Mono");
+
+/// Who asks: the name and icon of the window's application, else of the
+/// program's desktop entry, else the program's name (and no icon).
+pub fn who(dialog: &Dialog) -> (String, Option<String>) {
+    let window = dialog
+        .at
+        .as_ref()
+        .map(|a| a.app.clone())
+        .unwrap_or_default();
+    if let Some(entry) = crate::share::entry_of(&window) {
+        return (entry.name, entry.icon);
+    }
+    let program = dialog
+        .request
+        .program
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    if let Some(entry) = crate::share::entry_of(&program) {
+        return (entry.name, entry.icon);
+    }
+    let name = crate::share::app_name(&window)
+        .or_else(|| (!program.is_empty()).then_some(program))
+        .unwrap_or_else(|| "polkit".to_owned());
+    (name, None)
+}
+
+/// A fact of the details: its label, its value's lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fact {
+    pub label: &'static str,
+    pub lines: Vec<String>,
+    pub top: f32,
+}
+
+/// Where the dialog's parts are, and its size.
+#[derive(Debug, Clone)]
+pub struct Layout {
+    pub height: f32,
+    pub tile: Rectangle,
+    pub app_at: Point,
+    pub title_at: Point,
+    pub app: String,
+    pub message: Vec<String>,
+    pub message_top: f32,
+    pub account: f32,
+    pub change: Option<Rectangle>,
+    pub people: Vec<Rectangle>,
+    pub list: Option<Rectangle>,
+    pub field: Rectangle,
+    pub note: Vec<String>,
+    pub note_colour: Color,
+    pub note_top: f32,
+    pub details: Rectangle,
+    pub facts_box: Option<Rectangle>,
+    pub facts: Vec<Fact>,
+    pub footer: f32,
+    pub waiting: String,
+    pub cancel: Rectangle,
+    pub authorize: Rectangle,
+}
+
+fn width(text: &str, size: f32, font: Font) -> f32 {
+    kit::measure(text, size, font)
+}
+
+/// `text` broken anywhere into lines that fit `room` in Martian Mono.
+fn broken(text: &str, room: f32) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for c in text.chars() {
+        let line = lines
+            .last_mut()
+            .map(|l| format!("{l}{c}"))
+            .unwrap_or_default();
+        if !line.is_empty()
+            && width(&line, VALUE, MARTIAN) > room
+            && lines.last().is_some_and(|l| !l.is_empty())
+        {
+            lines.push(c.to_string());
+        } else if let Some(last) = lines.last_mut() {
+            *last = line;
+        }
+    }
+    lines
+}
+
+impl Layout {
+    pub fn of(dialog: &Dialog, words: Words, waiting: usize, caps: bool) -> Self {
+        let room = RIGHT - LEFT;
+        let mut y = BORDER + PAD_TOP;
+        let tile = Rectangle::new(Point::new(LEFT, y), Size::new(TILE, TILE));
+        let words_x = LEFT + TILE + TILE_GAP;
+        let block = APP * LINE + TITLE_GAP + TITLE * LINE;
+        let block_top = y + (TILE - block) / 2.0;
+        let app_at = Point::new(words_x, block_top + APP * LINE / 2.0);
+        let title_at = Point::new(
+            words_x,
+            block_top + APP * LINE + TITLE_GAP + TITLE * LINE / 2.0,
+        );
+        let app = kit::elide(&who(dialog).0, RIGHT - words_x, |t| {
+            width(t, APP, MANROPE_SEMIBOLD)
+        });
+        y += TILE + MESSAGE_GAP;
+        let message = kit::wrap(dialog.request.message.trim(), room, |t| {
+            width(t, MESSAGE, MANROPE)
+        });
+        let message_top = y;
+        y += message.len() as f32 * MESSAGE * MESSAGE_LINE + ACCOUNT_GAP;
+        let account = y;
+        let change = dialog.several().then(|| {
+            let w = CHANGE_PAD
+                + width(words.change(), CHANGE_TEXT, MANROPE_SEMIBOLD)
+                + CHEVRON_GAP
+                + CHEVRON
+                + CHANGE_PAD;
+            Rectangle::new(
+                Point::new(RIGHT - w, y + (AVATAR - CHANGE) / 2.0),
+                Size::new(w, CHANGE),
+            )
+        });
+        y += AVATAR;
+        let mut people = Vec::new();
+        let mut list = None;
+        if dialog.several() && dialog.chooser {
+            y += LIST_GAP;
+            let n = dialog.request.accounts.len() as f32;
+            let rect = Rectangle::new(
+                Point::new(LEFT, y),
+                Size::new(room, 2.0 * BORDER + 2.0 * LIST_PAD + n * PERSON),
+            );
+            for i in 0..dialog.request.accounts.len() {
+                people.push(Rectangle::new(
+                    Point::new(
+                        LEFT + BORDER + LIST_PAD,
+                        y + BORDER + LIST_PAD + i as f32 * PERSON,
+                    ),
+                    Size::new(room - 2.0 * (BORDER + LIST_PAD), PERSON),
+                ));
+            }
+            y += rect.height;
+            list = Some(rect);
+        }
+        y += FIELD_GAP;
+        let field = Rectangle::new(Point::new(LEFT, y), Size::new(room, FIELD));
+        y += FIELD + NOTE_GAP;
+        let (note, note_colour) = note(dialog, words, caps);
+        let note = if note.is_empty() {
+            Vec::new()
+        } else {
+            kit::wrap(&note, room, |t| width(t, NOTE, MANROPE))
+        };
+        let note_top = y;
+        y += (note.len() as f32 * NOTE * NOTE_LINE).max(NOTE_ROOM) + DETAILS_GAP;
+        let details_w = 4.0
+            + DETAILS_CHEVRON
+            + 4.0
+            + width(words.details(), DETAILS_TEXT, MANROPE_SEMIBOLD)
+            + 8.0;
+        let details = Rectangle::new(
+            Point::new(LEFT - DETAILS_OUT, y),
+            Size::new(details_w, DETAILS),
+        );
+        y += DETAILS;
+        let mut facts = Vec::new();
+        let mut facts_box = None;
+        if dialog.details {
+            y += FACTS_GAP;
+            let top = y;
+            let value_room = room - 2.0 * FACTS_PAD_X - LABEL_COLUMN - LABEL_GAP;
+            let mut at = top + FACTS_PAD_Y;
+            for (label, value) in self::facts(dialog, words) {
+                let lines = broken(&value, value_room);
+                let h = (lines.len() as f32 * VALUE * VALUE_LINE).max(LABEL * LINE);
+                facts.push(Fact {
+                    label,
+                    lines,
+                    top: at,
+                });
+                at += h + FACT_GAP;
+            }
+            let bottom = at - FACT_GAP + FACTS_PAD_Y;
+            facts_box = Some(Rectangle::new(
+                Point::new(LEFT, top),
+                Size::new(room, bottom - top),
+            ));
+            y = bottom;
+        }
+        y += FOOTER_GAP;
+        let footer = y;
+        let authorize_w = BUTTON_PAD
+            + width(words.authorize(), BUTTON_TEXT, MANROPE_BOLD)
+            + BUTTON_PAD
+            + if dialog.phase == Phase::Checking {
+                SPINNER + 8.0
+            } else {
+                0.0
+            };
+        let authorize = Rectangle::new(
+            Point::new(RIGHT - authorize_w, y),
+            Size::new(authorize_w, BUTTON),
+        );
+        let cancel_w =
+            BUTTON_PAD + width(words.cancel(), BUTTON_TEXT, MANROPE_SEMIBOLD) + BUTTON_PAD;
+        let cancel = Rectangle::new(
+            Point::new(authorize.x - BUTTON_GAP - cancel_w, y),
+            Size::new(cancel_w, BUTTON),
+        );
+        y += BUTTON + PAD_BOTTOM + BORDER;
+        Self {
+            height: y,
+            tile,
+            app_at,
+            title_at,
+            app,
+            message,
+            message_top,
+            account,
+            change,
+            people,
+            list,
+            field,
+            note,
+            note_colour,
+            note_top,
+            details,
+            facts_box,
+            facts,
+            footer,
+            waiting: words.waiting(waiting),
+            cancel,
+            authorize,
+        }
+    }
+
+    /// The surface's size.
+    pub fn surface(&self) -> (u32, u32) {
+        (WIDTH as u32, self.height.ceil() as u32)
+    }
+}
+
+/// The line under the field, and its colour.
+fn note(dialog: &Dialog, words: Words, caps: bool) -> (String, Color) {
+    match (&dialog.said, dialog.phase) {
+        (Some((text, error)), _) => (text.clone(), if *error { PEACH.get() } else { DIM.get() }),
+        (None, Phase::Checking) => (words.checking().to_owned(), FAINT.get()),
+        (None, Phase::Typing) if dialog.wrong_note => (words.wrong(caps), PEACH.get()),
+        (None, Phase::Typing) if caps => (words.caps().to_owned(), AMBER.get()),
+        _ => (String::new(), FAINT.get()),
+    }
+}
+
+/// The details' facts, in order.
+fn facts(dialog: &Dialog, words: Words) -> Vec<(&'static str, String)> {
+    let window = dialog
+        .at
+        .as_ref()
+        .filter(|a| !a.app.is_empty())
+        .map(|a| {
+            if a.title.is_empty() {
+                a.app.clone()
+            } else {
+                a.title.clone()
+            }
+        })
+        .unwrap_or_else(|| words.none().to_owned());
+    vec![
+        (words.action(), dialog.request.action.clone()),
+        (
+            words.program(),
+            if dialog.request.program.is_empty() {
+                "?".to_owned()
+            } else {
+                dialog.request.program.clone()
+            },
+        ),
+        (
+            words.process(),
+            words.started(dialog.request.pid, dialog.request.started_by.as_deref()),
+        ),
+        (words.window(), window),
+    ]
+}
+
+// --- The surface, on the widget kit ------------------------------------------------
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A control acts: clicked, `Enter` or `Space` on it.
+    Act(Target),
+    /// The ring comes to a control.
+    Focus(Target),
+    /// What the field did with a key, a press or the input method.
+    Took(Took),
+    /// A key typed while the ring is elsewhere: the field's.
+    Type(Pressed),
+    Escape,
+    /// What it shows changed under the view.
+    Stale,
+}
+
+/// A control's id: what tests and screen readers know it by.
+fn id_of(target: Target) -> String {
+    format!("auth:{target:?}")
+}
+
+/// The dialog on its surface `id`, on the glass (else opaque); its field
+/// shakes and Details' chevron turns with `motion`.
+pub fn view<'a>(
+    auth: &'a Lent<Auth>,
+    id: window::Id,
+    words: Words,
+    glass: bool,
+    motion: bool,
+) -> Element<'a, Message> {
+    Around::new(
+        id,
+        build(auth, id, words, motion),
+        move |m| handle(auth, id, m),
+        Msg::Stale,
+    )
+    .own(AUTH_NAMESPACE, move || !closing(auth, id))
+    .rebuild(move || build(auth, id, words, motion))
+    .keys(move |pressed| keys(auth, id, pressed))
+    .on(iced::widget::canvas(Back {
+        auth,
+        id,
+        words,
+        glass,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill))
+}
+
+/// Whether surface `id` fades out: it takes nothing then.
+fn closing(auth: &Lent<Auth>, id: window::Id) -> bool {
+    auth.read(|a| a.closing(id)).unwrap_or(true)
+}
+
+/// The keys the dialog takes before the kit: `Escape`, and what is typed
+/// while the ring is not on the field (the field's, wherever the ring
+/// is). `Tab`, `Enter` and `Space` are the kit's.
+fn keys(auth: &Lent<Auth>, id: window::Id, pressed: &Pressed) -> Option<Msg> {
+    use iced::keyboard::{Key, key::Named};
+    match &pressed.key {
+        Key::Named(Named::Escape) => Some(Msg::Escape),
+        Key::Named(Named::Tab | Named::Enter | Named::Space) => None,
+        _ if auth.read(|a| a.types_elsewhere(id)) == Some(true) => Some(Msg::Type(pressed.clone())),
+        _ => None,
+    }
+}
+
+fn handle(auth: &Lent<Auth>, id: window::Id, message: Msg) {
+    let now = Instant::now();
+    let effects = auth.change(|a| match message {
+        Msg::Act(target) => a.act_on(id, target, now),
+        Msg::Focus(target) => {
+            a.focus_on(id, target);
+            Vec::new()
+        }
+        Msg::Took(took) => {
+            a.took(id, took);
+            Vec::new()
+        }
+        Msg::Type(pressed) => {
+            a.typed(id, &pressed);
+            Vec::new()
+        }
+        Msg::Escape => a.escape(id, now),
+        Msg::Stale => Vec::new(),
+    });
+    if let Some(effects) = effects.filter(|e| !e.is_empty()) {
+        crate::popover::send(effects);
+    }
+    // Closed: the loop's tick takes its surface away once faded out, and
+    // opens the next request.
+    if auth.change(Auth::due).flatten().is_some() {
+        crate::surfaces::ask(crate::surfaces::Asked::Auth(super::Come::Tick));
+    }
+}
+
+/// Its content, as the dialog is now; said in the log when it changed.
+fn build<'a>(auth: &'a Lent<Auth>, id: window::Id, words: Words, motion: bool) -> El<'a> {
+    let built = auth.read(|a| {
+        a.drawn(id, |dialog, caps, waiting| {
+            content(auth, dialog, caps, waiting, words, motion)
+        })
+    });
+    let Some(Some((content, said))) = built else {
+        return Space::new().into();
+    };
+    if !closing(auth, id) {
+        auth.change(|a| {
+            if a.said.as_ref() != Some(&said) {
+                tracing::debug!(?said, "the authentication dialog shows it");
+                a.said = Some(said);
+            }
+        });
+    }
+    content
+}
+
+/// `content` placed at `at`.
+fn at<'a>(content: impl Into<El<'a>>, at: Point) -> El<'a> {
+    pin(content).x(at.x).y(at.y).into()
+}
+
+/// A button `rect` large drawn by `draw` in the surface's frame (and
+/// whether the pointer is over it), doing `target`.
+fn pressed<'a>(
+    rect: Rectangle,
+    target: Target,
+    draw: impl Fn(&mut Frame, bool) + 'a,
+) -> button::Button<'a, Msg> {
+    button(drawn_lit(rect.width, rect.height, 0.0, move |f, _, lit| {
+        f.translate(Vector::new(-rect.x, -rect.y));
+        draw(f, lit);
+    }))
+    .padding(0)
+    .style(|_, _| style::clear())
+    .on_press(Msg::Act(target))
+}
+
+/// The dialog's controls where its layout places them, over what
+/// [`Back`] draws, in the keyboard's order; and what it says (never the
+/// password: its length only).
+pub(super) fn content<'a>(
+    auth: &'a Lent<Auth>,
+    dialog: &Dialog,
+    caps: bool,
+    waiting: usize,
+    w: Words,
+    motion: bool,
+) -> (El<'a>, Vec<String>) {
+    let layout = Layout::of(dialog, w, waiting, caps);
+    let mut said = Vec::new();
+    let mut all: Vec<El<'a>> = Vec::new();
+    let checking = dialog.phase == Phase::Checking;
+    let ring = |target: Target| dialog.focus == target;
+    said.push(w.name(&layout.app));
+    said.push(layout.message.join(" "));
+    let account = dialog.request.account();
+    if let Some(account) = account {
+        let x = LEFT + AVATAR + AVATAR_GAP;
+        let room = layout.change.map_or(RIGHT, |c| c.x - 8.0) - x;
+        said.push(kit::elide(&account.name, room, |t| {
+            width(t, NAME, MANROPE_BOLD)
+        }));
+        said.push(w.administrator().to_owned());
+    }
+    let name = account.map(|a| a.name.clone()).unwrap_or_default();
+    // Changer, and the accounts' list.
+    if let Some(change) = layout.change {
+        let chooser = dialog.chooser;
+        let button = pressed(change, Target::Change, move |f, lit| {
+            draw_change(f, change, w, chooser, lit && !checking);
+        });
+        all.push(at(
+            control(button, id_of(Target::Change), Role::Button, w.change())
+                .node(|n| n.describe(name.clone()))
+                .focus(
+                    ring(Target::Change),
+                    Msg::Focus(Target::Change),
+                    CHANGE_RADIUS,
+                )
+                .activate(Msg::Act(Target::Change)),
+            change.position(),
+        ));
+        said.push(format!("[{}]", w.change()));
+    }
+    let n = dialog.request.accounts.len();
+    for (i, (row, account)) in layout
+        .people
+        .iter()
+        .copied()
+        .zip(&dialog.request.accounts)
+        .enumerate()
+    {
+        let on = i == dialog.request.chosen;
+        let person = account.name.clone();
+        let button = pressed(row, Target::Account(i), move |f, lit| {
+            draw_person(f, row, &person, on, lit);
+        });
+        let target = Target::Account(i);
+        all.push(at(
+            control(
+                button,
+                id_of(target),
+                Role::RadioButton,
+                account.name.clone(),
+            )
+            .node(|node| node.checked(on).set(i + 1, n))
+            .focus(ring(target), Msg::Focus(target), PERSON_RADIUS)
+            .activate(Msg::Act(target)),
+            row.position(),
+        ));
+        said.push(format!(
+            "{}{}",
+            if on { "(x) " } else { "( ) " },
+            account.name
+        ));
+    }
+    // The field: its box and Caps Lock's sign drawn, the shared field over
+    // them, shaking together.
+    let field = layout.field;
+    let caps_shown = caps && dialog.phase == Phase::Typing;
+    let border = match dialog.phase {
+        Phase::Checking => FIELD_CHECKING,
+        Phase::Typing if dialog.wrong_note => FIELD_WRONG,
+        Phase::Typing => FIELD_ON,
+    };
+    // A pixel past its bounds: its rim on a half pixel is not cut.
+    let look = drawn_out(field.width, field.height, 1.0, move |f, _| {
+        f.translate(Vector::new(-field.x, -field.y));
+        draw_field_box(f, field, border.get(), caps_shown);
+    });
+    let typed = Field {
+        with: Box::new(move |with: &mut dyn FnMut(&mut Entry)| {
+            auth.change(|a| a.entry(with));
+        }),
+        style: Style {
+            hint: (FIELD_TEXT, MANROPE),
+            ..Style::one(FIELD_TEXT, MANROPE_BOLD)
+        },
+        placeholder: w.password().to_owned(),
+        look: Look::of(TEXT.get(), FAINT.get()),
+        focused: ring(Target::Field) && !checking,
+        left: FIELD_LEFT + 2.0,
+        right: FIELD_RIGHT + if caps_shown { CAPS + 6.0 } else { 0.0 },
+        on_focus: Msg::Focus(Target::Field),
+        on_took: Msg::Took,
+    }
+    .view(field.height);
+    let shake = dialog.shake.filter(|_| motion);
+    let shaken = moved(
+        Stack::with_children([look, typed])
+            .width(field.width)
+            .height(field.height),
+        move |now| {
+            let dx = shake.map_or(0.0, |s| {
+                shake_at(now.saturating_duration_since(s).as_secs_f32() * 1000.0)
+            });
+            Vector::new(dx, 0.0)
+        },
+        move |now| busy(shake, now, SHAKE_MS),
+    );
+    if caps_shown {
+        said.push("[caps]".to_owned());
+    }
+    let note = layout.note.join(" ");
+    all.push(at(
+        control(
+            shaken,
+            id_of(Target::Field),
+            Role::PasswordField,
+            w.password_of(&name),
+        )
+        .node(|n| n.describe(note.clone()).disabled(checking))
+        .focus(ring(Target::Field), Msg::Focus(Target::Field), FIELD_RADIUS)
+        .activate(Msg::Act(Target::Authorize))
+        .typing(),
+        field.position(),
+    ));
+    said.push(format!(
+        "{}: {}",
+        w.password_of(&name),
+        dialog.field.chars()
+    ));
+    if !layout.note.is_empty() {
+        said.push(note);
+    }
+    // Details, its chevron turning as it unfolds.
+    let details = layout.details;
+    let (open, turned) = (dialog.details, dialog.turned.filter(|_| motion));
+    let chevron = moving_lit(
+        details.width,
+        details.height,
+        move |f, _, now, lit| {
+            f.translate(Vector::new(-details.x, -details.y));
+            let turn = turned.map_or(1.0, |t| {
+                (now.saturating_duration_since(t).as_secs_f32() * 1000.0 / TURN_MS).clamp(0.0, 1.0)
+            });
+            draw_details(f, details, w, if open { turn } else { 1.0 - turn }, lit);
+        },
+        move |now| busy(turned, now, TURN_MS),
+    );
+    let button = button(chevron)
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(Target::Details));
+    all.push(at(
+        control(
+            button,
+            id_of(Target::Details),
+            Role::ToggleButton,
+            w.details(),
+        )
+        .node(|n| n.checked(open))
+        .focus(
+            ring(Target::Details),
+            Msg::Focus(Target::Details),
+            DETAILS_RADIUS,
+        )
+        .activate(Msg::Act(Target::Details)),
+        details.position(),
+    ));
+    said.push(format!(
+        "[{}{}]",
+        if open { "v " } else { "> " },
+        w.details()
+    ));
+    for fact in &layout.facts {
+        let value = fact.lines.concat();
+        let line = format!("{}: {value}", fact.label);
+        let height = (fact.lines.len() as f32 * VALUE * VALUE_LINE).max(LABEL * LINE);
+        all.push(at(
+            ui::line(
+                Space::new()
+                    .width(RIGHT - LEFT - 2.0 * FACTS_PAD_X)
+                    .height(height),
+                line.clone(),
+            ),
+            Point::new(LEFT + FACTS_PAD_X, fact.top),
+        ));
+        said.push(line);
+    }
+    // The footer.
+    let middle = layout.footer + BUTTON / 2.0;
+    if !layout.waiting.is_empty() {
+        let room = layout.cancel.x - LEFT;
+        all.push(at(
+            ui::line(
+                Space::new().width(room).height(BUTTON),
+                layout.waiting.clone(),
+            ),
+            Point::new(LEFT, layout.footer),
+        ));
+        said.push(layout.waiting.clone());
+    }
+    let cancel = layout.cancel;
+    let button = pressed(cancel, Target::Cancel, move |f, lit| {
+        draw_cancel(f, cancel, w, lit);
+    });
+    all.push(at(
+        control(button, id_of(Target::Cancel), Role::Button, w.cancel())
+            .focus(
+                ring(Target::Cancel),
+                Msg::Focus(Target::Cancel),
+                BUTTON_RADIUS,
+            )
+            .activate(Msg::Act(Target::Cancel)),
+        cancel.position(),
+    ));
+    let ready = !dialog.field.is_empty() && !checking;
+    let authorize = layout.authorize;
+    let button = pressed(authorize, Target::Authorize, move |f, _| {
+        draw_authorize(f, authorize, middle, w, checking, ready);
+    });
+    all.push(at(
+        control(
+            button,
+            id_of(Target::Authorize),
+            Role::Button,
+            w.authorize(),
+        )
+        .node(|n| n.disabled(checking))
+        .focus(
+            ring(Target::Authorize),
+            Msg::Focus(Target::Authorize),
+            BUTTON_RADIUS,
+        )
+        .activate(Msg::Act(Target::Authorize)),
+        authorize.position(),
+    ));
+    said.push(format!("[{}]", w.cancel()));
+    said.push(format!(
+        "[{}{}]",
+        w.authorize(),
+        if ready { "" } else { " (inert)" }
+    ));
+    let content = Stack::with_children(all)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
+    (content, said)
+}
+
+/// Whether what started at `since` still moves at `now`, `ms` long.
+fn busy(since: Option<Instant>, now: Instant, ms: f32) -> bool {
+    since.is_some_and(|s| now.saturating_duration_since(s).as_secs_f32() * 1000.0 < ms)
+}
+
+/// What the dialog draws under its controls, as it is when it draws: its
+/// glass (else opaque) and rim, who asks and why, the account, the
+/// accounts' list's box, the line under the field, the facts and the
+/// requests waiting. Nothing once it faded out.
+#[derive(Debug, Clone, Copy)]
+struct Back<'a> {
+    auth: &'a Lent<Auth>,
+    id: window::Id,
+    words: Words,
+    glass: bool,
+}
+
+impl<M> canvas::Program<M> for Back<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        self.auth.read(|a| {
+            a.drawn(self.id, |dialog, caps, waiting| {
+                draw_back(&mut frame, dialog, caps, waiting, self.words, self.glass);
+            })
+        });
+        vec![frame.into_geometry()]
+    }
+}
+
+/// The shake's offset `ms` into it: 10, 9, 6, 4 px from side to side, the
+/// mockup's keyframes, eased as `cubic-bezier(0.36,0.07,0.19,0.97)` is
+/// near enough (linear between them).
+fn shake_at(ms: f32) -> f32 {
+    const KEYS: [(f32, f32); 6] = [
+        (0.0, 0.0),
+        (0.15, -10.0),
+        (0.35, 9.0),
+        (0.55, -6.0),
+        (0.75, 4.0),
+        (1.0, 0.0),
+    ];
+    let t = (ms / SHAKE_MS).clamp(0.0, 1.0);
+    KEYS.windows(2).find(|w| t <= w[1].0).map_or(0.0, |w| {
+        let k = (t - w[0].0) / (w[1].0 - w[0].0);
+        w[0].1 + (w[1].1 - w[0].1) * k
+    })
+}
+
+fn fill_rounded(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color) {
+    f.fill(&kit::rounded(rect, radius), colour);
+}
+
+fn rim(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color, width: f32) {
+    let inset = Rectangle::new(
+        Point::new(rect.x + width / 2.0, rect.y + width / 2.0),
+        Size::new(rect.width - width, rect.height - width),
+    );
+    f.stroke(
+        &kit::rounded(inset, radius - width / 2.0),
+        Stroke::default().with_color(colour).with_width(width),
+    );
+}
+
+fn text(f: &mut Frame, content: &str, at: Point, size: f32, colour: Color, font: Font) {
+    f.fill_text(kit::text_in(
+        font,
+        kit::text(content.to_owned(), at, size, colour, Alignment::Left),
+    ));
+}
+
+fn centred(f: &mut Frame, content: &str, at: Point, size: f32, colour: Color, font: Font) {
+    f.fill_text(kit::text_in(
+        font,
+        kit::text(content.to_owned(), at, size, colour, Alignment::Center),
+    ));
+}
+
+/// A chevron in a `size` box at `at`, pointing right, turned by `turn`
+/// radians: `M9 6 L15 12 L9 18`.
+fn chevron(f: &mut Frame, at: Point, size: f32, turn: f32, colour: Color, width: f32) {
+    let k = size / 24.0;
+    let centre = Point::new(at.x + 12.0 * k, at.y + 12.0 * k);
+    let point = |x: f32, y: f32| {
+        let (dx, dy) = ((x - 12.0) * k, (y - 12.0) * k);
+        let (s, c) = turn.sin_cos();
+        Point::new(centre.x + dx * c - dy * s, centre.y + dx * s + dy * c)
+    };
+    let path = Path::new(|b| {
+        b.move_to(point(9.0, 6.0));
+        b.line_to(point(15.0, 12.0));
+        b.line_to(point(9.0, 18.0));
+    });
+    f.stroke(&path, stroke(width, colour));
+}
+
+/// The system's padlock in its badge: `M8 11 V8 A4 4 0 0 1 16 8 V11` over
+/// a 14 × 10 body, 12 px in a 20 px circle.
+fn badge(f: &mut Frame, tile: Rectangle) {
+    let centre = Point::new(
+        tile.x + tile.width + BADGE_OUT - BADGE / 2.0,
+        tile.y + tile.height + BADGE_OUT - BADGE / 2.0,
+    );
+    f.fill(
+        &Path::circle(centre, BADGE / 2.0 + BADGE_RING),
+        BADGE_RING_COLOUR.get(),
+    );
+    f.fill(&Path::circle(centre, BADGE / 2.0), BADGE_FILL.get());
+    let k = 12.0 / 24.0;
+    let o = Point::new(centre.x - 6.0, centre.y - 6.0);
+    let p = |x: f32, y: f32| Point::new(o.x + x * k, o.y + y * k);
+    f.fill(
+        &kit::rounded(
+            Rectangle::new(p(5.0, 11.0), Size::new(14.0 * k, 10.0 * k)),
+            2.5 * k,
+        ),
+        ACCENT.get(),
+    );
+    let shackle = Path::new(|b| {
+        b.move_to(p(8.0, 11.0));
+        b.line_to(p(8.0, 8.0));
+        b.arc(canvas::path::Arc {
+            center: p(12.0, 8.0),
+            radius: 4.0 * k,
+            start_angle: Radians(std::f32::consts::PI),
+            end_angle: Radians(std::f32::consts::TAU),
+        });
+        b.line_to(p(16.0, 11.0));
+    });
+    f.stroke(&shackle, stroke(2.6 * k, ACCENT.get()));
+}
+
+/// A generic gear: the tile's neutral gradient and a white cog.
+fn gear(f: &mut Frame, tile: Rectangle) {
+    let fill = gradient::Linear::new(
+        tile.position(),
+        Point::new(tile.x + tile.width, tile.y + tile.height),
+    )
+    .add_stop(0.0, GEAR_FROM.get())
+    .add_stop(1.0, GEAR_TO.get());
+    f.fill(&kit::rounded(tile, TILE_RADIUS), canvas::Fill::from(fill));
+    let c = tile.center();
+    let teeth = 8;
+    let cog = Path::new(|b| {
+        for i in 0..teeth * 2 {
+            let a = i as f32 * std::f32::consts::PI / teeth as f32;
+            let r = if i % 2 == 0 { 11.0 } else { 8.5 };
+            let at = |a: f32| Point::new(c.x + r * a.cos(), c.y + r * a.sin());
+            let half = std::f32::consts::PI / teeth as f32 / 2.0;
+            if i == 0 {
+                b.move_to(at(a - half));
+            } else {
+                b.line_to(at(a - half));
+            }
+            b.line_to(at(a + half));
+        }
+        b.close();
+    });
+    f.stroke(&cog, stroke(2.0, Color::WHITE));
+    f.stroke(&Path::circle(c, 3.6), stroke(2.0, Color::WHITE));
+}
+
+/// The avatar: the user's panda on the accent's gradient; another account
+/// its initial on its own.
+fn avatar(f: &mut Frame, centre: Point, panda: bool, name: &str) {
+    let r = AVATAR / 2.0;
+    let (from, to) = if panda {
+        (AVATAR_FROM, AVATAR_TO)
+    } else {
+        (OTHER_FROM, OTHER_TO)
+    };
+    let fill = gradient::Linear::new(
+        Point::new(centre.x - r, centre.y - r),
+        Point::new(centre.x + r, centre.y + r),
+    )
+    .add_stop(0.0, from.get())
+    .add_stop(1.0, to.get());
+    f.fill(&Path::circle(centre, r), canvas::Fill::from(fill));
+    if !panda {
+        centred(
+            f,
+            &crate::user::initial(name),
+            centre,
+            14.0,
+            INK.get(),
+            MANROPE_BOLD,
+        );
+        return;
+    }
+    // The mockup's panda, 24 px of a 32 px avatar, of a 30 px box.
+    let face = AVATAR * 24.0 / 32.0;
+    let k = face / 30.0;
+    let o = Point::new(centre.x - face / 2.0, centre.y - face / 2.0);
+    let p = |x: f32, y: f32| Point::new(o.x + x * k, o.y + y * k);
+    f.fill(&Path::circle(p(8.5, 8.5), 4.2 * k), PANDA_DARK.get());
+    f.fill(&Path::circle(p(21.5, 8.5), 4.2 * k), PANDA_DARK.get());
+    f.fill(&Path::circle(p(15.0, 16.5), 10.5 * k), PANDA_LIGHT.get());
+    for (x, turn) in [(10.8, -20.0_f32), (19.2, 20.0)] {
+        let eye = Path::new(|b| {
+            b.ellipse(Elliptical {
+                center: p(x, 16.0),
+                radii: iced::Vector::new(2.8 * k, 3.6 * k),
+                rotation: Radians(turn.to_radians()),
+                start_angle: Radians(0.0),
+                end_angle: Radians(std::f32::consts::TAU),
+            });
+        });
+        f.fill(&eye, PANDA_DARK.get());
+    }
+    f.fill(&Path::circle(p(11.3, 15.4), k), Color::WHITE);
+    f.fill(&Path::circle(p(18.7, 15.4), k), Color::WHITE);
+    let nose = Path::new(|b| {
+        b.ellipse(Elliptical {
+            center: p(15.0, 21.0),
+            radii: iced::Vector::new(1.6 * k, 1.1 * k),
+            rotation: Radians(0.0),
+            start_angle: Radians(0.0),
+            end_angle: Radians(std::f32::consts::TAU),
+        });
+    });
+    f.fill(&nose, PANDA_DARK.get());
+}
+
+/// Caps Lock's arrow: `M12 4 L20 12.5 H15.5 V17 H8.5 V12.5 H4 Z M8.5 20
+/// H15.5`, 14 px.
+fn caps_arrow(f: &mut Frame, at: Point) {
+    let k = 14.0 / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
+    let arrow = Path::new(|b| {
+        b.move_to(p(12.0, 4.0));
+        b.line_to(p(20.0, 12.5));
+        b.line_to(p(15.5, 12.5));
+        b.line_to(p(15.5, 17.0));
+        b.line_to(p(8.5, 17.0));
+        b.line_to(p(8.5, 12.5));
+        b.line_to(p(4.0, 12.5));
+        b.close();
+        b.move_to(p(8.5, 20.0));
+        b.line_to(p(15.5, 20.0));
+    });
+    f.stroke(&arrow, stroke(2.0, AMBER.get()));
+}
+
+/// A check: `M5 12.5 L10 17.5 L19 7.5`.
+fn check(f: &mut Frame, at: Point) {
+    let k = CHECK / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
+    let path = Path::new(|b| {
+        b.move_to(p(5.0, 12.5));
+        b.line_to(p(10.0, 17.5));
+        b.line_to(p(19.0, 7.5));
+    });
+    f.stroke(&path, stroke(2.6, ACCENT.get()));
+}
+
+/// What [`Back`] draws, in the surface's frame.
+fn draw_back(f: &mut Frame, dialog: &Dialog, caps: bool, waiting: usize, w: Words, glass: bool) {
+    let layout = Layout::of(dialog, w, waiting, caps);
+    let size = f.size();
+    let (top, bottom) = if glass { GLASS } else { OPAQUE };
+    let (top, bottom) = (top.get(), bottom.get());
+    let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
+        .add_stop(0.0, top)
+        .add_stop(1.0, bottom);
+    f.fill(
+        &Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into()),
+        canvas::Fill::from(tint),
+    );
+    rim(
+        f,
+        Rectangle::new(Point::ORIGIN, size),
+        RADIUS,
+        RIM.get(),
+        BORDER,
+    );
+    // The header.
+    let (_, icon) = who(dialog);
+    let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
+    let px = crate::launcher::icons::pixels(ICON_PX, scale);
+    match icon.and_then(|name| crate::launcher::icons::of(&name, px).flatten()) {
+        Some(handle) => {
+            fill_rounded(f, layout.tile, TILE_RADIUS, FILL.get());
+            let inset = (TILE - ICON_PX as f32) / 2.0;
+            let rect = Rectangle::new(
+                Point::new(layout.tile.x + inset, layout.tile.y + inset),
+                Size::new(ICON_PX as f32, ICON_PX as f32),
+            );
+            f.draw_image(rect, canvas::Image::new(handle));
+        }
+        None => gear(f, layout.tile),
+    }
+    badge(f, layout.tile);
+    text(
+        f,
+        &layout.app,
+        layout.app_at,
+        APP,
+        DIM.get(),
+        MANROPE_SEMIBOLD,
+    );
+    text(
+        f,
+        w.title(),
+        layout.title_at,
+        TITLE,
+        TEXT.get(),
+        MANROPE_BOLD,
+    );
+    // The message.
+    for (i, line) in layout.message.iter().enumerate() {
+        let middle = layout.message_top + (i as f32 + 0.5) * MESSAGE * MESSAGE_LINE;
+        f.fill_text(canvas::Text {
+            line_height: iced::widget::text::LineHeight::Relative(MESSAGE_LINE),
+            ..kit::text(
+                line.clone(),
+                Point::new(LEFT, middle),
+                MESSAGE,
+                TEXT.get(),
+                Alignment::Left,
+            )
+        });
+    }
+    // The account.
+    let me = rustix::process::getuid().as_raw();
+    if let Some(account) = dialog.request.account() {
+        let centre = Point::new(LEFT + AVATAR / 2.0, layout.account + AVATAR / 2.0);
+        avatar(f, centre, account.uid == me, &account.name);
+        let x = LEFT + AVATAR + AVATAR_GAP;
+        let room = layout.change.map_or(RIGHT, |c| c.x - 8.0) - x;
+        let name = kit::elide(&account.name, room, |t| width(t, NAME, MANROPE_BOLD));
+        let block = NAME * LINE + ROLE * LINE;
+        let top = layout.account + (AVATAR - block) / 2.0;
+        text(
+            f,
+            &name,
+            Point::new(x, top + NAME * LINE / 2.0),
+            NAME,
+            TEXT.get(),
+            MANROPE_BOLD,
+        );
+        text(
+            f,
+            w.administrator(),
+            Point::new(x, top + NAME * LINE + ROLE * LINE / 2.0),
+            ROLE,
+            FAINT.get(),
+            MANROPE,
+        );
+    }
+    if let Some(list) = layout.list {
+        fill_rounded(f, list, LIST_RADIUS, LIST_FILL.get());
+        rim(f, list, LIST_RADIUS, LIST_RIM.get(), BORDER);
+    }
+    // The line under the field.
+    for (i, line) in layout.note.iter().enumerate() {
+        let middle = layout.note_top + (i as f32 + 0.5) * NOTE * NOTE_LINE;
+        f.fill_text(canvas::Text {
+            line_height: iced::widget::text::LineHeight::Relative(NOTE_LINE),
+            ..kit::text(
+                line.clone(),
+                Point::new(LEFT, middle),
+                NOTE,
+                layout.note_colour,
+                Alignment::Left,
+            )
+        });
+    }
+    // The facts.
+    if let Some(rect) = layout.facts_box {
+        fill_rounded(f, rect, FACTS_RADIUS, LIST_FILL.get());
+        for fact in &layout.facts {
+            text(
+                f,
+                fact.label,
+                Point::new(LEFT + FACTS_PAD_X, fact.top + VALUE * VALUE_LINE / 2.0),
+                LABEL,
+                FAINT.get(),
+                MANROPE,
+            );
+            for (i, line) in fact.lines.iter().enumerate() {
+                let middle = fact.top + (i as f32 + 0.5) * VALUE * VALUE_LINE;
+                f.fill_text(canvas::Text {
+                    line_height: iced::widget::text::LineHeight::Relative(VALUE_LINE),
+                    ..kit::text_in(
+                        MARTIAN,
+                        kit::text(
+                            line.clone(),
+                            Point::new(LEFT + FACTS_PAD_X + LABEL_COLUMN + LABEL_GAP, middle),
+                            VALUE,
+                            VALUE_INK.get(),
+                            Alignment::Left,
+                        ),
+                    )
+                });
+            }
+        }
+    }
+    // The requests waiting.
+    if !layout.waiting.is_empty() {
+        text(
+            f,
+            &layout.waiting,
+            Point::new(LEFT, layout.footer + BUTTON / 2.0),
+            WAITING,
+            FAINT.get(),
+            MANROPE,
+        );
+    }
+}
+
+/// "Changer" at `change`, its chevron down (up while the list is open).
+fn draw_change(f: &mut Frame, change: Rectangle, w: Words, chooser: bool, lit: bool) {
+    fill_rounded(
+        f,
+        change,
+        CHANGE_RADIUS,
+        if lit { HOVER.get() } else { FILL.get() },
+    );
+    text(
+        f,
+        w.change(),
+        Point::new(change.x + CHANGE_PAD, change.center_y()),
+        CHANGE_TEXT,
+        DIM.get(),
+        MANROPE_SEMIBOLD,
+    );
+    chevron(
+        f,
+        Point::new(
+            change.x + change.width - CHANGE_PAD - CHEVRON,
+            change.center_y() - CHEVRON / 2.0,
+        ),
+        CHEVRON,
+        if chooser {
+            -std::f32::consts::FRAC_PI_2
+        } else {
+            std::f32::consts::FRAC_PI_2
+        },
+        DIM.get(),
+        2.2,
+    );
+}
+
+/// An account's row of the list at `row`, checked when `on`.
+fn draw_person(f: &mut Frame, row: Rectangle, name: &str, on: bool, lit: bool) {
+    if on || lit {
+        fill_rounded(
+            f,
+            row,
+            PERSON_RADIUS,
+            if lit { HOVER.get() } else { FILL.get() },
+        );
+    }
+    text(
+        f,
+        name,
+        Point::new(row.x + PERSON_PAD, row.center_y()),
+        PERSON_TEXT,
+        TEXT.get(),
+        MANROPE_SEMIBOLD,
+    );
+    if on {
+        check(
+            f,
+            Point::new(
+                row.x + row.width - PERSON_PAD - CHECK,
+                row.center_y() - CHECK / 2.0,
+            ),
+        );
+    }
+}
+
+/// The field's box at `field`, its rim `border`, and Caps Lock's sign.
+fn draw_field_box(f: &mut Frame, field: Rectangle, border: Color, caps: bool) {
+    fill_rounded(f, field, FIELD_RADIUS, FIELD_FILL.get());
+    rim(f, field, FIELD_RADIUS, border, BORDER);
+    if caps {
+        let sign = Rectangle::new(
+            Point::new(
+                field.x + field.width - FIELD_RIGHT - CAPS,
+                field.center_y() - CAPS / 2.0,
+            ),
+            Size::new(CAPS, CAPS),
+        );
+        fill_rounded(f, sign, CAPS_RADIUS, AMBER_FILL.get());
+        caps_arrow(f, Point::new(sign.x + 4.0, sign.y + 4.0));
+    }
+}
+
+/// "Détails" at `details`, its chevron turned by `turn` (0 right, 1
+/// down).
+fn draw_details(f: &mut Frame, details: Rectangle, w: Words, turn: f32, lit: bool) {
+    if lit {
+        fill_rounded(f, details, DETAILS_RADIUS, FILL.get());
+    }
+    chevron(
+        f,
+        Point::new(details.x + 4.0, details.center_y() - DETAILS_CHEVRON / 2.0),
+        DETAILS_CHEVRON,
+        turn * std::f32::consts::FRAC_PI_2,
+        DIM.get(),
+        2.4,
+    );
+    text(
+        f,
+        w.details(),
+        Point::new(details.x + 4.0 + DETAILS_CHEVRON + 4.0, details.center_y()),
+        DETAILS_TEXT,
+        DIM.get(),
+        MANROPE_SEMIBOLD,
+    );
+}
+
+/// Annuler at `cancel`.
+fn draw_cancel(f: &mut Frame, cancel: Rectangle, w: Words, lit: bool) {
+    fill_rounded(
+        f,
+        cancel,
+        BUTTON_RADIUS,
+        if lit { HOVER.get() } else { FILL.get() },
+    );
+    centred(
+        f,
+        w.cancel(),
+        cancel.center(),
+        BUTTON_TEXT,
+        TEXT.get(),
+        MANROPE_SEMIBOLD,
+    );
+}
+
+/// Autoriser at `authorize`, its words' middle at `middle`: the accent
+/// when a password is typed, faint before, a spinner while it is checked.
+fn draw_authorize(
+    f: &mut Frame,
+    authorize: Rectangle,
+    middle: f32,
+    w: Words,
+    checking: bool,
+    ready: bool,
+) {
+    let (fill, ink) = if checking {
+        (CHECKING_FILL, TEXT)
+    } else if ready {
+        (ACCENT, INK)
+    } else {
+        (READY_OFF, FAINT)
+    };
+    fill_rounded(f, authorize, BUTTON_RADIUS, fill.get());
+    let mut word_x = authorize.x + BUTTON_PAD;
+    if checking {
+        let c = Point::new(word_x + SPINNER / 2.0, middle);
+        f.stroke(
+            &Path::circle(c, SPINNER / 2.0 - 1.0),
+            stroke(
+                2.0,
+                Color {
+                    a: 0.22,
+                    ..TEXT.get()
+                },
+            ),
+        );
+        let arc = Path::new(|b| {
+            b.arc(canvas::path::Arc {
+                center: c,
+                radius: SPINNER / 2.0 - 1.0,
+                start_angle: Radians(-std::f32::consts::FRAC_PI_2),
+                end_angle: Radians(0.0),
+            });
+        });
+        f.stroke(&arc, stroke(2.0, TEXT.get()));
+        word_x += SPINNER + 8.0;
+    }
+    text(
+        f,
+        w.authorize(),
+        Point::new(word_x, middle),
+        BUTTON_TEXT,
+        ink.get(),
+        MANROPE_BOLD,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_shake_goes_side_to_side_and_back() {
+        assert_eq!(shake_at(0.0), 0.0);
+        assert!((shake_at(0.15 * SHAKE_MS) + 10.0).abs() < 1e-3);
+        assert!((shake_at(0.35 * SHAKE_MS) - 9.0).abs() < 1e-3);
+        assert_eq!(shake_at(SHAKE_MS), 0.0);
+        assert_eq!(shake_at(2.0 * SHAKE_MS), 0.0);
+    }
+}

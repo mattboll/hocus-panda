@@ -11,6 +11,7 @@
 //! (`data/zones/zones.tsv`, made by `scripts/zones/generate.py`); their
 //! offsets and changes are computed with jiff from the system's tzdata.
 
+use hocus_words::settings::time as words;
 use std::sync::OnceLock;
 
 use jiff::{
@@ -20,13 +21,13 @@ use jiff::{
 };
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Outside, SectionId},
 };
 
-const TIME: Words = w("HEURE", "TIME");
-const ZONE_GROUP: Words = w("FUSEAU HORAIRE", "TIME ZONE");
-const FORMAT_GROUP: Words = w("FORMAT", "FORMAT");
+const TIME: Words = words::TIME;
+const ZONE_GROUP: Words = words::TIME_ZONE;
+const FORMAT_GROUP: Words = words::FORMAT;
 
 /// The rows, by their search ids.
 pub const AUTO: &str = "time.auto";
@@ -58,31 +59,28 @@ pub fn outside() -> &'static [Outside] {
         o(
             AUTO,
             TIME,
-            w(
-                "Mettre à l’heure automatiquement",
-                "Set the time automatically",
-            ),
+            words::SET_THE_TIME_AUTOMATICALLY,
             &["ntp", "synchroniser", "internet"],
             &["automatic time", "sync", "ntp"],
         ),
         o(
             SET,
             TIME,
-            w("Date et heure", "Date and time"),
+            words::DATE_AND_TIME,
             &["régler", "changer l’heure"],
             &["set time", "clock"],
         ),
         o(
             ZONE,
             ZONE_GROUP,
-            w("Fuseau horaire", "Time zone"),
+            words::TIME_ZONE_2,
             &["pays", "ville", "utc", "gmt", "décalage"],
             &["time zone", "timezone", "offset"],
         ),
         o(
             FORMAT,
             FORMAT_GROUP,
-            w("Format de l’heure", "Time format"),
+            words::TIME_FORMAT,
             &["12 h", "24 h", "am", "pm", "format de la date"],
             &["time format", "date format"],
         ),
@@ -105,9 +103,12 @@ pub struct City {
 
 impl City {
     pub fn name(&self, lang: Lang) -> &'static str {
-        match lang {
-            Lang::French => self.fr,
-            Lang::English => self.en,
+        // Cities are named in French and English; other languages take
+        // the English name, as the time zone database writes it.
+        if lang == Lang::French {
+            self.fr
+        } else {
+            self.en
         }
     }
 
@@ -160,7 +161,9 @@ pub fn country_name(code: &str, lang: Lang) -> Option<&'static str> {
         .countries
         .iter()
         .find(|(c, _, _)| *c == code)
-        .map(|(_, fr, en)| if lang.fr() { *fr } else { *en })
+        // Countries are named in French and English; other languages take
+        // the English name.
+        .map(|(_, fr, en)| if lang == Lang::French { *fr } else { *en })
 }
 
 /// The zone's own city (`Europe/Paris`: Paris).
@@ -194,44 +197,22 @@ pub fn say_date(date: Date, lang: Lang) -> String {
 
 /// "28 mars", "28 March": a day of the coming year.
 fn say_day(date: Date, lang: Lang) -> String {
-    const MONTHS_FR: [&str; 12] = [
-        "janvier",
-        "février",
-        "mars",
-        "avril",
-        "mai",
-        "juin",
-        "juillet",
-        "août",
-        "septembre",
-        "octobre",
-        "novembre",
-        "décembre",
-    ];
-    const MONTHS_EN: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
     let month = usize::from(date.month().unsigned_abs().clamp(1, 12)) - 1;
-    let name = if lang.fr() {
-        MONTHS_FR[month]
+    let month = hocus_words::date::MONTHS
+        .get(lang)
+        .get(month)
+        .copied()
+        .unwrap_or_default();
+    if date.day() == 1 {
+        words::first_of_month(lang, month)
     } else {
-        MONTHS_EN[month]
-    };
-    if lang.fr() && date.day() == 1 {
-        format!("1er {name}")
-    } else {
-        format!("{} {name}", date.day())
+        words::day_of_month(
+            lang,
+            words::DayOfMonth {
+                day: date.day(),
+                month,
+            },
+        )
     }
 }
 
@@ -245,9 +226,7 @@ pub fn next_change(tz: &TimeZone, now: Timestamp, lang: Lang) -> String {
         .find(|t| t.offset() != offset)
         .map(|t| t.timestamp());
     let Some(at) = next else {
-        return w("pas de changement d’heure", "no clock change")
-            .get(lang)
-            .to_owned();
+        return words::NO_CLOCK_CHANGE.get(lang).to_owned();
     };
     let dst = tz.to_offset_info(now).dst() == Dst::Yes;
     // The day the change happens there; the year said only when it is
@@ -257,11 +236,9 @@ pub fn next_change(tz: &TimeZone, now: Timestamp, lang: Lang) -> String {
     if at.duration_since(now).as_secs() > 365 * 86_400 {
         said = format!("{said} {}", day.year());
     }
-    match (lang, dst) {
-        (Lang::French, false) => format!("heure d’hiver jusqu’au {said}"),
-        (Lang::French, true) => format!("heure d’été jusqu’au {said}"),
-        (Lang::English, false) => format!("standard time until {said}"),
-        (Lang::English, true) => format!("summer time until {said}"),
+    match dst {
+        false => words::standard_time_until(lang, &said),
+        true => words::summer_time_until(lang, &said),
     }
 }
 

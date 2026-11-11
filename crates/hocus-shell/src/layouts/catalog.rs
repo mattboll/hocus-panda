@@ -21,10 +21,11 @@ const DOMAINS: [&str; 2] = ["xkeyboard-config-2", "xkeyboard-config"];
 /// The catalog for `lang`, if one is installed; none for English, XKB's
 /// own. Reads a file: off the loop.
 pub fn read(lang: Lang) -> Option<Vec<u8>> {
-    let code = match lang {
-        Lang::French => "fr",
-        Lang::English => return None,
-    };
+    // XKB's names are English; another language's are its catalog's.
+    if lang == Lang::English {
+        return None;
+    }
+    let code = lang.code();
     let dir = std::env::var_os(DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/usr/share/locale"));

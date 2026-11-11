@@ -4,6 +4,7 @@
 //! keys pressed (6.8).
 
 use crate::lang::Lang;
+use hocus_words::settings::keys as words;
 
 /// A chord: its modifiers and its key, the key's XKB name as written.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,13 +67,12 @@ impl Chord {
 
     /// Its keycaps as the window shows them, in `lang`.
     pub fn caps(&self, lang: Lang) -> Vec<String> {
-        let fr = lang.fr();
         let mut caps = Vec::new();
         for (held, name) in [
             (self.logo, "Super"),
             (self.ctrl, "Ctrl"),
             (self.alt, "Alt"),
-            (self.shift, if fr { "Maj" } else { "Shift" }),
+            (self.shift, words::SHIFT.get(lang)),
         ] {
             if held {
                 caps.push(name.to_owned());
@@ -118,30 +118,25 @@ pub fn shown(text: &str, lang: Lang) -> String {
 
 /// A key's XKB name as the window shows it.
 pub fn key_shown(key: &str, lang: Lang) -> String {
-    let fr = lang.fr();
     let named = match key.to_ascii_lowercase().as_str() {
-        "return" => Some(if fr { "Entrée" } else { "Enter" }),
-        "space" => Some(if fr { "Espace" } else { "Space" }),
+        "return" => Some(words::ENTER.get(lang)),
+        "space" => Some(words::SPACE.get(lang)),
         "left" => Some("←"),
         "right" => Some("→"),
         "up" => Some("↑"),
         "down" => Some("↓"),
-        "print" => Some(if fr { "Impr. écran" } else { "Print Screen" }),
+        "print" => Some(words::PRINT_SCREEN.get(lang)),
         "period" => Some("."),
         "comma" => Some(","),
         "tab" => Some("Tab"),
-        "escape" => Some(if fr { "Échap" } else { "Esc" }),
-        "backspace" => Some(if fr { "Retour arrière" } else { "Backspace" }),
-        "delete" => Some(if fr { "Suppr" } else { "Delete" }),
+        "escape" => Some(words::ESC.get(lang)),
+        "backspace" => Some(words::BACKSPACE.get(lang)),
+        "delete" => Some(words::DELETE.get(lang)),
         "xf86audioraisevolume" => Some("Volume +"),
         "xf86audiolowervolume" => Some("Volume −"),
-        "xf86audiomute" => Some(if fr { "Muet" } else { "Mute" }),
-        "xf86monbrightnessup" => Some(if fr { "Luminosité +" } else { "Brightness +" }),
-        "xf86monbrightnessdown" => Some(if fr {
-            "Luminosité −"
-        } else {
-            "Brightness −"
-        }),
+        "xf86audiomute" => Some(words::MUTE.get(lang)),
+        "xf86monbrightnessup" => Some(words::BRIGHTNESS.get(lang)),
+        "xf86monbrightnessdown" => Some(words::BRIGHTNESS_2.get(lang)),
         _ => None,
     };
     match named {

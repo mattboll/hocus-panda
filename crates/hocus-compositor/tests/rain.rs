@@ -315,10 +315,13 @@ fn a_rain_allocates_little_on_the_loop() -> anyhow::Result<()> {
         total(standard),
         total(rain)
     );
-    // Frame by frame, not their totals: either opening's frames take 7
-    // allocations more or fewer as the client's commits fall in them or
-    // not, which over 22 frames is as much as the rain's own. Its first
-    // two frames make its picture; then each as the standard's most.
+    // Frame by frame, not their totals: the standard's opening draws
+    // differently as it scales in, which over 22 frames is as much as the
+    // rain's own. A step's turns of the loop are the same on any machine
+    // (`Headless::step`): each turn more costs 7 allocations, and polled
+    // every 5 ms, a loaded machine (CI's) took a turn fewer than a fast one
+    // in frames of its own choosing. Its first two frames make its picture;
+    // then each as the standard's most.
     let first = |c: &[u64]| c[..2].iter().sum::<u64>();
     assert!(
         first(rain) <= first(standard) + 100,
@@ -333,7 +336,7 @@ fn a_rain_allocates_little_on_the_loop() -> anyhow::Result<()> {
     let rain = &costs[1];
     let early = rain[2..6].iter().max().copied().unwrap_or(0);
     let late = rain[16..20].iter().max().copied().unwrap_or(0);
-    assert!(late <= early + 2, "{rain:?}");
+    assert!(late <= early, "{rain:?}");
     Ok(())
 }
 
@@ -485,8 +488,7 @@ fn brighter_than_window_and_ice(shot: &(i32, i32, Vec<u8>), rect: Rect) -> usize
 fn the_pane_thaws_its_text_steady_from_200_ms_its_edges_never_wavering() -> anyhow::Result<()> {
     let mut hp = Headless::start_with(on(common::gles(), 1), frosting())?;
     if hp.renderer() != "gles" {
-        eprintln!("no GLES here: the pane does not thaw");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     common::at_rest(&mut hp)?;
     hp.hold_clock();

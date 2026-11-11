@@ -77,8 +77,7 @@ impl Bed {
     fn start_with_bus(text: &str, with_bus: bool) -> anyhow::Result<Option<Self>> {
         let (shell, settings) = (common::shell_program(), common::settings_program());
         if with_bus && !has("dbus-daemon") {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let root = dir.path();
@@ -160,7 +159,7 @@ impl Bed {
         config.keyboard.layouts = vec!["us".to_owned()];
         config.file = Some(file);
         config.home = Some(root.join("home"));
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         config.lock_auth = Authenticator::test("not a password");
         let mut hp = Headless::start_with_shell(
             HeadlessConfig {
@@ -673,7 +672,7 @@ fn at_rest_the_wallpaper_page_commits_nothing() -> anyhow::Result<()> {
         (
             hp.window_commits(),
             hp.bar_commits(),
-            hp.state().backgrounds.borrow().draws,
+            hp.state().graphics.backgrounds.borrow().draws,
         )
     };
     let before = counts(&bed.hp);

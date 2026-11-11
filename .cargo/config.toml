@@ -9,6 +9,12 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 # running beside them miss their frames. One already set wins.
 [env]
 LP_NUM_THREADS = { value = "1", force = false }
+# The tests' time zone and language, and those of every program they start
+# without naming its own: CI's, whatever the machine's are. A test that
+# read the machine's passed on one and failed on the other (#769). Tests
+# of another language give it to the program they start.
+TZ = { value = "UTC", force = true }
+LANG = { value = "C.UTF-8", force = true }
 
 # The programs the compositor's tests run, from beside the test's own: a
 # test binary does not build them, and a test fails when one is missing.

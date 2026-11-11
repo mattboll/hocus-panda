@@ -114,7 +114,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
         .name("wallpaper".to_owned())
         .spawn(move || draw(&taken, &sender));
     match started {
-        Ok(_) => state.backgrounds.get_mut().jobs = Some(jobs),
+        Ok(_) => state.graphics.backgrounds.get_mut().jobs = Some(jobs),
         Err(err) => tracing::warn!(%err, "no wallpaper thread: pictures are not drawn"),
     }
 }
@@ -260,7 +260,7 @@ impl State {
     pub fn theme_choice(&self) -> hocus_link::theme::Choice {
         self.config
             .appearance
-            .theme_choice(self.backgrounds.borrow().accent)
+            .theme_choice(self.graphics.backgrounds.borrow().accent)
     }
 
     /// The file's `[wallpaper]` and screens' wallpapers are now `new`'s:
@@ -309,7 +309,7 @@ impl State {
             rendered,
         } = drawn;
         let accent = {
-            let mut backgrounds = self.backgrounds.borrow_mut();
+            let mut backgrounds = self.graphics.backgrounds.borrow_mut();
             if backgrounds.asked.get(&output) != Some(&key) {
                 return;
             }
@@ -352,7 +352,7 @@ impl State {
     /// accent is the wallpaper's.
     fn wallpaper_accent(&mut self, accent: AccentColours) {
         let before = self.theme_choice();
-        self.backgrounds.get_mut().accent = accent;
+        self.graphics.backgrounds.get_mut().accent = accent;
         let now = self.theme_choice();
         if now != before {
             tracing::info!(accent = %now, "the wallpaper's accent changed");

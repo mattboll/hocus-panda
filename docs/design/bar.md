@@ -1531,7 +1531,8 @@ slots are not part of the product.
   closes and when dropped; its `Debug` says its length; it leaves the shell
   only in NetworkManager's D-Bus call. It is shown as dots unless the eye
   is pressed. The compositor logs no key, not even at trace.
-  Ctrl+Backspace clears the field. Paste came after (3.5b).
+  Ctrl+Backspace clears the field (a secret is one word). Paste came
+  after (3.5b).
 - **Popover**: its bottom on the bar's whatever its height (the mockup's),
   where the sound's top is on its item; it grows and shrinks as rows come,
   unfold and go. A hovered popover in the mini form whose row unfolds
@@ -1886,8 +1887,24 @@ What issue #465 changes under the five popovers, nothing on screen.
 The shell draws its own widgets on canvases, and each field was written
 by hand (typing and Backspace). One field, edited as everywhere, is now
 shared (`hocus-shell/src/field/`). Its first user, the secretary's
-drawer, was removed with her (2026-11-10): no surface uses it until the
-shell's other fields move to it (#771).
+drawer, was removed with her (2026-11-10). Every field of the shell is
+one since #771 (2026-11-11): the launcher's, the actions', the emoji
+picker's and the clipboard's searches, the task to add, the day's
+sources' address and token, the Wi-Fi's and the authentication's
+passwords (secrets), and the text typed into a capture. A surface takes
+its own keys first (Enter, Escape, Tab, the arrows of its list; in the
+launcher's and the emoji picker's grids the plain left and right arrows
+too, and Right into an action's step once the caret is at its field's
+end); the field takes the rest. So `Ctrl+Backspace` takes a word, not the
+field (a secret is one word).
+
+- **On a surface** (`field::Entry`): the model with what every surface
+  would do again around it: its keys, its copies and cuts sent to the
+  clipboard, the pointer's presses counted (a word, then it all; Shift
+  extends, with the modifiers the shell last heard), an input method's
+  events, and where it was last drawn, from which a press finds its
+  place. A paste is the surface's to ask (`paste::request`: on one line,
+  a secret's line breaks dropped) and comes in at the caret.
 
 - **The model** (`Field`): its text, its caret and the selection's anchor
   (byte offsets on character boundaries), what the pointer does (an enum:
@@ -1898,10 +1915,11 @@ shell's other fields move to it (#771).
   `release`), it says what came of it (`Outcome`: the same, moved,
   edited, to copy, cut, to paste); the surface reads and writes the
   clipboard.
-  Its kinds: `Lines` (a line break goes in) and `Secret` (one line,
-  masked, never copied nor cut out, no history, a word is its whole, its
-  room taken once and its text overwritten with zeros as it empties or
-  goes).
+  Its kinds: `Line` (one line: a line break pasted is a space), `Lines`
+  (a line break goes in; no surface has one now) and `Secret` (one line,
+  masked unless shown on purpose, never copied nor cut out, no history,
+  a word is its whole, its room taken once and its text overwritten with
+  zeros as it empties or goes; its `Debug` says its length only).
 - **Its keys** (`field::keys::act`): the arrows (Ctrl: by word), Home and
   End (Ctrl: the text's ends), Shift with them, Backspace and Delete
   (Ctrl: a word), `Ctrl+A`, `Ctrl+C`/`X`/`V`, `Ctrl+Insert`,
@@ -1916,12 +1934,188 @@ shell's other fields move to it (#771).
   selection colour (`theme::SELECTION`), the preedit underlined, the
   caret while it has the keyboard (still: nothing blinks at rest).
 - **An input method** (`field::ime::Asking`): a canvas cannot ask iced for
-  one, so a surface with a field wraps its widgets in `Asking`, which asks
-  at each redraw while a field there has the keyboard (text-input-v3
-  enabled, the caret's place, `Secure` for a secret). Its preedit and
-  commits come back to the canvas as iced's `InputMethod` events.
+  one, so every surface's widgets are wrapped in `Asking`, which hears a
+  field drawn with the keyboard and asks at each redraw from then on
+  (text-input-v3 enabled, the caret's place, `Secure` for a secret). Its
+  preedit and commits come back to the canvas as iced's `InputMethod`
+  events.
 - **Double and triple clicks** take the word and the line
   (`field::word_around`, `field::line_around`).
+
+### The shell's widget kit (#770, 2026-11-11)
+
+Decision [0005](../decisions/0005-shell-widgets.md). A surface of the
+kit (`hocus-shell/src/ui/`) is iced's stock widgets, a few of ours and
+canvases only for what the look draws. Built that way: every popover (the Wi-Fi's,
+Bluetooth's, the sound's, the music player's, the battery's, the
+brightness's, a desktop's list, the mini form's windows', a tray icon's
+menu, the in-use sign's, the session's, a window's menu, the next
+meeting's, the tasks', the calendar, the agents' briefing, Sources and
+the consent, the clipboard's history, the notifications' history and the
+day sources'), the music player's tile, and the surfaces of the shell's
+own: the actions palette, the emoji picker, the launcher, the share's
+chooser, the authentication dialog, the notifications' bubbles and the
+lock's controls (`Around::own`: open while their model says, woken by
+their namespace, every key theirs; `Around::own_by` when a closure wakes
+them, a bubble's namespace being its serial's), the capture's toolbar,
+thumbnail and editor, the peek and a meeting's reminder. The bar's own
+items are canvases that declare their controls to the kit (see "The
+bar's items", below).
+
+**How to build a surface with it.**
+
+1. **The model** stays the surface's (a `Ui` behind a lock, as before),
+   with what its controls are (`enum Target`) and one message type
+   (`Msg`): `Act(Target)`, `Focus(Target)`, `Pressed`, `Stale`, and what
+   its widgets ask (`Took` from a field, `Slide` from a slider…).
+2. **The view** is a function of the model, built again whenever it
+   changes: `parts::content(vec![parts::header(…), parts::block(GAP,
+   …), …])`, at the mockup's sizes (`popover::kit`'s constants). The
+   shared parts: the header, dividers, notes, spaced labels
+   (`parts::label`), the small button, a connected block, a list's row
+   (`parts::row_button`), a list that scrolls (`parts::list`; a notch of
+   the wheel two rows and a touchpad's logical pixels with
+   `parts::list_by`), spaced capitals cut to a room (`parts::spaced`;
+   any spacing, any font: `parts::spaced_by`), the Settings' link, the
+   header's switch (`parts::Knob`), a spinner, a glyph
+   (`parts::drawn(w, h, |frame, size| …)`, the canvas's own drawing;
+   `parts::drawn_out` to draw past its bounds, a ring round an icon;
+   `parts::drawn_lit` to draw it otherwise under the pointer, in a
+   button; `parts::moving` for what moves by itself, a panda playing its
+   mood, a switch's knob sliding: it draws again each frame while it
+   moves, and only then; `parts::moving_lit` for both, a chevron turning
+   in a button; `ui::moved` to draw a control moved by an offset of the
+   moment, a field shaking at a wrong password, laid out and hit where it
+   rests). Text that may hold a secret (what an agent's
+   tool said) is drawn and kept out of the dump (`ui::unsaid`). A
+   scrollable lays its content out as wide as its viewport at least:
+   rows of a width of their own go in a container. A surface whose parts a layout of its own places (the
+   session's, a window's menu) pins them there (iced's `pin` in a
+   `stack`). Styles from the theme's tokens: `ui::style`.
+3. **Every control is declared where it is built**:
+   `ui::control(widget, target.id(), Role::Button, name)`, then
+   `.node(|n| n.checked(…))` for its state, `.focus(focused,
+   Msg::Focus(target), radius)` if the ring can come to it,
+   `.activate(Msg::Act(target))` for `Enter`, `.rows(group)` if the
+   arrows go through its group, `.typing()` for a field. Lines that
+   nothing holds: `ui::line(widget, text)`. The id
+   (`wifi:Row(2)`, `sound:Mute`) is what tests and screen readers find
+   it by.
+4. **The surface**: `Around::new(id, content, handle, Msg::Stale)`, with
+   `.keys(…)` for the keys it takes before the kit (a field's `Esc`, a
+   slider's arrows), `.press(Msg::Pressed)`, `.first(…)` for where the
+   ring goes when it is opened by the keyboard, `.subtitle(…)`,
+   `.later(&LATER)` for what waits for the next tree (a list scrolled to
+   a row: `ui::reveal`, or to an offset its layout computed),
+   `.rebuild(…)` (how its content is built, so that a change seen as it
+   draws builds it again in place, this surface alone drawn),
+   `.wake_at(…)` (when what it shows ends by itself: a value asked and
+   not said, a time that goes on), then `.on_glass(glass)`, or
+   `.on(background)` for a tint of its own (the clipboard's, the
+   notifications' history). A control whose own look says it holds the
+   ring (a calendar's day, outlined) is `.ringless()`.
+5. **`handle`** changes the model at once; the surface's view alone is
+   built again and drawn. What changes outside it (a network, a mixer)
+   reaches it through `popover::changed`, which marks the kit's views
+   stale.
+
+What the kit then does, the same for every surface: the pointer's
+hit-testing and hover are the stock widgets'; `Tab`, `Shift+Tab`, the
+arrows, `Enter`, `Space` and `Escape` go through the declared controls in
+the tree's order (`ui::keys`); the ring is drawn by the control holding
+it, 3 px outside its bounds; screen readers' rows are the declarations
+with the bounds they were laid out at (`ui::walk`, published as
+`a11y::rows`); the log says the tree for tests
+(`RUST_LOG=hocuspanda_shell::shows=debug`: `shows {"wifi:Switch": {"at":
+[…], "says": […]}, "focus": "wifi:Row(0)"}`). The shared text field is
+`ui::field::Field` over the surface's `field::Entry`; a volume's slider,
+`ui::slider::Slider`. Text measures are cached (`kit::measure`).
+
+**Measured** against the canvas, headless on the CPU, dark, ×1, in their
+main state: the Wi-Fi's 0.50 % of pixels off (0.63 % with a row unfolded
+and its field typed in), Bluetooth's 0.81 %, the sound's 0.91 %, none by
+more than 24/255: rounded corners' and dividers' anti-aliasing. Their
+tests pass unchanged, but the screen reader's, which reads the ids.
+Then (#772): the battery's 0.44 %, the brightness's 0.14 %, the
+in-use's 0.20 %, a window's menu 0.30 %, the session's 0.01 %, a
+desktop's list, the windows' and a tray menu's none; the session's and
+the window menu's tests read the ring and the places from the dump.
+Then the second batch: the next meeting's 0.86 %, the tasks' 0.01 %, the
+calendar's 0.06 %, the briefing's 0.39 % (her head's SVG), Sources'
+0.08 %, the clipboard's 0.15 %, the notifications' history's 0.14 %, the
+day sources' 0.17 %; by more than 24/255 only the meeting's divider,
+the briefing's head and the history's moon (SVGs drawn as widgets).
+Their tests find their controls in the dump, as said after what the
+surface last showed. Then the third batch, the surfaces of their own: the
+actions palette's 0.35 %, the emoji picker's 0.12 %, the launcher's
+0.02 %, the share's chooser's 0.13 %, none by more than 24/255 but a few
+of the emoji's glyph edges. A long grid builds only its rows near the
+view (`parts::lazy`, the emoji's); a surface as large as its screen is
+told its size (`ui::sized`); the launcher's and the chooser's wheel
+still scroll by rows. Then the fourth batch: the authentication dialog,
+a notification's bubble and the lock, none: their looks are drawn as
+before inside the kit's controls (`ui::moved` for the shakes), and what
+nothing holds under them. A canvas' clip does not follow its
+translation, and its bounds cut a rim on a half pixel: a control draws
+in its own frame, a pixel past its bounds when its edge is on one. The
+dialog's field is the shared one, masked; the lock's dots stay the
+compositor's count, its keys the compositor's.
+Then the fifth batch: the capture's toolbar, its thumbnail, the peek and
+a reminder's tab, none; the capture's editor one pixel (a swatch's edge),
+but its file's name, whose time differs from a run to the next. The
+editor's image is a canvas of its own that takes the drags drawing a
+mark; the text being typed is the shared field (it scrolls inside its
+dashed box rather than running past it). The peek's and the reminder's
+controls are mouse areas over what is drawn as before (a part lit under
+the pointer, a press acting at once), the thumbnail's card a mouse area
+that holds it. iced hands every event of a batch the cursor as it is
+after the batch: a press and a release read with a move away (a slow
+frame) lost the click on a stock button. The kit's surface hands its
+widgets, with each mouse event, the pointer where that event has it.
+What changes outside a kit surface's messages (the compositor's
+capture line, a reminder's minute, a peek's words) calls `ui::touch`,
+else its controls stay as they were built.
+
+**The bar's items** (#785): the bar's own items stay drawn on their
+surfaces, a canvas each (a surface of its own draws alone, and nothing at
+rest), but what they hold is declared to the kit. The keyboard's ring
+across the bar is the kit's (`ui::ring`): every surface of the bar
+declares its controls as it draws (its item, its place in the bar's
+frame, its node for screen readers, the group they make), and `Tab`,
+`Shift+Tab`, the arrows, `Home` and `End` go through the declarations,
+from the bar's top to its bottom and along a row; the popovers'
+controller only moves the keyboard from a surface to the next as the
+ring goes. The hover cone (from where the pointer was to an open
+popover's near corners, its 150 ms and 300 ms) is the kit's too
+(`ui::cone`). Screen readers' bar (`a11y::bar`) is the declarations put
+together at their places: it names no item itself.
+
+- **On the kit's surface of items** (`ui::items`): the desktops' tiles,
+  the footer, the tray's icons, the windows, the tasks (and Day.1's
+  card), Today, the next meeting's card and the in-use sign. A surface
+  draws what it draws (`Items::draw`, handed the control under the
+  pointer to light it) and declares its controls once, where it lays
+  them out (`Items::controls`: `Control::new(item, rect, role, name,
+  radius)`, `.node(…)` for its state, `.part()` for a line's ✕). The kit
+  does the pointer's hit-testing (the innermost control under it), tells
+  the popovers' controller as it comes, goes and presses, draws the ring
+  round the control holding it, and publishes the nodes. What a surface
+  does besides goes through its hooks: `hovered` (a tooltip),
+  `pressed` (the tray's buttons, a window's menu), `before` (the tasks'
+  field: its keys, its drag, its caret), `update` (a frame's time, the
+  wheel). A hover or a press redraws that surface alone, as before.
+- **Their own hit-testing, declaring their controls**: the clock's group
+  (the bar's own surface's pointer), the levels, the connections, the
+  agents' group and the music player's tile, whose drawing is the point
+  (digits, gauges, pandas) or which is stock widgets already: they
+  declare their controls with their nodes to the kit's ring, and draw
+  their own ring with the kit's (`ui::ring::draw`).
+
+Measured against the hand-written surfaces, headless on the CPU, at
+rest, hovered and ringed (`bar_shot`, under `HOCUS_KIT_SHOTS`): every
+shot pixel-identical, but the tasks' ring, 0.05 % of its pixels (a row
+of 12): the ring is drawn over the next task's box's edge, which used to
+cover it.
 
 ### 3.9, the desktops (2026-10-30)
 

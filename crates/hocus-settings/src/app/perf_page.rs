@@ -9,6 +9,7 @@
 //! window also tells the compositor its page (and its process, measured
 //! with the desktop) on the control socket, off its thread.
 
+use hocus_words::settings::app_perf_page as words;
 use std::{path::PathBuf, time::Instant};
 
 use hocus_perf::{
@@ -32,7 +33,7 @@ use super::{
     view::{El, card_box, divided, label, t},
 };
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::SectionId,
     perf::{self as model, Bucket, Read},
 };
@@ -186,13 +187,8 @@ impl App {
                 let Some(signal) = read.report.signals.get(n) else {
                     return iced::Task::none();
                 };
-                let report = text::signal_report(
-                    &read.report,
-                    signal,
-                    read.date,
-                    model::said_in(self.lang),
-                    &self.perf.tz,
-                );
+                let report =
+                    text::signal_report(&read.report, signal, read.date, self.lang, &self.perf.tz);
                 self.perf.copied = Some((n, Instant::now()));
                 tracing::info!(signal = ?signal.kind, "a signal's report copied");
                 return iced::Task::batch([
@@ -203,18 +199,8 @@ impl App {
             Msg::Folder => {
                 if let Some(dir) = self.perf.dir.clone() {
                     tracing::info!(folder = %dir.display(), "the days' folder is opened");
-                    std::thread::spawn(move || {
-                        let _ = std::fs::create_dir_all(&dir);
-                        let opened = std::process::Command::new("xdg-open")
-                            .arg(&dir)
-                            .stdin(std::process::Stdio::null())
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .status();
-                        if let Err(err) = opened {
-                            tracing::warn!(%err, "xdg-open does not run");
-                        }
-                    });
+                    // Made first: no day may have been recorded yet.
+                    super::open_folder(dir, true);
                 }
             }
         }
@@ -227,7 +213,7 @@ impl App {
         let Some(read) = self.perf.read.as_ref().filter(|r| r.date == date) else {
             return serde_json::json!({ "date": date.to_string(), "read": false });
         };
-        let lang = model::said_in(self.lang);
+        let lang = self.lang;
         let tz = &self.perf.tz;
         serde_json::json!({
             "date": date.to_string(),
@@ -263,19 +249,15 @@ impl App {
         match self.perf.read.as_ref().filter(|r| r.date == date) {
             None => {
                 groups = groups.push(card_box(
-                    container(t(
-                        w("Lecture de la journée…", "Reading the day…").get(lang),
-                        13.0,
-                        DIM.get(),
-                    ))
-                    .padding([14, 16])
-                    .into(),
+                    container(t(words::READING_THE_DAY.get(lang), 13.0, DIM.get()))
+                        .padding([14, 16])
+                        .into(),
                 ));
             }
             Some(read) if self.perf.week && !read.week.is_empty() => {
                 groups = groups.push(
                     column![
-                        head(w("LES 7 DERNIERS JOURS", "THE LAST 7 DAYS").get(lang), None),
+                        head(words::THE_LAST_7_DAYS.get(lang), None),
                         card_box(self.perf_week(read)),
                     ]
                     .spacing(8),
@@ -285,19 +267,10 @@ impl App {
                 groups = groups.push(card_box(
                     container(
                         column![
+                            t(words::NOTHING_RECORDED_THAT_DAY.get(lang), 14.0, TEXT.get())
+                                .font(SEMIBOLD),
                             t(
-                                w("Rien d’enregistré ce jour-là", "Nothing recorded that day")
-                                    .get(lang),
-                                14.0,
-                                TEXT.get()
-                            )
-                            .font(SEMIBOLD),
-                            t(
-                                w(
-                                    "La journée est mesurée tant que « Mesurer la journée » est allumé ; les 14 derniers jours sont gardés.",
-                                    "The day is measured while “Record the day” is on; the last 14 days are kept.",
-                                )
-                                .get(lang),
+                                words::THE_DAY_IS_MEASURED_WHILE_RECORD.get(lang),
                                 12.5,
                                 DIM.get(),
                             ),
@@ -312,15 +285,13 @@ impl App {
                 groups = groups.push(self.perf_tiles(&read.report));
                 let count = read.report.signals.len();
                 let today = read.date == today(&self.perf.tz);
-                let right = match (lang, today) {
-                    (Lang::French, true) => format!("{count} aujourd’hui"),
-                    (Lang::French, false) => format!("{count} ce jour-là"),
-                    (Lang::English, true) => format!("{count} today"),
-                    (Lang::English, false) => format!("{count} that day"),
+                let right = match today {
+                    true => words::today(lang, count),
+                    false => words::that_day(lang, count),
                 };
                 groups = groups.push(
                     column![
-                        head(w("SIGNAUX", "SIGNALS").get(lang), Some(right)),
+                        head(words::SIGNALS.get(lang), Some(right)),
                         card_box(self.perf_signals(&read.report)),
                     ]
                     .spacing(8),
@@ -328,12 +299,8 @@ impl App {
                 groups = groups.push(
                     column![
                         head(
-                            w("LA JOURNÉE", "THE DAY").get(lang),
-                            Some(
-                                w("une échelle par bande", "a scale for each band")
-                                    .get(lang)
-                                    .to_owned()
-                            )
+                            words::THE_DAY.get(lang),
+                            Some(words::A_SCALE_FOR_EACH_BAND.get(lang).to_owned())
                         ),
                         card_box(
                             container(
@@ -351,7 +318,7 @@ impl App {
                 if !read.report.peaks.is_empty() {
                     groups = groups.push(
                         column![
-                            head(w("LES PICS", "THE PEAKS").get(lang), None),
+                            head(words::THE_PEAKS.get(lang), None),
                             card_box(self.perf_peaks(&read.report)),
                         ]
                         .spacing(8),
@@ -371,7 +338,7 @@ impl App {
         }
         groups = groups.push(
             column![
-                head(w("ENREGISTREMENT", "RECORDING").get(lang), None),
+                head(words::RECORDING.get(lang), None),
                 card_box(body.into()),
             ]
             .spacing(8),
@@ -434,18 +401,15 @@ impl App {
             .id(id.to_owned())
             .into()
         };
-        let segmented = container(row![
-            week(false, w("Jour", "Day")),
-            week(true, w("7 jours", "7 days"))
-        ])
-        .padding(2)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(crate::theme::ink(rgba(
-                255, 255, 255, 0.05,
-            )))),
-            border: border(9.0, 0.0, Color::TRANSPARENT),
-            ..container::Style::default()
-        });
+        let segmented = container(row![week(false, words::DAY), week(true, words::N_7_DAYS)])
+            .padding(2)
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(crate::theme::ink(rgba(
+                    255, 255, 255, 0.05,
+                )))),
+                border: border(9.0, 0.0, Color::TRANSPARENT),
+                ..container::Style::default()
+            });
         row![
             arrow("‹", Msg::Earlier, model::step(days, date, false).is_some()),
             t(
@@ -498,7 +462,7 @@ impl App {
 
     fn perf_signals(&self, report: &Report) -> El<'_> {
         let lang = self.lang;
-        let said = model::said_in(lang);
+        let said = lang;
         let mut rows: Vec<El<'_>> = Vec::new();
         for (n, signal) in report.signals.iter().enumerate() {
             let (title, line) = text::signal(signal, said, &self.perf.tz);
@@ -508,9 +472,9 @@ impl App {
                 .is_some_and(|(c, at)| c == n && at.elapsed() < COPIED);
             let copy = button(t(
                 if copied {
-                    w("Copié", "Copied").get(lang)
+                    words::COPIED.get(lang)
                 } else {
-                    w("Copier le rapport", "Copy the report").get(lang)
+                    words::COPY_THE_REPORT.get(lang)
                 },
                 12.5,
                 MINT.get(),
@@ -546,9 +510,9 @@ impl App {
                 column![
                     t(
                         if report.signals.is_empty() {
-                            w("✓ Aucun signal", "✓ No signal")
+                            words::NO_SIGNAL
                         } else {
-                            w("✓ Rien d’autre", "✓ Nothing else")
+                            words::NOTHING_ELSE
                         }
                         .get(lang),
                         13.5,
@@ -556,11 +520,7 @@ impl App {
                     )
                     .font(SEMIBOLD),
                     t(
-                        match lang {
-                            Lang::French => format!("Sous les seuils : {}.", calm.join(", ")),
-                            Lang::English =>
-                                format!("Under their thresholds: {}.", calm.join(", ")),
-                        },
+                        words::under_their_thresholds(lang, calm.join(", ")),
                         12.0,
                         DIM.get()
                     ),
@@ -579,22 +539,17 @@ impl App {
 
     fn perf_peaks(&self, report: &Report) -> El<'_> {
         let lang = self.lang;
-        let said = model::said_in(lang);
+        let said = lang;
         let tz = &self.perf.tz;
         let mut rows: Vec<El<'_>> = Vec::new();
         let head = row![
             Space::new().width(26),
-            t(w("Quand", "When").get(lang), 11.5, FAINT.get()).width(96),
-            t(
-                w("Ce qui se passait", "What was happening").get(lang),
-                11.5,
-                FAINT.get()
-            )
-            .width(Length::Fill),
+            t(words::WHEN.get(lang), 11.5, FAINT.get()).width(96),
+            t(words::WHAT_WAS_HAPPENING.get(lang), 11.5, FAINT.get()).width(Length::Fill),
             t("CPU", 11.5, FAINT.get())
                 .width(52)
                 .align_x(Alignment::End),
-            t(w("Durée", "Length").get(lang), 11.5, FAINT.get())
+            t(words::LENGTH.get(lang), 11.5, FAINT.get())
                 .width(60)
                 .align_x(Alignment::End),
         ]
@@ -657,7 +612,7 @@ impl App {
 
     fn perf_week<'a>(&'a self, read: &'a Read) -> El<'a> {
         let lang = self.lang;
-        let said = model::said_in(lang);
+        let said = lang;
         let most = read
             .week
             .iter()
@@ -679,10 +634,9 @@ impl App {
             } else {
                 String::new()
             };
-            let flags = match (r.signals.len(), lang) {
-                (0, _) => String::new(),
-                (n, Lang::French) => format!("⚠ {n} signa{}", if n > 1 { "ux" } else { "l" }),
-                (n, Lang::English) => format!("⚠ {n} signal{}", if n > 1 { "s" } else { "" }),
+            let flags = match r.signals.len() {
+                0 => String::new(),
+                n => words::signals_count(lang, n),
             };
             let line = button(
                 row![
@@ -714,30 +668,23 @@ impl App {
             .as_deref()
             .map(super::view::tilde)
             .unwrap_or_default();
-        let line = match lang {
-            Lang::French => format!("{place} · 14 jours · moins de 1 Mo par jour"),
-            Lang::English => format!("{place} · 14 days · under 1 MB a day"),
-        };
+        let line = words::n_14_days_under_1_mb_a(lang, &place);
         row![
             column![
-                t(w("Les fichiers", "The files").get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+                t(words::THE_FILES.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
                 t(line, 12.5, DIM.get()),
             ]
             .spacing(3)
             .width(Length::Fill),
-            button(t(
-                w("Ouvrir le dossier ›", "Open the folder ›").get(lang),
-                12.5,
-                MINT.get()
-            ))
-            .padding([4, 8])
-            .on_press_maybe(
-                self.perf
-                    .dir
-                    .is_some()
-                    .then_some(Message::Perf(Msg::Folder))
-            )
-            .style(flat(None, HOVER.get(), 7.0, false)),
+            button(t(words::OPEN_THE_FOLDER.get(lang), 12.5, MINT.get()))
+                .padding([4, 8])
+                .on_press_maybe(
+                    self.perf
+                        .dir
+                        .is_some()
+                        .then_some(Message::Perf(Msg::Folder))
+                )
+                .style(flat(None, HOVER.get(), 7.0, false)),
         ]
         .spacing(12)
         .align_y(Alignment::Center)
@@ -753,11 +700,11 @@ fn msg_later(msg: &Msg) -> bool {
 /// A signal's kind in two words, for "under their thresholds".
 fn kind_name(kind: SignalKind, lang: Lang) -> &'static str {
     match kind {
-        SignalKind::SustainedCpu => w("CPU soutenu", "sustained CPU"),
-        SignalKind::FramesAtRest => w("images au repos", "frames at rest"),
-        SignalKind::Wakeups => w("réveils", "wakeups"),
-        SignalKind::MemoryGrowing => w("mémoire", "memory"),
-        SignalKind::SlowMoment => w("moments lents", "slow moments"),
+        SignalKind::SustainedCpu => words::SUSTAINED_CPU,
+        SignalKind::FramesAtRest => words::FRAMES_AT_REST,
+        SignalKind::Wakeups => words::WAKEUPS,
+        SignalKind::MemoryGrowing => words::MEMORY,
+        SignalKind::SlowMoment => words::SLOW_MOMENTS,
     }
     .get(lang)
 }
@@ -820,14 +767,11 @@ impl Band {
 
     fn title(self, lang: Lang) -> &'static str {
         match self {
-            Self::Cpu => w("CPU · % d’un cœur", "CPU · % of a core"),
-            Self::Memory => w("Mémoire résidente · Mo", "Resident memory · MB"),
-            Self::Frames => w("Images dessinées · par seconde", "Frames drawn · a second"),
-            Self::Events => w("Ce qui se passait", "What was happening"),
-            Self::Power => w(
-                "Puissance de la machine · W (sur batterie)",
-                "The machine’s power · W (on battery)",
-            ),
+            Self::Cpu => words::CPU_OF_A_CORE,
+            Self::Memory => words::RESIDENT_MEMORY_MB,
+            Self::Frames => words::FRAMES_DRAWN_A_SECOND,
+            Self::Events => words::WHAT_WAS_HAPPENING,
+            Self::Power => words::THE_MACHINE_S_POWER_W_ON,
         }
         .get(lang)
     }
@@ -900,16 +844,11 @@ impl Chart {
         for s in &read.day.samples {
             for e in &s.e {
                 let said = match e.kind {
-                    EventKind::ScreenPlugged => match lang {
-                        Lang::French => format!("écran {}", e.what),
-                        Lang::English => format!("screen {}", e.what),
-                    },
-                    EventKind::SettingsPage => w("Réglages", "Settings").get(lang).to_owned(),
-                    EventKind::Locked => w("verrouillé", "locked").get(lang).to_owned(),
-                    EventKind::Resume => w("réveil", "woke").get(lang).to_owned(),
-                    EventKind::WallpaperMoving => {
-                        w("fond animé", "moving wallpaper").get(lang).to_owned()
-                    }
+                    EventKind::ScreenPlugged => words::screen(lang, &e.what),
+                    EventKind::SettingsPage => words::SETTINGS.get(lang).to_owned(),
+                    EventKind::Locked => words::LOCKED.get(lang).to_owned(),
+                    EventKind::Resume => words::WOKE.get(lang).to_owned(),
+                    EventKind::WallpaperMoving => words::MOVING_WALLPAPER.get(lang).to_owned(),
                     _ => continue,
                 };
                 labels.push((e.t, said));
@@ -923,13 +862,7 @@ impl Chart {
                 .filter(|e| e.kind == EventKind::WindowOpened)
                 .count();
             if opened > 4 {
-                labels.push((
-                    (p.from + p.to) / 2,
-                    match lang {
-                        Lang::French => format!("{opened} fenêtres"),
-                        Lang::English => format!("{opened} windows"),
-                    },
-                ));
+                labels.push(((p.from + p.to) / 2, words::windows(lang, opened)));
             }
         }
         labels.sort_by_key(|l| l.0);
@@ -1009,11 +942,11 @@ impl canvas::Program<Message> for Chart {
         // The legend.
         let mut lx = LEFT;
         for (swatch, words) in [
-            (COMPOSITOR, w("compositeur", "compositor")),
-            (SHELL, w("shell", "shell")),
-            (fade(WALLPAPER, 0.5), w("fond animé", "moving wallpaper")),
-            (fade(TEXT.get(), 0.25), w("verrouillé", "locked")),
-            (THRESHOLD, w("seuil d’un signal", "a signal's threshold")),
+            (COMPOSITOR, words::COMPOSITOR),
+            (SHELL, words::SHELL),
+            (fade(WALLPAPER, 0.5), words::MOVING_WALLPAPER),
+            (fade(TEXT.get(), 0.25), words::LOCKED),
+            (THRESHOLD, words::A_SIGNAL_S_THRESHOLD),
         ] {
             f.fill_rectangle(Point::new(lx, 2.0), Size::new(10.0, 10.0), swatch);
             let said = words.get(lang);
@@ -1151,9 +1084,7 @@ impl canvas::Program<Message> for Chart {
                     );
                     write(
                         &mut f,
-                        w("10 % pendant 5 min", "10% for 5 min")
-                            .get(lang)
-                            .to_owned(),
+                        words::N_10_FOR_5_MIN.get(lang).to_owned(),
                         Point::new(width, ty - 15.0),
                         10.5,
                         THRESHOLD,
@@ -1229,10 +1160,7 @@ impl canvas::Program<Message> for Chart {
                     let [_, s0] = self.memory_start;
                     write(
                         &mut f,
-                        match lang {
-                            Lang::French => format!("compositeur · {} Mo", c1.round()),
-                            Lang::English => format!("compositor · {} MB", c1.round()),
-                        },
+                        words::compositor_mb(lang, c1.round()),
                         Point::new(LEFT + 6.0, bottom - c1 / max * h - 16.0),
                         10.5,
                         COMPOSITOR,
@@ -1240,10 +1168,13 @@ impl canvas::Program<Message> for Chart {
                     );
                     write(
                         &mut f,
-                        match lang {
-                            Lang::French => format!("shell · {} → {} Mo", s0.round(), s1.round()),
-                            Lang::English => format!("shell · {} → {} MB", s0.round(), s1.round()),
-                        },
+                        words::shell_mb(
+                            lang,
+                            words::ShellMb {
+                                s0_round: s0.round(),
+                                s1_round: s1.round(),
+                            },
+                        ),
                         Point::new(LEFT + 6.0, (bottom - s0 / max * h + 3.0).min(bottom - 13.0)),
                         10.5,
                         SHELL,
@@ -1271,13 +1202,10 @@ impl canvas::Program<Message> for Chart {
                             ),
                             dashed,
                         );
-                        let whose = text::who(who, model::said_in(lang));
+                        let whose = text::who(who, lang);
                         write(
                             &mut f,
-                            match lang {
-                                Lang::French => format!("{whose} : ne fait que monter ⚠"),
-                                Lang::English => format!("{whose}: only grows ⚠"),
-                            },
+                            words::only_grows(lang, whose),
                             Point::new(width, yb + offset + 4.0),
                             10.5,
                             THRESHOLD,
@@ -1380,9 +1308,7 @@ impl canvas::Program<Message> for Chart {
                     if gaps {
                         write(
                             &mut f,
-                            w("sur secteur : non mesurée", "on AC: not measured")
-                                .get(lang)
-                                .to_owned(),
+                            words::ON_AC_NOT_MEASURED.get(lang).to_owned(),
                             Point::new(LEFT + (width - LEFT) / 2.0, top + h / 2.0 - 7.0),
                             10.5,
                             faint,

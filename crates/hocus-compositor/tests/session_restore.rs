@@ -386,7 +386,7 @@ fn those_that_do_not_come_back_are_named_in_one_notification() -> anyhow::Result
     ))?;
     let notifications = Notifications::start(&tree)?;
     let mut config = tree.config();
-    config.french = true;
+    config.lang = hocus_words::Lang::French;
     let mut hp = match &notifications {
         Some(n) => {
             let mut hp =
@@ -498,8 +498,7 @@ impl Notifications {
             .output()
             .is_err()
         {
-            eprintln!("no dbus-daemon: the notification is not looked at");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir: &Path = &tree.path("bus");
         std::fs::create_dir_all(dir)?;

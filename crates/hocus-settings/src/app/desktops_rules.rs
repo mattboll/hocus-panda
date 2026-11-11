@@ -6,6 +6,7 @@
 //! those with a window open first. The rules are written whole, as an
 //! array of tables, each change with its toast and "Annuler".
 
+use hocus_words::settings::app_desktops_rules as words;
 use std::time::Instant;
 
 use iced::{
@@ -22,7 +23,6 @@ use super::{
 };
 use crate::{
     desktops::{self as model, Rule},
-    lang::{Lang, w},
     model::Icon,
     store::KeyEdit,
 };
@@ -103,11 +103,7 @@ impl App {
         match menu {
             RuleMenu::Desktop(_) => {
                 let names = self.desktop_names_now();
-                let mut out = vec![
-                    w("Celui où tu l’ouvres", "Where you open it")
-                        .get(lang)
-                        .to_owned(),
-                ];
+                let mut out = vec![words::WHERE_YOU_OPEN_IT.get(lang).to_owned()];
                 for i in 0..self.desktop_count_now() {
                     out.push(format!("{} · {}", i + 1, model::name_of(&names, i, lang)));
                 }
@@ -253,18 +249,9 @@ impl App {
                 });
                 let lang = self.lang;
                 let said = KeysSaid {
-                    done: match lang {
-                        Lang::French => format!("Règle ajoutée : {name}"),
-                        Lang::English => format!("Rule added: {name}"),
-                    },
-                    undone: match lang {
-                        Lang::French => format!("Annulé : la règle de {name} est retirée."),
-                        Lang::English => format!("Undone: {name}’s rule is taken out."),
-                    },
-                    redone: match lang {
-                        Lang::French => format!("Rétabli : la règle de {name}."),
-                        Lang::English => format!("Redone: {name}’s rule."),
-                    },
+                    done: words::rule_added(lang, &name),
+                    undone: words::undone_s_rule_is_taken_out(lang, &name),
+                    redone: words::redone_s_rule(lang, &name),
                     row: model::RULES,
                 };
                 tracing::info!(app = id, "a rule added");
@@ -283,18 +270,9 @@ impl App {
         let name = Self::app_name(&gone.app_id);
         let lang = self.lang;
         let said = KeysSaid {
-            done: match lang {
-                Lang::French => format!("Règle de {name} retirée"),
-                Lang::English => format!("{name}’s rule removed"),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : la règle de {name} revient."),
-                Lang::English => format!("Undone: {name}’s rule is back."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : la règle de {name} retirée."),
-                Lang::English => format!("Redone: {name}’s rule removed."),
-            },
+            done: words::s_rule_removed(lang, &name),
+            undone: words::undone_s_rule_is_back(lang, &name),
+            redone: words::redone_s_rule_removed(lang, &name),
             row: model::RULES,
         };
         if self.desktops.rules.open.as_deref() == Some(gone.app_id.as_str()) {
@@ -315,18 +293,15 @@ impl App {
         let said_now = model::rule_said(now, &names, lang);
         let said_then = model::rule_said(then, &names, lang);
         let said = KeysSaid {
-            done: match lang {
-                Lang::French => format!("Règle de {name} : {said_now}"),
-                Lang::English => format!("{name}’s rule: {said_now}"),
-            },
-            undone: match lang {
-                Lang::French => format!("Annulé : {said_then}"),
-                Lang::English => format!("Undone: {said_then}"),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {said_now}"),
-                Lang::English => format!("Redone: {said_now}"),
-            },
+            done: words::s_rule(
+                lang,
+                words::SRule {
+                    name: &name,
+                    said_now: &said_now,
+                },
+            ),
+            undone: words::undone(lang, &said_then),
+            redone: words::redone(lang, &said_now),
             row: model::RULES,
         };
         self.rules_keys(&rules, said);
@@ -406,13 +381,9 @@ impl App {
         let edit_focused = self.rules_focused(&Stop::RuleEdit(i));
         let mut edit = button(
             t(
-                if open {
-                    w("Replier", "Fold")
-                } else {
-                    w("Modifier", "Edit")
-                }
-                .get(lang)
-                .to_owned(),
+                if open { words::FOLD } else { words::EDIT }
+                    .get(lang)
+                    .to_owned(),
                 13.0,
                 TEXT.get(),
             )
@@ -499,24 +470,13 @@ impl App {
         };
         let above_focused = self.rules_focused(&Stop::RuleAbove(i));
         column![
-            menu_row(w("Bureau", "Desktop").get(lang), RuleMenu::Desktop(i)),
-            menu_row(
-                w("En s’ouvrant", "When it opens").get(lang),
-                RuleMenu::Size(i)
-            ),
+            menu_row(words::DESKTOP.get(lang), RuleMenu::Desktop(i)),
+            menu_row(words::WHEN_IT_OPENS.get(lang), RuleMenu::Size(i)),
             row![
                 column![
+                    t(words::ABOVE_THE_OTHERS.get(lang), 13.5, TEXT.get()),
                     t(
-                        w("Au-dessus des autres", "Above the others").get(lang),
-                        13.5,
-                        TEXT.get()
-                    ),
-                    t(
-                        w(
-                            "Même sans le focus ; une fenêtre en plein écran la couvre.",
-                            "Even without the focus; a full-screen window covers it.",
-                        )
-                        .get(lang),
+                        words::EVEN_WITHOUT_THE_FOCUS_A_FULL.get(lang),
                         12.0,
                         DIM.get()
                     ),
@@ -554,21 +514,8 @@ impl App {
             .is_some_and(|(m, _)| m == RuleMenu::Add);
         let focused = self.rules_focused(&Stop::RuleMenu(RuleMenu::Add));
         let words = column![
-            t(
-                w("Une autre application", "Another application").get(lang),
-                14.0,
-                TEXT.get()
-            )
-            .font(SEMIBOLD),
-            t(
-                w(
-                    "Toujours sur un bureau, à une taille, au-dessus des autres.",
-                    "Always on a desktop, at a size, above the others.",
-                )
-                .get(lang),
-                12.5,
-                DIM.get()
-            ),
+            t(words::ANOTHER_APPLICATION.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+            t(words::ALWAYS_ON_A_DESKTOP_AT_A.get(lang), 12.5, DIM.get()),
         ]
         .spacing(2)
         .width(Length::Fill);
@@ -577,9 +524,7 @@ impl App {
             row![
                 words,
                 container(menu_button(
-                    w("+ Ajouter une règle", "+ Add a rule")
-                        .get(lang)
-                        .to_owned(),
+                    words::ADD_A_RULE.get(lang).to_owned(),
                     !self.writable(),
                     focused,
                     open,
@@ -646,11 +591,7 @@ impl App {
         if empty {
             list = list.push(
                 container(t(
-                    w(
-                        "Chaque application installée a déjà sa règle.",
-                        "Every installed application has its rule already.",
-                    )
-                    .get(self.lang),
+                    words::EVERY_INSTALLED_APPLICATION_HAS_ITS_RULE.get(self.lang),
                     13.0,
                     FAINT.get(),
                 ))
@@ -677,10 +618,7 @@ impl App {
         let bottom = self
             .places
             .at
-            .get(&format!(
-                "sidebar:{}",
-                if self.lang.fr() { "fr" } else { "en" }
-            ))
+            .get(&format!("sidebar:{}", words::EN.get(self.lang)))
             .map_or(f32::MAX, |s| s.y + s.height);
         let under = at.y + 38.0;
         let y = if under + height > bottom - 8.0 {

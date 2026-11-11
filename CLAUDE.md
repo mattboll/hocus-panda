@@ -10,6 +10,8 @@ Linux first. MIT. The first build is kept under the tag `v0-first-build`
 as a technical reference only.
 
 Read, in this order: [docs/vision.md](docs/vision.md),
+[docs/architecture.md](docs/architecture.md) (the processes, their
+sockets, the crates),
 [docs/design/tech-choices.md](docs/design/tech-choices.md), the
 [decisions](docs/decisions/), and the spec of whatever you work on
 ([docs/design/bar.md](docs/design/bar.md) for the bar,
@@ -78,12 +80,17 @@ sharing).
   trailers** (`Co-Authored-By`, `Claude-Session`, "Generated with…") in
   commits or pull requests.
 - Code, comments, docs, issues and PRs in English; user-facing strings
-  translatable, shipped in English and French.
+  in the catalogue (`crates/hocus-words/words/*.toml`, one file a
+  language, docs/design/settings.md "Words"), shipped in English and
+  French; one language type, `hocus_words::Lang`.
 - Ask when a product or design choice is unclear; do not guess.
 
 ## Style
 
 - Small crates with clear boundaries; the shell does not depend on smithay.
+- A shell surface is iced's stock widgets and the shell's kit
+  (`crates/hocus-shell/src/ui`, decision 0005; docs/design/bar.md, "The
+  shell's widget kit"), a canvas only where the look draws.
 - Comments explain why, not what.
 - Prefer explicit state machines (enums) over flags.
 - `unsafe` only at FFI boundaries, each block with a `// SAFETY:` comment.
@@ -104,6 +111,7 @@ cargo fmt --check
 cargo deny check                              # licences and advisories
 cargo machete                                 # dependencies no source uses
 scripts/vendor.sh --check                     # vendor/ is upstream plus its patch
+scripts/ci/docs-names.sh                      # the docs name no crate nor `hocus msg` that is gone
 ```
 
 The Rust version is the one `rust-toolchain.toml` pins; dependencies'
@@ -136,7 +144,11 @@ runs everything, as main does: built once, then four jobs. So does
 every push to a sprint branch. After each merge, main runs the whole suite; a failure
 there is fixed at once; a test that fails by chance is quarantined from
 CI (`[profile.ci]` in `.config/nextest.toml`) until its issue's fix
-takes it out. Update this section as commands land.
+takes it out (docs/workflow.md, "A test that fails by chance": no
+retries, no fail-fast). A test fails, never skips, when a system program
+it runs is missing (`common::missing`); tests and the programs they start
+run with `TZ=UTC` and `LANG=C.UTF-8` (`.cargo/config.toml`). Update this
+section as commands land.
 
 Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
 (docs/performance.md): the compositor draws with pixman, or with GLES on
@@ -181,20 +193,15 @@ RUST_LOG=hocus_compositor=debug                       # more of what it does
 ```
 
 Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
-`--config FILE`); it reads, among others, `[keyboard]` (`layouts = ["fr",
-"fr(bepo)"]`, `options`, `repeat_delay`, `repeat_rate`; without layouts,
-the program reads `/etc/default/keyboard`), `[outputs.NAME]` (`scale`, on
-the real screen; nested and headless take `--output`; `panel-form`),
-`[[screen-sets]]` (each set of screens' arrangement, docs/design/windows.md
-§12; the sets seen are kept in `$XDG_STATE_HOME/hocuspanda/screen-sets`),
-`[shortcuts]` (`terminal = "Super+Return"`, `log-out = "Super+Shift+E"`,
-`toggle-bar = "Super+B"`, `clipboard = "Super+V"`, `emoji = "Super+period"`, `capture = "Print"`, `record = "Super+Shift+R"`, the volume and brightness keys, and the
-windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
-(`screens`, `output`, `form`, `windows`), `[recording]` (`format`), `[idle]` (`delay`,
-docs/design/idle.md), `[magnifier]` (docs/design/accessibility.md) and
-`[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`), `[accessibility]` (`screen-reader`), `[developer]` (`live-reload`, docs/workflow.md); the shell reads `[day]` from the same file
-(`HOCUS_CONFIG`, which the compositor sets), the day's accounts (docs/design/day.md). `packaging/config.toml` lists every setting
-with its default (a test checks it). `--session` is what display managers
+`--config FILE`), followed live for most sections (`src/reload.rs`);
+`packaging/config.toml` lists every section and setting with its default,
+the one place defaults are defined (`hocus_config::defaults`): the
+compositor's and hocus-day's tests check their `Default`s against it, and
+the Settings' rows take theirs from it. Without `[keyboard] layouts`, the
+compositor reads `/etc/default/keyboard`; nested and headless, screens
+take `--output`, not `[outputs.NAME]`. The shell reads `[day]` (the
+day's accounts, docs/design/day.md) from the same file (`HOCUS_CONFIG`,
+which the compositor sets); the rest it is told on its line. `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd
 and D-Bus where the session is, so never use it next to a live session. Headless tests
 start it in-process (`hocus_compositor::Headless`, see
@@ -244,7 +251,7 @@ configuration file, a `HOME` and an `XDG_STATE_HOME` of their own.
 what they show in their log (`RUST_LOG=hocus_settings=debug`: "shows" and
 "places" lines, JSON), which their tests
 (`crates/hocus-compositor/tests/settings.rs`) read; those run the program
-built beside them (`cargo build -p hocus-settings`, as CI does).
+built beside them (`cargo programs`, as CI does).
 
 Screen sharing (docs/design/sharing.md): the compositor serves the
 desktop portal's `org.freedesktop.impl.portal.ScreenCast` on the same bus
@@ -255,7 +262,7 @@ live session, give the nested compositor a PipeWire of its own, or its
 streams appear on your real PipeWire. Its tests
 (`crates/hocus-compositor/tests/sharing.rs`) start a dbus-daemon and a
 PipeWire of their own (`Config::pipewire_remote`), link their consumer
-themselves (no WirePlumber), and skip without them.
+themselves (no WirePlumber), and fail without them.
 
 The system's authentication dialog (docs/design/polkit.md): the shell is
 the session's polkit agent on the system bus only with `HOCUS_AUTH_AGENT`
@@ -275,7 +282,7 @@ installed) and saved in `$XDG_VIDEOS_DIR` (else `user-dirs.dirs`', else
 `~/Videos`), their sound from PipeWire's default socket: next to a live
 session, give the nested compositor a fresh `HOME` (or `XDG_VIDEOS_DIR`)
 and a PipeWire of its own. Its tests save in folders of their own
-(`Config::videos`), decode the files with ffmpeg and ffprobe, and skip
+(`Config::videos`), decode the files with ffmpeg and ffprobe, and fail
 without them. The capture's editor (5.9) asks the desktop
 portal's file chooser only on the bus given with `--session-bus` (or the
 session's own on a virtual terminal), else saves beside the capture.

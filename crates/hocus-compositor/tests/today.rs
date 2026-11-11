@@ -166,7 +166,7 @@ fn start(
     let mut settings = Config {
         file: Some(file),
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         ..Config::default()
     };
     settings.keyboard.layouts = vec!["us".to_owned()];
@@ -433,8 +433,26 @@ fn on_a_short_screen_today_gives_way_first() -> anyhow::Result<()> {
     // Not even one line's room between the card and the desktops.
     let room = desktops.y + 5 - 14 - (8 + 100 + 58);
     assert!(room < 18 + 20, "room for {room} px");
+    // Today may come first, placed while the groups under it are not yet,
+    // and go once they are: time for it to come, then as long as it takes
+    // to go. Looked at once after 500 ms, it was still there on a loaded
+    // machine.
     common::wait(&mut bed.hp, Duration::from_millis(500))?;
-    assert!(bed.hp.layer_rects(TODAY_NAMESPACE).is_empty());
+    let gone = bed.hp.dispatch_until(common::WAIT, |hp| {
+        hp.layer_rects(TODAY_NAMESPACE).is_empty()
+    })?;
+    assert!(
+        gone,
+        "today stays at {:?}; the shell said:\n{}",
+        bed.hp.layer_rects(TODAY_NAMESPACE),
+        bed.lines_since(0, "oday").join("\n")
+    );
+    // What the shell last said of its rows, if it had any: none.
+    let rows = bed.lines_since(0, "today's rows");
+    assert!(
+        rows.last().is_none_or(|l| l.contains("shows=nothing")),
+        "{rows:?}"
+    );
     Ok(())
 }
 
@@ -725,4 +743,32 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     common::wait(&mut bed.hp, Duration::from_millis(500))?;
     shoot(&mut bed, "none", (1920 - 420, 0, 420, 420), None)?;
     Ok(())
+}
+
+/// Today at rest, hovered and ringed, shot under `HOCUS_KIT_SHOTS`
+/// (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        (1920, 1080),
+        "14:00:00",
+        &ordinary(),
+        FormChoice::Full,
+    )?;
+    bed.today_from(0, "AUJOURD'HUI 15:00")?;
+    let top = bed.surface()?.y + 5;
+    let at = (f64::from(LINE_X + 80), f64::from(line_middle(top, 0)));
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (TODAY_NAMESPACE, "today"),
+        at,
+        "TodayLine(1)",
+    )
 }

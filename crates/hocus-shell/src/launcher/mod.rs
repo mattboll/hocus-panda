@@ -14,10 +14,10 @@
 //! ([`LAUNCHER_NAMESPACE`]), in the overlay layer, holding the keyboard.
 //! The compositor darkens and blurs what is behind it and moves it in and
 //! out; the shell draws it once for that motion, and again only for what
-//! changes (a key, the pointer on another tile, an icon read). As for the
-//! popovers, nothing goes through iced's messages, which would draw every
-//! surface: the effects are layer-shell actions and lines to the
-//! compositor, carried out by [`crate::popover::effects`].
+//! changes (a key, the pointer on another tile, an icon read). Its surface
+//! is the widget kit's ([`view`]): what its widgets ask is handled at once
+//! and it alone draws again; the effects are layer-shell actions and lines
+//! to the compositor, carried out by [`crate::popover::effects`].
 //!
 //! The applications ([`apps`]) and their icons ([`icons`]) are read on
 //! threads of their own.
@@ -37,12 +37,13 @@
 
 pub mod answers;
 pub mod apps;
-pub mod draw;
 pub mod entries;
 pub mod icons;
 pub mod search;
 pub mod toast;
+pub mod view;
 
+use hocus_words::shell::launcher as txt;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, PoisonError},
@@ -53,7 +54,11 @@ use hocus_link::{LAUNCHER_CLOSE, LAUNCHER_NAMESPACE, Launch, ToCompositor};
 use iced::{keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
 
-use crate::{clock::time::Lang, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    field::{self, Entry, Took},
+    popover::Effect,
+};
 
 /// The grid's columns at most, and the frequent applications shown at
 /// most.
@@ -67,91 +72,71 @@ pub const EMOJI_MOST: usize = 8;
 /// The launcher's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     pub fn lang(self) -> Lang {
-        if self.fr { Lang::French } else { Lang::English }
+        if self.lang == Lang::French {
+            Lang::French
+        } else {
+            Lang::English
+        }
     }
 
     pub fn placeholder(self) -> &'static str {
-        self.pick(
-            "Chercher une application, calculer…",
-            "Search for an application, calculate…",
-        )
+        self.pick(txt::SEARCH_FOR_AN_APPLICATION_CALCULATE)
     }
 
     pub fn escape(self) -> &'static str {
-        self.pick("Échap", "Esc")
+        self.pick(txt::ESC)
     }
 
     pub fn frequent(self) -> &'static str {
-        self.pick("FRÉQUENTES", "FREQUENT")
+        self.pick(txt::FREQUENT)
     }
 
     pub fn all(self) -> &'static str {
-        self.pick("TOUTES LES APPLICATIONS", "ALL APPLICATIONS")
+        self.pick(txt::ALL_APPLICATIONS)
     }
 
     /// What `Enter` does on a card, shown at its right while it is
     /// selected.
     pub fn hint(self, card: Card) -> &'static str {
         match card {
-            Card::Answer => self.pick("Entrée copie", "Enter copies"),
-            Card::Address => self.pick("Entrée ouvre", "Enter opens"),
-            Card::Web => self.pick("Entrée cherche", "Enter searches"),
+            Card::Answer => self.pick(txt::ENTER_COPIES),
+            Card::Address => self.pick(txt::ENTER_OPENS),
+            Card::Web => self.pick(txt::ENTER_SEARCHES),
         }
     }
 
     pub fn open(self, typed: &str) -> String {
-        if self.fr {
-            format!("Ouvrir {typed}")
-        } else {
-            format!("Open {typed}")
-        }
+        txt::open(self.lang, typed)
     }
 
     pub fn in_browser(self, url: &str) -> String {
-        if self.fr {
-            format!("{url} · dans le navigateur")
-        } else {
-            format!("{url} · in the browser")
-        }
+        txt::in_the_browser(self.lang, url)
     }
 
     pub fn search_web(self, query: &str) -> String {
-        if self.fr {
-            format!("Chercher «\u{a0}{query}\u{a0}» sur le web")
-        } else {
-            format!("Search the web for \u{201c}{query}\u{201d}")
-        }
+        txt::search_the_web_for(self.lang, query)
     }
 
     pub fn web_engine(self) -> &'static str {
-        self.pick(
-            "DuckDuckGo · Ctrl+Entrée depuis n\u{2019}importe où",
-            "DuckDuckGo · Ctrl+Enter from anywhere",
-        )
+        self.pick(txt::DUCKDUCKGO_CTRL_ENTER_FROM_ANYWHERE)
     }
 
     /// The toast once a result is copied.
     pub fn copied(self, value: &str) -> String {
-        if self.fr {
-            format!("Copié\u{a0}: {value}")
-        } else {
-            format!("Copied: {value}")
-        }
+        txt::copied(self.lang, value)
     }
 }
 
@@ -375,7 +360,8 @@ pub struct Open {
     /// Its screen, where a toast shows once it closes.
     pub output: String,
     pub scale: f32,
-    pub query: String,
+    /// The search field (#771).
+    pub query: Entry,
     pub grid: Grid,
     pub catalog: Arc<apps::Catalog>,
     counts: HashMap<String, u32>,
@@ -383,15 +369,18 @@ pub struct Open {
     pub selected: usize,
     /// The first row shown.
     pub offset: usize,
-    /// The tile pressed, and the one under the pointer since when.
-    pub pressed: Option<usize>,
+    /// The tile under the pointer since when.
     pub hover: Option<(usize, Instant)>,
-    /// Where the pointer is on the surface, once it moved.
-    pub pointer: Option<iced::Point>,
-    /// The surface's size, once drawn: what the grid's rows fit in.
+    /// The surface's size, once laid out: what the grid's rows fit in;
+    /// and the size its view was built for.
     pub size: iced::Size,
+    pub built: iced::Size,
     /// When a cut name rested on shows whole.
     pub tooltip: Option<Instant>,
+    /// The wheel's notches.
+    pub wheel: crate::popover::kit::Wheel,
+    /// What it last said it shows, in the log.
+    pub logged: String,
 }
 
 impl Open {
@@ -408,7 +397,13 @@ impl Open {
             words,
             numbers: answers::Numbers::new(Lang::of_numbers()),
         };
-        Grid::of(&self.catalog, &self.counts, &self.query, reading, columns)
+        Grid::of(
+            &self.catalog,
+            &self.counts,
+            self.query.text(),
+            reading,
+            columns,
+        )
     }
 
     /// Its grid in rows of `columns` tiles, as its screen has room for:
@@ -419,7 +414,7 @@ impl Open {
         }
         tracing::debug!(columns, "the launcher's grid fits its screen");
         self.grid = self.grid_of(words(), columns);
-        self.offset = draw::keep_in_view(&self.grid, self.selected, 0, self.size);
+        self.offset = view::keep_in_view(&self.grid, self.selected, 0, self.size);
         self.hover = None;
         self.tooltip = None;
     }
@@ -466,6 +461,7 @@ pub fn start() {
 
 /// Its surface draws again.
 pub fn wake() {
+    crate::ui::touch();
     crate::popover::send(vec![Effect::Wake(LAUNCHER_NAMESPACE)]);
 }
 
@@ -480,7 +476,7 @@ pub fn changed() {
         Phase::Closed => None,
     });
     if let Some((names, scale)) = open {
-        icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        icons::want(names.iter().map(String::as_str), view::ICON as u32, scale);
         wake();
     }
 }
@@ -510,17 +506,18 @@ pub fn toggle(output: String, scale: u32) {
             surface,
             output: output.clone(),
             scale,
-            query: String::new(),
+            query: Entry::new(field::Kind::Line, QUERY_MOST),
             grid: Grid::default(),
             catalog,
             counts,
             selected: 0,
             offset: 0,
-            pressed: None,
             hover: None,
-            pointer: None,
             size: iced::Size::ZERO,
+            built: iced::Size::ZERO,
             tooltip: None,
+            wheel: crate::popover::kit::Wheel::default(),
+            logged: String::new(),
         };
         open.regrid(words());
         let wanted = (icon_names(&open), scale);
@@ -536,7 +533,7 @@ pub fn toggle(output: String, scale: u32) {
         // One popover at a time, and not under the launcher.
         crate::popover::event(crate::popover::Event::PressElsewhere);
         crate::actions::close();
-        icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        icons::want(names.iter().map(String::as_str), view::ICON as u32, scale);
     }
     crate::popover::send(effects);
 }
@@ -549,15 +546,16 @@ pub fn open_with(output: String, scale: u32, query: &str) {
     }
     let wanted = with(|l| match &mut l.phase {
         Phase::Open(open) => {
-            open.query = query.chars().take(QUERY_MOST).collect();
+            let query: String = query.chars().take(QUERY_MOST).collect();
+            open.query.set(&query);
             open.regrid(words());
-            tracing::debug!(query = open.query, "the launcher opens searching");
+            tracing::debug!(query, "the launcher opens searching");
             Some((icon_names(open), open.scale))
         }
         Phase::Closed => None,
     });
     if let Some((names, scale)) = wanted {
-        icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        icons::want(names.iter().map(String::as_str), view::ICON as u32, scale);
         wake();
     }
 }
@@ -636,6 +634,7 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             && open.tooltip.is_some_and(|at| at <= now)
         {
             open.tooltip = None;
+            crate::ui::touch();
             effects.push(Effect::Wake(LAUNCHER_NAMESPACE));
         }
         l.closing.retain(|(id, at)| {
@@ -698,7 +697,7 @@ pub fn act(id: window::Id, at: usize) {
                     effects.extend(browse(&address.url));
                 }
             }
-            Some(Item::Card(Card::Web)) => effects.extend(browse(&answers::web(&open.query))),
+            Some(Item::Card(Card::Web)) => effects.extend(browse(&answers::web(open.query.text()))),
             Some(Item::Emoji(e)) => {
                 let Some(emoji) = crate::emoji::data::table().emoji.get(*e) else {
                     return effects;
@@ -780,19 +779,21 @@ pub fn key_on(
         Act(usize),
         Web,
         Draw,
+        Paste,
     }
     let words = words();
     let then = with(|l| {
         let open = l.open_mut(id)?;
         let arrow = |arrow: Arrow, open: &mut Open| {
             open.selected = open.grid.step(open.selected, arrow);
-            open.offset = draw::keep_in_view(&open.grid, open.selected, open.offset, open.size);
+            open.offset = view::keep_in_view(&open.grid, open.selected, open.offset, open.size);
             Then::Draw
         };
+        let held = modifiers.shift() || modifiers.control();
         Some(match key {
             Key::Named(Named::Escape) => Then::Close,
             Key::Named(Named::Enter) => {
-                if modifiers.control() && !open.query.trim().is_empty() {
+                if modifiers.control() && !open.query.text().trim().is_empty() {
                     Then::Web
                 } else if open.grid.flat.is_empty() {
                     Then::Nothing
@@ -800,41 +801,19 @@ pub fn key_on(
                     Then::Act(open.selected)
                 }
             }
-            Key::Named(Named::ArrowLeft) => arrow(Arrow::Left, open),
-            Key::Named(Named::ArrowRight) => arrow(Arrow::Right, open),
+            // Across the grid; with Shift or Ctrl, in the field.
+            Key::Named(Named::ArrowLeft) if !held => arrow(Arrow::Left, open),
+            Key::Named(Named::ArrowRight) if !held => arrow(Arrow::Right, open),
             Key::Named(Named::ArrowUp) => arrow(Arrow::Up, open),
             Key::Named(Named::ArrowDown) => arrow(Arrow::Down, open),
-            Key::Named(Named::Backspace) => {
-                if open.query.is_empty() {
-                    Then::Nothing
-                } else {
-                    if modifiers.control() {
-                        // The last word, and the spaces after it.
-                        let kept = open.query.trim_end().rfind(' ').map_or(0, |at| at + 1);
-                        open.query.truncate(kept);
-                    } else {
-                        open.query.pop();
-                    }
+            _ => match open.query.key(key, modifiers, text) {
+                Took::No | Took::Same => Then::Nothing,
+                Took::Moved => Then::Draw,
+                Took::Edited => {
                     open.regrid(words);
                     Then::Draw
                 }
-            }
-            _ => match text {
-                Some(typed)
-                    if !modifiers.control()
-                        && !modifiers.alt()
-                        && !modifiers.logo()
-                        && !typed.is_empty()
-                        && !typed.chars().any(char::is_control) =>
-                {
-                    if open.query.chars().count() + typed.chars().count() > QUERY_MOST {
-                        return Some(Then::Nothing);
-                    }
-                    open.query.push_str(typed);
-                    open.regrid(words);
-                    Then::Draw
-                }
-                _ => Then::Nothing,
+                Took::Paste => Then::Paste,
             },
         })
     });
@@ -854,6 +833,47 @@ pub fn key_on(
             true
         }
         Some(Then::Draw) => true,
+        Some(Then::Paste) => {
+            paste(id);
+            true
+        }
+    }
+}
+
+/// The clipboard's text, on one line, into the field of the launcher on
+/// `id` at its caret, read off the loop.
+fn paste(id: window::Id) {
+    crate::paste::request(crate::paste::Clean::Spaced, move |pasted| {
+        let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+            return;
+        };
+        let words = words();
+        let took = with(|l| {
+            l.open_mut(id).is_some_and(|open| {
+                let took = open.query.paste(pasted);
+                if took {
+                    open.regrid(words);
+                }
+                took
+            })
+        });
+        if took {
+            wake();
+        }
+    });
+}
+
+/// What the field of the launcher on `id` took of an input method or of
+/// the pointer: its grid follows what was typed; a paste is asked for.
+pub fn took(id: window::Id, took: Took, words: Words) {
+    match took {
+        Took::Edited => with(|l| {
+            if let Some(open) = l.open_mut(id) {
+                open.regrid(words);
+            }
+        }),
+        Took::Paste => paste(id),
+        Took::No | Took::Same | Took::Moved => {}
     }
 }
 
@@ -872,6 +892,49 @@ pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&st
         wake();
     }
     taken
+}
+
+/// The open launcher for screen readers: a dialog holding what its
+/// controls declared (its field, the tiles, cards and emoji shown), the
+/// selected one holding the focus.
+pub fn a11y() -> Option<hocus_a11y::Window> {
+    use hocus_a11y::{Node, Role, Window};
+    with(|l| {
+        let Phase::Open(open) = &l.phase else {
+            return None;
+        };
+        let rows = crate::a11y::rows::of(open.surface)?;
+        let title = words().placeholder();
+        let dialog = Node::new("dialog", Role::Dialog, title).children(rows.nodes);
+        let mut window = Window::new("launcher", title);
+        window.nodes = vec![dialog];
+        window.active = true;
+        window.focus = Some(if open.grid.flat.is_empty() {
+            "launcher:Field".to_owned()
+        } else {
+            format!("launcher:Item({})", open.selected)
+        });
+        window.size = Some((open.size.width, open.size.height));
+        Some(window)
+    })
+}
+
+/// A screen reader clicks control `key` (`launcher:Item(N)`) of the open
+/// launcher.
+pub fn a11y_click(key: &str) {
+    let Some(at) = key
+        .strip_prefix("launcher:Item(")
+        .and_then(|k| k.strip_suffix(')'))
+        .and_then(|n| n.parse().ok())
+    else {
+        return;
+    };
+    if let Some(id) = with(|l| match &l.phase {
+        Phase::Open(open) => Some(open.surface),
+        Phase::Closed => None,
+    }) {
+        act(id, at);
+    }
 }
 
 #[cfg(test)]
@@ -902,7 +965,13 @@ mod tests {
 
     fn reading(fr: bool) -> Reading {
         Reading {
-            words: Words { fr },
+            words: Words {
+                lang: if fr {
+                    hocus_words::Lang::French
+                } else {
+                    hocus_words::Lang::English
+                },
+            },
             numbers: answers::Numbers::new(if fr { Lang::French } else { Lang::English }),
         }
     }
@@ -1025,7 +1094,9 @@ mod tests {
             grid.address.as_ref().map(|a| a.url.as_str()),
             Some("https://github.com")
         );
-        let words = Words { fr: true };
+        let words = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             words.search_web("crêpes"),
             "Chercher «\u{a0}crêpes\u{a0}» sur le web"

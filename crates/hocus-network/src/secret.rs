@@ -68,7 +68,9 @@ impl Secret {
         let Some((at, _)) = self.as_str().char_indices().next_back() else {
             return;
         };
-        wipe(&mut self.0[at..]);
+        if let Some(last) = self.0.get_mut(at..) {
+            wipe(last);
+        }
         self.0.truncate(at);
     }
 

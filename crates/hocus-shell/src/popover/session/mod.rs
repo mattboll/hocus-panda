@@ -16,6 +16,9 @@
 //!
 //! What the compositor said is kept here ([`set_can`], [`set_shown`]),
 //! from the link's task, without a message: the popover alone draws again.
+//!
+//! Built with the shell's widget kit ([`crate::ui`]), its parts pinned
+//! where [`layout`] places them.
 
 mod layout;
 mod words;
@@ -25,29 +28,32 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_a11y::Role;
 use hocus_link::{
     HolderKind, LEAVE_COUNTDOWN, Launch, LeaveAction, LeaveAsk, LeaveCan, LeaveShown, LeaveStep,
     LockAsk, POPOVER_WIDTH, ToCompositor,
 };
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme,
+    Border, Color, Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
+    alignment::Vertical,
     keyboard, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry, Stroke},
-        text::Alignment,
-    },
+    widget::{Space, button, canvas, container, pin, row, space},
     window,
 };
 
-use self::layout::{Layout, Named, Placed, Row, Target, View};
+use self::layout::{Block, Layout, Named, Placed, Row, Target, View};
 pub use self::words::Words;
-use super::{
-    Effect, Event as Seen, Item, Pressed, event,
-    kit::{self, Input, Pointer, text, text_in},
-};
-use crate::levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, ring};
+use super::{Effect, Event as Seen, Item, Pressed, event, kit};
+use crate::levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT};
 use crate::theme::Ink;
+use crate::ui::{
+    self, Around, control,
+    parts::drawn,
+    style::{self, said},
+};
+
+type El<'a> = Element<'a, Msg>;
 
 pub const WIDTH: u32 = POPOVER_WIDTH.unsigned_abs();
 
@@ -140,8 +146,10 @@ pub fn open(output: &str) {
     super::changed(Item::User);
 }
 
-/// The popover opens: what logind allows is read again.
+/// The popover opens: what logind allows is read again; nothing holds
+/// the ring.
 pub(super) fn opening() {
+    ui(|ui| *ui = Ui::default());
     super::tell(ToCompositor::Leave(LeaveAsk::Open));
 }
 
@@ -208,40 +216,6 @@ fn named(holder: &hocus_link::Holder, words: Words) -> Named {
     }
 }
 
-// --- The surface ------------------------------------------------------------------
-
-/// The popover on its surface.
-#[derive(Debug, Clone)]
-pub struct Panel {
-    /// Its surface: it reacts only while open, not while it fades out.
-    pub id: window::Id,
-    pub words: Words,
-    /// On the compositor's glass (else opaque).
-    pub glass: bool,
-    /// Things move (a GPU, no reduced motion): the bar drains smoothly,
-    /// else a step a second.
-    pub motion: bool,
-}
-
-/// What the surface keeps between draws.
-#[derive(Debug, Default)]
-pub struct State {
-    /// The name, as cut to the header.
-    name: Option<String>,
-    pointer: Pointer<Target>,
-    /// What holds the keyboard.
-    focused: Option<Target>,
-    layout: Option<(Layout, u64)>,
-    /// What was said last of what it shows, for the log.
-    said: Option<String>,
-}
-
-impl State {
-    fn layout(&self) -> Option<&Layout> {
-        self.layout.as_ref().map(|(l, _)| l)
-    }
-}
-
 /// The glyphs (the mockup's 24 px paths): the Settings' sliders, a
 /// padlock, a moon, a door and an arrow leaving it, an arrow going round,
 /// the power sign.
@@ -286,245 +260,366 @@ fn glyph(row: Row, amber: bool) -> svg::Handle {
     glyphs[usize::from(amber)][path_of(row)].clone()
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+// --- The surface ------------------------------------------------------------------
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => {
-                self.refresh(state);
-                for pressed in kit::keys(self.id) {
-                    let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-                }
-                // The bar drains, a frame at a time, on a GPU with motion.
-                let counting = store(|s| {
-                    s.shown
-                        .as_ref()
-                        .is_some_and(|(s, _)| matches!(s.step, LeaveStep::Counting { .. }))
-                });
-                (self.motion && counting).then(|| canvas::Action::request_redraw_at(now + FRAME))
-            }
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
+/// The popover on its surface.
+#[derive(Debug, Clone)]
+pub struct Panel {
+    /// Its surface: it reacts only while open, not while it fades out.
+    pub id: window::Id,
+    pub words: Words,
+    /// On the compositor's glass (else opaque).
+    pub glass: bool,
+    /// Things move (a GPU, no reduced motion): the bar drains smoothly,
+    /// else a step a second.
+    pub motion: bool,
+}
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("session:{self:?}")
     }
+}
 
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let f = &mut frame;
-        self.header(f, state);
-        let Some(layout) = state.layout() else {
-            return vec![frame.into_geometry()];
-        };
-        let hover = state.pointer.hover;
-        let focus = state.focused;
-        match &layout.view {
-            View::Rows { rows, dividers } => {
-                for y in dividers {
-                    f.fill_rectangle(
-                        Point::new(kit::LEFT, *y),
-                        Size::new(kit::RIGHT - kit::LEFT, 1.0),
-                        RULE.get(),
-                    );
-                }
-                for placed in rows {
-                    self.row(f, placed, hover, focus);
-                }
+/// What it keeps while it shows.
+#[derive(Debug, Default)]
+struct Ui {
+    /// What holds the keyboard.
+    focus: Option<Target>,
+    /// What it was built from last: the store's generation, and the kind
+    /// of view (rows, a confirmation, the list).
+    built: Option<(u64, std::mem::Discriminant<View>)>,
+    /// What was said last of what it shows, for the log.
+    said: Option<String>,
+}
+
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A click on it: the ring goes, it acts.
+    Click(Target),
+    /// `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// `Esc` while a confirmation shows: it is cancelled.
+    Cancel,
+    /// What the compositor said changed under the view.
+    Stale,
+}
+
+/// The popover on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (words, motion) = (panel.words, panel.motion);
+    let order = lay_out(words).0.order();
+    Around::new(panel.id, build(words, motion), handle, Msg::Stale)
+        .rebuild(move || build(words, motion))
+        .stale_when(move || {
+            let generation = store(|s| s.generation);
+            ui(|ui| ui.built.is_none_or(|(g, _)| g != generation))
+        })
+        .keys(move |pressed| keys(pressed, &order))
+        .on_glass(panel.glass)
+}
+
+/// `Esc` cancels a confirmation (else the kit closes the popover); the
+/// arrows with nothing holding the ring, the first (down) or the last
+/// (up); the kit takes them round after.
+fn keys(pressed: &Pressed, order: &[Target]) -> Option<Msg> {
+    use keyboard::{Key, key::Named as K};
+    match &pressed.key {
+        Key::Named(K::Escape) if confirming() => Some(Msg::Cancel),
+        Key::Named(arrow @ (K::ArrowDown | K::ArrowUp)) if ui(|ui| ui.focus.is_none()) => {
+            let target = if *arrow == K::ArrowDown {
+                order.first()
+            } else {
+                order.last()
+            };
+            target.map(|t| Msg::Focus(*t))
+        }
+        _ => None,
+    }
+}
+
+/// Its content, from what the compositor said now.
+fn build<'a>(words: Words, motion: bool) -> El<'a> {
+    let (layout, generation) = lay_out(words);
+    let name = crate::user::name();
+    let room = kit::RIGHT - (kit::LEFT + layout::AVATAR + TILE_GAP);
+    let name = kit::elide(&name, room, |t| kit::measure(t, NAME_SIZE, MANROPE_BOLD));
+    let kind = std::mem::discriminant(&layout.view);
+    let focus = ui(|ui| {
+        if ui.built.map(|(g, _)| g) != Some(generation) {
+            // Into a confirmation, or the list: the keyboard on its
+            // first place ("… maintenant", "Annuler"); back to the rows,
+            // on none. What held it and is gone lets it go.
+            if ui.built.map(|(_, k)| k) != Some(kind)
+                || ui.focus.is_some_and(|t| !layout.order().contains(&t))
+            {
+                ui.focus = layout.first_focus();
             }
-            View::Confirm {
-                action,
-                top,
-                sentence,
-                bar,
-                now,
-                cancel,
-            } => {
-                let step = store(|s| s.shown.clone());
-                let Some((shown, told)) = step else {
-                    return vec![frame.into_geometry()];
-                };
-                title(f, *action, *top, &[self.words.title(*action).to_owned()]);
-                let (said, left) = match &shown.step {
-                    LeaveStep::Counting { left_ms } => {
-                        // Told each whole second: between two, a GPU with
-                        // motion drains the bar on its own clock, a second
-                        // at most; else it shows what was told.
-                        let said = Duration::from_millis(u64::from(*left_ms));
-                        let left = if self.motion {
-                            said.saturating_sub(told.elapsed().min(Duration::from_secs(1)))
-                        } else {
-                            said
-                        };
-                        let seconds = left.as_millis().div_ceil(1000) as u32;
-                        (self.words.counting(*action, seconds), Some(left))
-                    }
-                    LeaveStep::Authorizing => (self.words.authorizing().to_owned(), None),
-                    LeaveStep::Closing => (self.words.closing().to_owned(), Some(Duration::ZERO)),
-                    LeaveStep::Acting => (self.words.acting(*action).to_owned(), None),
-                    LeaveStep::Held(_) => (String::new(), None),
-                };
-                f.fill_text(text(
-                    said,
-                    Point::new(kit::LEFT, *sentence),
-                    layout::SENTENCE,
-                    DIM.get(),
-                    Alignment::Left,
+            ui.built = Some((generation, kind));
+            super::refit(Item::User);
+        }
+        say(words, &name, &layout, ui);
+        ui.focus
+    });
+    let base = Space::new()
+        .width(Length::Fill)
+        .height(layout.end + kit::PAD_BOTTOM + kit::BORDER);
+    let mut layers: Vec<El<'a>> = vec![base.into()];
+    layers.extend(header(name));
+    match &layout.view {
+        View::Rows { rows, dividers } => {
+            for y in dividers {
+                layers.push(at(
+                    container(Space::new().width(kit::RIGHT - kit::LEFT).height(1.0))
+                        .style(|_| style::boxed(RULE.get(), 0.0)),
+                    Point::new(kit::LEFT, *y),
                 ));
-                if let Some(bar) = bar {
-                    f.fill(&kit::rounded(*bar, 2.0), TRACK.get());
-                    let left = left.unwrap_or(LEAVE_COUNTDOWN);
-                    // Smooth on a GPU with motion; else a step a second.
-                    let left = if self.motion {
-                        left.as_secs_f32()
-                    } else {
-                        left.as_secs_f32().ceil()
-                    };
-                    let part = (left / LEAVE_COUNTDOWN.as_secs_f32()).clamp(0.0, 1.0);
-                    if part > 0.0 {
-                        let mut drained = *bar;
-                        drained.width *= part;
-                        f.fill(&kit::rounded(drained, 2.0), AMBER.get());
-                    }
-                }
-                if let Some(now) = now {
-                    button(
-                        f,
-                        *now,
-                        self.words.now(*action),
-                        Button::Amber,
-                        hover == Some(Target::Now),
-                        focus == Some(Target::Now),
-                    );
-                }
-                if let Some(cancel) = cancel {
-                    button(
-                        f,
-                        *cancel,
-                        self.words.cancel(),
-                        Button::Plain,
-                        hover == Some(Target::Cancel),
-                        focus == Some(Target::Cancel),
-                    );
-                }
             }
-            View::Held {
-                action,
-                top,
-                title: lines,
-                sentence,
-                sentence_top,
-                blocks,
-                anyway,
-                cancel,
-            } => {
-                title(f, *action, *top, lines);
-                for (i, line) in sentence.iter().enumerate() {
-                    let line_height = layout::HELD_SENTENCE * layout::LINE;
-                    f.fill_text(text(
-                        line.clone(),
-                        Point::new(kit::LEFT, sentence_top + line_height * (i as f32 + 0.5)),
-                        layout::HELD_SENTENCE,
-                        DIM.get(),
-                        Alignment::Left,
-                    ));
-                }
-                let holders = store(|s| match s.shown.as_ref().map(|(s, _)| &s.step) {
-                    Some(LeaveStep::Held(holders)) => holders.clone(),
-                    _ => Vec::new(),
-                });
-                for (i, block) in blocks.iter().enumerate() {
-                    let app = holders.get(i).map_or("", |h| h.app.as_str());
-                    self.block(f, block, app, i, hover, focus);
-                }
-                button(
-                    f,
-                    *anyway,
-                    self.words.anyway(*action),
-                    Button::Anyway,
-                    hover == Some(Target::Anyway),
-                    focus == Some(Target::Anyway),
-                );
-                button(
-                    f,
-                    *cancel,
-                    self.words.cancel(),
-                    Button::Plain,
-                    hover == Some(Target::Cancel),
-                    focus == Some(Target::Cancel),
-                );
+            for placed in rows {
+                layers.push(row_of(words, placed, focus));
             }
         }
-        self.tell_readers(state, layout);
-        vec![frame.into_geometry()]
+        View::Confirm {
+            action,
+            top,
+            sentence,
+            bar,
+            now,
+            cancel,
+        } => {
+            layers.extend(title(*action, *top, &[words.title(*action).to_owned()]));
+            let step = store(|s| s.shown.clone());
+            if let Some((shown, told)) = step {
+                let said_now = match &shown.step {
+                    LeaveStep::Counting { left_ms } => {
+                        let left = left_of(*left_ms, told, motion);
+                        let seconds = left.as_millis().div_ceil(1000) as u32;
+                        words.counting(*action, seconds)
+                    }
+                    LeaveStep::Authorizing => words.authorizing().to_owned(),
+                    LeaveStep::Closing => words.closing().to_owned(),
+                    LeaveStep::Acting => words.acting(*action).to_owned(),
+                    LeaveStep::Held(_) => String::new(),
+                };
+                layers.push(middled(
+                    said(said_now, layout::SENTENCE, MANROPE, DIM.get()),
+                    kit::LEFT,
+                    *sentence,
+                ));
+            }
+            if let Some(bar) = bar {
+                layers.push(at(
+                    canvas(Drain { motion }).width(bar.width).height(bar.height),
+                    bar.position(),
+                ));
+            }
+            if let Some(rect) = now {
+                layers.push(wide(
+                    *rect,
+                    words.now(*action),
+                    Look::Amber,
+                    Target::Now,
+                    focus,
+                ));
+            }
+            if let Some(rect) = cancel {
+                layers.push(wide(
+                    *rect,
+                    words.cancel(),
+                    Look::Plain,
+                    Target::Cancel,
+                    focus,
+                ));
+            }
+        }
+        View::Held {
+            action,
+            top,
+            title: lines,
+            sentence,
+            sentence_top,
+            blocks,
+            anyway,
+            cancel,
+        } => {
+            layers.extend(title(*action, *top, lines));
+            let line = layout::HELD_SENTENCE * layout::LINE;
+            for (i, said_line) in sentence.iter().enumerate() {
+                layers.push(middled(
+                    said(said_line.clone(), layout::HELD_SENTENCE, MANROPE, DIM.get()),
+                    kit::LEFT,
+                    sentence_top + line * (i as f32 + 0.5),
+                ));
+            }
+            layers.push(at(
+                ui::line(Space::new(), sentence.join(" ")),
+                Point::new(kit::LEFT, *sentence_top),
+            ));
+            let holders = store(|s| match s.shown.as_ref().map(|(s, _)| &s.step) {
+                Some(LeaveStep::Held(holders)) => holders.clone(),
+                _ => Vec::new(),
+            });
+            for (i, block) in blocks.iter().enumerate() {
+                let app = holders.get(i).map_or("", |h| h.app.as_str());
+                layers.extend(block_of(words, block, app, i, focus));
+            }
+            layers.push(wide(
+                *anyway,
+                words.anyway(*action),
+                Look::Anyway,
+                Target::Anyway,
+                focus,
+            ));
+            layers.push(wide(
+                *cancel,
+                words.cancel(),
+                Look::Plain,
+                Target::Cancel,
+                focus,
+            ));
+        }
     }
+    iced::widget::Stack::with_children(layers).into()
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
+/// `content` with its top left corner at `point` in the popover.
+fn at<'a>(content: impl Into<El<'a>>, point: Point) -> El<'a> {
+    pin(content).x(point.x).y(point.y).into()
+}
+
+/// A line of text from `x`, its middle at `middle`.
+fn middled<'a>(content: impl Into<El<'a>>, x: f32, middle: f32) -> El<'a> {
+    const ROOM: f32 = 40.0;
+    at(
+        container(content).height(ROOM).align_y(Vertical::Center),
+        Point::new(x, middle - ROOM / 2.0),
+    )
+}
+
+/// The header: the avatar, the name.
+fn header<'a>(name: String) -> [El<'a>; 2] {
+    let middle = kit::HEADER_TOP + layout::HEADER / 2.0;
+    let avatar = drawn(layout::AVATAR, layout::AVATAR, |f, s| {
+        crate::lock::draw::avatar_round(f, Rectangle::new(Point::ORIGIN, s), 1.0);
+    });
+    [
+        at(avatar, Point::new(kit::LEFT, middle - layout::AVATAR / 2.0)),
+        middled(
+            ui::line(
+                said(name.clone(), NAME_SIZE, MANROPE_BOLD, TEXT.get()),
+                name,
+            ),
+            kit::LEFT + layout::AVATAR + TILE_GAP,
+            middle,
+        ),
+    ]
+}
+
+/// A glyph's tile `size` wide, filled with `fill`, its glyph (`amber`:
+/// the confirmation's; faded by `opacity`).
+fn tile<'a>(row: Row, fill: Color, amber: bool, opacity: f32) -> El<'a> {
+    drawn(layout::TILE, layout::TILE, move |f, s| {
+        let tile = Rectangle::new(Point::ORIGIN, s);
+        f.fill(&kit::rounded(tile, TILE_RADIUS), fill);
+        let centre = tile.center();
+        f.draw_svg(
+            Rectangle::new(
+                Point::new(centre.x - GLYPH / 2.0, centre.y - GLYPH / 2.0),
+                Size::new(GLYPH, GLYPH),
+            ),
+            svg::Svg::new(glyph(row, amber)).opacity(opacity),
+        );
+    })
 }
 
 /// The confirmation's title row at `top`: the action's glyph in amber on
 /// its tile, the title (on several lines when it must).
-fn title(f: &mut Frame, action: LeaveAction, top: f32, lines: &[String]) {
-    let tile = Rectangle::new(
+fn title<'a>(action: LeaveAction, top: f32, lines: &[String]) -> Vec<El<'a>> {
+    let mut layers = vec![at(
+        tile(Row::Leave(action), AMBER_TILE.get(), true, 1.0),
         Point::new(kit::LEFT, top),
-        Size::new(layout::TILE, layout::TILE),
-    );
-    f.fill(&kit::rounded(tile, TILE_RADIUS), AMBER_TILE.get());
-    draw_glyph(f, tile, Row::Leave(action), true);
+    )];
     let line = layout::TITLE * layout::LINE;
     let block = (lines.len() as f32 * line).max(layout::TILE);
     let first = top + (block - lines.len() as f32 * line) / 2.0;
-    for (i, said) in lines.iter().enumerate() {
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                said.clone(),
-                Point::new(
-                    tile.x + layout::TILE + TILE_GAP,
-                    first + line * (i as f32 + 0.5),
-                ),
-                layout::TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
+    for (i, said_line) in lines.iter().enumerate() {
+        layers.push(middled(
+            said(said_line.clone(), layout::TITLE, MANROPE_BOLD, TEXT.get()),
+            kit::LEFT + layout::TILE + TILE_GAP,
+            first + line * (i as f32 + 0.5),
         ));
     }
+    layers.push(at(
+        ui::line(Space::new(), lines.join(" ")),
+        Point::new(kit::LEFT, top),
+    ));
+    layers
 }
 
-fn draw_glyph(f: &mut Frame, tile: Rectangle, row: Row, amber: bool) {
-    let centre = tile.center();
-    f.draw_svg(
-        Rectangle::new(
-            Point::new(centre.x - GLYPH / 2.0, centre.y - GLYPH / 2.0),
-            Size::new(GLYPH, GLYPH),
+/// A row of the menu: its glyph on its tile, its words, Lock's keys.
+fn row_of<'a>(words: Words, placed: &Placed, focus: Option<Target>) -> El<'a> {
+    let rect = placed.rect;
+    let target = Target::Row(placed.row);
+    let enabled = placed.enabled;
+    let alpha = if enabled { 1.0 } else { 0.4 };
+    let glyph_alpha = if enabled { 1.0 } else { 0.35 };
+    let word = row_word(words, placed.row);
+    let mut line = row![
+        tile(placed.row, TILE_FILL.scale_alpha(alpha), false, glyph_alpha),
+        Space::new().width(TILE_GAP),
+        said(
+            word,
+            ROW_TEXT,
+            kit::MANROPE_SEMIBOLD,
+            if enabled { TEXT } else { GREYED }.get()
         ),
-        svg::Svg::new(glyph(row, amber)),
-    );
+        space::horizontal(),
+    ]
+    .align_y(Vertical::Center);
+    if placed.row == Row::Lock {
+        line = line.push(said("Super+L", SHORTCUT, MARTIAN, FAINT.get()));
+    }
+    let pressed = button(container(line).center_y(Length::Fill))
+        .padding(Padding {
+            left: ROW_PAD,
+            right: ROW_PAD,
+            ..Padding::ZERO
+        })
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, status| {
+            if enabled && style::lit(status) {
+                style::hovered(ROW_HOVER.get(), ROW_RADIUS)
+            } else {
+                style::clear()
+            }
+        })
+        .on_press_maybe(enabled.then_some(Msg::Click(target)));
+    let mut declared =
+        control(pressed, target.id(), Role::Button, word).node(|n| n.disabled(!enabled));
+    if enabled {
+        declared = declared
+            .focus(focus == Some(target), Msg::Focus(target), ROW_RADIUS)
+            .activate(Msg::Act(target))
+            .rows(0);
+    }
+    at(declared, rect.position())
 }
 
+/// How a wide button looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Button {
+enum Look {
     /// "… maintenant": amber.
     Amber,
     /// "Annuler".
@@ -534,546 +629,385 @@ enum Button {
 }
 
 /// A full-width button at `rect`.
-fn button(f: &mut Frame, rect: Rectangle, word: &str, look: Button, hover: bool, focus: bool) {
-    let shape = kit::rounded(rect, BUTTON_RADIUS);
+fn wide<'a>(
+    rect: Rectangle,
+    word: &str,
+    look: Look,
+    target: Target,
+    focus: Option<Target>,
+) -> El<'a> {
     let (ink, font) = match look {
-        Button::Amber => {
-            let fill = if hover {
-                AMBER.scale_alpha(0.9)
-            } else {
-                AMBER.get()
-            };
-            f.fill(&shape, fill);
-            (AMBER_INK, MANROPE_BOLD)
-        }
-        Button::Plain => {
-            f.fill(&shape, if hover { BUTTON_HOVER } else { BUTTON_FILL });
-            (TEXT, kit::MANROPE_SEMIBOLD)
-        }
-        Button::Anyway => {
-            f.fill(&shape, if hover { AMBER_TILE } else { ANYWAY_FILL });
-            f.stroke(
-                &kit::rounded(
-                    Rectangle::new(
-                        Point::new(rect.x + 0.5, rect.y + 0.5),
-                        Size::new(rect.width - 1.0, rect.height - 1.0),
-                    ),
-                    BUTTON_RADIUS - 0.5,
-                ),
-                Stroke::default()
-                    .with_color(ANYWAY_BORDER.get())
-                    .with_width(1.0),
-            );
-            (AMBER, MANROPE_BOLD)
-        }
+        Look::Amber => (AMBER_INK, MANROPE_BOLD),
+        Look::Plain => (TEXT, kit::MANROPE_SEMIBOLD),
+        Look::Anyway => (AMBER, MANROPE_BOLD),
     };
-    if focus {
-        ring(f, rect, BUTTON_RADIUS);
-    }
-    f.fill_text(text_in(
-        font,
-        text(
-            word.to_owned(),
-            rect.center(),
-            BUTTON_TEXT,
-            ink.get(),
-            Alignment::Center,
-        ),
-    ));
+    let pressed =
+        button(container(said(word.to_owned(), BUTTON_TEXT, font, ink.get())).center(Length::Fill))
+            .padding(0)
+            .width(rect.width)
+            .height(rect.height)
+            .style(move |_, status| {
+                let hover = style::lit(status);
+                let (fill, border) = match look {
+                    Look::Amber => (
+                        if hover {
+                            AMBER.scale_alpha(0.9)
+                        } else {
+                            AMBER.get()
+                        },
+                        None,
+                    ),
+                    Look::Plain => (if hover { BUTTON_HOVER } else { BUTTON_FILL }.get(), None),
+                    Look::Anyway => (
+                        if hover { AMBER_TILE } else { ANYWAY_FILL }.get(),
+                        Some(ANYWAY_BORDER.get()),
+                    ),
+                };
+                button::Style {
+                    background: Some(fill.into()),
+                    border: Border {
+                        color: border.unwrap_or(Color::TRANSPARENT),
+                        width: if border.is_some() { 1.0 } else { 0.0 },
+                        radius: BUTTON_RADIUS.into(),
+                    },
+                    ..button::Style::default()
+                }
+            })
+            .on_press(Msg::Click(target));
+    let declared = control(pressed, target.id(), Role::Button, word)
+        .focus(focus == Some(target), Msg::Focus(target), BUTTON_RADIUS)
+        .activate(Msg::Act(target))
+        .rows(0);
+    at(declared, rect.position())
 }
 
 /// A small button of a block.
-fn small(f: &mut Frame, rect: Rectangle, word: &str, hover: bool, focus: bool) {
-    f.fill(
-        &kit::rounded(rect, SMALL_RADIUS),
-        if hover { SMALL_HOVER } else { SMALL_FILL },
-    );
-    if focus {
-        ring(f, rect, SMALL_RADIUS);
-    }
-    f.fill_text(text_in(
-        kit::MANROPE_SEMIBOLD,
-        text(
+fn small<'a>(
+    rect: Rectangle,
+    word: &str,
+    name: String,
+    target: Target,
+    focus: Option<Target>,
+) -> El<'a> {
+    let pressed = button(
+        container(said(
             word.to_owned(),
-            rect.center(),
             layout::REASON,
+            kit::MANROPE_SEMIBOLD,
             TEXT.get(),
-            Alignment::Center,
-        ),
-    ));
+        ))
+        .center(Length::Fill),
+    )
+    .padding(0)
+    .width(rect.width)
+    .height(rect.height)
+    .style(|_, status| {
+        let fill = if style::lit(status) {
+            SMALL_HOVER
+        } else {
+            SMALL_FILL
+        };
+        style::filled(fill.get(), SMALL_RADIUS, TEXT.get())
+    })
+    .on_press(Msg::Click(target));
+    let declared = control(pressed, target.id(), Role::Button, name)
+        .focus(focus == Some(target), Msg::Focus(target), SMALL_RADIUS)
+        .activate(Msg::Act(target))
+        .rows(0);
+    at(declared, rect.position())
 }
 
-impl Panel {
-    /// The header: the avatar, the name.
-    fn header(&self, f: &mut Frame, state: &State) {
-        let middle = kit::HEADER_TOP + layout::HEADER / 2.0;
-        let avatar = Rectangle::new(
-            Point::new(kit::LEFT, middle - layout::AVATAR / 2.0),
-            Size::new(layout::AVATAR, layout::AVATAR),
-        );
-        crate::lock::draw::avatar_round(f, avatar, 1.0);
-        if let Some(name) = &state.name {
-            f.fill_text(text_in(
-                MANROPE_BOLD,
-                text(
-                    name.clone(),
-                    Point::new(avatar.x + layout::AVATAR + TILE_GAP, middle),
-                    NAME_SIZE,
-                    TEXT.get(),
-                    Alignment::Left,
-                ),
-            ));
-        }
-    }
-
-    /// A row of the menu.
-    fn row(&self, f: &mut Frame, placed: &Placed, hover: Option<Target>, focus: Option<Target>) {
-        let rect = placed.rect;
-        let target = Some(Target::Row(placed.row));
-        if placed.enabled && hover == target {
-            crate::theme::hover(f, &kit::rounded(rect, ROW_RADIUS), ROW_HOVER.get());
-        }
-        if focus == target {
-            ring(f, rect, ROW_RADIUS);
-        }
-        let tile = Rectangle::new(
-            Point::new(rect.x + ROW_PAD, rect.center_y() - layout::TILE / 2.0),
-            Size::new(layout::TILE, layout::TILE),
-        );
-        let alpha = if placed.enabled { 1.0 } else { 0.4 };
-        f.fill(
-            &kit::rounded(tile, TILE_RADIUS),
-            TILE_FILL.scale_alpha(alpha),
-        );
-        if placed.enabled {
-            draw_glyph(f, tile, placed.row, false);
-        } else {
-            f.with_save(|f| {
-                // The greyed rows' glyph, faded as their words.
-                let centre = tile.center();
-                f.draw_svg(
-                    Rectangle::new(
-                        Point::new(centre.x - GLYPH / 2.0, centre.y - GLYPH / 2.0),
-                        Size::new(GLYPH, GLYPH),
-                    ),
-                    svg::Svg::new(glyph(placed.row, false)).opacity(0.35_f32),
-                );
-            });
-        }
-        f.fill_text(text_in(
-            kit::MANROPE_SEMIBOLD,
-            text(
-                self.row_word(placed.row).to_owned(),
-                Point::new(tile.x + layout::TILE + TILE_GAP, rect.center_y()),
-                ROW_TEXT,
-                if placed.enabled {
-                    TEXT.get()
-                } else {
-                    GREYED.get()
-                },
-                Alignment::Left,
-            ),
+/// Block `i` of the list: application `app`'s.
+fn block_of<'a>(
+    words: Words,
+    block: &Block,
+    app: &str,
+    i: usize,
+    focus: Option<Target>,
+) -> Vec<El<'a>> {
+    let mut layers = vec![at(
+        container(
+            Space::new()
+                .width(block.rect.width)
+                .height(block.rect.height),
+        )
+        .style(|_| style::boxed(BLOCK_FILL.get(), BLOCK_RADIUS)),
+        block.rect.position(),
+    )];
+    let icon = icon_of(app, &block.name);
+    layers.push(at(
+        drawn(block.icon.width, block.icon.height, move |f, s| {
+            icon(f, Rectangle::new(Point::ORIGIN, s));
+        }),
+        block.icon.position(),
+    ));
+    let words_left = block.back.x;
+    layers.push(middled(
+        said(block.name.clone(), layout::NAME, MANROPE_BOLD, TEXT.get()),
+        words_left,
+        block.name_middle,
+    ));
+    let line = layout::REASON * layout::LINE;
+    for (n, said_line) in block.reason.iter().enumerate() {
+        layers.push(middled(
+            said(said_line.clone(), layout::REASON, MANROPE, DIM.get()),
+            words_left,
+            block.reason_top + line * (n as f32 + 0.5),
         ));
-        if placed.row == Row::Lock {
-            f.fill_text(text_in(
-                MARTIAN,
-                text(
-                    "Super+L".to_owned(),
-                    Point::new(rect.x + rect.width - ROW_PAD, rect.center_y()),
-                    SHORTCUT,
-                    FAINT.get(),
-                    Alignment::Right,
-                ),
-            ));
-        }
+    }
+    layers.push(at(
+        ui::line(
+            Space::new(),
+            format!("{}, {}", block.name, block.reason.join(" ")),
+        ),
+        block.rect.position(),
+    ));
+    layers.push(small(
+        block.back,
+        &block.back_word,
+        block.back_word.clone(),
+        Target::Back(i),
+        focus,
+    ));
+    if let Some(force) = block.force {
+        layers.push(small(
+            force,
+            words.close_anyway(),
+            format!("{}, {}", words.close_anyway(), block.name),
+            Target::Force(i),
+            focus,
+        ));
+    }
+    layers
+}
+
+/// What draws an application's icon: its entry's, else its letter on a
+/// colour of its own (3.4b).
+fn icon_of(app: &str, name: &str) -> impl Fn(&mut canvas::Frame, Rectangle) + 'static {
+    let scale = kit::popover_scale();
+    let px = crate::launcher::icons::pixels(layout::ICON as u32, scale);
+    let handle = crate::share::entry_of(app)
+        .and_then(|e| e.icon)
+        .and_then(|icon| match crate::launcher::icons::of(&icon, px) {
+            Some(found) => found,
+            None => {
+                crate::launcher::icons::want([icon.as_str()], layout::ICON as u32, scale);
+                None
+            }
+        });
+    let name = name.to_owned();
+    move |f, rect| match &handle {
+        Some(handle) => f.draw_image(rect, canvas::Image::new(handle.clone())),
+        None => kit::app_tile(f, rect, (None, &name), (ICON_RADIUS, 14.0), 1.0),
+    }
+}
+
+/// What is left of the countdown told `left_ms` at `told`: between two
+/// tells, a GPU with motion drains it on its own clock, a second at most;
+/// else what was told.
+fn left_of(left_ms: u32, told: Instant, motion: bool) -> Duration {
+    let said_left = Duration::from_millis(u64::from(left_ms));
+    if motion {
+        said_left.saturating_sub(told.elapsed().min(Duration::from_secs(1)))
+    } else {
+        said_left
+    }
+}
+
+/// The countdown's bar: it drains, a frame at a time on a GPU with
+/// motion, else a step a second.
+struct Drain {
+    motion: bool,
+}
+
+impl<M> canvas::Program<M> for Drain {
+    type State = ();
+
+    fn update(
+        &self,
+        _state: &mut (),
+        event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<M>> {
+        let iced::Event::Window(window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        let counting = store(|s| {
+            s.shown
+                .as_ref()
+                .is_some_and(|(s, _)| matches!(s.step, LeaveStep::Counting { .. }))
+        });
+        (self.motion && counting).then(|| canvas::Action::request_redraw_at(*now + FRAME))
     }
 
-    /// What it shows, for screen readers (crate::a11y::rows): its rows; a
-    /// confirmation's title and buttons; who holds it back, and the
-    /// buttons to go back to them, close them or go on.
-    fn tell_readers(&self, state: &State, layout: &layout::Layout) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let mut nodes = Vec::new();
-        match &layout.view {
-            View::Rows { rows: placed, .. } => {
-                for p in placed {
-                    nodes.push(
-                        rows::act(
-                            Target::Row(p.row),
-                            Role::Button,
-                            self.row_word(p.row),
-                            p.rect,
-                        )
-                        .disabled(!p.enabled),
-                    );
-                }
-            }
-            View::Confirm {
-                action,
-                now,
-                cancel,
-                ..
-            } => {
-                nodes.push(rows::line(self.words.title(*action)));
-                if let Some(now) = now {
-                    nodes.push(rows::act(
-                        Target::Now,
-                        Role::Button,
-                        self.words.now(*action),
-                        *now,
-                    ));
-                }
-                if let Some(cancel) = cancel {
-                    nodes.push(rows::act(
-                        Target::Cancel,
-                        Role::Button,
-                        self.words.cancel(),
-                        *cancel,
-                    ));
-                }
-            }
-            View::Held {
-                action,
-                title: lines,
-                sentence,
-                blocks,
-                anyway,
-                cancel,
-                ..
-            } => {
-                nodes.push(rows::line(lines.join(" ")));
-                nodes.push(rows::line(sentence.join(" ")));
-                for (i, block) in blocks.iter().enumerate() {
-                    nodes.push(rows::line(format!(
-                        "{}, {}",
-                        block.name,
-                        block.reason.join(" ")
-                    )));
-                    nodes.push(rows::act(
-                        Target::Back(i),
-                        Role::Button,
-                        block.back_word.clone(),
-                        block.back,
-                    ));
-                    if let Some(force) = block.force {
-                        nodes.push(rows::act(
-                            Target::Force(i),
-                            Role::Button,
-                            format!("{}, {}", self.words.close_anyway(), block.name),
-                            force,
-                        ));
-                    }
-                }
-                nodes.push(rows::act(
-                    Target::Anyway,
-                    Role::Button,
-                    self.words.anyway(*action),
-                    *anyway,
-                ));
-                nodes.push(rows::act(
-                    Target::Cancel,
-                    Role::Button,
-                    self.words.cancel(),
-                    *cancel,
-                ));
-            }
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(layout.targets().into_iter().map(|(t, _)| t)),
-                focus: state.focused.map(rows::key),
-                arrows: false,
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut f = canvas::Frame::new(renderer, bounds.size());
+        let bar = Rectangle::new(Point::ORIGIN, bounds.size());
+        f.fill(&kit::rounded(bar, 2.0), TRACK.get());
+        let left = store(|s| match s.shown.as_ref() {
+            Some((shown, told)) => match shown.step {
+                LeaveStep::Counting { left_ms } => Some(left_of(left_ms, *told, self.motion)),
+                LeaveStep::Closing => Some(Duration::ZERO),
+                _ => None,
             },
-        );
-    }
-
-    fn row_word(&self, row: Row) -> &'static str {
-        match row {
-            Row::Settings => self.words.settings(),
-            Row::Lock => self.words.lock(),
-            Row::Suspend => self.words.suspend(),
-            Row::Leave(action) => self.words.row(action),
+            None => None,
+        });
+        let left = left.unwrap_or(LEAVE_COUNTDOWN);
+        // Smooth on a GPU with motion; else a step a second.
+        let left = if self.motion {
+            left.as_secs_f32()
+        } else {
+            left.as_secs_f32().ceil()
+        };
+        let part = (left / LEAVE_COUNTDOWN.as_secs_f32()).clamp(0.0, 1.0);
+        if part > 0.0 {
+            let mut drained = bar;
+            drained.width *= part;
+            f.fill(&kit::rounded(drained, 2.0), AMBER.get());
         }
+        vec![f.into_geometry()]
     }
+}
 
-    /// Block `i` of the list: application `app`'s.
-    fn block(
-        &self,
-        f: &mut Frame,
-        block: &layout::Block,
-        app: &str,
-        i: usize,
-        hover: Option<Target>,
-        focus: Option<Target>,
-    ) {
-        f.fill(&kit::rounded(block.rect, BLOCK_RADIUS), BLOCK_FILL.get());
-        self.icon(f, block.icon, app, &block.name);
-        let words_left = block.back.x;
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                block.name.clone(),
-                Point::new(words_left, block.name_middle),
-                layout::NAME,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        let line = layout::REASON * layout::LINE;
-        for (n, said) in block.reason.iter().enumerate() {
-            f.fill_text(text(
-                said.clone(),
-                Point::new(words_left, block.reason_top + line * (n as f32 + 0.5)),
-                layout::REASON,
-                DIM.get(),
-                Alignment::Left,
-            ));
-        }
-        small(
-            f,
-            block.back,
-            &block.back_word,
-            hover == Some(Target::Back(i)),
-            focus == Some(Target::Back(i)),
-        );
-        if let Some(force) = block.force {
-            small(
-                f,
-                force,
-                self.words.close_anyway(),
-                hover == Some(Target::Force(i)),
-                focus == Some(Target::Force(i)),
-            );
-        }
+fn row_word(words: Words, row: Row) -> &'static str {
+    match row {
+        Row::Settings => words.settings(),
+        Row::Lock => words.lock(),
+        Row::Suspend => words.suspend(),
+        Row::Leave(action) => words.row(action),
     }
+}
 
-    /// An application's icon: its entry's, else its letter on a colour of
-    /// its own (3.4b).
-    fn icon(&self, f: &mut Frame, rect: Rectangle, app: &str, name: &str) {
-        let scale = kit::popover_scale();
-        let px = crate::launcher::icons::pixels(layout::ICON as u32, scale);
-        let handle = crate::share::entry_of(app)
-            .and_then(|e| e.icon)
-            .and_then(|icon| match crate::launcher::icons::of(&icon, px) {
-                Some(found) => found,
-                None => {
-                    crate::launcher::icons::want([icon.as_str()], layout::ICON as u32, scale);
-                    None
+/// What it shows, said in the log once (the tests read it).
+fn say(words: Words, name: &str, layout: &Layout, ui: &mut Ui) {
+    let said_now = match &layout.view {
+        View::Rows { rows, .. } => {
+            let rows: Vec<String> = rows
+                .iter()
+                .map(|p| {
+                    let word = row_word(words, p.row);
+                    if p.enabled {
+                        word.to_owned()
+                    } else {
+                        format!("({word})")
+                    }
+                })
+                .collect();
+            format!("rows {rows:?}")
+        }
+        View::Confirm { action, .. } => {
+            let step = store(|s| s.shown.as_ref().map(|(s, _)| s.step.clone()));
+            let sentence = match &step {
+                Some(LeaveStep::Counting { left_ms }) => {
+                    words.counting(*action, left_ms.div_ceil(1000))
                 }
+                Some(LeaveStep::Authorizing) => words.authorizing().to_owned(),
+                Some(LeaveStep::Closing) => words.closing().to_owned(),
+                Some(LeaveStep::Acting) => words.acting(*action).to_owned(),
+                _ => String::new(),
+            };
+            format!("{} « {sentence} »", words.title(*action))
+        }
+        View::Held { title, blocks, .. } => {
+            let names: Vec<String> = blocks
+                .iter()
+                .map(|b| format!("{}: {}", b.name, b.reason.join(" ")))
+                .collect();
+            format!("{} {names:?}", title.join(" "))
+        }
+    };
+    if ui.said.as_ref() == Some(&said_now) {
+        return;
+    }
+    tracing::debug!(
+        name,
+        shows = %said_now,
+        focus = ?ui.focus.map(Target::id),
+        "the session's popover shows it"
+    );
+    ui.said = Some(said_now);
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => {}
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Click(target) => {
+            ui(|ui| ui.focus = None);
+            act(target);
+        }
+        Msg::Act(target) => act(target),
+        Msg::Cancel => {
+            tracing::debug!("Escape: the confirmation is cancelled");
+            super::tell(ToCompositor::Leave(LeaveAsk::Cancel));
+        }
+    }
+}
+
+/// `target` clicked, or `Enter` on it.
+fn act(target: Target) {
+    tracing::info!(target = target.id(), "the session menu acts");
+    let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
+    match target {
+        Target::Row(Row::Settings) => open_settings(None),
+        Target::Row(Row::Lock) => {
+            super::send(vec![Effect::Tell(ToCompositor::Lock(LockAsk::Now))]);
+            event(Seen::Chosen);
+        }
+        Target::Row(Row::Suspend) => {
+            super::send(vec![Effect::Tell(ToCompositor::Leave(LeaveAsk::Suspend))]);
+            event(Seen::Chosen);
+        }
+        Target::Row(Row::Leave(action)) => {
+            let Some(output) = bar else {
+                return;
+            };
+            // It is worked in now: it stays when the pointer leaves.
+            event(Seen::Hold);
+            super::tell(ToCompositor::Leave(LeaveAsk::Ask { action, output }));
+        }
+        Target::Now | Target::Anyway => {
+            super::tell(ToCompositor::Leave(LeaveAsk::Now));
+        }
+        Target::Cancel => {
+            super::tell(ToCompositor::Leave(LeaveAsk::Cancel));
+        }
+        Target::Back(i) | Target::Force(i) => {
+            let holder = store(|s| match s.shown.as_ref().map(|(s, _)| &s.step) {
+                Some(LeaveStep::Held(holders)) => holders.get(i).cloned(),
+                _ => None,
             });
-        match handle {
-            Some(handle) => f.draw_image(rect, canvas::Image::new(handle)),
-            None => kit::app_tile(f, rect, (None, name), (ICON_RADIUS, 14.0), 1.0),
-        }
-    }
-
-    /// What it shows, read afresh while it is open: the name cut to the
-    /// header, the layout of what the compositor said.
-    fn refresh(&self, state: &mut State) {
-        if !super::with(|c| c.is_open(self.id)) {
-            return;
-        }
-        let name = crate::user::name();
-        let room = kit::RIGHT - (kit::LEFT + layout::AVATAR + TILE_GAP);
-        let name = match iced::advanced::graphics::text::font_system().write() {
-            Ok(mut system) => kit::elide(&name, room, |t| {
-                kit::measure_in(system.raw(), t, NAME_SIZE, MANROPE_BOLD)
-            }),
-            Err(_) => name,
-        };
-        let generation = store(|s| s.generation);
-        if state.name.as_ref() == Some(&name)
-            && state.layout.as_ref().is_some_and(|(_, g)| *g == generation)
-        {
-            return;
-        }
-        let kind = |view: &View| std::mem::discriminant(view);
-        let was = state.layout().map(|l| kind(&l.view));
-        let (layout, generation) = lay_out(self.words);
-        // Into a confirmation, or the list: the keyboard on "Annuler";
-        // back to the rows, on none. What held it and is gone lets it go.
-        if was != Some(kind(&layout.view))
-            || state.focused.is_some_and(|t| !layout.order().contains(&t))
-        {
-            state.focused = layout.first_focus();
-        }
-        super::refit(Item::User);
-        self.say(state, &name, &layout);
-        state.name = Some(name);
-        state.layout = Some((layout, generation));
-    }
-
-    /// What it shows, said in the log once (the tests read it).
-    fn say(&self, state: &mut State, name: &str, layout: &Layout) {
-        let said = match &layout.view {
-            View::Rows { rows, .. } => {
-                let rows: Vec<String> = rows
-                    .iter()
-                    .map(|p| {
-                        let word = self.row_word(p.row);
-                        if p.enabled {
-                            word.to_owned()
+            let Some(holder) = holder else {
+                return;
+            };
+            match (target, holder.kind) {
+                (Target::Force(_), HolderKind::Window { id }) => {
+                    super::tell(ToCompositor::Leave(LeaveAsk::Force(id)));
+                }
+                (_, HolderKind::Window { id }) => {
+                    super::tell(ToCompositor::Bring(id));
+                    event(Seen::Chosen);
+                }
+                (_, HolderKind::Inhibitor { pid }) => {
+                    super::tell(ToCompositor::Raise {
+                        pid,
+                        app: if holder.app.is_empty() {
+                            "-".to_owned()
                         } else {
-                            format!("({word})")
-                        }
-                    })
-                    .collect();
-                format!("rows {rows:?}")
-            }
-            View::Confirm { action, .. } => {
-                let step = store(|s| s.shown.as_ref().map(|(s, _)| s.step.clone()));
-                let sentence = match &step {
-                    Some(LeaveStep::Counting { left_ms }) => {
-                        self.words.counting(*action, left_ms.div_ceil(1000))
-                    }
-                    Some(LeaveStep::Authorizing) => self.words.authorizing().to_owned(),
-                    Some(LeaveStep::Closing) => self.words.closing().to_owned(),
-                    Some(LeaveStep::Acting) => self.words.acting(*action).to_owned(),
-                    _ => String::new(),
-                };
-                format!("{} « {sentence} »", self.words.title(*action))
-            }
-            View::Held { title, blocks, .. } => {
-                let names: Vec<String> = blocks
-                    .iter()
-                    .map(|b| format!("{}: {}", b.name, b.reason.join(" ")))
-                    .collect();
-                format!("{} {names:?}", title.join(" "))
-            }
-        };
-        if state.said.as_ref() == Some(&said) {
-            return;
-        }
-        tracing::debug!(
-            name,
-            shows = %said,
-            focus = ?state.focused,
-            "the session's popover shows it"
-        );
-        state.said = Some(said);
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| state.layout().and_then(|l| l.at(at)));
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    state.focused = None;
-                    self.act(target);
-                }
-                redraw
-            }
-            _ => None,
-        }
-    }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named as K};
-        let order = state.layout().map(Layout::order).unwrap_or_default();
-        match &pressed.key {
-            // A confirmation is cancelled; else the popover closes.
-            Key::Named(K::Escape) => {
-                if confirming() {
-                    tracing::debug!("Escape: the confirmation is cancelled");
-                    super::tell(ToCompositor::Leave(LeaveAsk::Cancel));
-                } else {
-                    event(Seen::Escape);
-                    return Some(canvas::Action::capture());
-                }
-            }
-            Key::Named(K::Tab | K::ArrowDown | K::ArrowUp) => {
-                let back = matches!(&pressed.key, Key::Named(K::ArrowUp))
-                    || (matches!(&pressed.key, Key::Named(K::Tab)) && pressed.modifiers.shift());
-                state.focused = kit::step(&order, state.focused, back);
-                tracing::debug!(focus = ?state.focused, "the keyboard in the session menu");
-            }
-            Key::Named(K::Enter | K::Space) => self.act(state.focused?),
-            _ => return None,
-        }
-        Some(canvas::Action::request_redraw().and_capture())
-    }
-
-    /// `target` clicked, or `Enter` on it.
-    fn act(&self, target: Target) {
-        tracing::info!(?target, "the session menu acts");
-        let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
-        match target {
-            Target::Row(Row::Settings) => open_settings(None),
-            Target::Row(Row::Lock) => {
-                super::send(vec![Effect::Tell(ToCompositor::Lock(LockAsk::Now))]);
-                event(Seen::Chosen);
-            }
-            Target::Row(Row::Suspend) => {
-                super::send(vec![Effect::Tell(ToCompositor::Leave(LeaveAsk::Suspend))]);
-                event(Seen::Chosen);
-            }
-            Target::Row(Row::Leave(action)) => {
-                let Some(output) = bar else {
-                    return;
-                };
-                // It is worked in now: it stays when the pointer leaves.
-                event(Seen::Hold);
-                super::tell(ToCompositor::Leave(LeaveAsk::Ask { action, output }));
-            }
-            Target::Now | Target::Anyway => {
-                super::tell(ToCompositor::Leave(LeaveAsk::Now));
-            }
-            Target::Cancel => {
-                super::tell(ToCompositor::Leave(LeaveAsk::Cancel));
-            }
-            Target::Back(i) | Target::Force(i) => {
-                let holder = store(|s| match s.shown.as_ref().map(|(s, _)| &s.step) {
-                    Some(LeaveStep::Held(holders)) => holders.get(i).cloned(),
-                    _ => None,
-                });
-                let Some(holder) = holder else {
-                    return;
-                };
-                match (target, holder.kind) {
-                    (Target::Force(_), HolderKind::Window { id }) => {
-                        super::tell(ToCompositor::Leave(LeaveAsk::Force(id)));
-                    }
-                    (_, HolderKind::Window { id }) => {
-                        super::tell(ToCompositor::Bring(id));
-                        event(Seen::Chosen);
-                    }
-                    (_, HolderKind::Inhibitor { pid }) => {
-                        super::tell(ToCompositor::Raise {
-                            pid,
-                            app: if holder.app.is_empty() {
-                                "-".to_owned()
-                            } else {
-                                holder.app.replace(' ', "_")
-                            },
-                        });
-                        event(Seen::Chosen);
-                    }
+                            holder.app.replace(' ', "_")
+                        },
+                    });
+                    event(Seen::Chosen);
                 }
             }
         }

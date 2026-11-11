@@ -702,17 +702,11 @@ fn at_rest_the_bar_page_draws_only_its_clock() -> anyhow::Result<()> {
         }
     }
     // The preview's clock draws at the minute, and the window says its
-    // places after: two commits. The 1.5 s looked at keep clear of it,
-    // from 2 s past a minute to 58 s.
-    let second = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs_f64()
-        % 60.0;
-    if !(2.0..56.0).contains(&second) {
-        wait(&mut bed.hp, Duration::from_secs_f64((62.0 - second) % 60.0))?;
-    }
+    // places after: two commits. The 1.5 s looked at keep clear of it.
+    let look = Duration::from_millis(1500);
+    common::clear_of_the_minute(&mut bed.hp, look)?;
     let before = bed.hp.window_commits();
-    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    wait(&mut bed.hp, look)?;
     assert!(
         bed.hp.window_commits() <= before + 1,
         "the page drew at rest: {} commits",

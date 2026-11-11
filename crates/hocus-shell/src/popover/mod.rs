@@ -59,6 +59,14 @@ pub mod wifi;
 pub mod window_menu;
 pub mod windows;
 
+mod carry;
+mod events;
+mod item;
+
+pub use carry::*;
+pub use events::*;
+pub use item::*;
+
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -72,423 +80,17 @@ use hocus_link::{
     TRAY_NAMESPACE, ToCompositor, WINDOWS_NAMESPACE,
 };
 use iced::{Point, Rectangle, Size, window};
+
+use crate::ui::{
+    cone::Cone,
+    ring::{Declared, Ring},
+};
 use iced_layershell::reexport::KeyboardInteractivity;
 
 /// Hovering a mini form's item this long opens its popover.
 pub const HOVER_OPEN: Duration = Duration::from_millis(150);
 /// A popover opened by hovering closes this long after the pointer left.
 pub const LEAVE_CLOSE: Duration = Duration::from_millis(300);
-
-/// What opens a popover, and the keyboard layout's item, which opens none.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Item {
-    Sound,
-    Wifi,
-    Bluetooth,
-    Brightness,
-    /// The battery and the power modes (the modes alone without a
-    /// battery).
-    Battery,
-    /// The keyboard's layout: a click, or `Enter` while it holds the
-    /// keyboard, asks for the next one (3.8).
-    Keyboard,
-    /// A desktop's tile (or dot) of the bar's row `row` (its screen's, 8.4:
-    /// 0 the bar's own), desktop `index` from 0: a click, or `Enter` while
-    /// it holds the keyboard, goes to that desktop of that screen (3.9);
-    /// hovered, it shows the list of its windows (3.9b).
-    Desktop {
-        row: u8,
-        index: u8,
-    },
-    /// The Sources popover (4.0): from the secretary's briefing, which it
-    /// replaces (4.6), and the card's "Un autre outil ?".
-    Sources,
-    AnotherTool,
-    /// A card's "Brancher": the consent popover for that tool.
-    Plug(crate::agents::Tool),
-    /// The card's "Ne rien brancher": a click declines the tools listed.
-    Decline,
-    /// An agent's row (4.1), by the compositor's id: a click, or `Enter`
-    /// while it holds the keyboard, goes to the agent.
-    Agent(u64),
-    /// The secretary, at the head of the agents' group (4.6): her
-    /// briefing, from which Sources opens.
-    Secretary,
-    /// The footer's bell (5.4, 5.5): the notifications' history.
-    Notifications,
-    /// The footer's clipboard (5.5): its history (5.6), which `Super+V`
-    /// opens too.
-    Clipboard,
-    /// The footer's menu (5.5): a click, or `Enter` while it holds the
-    /// keyboard, opens the launcher (5.1); hovering it opens nothing.
-    Menu,
-    /// The footer's user (5.5): their name and logging out (the session's
-    /// menu, 7.4).
-    User,
-    /// The sign of what is in use, under the clock (5.11, 5.12): who uses
-    /// the microphone, the camera or the screen; muting the microphone,
-    /// stopping a share or the recording.
-    InUse,
-    /// A tray icon (5.14), by its item's key: its menu, read before it
-    /// opens (a right click, or `Enter` while it holds the keyboard).
-    Tray(u32),
-    /// The next meeting's card (Day.2): a click, or `Enter`, opens the
-    /// calendar (Day.5) on today, its meeting chosen.
-    Meeting,
-    /// The card's join button: a click, or `Enter`, joins its video call.
-    Join,
-    /// The mini form's meeting mark: its popover, by a hover or a click.
-    MeetingMark,
-    /// A line of Today (Day.3), by its row from the top: a click, or
-    /// `Enter`, opens its call, else the calendar on its event.
-    TodayLine(u8),
-    /// Today's "+ N autres aujourd'hui": Day.5's calendar on today.
-    TodayMore,
-    /// The mini form's to-do item (Day.4): the tasks' popover.
-    Tasks,
-    /// The group's "+ N autres" (Day.4): the same popover, every task.
-    TasksMore,
-    /// The group's `+`: a click, or `Enter` while it holds the keyboard,
-    /// opens the field to add a task.
-    TaskAdd,
-    /// The box of the group's line, from its top: a click, or `Space` or
-    /// `Enter` while it holds the keyboard, ticks it (or unticks it).
-    Task(u8),
-    /// Day.1's first-run card's "Choisir…": the sources' popover, step by
-    /// step.
-    DayChoose,
-    /// The card's "Plus tard": a click, or `Enter`, removes the card for
-    /// good.
-    DayLater,
-    /// The clock's group, the date and the clock (Day.5): the calendar,
-    /// by a click only, in both forms.
-    Calendar,
-    /// A window's line over the desktops (#604), by the compositor's id: a
-    /// click, or `Enter`, focuses and raises it.
-    Window(u64),
-    /// Its ✕: a click, or `Enter`, asks it to close.
-    WindowClose(u64),
-    /// The windows' "+ N autres": the overview (8.5 A), by a click or
-    /// `Enter`.
-    WindowsMore,
-    /// The mini form's windows' item: their popover, by a hover or a
-    /// click.
-    Windows,
-    /// A window's menu (#723), by the compositor's id: opened by a right
-    /// click on its line, once the compositor said what it shows.
-    WindowMenu(u64),
-    /// The music player's tile over the desktops (s12): its popover, by a
-    /// click.
-    Music,
-}
-
-impl Item {
-    /// Whether a click (or `Enter`) opens its popover; else it acts.
-    fn clicks(self) -> bool {
-        !matches!(
-            self,
-            Self::Keyboard
-                | Self::Desktop { .. }
-                | Self::Decline
-                | Self::Agent(_)
-                | Self::Menu
-                | Self::Tray(_)
-                | Self::Meeting
-                | Self::Join
-                | Self::TodayLine(_)
-                | Self::TodayMore
-                | Self::TaskAdd
-                | Self::Task(_)
-                | Self::DayLater
-                | Self::Window(_)
-                | Self::WindowClose(_)
-                | Self::WindowsMore
-        )
-    }
-
-    /// Whether it is the agents' group's.
-    fn agents(self) -> bool {
-        matches!(
-            self,
-            Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline
-        )
-    }
-
-    /// Whether hovering it opens its popover, in `form`: a desktop's list
-    /// and the footer's clipboard, bell and user in both (5.5), the others
-    /// in the mini form; the agents' mini item (4.7), her briefing or
-    /// Sources on the card, as the others. The footer's menu never: a
-    /// screen-wide launcher must not open on the way past.
-    fn hovers(self, form: Form) -> bool {
-        match self {
-            Self::Desktop { .. }
-            | Self::Clipboard
-            | Self::Notifications
-            | Self::User
-            | Self::InUse => true,
-            Self::Keyboard
-            | Self::Agent(_)
-            | Self::Menu
-            | Self::Tray(_)
-            | Self::Meeting
-            | Self::Join
-            | Self::TodayLine(_)
-            | Self::TodayMore => false,
-            Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
-            Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore => false,
-            Self::DayChoose | Self::DayLater => false,
-            // Resting on the clock stays harmless (Day.5).
-            Self::Calendar => false,
-            Self::Secretary | Self::Sources => form == Form::Mini,
-            item if item.agents() => false,
-            _ => form == Form::Mini,
-        }
-    }
-
-    /// Its popover's width, logical pixels.
-    fn width(self) -> u32 {
-        match self {
-            Self::Desktop { .. } => desktop::WIDTH,
-            Self::Secretary => briefing::WIDTH,
-            Self::Notifications => history::WIDTH,
-            Self::Clipboard => clipboard::WIDTH,
-            Self::User => session::WIDTH,
-            Self::InUse => in_use::WIDTH,
-            Self::Tray(_) => tray::WIDTH,
-            Self::MeetingMark => meeting::WIDTH,
-            Self::Tasks | Self::TasksMore => tasks::WIDTH,
-            Self::DayChoose => setup::WIDTH,
-            Self::Calendar => calendar::WIDTH,
-            Self::Windows => windows::WIDTH,
-            Self::WindowMenu(_) => window_menu::WIDTH,
-            Self::WindowsMore => desktop::WIDTH,
-            Self::Music => music::WIDTH,
-            item if item.agents() => agents::WIDTH,
-            _ => POPOVER_WIDTH.unsigned_abs(),
-        }
-    }
-
-    /// Its popover's height on `bar`, in `form`, logical pixels, for what
-    /// it shows now: as it opens (`opening`), or after a change.
-    fn height(self, bar: &str, form: Form, opening: bool) -> u32 {
-        match self {
-            Self::Sound => sound::layout(opening).height(),
-            Self::Wifi => wifi::height(),
-            Self::Bluetooth => bluetooth::height(),
-            Self::Brightness => brightness::height(),
-            Self::Battery => battery::height(),
-            Self::Desktop { row, index } => desktop::height(bar, row, index),
-            Self::Sources | Self::AnotherTool => agents::sources_height(form),
-            Self::Plug(tool) => agents::consent_height(tool),
-            Self::Secretary => briefing::height(form),
-            Self::Notifications => history::height(),
-            Self::Clipboard => clipboard::height(),
-            Self::User => session::height(),
-            Self::InUse => in_use::height(),
-            Self::Tray(key) => tray::height(key),
-            Self::Calendar => calendar::height(),
-            Self::MeetingMark => meeting::height(),
-            Self::Tasks | Self::TasksMore => tasks::height(),
-            Self::DayChoose => setup::height(),
-            Self::Windows => windows::height(bar),
-            Self::WindowMenu(id) => window_menu::height(id),
-            Self::Music => music::height(),
-            Self::WindowsMore => desktop::height(
-                bar,
-                0,
-                u8::try_from(crate::desktops::current(bar)).unwrap_or(u8::MAX),
-            ),
-            Self::Keyboard
-            | Self::Decline
-            | Self::Agent(_)
-            | Self::Menu
-            | Self::Meeting
-            | Self::Join
-            | Self::TodayLine(_)
-            | Self::TodayMore
-            | Self::TaskAdd
-            | Self::Task(_)
-            | Self::DayLater
-            | Self::Window(_)
-            | Self::WindowClose(_) => 0,
-        }
-    }
-
-    /// Whether its surface draws it lit while its popover shows: a tile's
-    /// look does not change (it is lit by the pointer already); Sources
-    /// lights the mini form's agents' item, which opens it on the card.
-    fn lit_while_open(self) -> bool {
-        !matches!(self, Self::Desktop { .. }) && (!self.agents() || self == Self::Sources)
-    }
-
-    /// Its popover opens: what it shows starts afresh.
-    fn opening(self) {
-        match self {
-            Self::Sound => {}
-            Self::Wifi => wifi::opening(),
-            Self::Bluetooth => bluetooth::opening(),
-            Self::Brightness => brightness::opening(),
-            Self::Battery => battery::opening(),
-            Self::Keyboard | Self::Desktop { .. } | Self::Agent(_) | Self::Secretary => {}
-            Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
-            Self::Notifications => crate::notifications::history_open(true),
-            Self::Clipboard => clipboard::opening(),
-            Self::User => session::opening(),
-            Self::Menu | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
-            Self::Meeting | Self::Join | Self::MeetingMark => {}
-            Self::TodayLine(_) | Self::TodayMore => {}
-            Self::Tray(_) => tray::opening(),
-            Self::Tasks | Self::TasksMore => tasks::opening(),
-            Self::DayChoose => crate::setup::opening(),
-            Self::DayLater => {}
-            Self::Calendar => calendar::opening(),
-            Self::Music => music::opening(),
-            Self::Window(_)
-            | Self::WindowClose(_)
-            | Self::WindowsMore
-            | Self::Windows
-            | Self::WindowMenu(_) => {}
-        }
-    }
-
-    /// Its popover closes: what it kept goes (a password typed).
-    fn closing(self) {
-        match self {
-            Self::Sound
-            | Self::Brightness
-            | Self::Battery
-            | Self::Keyboard
-            | Self::Desktop { .. }
-            | Self::Sources
-            | Self::AnotherTool
-            | Self::Plug(_)
-            | Self::Decline
-            | Self::Agent(_)
-            | Self::Secretary
-            | Self::Menu
-            | Self::InUse
-            | Self::Tray(_)
-            | Self::Meeting
-            | Self::Join
-            | Self::MeetingMark
-            | Self::TodayLine(_)
-            | Self::TodayMore
-            | Self::TaskAdd
-            | Self::Task(_)
-            | Self::DayLater
-            | Self::Clipboard
-            | Self::Window(_)
-            | Self::WindowClose(_)
-            | Self::WindowsMore
-            | Self::Windows
-            | Self::WindowMenu(_)
-            | Self::Music => {}
-            Self::Tasks | Self::TasksMore => tasks::closing(),
-            Self::DayChoose => crate::setup::closing(),
-            Self::Wifi => wifi::closing(),
-            Self::Bluetooth => bluetooth::closing(),
-            Self::Notifications => crate::notifications::history_open(false),
-            Self::User => session::closing(),
-            Self::Calendar => {}
-        }
-    }
-
-    /// The namespace of the surface it is on in `form`, drawn again as
-    /// its popover opens and closes: the keyboard layout's is the
-    /// connections' row in the full form, the levels' button in the mini.
-    fn namespace(self, form: Form) -> &'static str {
-        match (self, form) {
-            (Self::Sound | Self::Brightness | Self::Battery, _) | (Self::Keyboard, Form::Mini) => {
-                LEVELS_NAMESPACE
-            }
-            (Self::Wifi | Self::Bluetooth, _) | (Self::Keyboard, Form::Full) => {
-                CONNECTIONS_NAMESPACE
-            }
-            (Self::Desktop { .. }, _) => DESKTOPS_NAMESPACE,
-            (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
-                FOOTER_NAMESPACE
-            }
-            (Self::InUse, _) => IN_USE_NAMESPACE,
-            (Self::Tray(_), _) => TRAY_NAMESPACE,
-            (Self::Meeting | Self::Join | Self::MeetingMark, _) => MEETING_NAMESPACE,
-            (Self::TodayLine(_) | Self::TodayMore, _) => TODAY_NAMESPACE,
-            (
-                Self::Tasks
-                | Self::TasksMore
-                | Self::TaskAdd
-                | Self::Task(_)
-                | Self::DayChoose
-                | Self::DayLater,
-                _,
-            ) => TASKS_NAMESPACE,
-            (Self::Calendar, _) => CLOCK_NAMESPACE,
-            (Self::Music, _) => MUSIC_NAMESPACE,
-            (
-                Self::Window(_)
-                | Self::WindowClose(_)
-                | Self::WindowsMore
-                | Self::Windows
-                | Self::WindowMenu(_),
-                _,
-            ) => WINDOWS_NAMESPACE,
-            (
-                Self::Sources
-                | Self::AnotherTool
-                | Self::Plug(_)
-                | Self::Decline
-                | Self::Agent(_)
-                | Self::Secretary,
-                _,
-            ) => AGENTS_NAMESPACE,
-        }
-    }
-
-    /// Whether its popover's bottom sits on the bar's whatever its height,
-    /// as the 3.5, 3.6 and 3.7 mockups draw the Wi-Fi's, Bluetooth's, the
-    /// brightness's and the battery's (else its top is on the item's,
-    /// pushed up to stay inside the bar: a desktop's list's on the tiles').
-    fn on_bottom(self) -> bool {
-        // The calendar's top on the clock's group's (Day.5).
-        if self == Self::Calendar {
-            return false;
-        }
-        !matches!(
-            self,
-            Self::Sound
-                | Self::Desktop { .. }
-                | Self::Secretary
-                | Self::InUse
-                | Self::Tray(_)
-                | Self::MeetingMark
-                | Self::Tasks
-                | Self::TasksMore
-                | Self::DayChoose
-                | Self::Windows
-                | Self::WindowsMore
-                | Self::WindowMenu(_)
-        ) && !self.agents()
-    }
-
-    /// Its surface on the bar at `place`, which holds the keyboard after
-    /// `Esc` in its popover.
-    fn surface(self, place: &Place) -> window::Id {
-        match self.namespace(place.form) {
-            LEVELS_NAMESPACE => place.levels,
-            DESKTOPS_NAMESPACE => place.desktops,
-            AGENTS_NAMESPACE => place.agents,
-            FOOTER_NAMESPACE => place.footer.unwrap_or(place.levels),
-            IN_USE_NAMESPACE => place.in_use.unwrap_or(place.levels),
-            MEETING_NAMESPACE => place.meeting.unwrap_or(place.levels),
-            TODAY_NAMESPACE => place.today.unwrap_or(place.levels),
-            TRAY_NAMESPACE => place.tray.unwrap_or(place.levels),
-            TASKS_NAMESPACE => place.tasks.unwrap_or(place.levels),
-            WINDOWS_NAMESPACE => place.windows.unwrap_or(place.levels),
-            // The bar's own surface hears the clock's group's keys.
-            CLOCK_NAMESPACE => place.surface,
-            _ => place.connections,
-        }
-    }
-}
 
 /// How a popover opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -529,285 +131,6 @@ pub struct Place {
 /// A bar's height until its surface's is known.
 const HEIGHT: f32 = 1064.0;
 
-/// What the shell's surfaces report.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Event {
-    /// The pointer is on `item` of `bar`, which is at `rect` (bar frame).
-    ItemEnter {
-        bar: String,
-        item: Item,
-        rect: Rectangle,
-    },
-    /// It left the item; last seen at `at`.
-    ItemLeave {
-        at: Point,
-    },
-    /// A press on `item` of `bar`, at `rect`.
-    ItemPress {
-        bar: String,
-        item: Item,
-        rect: Rectangle,
-    },
-    /// The pointer seen at `at` on a bar's surfaces, off its items.
-    Pointer {
-        at: Point,
-    },
-    PopoverEnter,
-    PopoverLeave,
-    /// A press on the bar's surfaces, off its items and the popover.
-    PressElsewhere,
-    /// A press on none of the shell's surfaces (the compositor's
-    /// `outside`).
-    Outside,
-    /// `Esc` in the popover.
-    Escape,
-    /// The popover, opened by hovering, is now worked in (a password to
-    /// type): it stays and takes the keyboard, as if a click had opened it.
-    Hold,
-    /// `Enter` or `Space` on the item holding the keyboard.
-    ItemActivate,
-    /// `Tab` (or down) on the item holding the keyboard: to the next item
-    /// of its surface; `back`, `Shift+Tab` (or up): to the previous.
-    ItemStep {
-        back: bool,
-    },
-    /// `Home` (`last`: `End`) on the item holding the keyboard: to the
-    /// bar's first item, or its last.
-    ItemEdge {
-        last: bool,
-    },
-    /// `←` or `→` (`right`) on the item holding the keyboard: along its
-    /// row (the desktops' tiles, the footer, the tray); on a level, its
-    /// value ∓5 % without opening it.
-    ItemSide {
-        right: bool,
-    },
-    /// `Esc` on the item holding the keyboard.
-    ItemRelease,
-    /// `bar` changed form, or went.
-    BarChanged {
-        bar: String,
-    },
-    /// What the popover offered was chosen (a window of a desktop's list):
-    /// it closes.
-    Chosen,
-    /// The popover gives way to `item`'s, beside the same item (Sources'
-    /// "Brancher": the consent popover; the briefing's "Sources").
-    Replace(Item),
-    /// `item`'s popover opens, from `rect` on `bar`, as a click opens it,
-    /// what was open closing: a tray icon's menu, once read.
-    Open {
-        bar: String,
-        item: Item,
-        rect: Rectangle,
-    },
-    /// A line of the popover names agent `id` (the briefing's): it closes,
-    /// and the compositor goes to the agent, the streak from the line, at
-    /// `row` in the popover.
-    GoTo {
-        id: u64,
-        row: Rectangle,
-    },
-}
-
-/// What the controller asks for.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Effect {
-    /// A popover's surface for `item`, on `bar`'s output: `size`, and its
-    /// layer-shell margins (top, right, bottom, left).
-    Open {
-        id: window::Id,
-        bar: String,
-        item: Item,
-        size: (u32, u32),
-        margin: (i32, i32, i32, i32),
-        keyboard: KeyboardInteractivity,
-    },
-    Keyboard(window::Id, KeyboardInteractivity),
-    /// The popover's surface to a new size, and its new margins if they
-    /// change.
-    Resize {
-        id: window::Id,
-        size: (u32, u32),
-        margin: Option<(i32, i32, i32, i32)>,
-    },
-    /// The compositor fades it out (`closing`).
-    Closing,
-    /// Popover `id`, opened by the keyboard, puts its first control under
-    /// the ring (as `Tab` would).
-    FirstControl(window::Id),
-    Remove(window::Id),
-    /// The surfaces of this namespace show something new.
-    Wake(&'static str),
-    /// Every surface's view built again (a view of stock widgets reads
-    /// what it shows as it is built, not as it draws).
-    Rebuild,
-    /// Surface `id` takes the pointer (`takes`), or lets it through.
-    Input {
-        id: window::Id,
-        takes: bool,
-    },
-    /// The compositor is told where the keyboard's ring is on `bar` (its
-    /// frame), for the magnifier.
-    Ring {
-        bar: String,
-        rect: Rectangle,
-    },
-    /// The compositor is asked for the next keyboard layout.
-    NextLayout,
-    /// A level steps, as its key on the keyboard does (`←`/`→` on the
-    /// sound's or the brightness's item).
-    Level(hocus_link::LevelKey),
-    /// The compositor is asked for a desktop of `bar`'s screen.
-    Desktop {
-        bar: String,
-        to: DesktopTo,
-    },
-    /// The compositor is asked for a window: its desktop, and the focus.
-    Bring(u64),
-    /// The compositor is asked for an agent: its window, and it is seen;
-    /// the streak runs from its row (`row`, in `bar`'s frame).
-    GoToAgent {
-        id: u64,
-        bar: String,
-        row: Rectangle,
-    },
-    /// The winking panda clicked: the compositor sends it back.
-    PeekClose,
-    /// The compositor plugs a tool in, or unplugs it (4.0).
-    Plug(crate::agents::Tool),
-    Unplug(crate::agents::Tool),
-    /// The compositor declines the tools listed ("Ne rien brancher").
-    Decline,
-    /// The compositor follows herdr again.
-    FollowHerdr,
-    /// The secretary's briefing opened (`true`) or closed: the compositor
-    /// sends a panda peeking out back, and keeps others in while it is
-    /// open (4.7b).
-    Briefing(bool),
-    /// The clipboard takes this text.
-    Copy(String),
-    /// The launcher opens on `bar`'s screen, or closes (the footer's menu).
-    ToggleLauncher(String),
-    /// Tray icon `key`'s menu is read, then opens beside it at `rect`.
-    TrayMenu {
-        bar: String,
-        key: u32,
-        rect: Rectangle,
-    },
-    /// A layer surface of the shell's beside `bar`, of `namespace` (the
-    /// peek, 4.5): `size`, its margins from the screen's top right (top,
-    /// right, bottom, left); it takes no keyboard.
-    Layer {
-        id: window::Id,
-        bar: String,
-        namespace: &'static str,
-        size: (u32, u32),
-        margin: (i32, i32, i32, i32),
-    },
-    /// Surface `id` takes the pointer in `rects` only (its own pixels).
-    Region {
-        id: window::Id,
-        rects: Vec<Rectangle>,
-    },
-    /// The launcher's surface on `output` (5.1): over all of it, the bar
-    /// too, holding the keyboard.
-    Launcher {
-        id: window::Id,
-        output: String,
-    },
-    /// The launcher's toast on `output` (5.2), `size` large: at its
-    /// bottom, taking neither the keyboard nor the pointer.
-    Toast {
-        id: window::Id,
-        output: String,
-        size: (u32, u32),
-    },
-    /// The actions palette's surface on `output` (#736): `size`, its
-    /// margins from the screen's top left corner (top, right, bottom,
-    /// left), holding the keyboard.
-    Actions {
-        id: window::Id,
-        output: String,
-        size: (u32, u32),
-        margin: (i32, i32, i32, i32),
-    },
-    /// The emoji picker's surface on `output` (5.7): `size`, its margins
-    /// from the screen's top left corner (top, right, bottom, left),
-    /// holding the keyboard.
-    Emoji {
-        id: window::Id,
-        output: String,
-        size: (u32, u32),
-        margin: (i32, i32, i32, i32),
-    },
-    /// A line to the compositor.
-    Tell(ToCompositor),
-    /// The calendar opens on `bar` on `day`, `event` chosen (Day.5): from
-    /// what acts within the controller (the next meeting's card, Today's
-    /// lines), carried out after it.
-    OpenCalendar {
-        bar: String,
-        day: jiff::civil::Date,
-        event: Option<hocus_day::model::EventId>,
-    },
-    /// The capture's toolbar on `output` (5.8), `size` large: at its
-    /// bottom, taking the pointer, never the keyboard.
-    CaptureBar {
-        id: window::Id,
-        output: String,
-        size: (u32, u32),
-    },
-    /// The share's chooser on `output` (5.11), `size` large: centred on
-    /// it, over everything, holding the keyboard.
-    ShareChooser {
-        id: window::Id,
-        output: String,
-        size: (u32, u32),
-    },
-    /// The authentication dialog on `output` (7.5), `size` large: centred
-    /// across it, `top` from its top, over everything, holding the
-    /// keyboard.
-    Auth {
-        id: window::Id,
-        output: String,
-        size: (u32, u32),
-        top: i32,
-    },
-    /// The capture's thumbnail on `output` (5.9), `size` large, its
-    /// margins from the screen's bottom right corner (top, right, bottom,
-    /// left): taking the pointer, never the keyboard.
-    CaptureThumb {
-        id: window::Id,
-        output: String,
-        size: (u32, u32),
-        margin: (i32, i32, i32, i32),
-    },
-    /// The capture's editor on `output` (5.9): all of it, over everything,
-    /// holding the keyboard.
-    CaptureEditor {
-        id: window::Id,
-        output: String,
-    },
-    /// What the to-do list's group does (Day.4): the field opens, a box
-    /// ticks.
-    Tasks(crate::tasks::Act),
-    /// The lock's surface on `output` (7.1): all of it, over everything,
-    /// never the keyboard (the compositor keeps it while locked).
-    LockSurface {
-        id: window::Id,
-        output: String,
-    },
-    /// The curtain's pill on `output` (7.2): 300 × 64, centred across it,
-    /// `top` from its top, over everything, taking neither the pointer nor
-    /// the keyboard.
-    CurtainSurface {
-        id: window::Id,
-        output: String,
-        top: i32,
-    },
-}
-
 #[derive(Debug, Clone, PartialEq)]
 enum Phase {
     Closed,
@@ -830,12 +153,10 @@ struct Open {
     /// The popover, and its item, in the bar's frame.
     rect: Rectangle,
     from: Rectangle,
-    /// Whether the pointer is on the item or the popover.
-    inside: bool,
-    /// Hovered: when it closes unless the pointer comes back, and where
-    /// the pointer was last seen.
+    /// Where the pointer goes, toward it or not (the kit's cone).
+    cone: Cone,
+    /// Hovered: when it closes unless the pointer comes back.
     leave: Option<Instant>,
-    last: Option<Point>,
     /// Opened by a shortcut (`Super+V`): `Esc` gives the keyboard back to
     /// the window that had it, not to the item.
     shortcut: bool,
@@ -847,13 +168,11 @@ pub struct Controller {
     phase: Phase,
     /// Surfaces fading out, what they show, and when they go.
     closing: Vec<(window::Id, Item, Instant)>,
-    /// The item holding the keyboard (after `Esc` in its popover): its bar,
-    /// and where it is.
-    focused: Option<(String, Item, Rectangle)>,
     bars: HashMap<String, Place>,
-    /// The items each bar's surfaces show, by namespace, from the top, and
-    /// where (the bar's frame): the keyboard steps through them.
-    items: HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
+    /// The controls each bar's surfaces declare, and the one holding the
+    /// keyboard's ring (after `Esc` in its popover, or `Super+B`): the
+    /// kit's ring across the bar's surfaces.
+    pub ring: Ring,
     /// The bars' surfaces whose height is known (their first size came).
     sized: std::collections::HashSet<window::Id>,
     /// Popovers move in and out (else they show and go at once).
@@ -865,9 +184,8 @@ impl Default for Controller {
         Self {
             phase: Phase::Closed,
             closing: Vec::new(),
-            focused: None,
             bars: HashMap::new(),
-            items: HashMap::new(),
+            ring: Ring::default(),
             sized: std::collections::HashSet::new(),
             motion: true,
         }
@@ -909,6 +227,8 @@ impl Controller {
             windows,
         };
         self.bars.insert(bar.to_owned(), place);
+        // The notifications' history waits for a bar's form (its icons).
+        crate::notifications::came();
     }
 
     /// Bar `bar`'s to-do list's surface is `tasks`.
@@ -931,7 +251,7 @@ impl Controller {
             place.in_use = in_use;
         }
         if in_use.is_none() {
-            self.items.remove(&(bar.to_owned(), IN_USE_NAMESPACE));
+            self.ring.forget(bar, IN_USE_NAMESPACE, false);
         }
     }
 
@@ -941,14 +261,7 @@ impl Controller {
             place.meeting = meeting;
         }
         if meeting.is_none() {
-            self.items.remove(&(bar.to_owned(), MEETING_NAMESPACE));
-            if self
-                .focused
-                .as_ref()
-                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == MEETING_NAMESPACE)
-            {
-                self.focused = None;
-            }
+            self.ring.forget(bar, MEETING_NAMESPACE, true);
         }
     }
 
@@ -958,14 +271,7 @@ impl Controller {
             place.today = today;
         }
         if today.is_none() {
-            self.items.remove(&(bar.to_owned(), TODAY_NAMESPACE));
-            if self
-                .focused
-                .as_ref()
-                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == TODAY_NAMESPACE)
-            {
-                self.focused = None;
-            }
+            self.ring.forget(bar, TODAY_NAMESPACE, true);
         }
     }
 
@@ -975,14 +281,7 @@ impl Controller {
             place.windows = windows;
         }
         if windows.is_none() {
-            self.items.remove(&(bar.to_owned(), WINDOWS_NAMESPACE));
-            if self
-                .focused
-                .as_ref()
-                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == WINDOWS_NAMESPACE)
-            {
-                self.focused = None;
-            }
+            self.ring.forget(bar, WINDOWS_NAMESPACE, true);
         }
     }
 
@@ -1022,7 +321,7 @@ impl Controller {
             self.sized.remove(&place.surface);
         }
         self.bars.remove(bar);
-        self.items.retain(|(b, _), _| b != bar);
+        self.ring.forget_bar(bar);
     }
 
     /// The bars, by their screen's name, and their forms.
@@ -1039,33 +338,27 @@ impl Controller {
     }
 
     /// Bar `bar`'s surface of `namespace` shows `items` (in the bar's
-    /// frame).
-    pub fn set_items(
-        &mut self,
-        bar: &str,
-        namespace: &'static str,
-        mut items: Vec<(Item, Rectangle)>,
-    ) {
-        items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y));
-        // The item under the ring went (an agent ended, a desktop was
-        // removed): the ring goes to the item now in its place, else the
-        // one before it, on the same surface.
-        if let Some((b, item, at)) = &mut self.focused
-            && b == bar
-            && self
-                .bars
-                .get(bar)
-                .is_some_and(|p| item.namespace(p.form) == namespace)
-            && !items.iter().any(|(i, _)| i == item)
-            && let Some(&(next, rect)) = items
-                .iter()
-                .find(|(_, r)| r.y >= at.y)
-                .or_else(|| items.last())
-        {
-            tracing::debug!(gone = ?item, item = ?next, "the keyboard on an item");
-            (*item, *at) = (next, rect);
-        }
-        self.items.insert((bar.to_owned(), namespace), items);
+    /// frame), without their nodes: the tests' surfaces.
+    #[cfg(test)]
+    pub fn set_items(&mut self, bar: &str, namespace: &'static str, items: Vec<(Item, Rectangle)>) {
+        let spots = items
+            .into_iter()
+            .map(|(i, r)| crate::ui::ring::Spot::at(i, r))
+            .collect();
+        self.declare(
+            bar,
+            namespace,
+            Declared {
+                spots,
+                ..Declared::default()
+            },
+        );
+    }
+
+    /// Bar `bar`'s surface of `namespace` declares `declared` (the kit's
+    /// ring, [`crate::ui::items`]).
+    pub fn declare(&mut self, bar: &str, namespace: &'static str, declared: Declared) {
+        self.ring.declare(bar, namespace, declared);
     }
 
     /// What the popover's surface `id` shows, open or closing.
@@ -1112,8 +405,8 @@ impl Controller {
     /// The item holding the keyboard (after `Esc` in its popover), and its
     /// bar.
     pub fn focused_on(&self) -> Option<(&str, Item)> {
-        self.focused
-            .as_ref()
+        self.ring
+            .holder()
             .map(|(bar, item, _)| (bar.as_str(), *item))
     }
 
@@ -1121,16 +414,11 @@ impl Controller {
     /// and where it is in the bar's frame, from the top (screen readers'
     /// tree, crate::a11y).
     pub fn items_of(&self, bar: &str) -> Vec<(&'static str, Item, Rectangle)> {
-        let mut items: Vec<(&'static str, Item, Rectangle)> = self
-            .items
-            .iter()
-            .filter(|((b, _), _)| b == bar)
-            .flat_map(|((_, namespace), items)| {
-                items.iter().map(|(item, rect)| (*namespace, *item, *rect))
-            })
-            .collect();
-        items.sort_by(|a, b| a.2.y.total_cmp(&b.2.y).then(a.2.x.total_cmp(&b.2.x)));
-        items
+        self.ring
+            .spots(bar)
+            .into_iter()
+            .map(|(namespace, s)| (namespace, s.item, s.rect))
+            .collect()
     }
 
     /// The form of the bar whose popover `id` is open.
@@ -1148,9 +436,7 @@ impl Controller {
 
     /// Whether `item` of `bar` holds the keyboard.
     pub fn focused(&self, bar: &str, item: Item) -> bool {
-        self.focused
-            .as_ref()
-            .is_some_and(|(b, i, _)| b == bar && *i == item)
+        self.ring.holds(bar, item)
     }
 
     /// When [`Self::tick`] has something to do.
@@ -1178,7 +464,7 @@ impl Controller {
                     };
                 }
                 Phase::Open(open) if open.bar == bar && open.item == item => {
-                    open.inside = true;
+                    open.cone.entered();
                     open.leave = None;
                 }
                 // A desktop's list shows: another tile's, at once.
@@ -1193,7 +479,7 @@ impl Controller {
                     tracing::debug!(?item, "the list shows another desktop");
                     open.item = item;
                     open.from = rect;
-                    open.inside = true;
+                    open.cone.entered();
                     open.leave = None;
                     effects.extend(self.refit());
                     effects.push(Effect::Wake(POPOVER_NAMESPACE));
@@ -1207,16 +493,13 @@ impl Controller {
             },
             Event::PopoverEnter => {
                 if let Phase::Open(open) = &mut self.phase {
-                    open.inside = true;
+                    open.cone.entered();
                     open.leave = None;
                 }
             }
             Event::PopoverLeave => {
                 if let Phase::Open(open) = &mut self.phase {
-                    // Where it left is the popover's own: the next move seen
-                    // on the bar starts the cone again.
-                    open.inside = false;
-                    open.last = None;
+                    open.cone.left_popover();
                     if open.how == Opened::Hover {
                         open.leave = Some(now + LEAVE_CLOSE);
                     }
@@ -1272,8 +555,7 @@ impl Controller {
                             item.surface(place),
                             KeyboardInteractivity::Exclusive,
                         ));
-                        tracing::debug!(?item, "the keyboard on an item");
-                        self.focused = Some((bar, item, from));
+                        self.ring.put(&bar, item, from);
                     }
                 }
             }
@@ -1289,7 +571,7 @@ impl Controller {
                     ));
                 }
             }
-            Event::ItemActivate => match self.focused.clone() {
+            Event::ItemActivate => match self.ring.holder().cloned() {
                 Some((bar, item, from)) if !item.clicks() => {
                     effects.extend(acts(bar, item, from));
                 }
@@ -1346,7 +628,7 @@ impl Controller {
                 if on_it {
                     self.close(now, &mut effects);
                 }
-                if self.focused.as_ref().is_some_and(|(b, _, _)| *b == bar) {
+                if self.ring.holder().is_some_and(|(b, _, _)| *b == bar) {
                     self.unfocus(&mut effects);
                 }
             }
@@ -1434,9 +716,8 @@ impl Controller {
             surface,
             rect,
             from,
-            inside: true,
+            cone: Cone::inside(),
             leave: None,
-            last: None,
             shortcut: false,
         });
     }
@@ -1474,10 +755,8 @@ impl Controller {
             }
         };
         let from = self
-            .items
-            .get(&(bar.clone(), FOOTER_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Clipboard))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, FOOTER_NAMESPACE, Item::Clipboard)
             .unwrap_or_else(|| {
                 let height = self.bar_height(&bar);
                 Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
@@ -1519,10 +798,8 @@ impl Controller {
             }
         };
         let from = self
-            .items
-            .get(&(bar.clone(), FOOTER_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::User))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, FOOTER_NAMESPACE, Item::User)
             .unwrap_or_else(|| {
                 let height = self.bar_height(&bar);
                 Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
@@ -1553,10 +830,8 @@ impl Controller {
             }
         };
         let from = self
-            .items
-            .get(&(bar.clone(), FOOTER_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Notifications))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, FOOTER_NAMESPACE, Item::Notifications)
             .unwrap_or_else(|| {
                 let height = self.bar_height(&bar);
                 Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
@@ -1587,10 +862,8 @@ impl Controller {
             return effects;
         }
         let from = self
-            .items
-            .get(&(bar.clone(), CLOCK_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Calendar))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, CLOCK_NAMESPACE, Item::Calendar)
             .unwrap_or_else(|| Rectangle::new(Point::new(-184.0, 14.0), Size::new(172.0, 77.0)));
         self.unfocus(&mut effects);
         self.close(now, &mut effects);
@@ -1659,12 +932,7 @@ impl Controller {
         let size = (open.item.width(), height);
         let before = margins(place, open.rect);
         let anchor = anchor(
-            &self.items,
-            &open.bar,
-            place.form,
-            open.item,
-            open.from,
-            height,
+            &self.ring, &open.bar, place.form, open.item, open.from, height,
         );
         open.rect = placed(place, anchor, size, open.item.on_bottom());
         let margin = margins(place, open.rect);
@@ -1703,11 +971,11 @@ impl Controller {
 
     /// What a popover of `item` opened from `from` on `bar` lines up with.
     fn anchor(&self, bar: &str, form: Form, item: Item, from: Rectangle, height: u32) -> Rectangle {
-        anchor(&self.items, bar, form, item, from, height)
+        anchor(&self.ring, bar, form, item, from, height)
     }
 
     fn unfocus(&mut self, effects: &mut Vec<Effect>) {
-        if let Some((bar, item, _)) = self.focused.take()
+        if let Some((bar, item, _)) = self.ring.take()
             && let Some(place) = self.bars.get(&bar)
         {
             effects.push(Effect::Keyboard(
@@ -1721,58 +989,21 @@ impl Controller {
     /// The items of bar `bar`, in the drawing's order: top to bottom, and
     /// along a row left to right.
     fn bar_items(&self, bar: &str) -> Vec<(Item, Rectangle)> {
-        let mut items: Vec<(Item, Rectangle)> = self
-            .items
-            .iter()
-            .filter(|((b, _), _)| b == bar)
-            .flat_map(|(_, items)| items.iter().copied())
-            .collect();
-        items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y).then(a.1.x.total_cmp(&b.1.x)));
-        items
+        self.ring.items(bar)
     }
 
-    /// The keyboard from the item holding it to the next item of the bar
-    /// (the previous, `back`), from its top to its bottom and round: the
-    /// next item's surface takes the keyboard when it is another (the
-    /// desktops' tiles, above the connections, are reached so). An item
-    /// gone meanwhile (an agent that ended) steps from where it was.
+    /// The keyboard to the next item of the bar (the previous, `back`),
+    /// as the kit's ring goes ([`Ring::step`]).
     fn step(&mut self, back: bool, effects: &mut Vec<Effect>) {
-        let Some((bar, item, at)) = self.focused.clone() else {
-            return;
-        };
-        let items = self.bar_items(&bar);
-        let order: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
-        let next = if order.contains(&item) {
-            kit::step(&order, Some(item), back)
-        } else {
-            // From where it was: the first item under it, or the last
-            // over it, round the ends.
-            let after = items.iter().position(|(_, r)| r.y >= at.y);
-            match (after, back) {
-                (Some(i), false) => order.get(i).copied(),
-                (Some(i), true) => i
-                    .checked_sub(1)
-                    .and_then(|i| order.get(i))
-                    .or(order.last())
-                    .copied(),
-                (None, false) => order.first().copied(),
-                (None, true) => order.last().copied(),
-            }
-        };
-        if let Some(next) = next {
-            self.focus_on(&bar, item, next, &items, effects);
+        if let Some(next) = self.ring.step(back) {
+            self.focus_on(next, effects);
         }
     }
 
     /// `Home` or `End` (`last`): the bar's first item, or its last.
     fn edge(&mut self, last: bool, effects: &mut Vec<Effect>) {
-        let Some((bar, item, _)) = self.focused.clone() else {
-            return;
-        };
-        let items = self.bar_items(&bar);
-        let to = if last { items.last() } else { items.first() };
-        if let Some(&(next, _)) = to {
-            self.focus_on(&bar, item, next, &items, effects);
+        if let Some(next) = self.ring.edge(last) {
+            self.focus_on(next, effects);
         }
     }
 
@@ -1781,7 +1012,7 @@ impl Controller {
     /// tray's icons), stopping at its ends.
     fn side(&mut self, right: bool, effects: &mut Vec<Effect>) {
         use hocus_link::LevelKey;
-        let Some((bar, item, at)) = self.focused.clone() else {
+        let Some(&(_, item, _)) = self.ring.holder() else {
             return;
         };
         match item {
@@ -1803,40 +1034,23 @@ impl Controller {
             }
             _ => {}
         }
-        let items = self.bar_items(&bar);
-        let middle = at.center_y();
-        let mut row: Vec<&(Item, Rectangle)> = items
-            .iter()
-            .filter(|(_, r)| r.y <= middle && middle <= r.y + r.height)
-            .collect();
-        row.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
-        let Some(here) = row.iter().position(|(i, _)| *i == item) else {
-            return;
-        };
-        let next = if right {
-            row.get(here + 1)
-        } else {
-            here.checked_sub(1).and_then(|i| row.get(i))
-        };
-        if let Some(&&(next, _)) = next {
-            self.focus_on(&bar, item, next, &items, effects);
+        if let Some(next) = self.ring.side(right) {
+            self.focus_on(next, effects);
         }
     }
 
-    /// The keyboard from `item` to `next` of bar `bar` (among `items`):
-    /// `next`'s surface takes it when it is another; both draw again.
+    /// The keyboard from the item holding it to `next` (its bar, its item,
+    /// where it is): `next`'s surface takes it when it is another; both
+    /// draw again.
     fn focus_on(
         &mut self,
-        bar: &str,
-        item: Item,
-        next: Item,
-        items: &[(Item, Rectangle)],
+        (bar, next, rect): (String, Item, Rectangle),
         effects: &mut Vec<Effect>,
     ) {
-        let Some(place) = self.bars.get(bar).copied() else {
+        let Some(place) = self.bars.get(&bar).copied() else {
             return;
         };
-        let Some(&(_, rect)) = items.iter().find(|(i, _)| *i == next) else {
+        let Some((_, item, _)) = self.ring.holder().cloned() else {
             return;
         };
         let (from, to) = (item.surface(&place), next.surface(&place));
@@ -1845,13 +1059,9 @@ impl Controller {
             effects.push(Effect::Keyboard(to, KeyboardInteractivity::Exclusive));
             effects.push(Effect::Wake(item.namespace(place.form)));
         }
-        tracing::debug!(item = ?next, "the keyboard on an item");
-        self.focused = Some((bar.to_owned(), next, rect));
+        self.ring.put(&bar, next, rect);
         effects.push(Effect::Wake(next.namespace(place.form)));
-        effects.push(Effect::Ring {
-            bar: bar.to_owned(),
-            rect,
-        });
+        effects.push(Effect::Ring { bar, rect });
     }
 
     /// `Super+B` (bar.md §11): the keyboard into bar `bar`, on the first
@@ -1868,14 +1078,7 @@ impl Controller {
         let Some(place) = self.bars.get(bar).copied() else {
             return effects;
         };
-        let items = self.bar_items(bar);
-        let find = |want: Item| items.iter().find(|(i, _)| *i == want);
-        let pick = wanted
-            .iter()
-            .find_map(|w| find(*w))
-            .or_else(|| find(Item::Calendar))
-            .or_else(|| items.first());
-        let Some(&(item, rect)) = pick else {
+        let Some((item, rect)) = self.ring.landing(bar, wanted, Item::Calendar) else {
             tracing::debug!(bar, "no item in the bar to take the keyboard");
             return effects;
         };
@@ -1884,7 +1087,7 @@ impl Controller {
             item.surface(&place),
             KeyboardInteractivity::Exclusive,
         ));
-        self.focused = Some((bar.to_owned(), item, rect));
+        self.ring.put(bar, item, rect);
         effects.push(Effect::Wake(item.namespace(place.form)));
         effects.push(Effect::Ring {
             bar: bar.to_owned(),
@@ -1909,7 +1112,7 @@ impl Controller {
 /// lines up with: the item, or for a desktop's list the tiles' top (their
 /// first row); a tray icon's menu has its bottom on the icon's.
 fn anchor(
-    items: &HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
+    ring: &Ring,
     bar: &str,
     form: Form,
     item: Item,
@@ -1928,9 +1131,8 @@ fn anchor(
     // group, wherever the bar's column puts the group (its first item's
     // top: her row, or the mini item).
     if item.agents() {
-        let group = items
-            .get(&(bar.to_owned(), AGENTS_NAMESPACE))
-            .and_then(|items| items.iter().map(|(_, r)| r.y).reduce(f32::min))
+        let group = ring
+            .top_of(bar, AGENTS_NAMESPACE)
             .unwrap_or_else(|| crate::column::start(form));
         return Rectangle {
             y: group + agents::TOP - crate::column::start(form),
@@ -1949,10 +1151,7 @@ fn anchor(
     if !matches!(item, Item::Desktop { .. }) {
         return from;
     }
-    let top = items
-        .get(&(bar.to_owned(), DESKTOPS_NAMESPACE))
-        .and_then(|tiles| tiles.iter().map(|(_, r)| r.y).reduce(f32::min))
-        .unwrap_or(from.y);
+    let top = ring.top_of(bar, DESKTOPS_NAMESPACE).unwrap_or(from.y);
     Rectangle { y: top, ..from }
 }
 
@@ -2016,52 +1215,22 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
 }
 
 impl Open {
-    /// The pointer left the item or the popover at `at`.
+    /// The pointer left the item at `at`.
     fn left(&mut self, at: Point, now: Instant) {
-        self.inside = false;
-        self.last = Some(at);
+        self.cone.left(at);
         if self.how == Opened::Hover {
             self.leave = Some(now + LEAVE_CLOSE);
         }
     }
 
     /// The pointer seen at `at`, off the item and the popover: moving
-    /// toward the popover, it keeps a hovered one open a while longer.
+    /// toward the popover, within the kit's cone, it keeps a hovered one
+    /// open a while longer.
     fn seen(&mut self, at: Point, now: Instant) {
-        if self.inside || self.how != Opened::Hover {
-            self.last = Some(at);
-            return;
-        }
-        if let Some(from) = self.last
-            && toward(from, at, self.rect)
-        {
+        if self.cone.seen(at, self.rect) && self.how == Opened::Hover {
             self.leave = Some(now + LEAVE_CLOSE);
         }
-        self.last = Some(at);
     }
-}
-
-/// Whether a move from `from` to `to` heads for `popover`, on the bar's
-/// inner side: `to` is within the cone from `from` to the popover's near
-/// corners (its right ones beside a bar on the right).
-pub fn toward(from: Point, to: Point, popover: Rectangle) -> bool {
-    let near = if crate::side::left() {
-        popover.x
-    } else {
-        popover.x + popover.width
-    };
-    let (a, b) = (
-        Point::new(near, popover.y),
-        Point::new(near, popover.y + popover.height),
-    );
-    if from == to {
-        return false;
-    }
-    let side = |p: Point, q: Point, r: Point| (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-    let (d1, d2, d3) = (side(from, a, to), side(a, b, to), side(b, from, to));
-    let negative = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-    let positive = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-    !(negative && positive)
 }
 
 /// A popover's layer-shell margins at `rect` (the bar's frame) on the bar
@@ -2167,7 +1336,7 @@ pub fn key(
     }
     let (menu, focused) = with(|c| {
         let menu = matches!(&c.phase, Phase::Open(open) if open.how == Opened::Click);
-        (menu, c.focused.is_some())
+        (menu, c.ring.holder().is_some())
     });
     if menu {
         KEYS.lock()
@@ -2223,12 +1392,7 @@ pub struct BarPointer {
 impl BarPointer {
     /// Where the clock's group is, in the bar's frame, while it shows.
     fn calendar(&self) -> Option<Rectangle> {
-        with(|c| {
-            c.items
-                .get(&(self.bar.clone(), CLOCK_NAMESPACE))
-                .and_then(|items| items.iter().find(|(i, _)| *i == Item::Calendar))
-                .map(|(_, rect)| *rect)
-        })
+        with(|c| c.ring.find(&self.bar, CLOCK_NAMESPACE, Item::Calendar))
     }
 
     /// `position` on the surface at `bounds`, in the bar's frame.
@@ -2413,15 +1577,13 @@ pub fn toggle_clipboard(output: &str) {
 /// What `item`'s popover shows changed: if it is open, it draws again, to
 /// its new size if that changed.
 pub fn changed(item: Item) {
-    // The widgets' view is built again as its surface next draws (#770).
-    if item == Item::Wifi {
-        wifi::widgets::touch();
-    }
     let (open, mut effects) = with(|c| {
         let open = c.open_item() == Some(item);
         (open, if open { c.refit() } else { Vec::new() })
     });
     if open {
+        // A kit surface's view is built again as it next draws (#770).
+        crate::ui::touch();
         effects.push(Effect::Wake(POPOVER_NAMESPACE));
         send(effects);
     }
@@ -2462,523 +1624,7 @@ pub(crate) fn tell(message: ToCompositor) -> bool {
     LINK.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
-        .is_some_and(|link| link.unbounded_send(message.to_string()).is_ok())
-}
-
-/// Carries out the controller's effects, and its deadlines: layer-shell
-/// actions (iced runs them without drawing the other surfaces) and lines
-/// to the compositor. A shell alone wakes its surfaces with a message.
-pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
-    use iced::futures::SinkExt;
-    iced::stream::channel(16, async |mut output| {
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        *EFFECTS.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
-        loop {
-            let deadline = with(|c| c.deadline());
-            let deadline = [
-                deadline,
-                crate::launcher::deadline(),
-                crate::emoji::deadline(),
-                crate::actions::deadline(),
-                crate::capture::thumb::deadline(),
-                crate::tray::tip::deadline(),
-                crate::tasks::deadline(),
-                crate::auth::deadline(),
-            ]
-            .into_iter()
-            .flatten()
-            .min();
-            let effects = match deadline {
-                Some(at) => {
-                    use iced::futures::future::{Either, select};
-                    let due = std::pin::pin!(tokio::time::sleep_until(at.into()));
-                    let next = std::pin::pin!(receiver.recv());
-                    match select(next, due).await {
-                        Either::Left((effects, _)) => effects,
-                        Either::Right(((), _)) => {
-                            let now = Instant::now();
-                            let mut due = with(|c| c.tick(now));
-                            due.extend(crate::launcher::tick(now));
-                            due.extend(crate::emoji::tick(now));
-                            due.extend(crate::actions::tick(now));
-                            due.extend(crate::capture::thumb::tick(now));
-                            due.extend(crate::tray::tip::tick(now));
-                            due.extend(crate::tasks::tick(now));
-                            due.extend(crate::auth::tick(now));
-                            Some(due)
-                        }
-                    }
-                }
-                None => receiver.recv().await,
-            };
-            let Some(effects) = effects else {
-                return;
-            };
-            for message in effects.into_iter().flat_map(carry_out) {
-                if output.send(message).await.is_err() {
-                    return;
-                }
-            }
-        }
-    })
-}
-
-/// `effects` as iced's messages, for a task to run in its order: a bar's
-/// surfaces opened after its own, so that they are in front of it.
-pub fn messages(effects: Vec<Effect>) -> Vec<crate::Message> {
-    effects.into_iter().flat_map(carry_out).collect()
-}
-
-/// Wider than any surface: a region as large as can be.
-const EVERYWHERE: i32 = 1 << 20;
-
-type WlRegion = wayland_client::protocol::wl_region::WlRegion;
-
-/// An effect as messages for iced, or a line to the compositor.
-fn carry_out(effect: Effect) -> Vec<crate::Message> {
-    use crate::Message;
-    use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings, OutputOption};
-    match effect {
-        Effect::Open {
-            id,
-            bar,
-            size,
-            margin,
-            keyboard,
-            ..
-        } => {
-            crate::side::opened(id);
-            vec![Message::NewLayerShell {
-                settings: NewLayerShellSettings {
-                    size: Some(size),
-                    layer: Layer::Top,
-                    anchor: crate::side::anchor(Anchor::Right | Anchor::Bottom),
-                    exclusive_zone: Some(0),
-                    margin: Some(crate::side::margin(margin)),
-                    keyboard_interactivity: keyboard,
-                    output_option: if bar == crate::ALONE {
-                        OutputOption::Active
-                    } else {
-                        OutputOption::OutputName(bar)
-                    },
-                    events_transparent: false,
-                    namespace: Some(POPOVER_NAMESPACE.to_owned()),
-                },
-                id,
-            }]
-        }
-        Effect::Keyboard(id, keyboard_interactivity) => {
-            vec![Message::KeyboardInteractivityChange {
-                id,
-                keyboard_interactivity,
-            }]
-        }
-        Effect::Resize { id, size, margin } => std::iter::once(Message::SizeChange { id, size })
-            .chain(margin.map(|margin| Message::MarginChange {
-                id,
-                margin: crate::side::moved(id, margin),
-            }))
-            .collect(),
-        Effect::Closing => {
-            tell(ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()));
-            Vec::new()
-        }
-        Effect::FirstControl(id) => {
-            kit::opened_by_keyboard(id);
-            Vec::new()
-        }
-        Effect::Remove(id) => {
-            crate::side::gone(id);
-            vec![Message::RemoveWindow(id)]
-        }
-        Effect::Rebuild => vec![crate::Message::Keys],
-        Effect::Wake(namespace) => {
-            if tell(ToCompositor::Wake(namespace.to_owned())) {
-                Vec::new()
-            } else {
-                vec![Message::Levels]
-            }
-        }
-        Effect::Input { id, takes } => {
-            // Whatever region it had (each bar's surfaces share one): all
-            // of it, or none.
-            let callback =
-                iced_layershell::actions::ActionCallback::new(move |region: &WlRegion| {
-                    region.subtract(-EVERYWHERE, -EVERYWHERE, 2 * EVERYWHERE, 2 * EVERYWHERE);
-                    if takes {
-                        region.add(0, 0, EVERYWHERE, EVERYWHERE);
-                    }
-                });
-            vec![Message::SetInputRegion { id, callback }]
-        }
-        Effect::NextLayout => {
-            tell(ToCompositor::NextLayout);
-            Vec::new()
-        }
-        Effect::Ring { bar, rect } => {
-            if bar != crate::ALONE {
-                tell(ToCompositor::Ring(hocus_link::Row {
-                    output: bar,
-                    x: rect.x.round() as i32,
-                    y: rect.y.round() as i32,
-                    width: rect.width.round() as i32,
-                    height: rect.height.round() as i32,
-                }));
-            }
-            Vec::new()
-        }
-        Effect::Level(key) => {
-            crate::levels::key(key);
-            Vec::new()
-        }
-        Effect::Desktop { bar, to } => {
-            tell(ToCompositor::Desktop { output: bar, to });
-            Vec::new()
-        }
-        Effect::Bring(id) => {
-            tell(ToCompositor::Bring(id));
-            Vec::new()
-        }
-        Effect::GoToAgent { id, bar, row } => {
-            let row = (bar != crate::ALONE).then(|| hocus_link::Row {
-                output: bar,
-                x: row.x.round() as i32,
-                y: row.y.round() as i32,
-                width: row.width.round() as i32,
-                height: row.height.round() as i32,
-            });
-            tell(ToCompositor::GoToAgent { id, row });
-            Vec::new()
-        }
-        Effect::PeekClose => {
-            tell(ToCompositor::PeekClose);
-            Vec::new()
-        }
-        Effect::Plug(tool) => {
-            tell(ToCompositor::Plug(tool.word().to_owned()));
-            Vec::new()
-        }
-        Effect::Unplug(tool) => {
-            tell(ToCompositor::Unplug(tool.word().to_owned()));
-            Vec::new()
-        }
-        Effect::Decline => {
-            tell(ToCompositor::Decline);
-            Vec::new()
-        }
-        Effect::FollowHerdr => {
-            tell(ToCompositor::Follow("herdr".to_owned()));
-            Vec::new()
-        }
-        Effect::Briefing(open) => {
-            tell(ToCompositor::Briefing { open });
-            Vec::new()
-        }
-        Effect::Copy(text) => {
-            tell(ToCompositor::Copy(text));
-            Vec::new()
-        }
-        Effect::OpenCalendar { bar, day, event } => {
-            calendar::open_on(&bar, day, event);
-            Vec::new()
-        }
-        Effect::TrayMenu { bar, key, rect } => {
-            crate::tray::ask(crate::tray::Ask::Menu { key, bar, rect });
-            Vec::new()
-        }
-        Effect::ToggleLauncher(bar) => {
-            // The scale as the compositor's line says it, in 120ths.
-            let scale = (kit::scale(&bar) * 120.0).round() as u32;
-            crate::launcher::toggle(bar, scale);
-            Vec::new()
-        }
-        Effect::Layer {
-            id,
-            bar,
-            namespace,
-            size,
-            margin,
-        } => {
-            crate::side::opened(id);
-            vec![Message::NewLayerShell {
-                settings: NewLayerShellSettings {
-                    size: Some(size),
-                    layer: Layer::Top,
-                    anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
-                    exclusive_zone: Some(0),
-                    margin: Some(crate::side::margin(margin)),
-                    keyboard_interactivity: KeyboardInteractivity::None,
-                    output_option: if bar == crate::ALONE {
-                        OutputOption::Active
-                    } else {
-                        OutputOption::OutputName(bar)
-                    },
-                    events_transparent: false,
-                    namespace: Some(namespace.to_owned()),
-                },
-                id,
-            }]
-        }
-        Effect::Region { id, rects } => {
-            let rects: Vec<(i32, i32, i32, i32)> = rects
-                .iter()
-                .map(|r| {
-                    let (x, y) = (r.x.floor() as i32, r.y.floor() as i32);
-                    let right = (r.x + r.width).ceil() as i32;
-                    let bottom = (r.y + r.height).ceil() as i32;
-                    (x, y, right - x, bottom - y)
-                })
-                .collect();
-            let callback =
-                iced_layershell::actions::ActionCallback::new(move |region: &WlRegion| {
-                    region.subtract(-EVERYWHERE, -EVERYWHERE, 2 * EVERYWHERE, 2 * EVERYWHERE);
-                    for &(x, y, w, h) in &rects {
-                        region.add(x, y, w, h);
-                    }
-                });
-            vec![Message::SetInputRegion { id, callback }]
-        }
-        Effect::Launcher { id, output } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                // All of the screen: anchored to its four edges.
-                size: Some((0, 0)),
-                layer: Layer::Overlay,
-                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-                exclusive_zone: Some(-1),
-                margin: Some((0, 0, 0, 0)),
-                keyboard_interactivity: KeyboardInteractivity::Exclusive,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::LAUNCHER_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::Toast { id, output, size } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Overlay,
-                // Centred across the space the bar leaves.
-                anchor: Anchor::Bottom,
-                exclusive_zone: Some(0),
-                margin: Some((0, 0, crate::launcher::toast::BOTTOM, 0)),
-                keyboard_interactivity: KeyboardInteractivity::None,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: true,
-                namespace: Some(hocus_link::LAUNCHER_TOAST_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::Emoji {
-            id,
-            output,
-            size,
-            margin,
-        } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Overlay,
-                anchor: Anchor::Top | Anchor::Left,
-                // Its margins from the screen's corner, whatever other
-                // surfaces keep.
-                exclusive_zone: Some(-1),
-                margin: Some(margin),
-                keyboard_interactivity: KeyboardInteractivity::Exclusive,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::EMOJI_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::Actions {
-            id,
-            output,
-            size,
-            margin,
-        } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Overlay,
-                anchor: Anchor::Top | Anchor::Left,
-                // Its margins from the screen's corner, whatever other
-                // surfaces keep.
-                exclusive_zone: Some(-1),
-                margin: Some(margin),
-                keyboard_interactivity: KeyboardInteractivity::Exclusive,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::ACTIONS_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::Tell(message) => {
-            tell(message);
-            Vec::new()
-        }
-        Effect::Tasks(act) => {
-            crate::tasks::act(act);
-            Vec::new()
-        }
-        Effect::CaptureBar { id, output, size } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Overlay,
-                anchor: Anchor::Bottom,
-                exclusive_zone: Some(0),
-                margin: Some((0, 0, hocus_link::CAPTURE_TOOLBAR_BOTTOM.round() as i32, 0)),
-                keyboard_interactivity: KeyboardInteractivity::None,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::CAPTURE_TOOLBAR_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::CaptureThumb {
-            id,
-            output,
-            size,
-            margin,
-        } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Overlay,
-                anchor: Anchor::Bottom | Anchor::Right,
-                // Its margins from the screen's corner, whatever the bar
-                // keeps.
-                exclusive_zone: Some(-1),
-                margin: Some(margin),
-                keyboard_interactivity: KeyboardInteractivity::None,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::CAPTURE_THUMB_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::CaptureEditor { id, output } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some((0, 0)),
-                layer: Layer::Overlay,
-                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-                exclusive_zone: Some(-1),
-                margin: Some((0, 0, 0, 0)),
-                keyboard_interactivity: KeyboardInteractivity::Exclusive,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::CAPTURE_EDITOR_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::LockSurface { id, output } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some((0, 0)),
-                layer: Layer::Overlay,
-                anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-                exclusive_zone: Some(-1),
-                margin: Some((0, 0, 0, 0)),
-                keyboard_interactivity: KeyboardInteractivity::None,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::LOCK_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::CurtainSurface { id, output, top } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some((
-                    hocus_link::PILL_WIDTH as u32,
-                    hocus_link::PILL_HEIGHT as u32,
-                )),
-                layer: Layer::Overlay,
-                // Centred across the screen, its top fixed.
-                anchor: Anchor::Top,
-                exclusive_zone: Some(-1),
-                margin: Some((top, 0, 0, 0)),
-                keyboard_interactivity: KeyboardInteractivity::None,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: true,
-                namespace: Some(hocus_link::CURTAIN_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::Auth {
-            id,
-            output,
-            size,
-            top,
-        } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Overlay,
-                // Centred across the screen, its top fixed: it grows down.
-                anchor: Anchor::Top,
-                exclusive_zone: Some(-1),
-                margin: Some((top, 0, 0, 0)),
-                keyboard_interactivity: KeyboardInteractivity::Exclusive,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::AUTH_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-        Effect::ShareChooser { id, output, size } => vec![Message::NewLayerShell {
-            settings: NewLayerShellSettings {
-                size: Some(size),
-                layer: Layer::Overlay,
-                // No anchor: centred on the screen.
-                anchor: Anchor::empty(),
-                exclusive_zone: Some(-1),
-                margin: Some((0, 0, 0, 0)),
-                keyboard_interactivity: KeyboardInteractivity::Exclusive,
-                output_option: if output == crate::ALONE {
-                    OutputOption::Active
-                } else {
-                    OutputOption::OutputName(output)
-                },
-                events_transparent: false,
-                namespace: Some(hocus_link::SHARE_CHOOSER_NAMESPACE.to_owned()),
-            },
-            id,
-        }],
-    }
+        .is_some_and(|link| link.unbounded_send(message.line()).is_ok())
 }
 
 #[cfg(test)]
@@ -3361,20 +2007,6 @@ mod tests {
             t,
         );
         assert!(!c.shows(BAR, Item::Sound));
-    }
-
-    #[test]
-    fn the_cone_reaches_the_popovers_near_corners() {
-        let popover = Rectangle::new(Point::new(-344.0, 800.0), Size::new(280.0, 264.0));
-        let from = Point::new(-40.0, 1000.0);
-        // Left and a little up: in. Straight up, or right: out.
-        assert!(toward(from, Point::new(-50.0, 995.0), popover));
-        assert!(toward(from, Point::new(-50.0, 960.0), popover));
-        assert!(!toward(from, Point::new(-40.0, 950.0), popover));
-        assert!(!toward(from, Point::new(-30.0, 1000.0), popover));
-        // Up beyond its top corner's line: out.
-        assert!(!toward(from, Point::new(-45.0, 900.0), popover));
-        assert!(!toward(from, from, popover));
     }
 
     #[test]
@@ -3822,7 +2454,7 @@ mod tests {
         assert!(!Item::TodayLine(0).clicks() && !Item::TodayMore.clicks());
         assert!(!Item::TodayLine(0).hovers(Form::Full));
         // From the card (it had the keyboard), down Today's rows and round.
-        c.focused = Some((BAR.to_owned(), Item::Meeting, card));
+        c.ring.put(BAR, Item::Meeting, card);
         let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert!(c.focused(BAR, Item::TodayLine(0)));
         assert!(effects.contains(&Effect::Keyboard(today, KeyboardInteractivity::Exclusive)));

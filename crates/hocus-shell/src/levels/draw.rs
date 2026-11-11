@@ -108,8 +108,7 @@ pub(crate) const ACCENT: Ink = crate::theme::ACCENT;
 /// The keyboard's ring (bar.md §11): 2 px wide, 3 px out from what holds
 /// the keyboard; with what it rings, it never reaches further than their
 /// sum, which the items' places leave room for.
-pub(crate) const RING: f32 = 2.0;
-pub(crate) const RING_OUT: f32 = 3.0;
+pub(crate) use crate::ui::ring::{RING, RING_OUT};
 
 pub(crate) const fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -347,11 +346,23 @@ impl<Message> canvas::Program<Message> for Levels {
         };
         let size = bounds.size();
         let items = self.items(state, size);
-        let in_bar = items
+        let in_bar: Vec<(Item, Rectangle)> = items
             .iter()
             .map(|(item, rect)| (*item, self.in_bar_rect(*rect, size)))
             .collect();
-        popover::with(|c| c.set_items(&self.bar, hocus_link::LEVELS_NAMESPACE, in_bar));
+        let said = crate::a11y::Words::new(self.words.lang);
+        let spots = in_bar
+            .into_iter()
+            .map(|(item, rect)| crate::ui::ring::Spot {
+                node: node(said, item, &state.levels),
+                ..crate::ui::ring::Spot::at(item, rect)
+            })
+            .collect();
+        let declared = crate::ui::ring::Declared {
+            spots,
+            ..crate::ui::ring::Declared::default()
+        };
+        popover::with(|c| c.declare(&self.bar, hocus_link::LEVELS_NAMESPACE, declared));
         // Under the signs and gauges, which are drawn in the column's clip.
         crate::backdrop::layer(&mut frame, Rectangle::with_size(size), |f| {
             for (item, rect) in items {
@@ -717,39 +728,53 @@ fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
     }
 }
 
-/// The keyboard's ring around `rect` (bar.md §11): 2 px of the accent as
-/// text, 3 px out, its radius the item's and as much again. Under high
-/// contrast, 3 px, 2 px out, the background's colour between: the same
-/// room.
-pub(crate) fn ring(f: &mut Frame, rect: Rectangle, radius: f32) {
-    let colour = crate::theme::ACCENT_TEXT.get();
-    if crate::theme::contrast() {
-        let gap = RING_OUT - 1.0;
-        let back = crate::theme::Ink::Token(|t| t.popover_opaque_bottom).get();
-        stroke_around(f, rect, radius, 0.0, gap, back);
-        stroke_around(f, rect, radius, gap, RING + 1.0, colour);
-    } else {
-        stroke_around(f, rect, radius, RING_OUT, RING, colour);
-    }
+/// A level's item as screen readers read it, `levels` as it shows them:
+/// the volume and the brightness sliders, the battery's charge (the power
+/// modes alone without one).
+pub fn node(words: crate::a11y::Words, item: Item, levels: &Snapshot) -> Option<hocus_a11y::Node> {
+    use hocus_a11y::{Act, Node, Role};
+    let key = crate::ui::items::key(item);
+    Some(match item {
+        Item::Sound => {
+            let sound = levels.sound?;
+            let value = if sound.muted {
+                words.muted().to_owned()
+            } else {
+                words.percent(sound.volume)
+            };
+            Node::new(key, Role::Slider, words.volume())
+                .value(value)
+                .range(f64::from(sound.volume), 0.0, 100.0, Some(5.0))
+                .act(Act::Click)
+                .act(Act::Increment)
+                .act(Act::Decrement)
+        }
+        Item::Brightness => {
+            let brightness = levels.brightness?;
+            Node::new(key, Role::Slider, Words::new(words.lang()).brightness())
+                .value(words.percent(brightness))
+                .range(f64::from(brightness), 0.0, 100.0, Some(5.0))
+                .act(Act::Click)
+                .act(Act::Increment)
+                .act(Act::Decrement)
+        }
+        Item::Battery => match levels.battery {
+            Some(battery) => Node::new(key, Role::ProgressBar, words.battery())
+                .value(words.battery_value(&battery, levels))
+                .range(f64::from(battery.shown()), 0.0, 100.0, None)
+                .act(Act::Click),
+            None => Node::new(key, Role::Button, words.power(levels)).act(Act::Click),
+        },
+        Item::Keyboard => {
+            let layout = crate::layouts::snapshot().shown().map(|l| l.name.clone())?;
+            crate::network::draw::node(words, item, None, None, Some(&layout))?
+        }
+        _ => return None,
+    })
 }
 
-/// A stroke `width` wide around `rect`, `out` px from it.
-fn stroke_around(f: &mut Frame, rect: Rectangle, radius: f32, out: f32, width: f32, colour: Color) {
-    let middle = out + width / 2.0;
-    let path = Path::rounded_rectangle(
-        Point::new(rect.x - middle, rect.y - middle),
-        Size::new(rect.width + 2.0 * middle, rect.height + 2.0 * middle),
-        (radius + middle).into(),
-    );
-    f.stroke(
-        &path,
-        Stroke {
-            style: Style::Solid(colour),
-            width,
-            ..Stroke::default()
-        },
-    );
-}
+/// The keyboard's ring around `rect` (bar.md §11): the kit's.
+pub(crate) use crate::ui::ring::draw as ring;
 
 /// One draw of the levels.
 struct Drawn<'a> {

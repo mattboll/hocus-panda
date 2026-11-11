@@ -21,6 +21,7 @@
 //! configuration's folder and the autostart folder). The window hears it
 //! through [`Heard`].
 
+use hocus_words::settings::applications as words;
 use std::{
     collections::HashMap,
     ffi::OsString,
@@ -36,8 +37,8 @@ use hocus_xdg::{
 };
 
 use crate::{
-    lang::{Lang, Words, w},
-    model::{Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::{Lang, Words},
+    model::{Codec, Kind, Outside, RowGroup, SectionId, Setting, one},
 };
 
 /// The rows' ids: the terminal is the file's key, the others live outside
@@ -54,11 +55,11 @@ pub const RESTORE: &str = "session.restore";
 pub const ADDED: &str = "applications.startup.added";
 
 pub const DEFAULTS_GROUP: RowGroup = RowGroup {
-    label: w("APPLICATIONS PAR DÉFAUT", "DEFAULT APPLICATIONS"),
+    label: words::DEFAULT_APPLICATIONS,
     per_source: false,
 };
 pub const STARTUP_GROUP: RowGroup = RowGroup {
-    label: w("AU DÉMARRAGE DE LA SESSION", "AT SESSION START"),
+    label: words::AT_SESSION_START,
     per_source: false,
 };
 
@@ -93,69 +94,39 @@ impl Opens {
 
     pub fn name(self) -> Words {
         match self {
-            Self::Browser => w("Navigateur web", "Web browser"),
-            Self::Mail => w("Courriel", "Mail"),
-            Self::Videos => w("Vidéos", "Videos"),
-            Self::Images => w("Images", "Images"),
+            Self::Browser => words::WEB_BROWSER,
+            Self::Mail => words::MAIL,
+            Self::Videos => words::VIDEOS,
+            Self::Images => words::IMAGES,
         }
     }
 
     pub fn line(self) -> Words {
         match self {
-            Self::Browser => w(
-                "Les liens, et les adresses tapées dans le lanceur.",
-                "Links, and addresses typed in the launcher.",
-            ),
-            Self::Mail => w(
-                "Les liens « mailto: », pour écrire à une adresse.",
-                "mailto: links, to write to an address.",
-            ),
-            Self::Videos => w(
-                "Les vidéos, et tes enregistrements d’écran quand tu cliques « Ouvrir ».",
-                "Videos, and your screen recordings when you click “Open”.",
-            ),
-            Self::Images => w(
-                "Les images ouvertes depuis un dossier, un courriel ou une autre application.",
-                "Images opened from a folder, a mail or another application.",
-            ),
+            Self::Browser => words::LINKS_AND_ADDRESSES_TYPED_IN_THE,
+            Self::Mail => words::MAILTO_LINKS_TO_WRITE_TO_AN,
+            Self::Videos => words::VIDEOS_AND_YOUR_SCREEN_RECORDINGS_WHEN,
+            Self::Images => words::IMAGES_OPENED_FROM_A_FOLDER_A,
         }
     }
 
     /// Under the menu's last application.
     pub fn hint(self) -> Words {
         match self {
-            Self::Browser => w(
-                "Celles qui ouvrent les pages web",
-                "Those that open web pages",
-            ),
-            Self::Mail => w(
-                "Celles qui ouvrent les liens « mailto: »",
-                "Those that open mailto: links",
-            ),
-            Self::Videos => w("Celles qui ouvrent les vidéos", "Those that open videos"),
-            Self::Images => w("Celles qui ouvrent les images", "Those that open images"),
+            Self::Browser => words::THOSE_THAT_OPEN_WEB_PAGES,
+            Self::Mail => words::THOSE_THAT_OPEN_MAILTO_LINKS,
+            Self::Videos => words::THOSE_THAT_OPEN_VIDEOS,
+            Self::Images => words::THOSE_THAT_OPEN_IMAGES,
         }
     }
 
     /// The row's line when no application opens its types.
     pub fn none(self) -> Words {
         match self {
-            Self::Browser => w(
-                "Aucune application installée n’ouvre les pages web.",
-                "No installed application opens web pages.",
-            ),
-            Self::Mail => w(
-                "Aucune application installée n’ouvre les liens « mailto: ».",
-                "No installed application opens mailto: links.",
-            ),
-            Self::Videos => w(
-                "Aucune application installée n’ouvre les vidéos.",
-                "No installed application opens videos.",
-            ),
-            Self::Images => w(
-                "Aucune application installée n’ouvre les images.",
-                "No installed application opens images.",
-            ),
+            Self::Browser => words::NO_INSTALLED_APPLICATION_OPENS_WEB_PAGES,
+            Self::Mail => words::NO_INSTALLED_APPLICATION_OPENS_MAILTO_LINKS,
+            Self::Videos => words::NO_INSTALLED_APPLICATION_OPENS_VIDEOS,
+            Self::Images => words::NO_INSTALLED_APPLICATION_OPENS_IMAGES,
         }
     }
 
@@ -194,45 +165,40 @@ impl Opens {
 
 /// A type as a sentence says it: "Les vidéos WebM" / "WebM videos".
 pub fn type_said(mime: &str, lang: Lang) -> String {
-    let (fr, en): (&str, &str) = match mime {
-        "x-scheme-handler/http" => ("Les liens http:", "http: links"),
-        "x-scheme-handler/https" => ("Les liens https:", "https: links"),
-        "text/html" => ("Les pages HTML", "HTML pages"),
-        "application/xhtml+xml" => ("Les pages XHTML", "XHTML pages"),
-        "video/mp4" => ("Les vidéos MP4", "MP4 videos"),
-        "video/webm" => ("Les vidéos WebM", "WebM videos"),
-        "video/x-matroska" => ("Les vidéos MKV", "MKV videos"),
-        "video/quicktime" => ("Les vidéos QuickTime", "QuickTime videos"),
-        "video/x-msvideo" => ("Les vidéos AVI", "AVI videos"),
-        "video/mpeg" => ("Les vidéos MPEG", "MPEG videos"),
-        "video/ogg" => ("Les vidéos Ogg", "Ogg videos"),
-        "image/png" => ("Les images PNG", "PNG images"),
-        "image/jpeg" => ("Les images JPEG", "JPEG images"),
-        "image/webp" => ("Les images WebP", "WebP images"),
-        "image/gif" => ("Les images GIF", "GIF images"),
-        "image/svg+xml" => ("Les images SVG", "SVG images"),
-        "image/avif" => ("Les images AVIF", "AVIF images"),
-        "image/bmp" => ("Les images BMP", "BMP images"),
-        "image/tiff" => ("Les images TIFF", "TIFF images"),
+    let text = match mime {
+        "x-scheme-handler/http" => words::HTTP_LINKS,
+        "x-scheme-handler/https" => words::HTTPS_LINKS,
+        "text/html" => words::HTML_PAGES,
+        "application/xhtml+xml" => words::XHTML_PAGES,
+        "video/mp4" => words::MP4_VIDEOS,
+        "video/webm" => words::WEBM_VIDEOS,
+        "video/x-matroska" => words::MKV_VIDEOS,
+        "video/quicktime" => words::QUICKTIME_VIDEOS,
+        "video/x-msvideo" => words::AVI_VIDEOS,
+        "video/mpeg" => words::MPEG_VIDEOS,
+        "video/ogg" => words::OGG_VIDEOS,
+        "image/png" => words::PNG_IMAGES,
+        "image/jpeg" => words::JPEG_IMAGES,
+        "image/webp" => words::WEBP_IMAGES,
+        "image/gif" => words::GIF_IMAGES,
+        "image/svg+xml" => words::SVG_IMAGES,
+        "image/avif" => words::AVIF_IMAGES,
+        "image/bmp" => words::BMP_IMAGES,
+        "image/tiff" => words::TIFF_IMAGES,
         other => {
-            return match lang {
-                Lang::French => format!("Le type {other}"),
-                Lang::English => format!("The type {other}"),
-            };
+            return words::the_type(lang, other);
         }
     };
-    if lang.fr() { fr } else { en }.to_owned()
+    text.get(lang).to_owned()
 }
 
 /// "Les vidéos WebM s’ouvrent avec VLC" / "WebM videos open with VLC".
 pub fn differs_said(mime: &str, app: &str, lang: Lang) -> String {
     let what = type_said(mime, lang);
     let plural = !what.starts_with("Le type") && !what.starts_with("The type");
-    match (lang, plural) {
-        (Lang::French, true) => format!("{what} s’ouvrent avec {app}"),
-        (Lang::French, false) => format!("{what} s’ouvre avec {app}"),
-        (Lang::English, true) => format!("{what} open with {app}"),
-        (Lang::English, false) => format!("{what} opens with {app}"),
+    match plural {
+        true => words::open_with(lang, words::OpenWith { app, what: &what }),
+        false => words::opens_with(lang, words::OpensWith { app, what: &what }),
     }
 }
 
@@ -246,11 +212,8 @@ pub fn settings() -> &'static [Setting] {
                 id: TERMINAL,
                 section: SectionId::Apps,
                 group: DEFAULTS_GROUP,
-                name: w("Terminal", "Terminal"),
-                line: Some(w(
-                    "Super+Entrée, et les applications qui s’ouvrent dans un terminal.",
-                    "Super+Return, and applications that open in a terminal.",
-                )),
+                name: words::TERMINAL,
+                line: Some(words::SUPER_RETURN_AND_APPLICATIONS_THAT_OPEN),
                 keywords: (
                     &[
                         "terminal",
@@ -268,25 +231,15 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 kind: Kind::Text,
-                places: Places::One(Place {
-                    key: &["programs", "terminal"],
-                    codec: Codec::Text,
-                    default: Value::Text(String::new()),
-                }),
+                places: one(&["programs", "terminal"], Codec::Text),
                 needs: None,
             },
             Setting {
                 id: RESTORE,
                 section: SectionId::Apps,
                 group: STARTUP_GROUP,
-                name: w(
-                    "Rouvrir les applications de la dernière session",
-                    "Reopen the applications of the last session",
-                ),
-                line: Some(w(
-                    "Celles ouvertes à la déconnexion reviennent, chaque fenêtre à sa place.",
-                    "Those open at log out come back, each window in its place.",
-                )),
+                name: words::REOPEN_THE_APPLICATIONS_OF_THE_LAST,
+                line: Some(words::THOSE_OPEN_AT_LOG_OUT_COME),
                 keywords: (
                     &[
                         "session",
@@ -306,11 +259,7 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(Place {
-                    key: &["session", "restore"],
-                    codec: Codec::Bool,
-                    default: Value::Bool(true),
-                }),
+                places: one(&["session", "restore"], Codec::Bool),
                 needs: None,
             },
         ]
@@ -324,7 +273,7 @@ pub fn outside() -> &'static [Outside] {
             id: BROWSER,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Navigateur web", "Web browser"),
+            name: words::WEB_BROWSER,
             keywords: (
                 &[
                     "navigateur",
@@ -350,7 +299,7 @@ pub fn outside() -> &'static [Outside] {
             id: MAIL,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Courriel", "Mail"),
+            name: words::MAIL,
             keywords: (
                 &["courriel", "mail", "e-mail", "mailto", "messagerie"],
                 &["mail", "e-mail", "email", "mailto"],
@@ -360,7 +309,7 @@ pub fn outside() -> &'static [Outside] {
             id: VIDEOS,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Vidéos", "Videos"),
+            name: words::VIDEOS,
             keywords: (
                 &["vidéos", "lecteur", "film", "enregistrement"],
                 &["videos", "player", "movie", "recording"],
@@ -370,7 +319,7 @@ pub fn outside() -> &'static [Outside] {
             id: IMAGES,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Images", "Images"),
+            name: words::IMAGES,
             keywords: (
                 &["images", "photos", "visionneuse"],
                 &["images", "photos", "pictures", "viewer"],
@@ -380,7 +329,7 @@ pub fn outside() -> &'static [Outside] {
             id: STARTUP,
             section: SectionId::Apps,
             group: STARTUP_GROUP.label,
-            name: w("Au démarrage de la session", "At session start"),
+            name: words::AT_SESSION_START_2,
             keywords: (
                 &[
                     "démarrage",
@@ -1172,6 +1121,7 @@ fn watch(dirs: &Dirs, asks: mpsc::Sender<Ask>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Places, Value};
 
     /// "Rouvrir les applications de la dernière session": a switch of the
     /// start-up group, `[session] restore`, on when the file says nothing;

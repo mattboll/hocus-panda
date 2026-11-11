@@ -24,34 +24,50 @@
 //! `Delete` or ✕ removes it, the pin pins it. `Esc` closes. Nothing goes
 //! through iced's messages: the history's changes wake its surface.
 
+use hocus_words::shell::popover_clipboard as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
 };
 
+use hocus_a11y::Role;
 use iced::{
-    Color, Font, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, ContentFit, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
+    alignment::{Horizontal, Vertical},
+    keyboard, mouse,
     widget::{
-        canvas::{self, Frame, Geometry, Path, Stroke},
-        text::Alignment,
+        Id, Space, Stack, button,
+        canvas::{self, Frame, Path, Stroke},
+        column, container, image, mouse_area, pin, row, scrollable, space,
     },
     window,
 };
 use iced_layershell::reexport::KeyboardInteractivity;
 use jiff::Zoned;
 
-use super::{
-    Effect, Event as Seen, Pressed, event,
-    kit::{self, Clip, Input, Pointer, Wheel, text, text_in},
-};
+use super::{Effect, Event as Seen, Pressed, event, kit};
 use crate::theme::Ink;
 use crate::{
     clipboard::{self, Item, Kind},
     clock::time::Lang,
+    field::{
+        self, Entry, Took,
+        entry::Pasted,
+        view::{Look, Style},
+    },
     levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     notifications::history::{Ago, ago},
     popover::kit::MANROPE_SEMIBOLD,
+    ui::{
+        self, Around, Later, control,
+        field::Field,
+        notched::Notched,
+        parts::{drawn, gap, spaced_by},
+        style::{self, boxed, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 ---------------------------------------------------
 
@@ -90,7 +106,7 @@ const LIST: f32 = 430.0;
 const HEAD: f32 = 22.0;
 const HEAD_PAD: f32 = 6.0;
 const HEAD_TEXT: f32 = 10.5;
-const HEAD_SPACING: f32 = 0.08 * HEAD_TEXT;
+const HEAD_SPACING: f32 = 0.08;
 const ROW: f32 = 44.0;
 const ROW_GAP: f32 = 2.0;
 const ROW_RADIUS: f32 = 10.0;
@@ -160,62 +176,53 @@ pub fn height() -> u32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     pub fn title(self) -> &'static str {
-        self.pick("Presse-papiers", "Clipboard")
+        self.pick(txt::CLIPBOARD)
     }
 
     fn clear(self) -> &'static str {
-        self.pick("Tout effacer", "Clear all")
+        self.pick(txt::CLEAR_ALL)
     }
 
     fn placeholder(self) -> &'static str {
-        self.pick("Chercher dans ce que tu as copié", "Search what you copied")
+        self.pick(txt::SEARCH_WHAT_YOU_COPIED)
     }
 
     fn head(self, head: Head) -> &'static str {
         match head {
-            Head::Pinned => self.pick("ÉPINGLÉS", "PINNED"),
-            Head::Recent => self.pick("RÉCENTS", "RECENT"),
-            Head::Off => self.pick("Historique coupé · Réglages", "History off · Settings"),
+            Head::Pinned => self.pick(txt::PINNED),
+            Head::Recent => self.pick(txt::RECENT),
+            Head::Off => self.pick(txt::HISTORY_OFF_SETTINGS),
         }
     }
 
     fn keys(self) -> &'static str {
-        self.pick(
-            "Entrée colle · Maj+Entrée copie · Suppr retire",
-            "Enter pastes · Shift+Enter copies · Delete removes",
-        )
+        self.pick(txt::ENTER_PASTES_SHIFT_ENTER_COPIES_DELETE)
     }
 
     fn nothing(self) -> &'static str {
-        self.pick("Rien de copié pour l’instant.", "Nothing copied yet.")
+        self.pick(txt::NOTHING_COPIED_YET)
     }
 
     fn not_found(self, query: &str) -> String {
-        if self.fr {
-            format!("Rien pour «\u{a0}{query}\u{a0}»")
-        } else {
-            format!("Nothing for \u{201c}{query}\u{201d}")
-        }
+        txt::nothing_for(self.lang, query)
     }
 
     /// Where a capture comes from (5.8b).
     fn capture(self) -> &'static str {
-        self.pick("Capture d'écran", "Screenshot")
+        self.pick(txt::SCREENSHOT)
     }
 
     fn image(self, width: u32, height: u32) -> String {
@@ -223,26 +230,26 @@ impl Words {
     }
 
     fn ago(self, ago: Ago) -> String {
-        match (ago, self.fr) {
-            (Ago::Now, true) => "maintenant".to_owned(),
-            (Ago::Now, false) => "now".to_owned(),
-            (Ago::Minutes(n), true) => format!("il y a {n}\u{a0}min"),
-            (Ago::Minutes(n), false) => format!("{n}\u{a0}min ago"),
-            (Ago::Hours(n), true) => format!("il y a {n}\u{a0}h"),
-            (Ago::Hours(n), false) => format!("{n}\u{a0}h ago"),
-            (Ago::Yesterday, true) => "hier".to_owned(),
-            (Ago::Yesterday, false) => "yesterday".to_owned(),
-            (Ago::Days(n), true) => format!("il y a {n}\u{a0}jours"),
-            (Ago::Days(n), false) => format!("{n}\u{a0}days ago"),
+        match ago {
+            Ago::Now => txt::NOW.get(self.lang).to_owned(),
+            Ago::Minutes(n) => txt::min_ago(self.lang, n),
+            Ago::Hours(n) => txt::h_ago(self.lang, n),
+            Ago::Yesterday => txt::YESTERDAY.get(self.lang).to_owned(),
+            Ago::Days(n) => txt::days_ago(self.lang, n),
         }
+    }
+
+    /// The ✕'s name.
+    fn remove(self) -> &'static str {
+        self.pick(txt::REMOVE)
     }
 
     /// The pin's name, for the log.
     fn pin(self, pinned: bool) -> &'static str {
         if pinned {
-            self.pick("Désépingler", "Unpin")
+            self.pick(txt::UNPIN)
         } else {
-            self.pick("Épingler", "Pin")
+            self.pick(txt::PIN)
         }
     }
 }
@@ -251,7 +258,7 @@ impl Words {
 
 /// What can be acted on in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub enum Target {
     Clear,
     Field,
     Row(u64),
@@ -260,22 +267,14 @@ enum Target {
 }
 
 impl Target {
-    /// The item it belongs to, if it is an item's.
-    fn key(self) -> Option<u64> {
-        match self {
-            Self::Row(k) | Self::Pin(k) | Self::Remove(k) => Some(k),
-            Self::Clear | Self::Field => None,
-        }
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("clipboard:{self:?}")
     }
 }
 
-/// A band of the background, across the popover.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Band {
-    Above,
-    List,
-    Below,
-}
+/// The list's scrollable.
+const LIST_ID: &str = "clipboard:list";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Head {
@@ -487,57 +486,6 @@ impl Laid {
         (self.content - LIST).max(0.0)
     }
 
-    fn view() -> Rectangle {
-        Rectangle::new(Point::new(LEFT, LIST_TOP), Size::new(RIGHT - LEFT, LIST))
-    }
-
-    fn field() -> Rectangle {
-        Rectangle::new(Point::new(LEFT, FIELD_TOP), Size::new(RIGHT - LEFT, FIELD))
-    }
-
-    /// Row `row` on the popover, scrolled by `scroll`.
-    fn rect(row: &Row, scroll: f32) -> Rectangle {
-        Rectangle::new(
-            Point::new(LEFT, LIST_TOP + row.top - scroll),
-            Size::new(RIGHT - LEFT, ROW),
-        )
-    }
-
-    /// A row's pin and ✕, on the popover.
-    fn tools(rect: Rectangle) -> (Rectangle, Rectangle) {
-        let size = Size::new(TOOL, TOOL);
-        let y = rect.center_y() - TOOL / 2.0;
-        let remove = Point::new(rect.x + rect.width - TOOLS_RIGHT - TOOL, y);
-        let pin = Point::new(remove.x - TOOL_GAP - TOOL, y);
-        (Rectangle::new(pin, size), Rectangle::new(remove, size))
-    }
-
-    /// What is under `at`, scrolled by `scroll`: a row's tools over it, in
-    /// the list only within its viewport.
-    fn target_at(&self, at: Point, scroll: f32) -> Option<Target> {
-        if self.clear.contains(at) {
-            return Some(Target::Clear);
-        }
-        if Self::field().contains(at) {
-            return Some(Target::Field);
-        }
-        if !Self::view().contains(at) {
-            return None;
-        }
-        let row = self
-            .rows
-            .iter()
-            .find(|r| Self::rect(r, scroll).contains(at))?;
-        let (pin, remove) = Self::tools(Self::rect(row, scroll));
-        Some(if pin.contains(at) {
-            Target::Pin(row.key)
-        } else if remove.contains(at) {
-            Target::Remove(row.key)
-        } else {
-            Target::Row(row.key)
-        })
-    }
-
     /// For the log (and the tests): the sections and their rows, each its
     /// kind, its line (its first 32 characters) and its details.
     fn said(&self, words: Words, selected: Option<u64>) -> String {
@@ -580,241 +528,643 @@ pub struct Panel {
     pub glass: bool,
 }
 
-/// What its surface keeps between draws: a surface each time it opens,
-/// so that it opens on an empty search.
-#[derive(Debug, Default)]
-pub struct State {
-    laid: Option<Laid>,
+/// What it keeps while it is open: it opens on an empty search.
+#[derive(Debug)]
+struct Ui {
     /// What it was laid out from: the history's version, the query, the
     /// minute.
     from: Option<(u64, String, i64)>,
-    query: String,
-    /// The query as it shows, and the caret after it.
-    field: (String, f32),
-    pointer: Pointer<Target>,
+    laid: Option<Laid>,
+    /// The search field (#771).
+    query: Entry,
     selected: Option<u64>,
+    /// How far the list is scrolled, as it said or was told.
     scroll: f32,
-    wheel: Wheel,
     logged: String,
 }
 
-impl State {
-    fn keys(&self) -> Vec<u64> {
-        self.laid
-            .as_ref()
-            .map_or_else(Vec::new, |l| l.rows.iter().map(|r| r.key).collect())
+impl Default for Ui {
+    fn default() -> Self {
+        Self {
+            from: None,
+            laid: None,
+            query: Entry::new(field::Kind::Line, QUERY_MOST),
+            selected: None,
+            scroll: 0.0,
+            logged: String::new(),
+        }
     }
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+static LATER: Later = Later::new();
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(_) => {
-                for pressed in kit::keys(self.id) {
-                    let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-                }
-                self.refresh(state);
-                None
-            }
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// The search, to the kit's field.
+fn query(with: &mut dyn FnMut(&mut Entry)) {
+    ui(|ui| with(&mut ui.query));
+}
+
+/// What a paste read for the search field.
+static PASTED: Pasted = Pasted::new();
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A button pressed, or `Enter` on it.
+    Act(Target),
+    /// The pointer came over an item's row: it is selected.
+    Select(u64),
+    /// What the search took.
+    Took(Took),
+    /// The list scrolled to there.
+    Scrolled(f32),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// A key of its own: `Enter`, `Delete`, the arrows, `Tab`.
+    Key(Pressed),
+    /// The history changed under the view, or a paste came.
+    Stale,
+}
+
+/// The history on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (id, words, glass) = (panel.id, panel.words, panel.glass);
+    let minute = || crate::notifications::wall().timestamp().as_second() / 60;
+    Around::new(
+        id,
+        build(id, words),
+        move |m| handle(id, words, m),
+        Msg::Stale,
+    )
+    .rebuild(move || build(id, words))
+    .stale_when(move || ui(|ui| ui.from.as_ref().is_some_and(|f| f.2 != minute())))
+    .keys(keys)
+    .later(&LATER)
+    .press(Msg::Pressed)
+    .on(iced::widget::canvas(Tint(glass))
+        .width(Length::Fill)
+        .height(Length::Fill))
+}
+
+/// Its keys before the field's: `Enter` pastes, `Shift+Enter` copies,
+/// `Delete` removes, the arrows select, `Tab` stays.
+fn keys(pressed: &Pressed) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    matches!(
+        pressed.key,
+        Key::Named(Named::Enter | Named::Delete | Named::ArrowDown | Named::ArrowUp | Named::Tab)
+    )
+    .then(|| Msg::Key(pressed.clone()))
+}
+
+/// Its content, as the history is now.
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    let keyboard = super::with(|c| c.holds_keyboard(id));
+    ui(|ui| {
+        refresh(ui, words);
+        let laid = ui.laid.clone();
+        match laid {
+            Some(laid) => content(&laid, words, ui, keyboard),
+            None => Space::new().into(),
+        }
+    })
+}
+
+fn content<'a>(laid: &Laid, words: Words, ui: &Ui, keyboard: bool) -> El<'a> {
+    let clear = button(
+        container(said(words.clear(), GHOST_TEXT, MANROPE_SEMIBOLD, DIM.get()))
+            .center(Length::Fill),
+    )
+    .padding(0)
+    .width(laid.clear.width)
+    .height(HEADER)
+    .style(|_, status| {
+        if style::lit(status) {
+            style::hovered(GHOST_HOVER.get(), GHOST_RADIUS)
+        } else {
+            style::clear()
+        }
+    })
+    .on_press(Msg::Act(Target::Clear));
+    let header = row![
+        said(words.title(), TITLE, MANROPE_BOLD, TEXT.get()),
+        space::horizontal(),
+        control(clear, Target::Clear.id(), Role::Button, words.clear()),
+    ]
+    .height(HEADER)
+    .align_y(Vertical::Center);
+    let magnifier = drawn(MAGNIFIER, MAGNIFIER, |f, _| magnifier(f, Point::ORIGIN));
+    let typed = Field {
+        with: Box::new(query),
+        style: Style::one(QUERY, MANROPE),
+        placeholder: words.placeholder().into(),
+        look: Look::of(TEXT.get(), QUIET.get()),
+        focused: keyboard,
+        left: BORDER + FIELD_PAD + MAGNIFIER + FIELD_GAP,
+        right: BORDER + FIELD_PAD,
+        on_focus: Msg::Stale,
+        on_took: Msg::Took,
+    }
+    .view(FIELD);
+    let search = container(Stack::with_children([
+        pin(magnifier)
+            .x(BORDER + FIELD_PAD)
+            .y((FIELD - MAGNIFIER) / 2.0)
+            .into(),
+        typed,
+    ]))
+    .height(FIELD)
+    .style(|_| container::Style {
+        background: Some(FIELD_FILL.get().into()),
+        border: iced::Border {
+            color: FIELD_RIM.get(),
+            width: 1.0,
+            radius: FIELD_RADIUS.into(),
+        },
+        ..container::Style::default()
+    });
+    let search = control(
+        search,
+        Target::Field.id(),
+        Role::TextField,
+        words.placeholder(),
+    )
+    .node(|n| n.value(ui.query.text().to_owned()))
+    .focus(keyboard, Msg::Stale, FIELD_RADIUS)
+    .typing();
+    // The list: its labels and rows, scrolling past 430 px.
+    let mut list = column![].width(RIGHT - LEFT);
+    let mut end = 0.0;
+    let mut rows = laid.rows.iter().peekable();
+    for (i, (head, top)) in laid.heads.iter().enumerate() {
+        if *top > end {
+            list = list.push(Space::new().height(top - end));
+        }
+        list = list.push(head_of(words, *head));
+        end = top + HEAD;
+        let next = laid.heads.get(i + 1).map(|(_, top)| *top);
+        while let Some(shown) = rows.next_if(|r| next.is_none_or(|top| r.top < top)) {
+            list = list.push(Space::new().height(shown.top - end));
+            list = list.push(row_of(words, shown, ui.selected == Some(shown.key)));
+            end = shown.top + ROW;
         }
     }
+    // In a container: a scrollable lays its content out as wide as its
+    // viewport at least.
+    let scrolled = scrollable(container(list))
+        .id(Id::new(LIST_ID))
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::new()
+                .width(kit::SCROLLBAR)
+                .scroller_width(kit::SCROLLBAR)
+                .margin(0)
+                .spacing(0),
+        ))
+        .style(|_, _| style::scrollbar(kit::SCROLLBAR))
+        .on_scroll(|v| Msg::Scrolled(v.absolute_offset().y))
+        .width(W - BORDER - 2.0 - LEFT)
+        .height(LIST);
+    let mut middle: Vec<El<'a>> = vec![Notched::new(scrolled, NOTCH).into()];
+    if let Some(empty) = &laid.empty {
+        middle.push(
+            pin(ui::line(
+                container(said(empty.clone(), EMPTY, MANROPE, FAINT.get()))
+                    .width(RIGHT - LEFT)
+                    .height(EMPTY * LINE)
+                    .align_x(Horizontal::Center)
+                    .align_y(Vertical::Center),
+                empty.clone(),
+            ))
+            .y(EMPTY_TOP)
+            .into(),
+        );
+    }
+    let all = column![
+        container(header).width(RIGHT - LEFT),
+        Space::new().height(GAP),
+        container(search).width(RIGHT - LEFT),
+        Space::new().height(GAP),
+        Stack::with_children(middle).height(LIST),
+        Space::new().height(GAP),
+        ui::line(
+            said(words.keys(), FOOTER, MANROPE, KEYS.get()),
+            words.keys()
+        ),
+    ];
+    container(all)
+        .padding(Padding {
+            top: HEADER_TOP,
+            right: 0.0,
+            bottom: 0.0,
+            left: LEFT,
+        })
+        .into()
+}
+
+/// A section's label, spaced; the history off, its line as it is.
+fn head_of<'a>(words: Words, head: Head) -> El<'a> {
+    let word = words.head(head);
+    let shown: El<'a> = if head == Head::Off {
+        said(word, META, MANROPE, DIM.get()).into()
+    } else {
+        spaced_by(word, HEAD_TEXT, MANROPE_BOLD, QUIET.get(), HEAD_SPACING)
+    };
+    let mut chars = word.chars();
+    let read = chars.next().map_or_else(String::new, |c| {
+        c.to_string() + &chars.as_str().to_lowercase()
+    });
+    ui::line(
+        container(shown)
+            .padding([0.0, HEAD_PAD])
+            .height(HEAD)
+            .align_y(Vertical::Center),
+        read,
+    )
+    .into()
+}
+
+/// An item's row: its tile, its content over its application and when;
+/// selected, its border and tint, its pin and ✕.
+fn row_of<'a>(words: Words, shown: &Row, selected: bool) -> El<'a> {
+    let tile: El<'a> = match &shown.tile {
+        Tile::Glyph(glyph) => container(said(*glyph, GLYPH, MANROPE_BOLD, DIM.get()))
+            .center(TILE)
+            .into(),
+        Tile::Swatch(colour) => {
+            let colour = *colour;
+            container(
+                container(
+                    Space::new()
+                        .width(TILE - 2.0 * TILE_PAD)
+                        .height(TILE - 2.0 * TILE_PAD),
+                )
+                .style(move |_| boxed(colour, INNER_RADIUS)),
+            )
+            .center(TILE)
+            .into()
+        }
+        Tile::Thumbnail(handle) => container(
+            image(handle.clone())
+                .width(TILE - 2.0 * TILE_PAD)
+                .height(TILE - 2.0 * TILE_PAD)
+                .content_fit(ContentFit::Fill),
+        )
+        .center(TILE)
+        .into(),
+    };
+    let tile = container(tile).style(|_| boxed(TILE_FILL.get(), TILE_RADIUS));
+    let (size, font) = if shown.kind.mono() {
+        (MONO_CONTENT, MONO)
+    } else {
+        (CONTENT, MANROPE_SEMIBOLD)
+    };
+    let texts = column![
+        container(said(shown.line.clone(), size, font, TEXT.get()))
+            .height(CONTENT * LINE)
+            .align_y(Vertical::Center),
+        Space::new().height(LINES_GAP),
+        said(shown.meta.clone(), META, MANROPE, QUIET.get()),
+    ];
+    let key = shown.key;
+    let face = row![gap(TILE_IN), tile, gap(TEXT_GAP), texts]
+        .height(ROW)
+        .align_y(Vertical::Center);
+    let pressed = button(face)
+        .padding(0)
+        .width(Length::Fill)
+        .height(ROW)
+        .style(move |_, _| {
+            if selected {
+                iced::widget::button::Style {
+                    background: Some(SELECTED_FILL.get().into()),
+                    border: iced::Border {
+                        color: SELECTED_RIM.get(),
+                        width: 1.0,
+                        radius: ROW_RADIUS.into(),
+                    },
+                    ..iced::widget::button::Style::default()
+                }
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(Target::Row(key)));
+    let item = control(
+        pressed,
+        Target::Row(key).id(),
+        Role::ListItem,
+        shown.line.clone(),
+    )
+    .node(|n| n.describe(shown.meta.clone()).selected(selected));
+    // Its pin and ✕, drawn while it is selected (the pointer over them
+    // selects it first).
+    let pinned = shown.pinned;
+    let tool = |target: Target, face: El<'a>, role: Role, name: &str| -> El<'a> {
+        let pressed = button(face)
+            .padding(0)
+            .width(TOOL)
+            .height(TOOL)
+            .style(move |_, status| {
+                if selected && style::lit(status) {
+                    style::hovered(GHOST_HOVER.get(), TOOL_RADIUS)
+                } else {
+                    style::clear()
+                }
+            })
+            .on_press(Msg::Act(target));
+        control(pressed, target.id(), role, name)
+            .node(|n| {
+                if role == Role::ToggleButton {
+                    n.checked(pinned)
+                } else {
+                    n
+                }
+            })
+            .into()
+    };
+    let pin_face = drawn(TOOL, TOOL, move |f, s| {
+        if selected {
+            pin_glyph(f, Point::new(s.width / 2.0, s.height / 2.0), pinned);
+        }
+    });
+    let cross: El<'a> = if selected {
+        container(said("✕", CROSS, MANROPE, FAINT.get()))
+            .center(TOOL)
+            .into()
+    } else {
+        Space::new().width(TOOL).height(TOOL).into()
+    };
+    let tools = row![
+        tool(
+            Target::Pin(key),
+            pin_face,
+            Role::ToggleButton,
+            words.pin(false)
+        ),
+        gap(TOOL_GAP),
+        tool(Target::Remove(key), cross, Role::Button, words.remove()),
+    ];
+    let whole = Stack::with_children([
+        item.into(),
+        pin(tools)
+            .x(RIGHT - LEFT - TOOLS_RIGHT - 2.0 * TOOL - TOOL_GAP)
+            .y((ROW - TOOL) / 2.0)
+            .into(),
+    ])
+    .width(Length::Fill)
+    .height(ROW);
+    mouse_area(whole).on_enter(Msg::Select(key)).into()
+}
+
+/// What it shows, read afresh: laid out again when the history, the
+/// query or the minute changed.
+fn refresh(ui: &mut Ui, words: Words) {
+    let now = crate::notifications::wall();
+    let (version, items, off) = clipboard::with(|h| {
+        (
+            h.version(),
+            h.shown(now.timestamp().as_millisecond()),
+            !h.rules().history,
+        )
+    });
+    let minute = now.timestamp().as_second() / 60;
+    let from = (version, ui.query.text().to_owned(), minute);
+    if ui.from.as_ref() == Some(&from) && ui.laid.is_some() {
+        log(ui, words);
+        return;
+    }
+    let laid = {
+        let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+        let cache = cache.get_or_insert_with(Cache::default);
+        // Only what the history holds stays cut.
+        cache
+            .lines
+            .retain(|key, _| items.iter().any(|i| i.key == *key));
+        lay_out(
+            &items,
+            off,
+            ui.query.text(),
+            words,
+            &now,
+            cache,
+            &mut kit::measure,
+        )
+    };
+    let keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
+    if ui.selected.is_none_or(|s| !keys.contains(&s)) {
+        ui.selected = keys.first().copied();
+    }
+    ui.laid = Some(laid);
+    ui.from = Some(from);
+    log(ui, words);
+}
+
+/// What it shows, in the log, when that changed.
+fn log(ui: &mut Ui, words: Words) {
+    let Some(laid) = &ui.laid else {
+        return;
+    };
+    let said = laid.said(words, ui.selected);
+    if said == ui.logged {
+        return;
+    }
+    tracing::debug!(
+        title = words.title(),
+        typed = ui.query.chars(),
+        history = %said,
+        "the clipboard's history shows it"
+    );
+    ui.logged = said;
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(id: window::Id, words: Words, message: Msg) {
+    match message {
+        Msg::Stale => {
+            if let Some(pasted) = PASTED.take(id)
+                && ui(|ui| ui.query.paste(&pasted))
+            {
+                typed();
+            }
+        }
+        // Clicked in, a hovered history takes the keyboard.
+        Msg::Pressed => event(Seen::Hold),
+        Msg::Select(key) => ui(|ui| ui.selected = Some(key)),
+        Msg::Scrolled(y) => ui(|ui| ui.scroll = y),
+        Msg::Took(took) => match took {
+            Took::Edited => typed(),
+            Took::Paste => PASTED.ask(id, crate::paste::Clean::Spaced, || {
+                super::changed(super::Item::Clipboard);
+            }),
+            Took::No | Took::Same | Took::Moved => {}
+        },
+        Msg::Act(target) => act(id, words, target),
+        Msg::Key(pressed) => key(id, &pressed),
+    }
+}
+
+fn act(id: window::Id, words: Words, target: Target) {
+    match target {
+        Target::Clear => clipboard::clear(),
+        Target::Field => {}
+        Target::Row(key) => choose(id, key, true),
+        Target::Pin(key) => {
+            let pinned = clipboard::with(|h| h.get(key).is_some_and(|i| i.pinned));
+            tracing::debug!(name = words.pin(pinned), "the clipboard's history's pin");
+            clipboard::pin(key);
+        }
+        Target::Remove(key) => remove(key),
+    }
+}
+
+/// Item `key` to the clipboard, and pasted (`paste`): the history closes,
+/// the keyboard going back to the window that had it.
+fn choose(id: window::Id, key: u64, paste: bool) {
+    super::send(vec![Effect::Keyboard(id, KeyboardInteractivity::None)]);
+    clipboard::choose(key, paste);
+    event(Seen::Chosen);
+}
+
+/// The rows' keys, from the top.
+fn shown_keys(ui: &Ui) -> Vec<u64> {
+    ui.laid
+        .as_ref()
+        .map_or_else(Vec::new, |l| l.rows.iter().map(|r| r.key).collect())
+}
+
+/// Item `key` goes: the next one (else the one before) is selected.
+fn remove(key: u64) {
+    ui(|ui| {
+        let keys = shown_keys(ui);
+        if ui.selected == Some(key)
+            && let Some(at) = keys.iter().position(|k| *k == key)
+        {
+            ui.selected = keys
+                .get(at + 1)
+                .or_else(|| at.checked_sub(1).and_then(|before| keys.get(before)))
+                .copied();
+        }
+    });
+    clipboard::remove(key);
+}
+
+fn key(id: window::Id, pressed: &Pressed) {
+    use keyboard::{Key, key::Named};
+    let (keys, selected) = ui(|ui| (shown_keys(ui), ui.selected));
+    let selected = selected.filter(|s| keys.contains(s));
+    match &pressed.key {
+        Key::Named(Named::Enter) => {
+            if let Some(key) = selected {
+                choose(id, key, !pressed.modifiers.shift());
+            }
+        }
+        Key::Named(Named::Delete) => {
+            if let Some(key) = selected {
+                remove(key);
+            }
+        }
+        Key::Named(arrow @ (Named::ArrowDown | Named::ArrowUp)) => {
+            let at = selected.and_then(|s| keys.iter().position(|k| *k == s));
+            let next = match (at, *arrow == Named::ArrowDown) {
+                (Some(at), true) => (at + 1).min(keys.len().saturating_sub(1)),
+                (Some(at), false) => at.saturating_sub(1),
+                (None, _) => 0,
+            };
+            ui(|ui| {
+                ui.selected = keys.get(next).copied();
+                reveal(ui);
+            });
+        }
+        // Nothing else to go to: the field keeps the keyboard.
+        _ => {}
+    }
+}
+
+/// The query changed: the list from its top, its first row selected.
+fn typed() {
+    ui(|ui| {
+        ui.selected = None;
+        ui.from = None;
+        scroll_to(ui, 0.0);
+    });
+}
+
+/// The list scrolled to `y`, once its tree is built.
+fn scroll_to(ui: &mut Ui, y: f32) {
+    if (ui.scroll - y).abs() < 0.5 {
+        return;
+    }
+    ui.scroll = y;
+    LATER.push(iced::advanced::widget::operation::scrollable::scroll_to(
+        Id::new(LIST_ID),
+        iced::advanced::widget::operation::scrollable::AbsoluteOffset {
+            x: None,
+            y: Some(y),
+        },
+    ));
+}
+
+/// The list scrolled so that the selected row shows, with its section's
+/// label when it is the first.
+fn reveal(ui: &mut Ui) {
+    let (Some(laid), Some(key)) = (&ui.laid, ui.selected) else {
+        return;
+    };
+    let Some(row) = laid.rows.iter().find(|r| r.key == key) else {
+        return;
+    };
+    let first = laid
+        .heads
+        .iter()
+        .any(|(_, top)| (top + HEAD + ROW_GAP - row.top).abs() < 0.5);
+    let top = if first {
+        row.top - HEAD - ROW_GAP
+    } else {
+        row.top
+    };
+    let to = kit::reveal(
+        (top, row.top + ROW - top),
+        LIST,
+        ui.scroll,
+        laid.most_scroll(),
+    );
+    scroll_to(ui, to);
+}
+
+/// Its background: its tint (opaque without glass) and its rim, as the
+/// mockup has them.
+#[derive(Debug, Clone, Copy)]
+struct Tint(bool);
+
+impl<M> canvas::Program<M> for Tint {
+    type State = ();
 
     fn draw(
         &self,
-        state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        // One frame: the list's band of the background, its rows, then the
-        // bands above and below it, over what of the rows scrolls past its
-        // edges (a frame of its own, clipped to the list, has iced's GPU
-        // renderer clip the other frame's shapes to it too). Text and
-        // images, drawn over every shape, show only whole in the list.
+    ) -> Vec<canvas::Geometry> {
         let size = bounds.size();
-        let mut frame = Frame::new(renderer, size);
-        self.background(&mut frame, size, Band::List);
-        let Some(laid) = &state.laid else {
-            self.background(&mut frame, size, Band::Above);
-            self.background(&mut frame, size, Band::Below);
-            self.rim(&mut frame, size);
-            return vec![frame.into_geometry()];
-        };
-        let view = Laid::view();
-        let clip = Clip::new(true, Some(view));
-        if let Some(empty) = &laid.empty {
-            frame.fill_text(text(
-                empty.clone(),
-                Point::new(view.center_x(), LIST_TOP + EMPTY_TOP + EMPTY * LINE / 2.0),
-                EMPTY,
-                FAINT.get(),
-                Alignment::Center,
-            ));
-        }
-        for (head, top) in &laid.heads {
-            let middle = LIST_TOP + top - state.scroll + HEAD / 2.0;
-            if middle < view.y - HEAD || middle > view.y + view.height + HEAD {
-                continue;
-            }
-            self.head(&mut frame, clip, *head, middle);
-        }
-        for row in &laid.rows {
-            let rect = Laid::rect(row, state.scroll);
-            if rect.y > view.y + view.height || rect.y + rect.height < view.y {
-                continue;
-            }
-            self.row(&mut frame, clip, row, rect, state);
-        }
-        self.background(&mut frame, size, Band::Above);
-        self.background(&mut frame, size, Band::Below);
-        self.rim(&mut frame, size);
-        self.header(&mut frame, laid, state.pointer.hover);
-        let keyboard = super::with(|c| c.holds_keyboard(self.id));
-        self.field(&mut frame, state, keyboard);
-        if laid.content > LIST + 0.5 {
-            let list = kit::list(LIST_TOP, LIST, laid.content);
-            list.scrollbar_at(&mut frame, state.scroll, W - BORDER - kit::SCROLLBAR - 2.0);
-        }
-        frame.fill_text(text(
-            self.words.keys().to_owned(),
-            Point::new(LEFT, FOOTER_TOP + FOOTER * LINE / 2.0),
-            FOOTER,
-            KEYS.get(),
-            Alignment::Left,
-        ));
-        self.tell_readers(state, laid);
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        match state.pointer.hover {
-            Some(Target::Field) => mouse::Interaction::Text,
-            _ => state.pointer.interaction(false),
-        }
-    }
-}
-
-impl Panel {
-    /// What it shows, for screen readers (crate::a11y::rows): the search,
-    /// then each section's items, the selected one selected; the arrows
-    /// go through them.
-    fn tell_readers(&self, state: &State, laid: &Laid) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::{Node, Role};
-        let words = self.words;
-        let mut nodes = vec![
-            Node::new(
-                rows::key(Target::Field),
-                Role::TextField,
-                words.placeholder(),
-            )
-            .value(state.query.clone())
-            .bounds(rows::at(Laid::field())),
-            Node::new(rows::key(Target::Clear), Role::Button, words.clear())
-                .bounds(rows::at(laid.clear)),
-        ];
-        if let Some(empty) = &laid.empty {
-            nodes.push(rows::line(empty.clone()));
-        }
-        let mut rows_left = laid.rows.iter().peekable();
-        for (i, (head, _)) in laid.heads.iter().enumerate() {
-            let label = words.head(*head);
-            let mut chars = label.chars();
-            let label = chars.next().map_or_else(String::new, |c| {
-                c.to_string() + &chars.as_str().to_lowercase()
-            });
-            nodes.push(rows::line(label));
-            let next = laid.heads.get(i + 1).map(|(_, top)| *top);
-            while let Some(row) = rows_left.next_if(|r| next.is_none_or(|top| r.top < top)) {
-                let mut node = rows::act(
-                    Target::Row(row.key),
-                    Role::ListItem,
-                    row.line.clone(),
-                    Laid::rect(row, state.scroll),
-                )
-                .describe(row.meta.clone())
-                .selected(state.selected == Some(row.key));
-                if row.pinned {
-                    node = node.child(
-                        Node::new(
-                            rows::key(Target::Pin(row.key)),
-                            Role::ToggleButton,
-                            words.pin(false),
-                        )
-                        .checked(true),
-                    );
-                }
-                nodes.push(node);
-            }
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: laid
-                    .rows
-                    .iter()
-                    .map(|r| rows::key(Target::Row(r.key)))
-                    .collect(),
-                focus: state.selected.map(|k| rows::key(Target::Row(k))),
-                arrows: true,
-            },
-        );
-    }
-
-    /// The background's `band`: its tint (opaque without glass), the
-    /// same gradient across the three.
-    fn background(&self, f: &mut Frame, size: Size, band: Band) {
-        let (top, bottom) = if self.glass {
+        let mut f = Frame::new(renderer, size);
+        let (top, bottom) = if self.0 {
             (GLASS_TOP, GLASS_BOTTOM)
         } else {
             (OPAQUE_TOP, OPAQUE_BOTTOM)
         };
-        let (y, height, radius) = match band {
-            Band::Above => (0.0, LIST_TOP, [RADIUS, RADIUS, 0.0, 0.0]),
-            Band::List => (LIST_TOP, LIST, [0.0; 4]),
-            Band::Below => (
-                LIST_TOP + LIST,
-                size.height - LIST_TOP - LIST,
-                [0.0, 0.0, RADIUS, RADIUS],
-            ),
-        };
-        let [top_left, top_right, bottom_right, bottom_left] = radius;
-        let shape = Path::rounded_rectangle(
-            Point::new(0.0, y),
-            Size::new(size.width, height),
-            iced::border::Radius {
-                top_left,
-                top_right,
-                bottom_right,
-                bottom_left,
-            },
-        );
+        let shape = Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into());
         let tint = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
             .add_stop(0.0, top.get())
             .add_stop(1.0, bottom.get());
         f.fill(&shape, canvas::Fill::from(tint));
-    }
-
-    fn rim(&self, f: &mut Frame, size: Size) {
         f.stroke(
             &Path::rounded_rectangle(
                 Point::new(BORDER / 2.0, BORDER / 2.0),
@@ -823,541 +1173,8 @@ impl Panel {
             ),
             Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
+        vec![f.into_geometry()]
     }
-
-    fn header(&self, f: &mut Frame, laid: &Laid, hover: Option<Target>) {
-        let middle = HEADER_TOP + HEADER / 2.0;
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                self.words.title().to_owned(),
-                Point::new(LEFT, middle),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        if hover == Some(Target::Clear) {
-            crate::theme::hover(
-                f,
-                &kit::rounded(laid.clear, GHOST_RADIUS),
-                GHOST_HOVER.get(),
-            );
-        }
-        f.fill_text(text_in(
-            MANROPE_SEMIBOLD,
-            text(
-                self.words.clear().to_owned(),
-                laid.clear.center(),
-                GHOST_TEXT,
-                DIM.get(),
-                Alignment::Center,
-            ),
-        ));
-    }
-
-    fn field(&self, f: &mut Frame, state: &State, keyboard: bool) {
-        let field = Laid::field();
-        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
-        f.stroke(
-            &kit::rounded(inset(field, 0.5), FIELD_RADIUS - 0.5),
-            Stroke::default()
-                .with_color(FIELD_RIM.get())
-                .with_width(1.0),
-        );
-        magnifier(
-            f,
-            Point::new(
-                field.x + BORDER + FIELD_PAD,
-                field.center_y() - MAGNIFIER / 2.0,
-            ),
-        );
-        let x = field.x + BORDER + FIELD_PAD + MAGNIFIER + FIELD_GAP;
-        let (shown, caret) = &state.field;
-        let (content, colour) = if state.query.is_empty() {
-            (self.words.placeholder().to_owned(), QUIET)
-        } else {
-            (shown.clone(), TEXT)
-        };
-        f.fill_text(text(
-            content,
-            Point::new(x, field.center_y()),
-            QUERY,
-            colour.get(),
-            Alignment::Left,
-        ));
-        // The caret after what is typed, while the field has the keyboard.
-        if keyboard {
-            let caret_x = if state.query.is_empty() {
-                x - 2.0
-            } else {
-                x + caret + 1.0
-            };
-            f.fill_rectangle(
-                Point::new(caret_x, field.center_y() - QUERY * 0.6),
-                Size::new(1.0, QUERY * 1.2),
-                TEXT.get(),
-            );
-        }
-    }
-
-    /// A section's label, spaced, its line centred on `middle`; the
-    /// history off, its line as it is.
-    fn head(&self, f: &mut Frame, clip: Clip, head: Head, middle: f32) {
-        let mut x = LEFT + HEAD_PAD;
-        if head == Head::Off {
-            clip.fill(
-                f,
-                text_in(
-                    MANROPE,
-                    text(
-                        self.words.head(head).to_owned(),
-                        Point::new(x, middle),
-                        META,
-                        DIM.get(),
-                        Alignment::Left,
-                    ),
-                ),
-            );
-            return;
-        }
-        for ch in self.words.head(head).chars() {
-            let letter = ch.to_string();
-            let width = kit::measure(&letter, HEAD_TEXT, MANROPE_BOLD);
-            clip.fill(
-                f,
-                text_in(
-                    MANROPE_BOLD,
-                    text(
-                        letter,
-                        Point::new(x, middle),
-                        HEAD_TEXT,
-                        QUIET.get(),
-                        Alignment::Left,
-                    ),
-                ),
-            );
-            x += width + HEAD_SPACING;
-        }
-    }
-
-    fn row(&self, f: &mut Frame, clip: Clip, row: &Row, rect: Rectangle, state: &State) {
-        let selected = state.selected == Some(row.key);
-        if selected {
-            f.fill(&kit::rounded(rect, ROW_RADIUS), SELECTED_FILL.get());
-            f.stroke(
-                &kit::rounded(inset(rect, 0.5), ROW_RADIUS - 0.5),
-                Stroke::default()
-                    .with_color(SELECTED_RIM.get())
-                    .with_width(1.0),
-            );
-        }
-        // Its kind's tile.
-        let tile = Rectangle::new(
-            Point::new(rect.x + TILE_IN, rect.center_y() - TILE / 2.0),
-            Size::new(TILE, TILE),
-        );
-        f.fill(&kit::rounded(tile, TILE_RADIUS), TILE_FILL.get());
-        let inner = inset(tile, TILE_PAD);
-        match &row.tile {
-            Tile::Glyph(glyph) => clip.fill(
-                f,
-                text_in(
-                    MANROPE_BOLD,
-                    text(
-                        (*glyph).to_owned(),
-                        tile.center(),
-                        GLYPH,
-                        DIM.get(),
-                        Alignment::Center,
-                    ),
-                ),
-            ),
-            Tile::Swatch(colour) => f.fill(&kit::rounded(inner, INNER_RADIUS), *colour),
-            // Images go over every shape: only whole in the list.
-            Tile::Thumbnail(handle) => {
-                let view = Laid::view();
-                if inner.y >= view.y && inner.y + inner.height <= view.y + view.height {
-                    f.draw_image(inner, canvas::Image::new(handle.clone()));
-                }
-            }
-        }
-        // Its content over its application and when.
-        let (size, font) = if row.kind.mono() {
-            (MONO_CONTENT, MONO)
-        } else {
-            (CONTENT, MANROPE_SEMIBOLD)
-        };
-        let column = CONTENT * LINE + LINES_GAP + META * LINE;
-        let top = rect.center_y() - column / 2.0;
-        let x = rect.x + TEXT_X;
-        clip.fill(
-            f,
-            text_in(
-                font,
-                text(
-                    row.line.clone(),
-                    Point::new(x, top + CONTENT * LINE / 2.0),
-                    size,
-                    TEXT.get(),
-                    Alignment::Left,
-                ),
-            ),
-        );
-        clip.fill(
-            f,
-            text(
-                row.meta.clone(),
-                Point::new(x, top + CONTENT * LINE + LINES_GAP + META * LINE / 2.0),
-                META,
-                QUIET.get(),
-                Alignment::Left,
-            ),
-        );
-        if !selected {
-            return;
-        }
-        // Its pin and ✕.
-        let (pin, remove) = Laid::tools(rect);
-        let hover = state.pointer.hover;
-        for (tool, lit) in [
-            (pin, hover == Some(Target::Pin(row.key))),
-            (remove, hover == Some(Target::Remove(row.key))),
-        ] {
-            if lit {
-                crate::theme::hover(f, &kit::rounded(tool, TOOL_RADIUS), GHOST_HOVER.get());
-            }
-        }
-        pin_glyph(f, pin.center(), row.pinned);
-        clip.fill(
-            f,
-            text(
-                "✕".to_owned(),
-                remove.center(),
-                CROSS,
-                FAINT.get(),
-                Alignment::Center,
-            ),
-        );
-    }
-
-    /// What it shows, read afresh while it is open: laid out again when the
-    /// history, the query or the minute changed.
-    fn refresh(&self, state: &mut State) {
-        if !super::with(|c| c.is_open(self.id)) {
-            return;
-        }
-        let now = crate::notifications::wall();
-        let (version, items, off) = clipboard::with(|h| {
-            (
-                h.version(),
-                h.shown(now.timestamp().as_millisecond()),
-                !h.rules().history,
-            )
-        });
-        let minute = now.timestamp().as_second() / 60;
-        let from = (version, state.query.clone(), minute);
-        if state.from.as_ref() == Some(&from) && state.laid.is_some() {
-            return;
-        }
-        let typed = state.from.as_ref().map(|f| &f.1) != Some(&state.query);
-        let laid = {
-            let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
-            let cache = cache.get_or_insert_with(Cache::default);
-            // Only what the history holds stays cut.
-            cache
-                .lines
-                .retain(|key, _| items.iter().any(|i| i.key == *key));
-            lay_out(
-                &items,
-                off,
-                &state.query,
-                self.words,
-                &now,
-                cache,
-                &mut kit::measure,
-            )
-        };
-        if typed {
-            let room = Laid::field().width - 2.0 * (BORDER + FIELD_PAD) - MAGNIFIER - FIELD_GAP;
-            let width = |t: &str| kit::measure(t, QUERY, MANROPE);
-            let shown = tail(&state.query, room, width);
-            let caret = if state.query.is_empty() {
-                0.0
-            } else {
-                width(&shown)
-            };
-            state.field = (shown, caret);
-        }
-        let keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
-        if state.selected.is_none_or(|s| !keys.contains(&s)) {
-            state.selected = keys.first().copied();
-        }
-        state.scroll = state.scroll.clamp(0.0, laid.most_scroll());
-        state.laid = Some(laid);
-        state.from = Some(from);
-        self.log(state);
-    }
-
-    /// What it shows, in the log, when that changed.
-    fn log(&self, state: &mut State) {
-        let Some(laid) = &state.laid else {
-            return;
-        };
-        let said = laid.said(self.words, state.selected);
-        if said == state.logged {
-            return;
-        }
-        let targets: Vec<String> = laid
-            .rows
-            .iter()
-            .flat_map(|row| {
-                let rect = Laid::rect(row, state.scroll);
-                let (pin, remove) = Laid::tools(rect);
-                [
-                    (format!("Row({})", row.key), rect),
-                    (format!("Pin({})", row.key), pin),
-                    (format!("Remove({})", row.key), remove),
-                ]
-            })
-            .chain([
-                ("Clear".to_owned(), laid.clear),
-                ("Field".to_owned(), Laid::field()),
-            ])
-            .map(|(name, r)| format!("{name}@{:.0},{:.0}", r.center().x, r.center().y))
-            .collect();
-        tracing::debug!(
-            title = self.words.title(),
-            typed = state.query.chars().count(),
-            history = %said,
-            items = %targets.join(" "),
-            "the clipboard's history shows it"
-        );
-        state.logged = said;
-    }
-
-    fn act(&self, state: &mut State, target: Target) {
-        match target {
-            Target::Clear => clipboard::clear(),
-            Target::Field => {}
-            Target::Row(key) => self.choose(key, true),
-            Target::Pin(key) => {
-                let pinned = clipboard::with(|h| h.get(key).is_some_and(|i| i.pinned));
-                tracing::debug!(
-                    name = self.words.pin(pinned),
-                    "the clipboard's history's pin"
-                );
-                clipboard::pin(key);
-            }
-            Target::Remove(key) => self.remove(state, key),
-        }
-    }
-
-    /// Item `key` to the clipboard, and pasted (`paste`): the history
-    /// closes, the keyboard going back to the window that had it.
-    fn choose(&self, key: u64, paste: bool) {
-        super::send(vec![Effect::Keyboard(self.id, KeyboardInteractivity::None)]);
-        clipboard::choose(key, paste);
-        event(Seen::Chosen);
-    }
-
-    /// Item `key` goes: the next one (else the one before) is selected.
-    fn remove(&self, state: &mut State, key: u64) {
-        let keys = state.keys();
-        if state.selected == Some(key)
-            && let Some(at) = keys.iter().position(|k| *k == key)
-        {
-            state.selected = keys
-                .get(at + 1)
-                .or_else(|| at.checked_sub(1).and_then(|before| keys.get(before)))
-                .copied();
-        }
-        clipboard::remove(key);
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| {
-            state
-                .laid
-                .as_ref()
-                .and_then(|l| l.target_at(at, state.scroll))
-        });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                let changed = state.pointer.over(target);
-                // Hovering a row selects it.
-                if let Some(key) = target.and_then(Target::key)
-                    && state.selected != Some(key)
-                {
-                    state.selected = Some(key);
-                    self.log(state);
-                    return redraw;
-                }
-                changed.then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                // Clicked in, a hovered history takes the keyboard.
-                event(Seen::Hold);
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    self.act(state, target);
-                }
-                redraw
-            }
-            mouse::Event::WheelScrolled { delta } => {
-                let laid = state.laid.as_ref()?;
-                if !at.is_some_and(|at| Laid::view().contains(at)) {
-                    return None;
-                }
-                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
-                state.scroll = (state.scroll + by).clamp(0.0, laid.most_scroll());
-                state.pointer.hover = at.and_then(|at| laid.target_at(at, state.scroll));
-                if let Some(key) = state.pointer.hover.and_then(Target::key) {
-                    state.selected = Some(key);
-                }
-                redraw
-            }
-            _ => None,
-        }
-    }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let keys = state.keys();
-        let modifiers = pressed.modifiers;
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Enter) => {
-                if let Some(key) = state.selected.filter(|s| keys.contains(s)) {
-                    self.choose(key, !modifiers.shift());
-                }
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Delete) => {
-                if let Some(key) = state.selected.filter(|s| keys.contains(s)) {
-                    self.remove(state, key);
-                }
-            }
-            Key::Named(arrow @ (Named::ArrowDown | Named::ArrowUp)) => {
-                let at = state
-                    .selected
-                    .and_then(|s| keys.iter().position(|k| *k == s));
-                let next = match (at, *arrow == Named::ArrowDown) {
-                    (Some(at), true) => (at + 1).min(keys.len().saturating_sub(1)),
-                    (Some(at), false) => at.saturating_sub(1),
-                    (None, _) => 0,
-                };
-                state.selected = keys.get(next).copied();
-                self.reveal(state);
-                self.log(state);
-            }
-            Key::Named(Named::Backspace) => {
-                if modifiers.control() {
-                    let kept = state.query.trim_end().rfind(' ').map_or(0, |at| at + 1);
-                    state.query.truncate(kept);
-                } else {
-                    state.query.pop();
-                }
-                self.typed(state);
-            }
-            // Nothing else to go to: the field keeps the keyboard.
-            Key::Named(Named::Tab) => return Some(canvas::Action::capture()),
-            _ => match pressed.text.as_deref() {
-                Some(typed)
-                    if !modifiers.control()
-                        && !modifiers.alt()
-                        && !modifiers.logo()
-                        && !typed.is_empty()
-                        && !typed.chars().any(char::is_control) =>
-                {
-                    if state.query.chars().count() + typed.chars().count() <= QUERY_MOST {
-                        state.query.push_str(typed);
-                        self.typed(state);
-                    }
-                }
-                _ => return None,
-            },
-        }
-        Some(canvas::Action::request_redraw().and_capture())
-    }
-
-    /// The query changed: the list from its top, its first row selected.
-    fn typed(&self, state: &mut State) {
-        state.scroll = 0.0;
-        state.selected = None;
-        self.refresh(state);
-    }
-
-    /// The list scrolled so that the selected row shows, with its
-    /// section's label when it is the first.
-    fn reveal(&self, state: &mut State) {
-        let (Some(laid), Some(key)) = (&state.laid, state.selected) else {
-            return;
-        };
-        let Some(row) = laid.rows.iter().find(|r| r.key == key) else {
-            return;
-        };
-        let first = laid
-            .heads
-            .iter()
-            .any(|(_, top)| (top + HEAD + ROW_GAP - row.top).abs() < 0.5);
-        let top = if first {
-            row.top - HEAD - ROW_GAP
-        } else {
-            row.top
-        };
-        state.scroll = kit::reveal(
-            (top, row.top + ROW - top),
-            LIST,
-            state.scroll,
-            laid.most_scroll(),
-        );
-    }
-}
-
-/// `query`'s end that fits `room`: what was typed last shows.
-fn tail(query: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
-    if width(query) <= room {
-        return query.to_owned();
-    }
-    let chars: Vec<char> = query.chars().collect();
-    for skip in 1..chars.len() {
-        let cut: String = std::iter::once('…')
-            .chain(chars[skip..].iter().copied())
-            .collect();
-        if width(&cut) <= room {
-            return cut;
-        }
-    }
-    "…".to_owned()
-}
-
-fn inset(rect: Rectangle, by: f32) -> Rectangle {
-    Rectangle::new(
-        Point::new(rect.x + by, rect.y + by),
-        Size::new(rect.width - 2.0 * by, rect.height - 2.0 * by),
-    )
 }
 
 /// The magnifier, 15 px from `at`: the mockup's 24 px path.
@@ -1402,8 +1219,9 @@ fn pin_glyph(f: &mut Frame, centre: Point, pinned: bool) {
     f.stroke(&Path::line(p(12.0, 13.0), p(12.0, 21.0)), stroke);
 }
 
-/// The history opens: what is past its limits goes.
+/// The history opens, on an empty search: what is past its limits goes.
 pub fn opening() {
+    ui(|ui| *ui = Ui::default());
     clipboard::opening();
 }
 
@@ -1473,10 +1291,23 @@ mod tests {
         assert_eq!(laid.heads, [(Head::Pinned, 0.0), (Head::Recent, 70.0)]);
         let tops: Vec<f32> = laid.rows.iter().map(|r| r.top).collect();
         assert_eq!(tops, [24.0, 94.0, 140.0, 186.0]);
-        let rect = Laid::rect(&laid.rows[0], 0.0);
-        assert_eq!((rect.x, rect.width, rect.height), (13.0, 334.0, 44.0));
+        // Laid out on the popover, as the kit declares them.
+        let shown = Ui {
+            laid: Some(laid.clone()),
+            ..Ui::default()
+        };
+        let placed: HashMap<String, Rectangle> =
+            ui::walk::declared(content(&laid, words, &shown, false), W)
+                .into_iter()
+                .map(|(r, d)| (d.node.key, r))
+                .collect();
+        let rect = placed["clipboard:Row(1)"];
+        assert_eq!(
+            (rect.x, rect.y, rect.width, rect.height),
+            (13.0, 115.0, 334.0, 44.0)
+        );
         // Its tools 5 px from its right, the ✕ last.
-        let (pin, remove) = Laid::tools(rect);
+        let (pin, remove) = (placed["clipboard:Pin(1)"], placed["clipboard:Remove(1)"]);
         assert_eq!(remove.x + remove.width, 347.0 - 5.0);
         assert_eq!(pin.x + pin.width + 2.0, remove.x);
         // The search 8 px under the header, the list 8 px under it.
@@ -1580,10 +1411,7 @@ mod tests {
     }
 
     #[test]
-    fn a_long_query_shows_its_end() {
-        let width = |t: &str| t.chars().count() as f32 * 7.0;
-        assert_eq!(tail("cargo", 100.0, width), "cargo");
-        assert_eq!(tail("cargo nextest run", 70.0, width), "…xtest run");
+    fn an_item_shows_on_one_line() {
         assert_eq!(one_line("  git log\n\t--oneline  \n"), "git log --oneline");
     }
 }

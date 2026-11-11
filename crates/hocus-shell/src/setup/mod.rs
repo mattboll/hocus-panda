@@ -20,6 +20,7 @@
 
 pub mod card;
 
+use hocus_words::shell::setup as txt;
 use std::{
     path::PathBuf,
     sync::{
@@ -41,7 +42,7 @@ use hocus_link::{Launch, TASKS_NAMESPACE, ToCompositor};
 
 use crate::{
     clock::time::Lang,
-    network::secret::Secret,
+    field::{self, Entry, Took},
     popover::{self, Effect, Item},
 };
 
@@ -228,8 +229,10 @@ pub struct Flow {
     pub online: Online,
     /// `gnome-control-center`'s path, once looked for and found.
     pub panel: Option<String>,
-    pub address: String,
-    pub token: Secret,
+    /// The board's address and its token (a secret: masked, never copied
+    /// out): the shell's text fields (#771).
+    pub address: Entry,
+    pub token: Entry,
     /// A check under way: its number.
     pub checking: Option<u64>,
     pub refused: Option<Refusal>,
@@ -245,8 +248,8 @@ impl Flow {
             step: Step::Accounts,
             online: Online::Unknown,
             panel: None,
-            address: String::new(),
-            token: Secret::longest(LONGEST_TOKEN),
+            address: Entry::new(field::Kind::Line, LONGEST_ADDRESS),
+            token: Entry::new(field::Kind::Secret, LONGEST_TOKEN),
             checking: None,
             refused: None,
             show: None,
@@ -380,51 +383,39 @@ pub fn back() -> bool {
     went
 }
 
-/// `text` typed (or pasted) at the end of `field`: whether it took it.
-pub fn type_in(field: Field, text: &str) -> bool {
+impl Flow {
+    /// Field `field`.
+    pub fn entry(&mut self, field: Field) -> &mut Entry {
+        match field {
+            Field::Address => &mut self.address,
+            Field::Token => &mut self.token,
+        }
+    }
+}
+
+/// `field` edited by `edit` (a key, an input method, the pointer): what
+/// was refused goes with what changes, a paste is asked for. What it took.
+pub fn edit(field: Field, edit: impl FnOnce(&mut Entry) -> Took) -> Took {
     let took = with(|flow| {
-        let took = match field {
-            Field::Address => {
-                let fits = flow.address.chars().count() + text.chars().count() <= LONGEST_ADDRESS;
-                if fits {
-                    flow.address.push_str(text);
-                }
-                fits
-            }
-            Field::Token => flow.token.push(text),
-        };
-        if took {
+        let took = edit(flow.entry(field));
+        if took == Took::Edited {
             flow.refused = None;
         }
         took
     })
-    .unwrap_or(false);
-    if took {
-        changed();
+    .unwrap_or(Took::No);
+    match took {
+        Took::Edited => changed(),
+        Took::Paste => paste(field),
+        Took::No | Took::Same | Took::Moved => {}
     }
     took
 }
 
-/// `Backspace` in `field` (`all`: with `Ctrl`, the field cleared).
-pub fn erase(field: Field, all: bool) {
-    with(|flow| {
-        match (field, all) {
-            (Field::Address, true) => flow.address.clear(),
-            (Field::Address, false) => {
-                flow.address.pop();
-            }
-            (Field::Token, true) => flow.token.clear(),
-            (Field::Token, false) => flow.token.pop(),
-        }
-        flow.refused = None;
-    });
-    changed();
-}
-
-/// The clipboard's text at the end of `field` (`Ctrl+V`, 3.5b), off the
+/// The clipboard's text at the caret of `field` (`Ctrl+V`, 3.5b), off the
 /// loop: on one line for the address; for the token, its line breaks
 /// dropped, never in a `String` of ours but the field's.
-pub fn paste(field: Field) {
+fn paste(field: Field) {
     let clean = match field {
         Field::Address => crate::paste::Clean::Spaced,
         Field::Token => crate::paste::Clean::Dropped,
@@ -434,7 +425,11 @@ pub fn paste(field: Field) {
             return;
         };
         let open = with(|flow| flow.step == Step::Planka).unwrap_or(false);
-        if open && type_in(field, text) {
+        let pasted = |entry: &mut Entry| match entry.paste(text) {
+            true => Took::Edited,
+            false => Took::Same,
+        };
+        if open && edit(field, pasted) == Took::Edited {
             tracing::debug!(?field, "the clipboard's text pasted into the Planka step");
         } else {
             tracing::debug!(
@@ -451,7 +446,8 @@ pub fn paste(field: Field) {
 /// "Se connecter": the address and the token checked off the loop.
 pub fn sign_in() {
     let asked = with(|flow| {
-        if flow.checking.is_some() || flow.address.trim().is_empty() || flow.token.is_empty() {
+        if flow.checking.is_some() || flow.address.text().trim().is_empty() || flow.token.is_empty()
+        {
             return None;
         }
         let n = flow.next();
@@ -459,8 +455,8 @@ pub fn sign_in() {
         flow.refused = None;
         Some(Job::Check {
             n,
-            address: flow.address.trim().to_owned(),
-            token: Token::new(flow.token.as_str()),
+            address: flow.address.text().trim().to_owned(),
+            token: Token::new(flow.token.text()),
         })
     })
     .flatten();
@@ -549,7 +545,7 @@ pub fn column(which: usize, column: usize) {
 /// One of a server's boards chosen: read off the loop.
 pub fn board(index: usize) {
     let asked = with(|flow| {
-        let token = Token::new(flow.token.as_str());
+        let token = Token::new(flow.token.text());
         let n = flow.next();
         flow.unfolded = None;
         let Some(Show::Planka { found, reading, .. }) = &mut flow.show else {
@@ -616,7 +612,7 @@ pub fn done() {
             }
             Show::Google { .. } => return None,
         };
-        let token = matches!(choice, Choice::Planka(_)).then(|| Token::new(flow.token.as_str()));
+        let token = matches!(choice, Choice::Planka(_)).then(|| Token::new(flow.token.text()));
         Some(Job::Finish { choice, token })
     })
     .flatten();
@@ -953,190 +949,152 @@ fn finish(choice: &Choice, token: Option<Token>) {
 /// The card's and the popover's words, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(self.lang)
     }
 
     pub fn card_title(self) -> &'static str {
-        self.pick("Ta journée ici", "Your day here")
+        self.pick(txt::YOUR_DAY_HERE)
     }
 
     pub fn card_text(self) -> &'static str {
-        self.pick(
-            "Branche ton agenda et tes tâches : la barre montrera tes réunions et ce qu'il reste à faire.",
-            "Connect your calendar and tasks: the bar will show your meetings and what is left to do.",
-        )
+        self.pick(txt::CONNECT_YOUR_CALENDAR_AND_TASKS_THE)
     }
 
     pub fn choose(self) -> &'static str {
-        self.pick("Choisir…", "Choose…")
+        self.pick(txt::CHOOSE)
     }
 
     pub fn later(self) -> &'static str {
-        self.pick("Plus tard", "Later")
+        self.pick(txt::LATER)
     }
 
     pub fn back(self) -> &'static str {
-        self.pick("Retour", "Back")
+        self.pick(txt::BACK)
     }
 
     pub fn close(self) -> &'static str {
-        self.pick("Fermer", "Close")
+        self.pick(txt::CLOSE)
     }
 
     pub fn add_account(self) -> &'static str {
-        self.pick("Ajouter un compte", "Add an account")
+        self.pick(txt::ADD_AN_ACCOUNT)
     }
 
     pub fn google(self) -> &'static str {
-        self.pick("Google Agenda", "Google Calendar")
+        self.pick(txt::GOOGLE_CALENDAR)
     }
 
     pub fn google_line(self) -> &'static str {
-        self.pick(
-            "Tes réunions et rendez-vous.",
-            "Your meetings and appointments.",
-        )
+        self.pick(txt::YOUR_MEETINGS_AND_APPOINTMENTS)
     }
 
     pub fn google_none(self) -> &'static str {
-        self.pick(
-            "Ajoute un compte Google dans les comptes en ligne",
-            "Add a Google account in Online Accounts",
-        )
+        self.pick(txt::ADD_A_GOOGLE_ACCOUNT_IN_ONLINE)
     }
 
     pub fn google_missing(self) -> &'static str {
-        self.pick(
-            "Comptes en ligne de GNOME absents",
-            "GNOME Online Accounts missing",
-        )
+        self.pick(txt::GNOME_ONLINE_ACCOUNTS_MISSING)
     }
 
     pub fn planka(self) -> &'static str {
-        self.pick("Tableau Planka", "Planka board")
+        self.pick(txt::PLANKA_BOARD)
     }
 
     pub fn planka_line(self) -> &'static str {
-        self.pick(
-            "Tes tâches : les cartes d'une colonne d'un tableau.",
-            "Your tasks: the cards of a board's column.",
-        )
+        self.pick(txt::YOUR_TASKS_THE_CARDS_OF_A)
     }
 
     pub fn local_note(self) -> &'static str {
-        self.pick(
-            "Tes tâches restent sur cet ordinateur tant qu'aucun tableau n'en fournit.",
-            "Your tasks stay on this computer until a board provides them.",
-        )
+        self.pick(txt::YOUR_TASKS_STAY_ON_THIS_COMPUTER)
     }
 
     pub fn board_address(self) -> &'static str {
-        self.pick("Adresse du tableau", "Board address")
+        self.pick(txt::BOARD_ADDRESS)
     }
 
     pub fn token(self) -> &'static str {
-        self.pick("Jeton d'accès", "Access token")
+        self.pick(txt::ACCESS_TOKEN)
     }
 
     pub fn token_help(self) -> &'static str {
-        self.pick(
-            "Dans Planka, une fois connecté : outils du navigateur (F12) › Stockage › Cookies : copie accessToken et httpOnlyToken.",
-            "In Planka, once signed in: the browser's tools (F12) › Storage › Cookies: copy accessToken and httpOnlyToken.",
-        )
+        self.pick(txt::IN_PLANKA_ONCE_SIGNED_IN_THE)
     }
 
     pub fn cancel(self) -> &'static str {
-        self.pick("Annuler", "Cancel")
+        self.pick(txt::CANCEL)
     }
 
     pub fn sign_in(self) -> &'static str {
-        self.pick("Se connecter", "Sign in")
+        self.pick(txt::SIGN_IN)
     }
 
     pub fn signing_in(self) -> &'static str {
-        self.pick("Connexion…", "Signing in…")
+        self.pick(txt::SIGNING_IN)
     }
 
     pub fn refusal(self, refusal: Refusal) -> &'static str {
         match refusal {
-            Refusal::Token => self.pick(
-                "Jeton refusé ou expiré : colle un nouveau jeton.",
-                "Token refused or expired: paste a new one.",
-            ),
-            Refusal::NoServer => self.pick(
-                "Aucun serveur Planka ne répond à cette adresse.",
-                "No Planka server answers at this address.",
-            ),
-            Refusal::NotShared => self.pick(
-                "Ce tableau n'existe pas ou ne t'est pas partagé.",
-                "This board does not exist or is not shared with you.",
-            ),
-            Refusal::Address => self.pick(
-                "Colle l'adresse d'un tableau : https://…/boards/…",
-                "Paste a board's address: https://…/boards/…",
-            ),
+            Refusal::Token => self.pick(txt::TOKEN_REFUSED_OR_EXPIRED_PASTE_A),
+            Refusal::NoServer => self.pick(txt::NO_PLANKA_SERVER_ANSWERS_AT_THIS),
+            Refusal::NotShared => self.pick(txt::THIS_BOARD_DOES_NOT_EXIST_OR),
+            Refusal::Address => self.pick(txt::PASTE_A_BOARD_S_ADDRESS_HTTPS),
         }
     }
 
     pub fn what_to_show(self) -> &'static str {
-        self.pick("Quoi montrer ?", "What to show?")
+        self.pick(txt::WHAT_TO_SHOW)
     }
 
     pub fn calendars(self) -> &'static str {
-        self.pick("AGENDAS", "CALENDARS")
+        self.pick(txt::CALENDARS)
     }
 
     /// A calendar's star's name.
     pub fn feature(self) -> &'static str {
-        self.pick("Mettre en avant", "Feature")
+        self.pick(txt::FEATURE)
     }
 
     pub fn read_only(self) -> &'static str {
-        self.pick("lecture seule", "read-only")
+        self.pick(txt::READ_ONLY)
     }
 
     pub fn reading(self) -> &'static str {
-        self.pick("Lecture des agendas…", "Reading the calendars…")
+        self.pick(txt::READING_THE_CALENDARS)
     }
 
     pub fn unread(self) -> &'static str {
-        self.pick(
-            "Les agendas de ce compte ne se lisent pas. Réessaie.",
-            "This account's calendars could not be read. Try again.",
-        )
+        self.pick(txt::THIS_ACCOUNT_S_CALENDARS_COULD_NOT)
     }
 
     pub fn tasks(self) -> &'static str {
-        self.pick("TÂCHES", "TASKS")
+        self.pick(txt::TASKS)
     }
 
     pub fn board(self) -> &'static str {
-        self.pick("Tableau", "Board")
+        self.pick(txt::BOARD)
     }
 
     /// The three choices of a board.
     pub fn choice(self, which: usize) -> &'static str {
         match which {
-            0 => self.pick("Colonne des tâches", "Tasks' column"),
-            1 => self.pick("Colonne des terminées", "Done column"),
-            _ => self.pick("Ajout dans", "Add to"),
+            0 => self.pick(txt::TASKS_COLUMN),
+            1 => self.pick(txt::DONE_COLUMN),
+            _ => self.pick(txt::ADD_TO),
         }
     }
 
     /// "12 cartes", "1 carte".
     pub fn cards(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 0 | 1) => format!("{n} carte"),
             (true, n) => format!("{n} cartes"),
             (false, 1) => "1 card".to_owned(),
@@ -1145,7 +1103,7 @@ impl Words {
     }
 
     pub fn done(self) -> &'static str {
-        self.pick("Terminé", "Done")
+        self.pick(txt::DONE)
     }
 }
 
@@ -1191,8 +1149,12 @@ mod tests {
 
     #[test]
     fn its_words_in_french_and_english() {
-        let fr = Words { fr: true };
-        let en = Words { fr: false };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(fr.card_title(), "Ta journée ici");
         assert_eq!(en.choose(), "Choose…");
         assert_eq!(fr.cards(12), "12 cartes");

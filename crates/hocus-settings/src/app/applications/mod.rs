@@ -12,6 +12,7 @@
 
 mod view;
 
+use hocus_words::settings::app_applications as words;
 use std::{
     collections::{BTreeMap, HashMap},
     time::Instant,
@@ -29,7 +30,7 @@ use crate::{
     applications::{
         self as model, ADDED, Ask, Done, Heard, Known, Opens, Picture, TERMINAL, Worker,
     },
-    lang::{Lang, w},
+    lang::Lang,
     model::{SectionId, Value},
     store::Slot,
 };
@@ -227,8 +228,8 @@ impl State {
     }
 }
 
-fn words(fr: &'static str, en: &'static str, lang: Lang) -> String {
-    w(fr, en).get(lang).to_owned()
+fn words(text: hocus_words::Text, lang: Lang) -> String {
+    text.get(lang).to_owned()
 }
 
 impl App {
@@ -431,19 +432,19 @@ impl App {
                 let before = known
                     .chosen(opens)
                     .map(|i| self.apps_name(i))
-                    .unwrap_or_else(|| words("aucune", "none", lang));
+                    .unwrap_or_else(|| words(words::NONE, lang));
                 let name = self.apps_name(&id);
                 let row = opens.name().get(lang);
                 let said = Said {
                     done: format!("{row}{}{name}", sep(lang)),
-                    undone: match lang {
-                        Lang::French => format!("Annulé : {row} : {before}"),
-                        Lang::English => format!("Undone: {row}: {before}"),
-                    },
-                    redone: match lang {
-                        Lang::French => format!("Rétabli : {row} : {name}"),
-                        Lang::English => format!("Redone: {row}: {name}"),
-                    },
+                    undone: words::undone(
+                        lang,
+                        words::Undone {
+                            before: &before,
+                            row,
+                        },
+                    ),
+                    redone: words::redone(lang, words::Redone { name: &name, row }),
                     row: Row::Default(opens),
                 };
                 self.apps.ask(
@@ -461,7 +462,7 @@ impl App {
                     return Task::none();
                 };
                 let (value, name) = if id.is_empty() {
-                    (String::new(), words("Automatique", "Automatic", lang))
+                    (String::new(), words(words::AUTOMATIC, lang))
                 } else {
                     let Some(app) = self.apps.known.as_ref().and_then(|k| k.app(&id)) else {
                         return Task::none();
@@ -537,24 +538,34 @@ impl App {
         let name = entry.name.clone();
         let yes = |on: bool| {
             if on {
-                words("oui", "on", lang)
+                words(words::ON, lang)
             } else {
-                words("non", "off", lang)
+                words(words::OFF, lang)
             }
         };
-        let said = match lang {
-            Lang::French => Said {
-                done: format!("{name} au démarrage : {}", yes(on)),
-                undone: format!("Annulé : {name} au démarrage : {}", yes(!on)),
-                redone: format!("Rétabli : {name} au démarrage : {}", yes(on)),
-                row: Row::Startup(id.to_owned()),
-            },
-            Lang::English => Said {
-                done: format!("{name} at start-up: {}", yes(on)),
-                undone: format!("Undone: {name} at start-up: {}", yes(!on)),
-                redone: format!("Redone: {name} at start-up: {}", yes(on)),
-                row: Row::Startup(id.to_owned()),
-            },
+        let said = Said {
+            done: words::at_start_up(
+                lang,
+                words::AtStartUp {
+                    name: &name,
+                    yes_on: yes(on),
+                },
+            ),
+            undone: words::undone_at_start_up(
+                lang,
+                words::UndoneAtStartUp {
+                    name: &name,
+                    yes_on: yes(!on),
+                },
+            ),
+            redone: words::redone_at_start_up(
+                lang,
+                words::RedoneAtStartUp {
+                    name: &name,
+                    yes_on: yes(on),
+                },
+            ),
+            row: Row::Startup(id.to_owned()),
         };
         let id = id.to_owned();
         self.apps
@@ -575,19 +586,11 @@ impl App {
             return;
         }
         let name = entry.name.clone();
-        let said = match lang {
-            Lang::French => Said {
-                done: format!("{name} enlevée du démarrage"),
-                undone: format!("Annulé : {name} revient au démarrage"),
-                redone: format!("Rétabli : {name} enlevée du démarrage"),
-                row: Row::Startup(id.to_owned()),
-            },
-            Lang::English => Said {
-                done: format!("{name} removed from start-up"),
-                undone: format!("Undone: {name} is back at start-up"),
-                redone: format!("Redone: {name} removed from start-up"),
-                row: Row::Startup(id.to_owned()),
-            },
+        let said = Said {
+            done: words::removed_from_start_up(lang, &name),
+            undone: words::undone_is_back_at_start_up(lang, &name),
+            redone: words::redone_removed_from_start_up(lang, &name),
+            row: Row::Startup(id.to_owned()),
         };
         let id = id.to_owned();
         self.apps
@@ -606,19 +609,11 @@ impl App {
         };
         let (id, name) = app;
         self.apps.sheet = None;
-        let said = match lang {
-            Lang::French => Said {
-                done: format!("{name} ajoutée au démarrage"),
-                undone: format!("Annulé : {name} n’est plus au démarrage"),
-                redone: format!("Rétabli : {name} ajoutée au démarrage"),
-                row: Row::Startup(id.clone()),
-            },
-            Lang::English => Said {
-                done: format!("{name} added to start-up"),
-                undone: format!("Undone: {name} is no longer at start-up"),
-                redone: format!("Redone: {name} added to start-up"),
-                row: Row::Startup(id.clone()),
-            },
+        let said = Said {
+            done: words::added_to_start_up(lang, &name),
+            undone: words::undone_is_no_longer_at_start(lang, &name),
+            redone: words::redone_added_to_start_up(lang, &name),
+            row: Row::Startup(id.clone()),
         };
         self.apps.added = Some(id.clone());
         self.apps
@@ -660,10 +655,7 @@ impl App {
                     Ok(done) => done,
                     Err(why) => {
                         tracing::warn!(why, "an application's change not written");
-                        let text = match self.lang {
-                            Lang::French => format!("Pas écrit : {why}"),
-                            Lang::English => format!("Not written: {why}"),
-                        };
+                        let text = words::not_written(self.lang, &why);
                         return self.toast(text, ToastAction::None, TOAST);
                     }
                 };
@@ -1000,10 +992,7 @@ impl App {
 /// The separator of a toast's row and value: " : " in French, ": " in
 /// English.
 fn sep(lang: Lang) -> &'static str {
-    match lang {
-        Lang::French => " : ",
-        Lang::English => ": ",
-    }
+    words::TEXT.get(lang)
 }
 
 fn model_sheet() -> Sheet {

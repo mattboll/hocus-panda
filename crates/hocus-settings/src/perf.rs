@@ -7,6 +7,7 @@
 //! buckets along one time axis, the four tiles, the signals and the peaks
 //! in words. `hocus perf day` reads the same files with the same report.
 
+use hocus_words::settings::perf as words;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
@@ -16,15 +17,15 @@ use hocus_perf::{Day, Report, files, format::Who, report::report, text};
 use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
-    lang::{Lang, w},
-    model::{Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::Lang,
+    model::{Codec, Kind, RowGroup, SectionId, Setting, one},
 };
 
 /// The switch's row.
 pub const RECORD: &str = "perf.record";
 
 const RECORDING: RowGroup = RowGroup {
-    label: w("ENREGISTREMENT", "RECORDING"),
+    label: words::RECORDING,
     per_source: false,
 };
 
@@ -36,11 +37,8 @@ pub fn settings() -> &'static [Setting] {
             id: RECORD,
             section: SectionId::Performance,
             group: RECORDING,
-            name: w("Mesurer la journée", "Record the day"),
-            line: Some(w(
-                "Toutes les 10 s : le CPU et la mémoire du compositeur et du shell, les images, les réveils, la puissance sur batterie.",
-                "Every 10 s: the compositor’s and the shell’s CPU and memory, the frames, the wakeups, the power on battery.",
-            )),
+            name: words::RECORD_THE_DAY,
+            line: Some(words::EVERY_10_S_THE_COMPOSITOR_S),
             keywords: (
                 &[
                     "performances",
@@ -51,25 +49,20 @@ pub fn settings() -> &'static [Setting] {
                     "batterie",
                     "gourmand",
                 ],
-                &["performance", "cpu", "processor", "memory", "usage", "battery"],
+                &[
+                    "performance",
+                    "cpu",
+                    "processor",
+                    "memory",
+                    "usage",
+                    "battery",
+                ],
             ),
             kind: Kind::Switch,
-            places: Places::One(Place {
-                key: &["perf", "record"],
-                codec: Codec::Bool,
-                default: Value::Bool(true),
-            }),
+            places: one(&["perf", "record"], Codec::Bool),
             needs: None,
         }]
     })
-}
-
-/// The language `hocus_perf` says things in.
-pub fn said_in(lang: Lang) -> text::Lang {
-    match lang {
-        Lang::French => text::Lang::French,
-        Lang::English => text::Lang::English,
-    }
 }
 
 /// The line that tells the compositor the window's page (`""`: none),
@@ -214,7 +207,7 @@ pub struct Tile {
 
 /// The four tiles: CPU, memory, frames, motion.
 pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
-    let l = said_in(lang);
+    let l = lang;
     let kb = |kb: [u32; 2]| kb[0] + kb[1];
     let mb = |kb: u32| (f64::from(kb) / 1024.0).round();
     let cpu_ms = r.cpu.compositor_ms + r.cpu.shell_ms;
@@ -223,114 +216,74 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         value: text::percent(r.cpu.average_percent, l),
         line: format!(
             "{} · {}",
-            w("d’un cœur en moyenne", "of a core on average").get(lang),
+            words::OF_A_CORE_ON_AVERAGE.get(lang),
             text::cpu_time(cpu_ms)
         ),
         sub: format!(
             "{} {} · shell {}",
-            w("compositeur", "compositor").get(lang),
+            words::COMPOSITOR.get(lang),
             text::cpu_time(r.cpu.compositor_ms),
             text::cpu_time(r.cpu.shell_ms)
         ),
     };
     let memory = Tile {
-        label: w("Mémoire", "Memory").get(lang).to_owned(),
+        label: words::MEMORY.get(lang).to_owned(),
         value: text::megabytes(kb(r.memory.end_kb), l),
-        line: match lang {
-            Lang::French => format!(
-                "au début {} · pic {} à {}",
-                mb(kb(r.memory.start_kb)),
-                mb(r.memory.peak_kb),
-                text::clock(r.memory.peak_at, tz)
-            ),
-            Lang::English => format!(
-                "at the start {} · peak {} at {}",
-                mb(kb(r.memory.start_kb)),
-                mb(r.memory.peak_kb),
-                text::clock(r.memory.peak_at, tz)
-            ),
-        },
+        line: words::at_the_start_peak_at(
+            lang,
+            words::AtTheStartPeakAt {
+                mb_kb_r_memory_start_kb: mb(kb(r.memory.start_kb)),
+                mb_r_memory_peak_kb: mb(r.memory.peak_kb),
+                text_clock_r_memory_peak: text::clock(r.memory.peak_at, tz),
+            },
+        ),
         sub: format!(
             "{} {} · shell {}",
-            w("compositeur", "compositor").get(lang),
+            words::COMPOSITOR.get(lang),
             mb(r.memory.end_kb[0]),
             mb(r.memory.end_kb[1])
         ),
     };
     let frames = Tile {
-        label: w("Images", "Frames").get(lang).to_owned(),
+        label: words::FRAMES.get(lang).to_owned(),
         value: text::count(r.drawing.frames, l),
         line: if r.locked_s > 0 {
-            match lang {
-                Lang::French => format!(
-                    "{} pendant {} verrouillé",
-                    r.drawing.locked_frames,
-                    text::duration(r.locked_s as i64)
-                ),
-                Lang::English => format!(
-                    "{} in {} locked",
-                    r.drawing.locked_frames,
-                    text::duration(r.locked_s as i64)
-                ),
-            }
+            words::in_locked(
+                lang,
+                words::InLocked {
+                    r_drawing_locked_frames: r.drawing.locked_frames,
+                    text_duration_r_locked_s: text::duration(r.locked_s as i64),
+                },
+            )
         } else {
-            match lang {
-                Lang::French => format!("{} scènes", text::count(r.drawing.scenes, l)),
-                Lang::English => format!("{} scenes", text::count(r.drawing.scenes, l)),
-            }
+            words::scenes(lang, text::count(r.drawing.scenes, l))
         },
-        sub: match lang {
-            Lang::French => format!(
-                "réveils au repos : {} par seconde",
-                text::number(r.drawing.rest_wakeups_per_s, 1, l)
-            ),
-            Lang::English => format!(
-                "wakeups at rest: {} a second",
-                text::number(r.drawing.rest_wakeups_per_s, 1, l)
-            ),
-        },
+        sub: words::wakeups_at_rest_a_second(
+            lang,
+            text::number(r.drawing.rest_wakeups_per_s, 1, l),
+        ),
     };
     let motion = Tile {
-        label: w("Mouvements", "Motion").get(lang).to_owned(),
+        label: words::MOTION.get(lang).to_owned(),
         value: if r.moving_wallpaper_s > 0 {
             text::duration(r.moving_wallpaper_s as i64)
         } else {
             text::count(r.drawing.motion_frames, l)
         },
         line: if r.moving_wallpaper_s > 0 {
-            match lang {
-                Lang::French => format!(
-                    "de fond animé · {} images animées",
-                    text::count(r.drawing.motion_frames, l)
-                ),
-                Lang::English => format!(
-                    "of moving wallpaper · {} frames in motion",
-                    text::count(r.drawing.motion_frames, l)
-                ),
-            }
+            words::of_moving_wallpaper_frames_in_motion(
+                lang,
+                text::count(r.drawing.motion_frames, l),
+            )
         } else {
-            w(
-                "images des animations du bureau",
-                "frames of the desktop’s motions",
-            )
-            .get(lang)
-            .to_owned()
+            words::FRAMES_OF_THE_DESKTOP_S_MOTIONS.get(lang).to_owned()
         },
-        sub: match (&r.power, lang) {
-            (Some(p), Lang::French) => format!(
-                "sur batterie : {} W en moyenne",
-                text::number(f64::from(p.average_mw) / 1000.0, 1, l)
+        sub: match &r.power {
+            Some(p) => words::on_battery_w_on_average(
+                lang,
+                text::number(f64::from(p.average_mw) / 1000.0, 1, l),
             ),
-            (Some(p), Lang::English) => format!(
-                "on battery: {} W on average",
-                text::number(f64::from(p.average_mw) / 1000.0, 1, l)
-            ),
-            (None, _) => w(
-                "sur secteur : puissance non mesurée",
-                "on AC: power not measured",
-            )
-            .get(lang)
-            .to_owned(),
+            None => words::ON_AC_POWER_NOT_MEASURED.get(lang).to_owned(),
         },
     };
     [cpu, memory, frames, motion]
@@ -344,21 +297,17 @@ pub fn session(r: &Report, lang: Lang, tz: &TimeZone) -> String {
             text::clock(from, tz),
             text::clock(to, tz)
         ),
-        _ => w("rien d’enregistré", "nothing recorded")
-            .get(lang)
-            .to_owned(),
+        _ => words::NOTHING_RECORDED.get(lang).to_owned(),
     }
 }
 
 /// The date said in full, "Aujourd’hui, " before today's.
 pub fn date_title(date: Date, today: Date, lang: Lang) -> String {
-    let said = text::date(date, said_in(lang));
+    let said = text::date(date, lang);
     let yesterday = today.checked_sub(jiff::Span::new().days(1)).ok();
-    match (date == today, Some(date) == yesterday, lang) {
-        (true, _, Lang::French) => format!("Aujourd’hui, {said}"),
-        (true, _, Lang::English) => format!("Today, {said}"),
-        (_, true, Lang::French) => format!("Hier, {said}"),
-        (_, true, Lang::English) => format!("Yesterday, {said}"),
+    match (date == today, Some(date) == yesterday) {
+        (true, _) => words::today(lang, &said),
+        (_, true) => words::yesterday(lang, &said),
         _ => {
             let mut chars = said.chars();
             chars
@@ -371,6 +320,7 @@ pub fn date_title(date: Date, today: Date, lang: Lang) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Places, Value};
     use hocus_perf::fixture;
 
     fn on() -> Date {

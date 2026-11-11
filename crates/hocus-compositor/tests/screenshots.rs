@@ -539,7 +539,7 @@ fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
     let mut config = Config::default();
     config.keyboard.layouts = vec!["us".to_owned()];
     config.pictures = Some(root.join("Images"));
-    config.french = true;
+    config.lang = hocus_words::Lang::French;
     let mut hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],

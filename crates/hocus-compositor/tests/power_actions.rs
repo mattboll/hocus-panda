@@ -40,7 +40,7 @@ fn config() -> Config {
     config.keyboard.layouts = vec!["us".to_owned()];
     config.plain_background = true;
     config.lock_auth = Authenticator::test("panda");
-    config.french = true;
+    config.lang = hocus_words::Lang::French;
     config
 }
 
@@ -1011,8 +1011,7 @@ impl System {
             .output()
             .is_err()
         {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let system_dir = dir.path().join("system");

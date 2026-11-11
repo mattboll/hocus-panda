@@ -5,6 +5,7 @@
 //! ([`crate::appearance`]); the window itself is the page's preview.
 
 use hocus_link::theme::{Accent, Scheme};
+use hocus_words::settings::app_appearance_page as words;
 use iced::{
     Alignment, Background, Color, Point, Rectangle, Renderer, Shadow, Theme, Vector, mouse,
     widget::{Space, button, canvas, container, row},
@@ -17,7 +18,7 @@ use super::{
 };
 use crate::{
     appearance::{self, Before, CURSOR_SIZES, Said, today_as},
-    lang::{Lang, w},
+    lang::Lang,
     model::{Choice, Kind, SectionId, Setting, Value},
     store::{KeyEdit, Reading, Slot},
     theme::Ink,
@@ -98,14 +99,14 @@ impl App {
         let then = self.said_value(slot);
         let done = said.join(" · ");
         let keys_said = KeysSaid {
-            undone: match lang {
-                Lang::French => format!("Annulé : {theme_name} revient à {then}."),
-                Lang::English => format!("Undone: {theme_name} is back to {then}."),
-            },
-            redone: match lang {
-                Lang::French => format!("Rétabli : {done}."),
-                Lang::English => format!("Redone: {done}."),
-            },
+            undone: words::undone_is_back_to(
+                lang,
+                words::UndoneIsBackTo {
+                    theme_name,
+                    then: &then,
+                },
+            ),
+            redone: words::redone(lang, &done),
             done,
             row: appearance::THEME_ID,
         };
@@ -120,10 +121,7 @@ impl App {
         };
         let name = setting.name.get(self.lang);
         let now = setting.say(value, self.lang);
-        match self.lang {
-            Lang::French => format!("{name} : {now}"),
-            Lang::English => format!("{name}: {now}"),
-        }
+        words::text(self.lang, words::TextArgs { name, now: &now })
     }
 
     /// What a theme's toast says of `key` set to `word` (`None`: its
@@ -135,10 +133,7 @@ impl App {
                 .and_then(|w| hocus_link::wallpaper::Picture::of(w).ok())
                 .unwrap_or_default();
             let name = crate::wallpaper::name_of(&picture, lang);
-            return match lang {
-                Lang::French => format!("Fond d’écran : {name}"),
-                Lang::English => format!("Wallpaper: {name}"),
-            };
+            return words::wallpaper(lang, &name);
         }
         let id = if key == appearance::ACCENT_KEY {
             appearance::ACCENT_ID
@@ -363,13 +358,8 @@ impl App {
 
     /// The accent's row says the chosen colour's name first.
     pub(super) fn accent_line(&self, slot: Slot) -> String {
-        let (fr, en) = crate::appearance::accent_of(self.value(slot).as_ref()).names();
-        let name = if self.lang.fr() { fr } else { en };
-        let rest = w(
-            "Les interrupteurs, la sélection, l’anneau du clavier.",
-            "Switches, selection, the keyboard’s ring.",
-        )
-        .get(self.lang);
+        let name = crate::appearance::accent_of(self.value(slot).as_ref()).name(self.lang);
+        let rest = words::SWITCHES_SELECTION_THE_KEYBOARD_S_RING.get(self.lang);
         format!("{name} · {rest}")
     }
 }
@@ -380,13 +370,14 @@ const ACCENT_TEXT_INK: Ink = Ink::AccentText;
 /// "(français)": the session's language, as the window would speak it
 /// without the file's choice.
 fn system_language(lang: Lang) -> String {
-    let name = match (Lang::of_messages(), lang) {
-        (Lang::French, Lang::French) => "français",
-        (Lang::French, Lang::English) => "French",
-        (Lang::English, Lang::French) => "anglais",
-        (Lang::English, Lang::English) => "English",
+    // A language the catalogue has no name for in `lang`: its own name.
+    let name = match Lang::of_messages() {
+        Lang::French => words::FRENCH_NAME.get(lang),
+        Lang::English => words::ENGLISH_NAME.get(lang),
+        #[allow(unreachable_patterns, reason = "a language added by its file alone")]
+        other => other.name(),
     };
-    format!("({name})")
+    words::in_parentheses(lang, name)
 }
 
 /// The cursor at `pixels`: a 72 × 72 tile with the arrow drawn at that

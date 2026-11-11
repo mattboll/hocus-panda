@@ -30,8 +30,8 @@
 //! [`open_on`] opens it on a day with an event chosen: the next meeting's
 //! card's (Day.2).
 
-mod draw;
 pub mod layout;
+mod view;
 pub mod words;
 
 use std::{
@@ -49,11 +49,7 @@ use hocus_day::{
     snapshot::Holds,
     source::Range,
 };
-use iced::{
-    Point, Rectangle, Renderer, Theme, keyboard, mouse,
-    widget::canvas::{self, Frame, Geometry},
-    window,
-};
+use iced::{Element, keyboard, widget::Id, window};
 use jiff::{Timestamp, Zoned, civil::Date, tz::TimeZone};
 
 pub use self::layout::WIDTH;
@@ -62,7 +58,10 @@ use self::{
     words::{Hours, Words},
 };
 use super::{Event as Seen, Item, Pressed, event, kit};
-use crate::clock::time::Lang;
+use crate::{
+    clock::time::Lang,
+    ui::{Around, Later},
+};
 
 /// A notch of a mouse's wheel scrolls the list by a row.
 const NOTCH: f32 = 44.0;
@@ -74,7 +73,7 @@ static ASKED: Mutex<Option<(Date, Option<EventId>)>> = Mutex::new(None);
 /// How many times it opened: each opening asks for its month again.
 static OPENED: AtomicU64 = AtomicU64::new(0);
 
-fn view<T>(with: impl FnOnce(&mut View) -> T) -> T {
+fn shown<T>(with: impl FnOnce(&mut View) -> T) -> T {
     let mut view = VIEW.lock().unwrap_or_else(PoisonError::into_inner);
     let view = view.get_or_insert_with(|| View::on(crate::notifications::wall().date(), None));
     with(view)
@@ -119,12 +118,13 @@ pub(super) fn opening() {
     };
     tracing::debug!(day = %opened.selected, focus = ?opened.focus, "the calendar opens");
     OPENED.fetch_add(1, Ordering::Relaxed);
+    ui(|ui| *ui = Ui::default());
     *VIEW.lock().unwrap_or_else(PoisonError::into_inner) = Some(opened);
 }
 
 /// Its height as it shows now.
 pub(super) fn height() -> u32 {
-    let view = view(|v| v.clone());
+    let view = shown(|v| v.clone());
     let read = Read::now(&view);
     let laid = layout::lay_out(&view, &read.context(), &mut kit::measure);
     layout::height(&laid)
@@ -301,474 +301,315 @@ impl Read {
 pub struct Panel {
     pub id: window::Id,
     pub glass: bool,
-    /// Drawn on the CPU: text in the list cut to it.
-    pub software: bool,
 }
 
-/// What the surface keeps between draws.
+/// What the surface keeps between builds of its view.
 #[derive(Debug, Default)]
-pub struct State {
-    laid: Option<Laid>,
-    shown: Option<View>,
+struct Ui {
     /// The month last asked of the workers ([`ask_months`]), and in which
     /// opening.
     asked: Option<(u64, Date)>,
-    pointer: kit::Pointer<Target>,
-    wheel: kit::Wheel,
+    /// What was said last: the calendar, its height, the keyboard.
+    said: Option<(String, u32, Option<String>)>,
+    /// How far its list is scrolled, as the list said or was told.
+    scrolled: f32,
+    /// Where the list was told to scroll, until it says it is there: what
+    /// it says before is of its tree before.
+    told: Option<f32>,
+    /// A tree is to be built for the list to be scrolled in.
+    scroll: bool,
+    /// When what it shows changes by itself.
+    next: Option<Instant>,
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+static LATER: Later = Later::new();
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            kit::Input::Redraw(_) => self.refresh(state),
-            kit::Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            kit::Input::Key(pressed) => {
-                let action = self.key(state, &pressed);
-                self.refresh::<Message>(state);
-                action
-            }
-            kit::Input::Nothing => None,
-        }
-    }
-
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        // Under the events' rows, drawn in their list's clip.
-        crate::backdrop::layer(&mut frame, Rectangle::with_size(bounds.size()), |f| {
-            kit::background(f, bounds.size(), self.glass);
-        });
-        if let (Some(laid), Some(view)) = (&state.laid, &state.shown) {
-            let clip = kit::Clip::new(self.software, draw::list_view(laid));
-            draw::calendar(&mut frame, laid, view, state.pointer.hover, clip);
-        }
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
 }
 
-impl Panel {
-    /// What it shows, read afresh, and when it next changes by itself.
-    fn refresh<Message>(&self, state: &mut State) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-        }
-        let shown = view(|v| v.clone());
-        // Turned to a month (or opened on one): those of its weeks out of
-        // the window asked for, once.
-        let asking = (OPENED.load(Ordering::Relaxed), shown.month);
-        if state.asked != Some(asking) {
-            state.asked = Some(asking);
-            ask_months(shown.month);
-        }
-        let read = Read::now(&shown);
-        let laid = layout::lay_out(&shown, &read.context(), &mut kit::measure);
-        let shown = view(|v| {
-            // The list scrolled as laid out (clamped, to what is revealed).
-            v.scroll = laid.scroll;
-            v.reveal = false;
-            v.clone()
-        });
-        if state.laid.as_ref() != Some(&laid) || state.shown.as_ref() != Some(&shown) {
-            if state.laid.as_ref().map(layout::height) != Some(layout::height(&laid)) {
-                tracing::debug!(height = layout::height(&laid), "the calendar's height");
-            }
-            tracing::debug!(calendar = %laid.said(&shown), "the calendar shows it");
-            let targets: Vec<String> = laid
-                .targets()
-                .iter()
-                .filter(|(t, _)| !matches!(t, Target::Day(_)))
-                .map(|(t, r)| format!("{t:?}@{:.0},{:.0}", r.center().x, r.center().y))
-                .collect();
-            tracing::debug!(targets = %targets.join(" "), "the calendar's targets");
-            if let Some(name) = self.focused_name(&laid, &shown, &read) {
-                tracing::debug!(name, "the calendar's keyboard is on");
-            }
-            self.tell_readers(&laid, &shown, &read);
-            state.laid = Some(laid);
-            state.shown = Some(shown.clone());
-            super::refit(Item::Calendar);
-        }
-        let wait = read.next_change(&shown)?;
-        Some(canvas::Action::request_redraw_at(Instant::now() + wait))
-    }
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A button pressed, or `Enter` on an event.
+    Act(Target),
+    /// `Enter` on a button of the header's, which keeps the keyboard.
+    Enter(Target, Stop),
+    /// The ring comes to it.
+    Focus(Stop),
+    /// A key on the days (an arrow, a page, an end, `Enter`).
+    Day(keyboard::key::Named),
+    /// `↑` (`true`) or `↓` on event `EventId`.
+    Event(EventId, bool),
+    /// The list scrolled to there.
+    Scrolled(f32),
+    /// The day changed under the view, or the clock moved on.
+    Stale,
+}
 
-    /// What it shows, for screen readers (crate::a11y::rows): the month and
-    /// its buttons, the day the keyboard is on, the chosen day's line and
-    /// its events, in `Tab`'s order.
-    fn tell_readers(&self, laid: &Laid, view: &View, read: &Read) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let words = read.words;
-        let mut nodes = vec![
-            rows::line(laid.title.text.clone()),
-            rows::act(
-                Stop::Previous,
-                Role::Button,
-                words.previous(),
-                laid.previous,
-            ),
-            rows::act(Stop::Next, Role::Button, words.next(), laid.next),
-            rows::act(
-                Stop::Today,
-                Role::Button,
-                words.today_button(),
-                laid.today_button,
-            ),
-        ];
-        let day = laid
-            .weeks
-            .iter()
-            .flat_map(|w| &w.days)
-            .find(|c| c.date == view.focus_day)
-            .map(|c| c.rect);
-        let count = if view.focus_day == view.selected {
-            read.agenda.events().len()
-        } else {
-            agenda(view.focus_day, &crate::notifications::wall())
-                .events()
-                .len()
-        };
-        let mut days = hocus_a11y::Node::new(
-            rows::key(Stop::Days),
-            Role::Button,
-            words.day_name(view.focus_day, count, read.today),
-        )
-        .bounds(day.and_then(rows::at))
-        .act(hocus_a11y::Act::Click);
-        if view.focus_day == view.selected {
-            days = days.selected(true);
-        }
-        nodes.push(days);
-        let mut line = laid.day_line.title.text.clone();
-        for more in [&laid.day_line.relative, &laid.day_line.count]
-            .into_iter()
-            .flatten()
-        {
-            line = format!("{line}, {}", more.text);
-        }
-        nodes.push(rows::line(line));
-        if let layout::Body::Note { text, .. } = &laid.body {
-            nodes.push(rows::line(text.clone()));
-        }
-        if let Some(rect) = laid.choose {
-            nodes.push(rows::act(
-                Stop::Choose,
-                Role::Button,
-                words.choose_calendars(),
-                rect,
+/// The calendar on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    Around::new(panel.id, build(), handle, Msg::Stale)
+        .rebuild(build)
+        .stale_when(|| ui(|ui| ui.scroll || ui.next.is_some_and(|at| Instant::now() >= at)))
+        .wake_at(|| ui(|ui| ui.next))
+        .keys(key)
+        .later(&LATER)
+        .on_glass(panel.glass)
+}
+
+/// Its content, as the day and the clock are now.
+fn build<'a>() -> Element<'a, Msg> {
+    let before = shown(|v| v.clone());
+    // Turned to a month (or opened on one): those of its weeks out of
+    // the window asked for, once.
+    let asking = (OPENED.load(Ordering::Relaxed), before.month);
+    if ui(|ui| ui.asked.replace(asking) != Some(asking)) {
+        ask_months(before.month);
+    }
+    let read = Read::now(&before);
+    let laid = layout::lay_out(&before, &read.context(), &mut kit::measure);
+    let view = shown(|v| {
+        // The list scrolled as laid out (clamped, to what is revealed).
+        v.scroll = laid.scroll;
+        v.reveal = false;
+        v.clone()
+    });
+    let days = days_name(&view, &read);
+    ui(|ui| {
+        if (ui.scrolled - laid.scroll).abs() > 0.5 {
+            ui.scrolled = laid.scroll;
+            ui.told = Some(laid.scroll);
+            ui.scroll = true;
+            LATER.push(iced::advanced::widget::operation::scrollable::scroll_to(
+                Id::new(view::LIST_ID),
+                iced::advanced::widget::operation::scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(laid.scroll),
+                },
             ));
         }
-        let rects = laid.targets();
-        for (i, row) in laid.rows().iter().enumerate() {
-            let rect = rects
-                .iter()
-                .find(|(t, _)| *t == Target::Event(i))
-                .map(|(_, r)| *r);
-            let mut node = hocus_a11y::Node::new(
-                rows::key(Stop::Event(row.id.clone())),
-                Role::Button,
-                row.title.clone(),
-            )
-            .bounds(rect.and_then(rows::at))
-            .act(hocus_a11y::Act::Click);
-            if row.past {
-                node = node.describe(if words.previous() == "Mois précédent" {
-                    "passé"
-                } else {
-                    "past"
-                });
-            }
-            nodes.push(node);
-        }
-        let order: Vec<Stop> = [Stop::Previous, Stop::Next, Stop::Today, Stop::Days]
-            .into_iter()
-            .chain(laid.choose.is_some().then_some(Stop::Choose))
-            .chain(laid.rows().iter().map(|r| Stop::Event(r.id.clone())))
-            .collect();
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(order),
-                focus: view.focus.as_ref().map(rows::key),
-                arrows: false,
-            },
-        );
-    }
+        ui.next = read.next_change(&view).map(|wait| Instant::now() + wait);
+        say(&laid, &view, &read, ui);
+    });
+    view::calendar(&laid, &view, read.words, days)
+}
 
-    /// What holds the keyboard, as a screen reader would say it.
-    fn focused_name(&self, laid: &Laid, view: &View, read: &Read) -> Option<String> {
-        let words = read.words;
-        match view.focus.as_ref()? {
-            Stop::Previous => Some(words.previous().to_owned()),
-            Stop::Next => Some(words.next().to_owned()),
-            Stop::Today => Some(words.today_button().to_owned()),
-            Stop::Choose => Some(words.choose_calendars().to_owned()),
-            Stop::Days => {
-                let count = if view.focus_day == view.selected {
-                    read.agenda.events().len()
-                } else {
-                    let now = crate::notifications::wall();
-                    agenda(view.focus_day, &now).events().len()
-                };
-                Some(words.day_name(view.focus_day, count, read.today))
-            }
-            Stop::Event(id) => laid
-                .rows()
-                .iter()
-                .find(|r| r.id == *id)
-                .map(|r| r.title.clone()),
-        }
+/// What it shows, for the log and tests, when it changed.
+fn say(laid: &Laid, view: &View, read: &Read, ui: &mut Ui) {
+    let said = (
+        laid.said(view),
+        layout::height(laid),
+        focused_name(laid, view, read),
+    );
+    if ui.said.as_ref() == Some(&said) {
+        return;
     }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let laid = state.laid.as_ref()?;
-        let target = at.and_then(|at| {
-            laid.targets()
-                .into_iter()
-                .find(|(_, r)| r.contains(at))
-                .map(|(t, _)| t)
-        });
-        let in_list = at.is_some_and(|at| draw::list_view(laid).is_some_and(|v| v.contains(at)));
-        let ids: Vec<EventId> = laid.rows().iter().map(|r| r.id.clone()).collect();
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    self.click(target, &ids);
-                    self.refresh::<Message>(state);
-                }
-                redraw
-            }
-            mouse::Event::WheelScrolled { delta } if in_list => {
-                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
-                view(|v| v.scroll = (v.scroll + by).max(0.0));
-                self.refresh::<Message>(state);
-                redraw
-            }
-            _ => None,
-        }
+    if ui.said.as_ref().map(|s| s.1) != Some(said.1) {
+        tracing::debug!(height = said.1, "the calendar's height");
     }
-
-    /// A click on `target`, the day's events' rows being `ids`.
-    fn click(&self, target: Target, ids: &[EventId]) {
-        tracing::debug!(?target, "a click in the calendar");
-        let today = crate::notifications::wall().date();
-        match target {
-            Target::Previous => view(|v| v.turn(-1)),
-            Target::Next => view(|v| v.turn(1)),
-            Target::Today => view(|v| {
-                v.select(today);
-                v.focus = Some(Stop::Days);
-                v.keyed = false;
-            }),
-            Target::Day(day) => view(|v| {
-                v.select(day);
-                v.focus = Some(Stop::Days);
-                v.keyed = false;
-            }),
-            Target::Event(row) => {
-                if let Some(id) = ids.get(row) {
-                    self.act_on(id);
-                }
-            }
-            // Day.1's popover, beside the clock, in its place.
-            Target::Choose => event(Seen::Replace(Item::DayChoose)),
-        }
+    tracing::debug!(calendar = %said.0, "the calendar shows it");
+    if let Some(name) = &said.2 {
+        tracing::debug!(name, "the calendar's keyboard is on");
     }
+    ui.said = Some(said);
+}
 
-    /// Event `id` acted on: its call, its page, or its details.
-    fn act_on(&self, id: &EventId) {
-        let now = crate::notifications::wall();
-        let day = view(|v| v.selected);
-        let Some(act) = agenda(day, &now)
+/// The day the keyboard is on, as a screen reader says it.
+fn days_name(view: &View, read: &Read) -> String {
+    let count = if view.focus_day == view.selected {
+        read.agenda.events().len()
+    } else {
+        agenda(view.focus_day, &crate::notifications::wall())
             .events()
-            .iter()
-            .find(|e| e.id == *id)
-            .map(Ev::act)
-        else {
-            return;
-        };
-        match act {
-            Act::Video(url) | Act::Page(url) => {
-                tracing::info!(id = id.as_str(), "the calendar opens an event's address");
-                super::send(crate::launcher::browse(&url).into_iter().collect());
-                event(Seen::Chosen);
-            }
-            Act::Unfold => view(|v| {
-                v.unfolded = if v.unfolded.as_ref() == Some(id) {
-                    None
-                } else {
-                    Some(id.clone())
-                };
-                v.reveal = true;
-            }),
-        }
-    }
+            .len()
+    };
+    read.words.day_name(view.focus_day, count, read.today)
+}
 
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let captured = Some(canvas::Action::request_redraw().and_capture());
-        let Key::Named(named) = &pressed.key else {
-            return None;
-        };
-        if *named == Named::Escape {
-            event(Seen::Escape);
-            return Some(canvas::Action::capture());
-        }
-        let events: Vec<EventId> = state
-            .laid
-            .as_ref()
-            .map(|l| l.rows().iter().map(|r| r.id.clone()).collect())
-            .unwrap_or_default();
-        let focus = view(|v| v.focus.clone());
-        let choose = state.laid.as_ref().is_some_and(|l| l.choose.is_some());
-        if *named == Named::Tab {
-            let order: Vec<Stop> = [Stop::Previous, Stop::Next, Stop::Today, Stop::Days]
-                .into_iter()
-                .chain(choose.then_some(Stop::Choose))
-                .chain(events.into_iter().map(Stop::Event))
-                .collect();
-            let next = step(&order, focus.as_ref(), pressed.modifiers.shift());
-            view(|v| {
-                v.keyed |= next == Some(Stop::Days);
-                v.reveal = matches!(next, Some(Stop::Event(_)));
-                v.focus = next;
-            });
-            return captured;
-        }
-        match focus {
-            None | Some(Stop::Days) => self.day_key(*named).then_some(captured).flatten(),
-            Some(Stop::Event(id)) => match named {
-                Named::Enter | Named::Space => {
-                    self.act_on(&id);
-                    captured
+/// What holds the keyboard, as a screen reader would say it.
+fn focused_name(laid: &Laid, view: &View, read: &Read) -> Option<String> {
+    let words = read.words;
+    match view.focus.as_ref()? {
+        Stop::Previous => Some(words.previous().to_owned()),
+        Stop::Next => Some(words.next().to_owned()),
+        Stop::Today => Some(words.today_button().to_owned()),
+        Stop::Choose => Some(words.choose_calendars().to_owned()),
+        Stop::Days => Some(days_name(view, read)),
+        Stop::Event(id) => laid
+            .rows()
+            .iter()
+            .find(|r| r.id == *id)
+            .map(|r| r.title.clone()),
+    }
+}
+
+/// The keys the calendar takes before the kit: on the days, the arrows,
+/// the pages, the ends and `Enter`; on an event, `↑` and `↓`.
+fn key(pressed: &Pressed) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    let Key::Named(named) = &pressed.key else {
+        return None;
+    };
+    match shown(|v| v.focus.clone()) {
+        None | Some(Stop::Days) => matches!(
+            named,
+            Named::ArrowLeft
+                | Named::ArrowRight
+                | Named::ArrowUp
+                | Named::ArrowDown
+                | Named::PageUp
+                | Named::PageDown
+                | Named::Home
+                | Named::End
+                | Named::Enter
+                | Named::Space
+        )
+        .then_some(Msg::Day(*named)),
+        Some(Stop::Event(id)) => match named {
+            Named::ArrowUp => Some(Msg::Event(id, true)),
+            Named::ArrowDown => Some(Msg::Event(id, false)),
+            _ => None,
+        },
+        Some(_) => None,
+    }
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => ui(|ui| ui.scroll = false),
+        Msg::Scrolled(y) => {
+            let heard = ui(|ui| match ui.told {
+                Some(told) if (told - y).abs() > 0.5 => false,
+                _ => {
+                    ui.told = None;
+                    ui.scrolled = y;
+                    true
                 }
-                Named::ArrowUp | Named::ArrowDown => {
-                    let at = events.iter().position(|e| *e == id)?;
-                    let next = if *named == Named::ArrowUp {
-                        at.checked_sub(1)?
-                    } else {
-                        at + 1
-                    };
-                    let next = events.get(next)?.clone();
-                    view(|v| {
+            });
+            if heard {
+                shown(|v| v.scroll = y);
+            }
+        }
+        Msg::Focus(stop) => shown(|v| {
+            v.keyed |= stop == Stop::Days;
+            v.reveal = matches!(stop, Stop::Event(_));
+            v.focus = Some(stop);
+        }),
+        Msg::Act(target) => click(target),
+        Msg::Enter(target, stop) => {
+            click(target);
+            if stop != Stop::Choose {
+                shown(|v| v.focus = Some(stop));
+            }
+        }
+        Msg::Day(named) => day_key(named),
+        Msg::Event(id, up) => {
+            let rows = ordered();
+            if let Some(at) = rows.iter().position(|e| *e == id) {
+                let next = if up { at.checked_sub(1) } else { Some(at + 1) };
+                if let Some(next) = next.and_then(|n| rows.get(n)) {
+                    let next = next.clone();
+                    shown(|v| {
                         v.focus = Some(Stop::Event(next));
                         v.reveal = true;
                     });
-                    captured
                 }
-                _ => None,
-            },
-            Some(Stop::Choose) => match named {
-                Named::Enter | Named::Space => {
-                    self.click(Target::Choose, &[]);
-                    captured
-                }
-                _ => None,
-            },
-            Some(stop @ (Stop::Previous | Stop::Next | Stop::Today)) => match named {
-                Named::Enter | Named::Space => {
-                    let target = match stop {
-                        Stop::Previous => Target::Previous,
-                        Stop::Next => Target::Next,
-                        _ => Target::Today,
-                    };
-                    self.click(target, &[]);
-                    view(|v| v.focus = Some(stop));
-                    captured
-                }
-                _ => None,
-            },
+            }
         }
     }
+    super::refit(Item::Calendar);
+}
 
-    /// A key on the days: whether it was theirs.
-    fn day_key(&self, named: keyboard::key::Named) -> bool {
-        use keyboard::key::Named;
-        let from = view(|v| v.focus_day);
-        let to = match named {
-            Named::ArrowLeft => layout::days_on(from, -1),
-            Named::ArrowRight => layout::days_on(from, 1),
-            Named::ArrowUp => layout::days_on(from, -7),
-            Named::ArrowDown => layout::days_on(from, 7),
-            Named::PageUp => layout::months_on(from, -1),
-            Named::PageDown => layout::months_on(from, 1),
-            Named::Home => layout::week_end(from, true),
-            Named::End => layout::week_end(from, false),
-            Named::Enter | Named::Space => {
-                view(|v| {
-                    v.select(v.focus_day);
-                    v.focus = Some(Stop::Days);
-                    v.keyed = true;
-                });
-                return true;
+/// The day's events in their rows' order.
+fn ordered() -> Vec<EventId> {
+    let view = shown(|v| v.clone());
+    let read = Read::now(&view);
+    let laid = layout::lay_out(&view, &read.context(), &mut kit::measure);
+    laid.rows().iter().map(|r| r.id.clone()).collect()
+}
+
+/// A click on `target`.
+fn click(target: Target) {
+    tracing::debug!(?target, "a click in the calendar");
+    let today = crate::notifications::wall().date();
+    match target {
+        Target::Previous => shown(|v| v.turn(-1)),
+        Target::Next => shown(|v| v.turn(1)),
+        Target::Today => shown(|v| {
+            v.select(today);
+            v.focus = Some(Stop::Days);
+            v.keyed = false;
+        }),
+        Target::Day(day) => shown(|v| {
+            v.select(day);
+            v.focus = Some(Stop::Days);
+            v.keyed = false;
+        }),
+        Target::Event(row) => {
+            if let Some(id) = ordered().get(row) {
+                act_on(id);
             }
-            _ => return false,
-        };
-        view(|v| v.focus_on(to));
-        true
+        }
+        // Day.1's popover, beside the clock, in its place.
+        Target::Choose => event(Seen::Replace(Item::DayChoose)),
     }
 }
 
-/// What holds the keyboard after `focus` in `order` (`back`: before it),
-/// round its ends; from nothing, the first (the last).
-fn step(order: &[Stop], focus: Option<&Stop>, back: bool) -> Option<Stop> {
-    let n = order.len() as isize;
-    if n == 0 {
-        return None;
-    }
-    let at = focus.and_then(|f| order.iter().position(|s| s == f));
-    let by = if back { -1 } else { 1 };
-    let next = match at {
-        Some(i) => (i as isize + by).rem_euclid(n),
-        None if by > 0 => 0,
-        None => n - 1,
+/// Event `id` acted on: its call, its page, or its details.
+fn act_on(id: &EventId) {
+    let now = crate::notifications::wall();
+    let day = shown(|v| v.selected);
+    let Some(act) = agenda(day, &now)
+        .events()
+        .iter()
+        .find(|e| e.id == *id)
+        .map(Ev::act)
+    else {
+        return;
     };
-    order.get(next as usize).cloned()
+    match act {
+        Act::Video(url) | Act::Page(url) => {
+            tracing::info!(id = id.as_str(), "the calendar opens an event's address");
+            super::send(crate::launcher::browse(&url).into_iter().collect());
+            event(Seen::Chosen);
+        }
+        Act::Unfold => shown(|v| {
+            v.unfolded = if v.unfolded.as_ref() == Some(id) {
+                None
+            } else {
+                Some(id.clone())
+            };
+            v.reveal = true;
+        }),
+    }
+}
+
+/// A key on the days.
+fn day_key(named: keyboard::key::Named) {
+    use keyboard::key::Named;
+    let from = shown(|v| v.focus_day);
+    let to = match named {
+        Named::ArrowLeft => layout::days_on(from, -1),
+        Named::ArrowRight => layout::days_on(from, 1),
+        Named::ArrowUp => layout::days_on(from, -7),
+        Named::ArrowDown => layout::days_on(from, 7),
+        Named::PageUp => layout::months_on(from, -1),
+        Named::PageDown => layout::months_on(from, 1),
+        Named::Home => layout::week_end(from, true),
+        Named::End => layout::week_end(from, false),
+        _ => {
+            shown(|v| {
+                v.select(v.focus_day);
+                v.focus = Some(Stop::Days);
+                v.keyed = true;
+            });
+            return;
+        }
+    };
+    shown(|v| v.focus_on(to));
 }

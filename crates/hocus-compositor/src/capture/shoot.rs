@@ -54,7 +54,7 @@ where
                 pictures: state.config.pictures.clone(),
                 chosen: state.config.chosen_folder(&state.config.capture.folder),
                 format: state.config.capture.format,
-                french: state.config.french,
+                lang: state.config.lang,
             };
             state.capture_taken(shot, job, flash);
         }

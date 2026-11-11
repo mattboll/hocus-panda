@@ -14,30 +14,28 @@
 //! over them, one holds the keyboard, or something runs: rows do not move
 //! under the pointer; newcomers join at the end.
 //!
-//! One canvas draws it, as the Wi-Fi's: what changes draws this surface
-//! alone. The nearby list is drawn in a frame of its own, cut to its
-//! bounds.
+//! Built with the shell's widget kit ([`crate::ui`]), as the Wi-Fi's.
 
 use std::{
     sync::{Mutex, PoisonError},
     time::Instant,
 };
 
+use hocus_a11y::Role;
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry, Path},
-        text::Alignment,
-    },
+    Color, Element, Padding, Point,
+    advanced::widget::Id,
+    alignment::Vertical,
+    widget::{Space, column, container, row, space, text::LineHeight},
     window,
 };
 
 use super::{
-    Event as Seen, Item, Pressed, event,
+    Item,
     kit::{
-        self, Aside, Clip, HEADER, HEADER_TOP, ICON, ICON_GAP, Input, LEFT, List, NOTE_HEIGHT,
-        PEACH, Pointer, RIGHT, ROW, ROW_GAP, ROW_OUT, ROW_PAD, ROW_RADIUS, ROW_TEXT, SCROLLBAR,
-        SMALL, SMALL_PAD, SMALL_RADIUS, STATUS, SWITCH, Spin, Switch, Wheel, Widths, text,
+        self, HEADER, HEADER_TOP, ICON, ICON_GAP, LEFT, List, MANROPE_SEMIBOLD, NAME, NOTE_HEIGHT,
+        PEACH, RIGHT, ROW, ROW_GAP, ROW_OUT, ROW_PAD, ROW_RADIUS, ROW_TEXT, SCROLLBAR, SMALL,
+        SMALL_PAD, SMALL_RADIUS, STATUS, SWITCH, Switch,
     },
 };
 use crate::{
@@ -47,10 +45,17 @@ use crate::{
         model::{Action, Device, Failure, Step},
     },
     levels::{
-        draw::{ACCENT, DIM, FAINT, LINE, MANROPE, TEXT, ring, stroke},
+        draw::{ACCENT, DIM, FAINT, LINE, MANROPE, TEXT},
         model::Words,
     },
+    ui::{
+        self, Around, Later, control,
+        parts::{self, Knob, drawn, gap, note, spinner},
+        style::said,
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
@@ -68,23 +73,17 @@ const ERROR_INDENT: f32 = 34.0;
 const ERROR_BOTTOM: f32 = 6.0;
 /// The room it wraps in: the row's width less its indent and padding.
 const ERROR_ROOM: f32 = RIGHT - LEFT + 2.0 * ROW_OUT - ERROR_INDENT - ROW_PAD;
-/// A notch of a mouse's wheel scrolls two rows.
-const NOTCH: f32 = 2.0 * (ROW + ROW_GAP);
-/// The Settings' link at the bottom, as the sound's (6.5): its row, its
-/// tile.
+/// The Settings' link at the bottom (the sound's, 6.5): its divider, its
+/// row.
 const LINK: f32 = 36.0;
-const LINK_TILE: f32 = 24.0;
-const LINK_TILE_RADIUS: f32 = 7.0;
-const LINK_TEXT: f32 = 13.5;
-const LINK_RADIUS: f32 = 8.0;
-const LINK_TILE_FILL: Color = Color::from_rgba8(255, 255, 255, 0.07);
-const LINK_HOVER: Color = Color::from_rgba8(255, 255, 255, 0.06);
+
+const LIST_ID: &str = "bluetooth:list";
 
 // --- What the popover keeps while it is open -----------------------------------
 
-/// What can be pointed at, or hold the keyboard's focus.
+/// What can hold the keyboard's ring, and be acted on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     Switch,
     /// A connected device's Disconnect, by its place.
     Disconnect(usize),
@@ -96,7 +95,14 @@ enum Target {
     Settings,
 }
 
-/// What it keeps between draws and between opening and closing.
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("bluetooth:{self:?}")
+    }
+}
+
+/// What it keeps between views and between opening and closing.
 #[derive(Debug, Default)]
 struct Ui {
     /// The devices around, by path, in the order shown.
@@ -106,12 +112,12 @@ struct Ui {
     /// The last attempt reacted to.
     seen: u64,
     focus: Option<Target>,
-    /// How far the nearby list is scrolled, px.
-    scroll: f32,
     /// The pointer is over the nearby list.
     over_list: bool,
     /// The adapter's switch, until BlueZ says it.
     switch: Switch,
+    /// The nearby rows as last said in the log.
+    said: Vec<Device>,
 }
 
 static UI: Mutex<Option<Ui>> = Mutex::new(None);
@@ -140,6 +146,20 @@ impl Ui {
             }
         } else {
             self.order = bt.nearby.iter().map(|d| d.path.clone()).collect();
+        }
+        // What a click on a row does follows these, not the thread's
+        // word: the tests wait for them.
+        let nearby = self.nearby(bt);
+        if nearby != self.said {
+            let rows: Vec<String> = nearby
+                .iter()
+                .map(|d| {
+                    let code = if d.code { " (code)" } else { "" };
+                    format!("{}{code}", d.name)
+                })
+                .collect();
+            tracing::debug!(rows = %rows.join(", "), "the popover's nearby rows");
+            self.said = nearby;
         }
     }
 
@@ -199,7 +219,8 @@ pub fn closing() {
     bluetooth::ask(Ask::Discover(false));
 }
 
-/// The popover's height for what it shows now.
+/// The popover's height for what it shows now, which the controller asks
+/// before its view is built.
 pub fn height() -> u32 {
     let bt = bluetooth::snapshot();
     ui(|ui| {
@@ -208,46 +229,27 @@ pub fn height() -> u32 {
     })
 }
 
-// --- Where everything is ---------------------------------------------------------
+// --- Its height ----------------------------------------------------------------------
 
 /// A list's part: the divider, the label, the note or the rows.
 #[derive(Debug, Clone, PartialEq)]
 struct Section {
-    rule: f32,
-    label: f32,
     note: Option<f32>,
     list: Option<List>,
-    /// Each row's top and height (with its failure), in the list.
-    rows: Vec<(f32, f32)>,
 }
 
 impl Section {
     fn scrolls(&self) -> bool {
         self.list.is_some_and(List::scrolls)
     }
-
-    fn most_scroll(&self) -> f32 {
-        self.list.map_or(0.0, List::most_scroll)
-    }
-
-    /// Row `i`'s 36 px, on the popover, scrolled by `scroll`.
-    fn row(&self, i: usize, scroll: f32) -> Option<Rectangle> {
-        let (top, _) = *self.rows.get(i)?;
-        Some(self.list?.row(top, scroll, 0.0))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct Layout {
-    switch: bool,
-    /// "Le Bluetooth est coupé."
-    note: Option<f32>,
-    /// Each connected device's block's top and height.
-    blocks: Vec<(f32, f32)>,
+    /// Each connected device's block's height.
+    blocks: Vec<f32>,
     mine: Option<Section>,
     nearby: Option<Section>,
-    /// The Settings' link: its divider, its row's top.
-    link: (f32, f32),
     end: f32,
 }
 
@@ -261,6 +263,10 @@ fn error_lines(failure: Failure) -> Vec<String> {
         }
     };
     kit::wrapped(said, ERROR, ERROR_ROOM)
+}
+
+fn disconnect_width() -> f32 {
+    kit::measure(kit::words().disconnect(), STATUS, MANROPE) + 2.0 * SMALL_PAD
 }
 
 /// Whether a connected device's state, "Connecté · batterie 82 %", wraps
@@ -278,8 +284,7 @@ fn wraps(battery: Option<u8>) -> bool {
     }
     let words = kit::words();
     let text = format!("{} · {}", words.connected(), words.battery_of(percent));
-    let disconnect = kit::measure(words.disconnect(), STATUS, MANROPE) + 2.0 * SMALL_PAD;
-    let wraps = kit::measure(&text, STATUS, MANROPE) > kit::block_room(disconnect);
+    let wraps = kit::measure(&text, STATUS, MANROPE) > kit::block_room(disconnect_width());
     known.push((percent, wraps));
     wraps
 }
@@ -311,68 +316,49 @@ impl Layout {
             top
         };
         let on = bt.powered && bt.adapter;
-        let note = (!on).then(|| next(NOTE_HEIGHT));
-        let blocks: Vec<(f32, f32)> = if on {
+        if !on {
+            next(NOTE_HEIGHT);
+        }
+        let blocks: Vec<f32> = if on {
             bt.connected
                 .iter()
                 .map(|d| {
                     let height = kit::block_height(state_lines(d));
-                    (next(height), height)
+                    next(height);
+                    height
                 })
                 .collect()
         } else {
             Vec::new()
         };
         let section = |devices: &[Device], most: f32, next: &mut dyn FnMut(f32) -> f32| {
-            let rule = next(2.0 * RULE + 1.0) + RULE;
-            let label = next(LABEL_ROW);
-            let (rows, content) =
-                kit::stack(devices.iter().map(|d| row_height(ui.failure(&d.path))));
+            next(2.0 * RULE + 1.0);
+            next(LABEL_ROW);
+            let (_, content) = kit::stack(devices.iter().map(|d| row_height(ui.failure(&d.path))));
             let note = devices.is_empty().then(|| next(NOTE_HEIGHT));
             let list = (!devices.is_empty()).then(|| {
                 let height = content.min(most);
                 let top = next(height);
                 kit::list(top, height, content)
             });
-            Section {
-                rule,
-                label,
-                note,
-                list,
-                rows,
-            }
+            Section { note, list }
         };
         let mine = on.then(|| section(&bt.paired, f32::INFINITY, &mut next));
         let nearby = on.then(|| section(nearby, LIST, &mut next));
-        // The link, under its divider (the sound's: 45 px).
-        let rule = y + RULE;
-        let top = rule + 1.0 + RULE;
-        y = top + LINK;
         Self {
-            switch: bt.adapter,
-            note,
             blocks,
             mine,
             nearby,
-            link: (rule, top),
-            end: y,
+            end: y + RULE + 1.0 + RULE + LINK,
         }
     }
 
     fn height(&self) -> u32 {
         kit::height(self.end)
     }
-
-    fn list(&self) -> Option<List> {
-        self.nearby.as_ref().and_then(|s| s.list)
-    }
-
-    fn most_scroll(&self) -> f32 {
-        self.nearby.as_ref().map_or(0.0, Section::most_scroll)
-    }
 }
 
-// --- The canvas ------------------------------------------------------------------
+// --- The view ------------------------------------------------------------------------
 
 /// Bluetooth's popover on its surface.
 #[derive(Debug, Clone)]
@@ -384,851 +370,404 @@ pub struct Panel {
     pub glass: bool,
     /// Its spinners turn and its switch slides.
     pub motion: bool,
-    /// The shell draws on the CPU.
-    pub software: bool,
 }
 
-/// What the surface keeps between draws.
-#[derive(Debug, Default)]
-pub struct State {
-    bt: Bluetooth,
-    nearby: Vec<Device>,
-    layout: Option<Layout>,
-    widths: Widths,
-    /// The names as shown: connected, paired, around.
-    shown: [Vec<String>; 3],
-    /// The labels' letters and their places.
-    labels: [Vec<(char, f32)>; 2],
-    pointer: Pointer<Target>,
-    spin: Spin,
-    wheel: Wheel,
-    now: Option<Instant>,
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A control pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// The pointer came over the nearby list, or left it.
+    OverList(bool),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// Bluetooth changed under the view.
+    Stale,
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+/// What waits for the tree built after a message: the list scrolled.
+static LATER: Later = Later::new();
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(event, at) => self.mouse(state, event, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
+/// The popover on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let bt = bluetooth::snapshot();
+    let content = ui(|ui| content(panel, &bt, ui, Instant::now()));
+    let motion = panel.motion;
+    Around::new(panel.id, content, move |m| handle(m, motion), Msg::Stale)
+        .press(Msg::Pressed)
+        .later(&LATER)
+        .on_glass(panel.glass)
+}
+
+fn content<'a>(panel: &Panel, bt: &Bluetooth, ui: &Ui, now: Instant) -> El<'a> {
+    let words = panel.words;
+    let on = bt.powered && bt.adapter;
+    let nearby = ui.nearby(bt);
+    let layout = Layout::of(bt, ui, &nearby);
+    let running = bt.running().map(|(p, a)| (p.to_owned(), a));
+    let focus = ui.focus;
+    let block = |content: Option<El<'a>>| parts::block(GAP, content);
+    let mut all: Vec<El<'a>> = vec![header(panel, bt, ui, now)];
+    all.push(block((!on).then(|| note(words.bluetooth_is_off()))));
+    // The connected blocks, each in its place.
+    let mut connected = column![];
+    for (i, device) in bt.connected.iter().enumerate().filter(|_| on) {
+        connected = connected.push(block(Some(connected_block(words, device, i, focus))));
     }
-
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let Some(layout) = &state.layout else {
-            return vec![frame.into_geometry()];
-        };
-        let now = state.now.unwrap_or_else(Instant::now);
-        ui(|ui| {
-            let drawn = Drawn {
-                panel: self,
-                state,
-                ui,
-                layout,
-                now,
+    all.push(connected.into());
+    let rows = |section: u8, devices: &[Device], scrolls: bool| -> El<'a> {
+        let mut list = column![].spacing(ROW_GAP);
+        for (i, device) in devices.iter().enumerate() {
+            let target = if section == 0 {
+                Target::Mine(i)
+            } else {
+                Target::Near(i)
             };
-            drawn.header(&mut frame);
-            drawn.blocks(&mut frame);
-            drawn.mine(&mut frame);
-            drawn.nearby_head(&mut frame);
-            drawn.link(&mut frame);
-            let mut all = Vec::new();
-            if let Some(list) = layout.list() {
-                let mut frame_of_list = Frame::with_bounds(renderer, list.view);
-                drawn.nearby(&mut frame_of_list);
-                list.scrollbar(&mut frame, ui.scroll);
-                all.push(frame_of_list.into_geometry());
-            }
-            drawn.focus(&mut frame);
-            drawn.tell_readers();
-            all.insert(0, frame.into_geometry());
-            all
-        })
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
-}
-
-impl Panel {
-    /// What it shows, read afresh: the keys that reached another surface,
-    /// Bluetooth, the nearby rows' order, the outcome of an attempt.
-    fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
+            let row = device_row(panel, ui, device, target, running.as_ref(), scrolls);
+            list = list.push(container(row).id(Id::from(target.id() + ":row")));
         }
-        let bt = bluetooth::snapshot();
-        ui(|ui| {
-            ui.react(&bt);
-            ui.relist(&bt);
-            ui.switch.settle(bt.powered, now);
-            let nearby = ui.nearby(&bt);
-            if nearby != state.nearby {
-                // What a click on a row does follows these, not the
-                // thread's word: the tests wait for them.
-                let rows: Vec<String> = nearby
-                    .iter()
-                    .map(|d| {
-                        let code = if d.code { " (code)" } else { "" };
-                        format!("{}{code}", d.name)
-                    })
-                    .collect();
-                tracing::debug!(rows = %rows.join(", "), "the popover's nearby rows");
+        // The rows reach the scrollbar's 2 px short, as the canvas's.
+        container(list)
+            .padding(Padding {
+                right: if scrolls { 2.0 } else { 0.0 },
+                ..Padding::ZERO
+            })
+            .into()
+    };
+    if let Some(mine) = &layout.mine {
+        all.push(block(Some(parts::rule())));
+        all.push(block(Some(parts::label(
+            words.my_devices(),
+            LABEL_ROW,
+            None,
+        ))));
+        all.push(block(Some(if mine.note.is_some() {
+            note(words.all_connected())
+        } else {
+            rows(0, &bt.paired, false)
+        })));
+    }
+    if let Some(around) = &layout.nearby {
+        let searching = bt.searching;
+        let aside = searching.then(|| {
+            let mut aside = row![].align_y(Vertical::Center);
+            if panel.motion {
+                aside = aside.push(spinner(FAINT.get())).push(gap(6.0));
             }
-            state.nearby = nearby;
-            let layout = Layout::of(&bt, ui, &state.nearby);
-            ui.scroll = ui.scroll.clamp(0.0, layout.most_scroll());
-            if ui
-                .focus
-                .is_some_and(|f| !targets(&layout, &bt, &state.nearby).contains(&f))
-            {
-                ui.focus = None;
-            }
-            // Resized under a still pointer: what it is over is not known
-            // until it moves.
-            if state.layout.as_ref().map(Layout::height) != Some(layout.height()) {
-                state.pointer.hover = None;
-            }
-            state.layout = Some(layout);
+            aside
+                .push(said(words.searching(), SMALL, MANROPE, FAINT.get()))
+                .into()
         });
-        state.bt = bt;
-        state.now = Some(now);
-        self.measure_all(state);
-        // A change of size reaches the controller, which resizes the
-        // surface (without waking it again).
-        super::refit(Item::Bluetooth);
-        let spins = self.motion && (state.bt.searching || state.bt.running().is_some());
-        let spinning = state.spin.run(spins, now);
-        let sliding = self.motion && ui(|ui| ui.switch.sliding(now));
-        (spinning || sliding).then(canvas::Action::request_redraw)
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let layout = state.layout.clone()?;
-        let target = at.and_then(|at| self.target_at(state, &layout, at));
-        let in_list = at.is_some_and(|at| layout.list().is_some_and(|l| l.view.contains(at)));
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                let held = ui(|ui| std::mem::replace(&mut ui.over_list, in_list));
-                if state.pointer.over(target) || held != in_list {
-                    return redraw;
-                }
-                None
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                ui(|ui| ui.over_list = false);
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.pointer.pressed = target;
-                ui(|ui| ui.focus = None);
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(clicked) = state.pointer.release(target) {
-                    self.act(state, Some(clicked));
-                }
-                redraw
-            }
-            mouse::Event::WheelScrolled { delta } if in_list => {
-                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
-                let most = layout.most_scroll();
-                ui(|ui| ui.scroll = (ui.scroll + by).clamp(0.0, most));
-                state.pointer.hover = at.and_then(|at| self.target_at(state, &layout, at));
-                redraw
-            }
-            _ => None,
-        }
-    }
-
-    /// What is under `at`: only what can be acted on.
-    fn target_at(&self, state: &mut State, layout: &Layout, at: Point) -> Option<Target> {
-        let scroll = ui(|ui| ui.scroll);
-        let disconnect = self.disconnect_width(state);
-        let list = layout.list();
-        targets(layout, &state.bt, &state.nearby)
-            .into_iter()
-            .find(|t| {
-                let Some(rect) = shape(*t, layout, scroll, disconnect) else {
-                    return false;
-                };
-                let in_list = matches!(t, Target::Near(_));
-                rect.contains(at) && (!in_list || list.is_some_and(|l| l.view.contains(at)))
+        all.push(block(Some(parts::rule())));
+        all.push(block(Some(parts::label(words.nearby(), LABEL_ROW, aside))));
+        all.push(block(Some(if around.note.is_some() {
+            note(if searching {
+                words.searching_devices()
+            } else {
+                words.no_new_device()
             })
+        } else {
+            parts::list(
+                rows(1, &nearby, around.scrolls()),
+                LIST_ID,
+                LIST,
+                Msg::OverList,
+            )
+        })));
     }
+    let [rule, link] = parts::settings_link(
+        words.bluetooth_settings(),
+        &Target::Settings.id(),
+        Msg::Act(Target::Settings),
+        focus == Some(Target::Settings),
+        Msg::Focus(Target::Settings),
+    );
+    all.push(rule);
+    all.push(link);
+    parts::content(all)
+}
 
-    fn disconnect_width(&self, state: &mut State) -> f32 {
-        state.widths.width(self.words.disconnect(), STATUS, false) + 2.0 * SMALL_PAD
-    }
-
-    /// `target` pressed, or `Enter` on it.
-    fn act(&self, state: &mut State, target: Option<Target>) {
-        let bt = state.bt.clone();
-        let busy = bt.running().is_some();
-        match target {
-            Some(Target::Switch) => {
-                let on = ui(|ui| ui.switch.flip(bt.powered, Instant::now(), self.motion));
-                bluetooth::ask(Ask::Power(on));
-            }
-            Some(Target::Disconnect(i)) => {
-                if let Some(device) = bt.connected.get(i) {
-                    bluetooth::ask(Ask::Disconnect(device.path.clone()));
-                }
-            }
-            Some(Target::Mine(i)) if !busy => {
-                if let Some(device) = bt.paired.get(i) {
-                    ui(|ui| ui.failed = None);
-                    bluetooth::ask(Ask::Connect(device.path.clone()));
-                }
-            }
-            Some(Target::Near(i)) if !busy => {
-                let Some(device) = state.nearby.get(i) else {
-                    return;
-                };
-                ui(|ui| ui.failed = None);
-                if device.code {
-                    // A code to show: the Settings pair it, on their page.
-                    super::session::open_settings_with(vec![
-                        "bluetooth".to_owned(),
-                        "--pair".to_owned(),
-                        device.address.clone(),
-                    ]);
-                } else {
-                    bluetooth::ask(Ask::Pair(device.path.clone()));
-                }
-            }
-            Some(Target::Settings) => super::session::open_settings(Some("bluetooth")),
-            _ => {}
-        }
-    }
-
-    /// The layout as the keys so far left it, not as last drawn: a failure
-    /// cleared in the same frame already changes the rows' heights (#462).
-    fn layout_now(state: &State) -> Layout {
-        ui(|ui| Layout::of(&state.bt, ui, &state.nearby))
-    }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        state.layout.as_ref()?;
-        let order = targets(&Self::layout_now(state), &state.bt, &state.nearby);
-        let focus = ui(|ui| ui.focus);
-        match &pressed.key {
-            Key::Named(Named::Escape) => event(Seen::Escape),
-            Key::Named(Named::Tab) => {
-                let next = kit::step(&order, focus, pressed.modifiers.shift());
-                ui(|ui| ui.focus = next);
-            }
-            Key::Named(Named::ArrowUp | Named::ArrowDown) => {
-                let rows: Vec<Target> = order
-                    .iter()
-                    .copied()
-                    .filter(|t| matches!(t, Target::Mine(_) | Target::Near(_)))
-                    .collect();
-                let down = matches!(pressed.key, Key::Named(Named::ArrowDown));
-                let next = kit::cycle(&rows, focus?, down)?;
-                ui(|ui| ui.focus = Some(next));
-            }
-            Key::Named(Named::Enter | Named::Space) => self.act(state, focus),
-            _ => return None,
-        }
-        self.reveal(state);
-        Some(canvas::Action::request_redraw().and_capture())
-    }
-
-    /// The nearby list scrolled so that the row holding the keyboard shows,
-    /// as the rows are now.
-    fn reveal(&self, state: &State) {
-        let Some(Target::Near(i)) = ui(|ui| ui.focus) else {
-            return;
+/// The title, and the switch.
+fn header<'a>(panel: &Panel, bt: &Bluetooth, state: &Ui, now: Instant) -> El<'a> {
+    let words = panel.words;
+    let switch = bt.adapter.then(|| {
+        let knob = Knob {
+            knob: |now, motion| {
+                let bt = bluetooth::snapshot();
+                ui(|ui| {
+                    let on = ui.switch.shown(bt.powered, now);
+                    ui.switch.knob_at(on, now, motion)
+                })
+            },
+            sliding: |now| ui(|ui| ui.switch.sliding(now)),
+            motion: panel.motion,
         };
-        let layout = Self::layout_now(state);
-        let Some(section) = &layout.nearby else {
-            return;
-        };
-        let (Some(list), Some(&row)) = (section.list, section.rows.get(i)) else {
-            return;
-        };
-        ui(|ui| ui.scroll = kit::reveal(row, list.view.height, ui.scroll, list.most_scroll()));
-    }
+        control(
+            knob.view(Msg::Act(Target::Switch)),
+            Target::Switch.id(),
+            Role::ToggleButton,
+            words.bluetooth(),
+        )
+        .node(|n| n.checked(state.switch.shown(bt.powered, now)))
+        .focus(
+            state.focus == Some(Target::Switch),
+            Msg::Focus(Target::Switch),
+            SWITCH.height / 2.0,
+        )
+        .activate(Msg::Act(Target::Switch))
+        .into()
+    });
+    parts::header(words.bluetooth(), switch)
+}
 
-    /// Measures, ahead of drawing, what the draw needs: the words once,
-    /// the labels' letters, the names cut to their room.
-    fn measure_all(&self, state: &mut State) {
-        let words = self.words;
-        for (text, size, bold) in [
-            (words.disconnect(), STATUS, false),
-            (words.connected(), STATUS, false),
-            (words.connecting(), SMALL, false),
-            (words.pairing(), SMALL, false),
-            (words.searching(), SMALL, false),
-            (words.in_settings(), SMALL, false),
-        ] {
-            state.widths.width(text, size, bold);
-        }
-        for (i, label) in [words.my_devices(), words.nearby()].into_iter().enumerate() {
-            if state.labels[i].is_empty() {
-                state.labels[i] = kit::label_letters(label);
+/// A connected device: its kind, its name over its state and battery,
+/// Disconnect.
+fn connected_block<'a>(words: Words, device: &Device, i: usize, focus: Option<Target>) -> El<'a> {
+    let name = kit::elide(&device.name, kit::block_room(disconnect_width()), |s| {
+        kit::measure(s, NAME, MANROPE_SEMIBOLD)
+    });
+    let connected = said(words.connected(), STATUS, MANROPE, ACCENT.get());
+    let state: El<'a> = match device.battery {
+        None => connected.into(),
+        Some(percent) => {
+            // " · batterie 82 %" in the battery's colour, beside, or " ·"
+            // beside and the battery under.
+            let colour = if device.low() { PEACH } else { ACCENT }.get();
+            let battery = words.battery_of(percent);
+            if wraps(device.battery) {
+                column![
+                    row![connected, said(" ·", STATUS, MANROPE, colour)],
+                    said(battery, STATUS, MANROPE, colour),
+                ]
+                .into()
+            } else {
+                row![
+                    connected,
+                    said(format!(" · {battery}"), STATUS, MANROPE, colour)
+                ]
+                .into()
             }
         }
-        let disconnect = state.widths.known(words.disconnect(), STATUS, false) + 2.0 * SMALL_PAD;
-        let block_room = kit::block_room(disconnect);
-        let connected: Vec<String> = state.bt.connected.iter().map(|d| d.name.clone()).collect();
-        state.shown[0] = connected
-            .iter()
-            .map(|n| state.widths.fit(n, block_room, true))
-            .collect();
-        let running = state.bt.running().map(|(p, a)| (p.to_owned(), a));
-        let row_room = |state: &State, device: &Device, scrolls: bool| {
-            let width = RIGHT - LEFT + 2.0 * ROW_OUT - if scrolls { SCROLLBAR + 2.0 } else { 0.0 };
-            let aside = row_aside(words, device, running.as_ref()).map(|aside| {
-                let width = state.widths.known(aside.text, SMALL, false);
-                (width, aside.spinner && self.motion)
-            });
-            kit::name_room(width, 0.0, aside)
-        };
-        let paired = state.bt.paired.clone();
-        state.shown[1] = paired
-            .iter()
-            .map(|d| {
-                let room = row_room(state, d, false);
-                state.widths.fit(&d.name, room, false)
-            })
-            .collect();
-        let scrolls = state
-            .layout
-            .as_ref()
-            .and_then(|l| l.nearby.as_ref())
-            .is_some_and(Section::scrolls);
-        let nearby = state.nearby.clone();
-        state.shown[2] = nearby
-            .iter()
-            .map(|d| {
-                let room = row_room(state, d, scrolls);
-                state.widths.fit(&d.name, room, false)
-            })
-            .collect();
+    };
+    let texts = column![
+        said(name, NAME, MANROPE_SEMIBOLD, TEXT.get()),
+        Space::new().height(1.0),
+        state
+    ]
+    .width(iced::Length::Fill);
+    let target = Target::Disconnect(i);
+    let leave = control(
+        parts::small_button(words.disconnect(), Msg::Act(target)),
+        target.id(),
+        Role::Button,
+        format!("{} {}", words.disconnect(), device.name),
+    )
+    .focus(focus == Some(target), Msg::Focus(target), SMALL_RADIUS)
+    .activate(Msg::Act(target));
+    let kind_of = device.kind;
+    let line = row![
+        drawn(ICON, ICON, move |f, s| kind(
+            f,
+            Point::ORIGIN,
+            s.width,
+            kind_of,
+            ACCENT.get()
+        )),
+        gap(ICON_GAP),
+        texts,
+        gap(ICON_GAP),
+        leave,
+    ]
+    .align_y(Vertical::Center);
+    let mut said = format!("{}, {}", device.name, words.connected());
+    if let Some(percent) = device.battery {
+        said = format!("{said}, {}", words.battery_of(percent));
+    }
+    ui::line(parts::connected(line), said).into()
+}
+
+/// One device's row, its failure under it.
+fn device_row<'a>(
+    panel: &Panel,
+    ui: &Ui,
+    device: &Device,
+    target: Target,
+    running: Option<&(String, Action)>,
+    scrolls: bool,
+) -> El<'a> {
+    let words = panel.words;
+    let idle = running.is_none();
+    let aside = row_aside(words, device, running);
+    let width = RIGHT - LEFT + 2.0 * ROW_OUT - if scrolls { SCROLLBAR + 2.0 } else { 0.0 };
+    let room = kit::name_room(
+        width,
+        0.0,
+        aside.map(|(text, _, spins)| (kit::measure(text, SMALL, MANROPE), spins && panel.motion)),
+    );
+    let name = kit::elide(&device.name, room, |s| kit::measure(s, ROW_TEXT, MANROPE));
+    let kind_of = device.kind;
+    let mut line = row![
+        drawn(ICON, ICON, move |f, s| kind(
+            f,
+            Point::ORIGIN,
+            s.width,
+            kind_of,
+            TEXT.get()
+        )),
+        gap(ICON_GAP),
+        said(name, ROW_TEXT, MANROPE, TEXT.get()),
+        space::horizontal(),
+    ]
+    .align_y(Vertical::Center);
+    if let Some((text, colour, spins)) = aside {
+        if spins && panel.motion {
+            line = line.push(spinner(DIM.get())).push(gap(6.0));
+        }
+        line = line.push(said(text, SMALL, MANROPE, colour));
+    }
+    let pressed = parts::row_button(line, ROW, idle.then_some(Msg::Act(target)));
+    let mut row = control(pressed, target.id(), Role::Button, device.name.clone())
+        .node(|n| n.describe(state_of(words, ui, device, running)))
+        .rows(0);
+    if idle {
+        row = row
+            .focus(ui.focus == Some(target), Msg::Focus(target), ROW_RADIUS)
+            .activate(Msg::Act(target));
+    }
+    match ui.failure(&device.path) {
+        None => row.into(),
+        Some(failure) => column![
+            row,
+            container(
+                said(error_lines(failure).join("\n"), ERROR, MANROPE, PEACH.get())
+                    .line_height(LineHeight::Relative(ERROR_LINE))
+            )
+            .padding(Padding {
+                left: ERROR_INDENT,
+                bottom: ERROR_BOTTOM,
+                ..Padding::ZERO
+            }),
+        ]
+        .into(),
     }
 }
 
-/// Where `target` is.
-fn shape(target: Target, layout: &Layout, scroll: f32, disconnect: f32) -> Option<Rectangle> {
-    Some(match target {
-        Target::Switch => Switch::rect(),
-        Target::Disconnect(i) => {
-            let (top, height) = *layout.blocks.get(i)?;
-            kit::block_button(top, height, disconnect)
-        }
-        Target::Mine(i) => layout.mine.as_ref()?.row(i, 0.0)?,
-        Target::Near(i) => layout.nearby.as_ref()?.row(i, scroll)?,
-        Target::Settings => Rectangle::new(
-            Point::new(LEFT - ROW_OUT, layout.link.1),
-            Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, LINK),
-        ),
-    })
-}
-
-/// What can hold the keyboard, in `Tab`'s order: the switch, each
-/// Disconnect, then the rows that can be acted on (none while something
-/// runs), then the Settings' link.
-fn targets(layout: &Layout, bt: &Bluetooth, nearby: &[Device]) -> Vec<Target> {
-    let mut order = Vec::new();
-    if layout.switch {
-        order.push(Target::Switch);
+/// What a device's row says to a screen reader beside its name.
+fn state_of(words: Words, ui: &Ui, device: &Device, running: Option<&(String, Action)>) -> String {
+    match running {
+        Some((path, action)) if *path == device.path => match action {
+            Action::Connect => words.connecting().to_owned(),
+            Action::Pair => words.pairing().to_owned(),
+        },
+        _ => match ui.failure(&device.path) {
+            Some(failure) => error_lines(failure).join(" "),
+            None if device.code && !device.paired => words.in_settings().to_owned(),
+            None => String::new(),
+        },
     }
-    order.extend((0..layout.blocks.len()).map(Target::Disconnect));
-    if bt.running().is_none() {
-        if layout.mine.as_ref().is_some_and(|s| s.list.is_some()) {
-            order.extend((0..bt.paired.len()).map(Target::Mine));
-        }
-        if layout.list().is_some() {
-            order.extend((0..nearby.len()).map(Target::Near));
-        }
-    }
-    order.push(Target::Settings);
-    order
 }
 
 /// What `device`'s row says on its right: "Connexion…" or "Association…"
-/// while asked for, "dans les Réglages" when it asks a code.
-fn row_aside(words: Words, device: &Device, running: Option<&(String, Action)>) -> Option<Aside> {
+/// while asked for, "dans les Réglages" when it asks a code; its colour,
+/// and whether a spinner turns before it.
+fn row_aside(
+    words: Words,
+    device: &Device,
+    running: Option<&(String, Action)>,
+) -> Option<(&'static str, Color, bool)> {
     match running {
-        Some((path, action)) if *path == device.path => Some(Aside {
-            text: match action {
+        Some((path, action)) if *path == device.path => Some((
+            match action {
                 Action::Connect => words.connecting(),
                 Action::Pair => words.pairing(),
             },
-            colour: DIM.get(),
-            spinner: true,
-        }),
-        _ if device.code && !device.paired => Some(Aside {
-            text: words.in_settings(),
-            colour: FAINT.get(),
-            spinner: false,
-        }),
+            DIM.get(),
+            true,
+        )),
+        _ if device.code && !device.paired => Some((words.in_settings(), FAINT.get(), false)),
         _ => None,
     }
 }
 
-// --- Drawing ---------------------------------------------------------------------
+// --- What a message does -------------------------------------------------------
 
-struct Drawn<'a> {
-    panel: &'a Panel,
-    state: &'a State,
-    ui: &'a Ui,
-    layout: &'a Layout,
-    now: Instant,
-}
-
-impl Drawn<'_> {
-    fn words(&self) -> Words {
-        self.panel.words
+/// `message`, handled at once; then what BlueZ says, the rows' order, and
+/// the list scrolled to the row the ring went to.
+fn handle(message: Msg, motion: bool) {
+    let bt = bluetooth::snapshot();
+    let before = ui(|ui| ui.focus);
+    match message {
+        Msg::Stale => {}
+        Msg::Act(target) => act(target, &bt, motion),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::OverList(over) => ui(|ui| ui.over_list = over),
+        Msg::Pressed => ui(|ui| ui.focus = None),
     }
-
-    fn hover(&self, target: Target) -> bool {
-        self.state.pointer.hover == Some(target)
-    }
-
-    fn width(&self, text: &'static str, size: f32) -> f32 {
-        self.state.widths.known(text, size, false)
-    }
-
-    fn shape(&self, target: Target) -> Option<Rectangle> {
-        let disconnect = self.width(self.words().disconnect(), STATUS) + 2.0 * SMALL_PAD;
-        shape(target, self.layout, self.ui.scroll, disconnect)
-    }
-
-    fn running(&self) -> Option<(String, Action)> {
-        self.state.bt.running().map(|(p, a)| (p.to_owned(), a))
-    }
-
-    /// The spinners' turn now, if they turn.
-    fn turn(&self) -> Option<f32> {
-        self.panel.motion.then(|| self.state.spin.turn(self.now))
-    }
-
-    fn header(&self, f: &mut Frame) {
-        kit::title(f, self.words().bluetooth());
-        if !self.layout.switch {
-            return;
-        }
-        let on = self.ui.switch.shown(self.state.bt.powered, self.now);
-        Switch::draw(f, self.ui.switch.knob_at(on, self.now, self.panel.motion));
-    }
-
-    /// "Le Bluetooth est coupé.", and the connected devices' blocks.
-    fn blocks(&self, f: &mut Frame) {
-        let words = self.words();
-        if let Some(top) = self.layout.note {
-            f.fill_text(kit::note(words.bluetooth_is_off().to_owned(), top));
-        }
-        for (i, ((top, height), device)) in self
-            .layout
-            .blocks
-            .iter()
-            .zip(&self.state.bt.connected)
-            .enumerate()
-        {
-            let middle = kit::block(f, *top, *height).center_y();
-            kind(
-                f,
-                Point::new(LEFT, middle - ICON / 2.0),
-                ICON,
-                device.kind,
-                ACCENT.get(),
-            );
-            if let Some(button) = self.shape(Target::Disconnect(i)) {
-                let hover = self.hover(Target::Disconnect(i));
-                kit::small_button(f, button, words.disconnect(), hover);
-            }
-            // Name and state: 14 px over 12.5 px (a line or two), 1 px
-            // apart, centred.
-            let x = LEFT + ICON + ICON_GAP;
-            let lines = state_lines(device);
-            let name = self.state.shown[0].get(i).cloned().unwrap_or_default();
-            let status = kit::block_name(f, name, middle, lines);
-            f.fill_text(text(
-                words.connected().to_owned(),
-                Point::new(x, status),
-                STATUS,
-                ACCENT.get(),
-                Alignment::Left,
-            ));
-            if let Some(percent) = device.battery {
-                // " · batterie 82 %" in the battery's colour, beside, or
-                // " ·" beside and the battery under.
-                let colour = if device.low() { PEACH } else { ACCENT };
-                let after = x + self.width(words.connected(), STATUS);
-                let battery = words.battery_of(percent);
-                let (beside, under) = if lines > 1.0 {
-                    (" ·".to_owned(), Some(battery))
-                } else {
-                    (format!(" · {battery}"), None)
-                };
-                f.fill_text(text(
-                    beside,
-                    Point::new(after, status),
-                    STATUS,
-                    colour.get(),
-                    Alignment::Left,
-                ));
-                if let Some(under) = under {
-                    f.fill_text(text(
-                        under,
-                        Point::new(x, status + STATUS * LINE),
-                        STATUS,
-                        colour.get(),
-                        Alignment::Left,
-                    ));
-                }
-            }
-        }
-    }
-
-    /// A section's divider and label (its letters spaced), and what is
-    /// said in place of its rows.
-    fn section(&self, f: &mut Frame, section: &Section, label: usize, note: &'static str) {
-        kit::rule(f, section.rule);
-        kit::label(
-            f,
-            &self.state.labels[label],
-            section.label + LABEL_ROW / 2.0,
-        );
-        if let Some(top) = section.note {
-            f.fill_text(kit::note(note.to_owned(), top));
-        }
-    }
-
-    /// "MES APPAREILS" and the paired devices.
-    fn mine(&self, f: &mut Frame) {
-        let Some(section) = &self.layout.mine else {
-            return;
-        };
-        self.section(f, section, 0, self.words().all_connected());
-        let running = self.running();
-        for (i, device) in self.state.bt.paired.iter().enumerate() {
-            let Some(rect) = section.row(i, 0.0) else {
-                continue;
-            };
-            let name = self.state.shown[1].get(i).cloned().unwrap_or_default();
-            let row = Row {
-                rect,
-                device,
-                name,
-                target: Target::Mine(i),
-            };
-            self.row(f, row, running.as_ref(), Clip::new(false, None));
-        }
-    }
-
-    /// What it found around, in the list's own frame.
-    fn nearby(&self, list: &mut Frame) {
-        let Some(section) = &self.layout.nearby else {
-            return;
-        };
-        let running = self.running();
-        let clip = Clip::new(self.panel.software, section.list.map(|l| l.view));
-        for (i, device) in self.state.nearby.iter().enumerate() {
-            let Some(rect) = section.row(i, self.ui.scroll) else {
-                continue;
-            };
-            let name = self.state.shown[2].get(i).cloned().unwrap_or_default();
-            let row = Row {
-                rect,
-                device,
-                name,
-                target: Target::Near(i),
-            };
-            self.row(list, row, running.as_ref(), clip);
-        }
-    }
-
-    /// One device's row, its failure under it.
-    fn row(&self, f: &mut Frame, row: Row<'_>, running: Option<&(String, Action)>, clip: Clip) {
-        let Row {
-            rect,
-            device,
-            name,
-            target,
-        } = row;
-        let enabled = running.is_none();
-        kit::row_fill(f, rect, false, enabled && self.hover(target));
-        let colour = TEXT;
-        let middle = rect.center_y();
-        let icon = Point::new(rect.x + ROW_PAD, middle - ICON / 2.0);
-        kind(f, icon, ICON, device.kind, colour.get());
-        if let Some(aside) = row_aside(self.words(), device, running) {
-            let right = rect.x + rect.width - ROW_PAD;
-            let width = self.width(aside.text, SMALL);
-            kit::aside(f, clip, aside, (right, middle), width, self.turn());
-        }
-        clip.fill(
-            f,
-            text(
-                name,
-                Point::new(icon.x + ICON + ICON_GAP, middle),
-                ROW_TEXT,
-                colour.get(),
-                Alignment::Left,
-            ),
-        );
-        if let Some(failure) = self.ui.failure(&device.path) {
-            let at = (rect.x + ERROR_INDENT, rect.y + ROW);
-            for said in kit::lines(&error_lines(failure), at, ERROR, ERROR_LINE, PEACH.get()) {
-                clip.fill(f, said);
-            }
-        }
-    }
-
-    /// "AUTOUR", its divider, its search, and its note.
-    fn nearby_head(&self, f: &mut Frame) {
-        let words = self.words();
-        if let Some(section) = &self.layout.nearby {
-            let searching = self.state.bt.searching;
-            let note = if searching {
-                words.searching_devices()
-            } else {
-                words.no_new_device()
-            };
-            self.section(f, section, 1, note);
-            if searching {
-                let middle = section.label + LABEL_ROW / 2.0;
-                let label = words.searching();
-                let width = self.width(label, SMALL);
-                kit::searching(f, label, width, middle, self.turn());
-            }
-        }
-    }
-
-    /// What it shows, for screen readers (crate::a11y::rows): the switch,
-    /// the connected devices with their Disconnect, my devices, those
-    /// around, the Settings' link.
-    fn tell_readers(&self) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::{Node, Role};
-        let words = self.words();
-        let bt = &self.state.bt;
-        let running = self.running();
-        let mut nodes = Vec::new();
-        if self.layout.switch {
-            nodes.push(
-                rows::act(
-                    Target::Switch,
-                    Role::ToggleButton,
-                    words.bluetooth(),
-                    Switch::rect(),
-                )
-                .checked(self.ui.switch.shown(bt.powered, self.now)),
-            );
-        }
-        if self.layout.note.is_some() {
-            nodes.push(rows::line(words.bluetooth_is_off()));
-        }
-        let state_of = |device: &Device| -> String {
-            match &running {
-                Some((path, action)) if *path == device.path => match action {
-                    Action::Connect => words.connecting().to_owned(),
-                    Action::Pair => words.pairing().to_owned(),
-                },
-                _ if self.ui.failure(&device.path).is_some() => self
-                    .ui
-                    .failure(&device.path)
-                    .map(|f| error_lines(f).join(" "))
-                    .unwrap_or_default(),
-                _ if device.code && !device.paired => words.in_settings().to_owned(),
-                _ => String::new(),
-            }
-        };
-        for (i, device) in bt.connected.iter().enumerate() {
-            let mut said = words.connected().to_owned();
-            if let Some(percent) = device.battery {
-                said = format!("{said}, {}", words.battery_of(percent));
-            }
-            nodes.push(rows::line(format!("{}, {said}", device.name)));
-            if let Some(rect) = self.shape(Target::Disconnect(i)) {
-                nodes.push(rows::act(
-                    Target::Disconnect(i),
-                    Role::Button,
-                    format!("{} {}", words.disconnect(), device.name),
-                    rect,
-                ));
-            }
-        }
-        if self.layout.mine.is_some() {
-            nodes.push(rows::line(words.my_devices()));
-            for (i, device) in bt.paired.iter().enumerate() {
-                let node = match self.shape(Target::Mine(i)) {
-                    Some(rect) => {
-                        rows::act(Target::Mine(i), Role::Button, device.name.clone(), rect)
-                    }
-                    None => Node::new(rows::key(Target::Mine(i)), Role::Label, device.name.clone()),
-                };
-                nodes.push(node.describe(state_of(device)));
-            }
-        }
-        if self.layout.nearby.is_some() {
-            nodes.push(rows::line(words.nearby()));
-            if bt.searching {
-                nodes.push(rows::line(words.searching_devices()));
-            }
-            for (i, device) in self.state.nearby.iter().enumerate() {
-                let node = match self.shape(Target::Near(i)) {
-                    Some(rect) => {
-                        rows::act(Target::Near(i), Role::Button, device.name.clone(), rect)
-                    }
-                    None => Node::new(rows::key(Target::Near(i)), Role::Label, device.name.clone()),
-                };
-                nodes.push(node.describe(state_of(device)));
-            }
-        }
-        if let Some(rect) = self.shape(Target::Settings) {
-            nodes.push(rows::act(
-                Target::Settings,
-                Role::Button,
-                words.bluetooth_settings(),
-                rect,
-            ));
-        }
-        rows::publish(
-            self.panel.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(targets(self.layout, bt, &self.state.nearby)),
-                focus: self.ui.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    /// The keyboard's ring, around what holds it.
-    fn focus(&self, f: &mut Frame) {
-        let Some(target) = self.ui.focus else {
-            return;
-        };
-        let Some(rect) = self.shape(target) else {
-            return;
-        };
-        let radius = match target {
-            Target::Switch => SWITCH.height / 2.0,
-            Target::Disconnect(_) => SMALL_RADIUS,
-            Target::Mine(_) | Target::Near(_) => ROW_RADIUS,
-            Target::Settings => LINK_RADIUS,
-        };
-        ring(f, rect, radius);
-    }
-
-    /// "Réglages du Bluetooth…": the sliders' glyph in its tile, its
-    /// words, a chevron; lit under the pointer (the sound's, 6.5).
-    fn link(&self, f: &mut Frame) {
-        kit::rule(f, self.layout.link.0);
-        let Some(rect) = self.shape(Target::Settings) else {
-            return;
-        };
-        if self.hover(Target::Settings) {
-            crate::theme::hover(f, &kit::rounded(rect, LINK_RADIUS), LINK_HOVER);
-        }
-        let middle = rect.center_y();
-        let tile = Rectangle::new(
-            Point::new(LEFT, middle - LINK_TILE / 2.0),
-            Size::new(LINK_TILE, LINK_TILE),
-        );
-        f.fill(&kit::rounded(tile, LINK_TILE_RADIUS), LINK_TILE_FILL);
-        let at = Point::new(tile.x + 4.5, tile.y + 4.5);
-        for segment in [
-            [(4.0, 7.0), (13.0, 7.0)],
-            [(17.0, 7.0), (20.0, 7.0)],
-            [(15.0, 4.5), (15.0, 9.5)],
-            [(4.0, 17.0), (7.0, 17.0)],
-            [(11.0, 17.0), (20.0, 17.0)],
-            [(9.0, 14.5), (9.0, 19.5)],
-        ] {
-            lines(f, at, 15.0 / 24.0, 2.2, DIM.get(), &segment);
-        }
-        let mut words = text(
-            self.words().bluetooth_settings().to_owned(),
-            Point::new(LEFT + LINK_TILE + ICON_GAP, middle),
-            LINK_TEXT,
-            TEXT.get(),
-            Alignment::Left,
-        );
-        words.font = kit::MANROPE_SEMIBOLD;
-        f.fill_text(words);
-        lines(
-            f,
-            Point::new(RIGHT - 14.0, middle - 7.0),
-            14.0 / 24.0,
-            2.4,
-            FAINT.get(),
-            &[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)],
-        );
-    }
-}
-
-/// Lines through `points` (SVG units from `at`, `scale` px a unit).
-fn lines(f: &mut Frame, at: Point, scale: f32, width: f32, colour: Color, points: &[(f32, f32)]) {
-    let p = |(x, y): (f32, f32)| Point::new(at.x + x * scale, at.y + y * scale);
-    let path = Path::new(|b| {
-        if let Some((first, rest)) = points.split_first() {
-            b.move_to(p(*first));
-            for point in rest {
-                b.line_to(p(*point));
-            }
+    let now = Instant::now();
+    let reveal = ui(|ui| {
+        ui.react(&bt);
+        ui.relist(&bt);
+        ui.switch.settle(bt.powered, now);
+        match ui.focus {
+            Some(Target::Near(i)) if ui.focus != before => Some(i),
+            _ => None,
         }
     });
-    f.stroke(&path, stroke(width * scale, colour));
+    if let Some(i) = reveal {
+        LATER.push(ui::reveal(
+            Id::new(LIST_ID),
+            Id::from(Target::Near(i).id() + ":row"),
+        ));
+    }
+    super::refit(Item::Bluetooth);
 }
 
-/// A device's row to draw: where, which, its name as it fits, and what it
-/// is to the pointer and the keyboard.
-struct Row<'a> {
-    rect: Rectangle,
-    device: &'a Device,
-    name: String,
-    target: Target,
+/// `target` pressed, or `Enter` on it.
+fn act(target: Target, bt: &Bluetooth, motion: bool) {
+    let busy = bt.running().is_some();
+    match target {
+        Target::Switch => {
+            let on = ui(|ui| ui.switch.flip(bt.powered, Instant::now(), motion));
+            bluetooth::ask(Ask::Power(on));
+        }
+        Target::Disconnect(i) => {
+            if let Some(device) = bt.connected.get(i) {
+                bluetooth::ask(Ask::Disconnect(device.path.clone()));
+            }
+        }
+        Target::Mine(i) if !busy => {
+            if let Some(device) = bt.paired.get(i) {
+                ui(|ui| ui.failed = None);
+                bluetooth::ask(Ask::Connect(device.path.clone()));
+            }
+        }
+        Target::Near(i) if !busy => {
+            let Some(device) = ui(|ui| ui.nearby(bt).get(i).cloned()) else {
+                return;
+            };
+            ui(|ui| ui.failed = None);
+            if device.code {
+                // A code to show: the Settings pair it, on their page.
+                super::session::open_settings_with(vec![
+                    "bluetooth".to_owned(),
+                    "--pair".to_owned(),
+                    device.address.clone(),
+                ]);
+            } else {
+                bluetooth::ask(Ask::Pair(device.path.clone()));
+            }
+        }
+        Target::Settings => super::session::open_settings(Some("bluetooth")),
+        Target::Mine(_) | Target::Near(_) => {}
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bluetooth::model::Kind;
-    use hocus_bluetooth::Attempt;
 
     fn device(name: &str, paired: bool, connected: bool) -> Device {
         Device {
@@ -1285,6 +824,79 @@ mod tests {
     }
 
     #[test]
+    fn nothing_can_be_asked_while_something_runs_but_the_settings_link() {
+        use hocus_bluetooth::Attempt;
+        let panel = Panel {
+            id: window::Id::unique(),
+            words: Words::new(crate::clock::time::Lang::French),
+            glass: false,
+            motion: false,
+        };
+        let mut bt = bt();
+        bt.nearby[1].code = true;
+        let mut ui = Ui::default();
+        ui.relist(&bt);
+        // What the ring goes to, and what `Enter` acts on, in order.
+        let held = |bt: &Bluetooth, ui: &Ui| -> Vec<(String, bool)> {
+            let content = content(&panel, bt, ui, Instant::now());
+            ui::walk::declared(content, hocus_link::POPOVER_WIDTH as f32)
+                .into_iter()
+                .filter(|(_, d)| d.node.key.starts_with("bluetooth:"))
+                .map(|(_, d)| {
+                    (
+                        d.node.key.clone(),
+                        d.on_focus.is_some() && d.on_activate.is_some(),
+                    )
+                })
+                .collect()
+        };
+        let idle = held(&bt, &ui);
+        let ring: Vec<&str> = idle
+            .iter()
+            .filter(|(_, held)| *held)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            ring[..5],
+            [
+                "bluetooth:Switch",
+                "bluetooth:Disconnect(0)",
+                "bluetooth:Mine(0)",
+                "bluetooth:Mine(1)",
+                "bluetooth:Near(0)"
+            ]
+        );
+        // A device asking a code goes to the Settings: it can be chosen.
+        assert!(ring.contains(&"bluetooth:Near(1)"));
+        assert_eq!(ring.last(), Some(&"bluetooth:Settings"));
+        // A connection under way: the rows are inert, still declared.
+        bt.attempt = Some(Attempt {
+            id: 1,
+            path: bt.paired[0].path.clone(),
+            step: Step::Running(Action::Connect),
+        });
+        let running = held(&bt, &ui);
+        let ring: Vec<&str> = running
+            .iter()
+            .filter(|(_, held)| *held)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            ring,
+            [
+                "bluetooth:Switch",
+                "bluetooth:Disconnect(0)",
+                "bluetooth:Settings"
+            ]
+        );
+        assert!(
+            running
+                .iter()
+                .any(|(id, held)| id == "bluetooth:Mine(0)" && !held)
+        );
+    }
+
+    #[test]
     fn the_nearby_rows_hold_their_order_while_worked_in() {
         let mut ui = Ui::default();
         let mut bt = bt();
@@ -1303,37 +915,5 @@ mod tests {
         ui.over_list = false;
         ui.relist(&bt);
         assert_eq!(ui.order[0], bt.nearby[0].path);
-    }
-
-    #[test]
-    fn nothing_can_be_asked_while_something_runs_but_the_settings_link() {
-        let mut bt = bt();
-        bt.nearby[1].code = true;
-        let ui = Ui::default();
-        let layout = Layout::of(&bt, &ui, &bt.nearby);
-        let order = targets(&layout, &bt, &bt.nearby);
-        assert_eq!(
-            order[..5],
-            [
-                Target::Switch,
-                Target::Disconnect(0),
-                Target::Mine(0),
-                Target::Mine(1),
-                Target::Near(0)
-            ]
-        );
-        // A device asking a code goes to the Settings: it can be chosen.
-        assert!(order.contains(&Target::Near(1)));
-        assert_eq!(order.last(), Some(&Target::Settings));
-        bt.attempt = Some(Attempt {
-            id: 1,
-            path: bt.paired[0].path.clone(),
-            step: Step::Running(Action::Connect),
-        });
-        let order = targets(&layout, &bt, &bt.nearby);
-        assert_eq!(
-            order,
-            [Target::Switch, Target::Disconnect(0), Target::Settings]
-        );
     }
 }

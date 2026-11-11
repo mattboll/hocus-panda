@@ -335,8 +335,8 @@ impl State {
         let names: Vec<String> = outputs.iter().map(Output::name).collect();
         let screens: Vec<String> = other_screens(&names)
             .into_iter()
-            .map(|i| {
-                let output = &outputs[i];
+            .filter_map(|i| outputs.get(i))
+            .map(|output| {
                 let model = output.user_data().get::<ScreenModel>();
                 let name = model.map_or_else(|| output.name(), |m| m.0.clone());
                 hocus_link::screen_name(&name)

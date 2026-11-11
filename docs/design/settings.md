@@ -92,6 +92,40 @@ Martian Mono; written 450 ms after it stops moving), the segmented
 control. A control that does not apply now (the slider while its switch is
 off; everything while the file does not read) is drawn at 45 % and inert.
 
+## Words
+
+Every program's words, the Settings' and the shell's alike, are in the
+catalogue of `crates/hocus-words` (decision 0006): `words/en.toml`, the
+reference, and one file for each other language (`words/fr.toml`). The
+build compiles them into `hocus_words::<section>::<KEY>` and
+`hocus_words::<section>::<key>(lang, …)`; `hocus_words::Lang` is the one
+language type.
+
+**To add a string**: add its key to `en.toml` and to every other file,
+in the section of the code that says it (`[settings.appearance]`,
+`[shell.lock]`, `[perf.signal]`). A plain text becomes a constant
+(`hocus_words::shell::lock::PASSWORD.get(lang)`, a `Text`; the Settings'
+tables hold them as they are). One placeholder, `{name}`, is a parameter
+(`words::found_in(lang, dir)`); several are the fields of a struct named
+after the key, so none can be swapped
+(`words::now_shows(lang, words::NowShows { left, now, then, title })`);
+`{{` and `}}` are braces. A count is `{ one = "…", other = "…" }` and its
+function takes `n`: `one` is 1 in English, 0 and 1 in French. A list
+(`["lundi", …]`) is the same length in every file. A text made in code
+from the catalogue's is `Text::per_lang(|lang| …)`; a name the same in
+every language, `Text::same(…)`. The build stops on a key a file lacks or
+has too many of, and on a placeholder English does not have.
+
+**To add a language**: copy `en.toml` to `words/<code>.toml` (`de`), set
+its `[language]` table (`code`, `variant = "German"`, `name =
+"Deutsch"`, `plural`: `n=1`, `n<2` or `none`), translate every value.
+`Lang::German` exists from then on, chosen by a locale starting with its
+code or by `[locale] language = "de"`; nothing else changes. CI proves
+it: `HOCUS_WORDS_TEST_LANGUAGE=1 cargo check --workspace --all-targets`
+builds everything with a third language, `xx`, English's words in a file
+of its own. City and country names, and XKB's layouts' names, come from
+their own tables: a language they lack says them in English.
+
 ## Énergie (6.10)
 
 Built 2026-11-06 (issue #410), from the approved spec (the issue's last
@@ -985,7 +1019,7 @@ window is the preview.
   and choose with `←` and `→`; the link opens with `Enter`.
 - **The search** finds the rows by the spec's nearby words and their keys
   (`theme`, `accent`, `text-scale`, `cursor-size`…).
-- **The language** (`src/lang.rs`'s words hold both): the window and the
+- **The language** (`src/lang.rs`: the catalogue's words, decision 0006): the window and the
   shell switch at once; `[locale] language` wins over `LC_ALL`,
   `LC_MESSAGES` and `LANG` for the desktop's own words, and is given as
   `LANGUAGE` to programs started afterwards.
@@ -1979,7 +2013,7 @@ pub struct Setting {
     pub id: &'static str,                     // "power.suspend-after"
     pub section: SectionId,
     pub group: RowGroup,                      // its group's label; per_source: one value on battery, one on AC
-    pub name: Words,                          // w("Mettre en veille après", "Suspend after")
+    pub name: Words,                          // a catalogue text: words::SUSPEND_AFTER (hocus_words::settings::power)
     pub line: Option<Words>,                  // the line under the name
     pub keywords: (&'static [&'static str], &'static [&'static str]), // nearby words, French then English
     pub kind: Kind,                           // Switch | Menu(Vec<Choice>) | Slider { min, max, step, unit } | Text

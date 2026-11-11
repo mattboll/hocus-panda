@@ -146,7 +146,11 @@ impl State {
         let at = match focused {
             Some(id) => match self.caret_of(id) {
                 Some(caret) => EmojiAt::Caret(local(caret)),
-                None => match self.space.element_geometry(&self.windows[&id].window) {
+                None => match self
+                    .windows
+                    .get(&id)
+                    .and_then(|w| self.space.element_geometry(&w.window))
+                {
                     Some(rect) => EmojiAt::Window(local(rect)),
                     None => EmojiAt::Screen,
                 },
@@ -497,7 +501,7 @@ impl State {
             ),
             _ => clear_data_device_selection(&self.display_handle, &self.seat),
         }
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.new_selection(SelectionTarget::Clipboard, types)
         {
             tracing::warn!(?err, "could not offer the clipboard to X11");

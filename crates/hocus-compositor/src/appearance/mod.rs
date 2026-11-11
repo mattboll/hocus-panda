@@ -26,7 +26,7 @@ impl State {
         if now == old {
             return false;
         }
-        let wallpaper = self.backgrounds.borrow().accent;
+        let wallpaper = self.graphics.backgrounds.borrow().accent;
         if now.theme_choice(wallpaper) != old.theme_choice(wallpaper) {
             let choice = now.theme_choice(wallpaper);
             tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme changed");
@@ -35,7 +35,7 @@ impl State {
         if (now.high_contrast, now.theme, now.accent) != (old.high_contrast, old.theme, old.accent)
         {
             // What the compositor draws itself, drawn again in its colours.
-            self.radial_paint = crate::radial_draw::RadialPaint::default();
+            self.radial_menu.paint = crate::radial_draw::RadialPaint::default();
             self.overview_paint = crate::overview_draw::OverviewPaint::default();
             self.magnifier.paint = crate::magnifier::draw::Paint::default();
         }

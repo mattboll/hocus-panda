@@ -7,42 +7,54 @@
 //! health, when known. Without a battery but with power profiles, the
 //! modes alone, titled "Énergie".
 //!
-//! One canvas draws it, as the sound's: what changes draws this surface
-//! alone. A tile asks power-profiles-daemon for its profile and shows it
+//! Built with the shell's widget kit ([`crate::ui`]), as the sound's:
+//! what changes draws this surface alone. A tile asks power-profiles-daemon for its profile and shows it
 //! chosen until the daemon says it (3 s at most: it may refuse).
 //!
 //! The keyboard: `Tab` and `Shift+Tab` go through the tiles the machine
 //! has; the arrows choose the next one; `Enter` or `Space` chooses; `Esc`
 //! closes.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
+use hocus_a11y::Role;
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Border, Color, Element, Length, Padding, Point, Rectangle, Size,
+    alignment::{Horizontal, Vertical},
+    keyboard,
     widget::{
-        canvas::{self, Frame, Geometry, Path},
-        text::{Alignment, LineHeight},
+        Space, button,
+        canvas::{Frame, Path},
+        column, container, row,
+        text::LineHeight,
     },
     window,
 };
 
 use super::{
-    Event as Seen, Pressed, event,
-    kit::{
-        self, HEADER, HEADER_TOP, ICON, Input, LABEL, LABEL_PAD, LEFT, MANROPE_SEMIBOLD, Pointer,
-        RIGHT, rounded, text,
-    },
+    Pressed,
+    kit::{self, ASIDE, HEADER, HEADER_TOP, ICON, LABEL, LABEL_PAD, LEFT, MANROPE_SEMIBOLD, RIGHT},
 };
 use crate::levels::{
     self,
     draw::{
         ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, Sign, TEXT, band_colour, battery_sign,
-        polygon, ring, stroke,
+        polygon, stroke,
     },
     model::{Band, Battery, Profile, Snapshot, Words},
     power::Ask,
 };
 use crate::theme::Ink;
+use crate::ui::{
+    self, Around, control,
+    parts::{self, drawn, gap},
+    style::{self, said},
+};
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
@@ -165,143 +177,125 @@ impl Layout {
     }
 }
 
-/// The popover opens: nothing to start.
-pub fn opening() {}
+/// The popover opens: nothing said yet, nothing asked.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
 
 /// Its height for what it shows now.
 pub fn height() -> u32 {
     Layout::of(&levels::snapshot(), kit::words()).height()
 }
 
-/// The battery's popover on its surface.
-#[derive(Debug, Clone)]
-pub struct Panel {
-    /// Its surface: it reacts only while open, not while it fades out.
-    pub id: window::Id,
-    pub words: Words,
-    /// On the compositor's glass (else opaque).
-    pub glass: bool,
+// --- What it keeps while it is open ---------------------------------------------
+
+/// What can hold the keyboard's ring, and be acted on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// A mode's tile.
+    Mode(Profile),
 }
 
-/// What the surface keeps between draws.
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("battery:{self:?}")
+    }
+}
+
 #[derive(Debug, Default)]
-pub struct State {
-    levels: Snapshot,
-    layout: Option<Layout>,
-    /// The label's letters and their places.
-    label: Vec<(char, f32)>,
-    pointer: Pointer<Profile>,
+struct Ui {
+    focus: Option<Target>,
     /// The profile asked, and since when.
     asked: Option<(Profile, Instant)>,
-    focus: Option<Profile>,
+    /// What was last said in the log.
+    said: Option<Snapshot>,
 }
 
-impl State {
-    /// The tiles that can be chosen, in `Tab`'s order.
-    fn targets(&self) -> Vec<Profile> {
-        if self.layout.as_ref().and_then(|l| l.tiles).is_none() {
-            return Vec::new();
-        }
-        MODES
-            .into_iter()
-            .filter(|p| self.levels.profiles.has(*p))
-            .collect()
-    }
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+impl Ui {
     /// The profile shown chosen: the one asked, else the daemon's.
-    fn chosen(&self) -> Option<Profile> {
-        self.asked.map(|(p, _)| p).or(self.levels.profile)
+    fn chosen(&self, levels: &Snapshot) -> Option<Profile> {
+        self.asked.map(|(p, _)| p).or(levels.profile)
     }
 
-    fn choose(&mut self, profile: Profile) {
-        if !self.levels.profiles.has(profile) {
+    fn choose(&mut self, levels: &Snapshot, profile: Profile) {
+        if !levels.profiles.has(profile) {
             return;
         }
-        if self.chosen() != Some(profile) {
+        if self.chosen(levels) != Some(profile) {
             levels::ask_power(Ask::Profile(profile));
         }
         self.asked = Some((profile, Instant::now()));
     }
-
-    /// Tile `profile`'s place.
-    fn tile(&self, profile: Profile) -> Option<Rectangle> {
-        let top = self.layout.as_ref()?.tiles?;
-        let i = MODES.iter().position(|p| *p == profile)? as f32;
-        let width = (RIGHT - LEFT - 2.0 * TILE_GAP) / 3.0;
-        Some(Rectangle::new(
-            Point::new(LEFT + i * (width + TILE_GAP), top),
-            Size::new(width, TILE),
-        ))
-    }
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+/// The tiles that can be chosen, in `Tab`'s order.
+fn targets(levels: &Snapshot) -> Vec<Profile> {
+    MODES
+        .into_iter()
+        .filter(|p| levels.profiles.has(*p))
+        .collect()
+}
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(event, at) => self.mouse(state, event, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
-    }
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A tile pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// An arrow on the tile holding the ring: the next, or the one before.
+    Step(bool),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The levels changed under the view.
+    Stale,
+}
 
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let Some(layout) = &state.layout else {
-            return vec![frame.into_geometry()];
-        };
-        self.header(&mut frame, state.levels.battery);
-        if let (Some(top), Some(battery)) = (layout.battery, state.levels.battery) {
-            self.battery(&mut frame, top, &battery, &layout.state);
-        }
-        if let Some((rule, label)) = layout.label {
-            kit::rule(&mut frame, rule);
-            kit::label(&mut frame, &state.label, kit::label_middle(label));
-        }
-        for profile in MODES {
-            self.tile(&mut frame, state, profile);
-        }
-        let notes = layout
-            .notes
-            .iter()
-            .map(|(top, lines)| (top, lines, NOTE_LINE));
-        let health = layout.health.iter().map(|(top, lines)| (top, lines, LINE));
-        for (top, lines, height) in notes.chain(health) {
-            for line in kit::lines(lines, (LEFT, *top), NOTE, height, FAINT.get()) {
-                frame.fill_text(line);
-            }
-        }
-        if let Some(rect) = state.focus.and_then(|p| state.tile(p)) {
-            ring(&mut frame, rect, TILE_RADIUS);
-        }
-        self.say(state, layout);
-        vec![frame.into_geometry()]
-    }
+/// The battery's popover on its surface.
+pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
+    let levels = levels::snapshot();
+    let subtitle = levels
+        .battery
+        .map(|b| words.plugged(b.charge.plugged()).to_owned());
+    let built = ui(|ui| content(words, &levels, ui));
+    // Asked and not said: the surface wakes when it stops showing.
+    Around::new(id, built, handle, Msg::Stale)
+        .rebuild(move || {
+            let levels = levels::snapshot();
+            ui(|ui| content(words, &levels, ui))
+        })
+        .stale_when(|| ui(|ui| expired(ui, Instant::now())))
+        .wake_at(|| ui(|ui| ui.asked.map(|(_, since)| since + ASKED_FOR)))
+        .keys(arrows)
+        .press(Msg::Pressed)
+        .subtitle(subtitle)
+        .on_glass(glass)
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
+/// Whether the profile asked showed long enough without the daemon
+/// saying it.
+fn expired(ui: &Ui, now: Instant) -> bool {
+    ui.asked.is_some_and(|(_, since)| now >= since + ASKED_FOR)
+}
+
+/// An arrow on a tile holding the ring chooses the next one (a radio
+/// group's way), stopping at the ends.
+fn arrows(pressed: &Pressed) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    let forward = match &pressed.key {
+        Key::Named(Named::ArrowRight | Named::ArrowDown) => true,
+        Key::Named(Named::ArrowLeft | Named::ArrowUp) => false,
+        _ => return None,
+    };
+    ui(|ui| ui.focus.is_some()).then_some(Msg::Step(forward))
 }
 
 /// The level's and its line's colour: as the bar's (§4.2).
@@ -312,262 +306,235 @@ fn band(band: Band) -> (Color, Color) {
     }
 }
 
-impl Panel {
-    /// What it shows, read afresh.
-    fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-        }
-        let levels = levels::snapshot();
-        if state.layout.is_none() || levels != state.levels {
-            let layout = Layout::of(&levels, self.words);
-            tracing::debug!(
-                "the battery's popover: title={} plugged={:?} line={:?} modes={:?} chosen={:?} \
-                 notes={:?} health={:?}",
-                self.words.battery_title(levels.battery.is_some()),
-                levels
-                    .battery
-                    .map(|b| self.words.plugged(b.charge.plugged())),
-                levels.battery.map(|b| self.words.battery_line(&b)),
-                levels.profiles,
-                levels.profile,
-                layout
-                    .notes
-                    .iter()
-                    .map(|(_, l)| l.join(" "))
-                    .collect::<Vec<_>>(),
-                layout.health.as_ref().map(|(_, l)| l.join(" ")),
-            );
-            if state.layout.as_ref() != Some(&layout) {
-                state.pointer.hover = None;
-                state.layout = Some(layout);
-                // A change of size reaches the controller, which resizes
-                // the surface (without waking it again).
-                super::refit(super::Item::Battery);
-            }
-            state.levels = levels;
-        }
-        if state.label.is_empty() {
-            state.label = kit::label_letters(self.words.power_mode());
-        }
-        if state
-            .focus
-            .is_some_and(|focus| !state.targets().contains(&focus))
-        {
-            state.focus = None;
-        }
-        let said = state
-            .asked
-            .is_some_and(|(asked, _)| state.levels.profile == Some(asked));
-        kit::awaited(&mut state.asked, said, now, ASKED_FOR).map(canvas::Action::request_redraw_at)
+/// What it shows, said in the log as it changes.
+fn say(words: Words, levels: &Snapshot, layout: &Layout, ui: &mut Ui) {
+    if ui.said.as_ref() == Some(levels) {
+        return;
     }
+    tracing::debug!(
+        "the battery's popover: title={} plugged={:?} line={:?} modes={:?} chosen={:?} \
+         notes={:?} health={:?}",
+        words.battery_title(levels.battery.is_some()),
+        levels.battery.map(|b| words.plugged(b.charge.plugged())),
+        levels.battery.map(|b| words.battery_line(&b)),
+        levels.profiles,
+        levels.profile,
+        layout
+            .notes
+            .iter()
+            .map(|(_, l)| l.join(" "))
+            .collect::<Vec<_>>(),
+        layout.health.as_ref().map(|(_, l)| l.join(" ")),
+    );
+    ui.said = Some(*levels);
+}
 
-    /// What it shows, for screen readers (crate::a11y::rows).
-    fn say(&self, state: &State, layout: &Layout) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::{Node, Role};
-        let mut nodes = Vec::new();
-        if let Some(battery) = state.levels.battery.filter(|_| layout.battery.is_some()) {
-            nodes.push(
-                Node::new("level", Role::ProgressBar, self.words.battery_title(true))
-                    .value(format!("{}\u{a0}%", battery.shown()))
-                    .range(f64::from(battery.shown()), 0.0, 100.0, None),
-            );
-            nodes.push(rows::line(layout.state.join(" ")));
-        }
-        let modes = state.targets();
-        if layout.tiles.is_some() {
-            nodes.push(rows::line(self.words.mode_label()));
-        }
-        let chosen = state.chosen();
-        for (i, profile) in modes.iter().enumerate() {
-            if let Some(rect) = state.tile(*profile) {
-                nodes.push(
-                    rows::act(*profile, Role::RadioButton, self.words.mode(*profile), rect)
-                        .checked(chosen == Some(*profile))
-                        .set(i + 1, modes.len()),
-                );
-            }
-        }
-        for (_, lines) in layout.notes.iter().chain(layout.health.iter()) {
-            nodes.push(rows::line(lines.join(" ")));
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: state
-                    .levels
-                    .battery
-                    .map(|b| self.words.plugged(b.charge.plugged()).to_owned()),
-                nodes,
-                order: rows::order(modes),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    fn header(&self, f: &mut Frame, battery: Option<Battery>) {
-        kit::title(f, self.words.battery_title(battery.is_some()));
-        if let Some(battery) = battery {
-            kit::title_aside(f, self.words.plugged(battery.charge.plugged()).to_owned());
-        }
-    }
-
-    /// The large battery, its level and its line.
-    fn battery(&self, f: &mut Frame, top: f32, battery: &Battery, lines: &[String]) {
-        let column = LEVEL * LEVEL_LINE + 1.0 + lines.len().max(1) as f32 * STATE * LINE;
-        let middle = top + 2.0 + column / 2.0;
-        let fill = band_colour(battery.band());
-        battery_sign(
-            f,
-            Rectangle::new(Point::new(LEFT, middle - BIG.height / 2.0), BIG),
-            Sign {
-                percent: battery.percent,
-                fill,
-                bolt: battery.bolt(),
-                outline: 1.4,
-            },
-            1.0,
-        );
-        let (level, line) = band(battery.band());
-        let x = LEFT + BIG.width + BIG_GAP;
-        let mut big = text(
-            format!("{}\u{a0}%", battery.shown()),
-            Point::new(x, top + 2.0 + LEVEL * LEVEL_LINE / 2.0),
-            LEVEL,
-            level,
-            Alignment::Left,
-        );
-        big.font = MANROPE_BOLD;
-        big.line_height = LineHeight::Relative(LEVEL_LINE);
-        f.fill_text(big);
-        let first = top + 2.0 + LEVEL * LEVEL_LINE + 1.0;
-        for said in kit::lines(lines, (x, first), STATE, LINE, line) {
-            f.fill_text(said);
-        }
-    }
-
-    /// A mode's tile: lit when chosen, greyed when the machine has none.
-    fn tile(&self, f: &mut Frame, state: &State, profile: Profile) {
-        let Some(rect) = state.tile(profile) else {
-            return;
-        };
-        let there = state.levels.profiles.has(profile);
-        let chosen = there && state.chosen() == Some(profile);
-        let (fill, edge, ink) = match (there, chosen) {
-            (false, _) => (TILE_FILL, TILE_EDGE, MISSING),
-            (true, true) => (CHOSEN, ACCENT, TEXT),
-            (true, false) if state.pointer.hover == Some(profile) => (TILE_HOVER, TILE_EDGE, DIM),
-            (true, false) => (TILE_FILL, TILE_EDGE, DIM),
-        };
-        f.fill(&rounded(rect, TILE_RADIUS), fill.get());
-        let inside = Path::rounded_rectangle(
-            Point::new(rect.x + 0.5, rect.y + 0.5),
-            Size::new(rect.width - 1.0, rect.height - 1.0),
-            (TILE_RADIUS - 0.5).into(),
-        );
-        f.stroke(&inside, stroke(1.0, edge.get()));
-        let column = ICON + ICON_GAP + MODE * LINE;
-        let top = rect.y + (TILE - column) / 2.0;
-        mode_icon(
-            f,
-            Point::new(rect.center_x() - ICON / 2.0, top),
-            profile,
-            ink.get(),
-        );
-        f.fill_text(kit::text_in(
-            MANROPE_SEMIBOLD,
-            text(
-                self.words.mode(profile).to_owned(),
-                Point::new(rect.center_x(), top + ICON + ICON_GAP + MODE * LINE / 2.0),
-                MODE,
-                ink.get(),
-                Alignment::Center,
-            ),
+fn content<'a>(words: Words, levels: &Snapshot, ui: &mut Ui) -> El<'a> {
+    let layout = Layout::of(levels, words);
+    say(words, levels, &layout, ui);
+    let mut all: Vec<El<'a>> = vec![header(words, levels.battery)];
+    if let Some(battery) = levels.battery.filter(|_| layout.battery.is_some()) {
+        all.push(parts::block(
+            GAP,
+            Some(battery_block(words, &battery, &layout.state)),
         ));
     }
+    if layout.label.is_some() {
+        all.push(parts::block(GAP, Some(parts::rule_of(RULE))));
+        all.push(parts::block(
+            GAP,
+            Some(parts::label_as(
+                words.power_mode(),
+                words.mode_label(),
+                2.0 * LABEL_PAD + LABEL * LINE,
+                None,
+            )),
+        ));
+    }
+    if layout.tiles.is_some() {
+        all.push(parts::block(GAP, Some(tiles(words, levels, ui))));
+    }
+    for (_, lines) in &layout.notes {
+        all.push(parts::block(GAP, Some(note(lines, NOTE_LINE))));
+    }
+    if let Some((_, lines)) = &layout.health {
+        all.push(parts::block(GAP + HEALTH_PAD, Some(note(lines, LINE))));
+    }
+    parts::content(all)
+}
 
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| {
-            state
-                .targets()
-                .into_iter()
-                .find(|p| state.tile(*p).is_some_and(|r| r.contains(at)))
+/// "Batterie" ("Énergie" without one), and whether it is plugged in.
+fn header<'a>(words: Words, battery: Option<Battery>) -> El<'a> {
+    let aside = battery.map(|b| {
+        said(
+            words.plugged(b.charge.plugged()).to_owned(),
+            ASIDE,
+            MANROPE,
+            FAINT.get(),
+        )
+        .into()
+    });
+    parts::header(words.battery_title(battery.is_some()), aside)
+}
+
+/// The large battery, its level and its line.
+fn battery_block<'a>(words: Words, battery: &Battery, lines: &[String]) -> El<'a> {
+    let (level, colour) = band(battery.band());
+    let sign = Sign {
+        percent: battery.percent,
+        fill: band_colour(battery.band()),
+        bolt: battery.bolt(),
+        outline: 1.4,
+    };
+    let big = drawn(BIG.width, BIG.height, move |f, s| {
+        battery_sign(f, Rectangle::new(Point::ORIGIN, s), sign, 1.0);
+    });
+    let mut texts = column![
+        said(
+            format!("{}\u{a0}%", battery.shown()),
+            LEVEL,
+            MANROPE_BOLD,
+            level
+        )
+        .line_height(LineHeight::Relative(LEVEL_LINE)),
+        Space::new().height(1.0),
+    ];
+    for line in lines {
+        texts = texts.push(said(line.clone(), STATE, MANROPE, colour));
+    }
+    let block =
+        container(row![big, gap(BIG_GAP), texts].align_y(Vertical::Center)).padding(Padding {
+            top: 2.0,
+            bottom: 4.0,
+            ..Padding::ZERO
         });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                if state.pointer.over(target) {
-                    return redraw;
-                }
-                None
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(profile) = state.pointer.release(target) {
-                    state.choose(profile);
-                }
-                redraw
-            }
-            _ => None,
-        }
-    }
+    let line = lines.join(" ");
+    control(
+        parts::inset(block),
+        "battery:Level",
+        Role::ProgressBar,
+        words.battery_title(true),
+    )
+    .node(|n| {
+        n.value(format!("{}\u{a0}%", battery.shown()))
+            .range(f64::from(battery.shown()), 0.0, 100.0, None)
+            .describe(line)
+    })
+    .into()
+}
 
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let order = state.targets();
-        let at = state.focus.and_then(|f| order.iter().position(|t| *t == f));
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(profile) = state.focus {
-                    state.choose(profile);
-                }
-            }
-            // Through the tiles, choosing as it goes (a radio group's way).
-            Key::Named(
-                arrow @ (Named::ArrowLeft | Named::ArrowRight | Named::ArrowUp | Named::ArrowDown),
-            ) => {
-                let i = at?;
-                let up = matches!(arrow, Named::ArrowRight | Named::ArrowDown);
-                let next = if up {
-                    (i + 1).min(order.len() - 1)
-                } else {
-                    i.saturating_sub(1)
-                };
-                let profile = order[next];
-                state.focus = Some(profile);
-                state.choose(profile);
-            }
-            _ => return None,
+/// The modes' tiles, the active one lit, one the machine has not greyed.
+fn tiles<'a>(words: Words, levels: &Snapshot, ui: &Ui) -> El<'a> {
+    let there = targets(levels);
+    let chosen = ui.chosen(levels);
+    let mut line = row![].spacing(TILE_GAP);
+    for profile in MODES {
+        let has = levels.profiles.has(profile);
+        let lit = has && chosen == Some(profile);
+        let ink = match (has, lit) {
+            (false, _) => MISSING,
+            (true, true) => TEXT,
+            (true, false) => DIM,
         }
-        Some(canvas::Action::request_redraw().and_capture())
+        .get();
+        let face = column![
+            drawn(ICON, ICON, move |f, _| mode_icon(
+                f,
+                Point::ORIGIN,
+                profile,
+                ink
+            )),
+            Space::new().height(ICON_GAP),
+            said(words.mode(profile), MODE, MANROPE_SEMIBOLD, ink),
+        ]
+        .align_x(Horizontal::Center);
+        let target = Target::Mode(profile);
+        let tile = button(container(face).center(Length::Fill))
+            .padding(0)
+            .width(Length::Fill)
+            .height(TILE)
+            .style(move |_, status| {
+                let (fill, edge) = match (has, lit) {
+                    (false, _) => (TILE_FILL, TILE_EDGE),
+                    (true, true) => (CHOSEN, ACCENT),
+                    (true, false) if style::lit(status) => (TILE_HOVER, TILE_EDGE),
+                    (true, false) => (TILE_FILL, TILE_EDGE),
+                };
+                button::Style {
+                    background: Some(fill.get().into()),
+                    text_color: ink,
+                    border: Border {
+                        color: edge.get(),
+                        width: 1.0,
+                        radius: TILE_RADIUS.into(),
+                    },
+                    ..button::Style::default()
+                }
+            })
+            .on_press_maybe(has.then_some(Msg::Act(target)));
+        let i = there.iter().position(|p| *p == profile);
+        let mut tile =
+            control(tile, target.id(), Role::RadioButton, words.mode(profile)).node(|n| match i {
+                Some(i) => n.checked(lit).set(i + 1, there.len()),
+                None => n.disabled(true),
+            });
+        if has {
+            tile = tile
+                .focus(ui.focus == Some(target), Msg::Focus(target), TILE_RADIUS)
+                .activate(Msg::Act(target));
+        }
+        line = line.push(tile);
     }
+    parts::inset(line)
+}
+
+/// Lines under the tiles: 12.5 px on lines `height` em apart, faint.
+fn note<'a>(lines: &[String], height: f32) -> El<'a> {
+    let mut said_lines = column![];
+    for line in lines {
+        said_lines = said_lines.push(
+            said(line.clone(), NOTE, MANROPE, FAINT.get())
+                .line_height(LineHeight::Relative(height)),
+        );
+    }
+    ui::line(parts::inset(said_lines), lines.join(" ")).into()
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    let levels = levels::snapshot();
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Act(Target::Mode(profile)) => ui(|ui| ui.choose(&levels, profile)),
+        Msg::Step(forward) => ui(|ui| {
+            let order = targets(&levels);
+            let Some(i) = order
+                .iter()
+                .position(|p| ui.focus == Some(Target::Mode(*p)))
+            else {
+                return;
+            };
+            let next = if forward {
+                (i + 1).min(order.len() - 1)
+            } else {
+                i.saturating_sub(1)
+            };
+            let profile = order[next];
+            ui.focus = Some(Target::Mode(profile));
+            ui.choose(&levels, profile);
+        }),
+    }
+    // The profile asked stays shown until the daemon says it, or a while.
+    ui(|ui| {
+        let said = ui
+            .asked
+            .is_some_and(|(asked, _)| levels.profile == Some(asked));
+        kit::awaited(&mut ui.asked, said, Instant::now(), ASKED_FOR);
+    });
+    super::refit(super::Item::Battery);
 }
 
 /// A mode's icon, 18 px, from the mockup's SVGs: a leaf, scales, a bolt.
@@ -597,7 +564,7 @@ fn mode_icon(f: &mut Frame, at: Point, profile: Profile, colour: Color) {
                 let pan = Path::new(|b| {
                     b.move_to(p(x, 7.0));
                     b.line_to(p(x - 3.0, 13.0));
-                    b.arc(canvas::path::Arc {
+                    b.arc(iced::widget::canvas::path::Arc {
                         center: p(x, 13.0),
                         radius: 3.0 * s,
                         start_angle: iced::Radians(std::f32::consts::PI),
@@ -704,21 +671,16 @@ mod tests {
 
     #[test]
     fn only_the_modes_there_can_be_chosen() {
-        let words = Words::new(crate::clock::time::Lang::English);
         let two = Profiles {
             performance: false,
             ..ALL
         };
-        let state = State {
-            levels: levels(None, two),
-            layout: Some(Layout::of(&levels(None, two), words)),
-            ..State::default()
-        };
-        assert_eq!(state.targets(), [Profile::PowerSaver, Profile::Balanced]);
-        let saver = state.tile(Profile::PowerSaver).expect("a tile");
-        let performance = state.tile(Profile::Performance).expect("a tile");
-        assert_eq!(saver.x, LEFT);
-        assert!((performance.x + performance.width - RIGHT).abs() < 0.01);
-        assert_eq!(state.chosen(), Some(Profile::Balanced));
+        let levels = levels(None, two);
+        assert_eq!(targets(&levels), [Profile::PowerSaver, Profile::Balanced]);
+        let mut ui = Ui::default();
+        assert_eq!(ui.chosen(&levels), Some(Profile::Balanced));
+        // The missing one is not asked.
+        ui.choose(&levels, Profile::Performance);
+        assert_eq!(ui.asked, None);
     }
 }

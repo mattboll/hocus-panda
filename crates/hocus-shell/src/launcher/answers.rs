@@ -17,6 +17,7 @@
 //! own reading of it.
 
 use super::{Words, search::fold};
+use hocus_words::shell::launcher_answers as txt;
 
 /// How numbers are written: French (`1 234,5`) or English (`1,234.5`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,12 +306,12 @@ pub enum Kind {
 impl Kind {
     fn name(self, words: Words) -> &'static str {
         match self {
-            Self::Length => words.pick("Longueur", "Length"),
-            Self::Mass => words.pick("Masse", "Mass"),
-            Self::Time => words.pick("Durée", "Time"),
-            Self::Volume => words.pick("Volume", "Volume"),
-            Self::Temperature => words.pick("Température", "Temperature"),
-            Self::Data => words.pick("Données", "Data"),
+            Self::Length => words.pick(txt::LENGTH),
+            Self::Mass => words.pick(txt::MASS),
+            Self::Time => words.pick(txt::TIME),
+            Self::Volume => words.pick(txt::VOLUME),
+            Self::Temperature => words.pick(txt::TEMPERATURE),
+            Self::Data => words.pick(txt::DATA),
         }
     }
 }
@@ -535,17 +536,17 @@ fn show(key: &str, words: Words) -> String {
         "c" => "°C",
         "f" => "°F",
         "k" => "K",
-        "j" => words.pick("j", "d"),
-        "sem" => words.pick("sem", "wk"),
-        "o" => words.pick("o", "B"),
-        "ko" => words.pick("Ko", "kB"),
-        "mo" => words.pick("Mo", "MB"),
-        "go" => words.pick("Go", "GB"),
-        "to" => words.pick("To", "TB"),
-        "kio" => words.pick("Kio", "KiB"),
-        "mio" => words.pick("Mio", "MiB"),
-        "gio" => words.pick("Gio", "GiB"),
-        "tio" => words.pick("Tio", "TiB"),
+        "j" => words.pick(txt::D),
+        "sem" => words.pick(txt::WK),
+        "o" => words.pick(txt::B),
+        "ko" => words.pick(txt::KB),
+        "mo" => words.pick(txt::MB),
+        "go" => words.pick(txt::GB),
+        "to" => words.pick(txt::TB),
+        "kio" => words.pick(txt::KIB),
+        "mio" => words.pick(txt::MIB),
+        "gio" => words.pick(txt::GIB),
+        "tio" => words.pick(txt::TIB),
         key => key,
     };
     shown.to_owned()
@@ -750,7 +751,9 @@ mod tests {
 
     #[test]
     fn a_currency_is_not_a_conversion() {
-        let words = Words { fr: false };
+        let words = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(convert("150 usd en eur"), None);
         assert_eq!(convert("150 $ to €"), None);
         assert_eq!(answer("150 usd en eur", EN, words), None);
@@ -758,7 +761,9 @@ mod tests {
 
     #[test]
     fn a_conversion_answers_with_its_kind() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         let answer = answer("10 km en miles", FR, fr).expect("an answer");
         assert_eq!(answer.main, "6,214 mi");
         assert_eq!(answer.sub, "10 km = 6,214 mi · Longueur");

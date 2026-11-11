@@ -27,7 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_a11y::{Act, Asked, Bridge, Event, Rect, Window};
+use hocus_a11y::{Act, Asked, Bridge, Event, Node, Rect, Role, Window};
 use hocus_link::LevelKey;
 use iced::{Rectangle, window};
 
@@ -51,6 +51,35 @@ enum Heard {
     Bridge(Event),
     /// The compositor asks what the shell shows (`hocus msg a11y`).
     Dump,
+    /// What a surface the loop owns shows now.
+    Shown(Shown),
+}
+
+/// What a surface the loop owns tells screen readers as it changes (#773):
+/// this thread reads no state of theirs.
+#[derive(Debug, Clone)]
+pub enum Shown {
+    /// The share's chooser, while it shows.
+    Share(Option<crate::share::Seen>),
+    /// The lock, while the session is locked.
+    Lock(Option<crate::lock::Lock>),
+    /// The authentication dialog, while it shows.
+    Auth(Option<crate::auth::Seen>),
+    /// The actions palette, while it is open.
+    Actions(Option<crate::actions::Seen>),
+    /// The emoji picker, while it is open.
+    Emoji(Option<crate::emoji::Seen>),
+}
+
+/// What a surface the loop owns shows now, for this thread.
+pub fn shown(shown: Shown) {
+    if let Some(tell) = HEARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        let _ = tell.send(Heard::Shown(shown));
+    }
 }
 
 /// The thread's channel, once it runs.
@@ -142,6 +171,11 @@ fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
                 continue;
             }
             Some(Heard::Bridge(Event::Asked(asked))) => said.carry_out(&asked),
+            Some(Heard::Shown(Shown::Share(seen))) => said.share = seen,
+            Some(Heard::Shown(Shown::Lock(lock))) => said.lock = lock,
+            Some(Heard::Shown(Shown::Auth(seen))) => said.auth = seen,
+            Some(Heard::Shown(Shown::Actions(seen))) => said.actions = seen,
+            Some(Heard::Shown(Shown::Emoji(seen))) => said.emoji = seen,
             Some(Heard::Dump) => {
                 for window in said.describe(Instant::now()) {
                     for line in window.dump().lines() {
@@ -172,18 +206,24 @@ enum Target {
     },
     /// A row of the open popover, by its key.
     Row(String),
-    /// A bubble's action, or the bubble itself (`None`: its default).
-    Bubble { serial: u64, action: Option<String> },
-    Lock {
-        surface: window::Id,
-        target: crate::lock::Target,
-    },
-    Auth {
-        surface: window::Id,
-        target: crate::auth::Target,
-    },
+    /// A bubble's control by its key, or the bubble itself (`note`: its
+    /// default).
+    Bubble { serial: u64, key: String },
+    /// A control of a lock, by its key.
+    Lock(String),
+    /// A control of the authentication dialog, by its key.
+    Auth(String),
     /// A row of the actions palette, by its key (#736).
     Palette(String),
+    /// A control of the emoji picker, by its key.
+    Emoji(String),
+    /// A control of the share's chooser, by its key.
+    Share(String),
+    /// A tile, card or emoji of the launcher, by its key.
+    Launcher(String),
+    /// A control of a surface of the kit's, by its key, and what a click
+    /// on it does.
+    Kit { key: String, click: fn(&str) },
 }
 
 /// The thread's state: the announcer, the last announcement, and what each
@@ -194,6 +234,16 @@ struct Said {
     announced: u64,
     announce: Option<(u64, String, Instant)>,
     targets: HashMap<(String, String), Target>,
+    /// The share's chooser, as the loop last told it.
+    share: Option<crate::share::Seen>,
+    /// The lock, as the loop last told it.
+    lock: Option<crate::lock::Lock>,
+    /// The authentication dialog, as the loop last told it.
+    auth: Option<crate::auth::Seen>,
+    /// The actions palette, as the loop last told it.
+    actions: Option<crate::actions::Seen>,
+    /// The emoji picker, as the loop last told it.
+    emoji: Option<crate::emoji::Seen>,
 }
 
 impl Said {
@@ -227,14 +277,14 @@ impl Said {
         }
         self.targets.clear();
         let mut windows = Vec::new();
-        if crate::lock::active() {
+        if self.lock.is_some() {
             windows.extend(self.locks(words));
             return windows;
         }
         let mut bars = crate::popover::with(|c| c.bar_forms());
         bars.sort_by(|a, b| a.0.cmp(&b.0));
         for (i, (bar, form)) in bars.iter().enumerate() {
-            let mut facts = gather(bar, *form, lang, &agents);
+            let mut facts = gather(bar, *form, lang);
             // Said once, from the first bar.
             if i == 0 {
                 facts.announce = self
@@ -245,7 +295,7 @@ impl Said {
             let window = bar::window(&facts, words);
             for (item, rect) in &facts.frame {
                 self.targets.insert(
-                    (window.key.clone(), bar::key(*item)),
+                    (window.key.clone(), crate::ui::items::key(*item)),
                     Target::Item {
                         bar: bar.clone(),
                         item: *item,
@@ -256,9 +306,9 @@ impl Said {
             windows.push(window);
         }
         windows.extend(self.popover(words));
-        if let Some(palette) = crate::actions::a11y() {
+        if let Some(palette) = self.actions.as_ref().and_then(crate::actions::a11y) {
             for node in palette.all() {
-                if node.key.starts_with("row:") {
+                if node.key.starts_with("actions:Row(") {
                     self.targets.insert(
                         (palette.key.clone(), node.key.clone()),
                         Target::Palette(node.key.clone()),
@@ -267,8 +317,93 @@ impl Said {
             }
             windows.push(palette);
         }
+        if let Some(launcher) = crate::launcher::a11y() {
+            for node in launcher.all() {
+                if node.key.starts_with("launcher:Item(") {
+                    self.targets.insert(
+                        (launcher.key.clone(), node.key.clone()),
+                        Target::Launcher(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(launcher);
+        }
+        if let Some(editor) = crate::capture::editor::view::a11y() {
+            for node in editor.all() {
+                if node.key.starts_with("capture:") {
+                    self.targets.insert(
+                        (editor.key.clone(), node.key.clone()),
+                        Target::Kit {
+                            key: node.key.clone(),
+                            click: crate::capture::editor::view::a11y_click,
+                        },
+                    );
+                }
+            }
+            windows.push(editor);
+        }
+        if let Some(thumb) = crate::capture::thumb::a11y() {
+            for node in thumb.all() {
+                if node.key.starts_with("thumb:") {
+                    self.targets.insert(
+                        (thumb.key.clone(), node.key.clone()),
+                        Target::Kit {
+                            key: node.key.clone(),
+                            click: crate::capture::thumb::a11y_click,
+                        },
+                    );
+                }
+            }
+            windows.push(thumb);
+        }
+        if let Some(toolbar) = crate::capture::toolbar::a11y() {
+            for node in toolbar.all() {
+                if node.key.starts_with("toolbar:") {
+                    self.targets.insert(
+                        (toolbar.key.clone(), node.key.clone()),
+                        Target::Kit {
+                            key: node.key.clone(),
+                            click: crate::capture::toolbar::a11y_click,
+                        },
+                    );
+                }
+            }
+            windows.push(toolbar);
+        }
+        if let Some(chooser) = self.share.as_ref().and_then(crate::share::a11y) {
+            for node in chooser.all() {
+                if node.key.starts_with("share:") {
+                    self.targets.insert(
+                        (chooser.key.clone(), node.key.clone()),
+                        Target::Share(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(chooser);
+        }
+        if let Some(picker) = self.emoji.as_ref().and_then(crate::emoji::a11y) {
+            for node in picker.all() {
+                if node.key.starts_with("emoji:") {
+                    self.targets.insert(
+                        (picker.key.clone(), node.key.clone()),
+                        Target::Emoji(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(picker);
+        }
         windows.extend(self.bubbles(words));
-        windows.extend(self.auth(words));
+        if let Some(dialog) = self.auth.as_ref().and_then(crate::auth::a11y) {
+            for node in dialog.all() {
+                if node.key.starts_with("auth:") {
+                    self.targets.insert(
+                        (dialog.key.clone(), node.key.clone()),
+                        Target::Auth(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(dialog);
+        }
         windows
     }
 
@@ -299,41 +434,45 @@ impl Said {
     }
 
     fn bubbles(&mut self, words: Words) -> Vec<Window> {
-        let bubbles: Vec<surfaces::Bubble> = crate::notifications::with(|c| {
+        let bubbles: Vec<(window::Id, surfaces::Bubble)> = crate::notifications::with(|c| {
             c.stack
                 .bubbles()
                 .iter()
-                .map(|b| surfaces::Bubble {
-                    serial: b.serial,
-                    app: b.note.app.clone(),
-                    summary: b.note.summary.clone(),
-                    body: b.note.body.clone(),
-                    urgent: b.note.urgency == crate::notifications::note::Urgency::Critical,
-                    actions: b.note.actions.clone(),
-                    default: b.note.default,
-                    progress: b.note.progress,
+                .map(|b| {
+                    (
+                        b.id,
+                        surfaces::Bubble {
+                            serial: b.serial,
+                            app: b.note.app.clone(),
+                            summary: b.note.summary.clone(),
+                            body: b.note.body.clone(),
+                            urgent: b.note.urgency == crate::notifications::note::Urgency::Critical,
+                            default: b.note.default,
+                            nodes: Vec::new(),
+                        },
+                    )
                 })
                 .collect()
         });
         bubbles
-            .iter()
-            .map(|b| {
-                let window = surfaces::bubble(b, words);
-                if b.default {
-                    self.targets.insert(
-                        (window.key.clone(), "note".to_owned()),
-                        Target::Bubble {
-                            serial: b.serial,
-                            action: None,
-                        },
+            .into_iter()
+            .map(|(id, mut b)| {
+                b.nodes = rows::of(id).map(|r| r.nodes).unwrap_or_default();
+                let window = surfaces::bubble(&b, words);
+                let keys = std::iter::once("note".to_owned())
+                    .filter(|_| b.default)
+                    .chain(
+                        b.nodes
+                            .iter()
+                            .filter(|n| !n.acts.is_empty())
+                            .map(|n| n.key.clone()),
                     );
-                }
-                for (action, _) in &b.actions {
+                for key in keys {
                     self.targets.insert(
-                        (window.key.clone(), format!("action:{action}")),
+                        (window.key.clone(), key.clone()),
                         Target::Bubble {
                             serial: b.serial,
-                            action: Some(action.clone()),
+                            key,
                         },
                     );
                 }
@@ -343,7 +482,7 @@ impl Said {
     }
 
     fn locks(&mut self, words: Words) -> Vec<Window> {
-        let Some(lock) = crate::lock::with(|l| l.clone()) else {
+        let Some(lock) = self.lock.clone() else {
             return Vec::new();
         };
         let lang = words.lang();
@@ -351,96 +490,24 @@ impl Said {
             &crate::notifications::wall(),
             lang,
         ));
-        let layout = crate::layouts::snapshot().shown().map(|l| l.name.clone());
         let mut screens: Vec<(&String, &window::Id)> = lock.surfaces.iter().collect();
         screens.sort();
         screens
             .into_iter()
             .map(|(output, surface)| {
-                let window = surfaces::lock(
-                    &surfaces::Lock {
-                        output: output.clone(),
-                        shown: lock.shown.clone(),
-                        clock: Some(clock.clone()),
-                        layout: layout.clone(),
-                    },
-                    words,
-                );
-                for (key, target) in [
-                    ("field", crate::lock::Target::Field),
-                    ("unlock", crate::lock::Target::Button),
-                    ("layout", crate::lock::Target::Layout),
-                ] {
-                    self.targets.insert(
-                        (window.key.clone(), key.to_owned()),
-                        Target::Lock {
-                            surface: *surface,
-                            target,
-                        },
-                    );
+                let clock = Node::new("clock", Role::Label, clock.clone());
+                let window = crate::lock::view::a11y(&lock, *surface, output, words, vec![clock]);
+                for node in window.all() {
+                    if node.key.starts_with("lock:") {
+                        self.targets.insert(
+                            (window.key.clone(), node.key.clone()),
+                            Target::Lock(node.key.clone()),
+                        );
+                    }
                 }
                 window
             })
             .collect()
-    }
-
-    fn auth(&mut self, words: Words) -> Option<Window> {
-        use crate::auth::Target as T;
-        let auth_words = crate::auth::words();
-        let (shown, surface) = crate::auth::with_shown(|dialog, caps, waiting| {
-            let laid = crate::auth::draw::Layout::of(dialog, auth_words, waiting, caps);
-            let rect = |r: Rectangle| Rect::new(r.x, r.y, r.width, r.height);
-            let (who, _) = crate::auth::draw::who(dialog);
-            let account = dialog.request.account();
-            let shown = surfaces::Auth {
-                name: auth_words.name(&who),
-                message: dialog.request.message.trim().to_owned(),
-                accounts: dialog
-                    .request
-                    .accounts
-                    .iter()
-                    .map(|a| a.name.clone())
-                    .collect(),
-                chosen: dialog.request.chosen,
-                chooser: dialog.chooser,
-                field: account.map_or_else(
-                    || auth_words.password().to_owned(),
-                    |a| auth_words.password_of(&a.name),
-                ),
-                note: laid.note.join(" "),
-                checking: dialog.phase == crate::auth::Phase::Checking,
-                details: dialog.details,
-                waiting: laid.waiting.clone(),
-                cancel: auth_words.cancel().to_owned(),
-                authorize: auth_words.authorize().to_owned(),
-                change: auth_words.change().to_owned(),
-                focus: Some(dialog.focus),
-                places: surfaces::AuthPlaces {
-                    change: laid.change.map(rect),
-                    people: laid.people.iter().copied().map(rect).collect(),
-                    field: Some(rect(laid.field)),
-                    details: Some(rect(laid.details)),
-                    cancel: Some(rect(laid.cancel)),
-                    authorize: Some(rect(laid.authorize)),
-                },
-                size: {
-                    let (w, h) = laid.surface();
-                    (w as f32, h as f32)
-                },
-            };
-            (shown, dialog.surface)
-        })?;
-        let surface = surface?;
-        let window = surfaces::auth(&shown, words);
-        let mut targets = vec![T::Change, T::Field, T::Details, T::Cancel, T::Authorize];
-        targets.extend((0..shown.accounts.len()).map(T::Account));
-        for target in targets {
-            self.targets.insert(
-                (window.key.clone(), surfaces::auth_key(target)),
-                Target::Auth { surface, target },
-            );
-        }
-        Some(window)
     }
 
     /// Does what a screen reader asked, as the pointer or the keys would.
@@ -489,25 +556,15 @@ impl Said {
             }
             (Target::Row(row), act) => press_row(row, act),
             (Target::Palette(key), Act::Click) => crate::actions::a11y_click(key),
-            (Target::Bubble { serial, action }, Act::Click) => {
-                crate::notifications::input(match action {
-                    Some(key) => crate::notifications::Input::Action {
-                        serial: *serial,
-                        key: key.clone(),
-                    },
-                    None => crate::notifications::Input::Card(*serial),
-                });
+            (Target::Emoji(key), Act::Click) => crate::emoji::a11y_click(key),
+            (Target::Share(key), Act::Click) => crate::share::a11y_click(key),
+            (Target::Kit { key, click }, Act::Click) => click(key),
+            (Target::Launcher(key), Act::Click) => crate::launcher::a11y_click(key),
+            (Target::Bubble { serial, key }, Act::Click) => {
+                crate::notifications::bubble::a11y_click(*serial, key);
             }
-            (Target::Lock { surface, target }, Act::Click | Act::Focus) => {
-                crate::lock::pointer(*surface, crate::lock::Pointing::Press(Some(*target)));
-                crate::lock::pointer(*surface, crate::lock::Pointing::Release(Some(*target)));
-            }
-            (Target::Auth { surface, target }, Act::Click | Act::Focus) => {
-                let now = Instant::now();
-                crate::auth::pointer(*surface, crate::auth::Pointing::Press(Some(*target)), now);
-                crate::auth::pointer(*surface, crate::auth::Pointing::Release(Some(*target)), now);
-                crate::auth::wake();
-            }
+            (Target::Lock(key), Act::Click | Act::Focus) => crate::lock::view::a11y_click(key),
+            (Target::Auth(key), Act::Click | Act::Focus) => crate::auth::a11y_click(key),
             (_, act) => tracing::debug!(?act, "not done from a screen reader"),
         }
     }
@@ -556,17 +613,35 @@ fn press_row(row: &str, act: Act) {
     }
 }
 
-/// What bar `bar` shows now, from the shell's model.
-fn gather(
-    bar: &str,
-    form: hocus_link::Form,
-    lang: Lang,
-    agents: &[hocus_link::AgentShown],
-) -> bar::Facts {
-    use crate::popover::Item as I;
-    let (shown, focused, open, height) = crate::popover::with(|c| {
+/// What bar `bar` shows now, as its surfaces declared it.
+fn gather(bar: &str, form: hocus_link::Form, lang: Lang) -> bar::Facts {
+    let (shown, declared, lives, groups, focused, open, height) = crate::popover::with(|c| {
+        let spots = c.ring.spots(bar);
+        let declared: Vec<(&'static str, Item, Option<Node>, bool)> = spots
+            .iter()
+            .map(|(namespace, s)| (*namespace, s.item, s.node.clone(), s.part))
+            .collect();
+        let mut lives = Vec::new();
+        for (namespace, _) in &spots {
+            if !lives.iter().any(|(n, _)| n == namespace)
+                && let Some(live) = c.ring.live(bar, namespace)
+            {
+                lives.push((*namespace, live));
+            }
+        }
+        let mut groups: Vec<(&'static str, Node)> = Vec::new();
+        for (namespace, _) in &spots {
+            if !groups.iter().any(|(n, _)| n == namespace)
+                && let Some(group) = c.ring.group(bar, namespace)
+            {
+                groups.push((namespace, group.clone()));
+            }
+        }
         (
             c.items_of(bar),
+            declared,
+            lives,
+            groups,
             c.focused_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
             c.open_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
             c.bar_height(bar),
@@ -586,140 +661,34 @@ fn gather(
         })
         .collect();
     let frame = shown.iter().map(|(_, item, r)| (*item, *r)).collect();
+    // Named as they are now where what their surface draws would age
+    // (read outside the controller's lock).
+    let words = Words::new(lang);
+    let declared: Vec<(Item, Node, bool)> = declared
+        .into_iter()
+        .filter_map(|(namespace, item, node, part)| {
+            let live = lives
+                .iter()
+                .find(|(n, _)| *n == namespace)
+                .and_then(|(_, live)| live(bar, words, item));
+            live.or(node).map(|node| (item, node, part))
+        })
+        .collect();
     let levels_words = crate::levels::model::Words::new(lang);
     let screen = crate::desktops::screen_of(bar, 0).map_or_else(
         || bar.to_owned(),
         |s| levels_words.screen(s.built_in, s.inches, s.number),
     );
-    let uses = crate::in_use::snapshot();
-    let mut used = Vec::new();
-    let apps = |media: &[crate::in_use::Seen<crate::in_use::Media>]| -> Vec<String> {
-        media
-            .iter()
-            .filter(|m| m.live())
-            .map(|m| m.what.app.clone())
-            .collect()
-    };
-    for (kind, apps) in [
-        (crate::in_use::Kind::Microphone, apps(&uses.microphone)),
-        (crate::in_use::Kind::Camera, apps(&uses.camera)),
-        (
-            crate::in_use::Kind::Screen,
-            uses.shares
-                .iter()
-                .filter(|s| s.live())
-                .map(|s| s.what.app.clone())
-                .collect(),
-        ),
-    ] {
-        if !apps.is_empty() {
-            used.push((kind, apps));
-        }
-    }
-    if uses.recording.as_ref().is_some_and(|r| r.live()) {
-        used.push((crate::in_use::Kind::Recording, Vec::new()));
-    }
-    let lines = crate::tasks::lines();
-    let tasks: Vec<bar::Task> = lines
-        .lines
-        .iter()
-        .filter(|l| l.going.is_none() && l.look != crate::tasks::Look::Adding)
-        .map(|l| bar::Task {
-            title: l.title.clone(),
-            ticked: l.look.ticked(),
-        })
-        .collect();
-    let shown_boxes = items
-        .iter()
-        .filter(|(_, item, _)| matches!(item, I::Task(_)))
-        .count();
-    let windows = crate::windows::shown(bar);
-    let window_lines: Vec<crate::windows::Line> = windows
-        .rows
-        .iter()
-        .filter_map(|r| match r {
-            crate::windows::Row::Window(line) => Some(line.clone()),
-            crate::windows::Row::More(_) => None,
-        })
-        .collect();
-    let more_windows = windows.count.saturating_sub(window_lines.len());
-    let mut desks = Vec::new();
-    for (_, item, _) in &items {
-        let I::Desktop { row, index } = *item else {
-            continue;
-        };
-        let output = crate::desktops::output_of(bar, row);
-        let Some(said) = crate::desktops::snapshot(&output) else {
-            continue;
-        };
-        let titles = crate::desktops::titles(&output).unwrap_or_default();
-        let i = usize::from(index);
-        let name = crate::desktops::name(i);
-        let screen = (row > 0)
-            .then(|| crate::desktops::screen_of(bar, row))
-            .flatten()
-            .map(|s| levels_words.screen(s.built_in, s.inches, s.number));
-        desks.push((
-            (row, index),
-            bar::Desk {
-                title: levels_words.desktop_title(i + 1, name.as_deref()),
-                current: usize::from(said.current) == i,
-                windows: said
-                    .windows
-                    .iter()
-                    .filter(|w| {
-                        usize::from(w.desktop) == i && w.look != hocus_link::Look::Minimized
-                    })
-                    .filter_map(|w| {
-                        titles
-                            .titles
-                            .iter()
-                            .find(|(id, _)| *id == w.id)
-                            .map(|(_, t)| t.clone())
-                    })
-                    .collect(),
-                count: usize::from(said.count),
-                screen,
-            },
-        ));
-    }
-    let link = crate::network::snapshot().link();
-    let bluetooth = crate::bluetooth::snapshot().row();
     bar::Facts {
         bar: bar.to_owned(),
         screen,
         size: Some((width, height)),
         items,
         frame,
+        nodes: declared,
+        groups,
         focused,
         open,
-        clock: Some(crate::clock::time::Shown::at(
-            &crate::notifications::wall(),
-            lang,
-        )),
-        meeting: crate::meeting::snapshot(),
-        uses: used,
-        microphone_muted: uses.muted,
-        today: crate::today::shown(bar).0,
-        open_tasks: lines.open(),
-        more_tasks: lines.open().saturating_sub(shown_boxes),
-        tasks,
-        agents: agents.to_vec(),
-        now_us: crate::agents::now_us(),
-        rows_shown: crate::agents::rows_shown(),
-        windows: window_lines,
-        more_windows,
-        desks,
-        link: (link != hocus_network::model::Link::Hidden).then_some(link),
-        bluetooth: (bluetooth != hocus_bluetooth::model::Row::Hidden).then_some(bluetooth),
-        layout: crate::layouts::snapshot().shown().map(|l| l.name.clone()),
-        levels: crate::levels::snapshot(),
-        unseen: crate::notifications::with(|c| c.stack.badge()),
-        user: crate::user::name(),
-        tray: crate::tray::shown()
-            .into_iter()
-            .map(|s| (s.key, s.name))
-            .collect(),
         announce: None,
     }
 }

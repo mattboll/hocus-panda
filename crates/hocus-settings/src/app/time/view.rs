@@ -2,6 +2,7 @@
 //! the clock's card, the automatic time and the time set by hand, the
 //! zone and its picker, the format's link, what comes later.
 
+use hocus_words::settings::app_time_view as words;
 use iced::{
     Alignment, Background, Color, Length, Padding, Shadow, Theme, Vector,
     widget::{
@@ -17,7 +18,7 @@ use crate::{
         style::*,
         view::{El, card_box, divided, icon, label, t},
     },
-    lang::{Lang, w},
+    lang::Lang,
     model::{Icon, SectionId},
     theme::Ink,
     time as model,
@@ -32,37 +33,25 @@ impl App {
         let lang = self.lang;
         page = page.push(self.time_clock());
         page = page.push(group(
-            w("HEURE", "TIME").get(lang),
+            words::TIME.get(lang),
             column![self.time_auto_row(), divided(true, self.time_set_row()),].into(),
         ));
+        page = page.push(group(words::TIME_ZONE.get(lang), self.time_zone_row()));
+        page = page.push(group(words::FORMAT.get(lang), self.time_format_row()));
         page = page.push(group(
-            w("FUSEAU HORAIRE", "TIME ZONE").get(lang),
-            self.time_zone_row(),
-        ));
-        page = page.push(group(
-            w("FORMAT", "FORMAT").get(lang),
-            self.time_format_row(),
-        ));
-        page = page.push(group(
-            w("PLUS TARD", "LATER").get(lang),
+            words::LATER.get(lang),
             column![
                 later_row(
-                    w("Fuseau horaire automatique", "Automatic time zone"),
-                    w(
-                        "Suivre le lieu où se trouve l’ordinateur, en voyage.",
-                        "Follow where the computer is, when travelling.",
-                    ),
+                    words::AUTOMATIC_TIME_ZONE,
+                    words::FOLLOW_WHERE_THE_COMPUTER_IS_WHEN,
                     true,
                     lang,
                 ),
                 divided(
                     true,
                     later_row(
-                        w("Formats régionaux", "Regional formats"),
-                        w(
-                            "Nombres, monnaie et premier jour de la semaine, indépendants de la langue.",
-                            "Numbers, currency and the first day of the week, apart from the language.",
-                        ),
+                        words::REGIONAL_FORMATS,
+                        words::NUMBERS_CURRENCY_AND_THE_FIRST_DAY,
                         false,
                         lang,
                     ),
@@ -82,11 +71,7 @@ impl App {
         let now = self.time_now();
         let clock = model::say_time(now.time(), self.time_twelve());
         let line = self.time_zone().map_or_else(
-            || {
-                w("Fuseau horaire inconnu", "Time zone not known")
-                    .get(lang)
-                    .to_owned()
-            },
+            || words::TIME_ZONE_NOT_KNOWN.get(lang).to_owned(),
             |zone| model::clock_line(zone, now.timestamp(), lang),
         );
         card_box(
@@ -133,11 +118,7 @@ impl App {
         .id(format!("control:{}", model::AUTO));
         self.time_row(
             model::AUTO,
-            w(
-                "Mettre à l’heure automatiquement",
-                "Set the time automatically",
-            )
-            .get(lang),
+            words::SET_THE_TIME_AUTOMATICALLY.get(lang),
             t(line, 12.5, ink).into(),
             switch.into(),
         )
@@ -146,44 +127,21 @@ impl App {
     /// The automatic time's line, and its colour.
     pub(super) fn time_auto_line(&self) -> (String, Color) {
         let lang = self.lang;
-        let said = |fr: &'static str, en: &'static str| w(fr, en).get(lang).to_owned();
+        let said = |text: hocus_words::Text| text.get(lang).to_owned();
         match self.time.heard.as_ref() {
             None => (String::new(), DIM.get()),
             Some(None) => (
-                said(
-                    "Le service de l’heure du système (timedated) ne répond pas.",
-                    "The system’s time service (timedated) does not answer.",
-                ),
+                said(words::THE_SYSTEM_S_TIME_SERVICE_TIMEDATED),
                 FAINT.get(),
             ),
-            Some(Some(td)) if !td.can_ntp => (
-                said(
-                    "Aucun service de mise à l’heure sur cet ordinateur.",
-                    "No time service on this computer.",
-                ),
-                FAINT.get(),
-            ),
-            Some(Some(_)) if !self.time_ntp() => (
-                said(
-                    "Coupé : l’heure ne se corrige plus seule.",
-                    "Off: the time no longer corrects itself.",
-                ),
-                DIM.get(),
-            ),
-            Some(Some(td)) if td.synced => (
-                said(
-                    "Par Internet (NTP) · à l’heure",
-                    "Over the Internet (NTP) · on time",
-                ),
-                MINT.get(),
-            ),
-            Some(Some(_)) => (
-                said(
-                    "Par Internet (NTP) · pas encore à l’heure",
-                    "Over the Internet (NTP) · not on time yet",
-                ),
-                AMBER.get(),
-            ),
+            Some(Some(td)) if !td.can_ntp => {
+                (said(words::NO_TIME_SERVICE_ON_THIS_COMPUTER), FAINT.get())
+            }
+            Some(Some(_)) if !self.time_ntp() => {
+                (said(words::OFF_THE_TIME_NO_LONGER_CORRECTS), DIM.get())
+            }
+            Some(Some(td)) if td.synced => (said(words::OVER_THE_INTERNET_NTP_ON_TIME), MINT.get()),
+            Some(Some(_)) => (said(words::OVER_THE_INTERNET_NTP_NOT_ON), AMBER.get()),
         }
     }
 
@@ -194,15 +152,9 @@ impl App {
         let manual = self.time_manual();
         let (date, time) = self.time_fields();
         let line = if manual {
-            w(
-                "Tape la date et l’heure, puis « Régler ».",
-                "Type the date and the time, then “Set”.",
-            )
+            words::TYPE_THE_DATE_AND_THE_TIME
         } else {
-            w(
-                "Se règlent à la main quand l’heure automatique est coupée.",
-                "Set by hand when automatic time is off.",
-            )
+            words::SET_BY_HAND_WHEN_AUTOMATIC_TIME
         };
         let busy = self.time.time_asked.is_some();
         let typed = self.time_typed();
@@ -222,7 +174,7 @@ impl App {
             let can = typed.is_some() && !busy;
             let focused = self.time_focused(Stop::Set);
             let mut set = button(
-                text(w("Régler", "Set").get(lang))
+                text(words::SET.get(lang))
                     .size(12.5)
                     .font(BOLD)
                     .color(fade(DEEP.get(), if can { 1.0 } else { INERT })),
@@ -256,7 +208,7 @@ impl App {
         }
         self.time_row(
             model::SET,
-            w("Date et heure", "Date and time").get(lang),
+            words::DATE_AND_TIME.get(lang),
             t(line.get(lang), 12.5, DIM.get()).into(),
             controls.into(),
         )
@@ -314,7 +266,7 @@ impl App {
         }
         self.time_row(
             model::ZONE,
-            w("Fuseau horaire", "Time zone").get(lang),
+            words::TIME_ZONE_2.get(lang),
             t(line, 12.5, DIM.get()).into(),
             container(open)
                 .id(format!("control:{}", model::ZONE))
@@ -338,7 +290,7 @@ impl App {
             ));
         self.time_row(
             model::FORMAT,
-            w("Format de l’heure et de la date", "Time and date format").get(lang),
+            words::TIME_AND_DATE_FORMAT.get(lang),
             t(self.time_format_line(), 12.5, DIM.get()).into(),
             container(link).id(format!("link:{}", model::FORMAT)).into(),
         )
@@ -349,14 +301,13 @@ impl App {
         let hours = if self.time_twelve() { "12 h" } else { "24 h" };
         let today =
             crate::appearance::today_as(self.time_date_format(), self.time_now().date(), self.lang);
-        match self.lang {
-            Lang::French => format!(
-                "{hours} · « {today} ». Une fois pour tout le bureau : la barre, l’agenda, l’écran verrouillé."
-            ),
-            Lang::English => format!(
-                "{hours} · “{today}”. Once for the whole desktop: the bar, the calendar, the lock screen."
-            ),
-        }
+        words::once_for_the_whole_desktop_the(
+            self.lang,
+            words::OnceForTheWholeDesktopThe {
+                hours,
+                today: &today,
+            },
+        )
     }
 
     /// A row of the page: its name, its line, its control, lit when found.
@@ -402,28 +353,21 @@ impl App {
         let found = self.time_found();
         let now = jiff::Timestamp::now();
         let twelve = self.time_twelve();
-        let field = text_input(
-            w(
-                "Une ville, un pays, un fuseau…",
-                "A city, a country, a zone…",
-            )
-            .get(lang),
-            &picker.query,
-        )
-        .id(ZONE_SEARCH)
-        .on_input(|s| Message::Time(Msg::Query(s)))
-        .on_submit(Message::Time(Msg::Choose))
-        .size(13.5)
-        .font(MANROPE)
-        .padding([7, 0])
-        .style(|_: &Theme, _| text_input::Style {
-            background: Background::Color(Color::TRANSPARENT),
-            border: border(0.0, 0.0, Color::TRANSPARENT),
-            icon: DIM.get(),
-            placeholder: FAINT.get(),
-            value: TEXT.get(),
-            selection: crate::theme::Ink::Accent(0.35).get(),
-        });
+        let field = text_input(words::A_CITY_A_COUNTRY_A_ZONE.get(lang), &picker.query)
+            .id(ZONE_SEARCH)
+            .on_input(|s| Message::Time(Msg::Query(s)))
+            .on_submit(Message::Time(Msg::Choose))
+            .size(13.5)
+            .font(MANROPE)
+            .padding([7, 0])
+            .style(|_: &Theme, _| text_input::Style {
+                background: Background::Color(Color::TRANSPARENT),
+                border: border(0.0, 0.0, Color::TRANSPARENT),
+                icon: DIM.get(),
+                placeholder: FAINT.get(),
+                value: TEXT.get(),
+                selection: crate::theme::Ink::Accent(0.35).get(),
+            });
         let search = container(
             row![icon(Icon::Search, 15.0, DIM.get()), field]
                 .spacing(8)
@@ -492,14 +436,7 @@ impl App {
         if found.is_empty() {
             rows = rows.push(
                 container(t(
-                    match lang {
-                        Lang::French => {
-                            format!("Aucun fuseau ne répond à « {} ».", picker.query.trim())
-                        }
-                        Lang::English => {
-                            format!("No time zone matches “{}”.", picker.query.trim())
-                        }
-                    },
+                    words::no_time_zone_matches(lang, picker.query.trim()),
                     13.0,
                     DIM.get(),
                 ))
@@ -508,11 +445,8 @@ impl App {
         }
         let chosen = found.get(picker.selected);
         let choose_said = chosen.map_or_else(
-            || w("Choisir", "Choose").get(lang).to_owned(),
-            |f| match lang {
-                Lang::French => format!("Choisir {}", f.city.name(lang)),
-                Lang::English => format!("Choose {}", f.city.name(lang)),
-            },
+            || words::CHOOSE.get(lang).to_owned(),
+            |f| words::choose_2(lang, f.city.name(lang)),
         );
         let mut choose = button(text(choose_said).size(13).font(BOLD).color(DEEP))
             .height(32)
@@ -524,7 +458,7 @@ impl App {
         let buttons = row![
             Space::new().width(Length::Fill),
             container(
-                button(t(w("Annuler", "Cancel").get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
+                button(t(words::CANCEL.get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
                     .height(32)
                     .padding([7, 14])
                     .on_press(Message::Time(Msg::Picker(false)))
@@ -544,7 +478,7 @@ impl App {
             column![
                 row![
                     icon(Icon::Appearance, 18.0, TEXT.get()),
-                    text(w("Fuseau horaire", "Time zone").get(lang))
+                    text(words::TIME_ZONE_2.get(lang))
                         .size(17)
                         .font(BOLD)
                         .color(TEXT),
@@ -553,15 +487,7 @@ impl App {
                 .align_y(Alignment::Center),
                 search,
                 rows,
-                t(
-                    w(
-                        "Une ville, un pays ou un nom de fuseau ; l’heure de chacun à droite.",
-                        "A city, a country or a zone name; each one’s time on the right.",
-                    )
-                    .get(lang),
-                    12.0,
-                    FAINT.get(),
-                ),
+                t(words::A_CITY_A_COUNTRY_OR_A.get(lang), 12.0, FAINT.get(),),
                 buttons,
             ]
             .spacing(12),
@@ -743,7 +669,7 @@ fn later_row<'a>(
     lang: Lang,
 ) -> El<'a> {
     let chip = container(
-        text(w("Plus tard", "Later").get(lang))
+        text(words::LATER_2.get(lang))
             .size(10.5)
             .font(BOLD)
             .color(rgb(0xF5B44A)),

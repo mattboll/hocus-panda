@@ -410,16 +410,27 @@ impl<Message> canvas::Program<Message> for Connections {
         let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let size = bounds.size();
         let items = self.items(state, size);
-        let in_bar = items
+        let said = crate::a11y::Words::new(self.words.lang);
+        let link = super::snapshot().link();
+        let link = (link != Link::Hidden).then_some(link);
+        let bt = bluetooth::snapshot().row();
+        let bt = (bt != Row::Hidden).then_some(bt);
+        let layout = crate::layouts::snapshot().shown().map(|l| l.name.clone());
+        let spots = items
             .iter()
-            .map(|(item, r)| {
-                (
+            .map(|(item, r)| crate::ui::ring::Spot {
+                node: node(said, *item, link.as_ref(), bt.as_ref(), layout.as_deref()),
+                ..crate::ui::ring::Spot::at(
                     *item,
                     Rectangle::new(self.in_bar(r.position(), size), r.size()),
                 )
             })
             .collect();
-        popover::with(|c| c.set_items(&self.bar, CONNECTIONS_NAMESPACE, in_bar));
+        let declared = crate::ui::ring::Declared {
+            spots,
+            ..crate::ui::ring::Declared::default()
+        };
+        popover::with(|c| c.declare(&self.bar, CONNECTIONS_NAMESPACE, declared));
         if state.shown.is_empty() {
             return crate::backdrop::over(under, frame);
         }
@@ -908,6 +919,25 @@ pub(crate) fn ethernet(f: &mut Frame, at: Point, size: f32, colour: Color) {
         }
     });
     f.stroke(&path, line);
+}
+
+/// A connection's item as screen readers read it: the Wi-Fi's `link`,
+/// Bluetooth's `bluetooth` row, the keyboard's `layout`.
+pub fn node(
+    words: crate::a11y::Words,
+    item: Item,
+    link: Option<&Link>,
+    bluetooth: Option<&Row>,
+    layout: Option<&str>,
+) -> Option<hocus_a11y::Node> {
+    use hocus_a11y::{Act, Node, Role};
+    let name = match item {
+        Item::Wifi => words.wifi(link?),
+        Item::Bluetooth => words.bluetooth(bluetooth?),
+        Item::Keyboard => words.layout(layout?),
+        _ => return None,
+    };
+    Some(Node::new(crate::ui::items::key(item), Role::Button, name).act(Act::Click))
 }
 
 #[cfg(test)]

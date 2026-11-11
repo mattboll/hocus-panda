@@ -1010,3 +1010,56 @@ fn an_answer_or_an_address_lists_no_application() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// A screenshot for the maintainer (#771): the search field with a
+/// selection and the caret in the middle of what is typed. Written to
+/// `$HOCUS_SHOTS` when it names a folder; run by hand (`--run-ignored
+/// only`).
+#[test]
+#[ignore = "a screenshot, by hand: HOCUS_SHOTS=DIR"]
+fn field_shot() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        eprintln!("HOCUS_SHOTS names no folder");
+        return Ok(());
+    };
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let from = bed.mark();
+    bed.type_text("firefox")?;
+    bed.shows_after(from, "query=\"firefox\"")?;
+    // « fox » selected from its end: the caret after « fire ».
+    bed.hp.key(KEY_LEFTSHIFT, true);
+    for _ in 0..3 {
+        bed.press(common::KEY_LEFT);
+    }
+    bed.hp.key(KEY_LEFTSHIFT, false);
+    wait(&mut bed.hp, Duration::from_millis(400))?;
+    let (w, h, px) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+        .ok_or_else(|| anyhow::anyhow!("no image"))?;
+    let file = out.join("launcher-field.png");
+    image.save(&file)?;
+    eprintln!("{}", file.display());
+    Ok(())
+}
+
+/// The launcher in its main state (the empty field), for the widget kit's
+/// side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.hp.pointer_move(1900.0, 1070.0);
+    common::layer_shot(&mut bed.hp, hocus_link::LAUNCHER_NAMESPACE, "launcher")
+}

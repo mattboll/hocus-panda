@@ -26,31 +26,39 @@
 //! What a tool said may hold code or a secret: it is drawn, never logged
 //! (its length is).
 
-use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, PoisonError},
+    time::Instant,
+};
 
+use hocus_a11y::Role;
 use hocus_link::{Form, Note};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme,
-    advanced::svg,
-    keyboard, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry},
-        text::Alignment,
-    },
+    Color, Element, Length, Padding, Point, Rectangle, Size,
+    alignment::Vertical,
+    widget::{Space, button, column, container, mouse_area, row, space, svg, text},
     window,
 };
 
 use super::{
-    Event as Seen, Item, Pressed, event,
-    kit::{self, FILL, Input, Pointer, text, text_in},
+    Event as Seen, Item, event,
+    kit::{self, FILL},
 };
 use crate::pandas::{self, Burst};
 use crate::theme::Ink;
 use crate::{
     agents::{self, Brief, Entry, Look, Words},
     clock::time::Lang,
-    levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring},
+    levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
+    ui::{
+        Around, control,
+        parts::{gap, moving, spaced_by},
+        style::{self, boxed, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 --------------------------------------------------
 
@@ -72,7 +80,7 @@ const TITLE: f32 = 16.0;
 /// A section's label: 11 px, 700, spaced 0.08 em, in its colour, 4 px
 /// more above; its lines 2 px apart.
 const LABEL: f32 = 11.0;
-const LABEL_SPACING: f32 = 0.08 * LABEL;
+const LABEL_SPACING: f32 = 0.08;
 const LABEL_PAD: f32 = 4.0;
 const LINE_GAP: f32 = 2.0;
 /// An agent's line: 5 px in, 6 px past the sides, radius 7; its panda
@@ -106,9 +114,16 @@ const RESTING: Ink = Ink::Dark(rgb(0x6A7384));
 
 /// What can be clicked in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub enum Target {
     Agent(u64),
     Sources,
+}
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("briefing:{self:?}")
+    }
 }
 
 /// A section, laid out.
@@ -324,65 +339,6 @@ pub fn height(form: Form) -> u32 {
 
 // --- The panel ------------------------------------------------------------------
 
-impl Panel {
-    /// What it shows, for screen readers (crate::a11y::rows): each section's
-    /// agents, their names whole, since when, what their tool said, then
-    /// the count and Sources.
-    fn tell_readers(&self, state: &State) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let Some(laid) = &state.laid else {
-            return;
-        };
-        let words = self.words;
-        let mut nodes = Vec::new();
-        for section in &laid.sections {
-            let label = words.section(section.look);
-            let mut label_chars = label.chars();
-            let label = label_chars.next().map_or_else(String::new, |first| {
-                first.to_string() + &label_chars.as_str().to_lowercase()
-            });
-            nodes.push(rows::line(label));
-            for line in &section.lines {
-                let agent = state.said.agents.iter().find(|a| a.id == line.id);
-                let name = agent.map_or_else(|| line.who.clone(), |a| crate::a11y::plain(&a.name));
-                let when = line.when.trim_start_matches('·').trim();
-                let name = if when.is_empty() {
-                    name
-                } else {
-                    format!("{name}, {when}")
-                };
-                let note = agent
-                    .and_then(|a| a.note.as_ref())
-                    .filter(|_| matches!(section.look, Look::Waiting | Look::Stuck))
-                    .map(|n| words.note(n));
-                let mut node = rows::act(Target::Agent(line.id), Role::Button, name, line.rect);
-                if let Some(note) = note {
-                    node = node.describe(note);
-                }
-                nodes.push(node);
-            }
-        }
-        nodes.push(rows::line(laid.footer.clone()));
-        nodes.push(rows::act(
-            Target::Sources,
-            Role::Button,
-            words.sources(),
-            laid.sources,
-        ));
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(laid.targets().into_iter().map(|(t, _)| t)),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-}
-
 /// The briefing on its surface.
 #[derive(Debug, Clone)]
 pub struct Panel {
@@ -391,381 +347,342 @@ pub struct Panel {
     pub glass: bool,
 }
 
-/// What the surface keeps between draws.
+/// What the surface keeps from a build of its view to the next.
 #[derive(Debug, Default)]
-pub struct State {
+struct Ui {
     /// The agents as last laid out, the minute and the bar's form then.
     said: agents::Said,
     minute: u64,
     form: Option<Form>,
     laid: Option<Laid>,
-    pointer: Pointer<Target>,
     focus: Option<Target>,
     /// Its pandas playing their moods as it opens, and the one the pointer
     /// came over (#649).
     bursts: HashMap<u64, Burst>,
     opened: bool,
-    hovered: Option<Target>,
-    now: Option<Instant>,
 }
 
-impl State {
-    fn targets(&self) -> Vec<(Target, Rectangle)> {
-        self.laid.as_ref().map_or_else(Vec::new, Laid::targets)
-    }
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+/// It opens: nothing holds the ring, its pandas play again.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A line or "Sources" pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// The pointer came over an agent's line: its panda plays.
+    Over(u64),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The agents changed under the view, or the minute did.
+    Stale,
+}
+
+/// The briefing on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (id, words) = (panel.id, panel.words);
+    Around::new(id, build(id, words), handle, Msg::Stale)
+        .rebuild(move || build(id, words))
+        .stale_when(move || {
+            let form = super::with(|c| c.form_of(id));
+            let minute = agents::now_us() / 60_000_000;
+            ui(|ui| ui.minute != minute || ui.form != form)
+        })
+        .press(Msg::Pressed)
+        .on_glass(panel.glass)
+}
+
+/// Its content, as the agents are now.
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    let form = super::with(|c| c.form_of(id)).unwrap_or(Form::Full);
+    let said = agents::said();
+    let now = agents::now_us();
+    let laid = lay_out(&Brief::of(&said.agents), words, now, form, kit::measure);
+    let at = Instant::now();
+    ui(|ui| {
+        if ui.laid.as_ref() != Some(&laid) {
+            tracing::debug!(briefing = %laid.said(words), "the briefing shows it");
         }
-    }
-
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        if let Some(laid) = &state.laid {
-            let now = state.now.unwrap_or_else(Instant::now);
-            self.briefing(&mut frame, laid, state.pointer.hover, &state.bursts, now);
-        }
-        if let Some((_, rect)) = state
-            .focus
-            .and_then(|focus| state.targets().into_iter().find(|(t, _)| *t == focus))
-        {
-            ring(&mut frame, rect, LINE_RADIUS);
-        }
-        self.tell_readers(state);
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
-}
-
-/// `word` in capitals spaced as a label's, from `x`, its line centred on
-/// `middle`, in `colour`.
-fn label(f: &mut Frame, word: &str, (x, middle): (f32, f32), colour: Color) {
-    let mut at = x;
-    for ch in word.chars() {
-        let letter = ch.to_string();
-        let width = kit::measure(&letter, LABEL, MANROPE_BOLD);
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                letter,
-                Point::new(at, middle),
-                LABEL,
-                colour,
-                Alignment::Left,
-            ),
-        ));
-        at += width + LABEL_SPACING;
-    }
-}
-
-impl Panel {
-    fn briefing(
-        &self,
-        f: &mut Frame,
-        laid: &Laid,
-        hover: Option<Target>,
-        bursts: &HashMap<u64, Burst>,
-        now: Instant,
-    ) {
-        let words = self.words;
-        let top = BORDER + PAD_TOP;
-        let middle = top + HEAD / 2.0;
-        f.draw_svg(
-            Rectangle::new(Point::new(LEFT, top), Size::new(HEAD, HEAD)),
-            svg::Svg::new(agents::draw::secretary(laid.mood).clone()),
-        );
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                words.briefing().to_owned(),
-                Point::new(LEFT + HEAD + HEAD_GAP, middle),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        for section in &laid.sections {
-            let colour = match section.look {
-                Look::Waiting => WAITING,
-                Look::Stuck => STUCK,
-                Look::ToSee => TO_SEE,
-                Look::Working => AT_WORK,
-                Look::Resting => RESTING,
-            };
-            label(
-                f,
-                words.section(section.look),
-                (LEFT, section.label_middle),
-                colour.get(),
-            );
-            for line in &section.lines {
-                if hover == Some(Target::Agent(line.id)) {
-                    f.fill(&kit::rounded(line.rect, LINE_RADIUS), FILL.get());
-                }
-                let middle = line.rect.center_y();
-                agents::draw::draw_panda(
-                    f,
-                    Rectangle::new(
-                        Point::new(LEFT, middle - PANDA / 2.0),
-                        Size::new(PANDA, PANDA),
-                    ),
-                    section.look,
-                    bursts.get(&line.id).copied(),
-                    now,
-                    if section.look == Look::Resting {
-                        0.55
-                    } else {
-                        1.0
-                    },
-                );
-                let text_height =
-                    WHO * LINE + line.what.as_ref().map_or(0.0, |_| WHAT_GAP + WHAT * LINE);
-                let who_middle = middle - text_height / 2.0 + WHO * LINE / 2.0;
-                f.fill_text(text_in(
-                    MANROPE_BOLD,
-                    text(
-                        line.who.clone(),
-                        Point::new(TEXT_LEFT, who_middle),
-                        WHO,
-                        TEXT.get(),
-                        Alignment::Left,
-                    ),
-                ));
-                f.fill_text(text(
-                    line.when.clone(),
-                    Point::new(line.when_x, who_middle),
-                    WHO,
-                    FAINT.get(),
-                    Alignment::Left,
-                ));
-                if let Some(what) = &line.what {
-                    f.fill_text(text(
-                        what.clone(),
-                        Point::new(
-                            TEXT_LEFT,
-                            who_middle + WHO * LINE / 2.0 + WHAT_GAP + WHAT * LINE / 2.0,
-                        ),
-                        WHAT,
-                        DIM.get(),
-                        Alignment::Left,
-                    ));
+        // As it opens, each line's panda plays its mood once (#649).
+        if !ui.opened && pandas::lively() {
+            for section in &laid.sections {
+                for line in &section.lines {
+                    ui.bursts
+                        .insert(line.id, Burst::of(pandas::mood(section.look), at));
                 }
             }
         }
-        f.fill_rectangle(
-            Point::new(LEFT, laid.rule),
-            Size::new(ROOM, 1.0),
-            RULE.get(),
-        );
-        f.fill_text(text(
-            laid.footer.clone(),
-            Point::new(LEFT, laid.footer_middle),
-            FOOTER,
-            FAINT.get(),
-            Alignment::Left,
-        ));
-        let lit = hover == Some(Target::Sources);
-        if lit {
-            f.fill(&kit::rounded(laid.sources, LINE_RADIUS), FILL.get());
+        ui.opened = true;
+        ui.bursts.retain(|_, b| b.plays(at));
+        let targets: Vec<Target> = laid.targets().into_iter().map(|(t, _)| t).collect();
+        if ui.focus.is_some_and(|f| !targets.contains(&f)) {
+            ui.focus = None;
         }
-        f.fill_text(text(
-            words.sources().to_owned(),
-            Point::new(laid.sources.x + LINK_PAD, laid.footer_middle),
-            FOOTER,
-            if lit { TEXT.get() } else { FAINT.get() },
-            Alignment::Left,
-        ));
-    }
+        let content = content(&laid, words, &said, ui);
+        ui.minute = now / 60_000_000;
+        ui.form = Some(form);
+        ui.said = said;
+        ui.laid = Some(laid);
+        content
+    })
+}
 
-    /// What it shows, read afresh: laid out again when the agents changed,
-    /// or the minute did.
-    fn refresh<Message>(&self, state: &mut State, now: Instant) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-        }
-        state.now = Some(now);
-        let laid = self.lay_out_again(state);
-        // As it opens, each line's panda plays its mood once (#649); the
-        // pointer coming over a line replays its panda's.
-        let lines: Vec<(u64, Look)> = state
-            .laid
-            .iter()
-            .flat_map(|l| l.sections.iter())
-            .flat_map(|s| s.lines.iter().map(|l| (l.id, s.look)))
-            .collect();
-        if pandas::lively() {
-            if !state.opened {
-                for (id, look) in &lines {
-                    state
-                        .bursts
-                        .insert(*id, Burst::of(pandas::mood(*look), now));
-                }
-            }
-            if state.pointer.hover != state.hovered
-                && let Some(Target::Agent(id)) = state.pointer.hover
-                && let Some((_, look)) = lines.iter().find(|(i, _)| *i == id)
-                && !state.bursts.get(&id).is_some_and(|b| b.plays(now))
-            {
-                state.bursts.insert(id, Burst::of(pandas::mood(*look), now));
-            }
-        }
-        state.opened |= state.laid.is_some();
-        state.hovered = state.pointer.hover;
-        state.bursts.retain(|_, b| b.plays(now));
-        laid.or_else(|| (!state.bursts.is_empty()).then(canvas::Action::request_redraw))
-    }
-
-    /// Laid out again when the agents changed, or the minute did.
-    fn lay_out_again<Message>(&self, state: &mut State) -> Option<canvas::Action<Message>> {
-        let form = super::with(|c| c.form_of(self.id))?;
-        let said = agents::said();
-        let now = agents::now_us();
-        let minute = now / 60_000_000;
-        if state.laid.is_none()
-            || said != state.said
-            || minute != state.minute
-            || state.form != Some(form)
-        {
-            let laid = lay_out(
-                &Brief::of(&said.agents),
-                self.words,
-                now,
-                form,
-                kit::measure,
-            );
-            if state.laid.as_ref() != Some(&laid) {
-                tracing::debug!(briefing = %laid.said(self.words), "the briefing shows it");
-                let items: Vec<String> = laid
-                    .targets()
-                    .iter()
-                    .map(|(t, r)| format!("{t:?}@{:.0},{:.0}", r.center().x, r.center().y))
-                    .collect();
-                tracing::debug!(items = %items.join(" "), "the briefing's items");
-            }
-            state.laid = Some(laid);
-            state.said = said;
-            state.minute = minute;
-            state.form = Some(form);
-            let targets: Vec<Target> = state.targets().into_iter().map(|(t, _)| t).collect();
-            if state.focus.is_some_and(|f| !targets.contains(&f)) {
-                state.focus = None;
-            }
-            super::refit(Item::Secretary);
-        }
-        None
-    }
-
-    fn act(&self, state: &State, target: Target) {
-        tracing::debug!(?target, "the briefing");
-        match target {
-            Target::Agent(id) => {
-                let row = state
-                    .targets()
-                    .into_iter()
-                    .find(|(t, _)| *t == target)
-                    .map(|(_, r)| r);
-                if let Some(row) = row {
-                    event(Seen::GoTo { id, row });
-                }
-            }
-            Target::Sources => event(Seen::Replace(Item::Sources)),
-        }
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| {
-            state
-                .targets()
-                .into_iter()
-                .find(|(_, r)| r.contains(at))
-                .map(|(t, _)| t)
+fn content<'a>(laid: &Laid, words: Words, said: &agents::Said, ui: &Ui) -> El<'a> {
+    let head = svg(agents::draw::secretary(laid.mood).clone())
+        .width(HEAD)
+        .height(HEAD);
+    let mut all = column![
+        container(
+            row![
+                head,
+                gap(HEAD_GAP),
+                said_line(words.briefing(), TITLE, MANROPE_BOLD, TEXT.get()),
+            ]
+            .height(HEAD)
+            .align_y(Vertical::Center)
+        )
+        .padding([0.0, LINE_OUT])
+    ];
+    for section in &laid.sections {
+        let colour = match section.look {
+            Look::Waiting => WAITING,
+            Look::Stuck => STUCK,
+            Look::ToSee => TO_SEE,
+            Look::Working => AT_WORK,
+            Look::Resting => RESTING,
+        };
+        let word = words.section(section.look);
+        let mut chars = word.chars();
+        let read = chars.next().map_or_else(String::new, |first| {
+            first.to_string() + &chars.as_str().to_lowercase()
         });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    self.act(state, target);
-                }
-                redraw
-            }
-            _ => None,
+        all = all.push(crate::ui::line(
+            container(spaced_by(
+                word,
+                LABEL,
+                MANROPE_BOLD,
+                colour.get(),
+                LABEL_SPACING,
+            ))
+            .padding(Padding {
+                top: GAP + LABEL_PAD,
+                right: 0.0,
+                bottom: 0.0,
+                left: LINE_OUT,
+            })
+            .height(GAP + LABEL_PAD + LABEL * LINE)
+            .align_y(Vertical::Bottom),
+            read,
+        ));
+        for line in &section.lines {
+            all = all.push(Space::new().height(LINE_GAP)).push(line_of(
+                section.look,
+                line,
+                words,
+                said,
+                ui,
+            ));
         }
     }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let order: Vec<Target> = state.targets().into_iter().map(|(t, _)| t).collect();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(arrow @ (Named::ArrowDown | Named::ArrowUp)) => {
-                state.focus = kit::step(&order, state.focus, *arrow == Named::ArrowUp);
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(target) = state.focus.filter(|t| order.contains(t)) {
-                    self.act(state, target);
-                }
-            }
-            _ => return None,
+    all = all
+        .push(Space::new().height(GAP + RULE_PAD))
+        .push(
+            container(
+                container(Space::new().width(Length::Fill).height(1.0))
+                    .style(|_| boxed(RULE.get(), 0.0)),
+            )
+            .padding([0.0, LINE_OUT]),
+        )
+        // "Sources" reaches 3 px above the footer's line.
+        .push(Space::new().height(RULE_PAD + GAP - (24.0 - FOOTER * LINE) / 2.0));
+    let sources = Target::Sources;
+    let link = button(
+        container(
+            text(words.sources())
+                .size(FOOTER)
+                .font(MANROPE)
+                .line_height(iced::widget::text::LineHeight::Relative(LINE))
+                .shaping(iced::widget::text::Shaping::Advanced)
+                .wrapping(iced::widget::text::Wrapping::None),
+        )
+        .center_y(Length::Fill),
+    )
+    .padding([0.0, LINK_PAD])
+    .height(24.0)
+    .style(|_, status| {
+        let lit = style::lit(status);
+        iced::widget::button::Style {
+            background: lit.then(|| FILL.get().into()),
+            text_color: if lit { TEXT.get() } else { FAINT.get() },
+            border: style::round(LINE_RADIUS),
+            ..iced::widget::button::Style::default()
         }
-        Some(canvas::Action::request_redraw().and_capture())
+    })
+    .on_press(Msg::Act(sources));
+    let link = control(link, sources.id(), Role::Button, words.sources())
+        .focus(ui.focus == Some(sources), Msg::Focus(sources), LINE_RADIUS)
+        .activate(Msg::Act(sources))
+        .rows(0);
+    all = all.push(
+        row![
+            gap(LINE_OUT),
+            crate::ui::line(
+                said_line(laid.footer.clone(), FOOTER, MANROPE, FAINT.get()),
+                laid.footer.clone()
+            ),
+            space::horizontal(),
+            link,
+        ]
+        .height(24.0)
+        .align_y(Vertical::Center),
+    );
+    container(all)
+        .padding(Padding {
+            top: BORDER + PAD_TOP,
+            right: LEFT - LINE_OUT,
+            bottom: 0.0,
+            left: LEFT - LINE_OUT,
+        })
+        .into()
+}
+
+fn said_line<'a>(content: impl Into<String>, size: f32, font: iced::Font, ink: Color) -> El<'a> {
+    said(content.into(), size, font, ink).into()
+}
+
+/// An agent's line: its panda, its name, since when, what its tool said;
+/// lit under the pointer, which replays its panda.
+fn line_of<'a>(look: Look, line: &Line, words: Words, said: &agents::Said, ui: &Ui) -> El<'a> {
+    let burst = ui.bursts.get(&line.id).copied();
+    let alpha = if look == Look::Resting { 0.55 } else { 1.0 };
+    let panda = moving(
+        PANDA,
+        PANDA,
+        move |f, s, now| {
+            agents::draw::draw_panda(f, Rectangle::new(Point::ORIGIN, s), look, burst, now, alpha);
+        },
+        move |now| burst.is_some_and(|b| b.plays(now)),
+    );
+    let mut first = row![said_line(line.who.clone(), WHO, MANROPE_BOLD, TEXT.get())];
+    if !line.when.is_empty() {
+        first =
+            first
+                .push(gap(WHEN_GAP))
+                .push(said_line(line.when.clone(), WHO, MANROPE, FAINT.get()));
+    }
+    let mut texts = column![first];
+    if let Some(what) = &line.what {
+        texts = texts
+            .push(Space::new().height(WHAT_GAP))
+            .push(crate::ui::unsaid(said_line(
+                what.clone(),
+                WHAT,
+                MANROPE,
+                DIM.get(),
+            )));
+    }
+    let target = Target::Agent(line.id);
+    let pressed = button(
+        row![panda, gap(PANDA_GAP), texts]
+            .height(Length::Fill)
+            .align_y(Vertical::Center),
+    )
+    .padding([0.0, LINE_OUT])
+    .width(Length::Fill)
+    .height(line.rect.height)
+    .style(|_, status| {
+        if style::lit(status) {
+            style::hovered(FILL.get(), LINE_RADIUS)
+        } else {
+            style::clear()
+        }
+    })
+    .on_press(Msg::Act(target));
+    // Its name whole, since when, what its tool said, for screen readers.
+    let agent = said.agents.iter().find(|a| a.id == line.id);
+    let name = agent.map_or_else(|| line.who.clone(), |a| crate::a11y::plain(&a.name));
+    let when = line.when.trim_start_matches('·').trim();
+    let name = if when.is_empty() {
+        name
+    } else {
+        format!("{name}, {when}")
+    };
+    let note = agent
+        .and_then(|a| a.note.as_ref())
+        .filter(|_| matches!(look, Look::Waiting | Look::Stuck))
+        .map(|n| words.note(n));
+    let declared = control(
+        mouse_area(pressed).on_enter(Msg::Over(line.id)),
+        target.id(),
+        Role::Button,
+        name,
+    )
+    .node(|n| match note {
+        Some(note) => n.describe(note),
+        None => n,
+    })
+    .focus(ui.focus == Some(target), Msg::Focus(target), LINE_RADIUS)
+    .activate(Msg::Act(target))
+    .rows(0);
+    declared.into()
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Over(id) => ui(|ui| {
+            // The pointer coming over a line replays its panda's.
+            let now = Instant::now();
+            let look = ui.laid.as_ref().and_then(|laid| {
+                laid.sections
+                    .iter()
+                    .find(|s| s.lines.iter().any(|l| l.id == id))
+                    .map(|s| s.look)
+            });
+            if let Some(look) = look
+                && pandas::lively()
+                && !ui.bursts.get(&id).is_some_and(|b| b.plays(now))
+            {
+                ui.bursts.insert(id, Burst::of(pandas::mood(look), now));
+            }
+        }),
+        Msg::Act(target) => act(target),
+    }
+    super::refit(Item::Secretary);
+}
+
+fn act(target: Target) {
+    tracing::debug!(?target, "the briefing");
+    match target {
+        Target::Agent(id) => {
+            let row = ui(|ui| {
+                ui.laid.as_ref().and_then(|laid| {
+                    laid.targets()
+                        .into_iter()
+                        .find(|(t, _)| *t == target)
+                        .map(|(_, r)| r)
+                })
+            });
+            if let Some(row) = row {
+                event(Seen::GoTo { id, row });
+            }
+        }
+        Target::Sources => event(Seen::Replace(Item::Sources)),
     }
 }
 

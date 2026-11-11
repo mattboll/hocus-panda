@@ -1,9 +1,9 @@
 # Spike: the bar drawn with iced (issue #315)
 
 Status: report, 2026-10-28. It answers the seven points of the spike in
-[tech-choices](tech-choices.md). The code is throwaway:
-[crates/bar-spike](../../crates/bar-spike/) (one file,
-`src/main.rs`) and the scripts used for the measurements
+[tech-choices](tech-choices.md). The code is throwaway, kept on the
+branch `spike/315-bar-iced`, not in the tree: `crates/bar-spike` (one
+file, `src/main.rs`) and the scripts used for the measurements
 (`crates/bar-spike/scripts/`).
 
 ## Verdict

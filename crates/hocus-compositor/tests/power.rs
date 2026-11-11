@@ -86,8 +86,7 @@ struct Bed {
 fn ready() -> Option<PathBuf> {
     let shell = common::shell_program();
     if !fakes::available() {
-        eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
-        return None;
+        common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
     }
     Some(shell)
 }
@@ -467,9 +466,13 @@ fn the_pointer_is_a_hand_over_the_rows_and_an_arrow_off_them() -> anyhow::Result
         };
         let shows = bed.hp.dispatch_until(
             WAIT,
-            |hp| matches!(hp.state().cursor, CursorImageStatus::Named(icon) if icon == want),
+            |hp| matches!(hp.state().pointer.cursor, CursorImageStatus::Named(icon) if icon == want),
         )?;
-        anyhow::ensure!(shows, "{:?} at {at:?}, not {want:?}", bed.hp.state().cursor);
+        anyhow::ensure!(
+            shows,
+            "{:?} at {at:?}, not {want:?}",
+            bed.hp.state().pointer.cursor
+        );
     }
     Ok(())
 }
@@ -500,18 +503,18 @@ fn the_hand_is_set_again_when_the_pointer_comes_back_over_a_row() -> anyhow::Res
     );
     let hand = |hp: &Headless| {
         matches!(
-            hp.state().cursor,
+            hp.state().pointer.cursor,
             CursorImageStatus::Named(CursorIcon::Pointer)
         )
     };
-    let hidden = |hp: &Headless| matches!(hp.state().cursor, CursorImageStatus::Hidden);
+    let hidden = |hp: &Headless| matches!(hp.state().pointer.cursor, CursorImageStatus::Hidden);
     for round in 0..3 {
         common::point(&mut bed.hp, LIGHT_ROW)?;
         let shows = bed.hp.dispatch_until(WAIT, hand)?;
         anyhow::ensure!(
             shows,
             "round {round}: no hand over the row: {:?}",
-            bed.hp.state().cursor
+            bed.hp.state().pointer.cursor
         );
         // Everything the shell had to do done before it is held.
         common::at_rest(&mut bed.hp)?;
@@ -522,7 +525,7 @@ fn the_hand_is_set_again_when_the_pointer_comes_back_over_a_row() -> anyhow::Res
             anyhow::ensure!(
                 shows,
                 "round {round}: the window's pointer: {:?}",
-                bed.hp.state().cursor
+                bed.hp.state().pointer.cursor
             );
             bed.hp.pointer_move(LIGHT_ROW.0, LIGHT_ROW.1);
             // One turn, which sends the enter before the shell reads
@@ -535,7 +538,7 @@ fn the_hand_is_set_again_when_the_pointer_comes_back_over_a_row() -> anyhow::Res
         anyhow::ensure!(
             shows,
             "round {round}: no hand back over the row: {:?}",
-            bed.hp.state().cursor
+            bed.hp.state().pointer.cursor
         );
     }
     Ok(())
@@ -948,4 +951,24 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
         }
     }
     anyhow::bail!("the clock ticked through every try")
+}
+
+/// Both popovers in their main state (the brightness's with the
+/// keyboard's three levels), shot under `HOCUS_KIT_SHOTS` (#772's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start_full(&shell, |p| p.keyboard = Some((1, 2)))?;
+    bed.click_row(BATTERY_ROW)?;
+    bed.opened()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "battery")?;
+    bed.click_row(LIGHT_ROW)?;
+    bed.popover_is(Some(popover(WITH_KEYS)))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "brightness")
 }

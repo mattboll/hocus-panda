@@ -9,21 +9,22 @@
 //! [`crate::devices`]). The page names the devices by their kind and where
 //! they are plugged, never by their vendor's name.
 
+use hocus_words::settings::mouse as words;
 use std::sync::OnceLock;
 
 use hocus_link::input::{Bus, DeviceKind, InputDevice, RightClick};
 
 use crate::{
-    lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::{Lang, Words},
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const TOUCHPAD: RowGroup = RowGroup {
-    label: w("PAVÉ TACTILE", "TOUCHPAD"),
+    label: words::TOUCHPAD,
     per_source: false,
 };
 pub const MOUSE: RowGroup = RowGroup {
-    label: w("SOURIS", "MOUSE"),
+    label: words::MOUSE,
     per_source: false,
 };
 /// The gestures' rows (6.13).
@@ -32,7 +33,7 @@ pub const SWIPE_LAUNCHER: &str = "touchpad.swipe-launcher";
 pub const LEFT_TO_APPS: &str = "touchpad.left-to-applications";
 
 pub const GESTURES: RowGroup = RowGroup {
-    label: w("GESTES DU PAVÉ TACTILE", "TOUCHPAD GESTURES"),
+    label: words::TOUCHPAD_GESTURES,
     per_source: false,
 };
 
@@ -44,17 +45,9 @@ const PROFILES: &[&str] = &["adaptive", "flat"];
 const SPEED: Kind = Kind::Speed { min: -10, max: 10 };
 const TENTHS: Codec = Codec::Tenths { min: -10, max: 10 };
 
-fn place(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -84,6 +77,7 @@ fn setting(
 }
 
 /// The page's settings, in its order.
+// Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
@@ -95,254 +89,209 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.speed",
                 TOUCHPAD,
-                w("Vitesse du pointeur", "Pointer speed"),
+                words::POINTER_SPEED,
                 None,
                 (
                     &["vitesse", "sensibilité", "pavé", "touchpad"],
                     &["speed", "sensitivity", "touchpad", "trackpad"],
                 ),
                 SPEED,
-                place(&["touchpad", "speed"], TENTHS, Value::Int(0)),
+                one(&["touchpad", "speed"], TENTHS),
                 None,
             ),
             setting(
                 "touchpad.tap-to-click",
                 TOUCHPAD,
-                w("Toucher pour cliquer", "Tap to click"),
-                Some(w(
-                    "Un doigt clique, deux font un clic droit, trois un clic du milieu.",
-                    "One finger clicks, two right-click, three middle-click.",
-                )),
+                words::TAP_TO_CLICK,
+                Some(words::ONE_FINGER_CLICKS_TWO_RIGHT_CLICK),
                 (
                     &["tap", "taper", "toucher", "pavé", "clic"],
                     &["tap", "touchpad", "click"],
                 ),
                 Kind::Switch,
-                place(&["touchpad", "tap-to-click"], Codec::Bool, Value::Bool(true)),
+                one(&["touchpad", "tap-to-click"], Codec::Bool),
                 None,
             ),
             setting(
                 "touchpad.tap-and-drag",
                 TOUCHPAD,
-                w("Toucher puis glisser", "Tap and drag"),
-                Some(w(
-                    "Deux touchers, le second gardé : déplacer sans appuyer.",
-                    "Tap twice and hold the second: drag without pressing.",
-                )),
+                words::TAP_AND_DRAG,
+                Some(words::TAP_TWICE_AND_HOLD_THE_SECOND),
                 (
                     &["glisser", "déplacer", "tap", "pavé"],
                     &["drag", "tap", "touchpad"],
                 ),
                 Kind::Switch,
-                place(&["touchpad", "tap-and-drag"], Codec::Bool, Value::Bool(true)),
+                one(&["touchpad", "tap-and-drag"], Codec::Bool),
                 Some("touchpad.tap-to-click"),
             ),
             setting(
                 "touchpad.right-click",
                 TOUCHPAD,
-                w("Clic droit en appuyant", "Right-click by pressing"),
-                Some(w(
-                    "À deux doigts n’importe où, ou d’un doigt dans le coin inférieur droit.",
-                    "With two fingers anywhere, or one finger in the bottom-right corner.",
-                )),
+                words::RIGHT_CLICK_BY_PRESSING,
+                Some(words::WITH_TWO_FINGERS_ANYWHERE_OR_ONE),
                 (
                     &["clic droit", "deux doigts", "coin", "clickfinger", "pavé"],
-                    &["right click", "two fingers", "corner", "clickfinger", "touchpad"],
+                    &[
+                        "right click",
+                        "two fingers",
+                        "corner",
+                        "clickfinger",
+                        "touchpad",
+                    ],
                 ),
                 Kind::Menu(vec![
-                    word("À deux doigts", "With two fingers", "two-fingers"),
-                    word("Coin inférieur droit", "Bottom-right corner", "corner"),
+                    word(words::WITH_TWO_FINGERS, "two-fingers"),
+                    word(words::BOTTOM_RIGHT_CORNER, "corner"),
                 ]),
                 // Without the key, the touchpad's own (libinput's default
                 // for it): the window shows the device's.
-                place(
+                Places::One(Place::unset(
                     &["touchpad", "right-click"],
                     Codec::Word(CLICKS),
                     Value::Word("two-fingers"),
-                ),
+                )),
                 None,
             ),
             setting(
                 "touchpad.disable-while-typing",
                 TOUCHPAD,
-                w("Désactivé pendant la frappe", "Off while typing"),
-                Some(w(
-                    "La paume ne déplace pas le pointeur pendant que tu tapes.",
-                    "Your palm does not move the pointer while you type.",
-                )),
+                words::OFF_WHILE_TYPING,
+                Some(words::YOUR_PALM_DOES_NOT_MOVE_THE),
                 (
                     &["paume", "frappe", "taper", "clavier", "pavé"],
                     &["palm", "typing", "keyboard", "touchpad"],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "disable-while-typing"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                one(&["touchpad", "disable-while-typing"], Codec::Bool),
                 None,
             ),
             setting(
                 "touchpad.natural-scroll",
                 TOUCHPAD,
-                w("Défilement naturel", "Natural scrolling"),
-                Some(w("Le contenu suit tes doigts.", "Content follows your fingers.")),
+                words::NATURAL_SCROLLING,
+                Some(words::CONTENT_FOLLOWS_YOUR_FINGERS),
                 (
                     &["défilement", "inversé", "sens", "pavé"],
                     &["natural", "scroll", "reverse", "touchpad"],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "natural-scroll"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                one(&["touchpad", "natural-scroll"], Codec::Bool),
                 None,
             ),
             setting(
                 "touchpad.scroll",
                 TOUCHPAD,
-                w("Défiler", "Scroll"),
+                words::SCROLL,
                 None,
                 (
                     &["défilement", "deux doigts", "bord", "pavé"],
                     &["scroll", "two fingers", "edge", "touchpad"],
                 ),
                 Kind::Menu(vec![
-                    word("À deux doigts", "With two fingers", "two-fingers"),
-                    word("Sur le bord droit", "On the right edge", "edge"),
+                    word(words::WITH_TWO_FINGERS, "two-fingers"),
+                    word(words::ON_THE_RIGHT_EDGE, "edge"),
                 ]),
-                place(
-                    &["touchpad", "scroll"],
-                    Codec::Word(SCROLLS),
-                    Value::Word("two-fingers"),
-                ),
+                one(&["touchpad", "scroll"], Codec::Word(SCROLLS)),
                 None,
             ),
             setting(
                 "touchpad.off-with-mouse",
                 TOUCHPAD,
-                w(
-                    "Coupé quand une souris est branchée",
-                    "Off while a mouse is plugged in",
-                ),
-                Some(w(
-                    "Il revient dès qu’elle est débranchée.",
-                    "It comes back as soon as it is unplugged.",
-                )),
+                words::OFF_WHILE_A_MOUSE_IS_PLUGGED,
+                Some(words::IT_COMES_BACK_AS_SOON_AS),
                 (
                     &["souris", "couper", "désactiver", "pavé"],
                     &["mouse", "disable", "touchpad"],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "off-with-mouse"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                one(&["touchpad", "off-with-mouse"], Codec::Bool),
                 None,
             ),
             setting(
                 "pointer.speed",
                 MOUSE,
-                w("Vitesse du pointeur", "Pointer speed"),
+                words::POINTER_SPEED,
                 None,
                 speed_words,
                 SPEED,
-                place(&["pointer", "speed"], TENTHS, Value::Int(0)),
+                one(&["pointer", "speed"], TENTHS),
                 None,
             ),
             setting(
                 "pointer.acceleration",
                 MOUSE,
-                w("Accélération", "Acceleration"),
-                Some(w(
-                    "Adaptative : un geste vif va plus loin. Aucune : la même distance à toute vitesse.",
-                    "Adaptive: a quick move goes further. None: the same distance at any speed.",
-                )),
+                words::ACCELERATION,
+                Some(words::ADAPTIVE_A_QUICK_MOVE_GOES_FURTHER),
                 (
                     &["accélération", "précision", "souris"],
                     &["acceleration", "flat", "precision", "mouse"],
                 ),
                 Kind::Menu(vec![
-                    word("Adaptative", "Adaptive", "adaptive"),
-                    word("Aucune", "None", "flat"),
+                    word(words::ADAPTIVE, "adaptive"),
+                    word(words::NONE, "flat"),
                 ]),
-                place(
-                    &["pointer", "acceleration"],
-                    Codec::Word(PROFILES),
-                    Value::Word("adaptive"),
-                ),
+                one(&["pointer", "acceleration"], Codec::Word(PROFILES)),
                 None,
             ),
             setting(
                 "pointer.natural-scroll",
                 MOUSE,
-                w("Défilement naturel", "Natural scrolling"),
-                Some(w(
-                    "Le contenu suit la molette, comme sous un doigt.",
-                    "Content follows the wheel, as under a finger.",
-                )),
+                words::NATURAL_SCROLLING,
+                Some(words::CONTENT_FOLLOWS_THE_WHEEL_AS_UNDER),
                 (
                     &["défilement", "inversé", "molette", "souris"],
                     &["natural", "scroll", "wheel", "reverse", "mouse"],
                 ),
                 Kind::Switch,
-                place(
-                    &["pointer", "natural-scroll"],
-                    Codec::Bool,
-                    Value::Bool(false),
-                ),
+                one(&["pointer", "natural-scroll"], Codec::Bool),
                 None,
             ),
             setting(
                 "pointer.left-handed",
                 MOUSE,
-                w("Gaucher", "Left-handed"),
-                Some(w(
-                    "Le bouton droit devient le principal.",
-                    "The right button becomes the main one.",
-                )),
+                words::LEFT_HANDED,
+                Some(words::THE_RIGHT_BUTTON_BECOMES_THE_MAIN),
                 (
                     &["gaucher", "boutons", "inverser", "souris"],
                     &["left-handed", "buttons", "swap", "mouse"],
                 ),
                 Kind::Switch,
-                place(&["pointer", "left-handed"], Codec::Bool, Value::Bool(false)),
+                one(&["pointer", "left-handed"], Codec::Bool),
                 None,
             ),
             setting(
                 SWIPE_DESKTOPS,
                 GESTURES,
-                w("Trois doigts de côté", "Three fingers sideways"),
-                Some(w(
-                    "Changer de bureau sur l’écran sous le pointeur ; le bureau suit tes doigts, puis se pose ou revient.",
-                    "Switch desktop on the screen under the pointer; the desktop follows your fingers, then settles or springs back.",
-                )),
+                words::THREE_FINGERS_SIDEWAYS,
+                Some(words::SWITCH_DESKTOP_ON_THE_SCREEN_UNDER),
                 (
                     &[
-                        "geste", "glisser", "doigts", "trois doigts", "bureau", "pavé",
+                        "geste",
+                        "glisser",
+                        "doigts",
+                        "trois doigts",
+                        "bureau",
+                        "pavé",
                     ],
                     &[
-                        "gesture", "swipe", "fingers", "three fingers", "desktop", "touchpad",
+                        "gesture",
+                        "swipe",
+                        "fingers",
+                        "three fingers",
+                        "desktop",
+                        "touchpad",
                     ],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "swipe-desktops"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                one(&["touchpad", "swipe-desktops"], Codec::Bool),
                 None,
             ),
             setting(
                 SWIPE_LAUNCHER,
                 GESTURES,
-                w("Quatre doigts vers le haut ou le bas", "Four fingers up or down"),
-                Some(w(
-                    "Vers le haut, le lanceur, qui grandit avec tes doigts ; vers le bas, la vue d’ensemble de tes bureaux, ou le lanceur se referme.",
-                    "Up opens the launcher, which grows with your fingers; down shows the overview of your desktops, or closes the launcher.",
-                )),
+                words::FOUR_FINGERS_UP_OR_DOWN,
+                Some(words::UP_OPENS_THE_LAUNCHER_WHICH_GROWS),
                 (
                     &[
                         "geste",
@@ -366,27 +315,20 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 Kind::Switch,
-                place(
-                    &["touchpad", "swipe-launcher"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                ),
+                one(&["touchpad", "swipe-launcher"], Codec::Bool),
                 None,
             ),
             // Not a setting: what the desktop never takes.
             setting(
                 LEFT_TO_APPS,
                 GESTURES,
-                w("Ce qui reste aux applications", "What is left to applications"),
-                Some(w(
-                    "Deux doigts pour défiler et pincer ; trois doigts vers le haut ou le bas ; quatre doigts de côté.",
-                    "Two fingers to scroll and pinch; three fingers up or down; four fingers sideways.",
-                )),
+                words::WHAT_IS_LEFT_TO_APPLICATIONS,
+                Some(words::TWO_FINGERS_TO_SCROLL_AND_PINCH),
                 (
                     &["geste", "doigts", "pincer", "applications", "pavé"],
                     &["gesture", "fingers", "pinch", "applications", "touchpad"],
                 ),
-                Kind::Note(w("Toujours", "Always")),
+                Kind::Note(words::ALWAYS),
                 Places::Page(Place {
                     key: &["touchpad", "swipe-desktops"],
                     codec: Codec::Bool,
@@ -413,8 +355,8 @@ pub fn kind_of(setting: &str) -> Option<DeviceKind> {
 pub fn aside(setting: &str) -> Option<Words> {
     match kind_of(setting)? {
         DeviceKind::Touchpad if setting.starts_with("touchpad.swipe") => None,
-        DeviceKind::Touchpad => Some(w(", pavé tactile", ", touchpad")),
-        DeviceKind::Pointer => Some(w(", souris", ", mouse")),
+        DeviceKind::Touchpad => Some(words::TOUCHPAD_2),
+        DeviceKind::Pointer => Some(words::MOUSE_2),
     }
 }
 
@@ -462,34 +404,29 @@ pub fn device_default(setting: &str, devices: Option<&[InputDevice]>) -> Option<
 /// and where it is plugged, never the vendor's name.
 pub fn named(kind: DeviceKind, devices: &[InputDevice], lang: Lang) -> Option<String> {
     let of: Vec<&InputDevice> = devices.iter().filter(|d| d.kind == kind).collect();
-    let fr = lang.fr();
     match (kind, of.as_slice()) {
         (_, []) => None,
         (DeviceKind::Touchpad, [one, ..]) => Some(
             if one.built_in {
-                w("Intégré au portable", "Built in")
+                words::BUILT_IN
             } else if one.bus == Bus::Bluetooth {
-                w("Pavé tactile Bluetooth", "Bluetooth touchpad")
+                words::BLUETOOTH_TOUCHPAD
             } else {
-                w("Pavé tactile USB", "USB touchpad")
+                words::USB_TOUCHPAD
             }
             .get(lang)
             .to_owned(),
         ),
         (DeviceKind::Pointer, [one]) => Some(
             match (one.bus, one.built_in) {
-                (Bus::Bluetooth, _) => w("Souris Bluetooth", "Bluetooth mouse"),
-                (Bus::Usb, _) => w("Souris USB", "USB mouse"),
-                (Bus::Internal, _) => w("Intégrée au portable", "Built in"),
+                (Bus::Bluetooth, _) => words::BLUETOOTH_MOUSE,
+                (Bus::Usb, _) => words::USB_MOUSE,
+                (Bus::Internal, _) => words::BUILT_IN_2,
             }
             .get(lang)
             .to_owned(),
         ),
-        (DeviceKind::Pointer, many) => Some(if fr {
-            format!("{} souris", many.len())
-        } else {
-            format!("{} mice", many.len())
-        }),
+        (DeviceKind::Pointer, many) => Some(words::mice(lang, many.len())),
     }
 }
 
@@ -583,9 +520,12 @@ mod tests {
         assert!(!takes("touchpad.right-click", Some(&devices)));
         assert!(takes("touchpad.scroll", None), "devices not known yet");
         assert_eq!(
-            aside("touchpad.natural-scroll").map(|w| w.fr),
+            aside("touchpad.natural-scroll").map(|w| w.get(hocus_words::Lang::French)),
             Some(", pavé tactile")
         );
-        assert_eq!(aside("pointer.speed").map(|w| w.en), Some(", mouse"));
+        assert_eq!(
+            aside("pointer.speed").map(|w| w.get(hocus_words::Lang::English)),
+            Some(", mouse")
+        );
     }
 }

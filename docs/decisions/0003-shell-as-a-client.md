@@ -1,7 +1,7 @@
 # 0003 — The shell is a client, drawn with iced
 
 Date: 2026-10-27 · Status: accepted, confirmed by the spike (2026-10-28,
-[report](../design/spike-iced.md))
+[report](../design/spike-iced.md)); how its surfaces are built: 0005
 
 ## Context
 

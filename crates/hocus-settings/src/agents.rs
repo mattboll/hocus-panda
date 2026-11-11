@@ -9,25 +9,26 @@
 //! halo, its reminder, the peek and the rows' pandas are `[agents]`'s
 //! keys, which the compositor follows as the file changes.
 
+use hocus_words::settings::agents as words;
 use std::sync::OnceLock;
 
 use hocus_link::ToolState;
 
 use crate::{
-    lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::{Lang, Words},
+    model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const TOOLS: RowGroup = RowGroup {
-    label: w("LES OUTILS SUIVIS", "FOLLOWED TOOLS"),
+    label: words::FOLLOWED_TOOLS,
     per_source: false,
 };
 pub const HALO_GROUP: RowGroup = RowGroup {
-    label: w("LE HALO", "THE HALO"),
+    label: words::THE_HALO,
     per_source: false,
 };
 pub const PANDAS_GROUP: RowGroup = RowGroup {
-    label: w("LES PANDAS", "THE PANDAS"),
+    label: words::THE_PANDAS,
     per_source: false,
 };
 
@@ -237,23 +238,14 @@ impl Row {
     /// Its state's words and colour.
     pub fn state(self) -> (Words, u32) {
         match self {
-            Self::Plugged => (w("Branché", "Plugged in"), 0x7EE0A0),
-            Self::ToApprove => (
-                w("Branché · à approuver", "Plugged in · to approve"),
-                0xF5C46E,
-            ),
-            Self::Found => (w("Trouvé, pas branché", "Found, not plugged in"), 0x8C96A8),
-            Self::Declined => (w("Refusé", "Declined"), 0x8C96A8),
-            Self::Absent => (
-                w("Pas sur cet ordinateur", "Not on this computer"),
-                0x8C96A8,
-            ),
-            Self::Running => (w("En marche", "Running"), 0x7EE0A0),
-            Self::RunningIgnored => (
-                w("En marche · pas suivi", "Running · not followed"),
-                0x8C96A8,
-            ),
-            Self::Stopped => (w("Ne tourne pas", "Not running"), 0x8C96A8),
+            Self::Plugged => (words::PLUGGED_IN, 0x7EE0A0),
+            Self::ToApprove => (words::PLUGGED_IN_TO_APPROVE, 0xF5C46E),
+            Self::Found => (words::FOUND_NOT_PLUGGED_IN, 0x8C96A8),
+            Self::Declined => (words::DECLINED, 0x8C96A8),
+            Self::Absent => (words::NOT_ON_THIS_COMPUTER, 0x8C96A8),
+            Self::Running => (words::RUNNING, 0x7EE0A0),
+            Self::RunningIgnored => (words::RUNNING_NOT_FOLLOWED, 0x8C96A8),
+            Self::Stopped => (words::NOT_RUNNING, 0x8C96A8),
         }
     }
 }
@@ -266,66 +258,34 @@ pub fn line(row: Row, tool: Tool, file: &str, declined: Option<&str>, lang: Lang
         Tool::Codex => "~/.codex",
         Tool::Herdr => "",
     };
-    match (row, lang) {
-        (Row::Plugged, Lang::French) => format!("ses crochets sont dans {file}"),
-        (Row::Plugged, Lang::English) => format!("its hooks are in {file}"),
-        (Row::ToApprove, Lang::French) => {
-            "dans Codex avec /hooks ; d’ici là, seule la fin de chaque tour arrive.".to_owned()
-        }
-        (Row::ToApprove, Lang::English) => {
-            "in Codex with /hooks; until then only the end of each turn arrives.".to_owned()
-        }
-        (Row::Found, Lang::French) => format!("trouvé dans {dir}"),
-        (Row::Found, Lang::English) => format!("found in {dir}"),
-        (Row::Declined, Lang::French) => match declined {
-            Some(day) => format!("avec « Ne rien brancher » le {day} · trouvé dans {dir}"),
-            None => format!("avec « Ne rien brancher » · trouvé dans {dir}"),
+    match row {
+        Row::Plugged => words::hooks_in(lang, file),
+        Row::ToApprove => words::TO_APPROVE.get(lang).to_owned(),
+        Row::Found => words::found_in(lang, dir),
+        Row::Declined => match declined {
+            Some(day) => words::declined_on(lang, words::DeclinedOn { day, dir }),
+            None => words::declined_found_in(lang, dir),
         },
-        (Row::Declined, Lang::English) => match declined {
-            Some(day) => format!("with “Plug nothing in” on {day} · found in {dir}"),
-            None => format!("with “Plug nothing in” · found in {dir}"),
-        },
-        (Row::Running, Lang::French) => {
-            "lu tout seul, rien à brancher ; ses noms d’onglets nomment les agents.".to_owned()
-        }
-        (Row::Running, Lang::English) => {
-            "read by itself, nothing to plug in; its tab names name the agents.".to_owned()
-        }
-        (Row::RunningIgnored, Lang::French) => {
-            "ses agents ne sont pas suivis ; « Suivre herdr » les reprend.".to_owned()
-        }
-        (Row::RunningIgnored, Lang::English) => {
-            "its agents are not followed; “Follow herdr” brings them back.".to_owned()
-        }
-        (Row::Stopped, Lang::French) => "suivi dès qu’il démarre".to_owned(),
-        (Row::Stopped, Lang::English) => "followed as soon as it starts".to_owned(),
-        (Row::Absent, _) => String::new(),
+        Row::Running => words::HERDR_RUNNING.get(lang).to_owned(),
+        Row::RunningIgnored => words::HERDR_IGNORED.get(lang).to_owned(),
+        Row::Stopped => words::HERDR_STOPPED.get(lang).to_owned(),
+        Row::Absent => String::new(),
     }
 }
 
 /// "~/.claude/settings.json ne se lit pas : il n'est pas touché."
 pub fn broken(file: &str, lang: Lang) -> String {
-    match lang {
-        Lang::French => format!("{file} ne se lit pas : il n’est pas touché."),
-        Lang::English => format!("{file} does not read: it is left alone."),
-    }
+    words::does_not_read_it_is_left(lang, file)
 }
 
 /// "2 suivis · 3 agents en cours".
 pub fn count_said(followed: usize, running: usize, lang: Lang) -> String {
-    let running = match (lang, running) {
-        (Lang::French, 0) => "aucun agent en cours".to_owned(),
-        (Lang::French, 1) => "1 agent en cours".to_owned(),
-        (Lang::French, n) => format!("{n} agents en cours"),
-        (Lang::English, 0) => "no agent running".to_owned(),
-        (Lang::English, 1) => "1 agent running".to_owned(),
-        (Lang::English, n) => format!("{n} agents running"),
+    let running = match running {
+        0 => words::NO_AGENT_RUNNING.get(lang).to_owned(),
+        1 => words::N_1_AGENT_RUNNING.get(lang).to_owned(),
+        n => words::agents_running(lang, n),
     };
-    let followed = match (lang, followed) {
-        (Lang::French, n) if n <= 1 => format!("{n} suivi"),
-        (Lang::French, n) => format!("{n} suivis"),
-        (Lang::English, n) => format!("{n} followed"),
-    };
+    let followed = words::followed(lang, followed);
     format!("{followed} · {running}")
 }
 
@@ -335,39 +295,15 @@ pub fn day_said(at: i64, lang: Lang) -> Option<String> {
     let zoned = jiff::Timestamp::from_second(at)
         .ok()?
         .to_zoned(jiff::tz::TimeZone::system());
-    let months_fr = [
-        "janvier",
-        "février",
-        "mars",
-        "avril",
-        "mai",
-        "juin",
-        "juillet",
-        "août",
-        "septembre",
-        "octobre",
-        "novembre",
-        "décembre",
-    ];
-    let months_en = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
     let month = usize::try_from(zoned.month() - 1).ok()?;
-    Some(match lang {
-        Lang::French => format!("{} {}", zoned.day(), months_fr.get(month)?),
-        Lang::English => format!("{} {}", zoned.day(), months_en.get(month)?),
-    })
+    let month = hocus_words::date::MONTHS.get(lang).get(month)?;
+    Some(words::day_month(
+        lang,
+        words::DayMonth {
+            day: zoned.day(),
+            month,
+        },
+    ))
 }
 
 /// A state the preview plays.
@@ -391,9 +327,9 @@ impl Played {
 
     pub fn label(self) -> Words {
         match self {
-            Self::Waiting => w("Attend", "Waiting"),
-            Self::Stuck => w("Bloqué", "Stuck"),
-            Self::Done => w("Fini", "Done"),
+            Self::Waiting => words::WAITING,
+            Self::Stuck => words::STUCK,
+            Self::Done => words::DONE,
         }
     }
 
@@ -409,18 +345,9 @@ impl Played {
     /// What the preview's line says of it.
     pub fn said(self) -> Words {
         match self {
-            Self::Waiting => w(
-                "Un agent t’attend : une vague, puis la lueur reste jusqu’à ce que tu y ailles.",
-                "An agent waits for you: a wave, then the glow stays until you go to it.",
-            ),
-            Self::Stuck => w(
-                "Un agent est bloqué : la lueur orange, sans vague.",
-                "An agent is stuck: the orange glow, without a wave.",
-            ),
-            Self::Done => w(
-                "Un agent a fini : une lueur douce, sans vague, jusqu’à ce que tu le voies.",
-                "An agent is done: a soft glow, without a wave, until you see it.",
-            ),
+            Self::Waiting => words::AN_AGENT_WAITS_FOR_YOU_A,
+            Self::Stuck => words::AN_AGENT_IS_STUCK_THE_ORANGE,
+            Self::Done => words::AN_AGENT_IS_DONE_A_SOFT,
         }
     }
 
@@ -441,7 +368,7 @@ pub fn outside() -> &'static [Outside] {
             id: TOOLS_ROW,
             section: SectionId::Agents,
             group: TOOLS.label,
-            name: w("Les outils suivis", "Followed tools"),
+            name: words::FOLLOWED_TOOLS_2,
             keywords: (
                 &[
                     "outils",
@@ -477,7 +404,7 @@ pub fn outside() -> &'static [Outside] {
             id: ANOTHER,
             section: SectionId::Agents,
             group: TOOLS.label,
-            name: w("Un autre outil", "Another tool"),
+            name: words::ANOTHER_TOOL,
             keywords: (
                 &["commande", "hocus agent", "programme", "état"],
                 &["command", "hocus agent", "program", "state"],
@@ -487,7 +414,7 @@ pub fn outside() -> &'static [Outside] {
             id: PREVIEW,
             section: SectionId::Agents,
             group: HALO_GROUP.label,
-            name: w("Aperçu", "Preview"),
+            name: words::PREVIEW,
             keywords: (
                 &["halo", "lueur", "vague", "aperçu"],
                 &["halo", "glow", "wave", "preview"],
@@ -497,7 +424,7 @@ pub fn outside() -> &'static [Outside] {
             id: REST,
             section: SectionId::Agents,
             group: PANDAS_GROUP.label,
-            name: w("Jamais au repos", "Never at rest"),
+            name: words::NEVER_AT_REST,
             keywords: (
                 &["panda", "pandas", "mouvement", "repos", "économie"],
                 &["panda", "pandas", "motion", "rest", "power saving"],
@@ -507,17 +434,9 @@ pub fn outside() -> &'static [Outside] {
     &ALL
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -548,11 +467,9 @@ fn setting(
 pub fn button_said(id: &str, value: &Value, lang: Lang) -> Option<&'static str> {
     Some(match (id, value) {
         (HALO, Value::Word("waiting")) | (PEEK, Value::Word("waiting")) => {
-            w("Quand il t’attend", "When it waits for you").get(lang)
+            words::WHEN_IT_WAITS_FOR_YOU.get(lang)
         }
-        (PEEK, Value::Word("waiting-and-done")) => {
-            w("Attend ou a fini", "Waits or is done").get(lang)
-        }
+        (PEEK, Value::Word("waiting-and-done")) => words::WAITS_OR_IS_DONE.get(lang),
         _ => return None,
     })
 }
@@ -560,9 +477,7 @@ pub fn button_said(id: &str, value: &Value, lang: Lang) -> Option<&'static str> 
 /// What a choice says beside it in its menu.
 pub fn aside(id: &str, value: &Value, lang: Lang) -> Option<&'static str> {
     match (id, value) {
-        (HALO, Value::Word("all")) => {
-            Some(w("attend, bloqué, fini", "waits, stuck, done").get(lang))
-        }
+        (HALO, Value::Word("all")) => Some(words::WAITS_STUCK_DONE.get(lang)),
         _ => None,
     }
 }
@@ -575,108 +490,63 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 HALO,
                 HALO_GROUP,
-                w("Le halo", "The halo"),
-                w(
-                    "La barre s’illumine : ambre quand un agent t’attend, orange s’il est bloqué, vert quand il a fini.",
-                    "The bar lights up: amber when an agent waits for you, orange when it is stuck, green when it is done.",
-                ),
+                words::THE_HALO_2,
+                words::THE_BAR_LIGHTS_UP_AMBER_WHEN,
                 (
                     &["halo", "lueur", "vague", "barre", "illumine"],
                     &["halo", "glow", "wave", "bar", "lights"],
                 ),
                 Kind::Menu(vec![
-                    word("Pour tout", "For everything", "all"),
-                    word(
-                        "Quand un agent t’attend",
-                        "When an agent waits for you",
-                        "waiting",
-                    ),
-                    word("Jamais", "Never", "off"),
+                    word(words::FOR_EVERYTHING, "all"),
+                    word(words::WHEN_AN_AGENT_WAITS_FOR_YOU, "waiting"),
+                    word(words::NEVER, "off"),
                 ]),
-                one(
-                    &["agents", "halo"],
-                    Codec::Word(HALO_WORDS),
-                    Value::Word("all"),
-                ),
+                one(&["agents", "halo"], Codec::Word(HALO_WORDS)),
             ),
             setting(
                 REMIND,
                 HALO_GROUP,
-                w(
-                    "Rappeler un agent qui t’attend",
-                    "Remind me of a waiting agent",
-                ),
-                w(
-                    "Une vague de plus, une seule fois, s’il attend encore.",
-                    "One more wave, once, if it still waits.",
-                ),
+                words::REMIND_ME_OF_A_WAITING_AGENT,
+                words::ONE_MORE_WAVE_ONCE_IF_IT,
                 (
                     &["rappel", "rappeler", "vague", "attend"],
                     &["reminder", "remind", "wave", "waits"],
                 ),
                 Kind::Menu(vec![
-                    word("Après 2 min", "After 2 min", "2m"),
-                    word("Après 5 min", "After 5 min", "5m"),
-                    word("Après 10 min", "After 10 min", "10m"),
-                    word("Jamais", "Never", "never"),
+                    word(words::AFTER_2_MIN, "2m"),
+                    word(words::AFTER_5_MIN, "5m"),
+                    word(words::AFTER_10_MIN, "10m"),
+                    word(words::NEVER, "never"),
                 ]),
-                one(
-                    &["agents", "remind"],
-                    Codec::Word(REMIND_WORDS),
-                    Value::Word("5m"),
-                ),
+                one(&["agents", "remind"], Codec::Word(REMIND_WORDS)),
             ),
             setting(
                 PEEK,
                 PANDAS_GROUP,
-                w(
-                    "Le panda qui sort de la barre",
-                    "The panda peeking out of the bar",
-                ),
-                w(
-                    "Il sort 8 s avec une bulle, puis rentre ; un clic va à l’agent.",
-                    "It comes out for 8 s with a bubble, then goes back; a click goes to the agent.",
-                ),
+                words::THE_PANDA_PEEKING_OUT_OF_THE,
+                words::IT_COMES_OUT_FOR_8_S,
                 (
                     &["panda", "peek", "bulle", "sort", "secrétaire"],
                     &["panda", "peek", "bubble", "peeking", "secretary"],
                 ),
                 Kind::Menu(vec![
-                    word(
-                        "Quand un agent t’attend ou a fini",
-                        "When an agent waits for you or is done",
-                        "waiting-and-done",
-                    ),
-                    word(
-                        "Quand un agent t’attend",
-                        "When an agent waits for you",
-                        "waiting",
-                    ),
-                    word("Jamais", "Never", "off"),
+                    word(words::WHEN_AN_AGENT_WAITS_FOR_YOU_2, "waiting-and-done"),
+                    word(words::WHEN_AN_AGENT_WAITS_FOR_YOU, "waiting"),
+                    word(words::NEVER, "off"),
                 ]),
-                one(
-                    &["agents", "peek"],
-                    Codec::Word(PEEK_WORDS),
-                    Value::Word("waiting-and-done"),
-                ),
+                one(&["agents", "peek"], Codec::Word(PEEK_WORDS)),
             ),
             setting(
                 PANDAS,
                 PANDAS_GROUP,
-                w(
-                    "Les pandas dans les lignes des agents",
-                    "Pandas in the agents’ rows",
-                ),
-                w(
-                    "Un panda par agent, qui montre son état ; coupé, un rond de sa couleur.",
-                    "A panda per agent, showing its state; off, a dot of its colour.",
-                ),
+                words::PANDAS_IN_THE_AGENTS_ROWS,
+                words::A_PANDA_PER_AGENT_SHOWING_ITS,
                 (
                     &["panda", "pandas", "rond", "couleur", "lignes"],
                     &["panda", "pandas", "dot", "colour", "rows"],
                 ),
                 Kind::Switch,
-                one(&["agents", "pandas"], Codec::Bool, Value::Bool(true)),
+                one(&["agents", "pandas"], Codec::Bool),
             ),
         ]
     })

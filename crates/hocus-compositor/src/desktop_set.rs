@@ -65,7 +65,7 @@ impl crate::State {
     /// The names changed: the shell is told them, Alt+Tab says them.
     fn desktop_names_changed(&mut self) {
         self.tell_shell(ToShell::DesktopNames(self.config.desktops.shown_names()));
-        if self.switcher.is_some() {
+        if self.switching.open.is_some() {
             self.redraw = true;
         }
     }
@@ -133,7 +133,7 @@ impl crate::State {
             self.focus(next);
         }
         // Alt+Tab's list was of the desktops before.
-        if self.switcher.is_some() {
+        if self.switching.open.is_some() {
             self.end_switcher(false);
         }
         self.redraw = true;
@@ -236,7 +236,7 @@ impl crate::State {
     /// The Settings' line's line for `counts`.
     pub(crate) fn desktops_line((count, windows): Counts) -> String {
         serde_json::json!({
-            "desktops": { "count": count, "windows": &windows[..count] }
+            "desktops": { "count": count, "windows": windows.get(..count).unwrap_or(&windows) }
         })
         .to_string()
     }

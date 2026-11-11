@@ -59,6 +59,8 @@ const KEY_1: u32 = 2;
 const KEY_0: u32 = 11;
 const KEY_LEFTBRACE: u32 = 26;
 const KEY_V: u32 = 47;
+const KEY_C: u32 = 46;
+const KEY_X: u32 = 45;
 const KEY_INSERT: u32 = 110;
 const KEY_SPACE: u32 = 57;
 
@@ -161,8 +163,7 @@ struct Bed {
 fn ready() -> Option<PathBuf> {
     let shell = common::shell_program();
     if !fakes::available() {
-        eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
-        return None;
+        common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
     }
     Some(shell)
 }
@@ -757,6 +758,47 @@ fn a_password_typed_on_a_french_keyboard_reaches_networkmanager_exactly() -> any
     Ok(())
 }
 
+/// The password's field is the shell's text field as a secret (#771):
+/// selected, it is neither copied nor cut out, and stays as typed.
+#[test]
+fn a_password_selected_is_neither_copied_nor_cut_out() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: around(),
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, true)?;
+    let item = bed.item();
+    bed.click(item)?;
+    let rect = popover(height(&[], 8, 0.0));
+    bed.popover_is(Some(rect))?;
+    bed.click(row(rect, &[], 2))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    for key in [KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_1] {
+        bed.press(key);
+    }
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_1]);
+    chord(&mut bed.hp, &[KEY_RIGHTALT, KEY_0]);
+    bed.press(KEY_LEFTBRACE);
+    bed.press(KEY_E);
+    // On a French keyboard: Ctrl+A is on Q's key. It all selected, Ctrl+C
+    // then Ctrl+X: the clipboard takes nothing.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Q]);
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_C]);
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_X]);
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    assert_eq!(bed.hp.clipboard(), None, "the password was copied");
+    // Nothing was cut out: NetworkManager gets it whole.
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: FREEBOX.to_owned(),
+        psk: Some(PASSWORD.to_owned()),
+    })?;
+    Ok(())
+}
+
 #[test]
 fn a_wrong_password_is_said_and_kept_and_esc_folds_then_closes() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
@@ -1197,6 +1239,15 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     assert!(drawn);
     let said = hp.dispatch_until(WAIT, |_| plain(&log).contains("NetworkManager: not there"))?;
     assert!(said, "the shell never said NetworkManager is away");
+    // Its surface placed: a first commit comes before its size, and the
+    // point aimed at was then one of the levels' surface, whose popover
+    // the click opened.
+    let placed = hp.dispatch_until(WAIT, |hp| {
+        hp.connections_surfaces()
+            .first()
+            .is_some_and(|(_, s)| s.width > 0 && s.height > 0)
+    })?;
+    assert!(placed, "the connections' surface has no size");
     let s = hp.connections_surfaces()[0].1;
     let (x, y) = (f64::from(s.x + 97), f64::from(s.y + 20));
     hp.pointer_move(x - 1.0, y);
@@ -1409,6 +1460,44 @@ fn nothing_is_pasted_from_an_empty_clipboard_one_without_text_or_a_client_that_h
     Ok(())
 }
 
-// Spike #770: the popover's states shot, and what they cost.
-#[path = "wifi_spike/shots.rs"]
-mod spike_shots;
+/// The popover in its main state, and a row unfolded, shot under
+/// `HOCUS_KIT_SHOTS` (#770's side-by-sides):
+///
+/// ```sh
+/// HOCUS_KIT_SHOTS=/some/dir cargo nextest run -p hocus-compositor --run-ignored only kit_shot
+/// ```
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: around(),
+        saved: vec![
+            (LIVEBOX, Some("livebox-test")),
+            ("Bbox-55D1", Some("bbox-test")),
+        ],
+        current: Some(LIVEBOX),
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, false)?;
+    bed.hp.pointer_move(600.0, 500.0);
+    let item = bed.item();
+    bed.click(item)?;
+    let rect = popover(height(&[CURRENT], 7, 0.0));
+    bed.popover_is(Some(rect))?;
+    bed.asked(&Call::Scan)?;
+    bed.settle()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "wifi")?;
+    // The Freebox's field, unfolded, the keyboard in it.
+    bed.click(row(rect, &[CURRENT], 1))?;
+    bed.popover_is(Some(popover(height(&[CURRENT], 7, FORM))))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    for key in [KEY_Q, KEY_W, KEY_E] {
+        bed.press(key);
+    }
+    common::popover_shot(&mut bed.hp, "wifi-field")?;
+    Ok(())
+}

@@ -1,14 +1,14 @@
-//! A popover's rows for screen readers: each popover says, as it draws,
-//! what it shows by the kit's kinds (buttons, switches, sliders, radio
-//! buttons, fields, lines), the order its keyboard's ring goes through
-//! them, and which one the ring is on. Only one popover shows at a time;
-//! a screen reader's click on a row is the keys that would reach it (`Tab`
-//! to it, then `Enter`), so that every popover does what it does for the
-//! keyboard.
+//! A surface's rows for screen readers: each popover, and each surface of
+//! the widget kit's own, says as it draws what it shows by the kit's kinds
+//! (buttons, switches, sliders, radio buttons, fields, lines), the order
+//! its keyboard's ring goes through them, and which one the ring is on.
+//! Only one popover shows at a time; a screen reader's click on a row is
+//! the keys that would reach it (`Tab` to it, then `Enter`), so that every
+//! popover does what it does for the keyboard.
 
 use std::sync::{Mutex, PoisonError};
 
-use hocus_a11y::{Act, Node, Rect, Role};
+use hocus_a11y::{Node, Rect};
 use iced::{Rectangle, window};
 
 /// What a popover shows, for screen readers.
@@ -27,76 +27,44 @@ pub struct Rows {
     pub arrows: bool,
 }
 
-static ROWS: Mutex<Option<(window::Id, Rows)>> = Mutex::new(None);
+/// The surfaces that said what they show, the last last: a popover, and
+/// the kit's surfaces of their own (the actions palette, the emoji
+/// picker…), which may show beside it.
+static ROWS: Mutex<Vec<(window::Id, Rows)>> = Mutex::new(Vec::new());
 
-/// Popover `surface` shows `rows` now.
+/// How many surfaces' rows are kept: those closed go first.
+const KEPT: usize = 8;
+
+/// Surface `surface` shows `rows` now.
 pub fn publish(surface: window::Id, rows: Rows) {
     let mut kept = ROWS.lock().unwrap_or_else(PoisonError::into_inner);
-    if kept
-        .as_ref()
-        .is_none_or(|(s, r)| *s != surface || *r != rows)
-    {
-        *kept = Some((surface, rows));
+    match kept.iter_mut().find(|(s, _)| *s == surface) {
+        Some((_, shown)) => {
+            if *shown != rows {
+                *shown = rows;
+            }
+        }
+        None => {
+            if kept.len() >= KEPT {
+                kept.remove(0);
+            }
+            kept.push((surface, rows));
+        }
     }
 }
 
-/// What popover `surface` last said it shows.
+/// What surface `surface` last said it shows.
 pub fn of(surface: window::Id) -> Option<Rows> {
     ROWS.lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-        .filter(|(s, _)| *s == surface)
+        .iter()
+        .find(|(s, _)| *s == surface)
         .map(|(_, r)| r.clone())
 }
 
 /// A rectangle of the popover's, as a node's bounds.
 pub fn at(rect: Rectangle) -> Option<Rect> {
     Some(Rect::new(rect.x, rect.y, rect.width, rect.height))
-}
-
-/// A target's key: its debug form.
-pub fn key(target: impl std::fmt::Debug) -> String {
-    format!("{target:?}")
-}
-
-/// A row the keyboard's ring goes to (`target`), `Enter` acting on it.
-pub fn act(
-    target: impl std::fmt::Debug,
-    role: Role,
-    name: impl Into<String>,
-    rect: Rectangle,
-) -> Node {
-    Node::new(key(target), role, name)
-        .bounds(at(rect))
-        .act(Act::Click)
-}
-
-/// A slider the ring goes to: its value as words and as a number, 0 to
-/// 100, the arrows' step `step`.
-pub fn slider(
-    target: impl std::fmt::Debug,
-    name: impl Into<String>,
-    value: f32,
-    step: f32,
-    rect: Rectangle,
-) -> Node {
-    Node::new(key(target), Role::Slider, name)
-        .value(format!("{}\u{a0}%", value.round().max(0.0) as u32))
-        .range(f64::from(value), 0.0, 100.0, Some(f64::from(step)))
-        .bounds(at(rect))
-        .act(Act::Increment)
-        .act(Act::Decrement)
-}
-
-/// A line of text that nothing holds: a note, a section's label.
-pub fn line(text: impl Into<String>) -> Node {
-    let text = text.into();
-    Node::new(format!("line:{text}"), Role::Label, text)
-}
-
-/// The keys of `targets`, the ring's order.
-pub fn order<T: std::fmt::Debug>(targets: impl IntoIterator<Item = T>) -> Vec<String> {
-    targets.into_iter().map(key).collect()
 }
 
 /// The `Tab`s that take the ring from `focus` to `to` in `order` (round

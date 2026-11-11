@@ -200,7 +200,7 @@ pub fn load_font(handle: &LoopHandle<'static, App>) {
         if let Event::Msg(font) = event {
             app.state.overlay.font = Some(font);
             app.state.overlay.labels.borrow_mut().clear();
-            if app.state.switcher.is_some() {
+            if app.state.switching.open.is_some() {
                 app.state.redraw = true;
             }
         }
@@ -302,8 +302,10 @@ fn text(
                         premultiply(colour[0]),
                         alpha as u8,
                     ];
-                    for k in 0..4 {
-                        pixels[at + k] = pixels[at + k].max(px[k]);
+                    if let Some(under) = pixels.get_mut(at..at + 4) {
+                        for (under, over) in under.iter_mut().zip(px) {
+                            *under = (*under).max(over);
+                        }
                     }
                 }
             }
@@ -375,7 +377,9 @@ impl State {
                 .into_iter()
                 .enumerate()
             {
-                let ids = &self.overlay.dots[(2 * d + k) % self.overlay.dots.len()];
+                let Some(ids) = self.overlay.dots.get(2 * d + k) else {
+                    continue;
+                };
                 out.extend(
                     box_elements(renderer, textures, ids, style, r, scale, alpha * a as f32)
                         .into_iter()
@@ -398,7 +402,8 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let reduced = self.reduced_motion();
-        let (switcher, shown): (&Switcher, f64) = match (&self.switcher, &self.switcher_out) {
+        let (switcher, shown): (&Switcher, f64) = match (&self.switching.open, &self.switching.out)
+        {
             (Some(s), _) if s.shown(now) => (s, s.appear(now)),
             (_, Some((s, tween))) => (s, 1.0 - tween.at(now)),
             _ => return,

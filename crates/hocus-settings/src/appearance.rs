@@ -9,33 +9,34 @@
 //! speaks the language too, as soon as the file says them: it is the
 //! page's own preview. `text-scale` sizes the Settings window.
 
+use hocus_words::settings::appearance as words;
 use std::{path::PathBuf, sync::OnceLock};
 
 use hocus_link::theme::{Accent, Scheme};
 
 use crate::{
-    lang::{Lang, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    lang::Lang,
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 const THEME: RowGroup = RowGroup {
-    label: w("THÈME ET COULEUR", "THEME AND COLOUR"),
+    label: words::THEME_AND_COLOUR,
     per_source: false,
 };
 const TEXT: RowGroup = RowGroup {
-    label: w("TEXTE", "TEXT"),
+    label: words::TEXT,
     per_source: false,
 };
 const CURSOR: RowGroup = RowGroup {
-    label: w("CURSEUR", "CURSOR"),
+    label: words::CURSOR,
     per_source: false,
 };
 const MOTION: RowGroup = RowGroup {
-    label: w("MOUVEMENT ET LISIBILITÉ", "MOTION AND LEGIBILITY"),
+    label: words::MOTION_AND_LEGIBILITY,
     per_source: false,
 };
 const LANGUAGE: RowGroup = RowGroup {
-    label: w("LANGUE ET FORMATS", "LANGUAGE AND FORMATS"),
+    label: words::LANGUAGE_AND_FORMATS,
     per_source: false,
 };
 
@@ -56,19 +57,11 @@ const TIMES: &[&str] = &["24h", "12h"];
 /// The cursor's sizes offered; the compositor takes 8 to 256.
 pub const CURSOR_SIZES: [i64; 4] = [24, 32, 48, 64];
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: text,
         value: Value::Word(word),
     }
-}
-
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
 }
 
 /// The theme's setting, and the accent's.
@@ -342,11 +335,12 @@ pub fn find_cursor_themes() {
 }
 
 /// The page's settings, in its order.
+// Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
         let mut cursor_themes = vec![Choice {
-            label: w("Celui du système", "The system's"),
+            label: words::THE_SYSTEM_S,
             value: Value::Text(String::new()),
         }];
         cursor_themes.extend(
@@ -355,16 +349,16 @@ pub fn settings() -> &'static [Setting] {
                 .into_iter()
                 .flatten()
                 .map(|name| Choice {
-                    label: w(name, name),
+                    label: hocus_words::Text::same(name),
                     value: Value::Text((*name).to_owned()),
                 }),
         );
         let size = |n: i64| Choice {
             label: match n {
-                24 => w("24", "24"),
-                32 => w("32", "32"),
-                48 => w("48", "48"),
-                _ => w("64", "64"),
+                24 => words::N_24,
+                32 => words::N_32,
+                48 => words::N_48,
+                _ => words::N_64,
             },
             value: Value::Int(n),
         };
@@ -373,58 +367,71 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.theme",
                 section: SectionId::Appearance,
                 group: THEME,
-                name: w("Thème", "Theme"),
-                line: Some(w(
-                    "La barre, les menus, le lanceur et les Réglages ; les applications le savent aussi. Givre et Matrix gardent les Réglages et les applications sombres.",
-                    "The bar, menus, launcher and Settings; applications are told too. Frost and Matrix keep the Settings and applications dark.",
-                )),
+                name: words::THEME,
+                line: Some(words::THE_BAR_MENUS_LAUNCHER_AND_SETTINGS),
                 keywords: (
-                    &["sombre", "clair", "nuit", "mode sombre", "thème", "givre", "glacé", "matrix", "phosphore"],
-                    &["dark", "light", "night", "dark mode", "theme", "frost", "ice", "matrix", "phosphor"],
+                    &[
+                        "sombre",
+                        "clair",
+                        "nuit",
+                        "mode sombre",
+                        "thème",
+                        "givre",
+                        "glacé",
+                        "matrix",
+                        "phosphore",
+                    ],
+                    &[
+                        "dark",
+                        "light",
+                        "night",
+                        "dark mode",
+                        "theme",
+                        "frost",
+                        "ice",
+                        "matrix",
+                        "phosphor",
+                    ],
                 ),
                 kind: Kind::Segmented(vec![
-                    word("Sombre", "Dark", "dark"),
-                    word("Clair", "Light", "light"),
-                    word("Givre", "Frost", "frost"),
-                    word("Matrix", "Matrix", "matrix"),
+                    word(words::DARK, "dark"),
+                    word(words::LIGHT, "light"),
+                    word(words::FROST, "frost"),
+                    word(words::MATRIX, "matrix"),
                 ]),
-                places: one(
-                    &["appearance", "theme"],
-                    Codec::Word(SCHEMES),
-                    Value::Word("dark"),
-                ),
+                places: one(&["appearance", "theme"], Codec::Word(SCHEMES)),
                 needs: None,
             },
             Setting {
                 id: "appearance.accent",
                 section: SectionId::Appearance,
                 group: THEME,
-                name: w("Couleur d’accent", "Accent colour"),
-                line: Some(w(
-                    "Les interrupteurs, la sélection, l’anneau du clavier.",
-                    "Switches, selection, the keyboard’s ring.",
-                )),
+                name: words::ACCENT_COLOUR,
+                line: Some(words::SWITCHES_SELECTION_THE_KEYBOARD_S_RING),
                 keywords: (
-                    &["couleur", "teinte", "vert", "bleu", "violet", "rose", "accent"],
-                    &["colour", "color", "hue", "highlight", "green", "blue", "accent"],
+                    &[
+                        "couleur", "teinte", "vert", "bleu", "violet", "rose", "accent",
+                    ],
+                    &[
+                        "colour",
+                        "color",
+                        "hue",
+                        "highlight",
+                        "green",
+                        "blue",
+                        "accent",
+                    ],
                 ),
                 kind: Kind::Swatches,
-                places: one(
-                    &["appearance", "accent"],
-                    Codec::Word(ACCENTS),
-                    Value::Word("green"),
-                ),
+                places: one(&["appearance", "accent"], Codec::Word(ACCENTS)),
                 needs: None,
             },
             Setting {
                 id: "appearance.text-scale",
                 section: SectionId::Appearance,
                 group: TEXT,
-                name: w("Taille du texte", "Text size"),
-                line: Some(w(
-                    "La fenêtre des Réglages, sans changer l’échelle de l’écran ; la barre garde ses tailles.",
-                    "The Settings window, without changing the screen’s scale; the bar keeps its sizes.",
-                )),
+                name: words::TEXT_SIZE,
+                line: Some(words::THE_SETTINGS_WINDOW_WITHOUT_CHANGING_THE),
                 keywords: (
                     &["police", "grand", "petit", "zoom", "agrandir", "taille"],
                     &["font", "big", "small", "zoom", "larger", "text size"],
@@ -438,7 +445,6 @@ pub fn settings() -> &'static [Setting] {
                 places: one(
                     &["appearance", "text-scale"],
                     Codec::Hundredths { min: 80, max: 150 },
-                    Value::Int(100),
                 ),
                 needs: None,
             },
@@ -446,56 +452,59 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.cursor-theme",
                 section: SectionId::Appearance,
                 group: CURSOR,
-                name: w("Thème du curseur", "Cursor theme"),
-                line: Some(w(
-                    "Les programmes que le bureau lance prennent le même.",
-                    "Programs the desktop starts take the same.",
-                )),
+                name: words::CURSOR_THEME,
+                line: Some(words::PROGRAMS_THE_DESKTOP_STARTS_TAKE_THE),
                 keywords: (
                     &["pointeur", "souris", "flèche", "curseur"],
                     &["pointer", "mouse", "arrow", "cursor"],
                 ),
                 kind: Kind::Menu(cursor_themes),
-                places: one(
+                places: Places::One(Place::unset(
                     &["appearance", "cursor-theme"],
                     Codec::Text,
                     Value::Text(String::new()),
-                ),
+                )),
                 needs: None,
             },
             Setting {
                 id: "appearance.cursor-size",
                 section: SectionId::Appearance,
                 group: CURSOR,
-                name: w("Taille du curseur", "Cursor size"),
-                line: Some(w(
-                    "En pixels, à l’échelle de chaque écran.",
-                    "In pixels, at each screen’s scale.",
-                )),
+                name: words::CURSOR_SIZE,
+                line: Some(words::IN_PIXELS_AT_EACH_SCREEN_S),
                 keywords: (
                     &["pointeur", "souris", "flèche", "grand curseur"],
                     &["pointer", "mouse", "arrow", "big cursor"],
                 ),
                 kind: Kind::Segmented(CURSOR_SIZES.map(size).to_vec()),
-                places: one(
+                places: Places::One(Place::unset(
                     &["appearance", "cursor-size"],
                     Codec::Int { min: 8, max: 256 },
                     Value::Int(24),
-                ),
+                )),
                 needs: None,
             },
             Setting {
                 id: "appearance.accessibility",
                 section: SectionId::Appearance,
                 group: MOTION,
-                name: w("Accessibilité", "Accessibility"),
-                line: Some(w(
-                    "Les mouvements réduits, la transparence réduite, le contraste élevé et la loupe.",
-                    "Reduced motion, reduced transparency, high contrast and the magnifier.",
-                )),
+                name: words::ACCESSIBILITY,
+                line: Some(words::REDUCED_MOTION_REDUCED_TRANSPARENCY_HIGH_CONTRAST),
                 keywords: (
-                    &["mouvement", "transparence", "contraste", "loupe", "accessibilité"],
-                    &["motion", "transparency", "contrast", "magnifier", "accessibility"],
+                    &[
+                        "mouvement",
+                        "transparence",
+                        "contraste",
+                        "loupe",
+                        "accessibilité",
+                    ],
+                    &[
+                        "motion",
+                        "transparency",
+                        "contrast",
+                        "magnifier",
+                        "accessibility",
+                    ],
                 ),
                 kind: Kind::Link(SectionId::Accessibility),
                 places: Places::Page(Place {
@@ -509,86 +518,66 @@ pub fn settings() -> &'static [Setting] {
                 id: "locale.language",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("Langue", "Language"),
-                line: Some(w(
-                    "Tout le bureau change aussitôt ; une application déjà ouverte, à son prochain démarrage.",
-                    "The whole desktop changes at once; an application already open, when it next starts.",
-                )),
+                name: words::LANGUAGE,
+                line: Some(words::THE_WHOLE_DESKTOP_CHANGES_AT_ONCE),
                 keywords: (
                     &["anglais", "français", "traduction", "langue"],
                     &["english", "french", "translation", "locale", "language"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("Celle du système", "The system’s", "system"),
-                    word("Français", "Français", "fr"),
-                    word("English", "English", "en"),
+                    word(words::THE_SYSTEM_S_2, "system"),
+                    word(words::FRAN_AIS, "fr"),
+                    word(words::ENGLISH, "en"),
                 ]),
-                places: one(
-                    &["locale", "language"],
-                    Codec::Word(LANGUAGES),
-                    Value::Word("system"),
-                ),
+                places: one(&["locale", "language"], Codec::Word(LANGUAGES)),
                 needs: None,
             },
             Setting {
                 id: "locale.date",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("Date", "Date"),
-                line: Some(w(
-                    "Dans la barre, sur l’écran verrouillé et dans le calendrier.",
-                    "In the bar, on the lock screen and in the calendar.",
-                )),
+                name: words::DATE,
+                line: Some(words::IN_THE_BAR_ON_THE_LOCK),
                 keywords: (
                     &["format", "jour", "mois", "jj/mm"],
                     &["format", "day", "month", "dd/mm"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("En toutes lettres", "In words", "long"),
-                    word("Abrégée", "Short", "short"),
-                    word("En chiffres", "In numbers", "numeric"),
-                    word("Année d’abord", "Year first", "iso"),
+                    word(words::IN_WORDS, "long"),
+                    word(words::SHORT, "short"),
+                    word(words::IN_NUMBERS, "numeric"),
+                    word(words::YEAR_FIRST, "iso"),
                 ]),
-                places: one(
-                    &["locale", "date"],
-                    Codec::Word(DATES),
-                    Value::Word("long"),
-                ),
+                places: one(&["locale", "date"], Codec::Word(DATES)),
                 needs: None,
             },
             Setting {
                 id: "locale.time",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("Heure", "Time"),
-                line: Some(w(
-                    "Sur 24 heures, ou sur 12 avec le matin et l’après-midi.",
-                    "Over 24 hours, or 12 with AM and PM.",
-                )),
+                name: words::TIME,
+                line: Some(words::OVER_24_HOURS_OR_12_WITH),
                 keywords: (
                     &["12 h", "24 h", "am", "pm", "format de l’heure"],
                     &["12 h", "24 h", "am", "pm", "time format"],
                 ),
                 kind: Kind::Segmented(vec![
-                    word("14:05", "14:05", "24h"),
-                    word("2:05 PM", "2:05 PM", "12h"),
+                    word(words::N_14_05, "24h"),
+                    word(words::N_2_05_PM, "12h"),
                 ]),
-                places: one(
+                places: Places::One(Place::unset(
                     &["locale", "time"],
                     Codec::Word(TIMES),
                     Value::Word(locale_hours()),
-                ),
+                )),
                 needs: None,
             },
             Setting {
                 id: "appearance.bar-clock",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("L’horloge de la barre", "The bar’s clock"),
-                line: Some(w(
-                    "Sa police, sa couleur et ses secondes.",
-                    "Its font, colour and seconds.",
-                )),
+                name: words::THE_BAR_S_CLOCK,
+                line: Some(words::ITS_FONT_COLOUR_AND_SECONDS),
                 keywords: (&["horloge", "secondes"], &["clock", "seconds"]),
                 kind: Kind::Link(SectionId::Bar),
                 places: Places::Page(Place {
@@ -606,80 +595,23 @@ pub fn settings() -> &'static [Setting] {
 /// novembre", "jeu. 5 nov.", "05/11/2026", "2026-11-05".
 pub fn today_as(format: &str, today: jiff::civil::Date, lang: Lang) -> String {
     let (year, month, day) = (today.year(), today.month(), today.day());
-    let fr = lang.fr();
     let weekday = usize::from(today.weekday().to_monday_zero_offset().unsigned_abs());
     let month_i = usize::from(month.unsigned_abs().clamp(1, 12)) - 1;
+    let name =
+        |list: hocus_words::List, i: usize| list.get(lang).get(i).copied().unwrap_or_default();
     match format {
-        "short" => {
-            let days = if fr {
-                ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
-            } else {
-                ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            };
-            let months = if fr {
-                [
-                    "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.",
-                    "oct.", "nov.", "déc.",
-                ]
-            } else {
-                [
-                    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-                    "Dec",
-                ]
-            };
-            format!("{} {day} {}", days[weekday], months[month_i])
-        }
+        "short" => format!(
+            "{} {day} {}",
+            name(hocus_words::date::SHORT_WEEKDAYS, weekday),
+            name(hocus_words::date::SHORT_MONTHS, month_i)
+        ),
         "numeric" => format!("{day:02}/{month:02}/{year}"),
         "iso" => format!("{year}-{month:02}-{day:02}"),
-        _ => {
-            let days = if fr {
-                [
-                    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
-                ]
-            } else {
-                [
-                    "Monday",
-                    "Tuesday",
-                    "Wednesday",
-                    "Thursday",
-                    "Friday",
-                    "Saturday",
-                    "Sunday",
-                ]
-            };
-            let months = if fr {
-                [
-                    "janvier",
-                    "février",
-                    "mars",
-                    "avril",
-                    "mai",
-                    "juin",
-                    "juillet",
-                    "août",
-                    "septembre",
-                    "octobre",
-                    "novembre",
-                    "décembre",
-                ]
-            } else {
-                [
-                    "January",
-                    "February",
-                    "March",
-                    "April",
-                    "May",
-                    "June",
-                    "July",
-                    "August",
-                    "September",
-                    "October",
-                    "November",
-                    "December",
-                ]
-            };
-            format!("{} {day} {}", days[weekday], months[month_i])
-        }
+        _ => format!(
+            "{} {day} {}",
+            name(hocus_words::date::WEEKDAYS, weekday),
+            name(hocus_words::date::MONTHS, month_i)
+        ),
     }
 }
 
@@ -849,7 +781,10 @@ mod tests {
 
     #[test]
     fn the_page_has_its_five_groups_in_order() {
-        let mut groups: Vec<&str> = settings().iter().map(|s| s.group.label.fr).collect();
+        let mut groups: Vec<&str> = settings()
+            .iter()
+            .map(|s| s.group.label.get(hocus_words::Lang::French))
+            .collect();
         groups.dedup();
         assert_eq!(
             groups,

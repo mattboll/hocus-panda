@@ -16,27 +16,37 @@
 //! `Enter` acts; in the field, `Enter` adds and `Esc` closes it, a second
 //! `Esc` the popover.
 
+use std::sync::{Mutex, PoisonError};
+
+use hocus_a11y::Role;
 use hocus_link::POPOVER_WIDTH;
 use iced::{
-    Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry},
-        text::Alignment,
-    },
+    Element, Length, Padding, Point, Rectangle, Size,
+    alignment::Vertical,
+    widget::{Id, button, column, container, row, space},
     window,
 };
 
 use super::{
-    Event as Seen, Pressed, event,
-    kit::{self, BORDER, Input, LEFT, Pointer, RIGHT},
+    Pressed,
+    kit::{self, BORDER, LEFT, RIGHT},
 };
 use crate::{
-    levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, ring},
+    field::view::{Look as FieldLook, Style},
+    levels::draw::{DIM, FAINT, HOVER, MANROPE, MANROPE_BOLD, TEXT},
     tasks::{
         self, At, Key, Lines, Look, POPOVER_LINES, Words,
-        draw::{plus, tick_box, title, unsaved},
+        draw::{FIELD_BORDER, FIELD_FILL, plus, tick_box, title, unsaved},
+    },
+    ui::{
+        self, Around, Later, control,
+        field::Field,
+        parts::{drawn, gap, list_by},
+        style::{self, said},
     },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 pub const WIDTH: u32 = POPOVER_WIDTH.unsigned_abs();
 /// The header: 30 px from the padding's top; its title 14 px, the count
@@ -49,6 +59,8 @@ const COUNT_GAP: f32 = 6.0;
 const ADD: Size = Size::new(22.0, 18.0);
 const ADD_OUT: f32 = 4.0;
 const ADD_RADIUS: f32 = 6.0;
+/// A box's button under the pointer, as the group's.
+const BOX_HOVER_RADIUS: f32 = 6.0;
 /// The field: 30 px, 4 px above and under, radius 8, 9 px in, 13.5 px.
 const FIELD: f32 = 30.0;
 const FIELD_MARGIN: f32 = 4.0;
@@ -68,11 +80,25 @@ const MORE_TEXT: f32 = 12.5;
 
 /// What can be acted on.
 #[derive(Debug, Clone, PartialEq)]
-enum Target {
+pub enum Target {
     Add,
     Field,
     Box(Key),
 }
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(&self) -> String {
+        match self {
+            Self::Box(Key::Task(id)) => format!("tasks:Box({})", id.as_str()),
+            Self::Box(Key::Adding(n)) => format!("tasks:Adding({n:?})"),
+            target => format!("tasks:{target:?}"),
+        }
+    }
+}
+
+/// The list's scrollable.
+const LIST_ID: &str = "tasks:list";
 
 /// The popover laid out, from its top.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -83,16 +109,6 @@ struct Laid {
     empty: Option<f32>,
     more: Option<(String, f32)>,
     end: f32,
-}
-
-fn add_rect() -> Rectangle {
-    Rectangle::new(
-        Point::new(
-            RIGHT + ADD_OUT - ADD.width,
-            HEADER_TOP + (HEADER - ADD.height) / 2.0,
-        ),
-        ADD,
-    )
 }
 
 fn lay_out(lines: &Lines, field: bool, words: Words) -> Laid {
@@ -146,19 +162,15 @@ pub fn height() -> u32 {
     )
 }
 
-/// It opens: its list at its top.
+/// It opens: nothing holds the ring, nothing said yet.
 pub fn opening() {
-    SCROLL.store(0, std::sync::atomic::Ordering::Relaxed);
+    ui(|ui| *ui = Ui::default());
 }
 
 /// It closes: its field with it.
 pub fn closing() {
     tasks::drop_field_at(&At::Popover);
 }
-
-/// How far the list is scrolled, in lines: kept between draws, from the
-/// popover's opening.
-static SCROLL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The popover on its surface.
 #[derive(Debug, Clone)]
@@ -169,56 +181,271 @@ pub struct Panel {
 }
 
 #[derive(Debug, Default)]
-pub struct State {
-    pointer: Pointer<usize>,
-    /// What the pointer is over, and what holds the keyboard.
-    over: Option<Target>,
+struct Ui {
     focus: Option<Target>,
-    lines: Lines,
-    laid: Laid,
+    /// The press now is in the field.
+    in_field: bool,
     said: Option<String>,
 }
 
-impl State {
-    /// The lines in the list's viewport now: their index, and their top.
-    fn visible(&self) -> Vec<(usize, f32)> {
-        let Some((view, _)) = self.laid.list else {
-            return Vec::new();
-        };
-        let scroll = SCROLL.load(std::sync::atomic::Ordering::Relaxed);
-        (scroll..self.lines.lines.len())
-            .take(POPOVER_LINES)
-            .enumerate()
-            .map(|(i, index)| (index, view.y + i as f32 * LINE))
-            .collect()
-    }
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+static LATER: Later = Later::new();
 
-    /// What `Tab` goes through: the `+`, then each box shown.
-    fn order(&self) -> Vec<Target> {
-        let mut order = vec![Target::Add];
-        for (index, _) in self.visible() {
-            if let Some(line) = self.lines.lines.get(index)
-                && acts(line.look, &line.key)
-            {
-                order.push(Target::Box(line.key.clone()));
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A button pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A press in the field.
+    InField,
+    /// The field took the pointer or an input method.
+    Took,
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The tasks changed under the view, or a line is going.
+    Stale,
+}
+
+/// The popover on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let words = panel.words;
+    Around::new(panel.id, build(words), handle, Msg::Stale)
+        .rebuild(move || build(words))
+        .stale_when(|| tasks::peek().moving())
+        .keys(|pressed: &Pressed| tasks::field_key(&At::Popover, pressed).then_some(Msg::Stale))
+        .subtitle(Some(words.count(tasks::peek().open())))
+        .later(&LATER)
+        .press(Msg::Pressed)
+        .on_glass(panel.glass)
+}
+
+/// Its content, as the tasks are now.
+fn build<'a>(words: Words) -> El<'a> {
+    let lines = tasks::lines();
+    let field = tasks::field().filter(|f| f.at == At::Popover);
+    let laid = lay_out(&lines, field.is_some(), words);
+    ui(|ui| {
+        say(words, &lines, &laid, field.as_ref(), ui);
+        content(words, &lines, &laid, field.as_ref(), ui.focus.as_ref())
+    })
+}
+
+/// The field, as the tasks hold it, to the kit's field.
+fn entry(with: &mut dyn FnMut(&mut crate::field::Entry)) {
+    tasks::popover_entry(with);
+}
+
+fn content<'a>(
+    words: Words,
+    lines: &Lines,
+    laid: &Laid,
+    field: Option<&tasks::Field>,
+    focus: Option<&Target>,
+) -> El<'a> {
+    // The boxes' buttons reach 5 px past the content's left; the list's
+    // scrollbar 4 px past its right.
+    let right = RIGHT + 4.0 + kit::SCROLLBAR;
+    let add = control(
+        button(drawn(ADD.width, ADD.height, |f, s| {
+            plus(f, Rectangle::new(Point::ORIGIN, s), false, 1.0);
+        }))
+        .padding(0)
+        .style(|_, status| {
+            if style::lit(status) {
+                style::hovered(HOVER.get(), ADD_RADIUS)
+            } else {
+                style::clear()
             }
-        }
-        order
-    }
-
-    /// What is under `at`.
-    fn target(&self, at: Point) -> Option<Target> {
-        if add_rect().contains(at) {
-            return Some(Target::Add);
-        }
-        if self.laid.field.is_some_and(|f| f.contains(at)) {
-            return Some(Target::Field);
-        }
-        self.visible().into_iter().find_map(|(index, top)| {
-            let line = self.lines.lines.get(index)?;
-            (acts(line.look, &line.key) && button(top).contains(at))
-                .then(|| Target::Box(line.key.clone()))
         })
+        .on_press(Msg::Act(Target::Add)),
+        Target::Add.id(),
+        Role::Button,
+        words.add(),
+    )
+    .focus(
+        focus == Some(&Target::Add),
+        Msg::Focus(Target::Add),
+        ADD_RADIUS,
+    )
+    .activate(Msg::Act(Target::Add));
+    let header = row![
+        gap(BUTTON_OUT),
+        said(words.title(), TITLE, MANROPE_BOLD, TEXT.get()),
+        gap(COUNT_GAP),
+        said(lines.open().to_string(), COUNT, MANROPE, DIM.get()),
+        space::horizontal(),
+        add,
+        gap(right - (RIGHT + ADD_OUT)),
+    ]
+    .height(HEADER)
+    .align_y(Vertical::Center);
+    let mut all = column![header];
+    if let Some(field) = field {
+        let typed = Field {
+            with: Box::new(entry),
+            style: Style::one(LINE_TEXT, MANROPE),
+            placeholder: words.placeholder().into(),
+            look: FieldLook::of(TEXT.get(), FAINT.get()),
+            focused: field.focused,
+            left: FIELD_PAD,
+            right: FIELD_PAD,
+            on_focus: Msg::InField,
+            on_took: |_| Msg::Took,
+        }
+        .view(FIELD);
+        let boxed = container(typed).style(|_| iced::widget::container::Style {
+            background: Some(FIELD_FILL.get().into()),
+            border: iced::Border {
+                color: FIELD_BORDER.get(),
+                width: 1.0,
+                radius: FIELD_RADIUS.into(),
+            },
+            ..iced::widget::container::Style::default()
+        });
+        let declared = control(
+            boxed,
+            Target::Field.id(),
+            Role::TextField,
+            words.placeholder(),
+        )
+        .node(|n| n.value(field.text.clone()))
+        .typing();
+        all = all.push(container(declared).padding(Padding {
+            top: FIELD_MARGIN,
+            right: right - RIGHT,
+            bottom: FIELD_MARGIN,
+            left: BUTTON_OUT,
+        }));
+    }
+    if laid.empty.is_some() {
+        all = all.push(ui::line(
+            container(said(words.nothing(), LINE_TEXT, MANROPE, FAINT.get()))
+                .padding([0.0, BUTTON_OUT])
+                .height(LINE)
+                .align_y(Vertical::Center),
+            words.nothing(),
+        ));
+    }
+    if laid.list.is_some() {
+        let mut rows = column![].width(Length::Fill);
+        for line in &lines.lines {
+            rows = rows.push(line_of(words, line, focus));
+        }
+        all = all.push(list_by(
+            rows.into(),
+            LIST_ID,
+            POPOVER_LINES as f32 * LINE,
+            None,
+            Some(LINE),
+        ));
+    }
+    if let Some((more, _)) = &laid.more {
+        all = all.push(ui::line(
+            container(said(more.clone(), MORE_TEXT, MANROPE, FAINT.get()))
+                .padding([0.0, BUTTON_OUT])
+                .height(MORE)
+                .align_y(Vertical::Center),
+            more.clone(),
+        ));
+    }
+    container(all)
+        .padding(Padding {
+            top: HEADER_TOP,
+            right: WIDTH as f32 - right,
+            bottom: 0.0,
+            left: LEFT - BUTTON_OUT,
+        })
+        .into()
+}
+
+/// A task's line: its box, a button, and its title (struck through when
+/// ticked, "Pas enregistré" when refused).
+fn line_of<'a>(words: Words, line: &tasks::Line, focus: Option<&Target>) -> El<'a> {
+    let alpha = line.going.map_or(1.0, |t| 1.0 - t);
+    let ticked = line.look.ticked();
+    let target = Target::Box(line.key.clone());
+    let acts = acts(line.look, &line.key);
+    let tick = button(drawn(BUTTON, BUTTON, move |f, s| {
+        tick_box(f, Rectangle::new(Point::ORIGIN, s), ticked, false, alpha);
+    }))
+    .padding(0)
+    .style(move |_, status| {
+        if acts && style::lit(status) {
+            let mut lit = style::hovered(HOVER.get(), BOX_HOVER_RADIUS);
+            lit.background = lit.background.map(|b| b.scale_alpha(alpha));
+            lit
+        } else {
+            style::clear()
+        }
+    })
+    .on_press_maybe(acts.then(|| Msg::Act(target.clone())));
+    let mut declared = control(tick, target.id(), Role::CheckBox, line.title.clone()).node(|n| {
+        let n = n.checked(ticked);
+        if matches!(line.look, Look::Unsaved { .. }) {
+            n.describe(words.unsaved())
+        } else {
+            n
+        }
+    });
+    if acts {
+        declared = declared
+            .focus(
+                focus == Some(&target),
+                Msg::Focus(target.clone()),
+                BUTTON_RADIUS,
+            )
+            .activate(Msg::Act(target));
+    } else {
+        declared = declared.node(|n| n.disabled(true));
+    }
+    let room = RIGHT - (LEFT - BUTTON_OUT + BUTTON + TITLE_GAP);
+    let look = line.look;
+    let said = kit::elide(&line.title, room, |t| kit::measure(t, LINE_TEXT, MANROPE));
+    let shown = drawn(room, LINE, move |f, s| {
+        let at = Point::new(0.0, s.height / 2.0);
+        match look {
+            Look::Unsaved { .. } => unsaved(f, words, at, alpha),
+            look => title(f, &said, at, LINE_TEXT, look.ticked(), alpha),
+        }
+    });
+    row![declared, gap(TITLE_GAP), shown]
+        .height(LINE)
+        .align_y(Vertical::Center)
+        .into()
+}
+
+/// What it shows, for the log, when it changed.
+fn say(words: Words, lines: &Lines, laid: &Laid, field: Option<&tasks::Field>, ui: &mut Ui) {
+    let rows: Vec<String> = lines
+        .lines
+        .iter()
+        .take(POPOVER_LINES)
+        .map(|l| {
+            let name = words.tick(&l.title, l.look.ticked());
+            match l.look {
+                Look::Unsaved { .. } => format!("{name}: {}", words.unsaved()),
+                _ => name,
+            }
+        })
+        .collect();
+    let said = format!(
+        "count={} rows=[{}] more={} empty={} field={}",
+        lines.open(),
+        rows.join("; "),
+        laid.more.as_ref().map_or("none", |(m, _)| m.as_str()),
+        laid.empty.is_some(),
+        field.map_or_else(|| "none".to_owned(), |f| format!("«{}»", f.text)),
+    );
+    if ui.said.as_ref() != Some(&said) {
+        tracing::debug!("the tasks' popover shows it: {said}");
+        ui.said = Some(said);
     }
 }
 
@@ -227,359 +454,35 @@ fn acts(look: Look, key: &Key) -> bool {
     look != Look::Adding && matches!(key, Key::Task(_))
 }
 
-/// A line's box's button, its line from `top`.
-fn button(top: f32) -> Rectangle {
-    Rectangle::new(
-        Point::new(LEFT - BUTTON_OUT, top + (LINE - BUTTON) / 2.0),
-        Size::new(BUTTON, BUTTON),
-    )
-}
+// --- What a message does -------------------------------------------------------
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(_) => {
-                for pressed in kit::keys(self.id) {
-                    let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-                }
-                self.refresh(state);
-                state.lines.moving().then(canvas::Action::request_redraw)
-            }
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
+fn handle(message: Msg) {
+    match message {
+        // What the field took is in it; its view is built again.
+        Msg::Stale | Msg::Took => {}
+        Msg::InField => {
+            ui(|ui| ui.in_field = true);
+            tasks::open_field(At::Popover);
         }
+        Msg::Pressed => {
+            let in_field = ui(|ui| {
+                ui.focus = None;
+                std::mem::take(&mut ui.in_field)
+            });
+            if !in_field {
+                tasks::pressed_elsewhere();
+            }
+        }
+        Msg::Focus(target) => {
+            LATER.push(ui::reveal(Id::new(LIST_ID), Id::from(target.id())));
+            ui(|ui| ui.focus = Some(target));
+        }
+        Msg::Act(Target::Add | Target::Field) => tasks::open_field(At::Popover),
+        Msg::Act(Target::Box(key)) => tasks::toggle(&key),
     }
-
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let f = &mut frame;
-        let middle = HEADER_TOP + HEADER / 2.0;
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                self.words.title().to_owned(),
-                Point::new(LEFT, middle),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        let title_width = kit::measure(self.words.title(), TITLE, MANROPE_BOLD);
-        f.fill_text(kit::text(
-            state.lines.open().to_string(),
-            Point::new(LEFT + title_width + COUNT_GAP, middle),
-            COUNT,
-            DIM.get(),
-            Alignment::Left,
-        ));
-        let add = add_rect();
-        plus(f, add, state.over == Some(Target::Add), 1.0);
-        if state.focus == Some(Target::Add) {
-            ring(f, add, ADD_RADIUS);
-        }
-        let laid = &state.laid;
-        if let (Some(rect), Some(open)) = (laid.field, tasks::field()) {
-            tasks::draw::field(
-                f,
-                rect,
-                (&open.text, open.focused),
-                (LINE_TEXT, FIELD_RADIUS, FIELD_PAD),
-                self.words,
-                1.0,
-            );
-        }
-        if let Some(middle) = laid.empty {
-            f.fill_text(kit::text(
-                self.words.nothing().to_owned(),
-                Point::new(LEFT, middle),
-                LINE_TEXT,
-                FAINT.get(),
-                Alignment::Left,
-            ));
-        }
-        if let Some((view, content)) = laid.list {
-            for (index, top) in state.visible() {
-                let Some(line) = state.lines.lines.get(index) else {
-                    continue;
-                };
-                let alpha = line.going.map_or(1.0, |t| 1.0 - t);
-                let target = Target::Box(line.key.clone());
-                let rect = button(top);
-                tick_box(
-                    f,
-                    rect,
-                    line.look.ticked(),
-                    state.over.as_ref() == Some(&target),
-                    alpha,
-                );
-                if state.focus.as_ref() == Some(&target) {
-                    ring(f, rect, BUTTON_RADIUS);
-                }
-                let at = Point::new(rect.x + BUTTON + TITLE_GAP, top + LINE / 2.0);
-                match line.look {
-                    Look::Unsaved { .. } => unsaved(f, self.words, at, alpha),
-                    look => {
-                        let room = RIGHT - at.x;
-                        let said =
-                            kit::elide(&line.title, room, |t| kit::measure(t, LINE_TEXT, MANROPE));
-                        title(f, &said, at, LINE_TEXT, look.ticked(), alpha);
-                    }
-                }
-            }
-            let list = kit::List {
-                view: Rectangle::new(
-                    Point::new(view.x, view.y),
-                    Size::new(view.width, view.height),
-                ),
-                content,
-            };
-            let scroll = SCROLL.load(std::sync::atomic::Ordering::Relaxed) as f32 * LINE;
-            list.scrollbar_at(f, scroll, RIGHT + 4.0);
-        }
-        if let Some((said, middle)) = &laid.more {
-            f.fill_text(kit::text(
-                said.clone(),
-                Point::new(LEFT, *middle),
-                MORE_TEXT,
-                FAINT.get(),
-                Alignment::Left,
-            ));
-        }
-        self.say(state);
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        match state.over {
-            Some(Target::Field) => mouse::Interaction::Text,
-            Some(_) => mouse::Interaction::Pointer,
-            None => mouse::Interaction::default(),
-        }
-    }
-}
-
-impl Panel {
-    /// What it shows, for screen readers (crate::a11y::rows): the `+`, the
-    /// field, the tasks' boxes, the empty list's line, "+ N".
-    fn say(&self, state: &State) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::{Node, Role};
-        let mut nodes = vec![rows::act(
-            Target::Add,
-            Role::Button,
-            self.words.add(),
-            add_rect(),
-        )];
-        if let Some(rect) = state.laid.field {
-            let text = tasks::field()
-                .filter(|f| f.at == At::Popover)
-                .map(|f| f.text);
-            nodes.push(
-                Node::new(
-                    rows::key(Target::Field),
-                    Role::TextField,
-                    self.words.placeholder(),
-                )
-                .value(text.unwrap_or_default())
-                .bounds(rows::at(rect)),
-            );
-        }
-        for (index, top) in state.visible() {
-            let Some(line) = state.lines.lines.get(index) else {
-                continue;
-            };
-            let mut node = Node::new(
-                rows::key(Target::Box(line.key.clone())),
-                Role::CheckBox,
-                line.title.clone(),
-            )
-            .checked(line.look.ticked())
-            .bounds(rows::at(button(top)));
-            if acts(line.look, &line.key) {
-                node = node.act(hocus_a11y::Act::Click);
-            }
-            if matches!(line.look, Look::Unsaved { .. }) {
-                node = node.describe(self.words.unsaved());
-            }
-            nodes.push(node);
-        }
-        if state.laid.empty.is_some() {
-            nodes.push(rows::line(self.words.nothing()));
-        }
-        if let Some((more, _)) = &state.laid.more {
-            nodes.push(rows::line(more.clone()));
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: Some(self.words.count(state.lines.open())),
-                nodes,
-                order: rows::order(state.order()),
-                focus: state.focus.as_ref().map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    /// What it shows, read afresh while it is open.
-    fn refresh(&self, state: &mut State) {
-        if !super::with(|c| c.is_open(self.id)) {
-            return;
-        }
-        let lines = tasks::lines();
-        let field = tasks::field().filter(|f| f.at == At::Popover);
-        state.laid = lay_out(&lines, field.is_some(), self.words);
-        // The list scrolled no further than its end.
-        let most = lines.lines.len().saturating_sub(POPOVER_LINES);
-        if SCROLL.load(std::sync::atomic::Ordering::Relaxed) > most {
-            SCROLL.store(most, std::sync::atomic::Ordering::Relaxed);
-        }
-        state.lines = lines;
-        // Its height follows what it shows.
-        super::refit(super::Item::Tasks);
-        super::refit(super::Item::TasksMore);
-        let rows: Vec<String> = state
-            .visible()
-            .into_iter()
-            .filter_map(|(i, _)| state.lines.lines.get(i))
-            .map(|l| {
-                let name = self.words.tick(&l.title, l.look.ticked());
-                match l.look {
-                    Look::Unsaved { .. } => format!("{name}: {}", self.words.unsaved()),
-                    _ => name,
-                }
-            })
-            .collect();
-        let said = format!(
-            "count={} rows=[{}] more={} empty={} field={}",
-            state.lines.open(),
-            rows.join("; "),
-            state.laid.more.as_ref().map_or("none", |(m, _)| m.as_str()),
-            state.laid.empty.is_some(),
-            field.map_or_else(|| "none".to_owned(), |f| format!("«{}»", f.text)),
-        );
-        if state.said.as_ref() != Some(&said) {
-            tracing::debug!("the tasks' popover shows it: {said}");
-            state.said = Some(said);
-        }
-    }
-
-    fn act(target: Option<Target>) {
-        match target {
-            Some(Target::Add | Target::Field) => tasks::open_field(At::Popover),
-            Some(Target::Box(key)) => tasks::toggle(&key),
-            None => {}
-        }
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| state.target(at));
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                if state.over == target {
-                    return None;
-                }
-                state.over = target;
-                redraw
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                state.over = None;
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                match target {
-                    Some(target) => Self::act(Some(target)),
-                    // A press elsewhere in it: the field, empty, closes.
-                    None => tasks::pressed_elsewhere(),
-                }
-                redraw
-            }
-            mouse::Event::WheelScrolled { delta } => {
-                let lines = state.lines.lines.len();
-                if lines <= POPOVER_LINES {
-                    return None;
-                }
-                let y = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => *y,
-                    mouse::ScrollDelta::Pixels { y, .. } => *y / LINE,
-                };
-                let most = lines - POPOVER_LINES;
-                let scroll = SCROLL.load(std::sync::atomic::Ordering::Relaxed);
-                let next = if y < 0.0 {
-                    (scroll + 1).min(most)
-                } else if y > 0.0 {
-                    scroll.saturating_sub(1)
-                } else {
-                    scroll
-                };
-                SCROLL.store(next, std::sync::atomic::Ordering::Relaxed);
-                state.over = at.and_then(|at| state.target(at));
-                redraw
-            }
-            _ => None,
-        }
-    }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key as K, key::Named};
-        if tasks::field_key(&At::Popover, pressed) {
-            return Some(canvas::Action::request_redraw().and_capture());
-        }
-        match &pressed.key {
-            K::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            K::Named(Named::Tab) => {
-                let order = state.order();
-                let at = state
-                    .focus
-                    .as_ref()
-                    .and_then(|f| order.iter().position(|t| t == f));
-                let places: Vec<usize> = (0..order.len()).collect();
-                state.focus = kit::step(&places, at, pressed.modifiers.shift())
-                    .and_then(|i| order.get(i).cloned());
-            }
-            K::Named(Named::Space | Named::Enter) => Self::act(state.focus.clone()),
-            _ => return None,
-        }
-        Some(canvas::Action::request_redraw().and_capture())
-    }
+    // Its height follows what it shows.
+    super::refit(super::Item::Tasks);
+    super::refit(super::Item::TasksMore);
 }
 
 #[cfg(test)]
