@@ -51,6 +51,29 @@ enum Heard {
     Bridge(Event),
     /// The compositor asks what the shell shows (`hocus msg a11y`).
     Dump,
+    /// What a surface the loop owns shows now.
+    Shown(Shown),
+}
+
+/// What a surface the loop owns tells screen readers as it changes (#773):
+/// this thread reads no state of theirs.
+#[derive(Debug, Clone)]
+pub enum Shown {
+    /// The share's chooser, while it shows.
+    Share(Option<crate::share::Seen>),
+    /// The lock, while the session is locked.
+    Lock(Option<crate::lock::Lock>),
+}
+
+/// What a surface the loop owns shows now, for this thread.
+pub fn shown(shown: Shown) {
+    if let Some(tell) = HEARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        let _ = tell.send(Heard::Shown(shown));
+    }
 }
 
 /// The thread's channel, once it runs.
@@ -142,6 +165,8 @@ fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
                 continue;
             }
             Some(Heard::Bridge(Event::Asked(asked))) => said.carry_out(&asked),
+            Some(Heard::Shown(Shown::Share(seen))) => said.share = seen,
+            Some(Heard::Shown(Shown::Lock(lock))) => said.lock = lock,
             Some(Heard::Dump) => {
                 for window in said.describe(Instant::now()) {
                     for line in window.dump().lines() {
@@ -200,6 +225,10 @@ struct Said {
     announced: u64,
     announce: Option<(u64, String, Instant)>,
     targets: HashMap<(String, String), Target>,
+    /// The share's chooser, as the loop last told it.
+    share: Option<crate::share::Seen>,
+    /// The lock, as the loop last told it.
+    lock: Option<crate::lock::Lock>,
 }
 
 impl Said {
@@ -233,7 +262,7 @@ impl Said {
         }
         self.targets.clear();
         let mut windows = Vec::new();
-        if crate::lock::active() {
+        if self.lock.is_some() {
             windows.extend(self.locks(words));
             return windows;
         }
@@ -326,7 +355,7 @@ impl Said {
             }
             windows.push(toolbar);
         }
-        if let Some(chooser) = crate::share::a11y() {
+        if let Some(chooser) = self.share.as_ref().and_then(crate::share::a11y) {
             for node in chooser.all() {
                 if node.key.starts_with("share:") {
                     self.targets.insert(
@@ -438,7 +467,7 @@ impl Said {
     }
 
     fn locks(&mut self, words: Words) -> Vec<Window> {
-        let Some(lock) = crate::lock::with(|l| l.clone()) else {
+        let Some(lock) = self.lock.clone() else {
             return Vec::new();
         };
         let lang = words.lang();
@@ -452,7 +481,7 @@ impl Said {
             .into_iter()
             .map(|(output, surface)| {
                 let clock = Node::new("clock", Role::Label, clock.clone());
-                let window = crate::lock::view::a11y(*surface, output, words, vec![clock]);
+                let window = crate::lock::view::a11y(&lock, *surface, output, words, vec![clock]);
                 for node in window.all() {
                     if node.key.starts_with("lock:") {
                         self.targets.insert(

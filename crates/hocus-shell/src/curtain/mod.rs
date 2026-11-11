@@ -9,15 +9,16 @@
 
 pub mod draw;
 
-use std::{
-    sync::{Mutex, PoisonError},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use hocus_link::{CURTAIN_NAMESPACE, CurtainShown};
-use iced::window;
+use iced::{Element, Length, widget::canvas, window};
 
-use crate::{clock::time::Lang, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    popover::Effect,
+    surfaces::{Context, Surface},
+};
 
 /// The pill as the shell shows it.
 #[derive(Debug, Clone)]
@@ -56,28 +57,45 @@ impl Pill {
     }
 }
 
-static PILL: Mutex<Option<Pill>> = Mutex::new(None);
-
-/// `with` on the pill, if one shows.
-pub fn with<T>(with: impl FnOnce(&mut Option<Pill>) -> T) -> T {
-    with(&mut PILL.lock().unwrap_or_else(PoisonError::into_inner))
+/// The curtain's pill, while one shows: the shell's own (#773).
+#[derive(Debug, Default)]
+pub struct Curtain {
+    pill: Option<Pill>,
 }
 
-pub fn is_surface(id: window::Id) -> bool {
-    with(|p| p.as_ref().is_some_and(|p| p.surface == id))
+/// What the compositor says of the curtain.
+#[derive(Debug, Clone)]
+pub enum Said {
+    /// `curtain …`: the pill opens on the screen it names (a new one if
+    /// that changed), its countdown from what it says.
+    Shown(CurtainShown),
+    /// `curtain-end`: the pill goes.
+    End,
 }
 
-/// The compositor's `curtain …`: the pill opens on the screen it names (a
-/// new one if that changed), its countdown from what it says.
-pub fn set(shown: CurtainShown) -> Vec<Effect> {
-    let now = Instant::now();
-    with(|slot| {
+impl Curtain {
+    /// The pill on surface `id`, if it is the pill's.
+    pub fn pill_on(&self, id: window::Id) -> Option<&Pill> {
+        self.pill.as_ref().filter(|p| p.surface == id)
+    }
+
+    /// What the pill's canvas draws on surface `id`.
+    pub fn program(&self, id: window::Id, glass: bool) -> Option<draw::View> {
+        Some(draw::View {
+            pill: self.pill_on(id)?.clone(),
+            words: words(),
+            glass,
+        })
+    }
+
+    fn shown(&mut self, shown: CurtainShown, now: Instant) -> Vec<Effect> {
         let mut effects = Vec::new();
-        let same = slot
+        let same = self
+            .pill
             .as_ref()
             .is_some_and(|p| p.shown.output == shown.output && p.shown.top == shown.top);
         if !same {
-            if let Some(old) = slot.take() {
+            if let Some(old) = self.pill.take() {
                 effects.push(Effect::Remove(old.surface));
             }
             let surface = window::Id::unique();
@@ -87,25 +105,42 @@ pub fn set(shown: CurtainShown) -> Vec<Effect> {
                 output: shown.output.clone(),
                 top: shown.top,
             });
-            *slot = Some(Pill {
+            self.pill = Some(Pill {
                 shown,
                 told: now,
                 surface,
             });
-        } else if let Some(pill) = slot.as_mut() {
+        } else if let Some(pill) = self.pill.as_mut() {
             pill.shown = shown;
             pill.told = now;
         }
         effects.push(Effect::Wake(CURTAIN_NAMESPACE));
         effects
-    })
+    }
 }
 
-/// The compositor's `curtain-end`: the pill goes.
-pub fn end() -> Vec<Effect> {
-    with(Option::take)
-        .map(|pill| vec![Effect::Remove(pill.surface)])
-        .unwrap_or_default()
+impl Surface for Curtain {
+    type Message = Said;
+
+    fn update(&mut self, message: Said, now: Instant) -> Vec<Effect> {
+        match message {
+            Said::Shown(shown) => self.shown(shown, now),
+            Said::End => self
+                .pill
+                .take()
+                .map(|pill| vec![Effect::Remove(pill.surface)])
+                .unwrap_or_default(),
+        }
+    }
+
+    fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
+        Some(
+            canvas(self.program(id, context.look.glass)?)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        )
+    }
 }
 
 /// The pill's words, in the shell's language.
@@ -191,5 +226,36 @@ mod tests {
         assert_eq!(pill.seconds_left(told + Duration::from_millis(500)), 7);
         assert_eq!(pill.seconds_left(told + Duration::from_secs(30)), 1);
         assert!((pill.progress(told) - 0.25).abs() < 1e-6);
+    }
+
+    /// The surface alone (#773): told, it opens its pill, keeps it while
+    /// the screen is the same, draws it on its surface only, and lets it go.
+    #[test]
+    fn the_pill_alone_opens_counts_and_goes() {
+        let mut curtain = Curtain::default();
+        let now = Instant::now();
+        let effects = curtain.update(Said::Shown(shown(0)), now);
+        let Some(Effect::CurtainSurface { id, output, top }) = effects.first() else {
+            panic!("a surface opened first: {effects:?}");
+        };
+        let id = *id;
+        assert_eq!((output.as_str(), *top), ("eDP-1", 1010));
+        assert!(matches!(
+            effects.last(),
+            Some(Effect::Wake(CURTAIN_NAMESPACE))
+        ));
+        let drawn = curtain.program(id, true).expect("drawn on its surface");
+        assert_eq!(drawn.pill.seconds_left(now), 10);
+        assert!(curtain.program(window::Id::unique(), true).is_none());
+        // Told again on the same screen: the same surface, the countdown
+        // from the new word.
+        let later = now + Duration::from_secs(1);
+        let effects = curtain.update(Said::Shown(shown(4_000)), later);
+        assert!(matches!(effects.as_slice(), [Effect::Wake(_)]));
+        assert_eq!(curtain.pill_on(id).map(|p| p.seconds_left(later)), Some(6));
+        let effects = curtain.update(Said::End, later);
+        assert!(matches!(effects.as_slice(), [Effect::Remove(gone)] if *gone == id));
+        assert!(curtain.pill_on(id).is_none());
+        assert!(curtain.update(Said::End, later).is_empty());
     }
 }

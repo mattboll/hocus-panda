@@ -26,7 +26,7 @@ use iced::{
     window,
 };
 
-use super::{Chooser, Tab, Words};
+use super::{Act, Chooser, Said, Share, Tab, Words};
 use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, rgb},
@@ -34,6 +34,7 @@ use crate::{
         Pressed,
         kit::{self, MANROPE_SEMIBOLD},
     },
+    surfaces::Lent,
     ui::{self, Around, control, parts::drawn, style},
 };
 
@@ -290,54 +291,73 @@ fn id_of(what: &str) -> String {
 }
 
 /// The chooser on its surface `id`, on the glass (else opaque).
-pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
-    Around::new(id, build(id, words), move |m| handle(id, m), Msg::Stale)
-        .own(SHARE_CHOOSER_NAMESPACE, move || super::is_surface(id))
-        .rebuild(move || build(id, words))
-        .keys(|pressed| Some(Msg::Key(pressed.clone())))
-        .on(canvas(Tint(glass)).width(Length::Fill).height(Length::Fill))
+pub fn view<'a>(
+    share: &'a Lent<Share>,
+    id: window::Id,
+    words: Words,
+    glass: bool,
+) -> Element<'a, crate::Message> {
+    Around::new(
+        id,
+        build(share, id, words),
+        move |m| handle(share, id, m),
+        Msg::Stale,
+    )
+    .own(SHARE_CHOOSER_NAMESPACE, move || {
+        share.read(|s| s.is_surface(id)).unwrap_or(false)
+    })
+    .rebuild(move || build(share, id, words))
+    .keys(|pressed| Some(Msg::Key(pressed.clone())))
+    .on(canvas(Tint(glass)).width(Length::Fill).height(Length::Fill))
 }
 
-fn handle(id: window::Id, message: Msg) {
-    let now = std::time::Instant::now();
+/// What a widget asked, as the chooser's change.
+fn said(id: window::Id, message: Msg) -> Option<Said> {
+    let act = |act| Some(Said::Act { on: Some(id), act });
     match message {
-        Msg::Tab(tab) => super::act(id, super::Act::Tab(tab), now),
-        Msg::Card(index) => super::act(id, super::Act::Card(index), now),
-        Msg::Pointer => super::act(id, super::Act::Pointer, now),
-        Msg::Cancel => super::act(id, super::Act::Cancel, now),
-        Msg::Share => super::act(id, super::Act::Share, now),
+        Msg::Tab(tab) => act(Act::Tab(tab)),
+        Msg::Card(index) => act(Act::Card(index)),
+        Msg::Pointer => act(Act::Pointer),
+        Msg::Cancel => act(Act::Cancel),
+        Msg::Share => act(Act::Share),
         Msg::Wheel(delta) => {
             let y = match delta {
                 mouse::ScrollDelta::Lines { y, .. } => y,
                 mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
             };
-            if y != 0.0 {
-                super::act(id, super::Act::Wheel(if y > 0.0 { -1 } else { 1 }), now);
+            if y == 0.0 {
+                None
+            } else {
+                act(Act::Wheel(if y > 0.0 { -1 } else { 1 }))
             }
         }
-        Msg::Key(pressed) => {
-            super::key_on(id, &pressed.key);
-        }
-        Msg::Stale => {}
+        Msg::Key(pressed) => Some(Said::Key(id, pressed.key)),
+        Msg::Stale => None,
     }
 }
 
-/// What the chooser last said it shows, for the log.
-static SAID: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+fn handle(share: &Lent<Share>, id: window::Id, message: Msg) {
+    let Some(said) = said(id, message) else {
+        return;
+    };
+    let now = std::time::Instant::now();
+    if let Some(effects) = share.change(|s| s.update(said, now)) {
+        crate::popover::send(effects);
+    }
+}
 
 /// Its content, as the chooser is now; said in the log when it changed.
-fn build<'a>(id: window::Id, words: Words) -> El<'a> {
-    let Some(chooser) = super::with(|c| c.as_ref().filter(|c| c.id == id).cloned()) else {
+fn build<'a>(share: &Lent<Share>, id: window::Id, words: Words) -> El<'a> {
+    let built = share.read(|s| s.chooser_on(id).map(|chooser| content(chooser, words)));
+    let Some(Some((content, said))) = built else {
         return Space::new().into();
     };
-    let (content, said) = content(&chooser, words);
-    let mut last = SAID
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if last.as_ref() != Some(&said) {
-        tracing::debug!(?said, "the share's chooser shows it");
-        *last = Some(said);
-    }
+    share.change(|s| {
+        if s.said.as_ref() != Some(&said) {
+            tracing::debug!(?said, "the share's chooser shows it");
+            s.said = Some(said);
+        }
+    });
     content
 }
 
@@ -347,7 +367,7 @@ fn at<'a>(content: impl Into<El<'a>>, at: Point) -> El<'a> {
 }
 
 /// The chooser's widgets where its layout places them, and what it says.
-fn content<'a>(chooser: &Chooser, words: Words) -> (El<'a>, Vec<String>) {
+pub(super) fn content<'a>(chooser: &Chooser, words: Words) -> (El<'a>, Vec<String>) {
     let layout = Layout::of(chooser);
     let mut said = Vec::new();
     let mut all: Vec<El<'a>> = Vec::new();

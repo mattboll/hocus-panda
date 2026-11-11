@@ -73,6 +73,7 @@ mod renderer;
 mod setup;
 mod share;
 mod side;
+mod surfaces;
 mod tasks;
 mod theme;
 mod today;
@@ -287,14 +288,7 @@ fn clock_shift() -> Option<String> {
     Some(at)
 }
 
-/// How bars look, as the compositor says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Look {
-    /// The compositor blurs behind: the bar is a tint over it.
-    glass: bool,
-    /// The form switch animates.
-    motion: bool,
-}
+use surfaces::{Look, Surface};
 
 /// A bar on an output.
 #[derive(Debug, Clone)]
@@ -413,6 +407,12 @@ struct Shell {
     wall: clock::time::Wall,
     lang: clock::time::Lang,
     words: levels::model::Words,
+    /// The curtain's pill before the lock (7.2).
+    curtain: curtain::Curtain,
+    /// The share's chooser (5.11).
+    share: surfaces::Lent<share::Share>,
+    /// The lock (7.1).
+    lock: surfaces::Lent<lock::Locked>,
 }
 
 #[to_layer_message(multi)]
@@ -443,6 +443,8 @@ enum Message {
     Music,
     /// The music tile was pressed.
     MusicTile(music::tile::Press),
+    /// Asked of a surface from another thread (a screen reader's click).
+    Surface(surfaces::Asked),
 }
 
 impl Shell {
@@ -473,6 +475,9 @@ impl Shell {
             wall: clock::time::Wall { zone, shift },
             lang: clock::time::Lang::from_env(),
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
+            curtain: curtain::Curtain::default(),
+            share: surfaces::Lent::default(),
+            lock: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -571,6 +576,14 @@ impl Shell {
             Message::MusicTile(press) => {
                 music::tile::pressed(press);
                 Task::none()
+            }
+            Message::Surface(asked) => {
+                let effects = match asked {
+                    surfaces::Asked::Share(act) => self
+                        .share
+                        .update(share::Said::Act { on: None, act }, self.now),
+                };
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
@@ -855,13 +868,15 @@ impl Shell {
                 capture::captured(captured);
                 Task::none()
             }
+            // A message (every surface's view built again): the chooser
+            // opens a surface, which is one.
             ToShell::ShareChoose(choose) => {
-                share::set(choose);
-                Task::none()
+                let effects = self.share.update(share::Said::Choose(choose), self.now);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::ShareChooseEnd(request) => {
-                share::end(request);
-                Task::none()
+                let effects = self.share.update(share::Said::End(request), self.now);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::AuthAt(at) => {
                 auth::placed(at);
@@ -920,7 +935,9 @@ impl Shell {
             }
             ToShell::Lock(shown) => {
                 let screens = outputs::step();
-                let effects = lock::set(shown, &screens);
+                let effects = self
+                    .lock
+                    .update(lock::Told::Shown(shown, screens), self.now);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::A11y => {
@@ -928,15 +945,17 @@ impl Shell {
                 Task::none()
             }
             ToShell::Unlocked => {
-                let effects = lock::end();
+                let effects = self.lock.update(lock::Told::End, self.now);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::Curtain(shown) => {
-                let effects = curtain::set(shown);
+                let effects = self
+                    .curtain
+                    .update(curtain::Said::Shown(shown), Instant::now());
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::CurtainEnd => {
-                let effects = curtain::end();
+                let effects = self.curtain.update(curtain::Said::End, Instant::now());
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             // Taken by the link itself, without a message.
@@ -989,9 +1008,12 @@ impl Shell {
         let known = outputs::step();
         // Locked (7.1): a screen plugged in gets the clock.
         let lock = Task::batch(
-            popover::messages(lock::screens_known(&known))
-                .into_iter()
-                .map(Task::done),
+            popover::messages(
+                self.lock
+                    .update(lock::Told::Screens(known.clone()), self.now),
+            )
+            .into_iter()
+            .map(Task::done),
         );
         if self.waiting.is_empty() {
             return lock;
@@ -1348,6 +1370,7 @@ impl Shell {
             bar_width: bar.width(at),
             surface_width: width as f32,
             backdrop,
+            locked: self.lock.read(lock::Locked::active).unwrap_or(false),
         };
         Some(in_bar(
             bar,
@@ -1706,35 +1729,6 @@ impl Shell {
         ))
     }
 
-    /// The lock (7.1), if its surface is `id`.
-    fn lock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = lock::output_of(id)?;
-        Some(lock::view::view(
-            id,
-            output,
-            self.wall.clone(),
-            self.lang,
-            lock::words(),
-        ))
-    }
-
-    /// The curtain's pill (7.2), if its surface is `id`.
-    fn curtain_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !curtain::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(curtain::draw::View {
-                id,
-                words: curtain::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
     /// The authentication dialog (7.5), if its surface is `id`.
     fn auth_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !auth::is_surface(id) {
@@ -1746,14 +1740,6 @@ impl Shell {
             self.look.glass,
             self.look.motion,
         ))
-    }
-
-    /// The share's chooser (5.11), if its surface is `id`.
-    fn share_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !share::is_surface(id) {
-            return None;
-        }
-        Some(share::view::view(id, share::words(), self.look.glass))
     }
 
     /// The panda peeking out (4.5), if its surface is `id`.
@@ -1958,8 +1944,18 @@ impl Shell {
         .into()
     }
 
+    /// What every surface's view is built with.
+    fn context(&self) -> surfaces::Context {
+        surfaces::Context {
+            look: self.look,
+            wall: self.wall.clone(),
+            lang: self.lang,
+        }
+    }
+
     fn surface_view(&self, id: window::Id) -> Element<'_, Message> {
         let Some(bar) = self.bars.get(&id) else {
+            let context = self.context();
             return self
                 .clock_view(id)
                 .or_else(|| self.levels_view(id))
@@ -1976,9 +1972,9 @@ impl Shell {
                 .or_else(|| self.actions_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
-                .or_else(|| self.share_view(id))
-                .or_else(|| self.lock_view(id))
-                .or_else(|| self.curtain_view(id))
+                .or_else(|| self.share.view(id, &context))
+                .or_else(|| self.lock.view(id, &context))
+                .or_else(|| self.curtain.view(id, &context))
                 .or_else(|| self.in_use_view(id))
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))
@@ -2502,15 +2498,6 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::Captured(captured) => {
                             capture::captured(captured);
-                            continue;
-                        }
-                        // Sharing (5.11): the chooser's surface, the sign's.
-                        ToShell::ShareChoose(choose) => {
-                            share::set(choose);
-                            continue;
-                        }
-                        ToShell::ShareChooseEnd(request) => {
-                            share::end(request);
                             continue;
                         }
                         // The authentication dialog (7.5): its place, and

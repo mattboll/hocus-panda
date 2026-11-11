@@ -18,16 +18,17 @@ pub mod draw;
 pub mod view;
 pub mod wallpaper;
 
-use std::{
-    collections::HashMap,
-    sync::{Mutex, PoisonError},
-    time::Instant,
-};
+use std::{collections::HashMap, time::Instant};
 
 use hocus_link::{LOCK_NAMESPACE, LockPhase, LockShown};
-use iced::window;
+use iced::{Element, Size, window};
 
-use crate::{clock::time::Lang, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    outputs::Known,
+    popover::Effect,
+    surfaces::{Context, Lent, Surface},
+};
 
 /// The lock as the shell shows it.
 #[derive(Debug, Clone)]
@@ -41,37 +42,67 @@ pub struct Lock {
     pub checking: Option<Instant>,
 }
 
-static LOCK: Mutex<Option<Lock>> = Mutex::new(None);
-
-/// `with` on the lock, if one shows.
-pub fn with<T>(with: impl FnOnce(&mut Option<Lock>) -> T) -> T {
-    with(&mut LOCK.lock().unwrap_or_else(PoisonError::into_inner))
+/// The lock while it shows, the shell's own (#773), and what its
+/// surfaces keep from a view to the next.
+#[derive(Debug, Default)]
+pub struct Locked {
+    lock: Option<Lock>,
+    /// Each lock surface's size, as it was laid out: its controls are
+    /// placed from it.
+    sizes: HashMap<window::Id, Size>,
+    /// What each screen's lock last showed, as the log says it.
+    said: HashMap<String, draw::Said>,
 }
 
-/// Whether the session is locked: the bar's clock and the bubbles wait.
-pub fn active() -> bool {
-    with(|l| l.is_some())
+/// What changes the lock.
+#[derive(Debug, Clone)]
+pub enum Told {
+    /// The compositor's `lock …`: the lock opens on every screen `screens`
+    /// names (or where the compositor puts it, when they cannot be
+    /// known), or shows its new state.
+    Shown(LockShown, Known),
+    /// The screens changed while locked: a new one gets the clock, one
+    /// gone takes its surface with it.
+    Screens(Known),
+    /// The compositor's `unlocked`: the lock's surfaces go, what waited
+    /// goes on.
+    End,
 }
 
-/// The screen surface `id` is the lock's on, if it is one.
-pub fn output_of(id: window::Id) -> Option<String> {
-    with(|l| {
-        l.as_ref()?
+impl Locked {
+    /// Whether the session is locked: the bar's clock and the bubbles wait.
+    pub fn active(&self) -> bool {
+        self.lock.is_some()
+    }
+
+    /// The screen surface `id` is the lock's on, if it is one.
+    pub fn output_of(&self, id: window::Id) -> Option<String> {
+        self.lock
+            .as_ref()?
             .surfaces
             .iter()
             .find(|(_, s)| **s == id)
             .map(|(o, _)| o.clone())
-    })
-}
+    }
 
-/// The compositor's `lock …`: the lock opens on every screen `screens`
-/// names (or where the compositor puts it, when they cannot be known),
-/// or shows its new state.
-pub fn set(shown: LockShown, screens: &crate::outputs::Known) -> Vec<Effect> {
-    let now = Instant::now();
-    let mut opened = false;
-    let effects = with(|slot| {
-        let lock = slot.get_or_insert_with(|| {
+    /// `told` taken in at `now`: what the shell then does.
+    pub fn update(&mut self, told: Told, now: Instant) -> Vec<Effect> {
+        let effects = match told {
+            Told::Shown(shown, screens) => self.shown(shown, &screens, now),
+            Told::Screens(screens) => self
+                .lock
+                .as_mut()
+                .map(|lock| surfaces(lock, &screens))
+                .unwrap_or_default(),
+            Told::End => self.end(),
+        };
+        crate::a11y::shown(crate::a11y::Shown::Lock(self.lock.clone()));
+        effects
+    }
+
+    fn shown(&mut self, shown: LockShown, screens: &Known, now: Instant) -> Vec<Effect> {
+        let mut opened = false;
+        let lock = self.lock.get_or_insert_with(|| {
             opened = true;
             Lock {
                 shown: shown.clone(),
@@ -97,28 +128,56 @@ pub fn set(shown: LockShown, screens: &crate::outputs::Known) -> Vec<Effect> {
         crate::ui::touch();
         let mut effects = surfaces(lock, screens);
         effects.push(Effect::Wake(LOCK_NAMESPACE));
+        let surfaces: Vec<window::Id> = lock.surfaces.values().copied().collect();
+        self.sizes.retain(|id, _| surfaces.contains(id));
+        if opened {
+            tracing::info!("the session is locked: the lock shows");
+            // Nothing else of the shell stays open over it.
+            crate::popover::event(crate::popover::Event::PressElsewhere);
+            crate::launcher::close();
+            crate::emoji::close();
+            crate::actions::close();
+            crate::notifications::locked(true);
+        }
         effects
-    });
-    if opened {
-        tracing::info!("the session is locked: the lock shows");
-        // Nothing else of the shell stays open over it.
-        crate::popover::event(crate::popover::Event::PressElsewhere);
-        crate::launcher::close();
-        crate::emoji::close();
-        crate::actions::close();
-        crate::notifications::locked(true);
     }
-    effects
+
+    fn end(&mut self) -> Vec<Effect> {
+        let Some(lock) = self.lock.take() else {
+            return Vec::new();
+        };
+        self.sizes.clear();
+        tracing::info!("the session is unlocked: the lock goes");
+        crate::notifications::locked(false);
+        let mut effects: Vec<Effect> = lock.surfaces.into_values().map(Effect::Remove).collect();
+        // The bar's clock waited: it draws again.
+        effects.push(Effect::Wake(hocus_link::CLOCK_NAMESPACE));
+        effects
+    }
 }
 
-/// The screens changed while locked: a new one gets the clock, one gone
-/// takes its surface with it.
-pub fn screens_known(screens: &crate::outputs::Known) -> Vec<Effect> {
-    with(|slot| slot.as_mut().map(|lock| surfaces(lock, screens))).unwrap_or_default()
+impl Surface for Lent<Locked> {
+    type Message = Told;
+
+    fn update(&mut self, told: Told, now: Instant) -> Vec<Effect> {
+        self.get_mut().update(told, now)
+    }
+
+    fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
+        let output = self.read(|l| l.output_of(id))??;
+        Some(view::view(
+            self,
+            id,
+            output,
+            context.wall.clone(),
+            context.lang,
+            words(),
+        ))
+    }
 }
 
 /// The surfaces opened or closed for `screens`.
-fn surfaces(lock: &mut Lock, screens: &crate::outputs::Known) -> Vec<Effect> {
+fn surfaces(lock: &mut Lock, screens: &Known) -> Vec<Effect> {
     let mut effects = Vec::new();
     let names: Vec<String> = match screens {
         crate::outputs::Known::Names(names) => names.clone(),
@@ -144,20 +203,6 @@ fn surfaces(lock: &mut Lock, screens: &crate::outputs::Known) -> Vec<Effect> {
         lock.surfaces.insert(name.clone(), id);
         effects.push(Effect::LockSurface { id, output: name });
     }
-    effects
-}
-
-/// The compositor's `unlocked`: the lock's surfaces go, what waited goes
-/// on.
-pub fn end() -> Vec<Effect> {
-    let Some(lock) = with(Option::take) else {
-        return Vec::new();
-    };
-    tracing::info!("the session is unlocked: the lock goes");
-    crate::notifications::locked(false);
-    let mut effects: Vec<Effect> = lock.surfaces.into_values().map(Effect::Remove).collect();
-    // The bar's clock waited: it draws again.
-    effects.push(Effect::Wake(hocus_link::CLOCK_NAMESPACE));
     effects
 }
 
@@ -269,6 +314,60 @@ mod tests {
             fr.layout("français"),
             "Disposition du clavier : français. Changer"
         );
+    }
+
+    fn shown(phase: LockPhase, shake: u32) -> LockShown {
+        LockShown {
+            phase,
+            chars: 3,
+            caps: false,
+            shake,
+            focus: LockFocus::Field,
+            agents: 0,
+            wallpaper: true,
+            motion: true,
+            output: "eDP-1".into(),
+        }
+    }
+
+    /// The lock alone (#773): told, it opens a surface a screen; a wrong
+    /// password shakes it and its words say so; a screen gone takes its
+    /// surface; unlocked, they all go and the bar's clock draws again.
+    #[test]
+    fn the_lock_alone_opens_shakes_follows_the_screens_and_goes() {
+        let mut locked = Locked::default();
+        let now = Instant::now();
+        let two = Known::Names(vec!["eDP-1".into(), "HDMI-A-1".into()]);
+        let effects = locked.update(Told::Shown(shown(LockPhase::Idle, 0), two), now);
+        let opened: Vec<window::Id> = effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::LockSurface { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opened.len(), 2);
+        assert!(effects.contains(&Effect::Wake(LOCK_NAMESPACE)));
+        assert!(locked.active());
+        let on: Vec<String> = opened
+            .iter()
+            .filter_map(|id| locked.output_of(*id))
+            .collect();
+        assert!(on.contains(&"eDP-1".to_owned()) && on.contains(&"HDMI-A-1".to_owned()));
+        let words = Words::new(Lang::English);
+        let one = Known::Names(vec!["eDP-1".into()]);
+        locked.update(Told::Shown(shown(LockPhase::Wrong, 1), one.clone()), now);
+        let lock = locked.lock.as_ref().expect("locked");
+        assert_eq!(lock.shake.map(|(n, _)| n), Some(1));
+        assert_eq!(draw::message(lock, words).0, "Wrong password.");
+        assert_eq!(lock.surfaces.len(), 1, "the screen gone took its surface");
+        let effects = locked.update(Told::End, now);
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::Remove(_), Effect::Wake(hocus_link::CLOCK_NAMESPACE)]
+        ));
+        assert!(!locked.active());
+        assert!(locked.update(Told::Screens(one), now).is_empty());
     }
 
     #[test]

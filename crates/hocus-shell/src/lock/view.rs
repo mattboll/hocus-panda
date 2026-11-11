@@ -8,13 +8,7 @@
 //! `next-layout`). What nothing holds is drawn under them
 //! ([`draw::View`]).
 
-use std::{
-    cell::Cell,
-    collections::HashMap,
-    rc::Rc,
-    sync::{Mutex, PoisonError},
-    time::Instant,
-};
+use std::{cell::Cell, rc::Rc, time::Instant};
 
 use hocus_a11y::Role;
 use hocus_link::{LOCK_NAMESPACE, LockAsk, LockFocus, LockPhase, ToCompositor};
@@ -25,12 +19,13 @@ use iced::{
 };
 
 use super::{
-    Words,
+    Lock, Locked, Words,
     draw::{self, Layer, Layout},
 };
 use crate::{
     Message,
     clock::time::{Lang, Wall},
+    surfaces::Lent,
     ui::{
         self, Around, control, moved,
         parts::{drawn_lit, drawn_out, moving},
@@ -53,21 +48,18 @@ pub enum Msg {
     Stale,
 }
 
-/// Each lock surface's size, as it was laid out: its controls are placed
+/// The size lock surface `id` was laid out at: its controls are placed
 /// from it.
-static SIZES: Mutex<Option<HashMap<window::Id, Size>>> = Mutex::new(None);
-
-fn size_of(id: window::Id) -> Size {
-    SIZES
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-        .and_then(|s| s.get(&id).copied())
+fn size_of(locked: &Lent<Locked>, id: window::Id) -> Size {
+    locked
+        .read(|l| l.sizes.get(&id).copied())
+        .flatten()
         .unwrap_or(Size::ZERO)
 }
 
 /// The lock on its surface `id`, on screen `output`.
 pub fn view<'a>(
+    locked: &'a Lent<Locked>,
     id: window::Id,
     output: String,
     wall: Wall,
@@ -76,6 +68,7 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let layer = |layer| {
         canvas(draw::View {
+            locked,
             layer,
             output: output.clone(),
             wall: wall.clone(),
@@ -90,11 +83,18 @@ pub fn view<'a>(
     let seen: Rc<Cell<Size>> = Rc::default();
     let (built, rebuilt, stale) = (seen.clone(), seen.clone(), seen);
     let again = output.clone();
-    Around::new(id, build(id, &output, words, &built), handle, Msg::Stale)
-        .own(LOCK_NAMESPACE, move || super::output_of(id).is_some())
-        .rebuild(move || build(id, &again, words, &rebuilt))
-        .stale_when(move || size_of(id) != stale.get())
-        .on(under)
+    Around::new(
+        id,
+        build(locked, id, &output, words, &built),
+        handle,
+        Msg::Stale,
+    )
+    .own(LOCK_NAMESPACE, move || {
+        locked.read(|l| l.output_of(id).is_some()).unwrap_or(false)
+    })
+    .rebuild(move || build(locked, id, &again, words, &rebuilt))
+    .stale_when(move || size_of(locked, id) != stale.get())
+    .on(under)
 }
 
 fn handle(message: Msg) {
@@ -122,39 +122,54 @@ fn at<'a>(content: impl Into<El<'a>>, at: Point) -> El<'a> {
 }
 
 /// The lock's state when it draws.
-fn now_shown() -> Option<super::Lock> {
-    super::with(|l| l.clone())
+fn now_shown(locked: &Lent<Locked>) -> Option<Lock> {
+    locked.read(|l| l.lock.clone()).flatten()
 }
 
 /// The field and its button shaken after a wrong password, at `now`.
-fn shake(now: Instant) -> Vector {
-    Vector::new(now_shown().map_or(0.0, |l| draw::shaken(&l, now)), 0.0)
+fn shake(locked: &Lent<Locked>, now: Instant) -> Vector {
+    Vector::new(
+        now_shown(locked).map_or(0.0, |l| draw::shaken(&l, now)),
+        0.0,
+    )
 }
 
 /// The controls of the lock on screen `output`, from the size its surface
 /// was laid out at (none before it is known, nor on a screen with the
 /// clock alone); told the size it is laid out at.
-fn build<'a>(id: window::Id, output: &str, words: Words, seen: &Cell<Size>) -> El<'a> {
-    let size = size_of(id);
+fn build<'a>(
+    locked: &'a Lent<Locked>,
+    id: window::Id,
+    output: &str,
+    words: Words,
+    seen: &Cell<Size>,
+) -> El<'a> {
+    let size = size_of(locked, id);
     seen.set(size);
-    let content = super::with(|l| {
-        let lock = l.as_ref()?;
-        (size.width > 0.0 && draw::form(lock, output)).then(|| controls(lock, size, words))
-    })
-    .unwrap_or_else(|| Space::new().into());
+    let content = now_shown(locked)
+        .filter(|lock| size.width > 0.0 && draw::form(lock, output))
+        .map_or_else(
+            || Space::new().into(),
+            |lock| controls(locked, &lock, size, words),
+        );
     Sized::new(content, move |room| {
-        let mut sizes = SIZES.lock().unwrap_or_else(PoisonError::into_inner);
-        let sizes = sizes.get_or_insert_with(HashMap::new);
-        // Surfaces gone go with the next one told.
-        sizes.retain(|s, _| super::output_of(*s).is_some());
-        sizes.insert(id, room);
+        locked.change(|l| {
+            // Surfaces gone go with the next one told.
+            let surfaces: Vec<window::Id> = l
+                .lock
+                .as_ref()
+                .map(|lock| lock.surfaces.values().copied().collect())
+                .unwrap_or_default();
+            l.sizes.retain(|s, _| surfaces.contains(s));
+            l.sizes.insert(id, room);
+        });
     })
     .into()
 }
 
 /// The field, its button, the layout's button and the agents' line, on
 /// a screen `size` large; the ring where the compositor says.
-fn controls<'a>(lock: &super::Lock, size: Size, words: Words) -> El<'a> {
+fn controls<'a>(locked: &'a Lent<Locked>, lock: &Lock, size: Size, words: Words) -> El<'a> {
     let layout = Layout::of(size, true);
     let shown = &lock.shown;
     let keys = shown.phase.takes_keys();
@@ -164,7 +179,7 @@ fn controls<'a>(lock: &super::Lock, size: Size, words: Words) -> El<'a> {
     let field = layout.field;
     let local = layout.from(field.position());
     let look = drawn_out(field.width, field.height, 1.0, move |f, _| {
-        if let Some(lock) = now_shown() {
+        if let Some(lock) = now_shown(locked) {
             draw::draw_field(f, &lock, &local, words);
         }
     });
@@ -187,7 +202,7 @@ fn controls<'a>(lock: &super::Lock, size: Size, words: Words) -> El<'a> {
             .node(|n| n.describe(said).disabled(waiting))
             .focus(ring(LockFocus::Field), Msg::Focus(LockFocus::Field), 12.0)
             .typing(),
-            shake,
+            move |now| shake(locked, now),
             |_| false,
         ),
         field.position(),
@@ -198,12 +213,12 @@ fn controls<'a>(lock: &super::Lock, size: Size, words: Words) -> El<'a> {
         rect.width,
         rect.height,
         move |f, _, now| {
-            if let Some(lock) = now_shown() {
+            if let Some(lock) = now_shown(locked) {
                 f.translate(Vector::new(-rect.x, -rect.y));
                 draw::draw_button(f, &lock, rect, now);
             }
         },
-        |_| now_shown().is_some_and(|l| draw::spinning(&l)),
+        move |_| now_shown(locked).is_some_and(|l| draw::spinning(&l)),
     );
     let pressed = button(arrow)
         .padding(0)
@@ -219,7 +234,7 @@ fn controls<'a>(lock: &super::Lock, size: Size, words: Words) -> El<'a> {
             )
             .focus(ring(LockFocus::Button), Msg::Focus(LockFocus::Button), 9.0)
             .activate(Msg::Act(LockFocus::Button)),
-            shake,
+            move |now| shake(locked, now),
             |_| false,
         ),
         rect.position(),
@@ -269,6 +284,7 @@ fn controls<'a>(lock: &super::Lock, size: Size, words: Words) -> El<'a> {
 /// declared, after `before` (the clock); the form's screen holds the
 /// keyboard, its ring where the compositor says.
 pub fn a11y(
+    lock: &Lock,
     surface: window::Id,
     output: &str,
     words: crate::a11y::Words,
@@ -276,7 +292,7 @@ pub fn a11y(
 ) -> hocus_a11y::Window {
     let mut window = hocus_a11y::Window::new(format!("lock:{output}"), words.lock());
     window.nodes = before;
-    let form = super::with(|l| l.as_ref().is_some_and(|l| draw::form(l, output)));
+    let form = draw::form(lock, output);
     if let Some(rows) = crate::a11y::rows::of(surface).filter(|_| form) {
         window.nodes.extend(rows.nodes);
         window.active = true;
