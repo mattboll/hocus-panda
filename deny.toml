@@ -24,35 +24,38 @@ allow = [
     "OFL-1.1",
 ]
 confidence-threshold = 0.9
-# SQLCipher's sources (decision 0004): SQLite's public-domain blessing, and
-# libtomcrypt's WTFPL, compiled only for targets without a system crypto
-# library. Both more permissive than MIT; this crate only.
-exceptions = [
-    { allow = ["blessing", "WTFPL"], crate = "sqlcipher-src" },
-]
 # The list is a policy, not an inventory.
 unused-allowed-license = "allow"
 
 [advisories]
 yanked = "deny"
+# Each ignored advisory has an owner, the day it was ignored and the day it
+# is looked at again at the latest (sooner if the dependency named moves):
+# on that day, either the advisory is gone from the tree and the line goes,
+# or the date is pushed with a reason.
 ignore = [
     # cgmath is unmaintained; smithay 0.7 depends on it. Revisit on the next smithay release.
+    # Owner: mattboll. Ignored 2026-10-27, review by 2027-02-01.
     { id = "RUSTSEC-2026-0196", reason = "transitive through smithay 0.7" },
     # paste is unmaintained; a compile-time macro of pixman, which smithay's
     # software renderer uses. Revisit on the next pixman release.
+    # Owner: mattboll. Ignored 2026-10-27, review by 2027-02-01.
     { id = "RUSTSEC-2024-0436", reason = "proc-macro, transitive through pixman" },
     # ttf-parser is unmaintained (no known vulnerability); it is the core of
     # iced's text through fontdb and cosmic-text (decision 0003, spike #315).
     # Revisit on every iced update.
+    # Owner: mattboll. Ignored 2026-10-28, review by 2027-02-01.
     { id = "RUSTSEC-2026-0192", reason = "transitive through iced's text stack" },
     # rustybuzz is unmaintained (no known vulnerability); usvg shapes SVG
     # text with it, through iced's `svg` (resvg), which draws the sound
     # popover's applications' icons. Revisit on every iced update.
+    # Owner: mattboll. Ignored 2026-10-29, review by 2027-02-01.
     { id = "RUSTSEC-2026-0206", reason = "transitive through iced's resvg" },
     # zvariant, zvariant_derive and zbus_names are unmaintained (no known
     # vulnerability): merged into zbus 6, which the workspace uses, while
     # accesskit_unix (the screen readers' tree, hocus-a11y) is still on
     # zbus 5. Revisit on every accesskit_unix release.
+    # Owner: mattboll. The three ignored 2026-11-07, review by 2027-02-01.
     { id = "RUSTSEC-2026-0370", reason = "transitive through accesskit_unix's zbus 5" },
     { id = "RUSTSEC-2026-0371", reason = "transitive through accesskit_unix's zbus 5" },
     { id = "RUSTSEC-2026-0372", reason = "transitive through accesskit_unix's zbus 5" },

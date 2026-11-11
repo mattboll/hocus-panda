@@ -15,7 +15,6 @@
 //! trusted and forgotten as BlueZ does it. Every change is signalled with its values
 //! (`PropertiesChanged`, `InterfacesAdded` and `…Removed`), and what the
 //! shell asked is recorded, for the tests to compare.
-#![allow(dead_code)]
 
 use std::{
     collections::HashMap,
@@ -369,16 +368,6 @@ impl Bluez {
     /// Whether a device named `name` is known (not forgotten).
     pub fn known(&self, name: &str) -> bool {
         state(&self.shared, |s| s.devices.iter().any(|d| d.name() == name))
-    }
-
-    /// The name given to `name`, if one.
-    pub fn alias(&self, name: &str) -> Option<String> {
-        state(&self.shared, |s| {
-            s.devices
-                .iter()
-                .find(|d| d.name() == name)
-                .and_then(|d| d.alias.clone())
-        })
     }
 
     /// Whether an agent is registered and BlueZ's default.

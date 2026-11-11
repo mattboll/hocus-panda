@@ -11,15 +11,10 @@
 //! in from the page and its refusal cleared; "Suivre herdr" off declining
 //! it, its agents gone; the halo for a waiting agent only, the preview
 //! saying so; the peek never; the rows' pandas as dots; no tool at all.
-//! What the window shows is read from its log, never on a time; and the
-//! line to the secretary's own page (#759, `settings_secretary.rs`).
+//! What the window shows is read from its log, never on a time.
 
-mod agents_bed;
-mod common;
-mod settings_page;
-
-#[path = "../../hocus-day/tests/fakes/mod.rs"]
-mod fakes;
+use crate::agents_bed;
+use crate::common;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -350,7 +345,6 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         codex_declined: true,
         herdr: true,
         motion: true,
-        ..Machine::default()
     })?
     else {
         return Ok(());
@@ -391,28 +385,5 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     none.open()?;
     none.shows(|s| s["agents"]["none"] == true)?;
     save(&mut none, &out, "agents-none.png")?;
-    Ok(())
-}
-
-/// #759: the secretary's rows are on her own page; Agents keeps a line
-/// to it.
-#[test]
-fn the_page_keeps_a_line_to_the_secretary_s_page() -> anyhow::Result<()> {
-    let Some(mut bed) = Bed::start(Machine {
-        assistant: true,
-        ..Machine::default()
-    })?
-    else {
-        return Ok(());
-    };
-    bed.open()?;
-    let places = bed.places_with("link:secretary")?;
-    assert!(
-        places.get("control:secretary.mode").is_none(),
-        "not on Agents"
-    );
-    bed.click("link:secretary")?;
-    bed.shows(|s| s["page"] == "secretary" && s["secretary"]["assistant"] == true)?;
-    bed.place_of("control:secretary.mode")?;
     Ok(())
 }

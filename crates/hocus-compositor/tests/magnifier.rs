@@ -10,7 +10,7 @@
 //! Pixman here, the same pixels everywhere; the pixels' test again with
 //! GLES on Mesa's software device, where there is one.
 
-mod common;
+use crate::common;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -541,10 +541,7 @@ fn screenshots_for_the_maintainer() -> anyhow::Result<()> {
     let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
         return Ok(());
     };
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built");
-        return Ok(());
-    };
+    let shell = common::shell_program();
     std::fs::create_dir_all(&out)?;
     let dir = tempfile::tempdir()?;
     let root = dir.path();

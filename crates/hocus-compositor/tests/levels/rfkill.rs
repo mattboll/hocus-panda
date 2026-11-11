@@ -4,7 +4,6 @@
 //! (`RFKILL_OP_ADD`), takes `RFKILL_OP_CHANGE_ALL` by kind, and says each
 //! radio that changed to every client (`RFKILL_OP_CHANGE`). What it was
 //! asked is recorded.
-#![allow(dead_code)]
 
 use std::{
     io::{Read, Write},

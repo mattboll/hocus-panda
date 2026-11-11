@@ -193,7 +193,9 @@ pub fn shared_top(form: Form, part: Part) -> f32 {
 /// not known before its desktops are placed.
 pub fn bottom(bar: &str) -> Option<f32> {
     let under = crate::desktops::draw::top_above_bottom(bar)?;
-    Some(crate::popover::with(|c| c.bar_height(bar)) - under)
+    // The music player's tile sits over the desktops (s12).
+    let music = crate::music::room(bar, Form::Full);
+    Some(crate::popover::with(|c| c.bar_height(bar)) - under - music)
 }
 
 /// The room bar `bar`'s full form has for `part`'s group (one of
@@ -263,6 +265,7 @@ fn least(bar: &str, part: Part) -> f32 {
 /// order where each reads what it depends on (the agents' rows' room, the
 /// to-do list's, the windows', Today's rows, then everyone's top).
 pub fn moved() {
+    crate::music::moved();
     agents::draw::fit_rows();
     crate::tasks::draw::fit_lines();
     crate::windows::fit_all();
@@ -270,7 +273,6 @@ pub fn moved() {
     crate::tasks::draw::moved();
     agents::draw::moved();
     agents::peek::moved();
-    crate::speak::peek::moved();
 }
 
 #[cfg(test)]

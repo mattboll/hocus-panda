@@ -24,13 +24,10 @@
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
 
-#[path = "levels/bluez.rs"]
-mod bluez;
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-#[path = "levels/nm.rs"]
-mod nm;
+use crate::bluez;
+use crate::common;
+use crate::fakes;
+use crate::nm;
 
 use std::{
     path::{Path, PathBuf},
@@ -162,10 +159,7 @@ struct Bed {
 }
 
 fn ready() -> Option<PathBuf> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = common::shell_program();
     if !fakes::available() {
         eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
         return None;
@@ -1414,3 +1408,7 @@ fn nothing_is_pasted_from_an_empty_clipboard_one_without_text_or_a_client_that_h
     );
     Ok(())
 }
+
+// Spike #770: the popover's states shot, and what they cost.
+#[path = "wifi_spike/shots.rs"]
+mod spike_shots;

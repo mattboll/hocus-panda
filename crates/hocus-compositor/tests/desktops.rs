@@ -4,7 +4,7 @@
 //! side), the strip at rest once it has slid, and Alt+Tab's order,
 //! selection and minimised windows.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

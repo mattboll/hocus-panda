@@ -32,7 +32,7 @@
 //! on that GPU alone, and are skipped without it. The shell runs away from
 //! the machine's services (no session bus, no system bus, no PipeWire).
 
-mod common;
+use crate::common;
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -137,17 +137,8 @@ impl FakeHerdr {
 
 /// The programs this test needs, built beside it.
 fn ready() -> Option<(PathBuf, PathBuf)> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
-    let exe = std::env::current_exe().ok()?;
-    let hocus = exe.parent()?.parent()?.join("hocus");
-    if !hocus.exists() {
-        eprintln!("hocus is not built: build the workspace to run this test");
-        return None;
-    }
-    Some((shell, hocus))
+    let shell = common::shell_program();
+    Some((shell, common::hocus_program()))
 }
 
 fn places(home: &Path, hocus: &Path) -> Places {
@@ -1345,17 +1336,18 @@ fn motion_of(commits: &[Duration]) -> (usize, Duration) {
 
 /// On a GPU: a change slides the rows and hops the changed agent's panda,
 /// which plays its mood about 2.5 s (#649), then nothing moves; with
-/// reduced motion, it changes at once and its panda is still. Skipped
+/// reduced motion, it changes at once and its panda is still. Fails
 /// without a render node named in `HOCUS_TEST_GPU`.
 #[test]
+#[ignore = "needs a GPU: HOCUS_TEST_GPU names its render node (docs/performance.md)"]
 fn a_change_slides_and_hops_then_rests() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    if render_node().is_none() {
-        eprintln!("the shell would draw on the CPU, without motion: skipped");
-        return Ok(());
-    }
+    anyhow::ensure!(
+        render_node().is_some(),
+        "no GPU: the shell would draw without motion"
+    );
     for (reduced_motion, moves) in [(false, true), (true, false)] {
         let mut bed = start(
             &shell,
@@ -3064,20 +3056,9 @@ fn nudge(hp: &mut Headless) {
     hp.key(common::KEY_LEFTSHIFT, false);
 }
 
-/// Waits until the machine has been up `time`: its clock (`CLOCK_MONOTONIC`,
-/// the agents' starts and the shell's minutes) counts from boot, and an
-/// agent cannot be backdated before it.
-fn up_for(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
-    let up = Duration::from(hp.state().clock.now());
-    if up < time {
-        eprintln!("up for {up:?} only: waiting until {time:?}");
-        wait(hp, time - up)?;
-    }
-    Ok(())
-}
-
 /// Still waiting at its fifth minute, the agent's panda comes out once
-/// more, by the halo's reminder: "· 5 min"; then never again.
+/// more, by the halo's reminder, and the shell says who waits again; then
+/// never again.
 #[test]
 fn the_reminder_brings_the_panda_out_once_more() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
@@ -3088,19 +3069,33 @@ fn the_reminder_brings_the_panda_out_once_more() -> anyhow::Result<()> {
     bed.peek_surface()?;
     assert_eq!(bed.hp.peeks_told(), 1);
     let from = bed.mark();
-    // As if it had waited 4 min 59 s by now. The shell reads its wait on
-    // the machine's clock, which counts from boot: on a machine up for
-    // less than that, the test waits until it has been.
-    up_for(&mut bed.hp, Duration::from_secs(301))?;
+    // At 4 min 59 s of waiting, then over its fifth minute: the motions'
+    // clock held and moved on, as for the reminder's wave. The clock
+    // moves, not the agent's start: that is on the machine's clock, which
+    // counts from boot, and a test may run less than 5 min after it. A key
+    // before and after, so that the session is not idle meanwhile.
+    nudge(&mut bed.hp);
+    bed.hp.hold_clock();
     let since = Duration::from_micros(bed.hp.agents_peek()[0].since);
-    let waited = bed.hp.state().now().saturating_sub(since);
-    bed.hp
-        .backdate_agents(Duration::from_secs(299).saturating_sub(waited));
-    let again = bed
-        .hp
-        .dispatch_until(Duration::from_secs(3), |hp| hp.peeks_told() == 2)?;
-    anyhow::ensure!(again, "no reminder");
-    bed.logged_after(from, &["said=build t'attend · 5\u{a0}min"])?;
+    let to = (since + Duration::from_secs(299)).saturating_sub(bed.hp.now());
+    let stepped = (|| {
+        bed.hp.step(to)?;
+        nudge(&mut bed.hp);
+        anyhow::ensure!(bed.hp.peeks_told() == 1, "reminded before 5 min");
+        let start = bed.hp.now();
+        while bed.hp.peeks_told() < 2 && bed.hp.now() - start < Duration::from_millis(2500) {
+            bed.hp.step(common::STEP)?;
+        }
+        anyhow::Ok(())
+    })();
+    bed.hp.release_clock();
+    nudge(&mut bed.hp);
+    stepped?;
+    anyhow::ensure!(bed.hp.peeks_told() == 2, "no reminder");
+    // The shell says it again. Its minutes are counted on the machine's
+    // clock, which did not move: "· 5 min" is its own test's
+    // (`it_says_who_waits_since_when_and_who_is_done`).
+    bed.logged_after(from, &["said=build t'attend · à l'instant"])?;
     // An hour later, still waiting: no more.
     bed.hp.backdate_agents(Duration::from_secs(3600));
     wait(&mut bed.hp, Duration::from_millis(1500))?;
@@ -3437,16 +3432,17 @@ fn the_secretary_heads_the_group_with_her_line_in_the_moments_mood() -> anyhow::
 
 /// On a GPU: when someone starts waiting, her ear radiates twice and she
 /// hops twice, 1.2 s, once; then nothing moves. With reduced motion, she
-/// holds still. Skipped without a render node named in `HOCUS_TEST_GPU`.
+/// holds still. Fails without a render node named in `HOCUS_TEST_GPU`.
 #[test]
+#[ignore = "needs a GPU: HOCUS_TEST_GPU names its render node (docs/performance.md)"]
 fn the_secretary_radiates_once_when_someone_starts_waiting_then_rests() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
-    if render_node().is_none() {
-        eprintln!("the shell would draw on the CPU, without motion: skipped");
-        return Ok(());
-    }
+    anyhow::ensure!(
+        render_node().is_some(),
+        "no GPU: the shell would draw without motion"
+    );
     for (reduced_motion, moves) in [(false, true), (true, false)] {
         let mut bed = start(
             &shell,

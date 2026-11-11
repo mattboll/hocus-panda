@@ -24,9 +24,8 @@
 //! Pixman here, so the shell draws on the CPU (tiny-skia): nothing draws
 //! on a GPU, which may be the live session's.
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
+use crate::common;
+use crate::fakes;
 
 use std::{
     collections::HashMap,
@@ -52,10 +51,7 @@ const PATH: &str = "/org/freedesktop/portal/desktop";
 const CAST: &str = "org.freedesktop.impl.portal.ScreenCast";
 
 fn ready() -> Option<PathBuf> {
-    let Some(shell) = shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
+    let shell = shell_program();
     let tools = ["pw-cli", "pw-link"].iter().all(|p| has(p));
     if !fakes::available() || !tools {
         eprintln!("dbus-daemon, pipewire or its tools missing: skipped");

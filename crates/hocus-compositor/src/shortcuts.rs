@@ -93,10 +93,6 @@ pub enum Action {
     /// The actions palette, for the focused window; open, it closes
     /// (#736, `crate::actions`).
     Actions,
-    /// The secretary's drawer, beside the bar of the focused window's
-    /// screen; open, it closes (docs/design/secretary.md §4). In
-    /// assistant mode only: in classic mode the chord is no shortcut.
-    Secretary,
 }
 
 impl Action {
@@ -322,7 +318,6 @@ shortcuts! {
     overview: ["Super+W"] => Action::Overview,
     clipboard: ["Super+V"] => Action::Clipboard,
     emoji: ["Super+period"] => Action::Emoji,
-    secretary: ["Super+S"] => Action::Secretary,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
     volume_down: ["XF86AudioLowerVolume"] => Action::Level(LevelKey::VolumeDown),
     mute: ["XF86AudioMute"] => Action::Level(LevelKey::Mute),
@@ -486,7 +481,6 @@ impl State {
             Action::MagnifierOff => self.magnifier_off(),
             Action::ScreenReader => self.toggle_screen_reader(),
             Action::Actions => self.toggle_actions(),
-            Action::Secretary => self.toggle_secretary_drawer(),
         }
     }
 

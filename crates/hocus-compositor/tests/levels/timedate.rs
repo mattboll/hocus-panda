@@ -4,7 +4,6 @@
 //! refuses everything while told to (polkit saying no). It says its
 //! changes as timedated does (`PropertiesChanged`), all but
 //! `NTPSynchronized`, which timedated never says.
-#![allow(dead_code)]
 
 use std::{
     collections::HashMap,

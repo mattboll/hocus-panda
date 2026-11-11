@@ -3,13 +3,9 @@
 //! software device; skipped without either) and on pixman: their pace,
 //! when they stop, the glass over them, and what they cost.
 
-mod common;
+use crate::common;
 
-use std::{
-    alloc::{GlobalAlloc, Layout, System},
-    cell::Cell,
-    time::Duration,
-};
+use std::time::Duration;
 
 use common::{Command, Shows, open_showing, open_with};
 use hocus_compositor::{
@@ -18,44 +14,8 @@ use hocus_compositor::{
 };
 use hocus_link::wallpaper::Picture;
 
-/// Counts the allocations of the thread that asks, while it asks: the
-/// loop runs on the test's thread, the clients on theirs.
-struct Counting;
-
-thread_local! {
-    static COUNTING: Cell<bool> = const { Cell::new(false) };
-    static COUNTED: Cell<u64> = const { Cell::new(0) };
-}
-
-// SAFETY: every call goes to the system's allocator; counting touches
-// thread-locals of plain integers only, which never allocate.
-#[allow(unsafe_code)]
-unsafe impl GlobalAlloc for Counting {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let _ = COUNTING.try_with(|on| {
-            if on.get() {
-                let _ = COUNTED.try_with(|n| n.set(n.get() + 1));
-            }
-        });
-        // SAFETY: as the caller promised us.
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: as the caller promised us.
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: Counting = Counting;
-
 fn allocations(run: impl FnOnce()) -> u64 {
-    COUNTED.with(|n| n.set(0));
-    COUNTING.with(|on| on.set(true));
-    run();
-    COUNTING.with(|on| on.set(false));
-    COUNTED.with(Cell::get)
+    common::counting::allocations(run).1
 }
 
 const STEP: Duration = Duration::from_micros(16_667);

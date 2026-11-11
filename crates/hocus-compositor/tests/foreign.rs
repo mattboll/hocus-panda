@@ -7,7 +7,7 @@
 //! [`common::other_program`]): the desktop lets a window of the program
 //! with the focus take it, so windows of the test's own process would.
 
-mod common;
+use crate::common;
 
 use common::{Command, Event, Shows, WAIT, other_program};
 use hocus_compositor::Headless;

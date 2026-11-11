@@ -3,6 +3,7 @@ name = "hocus-shell"
 description = "The Hocuspanda shell: the bar, drawn with iced as a layer-shell client of the compositor"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -14,23 +15,21 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-hocus-link = { path = "../hocus-link", version = "1.0.0" }
-# The secretary's socket, in assistant mode: her protocol.
-hocus-secretary-link = { path = "../hocus-secretary-link", version = "1.0.0" }
-hocus-pandas = { path = "../hocus-pandas", version = "1.0.0" }
+hocus-link.workspace = true
+hocus-pandas.workspace = true
 # What the shell shows, for screen readers: AT-SPI through AccessKit.
-hocus-a11y = { path = "../hocus-a11y", version = "1.0.0" }
+hocus-a11y.workspace = true
 # The desktop entries, read as the compositor and the Settings read them.
-hocus-xdg = { path = "../hocus-xdg", version = "1.0.0" }
+hocus-xdg.workspace = true
 # "Your day"'s data: calendars, events and tasks, read off the loop.
-hocus-day = { path = "../hocus-day", version = "1.0.0" }
+hocus-day.workspace = true
 # The sound, from PipeWire, shared with the Settings.
-hocus-sound = { path = "../hocus-sound", version = "1.0.0" }
+hocus-sound.workspace = true
 # Bluetooth, from BlueZ, shared with the Settings.
-hocus-bluetooth = { path = "../hocus-bluetooth", version = "1.0.0" }
+hocus-bluetooth.workspace = true
 # No x11, no winit-side theme detection: the shell only talks Wayland
 # through iced_layershell (tech-choices, spike #315).
-iced = { version = "0.14", default-features = false, features = [
+iced = { workspace = true, features = [
     "wgpu",
     "tiny-skia",
     "crisp",
@@ -48,51 +47,55 @@ iced = { version = "0.14", default-features = false, features = [
 ] }
 # PNG and JPEG alone of the image crate's codecs: the applications' icons,
 # and the captures (a JPEG's, `[capture] format`, 6.17).
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { workspace = true, features = ["png", "jpeg"] }
+# The music player's covers on an http(s) URL (Spotify's), fetched on its
+# thread's blocking pool: the client and TLS the day's sources use already.
+ureq.workspace = true
+rustls.workspace = true
 # Without its default theme detection (mundy, over the session's D-Bus).
 # Pinned: its winit-core prerelease dependencies broke it once (spike).
-iced_layershell = { version = "=0.19.1", default-features = false }
+iced_layershell.workspace = true
 # The clock's time zone and its rules, read from the system's database.
-jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 # CLOCK_MONOTONIC, the compositor's clock, to start a form switch when it
 # does; inotify, to see the time zone change; the user's id, for their name.
-rustix = { version = "1.1.6", features = ["time", "fs", "event", "process"] }
+rustix = { workspace = true, features = ["time", "fs", "event", "process"] }
 # `signal`: SIGTERM ends the shell once what it keeps is written.
-tokio = { version = "1.54.1", features = ["net", "io-util", "rt", "signal", "sync", "time"] }
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tokio = { workspace = true, features = ["net", "io-util", "rt", "signal", "sync", "time"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 # The levels: UPower, power-profiles-daemon and logind on the system bus
 # (MIT); the backlight's changes from udev (MIT); PipeWire's graph as
 # `pw-dump` writes it, in JSON. `service`: Bluetooth's pairing agent,
 # which BlueZ calls.
-zbus = { version = "6.0.0", default-features = false, features = ["tokio", "proxy", "service"] }
-udev = "0.9.3"
-serde_json = "1.0.154"
+zbus = { workspace = true, features = ["tokio", "proxy", "service"] }
+udev.workspace = true
+serde_json.workspace = true
 # What zbus calls take, for a call helper of the network's.
-serde = "1.0.229"
+serde.workspace = true
 # NetworkManager followed, as the Settings' Réseau page does (6.6).
-hocus-network = { path = "../hocus-network", version = "1.0.0" }
+hocus-network.workspace = true
 # The Wayland connection iced draws on, made here to read the clipboard
 # on it (paste); the same version as iced_layershell's.
-wayland-client = "0.31.15"
+wayland-client.workspace = true
 # Its screens' xdg-output names, which iced_layershell finds them by
 # (outputs), and the pointer's shapes (pointer); the same version as
 # iced_layershell's.
-wayland-protocols = { version = "0.32.13", features = ["client", "unstable", "staging"] }
+wayland-protocols.workspace = true
 # The clipboard's history sealed on disk (5.6): XChaCha20-Poly1305
 # (RustCrypto, MIT or Apache-2.0); its random keys and nonces.
-chacha20poly1305 = "0.11.0"
+chacha20poly1305.workspace = true
 # The launcher's search ignores accents: names decomposed (NFD), their
 # marks left out (MIT or Apache-2.0).
-unicode-normalization = "0.1.25"
+unicode-normalization.workspace = true
 # The launcher's SVG icons drawn at their size on the icons' thread, not
 # on the one that draws: the same resvg as iced's (MIT or Apache-2.0).
-resvg = { version = "0.45.1", default-features = false }
+resvg.workspace = true
 # The capture's marks' texts drawn into its image off the shell's thread
 # (5.9), in Manrope: the compositor's (MIT, Apache-2.0 or Zlib).
-fontdue = "0.9.3"
+fontdue.workspace = true
 # The adapter wgpu offers, to choose the CPU renderer when it is a CPU.
-wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
+wgpu.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true

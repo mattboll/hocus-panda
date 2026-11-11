@@ -5,7 +5,7 @@
 //!
 //! One test per point of the acceptance.
 
-mod fakes;
+use crate::fakes;
 
 use std::{path::Path, sync::mpsc, time::Duration};
 

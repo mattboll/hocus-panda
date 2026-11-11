@@ -2,6 +2,12 @@
 //! it once ready, restarts it when it ends (sooner or later as it keeps
 //! ending), and talks to it over a private socket (`hocus-link`).
 //!
+//! `hocus msg shell restart [--program PATH]` ends it (`SIGTERM`: it
+//! writes what it keeps) and starts it again as soon as it has ended,
+//! without that delay, from the program given if one is ([`crate::given`],
+//! docs/workflow.md "Development loop"). Its bars' space stays kept and
+//! the windows stay where they are meanwhile.
+//!
 //! The socket sits next to the Wayland one, `<socket>.shell`, in the
 //! session's runtime directory; its path goes to the shell in
 //! `HOCUS_SHELL_SOCKET`. The compositor reads it from the loop without ever
@@ -18,6 +24,7 @@ use std::{
     io::{ErrorKind, Read, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
+    process::ExitStatus,
     sync::{Arc, Condvar, Mutex, PoisonError},
     time::{Duration, Instant},
 };
@@ -39,12 +46,23 @@ const STEADY: Duration = Duration::from_secs(30);
 /// The first restart's delay, doubled at each quick end, up to the last.
 const FIRST_DELAY: Duration = Duration::from_millis(500);
 const LAST_DELAY: Duration = Duration::from_secs(30);
+/// How long a shell asked to end has to end, before `SIGKILL`.
+const GRACE: Duration = Duration::from_secs(2);
 
 /// The shell, as the compositor sees it.
 #[derive(Debug, Default)]
 pub struct Shell {
-    /// Its program; `None`: no shell (tests, `--no-shell`).
+    /// Its program, the installed one; `None`: no shell (tests,
+    /// `--no-shell`).
     pub program: Option<PathBuf>,
+    /// The program given in its place for this session, if one is.
+    pub given: crate::given::Given,
+    phase: Phase,
+    /// Starts so far: a run's number is its start's.
+    pub starts: u64,
+    /// What the shell is told once it is connected (again): a given
+    /// program let go of.
+    pub notices: Vec<ToShell>,
     /// The session bus it serves the notifications on; `None`: none.
     pub bus: Option<Bus>,
     /// The socket it reaches the compositor on.
@@ -61,7 +79,7 @@ pub struct Shell {
     pub desktops: crate::desktops::Told,
     /// Ends in a row that came quickly.
     quick_ends: u32,
-    ended: Option<Sender<Duration>>,
+    ended: Option<Sender<Ended>>,
     /// The shells started and not ended yet.
     pub running: Arc<Running>,
     /// The shell's Wayland connection, made by the compositor and handed
@@ -71,6 +89,33 @@ pub struct Shell {
     /// `hocus msg a11y`'s askers, answered with the lines the shell says
     /// once it ends them.
     a11y: A11yAsked,
+}
+
+/// Where the shell's process is.
+#[derive(Debug, Default)]
+enum Phase {
+    /// None runs: not started yet, no program, or the session ends.
+    #[default]
+    Off,
+    /// Run `run` of `program`.
+    Running {
+        run: u64,
+        program: PathBuf,
+        started: crate::given::Started,
+    },
+    /// It ended by itself; started again by this timer.
+    Waiting(RegistrationToken),
+    /// Asked to end (`hocus msg shell restart`): started again as soon as
+    /// run `run` has ended.
+    Ending { run: u64 },
+}
+
+/// A run ended, as its thread says it.
+#[derive(Debug)]
+struct Ended {
+    run: u64,
+    /// How long it ran; `None`: it did not start.
+    ran: Option<Duration>,
 }
 
 /// The screen readers' tree asked of the shell: who waits, and what it said
@@ -108,7 +153,20 @@ pub struct Running {
     changed: Condvar,
     /// The shell's process while it runs: its Wayland connection's
     /// credentials are the compositor's own, which made it.
-    pid: Mutex<Option<u32>>,
+    process: Mutex<Process>,
+}
+
+/// The shell's process, and which runs were asked to end. Its thread
+/// takes it out under the lock before it reaps it, and a signal is sent
+/// under the same lock: it reaches that process or none, never another
+/// that was given its number since.
+#[derive(Debug, Default)]
+struct Process {
+    /// The run and its process, from its start until it ended.
+    running: Option<(u64, u32)>,
+    /// Every run up to this one was asked to end: one whose process
+    /// starts after that is ended as it starts.
+    ending: u64,
 }
 
 /// One shell, from before its thread starts until it ended (or its thread
@@ -123,11 +181,58 @@ impl Running {
 
     /// The shell's process, while one runs.
     pub fn pid(&self) -> Option<u32> {
-        *self.pid.lock().unwrap_or_else(PoisonError::into_inner)
+        let process = self.process.lock().unwrap_or_else(PoisonError::into_inner);
+        process.running.map(|(_, pid)| pid)
     }
 
-    fn set_pid(&self, pid: Option<u32>) {
-        *self.pid.lock().unwrap_or_else(PoisonError::into_inner) = pid;
+    /// Run `run`'s process started: ended at once if that was asked
+    /// before it had.
+    fn started(&self, run: u64, pid: u32) {
+        let mut process = self.process.lock().unwrap_or_else(PoisonError::into_inner);
+        process.running = Some((run, pid));
+        if process.ending >= run {
+            signal(pid, rustix::process::Signal::TERM);
+        }
+    }
+
+    /// Asks run `run` (and any before it) to end, with `signal`.
+    fn end(&self, run: u64, with: rustix::process::Signal) {
+        let mut process = self.process.lock().unwrap_or_else(PoisonError::into_inner);
+        process.ending = process.ending.max(run);
+        if let Some((running, pid)) = process.running
+            && running <= run
+        {
+            signal(pid, with);
+        }
+    }
+
+    /// Waits for run `run`'s process to end. It is first waited for
+    /// without being reaped, so that its number stays its own until it is
+    /// taken out of [`Process`].
+    fn wait(&self, run: u64, child: &mut std::process::Child) -> std::io::Result<ExitStatus> {
+        use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
+        let exited = i32::try_from(child.id())
+            .ok()
+            .and_then(Pid::from_raw)
+            .is_some_and(|pid| {
+                loop {
+                    let options = WaitIdOptions::EXITED | WaitIdOptions::NOWAIT;
+                    match waitid(WaitId::Pid(pid), options) {
+                        Ok(_) => break true,
+                        Err(rustix::io::Errno::INTR) => {}
+                        Err(_) => break false,
+                    }
+                }
+            });
+        let mut process = self.process.lock().unwrap_or_else(PoisonError::into_inner);
+        if process.running.is_some_and(|(running, _)| running == run) {
+            process.running = None;
+        }
+        if !exited {
+            // Not known to have ended: the wait may last, without the lock.
+            drop(process);
+        }
+        child.wait()
     }
 
     /// Waits until no shell runs, `timeout` at most: whether none does.
@@ -146,6 +251,19 @@ impl Drop for Runs {
         let mut count = self.0.count.lock().unwrap_or_else(PoisonError::into_inner);
         *count = count.saturating_sub(1);
         self.0.changed.notify_all();
+    }
+}
+
+/// `with` to `pid`, the shell's process (see [`Process`]).
+fn signal(pid: u32, with: rustix::process::Signal) {
+    let Some(pid) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    else {
+        return;
+    };
+    if let Err(err) = rustix::process::kill_process(pid, with) {
+        tracing::debug!(%err, "the shell is gone already");
     }
 }
 
@@ -203,11 +321,11 @@ pub fn listen(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::R
         )
         .map_err(|err| err.error)
         .context("could not watch the shell's socket")?;
-    let (sender, ended) = channel::channel::<Duration>();
+    let (sender, ended) = channel::channel::<Ended>();
     handle
         .insert_source(ended, |event, _, app| {
-            if let Event::Msg(ran) = event {
-                app.state.shell_ended(ran);
+            if let Event::Msg(ended) = event {
+                app.state.shell_ended(ended);
             }
         })
         .map_err(|err| err.error)
@@ -218,15 +336,30 @@ pub fn listen(handle: &LoopHandle<'static, App>, state: &mut State) -> anyhow::R
 }
 
 impl State {
+    /// The program the shell runs from: the one given for this session,
+    /// else the installed one.
+    pub(crate) fn shell_program(&self) -> Option<PathBuf> {
+        let given = self.shell.given.program().map(Path::to_path_buf);
+        given.or_else(|| self.shell.program.clone())
+    }
+
     /// Starts the shell, on a thread that waits for it to end.
     pub fn start_shell(&mut self) {
         let (Some(program), Some(socket), Some(ended)) = (
-            self.shell.program.clone(),
+            self.shell_program(),
             self.shell.socket.clone(),
             self.shell.ended.clone(),
         ) else {
             return;
         };
+        if let Phase::Waiting(token) = std::mem::take(&mut self.shell.phase) {
+            self.loop_handle.remove(token);
+        }
+        // A former shell's connection is no longer the shell's: whether
+        // the shell is there is said of this one.
+        if self.shell.link.is_some() {
+            self.shell_gone();
+        }
         let env = programs::Env::of(self);
         let gpu = self.gpu;
         let bus = self.shell.bus.clone();
@@ -240,6 +373,14 @@ impl State {
                 return;
             }
         };
+        self.shell.starts += 1;
+        let run = self.shell.starts;
+        self.shell.phase = Phase::Running {
+            run,
+            program: program.clone(),
+            started: crate::given::Started::now(),
+        };
+        let given = self.shell.given.program().is_some();
         let runs = Running::start(&self.shell.running);
         programs::on_a_thread("shell".to_owned(), move || {
             let _runs = runs;
@@ -264,22 +405,29 @@ impl State {
             let spawned = command.spawn();
             // Its copy is the child's now.
             drop(theirs);
-            match spawned {
+            let ran = match spawned {
                 Ok(mut child) => {
-                    tracing::info!(program = %program.display(), pid = child.id(), "shell started");
-                    _runs.0.set_pid(Some(child.id()));
-                    match child.wait() {
-                        Ok(status) => tracing::warn!(%status, "the shell ended"),
+                    tracing::info!(
+                        program = %program.display(),
+                        given,
+                        pid = child.id(),
+                        run,
+                        "shell started"
+                    );
+                    _runs.0.started(run, child.id());
+                    match _runs.0.wait(run, &mut child) {
+                        Ok(status) => tracing::warn!(%status, run, "the shell ended"),
                         Err(err) => tracing::warn!(%err, "could not wait for the shell"),
                     }
-                    _runs.0.set_pid(None);
+                    Some(started.elapsed())
                 }
                 Err(err) => {
-                    tracing::warn!(program = %program.display(), %err, "could not start the shell");
+                    tracing::warn!(program = %program.display(), given, %err, "could not start the shell");
+                    None
                 }
-            }
+            };
             // The loop is gone when the compositor is: nothing to restart.
-            let _ = ended.send(started.elapsed());
+            let _ = ended.send(Ended { run, ran });
         });
     }
 
@@ -307,29 +455,172 @@ impl State {
         Ok(theirs)
     }
 
-    /// The shell ended after running `ran`: started again, later each time
-    /// it ends quickly. Its bars' space stays kept meanwhile.
-    fn shell_ended(&mut self, ran: Duration) {
+    /// A run of the shell ended. One asked to end is started again at
+    /// once; one that ended by itself, later each time it ends quickly,
+    /// unless it is a given program's that does not hold: the installed
+    /// one then starts at once. Its bars' space stays kept meanwhile.
+    fn shell_ended(&mut self, ended: Ended) {
+        let Ended { run, ran } = ended;
+        match std::mem::take(&mut self.shell.phase) {
+            Phase::Ending { run: asked } if asked == run => {
+                if self.ending.is_none() {
+                    tracing::info!("the shell ended as asked: it starts again");
+                    self.start_shell();
+                }
+            }
+            Phase::Running {
+                run: running,
+                program,
+                ..
+            } if running == run => {
+                if self.ending.is_some() {
+                    return;
+                }
+                if let Some(why) = self.shell.given.ended(&program, ran, STEADY) {
+                    self.fell_back(hocus_agents::Supervised::Shell, program, why);
+                    self.shell.quick_ends = 0;
+                    self.start_shell();
+                    return;
+                }
+                if ran.is_some_and(|ran| ran >= STEADY) {
+                    self.shell.quick_ends = 0;
+                }
+                let delay = FIRST_DELAY
+                    .saturating_mul(1 << self.shell.quick_ends.min(8))
+                    .min(LAST_DELAY);
+                self.shell.quick_ends += 1;
+                tracing::info!(?delay, "the shell starts again");
+                let restart =
+                    self.loop_handle
+                        .insert_source(Timer::from_duration(delay), |_, _, app| {
+                            // This timer goes as it returns: not removed
+                            // by the start.
+                            if matches!(app.state.shell.phase, Phase::Waiting(_)) {
+                                app.state.shell.phase = Phase::Off;
+                                app.state.start_shell();
+                            }
+                            TimeoutAction::Drop
+                        });
+                match restart {
+                    Ok(token) => self.shell.phase = Phase::Waiting(token),
+                    Err(err) => {
+                        tracing::warn!(%err.error, "could not schedule the shell's restart");
+                    }
+                }
+            }
+            // An older run's end, already dealt with.
+            other => self.shell.phase = other,
+        }
+    }
+
+    /// Why the shell cannot be restarted now, if it cannot.
+    pub(crate) fn shell_restartable(&self) -> Result<(), &'static str> {
+        if self.shell.program.is_none() || self.shell.ended.is_none() {
+            return Err("no shell in this session");
+        }
         if self.ending.is_some() {
-            return;
+            return Err("the session ends");
         }
-        if ran >= STEADY {
-            self.shell.quick_ends = 0;
+        Ok(())
+    }
+
+    /// `hocus msg shell restart`: the shell that runs is asked to end, and
+    /// its end starts the next one at once; none running, it starts now.
+    /// The loop waits for nothing.
+    pub(crate) fn restart_shell(&mut self) {
+        let program = self.shell_program().unwrap_or_default();
+        tracing::info!(
+            program = %program.display(),
+            given = self.shell.given.program().is_some(),
+            "hocus msg shell restart"
+        );
+        self.shell.quick_ends = 0;
+        match std::mem::take(&mut self.shell.phase) {
+            Phase::Running { run, .. } => {
+                self.shell.phase = Phase::Ending { run };
+                self.shell.running.end(run, rustix::process::Signal::TERM);
+                let kill = self.loop_handle.insert_source(
+                    Timer::from_duration(GRACE),
+                    move |_, _, app| {
+                        if matches!(app.state.shell.phase, Phase::Ending { run: r } if r == run) {
+                            tracing::warn!(run, "the shell did not end: killed");
+                            app.state
+                                .shell
+                                .running
+                                .end(run, rustix::process::Signal::KILL);
+                        }
+                        TimeoutAction::Drop
+                    },
+                );
+                if let Err(err) = kill {
+                    tracing::warn!(%err.error, "no timer for the shell's end");
+                }
+            }
+            // Already asked to end: its end starts the program as it is
+            // now.
+            Phase::Ending { run } => self.shell.phase = Phase::Ending { run },
+            waiting @ (Phase::Waiting(_) | Phase::Off) => {
+                self.shell.phase = waiting;
+                self.start_shell();
+            }
         }
-        let delay = FIRST_DELAY
-            .saturating_mul(1 << self.shell.quick_ends.min(8))
-            .min(LAST_DELAY);
-        self.shell.quick_ends += 1;
-        tracing::info!(?delay, "the shell starts again");
-        let restart = self
-            .loop_handle
-            .insert_source(Timer::from_duration(delay), |_, _, app| {
-                app.state.start_shell();
-                TimeoutAction::Drop
-            });
-        if let Err(err) = restart {
-            tracing::warn!(%err.error, "could not schedule the shell's restart");
+    }
+
+    /// `hocus msg shell status`: which program runs, since when.
+    pub(crate) fn shell_status(&self) -> String {
+        let shell = &self.shell;
+        let program = self.shell_program();
+        let (state, running) = match &shell.phase {
+            Phase::Off => ("off", None),
+            Phase::Running {
+                program, started, ..
+            } => (
+                if self.shell_linked() {
+                    "running"
+                } else {
+                    "starting"
+                },
+                Some((program, started)),
+            ),
+            Phase::Waiting(_) => ("waiting", None),
+            Phase::Ending { .. } => ("ending", None),
+        };
+        let mut said = crate::given::Status {
+            state,
+            program: running.map(|(p, _)| p.as_path()).or(program.as_deref()),
+            installed: shell.program.as_deref(),
+            given: &shell.given,
+            process: running.map(|(_, started)| (shell.running.pid(), started)),
+            starts: shell.starts,
+            live_reload: self.config.developer.live_reload,
         }
+        .lines();
+        said.push_str(&format!(
+            "bars {} of {}\n",
+            self.bars_drawn(),
+            self.panel.bars.len()
+        ));
+        said
+    }
+
+    /// How many screens show their bar: its surface has a buffer of its
+    /// place's size.
+    fn bars_drawn(&self) -> usize {
+        use smithay::backend::renderer::utils::with_renderer_surface_state;
+        self.space
+            .outputs()
+            .filter(|output| {
+                let map = smithay::desktop::layer_map_for_output(output);
+                map.layers().any(|layer| {
+                    layer.namespace() == hocus_link::NAMESPACE
+                        && map.layer_geometry(layer).is_some_and(|g| {
+                            with_renderer_surface_state(layer.wl_surface(), |s| s.surface_size())
+                                .flatten()
+                                == Some(g.size)
+                        })
+                })
+            })
+            .count()
     }
 
     /// The shell connected (again): it is told how bars and their clock
@@ -428,7 +719,6 @@ impl State {
         self.tell_desktops();
         self.tell_window_states(true);
         self.tell_agents();
-        self.secretary_shell_connected();
         self.tell_bubbles_screen();
         self.tell_fullscreen_again();
         self.hand_kept_levels();
@@ -440,6 +730,7 @@ impl State {
         self.lock_shell_connected();
         self.away_shell_connected();
         self.leave_shell_connected();
+        self.tell_notices();
     }
 
     /// The shell's connection ended.
@@ -495,7 +786,6 @@ impl State {
                 self.popovers_closing(&namespace);
                 self.launcher_closing(&namespace);
             }
-            ToCompositor::SecretaryDrawer(output) => self.secretary_drawer_on(&output),
             ToCompositor::NextLayout => self.next_layout(),
             ToCompositor::Desktop { output, to } => self.desktop_asked(&output, to),
             ToCompositor::Bring(id) => self.window_asked(id),
@@ -538,7 +828,6 @@ impl State {
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::PeekClose => self.peek_closed(),
-            ToCompositor::SecretaryPeek { id, stays } => self.secretary_peek(id, stays),
             ToCompositor::Meeting(near) => {
                 tracing::debug!(?near, "the next meeting, for the halo");
                 self.meeting_near(near.map(|near| match near {

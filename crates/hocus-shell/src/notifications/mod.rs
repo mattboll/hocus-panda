@@ -659,8 +659,6 @@ fn carry_out(effect: Effect) -> Vec<Message> {
         }
         Effect::Changed => {
             crate::popover::changed(crate::popover::Item::Notifications);
-            // Do not disturb may have changed: the secretary's gate looks.
-            crate::speak::poke();
             Vec::new()
         }
         Effect::Save(records) => {
@@ -821,6 +819,55 @@ fn reminder_note(
         icon_from: note::IconFrom::default(),
         at,
     }
+}
+
+// --- A developer's program let go of (docs/workflow.md) --------------------------------
+
+/// The ids of what the desktop says of itself: past any the server gives,
+/// apart from the reminders' and the captures'.
+const DESKTOPS_OWN_FROM: u32 = 0x4000_0000;
+
+/// The program given for this session as the shell (`hocus msg shell
+/// restart --program`) did not start or kept ending, and the installed
+/// one runs again: a notification says so, the latest in place of the one
+/// before.
+pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
+    use crate::clock::time::Lang;
+    use hocus_link::Supervised;
+    let program = program.display();
+    let (number, summary, body) = match (which, Lang::of_messages()) {
+        (Supervised::Shell, Lang::French) => (
+            0,
+            "Le shell de développement s’est arrêté",
+            format!(
+                "{program} n’a pas démarré ou s’arrêtait sans cesse. Le shell installé a repris."
+            ),
+        ),
+        (Supervised::Shell, Lang::English) => (
+            0,
+            "The development shell stopped",
+            format!("{program} did not start or kept ending. The installed shell runs again."),
+        ),
+    };
+    tracing::info!(which = which.word(), %program, "a given program was let go of: said");
+    input(Input::Notify(Box::new(note::Note {
+        id: DESKTOPS_OWN_FROM | number,
+        app: "Hocuspanda".to_owned(),
+        entry: None,
+        icon: None,
+        summary: summary.to_owned(),
+        body,
+        actions: Vec::new(),
+        default: false,
+        urgency: note::Urgency::Normal,
+        timeout: note::Timeout::After(note::LIFE),
+        progress: None,
+        resident: false,
+        pid: 0,
+        agent: false,
+        icon_from: note::IconFrom::default(),
+        at: wall_ms(),
+    })));
 }
 
 /// What surface `id` shows, if it is one of the notifications': a bubble,

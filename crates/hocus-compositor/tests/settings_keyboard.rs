@@ -16,8 +16,8 @@
 //! What the window shows is read from its log ("shows" and "places"
 //! lines, JSON), never on a time.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -83,10 +83,7 @@ impl Bed {
 
     /// The same on a screen `output` (`WxH[@SCALE]`).
     fn start_on(file: &str, output: &str) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config/hocuspanda", "cache", "state", "data", "bin"] {
@@ -372,8 +369,8 @@ fn the_shortcuts_are_on_a_sub_page_with_their_own_search() -> anyhow::Result<()>
         ]
     );
     let shown = bed.shortcuts()?;
-    // 74 actions: three families of nine folded, 47 others.
-    assert_eq!(shortcut_ids(&shown).len(), 50, "{:?}", shortcut_ids(&shown));
+    // 73 actions: three families of nine folded, 46 others.
+    assert_eq!(shortcut_ids(&shown).len(), 49, "{:?}", shortcut_ids(&shown));
     // Its own search: Print's.
     bed.click("shortcuts:search")?;
     bed.type_text("impr")?;

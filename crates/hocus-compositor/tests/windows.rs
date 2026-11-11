@@ -4,7 +4,7 @@
 //! the keyboard, a window opened in the background pulsing once, and no
 //! frame drawn once nothing moves.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 
@@ -586,7 +586,11 @@ impl Drop for Foreign {
 /// Starts the other program's window, and waits until it has the keyboard.
 fn foreign_window(hp: &mut Headless) -> anyhow::Result<Foreign> {
     let child = std::process::Command::new(std::env::current_exe()?)
-        .args(["--exact", "a_window_of_another_program", "--nocapture"])
+        .args([
+            "--exact",
+            "windows::a_window_of_another_program",
+            "--nocapture",
+        ])
         .env("HOCUS_TEST_FOREIGN", hp.socket())
         .stdout(std::process::Stdio::null())
         .spawn()?;

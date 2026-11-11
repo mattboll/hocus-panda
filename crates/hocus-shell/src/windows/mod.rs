@@ -349,7 +349,8 @@ pub fn fit_all() -> bool {
             let height = popover::with(|c| c.known_height(&bar));
             let under = |form| {
                 let above = crate::desktops::draw::top_above_bottom_in(&bar, form)?;
-                Some(height? - above)
+                // Over the music player's tile, when it shows (s12).
+                Some(height? - above - crate::music::room(&bar, form))
             };
             let (full_bottom, mini_bottom) = (under(Form::Full), under(Form::Mini));
             let room = column::room(&bar, Part::Windows);
@@ -477,8 +478,9 @@ fn margin(top: f32) -> (i32, i32, i32, i32) {
 
 /// The surface's height when it shows nothing: the ring's room, drawing
 /// nothing. Not a pixel: at a fractional scale tiny-skia refuses a buffer
-/// that small (#617).
-const IDLE: u32 = (2.0 * draw::ROOM) as u32;
+/// that small (#617). On the CPU, where it would show black, the
+/// compositor leaves it out.
+const IDLE: u32 = hocus_link::IDLE_HEIGHT as u32;
 
 /// The surface's width when it shows nothing, in `form`.
 fn width_of(form: Option<Form>, switching: bool) -> u32 {

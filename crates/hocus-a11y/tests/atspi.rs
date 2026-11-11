@@ -362,7 +362,7 @@ fn a_screen_reader_reads_the_tree_and_presses_a_button() {
         .env(CHILD_ENV, "1")
         .args([
             "--exact",
-            "a_screen_reader_reads_the_tree_and_presses_a_button",
+            "atspi::a_screen_reader_reads_the_tree_and_presses_a_button",
             "--nocapture",
             "--test-threads=1",
         ])
@@ -377,9 +377,14 @@ fn a_screen_reader_reads_the_tree_and_presses_a_button() {
     let shown = wait_for(&said, "shown").expect("the program heard nobody listen");
     assert_ne!(shown, "shown 0", "no tree built");
 
-    // Named as the bridge names it, not after its program.
+    // Named after its program, as accesskit_unix names an application.
+    let name = exe
+        .file_name()
+        .expect("the test's program's name")
+        .to_string_lossy()
+        .into_owned();
     let read = private("python3", &dir, &bus)
-        .args(["-I", "-c", READER, "Hocuspanda"])
+        .args(["-I", "-c", READER, &name])
         .output()
         .expect("the reader");
     let tree = String::from_utf8_lossy(&read.stdout).into_owned();
@@ -394,7 +399,7 @@ fn a_screen_reader_reads_the_tree_and_presses_a_button() {
             "no line starting {line:?} in:\n{tree}"
         );
     };
-    has("application | Hocuspanda");
+    has(&format!("application | {name}"));
     has("frame | Barre — eDP-1");
     has("panel | Bureaux");
     has("button | 14 h 32, jeudi 6 novembre |");

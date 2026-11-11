@@ -4,7 +4,7 @@
 //! when it names a folder; run by hand (`--run-ignored only`). The clock
 //! runs: the shell counts down on its own.
 
-mod common;
+use crate::common;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -53,9 +53,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
         return Ok(());
     };
-    let Some(shell) = common::shell_program() else {
-        return Ok(());
-    };
+    let shell = common::shell_program();
     std::fs::create_dir_all(&out)?;
     let home = tempfile::tempdir()?;
     let at = |sub: &str| home.path().join(sub).display().to_string();

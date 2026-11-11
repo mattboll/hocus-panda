@@ -4,7 +4,7 @@
 //! power supplies, buses or GPU (it draws with tiny-skia).
 //!
 //! One test per point of the issue: the window opens with its sidebar's
-//! 20 sections; searching "veille" finds "Mettre en veille après", the lid
+//! 19 sections; searching "veille" finds "Mettre en veille après", the lid
 //! and the power button, and opening a result lights its row; changing the
 //! delay writes `[idle] delay` at once, the file's other sections and
 //! comments kept; "Annuler" and `Ctrl+Z` take it back; a hand edit of the
@@ -21,8 +21,8 @@
 //! "places" lines, JSON): the places are the window's own, the window's
 //! place on the screen added.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -87,10 +87,7 @@ impl Bed {
 
     /// The same on a screen `output` (`WxH[@SCALE]`).
     fn start_on(file: &str, output: &str) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config/hocuspanda", "cache", "state", "data", "bin"] {
@@ -338,7 +335,7 @@ fn kept(before: &str, after: &str, but: &[&str]) -> bool {
 }
 
 #[test]
-fn the_window_opens_with_its_sidebars_20_sections() -> anyhow::Result<()> {
+fn the_window_opens_with_its_sidebars_19_sections() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -348,11 +345,10 @@ fn the_window_opens_with_its_sidebars_20_sections() -> anyhow::Result<()> {
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    assert_eq!(sections.len(), 20, "{sections:?}");
+    assert_eq!(sections.len(), 19, "{sections:?}");
     assert_eq!(sections[0], "Apparence et langue");
     assert_eq!(sections[3], "Accessibilité");
-    assert_eq!(sections[14], "Secrétaire");
-    assert_eq!(sections[16], "Énergie");
+    assert_eq!(sections[15], "Énergie");
     // Each drawn in the sidebar, in that order, under the home's row.
     let places = bed.places_with("nav:performance")?;
     let y = |id: &str| places[id][1].as_f64().unwrap_or(-1.0);
@@ -372,7 +368,6 @@ fn the_window_opens_with_its_sidebars_20_sections() -> anyhow::Result<()> {
         "desktops",
         "applications",
         "agents",
-        "secretary",
         "captures",
         "power",
         "account",

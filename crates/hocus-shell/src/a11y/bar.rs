@@ -190,6 +190,7 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
     let node = match item {
         Item::Calendar => button(facts.clock.as_ref().map(|c| words.clock(c))?),
         Item::InUse => button(words.in_use(&facts.uses, facts.microphone_muted)),
+        Item::Music => button(crate::music::Words::new(lang).music().to_owned()),
         Item::Meeting | Item::MeetingMark => {
             button(crate::meeting::Words::new(lang).name(facts.meeting.as_ref()?))
         }

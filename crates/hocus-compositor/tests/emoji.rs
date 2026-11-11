@@ -13,7 +13,7 @@
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -53,10 +53,7 @@ struct Window {
 
 impl Bed {
     fn start(root: &Path) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         for sub in ["home", "config", "cache", "state", "data/applications"] {
             std::fs::create_dir_all(root.join(sub))?;
         }

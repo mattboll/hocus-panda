@@ -9,7 +9,6 @@
 //! choosing the default sink and source (one chosen with `wpctl
 //! set-default` becomes the default); and a backlight directory. The shell
 //! is started through a script pointing it at them.
-#![allow(dead_code)]
 
 use std::{
     collections::HashMap,
@@ -437,14 +436,6 @@ impl Fakes {
         std::fs::write(aside.join("max_brightness"), format!("{max}\n"))?;
         std::fs::write(aside.join("brightness"), format!("{value}\n"))?;
         std::fs::rename(&aside, &path)?;
-        Ok(())
-    }
-
-    pub fn remove_backlight(&self) -> anyhow::Result<()> {
-        let path = self.backlights().join("intel_backlight");
-        let aside = self.dir.path().join("removed_backlight");
-        std::fs::rename(&path, &aside)?;
-        std::fs::remove_dir_all(&aside)?;
         Ok(())
     }
 

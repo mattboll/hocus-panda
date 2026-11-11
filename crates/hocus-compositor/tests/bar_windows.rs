@@ -16,7 +16,7 @@
 //! has, never for a time. With `HOCUS_SHOTS` naming a folder, the tests
 //! save the bar's right side there.
 
-mod common;
+use crate::common;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -139,10 +139,7 @@ fn config_text(machine: &Machine) -> String {
 /// The compositor with the real shell on the CPU, for `machine`; none
 /// when the shell is not built.
 fn start(machine: &Machine) -> anyhow::Result<Option<Bed>> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(None);
-    };
+    let shell = common::shell_program();
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     let home = root.join("home");

@@ -19,7 +19,6 @@
 //! (`AddConnection`); a connection deleted while in use is left first;
 //! the Wi-Fi device's IPv4 configuration. Changes can be refused as polkit
 //! would ([`Nm::refuse`]).
-#![allow(dead_code)]
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -316,10 +315,10 @@ impl Nm {
             let _ = served.connection.set(connection.clone());
             let server = connection.object_server();
             if setup.hardware {
-                server.at(WIFI, Device(served.clone(), WIFI, 2)).await?;
+                server.at(WIFI, Device(served.clone(), 2)).await?;
                 server.at(WIFI, Wireless(served.clone())).await?;
             }
-            server.at(WIRED, Device(served.clone(), WIRED, 1)).await?;
+            server.at(WIRED, Device(served.clone(), 1)).await?;
             server.at(WIRED, Wired(served.clone())).await?;
             server.at(IP4_WIRED, Ip4Wired).await?;
             for ap in setup.aps {
@@ -463,69 +462,9 @@ impl Nm {
         })
     }
 
-    /// A sign-in page passed (or back): `Connectivity` full (or portal).
-    pub fn set_portal(&self, portal: bool) -> anyhow::Result<()> {
-        let shared = self.shared.clone();
-        self.handle.block_on(async move {
-            let value = if portal { 2u32 } else { 4 };
-            state(&shared, |s| s.connectivity = value);
-            changed(
-                &shared,
-                ROOT,
-                NM,
-                vec![("Connectivity", Variant::from(value))],
-            )
-            .await
-        })
-    }
-
-    /// NetworkManager joins `ssid`'s saved connection by itself, as it
-    /// does on its own.
-    pub fn join(&self, ssid: &str) -> anyhow::Result<()> {
-        let shared = self.shared.clone();
-        let found = state(&shared, |s| {
-            let saved = s.saved.iter().find(|c| c.ssid == ssid)?;
-            let ap = s.aps.iter().find(|a| a.fake.ssid == ssid)?;
-            Some((saved.path.clone(), ap.path.clone(), saved.secret.clone()))
-        });
-        let (saved, ap, psk) = found.ok_or_else(|| anyhow::anyhow!("no saved {ssid}"))?;
-        self.handle
-            .block_on(async move { activate(shared, saved, ap, psk).await.map(|_| ()) })
-    }
-
-    /// Connections take `takes` from now on.
+    /// Connections take `takes` from now on (the Wi-Fi spike's shots).
     pub fn set_takes(&self, takes: Duration) {
         state(&self.shared, |s| s.takes = takes);
-    }
-
-    /// The Wi-Fi device leaves its network, as if from elsewhere.
-    pub fn disconnect(&self) -> anyhow::Result<()> {
-        let shared = self.shared.clone();
-        self.handle.block_on(async move {
-            drop_active(&shared, 2).await?;
-            device_state(&shared, 30, 39).await
-        })
-    }
-
-    /// The Wi-Fi switched off or on, as if from elsewhere.
-    pub fn set_enabled(&self, on: bool) -> anyhow::Result<()> {
-        let shared = self.shared.clone();
-        self.handle.block_on(async move {
-            state(&shared, |s| s.enabled = on);
-            changed(
-                &shared,
-                ROOT,
-                NM,
-                vec![("WirelessEnabled", Variant::from(on))],
-            )
-            .await?;
-            if on {
-                device_state(&shared, 30, 0).await
-            } else {
-                drop_active(&shared, 3).await?;
-                device_state(&shared, 20, 0).await
-            }
-        })
     }
 
     /// A cable plugged in or out.
@@ -1013,18 +952,18 @@ impl Manager {
     }
 }
 
-struct Device(Shared, &'static str, u32);
+struct Device(Shared, u32);
 
 #[zbus::interface(name = "org.freedesktop.NetworkManager.Device")]
 impl Device {
     #[zbus(property)]
     fn device_type(&self) -> u32 {
-        self.2
+        self.1
     }
 
     #[zbus(property)]
     fn state(&self) -> u32 {
-        state(&self.0, |s| match self.2 {
+        state(&self.0, |s| match self.1 {
             2 => s.device,
             _ if s.wired => 100,
             _ => 20,
@@ -1033,14 +972,14 @@ impl Device {
 
     #[zbus(property)]
     fn interface(&self) -> String {
-        if self.2 == 2 { "wlan0" } else { "eth0" }.to_owned()
+        if self.1 == 2 { "wlan0" } else { "eth0" }.to_owned()
     }
 
     /// The Wi-Fi device's IPv4 configuration, the same whatever its
     /// network; the cable's while it is plugged.
     #[zbus(property)]
     fn ip4_config(&self) -> OwnedObjectPath {
-        match self.2 {
+        match self.1 {
             2 => path(IP4),
             _ if state(&self.0, |s| s.wired) => path(IP4_WIRED),
             _ => none(),
@@ -1050,7 +989,7 @@ impl Device {
     /// Where it sits: the cable on a USB adapter.
     #[zbus(property)]
     fn path(&self) -> String {
-        if self.2 == 2 {
+        if self.1 == 2 {
             "pci-0000:00:14.3"
         } else {
             "pci-0000:00:14.0-usb-0:2:1.0"

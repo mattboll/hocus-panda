@@ -1129,13 +1129,6 @@ pub fn set_fullscreen(screens: Vec<String>) {
     }
     tracing::debug!(?screens, "the reminders' screens in full screen");
     places_changed(|p| p.fullscreen = screens);
-    crate::speak::poke();
-}
-
-/// Whether a screen's front window is full screen (her speak gate holds
-/// her peek then).
-pub fn fullscreen_any() -> bool {
-    shown(|s| !s.places.fullscreen.is_empty())
 }
 
 /// The screens shared (5.11).

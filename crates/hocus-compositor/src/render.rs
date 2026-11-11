@@ -765,15 +765,20 @@ impl State {
                 let Some(mut geometry) = map.layer_geometry(&layer) else {
                     continue;
                 };
+                // The windows' and the music player's surfaces are kept
+                // while they show nothing: transparent on a GPU, black
+                // from a shell on the CPU, whose buffers have no alpha.
+                if self.shell.software
+                    && hocus_link::shows_nothing(layer.namespace(), geometry.size.h)
+                {
+                    continue;
+                }
                 // A popover moves in and out, and a notification's bubble;
                 // they show from their first frame.
                 // The emoji picker too (5.7).
-                // The secretary's drawer too (secretary.md §5.1).
                 let popover = matches!(
                     layer.namespace(),
-                    hocus_link::POPOVER_NAMESPACE
-                        | hocus_link::EMOJI_NAMESPACE
-                        | hocus_link::SECRETARY_NAMESPACE
+                    hocus_link::POPOVER_NAMESPACE | hocus_link::EMOJI_NAMESPACE
                 );
                 // Popovers and reminders' tabs slide from the bar, on its
                 // side; the bubbles from the screen's right edge.
@@ -816,9 +821,9 @@ impl State {
                 // A bubble and the chip under them are cards of their own.
                 let own = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
                 let cut = match layer.namespace() {
-                    hocus_link::NAMESPACE
-                    | hocus_link::POPOVER_NAMESPACE
-                    | hocus_link::SECRETARY_NAMESPACE => Some((own, hocus_link::RADIUS)),
+                    hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => {
+                        Some((own, hocus_link::RADIUS))
+                    }
                     hocus_link::EMOJI_NAMESPACE => Some((own, hocus_link::EMOJI_RADIUS)),
                     ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
                     ns if hocus_link::is_reminder(ns) => Some((own, hocus_link::REMINDER_RADIUS)),
@@ -834,6 +839,7 @@ impl State {
                     | hocus_link::MEETING_NAMESPACE
                     | hocus_link::TODAY_NAMESPACE
                     | hocus_link::WINDOWS_NAMESPACE
+                    | hocus_link::MUSIC_NAMESPACE
                     | hocus_link::BELL_NAMESPACE
                     | hocus_link::TRAY_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
                     _ => None,
@@ -1707,16 +1713,10 @@ impl State {
             let reach = crate::glass::REACH;
             let rect = geometry.to_f64();
             let screen = Rectangle::<f64, Logical>::from_size(size.to_f64());
-            let drawer = layer.namespace() == hocus_link::SECRETARY_NAMESPACE;
-            let shift = if drawer {
-                hocus_link::DRAWER_SHIFT
-            } else {
-                hocus_link::POPOVER_SHIFT
-            };
             let Some(around) = Rectangle::<f64, Logical>::new(
                 (rect.loc.x - reach, rect.loc.y - reach - rise).into(),
                 (
-                    rect.size.w + shift + 2.0 * reach,
+                    rect.size.w + hocus_link::POPOVER_SHIFT + 2.0 * reach,
                     rect.size.h + 2.0 * reach + rise,
                 )
                     .into(),
@@ -1728,8 +1728,6 @@ impl State {
                 &mut self.panes.borrow_mut(),
                 &if layer.namespace() == hocus_link::EMOJI_NAMESPACE {
                     crate::glass::emoji_pane(&output.name())
-                } else if drawer {
-                    crate::glass::drawer_pane(&output.name())
                 } else {
                     crate::glass::popover_pane(&output.name())
                 },

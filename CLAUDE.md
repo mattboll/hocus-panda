@@ -49,6 +49,17 @@ sharing).
   `XDG_CACHE_HOME`, and no session D-Bus. Never write into the user's real
   configuration. Stop processes by exact PID, never with `pkill -f` or
   pattern matching. Never signal processes you did not start.
+  One exception, and only one: when the maintainer asks to see a change
+  of the shell live, `scripts/dev/live.sh shell` reloads that program
+  alone in their session
+  ([docs/workflow.md](docs/workflow.md), "Development loop"); the session
+  takes it only with `[developer] live-reload = true` in its
+  configuration, off by default, which the maintainer turns on, never an
+  agent. Only when
+  asked, only through that script: nothing else of the session is touched,
+  and the change is still developed and tested headless first. A
+  compositor change is not seen this way: it needs the package and a new
+  login.
 - **Deleting files**: name every path explicitly; no globs or variables in
   `rm`.
 
@@ -81,15 +92,39 @@ sharing).
 
 Building needs, besides Rust, the system's headers the CI installs
 (`.github/workflows/ci.yml`), `libpipewire-0.3-dev` among them (screen
-sharing's streams), and `libssl-dev` (the secretary's SQLCipher).
+sharing's streams).
 
 ```sh
 cargo build                                   # build everything
+cargo programs                                # the programs the tests run (an alias)
 cargo nextest run --workspace                 # tests, on the CPU
+cargo nextest run -p hocus-compositor settings_sound::   # one test file's
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo deny check                              # licences and advisories
+cargo machete                                 # dependencies no source uses
+scripts/vendor.sh --check                     # vendor/ is upstream plus its patch
 ```
+
+The Rust version is the one `rust-toolchain.toml` pins; dependencies'
+versions are declared once, in the root `Cargo.toml`'s
+`[workspace.dependencies]`. What CI runs when, and why a pull request runs
+only the tests of what it changes: [docs/workflow.md](docs/workflow.md).
+The vendored crate and its patch: [vendor/README.md](vendor/README.md).
+
+A crate's integration tests are one program, `tests/main.rs`, and each
+test file a module of it (#765: one link a crate, what the files share
+built once): a test is named `FILE::TEST`, and a new test file is declared
+in `main.rs` (a test fails while one is not). Select by name
+(`settings_sound::`, or `-E 'test(/^bar::/)'` when another file's name
+ends the same), never with `--test FILE`. Run them with nextest, each test
+in a process of its own: `cargo test` runs a binary's tests as threads of
+one process, which these do not support (environment variables, children,
+a process's working directory). The compositor's tests run the shell, the
+Settings and `hocus` from beside their own program: build
+them first with `cargo programs` (CI does, and its archive takes them
+along). A test that needs one that is missing, or older than its sources,
+fails and names it; none passes without testing.
 
 On a pull request, CI runs the tests of what it changes
 (`scripts/ci/pr-tests.sh`): the test files it touches, the unit tests of
@@ -106,13 +141,17 @@ takes it out. Update this section as commands land.
 Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
 (docs/performance.md): the compositor draws with pixman, or with GLES on
 Mesa's software device for its shaders' tests; test shells draw with
-tiny-skia; the shell's motion tests are skipped. A test fails if it, or a
+tiny-skia; the shell's motion tests are `#[ignore]`d (they need the
+GPU, and fail without it). A test fails if it, or a
 process it started, holds a render node open without the variable. Run
 the GPU tests on purpose only: alone, one process at a time, on a machine
 or VM whose session does not depend on that GPU:
 
 ```sh
-HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor --test glass -j1
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor glass:: -j1
+# the shell's motion, which only a GPU shows (ignored without one)
+HOCUS_TEST_GPU=/dev/dri/renderD128 cargo nextest run -p hocus-compositor -j1 --run-ignored only \
+    -E 'test(a_minute_change_moves_once) | test(a_change_slides_and_hops) | test(the_secretary_radiates_once)'
 ```
 
 The compositor (`crates/hocus-compositor`, binary `hocuspanda`): nested in
@@ -153,7 +192,7 @@ the real screen; nested and headless take `--output`; `panel-form`),
 windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[panel]`
 (`screens`, `output`, `form`, `windows`), `[recording]` (`format`), `[idle]` (`delay`,
 docs/design/idle.md), `[magnifier]` (docs/design/accessibility.md) and
-`[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`), `[accessibility]` (`screen-reader`); the shell reads `[day]` from the same file
+`[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`), `[accessibility]` (`screen-reader`), `[developer]` (`live-reload`, docs/workflow.md); the shell reads `[day]` from the same file
 (`HOCUS_CONFIG`, which the compositor sets), the day's accounts (docs/design/day.md). `packaging/config.toml` lists every setting
 with its default (a test checks it). `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd
@@ -168,8 +207,8 @@ PATH`), restarts it when it ends, and talks to it over a private socket
 all the same); the in-process harness starts none unless asked
 (`Headless::start_with_shell`). The compositor's tests that ask run the
 shell built beside them, which a test binary does not build: build it
-first (`cargo build -p hocus-shell -p hocus-settings`, as CI does). They skip without it,
-and fail when it is older than its sources. The bar's base:
+first (`cargo programs`, as CI does). They fail without it, saying so,
+and when it is older than its sources. The bar's base:
 docs/design/bar.md, "As built".
 
 The shell keeps the clipboard's history in `$XDG_STATE_HOME/hocuspanda/clipboard`
@@ -251,7 +290,7 @@ instead of PAM, for screenshots, and is never packaged. The lock's
 screenshots:
 
 ```sh
-HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor --test lock_shots --run-ignored only
+HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor lock_shots:: --run-ignored only
 ```
 
 Screen readers (docs/design/screen-reader.md, crate `hocus-a11y`): the
@@ -289,59 +328,6 @@ next to a live session, give the nested compositor a fresh `HOME`, or
 plugging in writes into your real `~/.claude/settings.json`. Tests give
 `Config::agent_places` a home of their own (`tests/agents.rs`).
 
-The secretary (docs/design/secretary.md, crates `hocus-secretary`, binary
-`hocus-secretary`, and `hocus-secretary-link`, her socket's protocol) runs
-only with `[secretary] mode = "assistant"` (default `"classic"`, followed
-live; also Settings › Secretary): the compositor starts her from beside its
-own binary (or `--secretary PATH`), starts her again when she ends, and
-stops her back in classic mode; she listens on `<socket>.secretary`, which
-the shell and `hocus` connect to. Her memory is an SQLCipher database in
-`$XDG_DATA_HOME/hocuspanda/secretary`, its key in the keyring of the bus
-given with `--session-bus` only, else in `memory.key` beside it: next to a
-live session, give the nested compositor a fresh `HOME` (or
-`XDG_DATA_HOME`). Run alone, for tests and debugging, on a clock of her
-own, with the scripted fake model, its recorder and fixture sources:
-
-```sh
-# her socket beside a control socket's name, as under a compositor
-target/debug/hocus-secretary --socket /tmp/hp-XXXX/hocus-0.secretary --data /tmp/hp-XXXX/data \
-    --virtual-clock 2026-11-09T08:00:00Z --fake-model model.toml \
-    --recorder calls.jsonl --fixture mail.toml      # formats: crates/hocus-secretary/src/{model,sources}.rs
-target/debug/hocus --socket /tmp/hp-XXXX/hocus-0.control msg secretary status
-target/debug/hocus --socket /tmp/hp-XXXX/hocus-0.control msg secretary graph Chapitô --as-of 2026-04-15
-```
-
-The compositor's tests that start her (`tests/secretary.rs`) run the
-program built beside them: build it first (`cargo build -p hocus-secretary`,
-as CI does).
-
-Her models (lot 4) are set in `[secretary.models]` (`"PROVIDER/MODEL"`
-per role) and `[secretary.providers.NAME]` of the configuration she is
-given (`--config`, else `HOCUS_CONFIG`, else the user's), read again when
-it changes; `[secretary.triage]` paces the local triage. Without
-`--fake-model` she calls the Anthropic API with the key the keyring of
-her bus holds, and the local model server the settings name: next to a
-live session, give her a configuration of your own, and never run a
-model on a laptop to try her. Her Google accounts are read on the bus
-given, unless `--fixture` or `--no-google`; `--google-at
-http://127.0.0.1:PORT` puts Google's services on fakes of this machine,
-never the network. Her first run (one consent card a source, then « Dis-moi
-sur quoi tu travailles et avec qui ») needs a shell and those accounts;
-the Settings list them on the session's bus (Settings › Agents). Her
-tests fake both APIs on 127.0.0.1 (`crates/hocus-secretary/tests/common/http.rs`),
-and Online Accounts on a private bus (`tests/first_run.rs`). The
-user-facing steps are [docs/secretary.md](docs/secretary.md).
-
-```sh
-# the compositor tells its programs her bus (HOCUS_SECRETARY_BUS): in a
-# terminal of a nested session, the key goes to that session's keyring
-printf '%s\n' "$KEY" | target/debug/hocus-secretary --bus "$ADDRESS" key anthropic
-HOCUS_DRAWER_SHOTS=DIR cargo nextest run -p hocus-compositor --test secretary_drawer first_run
-HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --test settings_agents --run-ignored all google
-HOCUS_POWER_SUPPLY_DIR=… HOCUS_THERMAL_DIR=…        # the triage's power and heat (tests)
-cargo nextest run -p hocus-sources --test secrets_corpus --no-capture   # AC50's numbers
-```
-
 The real-screen path (DRM/KMS, libinput, logind) in a Debian testing VM
 (QEMU with KVM; the base image is cached in
 `$XDG_CACHE_HOME/hocuspanda-vm`):
@@ -369,7 +355,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex

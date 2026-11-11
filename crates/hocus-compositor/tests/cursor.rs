@@ -1,7 +1,7 @@
 //! Cursors from a cursor theme, at each screen's scale; the compositor's
 //! own drawn ones without a theme.
 
-mod common;
+use crate::common;
 
 use std::time::{Duration, Instant};
 

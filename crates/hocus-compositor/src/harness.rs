@@ -667,17 +667,6 @@ impl Headless {
         self.layer_rects(hocus_link::POPOVER_NAMESPACE)
     }
 
-    /// Commits of the secretary's drawer so far.
-    pub fn drawer_commits(&self) -> u64 {
-        self.app.state.panel.drawer_commits
-    }
-
-    /// The secretary's drawer as the shell placed it: its screen, and
-    /// where it is (global).
-    pub fn drawer_surfaces(&self) -> Vec<(String, Rect)> {
-        self.layer_rects(hocus_link::SECRETARY_NAMESPACE)
-    }
-
     /// Commits of the launcher's surfaces so far.
     pub fn launcher_commits(&self) -> u64 {
         self.app.state.panel.launcher_commits
@@ -1315,40 +1304,6 @@ impl Headless {
             .unwrap_or_default();
         names.sort();
         names
-    }
-
-    /// The secretary's process while it runs (assistant mode).
-    pub fn secretary_pid(&self) -> Option<u32> {
-        self.app.state.secretary_pid()
-    }
-
-    /// How many times the secretary was started.
-    pub fn secretary_starts(&self) -> u64 {
-        self.app.state.secretary.starts
-    }
-
-    /// What the shell was told last of the secretary.
-    pub fn secretary_told(&self) -> Option<hocus_link::SecretaryShown> {
-        self.app.state.secretary.told.clone()
-    }
-
-    /// Her socket's path.
-    pub fn secretary_socket(&self) -> Option<&Path> {
-        self.app.state.secretary.socket.as_deref()
-    }
-
-    /// Ends the secretary at once (`SIGKILL`), as a crash would: the
-    /// process the compositor started for the test.
-    pub fn kill_secretary(&self) -> anyhow::Result<()> {
-        use rustix::process::{Pid, Signal, kill_process};
-        let pid = self
-            .secretary_pid()
-            .and_then(|pid| i32::try_from(pid).ok())
-            .and_then(Pid::from_raw)
-            .context("no secretary")?;
-        kill_process(pid, Signal::KILL)
-            .with_context(|| format!("killing the secretary ({pid:?})"))?;
-        Ok(())
     }
 
     /// The shell's process, as the compositor started it.
@@ -2282,11 +2237,6 @@ impl Headless {
     /// Whether the winking panda saying screens moved is out.
     pub fn screens_peek_out(&self) -> bool {
         self.app.state.peek.screens_out()
-    }
-
-    /// The secretary's request whose peek is out, if hers is.
-    pub fn secretary_peek_out(&self) -> Option<u64> {
-        self.app.state.peek.secretary_out()
     }
 
     /// Whether the panda out goes back.

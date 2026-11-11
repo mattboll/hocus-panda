@@ -1,10 +1,5 @@
-//! The Settings' window on a headless compositor whose agents' tools,
-//! notifications, Google accounts and secretary's socket are the test's
-//! own: the bed of the Agents page's tests (6.16) and the Secrétaire
-//! page's (#759).
-
-// Each test file uses a part of it.
-#![allow(dead_code)]
+//! The Settings' window on a headless compositor whose agents' tools are
+//! the test's own: the bed of the Agents page's tests (6.16).
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -14,7 +9,7 @@ use std::{
 };
 
 use crate::common::{self, BTN_LEFT, WAIT, wait};
-use crate::{fakes, settings_page};
+use crate::settings_page;
 use hocus_agents::tools::Places;
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use serde_json::Value;
@@ -35,93 +30,6 @@ pub struct Machine {
     pub codex_declined: bool,
     /// The window moves (else reduced motion, as the file says).
     pub motion: bool,
-    /// The secretary is the assistant, as the file says.
-    pub assistant: bool,
-    /// Slack and Signal notified (the shell's history), and an agents'
-    /// tool.
-    pub notified: bool,
-    /// Two Google accounts in Online Accounts (a fake, on a private bus
-    /// the Settings take for the session's): a company's and a gmail.com
-    /// one.
-    pub google: bool,
-    /// Her socket, a fake of the test's (#752): her key missing until one
-    /// is given, `sk-ant-good` taken, any other refused.
-    pub her: bool,
-}
-
-/// What the fake secretary was given: each key line's key (none: erase).
-pub type Given = std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>;
-
-/// Her socket at `path`, faked: hello, her status (her key missing or
-/// not), and her key given or erased.
-pub fn fake_her(path: &Path, given: Given) -> anyhow::Result<()> {
-    use hocus_secretary_link::{FromSecretary, KeyOutcome, Status, ToSecretary, line, read};
-    let listener = UnixListener::bind(path)?;
-    let missing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let (given, missing) = (given.clone(), missing.clone());
-            std::thread::spawn(move || {
-                let Ok(reader) = stream.try_clone() else {
-                    return;
-                };
-                let mut out = stream;
-                for text in BufReader::new(reader).lines() {
-                    let Ok(text) = text else {
-                        return;
-                    };
-                    let answer = match read::<ToSecretary>(&text) {
-                        Ok(ToSecretary::Hello { .. }) => FromSecretary::Hello {
-                            version: hocus_secretary_link::VERSION,
-                        },
-                        Ok(ToSecretary::Status { id }) => FromSecretary::Status {
-                            id,
-                            status: Box::new(Status {
-                                key_provider: Some("anthropic".to_owned()),
-                                key_missing: missing.load(std::sync::atomic::Ordering::SeqCst),
-                                // On battery, below its threshold (#759).
-                                triage: Some(hocus_secretary_link::TriageStatus {
-                                    state: "paused: battery 32 %".to_owned(),
-                                    model: "local/qwen3:8b".to_owned(),
-                                    pending: 21,
-                                    ..hocus_secretary_link::TriageStatus::default()
-                                }),
-                                ..Status::default()
-                            }),
-                        },
-                        Ok(ToSecretary::Key { id, provider, key }) => {
-                            let key = key.map(|k| k.expose().to_owned());
-                            let outcome = match key.as_deref() {
-                                None => {
-                                    missing.store(true, std::sync::atomic::Ordering::SeqCst);
-                                    KeyOutcome::Erased
-                                }
-                                Some("sk-ant-good") => {
-                                    missing.store(false, std::sync::atomic::Ordering::SeqCst);
-                                    KeyOutcome::Kept
-                                }
-                                Some(_) => KeyOutcome::Refused,
-                            };
-                            given
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .push(key);
-                            FromSecretary::Keyed {
-                                id,
-                                provider,
-                                outcome,
-                            }
-                        }
-                        _ => continue,
-                    };
-                    if out.write_all(line(&answer).as_bytes()).is_err() {
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    Ok(())
 }
 
 pub struct Bed {
@@ -131,9 +39,6 @@ pub struct Bed {
     pub script: PathBuf,
     pub hocus: PathBuf,
     pub _herdr: Option<std::thread::JoinHandle<()>>,
-    pub _google: Option<(fakes::FakeGoa, fakes::PrivateBus)>,
-    /// What her fake socket was given.
-    pub given: Given,
 }
 
 /// A fake herdr on `socket`: one workspace, one tab, one Claude Code
@@ -184,20 +89,8 @@ impl Bed {
     /// The compositor and the Settings' script; `None` when the programs
     /// are not built.
     pub fn start(machine: Machine) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
-        let exe = std::env::current_exe()?;
-        let Some(hocus) = exe
-            .parent()
-            .and_then(Path::parent)
-            .map(|d| d.join("hocus"))
-            .filter(|h| h.exists())
-        else {
-            eprintln!("hocus is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
+        let hocus = common::hocus_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in [
@@ -235,57 +128,19 @@ impl Bed {
         std::fs::create_dir_all(&mine)?;
         std::os::unix::fs::symlink(std::env::current_dir()?, mine.join("cwd"))?;
         let file = root.join("config/hocuspanda/config.toml");
-        let mut text = if machine.motion {
+        let text = if machine.motion {
             FILE.to_owned()
         } else {
             format!("{FILE}\n[appearance]\nreduced-motion = true\n")
         };
-        if machine.assistant {
-            text.push_str("\n[secretary]\nmode = \"assistant\"\n");
-        }
-        if machine.notified {
-            std::fs::write(
-                root.join("state/hocuspanda/notifications"),
-                [
-                    r#"{"app":"Signal","summary":"Claire","body":"Dimanche ?","agent":false,"at":1794215520000,"unseen":true}"#,
-                    r#"{"app":"Slack","entry":"slack","summary":"Karim (#prod-alertes)","body":"la prod est tombée","agent":false,"at":1794215500000,"unseen":true}"#,
-                    r#"{"app":"Claude Code","summary":"waiting for your input","agent":true,"at":1794215400000,"unseen":false}"#,
-                ]
-                .join("\n"),
-            )?;
-        }
         std::fs::write(&file, &text)?;
-        let google = if machine.google {
-            let bus = fakes::PrivateBus::start(root)?;
-            let goa = fakes::FakeGoa::start(&bus.address)?;
-            goa.add("account_1700000000_0", "google", "alex@atelier-lune.fr")?;
-            goa.add("account_1700000000_1", "google", "alex.martin@gmail.com")?;
-            Some((goa, bus))
-        } else {
-            None
-        };
-        let mut session_bus = google.as_ref().map_or_else(
-            || "unset DBUS_SESSION_BUS_ADDRESS".to_owned(),
-            |(_, bus)| format!("export DBUS_SESSION_BUS_ADDRESS='{}'", bus.address),
-        );
-        let given = Given::default();
-        let her = root.join("her.sock");
-        if machine.her {
-            fake_her(&her, given.clone())?;
-        }
-        // Her socket: the fake, or one where nothing listens.
-        session_bus.push_str(&format!(
-            "\nexport {}='{}'",
-            hocus_secretary_link::SOCKET_ENV,
-            her.display()
-        ));
         let log = root.join("settings.log");
         let script = root.join("bin/hocus-settings");
         let at = |sub: &str| root.join(sub).display().to_string();
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\n{session_bus}\nunset CODEX_HOME\n\
+                "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS CODEX_HOME\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
                  HOCUS_POWER_SUPPLY_DIR=/nonexistent PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 TZ=UTC HOME='{}' XDG_CONFIG_HOME='{}' \
@@ -335,8 +190,6 @@ impl Bed {
             script,
             hocus,
             _herdr: herdr,
-            _google: google,
-            given,
         }))
     }
 
@@ -360,13 +213,6 @@ impl Bed {
         self.shows(|s| {
             s["file"] == "saved" && s["page"] == "agents" && s["agents"]["known"] == true
         })
-    }
-
-    /// Launched on the Secrétaire page (#759), its window open with the
-    /// keyboard.
-    pub fn open_secretary(&mut self) -> anyhow::Result<Value> {
-        self.launch("secretary")?;
-        self.shows(|s| s["file"] == "saved" && s["page"] == "secretary")
     }
 
     /// Launched on `page`, its window open with the keyboard.
@@ -580,12 +426,6 @@ pub fn read_place(log: &Path, id: &str) -> Option<[f64; 4]> {
     let place = places.get(id)?;
     let n = |i: usize| place[i].as_f64();
     Some([n(0)?, n(1)?, n(2)?, n(3)?])
-}
-
-/// Her consent book, in the test's data folder.
-pub fn consents(bed: &Bed) -> String {
-    std::fs::read_to_string(bed.root().join("data/hocuspanda/secretary/consents.json"))
-        .unwrap_or_default()
 }
 
 /// The window as drawn, once it rests, saved as `out/name`.

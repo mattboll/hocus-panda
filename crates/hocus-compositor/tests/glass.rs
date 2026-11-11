@@ -5,7 +5,7 @@
 //! namespace and place stands for the shell's, so that the screen there
 //! shows the glass alone.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

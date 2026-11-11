@@ -9,3 +9,8 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 # running beside them miss their frames. One already set wins.
 [env]
 LP_NUM_THREADS = { value = "1", force = false }
+
+# The programs the compositor's tests run, from beside the test's own: a
+# test binary does not build them, and a test fails when one is missing.
+[alias]
+programs = "build -p hocus-shell -p hocus-cli -p hocus-settings"

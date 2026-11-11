@@ -22,7 +22,7 @@ pub mod watch;
 
 use std::{fmt, str::FromStr};
 
-pub use hocus_link::Note;
+pub use hocus_link::{Note, Supervised};
 
 /// The environment variable naming the compositor's control socket, set
 /// for the programs it starts.
@@ -82,6 +82,67 @@ impl Question {
             "msg input-devices follow" => Some(Self::InputDevices { follow: true }),
             "msg a11y" => Some(Self::A11y),
             _ => None,
+        }
+    }
+}
+
+/// Which program a restart runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Restart {
+    /// The one that ran: the installed one, or the one given before.
+    Same,
+    /// The installed one again: a program given before is let go of.
+    Installed,
+    /// This one, for this session only: an absolute path. Nothing is
+    /// written to the configuration; the next session runs the installed
+    /// one.
+    Given(std::path::PathBuf),
+}
+
+/// What is asked of a supervised program (`hocus msg shell status`, `hocus
+/// msg shell restart [--program PATH]`): a line `msg shell status` or `msg
+/// shell restart [installed|program PATH]`, answered with lines of text. A
+/// refusal's answer starts with [`REFUSED`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramAsk {
+    /// Which program runs, since when, and whether it was given.
+    Status(Supervised),
+    /// End it and start it again at once.
+    Restart(Supervised, Restart),
+}
+
+/// How a refusal's answer starts: `hocus msg` then fails.
+pub const REFUSED: &str = "refused: ";
+
+impl ProgramAsk {
+    /// Its line, without the line break.
+    pub fn line(&self) -> String {
+        match self {
+            Self::Status(which) => format!("msg {} status", which.word()),
+            Self::Restart(which, Restart::Same) => format!("msg {} restart", which.word()),
+            Self::Restart(which, Restart::Installed) => {
+                format!("msg {} restart installed", which.word())
+            }
+            Self::Restart(which, Restart::Given(program)) => {
+                format!("msg {} restart program {}", which.word(), program.display())
+            }
+        }
+    }
+
+    /// What a line asks, if it asks this. A program's path is the rest of
+    /// its line, spaces and all.
+    pub fn of(line: &str) -> Option<Self> {
+        let rest = line.trim_end_matches(['\n', '\r']).strip_prefix("msg ")?;
+        let (which, rest) = rest.split_once(' ')?;
+        let which = Supervised::of(which)?;
+        match rest {
+            "status" => Some(Self::Status(which)),
+            "restart" => Some(Self::Restart(which, Restart::Same)),
+            "restart installed" => Some(Self::Restart(which, Restart::Installed)),
+            _ => {
+                let program = rest.strip_prefix("restart program ")?;
+                (!program.is_empty()).then(|| Self::Restart(which, Restart::Given(program.into())))
+            }
         }
     }
 }
@@ -366,6 +427,34 @@ mod tests {
             let question = Question::InputDevices { follow };
             assert_eq!(Question::of(question.line()), Some(question));
         }
+    }
+
+    /// What is asked of a supervised program reads back as written, a
+    /// path with spaces too, and is neither a question nor a report.
+    #[test]
+    fn a_programs_ask_reads_back() {
+        let asks = [
+            ProgramAsk::Status(Supervised::Shell),
+            ProgramAsk::Restart(Supervised::Shell, Restart::Same),
+            ProgramAsk::Restart(Supervised::Shell, Restart::Installed),
+            ProgramAsk::Restart(
+                Supervised::Shell,
+                Restart::Given("/home/alex/my builds/hocuspanda-shell".into()),
+            ),
+        ];
+        for ask in asks {
+            assert_eq!(ProgramAsk::of(&ask.line()), Some(ask.clone()));
+            assert_eq!(
+                ProgramAsk::of(&format!("{}\n", ask.line())),
+                Some(ask.clone())
+            );
+            assert_eq!(Question::of(&ask.line()), None);
+            assert!(ask.line().parse::<Report>().is_err());
+        }
+        assert_eq!(ProgramAsk::of("msg shell"), None);
+        assert_eq!(ProgramAsk::of("msg shell restart program "), None);
+        assert_eq!(ProgramAsk::of("msg bar restart"), None);
+        assert_eq!(ProgramAsk::of("msg idle"), None);
     }
 
     #[test]

@@ -438,6 +438,8 @@ pub const FAINT: Ink = Ink::Token(|t| t.faint);
 pub const ACCENT: Ink = Ink::Accent(1.0);
 pub const ACCENT_TEXT: Ink = Ink::AccentText;
 /// Text selected: the accent behind it, as the Settings' fields select.
+// The text field's (`crate::field`), which has no user until #771.
+#[allow(dead_code)]
 pub const SELECTION: Ink = Ink::Accent(0.35);
 
 #[cfg(test)]

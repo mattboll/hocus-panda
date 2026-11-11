@@ -49,6 +49,7 @@ pub mod history;
 pub mod in_use;
 pub mod kit;
 pub mod meeting;
+pub mod music;
 pub mod session;
 pub mod setup;
 pub mod sound;
@@ -66,9 +67,9 @@ use std::{
 
 use hocus_link::{
     AGENTS_NAMESPACE, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, DesktopTo, EDGE,
-    FOOTER_NAMESPACE, Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, POPOVER_CLOSE,
-    POPOVER_NAMESPACE, POPOVER_WIDTH, TASKS_NAMESPACE, TODAY_NAMESPACE, TRAY_NAMESPACE,
-    ToCompositor, WINDOWS_NAMESPACE,
+    FOOTER_NAMESPACE, Form, IN_USE_NAMESPACE, LEVELS_NAMESPACE, MEETING_NAMESPACE, MUSIC_NAMESPACE,
+    POPOVER_CLOSE, POPOVER_NAMESPACE, POPOVER_WIDTH, TASKS_NAMESPACE, TODAY_NAMESPACE,
+    TRAY_NAMESPACE, ToCompositor, WINDOWS_NAMESPACE,
 };
 use iced::{Point, Rectangle, Size, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -176,6 +177,9 @@ pub enum Item {
     /// A window's menu (#723), by the compositor's id: opened by a right
     /// click on its line, once the compositor said what it shows.
     WindowMenu(u64),
+    /// The music player's tile over the desktops (s12): its popover, by a
+    /// click.
+    Music,
 }
 
 impl Item {
@@ -258,6 +262,7 @@ impl Item {
             Self::Windows => windows::WIDTH,
             Self::WindowMenu(_) => window_menu::WIDTH,
             Self::WindowsMore => desktop::WIDTH,
+            Self::Music => music::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -287,6 +292,7 @@ impl Item {
             Self::DayChoose => setup::height(),
             Self::Windows => windows::height(bar),
             Self::WindowMenu(id) => window_menu::height(id),
+            Self::Music => music::height(),
             Self::WindowsMore => desktop::height(
                 bar,
                 0,
@@ -336,6 +342,7 @@ impl Item {
             Self::DayChoose => crate::setup::opening(),
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
+            Self::Music => music::opening(),
             Self::Window(_)
             | Self::WindowClose(_)
             | Self::WindowsMore
@@ -374,7 +381,8 @@ impl Item {
             | Self::WindowClose(_)
             | Self::WindowsMore
             | Self::Windows
-            | Self::WindowMenu(_) => {}
+            | Self::WindowMenu(_)
+            | Self::Music => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -414,6 +422,7 @@ impl Item {
                 _,
             ) => TASKS_NAMESPACE,
             (Self::Calendar, _) => CLOCK_NAMESPACE,
+            (Self::Music, _) => MUSIC_NAMESPACE,
             (
                 Self::Window(_)
                 | Self::WindowClose(_)
@@ -630,6 +639,9 @@ pub enum Effect {
     Remove(window::Id),
     /// The surfaces of this namespace show something new.
     Wake(&'static str),
+    /// Every surface's view built again (a view of stock widgets reads
+    /// what it shows as it is built, not as it draws).
+    Rebuild,
     /// Surface `id` takes the pointer (`takes`), or lets it through.
     Input {
         id: window::Id,
@@ -697,16 +709,6 @@ pub enum Effect {
     Region {
         id: window::Id,
         rects: Vec<Rectangle>,
-    },
-    /// The secretary's drawer beside `bar` (docs/design/secretary.md
-    /// §5.1): `width` wide, its top and bottom on the bar's, its margins
-    /// from the screen's top right (top, right, bottom, left); it takes
-    /// the keyboard on demand.
-    Drawer {
-        id: window::Id,
-        bar: String,
-        width: u32,
-        margin: (i32, i32, i32, i32),
     },
     /// The launcher's surface on `output` (5.1): over all of it, the bar
     /// too, holding the keyboard.
@@ -2008,7 +2010,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::TasksMore
         | Item::DayChoose
         | Item::Windows
-        | Item::WindowMenu(_) => None,
+        | Item::WindowMenu(_)
+        | Item::Music => None,
     }
 }
 
@@ -2104,21 +2107,6 @@ pub fn with<T>(with: impl FnOnce(&mut Controller) -> T) -> T {
 /// What a surface saw; the effects go to [`effects`]' stream, and so does
 /// a new deadline, which the stream then waits for.
 pub fn event(event: Event) {
-    // In assistant mode, a click (or `Enter`) on her head opens her
-    // drawer, not the 4.6 briefing (docs/design/secretary.md §4).
-    if let Event::ItemPress {
-        item: Item::Secretary,
-        bar,
-        ..
-    } = &event
-        && crate::secretary::state() != crate::secretary::State::Off
-    {
-        crate::drawer::head_clicked(bar);
-        return;
-    }
-    if let Event::BarChanged { bar } = &event {
-        crate::drawer::bar_changed(bar);
-    }
     // The field to add a task, open, sees the presses elsewhere: it
     // closes when empty, else lets the keyboard go.
     if matches!(
@@ -2425,6 +2413,10 @@ pub fn toggle_clipboard(output: &str) {
 /// What `item`'s popover shows changed: if it is open, it draws again, to
 /// its new size if that changed.
 pub fn changed(item: Item) {
+    // The widgets' view is built again as its surface next draws (#770).
+    if item == Item::Wifi {
+        wifi::widgets::touch();
+    }
     let (open, mut effects) = with(|c| {
         let open = c.open_item() == Some(item);
         (open, if open { c.refit() } else { Vec::new() })
@@ -2486,7 +2478,6 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
             let deadline = [
                 deadline,
                 crate::launcher::deadline(),
-                crate::drawer::deadline(),
                 crate::emoji::deadline(),
                 crate::actions::deadline(),
                 crate::capture::thumb::deadline(),
@@ -2508,7 +2499,6 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             let now = Instant::now();
                             let mut due = with(|c| c.tick(now));
                             due.extend(crate::launcher::tick(now));
-                            due.extend(crate::drawer::tick(now));
                             due.extend(crate::emoji::tick(now));
                             due.extend(crate::actions::tick(now));
                             due.extend(crate::capture::thumb::tick(now));
@@ -2601,6 +2591,7 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
             crate::side::gone(id);
             vec![Message::RemoveWindow(id)]
         }
+        Effect::Rebuild => vec![crate::Message::Keys],
         Effect::Wake(namespace) => {
             if tell(ToCompositor::Wake(namespace.to_owned())) {
                 Vec::new()
@@ -2746,33 +2737,6 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
                     }
                 });
             vec![Message::SetInputRegion { id, callback }]
-        }
-        Effect::Drawer {
-            id,
-            bar,
-            width,
-            margin,
-        } => {
-            crate::side::opened(id);
-            vec![Message::NewLayerShell {
-                settings: NewLayerShellSettings {
-                    // As high as the bar: anchored top and bottom.
-                    size: Some((width, 0)),
-                    layer: Layer::Top,
-                    anchor: crate::side::anchor(Anchor::Top | Anchor::Bottom | Anchor::Right),
-                    exclusive_zone: Some(0),
-                    margin: Some(crate::side::margin(margin)),
-                    keyboard_interactivity: KeyboardInteractivity::OnDemand,
-                    output_option: if bar == crate::ALONE {
-                        OutputOption::Active
-                    } else {
-                        OutputOption::OutputName(bar)
-                    },
-                    events_transparent: false,
-                    namespace: Some(hocus_link::SECRETARY_NAMESPACE.to_owned()),
-                },
-                id,
-            }]
         }
         Effect::Launcher { id, output } => vec![Message::NewLayerShell {
             settings: NewLayerShellSettings {

@@ -129,34 +129,6 @@ pub const TASKS_NAMESPACE: &str = "hocus-bar-tasks";
 /// one at a time. The compositor blurs behind it as behind the bar, draws
 /// its shadow, and moves it in and out ([`POPOVER_OPEN`], [`POPOVER_CLOSE`]).
 pub const POPOVER_NAMESPACE: &str = "hocus-bar-popover";
-/// The namespace of the secretary's drawer (docs/design/secretary.md
-/// §5.1, assistant mode): against the bar, its top and bottom on the
-/// bar's, over the windows. The compositor blurs behind it, draws its
-/// shadow, and moves it in and out ([`DRAWER_OPEN`], [`DRAWER_CLOSE`]).
-pub const SECRETARY_NAMESPACE: &str = "hocus-secretary";
-/// The drawer's widths: [`DRAWER_WIDTH`], [`DRAWER_NARROW`] on a screen
-/// under [`DRAWER_NARROW_BELOW`] logical pixels wide, and
-/// [`DRAWER_WIDE`] for "Ce qu'elle sait".
-pub const DRAWER_WIDTH: u32 = 420;
-pub const DRAWER_NARROW: u32 = 360;
-pub const DRAWER_NARROW_BELOW: u32 = 1600;
-pub const DRAWER_WIDE: u32 = 720;
-/// It comes in over this, fading and sliding [`DRAWER_SHIFT`] from the
-/// bar (`ease-out`), and goes over [`DRAWER_CLOSE`] (`ease-in`); with
-/// reduced motion or a shell on the CPU, it only fades.
-pub const DRAWER_OPEN: Duration = Duration::from_millis(180);
-pub const DRAWER_CLOSE: Duration = Duration::from_millis(140);
-pub const DRAWER_SHIFT: f64 = 16.0;
-
-/// The drawer's width on a screen `screen` logical pixels wide.
-pub const fn drawer_width(screen: u32) -> u32 {
-    if screen < DRAWER_NARROW_BELOW {
-        DRAWER_NARROW
-    } else {
-        DRAWER_WIDTH
-    }
-}
-
 /// The namespace of the panda peeking out of the bar's edge (bar.md §7 C,
 /// 4.5): one surface beside each bar while it is out, none at rest. The
 /// shell draws it once; the compositor moves it out and back.
@@ -236,6 +208,23 @@ pub const TODAY_NAMESPACE: &str = "hocus-bar-today";
 /// screen's current desktop over its desktops' tiles, or the mini form's
 /// item over its dots. Opened while it lists a window, none without.
 pub const WINDOWS_NAMESPACE: &str = "hocus-bar-windows";
+/// The namespace of the music player's tile (s12): what an MPRIS player
+/// plays, over the desktops in the full form. Kept with its bar, drawing
+/// nothing while no player is there.
+pub const MUSIC_NAMESPACE: &str = "hocus-bar-music";
+/// The height of the windows' and the music player's surfaces while they
+/// show nothing, logical pixels: they are kept with their bar (one made
+/// later would take the keyboard's keys, #617), and are not a pixel (at a
+/// fractional scale tiny-skia refuses a buffer that small). A shell that
+/// draws on the CPU has no alpha in its buffers, so the compositor leaves
+/// out a surface this short ([`shows_nothing`]): it would show black.
+pub const IDLE_HEIGHT: i32 = 10;
+
+/// Whether a surface of `namespace`, `height` tall, is one kept while it
+/// shows nothing ([`IDLE_HEIGHT`]).
+pub fn shows_nothing(namespace: &str, height: i32) -> bool {
+    matches!(namespace, WINDOWS_NAMESPACE | MUSIC_NAMESPACE) && height <= IDLE_HEIGHT
+}
 /// The tooltip's corners, logical pixels.
 pub const TIP_RADIUS: f64 = 9.0;
 
@@ -695,25 +684,14 @@ pub enum ToShell {
     /// shows is joined, else the one starting next within 10 min; nothing
     /// without one. Written `join`.
     Join,
-    /// The secretary's process (docs/design/secretary.md §16): sent as the
-    /// shell connects and whenever it changes. The shell talks to her on
-    /// her own socket, on a thread of its own. Written `secretary off`,
-    /// `secretary unavailable`, or `secretary ready` and her socket's path.
-    Secretary(SecretaryShown),
-    /// A sentence put to her through the shell, as the drawer's field
-    /// does: for tests and tools. Written `secretary-ask TEXT`.
-    SecretaryAsk(String),
-    /// `Super+S` (`[shortcuts] secretary`, assistant mode only): her
-    /// drawer opens beside the bar of `output` (the focused window's
-    /// screen), `width` logical pixels wide, or closes. Written
-    /// `secretary-drawer OUTPUT WIDTH`.
-    SecretaryDrawer { output: String, width: u32 },
-    /// Her peek of request `ID` comes out (secretary.md §6.2), as the
-    /// shell asked ([`ToCompositor::SecretaryPeek`]), in place of a panda
-    /// out: the shell draws it beside each bar on [`PEEK_NAMESPACE`]
-    /// surfaces, which the compositor moves as an agent's; `no-peek` when
-    /// she is back. Written `secretary-peek ID`.
-    SecretaryPeek(u64),
+    /// A program given for this session in place of an installed one
+    /// (`hocus msg shell restart --program`, docs/workflow.md) did not
+    /// start or kept ending, and the installed one runs again: the shell
+    /// says so in a notification. Written `fell-back shell PROGRAM`.
+    FellBack {
+        which: Supervised,
+        program: std::path::PathBuf,
+    },
     /// The screens whose front window is full screen, which covers their
     /// bar (Day.6: a meeting's reminder then shows at the screen's edge):
     /// sent as the shell connects and when they change. Written
@@ -772,15 +750,23 @@ pub enum ToShell {
     ActionsEnd,
 }
 
-/// The secretary's process as the compositor knows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SecretaryShown {
-    /// `[secretary] mode = "classic"`: no process; the 4.6 secretary.
-    Off,
-    /// Ended, and not started again yet: her header says "indisponible".
-    Unavailable,
-    /// Started, listening (or about to) on this socket.
-    Ready(std::path::PathBuf),
+/// A program the compositor starts, supervises and starts again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Supervised {
+    /// `hocuspanda-shell`.
+    Shell,
+}
+
+impl Supervised {
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Shell => "shell",
+        }
+    }
+
+    pub fn of(word: &str) -> Option<Self> {
+        (word == Self::Shell.word()).then_some(Self::Shell)
+    }
 }
 
 /// What [`ToShell::Day`] asks.
@@ -1741,11 +1727,6 @@ pub enum ToCompositor {
     /// motion), and they are no longer a menu; the shell removes them
     /// after that.
     Closing(String),
-    /// A click on the secretary's head (assistant mode): her drawer is
-    /// asked for on `output`'s bar; the compositor answers
-    /// [`ToShell::SecretaryDrawer`] with the screen's width, as `Super+S`
-    /// does. Written `secretary-drawer OUTPUT`.
-    SecretaryDrawer(String),
     /// The user asks for the next keyboard layout (the bar's row): the
     /// compositor switches the seat's keyboard to it, then says which is
     /// active ([`ToShell::Layout`]).
@@ -1799,15 +1780,8 @@ pub enum ToCompositor {
     /// closed`.
     Briefing { open: bool },
     /// The user clicked the panda that says screens moved
-    /// ([`ToShell::ScreensMoved`]), or answered her peek: it goes back.
-    /// Written `peek-close`.
+    /// ([`ToShell::ScreensMoved`]): it goes back. Written `peek-close`.
     PeekClose,
-    /// The shell's speak gate lets her peek of request `id` out
-    /// (secretary.md §6.2, §6.3) for `stays` seconds: it comes out as an
-    /// agent's panda does, in place of one out, and none comes out while
-    /// it is; asked again while it is out, it stays `stays` more. Written
-    /// `secretary-peek ID STAYS`.
-    SecretaryPeek { id: u64, stays: u32 },
     /// How near the next meeting is (bar.md §6, Day.2), for the halo: in
     /// 10 min or less, in 2 min or less, or neither (none, further, in
     /// progress, or opened by the user). Written `meeting ten`, `meeting
@@ -2174,16 +2148,12 @@ impl fmt::Display for ToShell {
             }
             Self::EmojiInserted => f.write_str("emoji-inserted"),
             Self::Join => f.write_str("join"),
-            Self::Secretary(SecretaryShown::Off) => f.write_str("secretary off"),
-            Self::Secretary(SecretaryShown::Unavailable) => f.write_str("secretary unavailable"),
-            Self::Secretary(SecretaryShown::Ready(socket)) => {
-                write!(f, "secretary ready {}", one_line(&socket.to_string_lossy()))
-            }
-            Self::SecretaryAsk(text) => write!(f, "secretary-ask {}", one_line(text)),
-            Self::SecretaryDrawer { output, width } => {
-                write!(f, "secretary-drawer {output} {width}")
-            }
-            Self::SecretaryPeek(id) => write!(f, "secretary-peek {id}"),
+            Self::FellBack { which, program } => write!(
+                f,
+                "fell-back {} {}",
+                which.word(),
+                one_line(&program.to_string_lossy())
+            ),
             Self::SharedScreens(names) => {
                 f.write_str("shared-screens")?;
                 for name in names {
@@ -2292,17 +2262,15 @@ impl FromStr for ToShell {
         if let Some(rest) = line.strip_prefix("leave ") {
             return LeaveShown::read(rest).map(Self::Leave);
         }
-        if let Some(rest) = line.strip_prefix("secretary-ask ") {
-            return Ok(Self::SecretaryAsk(rest.to_owned()));
-        }
-        if let Some(rest) = line.strip_prefix("secretary ") {
+        if let Some(rest) = line.strip_prefix("fell-back ") {
             return match rest.split_once(' ') {
-                None if rest == "off" => Ok(Self::Secretary(SecretaryShown::Off)),
-                None if rest == "unavailable" => Ok(Self::Secretary(SecretaryShown::Unavailable)),
-                Some(("ready", socket)) if !socket.is_empty() => Ok(Self::Secretary(
-                    SecretaryShown::Ready(std::path::PathBuf::from(socket)),
-                )),
-                _ => Err(BadLine(format!("secretary {rest}"))),
+                Some((which, program)) if !program.is_empty() => Supervised::of(which)
+                    .map(|which| Self::FellBack {
+                        which,
+                        program: std::path::PathBuf::from(program),
+                    })
+                    .ok_or_else(|| BadLine(format!("fell-back {rest}"))),
+                _ => Err(BadLine(format!("fell-back {rest}"))),
             };
         }
         if let Some(rest) = line.strip_prefix("day ") {
@@ -2580,17 +2548,6 @@ impl FromStr for ToShell {
             Some("clipboard") => Ok(Self::Clipboard {
                 output: word(&mut words, "output")?.to_owned(),
             }),
-            Some("secretary-drawer") => Ok(Self::SecretaryDrawer {
-                output: word(&mut words, "output")?.to_owned(),
-                width: word(&mut words, "width")?
-                    .parse()
-                    .map_err(|e| BadLine(format!("width: {e}")))?,
-            }),
-            Some("secretary-peek") => Ok(Self::SecretaryPeek(
-                word(&mut words, "peek")?
-                    .parse()
-                    .map_err(|e| BadLine(format!("peek: {e}")))?,
-            )),
             Some("clipboard-rules") => Ok(Self::ClipboardRules(ClipRules {
                 history: flag(words.next(), "on", "off")?,
                 keep: ClipKeep::of(word(&mut words, "keep")?)?,
@@ -2813,7 +2770,6 @@ impl fmt::Display for ToCompositor {
             Self::A11yEnd => f.write_str("a11y-end"),
             Self::Wake(namespace) => write!(f, "wake {namespace}"),
             Self::Closing(namespace) => write!(f, "closing {namespace}"),
-            Self::SecretaryDrawer(output) => write!(f, "secretary-drawer {output}"),
             Self::NextLayout => f.write_str("next-layout"),
             Self::Desktop { output, to } => match to {
                 DesktopTo::At(index) => write!(f, "desktop {output} {index}"),
@@ -2858,7 +2814,6 @@ impl fmt::Display for ToCompositor {
                 write!(f, "briefing {}", if *open { "open" } else { "closed" })
             }
             Self::PeekClose => f.write_str("peek-close"),
-            Self::SecretaryPeek { id, stays } => write!(f, "secretary-peek {id} {stays}"),
             Self::Meeting(near) => f.write_str(match near {
                 Some(MeetingNear::Ten) => "meeting ten",
                 Some(MeetingNear::Two) => "meeting two",
@@ -2956,18 +2911,6 @@ impl FromStr for ToCompositor {
                 open: flag(words.next(), "open", "closed")?,
             }),
             Some("peek-close") => Ok(Self::PeekClose),
-            Some("secretary-peek") => {
-                let mut number = |what: &str| -> Result<u64, BadLine> {
-                    word(&mut words, what)?
-                        .parse()
-                        .map_err(|e| BadLine(format!("{what}: {e}")))
-                };
-                Ok(Self::SecretaryPeek {
-                    id: number("peek")?,
-                    stays: u32::try_from(number("stays")?)
-                        .map_err(|e| BadLine(format!("stays: {e}")))?,
-                })
-            }
             Some("meeting") => match words.next() {
                 Some("ten") => Ok(Self::Meeting(Some(MeetingNear::Ten))),
                 Some("two") => Ok(Self::Meeting(Some(MeetingNear::Two))),
@@ -2976,9 +2919,6 @@ impl FromStr for ToCompositor {
             },
             Some("wake") => Ok(Self::Wake(word(&mut words, "namespace")?.to_owned())),
             Some("closing") => Ok(Self::Closing(word(&mut words, "namespace")?.to_owned())),
-            Some("secretary-drawer") => Ok(Self::SecretaryDrawer(
-                word(&mut words, "output")?.to_owned(),
-            )),
             Some("next-layout") => Ok(Self::NextLayout),
             Some("log-out") => Ok(Self::LogOut),
             Some("tray-click") => {
@@ -3467,17 +3407,10 @@ mod tests {
             ToShell::Day(DayAsk::Refresh),
             ToShell::Day(DayAsk::Slept(900)),
             ToShell::Join,
-            ToShell::Secretary(SecretaryShown::Off),
-            ToShell::Secretary(SecretaryShown::Unavailable),
-            ToShell::Secretary(SecretaryShown::Ready(
-                "/run/user/1000/hocus 0.secretary".into(),
-            )),
-            ToShell::SecretaryAsk("Qui relit les PR ?".into()),
-            ToShell::SecretaryDrawer {
-                output: "eDP-1".into(),
-                width: 1366,
+            ToShell::FellBack {
+                which: Supervised::Shell,
+                program: "/home/alex/my builds/hocuspanda-shell".into(),
             },
-            ToShell::SecretaryPeek(3),
             ToShell::Fullscreen(vec!["HDMI-A-1".to_owned(), "eDP-1".to_owned()]),
             ToShell::Fullscreen(Vec::new()),
             ToShell::SharedScreens(vec!["HEADLESS-1".to_owned()]),
@@ -3651,7 +3584,6 @@ mod tests {
             ToCompositor::Wake(LEVELS_NAMESPACE.to_owned()),
             ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned()),
             ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()),
-            ToCompositor::SecretaryDrawer("eDP-1".to_owned()),
             ToCompositor::NextLayout,
             ToCompositor::Lock(LockAsk::Submit),
             ToCompositor::Lock(LockAsk::Focus(LockFocus::Button)),
@@ -3675,7 +3607,6 @@ mod tests {
             ToCompositor::A11yEnd,
             ToCompositor::GoToAgent { id: 7, row: None },
             ToCompositor::PeekClose,
-            ToCompositor::SecretaryPeek { id: 3, stays: 12 },
             ToCompositor::Ring(Row {
                 output: "eDP-1".into(),
                 x: -190,

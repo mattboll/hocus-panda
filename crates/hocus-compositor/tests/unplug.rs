@@ -4,7 +4,7 @@
 //! those the user placed meanwhile. A drag, Alt+Tab or a desktop slide on
 //! the screen as it goes ends cleanly.
 
-mod common;
+use crate::common;
 
 use std::time::Duration;
 

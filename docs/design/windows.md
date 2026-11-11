@@ -1113,7 +1113,6 @@ holds the keyboard; the virtual terminals' switch stays.
 | `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
 | `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
-| `secretary` | `Super+S` | The secretary's drawer beside the bar of the focused window's screen; again, closes it. Assistant mode only: in classic mode the chord goes to the window ([secretary.md](secretary.md) §4) |
 | `join` | `Super+J` | Joins the meeting whose reminder shows, else the one starting next within 10 min; nothing without one ([bar.md](bar.md), Day.6) |
 | `capture`, `capture-screen`, `capture-window` | `Print`, `Shift+Print`, `Alt+Print` | The screen capture; the screen under the pointer or the focused window at once ([screenshots.md](screenshots.md)) |
 | `record` | `Super+Shift+R` | Records the screen with the last settings; while recording, stops ([screenshots.md](screenshots.md), 5.10) |

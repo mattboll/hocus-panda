@@ -23,11 +23,12 @@
 //! - `hocus msg outputs`: the screens, their modes, places, scales and
 //!   settings, as one line of JSON (docs/design/settings.md, "Écrans").
 //!
-//! - `hocus msg secretary status`, `hocus msg secretary graph NODE
-//!   [--as-of DATE] [--hops N] [--notebook pro|perso]`: the secretary's
-//!   state, or her graph around a node now or as of a date, as JSON
-//!   (docs/design/secretary.md; in assistant mode only). These go to her
-//!   own socket, beside the control socket (`<socket>.secretary`).
+//! - `hocus msg shell status`, `hocus msg shell restart [--program PATH |
+//!   --installed]`: which program the compositor runs as the shell and
+//!   since when, and that program ended and started again at once, from
+//!   PATH when given, for this session only, which the compositor takes
+//!   only in developer mode (`[developer] live-reload`; docs/workflow.md,
+//!   "Development loop").
 //!
 //! - `hocus day planka-token [ACCOUNT]`: a Planka board's access token,
 //!   on standard input, checked and kept where the bar reads it
@@ -52,7 +53,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
-use hocus_agents::{Question, Report, Source, State, hooks};
+use hocus_agents::{ProgramAsk, Question, Report, Restart, Source, State, Supervised, hooks};
 
 mod day;
 mod perf;
@@ -174,33 +175,47 @@ enum MsgCommand {
     /// readers read it: each window's nodes, their roles, names, values,
     /// states, places and actions (docs/design/screen-reader.md).
     A11y,
-    /// The secretary, in assistant mode (docs/design/secretary.md): asked
-    /// on her own socket, beside the control socket.
-    Secretary {
+    /// The shell (the bar) as the compositor runs it: which program, since
+    /// when; or restarted (docs/workflow.md, "Development loop").
+    Shell {
         #[command(subcommand)]
-        question: SecretaryCommand,
+        question: ShellCommand,
     },
 }
 
 #[derive(Debug, Subcommand)]
-enum SecretaryCommand {
-    /// Her state: her clock, the lock, her memory's counts, her sources'
-    /// cursors, the last catch-up, her connections, her model.
+enum ShellCommand {
+    /// Which program runs as the shell, whether it was given, its process
+    /// and since when, and how many screens show their bar.
     Status,
-    /// Her graph around NODE (a name or an alias): the edges that count,
-    /// now or as of a date, and where she has each from.
-    Graph {
-        node: String,
-        /// YYYY-MM-DD (default: today).
-        #[arg(long, value_name = "DATE")]
-        as_of: Option<String>,
-        /// How many edges away from NODE.
-        #[arg(long, default_value_t = 2)]
-        hops: u8,
-        /// pro or perso (default: both).
-        #[arg(long)]
-        notebook: Option<String>,
-    },
+    /// Ends the shell and starts it again at once. The windows stay, and
+    /// the bar's space stays kept.
+    Restart(RestartArgs),
+}
+
+/// Which program a restart runs.
+#[derive(Debug, clap::Args)]
+struct RestartArgs {
+    /// Run this program from now on, for this session only (an absolute
+    /// path): nothing is written to the configuration, and the next
+    /// session runs the installed one. One that does not start or keeps
+    /// ending gives way to the installed one. Refused unless the
+    /// configuration says `[developer] live-reload = true`.
+    #[arg(long, value_name = "PATH", conflicts_with = "installed")]
+    program: Option<PathBuf>,
+    /// Run the installed program again, after one was given.
+    #[arg(long)]
+    installed: bool,
+}
+
+impl RestartArgs {
+    fn restart(self) -> Restart {
+        match (self.program, self.installed) {
+            (Some(program), _) => Restart::Given(program),
+            (None, true) => Restart::Installed,
+            (None, false) => Restart::Same,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -275,17 +290,20 @@ fn main() -> ExitCode {
             }
         }
         Command::Msg {
-            question: MsgCommand::Secretary { question },
-        } => match secretary(args.socket, question) {
-            Ok(answer) => {
-                println!("{answer}");
-                ExitCode::SUCCESS
-            }
-            Err(err) => {
-                eprintln!("hocus: {err}");
-                ExitCode::FAILURE
-            }
-        },
+            question:
+                MsgCommand::Shell {
+                    question: ShellCommand::Status,
+                },
+        } => program(args.socket, &ProgramAsk::Status(Supervised::Shell)),
+        Command::Msg {
+            question:
+                MsgCommand::Shell {
+                    question: ShellCommand::Restart(restart),
+                },
+        } => program(
+            args.socket,
+            &ProgramAsk::Restart(Supervised::Shell, restart.restart()),
+        ),
         Command::Msg { question } => {
             let question = match question {
                 MsgCommand::Idle => Question::Idle,
@@ -298,9 +316,11 @@ fn main() -> ExitCode {
                 MsgCommand::InputDevices { follow: false } => {
                     Question::InputDevices { follow: false }
                 }
-                MsgCommand::Secretary { .. } => return ExitCode::FAILURE,
+                MsgCommand::Shell { .. } => {
+                    return ExitCode::FAILURE;
+                }
             };
-            match ask(args.socket, question) {
+            match ask(args.socket, question.line()) {
                 Ok(answer) => {
                     print!("{answer}");
                     ExitCode::SUCCESS
@@ -341,51 +361,25 @@ fn main() -> ExitCode {
     }
 }
 
-/// Asks the secretary on her socket, beside the control socket: her
-/// answer as pretty JSON.
-fn secretary(socket: Option<PathBuf>, question: SecretaryCommand) -> Result<String, String> {
-    use hocus_secretary_link::{
-        Client, Connection, FromSecretary, GraphQuery, Notebook, ToSecretary,
-    };
-    let control = socket_path(socket)
-        .ok_or("no desktop to ask: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
-    let path = hocus_secretary_link::beside_control(&control)
-        .ok_or_else(|| format!("{}: not a control socket", control.display()))?;
-    let mut her = Connection::open(&path, Client::Cli, ANSWER).map_err(|e| {
-        format!("the secretary does not answer ({e}): is [secretary] mode \"assistant\"?")
-    })?;
-    let answer = match question {
-        SecretaryCommand::Status => her.request(|id| ToSecretary::Status { id })?,
-        SecretaryCommand::Graph {
-            node,
-            as_of,
-            hops,
-            notebook,
-        } => {
-            let notebook = match notebook.as_deref() {
-                None => None,
-                Some(word) => {
-                    Some(Notebook::of(word).ok_or_else(|| format!("{word:?}: pro or perso"))?)
-                }
-            };
-            her.request(|id| ToSecretary::Graph {
-                id,
-                query: GraphQuery {
-                    node,
-                    as_of,
-                    hops,
-                    notebook,
-                },
-            })?
+/// Asks the compositor about the shell's program, or to restart it: its
+/// answer, a refusal being a failure.
+fn program(socket: Option<PathBuf>, asked: &ProgramAsk) -> ExitCode {
+    match ask(socket, &asked.line()) {
+        Ok(answer) => match answer.strip_prefix(hocus_agents::REFUSED) {
+            Some(why) => {
+                eprintln!("hocus: {}", why.trim_end());
+                ExitCode::FAILURE
+            }
+            None => {
+                print!("{answer}");
+                ExitCode::SUCCESS
+            }
+        },
+        Err(err) => {
+            eprintln!("hocus: {err}");
+            ExitCode::FAILURE
         }
-    };
-    let value = match answer {
-        FromSecretary::Status { status, .. } => serde_json::to_value(status),
-        FromSecretary::Graph { graph, .. } => serde_json::to_value(graph),
-        other => return Err(format!("an unexpected answer: {other:?}")),
     }
-    .map_err(|e| e.to_string())?;
-    serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
 }
 
 /// The agent that ran this: the nearest process above that is not a
@@ -507,9 +501,9 @@ fn follow(socket: Option<PathBuf>, question: Question) -> ExitCode {
     }
 }
 
-/// Asks `question`, and reads the answer until the desktop closes the
-/// connection.
-fn ask(socket: Option<PathBuf>, question: Question) -> Result<String, String> {
+/// Asks `question` (its line), and reads the answer until the desktop
+/// closes the connection.
+fn ask(socket: Option<PathBuf>, question: &str) -> Result<String, String> {
     let path = socket_path(socket)
         .ok_or("no desktop to ask: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
     let place = |e: std::io::Error| format!("{}: {e}", path.display());
@@ -517,7 +511,7 @@ fn ask(socket: Option<PathBuf>, question: Question) -> Result<String, String> {
     stream.set_write_timeout(Some(WRITE)).map_err(place)?;
     stream.set_read_timeout(Some(ANSWER)).map_err(place)?;
     stream
-        .write_all(format!("{}\n", question.line()).as_bytes())
+        .write_all(format!("{question}\n").as_bytes())
         .map_err(place)?;
     let mut answer = String::new();
     stream.read_to_string(&mut answer).map_err(place)?;

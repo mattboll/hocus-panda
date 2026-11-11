@@ -5,7 +5,7 @@
 //! screen on that side, onto the desktop it shows, at the same share of
 //! its work area, focused, and with no screen there does nothing.
 
-mod common;
+use crate::common;
 
 use common::{
     BTN_LEFT, KEY_2, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_RIGHT, chord, open, rect_of,

@@ -98,7 +98,6 @@ fn shortcut_action(id: &str) -> Option<Action> {
         "overview" => Action::Overview,
         "clipboard" => Action::Clipboard,
         "emoji" => Action::Emoji,
-        "secretary" => Action::Secretary,
         "volume-up" => Action::Level(LevelKey::VolumeUp),
         "volume-down" => Action::Level(LevelKey::VolumeDown),
         "mute" => Action::Level(LevelKey::Mute),

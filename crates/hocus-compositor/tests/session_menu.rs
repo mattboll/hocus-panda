@@ -14,7 +14,7 @@
 //! password asked first when logind says `challenge`; and at rest, nothing
 //! drawn. Times are the motions' clock, held and stepped, where they count.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::HashMap,
@@ -198,10 +198,7 @@ impl Bed {
     /// The compositor on a 1920 × 1080 screen, its shell's user named
     /// Alex, logind saying `logind`.
     fn start(logind: Logind) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config", "cache", "state", "data"] {

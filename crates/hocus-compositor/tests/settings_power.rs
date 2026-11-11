@@ -14,8 +14,8 @@
 //! decides; a file 6.1 wrote showing its battery's dim; at rest, nothing
 //! drawn. What the window shows is read from its log ("shows" lines).
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -352,10 +352,7 @@ impl Bed {
     /// A compositor, the file holding `file`, the system bus's services
     /// as `services` say (`None`: no system bus at all).
     fn start(file: &str, services: Option<Services>) -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         if std::process::Command::new("dbus-daemon")
             .arg("--version")
             .output()

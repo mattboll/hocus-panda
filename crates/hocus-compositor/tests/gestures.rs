@@ -15,7 +15,7 @@
 //! The launcher is the real shell's, with no applications (a data
 //! directory of the test's own), on the CPU.
 
-mod common;
+use crate::common;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -48,10 +48,7 @@ struct Bed {
 
 impl Bed {
     fn start(file: &str) -> anyhow::Result<Option<Self>> {
-        let Some(shell) = common::shell_program() else {
-            eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let shell = common::shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in ["home", "config", "cache", "state", "system"] {

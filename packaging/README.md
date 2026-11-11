@@ -10,6 +10,7 @@ What the package of Hocuspanda holds, and how it is built.
 | `hocuspanda-shell` | `/usr/bin` | The shell (the bar), which the compositor starts and restarts |
 | `hocus-settings` | `/usr/bin` | The Settings (6.1, [docs/design/settings.md](../docs/design/settings.md)), an application window that writes `~/.config/hocuspanda/config.toml`; one window at a time |
 | [`hocus-settings.desktop`](hocus-settings.desktop) | `/usr/share/applications` | "Réglages" / "Settings" in the launcher (shown in the Hocuspanda session only) |
+| `panda-1.png` … `panda-8.png` | `/usr/share/hocuspanda/avatars` | The pandas the Settings' Account page offers as avatars |
 | `hocus` | `/usr/bin` | What agents' hooks and scripts run to tell the bar their state ([docs/agents.md](../docs/agents.md)) |
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
@@ -26,10 +27,16 @@ The binary keeps its symbols, for backtraces.
 On Debian or Ubuntu, with `dpkg-dev` and the build dependencies of the CI:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-secretary
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
 packaging/deb/build.sh                  # target/packages/hocuspanda_<version>-1_<arch>.deb
+packaging/deb/check.sh target/packages/hocuspanda_<version>-1_<arch>.deb   # it holds the files above, no others
 sudo apt install ./target/packages/hocuspanda_<version>-1_<arch>.deb
 ```
+
+CI does the same on every push to `main` and to a sprint branch (the
+`package` job), and keeps the .deb as the run's artifact. A file added to
+or taken out of the package changes [`install.sh`](install.sh), the table
+above and [`deb/check.sh`](deb/check.sh) together.
 
 Library dependencies are the ones `dpkg-shlibdeps` finds on the build
 system, so a package built on a release installs on that release and later

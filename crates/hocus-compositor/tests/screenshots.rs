@@ -8,7 +8,7 @@
 //! Pixman, a flat background: what is darkened, and what is not, is told
 //! by its pixels.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -511,10 +511,7 @@ fn escape_cancels() -> anyhow::Result<()> {
 /// thumbnail once taken (5.9), in its French folder.
 #[test]
 fn the_toolbar_and_the_toast() -> anyhow::Result<()> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let shell = common::shell_program();
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     for sub in ["home", "config", "cache", "state"] {

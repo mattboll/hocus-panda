@@ -30,6 +30,10 @@
 //! alone. The list, and the field's text, are drawn in frames of their own,
 //! cut to their bounds, which both renderers honour.
 
+// The same popover as a tree of iced's stock widgets (spike #770).
+pub(crate) mod custom;
+pub mod widgets;
+
 use std::{
     sync::{Mutex, PoisonError},
     time::Instant,
@@ -121,7 +125,7 @@ const INK: Ink = Ink::Dark(rgb(0x0B1020));
 
 /// What can be pointed at, or hold the keyboard's focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     Switch,
     Disconnect,
     Portal,

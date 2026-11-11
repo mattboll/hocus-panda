@@ -39,9 +39,11 @@ mod column;
 mod curtain;
 mod day;
 mod desktops;
-mod drawer;
 mod emoji;
 mod ending;
+// Its first user, the secretary's drawer, is gone: the shell's other
+// fields move onto it with #771.
+#[allow(dead_code)]
 mod field;
 mod footer;
 mod foreign;
@@ -53,6 +55,7 @@ mod levels;
 mod locale;
 mod lock;
 mod meeting;
+mod music;
 mod network;
 mod notifications;
 mod outputs;
@@ -62,11 +65,9 @@ mod pointer;
 mod popover;
 mod reminder;
 mod renderer;
-mod secretary;
 mod setup;
 mod share;
 mod side;
-mod speak;
 mod tasks;
 mod theme;
 mod today;
@@ -132,6 +133,12 @@ fn main() -> ExitCode {
         Ok(quiet) => filter.add_directive(quiet),
         Err(_) => filter,
     };
+    // iced traces the text of every paragraph it lays out, a stock text
+    // field's too (spike #770): never either.
+    let filter = match "iced_graphics::text::paragraph=off".parse() {
+        Ok(quiet) => filter.add_directive(quiet),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(filter)
@@ -167,6 +174,7 @@ fn main() -> ExitCode {
     // The lock's avatar: the account's photo, if AccountsService has one.
     lock::avatar::start();
     tray::start();
+    music::start();
     // Screen readers: a thread that waits until one listens.
     a11y::start();
     let link = std::env::var(hocus_link::SOCKET_ENV).ok();
@@ -419,6 +427,10 @@ enum Message {
     /// A key went to another surface than the one holding the keyboard:
     /// every surface is woken, that one's widgets taking it ([`keys`]).
     Keys,
+    /// The music players changed (s12): their tiles and popover follow.
+    Music,
+    /// The music tile was pressed.
+    MusicTile(music::tile::Press),
 }
 
 impl Shell {
@@ -479,6 +491,7 @@ impl Shell {
         subscriptions.push(Subscription::run(popover::effects));
         subscriptions.push(Subscription::run(notifications::effects));
         subscriptions.push(Subscription::run(tray::effects));
+        subscriptions.push(Subscription::run(music::effects));
         subscriptions.push(Subscription::run(reminder::effects));
         subscriptions.push(bar_sizes());
         Subscription::batch(subscriptions)
@@ -545,6 +558,14 @@ impl Shell {
             // Its update is the wake: iced_layershell redraws every surface
             // after one.
             Message::Keys => Task::none(),
+            Message::Music => {
+                music::changed();
+                Task::none()
+            }
+            Message::MusicTile(press) => {
+                music::tile::pressed(press);
+                Task::none()
+            }
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
                     bar.height = size.height;
@@ -644,7 +665,6 @@ impl Shell {
                     desktops::draw::forget(&bar.output);
                     agents::draw::forget(&bar.output);
                     agents::peek::forget(&bar.output);
-                    speak::peek::forget(&bar.output);
                     footer::forget(&bar.output);
                     tasks::draw::forget(&bar.output);
                     let sign = in_use::forget(&bar.output);
@@ -652,12 +672,14 @@ impl Shell {
                     reminder::forget(&bar.output);
                     let today = today::forget(&bar.output);
                     let windows = windows::forget(&bar.output);
+                    let music = music::forget(&bar.output);
                     let tray = tray::draw::forget(&bar.output);
                     Some(Task::batch([
                         sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
                         card.map_or_else(Task::none, |c| Task::done(Message::RemoveWindow(c))),
                         today.map_or_else(Task::none, |t| Task::done(Message::RemoveWindow(t))),
                         windows.map_or_else(Task::none, |w| Task::done(Message::RemoveWindow(w))),
+                        music.map_or_else(Task::none, |m| Task::done(Message::RemoveWindow(m))),
                         Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
                         Task::done(Message::RemoveWindow(bar.footer)),
                         Task::done(Message::RemoveWindow(bar.tasks)),
@@ -692,7 +714,6 @@ impl Shell {
                 launcher::outside();
                 emoji::outside();
                 actions::close();
-                drawer::outside();
                 Task::none()
             }
             ToShell::Launcher { output, scale } => {
@@ -760,7 +781,6 @@ impl Shell {
             }
             ToShell::NoPeek => {
                 agents::peek::back();
-                speak::peek::back();
                 Task::none()
             }
             ToShell::ScreensMoved(moved) => {
@@ -872,7 +892,6 @@ impl Shell {
             ToShell::Day(ask) => {
                 if let hocus_link::DayAsk::Slept(seconds) = ask {
                     self.slept(seconds);
-                    secretary::resumed(Some(seconds));
                 }
                 day::ask(ask);
                 Task::none()
@@ -881,20 +900,8 @@ impl Shell {
                 reminder::join_key();
                 Task::none()
             }
-            ToShell::Secretary(shown) => {
-                secretary::told(shown);
-                Task::none()
-            }
-            ToShell::SecretaryAsk(text) => {
-                secretary::ask(text);
-                Task::none()
-            }
-            ToShell::SecretaryDrawer { output, width } => {
-                drawer::toggle(&output, width);
-                Task::none()
-            }
-            ToShell::SecretaryPeek(id) => {
-                speak::peek::show(id);
+            ToShell::FellBack { which, program } => {
+                notifications::fell_back(which, &program);
                 Task::none()
             }
             ToShell::Fullscreen(screens) => {
@@ -906,8 +913,6 @@ impl Shell {
                 Task::none()
             }
             ToShell::Lock(shown) => {
-                secretary::locked(true);
-                speak::poke();
                 let screens = outputs::step();
                 let effects = lock::set(shown, &screens);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
@@ -917,19 +922,15 @@ impl Shell {
                 Task::none()
             }
             ToShell::Unlocked => {
-                secretary::locked(false);
                 let effects = lock::end();
-                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::Curtain(shown) => {
                 let effects = curtain::set(shown);
-                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::CurtainEnd => {
                 let effects = curtain::end();
-                speak::poke();
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             // Taken by the link itself, without a message.
@@ -1160,6 +1161,7 @@ impl Shell {
             after.extend(meeting::bar_opened(&output, form));
             after.extend(today::bar_opened(&output, form));
             after.extend(windows::bar_opened(&output, form));
+            after.extend(music::bar_opened(&output, form));
             reminder::bar_opened(&output, form);
         }
         open.chain(open_clock)
@@ -1235,7 +1237,6 @@ impl Shell {
         let output = bar.output.clone();
         self.place_popovers(id);
         agents::peek::form(&output, form);
-        speak::peek::moved();
         self.fit(id)
     }
 
@@ -1306,6 +1307,7 @@ impl Shell {
         let form = bar.form;
         today::form(&output, form, switching);
         windows::form(&output, form, switching);
+        music::form(&output, form, switching);
         // The column's groups to their places in the form: Today's rows,
         // the room the agents' rows have on a bar in the full form.
         column::moved();
@@ -1618,6 +1620,22 @@ impl Shell {
         ))
     }
 
+    /// The music player's tile (s12), if its surface is `id`.
+    fn music_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
+        let output = music::bar_of(id)?;
+        let bar = self.bars.values().find(|b| b.output == output)?;
+        // The bar's colour behind it, where the column puts it.
+        let backdrop = (!self.look.glass).then(|| {
+            let middle = music::placed(&output).map_or(0.0, |(top, _)| top + music::TILE / 2.0);
+            agents::draw::Backdrop {
+                top: OPAQUE_TOP.get(),
+                bottom: OPAQUE_BOTTOM.get(),
+            }
+            .at(middle, bar.height)
+        });
+        Some(music::tile::view(&output, self.look.motion, backdrop))
+    }
+
     /// Today (Day.3), if its surface is `id`.
     fn today_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let output = today::bar_of(id)?;
@@ -1755,14 +1773,6 @@ impl Shell {
 
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if let Some(bar) = speak::peek::bar_of(id) {
-            return Some(
-                canvas(speak::peek::View { bar })
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into(),
-            );
-        }
         let bar = agents::peek::bar_of(id)?;
         Some(
             canvas(agents::peek::View { bar })
@@ -1815,22 +1825,6 @@ impl Shell {
             .height(Length::Fill)
             .into(),
         )
-    }
-
-    /// The secretary's drawer, if its surface is `id`.
-    fn drawer_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !drawer::is_surface(id) {
-            return None;
-        }
-        let drawn = canvas(drawer::draw::View {
-            id,
-            words: drawer::words(),
-            glass: self.look.glass,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill);
-        // An input method for its fields (#763).
-        Some(field::ime::Asking::new(drawn, Box::new(move || drawer::ime(id))).into())
     }
 
     /// The emoji picker, if its surface is `id`.
@@ -1906,6 +1900,16 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+            popover::Item::Wifi if popover::wifi::widgets::on() => {
+                popover::wifi::widgets::view(&popover::wifi::Panel {
+                    id,
+                    words: self.words,
+                    glass: self.look.glass,
+                    motion: self.look.motion,
+                    software: self.software,
+                })
+            }
+            popover::Item::Music => popover::music::view(id, self.look.glass),
             popover::Item::Wifi => canvas(popover::wifi::Panel {
                 id,
                 words: self.words,
@@ -2111,7 +2115,6 @@ impl Shell {
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
                 .or_else(|| self.actions_view(id))
-                .or_else(|| self.drawer_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
@@ -2121,6 +2124,7 @@ impl Shell {
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))
                 .or_else(|| self.windows_view(id))
+                .or_else(|| self.music_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .or_else(|| reminder::view(id, self.look.glass))
@@ -2413,7 +2417,6 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             launcher::outside();
                             emoji::outside();
                             actions::close();
-                            drawer::outside();
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
@@ -2507,11 +2510,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::NoPeek) => {
                             agents::peek::back();
-                            speak::peek::back();
                             continue;
                         }
-                        Ok(ToShell::SecretaryPeek(id)) => {
-                            speak::peek::show(id);
+                        // A developer's program let go of: a bubble, the
+                        // notifications' own surface.
+                        Ok(ToShell::FellBack { which, program }) => {
+                            notifications::fell_back(which, &program);
                             continue;
                         }
                         Ok(ToShell::ScreensMoved(moved)) => {
@@ -2566,12 +2570,6 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         Ok(ToShell::EmojiInserted) => {
                             emoji::inserted();
-                            continue;
-                        }
-                        // The secretary's drawer: its own surface
-                        // (secretary.md §5).
-                        Ok(ToShell::SecretaryDrawer { output, width }) => {
-                            drawer::toggle(&output, width);
                             continue;
                         }
                         // The actions palette: its own surface (#736).

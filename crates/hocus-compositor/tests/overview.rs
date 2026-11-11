@@ -9,7 +9,7 @@
 //! draws nothing. With `HOCUS_SHOTS` naming a folder, the tests save the
 //! screens as `overview-*.png`.
 
-mod common;
+use crate::common;
 
 use std::{io::Write, os::unix::net::UnixStream, path::Path, time::Duration};
 

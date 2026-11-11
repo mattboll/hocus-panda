@@ -15,7 +15,7 @@
 //! be where it should, never for a time. With `HOCUS_SHOTS` naming a
 //! folder, the tests save the bar's top right there.
 
-mod common;
+use crate::common;
 
 use std::{
     io::Write,
@@ -118,17 +118,7 @@ struct Bed {
 
 /// The programs the tests need, built beside them.
 fn ready() -> Option<(PathBuf, PathBuf)> {
-    let Some(shell) = common::shell_program() else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return None;
-    };
-    let exe = std::env::current_exe().ok()?;
-    let hocus = exe.parent()?.parent()?.join("hocus");
-    if !hocus.exists() {
-        eprintln!("hocus is not built: build the workspace to run this test");
-        return None;
-    }
-    Some((shell, hocus))
+    Some((common::shell_program(), common::hocus_program()))
 }
 
 /// What the test's machine has.

@@ -17,10 +17,9 @@
 //! the Settings on Son, or brings them forward there; at rest, the window
 //! commits nothing.
 
-mod common;
-#[path = "levels/fakes.rs"]
-mod fakes;
-mod settings_page;
+use crate::common;
+use crate::fakes;
+use crate::settings_page;
 
 use settings_page::{Floor, Wheel};
 use std::{
@@ -59,9 +58,9 @@ struct Bed {
 /// Whether what the tests need is there: the Settings built, PipeWire
 /// and its tools (and the shell, if `shell`).
 fn ready(shell: bool) -> bool {
-    if common::settings_program().is_none() || (shell && common::shell_program().is_none()) {
-        eprintln!("the Settings or the shell are not built: build the workspace to run this test");
-        return false;
+    common::settings_program();
+    if shell {
+        common::shell_program();
     }
     let tools = ["pw-cli", "pw-link", "pw-record", "pw-dump", "wpctl"]
         .iter()
@@ -96,7 +95,7 @@ impl Bed {
         let fakes = Fakes::start_with_sources(&SINKS, &SOURCES)?;
         let config_file = root.join("config/hocuspanda/config.toml");
         std::fs::write(&config_file, "# Mine.\n")?;
-        let program = common::settings_program().ok_or_else(|| anyhow::anyhow!("no settings"))?;
+        let program = common::settings_program();
         let log = root.join("settings.log");
         let script = root.join("bin/hocus-settings");
         let at = |sub: &str| root.join(sub).display().to_string();
@@ -125,7 +124,7 @@ impl Bed {
         )?;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
         let shell_log = root.join("shell.log");
-        let shell_script = match common::shell_program().filter(|_| shell) {
+        let shell_script = match shell.then(common::shell_program) {
             Some(shell) => Some(fakes.shell_with(
                 &shell,
                 "fr_FR.UTF-8",

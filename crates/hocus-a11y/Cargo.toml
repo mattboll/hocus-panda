@@ -3,8 +3,11 @@ name = "hocus-a11y"
 description = "Hocuspanda's accessibility tree: what the shell shows, as AT-SPI names, roles, states and actions for screen readers (AccessKit)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program, tests/main.rs: each test file is a module of it (#765).
+autotests = false
 
 [lints]
 workspace = true
@@ -12,9 +15,13 @@ workspace = true
 [dependencies]
 # The tree, and its AT-SPI side over D-Bus on a thread of its own (MIT OR
 # Apache-2.0): iced has no tree (docs/design/spike-iced.md, 6).
-accesskit = "0.25.2"
-accesskit_unix = "0.24.1"
-tracing = "0.1.44"
+accesskit.workspace = true
+accesskit_unix.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

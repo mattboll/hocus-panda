@@ -13,8 +13,8 @@
 //! puts it back. What the window shows is read from its log, never on a
 //! time.
 
-mod common;
-mod settings_page;
+use crate::common;
+use crate::settings_page;
 
 use std::{
     os::unix::fs::PermissionsExt,
@@ -113,10 +113,7 @@ impl Bed {
     /// The compositor and the Settings' script; `None` when the Settings
     /// are not built.
     fn start() -> anyhow::Result<Option<Self>> {
-        let Some(program) = common::settings_program() else {
-            eprintln!("hocus-settings is not built: build the workspace to run this test");
-            return Ok(None);
-        };
+        let program = common::settings_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
         for sub in [

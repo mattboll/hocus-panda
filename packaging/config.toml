@@ -265,10 +265,6 @@
 # (docs/design/emoji.md). The key is the one typing `.`, with Shift on
 # layouts that need it (AZERTY).
 # emoji = "Super+period"
-# The secretary's drawer, beside the bar of the focused window's screen;
-# again, it closes. In the assistant mode of `[secretary]` only: in the
-# classic mode the chord goes to the window (docs/design/secretary.md §4).
-# secretary = "Super+S"
 # The keyboard's sound and brightness keys: 5 % a press, stepping on while
 # held; up stops at 100 %, brightness down at 5 %, so that the screen never
 # goes black. A volume key unmutes. Only the bar's gauges show it.
@@ -354,6 +350,15 @@
 # `hocus perf day`). Followed live.
 # record = true
 
+# [developer]
+# For those who develop the desktop itself: lets `hocus msg shell restart
+# --program PATH` (scripts/dev/live.sh) run a program just built as the
+# shell, for the session. Off by default: the shell draws the lock screen
+# and the password dialog, and any of your programs could ask for another
+# one in its place. Followed live; turned off, a program given gives way
+# to the installed one at once.
+# live-reload = false
+
 # [agents]
 # How the bar calls you for the agents (Claude Code, Codex, herdr, and
 # what says its state with `hocus agent`), followed live. Which of their
@@ -368,94 +373,6 @@
 # remind = "5m"
 # peek = "waiting-and-done"
 # pandas = true
-
-# [secretary]
-# The secretary (docs/design/secretary.md): "classic" is the agents'
-# secretary as she is; "assistant" starts her own process, which keeps an
-# encrypted memory in ~/.local/share/hocuspanda/secretary (its key in the
-# keyring) and reads the sources you consent to. Followed live: back to
-# "classic", her process stops and her memory stays on disk until you ask
-# her to forget it. What she reads is not listed here: each source is
-# consented to on its own (each kind of a Google account of Online
-# Accounts, an application's notifications, Slack's for one: in her drawer
-# the first time, and under Settings › Secretary), kept in her folder's
-# consents.json. Her key: `hocus-secretary key anthropic` in a terminal of
-# the session (docs/secretary.md). name is her name, in her drawer, her
-# bubble and when she introduces herself; empty, "Ta secrétaire".
-# mode = "classic"
-# name = ""
-
-# [secretary.models]
-# Each role's provider and model, "PROVIDER/MODEL", applied at the next
-# request. Claude for what needs understanding; the local model only
-# triages (and points at secrets) what arrives.
-# answer = "anthropic/claude-sonnet-5-5"
-# briefing = "anthropic/claude-sonnet-5-5"
-# extraction = "anthropic/claude-sonnet-5-5"
-# compaction = "anthropic/claude-sonnet-5-5"
-# triage = "local/qwen3:8b"
-
-# [secretary.providers.anthropic]
-# No key here: it is in the keyring (hocus-secretary key anthropic).
-# kind = "anthropic"
-# url = "https://api.anthropic.com"
-
-# [secretary.providers.local]
-# A server you run on this machine (Ollama, llama.cpp); the desktop ships
-# no weights. "ollama" also unloads the model when the triage is idle;
-# "openai" is any OpenAI-compatible endpoint.
-# kind = "ollama"
-# url = "http://127.0.0.1:11434/v1"
-
-# [secretary.triage]
-# On battery, the triage runs only above this charge (%, Settings ›
-# Secretary › « Quand trier »); the model is
-# unloaded after unload-after idle seconds; pace seconds between two
-# requests. context is the local model's context in tokens, asked of
-# Ollama (its own default is far larger, and takes an 8B model past an
-# 8 GB graphics card); a longer item is cut to fit, its start kept.
-# threads: with the model whole on the graphics card, Ollama runs it on
-# this many processor threads, so that it does not heat the processor.
-# battery = 50
-# unload-after = 120
-# pace = 2
-# context = 8192
-# threads = 2
-# It pauses while the machine is too hot, on its temperature averaged
-# over the last minute (a processor jumps to 100 °C on every burst, which
-# says nothing): the processor's package at heat (°C), going on below
-# resume; with the model whole on the graphics card, the card's instead,
-# at gpu-heat, going on below gpu-resume. Unset, as here: the package's
-# critical point minus 10 (else 100), the card's slowdown point as its
-# driver says it (else 87), and each resume point 10 below; for example
-#   heat = 100
-#   resume = 90
-#   gpu-heat = 87
-#   gpu-resume = 77
-
-# [secretary.speak]
-# When she speaks up (docs/design/secretary.md §6). Her morning briefing
-# comes out once, at your first session (unlock or login) after morning;
-# "Pendant ton absence" after more than 4 h away. Her peek ("Fait",
-# "Plus tard") stays out `stays` seconds; at most `most` a day, `apart`
-# minutes apart (people you named as passing always aside). Never during a
-# meeting, do not disturb, a shared screen, the camera or the microphone
-# in use, a full-screen window, a locked screen; nothing in each notebook's
-# quiet hours (it waits for the next briefing), the pro notebook's
-# weekends too; nothing perso during a meeting, a share or a camera call.
-# morning = "07:00"
-# most = 6
-# apart = 30
-# quiet-pro = "19:00-08:00"
-# quiet-weekends = true
-# quiet-perso = "22:00-08:00"
-# stays = 12
-
-# [secretary.compaction]
-# The night's tidying of her memory (each day's summary, the week's on
-# Sunday night, duplicates merged), at this hour; on battery only above
-# the triage's battery threshold, else an hour later, again. Once a night.
-# hour = 3
 
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the

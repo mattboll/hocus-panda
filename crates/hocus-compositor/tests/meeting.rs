@@ -14,7 +14,7 @@
 //! form's mark and its popover; at rest nothing drawn, the minute's change
 //! drawn once.
 
-mod common;
+use crate::common;
 
 use std::{
     path::{Path, PathBuf},
@@ -93,13 +93,9 @@ struct Bed {
     launched: PathBuf,
 }
 
-/// The shell's program, or `None` (the test skips) when it is not built.
+/// The shell's program: the test fails when it is not built.
 fn ready() -> Option<PathBuf> {
-    let shell = common::shell_program();
-    if shell.is_none() {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-    }
-    shell
+    Some(common::shell_program())
 }
 
 /// The compositor with the real shell on the CPU, its clock at `clock`
