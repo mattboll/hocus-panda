@@ -24,7 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use hocus_sound::{Ask, Kind, Set, Sink, Step};
+pub use hocus_sound::{Ask, Kind, Set, Step};
 use hocus_sound::{Known, Using};
 
 use super::{Presence, RETRY_FIRST, icons::Icon, next_retry, publish};

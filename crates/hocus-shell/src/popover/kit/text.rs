@@ -1,5 +1,6 @@
-//! Text: measured, cut with an ellipsis, broken into lines, and the widths
-//! a popover measures once and keeps.
+//! Text: measured (once each: the kit's views are built again as they
+//! change, and measure the same words and names each time), cut with an
+//! ellipsis, broken into lines.
 
 use std::{
     collections::HashMap,
@@ -8,8 +9,7 @@ use std::{
 
 use iced::advanced::graphics::text::cosmic_text::FontSystem;
 
-use super::{MANROPE_SEMIBOLD, ROW_TEXT};
-use crate::levels::draw::{LINE, MANROPE, MANROPE_BOLD, VALUE};
+use crate::levels::draw::{LINE, MANROPE, VALUE};
 
 /// `text`'s width in `font` at `size`, with the font system at hand.
 pub(crate) fn measure_in(system: &mut FontSystem, text: &str, size: f32, font: iced::Font) -> f32 {
@@ -24,13 +24,30 @@ pub(crate) fn measure_in(system: &mut FontSystem, text: &str, size: f32, font: i
         .fold(0.0, f32::max)
 }
 
-/// `text`'s width, measured (an estimate if the font system is out of
-/// reach).
+/// The widths measured, by text, size (in tenths) and font: forgotten
+/// past [`MEASURES`], a name's prefixes measured to cut it being many.
+type Measured = HashMap<(String, u32, iced::Font), f32>;
+static MEASURED: Mutex<Option<Measured>> = Mutex::new(None);
+const MEASURES: usize = 2048;
+
+/// `text`'s width, measured once (an estimate if the font system is out
+/// of reach).
 pub(crate) fn measure(text: &str, size: f32, font: iced::Font) -> f32 {
-    match iced::advanced::graphics::text::font_system().write() {
-        Ok(mut system) => measure_in(system.raw(), text, size, font),
-        Err(_) => text.chars().count() as f32 * size * 0.55,
+    let key = (text.to_owned(), tenths(size), font);
+    let mut measured = MEASURED.lock().unwrap_or_else(PoisonError::into_inner);
+    let measured = measured.get_or_insert_with(HashMap::new);
+    if let Some(width) = measured.get(&key) {
+        return *width;
     }
+    let width = match iced::advanced::graphics::text::font_system().write() {
+        Ok(mut system) => measure_in(system.raw(), text, size, font),
+        Err(_) => return text.chars().count() as f32 * size * 0.55,
+    };
+    if measured.len() >= MEASURES {
+        measured.clear();
+    }
+    measured.insert(key, width);
+    width
 }
 
 /// The `0`'s advance of the values' font, for tabular figures.
@@ -92,53 +109,6 @@ pub(crate) fn wrapped(text: &'static str, size: f32, room: f32) -> Vec<String> {
 /// A key for a measure: the size in tenths.
 fn tenths(size: f32) -> u32 {
     (size * 10.0).round() as u32
-}
-
-/// Words measured once, and names cut to their room once: a popover
-/// measures ahead of drawing, which only reads.
-#[derive(Debug, Default)]
-pub(crate) struct Widths {
-    /// (text, size, bold) → width.
-    widths: HashMap<(&'static str, u32, bool), f32>,
-    /// (name, room, semibold) → shown.
-    names: HashMap<(String, u32, bool), String>,
-}
-
-impl Widths {
-    /// A word's width, measured once.
-    pub(crate) fn width(&mut self, text: &'static str, size: f32, bold: bool) -> f32 {
-        let key = (text, tenths(size), bold);
-        if let Some(width) = self.widths.get(&key) {
-            return *width;
-        }
-        let width = measure(text, size, if bold { MANROPE_BOLD } else { MANROPE });
-        self.widths.insert(key, width);
-        width
-    }
-
-    /// A word's width as measured (an estimate if it was not).
-    pub(crate) fn known(&self, text: &'static str, size: f32, bold: bool) -> f32 {
-        self.widths
-            .get(&(text, tenths(size), bold))
-            .copied()
-            .unwrap_or(text.chars().count() as f32 * size * 0.55)
-    }
-
-    /// `name` (a row's, 14 px; `semibold`, a connected block's) cut to fit
-    /// `room`, once.
-    pub(crate) fn fit(&mut self, name: &str, room: f32, semibold: bool) -> String {
-        let key = (name.to_owned(), room.max(0.0) as u32, semibold);
-        if let Some(shown) = self.names.get(&key) {
-            return shown.clone();
-        }
-        let font = if semibold { MANROPE_SEMIBOLD } else { MANROPE };
-        let shown = match iced::advanced::graphics::text::font_system().write() {
-            Ok(mut system) => elide(name, room, |t| measure_in(system.raw(), t, ROW_TEXT, font)),
-            Err(_) => name.to_owned(),
-        };
-        self.names.insert(key, shown.clone());
-        shown
-    }
 }
 
 #[cfg(test)]

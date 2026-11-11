@@ -1898,14 +1898,7 @@ impl Shell {
     fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let item = popover::with(|c| c.item_of(id))?;
         let panel: Element<'_, Message> = match item {
-            popover::Item::Sound => canvas(popover::sound::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            popover::Item::Sound => popover::sound::view(id, self.words, self.look.glass),
             popover::Item::Wifi => popover::wifi::view(&popover::wifi::Panel {
                 id,
                 words: self.words,

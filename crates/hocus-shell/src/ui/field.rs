@@ -14,10 +14,13 @@ use crate::field::{
     view::{Look, Style},
 };
 
+/// The surface's field, reached through its lock: what is to be done
+/// with it is handed in.
+pub type With = fn(&mut dyn FnMut(&mut Entry));
+
 /// A field: its text from `left` to `right` px in from its sides.
 pub struct Field<M> {
-    /// The surface's field, reached through its lock.
-    pub with: fn(&mut dyn FnMut(&mut Entry)),
+    pub with: With,
     pub style: Style,
     pub placeholder: &'static str,
     pub look: Look,

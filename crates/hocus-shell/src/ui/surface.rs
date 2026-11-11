@@ -64,6 +64,9 @@ impl Later {
     }
 }
 
+/// A key, before the kit's: `Some` takes it.
+type OnKey<'a, L> = Box<dyn Fn(&Pressed) -> Option<L> + 'a>;
+
 /// A popover's surface around its widgets, and their loop.
 ///
 /// iced hands a widget's message to the application, and iced_layershell
@@ -91,7 +94,7 @@ pub struct Around<'a, L> {
     stale: Box<dyn Fn() -> bool + 'a>,
     on_stale: L,
     /// A key, before the kit's: `Some` takes it.
-    on_key: Box<dyn Fn(&Pressed) -> Option<L> + 'a>,
+    on_key: OnKey<'a, L>,
     /// A press anywhere, once the content has had it.
     on_press: Option<L>,
     /// Opened by the keyboard: the ring's first place (else `Tab`'s).

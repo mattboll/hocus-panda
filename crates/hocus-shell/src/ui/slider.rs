@@ -13,18 +13,18 @@ use crate::{levels::draw::SOUND, popover::kit};
 /// A slider at `volume` (0 to 100), grey when what it sets is `grey`;
 /// its track `track` tall, its knob `knob`. Dragging tells `on_change`
 /// each volume, then `on_release`.
-pub struct Slider<M> {
+pub struct Slider<'a, M> {
     pub volume: f32,
     pub grey: bool,
     pub track: f32,
     pub knob: f32,
-    pub on_change: fn(f32) -> M,
+    pub on_change: Box<dyn Fn(f32) -> M + 'a>,
     pub on_release: M,
 }
 
-impl<M: Clone + 'static> Slider<M> {
+impl<'a, M: Clone + 'a> Slider<'a, M> {
     /// As a widget across its room, `height` tall.
-    pub fn view<'a>(self, height: f32) -> iced::Element<'a, M> {
+    pub fn view(self, height: f32) -> iced::Element<'a, M> {
         iced::widget::canvas(self)
             .width(Length::Fill)
             .height(height)
@@ -42,7 +42,7 @@ impl<M: Clone + 'static> Slider<M> {
     }
 }
 
-impl<M: Clone + 'static> canvas::Program<M> for Slider<M> {
+impl<M: Clone> canvas::Program<M> for Slider<'_, M> {
     /// Dragged.
     type State = bool;
 

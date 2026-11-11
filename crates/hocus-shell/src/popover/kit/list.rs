@@ -5,21 +5,16 @@ use std::time::{Duration, Instant};
 
 use iced::{
     Color, Point, Radians, Rectangle, Size,
-    widget::{
-        canvas::{self, Frame, Path},
-        text::Alignment,
-    },
+    widget::canvas::{self, Frame, Path},
 };
 
-use super::{ICON, ICON_GAP, LEFT, RIGHT, ROW, ROW_GAP, ROW_OUT, ROW_PAD, ROW_RADIUS, SMALL, text};
-use crate::levels::draw::{DIM, FAINT, HOVER, LINE, stroke};
+use super::{ICON, ICON_GAP, LEFT, RIGHT, ROW_GAP, ROW_OUT, ROW_PAD};
+use crate::levels::draw::{LINE, stroke};
 use crate::theme::Ink;
 
 /// A list's scrollbar, on the content's right.
 pub(crate) const SCROLLBAR: f32 = 6.0;
 const THUMB: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
-/// A row lit under the pointer (or unfolded).
-const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 /// The spinners: 12 px, a turn in 900 ms.
 const SPINNER: f32 = 12.0;
 const TURN: Duration = Duration::from_millis(900);
@@ -67,27 +62,6 @@ impl List {
         (self.content - self.view.height).max(0.0)
     }
 
-    /// The row whose top is `top` in the content, its [`ROW`] px, on the
-    /// popover, scrolled by `scroll`: to the scrollbar when the list
-    /// scrolls, else to the list's right less `end`.
-    pub(crate) fn row(self, top: f32, scroll: f32, end: f32) -> Rectangle {
-        let view = self.view;
-        let right = if self.scrolls() {
-            RIGHT - 2.0
-        } else {
-            view.x + view.width - end
-        };
-        Rectangle::new(
-            Point::new(view.x, view.y + top - scroll),
-            Size::new(right - view.x, ROW),
-        )
-    }
-
-    /// Its thumb, at `scroll`, when it scrolls.
-    pub(crate) fn scrollbar(self, f: &mut Frame, scroll: f32) {
-        self.scrollbar_at(f, scroll, RIGHT);
-    }
-
     /// Its thumb, at `scroll`, from `left`: on a popover narrower than
     /// the others, its content's right.
     pub(crate) fn scrollbar_at(self, f: &mut Frame, scroll: f32, left: f32) {
@@ -122,16 +96,6 @@ pub(crate) fn reveal((top, height): (f32, f32), view: f32, scroll: f32, most: f3
     scroll.clamp(0.0, most)
 }
 
-/// A list's row lit: the chosen one, or the one under the pointer.
-pub(crate) fn row_fill(f: &mut Frame, rect: Rectangle, chosen: bool, hovered: bool) {
-    let path = Path::rounded_rectangle(rect.position(), rect.size(), ROW_RADIUS.into());
-    if chosen {
-        crate::theme::hover(f, &path, HOVER.get());
-    } else if hovered {
-        crate::theme::hover(f, &path, ROW_HOVER.get());
-    }
-}
-
 /// Where a list's text shows: on the CPU, whose renderer does not cut text
 /// to a frame's bounds, a text in a list is drawn only when it shows whole.
 #[derive(Debug, Clone, Copy)]
@@ -153,67 +117,6 @@ impl Clip {
             }
         }
         f.fill_text(text);
-    }
-}
-
-/// What a row says on its right: "Connexion…", "enregistré", "dans les
-/// Réglages"…
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Aside {
-    pub text: &'static str,
-    pub colour: Color,
-    /// With a spinner before it.
-    pub spinner: bool,
-}
-
-/// `aside`, `width` wide, right-aligned on `right` at `middle`, and its
-/// spinner before it at `turn` (none without motion): where it begins.
-pub(crate) fn aside(
-    f: &mut Frame,
-    clip: Clip,
-    aside: Aside,
-    (right, middle): (f32, f32),
-    width: f32,
-    turn: Option<f32>,
-) -> f32 {
-    clip.fill(
-        f,
-        text(
-            aside.text.to_owned(),
-            Point::new(right, middle),
-            SMALL,
-            aside.colour,
-            Alignment::Right,
-        ),
-    );
-    let mut right = right - width;
-    if aside.spinner
-        && let Some(turn) = turn
-    {
-        right -= 6.0 + SPINNER;
-        spinner(
-            f,
-            Point::new(right, middle - SPINNER / 2.0),
-            DIM.get(),
-            turn,
-        );
-    }
-    right
-}
-
-/// "Recherche…" on a label's line centred on `middle`, right-aligned,
-/// `width` wide, and its spinner before it at `turn` (none without motion).
-pub(crate) fn searching(f: &mut Frame, word: &str, width: f32, middle: f32, turn: Option<f32>) {
-    f.fill_text(text(
-        word.to_owned(),
-        Point::new(RIGHT, middle),
-        SMALL,
-        FAINT.get(),
-        Alignment::Right,
-    ));
-    if let Some(turn) = turn {
-        let at = RIGHT - width - 6.0 - SPINNER;
-        spinner(f, Point::new(at, middle - SPINNER / 2.0), FAINT.get(), turn);
     }
 }
 

@@ -464,10 +464,6 @@ impl Words {
     pub fn microphone(self) -> &'static str {
         self.pick("Micro", "Microphone")
     }
-
-    pub fn sound_settings(self) -> &'static str {
-        self.pick("Réglages du son…", "Sound settings…")
-    }
 }
 
 #[cfg(test)]
