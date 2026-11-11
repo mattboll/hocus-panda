@@ -6,7 +6,11 @@
 //! bar is in front (`crate::front`), and the layers under them; and what
 //! clients are told once a frame is out.
 
-use std::time::Duration;
+mod layers;
+mod leaving;
+mod stack;
+
+use std::{ops::ControlFlow, time::Duration};
 
 use smithay::{
     backend::renderer::{
@@ -49,7 +53,7 @@ use crate::{
     cursor::CursorElement,
     decoration::{
         self, FramePiece, Keyed, Outside, RimKind, Rounded, ShadowPiece, ShadowStyle, grip_element,
-        handle_element, preview_elements, rim_elements, shadow_elements,
+        rim_elements, shadow_elements,
     },
     front::{Pick, in_the_bar},
     going::{ShaderElement, Shaders},
@@ -664,46 +668,23 @@ impl State {
         };
         let origin = area.loc.to_f64();
         let scale = output.current_scale().fractional_scale();
-        let sc = Scale::from(scale);
         // A screen off (7.2) shows nothing, not even the cursor.
         if purpose.screen() && !self.output_powered(output) {
             return elements;
         }
-        if purpose.cursor() {
-            elements.extend(
-                self.cursor_elements(renderer, output)
-                    .into_iter()
-                    .map(OutputElements::Cursor),
-            );
-        }
-        // Locked (7.1): the lock alone, whatever the purpose but its own
-        // last look at the desktop.
-        if purpose != Purpose::Freeze
-            && let Some(mut lock) = self.lock_elements(renderer, output, purpose, now)
+        let frame = Frame {
+            output,
+            purpose,
+            now,
+            area,
+            origin,
+            scale,
+        };
+        if self
+            .covering_elements(renderer, &frame, &mut elements)
+            .is_break()
         {
-            elements.append(&mut lock);
             return elements;
-        }
-        // Opening: its halves over everything (on the screen; a capture
-        // sees the desktop it opens on).
-        if purpose.screen() {
-            let mut parting = self.lock_parting_elements(renderer, output, now);
-            elements.append(&mut parting);
-        }
-        // The curtain before the lock over everything but the cursor
-        // (7.2): on the screen, and in the lock's last look at the desktop.
-        self.curtain_elements(renderer, output, purpose, now, &mut elements);
-        // The authentication dialog and its dim over everything but the
-        // cursor (7.5): on the screen only.
-        if purpose.screen() {
-            self.auth_elements(renderer, output, now, &mut elements);
-        }
-        // The share's chooser over everything else, and the
-        // ring around a screen shared (5.11): on the screen only.
-        if purpose.screen() {
-            self.share_elements(renderer, output, now, &mut elements);
-            // The recorded area's frame (5.10).
-            self.record_elements(output, &mut elements);
         }
         // The capture over everything but the cursor (5.8); its toolbar's
         // glass goes in once what is behind it is known.
@@ -717,160 +698,6 @@ impl State {
             self.capture_after_elements(renderer, output, now, &mut elements)
         } else {
             None
-        };
-        // The surfaces of layer `which` that `pick` takes; where the bar's
-        // first surface is drawn among `out`, if it is.
-        let layers = |renderer: &mut R,
-                      which: Layer,
-                      pick: Pick,
-                      out: &mut Vec<OutputElement<R>>| {
-            let mut bar_at = None;
-            let map = layer_map_for_output(output);
-            let on: Vec<_> = map.layers_on(which).rev().cloned().collect();
-            let bar = map
-                .layers()
-                .find(|l| l.namespace() == hocus_link::NAMESPACE)
-                .and_then(|l| map.layer_geometry(l))
-                .map(|g| {
-                    Rectangle::new(
-                        g.loc.to_physical_precise_round(scale),
-                        g.size.to_physical_precise_round(scale),
-                    )
-                });
-            for layer in on.into_iter().filter(|l| pick.takes(l.namespace())) {
-                // The bar's item of what is in use and of the recording
-                // (5.10, 5.11) is never in a recording, a capture or a share.
-                if !purpose.screen() && layer.namespace() == hocus_link::IN_USE_NAMESPACE {
-                    continue;
-                }
-                // The peek goes under the bar's surfaces (`peek_elements`),
-                // the launcher and its toast over everything
-                // (`launcher_elements`, `toast_elements`).
-                if matches!(
-                    layer.namespace(),
-                    hocus_link::LOCK_NAMESPACE
-                        | hocus_link::CURTAIN_NAMESPACE
-                        | hocus_link::PEEK_NAMESPACE
-                        | hocus_link::LAUNCHER_NAMESPACE
-                        | hocus_link::LAUNCHER_TOAST_NAMESPACE
-                        | hocus_link::ACTIONS_NAMESPACE
-                        | hocus_link::CAPTURE_TOOLBAR_NAMESPACE
-                        | hocus_link::SHARE_CHOOSER_NAMESPACE
-                        | hocus_link::AUTH_NAMESPACE
-                        | hocus_link::CAPTURE_THUMB_NAMESPACE
-                        | hocus_link::CAPTURE_EDITOR_NAMESPACE
-                ) {
-                    continue;
-                }
-                let Some(mut geometry) = map.layer_geometry(&layer) else {
-                    continue;
-                };
-                // The windows' and the music player's surfaces are kept
-                // while they show nothing: transparent on a GPU, black
-                // from a shell on the CPU, whose buffers have no alpha.
-                if self.shell.software
-                    && hocus_link::shows_nothing(layer.namespace(), geometry.size.h)
-                {
-                    continue;
-                }
-                // A popover moves in and out, and a notification's bubble;
-                // they show from their first frame.
-                // The emoji picker too (5.7).
-                let popover = matches!(
-                    layer.namespace(),
-                    hocus_link::POPOVER_NAMESPACE | hocus_link::EMOJI_NAMESPACE
-                );
-                // Popovers and reminders' tabs slide from the bar, on its
-                // side; the bubbles from the screen's right edge.
-                let look = if popover {
-                    self.panel
-                        .popovers
-                        .look(&layer, now, self.popover_motion())
-                        .map(|l| (l.alpha, l.shift * self.toward_bar(), l.rise))
-                } else if hocus_link::slides_in(layer.namespace()) {
-                    let toward = if hocus_link::is_reminder(layer.namespace()) {
-                        self.toward_bar()
-                    } else {
-                        1.0
-                    };
-                    self.bubbles
-                        .look(&layer, now, self.bubbles_slide())
-                        .map(|l| (l.alpha, l.shift * toward, 0.0))
-                } else {
-                    Some((1.0, 0.0, 0.0))
-                };
-                let alpha = match look {
-                    Some((alpha, shift, rise)) if alpha > 0.0 => {
-                        geometry.loc.x += shift.round() as i32;
-                        geometry.loc.y -= rise.round() as i32;
-                        alpha
-                    }
-                    _ => continue,
-                };
-                let loc = geometry.loc.to_physical_precise_round(scale);
-                let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
-                    AsRenderElements::<R>::render_elements(&layer, renderer, loc, sc, alpha);
-                if bar_at.is_none() && in_the_bar(layer.namespace()) {
-                    bar_at = Some(out.len());
-                }
-                // The CPU renderer's buffers have no alpha: what the bar
-                // leaves out at its corners would show black. The clock's,
-                // the levels', the connections' and the desktops' surfaces
-                // are opaque too, and cut to the bar: they change size in
-                // their own commits when the form switches.
-                // A bubble and the chip under them are cards of their own.
-                let own = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-                let cut = match layer.namespace() {
-                    hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => {
-                        Some((own, hocus_link::RADIUS))
-                    }
-                    hocus_link::EMOJI_NAMESPACE => Some((own, hocus_link::EMOJI_RADIUS)),
-                    ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
-                    ns if hocus_link::is_reminder(ns) => Some((own, hocus_link::REMINDER_RADIUS)),
-                    hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),
-                    hocus_link::TIP_NAMESPACE => Some((own, hocus_link::TIP_RADIUS)),
-                    hocus_link::CLOCK_NAMESPACE
-                    | hocus_link::LEVELS_NAMESPACE
-                    | hocus_link::CONNECTIONS_NAMESPACE
-                    | hocus_link::DESKTOPS_NAMESPACE
-                    | hocus_link::AGENTS_NAMESPACE
-                    | hocus_link::TASKS_NAMESPACE
-                    | hocus_link::IN_USE_NAMESPACE
-                    | hocus_link::MEETING_NAMESPACE
-                    | hocus_link::TODAY_NAMESPACE
-                    | hocus_link::WINDOWS_NAMESPACE
-                    | hocus_link::MUSIC_NAMESPACE
-                    | hocus_link::BELL_NAMESPACE
-                    | hocus_link::TRAY_NAMESPACE => bar.map(|b| (b, hocus_link::RADIUS)),
-                    _ => None,
-                };
-                if let Some((clip, radius)) = cut.filter(|_| self.shell.software) {
-                    let radius = (radius * scale).round() as i32;
-                    out.extend(surfaces.into_iter().map(|e| {
-                        OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
-                    }));
-                } else {
-                    out.extend(surfaces.into_iter().map(OutputElements::Surface));
-                }
-                // The popover's shadow, right under it: over the bar, as
-                // the mockup's popover's is.
-                if let Some(shown) = self.panel.popovers.shown(&layer).filter(|_| popover) {
-                    out.extend(
-                        shadow_elements(
-                            renderer,
-                            &self.textures,
-                            &shown.ids,
-                            shown.shadow(),
-                            geometry.to_f64(),
-                            scale,
-                            alpha,
-                        )
-                        .into_iter()
-                        .map(OutputElements::Shadow),
-                    );
-                }
-            }
-            bar_at
         };
         // The strokes and the laser over the windows and the shell's
         // surfaces, under what the compositor shows to share, record or
@@ -900,9 +727,7 @@ impl State {
         } else {
             None
         };
-        let palette_target = palette.and_then(|(_, window, _)| window);
-        let mut target = Vec::new();
-        layers(renderer, Layer::Overlay, Pick::All, &mut elements);
+        self.layer_elements(renderer, &frame, Layer::Overlay, Pick::All, &mut elements);
         // The bar's own surfaces go under the windows unless the pointer
         // brought it in front (#519); its popovers, its halo, the peek and
         // the bubbles stay above them.
@@ -912,142 +737,12 @@ impl State {
         let cover = self.overview_cover(now);
         // The windows on this output, front first, where their desktop is
         // on the strip; a fullscreen one on top goes over the bars.
-        let looks: Vec<(WindowId, Look)> = self
-            .model
-            .stack()
-            .iter()
-            .rev()
-            .copied()
-            .filter(|id| !self.model.is_minimized(*id))
-            .filter_map(|id| {
-                let (offset, alpha) = self.strip_offset(id, now)?;
-                let mut look = self.look(id, now)?;
-                look.visual.loc.x += offset;
-                look.alpha *= alpha;
-                if let Some(cover) = cover {
-                    look.alpha *= cover;
-                    if look.alpha <= 0.0 {
-                        return None;
-                    }
-                }
-                Some((id, look))
-            })
-            .filter(|(_, look)| {
-                let reach = 2.0 * ShadowStyle::MOVING.blur;
-                let around = Rectangle::new(
-                    look.visual.loc - Point::from((reach, reach)),
-                    look.visual.size + (2.0 * reach, 2.0 * reach).into(),
-                );
-                around.overlaps(area.to_f64())
-            })
-            .collect();
+        let looks = self.window_looks(&frame, cover);
         let fullscreen_on_top = cover.is_none()
             && looks
                 .first()
                 .is_some_and(|(id, _)| self.model.mode(*id) == Mode::Fullscreen);
-        // The handle of a pair's seam, where the pair is now: right above
-        // the front one of the two, so that a window over the seam covers
-        // it (§8).
-        let mut handle = self.snap.seam_handle.and_then(|(seam, handle)| {
-            let live = self.live_seam(seam.first, seam.second)?;
-            let (x, y) = live.centre();
-            area.to_f64()
-                .contains((x, y))
-                .then(|| (live, handle.alpha(now)))
-        });
-        let mut windows = Vec::new();
-        for (id, look) in &looks {
-            if let Some((seam, alpha)) = handle.take_if(|(s, _)| *id == s.first || *id == s.second)
-            {
-                let (x, y) = seam.centre();
-                windows.extend(
-                    handle_element(
-                        renderer,
-                        &self.textures,
-                        &self.snap.seam_handle_id,
-                        Point::from((x, y)) - origin,
-                        seam.vertical,
-                        scale,
-                        alpha,
-                    )
-                    .map(OutputElements::Frame),
-                );
-            }
-            if !purpose.screen() && self.protected(*id) {
-                let r = Rectangle::new(look.visual.loc - origin, look.visual.size);
-                windows.push(OutputElements::Solid(SolidColorRenderElement::new(
-                    // A capture's buffer is drawn whole, once: any id.
-                    smithay::backend::renderer::element::Id::new(),
-                    r.to_physical_precise_round(scale),
-                    0,
-                    PROTECTED,
-                    Kind::Unspecified,
-                )));
-                continue;
-            }
-            // A shared window's ring, right over it (5.11).
-            if purpose.screen() {
-                let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
-                windows.extend(self.window_ring(renderer, *id, &output.name(), visual, scale, now));
-            }
-            // The palette's target over its dim, ringed.
-            let out = if palette_target == Some(*id) {
-                &mut target
-            } else {
-                &mut windows
-            };
-            // Raining (#432): through the rain, else fading over its time.
-            let rain = look.rain.map(|fade| {
-                (
-                    fade,
-                    self.rain_window(renderer, *id, look, origin, scale, now),
-                )
-            });
-            match rain {
-                Some((_, Some(rain))) => out.push(OutputElements::Rain(rain)),
-                Some((fade, None)) => {
-                    let mut faded = look.clone();
-                    faded.alpha *= fade;
-                    self.framed_window(renderer, *id, &faded, origin, scale, out);
-                }
-                None => match self.bent_window(renderer, *id, look, origin, scale) {
-                    Some(bent) => out.push(OutputElements::Bent(bent)),
-                    None => self.framed_window(renderer, *id, look, origin, scale, out),
-                },
-            }
-            if palette_target == Some(*id)
-                && let Some((_, _, alpha)) = palette
-            {
-                let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
-                let radius = if self.model.mode(*id) == Mode::Fullscreen {
-                    0.0
-                } else {
-                    decoration::RADIUS
-                };
-                let mut ring = Vec::new();
-                for ((style, around), ids) in State::actions_ring(visual, radius)
-                    .into_iter()
-                    .zip([&self.actions.glow, &self.actions.ring])
-                {
-                    ring.extend(
-                        decoration::box_elements(
-                            renderer,
-                            &self.textures,
-                            ids,
-                            style,
-                            around,
-                            scale,
-                            alpha,
-                        )
-                        .into_iter()
-                        .map(OutputElements::Frame),
-                    );
-                }
-                // Front first: the ring, then the glow under it.
-                ring.reverse();
-                target.splice(0..0, ring);
-            }
-        }
+        let (mut windows, target) = self.window_elements(renderer, &frame, &looks, palette);
         if let Some((at, _, alpha)) = palette {
             let dim = self.actions_dim(output, alpha).map(OutputElements::Solid);
             elements.splice(at..at, target.into_iter().chain(dim));
@@ -1058,7 +753,13 @@ impl State {
         // The halo over the bar's surfaces and around them, under the
         // popovers beside it (4.4); with the bar under the windows, over
         // them still.
-        let bar_at = layers(renderer, Layer::Top, Pick::above(front), &mut elements);
+        let bar_at = self.layer_elements(
+            renderer,
+            &frame,
+            Layer::Top,
+            Pick::above(front),
+            &mut elements,
+        );
         let halo_at = if front {
             bar_at
         } else {
@@ -1088,123 +789,8 @@ impl State {
         // windows, over everything after them; the bar's too when it is in
         // front.
         let glass_at = elements.len();
-        // Where a dragged window would snap, above the windows.
-        let preview = self
-            .snap
-            .preview
-            .as_ref()
-            .filter(|p| p.shown(now))
-            .map(|p| (p.rect, p.alpha(now)))
-            .or_else(|| {
-                self.snap
-                    .preview_out
-                    .as_ref()
-                    .map(|(rect, t)| (*rect, 1.0 - t.at(now) as f32))
-            });
-        if let Some((rect, alpha)) = preview {
-            let r = crate::windows::rectangle(rect).to_f64();
-            let r = Rectangle::new(r.loc - origin, r.size);
-            elements.extend(
-                preview_elements(
-                    renderer,
-                    &self.textures,
-                    &self.snap.preview_ids,
-                    r,
-                    scale,
-                    alpha,
-                )
-                .into_iter()
-                .map(OutputElements::Frame),
-            );
-        }
-        // Windows leaving, from their last frame.
-        for leaving in self.departures.leaving.iter().rev() {
-            let p = leaving.tween.at(now);
-            let rect = Rectangle::<f64, Logical>::new(
-                (
-                    lerp(leaving.from.loc.x, leaving.to.loc.x, p),
-                    lerp(leaving.from.loc.y, leaving.to.loc.y, p),
-                )
-                    .into(),
-                (
-                    lerp(leaving.from.size.w, leaving.to.size.w, p),
-                    lerp(leaving.from.size.h, leaving.to.size.h, p),
-                )
-                    .into(),
-            );
-            if !rect.overlaps(area.to_f64()) {
-                continue;
-            }
-            let local = Rectangle::new(rect.loc - origin, rect.size);
-            // Through its rain (#432), its last frame drawn once; a margin
-            // around it for the thawing pane (#740).
-            if let Some(rain) = &leaving.rain {
-                let margin = match rain.style {
-                    crate::rain::Style::Rain => 0.0,
-                    crate::rain::Style::Frost => 8.0,
-                };
-                let picture = Picture {
-                    window: local,
-                    extent: Rectangle::new(
-                        (-margin, -margin).into(),
-                        (local.size.w + 2.0 * margin, local.size.h + 2.0 * margin).into(),
-                    ),
-                    scale,
-                };
-                let first = rain
-                    .picture
-                    .borrow()
-                    .as_ref()
-                    .is_none_or(|(s, _)| *s != picture.buffer_size());
-                let mut parts = Vec::new();
-                if first {
-                    let at = Point::<f64, Logical>::from((margin, margin));
-                    let clip = Rectangle::new(
-                        at.to_physical_precise_round(scale),
-                        local.size.to_physical_precise_round(scale),
-                    );
-                    let radius = (decoration::RADIUS * scale).round() as i32;
-                    parts.extend(
-                        leaving
-                            .picture
-                            .stretched(renderer, Rectangle::new(at, local.size), scale, 1.0)
-                            .into_iter()
-                            .map(|e| Rounded::new(e, clip, radius, Outside::Shown, scale)),
-                    );
-                }
-                let look = self.rain_look(rain, now, &picture, 1.0);
-                if let Some(element) = renderer.rain(rain, first, &picture, &parts, look) {
-                    elements.push(OutputElements::Rain(element));
-                    continue;
-                }
-            }
-            let alpha = match &leaving.rain {
-                Some(rain) => rain.fade(now),
-                None => (1.0 - leaving.fade.linear(now)) as f32,
-            };
-            let clip: Rectangle<i32, Physical> = Rectangle::new(
-                local.loc.to_physical_precise_round(scale),
-                local.size.to_physical_precise_round(scale),
-            );
-            let k = (local.size.w / leaving.picture.size.w.max(1.0))
-                .min(local.size.h / leaving.picture.size.h.max(1.0));
-            let radius = (decoration::RADIUS * scale * k).round() as i32;
-            elements.extend(
-                leaving
-                    .picture
-                    .stretched(renderer, local, scale, alpha)
-                    .into_iter()
-                    .map(|e| {
-                        OutputElements::Picture(Rounded::new(
-                            e,
-                            clip,
-                            radius,
-                            Outside::Shown,
-                            scale,
-                        ))
-                    }),
-            );
-        }
+        self.snap_elements(renderer, &frame, &mut elements);
+        self.leaving_elements(renderer, &frame, &mut elements);
         // The overview over the windows, under the bar.
         // Its words and marks sit on the dimmed wallpaper, dark in either
         // theme: under high contrast, the dark table's.
@@ -1216,62 +802,37 @@ impl State {
         elements.append(&mut windows);
         // Under the windows, the bar, its glass right under it showing
         // what is under the bar: a window over it hides both there.
-        layers(renderer, Layer::Top, Pick::below(front), &mut elements);
+        self.layer_elements(
+            renderer,
+            &frame,
+            Layer::Top,
+            Pick::below(front),
+            &mut elements,
+        );
         let bar_glass_at = if front { glass_at } else { elements.len() };
-        layers(renderer, Layer::Bottom, Pick::All, &mut elements);
-        layers(renderer, Layer::Background, Pick::All, &mut elements);
+        self.layer_elements(renderer, &frame, Layer::Bottom, Pick::All, &mut elements);
+        self.layer_elements(
+            renderer,
+            &frame,
+            Layer::Background,
+            Pick::All,
+            &mut elements,
+        );
         // A wallpaper that moves (#433): still behind the glass, which is
         // blurred from what is behind it below; moving on the screen, put
         // in its place once the glass is done.
-        let wall = self.wall_elements(renderer, output);
-        match &wall {
-            Some((_, still)) => elements.push(OutputElements::Wall(still.clone())),
-            None => {
-                if let Some(backdrop) = self.backdrop_element(renderer, output) {
-                    elements.push(backdrop);
-                }
-            }
-        }
-        // What is behind a pane: the elements from its place on.
-        fn behind<T>(elements: &[T], at: usize) -> &[T] {
-            elements.get(at..).unwrap_or_default()
-        }
-        let mut glass = self.glass_element(renderer, output, now, behind(&elements, bar_glass_at));
-        let popovers = self.popover_glass(renderer, output, now, behind(&elements, glass_at));
-        // From the back, so that the places before stay right.
-        if bar_glass_at > glass_at
-            && let Some(pane) = glass.take()
-        {
-            elements.insert(bar_glass_at, pane);
-        }
-        for pane in popovers.into_iter().chain(glass) {
-            elements.insert(glass_at, pane);
-        }
-        if let Some((at, alpha)) = launcher
-            && let Some(pane) = self.launcher_glass(renderer, output, alpha, behind(&elements, at))
-        {
-            elements.insert(at, pane);
-        }
-        // In front of the launcher's: inserted after it.
-        if let Some((at, alpha)) = editor_glass
-            && let Some(pane) =
-                self.capture_editor_glass(renderer, output, alpha, behind(&elements, at))
-        {
-            elements.insert(at, pane);
-        }
-        if let Some(glass) = capture_glass
-            && let Some(pane) =
-                self.capture_glass(renderer, output, glass, behind(&elements, glass.at))
-        {
-            elements.insert(glass.at, pane);
-        }
-        if let Some((moving, _)) = wall
-            && let Some(still) = elements
-                .iter_mut()
-                .rfind(|e| matches!(e, OutputElements::Wall(_)))
-        {
-            *still = OutputElements::Wall(moving);
-        }
+        self.wall_and_glass(
+            renderer,
+            &frame,
+            &mut elements,
+            GlassAt {
+                glass_at,
+                bar_glass_at,
+                launcher,
+                editor_glass,
+                capture_glass,
+            },
+        );
         elements
     }
 
@@ -1928,5 +1489,159 @@ impl State {
         // The lock on screen: what the machine waits for before it sleeps
         // (7.2).
         self.lock_presented_on(output);
+    }
+}
+
+/// The frame `elements_for` draws: for which output and purpose, at what
+/// time, where the output is and at what scale.
+#[derive(Clone, Copy)]
+pub(super) struct Frame<'a> {
+    pub output: &'a Output,
+    pub purpose: Purpose,
+    pub now: Duration,
+    pub area: Rectangle<i32, Logical>,
+    pub origin: Point<f64, Logical>,
+    pub scale: f64,
+}
+
+/// Where the panes of glass go among the elements, each blurred from what
+/// is behind it.
+struct GlassAt {
+    /// The popovers' glass, and the bar's when it is in front.
+    glass_at: usize,
+    bar_glass_at: usize,
+    launcher: Option<(usize, f32)>,
+    editor_glass: Option<(usize, f32)>,
+    capture_glass: Option<crate::capture::ToolbarGlass>,
+}
+
+impl State {
+    /// What goes over everything: the cursor, the lock (`Break`: it shows
+    /// alone), its halves opening, the curtain, the authentication dialog,
+    /// the share's chooser and the recorded area's frame.
+    fn covering_elements<R>(
+        &self,
+        renderer: &mut R,
+        frame: &Frame,
+        elements: &mut Vec<OutputElement<R>>,
+    ) -> ControlFlow<()>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let Frame {
+            output,
+            purpose,
+            now,
+            ..
+        } = *frame;
+        if purpose.cursor() {
+            elements.extend(
+                self.cursor_elements(renderer, output)
+                    .into_iter()
+                    .map(OutputElements::Cursor),
+            );
+        }
+        // Locked (7.1): the lock alone, whatever the purpose but its own
+        // last look at the desktop.
+        if purpose != Purpose::Freeze
+            && let Some(mut lock) = self.lock_elements(renderer, output, purpose, now)
+        {
+            elements.append(&mut lock);
+            return ControlFlow::Break(());
+        }
+        // Opening: its halves over everything (on the screen; a capture
+        // sees the desktop it opens on).
+        if purpose.screen() {
+            let mut parting = self.lock_parting_elements(renderer, output, now);
+            elements.append(&mut parting);
+        }
+        // The curtain before the lock over everything but the cursor
+        // (7.2): on the screen, and in the lock's last look at the desktop.
+        self.curtain_elements(renderer, output, purpose, now, elements);
+        // The authentication dialog and its dim over everything but the
+        // cursor (7.5): on the screen only.
+        if purpose.screen() {
+            self.auth_elements(renderer, output, now, elements);
+        }
+        // The share's chooser over everything else, and the
+        // ring around a screen shared (5.11): on the screen only.
+        if purpose.screen() {
+            self.share_elements(renderer, output, now, elements);
+            // The recorded area's frame (5.10).
+            self.record_elements(output, elements);
+        }
+        ControlFlow::Continue(())
+    }
+
+    /// The wallpaper behind everything, and the panes of glass put in
+    /// where `at` says, each blurred from what is behind it.
+    fn wall_and_glass<R>(
+        &self,
+        renderer: &mut R,
+        frame: &Frame,
+        elements: &mut Vec<OutputElement<R>>,
+        at: GlassAt,
+    ) where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let Frame { output, now, .. } = *frame;
+        let GlassAt {
+            glass_at,
+            bar_glass_at,
+            launcher,
+            editor_glass,
+            capture_glass,
+        } = at;
+        let wall = self.wall_elements(renderer, output);
+        match &wall {
+            Some((_, still)) => elements.push(OutputElements::Wall(still.clone())),
+            None => {
+                if let Some(backdrop) = self.backdrop_element(renderer, output) {
+                    elements.push(backdrop);
+                }
+            }
+        }
+        // What is behind a pane: the elements from its place on.
+        fn behind<T>(elements: &[T], at: usize) -> &[T] {
+            elements.get(at..).unwrap_or_default()
+        }
+        let mut glass = self.glass_element(renderer, output, now, behind(elements, bar_glass_at));
+        let popovers = self.popover_glass(renderer, output, now, behind(elements, glass_at));
+        // From the back, so that the places before stay right.
+        if bar_glass_at > glass_at
+            && let Some(pane) = glass.take()
+        {
+            elements.insert(bar_glass_at, pane);
+        }
+        for pane in popovers.into_iter().chain(glass) {
+            elements.insert(glass_at, pane);
+        }
+        if let Some((at, alpha)) = launcher
+            && let Some(pane) = self.launcher_glass(renderer, output, alpha, behind(elements, at))
+        {
+            elements.insert(at, pane);
+        }
+        // In front of the launcher's: inserted after it.
+        if let Some((at, alpha)) = editor_glass
+            && let Some(pane) =
+                self.capture_editor_glass(renderer, output, alpha, behind(elements, at))
+        {
+            elements.insert(at, pane);
+        }
+        if let Some(glass) = capture_glass
+            && let Some(pane) =
+                self.capture_glass(renderer, output, glass, behind(elements, glass.at))
+        {
+            elements.insert(glass.at, pane);
+        }
+        if let Some((moving, _)) = wall
+            && let Some(still) = elements
+                .iter_mut()
+                .rfind(|e| matches!(e, OutputElements::Wall(_)))
+        {
+            *still = OutputElements::Wall(moving);
+        }
     }
 }

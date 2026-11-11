@@ -36,6 +36,7 @@
 
 mod after;
 mod draw;
+pub(crate) use draw::ToolbarGlass;
 pub mod geometry;
 pub(crate) mod save;
 pub mod shoot;
