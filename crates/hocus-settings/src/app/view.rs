@@ -2,6 +2,8 @@
 //! with its search, the content's header, the home and the sections'
 //! pages, the menus, the toast and the unreadable file's banner.
 
+use crate::lang::French as _;
+use hocus_words::settings::app_view as words;
 use std::time::{Duration, Instant, SystemTime};
 
 use iced::{
@@ -169,22 +171,19 @@ impl App {
         .align_y(Alignment::Center)
         .height(HEADER)
         .padding(Padding::default().left(16));
-        let field = text_input(
-            self.say(w("Rechercher un réglage", "Search settings")),
-            &self.query,
-        )
-        .id(SEARCH)
-        .on_input(Message::Query)
-        .on_submit(Message::Submit)
-        .size(13.0)
-        .font(MANROPE)
-        .padding(Padding {
-            top: 8.0,
-            bottom: 8.0,
-            left: 29.0,
-            right: 30.0,
-        })
-        .style(style::search);
+        let field = text_input(self.say(w(words::SEARCH_SETTINGS)), &self.query)
+            .id(SEARCH)
+            .on_input(Message::Query)
+            .on_submit(Message::Submit)
+            .size(13.0)
+            .font(MANROPE)
+            .padding(Padding {
+                top: 8.0,
+                bottom: 8.0,
+                left: 29.0,
+                right: 30.0,
+            })
+            .style(style::search);
         let focused = self.focus == Focus::Search;
         let aside: El<'_> = if self.query.is_empty() {
             container(text("Ctrl F").size(9.0).font(MONO).color(FAINT))
@@ -307,7 +306,7 @@ impl App {
     fn nav(&self) -> El<'_> {
         let mut list = column![self.nav_row(
             Icon::Home,
-            self.say(w("Accueil", "Home")),
+            self.say(w(words::HOME)),
             self.page == Page::Home,
             self.focus == Focus::Nav(0),
             Message::Home,
@@ -394,7 +393,7 @@ impl App {
                     .into(),
             };
             let mut path = match found.target {
-                Target::Section(_) => w("Toute la page", "The whole page").get(lang).to_owned(),
+                Target::Section(_) => w(words::THE_WHOLE_PAGE).get(lang).to_owned(),
                 Target::Outside(outside) => format!(
                     "{} › {}",
                     section.name.get(lang),
@@ -403,7 +402,7 @@ impl App {
                 Target::Setting(setting) if setting.kind == Kind::Shortcut => format!(
                     "{} › {} › {}",
                     section.name.get(lang),
-                    w("Raccourcis", "Shortcuts").get(lang),
+                    w(words::SHORTCUTS).get(lang),
                     capitalised(setting.group.label.get(lang))
                 ),
                 Target::Setting(setting) => format!(
@@ -457,28 +456,27 @@ impl App {
                 "{} › {} › {}",
                 self.title(),
                 SectionId::Keyboard.name(lang),
-                w("Raccourcis", "Shortcuts").get(lang)
+                w(words::SHORTCUTS).get(lang)
             ),
             Page::Section(SectionId::Network) if self.network.sub => format!(
                 "{} › {} › {}",
                 self.title(),
                 SectionId::Network.name(lang),
-                w("Réseaux enregistrés", "Saved networks").get(lang)
+                w(words::SAVED_NETWORKS).get(lang)
             ),
             Page::Section(id) => format!("{} › {}", self.title(), id.name(lang)),
         };
         let (dot, state) = match self.snapshot.as_ref().map(|s| &s.state) {
-            _ if self.screens_to_confirm() => (
-                crate::theme::ink(rgb(0xF5B44A)),
-                w("À confirmer", "To confirm"),
-            ),
+            _ if self.screens_to_confirm() => {
+                (crate::theme::ink(rgb(0xF5B44A)), w(words::TO_CONFIRM))
+            }
             // The clipboard's history cleared (6.17): said, then saved again.
             Some(FileState::Reads) | None if self.captures_cleared() => {
-                (ACCENT.get(), w("Effacé", "Cleared"))
+                (ACCENT.get(), w(words::CLEARED))
             }
-            Some(FileState::Reads) | None => (ACCENT.get(), w("Enregistré", "Saved")),
-            Some(FileState::Broken { .. }) => (ORANGE.get(), w("Lecture seule", "Read-only")),
-            Some(FileState::NoFile) => (ORANGE.get(), w("Aucun fichier", "No file")),
+            Some(FileState::Reads) | None => (ACCENT.get(), w(words::SAVED)),
+            Some(FileState::Broken { .. }) => (ORANGE.get(), w(words::READ_ONLY)),
+            Some(FileState::NoFile) => (ORANGE.get(), w(words::NO_FILE)),
         };
         let header = mouse_area(
             row![
@@ -563,22 +561,15 @@ impl App {
         let title = banner_title(*line, lang);
         let restore = self.restore_label();
         let mut buttons = row![
-            button(
-                t(
-                    w("Ouvrir le fichier", "Open the file").get(lang),
-                    12.5,
-                    TEXT.get()
-                )
-                .font(SEMIBOLD)
-            )
-            .height(28)
-            .padding([5, 12])
-            .on_press(Message::OpenFile)
-            .style(|_, status| solid(
-                crate::theme::ink(rgba(255, 255, 255, 0.08)),
-                TEXT.get(),
-                status
-            )),
+            button(t(w(words::OPEN_THE_FILE).get(lang), 12.5, TEXT.get()).font(SEMIBOLD))
+                .height(28)
+                .padding([5, 12])
+                .on_press(Message::OpenFile)
+                .style(|_, status| solid(
+                    crate::theme::ink(rgba(255, 255, 255, 0.08)),
+                    TEXT.get(),
+                    status
+                )),
         ]
         .spacing(8);
         if let Some(restore) = restore {
@@ -596,16 +587,13 @@ impl App {
         Some(
             container(
                 row![
-                    container(icon(Icon::Warning, 18.0, PEACH.get())).padding(Padding::default().top(1)),
+                    container(icon(Icon::Warning, 18.0, PEACH.get()))
+                        .padding(Padding::default().top(1)),
                     column![
                         t(title, 13.5, PEACH.get()).font(BOLD),
                         t(message.clone(), 12.5, SOFT.get()),
                         t(
-                            w(
-                                "Le bureau garde la dernière configuration lisible, et les Réglages ne changent rien tant que le fichier n’est pas réparé.",
-                                "The desktop keeps the last readable configuration, and Settings changes nothing until the file is fixed.",
-                            )
-                            .get(lang),
+                            w(words::THE_DESKTOP_KEEPS_THE_LAST_READABLE).get(lang),
                             12.5,
                             SOFT.get(),
                         ),
@@ -668,11 +656,7 @@ impl App {
             column![
                 text(hello).size(22).font(BOLD).color(TEXT),
                 t(
-                    w(
-                        "Ce que tu règles ici est enregistré aussitôt, sans bouton à presser.",
-                        "What you set here is saved at once, with no button to press.",
-                    )
-                    .get(lang),
+                    w(words::WHAT_YOU_SET_HERE_IS_SAVED).get(lang),
                     13.5,
                     DIM.get(),
                 ),
@@ -705,7 +689,7 @@ impl App {
             let name = self.slot_name(setting, change.slot);
             let value = setting.say(&change.value, lang);
             let when = if change.by_hand {
-                w("à la main", "by hand").get(lang).to_owned()
+                w(words::BY_HAND).get(lang).to_owned()
             } else {
                 when(change.at, lang)
             };
@@ -729,7 +713,7 @@ impl App {
         let mut page = column![greeting, grid].spacing(22);
         if !self.recent.is_empty() {
             page = page.push(group_box(
-                label(w("CHANGÉS RÉCEMMENT", "CHANGED RECENTLY").get(lang)),
+                label(w(words::CHANGED_RECENTLY).get(lang)),
                 card_box(recent.into()),
             ));
         }
@@ -737,24 +721,24 @@ impl App {
         let file = column![
             text(path).size(12).font(MONO).color(TEXT),
             t(
-                w(
-                    "Tu peux toujours l’éditer à la main : les Réglages le relisent dès qu’il change, n’écrivent que les lignes qu’ils modifient et gardent tes commentaires.",
-                    "You can still edit it by hand: Settings reads it again as soon as it changes, writes only the lines it changes and keeps your comments.",
-                )
-                .get(lang),
+                w(words::YOU_CAN_STILL_EDIT_IT_BY).get(lang),
                 12.5,
                 DIM.get(),
             )
             .line_height(1.5),
-            button(t(w("Ouvrir le fichier", "Open the file").get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
+            button(t(w(words::OPEN_THE_FILE).get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
                 .height(32)
                 .padding([7, 14])
                 .on_press(Message::OpenFile)
-                .style(|_, status| solid(crate::theme::ink(rgba(255, 255, 255, 0.06)), TEXT.get(), status)),
+                .style(|_, status| solid(
+                    crate::theme::ink(rgba(255, 255, 255, 0.06)),
+                    TEXT.get(),
+                    status
+                )),
         ]
         .spacing(8);
         page = page.push(group_box(
-            label(w("LE FICHIER", "THE FILE").get(lang)),
+            label(w(words::THE_FILE).get(lang)),
             card_box(container(file).padding([14, 16]).into()),
         ));
         container(page).padding(Padding::default().top(14)).into()
@@ -850,10 +834,8 @@ impl App {
             SectionId::Sound => return self.sound_card(),
             SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
-            SectionId::Appearance => w("Sombre · français", "Dark · English")
-                .get(lang)
-                .to_owned(),
-            _ => w("À venir", "Coming").get(lang).to_owned(),
+            SectionId::Appearance => w(words::DARK_ENGLISH).get(lang).to_owned(),
+            _ => w(words::COMING).get(lang).to_owned(),
         };
         (whole, String::new())
     }
@@ -926,13 +908,9 @@ impl App {
             page = page.push(card_box(
                 container(
                     column![
-                        t(w("À venir", "Coming").get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+                        t(w(words::COMING).get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
                         t(
-                            w(
-                                "Les réglages de cette page arrivent bientôt. En attendant, le fichier de configuration les garde.",
-                                "This page's settings come soon. Meanwhile, the configuration file keeps them.",
-                            )
-                            .get(lang),
+                            w(words::THIS_PAGE_S_SETTINGS_COME_SOON).get(lang),
                             12.5,
                             DIM.get(),
                         ),
@@ -1071,10 +1049,7 @@ impl App {
             words = words.push(t(line, 12.5, colour));
         } else if self.implied(setting) {
             // High contrast holds it on (#423).
-            let said = w(
-                "Comprise dans le contraste élevé.",
-                "Included in high contrast.",
-            );
+            let said = w(words::INCLUDED_IN_HIGH_CONTRAST);
             words = words.push(t(said.get(lang), 12.5, fade(DIM.get(), ink)));
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
@@ -1493,8 +1468,8 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center);
         let action = match toast.action {
-            ToastAction::Undo => Some(w("Annuler", "Undo").get(lang).to_owned()),
-            ToastAction::Show(_) => Some(w("Voir", "Show").get(lang).to_owned()),
+            ToastAction::Undo => Some(w(words::UNDO).get(lang).to_owned()),
+            ToastAction::Show(_) => Some(w(words::SHOW).get(lang).to_owned()),
             ToastAction::Sound(act) => Some(self.sound_act_label(act)),
             ToastAction::None => None,
         };

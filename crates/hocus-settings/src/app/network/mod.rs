@@ -15,6 +15,7 @@ mod sheet;
 mod view;
 mod vpn;
 
+use hocus_words::settings::app_network as words;
 use std::{
     sync::{Arc, Mutex, PoisonError, mpsc},
     time::{Instant, SystemTime},
@@ -1088,21 +1089,21 @@ impl App {
 /// What a change's toast says, done, undone or redone.
 fn network_said(choice: &Choice, lang: Lang, doing: Doing) -> String {
     let said = match choice {
-        Choice::Airplane(true) => w("Mode avion activé", "Airplane mode on"),
-        Choice::Airplane(false) => w("Mode avion désactivé", "Airplane mode off"),
-        Choice::Wifi { on: true, .. } => w("Wi-Fi allumé", "Wi-Fi on"),
-        Choice::Wifi { on: false, .. } => w("Wi-Fi coupé", "Wi-Fi off"),
-        Choice::Forget(_) => w("Réseau oublié", "Network forgotten"),
-        Choice::Imported { .. } => w("VPN ajouté", "VPN added"),
+        Choice::Airplane(true) => w(words::AIRPLANE_MODE_ON),
+        Choice::Airplane(false) => w(words::AIRPLANE_MODE_OFF),
+        Choice::Wifi { on: true, .. } => w(words::WI_FI_ON),
+        Choice::Wifi { on: false, .. } => w(words::WI_FI_OFF),
+        Choice::Forget(_) => w(words::NETWORK_FORGOTTEN),
+        Choice::Imported { .. } => w(words::VPN_ADDED),
     }
     .get(lang);
     let back = match choice {
-        Choice::Airplane(true) => w("mode avion désactivé", "airplane mode off"),
-        Choice::Airplane(false) => w("mode avion activé", "airplane mode on"),
-        Choice::Wifi { on: true, .. } => w("Wi-Fi coupé", "Wi-Fi off"),
-        Choice::Wifi { on: false, .. } => w("Wi-Fi allumé", "Wi-Fi on"),
-        Choice::Forget(_) => w("réseau revenu", "network back"),
-        Choice::Imported { .. } => w("VPN retiré", "VPN removed"),
+        Choice::Airplane(true) => w(words::AIRPLANE_MODE_OFF_2),
+        Choice::Airplane(false) => w(words::AIRPLANE_MODE_ON_2),
+        Choice::Wifi { on: true, .. } => w(words::WI_FI_OFF),
+        Choice::Wifi { on: false, .. } => w(words::WI_FI_ON),
+        Choice::Forget(_) => w(words::NETWORK_BACK),
+        Choice::Imported { .. } => w(words::VPN_REMOVED),
     }
     .get(lang);
     match (doing, lang) {

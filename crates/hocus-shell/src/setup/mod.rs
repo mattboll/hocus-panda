@@ -20,6 +20,7 @@
 
 pub mod card;
 
+use hocus_words::shell::setup as txt;
 use std::{
     path::PathBuf,
     sync::{
@@ -958,174 +959,142 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn card_title(self) -> &'static str {
-        self.pick("Ta journée ici", "Your day here")
+        self.pick(txt::YOUR_DAY_HERE)
     }
 
     pub fn card_text(self) -> &'static str {
-        self.pick(
-            "Branche ton agenda et tes tâches : la barre montrera tes réunions et ce qu'il reste à faire.",
-            "Connect your calendar and tasks: the bar will show your meetings and what is left to do.",
-        )
+        self.pick(txt::CONNECT_YOUR_CALENDAR_AND_TASKS_THE)
     }
 
     pub fn choose(self) -> &'static str {
-        self.pick("Choisir…", "Choose…")
+        self.pick(txt::CHOOSE)
     }
 
     pub fn later(self) -> &'static str {
-        self.pick("Plus tard", "Later")
+        self.pick(txt::LATER)
     }
 
     pub fn back(self) -> &'static str {
-        self.pick("Retour", "Back")
+        self.pick(txt::BACK)
     }
 
     pub fn close(self) -> &'static str {
-        self.pick("Fermer", "Close")
+        self.pick(txt::CLOSE)
     }
 
     pub fn add_account(self) -> &'static str {
-        self.pick("Ajouter un compte", "Add an account")
+        self.pick(txt::ADD_AN_ACCOUNT)
     }
 
     pub fn google(self) -> &'static str {
-        self.pick("Google Agenda", "Google Calendar")
+        self.pick(txt::GOOGLE_CALENDAR)
     }
 
     pub fn google_line(self) -> &'static str {
-        self.pick(
-            "Tes réunions et rendez-vous.",
-            "Your meetings and appointments.",
-        )
+        self.pick(txt::YOUR_MEETINGS_AND_APPOINTMENTS)
     }
 
     pub fn google_none(self) -> &'static str {
-        self.pick(
-            "Ajoute un compte Google dans les comptes en ligne",
-            "Add a Google account in Online Accounts",
-        )
+        self.pick(txt::ADD_A_GOOGLE_ACCOUNT_IN_ONLINE)
     }
 
     pub fn google_missing(self) -> &'static str {
-        self.pick(
-            "Comptes en ligne de GNOME absents",
-            "GNOME Online Accounts missing",
-        )
+        self.pick(txt::GNOME_ONLINE_ACCOUNTS_MISSING)
     }
 
     pub fn planka(self) -> &'static str {
-        self.pick("Tableau Planka", "Planka board")
+        self.pick(txt::PLANKA_BOARD)
     }
 
     pub fn planka_line(self) -> &'static str {
-        self.pick(
-            "Tes tâches : les cartes d'une colonne d'un tableau.",
-            "Your tasks: the cards of a board's column.",
-        )
+        self.pick(txt::YOUR_TASKS_THE_CARDS_OF_A)
     }
 
     pub fn local_note(self) -> &'static str {
-        self.pick(
-            "Tes tâches restent sur cet ordinateur tant qu'aucun tableau n'en fournit.",
-            "Your tasks stay on this computer until a board provides them.",
-        )
+        self.pick(txt::YOUR_TASKS_STAY_ON_THIS_COMPUTER)
     }
 
     pub fn board_address(self) -> &'static str {
-        self.pick("Adresse du tableau", "Board address")
+        self.pick(txt::BOARD_ADDRESS)
     }
 
     pub fn token(self) -> &'static str {
-        self.pick("Jeton d'accès", "Access token")
+        self.pick(txt::ACCESS_TOKEN)
     }
 
     pub fn token_help(self) -> &'static str {
-        self.pick(
-            "Dans Planka, une fois connecté : outils du navigateur (F12) › Stockage › Cookies : copie accessToken et httpOnlyToken.",
-            "In Planka, once signed in: the browser's tools (F12) › Storage › Cookies: copy accessToken and httpOnlyToken.",
-        )
+        self.pick(txt::IN_PLANKA_ONCE_SIGNED_IN_THE)
     }
 
     pub fn cancel(self) -> &'static str {
-        self.pick("Annuler", "Cancel")
+        self.pick(txt::CANCEL)
     }
 
     pub fn sign_in(self) -> &'static str {
-        self.pick("Se connecter", "Sign in")
+        self.pick(txt::SIGN_IN)
     }
 
     pub fn signing_in(self) -> &'static str {
-        self.pick("Connexion…", "Signing in…")
+        self.pick(txt::SIGNING_IN)
     }
 
     pub fn refusal(self, refusal: Refusal) -> &'static str {
         match refusal {
-            Refusal::Token => self.pick(
-                "Jeton refusé ou expiré : colle un nouveau jeton.",
-                "Token refused or expired: paste a new one.",
-            ),
-            Refusal::NoServer => self.pick(
-                "Aucun serveur Planka ne répond à cette adresse.",
-                "No Planka server answers at this address.",
-            ),
-            Refusal::NotShared => self.pick(
-                "Ce tableau n'existe pas ou ne t'est pas partagé.",
-                "This board does not exist or is not shared with you.",
-            ),
-            Refusal::Address => self.pick(
-                "Colle l'adresse d'un tableau : https://…/boards/…",
-                "Paste a board's address: https://…/boards/…",
-            ),
+            Refusal::Token => self.pick(txt::TOKEN_REFUSED_OR_EXPIRED_PASTE_A),
+            Refusal::NoServer => self.pick(txt::NO_PLANKA_SERVER_ANSWERS_AT_THIS),
+            Refusal::NotShared => self.pick(txt::THIS_BOARD_DOES_NOT_EXIST_OR),
+            Refusal::Address => self.pick(txt::PASTE_A_BOARD_S_ADDRESS_HTTPS),
         }
     }
 
     pub fn what_to_show(self) -> &'static str {
-        self.pick("Quoi montrer ?", "What to show?")
+        self.pick(txt::WHAT_TO_SHOW)
     }
 
     pub fn calendars(self) -> &'static str {
-        self.pick("AGENDAS", "CALENDARS")
+        self.pick(txt::CALENDARS)
     }
 
     /// A calendar's star's name.
     pub fn feature(self) -> &'static str {
-        self.pick("Mettre en avant", "Feature")
+        self.pick(txt::FEATURE)
     }
 
     pub fn read_only(self) -> &'static str {
-        self.pick("lecture seule", "read-only")
+        self.pick(txt::READ_ONLY)
     }
 
     pub fn reading(self) -> &'static str {
-        self.pick("Lecture des agendas…", "Reading the calendars…")
+        self.pick(txt::READING_THE_CALENDARS)
     }
 
     pub fn unread(self) -> &'static str {
-        self.pick(
-            "Les agendas de ce compte ne se lisent pas. Réessaie.",
-            "This account's calendars could not be read. Try again.",
-        )
+        self.pick(txt::THIS_ACCOUNT_S_CALENDARS_COULD_NOT)
     }
 
     pub fn tasks(self) -> &'static str {
-        self.pick("TÂCHES", "TASKS")
+        self.pick(txt::TASKS)
     }
 
     pub fn board(self) -> &'static str {
-        self.pick("Tableau", "Board")
+        self.pick(txt::BOARD)
     }
 
     /// The three choices of a board.
     pub fn choice(self, which: usize) -> &'static str {
         match which {
-            0 => self.pick("Colonne des tâches", "Tasks' column"),
-            1 => self.pick("Colonne des terminées", "Done column"),
-            _ => self.pick("Ajout dans", "Add to"),
+            0 => self.pick(txt::TASKS_COLUMN),
+            1 => self.pick(txt::DONE_COLUMN),
+            _ => self.pick(txt::ADD_TO),
         }
     }
 
@@ -1140,7 +1109,7 @@ impl Words {
     }
 
     pub fn done(self) -> &'static str {
-        self.pick("Terminé", "Done")
+        self.pick(txt::DONE)
     }
 }
 

@@ -5,6 +5,7 @@
 //! NetworkManager's own importers, off, its user name and password asked
 //! first when an OpenVPN file wants them.
 
+use hocus_words::settings::app_network_vpn as words;
 use std::path::{Path, PathBuf};
 
 use hocus_network::{
@@ -87,24 +88,15 @@ fn kind_name(kind: &VpnKind) -> String {
 /// Why a VPN failed, from NetworkManager's reason.
 fn reason(code: u32) -> Words {
     match code {
-        3 => w("l’appareil s’est déconnecté", "the device disconnected"),
-        4 => w("le service VPN s’est arrêté", "the VPN service stopped"),
-        5 => w("aucune adresse reçue", "no address received"),
-        6 => w("le serveur ne répond pas", "the server does not answer"),
-        7 => w(
-            "le service VPN n’a pas démarré à temps",
-            "the VPN service did not start in time",
-        ),
-        8 => w(
-            "le service VPN n’a pas démarré",
-            "the VPN service did not start",
-        ),
-        9 => w("des secrets manquent", "secrets are missing"),
-        10 => w(
-            "identifiant ou mot de passe refusé",
-            "user name or password refused",
-        ),
-        _ => w("raison inconnue", "unknown reason"),
+        3 => w(words::THE_DEVICE_DISCONNECTED),
+        4 => w(words::THE_VPN_SERVICE_STOPPED),
+        5 => w(words::NO_ADDRESS_RECEIVED),
+        6 => w(words::THE_SERVER_DOES_NOT_ANSWER),
+        7 => w(words::THE_VPN_SERVICE_DID_NOT_START),
+        8 => w(words::THE_VPN_SERVICE_DID_NOT_START_2),
+        9 => w(words::SECRETS_ARE_MISSING),
+        10 => w(words::USER_NAME_OR_PASSWORD_REFUSED),
+        _ => w(words::UNKNOWN_REASON),
     }
 }
 
@@ -127,16 +119,13 @@ pub(super) fn vpn_line(vpn: &Vpn, lang: Lang) -> (String, Color) {
             let mut parts = vec![match (since.and_then(clock), lang) {
                 (Some(at), Lang::French) => format!("Connecté depuis {at}"),
                 (Some(at), Lang::English) => format!("Connected since {at}"),
-                (None, _) => w("Connecté", "Connected").get(lang).to_owned(),
+                (None, _) => w(words::CONNECTED).get(lang).to_owned(),
             }];
             parts.push(kind);
             parts.extend(address.clone());
             (parts.join(" · "), GREEN.get())
         }
-        VpnState::Connecting => (
-            w("Connexion…", "Connecting…").get(lang).to_owned(),
-            DIM.get(),
-        ),
+        VpnState::Connecting => (w(words::CONNECTING).get(lang).to_owned(), DIM.get()),
         VpnState::Off => match vpn.failed {
             Some(code) => (
                 match lang {
@@ -145,10 +134,7 @@ pub(super) fn vpn_line(vpn: &Vpn, lang: Lang) -> (String, Color) {
                 },
                 PEACH.get(),
             ),
-            None => (
-                format!("{kind} · {}", w("coupé", "off").get(lang)),
-                DIM.get(),
-            ),
+            None => (format!("{kind} · {}", w(words::OFF).get(lang)), DIM.get()),
         },
     }
 }
@@ -238,12 +224,9 @@ impl App {
                 Task::none()
             }
             Msg::Chosen(None, true) => {
-                let text = w(
-                    "Aucun sélecteur de fichiers ne répond : le portail du bureau n’est pas là.",
-                    "No file chooser answers: the desktop portal is not there.",
-                )
-                .get(self.lang)
-                .to_owned();
+                let text = w(words::NO_FILE_CHOOSER_ANSWERS_THE_DESKTOP)
+                    .get(self.lang)
+                    .to_owned();
                 self.toast(text, super::super::ToastAction::None, super::super::TOAST)
             }
             Msg::Chosen(None, false) => Task::none(),
@@ -264,12 +247,9 @@ impl App {
                     Task::none()
                 }
                 None => {
-                    let text = w(
-                        "Ce fichier n’est ni un WireGuard (.conf) ni un OpenVPN (.ovpn).",
-                        "This file is neither WireGuard's (.conf) nor OpenVPN's (.ovpn).",
-                    )
-                    .get(self.lang)
-                    .to_owned();
+                    let text = w(words::THIS_FILE_IS_NEITHER_WIREGUARD_S)
+                        .get(self.lang)
+                        .to_owned();
                     self.toast(text, super::super::ToastAction::None, super::super::TOAST)
                 }
             },
@@ -290,8 +270,8 @@ impl App {
             .name("network: VPN file".to_owned())
             .spawn(move || {
                 let chosen = crate::portal::open_file_of(
-                    w("Importer un VPN", "Import a VPN").get(lang),
-                    w("WireGuard ou OpenVPN", "WireGuard or OpenVPN").get(lang),
+                    w(words::IMPORT_A_VPN).get(lang),
+                    w(words::WIREGUARD_OR_OPENVPN).get(lang),
                     &[(0, "*.conf"), (0, "*.ovpn")],
                     &folder,
                 );
@@ -318,17 +298,13 @@ impl App {
         }
         let add = super::view::page_row(
             super::view::tile(|c| draw(PLUS, 18.0, c), super::view::Tone::Plain, 1.0),
-            super::view::name(w("Ajouter un VPN", "Add a VPN").get(lang).to_owned(), 1.0, None),
+            super::view::name(w(words::ADD_A_VPN).get(lang).to_owned(), 1.0, None),
             vec![super::view::line(
-                w(
-                    "Depuis un fichier WireGuard (.conf) ou OpenVPN (.ovpn) que te donne ton fournisseur.",
-                    "From a WireGuard (.conf) or OpenVPN (.ovpn) file your provider gives you.",
-                )
-                .get(lang),
+                w(words::FROM_A_WIREGUARD_CONF_OR_OPENVPN).get(lang),
                 DIM.get(),
             )],
             container(import_button(
-                w("Importer un fichier…", "Import a file…").get(lang).to_owned(),
+                w(words::IMPORT_A_FILE).get(lang).to_owned(),
                 self.network_focused(Stop::Import),
             ))
             .id("network:import".to_owned())
@@ -341,7 +317,7 @@ impl App {
         rows = rows.push(divided(!vpns.is_empty(), add));
         container(
             column![
-                container(label(w("VPN", "VPN").get(lang)))
+                container(label(w(words::VPN).get(lang)))
                     .height(28)
                     .center_y(28),
                 card_box(rows.into())
@@ -506,14 +482,14 @@ impl App {
         let list = column![
             option(
                 0,
-                w("Renommer…", "Rename…").get(lang),
+                w(words::RENAME).get(lang),
                 TEXT.get(),
                 false,
                 Msg::Rename(vpn.uuid.clone())
             ),
             option(
                 1,
-                w("Se connecter seul", "Connect automatically").get(lang),
+                w(words::CONNECT_AUTOMATICALLY).get(lang),
                 TEXT.get(),
                 vpn.autoconnect,
                 Msg::Autoconnect(vpn.uuid.clone())
@@ -528,7 +504,7 @@ impl App {
             .padding([4, 6]),
             option(
                 2,
-                w("Supprimer", "Delete").get(lang),
+                w(words::DELETE).get(lang),
                 PEACH.get(),
                 false,
                 Msg::Delete(vpn.uuid.clone())

@@ -13,30 +13,31 @@
 //! lock-after` are read where the new keys are absent (`store`), never
 //! written. The power mode is power-profiles-daemon's, not the file's.
 
+use hocus_words::settings::power as words;
 use std::sync::OnceLock;
 
 use std::time::Duration;
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words, pair, w},
     model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
     power_bus::Charge,
 };
 
 const SCREEN: RowGroup = RowGroup {
-    label: w("ÉCRAN ET VEILLE", "SCREEN AND SLEEP"),
+    label: w(words::SCREEN_AND_SLEEP),
     per_source: true,
 };
 const LOCKING: RowGroup = RowGroup {
-    label: w("VERROUILLAGE", "LOCKING"),
+    label: w(words::LOCKING),
     per_source: false,
 };
 const LID: RowGroup = RowGroup {
-    label: w("COUVERCLE ET BOUTON", "LID AND BUTTON"),
+    label: w(words::LID_AND_BUTTON),
     per_source: false,
 };
 const SAVING: RowGroup = RowGroup {
-    label: w("ÉCONOMIE D’ÉNERGIE", "POWER SAVING"),
+    label: w(words::POWER_SAVING),
     per_source: false,
 };
 
@@ -61,14 +62,14 @@ const BUTTONS: &[&str] = &["ask", "suspend", "power-off", "nothing"];
 
 fn minutes(fr: &'static str, en: &'static str, seconds: Option<u64>) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: pair(fr, en),
         value: Value::Seconds(seconds),
     }
 }
 
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: pair(fr, en),
         value: Value::Word(word),
     }
 }
@@ -84,11 +85,8 @@ pub fn settings() -> &'static [Setting] {
                 id: IDLE,
                 section: SectionId::Power,
                 group: SCREEN,
-                name: w("Assombrir l’écran après", "Dim the screen after"),
-                line: Some(w(
-                    "Sans clic ni touche. Bouger la souris pendant les 10 s d’assombrissement l’arrête.",
-                    "With no click or key. Moving the mouse during the 10 s of dimming stops it.",
-                )),
+                name: w(words::DIM_THE_SCREEN_AFTER),
+                line: Some(w(words::WITH_NO_CLICK_OR_KEY_MOVING)),
                 keywords: (
                     &[
                         "rideau",
@@ -99,7 +97,14 @@ pub fn settings() -> &'static [Setting] {
                         "inactif",
                         "économiseur",
                     ],
-                    &["dim", "curtain", "idle", "blank", "inactivity", "screen saver"],
+                    &[
+                        "dim",
+                        "curtain",
+                        "idle",
+                        "blank",
+                        "inactivity",
+                        "screen saver",
+                    ],
                 ),
                 kind: Kind::Menu(vec![
                     minutes("1 min", "1 min", Some(60)),
@@ -123,11 +128,8 @@ pub fn settings() -> &'static [Setting] {
                 id: SCREEN_OFF,
                 section: SectionId::Power,
                 group: SCREEN,
-                name: w("Éteindre l’écran", "Turn the screen off"),
-                line: Some(w(
-                    "Une fois verrouillé, s’il ne se passe toujours rien.",
-                    "Once locked, if nothing happens still.",
-                )),
+                name: w(words::TURN_THE_SCREEN_OFF),
+                line: Some(w(words::ONCE_LOCKED_IF_NOTHING_HAPPENS_STILL)),
                 keywords: (
                     &["extinction", "veille de l’écran", "éteindre", "noir"],
                     &["screen off", "display off", "dpms", "blank"],
@@ -149,11 +151,8 @@ pub fn settings() -> &'static [Setting] {
                 id: SUSPEND,
                 section: SectionId::Power,
                 group: SCREEN,
-                name: w("Mettre en veille après", "Suspend after"),
-                line: Some(w(
-                    "Depuis la dernière activité ; la session reste ouverte, verrouillée.",
-                    "Since the last activity; the session stays open, locked.",
-                )),
+                name: w(words::SUSPEND_AFTER),
+                line: Some(w(words::SINCE_THE_LAST_ACTIVITY_THE_SESSION)),
                 keywords: (
                     &["suspendre", "sommeil", "dormir", "inactivité"],
                     &["sleep", "suspend", "standby", "hibernate", "idle"],
@@ -176,14 +175,8 @@ pub fn settings() -> &'static [Setting] {
                 id: LOCK_ON_IDLE,
                 section: SectionId::Power,
                 group: LOCKING,
-                name: w(
-                    "Verrouiller après l’assombrissement",
-                    "Lock after dimming",
-                ),
-                line: Some(w(
-                    "Coupé, l’écran s’assombrit puis s’éteint sans verrouiller.",
-                    "Off, the screen dims then turns off without locking.",
-                )),
+                name: w(words::LOCK_AFTER_DIMMING),
+                line: Some(w(words::OFF_THE_SCREEN_DIMS_THEN_TURNS)),
                 keywords: (
                     &["verrou", "verrouillage", "mot de passe", "sécurité"],
                     &["lock", "auto-lock", "password", "security"],
@@ -196,14 +189,8 @@ pub fn settings() -> &'static [Setting] {
                 id: LOCK_BEFORE_SLEEP,
                 section: SectionId::Power,
                 group: LOCKING,
-                name: w(
-                    "Verrouiller avant la mise en veille",
-                    "Lock before sleeping",
-                ),
-                line: Some(w(
-                    "L’écran verrouillé est déjà là au réveil, sans montrer le bureau.",
-                    "The lock screen is already there on waking, without showing the desktop.",
-                )),
+                name: w(words::LOCK_BEFORE_SLEEPING),
+                line: Some(w(words::THE_LOCK_SCREEN_IS_ALREADY_THERE)),
                 keywords: (
                     &["réveil", "verrou", "veille"],
                     &["lock on suspend", "resume", "wake"],
@@ -216,7 +203,7 @@ pub fn settings() -> &'static [Setting] {
                 id: LID_CLOSED,
                 section: SectionId::Power,
                 group: LID,
-                name: w("Couvercle fermé", "Lid closed"),
+                name: w(words::LID_CLOSED),
                 line: None,
                 keywords: (
                     &["capot", "fermer", "portable", "veille"],
@@ -235,31 +222,25 @@ pub fn settings() -> &'static [Setting] {
                 id: DOCKED,
                 section: SectionId::Power,
                 group: LID,
-                name: w(
-                    "Rester allumé avec un écran branché",
-                    "Stay on with a screen plugged in",
-                ),
-                line: Some(w(
-                    "Couvercle fermé, sur secteur, un écran externe allumé.",
-                    "Lid closed, on AC, an external screen on.",
-                )),
+                name: w(words::STAY_ON_WITH_A_SCREEN_PLUGGED),
+                line: Some(w(words::LID_CLOSED_ON_AC_AN_EXTERNAL)),
                 keywords: (
                     &["écran externe", "station", "dock", "moniteur", "couvercle"],
                     &["external screen", "dock", "monitor", "docked", "lid"],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(Place::new(&["power", "lid-ignored-when-docked"], Codec::Bool)),
+                places: Places::One(Place::new(
+                    &["power", "lid-ignored-when-docked"],
+                    Codec::Bool,
+                )),
                 needs: None,
             },
             Setting {
                 id: BUTTON,
                 section: SectionId::Power,
                 group: LID,
-                name: w("Bouton d’alimentation", "Power button"),
-                line: Some(w(
-                    "Un appui court ; un appui long éteint toujours.",
-                    "A short press; a long press always powers off.",
-                )),
+                name: w(words::POWER_BUTTON),
+                line: Some(w(words::A_SHORT_PRESS_A_LONG_PRESS)),
                 keywords: (
                     &["power", "arrêt", "éteindre", "veille"],
                     &["power", "shut down", "power off", "sleep"],
@@ -277,11 +258,8 @@ pub fn settings() -> &'static [Setting] {
                 id: AUTO_SAVER,
                 section: SectionId::Power,
                 group: SAVING,
-                name: w("Économie d’énergie automatique", "Automatic power saver"),
-                line: Some(w(
-                    "S’allume seule sous un niveau de batterie, s’éteint sur secteur.",
-                    "Turns itself on under a battery level, off on AC.",
-                )),
+                name: w(words::AUTOMATIC_POWER_SAVER),
+                line: Some(w(words::TURNS_ITSELF_ON_UNDER_A_BATTERY)),
                 keywords: (
                     &["batterie", "autonomie", "économiser"],
                     &["battery", "battery life", "power saving", "saver"],
@@ -294,7 +272,7 @@ pub fn settings() -> &'static [Setting] {
                 id: SAVER_BELOW,
                 section: SectionId::Power,
                 group: SAVING,
-                name: w("Sous ce niveau de batterie", "Under this battery level"),
+                name: w(words::UNDER_THIS_BATTERY_LEVEL),
                 line: None,
                 keywords: (
                     &["batterie", "pourcentage", "niveau", "économie"],
@@ -306,7 +284,10 @@ pub fn settings() -> &'static [Setting] {
                     step: 5,
                     unit: " %",
                 },
-                places: Places::One(Place::new(&["power", "auto-saver-below"], Codec::Int { min: 5, max: 50 })),
+                places: Places::One(Place::new(
+                    &["power", "auto-saver-below"],
+                    Codec::Int { min: 5, max: 50 },
+                )),
                 needs: Some(AUTO_SAVER),
             },
         ]
@@ -315,14 +296,14 @@ pub fn settings() -> &'static [Setting] {
 
 /// The page's rows outside the file, for the search: each lights its row.
 pub fn outside() -> &'static [Outside] {
-    const BATTERY_GROUP: Words = w("BATTERIE", "BATTERY");
-    const LATER: Words = w("PLUS TARD", "LATER");
+    const BATTERY_GROUP: Words = w(words::BATTERY);
+    const LATER: Words = w(words::LATER);
     const ALL: [Outside; 3] = [
         Outside {
             id: BATTERY,
             section: SectionId::Power,
             group: BATTERY_GROUP,
-            name: w("État de la batterie", "Battery health"),
+            name: w(words::BATTERY_HEALTH),
             keywords: (
                 &["santé", "capacité", "usure", "autonomie", "batterie"],
                 &["battery health", "capacity", "wear", "time left", "battery"],
@@ -332,7 +313,7 @@ pub fn outside() -> &'static [Outside] {
             id: MODE,
             section: SectionId::Power,
             group: SAVING.label,
-            name: w("Mode d’énergie", "Power mode"),
+            name: w(words::POWER_MODE),
             keywords: (
                 &["profil", "performance", "économie", "équilibré"],
                 &[
@@ -348,7 +329,7 @@ pub fn outside() -> &'static [Outside] {
             id: CHARGE_LIMIT,
             section: SectionId::Power,
             group: LATER,
-            name: w("Limiter la charge à 80 %", "Limit charging to 80 %"),
+            name: w(words::LIMIT_CHARGING_TO_80),
             keywords: (
                 &["80 %", "seuil", "charge"],
                 &["charge limit", "threshold", "charging"],
@@ -364,9 +345,9 @@ pub const MODES: [&str; 3] = ["power-saver", "balanced", "performance"];
 /// A mode's name: "Économie", "Équilibré", "Performance".
 pub fn mode_name(mode: &str, lang: Lang) -> &'static str {
     match mode {
-        "power-saver" => w("Économie", "Power saver").get(lang),
+        "power-saver" => w(words::POWER_SAVER).get(lang),
         "performance" => "Performance",
-        _ => w("Équilibré", "Balanced").get(lang),
+        _ => w(words::BALANCED).get(lang),
     }
 }
 
@@ -376,18 +357,9 @@ pub fn degraded(reason: &str, lang: Lang) -> Option<&'static str> {
     Some(
         match reason {
             "" => return None,
-            "lap-detected" => w(
-                "Performance réduite\u{a0}: l’ordinateur est sur tes genoux.",
-                "Performance reduced: the computer is on a lap.",
-            ),
-            "high-operating-temperature" => w(
-                "Performance réduite\u{a0}: l’ordinateur est trop chaud.",
-                "Performance reduced: the computer is too hot.",
-            ),
-            _ => w(
-                "Performance réduite par le système.",
-                "Performance reduced by the system.",
-            ),
+            "lap-detected" => w(words::PERFORMANCE_REDUCED_THE_COMPUTER_IS_ON),
+            "high-operating-temperature" => w(words::PERFORMANCE_REDUCED_THE_COMPUTER_IS_TOO),
+            _ => w(words::PERFORMANCE_REDUCED_BY_THE_SYSTEM),
         }
         .get(lang),
     )
@@ -411,19 +383,15 @@ pub fn battery_line(charge: Charge, left: Option<Duration>, lang: Lang) -> Strin
     match (charge, left) {
         (Charge::Discharging, Some(t)) if fr => format!("Sur batterie · {} restantes", duration(t)),
         (Charge::Discharging, Some(t)) => format!("On battery · {} left", duration(t)),
-        (Charge::Discharging, None) => w("Sur batterie", "On battery").get(lang).to_owned(),
+        (Charge::Discharging, None) => w(words::ON_BATTERY).get(lang).to_owned(),
         (Charge::Charging, Some(t)) if fr => {
             format!("Branché · en charge, plein dans {}", duration(t))
         }
         (Charge::Charging, Some(t)) => format!("Plugged in · charging, full in {}", duration(t)),
-        (Charge::Charging, None) => w("Branché · en charge", "Plugged in · charging")
-            .get(lang)
-            .to_owned(),
-        (Charge::Full, _) => w("Branché, plein", "Plugged in, full").get(lang).to_owned(),
+        (Charge::Charging, None) => w(words::PLUGGED_IN_CHARGING).get(lang).to_owned(),
+        (Charge::Full, _) => w(words::PLUGGED_IN_FULL).get(lang).to_owned(),
         (Charge::Held | Charge::Unknown, _) => {
-            w("Branché, ne charge pas", "Plugged in, not charging")
-                .get(lang)
-                .to_owned()
+            w(words::PLUGGED_IN_NOT_CHARGING).get(lang).to_owned()
         }
     }
 }
@@ -454,12 +422,12 @@ impl StepKind {
     /// Its name, under its dot.
     pub fn name(self, lang: Lang) -> &'static str {
         match self {
-            Self::Start => w("dernière activité", "last activity"),
-            Self::Dim => w("assombri", "dimmed"),
-            Self::Lock => w("verrouillé", "locked"),
-            Self::Off => w("écran éteint", "screen off"),
-            Self::Sleep => w("en veille", "asleep"),
-            Self::NoSleep => w("pas de veille", "no sleep"),
+            Self::Start => w(words::LAST_ACTIVITY),
+            Self::Dim => w(words::DIMMED),
+            Self::Lock => w(words::LOCKED),
+            Self::Off => w(words::SCREEN_OFF),
+            Self::Sleep => w(words::ASLEEP),
+            Self::NoSleep => w(words::NO_SLEEP),
         }
         .get(lang)
     }
@@ -509,7 +477,7 @@ pub fn timeline(
         Some(sleep) => steps.push((StepKind::Sleep, short(sleep), sleep)),
         None => steps.push((
             StepKind::NoSleep,
-            w("jamais", "never").get(lang).to_owned(),
+            w(words::NEVER).get(lang).to_owned(),
             u64::MAX,
         )),
     }

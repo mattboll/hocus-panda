@@ -23,6 +23,7 @@ pub mod portal;
 pub mod thumb;
 pub mod toolbar;
 
+use hocus_words::shell::capture as txt;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
@@ -52,35 +53,39 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn mode(self, mode: CaptureMode) -> &'static str {
         match mode {
-            CaptureMode::Area => self.pick("Zone", "Area"),
-            CaptureMode::Window => self.pick("Fenêtre", "Window"),
-            CaptureMode::Screen => self.pick("Écran", "Screen"),
-            CaptureMode::All => self.pick("Tous les écrans", "All screens"),
+            CaptureMode::Area => self.pick(txt::AREA),
+            CaptureMode::Window => self.pick(txt::WINDOW),
+            CaptureMode::Screen => self.pick(txt::SCREEN),
+            CaptureMode::All => self.pick(txt::ALL_SCREENS),
         }
     }
 
     pub fn delay(self, seconds: u8) -> String {
         if seconds == 0 {
-            self.pick("Tout de suite", "Now").to_owned()
+            self.pick(txt::NOW).to_owned()
         } else {
             format!("{seconds}\u{a0}s")
         }
     }
 
     pub fn shoot(self) -> &'static str {
-        self.pick("Capturer", "Capture")
+        self.pick(txt::CAPTURE)
     }
 
     /// The switch's tabs (5.10).
     pub fn kind(self, video: bool) -> &'static str {
         if video {
-            self.pick("Vidéo", "Video")
+            self.pick(txt::VIDEO)
         } else {
             "Photo"
         }
@@ -88,91 +93,91 @@ impl Words {
 
     /// The computer's sound, and the microphone (5.10).
     pub fn sound(self) -> &'static str {
-        self.pick("Son", "Sound")
+        self.pick(txt::SOUND)
     }
 
     pub fn micro(self) -> &'static str {
-        self.pick("Micro", "Mic")
+        self.pick(txt::MIC)
     }
 
     /// Vidéo's red button.
     pub fn start(self) -> &'static str {
-        self.pick("Démarrer", "Start")
+        self.pick(txt::START)
     }
 
     /// Under the thumbnail (5.9).
     pub fn kept(self) -> &'static str {
-        self.pick("Copiée · enregistrée", "Copied · saved")
+        self.pick(txt::COPIED_SAVED)
     }
 
     pub fn annotate(self) -> &'static str {
-        self.pick("Annoter", "Annotate")
+        self.pick(txt::ANNOTATE)
     }
 
     pub fn open_folder(self) -> &'static str {
-        self.pick("Ouvrir le dossier", "Open folder")
+        self.pick(txt::OPEN_FOLDER)
     }
 
     pub fn delete(self) -> &'static str {
-        self.pick("Supprimer", "Delete")
+        self.pick(txt::DELETE)
     }
 
     /// The editor's tools.
     pub fn tool(self, tool: editor::Tool) -> &'static str {
         match tool {
-            editor::Tool::Arrow => self.pick("Flèche", "Arrow"),
-            editor::Tool::Box => self.pick("Cadre", "Box"),
-            editor::Tool::Text => self.pick("Texte", "Text"),
-            editor::Tool::Blur => self.pick("Flou", "Blur"),
+            editor::Tool::Arrow => self.pick(txt::ARROW),
+            editor::Tool::Box => self.pick(txt::BOX),
+            editor::Tool::Text => self.pick(txt::TEXT),
+            editor::Tool::Blur => self.pick(txt::BLUR),
         }
     }
 
     /// What the text's field shows while empty.
     pub fn text_hint(self) -> &'static str {
-        self.pick("Texte", "Text")
+        self.pick(txt::TEXT)
     }
 
     /// The pointer's button, for screen readers.
     pub fn pointer(self) -> &'static str {
-        self.pick("Afficher le pointeur", "Show the pointer")
+        self.pick(txt::SHOW_THE_POINTER)
     }
 
     /// The toolbar, for screen readers.
     pub fn toolbar(self) -> &'static str {
-        self.pick("Capture d'écran", "Screenshot")
+        self.pick(txt::SCREENSHOT)
     }
 
     /// The editor's colours, for screen readers.
     pub fn colour(self, i: usize) -> &'static str {
         match i {
-            0 => self.pick("Rouge", "Red"),
-            1 => self.pick("Ambre", "Amber"),
-            2 => self.pick("Vert", "Green"),
-            3 => self.pick("Bleu", "Blue"),
-            _ => self.pick("Blanc", "White"),
+            0 => self.pick(txt::RED),
+            1 => self.pick(txt::AMBER),
+            2 => self.pick(txt::GREEN),
+            3 => self.pick(txt::BLUE),
+            _ => self.pick(txt::WHITE),
         }
     }
 
     pub fn undo(self) -> &'static str {
-        self.pick("Annuler", "Undo")
+        self.pick(txt::UNDO)
     }
 
     /// The editor, for screen readers.
     pub fn editor(self) -> &'static str {
-        self.pick("Annoter la capture", "Annotate the capture")
+        self.pick(txt::ANNOTATE_THE_CAPTURE)
     }
 
     pub fn save_as(self) -> &'static str {
-        self.pick("Enregistrer sous…", "Save as…")
+        self.pick(txt::SAVE_AS)
     }
 
     pub fn copy_and_close(self) -> &'static str {
-        self.pick("Copier et fermer", "Copy and close")
+        self.pick(txt::COPY_AND_CLOSE)
     }
 
     /// The file chooser's title.
     pub fn save_title(self) -> &'static str {
-        self.pick("Enregistrer la capture", "Save the capture")
+        self.pick(txt::SAVE_THE_CAPTURE)
     }
 
     /// Where "Save as…" wrote it, under the image.
@@ -196,31 +201,28 @@ impl Words {
 
     /// The capture in the notifications' history: its application's name.
     pub fn screenshot(self) -> &'static str {
-        self.pick("Capture d'écran", "Screenshot")
+        self.pick(txt::SCREENSHOT)
     }
 
     /// A recording (5.10): under its thumbnail, "Enregistrée · MP4".
     pub fn recorded(self, format: RecordFormat) -> String {
-        format!("{} · {}", self.pick("Enregistrée", "Saved"), format.label())
+        format!("{} · {}", self.pick(txt::SAVED), format.label())
     }
 
     /// Its button: the default player.
     pub fn open(self) -> &'static str {
-        self.pick("Ouvrir", "Open")
+        self.pick(txt::OPEN)
     }
 
     /// The recording in the notifications' history: its application's
     /// name.
     pub fn screen_recording(self) -> &'static str {
-        self.pick("Enregistrement d'écran", "Screen recording")
+        self.pick(txt::SCREEN_RECORDING)
     }
 
     /// A recording that could not be saved: its toast.
     pub fn not_recorded(self) -> &'static str {
-        self.pick(
-            "L'enregistrement n'a pas pu être enregistré",
-            "The recording could not be saved",
-        )
+        self.pick(txt::THE_RECORDING_COULD_NOT_BE_SAVED)
     }
 
     /// The toast once taken: what, copied, and where it was saved.

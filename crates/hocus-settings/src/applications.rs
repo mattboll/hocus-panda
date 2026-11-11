@@ -21,6 +21,8 @@
 //! configuration's folder and the autostart folder). The window hears it
 //! through [`Heard`].
 
+use crate::lang::French as _;
+use hocus_words::settings::applications as words;
 use std::{
     collections::HashMap,
     ffi::OsString,
@@ -54,11 +56,11 @@ pub const RESTORE: &str = "session.restore";
 pub const ADDED: &str = "applications.startup.added";
 
 pub const DEFAULTS_GROUP: RowGroup = RowGroup {
-    label: w("APPLICATIONS PAR DÉFAUT", "DEFAULT APPLICATIONS"),
+    label: w(words::DEFAULT_APPLICATIONS),
     per_source: false,
 };
 pub const STARTUP_GROUP: RowGroup = RowGroup {
-    label: w("AU DÉMARRAGE DE LA SESSION", "AT SESSION START"),
+    label: w(words::AT_SESSION_START),
     per_source: false,
 };
 
@@ -93,69 +95,39 @@ impl Opens {
 
     pub fn name(self) -> Words {
         match self {
-            Self::Browser => w("Navigateur web", "Web browser"),
-            Self::Mail => w("Courriel", "Mail"),
-            Self::Videos => w("Vidéos", "Videos"),
-            Self::Images => w("Images", "Images"),
+            Self::Browser => w(words::WEB_BROWSER),
+            Self::Mail => w(words::MAIL),
+            Self::Videos => w(words::VIDEOS),
+            Self::Images => w(words::IMAGES),
         }
     }
 
     pub fn line(self) -> Words {
         match self {
-            Self::Browser => w(
-                "Les liens, et les adresses tapées dans le lanceur.",
-                "Links, and addresses typed in the launcher.",
-            ),
-            Self::Mail => w(
-                "Les liens « mailto: », pour écrire à une adresse.",
-                "mailto: links, to write to an address.",
-            ),
-            Self::Videos => w(
-                "Les vidéos, et tes enregistrements d’écran quand tu cliques « Ouvrir ».",
-                "Videos, and your screen recordings when you click “Open”.",
-            ),
-            Self::Images => w(
-                "Les images ouvertes depuis un dossier, un courriel ou une autre application.",
-                "Images opened from a folder, a mail or another application.",
-            ),
+            Self::Browser => w(words::LINKS_AND_ADDRESSES_TYPED_IN_THE),
+            Self::Mail => w(words::MAILTO_LINKS_TO_WRITE_TO_AN),
+            Self::Videos => w(words::VIDEOS_AND_YOUR_SCREEN_RECORDINGS_WHEN),
+            Self::Images => w(words::IMAGES_OPENED_FROM_A_FOLDER_A),
         }
     }
 
     /// Under the menu's last application.
     pub fn hint(self) -> Words {
         match self {
-            Self::Browser => w(
-                "Celles qui ouvrent les pages web",
-                "Those that open web pages",
-            ),
-            Self::Mail => w(
-                "Celles qui ouvrent les liens « mailto: »",
-                "Those that open mailto: links",
-            ),
-            Self::Videos => w("Celles qui ouvrent les vidéos", "Those that open videos"),
-            Self::Images => w("Celles qui ouvrent les images", "Those that open images"),
+            Self::Browser => w(words::THOSE_THAT_OPEN_WEB_PAGES),
+            Self::Mail => w(words::THOSE_THAT_OPEN_MAILTO_LINKS),
+            Self::Videos => w(words::THOSE_THAT_OPEN_VIDEOS),
+            Self::Images => w(words::THOSE_THAT_OPEN_IMAGES),
         }
     }
 
     /// The row's line when no application opens its types.
     pub fn none(self) -> Words {
         match self {
-            Self::Browser => w(
-                "Aucune application installée n’ouvre les pages web.",
-                "No installed application opens web pages.",
-            ),
-            Self::Mail => w(
-                "Aucune application installée n’ouvre les liens « mailto: ».",
-                "No installed application opens mailto: links.",
-            ),
-            Self::Videos => w(
-                "Aucune application installée n’ouvre les vidéos.",
-                "No installed application opens videos.",
-            ),
-            Self::Images => w(
-                "Aucune application installée n’ouvre les images.",
-                "No installed application opens images.",
-            ),
+            Self::Browser => w(words::NO_INSTALLED_APPLICATION_OPENS_WEB_PAGES),
+            Self::Mail => w(words::NO_INSTALLED_APPLICATION_OPENS_MAILTO_LINKS),
+            Self::Videos => w(words::NO_INSTALLED_APPLICATION_OPENS_VIDEOS),
+            Self::Images => w(words::NO_INSTALLED_APPLICATION_OPENS_IMAGES),
         }
     }
 
@@ -246,11 +218,8 @@ pub fn settings() -> &'static [Setting] {
                 id: TERMINAL,
                 section: SectionId::Apps,
                 group: DEFAULTS_GROUP,
-                name: w("Terminal", "Terminal"),
-                line: Some(w(
-                    "Super+Entrée, et les applications qui s’ouvrent dans un terminal.",
-                    "Super+Return, and applications that open in a terminal.",
-                )),
+                name: w(words::TERMINAL),
+                line: Some(w(words::SUPER_RETURN_AND_APPLICATIONS_THAT_OPEN)),
                 keywords: (
                     &[
                         "terminal",
@@ -275,14 +244,8 @@ pub fn settings() -> &'static [Setting] {
                 id: RESTORE,
                 section: SectionId::Apps,
                 group: STARTUP_GROUP,
-                name: w(
-                    "Rouvrir les applications de la dernière session",
-                    "Reopen the applications of the last session",
-                ),
-                line: Some(w(
-                    "Celles ouvertes à la déconnexion reviennent, chaque fenêtre à sa place.",
-                    "Those open at log out come back, each window in its place.",
-                )),
+                name: w(words::REOPEN_THE_APPLICATIONS_OF_THE_LAST),
+                line: Some(w(words::THOSE_OPEN_AT_LOG_OUT_COME)),
                 keywords: (
                     &[
                         "session",
@@ -316,7 +279,7 @@ pub fn outside() -> &'static [Outside] {
             id: BROWSER,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Navigateur web", "Web browser"),
+            name: w(words::WEB_BROWSER),
             keywords: (
                 &[
                     "navigateur",
@@ -342,7 +305,7 @@ pub fn outside() -> &'static [Outside] {
             id: MAIL,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Courriel", "Mail"),
+            name: w(words::MAIL),
             keywords: (
                 &["courriel", "mail", "e-mail", "mailto", "messagerie"],
                 &["mail", "e-mail", "email", "mailto"],
@@ -352,7 +315,7 @@ pub fn outside() -> &'static [Outside] {
             id: VIDEOS,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Vidéos", "Videos"),
+            name: w(words::VIDEOS),
             keywords: (
                 &["vidéos", "lecteur", "film", "enregistrement"],
                 &["videos", "player", "movie", "recording"],
@@ -362,7 +325,7 @@ pub fn outside() -> &'static [Outside] {
             id: IMAGES,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w("Images", "Images"),
+            name: w(words::IMAGES),
             keywords: (
                 &["images", "photos", "visionneuse"],
                 &["images", "photos", "pictures", "viewer"],
@@ -372,7 +335,7 @@ pub fn outside() -> &'static [Outside] {
             id: STARTUP,
             section: SectionId::Apps,
             group: STARTUP_GROUP.label,
-            name: w("Au démarrage de la session", "At session start"),
+            name: w(words::AT_SESSION_START_2),
             keywords: (
                 &[
                     "démarrage",

@@ -22,6 +22,7 @@
 //! chips and the items (each with its ✕ and its actions), the arrows through
 //! the items, `Enter` or `Space` acts, `Esc` closes.
 
+use hocus_words::shell::popover_history as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -211,8 +212,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     fn title(self) -> &'static str {
@@ -220,18 +225,18 @@ impl Words {
     }
 
     fn clear(self) -> &'static str {
-        self.pick("Tout effacer", "Clear all")
+        self.pick(txt::CLEAR_ALL)
     }
 
     fn dnd(self) -> &'static str {
-        self.pick("Ne pas déranger", "Do not disturb")
+        self.pick(txt::DO_NOT_DISTURB)
     }
 
     fn chip(self, choice: Choice) -> &'static str {
         match choice {
-            Choice::Hour => self.pick("Pendant 1\u{a0}h", "For 1 hour"),
-            Choice::Morning => self.pick("Jusqu’à demain matin", "Until tomorrow morning"),
-            Choice::Always => self.pick("Sans limite", "No limit"),
+            Choice::Hour => self.pick(txt::FOR_1_HOUR),
+            Choice::Morning => self.pick(txt::UNTIL_TOMORROW_MORNING),
+            Choice::Always => self.pick(txt::NO_LIMIT),
         }
     }
 
@@ -262,15 +267,11 @@ impl Words {
     /// What do not disturb does now, at `now`.
     fn said(self, dnd: Dnd, now: &Zoned) -> String {
         let Dnd::On { choice, until } = dnd else {
-            return self
-                .pick("Les bulles s’affichent", "Bubbles show")
-                .to_owned();
+            return self.pick(txt::BUBBLES_SHOW).to_owned();
         };
         let until = until.and_then(|u| notifications::dnd::zoned(u.wall, now));
         let when = match (choice, until) {
-            (Choice::Always, _) | (_, None) => self
-                .pick("Jusqu’à ce que tu l’arrêtes", "Until you turn it off")
-                .to_owned(),
+            (Choice::Always, _) | (_, None) => self.pick(txt::UNTIL_YOU_TURN_IT_OFF).to_owned(),
             (_, Some(at)) => {
                 let tomorrow = now.date().tomorrow().ok() == Some(at.date());
                 match (self.fr, tomorrow) {
@@ -281,21 +282,15 @@ impl Words {
                 }
             }
         };
-        format!(
-            "{when} · {}",
-            self.pick(
-                "seules les urgences passent",
-                "only urgent ones come through"
-            )
-        )
+        format!("{when} · {}", self.pick(txt::ONLY_URGENT_ONES_COME_THROUGH))
     }
 
     fn section(self, section: Section) -> &'static str {
         match section {
-            Section::Recent => self.pick("RÉCENTES", "RECENT"),
-            Section::Today => self.pick("PLUS TÔT AUJOURD’HUI", "EARLIER TODAY"),
-            Section::Yesterday => self.pick("HIER", "YESTERDAY"),
-            Section::Older => self.pick("PLUS ANCIENNES", "OLDER"),
+            Section::Recent => self.pick(txt::RECENT),
+            Section::Today => self.pick(txt::EARLIER_TODAY),
+            Section::Yesterday => self.pick(txt::YESTERDAY),
+            Section::Older => self.pick(txt::OLDER),
         }
     }
 
@@ -315,11 +310,11 @@ impl Words {
     }
 
     fn nothing(self) -> &'static str {
-        self.pick("Rien de neuf", "Nothing new")
+        self.pick(txt::NOTHING_NEW)
     }
 
     fn all_read(self) -> &'static str {
-        self.pick("Tout est lu.", "All read.")
+        self.pick(txt::ALL_READ)
     }
 }
 

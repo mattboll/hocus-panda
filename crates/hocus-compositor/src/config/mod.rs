@@ -801,7 +801,10 @@ mod tests {
             "[locale]\nlanguage = \"en\"\ndate = \"iso\"\ntime = \"12h\"\n\
              [appearance]\ntext-scale = 1.2\n",
         )?;
-        assert_eq!(config.locale.language, Language::English);
+        assert_eq!(
+            config.locale.language,
+            Language::Chosen(hocus_words::Lang::English)
+        );
         assert_eq!(config.locale.date, DateFormat::Iso);
         assert_eq!(config.locale.time, Some(TimeFormat::H12));
         assert_eq!(config.appearance.text_scale, TextScale(120));

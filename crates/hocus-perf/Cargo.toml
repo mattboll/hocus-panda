@@ -11,6 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# The desktop's languages and the words said in them.
+hocus-words.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 # The day's file is the user's day: named by the local date, its times read

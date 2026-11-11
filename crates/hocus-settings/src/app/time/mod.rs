@@ -15,6 +15,7 @@
 
 mod view;
 
+use hocus_words::settings::app_time as words;
 use std::time::Duration;
 
 use iced::{
@@ -349,9 +350,7 @@ impl App {
                     }
                 };
                 if refused {
-                    let text = self
-                        .say(w("Le système a refusé.", "The system refused."))
-                        .to_owned();
+                    let text = self.say(w(words::THE_SYSTEM_REFUSED)).to_owned();
                     return self.toast(text, ToastAction::None, TOAST);
                 }
                 task

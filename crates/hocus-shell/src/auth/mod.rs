@@ -26,6 +26,7 @@ mod agent;
 mod helper;
 pub mod view;
 
+use hocus_words::shell::auth as txt;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{Arc, Mutex, PoisonError},
@@ -306,12 +307,16 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn title(self) -> &'static str {
-        self.pick("Autorisation nécessaire", "Authorization required")
+        self.pick(txt::AUTHORIZATION_REQUIRED)
     }
 
     /// The dialog's name for screen readers.
@@ -324,15 +329,15 @@ impl Words {
     }
 
     pub fn administrator(self) -> &'static str {
-        self.pick("administrateur", "administrator")
+        self.pick(txt::ADMINISTRATOR)
     }
 
     pub fn change(self) -> &'static str {
-        self.pick("Changer", "Change")
+        self.pick(txt::CHANGE)
     }
 
     pub fn password(self) -> &'static str {
-        self.pick("Mot de passe", "Password")
+        self.pick(txt::PASSWORD)
     }
 
     /// The field's name for screen readers.
@@ -353,31 +358,25 @@ impl Words {
     }
 
     pub fn caps(self) -> &'static str {
-        self.pick("Majuscules verrouillées", "Caps Lock is on")
+        self.pick(txt::CAPS_LOCK_IS_ON)
     }
 
     pub fn checking(self) -> &'static str {
-        self.pick("Vérification…", "Checking…")
+        self.pick(txt::CHECKING)
     }
 
     /// A wrong password, Caps Lock on or not.
     pub fn wrong(self, caps: bool) -> String {
-        let wrong = self.pick(
-            "Mot de passe incorrect. Réessaie.",
-            "Wrong password. Try again.",
-        );
+        let wrong = self.pick(txt::WRONG_PASSWORD_TRY_AGAIN);
         if caps {
-            format!(
-                "{wrong} {}",
-                self.pick("Les majuscules sont verrouillées.", "Caps Lock is on.")
-            )
+            format!("{wrong} {}", self.pick(txt::CAPS_LOCK_IS_ON_2))
         } else {
             wrong.to_owned()
         }
     }
 
     pub fn details(self) -> &'static str {
-        self.pick("Détails", "Details")
+        self.pick(txt::DETAILS)
     }
 
     pub fn action(self) -> &'static str {
@@ -385,15 +384,15 @@ impl Words {
     }
 
     pub fn program(self) -> &'static str {
-        self.pick("Programme", "Program")
+        self.pick(txt::PROGRAM)
     }
 
     pub fn process(self) -> &'static str {
-        self.pick("Processus", "Process")
+        self.pick(txt::PROCESS)
     }
 
     pub fn window(self) -> &'static str {
-        self.pick("Fenêtre", "Window")
+        self.pick(txt::WINDOW)
     }
 
     /// The process's line: its id, and who started it.
@@ -407,7 +406,7 @@ impl Words {
     }
 
     pub fn none(self) -> &'static str {
-        self.pick("aucune", "none")
+        self.pick(txt::NONE)
     }
 
     /// The requests waiting behind it.
@@ -422,11 +421,11 @@ impl Words {
     }
 
     pub fn cancel(self) -> &'static str {
-        self.pick("Annuler", "Cancel")
+        self.pick(txt::CANCEL)
     }
 
     pub fn authorize(self) -> &'static str {
-        self.pick("Autoriser", "Authorize")
+        self.pick(txt::AUTHORIZE)
     }
 }
 

@@ -24,6 +24,7 @@
 //! `Delete` or ✕ removes it, the pin pins it. `Esc` closes. Nothing goes
 //! through iced's messages: the history's changes wake its surface.
 
+use hocus_words::shell::popover_clipboard as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError},
@@ -185,39 +186,40 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn title(self) -> &'static str {
-        self.pick("Presse-papiers", "Clipboard")
+        self.pick(txt::CLIPBOARD)
     }
 
     fn clear(self) -> &'static str {
-        self.pick("Tout effacer", "Clear all")
+        self.pick(txt::CLEAR_ALL)
     }
 
     fn placeholder(self) -> &'static str {
-        self.pick("Chercher dans ce que tu as copié", "Search what you copied")
+        self.pick(txt::SEARCH_WHAT_YOU_COPIED)
     }
 
     fn head(self, head: Head) -> &'static str {
         match head {
-            Head::Pinned => self.pick("ÉPINGLÉS", "PINNED"),
-            Head::Recent => self.pick("RÉCENTS", "RECENT"),
-            Head::Off => self.pick("Historique coupé · Réglages", "History off · Settings"),
+            Head::Pinned => self.pick(txt::PINNED),
+            Head::Recent => self.pick(txt::RECENT),
+            Head::Off => self.pick(txt::HISTORY_OFF_SETTINGS),
         }
     }
 
     fn keys(self) -> &'static str {
-        self.pick(
-            "Entrée colle · Maj+Entrée copie · Suppr retire",
-            "Enter pastes · Shift+Enter copies · Delete removes",
-        )
+        self.pick(txt::ENTER_PASTES_SHIFT_ENTER_COPIES_DELETE)
     }
 
     fn nothing(self) -> &'static str {
-        self.pick("Rien de copié pour l’instant.", "Nothing copied yet.")
+        self.pick(txt::NOTHING_COPIED_YET)
     }
 
     fn not_found(self, query: &str) -> String {
@@ -230,7 +232,7 @@ impl Words {
 
     /// Where a capture comes from (5.8b).
     fn capture(self) -> &'static str {
-        self.pick("Capture d'écran", "Screenshot")
+        self.pick(txt::SCREENSHOT)
     }
 
     fn image(self, width: u32, height: u32) -> String {
@@ -254,15 +256,15 @@ impl Words {
 
     /// The ✕'s name.
     fn remove(self) -> &'static str {
-        self.pick("Retirer", "Remove")
+        self.pick(txt::REMOVE)
     }
 
     /// The pin's name, for the log.
     fn pin(self, pinned: bool) -> &'static str {
         if pinned {
-            self.pick("Désépingler", "Unpin")
+            self.pick(txt::UNPIN)
         } else {
-            self.pick("Épingler", "Pin")
+            self.pick(txt::PIN)
         }
     }
 }

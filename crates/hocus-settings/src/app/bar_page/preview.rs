@@ -1,6 +1,7 @@
 //! The bar's preview on the Bar page, drawn on a canvas.
 
 use super::*;
+use hocus_words::settings::app_bar_page_preview as words;
 
 /// A screen in the preview's row.
 #[derive(Debug, Clone)]
@@ -528,7 +529,7 @@ impl Preview {
                     });
                     write(
                         f,
-                        w("Point d’équipe", "Team check-in").get(lang),
+                        w(words::TEAM_CHECK_IN).get(lang),
                         Point::new(r.x + 14.0, r.y + 5.0),
                         13.5,
                         BOLD,
@@ -537,7 +538,7 @@ impl Preview {
                     );
                     write(
                         f,
-                        w("14:30 · dans 48 min", "14:30 · in 48 min").get(lang),
+                        w(words::N_14_30_IN_48_MIN).get(lang),
                         Point::new(r.x + 14.0, r.y + 24.0),
                         12.0,
                         MANROPE,
@@ -565,7 +566,7 @@ impl Preview {
                 model::TODAY => {
                     write(
                         f,
-                        w("AUJOURD’HUI", "TODAY").get(lang),
+                        w(words::TODAY).get(lang),
                         Point::new(r.x, r.y + 3.0),
                         11.5,
                         BOLD,
@@ -573,8 +574,8 @@ impl Preview {
                         false,
                     );
                     for (i, (at, what, dot)) in [
-                        ("16:00", w("Revue du budget", "Budget review"), GREEN),
-                        ("18:30", w("Cours de yoga", "Yoga class"), AMBER),
+                        ("16:00", w(words::BUDGET_REVIEW), GREEN),
+                        ("18:30", w(words::YOGA_CLASS), AMBER),
                     ]
                     .iter()
                     .enumerate()
@@ -599,7 +600,7 @@ impl Preview {
                 model::TASKS => {
                     write(
                         f,
-                        w("À FAIRE", "TO DO").get(lang),
+                        w(words::TO_DO).get(lang),
                         Point::new(r.x, r.y + 3.0),
                         11.5,
                         BOLD,
@@ -608,9 +609,9 @@ impl Preview {
                     );
                     write_right(f, "+", r.x + r.width, r.y, 14.0, MANROPE, INK_DIM);
                     for (i, what) in [
-                        w("Relire la page de la barre", "Review the bar's page"),
-                        w("Rappeler le garage", "Call the garage back"),
-                        w("Acheter du café", "Buy coffee"),
+                        w(words::REVIEW_THE_BAR_S_PAGE),
+                        w(words::CALL_THE_GARAGE_BACK),
+                        w(words::BUY_COFFEE),
                     ]
                     .iter()
                     .enumerate()
@@ -649,9 +650,9 @@ impl Preview {
                     );
                     write_right(f, "3", r.x + r.width, r.y + 2.0, 11.0, MANROPE, INK_DIM);
                     for (i, (name, says, ring, lit)) in [
-                        ("hocus-panda", w("t’attend", "waiting"), AMBER, true),
-                        ("site-web", w("12 min", "12 min"), GREEN, false),
-                        ("carnet", w("repos", "resting"), soft(0.20), false),
+                        ("hocus-panda", w(words::WAITING), AMBER, true),
+                        ("site-web", w(words::N_12_MIN), GREEN, false),
+                        ("carnet", w(words::RESTING), soft(0.20), false),
                     ]
                     .iter()
                     .enumerate()
@@ -695,14 +696,14 @@ impl Preview {
                 model::WINDOWS => {
                     for (i, (name, colour)) in [
                         (
-                            w("Terminal — hocus-panda", "Terminal — hocus-panda"),
+                            w(words::TERMINAL_HOCUS_PANDA),
                             Color::from_rgb8(0x5B, 0x8D, 0xEF),
                         ),
                         (
-                            w("Navigateur — Agenda", "Browser — Calendar"),
+                            w(words::BROWSER_CALENDAR),
                             Color::from_rgb8(0xF2, 0x94, 0x5B),
                         ),
-                        (w("Fichiers — Images", "Files — Pictures"), GREEN),
+                        (w(words::FILES_PICTURES), GREEN),
                     ]
                     .iter()
                     .enumerate()
@@ -774,8 +775,8 @@ impl Preview {
             }
             for (i, (name, right)) in [
                 ("Maison", ""),
-                (w("Casque", "Headset").get(lang), "82 %"),
-                (w("Français", "French").get(lang), "FR"),
+                (w(words::HEADSET).get(lang), "82 %"),
+                (w(words::FRENCH).get(lang), "FR"),
             ]
             .iter()
             .enumerate()
@@ -993,7 +994,7 @@ pub(super) fn draw_mini_item(f: &mut canvas::Frame, bw: f32, id: &str, r: Rectan
             );
             write(
                 f,
-                w("au travail", "working").get(lang),
+                w(words::WORKING).get(lang),
                 Point::new(c, r.y + 55.0),
                 11.0,
                 SEMIBOLD,

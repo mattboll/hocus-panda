@@ -1,37 +1,18 @@
 //! The window's language, French or English, and the words it says in
 //! both: every string the user reads is a [`Words`].
 
-/// The two languages shipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Lang {
-    French,
-    #[default]
-    English,
+/// The window's language: the workspace's one.
+pub use hocus_words::Lang;
+
+/// Whether a language is French: the sites that still choose between two
+/// languages in code, not in the catalogue (#775's next lot).
+pub trait French {
+    fn fr(self) -> bool;
 }
 
-impl Lang {
-    /// The messages' language: `LC_ALL`, `LC_MESSAGES`, then `LANG`, as
-    /// the shell reads it.
-    pub fn of_messages() -> Self {
-        let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
-            .into_iter()
-            .filter_map(|name| std::env::var(name).ok())
-            .find(|value| !value.is_empty())
-            .unwrap_or_default();
-        Self::of(&locale)
-    }
-
-    /// From a locale's name, `fr_FR.UTF-8`.
-    pub fn of(locale: &str) -> Self {
-        if locale.starts_with("fr") {
-            Self::French
-        } else {
-            Self::English
-        }
-    }
-
-    pub fn fr(self) -> bool {
-        self == Self::French
+impl French for Lang {
+    fn fr(self) -> bool {
+        self == Lang::French
     }
 }
 
@@ -55,7 +36,36 @@ impl Words {
     }
 }
 
-/// Shorthand for the catalogue's tables.
-pub const fn w(fr: &'static str, en: &'static str) -> Words {
+/// A text of the catalogue (`hocus_words::settings`), for the tables.
+pub const fn w(text: hocus_words::Text) -> Words {
+    Words::new(text.get(Lang::French), text.get(Lang::English))
+}
+
+/// A text the catalogue does not hold yet: built from parts in code
+/// (#775's next lot).
+pub const fn pair(fr: &'static str, en: &'static str) -> Words {
     Words::new(fr, en)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    /// Every key the Settings moved to the catalogue says, byte for byte,
+    /// what its pair said in the code before (#775).
+    #[test]
+    fn the_catalogue_says_what_the_code_said() {
+        let said = |lang| {
+            hocus_words::every(lang)
+                .into_iter()
+                .collect::<HashMap<_, _>>()
+        };
+        let (fr, en) = (said(Lang::French), said(Lang::English));
+        for (key, before_fr, before_en) in crate::words_before::BEFORE {
+            assert_eq!(fr.get(*key).map(String::as_str), Some(*before_fr), "{key}");
+            assert_eq!(en.get(*key).map(String::as_str), Some(*before_en), "{key}");
+        }
+    }
 }

@@ -29,6 +29,7 @@
 pub mod cameras;
 pub mod draw;
 
+use hocus_words::shell::in_use as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, PoisonError, mpsc},
@@ -575,34 +576,38 @@ impl Words {
     /// The words to pause or resume the recording, for screen readers.
     pub fn pause_recording(self, paused: bool) -> &'static str {
         if paused {
-            self.pick("Reprendre l'enregistrement", "Resume the recording")
+            self.pick(txt::RESUME_THE_RECORDING)
         } else {
-            self.pick("Mettre l'enregistrement en pause", "Pause the recording")
+            self.pick(txt::PAUSE_THE_RECORDING)
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     /// The popover's title.
     pub fn right_now(self) -> &'static str {
-        self.pick("En ce moment", "Right now")
+        self.pick(txt::RIGHT_NOW)
     }
 
     /// What is used, as a use's line starts.
     pub fn kind(self, kind: Kind, muted: bool) -> &'static str {
         match kind {
-            Kind::Microphone if muted => self.pick("Micro coupé", "Microphone muted"),
-            Kind::Microphone => self.pick("Micro", "Microphone"),
-            Kind::Camera => self.pick("Caméra", "Camera"),
-            Kind::Recording | Kind::Screen => self.pick("Écran", "Screen"),
+            Kind::Microphone if muted => self.pick(txt::MICROPHONE_MUTED),
+            Kind::Microphone => self.pick(txt::MICROPHONE),
+            Kind::Camera => self.pick(txt::CAMERA),
+            Kind::Recording | Kind::Screen => self.pick(txt::SCREEN),
         }
     }
 
     /// The recording's tile's time while it is paused (5.10).
     pub fn paused(self) -> &'static str {
-        self.pick("pause", "paused")
+        self.pick(txt::PAUSED)
     }
 
     /// "depuis 12 min": how long it has been used.
@@ -653,20 +658,20 @@ impl Words {
 
     /// An application not known by name.
     pub fn an_app(self) -> &'static str {
-        self.pick("Une application", "An application")
+        self.pick(txt::AN_APPLICATION)
     }
 
     /// The recording's line's name (5.10).
     pub fn recording(self) -> &'static str {
-        self.pick("Enregistrement d'écran", "Screen recording")
+        self.pick(txt::SCREEN_RECORDING)
     }
 
     /// The recording's line: "Écran · enregistrement · 0:12".
     pub fn recording_line(self, paused: bool, elapsed: Duration) -> String {
         let state = if paused {
-            self.pick("en pause", "paused")
+            self.pick(txt::PAUSED_2)
         } else {
-            self.pick("enregistrement", "recording")
+            self.pick(txt::RECORDING)
         };
         format!(
             "{} · {state} · {}",
@@ -690,9 +695,9 @@ impl Words {
     /// The microphone's button: muting the default source, or not.
     pub fn mute(self, muted: bool) -> &'static str {
         if muted {
-            self.pick("Rétablir le micro", "Unmute")
+            self.pick(txt::UNMUTE)
         } else {
-            self.pick("Couper le micro", "Mute the microphone")
+            self.pick(txt::MUTE_THE_MICROPHONE)
         }
     }
 
@@ -707,7 +712,7 @@ impl Words {
     }
 
     pub fn stop_recording(self) -> &'static str {
-        self.pick("Arrêter l'enregistrement", "Stop recording")
+        self.pick(txt::STOP_RECORDING)
     }
 }
 

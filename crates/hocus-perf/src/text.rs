@@ -1,6 +1,8 @@
-//! A day said in words, French or English: `hocus perf day`, the
+//! A day said in words, in the desktop's language: `hocus perf day`, the
 //! Settings' Performances page, a signal's notification and its report.
+//! The words are the catalogue's (`hocus_words::perf`).
 
+use hocus_words::{date as dates, number as numbers, perf as words};
 use jiff::{Timestamp, civil::Date, tz::TimeZone};
 
 use crate::{
@@ -10,42 +12,11 @@ use crate::{
 };
 
 /// The language said in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Lang {
-    French,
-    #[default]
-    English,
-}
-
-impl Lang {
-    /// The messages' locale: `LC_ALL`, `LC_MESSAGES`, `LANG`.
-    pub fn from_env() -> Self {
-        let said = ["LC_ALL", "LC_MESSAGES", "LANG"]
-            .iter()
-            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
-            .unwrap_or_default();
-        if said.starts_with("fr") {
-            Self::French
-        } else {
-            Self::English
-        }
-    }
-
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        match self {
-            Self::French => fr,
-            Self::English => en,
-        }
-    }
-}
+pub use hocus_words::Lang;
 
 /// `x` with `decimals`, its separator the language's.
 pub fn number(x: f64, decimals: usize, lang: Lang) -> String {
-    let s = format!("{x:.decimals$}");
-    match lang {
-        Lang::French => s.replace('.', ","),
-        Lang::English => s,
-    }
+    format!("{x:.decimals$}").replace('.', numbers::DECIMAL.get(lang))
 }
 
 /// A share of one core: whole from 10 %, else with a decimal.
@@ -55,19 +26,12 @@ pub fn percent(x: f64, lang: Lang) -> String {
     } else {
         number(x, 1, lang)
     };
-    match lang {
-        Lang::French => format!("{n} %"),
-        Lang::English => format!("{n}%"),
-    }
+    numbers::percent(lang, n)
 }
 
 /// Kilobytes in megabytes.
 pub fn megabytes(kb: u32, lang: Lang) -> String {
-    format!(
-        "{} {}",
-        (f64::from(kb) / 1024.0).round(),
-        lang.pick("Mo", "MB")
-    )
+    words::megabytes(lang, (f64::from(kb) / 1024.0).round())
 }
 
 /// A count of frames: 520, 52 k, 0.52 M.
@@ -122,58 +86,16 @@ pub fn when(from: i64, to: i64, tz: &TimeZone) -> String {
 
 /// A date said in full: vendredi 7 novembre, Friday 7 November.
 pub fn date(date: Date, lang: Lang) -> String {
-    use jiff::civil::Weekday::*;
-    let day = match (date.weekday(), lang) {
-        (Monday, Lang::French) => "lundi",
-        (Tuesday, Lang::French) => "mardi",
-        (Wednesday, Lang::French) => "mercredi",
-        (Thursday, Lang::French) => "jeudi",
-        (Friday, Lang::French) => "vendredi",
-        (Saturday, Lang::French) => "samedi",
-        (Sunday, Lang::French) => "dimanche",
-        (Monday, Lang::English) => "Monday",
-        (Tuesday, Lang::English) => "Tuesday",
-        (Wednesday, Lang::English) => "Wednesday",
-        (Thursday, Lang::English) => "Thursday",
-        (Friday, Lang::English) => "Friday",
-        (Saturday, Lang::English) => "Saturday",
-        (Sunday, Lang::English) => "Sunday",
-    };
-    const FR: [&str; 12] = [
-        "janvier",
-        "février",
-        "mars",
-        "avril",
-        "mai",
-        "juin",
-        "juillet",
-        "août",
-        "septembre",
-        "octobre",
-        "novembre",
-        "décembre",
-    ];
-    const EN: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
+    let day = usize::from(date.weekday().to_monday_zero_offset().unsigned_abs());
     let month = usize::try_from(date.month() - 1).unwrap_or(0);
-    let month = match lang {
-        Lang::French => FR.get(month),
-        Lang::English => EN.get(month),
-    };
-    let month = month.copied().unwrap_or_default();
-    format!("{day} {} {month}", date.day())
+    let name =
+        |list: hocus_words::List, i: usize| list.get(lang).get(i).copied().unwrap_or_default();
+    format!(
+        "{} {} {}",
+        name(dates::WEEKDAYS, day),
+        date.day(),
+        name(dates::MONTHS, month)
+    )
 }
 
 fn capital(s: &str) -> String {
@@ -186,40 +108,36 @@ fn capital(s: &str) -> String {
 /// Whose: the compositor, the shell, the Settings.
 pub fn who(who: Who, lang: Lang) -> &'static str {
     match who {
-        Who::Compositor => lang.pick("compositeur", "compositor"),
-        Who::Shell => "shell",
-        Who::Settings => lang.pick("Réglages", "Settings"),
+        Who::Compositor => words::who::COMPOSITOR,
+        Who::Shell => words::who::SHELL,
+        Who::Settings => words::who::SETTINGS,
     }
+    .get(lang)
 }
 
 /// An event in a few words.
 pub fn event(e: &Event, lang: Lang) -> String {
+    use words::event as w;
     let what = e.what.as_str();
-    match (e.kind, lang) {
-        (EventKind::WindowOpened, Lang::French) => format!("fenêtre ouverte : {what}"),
-        (EventKind::WindowOpened, Lang::English) => format!("window opened: {what}"),
-        (EventKind::WindowClosed, Lang::French) => format!("fenêtre fermée : {what}"),
-        (EventKind::WindowClosed, Lang::English) => format!("window closed: {what}"),
-        (EventKind::ScreenPlugged, Lang::French) => format!("écran {what} branché"),
-        (EventKind::ScreenPlugged, Lang::English) => format!("screen {what} plugged in"),
-        (EventKind::ScreenUnplugged, Lang::French) => format!("écran {what} débranché"),
-        (EventKind::ScreenUnplugged, Lang::English) => format!("screen {what} unplugged"),
-        (EventKind::SettingsPage, Lang::French) => format!("Réglages › {what}"),
-        (EventKind::SettingsPage, Lang::English) => format!("Settings › {what}"),
-        (EventKind::Config, Lang::French) => format!("configuration changée : {what}"),
-        (EventKind::Config, Lang::English) => format!("configuration changed: {what}"),
-        (EventKind::WallpaperMoving, Lang::French) => format!("fond animé en marche : {what}"),
-        (EventKind::WallpaperMoving, Lang::English) => format!("moving wallpaper on: {what}"),
-        (kind, lang) => match kind {
-            EventKind::Locked => lang.pick("session verrouillée", "session locked"),
-            EventKind::Unlocked => lang.pick("session déverrouillée", "session unlocked"),
-            EventKind::Suspend => lang.pick("mise en veille", "going to sleep"),
-            EventKind::Resume => lang.pick("sortie de veille", "woken from sleep"),
-            EventKind::OnBattery => lang.pick("sur batterie", "on battery"),
-            EventKind::OnAc => lang.pick("sur secteur", "on AC"),
-            EventKind::WallpaperStill => lang.pick("fond animé arrêté", "moving wallpaper stopped"),
-            _ => lang.pick("autre chose", "something else"),
+    match e.kind {
+        EventKind::WindowOpened => w::window_opened(lang, what),
+        EventKind::WindowClosed => w::window_closed(lang, what),
+        EventKind::ScreenPlugged => w::screen_plugged(lang, what),
+        EventKind::ScreenUnplugged => w::screen_unplugged(lang, what),
+        EventKind::SettingsPage => w::settings_page(lang, what),
+        EventKind::Config => w::config(lang, what),
+        EventKind::WallpaperMoving => w::wallpaper_moving(lang, what),
+        kind => match kind {
+            EventKind::Locked => w::LOCKED,
+            EventKind::Unlocked => w::UNLOCKED,
+            EventKind::Suspend => w::SUSPEND,
+            EventKind::Resume => w::RESUME,
+            EventKind::OnBattery => w::ON_BATTERY,
+            EventKind::OnAc => w::ON_AC,
+            EventKind::WallpaperStill => w::WALLPAPER_STILL,
+            _ => w::OTHER,
         }
+        .get(lang)
         .to_owned(),
     }
 }
@@ -227,21 +145,13 @@ pub fn event(e: &Event, lang: Lang) -> String {
 /// What a peak was, and the line under it: its events, else what its
 /// counters say.
 pub fn peak(p: &Peak, lang: Lang) -> (String, String) {
+    use words::peak as w;
     let seconds = p.seconds().max(1) as f64;
     let fps = p.frames as f64 / seconds;
     let of = |kind: EventKind| p.events.iter().filter(move |e| e.kind == kind);
     let opened = of(EventKind::WindowOpened).count();
     let what = if p.signal == Some(SignalKind::FramesAtRest) {
-        match lang {
-            Lang::French => format!(
-                "Des images sans que rien ne bouge : {} par seconde",
-                number(fps, 0, lang)
-            ),
-            Lang::English => format!(
-                "Frames with nothing moving: {} a second",
-                number(fps, 0, lang)
-            ),
-        }
+        w::frames_at_rest(lang, number(fps, 0, lang))
     } else if let Some(e) = [
         EventKind::ScreenPlugged,
         EventKind::ScreenUnplugged,
@@ -252,13 +162,9 @@ pub fn peak(p: &Peak, lang: Lang) -> (String, String) {
     {
         capital(&event(e, lang))
     } else if p.wallpaper {
-        lang.pick("Le fond animé en marche", "The moving wallpaper running")
-            .to_owned()
+        w::WALLPAPER.get(lang).to_owned()
     } else if opened > 1 {
-        match lang {
-            Lang::French => format!("{opened} fenêtres ouvertes"),
-            Lang::English => format!("{opened} windows opened"),
-        }
+        w::windows_opened(lang, opened)
     } else if let Some(e) = [
         EventKind::WindowOpened,
         EventKind::WindowClosed,
@@ -277,181 +183,88 @@ pub fn peak(p: &Peak, lang: Lang) -> (String, String) {
         capital(&event(e, lang))
     } else {
         match p.signal {
-            Some(SignalKind::SustainedCpu) => lang.pick("Un CPU soutenu", "Sustained CPU"),
-            Some(SignalKind::Wakeups) => {
-                lang.pick("La boucle réveillée au repos", "The loop woken at rest")
-            }
-            Some(SignalKind::SlowMoment) => lang.pick("Un moment lent", "A slow moment"),
-            _ if p.inputs > 0 => lang.pick("Le bureau en usage", "The desktop in use"),
-            _ if p.app_commits > 0 => lang.pick("Des fenêtres qui se dessinent", "Windows drawing"),
-            _ if p.motion_frames > 0 => {
-                lang.pick("Une animation du bureau", "A motion of the desktop")
-            }
-            _ => lang.pick("Rien de noté", "Nothing noted"),
+            Some(SignalKind::SustainedCpu) => w::SUSTAINED_CPU,
+            Some(SignalKind::Wakeups) => w::WAKEUPS,
+            Some(SignalKind::SlowMoment) => w::SLOW_MOMENT,
+            _ if p.inputs > 0 => w::IN_USE,
+            _ if p.app_commits > 0 => w::WINDOWS_DRAWING,
+            _ if p.motion_frames > 0 => w::MOTION,
+            _ => w::NOTHING,
         }
+        .get(lang)
         .to_owned()
     };
-    let mut why = match lang {
-        Lang::French => format!("{} images/s", number(fps, 0, lang)),
-        Lang::English => format!("{} frames/s", number(fps, 0, lang)),
-    };
+    let mut why = words::fps(lang, number(fps, 0, lang));
     why.push_str(if p.inputs > 0 {
-        lang.pick(" · en usage", " · in use")
+        words::IN_USE.get(lang)
     } else {
-        lang.pick(" · sans geste", " · untouched")
+        words::UNTOUCHED.get(lang)
     });
     if p.events.len() > 1 {
-        let more = p.events.len() - 1;
-        why.push_str(&match lang {
-            Lang::French => format!(
-                " · {more} autre{} événement{}",
-                if more > 1 { "s" } else { "" },
-                if more > 1 { "s" } else { "" }
-            ),
-            Lang::English => format!(" · {more} more event{}", if more > 1 { "s" } else { "" }),
-        });
+        why.push_str(&words::more_events(lang, p.events.len() - 1));
     }
     (what, why)
 }
 
 /// A signal's title and the line under it, as the page shows them.
 pub fn signal(s: &Signal, lang: Lang, tz: &TimeZone) -> (String, String) {
+    use words::signal as w;
     let span = when(s.from, s.to, tz);
     let long = duration(s.to - s.from);
-    match (s.kind, lang) {
-        (SignalKind::SustainedCpu, Lang::French) => (
-            format!("{span} : un CPU soutenu"),
-            format!(
-                "Jusqu’à {} d’un cœur pendant {long}. Signal : le compositeur et le shell au-dessus de {} pendant 5 min.",
+    match s.kind {
+        SignalKind::SustainedCpu => (
+            w::sustained_cpu(lang, &span),
+            w::sustained_cpu_line(
+                lang,
+                &long,
                 percent(s.value, lang),
-                percent(signals::CPU_PERCENT, lang)
+                percent(signals::CPU_PERCENT, lang),
             ),
         ),
-        (SignalKind::SustainedCpu, Lang::English) => (
-            format!("{span}: sustained CPU"),
-            format!(
-                "Up to {} of a core for {long}. Signal: the compositor and the shell above {} for 5 min.",
-                percent(s.value, lang),
-                percent(signals::CPU_PERCENT, lang)
-            ),
+        SignalKind::FramesAtRest => (
+            w::frames_at_rest(lang, &span),
+            w::frames_at_rest_line(lang, number(s.value, 0, lang), &long),
         ),
-        (SignalKind::FramesAtRest, Lang::French) => (
-            format!("{span} : des images sans que rien ne bouge"),
-            format!(
-                "{} images par seconde pendant {long}, sans geste ni fenêtre qui se dessine. Signal : plus d’une image par seconde au repos pendant 1 min.",
-                number(s.value, 0, lang)
-            ),
+        SignalKind::Wakeups => (
+            w::wakeups(lang, &span),
+            w::wakeups_line(lang, &long, number(s.value, 1, lang)),
         ),
-        (SignalKind::FramesAtRest, Lang::English) => (
-            format!("{span}: frames with nothing moving"),
-            format!(
-                "{} frames a second for {long}, untouched, no window drawing. Signal: more than one frame a second at rest for 1 min.",
-                number(s.value, 0, lang)
-            ),
-        ),
-        (SignalKind::Wakeups, Lang::French) => (
-            format!("{span} : la boucle réveillée au repos"),
-            format!(
-                "{} réveils par seconde pendant {long}, sans geste. Signal : plus de 5 réveils par seconde en moyenne sur 10 min sans geste.",
-                number(s.value, 1, lang)
-            ),
-        ),
-        (SignalKind::Wakeups, Lang::English) => (
-            format!("{span}: the loop woken at rest"),
-            format!(
-                "{} wakeups a second for {long}, untouched. Signal: more than 5 wakeups a second on average over 10 min with no input.",
-                number(s.value, 1, lang)
-            ),
-        ),
-        (SignalKind::MemoryGrowing, lang) => {
+        SignalKind::MemoryGrowing => {
             let whose = who(s.who.unwrap_or(Who::Shell), lang);
             let [a, b] = s.kb.unwrap_or_default();
-            match lang {
-                Lang::French => (
-                    format!("La mémoire du {whose} ne fait que monter"),
-                    format!(
-                        "{} → {}, +{} Mo par heure depuis {}, sans jamais redescendre. Signal : une hausse continue sur plus de 3 heures.",
-                        (f64::from(a) / 1024.0).round(),
-                        megabytes(b, lang),
-                        number(s.value, 1, lang),
-                        clock(s.from, tz)
-                    ),
+            (
+                w::memory(lang, whose),
+                w::memory_line(
+                    lang,
+                    megabytes(b, lang),
+                    number(s.value, 1, lang),
+                    clock(s.from, tz),
+                    (f64::from(a) / 1024.0).round(),
                 ),
-                Lang::English => (
-                    format!("The {whose}'s memory only grows"),
-                    format!(
-                        "{} → {}, +{} MB an hour since {}, never coming back down. Signal: a steady rise over more than 3 hours.",
-                        (f64::from(a) / 1024.0).round(),
-                        megabytes(b, lang),
-                        number(s.value, 1, lang),
-                        clock(s.from, tz)
-                    ),
-                ),
-            }
+            )
         }
-        (SignalKind::SlowMoment, Lang::French) => (
-            format!("{span} : un moment lent"),
-            format!(
-                "Un tour de la boucle ou une image de {} ms. Signal : une image de plus de 50 ms, ou un tour de boucle de plus de 16 ms.",
-                number(s.value, 0, lang)
-            ),
-        ),
-        (SignalKind::SlowMoment, Lang::English) => (
-            format!("{span}: a slow moment"),
-            format!(
-                "A turn of the loop or a frame of {} ms. Signal: a frame over 50 ms, or a loop turn over 16 ms.",
-                number(s.value, 0, lang)
-            ),
+        SignalKind::SlowMoment => (
+            w::slow_moment(lang, &span),
+            w::slow_moment_line(lang, number(s.value, 0, lang)),
         ),
     }
 }
 
 /// A signal's notification, as it begins.
 pub fn notification(s: &Signal, lang: Lang, tz: &TimeZone) -> String {
+    use words::notification as w;
     let at = clock(s.from, tz);
-    match (s.kind, lang) {
-        (SignalKind::SustainedCpu, Lang::French) => format!(
-            "Le bureau a pris {} d’un cœur pendant plus de 5 minutes (depuis {at}).",
-            percent(s.value, lang)
-        ),
-        (SignalKind::SustainedCpu, Lang::English) => format!(
-            "The desktop took {} of a core for more than 5 minutes (since {at}).",
-            percent(s.value, lang)
-        ),
-        (SignalKind::FramesAtRest, Lang::French) => format!(
-            "Le bureau a dessiné {} images par seconde sans rien qui bouge (depuis {at}).",
-            number(s.value, 0, lang)
-        ),
-        (SignalKind::FramesAtRest, Lang::English) => format!(
-            "The desktop drew {} frames a second with nothing moving (since {at}).",
-            number(s.value, 0, lang)
-        ),
-        (SignalKind::Wakeups, Lang::French) => format!(
-            "Le bureau s’est réveillé {} fois par seconde sans geste pendant 10 minutes.",
-            number(s.value, 1, lang)
-        ),
-        (SignalKind::Wakeups, Lang::English) => format!(
-            "The desktop woke {} times a second, untouched, for 10 minutes.",
-            number(s.value, 1, lang)
-        ),
-        (SignalKind::MemoryGrowing, Lang::French) => format!(
-            "La mémoire du {} monte depuis {at} : +{} Mo par heure.",
+    match s.kind {
+        SignalKind::SustainedCpu => w::sustained_cpu(lang, &at, percent(s.value, lang)),
+        SignalKind::FramesAtRest => w::frames_at_rest(lang, &at, number(s.value, 0, lang)),
+        SignalKind::Wakeups => w::wakeups(lang, number(s.value, 1, lang)),
+        SignalKind::MemoryGrowing => w::memory(
+            lang,
+            &at,
+            number(s.value, 1, lang),
             who(s.who.unwrap_or(Who::Shell), lang),
-            number(s.value, 1, lang)
         ),
-        (SignalKind::MemoryGrowing, Lang::English) => format!(
-            "The {}'s memory has been growing since {at}: +{} MB an hour.",
-            who(s.who.unwrap_or(Who::Shell), lang),
-            number(s.value, 1, lang)
-        ),
-        (SignalKind::SlowMoment, Lang::French) => format!(
-            "Un moment lent du bureau à {at} : {} ms.",
-            number(s.value, 0, lang)
-        ),
-        (SignalKind::SlowMoment, Lang::English) => format!(
-            "A slow moment of the desktop at {at}: {} ms.",
-            number(s.value, 0, lang)
-        ),
+        SignalKind::SlowMoment => w::slow_moment(lang, &at, number(s.value, 0, lang)),
     }
 }
 
@@ -467,10 +280,7 @@ pub fn heading(r: &Report, day: Date, lang: Lang, tz: &TimeZone) -> String {
             duration(to - from)
         ));
         if r.locked_s > 0 {
-            line.push_str(&match lang {
-                Lang::French => format!(", dont {} verrouillé", duration(r.locked_s as i64)),
-                Lang::English => format!(", {} of it locked", duration(r.locked_s as i64)),
-            });
+            line.push_str(&words::locked(lang, duration(r.locked_s as i64)));
         }
         line.push(')');
     }
@@ -479,67 +289,57 @@ pub fn heading(r: &Report, day: Date, lang: Lang, tz: &TimeZone) -> String {
 
 /// The day's totals, a line each: what the page's tiles say.
 pub fn totals(r: &Report, lang: Lang, tz: &TimeZone) -> Vec<(String, String)> {
+    use words::totals as w;
     let mut lines = Vec::new();
     lines.push((
         "CPU".to_owned(),
-        match lang {
-            Lang::French => format!(
-                "{} d’un cœur en moyenne · compositeur {} · shell {}",
-                percent(r.cpu.average_percent, lang),
-                cpu_time(r.cpu.compositor_ms),
-                cpu_time(r.cpu.shell_ms)
-            ),
-            Lang::English => format!(
-                "{} of a core on average · compositor {} · shell {}",
-                percent(r.cpu.average_percent, lang),
-                cpu_time(r.cpu.compositor_ms),
-                cpu_time(r.cpu.shell_ms)
-            ),
-        },
+        w::cpu(
+            lang,
+            cpu_time(r.cpu.compositor_ms),
+            percent(r.cpu.average_percent, lang),
+            cpu_time(r.cpu.shell_ms),
+        ),
     ));
     let sum = |kb: [u32; 2]| kb[0] + kb[1];
     lines.push((
-        lang.pick("Mémoire", "Memory").to_owned(),
+        w::MEMORY.get(lang).to_owned(),
         format!(
             "{} → {} · {} {} {} {}",
             (f64::from(sum(r.memory.start_kb)) / 1024.0).round(),
             megabytes(sum(r.memory.end_kb), lang),
-            lang.pick("pic", "peak"),
+            w::PEAK.get(lang),
             megabytes(r.memory.peak_kb, lang),
-            lang.pick("à", "at"),
+            w::AT.get(lang),
             clock(r.memory.peak_at, tz)
         ),
     ));
     lines.push((
-        lang.pick("Images", "Frames").to_owned(),
+        w::FRAMES.get(lang).to_owned(),
         format!(
             "{} · {} {}/s",
             count(r.drawing.frames, lang),
-            lang.pick("réveils au repos", "wakeups at rest"),
+            w::WAKEUPS_AT_REST.get(lang),
             number(r.drawing.rest_wakeups_per_s, 1, lang)
         ),
     ));
     if r.drawing.motion_frames > 0 || r.moving_wallpaper_s > 0 {
-        let mut said = match lang {
-            Lang::French => format!("{} images animées", count(r.drawing.motion_frames, lang)),
-            Lang::English => format!("{} frames in motion", count(r.drawing.motion_frames, lang)),
-        };
+        let mut said = w::motion_frames(lang, count(r.drawing.motion_frames, lang));
         if r.moving_wallpaper_s > 0 {
             said.push_str(&format!(
                 " · {} {}",
-                lang.pick("fond animé", "moving wallpaper"),
+                w::MOVING_WALLPAPER.get(lang),
                 duration(r.moving_wallpaper_s as i64)
             ));
         }
-        lines.push((lang.pick("Mouvements", "Motion").to_owned(), said));
+        lines.push((w::MOTION.get(lang).to_owned(), said));
     }
     if let Some(power) = &r.power {
         lines.push((
-            lang.pick("Batterie", "Battery").to_owned(),
+            w::BATTERY.get(lang).to_owned(),
             format!(
                 "{} W {} {}",
                 number(f64::from(power.average_mw) / 1000.0, 1, lang),
-                lang.pick("en moyenne sur", "on average over"),
+                w::ON_AVERAGE_OVER.get(lang),
                 duration(power.on_battery_s as i64)
             ),
         ));
@@ -552,10 +352,7 @@ pub fn day(r: &Report, on: Date, lang: Lang, tz: &TimeZone) -> String {
     let mut out = heading(r, on, lang, tz);
     out.push('\n');
     if r.from.is_none() {
-        out.push_str(lang.pick(
-            "Rien d’enregistré ce jour-là.\n",
-            "Nothing recorded that day.\n",
-        ));
+        out.push_str(words::NOTHING_RECORDED.get(lang));
         return out;
     }
     let lines = totals(r, lang, tz);
@@ -569,9 +366,9 @@ pub fn day(r: &Report, on: Date, lang: Lang, tz: &TimeZone) -> String {
         out.push_str(&format!("{key:width$}{said}\n"));
     }
     out.push('\n');
-    out.push_str(lang.pick("Pics\n", "Peaks\n"));
+    out.push_str(words::PEAKS.get(lang));
     if r.peaks.is_empty() {
-        out.push_str(lang.pick("  aucun\n", "  none\n"));
+        out.push_str(words::NONE.get(lang));
     }
     for p in &r.peaks {
         let (what, _) = peak(p, lang);
@@ -584,9 +381,9 @@ pub fn day(r: &Report, on: Date, lang: Lang, tz: &TimeZone) -> String {
         ));
     }
     out.push('\n');
-    out.push_str(lang.pick("Signaux\n", "Signals\n"));
+    out.push_str(words::SIGNALS.get(lang));
     if r.signals.is_empty() {
-        out.push_str(lang.pick("  aucun\n", "  none\n"));
+        out.push_str(words::NONE.get(lang));
     }
     for s in &r.signals {
         let (title, line) = signal(s, lang, tz);
@@ -601,7 +398,7 @@ pub fn signal_report(r: &Report, s: &Signal, on: Date, lang: Lang, tz: &TimeZone
     format!(
         "Hocuspanda {} {}\n{title}\n{line}\n\n{}",
         env!("CARGO_PKG_VERSION"),
-        lang.pick("— performances", "— performance"),
+        words::REPORT.get(lang),
         day(r, on, lang, tz)
     )
 }
@@ -662,5 +459,153 @@ Signaux
             notification(&r.signals[0], Lang::English, &tz),
             "The desktop drew 9 frames a second with nothing moving (since 08:00)."
         );
+    }
+
+    /// Everything this module says, in every language, against what it
+    /// said before its words moved to the catalogue (#775): byte for
+    /// byte. `HOCUS_WORDS_BLESS=1` writes the file again.
+    #[test]
+    fn the_words_are_those_said_before_the_catalogue() {
+        let tz = TimeZone::UTC;
+        let kinds = [
+            EventKind::WindowOpened,
+            EventKind::WindowClosed,
+            EventKind::ScreenPlugged,
+            EventKind::ScreenUnplugged,
+            EventKind::Locked,
+            EventKind::Unlocked,
+            EventKind::Suspend,
+            EventKind::Resume,
+            EventKind::SettingsPage,
+            EventKind::Config,
+            EventKind::OnBattery,
+            EventKind::OnAc,
+            EventKind::WallpaperMoving,
+            EventKind::WallpaperStill,
+            EventKind::Other,
+        ];
+        let event = |kind| Event {
+            t: 27_000,
+            kind,
+            what: "{what}".to_owned(),
+        };
+        let base = Peak {
+            n: 1,
+            from: 27_000,
+            to: 27_100,
+            cpu_percent: 12.5,
+            cpu_ms: 1_000,
+            signal: None,
+            events: Vec::new(),
+            wallpaper: false,
+            frames: 600,
+            inputs: 0,
+            motion_frames: 0,
+            app_commits: 0,
+        };
+        let mut peaks = vec![
+            Peak {
+                signal: Some(SignalKind::FramesAtRest),
+                ..base.clone()
+            },
+            Peak {
+                wallpaper: true,
+                inputs: 3,
+                ..base.clone()
+            },
+            Peak {
+                events: vec![event(EventKind::WindowOpened); 3],
+                ..base.clone()
+            },
+            Peak {
+                events: vec![event(EventKind::WindowOpened), event(EventKind::Config)],
+                ..base.clone()
+            },
+            Peak {
+                inputs: 1,
+                ..base.clone()
+            },
+            Peak {
+                app_commits: 1,
+                ..base.clone()
+            },
+            Peak {
+                motion_frames: 1,
+                ..base.clone()
+            },
+            base.clone(),
+        ];
+        for kind in [EventKind::ScreenPlugged, EventKind::Resume] {
+            peaks.push(Peak {
+                events: vec![event(kind)],
+                ..base.clone()
+            });
+        }
+        for kind in SignalKind::ALL {
+            peaks.push(Peak {
+                signal: Some(kind),
+                ..base.clone()
+            });
+        }
+        let signals: Vec<Signal> = SignalKind::ALL
+            .into_iter()
+            .map(|kind| Signal {
+                kind,
+                from: 27_000,
+                to: 27_400,
+                value: 42.25,
+                who: Some(Who::Compositor),
+                kb: Some([200_000, 300_000]),
+            })
+            .collect();
+        let full = Report {
+            from: Some(26_000),
+            to: Some(30_000),
+            recorded_s: 4_000,
+            locked_s: 600,
+            moving_wallpaper_s: 90,
+            power: Some(crate::report::Power {
+                average_mw: 6_500,
+                on_battery_s: 3_600,
+            }),
+            drawing: crate::report::Drawing {
+                frames: 52_000,
+                motion_frames: 1_200,
+                rest_wakeups_per_s: 0.4,
+                ..Default::default()
+            },
+            peaks: peaks.clone(),
+            signals: signals.clone(),
+            ..Default::default()
+        };
+        let mut said = String::new();
+        for lang in Lang::ALL {
+            said.push_str(&format!("# {lang:?}\n"));
+            said.push_str(&format!("{}\n", megabytes(300_000, lang)));
+            said.push_str(&format!("{}\n", date(on(), lang)));
+            for who in Who::ALL {
+                said.push_str(&format!("{}\n", self::who(who, lang)));
+            }
+            for kind in kinds {
+                said.push_str(&format!("{}\n", self::event(&event(kind), lang)));
+            }
+            for p in &peaks {
+                let (what, why) = peak(p, lang);
+                said.push_str(&format!("{what} | {why}\n"));
+            }
+            for s in &signals {
+                let (title, line) = signal(s, lang, &tz);
+                said.push_str(&format!("{title} | {line}\n"));
+                said.push_str(&format!("{}\n", notification(s, lang, &tz)));
+            }
+            said.push_str(&day(&Report::default(), on(), lang, &tz));
+            said.push_str(&signal_report(&full, &signals[0], on(), lang, &tz));
+        }
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/words-before.txt");
+        if std::env::var_os("HOCUS_WORDS_BLESS").is_some() {
+            std::fs::write(path, &said).unwrap();
+        }
+        let before = std::fs::read_to_string(path).unwrap();
+        assert_eq!(said, before);
     }
 }

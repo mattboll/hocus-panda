@@ -10,6 +10,8 @@
 //! (`clipboard-clear`). Turned off, the history is erased by the shell once
 //! the toast is gone: "Annuler" within it brings everything back.
 
+use crate::lang::French as _;
+use hocus_words::settings::app_captures_page as words;
 use std::time::{Duration, Instant};
 
 use iced::{
@@ -25,7 +27,7 @@ use super::{
 };
 use crate::{
     captures::{self as model, Folder, Writable},
-    lang::{Lang, w},
+    lang::{Lang, pair, w},
     model::{Icon, SectionId, Setting, Value},
     screens::Said,
     store::Slot,
@@ -368,7 +370,7 @@ impl App {
     /// warns.
     pub(super) fn captures_line(&self, id: &str) -> Option<(String, bool)> {
         let lang = self.lang;
-        let said = |fr: &'static str, en: &'static str| w(fr, en).get(lang).to_owned();
+        let said = |fr: &'static str, en: &'static str| pair(fr, en).get(lang).to_owned();
         Some(match id {
             model::CAPTURE_FORMAT => match self.captures_word(id) {
                 Some("jpeg") => (
@@ -450,23 +452,16 @@ impl App {
 
     /// "Nouveau" (10.5/700, `#8FB3FF` on its 16 %, radius 5).
     pub(super) fn new_chip<'a>(&self) -> El<'a> {
-        container(
-            t(
-                w("Nouveau", "New").get(self.lang).to_owned(),
-                10.5,
-                BLUE.get(),
-            )
-            .font(BOLD),
-        )
-        .padding([1, 6])
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(crate::theme::ink(rgba(
-                143, 179, 255, 0.16,
-            )))),
-            border: border(5.0, 0.0, Color::TRANSPARENT),
-            ..container::Style::default()
-        })
-        .into()
+        container(t(w(words::NEW).get(self.lang).to_owned(), 10.5, BLUE.get()).font(BOLD))
+            .padding([1, 6])
+            .style(|_: &Theme| container::Style {
+                background: Some(Background::Color(crate::theme::ink(rgba(
+                    143, 179, 255, 0.16,
+                )))),
+                border: border(5.0, 0.0, Color::TRANSPARENT),
+                ..container::Style::default()
+            })
+            .into()
     }
 
     /// Under the passwords' row: the applications left out.
@@ -501,18 +496,11 @@ impl App {
             row![
                 icon(Icon::Keyboard, 15.0, FAINT.get()),
                 t(
-                    w(
-                        "Impr, Super+Maj+R et Super+V se changent dans",
-                        "Print, Super+Shift+R and Super+V are changed in",
-                    )
-                    .get(lang),
+                    w(words::PRINT_SUPER_SHIFT_R_AND_SUPER).get(lang),
                     13.0,
                     FAINT.get()
                 ),
-                self.captures_link(
-                    model::SHORTCUTS,
-                    w("Clavier et raccourcis ›", "Keyboard and shortcuts ›").get(lang),
-                ),
+                self.captures_link(model::SHORTCUTS, w(words::KEYBOARD_AND_SHORTCUTS).get(lang),),
             ]
             .spacing(6)
             .align_y(Alignment::Center)
@@ -545,9 +533,7 @@ impl App {
         page = page.push(group(
             head(
                 model::CAPTURES.label.get(lang),
-                w("Copiées et enregistrées", "Copied and saved")
-                    .get(lang)
-                    .to_owned(),
+                w(words::COPIED_AND_SAVED).get(lang).to_owned(),
             ),
             vec![
                 self.folder_row(Folder::Captures),
@@ -558,12 +544,9 @@ impl App {
         page = page.push(group(
             head(
                 model::RECORDING.label.get(lang),
-                w(
-                    "Le son et le micro se choisissent à chaque fois",
-                    "Sound and microphone are chosen each time",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::SOUND_AND_MICROPHONE_ARE_CHOSEN_EACH)
+                    .get(lang)
+                    .to_owned(),
             ),
             vec![
                 self.folder_row(Folder::Recordings),
@@ -585,15 +568,9 @@ impl App {
             ],
         );
         let foot = if self.key_in_a_file() {
-            w(
-                "Gardé chiffré sur cet ordinateur ; sa clé est dans un fichier lisible par toi seul.",
-                "Kept encrypted on this computer; its key is in a file only you can read.",
-            )
+            w(words::KEPT_ENCRYPTED_ON_THIS_COMPUTER_ITS)
         } else {
-            w(
-                "Gardé chiffré sur cet ordinateur ; sa clé est dans le trousseau de ta session.",
-                "Kept encrypted on this computer; its key is in your session's keyring.",
-            )
+            w(words::KEPT_ENCRYPTED_ON_THIS_COMPUTER_ITS_2)
         };
         page = page.push(
             column![
@@ -664,21 +641,13 @@ impl App {
                 folder.unwritable(state == Writable::Gone, &model::shown(&used), lang),
                 true,
             ),
-            None if folder == Folder::Recordings && self.captures.recording => (
-                w("Pour le prochain enregistrement", "For the next recording")
-                    .get(lang)
-                    .to_owned(),
-                false,
-            ),
+            None if folder == Folder::Recordings && self.captures.recording => {
+                (w(words::FOR_THE_NEXT_RECORDING).get(lang).to_owned(), false)
+            }
             None => (folder.sample((&day, &time), extension, lang), false),
         };
         let words = column![
-            t(
-                w("Dossier", "Folder").get(lang).to_owned(),
-                14.0,
-                TEXT.get()
-            )
-            .font(SEMIBOLD),
+            t(w(words::FOLDER).get(lang).to_owned(), 14.0, TEXT.get()).font(SEMIBOLD),
             t(line, 12.5, if warn { PEACH.get() } else { DIM.get() }),
         ]
         .spacing(2)
@@ -708,16 +677,9 @@ impl App {
         .id(format!("{}:open", folder.word()));
         let change_focused = self.captures_focused(&Stop::Change(folder));
         let mut change = button(
-            container(
-                t(
-                    w("Changer…", "Change…").get(lang).to_owned(),
-                    13.0,
-                    TEXT.get(),
-                )
-                .font(SEMIBOLD),
-            )
-            .height(Length::Fill)
-            .center_y(Length::Fill),
+            container(t(w(words::CHANGE).get(lang).to_owned(), 13.0, TEXT.get()).font(SEMIBOLD))
+                .height(Length::Fill)
+                .center_y(Length::Fill),
         )
         .height(32)
         .padding([0, 12])
@@ -805,7 +767,7 @@ impl App {
         let mut add = button(
             container(
                 t(
-                    w("+ Ajouter", "+ Add").get(lang).to_owned(),
+                    w(words::ADD).get(lang).to_owned(),
                     12.5,
                     fade(MINT.get(), alpha),
                 )
@@ -844,18 +806,13 @@ impl App {
                 (Lang::English, p) => format!("{n}, but the {p} pinned."),
             }
         } else {
-            w(
-                "Tout sauf les épinglés, sur cet ordinateur.",
-                "Everything but the pinned items, on this computer.",
-            )
-            .get(lang)
-            .to_owned()
+            w(words::EVERYTHING_BUT_THE_PINNED_ITEMS_ON)
+                .get(lang)
+                .to_owned()
         };
         let words = column![
             t(
-                w("Effacer l’historique", "Clear the history")
-                    .get(lang)
-                    .to_owned(),
+                w(words::CLEAR_THE_HISTORY).get(lang).to_owned(),
                 14.0,
                 fade(TEXT.get(), alpha)
             )
@@ -938,7 +895,7 @@ impl App {
             });
             row![
                 plain(
-                    w("Garder", "Keep").get(lang).to_owned(),
+                    w(words::KEEP).get(lang).to_owned(),
                     Stop::Keep,
                     Msg::Keep,
                     true
@@ -949,7 +906,7 @@ impl App {
             .into()
         } else {
             plain(
-                w("Effacer…", "Clear…").get(lang).to_owned(),
+                w(words::CLEAR).get(lang).to_owned(),
                 Stop::Clear,
                 Msg::Clear,
                 false,
@@ -1023,11 +980,7 @@ impl App {
         if choices.is_empty() {
             list = list.push(
                 container(t(
-                    w(
-                        "Aucune autre application installée.",
-                        "No other application installed.",
-                    )
-                    .get(self.lang),
+                    w(words::NO_OTHER_APPLICATION_INSTALLED).get(self.lang),
                     13.0,
                     FAINT.get(),
                 ))

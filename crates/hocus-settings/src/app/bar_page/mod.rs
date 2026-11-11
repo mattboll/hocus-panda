@@ -11,6 +11,7 @@
 
 mod preview;
 
+use hocus_words::settings::app_bar_page as words;
 use preview::*;
 
 use std::time::{Duration, Instant};
@@ -564,9 +565,7 @@ impl App {
                     .find(|(hex, _)| *hex == colour)
                     .map(|(_, name)| name.get(lang));
                 Some(match name {
-                    Some(_) => w("Les heures et les minutes.", "The hours and minutes.")
-                        .get(lang)
-                        .to_owned(),
+                    Some(_) => w(words::THE_HOURS_AND_MINUTES).get(lang).to_owned(),
                     None => match lang {
                         Lang::French => format!(
                             "Une couleur du fichier, {} ; elle reste jusqu’à ce qu’une autre soit choisie.",
@@ -605,7 +604,7 @@ impl App {
         }
         Some(format!(
             "{} · {}",
-            w("Personnalisée", "Custom").get(self.lang),
+            w(words::CUSTOM).get(self.lang),
             hex.to_uppercase()
         ))
     }
@@ -615,17 +614,11 @@ impl App {
     pub(super) fn bar_row_extra(&self, setting: &Setting, ink: f32) -> Option<El<'_>> {
         let lang = self.lang;
         match setting.id {
-            model::SCREENS => Some(
-                self.bar_link(
-                    crate::screens::PRIMARY,
-                    w(
-                        "L’écran principal se choisit dans Écrans ›",
-                        "The primary screen is chosen in Screens ›",
-                    )
-                    .get(lang),
-                    ink,
-                ),
-            ),
+            model::SCREENS => Some(self.bar_link(
+                crate::screens::PRIMARY,
+                w(words::THE_PRIMARY_SCREEN_IS_CHOSEN_IN).get(lang),
+                ink,
+            )),
             model::MEETING | model::TODAY | model::TASKS => {
                 let file = self.bar_file();
                 let none = if setting.id == model::TASKS {
@@ -639,19 +632,11 @@ impl App {
                 Some(
                     row![
                         t(
-                            w(
-                                "Rien à montrer : aucun agenda ni tableau de tâches branché.",
-                                "Nothing to show: no calendar or task board connected.",
-                            )
-                            .get(lang),
+                            w(words::NOTHING_TO_SHOW_NO_CALENDAR_OR).get(lang),
                             12.5,
                             fade(PEACH.get(), ink),
                         ),
-                        self.bar_link(
-                            "agenda",
-                            w("Agenda et tâches ›", "Calendar and tasks ›").get(lang),
-                            ink
-                        ),
+                        self.bar_link("agenda", w(words::CALENDAR_AND_TASKS).get(lang), ink),
                     ]
                     .spacing(4)
                     .align_y(Alignment::Center)
@@ -670,23 +655,16 @@ impl App {
             return None;
         }
         Some(
-            container(
-                t(
-                    w("Nouveau", "New").get(self.lang).to_owned(),
-                    10.5,
-                    BLUE.get(),
-                )
-                .font(BOLD),
-            )
-            .padding([1, 6])
-            .style(|_: &Theme| container::Style {
-                background: Some(Background::Color(crate::theme::ink(rgba(
-                    143, 179, 255, 0.16,
-                )))),
-                border: border(5.0, 0.0, Color::TRANSPARENT),
-                ..container::Style::default()
-            })
-            .into(),
+            container(t(w(words::NEW).get(self.lang).to_owned(), 10.5, BLUE.get()).font(BOLD))
+                .padding([1, 6])
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(crate::theme::ink(rgba(
+                        143, 179, 255, 0.16,
+                    )))),
+                    border: border(5.0, 0.0, Color::TRANSPARENT),
+                    ..container::Style::default()
+                })
+                .into(),
         )
     }
 
@@ -766,17 +744,13 @@ impl App {
             row![
                 icon(Icon::Accessibility, 14.0, FAINT.get()),
                 t(
-                    w(
-                        "La transparence de la barre et les mouvements réduits se règlent dans",
-                        "The bar’s transparency and reduced motion are set in",
-                    )
-                    .get(lang),
+                    w(words::THE_BAR_S_TRANSPARENCY_AND_REDUCED).get(lang),
                     13.0,
                     FAINT.get()
                 ),
                 self.bar_link(
                     "appearance.reduce-transparency",
-                    w("Accessibilité ›", "Accessibility ›").get(lang),
+                    w(words::ACCESSIBILITY).get(lang),
                     1.0
                 ),
             ]
@@ -824,27 +798,17 @@ impl App {
         rows = rows.push(group(
             head(
                 model::FORM.label.get(lang),
-                Some(
-                    w("Pleine 196 px · mini 56 px", "Full 196 px · mini 56 px")
-                        .get(lang)
-                        .to_owned(),
-                ),
+                Some(w(words::FULL_196_PX_MINI_56_PX).get(lang).to_owned()),
             ),
             forms,
         ));
         // CE QU'ELLE MONTRE, in the bar's order.
         let mut shows: Vec<El<'_>> = vec![
-            self.always_row(w("L’horloge et la date", "The clock and the date"), None),
+            self.always_row(w(words::THE_CLOCK_AND_THE_DATE), None),
             model_row(model::MEETING),
             self.always_row(
-                w(
-                    "Micro, caméra ou écran en cours",
-                    "Microphone, camera or screen in use",
-                ),
-                Some(w(
-                    "Le signe de ce qui t’écoute, te filme ou partage l’écran ne se masque pas.",
-                    "The sign of what listens, films or shares the screen is never hidden.",
-                )),
+                w(words::MICROPHONE_CAMERA_OR_SCREEN_IN_USE),
+                Some(w(words::THE_SIGN_OF_WHAT_LISTENS_FILMS)),
             ),
         ];
         for (i, g) in self.bar_file().order().into_iter().enumerate() {
@@ -856,24 +820,11 @@ impl App {
             });
         }
         shows.push(model_row(model::WINDOWS));
-        shows.push(self.always_row(
-            w(
-                "Bureaux, connexions, niveaux, boutons du bas",
-                "Desktops, connections, levels, bottom buttons",
-            ),
-            None,
-        ));
+        shows.push(self.always_row(w(words::DESKTOPS_CONNECTIONS_LEVELS_BOTTOM_BUTTONS), None));
         rows = rows.push(group(
             head(
                 model::SHOWS.label.get(lang),
-                Some(
-                    w(
-                        "Un groupe vide ne prend pas de place",
-                        "An empty group takes no room",
-                    )
-                    .get(lang)
-                    .to_owned(),
-                ),
+                Some(w(words::AN_EMPTY_GROUP_TAKES_NO_ROOM).get(lang).to_owned()),
             ),
             shows,
         ));
@@ -910,11 +861,7 @@ impl App {
         container(
             row![
                 words,
-                t(
-                    w("Toujours", "Always").get(lang).to_owned(),
-                    13.0,
-                    FAINT.get()
-                ),
+                t(w(words::ALWAYS).get(lang).to_owned(), 13.0, FAINT.get()),
             ]
             .spacing(16)
             .align_y(Alignment::Center),
@@ -934,12 +881,9 @@ impl App {
     fn form_line(&self, r: &FormRow) -> String {
         let lang = self.lang;
         if !r.plugged {
-            return w(
-                "Débranché ; sa forme est gardée pour son retour.",
-                "Unplugged; its form is kept for its return.",
-            )
-            .get(lang)
-            .to_owned();
+            return w(words::UNPLUGGED_ITS_FORM_IS_KEPT_FOR)
+                .get(lang)
+                .to_owned();
         }
         let mut line = match (r.asked, r.chosen, lang) {
             ("auto", Some(c), Lang::French) => {
@@ -982,13 +926,7 @@ impl App {
             self.bar_slot(model::SCREENS).and_then(|s| self.value(s)) == Some(Value::Word("all"));
         if r.bar.is_none() && !screens_all {
             line.push(' ');
-            line.push_str(
-                w(
-                    "La barre n’y vient que si l’écran principal s’éteint.",
-                    "The bar only comes here if the primary screen goes off.",
-                )
-                .get(lang),
-            );
+            line.push_str(w(words::THE_BAR_ONLY_COMES_HERE_IF).get(lang));
         }
         line
     }
@@ -1005,12 +943,7 @@ impl App {
             let focused = self.bar_focused(&Stop::Auto(r.name.clone()));
             let mut back = button(
                 t(
-                    w(
-                        "Revenir à la forme de sa largeur",
-                        "Back to the form of its width",
-                    )
-                    .get(lang)
-                    .to_owned(),
+                    w(words::BACK_TO_THE_FORM_OF_ITS).get(lang).to_owned(),
                     12.5,
                     MINT.get(),
                 )
@@ -1032,9 +965,9 @@ impl App {
         }
         let focused = self.bar_focused(&Stop::Form(r.name.clone()));
         let choices = [
-            ("auto", w("Auto", "Auto")),
-            ("full", w("Pleine", "Full")),
-            ("mini", w("Mini", "Mini")),
+            ("auto", w(words::AUTO)),
+            ("full", w(words::FULL)),
+            ("mini", w(words::MINI)),
         ];
         let mut segments = row![];
         for (word, said) in choices {
@@ -1112,7 +1045,7 @@ impl App {
             _ => vec!["Super+Shift+B".to_owned()],
         };
         let said = if chords.is_empty() {
-            w("aucun", "none").get(lang).to_owned()
+            w(words::NONE).get(lang).to_owned()
         } else {
             chords
                 .iter()
@@ -1122,28 +1055,21 @@ impl App {
         };
         let words = column![
             t(
-                w("Changer de forme à la main", "Change form by hand").get(lang).to_owned(),
+                w(words::CHANGE_FORM_BY_HAND).get(lang).to_owned(),
                 14.0,
                 TEXT.get()
             )
             .font(SEMIBOLD),
             t(
-                w(
-                    "Un clic sur le bord extérieur de la barre, ou SHORTCUT. En automatique, l’écran retient ton choix.",
-                    "A click on the bar’s outer edge, or SHORTCUT. In automatic, the screen remembers your choice.",
-                )
-                .get(lang)
-                .replace("SHORTCUT", &said),
+                w(words::A_CLICK_ON_THE_BAR_S)
+                    .get(lang)
+                    .replace("SHORTCUT", &said),
                 12.5,
                 DIM.get()
             ),
             self.bar_link(
                 "shortcuts.toggle-bar",
-                w(
-                    "Changer le raccourci dans Clavier et raccourcis ›",
-                    "Change the shortcut in Keyboard and shortcuts ›",
-                )
-                .get(lang),
+                w(words::CHANGE_THE_SHORTCUT_IN_KEYBOARD_AND).get(lang),
                 1.0
             ),
         ]
@@ -1272,7 +1198,7 @@ impl App {
             (t < PLAY && !self.reduced_motion).then(|| (word, t.as_secs_f32() / PLAY.as_secs_f32()))
         });
         Preview {
-            label: w("APERÇU", "PREVIEW").get(lang).to_owned(),
+            label: w(words::PREVIEW).get(lang).to_owned(),
             caption,
             screens,
             screens_high,
@@ -1294,12 +1220,7 @@ impl App {
             lang,
             left: self.bar_slot(model::SIDE).and_then(|s| self.value(s))
                 == Some(Value::Word("left")),
-            hint: w(
-                "La barre de l’écran du portable, à 55 %. Un clic sur un groupe allume sa ligne.",
-                "The laptop screen’s bar, at 55 %. A click on a group lights its row.",
-            )
-            .get(lang)
-            .to_owned(),
+            hint: w(words::THE_LAPTOP_SCREEN_S_BAR_AT).get(lang).to_owned(),
         }
     }
 

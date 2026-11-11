@@ -35,6 +35,7 @@ mod view;
 mod wallpaper_page;
 mod wheels;
 
+use hocus_words::settings::app as words;
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -576,7 +577,7 @@ impl App {
     }
 
     pub fn title(&self) -> String {
-        w("Réglages", "Settings").get(self.lang).to_owned()
+        w(words::SETTINGS).get(self.lang).to_owned()
     }
 
     fn say(&self, words: Words) -> &'static str {
@@ -976,10 +977,7 @@ impl App {
                 if let Some(id) = id {
                     self.pending.remove(&id);
                 }
-                let text = format!(
-                    "{} {why}",
-                    self.say(w("Rien n’est écrit :", "Nothing is written:"))
-                );
+                let text = format!("{} {why}", self.say(w(words::NOTHING_IS_WRITTEN)));
                 self.toast(text, ToastAction::None, TOAST)
             }
             Heard::Read {
@@ -1019,10 +1017,7 @@ impl App {
                     Why::ByHand(changed) => self.by_hand(&changed, was_broken),
                     Why::Restored => {
                         let text = self
-                            .say(w(
-                                "Dernière version lisible reprise ; l’autre est gardée dans config.toml.broken.",
-                                "The last readable version is back; the other is kept as config.toml.broken.",
-                            ))
+                            .say(w(words::THE_LAST_READABLE_VERSION_IS_BACK))
                             .to_owned();
                         self.toast(text, ToastAction::None, TOAST)
                     }
@@ -1148,15 +1143,9 @@ impl App {
             _ => ToastAction::None,
         };
         let text = if was_broken {
-            w(
-                "config.toml se relit : modifiable à nouveau.",
-                "config.toml reads again: editable again.",
-            )
+            w(words::CONFIG_TOML_READS_AGAIN_EDITABLE_AGAIN)
         } else {
-            w(
-                "config.toml a changé : relu.",
-                "config.toml changed: read again.",
-            )
+            w(words::CONFIG_TOML_CHANGED_READ_AGAIN)
         };
         self.toast(self.say(text).to_owned(), action, TOAST)
     }

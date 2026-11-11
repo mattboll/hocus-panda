@@ -10,6 +10,7 @@
 //! file is written back. Adding one is the count written: the compositor
 //! appends an empty desktop on every screen.
 
+use hocus_words::settings::app_desktops_page as words;
 use std::time::Duration;
 
 use iced::{
@@ -569,28 +570,19 @@ impl App {
         let lang = self.lang;
         match id {
             model::ANIMATION if self.reduced_motion => Some(
-                w(
-                    "Un fondu court tant que Mouvements réduits est activé.",
-                    "A short fade while Reduced motion is on.",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::A_SHORT_FADE_WHILE_REDUCED_MOTION)
+                    .get(lang)
+                    .to_owned(),
             ),
             model::WOBBLE if self.reduced_motion => Some(
-                w(
-                    "Coupées tant que Mouvements réduits est activé.",
-                    "Off while Reduced motion is on.",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::OFF_WHILE_REDUCED_MOTION_IS_ON)
+                    .get(lang)
+                    .to_owned(),
             ),
             model::INK if self.desktops_word(model::MOVE_KEY) == Some("super") => Some(
-                w(
-                    "Super + glisser déplace les fenêtres : l’encre ne se lance plus. Choisis Alt pour la retrouver.",
-                    "Super+drag moves windows: the ink no longer starts. Choose Alt to get it back.",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::SUPER_DRAG_MOVES_WINDOWS_THE_INK)
+                    .get(lang)
+                    .to_owned(),
             ),
             _ => None,
         }
@@ -602,24 +594,17 @@ impl App {
 
     /// Under the wobble's row with reduced motion: the link to it.
     pub(super) fn desktops_row_extra(&self, setting: &Setting) -> Option<El<'_>> {
-        (setting.id == model::WOBBLE && self.reduced_motion).then(|| {
-            self.desktops_link(
-                REDUCED,
-                w("Accessibilité ›", "Accessibility ›").get(self.lang),
-            )
-        })
+        (setting.id == model::WOBBLE && self.reduced_motion)
+            .then(|| self.desktops_link(REDUCED, w(words::ACCESSIBILITY).get(self.lang)))
     }
 
     /// A choice's toast, when it says more than its value: Super to move
     /// says the ink no longer starts.
     pub(super) fn desktops_toast(&self, slot: Slot, value: &Value) -> Option<String> {
         (slot.setting == model::MOVE_KEY && *value == Value::Word("super")).then(|| {
-            w(
-                "Déplacer : Super + glisser · l’encre ne se lance plus",
-                "Move: Super + drag · the ink no longer starts",
-            )
-            .get(self.lang)
-            .to_owned()
+            w(words::MOVE_SUPER_DRAG_THE_INK_NO)
+                .get(self.lang)
+                .to_owned()
         })
     }
 
@@ -656,18 +641,11 @@ impl App {
             row![
                 icon(Icon::Keyboard, 15.0, FAINT.get()),
                 t(
-                    w(
-                        "Les raccourcis des fenêtres et des bureaux se règlent dans",
-                        "The windows’ and desktops’ shortcuts are set in",
-                    )
-                    .get(lang),
+                    w(words::THE_WINDOWS_AND_DESKTOPS_SHORTCUTS_ARE).get(lang),
                     13.0,
                     FAINT.get()
                 ),
-                self.desktops_link(
-                    model::SHORTCUTS,
-                    w("Clavier et raccourcis ›", "Keyboard and shortcuts ›").get(lang),
-                ),
+                self.desktops_link(model::SHORTCUTS, w(words::KEYBOARD_AND_SHORTCUTS).get(lang),),
             ]
             .spacing(6)
             .align_y(Alignment::Center)
@@ -724,15 +702,8 @@ impl App {
         page = page.push(
             column![
                 head(
-                    w("ESSAYER ICI", "TRY IT HERE").get(lang),
-                    Some(
-                        w(
-                            "Ce que tu fais ici n’est pas écrit",
-                            "Nothing done here is written",
-                        )
-                        .get(lang)
-                        .to_owned(),
-                    ),
+                    w(words::TRY_IT_HERE).get(lang),
+                    Some(w(words::NOTHING_DONE_HERE_IS_WRITTEN).get(lang).to_owned(),),
                 ),
                 card_box(self.trial_card()),
             ]
@@ -886,7 +857,7 @@ impl App {
                 row![
                     t("+", 14.0, MINT.get()).font(SEMIBOLD),
                     t(
-                        w("Ajouter un bureau", "Add a desktop").get(lang).to_owned(),
+                        w(words::ADD_A_DESKTOP).get(lang).to_owned(),
                         13.0,
                         DIM.get()
                     )

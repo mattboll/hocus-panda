@@ -24,7 +24,7 @@ use super::{App, Doing, Message, Page, TOAST, ToastAction, UNDONE};
 use crate::{
     account as model,
     accounts::{self, Account, Ask, Asks, Heard},
-    lang::{Lang, w},
+    lang::{Lang, pair},
     model::SectionId,
     passwd::{self, Outcome},
     secret::Secret,
@@ -760,5 +760,5 @@ impl App {
 }
 
 fn w_owned(fr: &'static str, en: &'static str, lang: Lang) -> String {
-    w(fr, en).get(lang).to_owned()
+    pair(fr, en).get(lang).to_owned()
 }

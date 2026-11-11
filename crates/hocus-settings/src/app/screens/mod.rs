@@ -13,7 +13,9 @@
 mod drawing;
 mod view;
 
+use crate::lang::French as _;
 use drawing::*;
+use hocus_words::settings::app_screens as words;
 
 use std::time::{Duration, Instant};
 
@@ -428,7 +430,7 @@ impl App {
             }
             Said::Refused(why) => {
                 self.screens.asked = None;
-                let text = format!("{} {why}", self.say(w("Refusé :", "Refused:")));
+                let text = format!("{} {why}", self.say(w(words::REFUSED)));
                 self.toast(text, ToastAction::None, super::TOAST)
             }
             Said::Gone => {
@@ -875,10 +877,7 @@ impl App {
         }
         if landing == moving.position {
             let text = self
-                .say(w(
-                    "Lâché à sa place : rien ne change.",
-                    "Dropped where it was: nothing changes.",
-                ))
+                .say(w(words::DROPPED_WHERE_IT_WAS_NOTHING_CHANGES))
                 .to_owned();
             return self.toast(text, ToastAction::None, super::UNDONE);
         }
@@ -911,10 +910,7 @@ impl App {
         let said = super::KeysSaid {
             redone: redone_of(&done, lang),
             undone: self
-                .say(w(
-                    "Annulé : les écrans reprennent leur place.",
-                    "Undone: the screens are back in their places.",
-                ))
+                .say(w(words::UNDONE_THE_SCREENS_ARE_BACK_IN))
                 .to_owned(),
             done,
             row: ARRANGE,
@@ -985,10 +981,7 @@ impl App {
         let said = super::KeysSaid {
             redone: redone_of(&done, lang),
             undone: self
-                .say(w(
-                    "Annulé : les écrans reprennent leur place.",
-                    "Undone: the screens are back in their places.",
-                ))
+                .say(w(words::UNDONE_THE_SCREENS_ARE_BACK_IN))
                 .to_owned(),
             done,
             row: ARRANGE,
@@ -1015,8 +1008,7 @@ impl App {
                 .map(|name| {
                     vec![(
                         Choice::Forget(name),
-                        self.say(w("Oublier cet ensemble", "Forget this set"))
-                            .to_owned(),
+                        self.say(w(words::FORGET_THIS_SET)).to_owned(),
                     )]
                 })
                 .unwrap_or_default();
@@ -1059,7 +1051,7 @@ impl App {
                     for s in &known.list {
                         let mut label = s.title(lang);
                         if !s.connected {
-                            label.push_str(self.say(w(" (débranché)", " (unplugged)")));
+                            label.push_str(self.say(w(words::UNPLUGGED)));
                         }
                         list.push((Choice::Primary(Some(s.name.clone())), label));
                     }
@@ -1094,7 +1086,7 @@ impl App {
 
     fn say_primary(&self, name: Option<&str>) -> String {
         match name {
-            None => self.say(w("Automatique", "Automatic")).to_owned(),
+            None => self.say(w(words::AUTOMATIC)).to_owned(),
             Some(name) => self
                 .screens_list()
                 .and_then(|k| k.get(name))
@@ -1382,7 +1374,7 @@ fn divided(divider: bool, row: El<'_>) -> El<'_> {
 /// "Plus tard", amber.
 fn later<'a>(lang: Lang) -> El<'a> {
     container(
-        text(w("Plus tard", "Later").get(lang))
+        text(w(words::LATER).get(lang))
             .size(10.5)
             .font(BOLD)
             .color(AMBER),

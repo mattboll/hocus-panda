@@ -3,6 +3,7 @@
 //! shows them (in French: "Super + Maj + E"), and as recorded from the
 //! keys pressed (6.8).
 
+use crate::lang::French as _;
 use crate::lang::Lang;
 
 /// A chord: its modifiers and its key, the key's XKB name as written.

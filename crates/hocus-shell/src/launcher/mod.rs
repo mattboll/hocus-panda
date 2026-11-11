@@ -43,6 +43,7 @@ pub mod search;
 pub mod toast;
 pub mod view;
 
+use hocus_words::shell::launcher as txt;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, PoisonError},
@@ -81,8 +82,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn lang(self) -> Lang {
@@ -90,31 +95,28 @@ impl Words {
     }
 
     pub fn placeholder(self) -> &'static str {
-        self.pick(
-            "Chercher une application, calculer…",
-            "Search for an application, calculate…",
-        )
+        self.pick(txt::SEARCH_FOR_AN_APPLICATION_CALCULATE)
     }
 
     pub fn escape(self) -> &'static str {
-        self.pick("Échap", "Esc")
+        self.pick(txt::ESC)
     }
 
     pub fn frequent(self) -> &'static str {
-        self.pick("FRÉQUENTES", "FREQUENT")
+        self.pick(txt::FREQUENT)
     }
 
     pub fn all(self) -> &'static str {
-        self.pick("TOUTES LES APPLICATIONS", "ALL APPLICATIONS")
+        self.pick(txt::ALL_APPLICATIONS)
     }
 
     /// What `Enter` does on a card, shown at its right while it is
     /// selected.
     pub fn hint(self, card: Card) -> &'static str {
         match card {
-            Card::Answer => self.pick("Entrée copie", "Enter copies"),
-            Card::Address => self.pick("Entrée ouvre", "Enter opens"),
-            Card::Web => self.pick("Entrée cherche", "Enter searches"),
+            Card::Answer => self.pick(txt::ENTER_COPIES),
+            Card::Address => self.pick(txt::ENTER_OPENS),
+            Card::Web => self.pick(txt::ENTER_SEARCHES),
         }
     }
 
@@ -143,10 +145,7 @@ impl Words {
     }
 
     pub fn web_engine(self) -> &'static str {
-        self.pick(
-            "DuckDuckGo · Ctrl+Entrée depuis n\u{2019}importe où",
-            "DuckDuckGo · Ctrl+Enter from anywhere",
-        )
+        self.pick(txt::DUCKDUCKGO_CTRL_ENTER_FROM_ANYWHERE)
     }
 
     /// The toast once a result is copied.

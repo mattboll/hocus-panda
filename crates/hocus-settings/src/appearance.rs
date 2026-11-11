@@ -9,33 +9,35 @@
 //! speaks the language too, as soon as the file says them: it is the
 //! page's own preview. `text-scale` sizes the Settings window.
 
+use crate::lang::French as _;
+use hocus_words::settings::appearance as words;
 use std::{path::PathBuf, sync::OnceLock};
 
 use hocus_link::theme::{Accent, Scheme};
 
 use crate::{
-    lang::{Lang, w},
+    lang::{Lang, pair, w},
     model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 const THEME: RowGroup = RowGroup {
-    label: w("THÈME ET COULEUR", "THEME AND COLOUR"),
+    label: w(words::THEME_AND_COLOUR),
     per_source: false,
 };
 const TEXT: RowGroup = RowGroup {
-    label: w("TEXTE", "TEXT"),
+    label: w(words::TEXT),
     per_source: false,
 };
 const CURSOR: RowGroup = RowGroup {
-    label: w("CURSEUR", "CURSOR"),
+    label: w(words::CURSOR),
     per_source: false,
 };
 const MOTION: RowGroup = RowGroup {
-    label: w("MOUVEMENT ET LISIBILITÉ", "MOTION AND LEGIBILITY"),
+    label: w(words::MOTION_AND_LEGIBILITY),
     per_source: false,
 };
 const LANGUAGE: RowGroup = RowGroup {
-    label: w("LANGUE ET FORMATS", "LANGUAGE AND FORMATS"),
+    label: w(words::LANGUAGE_AND_FORMATS),
     per_source: false,
 };
 
@@ -58,7 +60,7 @@ pub const CURSOR_SIZES: [i64; 4] = [24, 32, 48, 64];
 
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: pair(fr, en),
         value: Value::Word(word),
     }
 }
@@ -339,7 +341,7 @@ pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
         let mut cursor_themes = vec![Choice {
-            label: w("Celui du système", "The system's"),
+            label: w(words::THE_SYSTEM_S),
             value: Value::Text(String::new()),
         }];
         cursor_themes.extend(
@@ -348,16 +350,16 @@ pub fn settings() -> &'static [Setting] {
                 .into_iter()
                 .flatten()
                 .map(|name| Choice {
-                    label: w(name, name),
+                    label: pair(name, name),
                     value: Value::Text((*name).to_owned()),
                 }),
         );
         let size = |n: i64| Choice {
             label: match n {
-                24 => w("24", "24"),
-                32 => w("32", "32"),
-                48 => w("48", "48"),
-                _ => w("64", "64"),
+                24 => w(words::N_24),
+                32 => w(words::N_32),
+                48 => w(words::N_48),
+                _ => w(words::N_64),
             },
             value: Value::Int(n),
         };
@@ -366,14 +368,31 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.theme",
                 section: SectionId::Appearance,
                 group: THEME,
-                name: w("Thème", "Theme"),
-                line: Some(w(
-                    "La barre, les menus, le lanceur et les Réglages ; les applications le savent aussi. Givre et Matrix gardent les Réglages et les applications sombres.",
-                    "The bar, menus, launcher and Settings; applications are told too. Frost and Matrix keep the Settings and applications dark.",
-                )),
+                name: w(words::THEME),
+                line: Some(w(words::THE_BAR_MENUS_LAUNCHER_AND_SETTINGS)),
                 keywords: (
-                    &["sombre", "clair", "nuit", "mode sombre", "thème", "givre", "glacé", "matrix", "phosphore"],
-                    &["dark", "light", "night", "dark mode", "theme", "frost", "ice", "matrix", "phosphor"],
+                    &[
+                        "sombre",
+                        "clair",
+                        "nuit",
+                        "mode sombre",
+                        "thème",
+                        "givre",
+                        "glacé",
+                        "matrix",
+                        "phosphore",
+                    ],
+                    &[
+                        "dark",
+                        "light",
+                        "night",
+                        "dark mode",
+                        "theme",
+                        "frost",
+                        "ice",
+                        "matrix",
+                        "phosphor",
+                    ],
                 ),
                 kind: Kind::Segmented(vec![
                     word("Sombre", "Dark", "dark"),
@@ -388,14 +407,21 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.accent",
                 section: SectionId::Appearance,
                 group: THEME,
-                name: w("Couleur d’accent", "Accent colour"),
-                line: Some(w(
-                    "Les interrupteurs, la sélection, l’anneau du clavier.",
-                    "Switches, selection, the keyboard’s ring.",
-                )),
+                name: w(words::ACCENT_COLOUR),
+                line: Some(w(words::SWITCHES_SELECTION_THE_KEYBOARD_S_RING)),
                 keywords: (
-                    &["couleur", "teinte", "vert", "bleu", "violet", "rose", "accent"],
-                    &["colour", "color", "hue", "highlight", "green", "blue", "accent"],
+                    &[
+                        "couleur", "teinte", "vert", "bleu", "violet", "rose", "accent",
+                    ],
+                    &[
+                        "colour",
+                        "color",
+                        "hue",
+                        "highlight",
+                        "green",
+                        "blue",
+                        "accent",
+                    ],
                 ),
                 kind: Kind::Swatches,
                 places: one(&["appearance", "accent"], Codec::Word(ACCENTS)),
@@ -405,11 +431,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.text-scale",
                 section: SectionId::Appearance,
                 group: TEXT,
-                name: w("Taille du texte", "Text size"),
-                line: Some(w(
-                    "La fenêtre des Réglages, sans changer l’échelle de l’écran ; la barre garde ses tailles.",
-                    "The Settings window, without changing the screen’s scale; the bar keeps its sizes.",
-                )),
+                name: w(words::TEXT_SIZE),
+                line: Some(w(words::THE_SETTINGS_WINDOW_WITHOUT_CHANGING_THE)),
                 keywords: (
                     &["police", "grand", "petit", "zoom", "agrandir", "taille"],
                     &["font", "big", "small", "zoom", "larger", "text size"],
@@ -420,55 +443,69 @@ pub fn settings() -> &'static [Setting] {
                     step: 10,
                     unit: " %",
                 },
-                places: one(&["appearance", "text-scale"], Codec::Hundredths { min: 80, max: 150 }),
+                places: one(
+                    &["appearance", "text-scale"],
+                    Codec::Hundredths { min: 80, max: 150 },
+                ),
                 needs: None,
             },
             Setting {
                 id: "appearance.cursor-theme",
                 section: SectionId::Appearance,
                 group: CURSOR,
-                name: w("Thème du curseur", "Cursor theme"),
-                line: Some(w(
-                    "Les programmes que le bureau lance prennent le même.",
-                    "Programs the desktop starts take the same.",
-                )),
+                name: w(words::CURSOR_THEME),
+                line: Some(w(words::PROGRAMS_THE_DESKTOP_STARTS_TAKE_THE)),
                 keywords: (
                     &["pointeur", "souris", "flèche", "curseur"],
                     &["pointer", "mouse", "arrow", "cursor"],
                 ),
                 kind: Kind::Menu(cursor_themes),
-                places: Places::One(Place::unset(&["appearance", "cursor-theme"], Codec::Text, Value::Text(String::new()))),
+                places: Places::One(Place::unset(
+                    &["appearance", "cursor-theme"],
+                    Codec::Text,
+                    Value::Text(String::new()),
+                )),
                 needs: None,
             },
             Setting {
                 id: "appearance.cursor-size",
                 section: SectionId::Appearance,
                 group: CURSOR,
-                name: w("Taille du curseur", "Cursor size"),
-                line: Some(w(
-                    "En pixels, à l’échelle de chaque écran.",
-                    "In pixels, at each screen’s scale.",
-                )),
+                name: w(words::CURSOR_SIZE),
+                line: Some(w(words::IN_PIXELS_AT_EACH_SCREEN_S)),
                 keywords: (
                     &["pointeur", "souris", "flèche", "grand curseur"],
                     &["pointer", "mouse", "arrow", "big cursor"],
                 ),
                 kind: Kind::Segmented(CURSOR_SIZES.map(size).to_vec()),
-                places: Places::One(Place::unset(&["appearance", "cursor-size"], Codec::Int { min: 8, max: 256 }, Value::Int(24))),
+                places: Places::One(Place::unset(
+                    &["appearance", "cursor-size"],
+                    Codec::Int { min: 8, max: 256 },
+                    Value::Int(24),
+                )),
                 needs: None,
             },
             Setting {
                 id: "appearance.accessibility",
                 section: SectionId::Appearance,
                 group: MOTION,
-                name: w("Accessibilité", "Accessibility"),
-                line: Some(w(
-                    "Les mouvements réduits, la transparence réduite, le contraste élevé et la loupe.",
-                    "Reduced motion, reduced transparency, high contrast and the magnifier.",
-                )),
+                name: w(words::ACCESSIBILITY),
+                line: Some(w(words::REDUCED_MOTION_REDUCED_TRANSPARENCY_HIGH_CONTRAST)),
                 keywords: (
-                    &["mouvement", "transparence", "contraste", "loupe", "accessibilité"],
-                    &["motion", "transparency", "contrast", "magnifier", "accessibility"],
+                    &[
+                        "mouvement",
+                        "transparence",
+                        "contraste",
+                        "loupe",
+                        "accessibilité",
+                    ],
+                    &[
+                        "motion",
+                        "transparency",
+                        "contrast",
+                        "magnifier",
+                        "accessibility",
+                    ],
                 ),
                 kind: Kind::Link(SectionId::Accessibility),
                 places: Places::Page(Place {
@@ -482,11 +519,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "locale.language",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("Langue", "Language"),
-                line: Some(w(
-                    "Tout le bureau change aussitôt ; une application déjà ouverte, à son prochain démarrage.",
-                    "The whole desktop changes at once; an application already open, when it next starts.",
-                )),
+                name: w(words::LANGUAGE),
+                line: Some(w(words::THE_WHOLE_DESKTOP_CHANGES_AT_ONCE)),
                 keywords: (
                     &["anglais", "français", "traduction", "langue"],
                     &["english", "french", "translation", "locale", "language"],
@@ -503,11 +537,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "locale.date",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("Date", "Date"),
-                line: Some(w(
-                    "Dans la barre, sur l’écran verrouillé et dans le calendrier.",
-                    "In the bar, on the lock screen and in the calendar.",
-                )),
+                name: w(words::DATE),
+                line: Some(w(words::IN_THE_BAR_ON_THE_LOCK)),
                 keywords: (
                     &["format", "jour", "mois", "jj/mm"],
                     &["format", "day", "month", "dd/mm"],
@@ -525,11 +556,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "locale.time",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("Heure", "Time"),
-                line: Some(w(
-                    "Sur 24 heures, ou sur 12 avec le matin et l’après-midi.",
-                    "Over 24 hours, or 12 with AM and PM.",
-                )),
+                name: w(words::TIME),
+                line: Some(w(words::OVER_24_HOURS_OR_12_WITH)),
                 keywords: (
                     &["12 h", "24 h", "am", "pm", "format de l’heure"],
                     &["12 h", "24 h", "am", "pm", "time format"],
@@ -538,18 +566,19 @@ pub fn settings() -> &'static [Setting] {
                     word("14:05", "14:05", "24h"),
                     word("2:05 PM", "2:05 PM", "12h"),
                 ]),
-                places: Places::One(Place::unset(&["locale", "time"], Codec::Word(TIMES), Value::Word(locale_hours()))),
+                places: Places::One(Place::unset(
+                    &["locale", "time"],
+                    Codec::Word(TIMES),
+                    Value::Word(locale_hours()),
+                )),
                 needs: None,
             },
             Setting {
                 id: "appearance.bar-clock",
                 section: SectionId::Appearance,
                 group: LANGUAGE,
-                name: w("L’horloge de la barre", "The bar’s clock"),
-                line: Some(w(
-                    "Sa police, sa couleur et ses secondes.",
-                    "Its font, colour and seconds.",
-                )),
+                name: w(words::THE_BAR_S_CLOCK),
+                line: Some(w(words::ITS_FONT_COLOUR_AND_SECONDS)),
                 keywords: (&["horloge", "secondes"], &["clock", "seconds"]),
                 kind: Kind::Link(SectionId::Bar),
                 places: Places::Page(Place {

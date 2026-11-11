@@ -9,21 +9,23 @@
 //! [`crate::devices`]). The page names the devices by their kind and where
 //! they are plugged, never by their vendor's name.
 
+use crate::lang::French as _;
+use hocus_words::settings::mouse as words;
 use std::sync::OnceLock;
 
 use hocus_link::input::{Bus, DeviceKind, InputDevice, RightClick};
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words, pair, w},
     model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const TOUCHPAD: RowGroup = RowGroup {
-    label: w("PAVÉ TACTILE", "TOUCHPAD"),
+    label: w(words::TOUCHPAD),
     per_source: false,
 };
 pub const MOUSE: RowGroup = RowGroup {
-    label: w("SOURIS", "MOUSE"),
+    label: w(words::MOUSE),
     per_source: false,
 };
 /// The gestures' rows (6.13).
@@ -32,7 +34,7 @@ pub const SWIPE_LAUNCHER: &str = "touchpad.swipe-launcher";
 pub const LEFT_TO_APPS: &str = "touchpad.left-to-applications";
 
 pub const GESTURES: RowGroup = RowGroup {
-    label: w("GESTES DU PAVÉ TACTILE", "TOUCHPAD GESTURES"),
+    label: w(words::TOUCHPAD_GESTURES),
     per_source: false,
 };
 
@@ -46,7 +48,7 @@ const TENTHS: Codec = Codec::Tenths { min: -10, max: 10 };
 
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: pair(fr, en),
         value: Value::Word(word),
     }
 }
@@ -88,7 +90,7 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.speed",
                 TOUCHPAD,
-                w("Vitesse du pointeur", "Pointer speed"),
+                w(words::POINTER_SPEED),
                 None,
                 (
                     &["vitesse", "sensibilité", "pavé", "touchpad"],
@@ -101,11 +103,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.tap-to-click",
                 TOUCHPAD,
-                w("Toucher pour cliquer", "Tap to click"),
-                Some(w(
-                    "Un doigt clique, deux font un clic droit, trois un clic du milieu.",
-                    "One finger clicks, two right-click, three middle-click.",
-                )),
+                w(words::TAP_TO_CLICK),
+                Some(w(words::ONE_FINGER_CLICKS_TWO_RIGHT_CLICK)),
                 (
                     &["tap", "taper", "toucher", "pavé", "clic"],
                     &["tap", "touchpad", "click"],
@@ -117,11 +116,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.tap-and-drag",
                 TOUCHPAD,
-                w("Toucher puis glisser", "Tap and drag"),
-                Some(w(
-                    "Deux touchers, le second gardé : déplacer sans appuyer.",
-                    "Tap twice and hold the second: drag without pressing.",
-                )),
+                w(words::TAP_AND_DRAG),
+                Some(w(words::TAP_TWICE_AND_HOLD_THE_SECOND)),
                 (
                     &["glisser", "déplacer", "tap", "pavé"],
                     &["drag", "tap", "touchpad"],
@@ -133,14 +129,17 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.right-click",
                 TOUCHPAD,
-                w("Clic droit en appuyant", "Right-click by pressing"),
-                Some(w(
-                    "À deux doigts n’importe où, ou d’un doigt dans le coin inférieur droit.",
-                    "With two fingers anywhere, or one finger in the bottom-right corner.",
-                )),
+                w(words::RIGHT_CLICK_BY_PRESSING),
+                Some(w(words::WITH_TWO_FINGERS_ANYWHERE_OR_ONE)),
                 (
                     &["clic droit", "deux doigts", "coin", "clickfinger", "pavé"],
-                    &["right click", "two fingers", "corner", "clickfinger", "touchpad"],
+                    &[
+                        "right click",
+                        "two fingers",
+                        "corner",
+                        "clickfinger",
+                        "touchpad",
+                    ],
                 ),
                 Kind::Menu(vec![
                     word("À deux doigts", "With two fingers", "two-fingers"),
@@ -148,17 +147,18 @@ pub fn settings() -> &'static [Setting] {
                 ]),
                 // Without the key, the touchpad's own (libinput's default
                 // for it): the window shows the device's.
-                Places::One(Place::unset(&["touchpad", "right-click"], Codec::Word(CLICKS), Value::Word("two-fingers"))),
+                Places::One(Place::unset(
+                    &["touchpad", "right-click"],
+                    Codec::Word(CLICKS),
+                    Value::Word("two-fingers"),
+                )),
                 None,
             ),
             setting(
                 "touchpad.disable-while-typing",
                 TOUCHPAD,
-                w("Désactivé pendant la frappe", "Off while typing"),
-                Some(w(
-                    "La paume ne déplace pas le pointeur pendant que tu tapes.",
-                    "Your palm does not move the pointer while you type.",
-                )),
+                w(words::OFF_WHILE_TYPING),
+                Some(w(words::YOUR_PALM_DOES_NOT_MOVE_THE)),
                 (
                     &["paume", "frappe", "taper", "clavier", "pavé"],
                     &["palm", "typing", "keyboard", "touchpad"],
@@ -170,8 +170,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.natural-scroll",
                 TOUCHPAD,
-                w("Défilement naturel", "Natural scrolling"),
-                Some(w("Le contenu suit tes doigts.", "Content follows your fingers.")),
+                w(words::NATURAL_SCROLLING),
+                Some(w(words::CONTENT_FOLLOWS_YOUR_FINGERS)),
                 (
                     &["défilement", "inversé", "sens", "pavé"],
                     &["natural", "scroll", "reverse", "touchpad"],
@@ -183,7 +183,7 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.scroll",
                 TOUCHPAD,
-                w("Défiler", "Scroll"),
+                w(words::SCROLL),
                 None,
                 (
                     &["défilement", "deux doigts", "bord", "pavé"],
@@ -199,14 +199,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.off-with-mouse",
                 TOUCHPAD,
-                w(
-                    "Coupé quand une souris est branchée",
-                    "Off while a mouse is plugged in",
-                ),
-                Some(w(
-                    "Il revient dès qu’elle est débranchée.",
-                    "It comes back as soon as it is unplugged.",
-                )),
+                w(words::OFF_WHILE_A_MOUSE_IS_PLUGGED),
+                Some(w(words::IT_COMES_BACK_AS_SOON_AS)),
                 (
                     &["souris", "couper", "désactiver", "pavé"],
                     &["mouse", "disable", "touchpad"],
@@ -218,7 +212,7 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.speed",
                 MOUSE,
-                w("Vitesse du pointeur", "Pointer speed"),
+                w(words::POINTER_SPEED),
                 None,
                 speed_words,
                 SPEED,
@@ -228,11 +222,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.acceleration",
                 MOUSE,
-                w("Accélération", "Acceleration"),
-                Some(w(
-                    "Adaptative : un geste vif va plus loin. Aucune : la même distance à toute vitesse.",
-                    "Adaptive: a quick move goes further. None: the same distance at any speed.",
-                )),
+                w(words::ACCELERATION),
+                Some(w(words::ADAPTIVE_A_QUICK_MOVE_GOES_FURTHER)),
                 (
                     &["accélération", "précision", "souris"],
                     &["acceleration", "flat", "precision", "mouse"],
@@ -247,11 +238,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.natural-scroll",
                 MOUSE,
-                w("Défilement naturel", "Natural scrolling"),
-                Some(w(
-                    "Le contenu suit la molette, comme sous un doigt.",
-                    "Content follows the wheel, as under a finger.",
-                )),
+                w(words::NATURAL_SCROLLING),
+                Some(w(words::CONTENT_FOLLOWS_THE_WHEEL_AS_UNDER)),
                 (
                     &["défilement", "inversé", "molette", "souris"],
                     &["natural", "scroll", "wheel", "reverse", "mouse"],
@@ -263,11 +251,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.left-handed",
                 MOUSE,
-                w("Gaucher", "Left-handed"),
-                Some(w(
-                    "Le bouton droit devient le principal.",
-                    "The right button becomes the main one.",
-                )),
+                w(words::LEFT_HANDED),
+                Some(w(words::THE_RIGHT_BUTTON_BECOMES_THE_MAIN)),
                 (
                     &["gaucher", "boutons", "inverser", "souris"],
                     &["left-handed", "buttons", "swap", "mouse"],
@@ -279,17 +264,24 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SWIPE_DESKTOPS,
                 GESTURES,
-                w("Trois doigts de côté", "Three fingers sideways"),
-                Some(w(
-                    "Changer de bureau sur l’écran sous le pointeur ; le bureau suit tes doigts, puis se pose ou revient.",
-                    "Switch desktop on the screen under the pointer; the desktop follows your fingers, then settles or springs back.",
-                )),
+                w(words::THREE_FINGERS_SIDEWAYS),
+                Some(w(words::SWITCH_DESKTOP_ON_THE_SCREEN_UNDER)),
                 (
                     &[
-                        "geste", "glisser", "doigts", "trois doigts", "bureau", "pavé",
+                        "geste",
+                        "glisser",
+                        "doigts",
+                        "trois doigts",
+                        "bureau",
+                        "pavé",
                     ],
                     &[
-                        "gesture", "swipe", "fingers", "three fingers", "desktop", "touchpad",
+                        "gesture",
+                        "swipe",
+                        "fingers",
+                        "three fingers",
+                        "desktop",
+                        "touchpad",
                     ],
                 ),
                 Kind::Switch,
@@ -299,11 +291,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SWIPE_LAUNCHER,
                 GESTURES,
-                w("Quatre doigts vers le haut ou le bas", "Four fingers up or down"),
-                Some(w(
-                    "Vers le haut, le lanceur, qui grandit avec tes doigts ; vers le bas, la vue d’ensemble de tes bureaux, ou le lanceur se referme.",
-                    "Up opens the launcher, which grows with your fingers; down shows the overview of your desktops, or closes the launcher.",
-                )),
+                w(words::FOUR_FINGERS_UP_OR_DOWN),
+                Some(w(words::UP_OPENS_THE_LAUNCHER_WHICH_GROWS)),
                 (
                     &[
                         "geste",
@@ -334,16 +323,13 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 LEFT_TO_APPS,
                 GESTURES,
-                w("Ce qui reste aux applications", "What is left to applications"),
-                Some(w(
-                    "Deux doigts pour défiler et pincer ; trois doigts vers le haut ou le bas ; quatre doigts de côté.",
-                    "Two fingers to scroll and pinch; three fingers up or down; four fingers sideways.",
-                )),
+                w(words::WHAT_IS_LEFT_TO_APPLICATIONS),
+                Some(w(words::TWO_FINGERS_TO_SCROLL_AND_PINCH)),
                 (
                     &["geste", "doigts", "pincer", "applications", "pavé"],
                     &["gesture", "fingers", "pinch", "applications", "touchpad"],
                 ),
-                Kind::Note(w("Toujours", "Always")),
+                Kind::Note(w(words::ALWAYS)),
                 Places::Page(Place {
                     key: &["touchpad", "swipe-desktops"],
                     codec: Codec::Bool,
@@ -370,8 +356,8 @@ pub fn kind_of(setting: &str) -> Option<DeviceKind> {
 pub fn aside(setting: &str) -> Option<Words> {
     match kind_of(setting)? {
         DeviceKind::Touchpad if setting.starts_with("touchpad.swipe") => None,
-        DeviceKind::Touchpad => Some(w(", pavé tactile", ", touchpad")),
-        DeviceKind::Pointer => Some(w(", souris", ", mouse")),
+        DeviceKind::Touchpad => Some(w(words::TOUCHPAD_2)),
+        DeviceKind::Pointer => Some(w(words::MOUSE_2)),
     }
 }
 
@@ -424,20 +410,20 @@ pub fn named(kind: DeviceKind, devices: &[InputDevice], lang: Lang) -> Option<St
         (_, []) => None,
         (DeviceKind::Touchpad, [one, ..]) => Some(
             if one.built_in {
-                w("Intégré au portable", "Built in")
+                w(words::BUILT_IN)
             } else if one.bus == Bus::Bluetooth {
-                w("Pavé tactile Bluetooth", "Bluetooth touchpad")
+                w(words::BLUETOOTH_TOUCHPAD)
             } else {
-                w("Pavé tactile USB", "USB touchpad")
+                w(words::USB_TOUCHPAD)
             }
             .get(lang)
             .to_owned(),
         ),
         (DeviceKind::Pointer, [one]) => Some(
             match (one.bus, one.built_in) {
-                (Bus::Bluetooth, _) => w("Souris Bluetooth", "Bluetooth mouse"),
-                (Bus::Usb, _) => w("Souris USB", "USB mouse"),
-                (Bus::Internal, _) => w("Intégrée au portable", "Built in"),
+                (Bus::Bluetooth, _) => w(words::BLUETOOTH_MOUSE),
+                (Bus::Usb, _) => w(words::USB_MOUSE),
+                (Bus::Internal, _) => w(words::BUILT_IN_2),
             }
             .get(lang)
             .to_owned(),

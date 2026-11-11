@@ -36,6 +36,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::reminder as txt;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -408,8 +409,12 @@ impl Words {
         Self::new(Lang::of_messages())
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     /// "dans 5 min", "maintenant", "a commencé il y a 4 min".
@@ -418,7 +423,7 @@ impl Words {
         match (left, self.fr) {
             (1.., true) => format!("dans {}", minutes(left)),
             (1.., false) => format!("in {}", minutes(left)),
-            (0, _) => self.pick("maintenant", "now").to_owned(),
+            (0, _) => self.pick(txt::NOW).to_owned(),
             (_, true) => format!("a commencé il y a {}", minutes(-left)),
             (_, false) => format!("started {} ago", minutes(-left)),
         }
@@ -427,7 +432,7 @@ impl Words {
     /// What the line says of where: "visio", else its place.
     fn place(self, m: &Meeting) -> Option<String> {
         match (&m.video, &m.place) {
-            (Some(_), _) => Some(self.pick("visio", "video").to_owned()),
+            (Some(_), _) => Some(self.pick(txt::VIDEO).to_owned()),
             (None, Some(place)) => Some(place.clone()),
             (None, None) => None,
         }
@@ -446,31 +451,31 @@ impl Words {
     /// The title, or "Réunion" on a screen shared.
     pub fn title(self, tab: &Tab, shared: bool) -> String {
         if shared {
-            self.pick("Réunion", "Meeting").to_owned()
+            self.pick(txt::MEETING).to_owned()
         } else {
             tab.meeting.title.clone()
         }
     }
 
     pub fn join(self) -> &'static str {
-        self.pick("Rejoindre", "Join")
+        self.pick(txt::JOIN)
     }
 
     pub fn open(self) -> &'static str {
-        self.pick("Voir", "Open")
+        self.pick(txt::OPEN)
     }
 
     /// Later's name, `left` minutes before the start.
     pub fn later(self, left: i64) -> &'static str {
         if left > 1 {
-            self.pick("Me le redire 1 min avant", "Remind me 1 min before")
+            self.pick(txt::REMIND_ME_1_MIN_BEFORE)
         } else {
-            self.pick("Me le redire à l'heure", "Remind me when it starts")
+            self.pick(txt::REMIND_ME_WHEN_IT_STARTS)
         }
     }
 
     pub fn dismiss(self) -> &'static str {
-        self.pick("Ignorer ce rappel", "Dismiss this reminder")
+        self.pick(txt::DISMISS_THIS_REMINDER)
     }
 
     /// For screen readers, said once as it comes: "Revue de sprint, dans 5
@@ -493,13 +498,13 @@ impl Words {
         let when = match (tab.left, self.fr) {
             (1.., true) => format!("dans {}", long(tab.left)),
             (1.., false) => format!("in {}", long(tab.left)),
-            (0, _) => self.pick("maintenant", "now").to_owned(),
+            (0, _) => self.pick(txt::NOW).to_owned(),
             (_, true) => format!("a commencé il y a {}", long(-tab.left)),
             (_, false) => format!("started {} ago", long(-tab.left)),
         };
         let mut name = format!("{}, {when}", self.title(tab, shared));
         match (&tab.meeting.video, &tab.meeting.place) {
-            (Some(_), _) => name.push_str(self.pick(", visio", ", video call")),
+            (Some(_), _) => name.push_str(self.pick(txt::VIDEO_CALL)),
             (None, Some(place)) => {
                 name.push_str(", ");
                 name.push_str(place);
@@ -520,7 +525,7 @@ impl Words {
 
     /// The history's application.
     pub fn calendar(self) -> &'static str {
-        self.pick("Agenda", "Calendar")
+        self.pick(txt::CALENDAR)
     }
 }
 

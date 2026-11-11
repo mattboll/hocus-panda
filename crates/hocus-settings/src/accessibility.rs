@@ -9,31 +9,32 @@
 //! transparency's switch shows on and does not take clicks ("Comprise dans
 //! le contraste élevé"); the file keeps its own value.
 
+use hocus_words::settings::accessibility as words;
 use std::sync::OnceLock;
 
 use crate::{
-    lang::w,
+    lang::{pair, w},
     model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 /// The magnifier's rows (#424).
 pub const MAGNIFIER: RowGroup = RowGroup {
-    label: w("LOUPE", "MAGNIFIER"),
+    label: w(words::MAGNIFIER),
     per_source: false,
 };
 /// What the desktop looks like (#423).
 pub const VIEW: RowGroup = RowGroup {
-    label: w("VUE", "VIEW"),
+    label: w(words::VIEW),
     per_source: false,
 };
 /// The screen reader (#421, #734).
 pub const READER: RowGroup = RowGroup {
-    label: w("LECTEUR D’ÉCRAN", "SCREEN READER"),
+    label: w(words::SCREEN_READER),
     per_source: false,
 };
 /// The bar by the keyboard (#422).
 pub const KEYBOARD: RowGroup = RowGroup {
-    label: w("CLAVIER", "KEYBOARD"),
+    label: w(words::KEYBOARD),
     per_source: false,
 };
 
@@ -49,7 +50,7 @@ const FOLLOWS: &[&str] = &["edge", "centre", "proportional"];
 
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: pair(fr, en),
         value: Value::Word(word),
     }
 }
@@ -64,14 +65,24 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.enabled",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w("Loupe", "Magnifier"),
-                line: Some(w(
-                    "L’écran sous le pointeur grossi ; Super+= et Super+- changent le zoom, Super+Échap l’éteint.",
-                    "The screen under the pointer magnified; Super+= and Super+- change the zoom, Super+Esc turns it off.",
-                )),
+                name: w(words::MAGNIFIER_2),
+                line: Some(w(words::THE_SCREEN_UNDER_THE_POINTER_MAGNIFIED)),
                 keywords: (
-                    &["loupe", "zoom", "grossir", "agrandir", "malvoyant", "accessibilité"],
-                    &["magnifier", "zoom", "magnify", "low vision", "accessibility"],
+                    &[
+                        "loupe",
+                        "zoom",
+                        "grossir",
+                        "agrandir",
+                        "malvoyant",
+                        "accessibilité",
+                    ],
+                    &[
+                        "magnifier",
+                        "zoom",
+                        "magnify",
+                        "low vision",
+                        "accessibility",
+                    ],
                 ),
                 kind: Kind::Switch,
                 places: one(&["magnifier", "enabled"], Codec::Bool),
@@ -81,25 +92,25 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.zoom",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w("Zoom", "Zoom"),
-                line: Some(w(
-                    "Celui où elle s’allume ; Super et la molette l’ajustent par 10 %.",
-                    "The one it turns on at; Super and the wheel adjust it by 10 %.",
-                )),
+                name: w(words::ZOOM),
+                line: Some(w(words::THE_ONE_IT_TURNS_ON_AT)),
                 keywords: (&["loupe", "grossissement"], &["magnifier", "magnification"]),
                 kind: Kind::Menu(ZOOMS.iter().map(|&z| zoom(z)).collect()),
-                places: one(&["magnifier", "zoom"], Codec::Hundredths { min: 100, max: 1600 }),
+                places: one(
+                    &["magnifier", "zoom"],
+                    Codec::Hundredths {
+                        min: 100,
+                        max: 1600,
+                    },
+                ),
                 needs: None,
             },
             Setting {
                 id: "magnifier.follow-pointer",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w("La vue suit le pointeur", "The view follows the pointer"),
-                line: Some(w(
-                    "Au bord : elle ne bouge que quand le pointeur la pousse.",
-                    "At the edge: it moves only when the pointer pushes it.",
-                )),
+                name: w(words::THE_VIEW_FOLLOWS_THE_POINTER),
+                line: Some(w(words::AT_THE_EDGE_IT_MOVES_ONLY)),
                 keywords: (&["loupe", "souris"], &["magnifier", "mouse", "tracking"]),
                 kind: Kind::Menu(vec![
                     word("Au bord", "At the edge", "edge"),
@@ -113,12 +124,12 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.follow-keyboard",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w("Suivre le clavier", "Follow the keyboard"),
-                line: Some(w(
-                    "La vue saute à ce qui prend le clavier et suit le curseur de texte.",
-                    "The view jumps to what takes the keyboard and follows the text caret.",
-                )),
-                keywords: (&["loupe", "focus", "curseur"], &["magnifier", "focus", "caret"]),
+                name: w(words::FOLLOW_THE_KEYBOARD),
+                line: Some(w(words::THE_VIEW_JUMPS_TO_WHAT_TAKES)),
+                keywords: (
+                    &["loupe", "focus", "curseur"],
+                    &["magnifier", "focus", "caret"],
+                ),
                 kind: Kind::Switch,
                 places: one(&["magnifier", "follow-keyboard"], Codec::Bool),
                 needs: None,
@@ -127,12 +138,12 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.smooth",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w("Lissage", "Smoothing"),
-                line: Some(w(
-                    "Sans : des pixels nets.",
-                    "Without: hard pixels.",
-                )),
-                keywords: (&["loupe", "flou", "pixels"], &["magnifier", "smooth", "pixels"]),
+                name: w(words::SMOOTHING),
+                line: Some(w(words::WITHOUT_HARD_PIXELS)),
+                keywords: (
+                    &["loupe", "flou", "pixels"],
+                    &["magnifier", "smooth", "pixels"],
+                ),
                 kind: Kind::Switch,
                 places: one(&["magnifier", "smooth"], Codec::Bool),
                 needs: None,
@@ -141,11 +152,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.high-contrast",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w("Contraste élevé", "High contrast"),
-                line: Some(w(
-                    "Le thème choisi renforcé : texte à 7:1, bords pleins, sans verre ; la couleur d’accent reste. Les applications le savent.",
-                    "The chosen theme reinforced: text at 7:1, solid borders, no glass; the accent stays. Applications are told.",
-                )),
+                name: w(words::HIGH_CONTRAST),
+                line: Some(w(words::THE_CHOSEN_THEME_REINFORCED_TEXT_AT)),
                 keywords: (
                     &["contraste", "malvoyant", "accessibilité"],
                     &["contrast", "low vision", "accessibility"],
@@ -158,11 +166,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.reduce-transparency",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w("Transparence réduite", "Reduced transparency"),
-                line: Some(w(
-                    "La barre, ses menus et les bulles deviennent opaques au lieu de laisser voir le fond.",
-                    "The bar, its menus and the bubbles turn opaque instead of showing what is behind them.",
-                )),
+                name: w(words::REDUCED_TRANSPARENCY),
+                line: Some(w(words::THE_BAR_ITS_MENUS_AND_THE)),
                 keywords: (
                     &["verre", "flou", "opacité", "transparence"],
                     &["glass", "blur", "opacity", "transparency"],
@@ -175,11 +180,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.reduced-motion",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w("Mouvements réduits", "Reduced motion"),
-                line: Some(w(
-                    "Les fenêtres et les bureaux se fondent au lieu de bouger ; rien n’ondule.",
-                    "Windows and desktops fade instead of moving; nothing wobbles.",
-                )),
+                name: w(words::REDUCED_MOTION),
+                line: Some(w(words::WINDOWS_AND_DESKTOPS_FADE_INSTEAD_OF)),
                 keywords: (
                     &["animation", "onduler", "mouvement"],
                     &["animation", "motion", "wobbly", "reduce motion"],
@@ -192,11 +194,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "accessibility.text-and-cursor",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w("Taille du texte et du curseur", "Text and cursor size"),
-                line: Some(w(
-                    "Dans Apparence et langue.",
-                    "In Appearance and language.",
-                )),
+                name: w(words::TEXT_AND_CURSOR_SIZE),
+                line: Some(w(words::IN_APPEARANCE_AND_LANGUAGE)),
                 keywords: (
                     &["texte", "police", "curseur", "pointeur", "grand"],
                     &["text", "font", "cursor", "pointer", "large"],
@@ -213,13 +212,16 @@ pub fn settings() -> &'static [Setting] {
                 id: SCREEN_READER,
                 section: SectionId::Accessibility,
                 group: READER,
-                name: w("Lecteur d’écran", "Screen reader"),
-                line: Some(w(
-                    "Orca démarre avec la session. Super+Alt+S le lance ou l’arrête, même sur l’écran de verrouillage.",
-                    "Orca starts with the session. Super+Alt+S starts or stops it, on the lock screen too.",
-                )),
+                name: w(words::SCREEN_READER_2),
+                line: Some(w(words::ORCA_STARTS_WITH_THE_SESSION_SUPER)),
                 keywords: (
-                    &["lecteur d’écran", "orca", "aveugle", "voix", "accessibilité"],
+                    &[
+                        "lecteur d’écran",
+                        "orca",
+                        "aveugle",
+                        "voix",
+                        "accessibilité",
+                    ],
                     &["screen reader", "orca", "blind", "speech", "accessibility"],
                 ),
                 kind: Kind::Switch,
@@ -230,11 +232,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "accessibility.focus-bar",
                 section: SectionId::Accessibility,
                 group: KEYBOARD,
-                name: w("Aller dans la barre", "Go to the bar"),
-                line: Some(w(
-                    "Super+B, puis Tab et les flèches ; Entrée ouvre, Échap revient. Le raccourci se change dans Clavier et raccourcis.",
-                    "Super+B, then Tab and the arrows; Enter opens, Esc goes back. The shortcut is changed in Keyboard and shortcuts.",
-                )),
+                name: w(words::GO_TO_THE_BAR),
+                line: Some(w(words::SUPER_B_THEN_TAB_AND_THE)),
                 keywords: (
                     &["clavier", "barre", "super+b", "focus", "sans souris"],
                     &["keyboard", "bar", "super+b", "focus", "without a mouse"],
@@ -266,7 +265,7 @@ fn zoom(hundredths: i64) -> Choice {
         }
     };
     Choice {
-        label: w(label(","), label(".")),
+        label: pair(label(","), label(".")),
         value: Value::Int(hundredths),
     }
 }

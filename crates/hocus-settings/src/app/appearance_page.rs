@@ -4,7 +4,9 @@
 //! rows, their saving and their search are the window's as on any page
 //! ([`crate::appearance`]); the window itself is the page's preview.
 
+use crate::lang::French as _;
 use hocus_link::theme::{Accent, Scheme};
+use hocus_words::settings::app_appearance_page as words;
 use iced::{
     Alignment, Background, Color, Point, Rectangle, Renderer, Shadow, Theme, Vector, mouse,
     widget::{Space, button, canvas, container, row},
@@ -365,11 +367,7 @@ impl App {
     pub(super) fn accent_line(&self, slot: Slot) -> String {
         let (fr, en) = crate::appearance::accent_of(self.value(slot).as_ref()).names();
         let name = if self.lang.fr() { fr } else { en };
-        let rest = w(
-            "Les interrupteurs, la sélection, l’anneau du clavier.",
-            "Switches, selection, the keyboard’s ring.",
-        )
-        .get(self.lang);
+        let rest = w(words::SWITCHES_SELECTION_THE_KEYBOARD_S_RING).get(self.lang);
         format!("{name} · {rest}")
     }
 }

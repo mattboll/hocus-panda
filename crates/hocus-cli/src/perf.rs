@@ -46,7 +46,10 @@ pub fn day(date: Option<&str>, json: bool) -> ExitCode {
         }
         println!("{value:#}");
     } else {
-        print!("{}", text::day(&report, date, text::Lang::from_env(), &tz));
+        print!(
+            "{}",
+            text::day(&report, date, text::Lang::of_messages(), &tz)
+        );
     }
     if day.samples.is_empty() {
         eprintln!(

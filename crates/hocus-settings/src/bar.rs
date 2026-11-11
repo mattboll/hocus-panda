@@ -10,33 +10,31 @@
 //! with a click on the bar's edge is the compositor's: the page reads it
 //! from its line and asks it to forget it (`bar-auto NAME`).
 
+use hocus_words::settings::bar as words;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use hocus_link::BarGroup;
 use toml_edit::{DocumentMut, Item};
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words, pair, w},
     model::{Choice, Codec, Kind, Outside, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const PLACE: RowGroup = RowGroup {
-    label: w("EMPLACEMENT", "PLACE"),
+    label: w(words::PLACE),
     per_source: false,
 };
 pub const FORM: RowGroup = RowGroup {
-    label: w("FORME", "FORM"),
+    label: w(words::FORM),
     per_source: false,
 };
 pub const SHOWS: RowGroup = RowGroup {
-    label: w(
-        "CE QU’ELLE MONTRE, DE HAUT EN BAS",
-        "WHAT IT SHOWS, TOP TO BOTTOM",
-    ),
+    label: w(words::WHAT_IT_SHOWS_TOP_TO_BOTTOM),
     per_source: false,
 };
 pub const CLOCK: RowGroup = RowGroup {
-    label: w("L’HORLOGE", "THE CLOCK"),
+    label: w(words::THE_CLOCK),
     per_source: false,
 };
 
@@ -62,10 +60,10 @@ pub const BUNDLED: &str = hocus_link::ClockLook::DEFAULT_FONT;
 /// The clock's colours offered, `#RRGGBB` in lower case as the model
 /// holds them.
 pub const COLOURS: [(&str, Words); 4] = [
-    ("#eef1f6", w("Blanc doux", "Soft white")),
-    ("#7ee0a0", w("Vert", "Green")),
-    ("#8fb3ff", w("Bleu", "Blue")),
-    ("#f5c46e", w("Ambre", "Amber")),
+    ("#eef1f6", w(words::SOFT_WHITE)),
+    ("#7ee0a0", w(words::GREEN)),
+    ("#8fb3ff", w(words::BLUE)),
+    ("#f5c46e", w(words::AMBER)),
 ];
 
 const TRANSITIONS: &[&str] = &["odometer", "roll", "flip", "neon", "none"];
@@ -84,9 +82,9 @@ pub fn group_setting(group: BarGroup) -> &'static str {
 /// A group's name, as its row says it.
 pub fn group_name(group: BarGroup) -> Words {
     match group {
-        BarGroup::Today => w("Aujourd’hui", "Today"),
-        BarGroup::Tasks => w("À faire", "To do"),
-        BarGroup::Agents => w("Les agents", "The agents"),
+        BarGroup::Today => w(words::TODAY),
+        BarGroup::Tasks => w(words::TO_DO),
+        BarGroup::Agents => w(words::THE_AGENTS),
     }
 }
 
@@ -251,7 +249,7 @@ fn fonts() -> &'static [&'static str] {
 
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
-        label: w(fr, en),
+        label: pair(fr, en),
         value: Value::Word(word),
     }
 }
@@ -283,11 +281,11 @@ pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
         let mut fonts = vec![Choice {
-            label: w("Martian Mono (fournie)", "Martian Mono (bundled)"),
+            label: w(words::MARTIAN_MONO_BUNDLED),
             value: Value::Text(BUNDLED.to_owned()),
         }];
         fonts.extend(self::fonts().iter().map(|name| Choice {
-            label: w(name, name),
+            label: pair(name, name),
             value: Value::Text((*name).to_owned()),
         }));
         vec![
@@ -295,11 +293,8 @@ pub fn settings() -> &'static [Setting] {
                 id: SIDE,
                 section: SectionId::Bar,
                 group: PLACE,
-                name: w("Côté de l’écran", "Side of the screen"),
-                line: Some(w(
-                    "La barre, son bord à cliquer et la place gardée pour elle passent de l’autre côté, sur chaque écran.",
-                    "The bar, its edge to click and the room kept for it move to the other side, on every screen.",
-                )),
+                name: w(words::SIDE_OF_THE_SCREEN),
+                line: Some(w(words::THE_BAR_ITS_EDGE_TO_CLICK)),
                 keywords: (
                     &["gauche", "droite", "côté", "bord", "side"],
                     &["left", "right", "side", "edge"],
@@ -315,7 +310,7 @@ pub fn settings() -> &'static [Setting] {
                 id: SCREENS,
                 section: SectionId::Bar,
                 group: PLACE,
-                name: w("Sur quels écrans", "On which screens"),
+                name: w(words::ON_WHICH_SCREENS),
                 line: None,
                 keywords: (
                     &["plusieurs écrans", "moniteur", "tous", "principal", "écran"],
@@ -331,11 +326,8 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 MEETING,
                 SHOWS,
-                w("La prochaine réunion", "The next meeting"),
-                w(
-                    "Sa carte sous l’horloge, et sa marque dans la forme mini.",
-                    "Its card under the clock, and its mark in the mini form.",
-                ),
+                w(words::THE_NEXT_MEETING),
+                w(words::ITS_CARD_UNDER_THE_CLOCK_AND),
                 (
                     &["réunion", "agenda", "rendez-vous"],
                     &["meeting", "calendar"],
@@ -345,11 +337,8 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 TODAY,
                 SHOWS,
-                w("Aujourd’hui", "Today"),
-                w(
-                    "Les rendez-vous qui suivent la réunion ; la forme pleine seulement.",
-                    "The events after the meeting; the full form only.",
-                ),
+                w(words::TODAY),
+                w(words::THE_EVENTS_AFTER_THE_MEETING_THE),
                 (
                     &["agenda", "journée", "rendez-vous"],
                     &["today", "calendar", "events"],
@@ -359,22 +348,16 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 TASKS,
                 SHOWS,
-                w("À faire", "To do"),
-                w(
-                    "Les tâches ouvertes, trois au plus ; dans la forme mini, leur nombre.",
-                    "The open tasks, three at most; in the mini form, how many.",
-                ),
+                w(words::TO_DO),
+                w(words::THE_OPEN_TASKS_THREE_AT_MOST),
                 (&["tâches", "kanban", "liste"], &["tasks", "todo", "kanban"]),
                 &["panel", "tasks"],
             ),
             switch(
                 AGENTS,
                 SHOWS,
-                w("Les agents", "The agents"),
-                w(
-                    "Ceux qui t’attendent d’abord ; dans la forme mini, la secrétaire.",
-                    "Those waiting for you first; in the mini form, the secretary.",
-                ),
+                w(words::THE_AGENTS),
+                w(words::THOSE_WAITING_FOR_YOU_FIRST_IN),
                 (
                     &["agents", "secrétaire", "pandas"],
                     &["agents", "secretary"],
@@ -384,11 +367,8 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 WINDOWS,
                 SHOWS,
-                w("Les fenêtres", "The windows"),
-                w(
-                    "Celles du bureau en cours, au-dessus des bureaux, trois au plus.",
-                    "The current desktop’s, over the desktops, three at most.",
-                ),
+                w(words::THE_WINDOWS),
+                w(words::THE_CURRENT_DESKTOP_S_OVER_THE),
                 (&["fenêtres", "liste"], &["windows", "list"]),
                 &["panel", "windows"],
             ),
@@ -396,11 +376,8 @@ pub fn settings() -> &'static [Setting] {
                 id: SECONDS,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w("Les secondes", "Seconds"),
-                line: Some(w(
-                    "À côté des minutes, dans la forme pleine ; la forme mini n’en montre pas.",
-                    "Beside the minutes, in the full form; the mini form shows none.",
-                )),
+                name: w(words::SECONDS),
+                line: Some(w(words::BESIDE_THE_MINUTES_IN_THE_FULL)),
                 keywords: (&["secondes", "horloge", "heure"], &["seconds", "clock"]),
                 kind: Kind::Switch,
                 places: one(&["panel", "clock", "seconds"], Codec::Bool),
@@ -410,11 +387,8 @@ pub fn settings() -> &'static [Setting] {
                 id: TRANSITION,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w("Quand la minute change", "When the minute changes"),
-                line: Some(w(
-                    "Ce que font les chiffres ; rien ne bouge avec les mouvements réduits.",
-                    "What the digits do; nothing moves with reduced motion.",
-                )),
+                name: w(words::WHEN_THE_MINUTE_CHANGES),
+                line: Some(w(words::WHAT_THE_DIGITS_DO_NOTHING_MOVES)),
                 keywords: (
                     &[
                         "animation",
@@ -440,11 +414,8 @@ pub fn settings() -> &'static [Setting] {
                 id: FONT,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w("Police de l’horloge", "Clock font"),
-                line: Some(w(
-                    "Une police qui n’est pas installée revient à Martian Mono.",
-                    "A font that is not installed falls back to Martian Mono.",
-                )),
+                name: w(words::CLOCK_FONT),
+                line: Some(w(words::A_FONT_THAT_IS_NOT_INSTALLED)),
                 keywords: (
                     &["police", "chiffres", "horloge"],
                     &["font", "typeface", "clock"],
@@ -457,7 +428,7 @@ pub fn settings() -> &'static [Setting] {
                 id: COLOR,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w("Couleur de l’heure", "Clock colour"),
+                name: w(words::CLOCK_COLOUR),
                 line: None,
                 keywords: (
                     &["couleur", "teinte", "horloge"],
@@ -501,7 +472,7 @@ pub fn outside() -> &'static [Outside] {
         o(
             FORM_ROW,
             FORM.label,
-            w("Forme de la barre", "The bar’s form"),
+            w(words::THE_BAR_S_FORM),
             &[
                 "forme",
                 "pleine",
@@ -515,14 +486,14 @@ pub fn outside() -> &'static [Outside] {
         o(
             BY_HAND,
             FORM.label,
-            w("Changer de forme à la main", "Change form by hand"),
+            w(words::CHANGE_FORM_BY_HAND),
             &["super+shift+b", "toggle-bar", "clic", "bord", "raccourci"],
             &["super+shift+b", "toggle-bar", "click", "edge", "shortcut"],
         ),
         o(
             ORDER,
             SHOWS.label,
-            w("Ordre des groupes", "Order of the groups"),
+            w(words::ORDER_OF_THE_GROUPS),
             &["ordre", "monter", "descendre", "ranger", "order"],
             &["order", "move up", "move down", "arrange", "sort"],
         ),

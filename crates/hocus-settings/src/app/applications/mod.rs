@@ -29,7 +29,7 @@ use crate::{
     applications::{
         self as model, ADDED, Ask, Done, Heard, Known, Opens, Picture, TERMINAL, Worker,
     },
-    lang::{Lang, w},
+    lang::{Lang, pair},
     model::{SectionId, Value},
     store::Slot,
 };
@@ -228,7 +228,7 @@ impl State {
 }
 
 fn words(fr: &'static str, en: &'static str, lang: Lang) -> String {
-    w(fr, en).get(lang).to_owned()
+    pair(fr, en).get(lang).to_owned()
 }
 
 impl App {

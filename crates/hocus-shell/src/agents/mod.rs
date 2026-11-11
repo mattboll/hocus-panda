@@ -23,6 +23,7 @@
 pub mod draw;
 pub mod peek;
 
+use hocus_words::shell::agents as txt;
 use std::sync::{
     Mutex, PoisonError,
     atomic::{AtomicBool, AtomicU32, Ordering},
@@ -523,8 +524,12 @@ impl Words {
         }
     }
 
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        if self.fr { fr } else { en }
+    fn pick(self, text: hocus_words::Text) -> &'static str {
+        text.get(if self.fr {
+            hocus_words::Lang::French
+        } else {
+            hocus_words::Lang::English
+        })
     }
 
     pub fn header(self) -> &'static str {
@@ -582,23 +587,23 @@ impl Words {
 
     /// The briefing's title.
     pub fn briefing(self) -> &'static str {
-        self.pick("Le point", "Briefing")
+        self.pick(txt::BRIEFING)
     }
 
     /// Its sections' labels; the last two in the mini form's (4.7).
     pub fn section(self, look: Look) -> &'static str {
         match look {
-            Look::Waiting => self.pick("T'ATTEND", "WAITING"),
-            Look::Stuck => self.pick("BLOQUÉ", "STUCK"),
-            Look::ToSee => self.pick("À VOIR", "TO SEE"),
-            Look::Working => self.pick("AU TRAVAIL", "AT WORK"),
-            Look::Resting => self.pick("AU REPOS", "RESTING"),
+            Look::Waiting => self.pick(txt::WAITING),
+            Look::Stuck => self.pick(txt::STUCK),
+            Look::ToSee => self.pick(txt::TO_SEE),
+            Look::Working => self.pick(txt::AT_WORK),
+            Look::Resting => self.pick(txt::RESTING),
         }
     }
 
     /// The mini form's item, under how many work (4.7).
     pub fn at_work(self) -> &'static str {
-        self.pick("au travail", "at work")
+        self.pick(txt::AT_WORK_2)
     }
 
     /// Since when, after a name: "· 2 min" (waiting, stuck), "· il y a
@@ -606,7 +611,7 @@ impl Words {
     /// minute; "1 h 05" from an hour.
     pub fn since(self, minutes: u64, ago: bool) -> String {
         if minutes == 0 {
-            return format!("· {}", self.pick("à l'instant", "just now"));
+            return format!("· {}", self.pick(txt::JUST_NOW));
         }
         let time = if minutes >= 60 {
             format!("{}\u{a0}h\u{a0}{:02}", minutes / 60, minutes % 60)
@@ -623,8 +628,8 @@ impl Words {
     /// What the peek's bubble says after the agent's name (4.5).
     pub fn peek(self, kind: hocus_link::PeekKind) -> &'static str {
         match kind {
-            hocus_link::PeekKind::Waiting => self.pick("t'attend", "is waiting"),
-            hocus_link::PeekKind::Done => self.pick("a fini", "is done"),
+            hocus_link::PeekKind::Waiting => self.pick(txt::IS_WAITING),
+            hocus_link::PeekKind::Done => self.pick(txt::IS_DONE),
         }
     }
 
@@ -645,26 +650,23 @@ impl Words {
     }
 
     pub fn intro(self) -> &'static str {
-        self.pick(
-            "Pour suivre tes agents, branche ton outil\u{a0}:",
-            "To follow your agents, plug in your tool:",
-        )
+        self.pick(txt::TO_FOLLOW_YOUR_AGENTS_PLUG_IN)
     }
 
     pub fn plug(self) -> &'static str {
-        self.pick("Brancher", "Plug in")
+        self.pick(txt::PLUG_IN)
     }
 
     pub fn another(self) -> &'static str {
-        self.pick("Un autre outil\u{a0}?", "Another tool?")
+        self.pick(txt::ANOTHER_TOOL)
     }
 
     pub fn decline(self) -> &'static str {
-        self.pick("Ne rien brancher", "Plug nothing in")
+        self.pick(txt::PLUG_NOTHING_IN)
     }
 
     pub fn no_agent(self) -> &'static str {
-        self.pick("Aucun agent en cours.", "No agent running.")
+        self.pick(txt::NO_AGENT_RUNNING)
     }
 
     pub fn followed(self, names: &[&str]) -> String {
@@ -721,10 +723,10 @@ impl Words {
     /// What an agent's row says on its right.
     pub fn word(self, line: &Line) -> String {
         match line.look {
-            Look::Waiting => self.pick("t'attend", "waiting").to_owned(),
-            Look::Stuck => self.pick("bloqué", "stuck").to_owned(),
-            Look::ToSee => self.pick("à voir", "to see").to_owned(),
-            Look::Resting => self.pick("repos", "resting").to_owned(),
+            Look::Waiting => self.pick(txt::WAITING_2).to_owned(),
+            Look::Stuck => self.pick(txt::STUCK_2).to_owned(),
+            Look::ToSee => self.pick(txt::TO_SEE_2).to_owned(),
+            Look::Resting => self.pick(txt::RESTING_2).to_owned(),
             // "1 h 05" from an hour.
             Look::Working if line.minutes >= 60 => {
                 format!("{}\u{a0}h\u{a0}{:02}", line.minutes / 60, line.minutes % 60)
@@ -737,8 +739,8 @@ impl Words {
     /// rest, else "+ 2 autres".
     pub fn more(self, hidden: usize, rest: bool) -> String {
         let what = match rest {
-            true => self.pick("au repos", "resting"),
-            false => self.pick("autres", "more"),
+            true => self.pick(txt::RESTING_3),
+            false => self.pick(txt::MORE),
         };
         format!("+\u{a0}{hidden} {what}")
     }
@@ -753,81 +755,54 @@ impl Words {
 
     pub fn what(self, tool: Tool) -> &'static str {
         match tool {
-            Tool::ClaudeCode => self.pick(
-                "Hocuspanda ajoute ses crochets aux réglages de Claude Code\u{a0}: il saura quand un agent travaille, t'attend (une permission, une question) ou a fini.",
-                "Hocuspanda adds its hooks to Claude Code's settings: it will know when an agent works, waits for you (a permission, a question) or is done.",
-            ),
-            Tool::Codex => self.pick(
-                "Hocuspanda ajoute ses crochets et sa notification aux réglages de Codex\u{a0}: il saura quand un agent travaille, t'attend (une permission) ou a fini son tour. Codex te demande de les approuver avec /hooks.",
-                "Hocuspanda adds its hooks and its notification to Codex's settings: it will know when an agent works, waits for you (a permission) or has finished its turn. Codex asks you to approve them with /hooks.",
-            ),
+            Tool::ClaudeCode => self.pick(txt::HOCUSPANDA_ADDS_ITS_HOOKS_TO_CLAUDE),
+            Tool::Codex => self.pick(txt::HOCUSPANDA_ADDS_ITS_HOOKS_AND_ITS),
         }
     }
 
     pub fn file_changed(self) -> &'static str {
-        self.pick("Fichier modifié", "File changed")
+        self.pick(txt::FILE_CHANGED)
     }
 
     pub fn copy_kept(self) -> &'static str {
-        self.pick(
-            "Une copie de l'original est gardée. «\u{a0}Débrancher\u{a0}», dans Sources, remet tout comme avant.",
-            "A copy of the original is kept. “Unplug”, in Sources, puts everything back as it was.",
-        )
+        self.pick(txt::A_COPY_OF_THE_ORIGINAL_IS)
     }
 
     pub fn cancel(self) -> &'static str {
-        self.pick("Annuler", "Cancel")
+        self.pick(txt::CANCEL)
     }
 
     pub fn sources_title(self) -> &'static str {
-        self.pick("Sources des agents", "Agents' sources")
+        self.pick(txt::AGENTS_SOURCES)
     }
 
     /// A tool's state in Sources, and whether it shows in green.
     pub fn tool_state(self, state: ToolState) -> (&'static str, bool) {
         match state {
-            ToolState::Plugged => (self.pick("Branché", "Plugged in"), true),
-            ToolState::Found | ToolState::Declined => (
-                self.pick("Trouvé, pas branché", "Found, not plugged in"),
-                false,
-            ),
-            ToolState::Absent => (
-                self.pick("Pas sur cet ordinateur", "Not on this computer"),
-                false,
-            ),
-            ToolState::Running => (
-                self.pick(
-                    "En marche · suivi tout seul",
-                    "Running · followed by itself",
-                ),
-                true,
-            ),
-            ToolState::Ignored => (
-                self.pick("En marche · pas suivi", "Running · not followed"),
-                false,
-            ),
-            ToolState::Stopped => (self.pick("Ne tourne pas", "Not running"), false),
+            ToolState::Plugged => (self.pick(txt::PLUGGED_IN), true),
+            ToolState::Found | ToolState::Declined => (self.pick(txt::FOUND_NOT_PLUGGED_IN), false),
+            ToolState::Absent => (self.pick(txt::NOT_ON_THIS_COMPUTER), false),
+            ToolState::Running => (self.pick(txt::RUNNING_FOLLOWED_BY_ITSELF), true),
+            ToolState::Ignored => (self.pick(txt::RUNNING_NOT_FOLLOWED), false),
+            ToolState::Stopped => (self.pick(txt::NOT_RUNNING), false),
         }
     }
 
     /// Sources' button for a herdr declined.
     pub fn follow(self) -> &'static str {
-        self.pick("Suivre", "Follow")
+        self.pick(txt::FOLLOW)
     }
 
     pub fn unplug(self) -> &'static str {
-        self.pick("Débrancher", "Unplug")
+        self.pick(txt::UNPLUG)
     }
 
     pub fn another_label(self) -> &'static str {
-        self.pick("UN AUTRE OUTIL", "ANOTHER TOOL")
+        self.pick(txt::ANOTHER_TOOL_2)
     }
 
     pub fn any_tool(self) -> &'static str {
-        self.pick(
-            "N'importe quel outil peut dire où en est son agent avec une commande\u{a0}:",
-            "Any tool can say how its agent is doing with a command:",
-        )
+        self.pick(txt::ANY_TOOL_CAN_SAY_HOW_ITS)
     }
 
     pub fn command(self) -> &'static str {
@@ -836,16 +811,13 @@ impl Words {
 
     pub fn copy(self, copied: bool) -> &'static str {
         match copied {
-            false => self.pick("Copier", "Copy"),
-            true => self.pick("Copié", "Copied"),
+            false => self.pick(txt::COPY),
+            true => self.pick(txt::COPIED),
         }
     }
 
     pub fn states_note(self) -> &'static str {
-        self.pick(
-            "États\u{a0}: working, waiting, done, failed, idle. La fenêtre de l'agent est trouvée d'elle-même.",
-            "States: working, waiting, done, failed, idle. The agent's window is found by itself.",
-        )
+        self.pick(txt::STATES_WORKING_WAITING_DONE_FAILED_IDLE)
     }
 }
 
