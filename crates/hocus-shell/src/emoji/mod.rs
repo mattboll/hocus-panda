@@ -24,19 +24,20 @@ pub mod store;
 pub mod view;
 
 use std::{
-    sync::{Mutex, PoisonError},
+    sync::atomic::{AtomicBool, Ordering},
     time::Instant,
 };
 
 use hocus_link::{EMOJI_NAMESPACE, EmojiAt, POPOVER_CLOSE, ToCompositor};
-use iced::{keyboard, window};
+use iced::{Element, keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
 
 use self::data::Group;
 use crate::{
     clock::time::Lang,
     field::{self, Entry, Took},
-    popover::Effect,
+    popover::{Effect, Pressed},
+    surfaces::{Asked, Context, Lent, Surface},
 };
 
 /// The grid's columns.
@@ -363,19 +364,63 @@ pub enum Phase {
     Open(Box<Open>),
 }
 
-/// The picker, and its surfaces fading out until they go.
+/// The picker, and its surfaces fading out until they go: the shell's own
+/// (#773).
 #[derive(Debug, Default)]
 pub struct Picker {
     pub phase: Phase,
     closing: Vec<(window::Id, Instant)>,
+    /// The time a tick was asked for.
+    asked: Option<Instant>,
 }
 
-static PICKER: Mutex<Option<Picker>> = Mutex::new(None);
+/// Whether the picker holds the keyboard open, for the threads that do
+/// not own it (a press outside, a key that reached another surface): a
+/// flag it keeps, nothing they read of its state.
+static HOLDING: AtomicBool = AtomicBool::new(false);
+/// Whether it is open at all.
+static OPEN: AtomicBool = AtomicBool::new(false);
 
-/// `with` on the picker.
-pub fn with<T>(with: impl FnOnce(&mut Picker) -> T) -> T {
-    let mut picker = PICKER.lock().unwrap_or_else(PoisonError::into_inner);
-    with(picker.get_or_insert_with(Picker::default))
+/// What a screen reader clicks on the picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clicked {
+    Cell(usize),
+    Tab(Heading),
+    Tone(usize),
+    Tones,
+}
+
+/// What other threads and surfaces ask of the picker, as messages for the
+/// loop that owns it ([`crate::surfaces::ask`]).
+#[derive(Debug, Clone)]
+pub enum Come {
+    /// `Super+.`: it opens on that screen at that place, or closes.
+    Toggle {
+        output: String,
+        screen: (i32, i32),
+        at: EmojiAt,
+    },
+    /// A press outside, another surface opening, the lock: it closes.
+    Close,
+    /// The emoji inserted with the picker kept open is in.
+    Inserted,
+    /// A key that reached another of the shell's surfaces.
+    Key(Pressed),
+    /// The clipboard's text for the search of the picker on that surface.
+    Pasted(window::Id, String),
+    /// A screen reader's click.
+    Clicked(Clicked),
+    /// What was due is due ([`Picker::due`]).
+    Tick,
+}
+
+/// What screen readers are told of the picker ([`a11y`]).
+#[derive(Debug, Clone)]
+pub struct Seen {
+    surface: window::Id,
+    holding: bool,
+    focus: String,
+    size: (u32, u32),
 }
 
 pub fn words() -> Words {
@@ -387,10 +432,45 @@ pub fn start() {
     store::start();
 }
 
-/// Its surface is built again and draws.
-pub fn wake() {
+/// A press on none of the shell's surfaces: it closes.
+pub fn outside() {
+    close();
+}
+
+/// It closes, if it is open: asked of the loop, from any thread.
+pub fn close() {
+    if OPEN.load(Ordering::Relaxed) {
+        crate::surfaces::ask(Asked::Emoji(Come::Close));
+    }
+}
+
+/// A key that reached another of the shell's surfaces while the picker
+/// holds the keyboard (layershellev hands keys to the surface last created
+/// or clicked): its, handed to the loop. Whether it was taken.
+pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>) -> bool {
+    if !HOLDING.load(Ordering::Relaxed) {
+        return false;
+    }
+    crate::surfaces::ask(Asked::Emoji(Come::Key(Pressed {
+        key: key.clone(),
+        modifiers,
+        text: text.map(str::to_owned),
+    })));
+    true
+}
+
+/// `text` chosen (`keep`: the picker stays open): the recent ones take it,
+/// and the compositor inserts it.
+pub fn chosen(emoji: &data::Emoji, text: String, keep: bool, effects: &mut Vec<Effect>) {
+    tracing::debug!(keep, "an emoji chosen");
+    store::change(|k| k.used(emoji.text));
+    effects.push(Effect::Tell(ToCompositor::Emoji { keep, text }));
+}
+
+/// Its surface drawn again, its view built again.
+fn woken() -> Vec<Effect> {
     crate::ui::touch();
-    crate::popover::send(vec![Effect::Wake(EMOJI_NAMESPACE)]);
+    vec![Effect::Wake(EMOJI_NAMESPACE)]
 }
 
 impl Picker {
@@ -408,6 +488,118 @@ impl Picker {
         }
     }
 
+    fn surface(&self) -> Option<window::Id> {
+        match &self.phase {
+            Phase::Open(open) => Some(open.surface),
+            Phase::Closed => None,
+        }
+    }
+
+    /// Whether surface `id` is the picker's, open or fading out.
+    pub fn is_surface(&self, id: window::Id) -> bool {
+        self.open_on(id).is_some() || self.closing.iter().any(|(c, _)| *c == id)
+    }
+
+    /// `come` taken in at `now`: what the shell then does.
+    pub fn update(&mut self, come: Come, now: Instant) -> Vec<Effect> {
+        let effects = match come {
+            Come::Toggle { output, screen, at } => self.toggle(output, screen, at, now),
+            Come::Close => {
+                let mut effects = Vec::new();
+                self.close(now, &mut effects);
+                effects
+            }
+            Come::Inserted => self.inserted(),
+            Come::Key(pressed) => match self.surface() {
+                Some(id) => {
+                    let mut effects = self
+                        .key_on(
+                            id,
+                            &pressed.key,
+                            pressed.modifiers,
+                            pressed.text.as_deref(),
+                            now,
+                        )
+                        .unwrap_or_default();
+                    effects.extend(woken());
+                    effects
+                }
+                None => Vec::new(),
+            },
+            Come::Pasted(id, pasted) => {
+                let pasted = |entry: &mut Entry| match entry.paste(&pasted) {
+                    true => Took::Edited,
+                    false => Took::Same,
+                };
+                if self.edited(id, pasted) {
+                    woken()
+                } else {
+                    Vec::new()
+                }
+            }
+            Come::Clicked(clicked) => match self.surface() {
+                Some(id) => {
+                    let mut effects = match clicked {
+                        Clicked::Cell(at) => self.act(id, at, false, now),
+                        Clicked::Tab(heading) => {
+                            self.tab(id, heading);
+                            Vec::new()
+                        }
+                        Clicked::Tone(tone) => self.tones(id, Some(tone)),
+                        Clicked::Tones => self.tones(id, None),
+                    };
+                    effects.extend(woken());
+                    effects
+                }
+                None => Vec::new(),
+            },
+            Come::Tick => {
+                self.asked = None;
+                self.tick(now)
+            }
+        };
+        self.said();
+        effects
+    }
+
+    /// What the threads that do not own it are told of it: whether it is
+    /// open and holds the keyboard, and what screen readers read.
+    pub fn said(&self) {
+        let (open, holding) = match &self.phase {
+            Phase::Open(open) => (true, open.holding),
+            Phase::Closed => (false, false),
+        };
+        OPEN.store(open, Ordering::Relaxed);
+        HOLDING.store(holding, Ordering::Relaxed);
+        crate::a11y::shown(crate::a11y::Shown::Emoji(self.seen()));
+    }
+
+    fn seen(&self) -> Option<Seen> {
+        let Phase::Open(open) = &self.phase else {
+            return None;
+        };
+        Some(Seen {
+            surface: open.surface,
+            holding: open.holding,
+            focus: if open.grid.flat.is_empty() {
+                "emoji:Field".to_owned()
+            } else {
+                format!("emoji:Cell({})", open.selected)
+            },
+            size: open.size(),
+        })
+    }
+
+    /// When a tick is due, if one was not asked for by then already.
+    pub fn due(&mut self) -> Option<Instant> {
+        let at = self.closing.iter().map(|(_, at)| *at).min()?;
+        if self.asked.is_some_and(|asked| asked <= at) {
+            return None;
+        }
+        self.asked = Some(at);
+        Some(at)
+    }
+
     /// It closes at `now`: the keyboard goes back at once, the compositor
     /// fades it out, and it goes after that.
     fn close(&mut self, now: Instant, effects: &mut Vec<Effect>) {
@@ -421,22 +613,20 @@ impl Picker {
             EMOJI_NAMESPACE.to_owned(),
         )));
     }
-}
 
-/// Whether surface `id` is the picker's, open or fading out.
-pub fn is_surface(id: window::Id) -> bool {
-    with(|p| p.open_on(id).is_some() || p.closing.iter().any(|(c, _)| *c == id))
-}
-
-/// `Super+.` (the compositor's line): it opens on `output` at `at`, or
-/// closes when it is open.
-pub fn toggle(output: String, screen: (i32, i32), at: EmojiAt) {
-    let now = Instant::now();
-    let opened = with(|p| {
+    /// `Super+.` (the compositor's line): it opens on `output` at `at`, or
+    /// closes when it is open.
+    fn toggle(
+        &mut self,
+        output: String,
+        screen: (i32, i32),
+        at: EmojiAt,
+        now: Instant,
+    ) -> Vec<Effect> {
         let mut effects = Vec::new();
-        if matches!(p.phase, Phase::Open(_)) {
-            p.close(now, &mut effects);
-            return (effects, false);
+        if matches!(self.phase, Phase::Open(_)) {
+            self.close(now, &mut effects);
+            return effects;
         }
         let surface = window::Id::unique();
         let screen = (screen.0 as f32, screen.1 as f32);
@@ -460,66 +650,38 @@ pub fn toggle(output: String, screen: (i32, i32), at: EmojiAt) {
         tracing::debug!(output, ?at, place = ?open.place, "the emoji picker opens");
         effects.push(Effect::Emoji {
             id: surface,
-            output: output.clone(),
+            output,
             size,
             margin: (open.place.1, 0, 0, open.place.0),
         });
-        p.phase = Phase::Open(Box::new(open));
-        (effects, true)
-    });
-    let (effects, opened) = opened;
-    if opened {
+        self.phase = Phase::Open(Box::new(open));
         // One at a time: the bar's popover, the launcher and the actions
         // palette close.
         crate::popover::event(crate::popover::Event::PressElsewhere);
         crate::launcher::close();
         crate::actions::close();
-    }
-    crate::popover::send(effects);
-}
-
-/// A press on none of the shell's surfaces: it closes.
-pub fn outside() {
-    close();
-}
-
-pub fn close() {
-    let effects = with(|p| {
-        let mut effects = Vec::new();
-        p.close(Instant::now(), &mut effects);
         effects
-    });
-    if !effects.is_empty() {
-        crate::popover::send(effects);
     }
-}
 
-/// The emoji inserted with the picker kept open is in: it takes the
-/// keyboard back.
-pub fn inserted() {
-    let effects = with(|p| match &mut p.phase {
-        Phase::Open(open) if !open.holding => {
-            open.holding = true;
-            vec![
-                Effect::Keyboard(open.surface, KeyboardInteractivity::Exclusive),
-                Effect::Wake(EMOJI_NAMESPACE),
-            ]
+    /// The emoji inserted with the picker kept open is in: it takes the
+    /// keyboard back.
+    fn inserted(&mut self) -> Vec<Effect> {
+        match &mut self.phase {
+            Phase::Open(open) if !open.holding => {
+                open.holding = true;
+                vec![
+                    Effect::Keyboard(open.surface, KeyboardInteractivity::Exclusive),
+                    Effect::Wake(EMOJI_NAMESPACE),
+                ]
+            }
+            _ => Vec::new(),
         }
-        _ => Vec::new(),
-    });
-    crate::popover::send(effects);
-}
+    }
 
-/// When [`tick`] has something to do.
-pub fn deadline() -> Option<Instant> {
-    with(|p| p.closing.iter().map(|(_, at)| *at).min())
-}
-
-/// What is due at `now`: the surfaces faded out go.
-pub fn tick(now: Instant) -> Vec<Effect> {
-    with(|p| {
+    /// What is due at `now`: the surfaces faded out go.
+    fn tick(&mut self, now: Instant) -> Vec<Effect> {
         let mut effects = Vec::new();
-        p.closing.retain(|(id, at)| {
+        self.closing.retain(|(id, at)| {
             let due = *at <= now;
             if due {
                 effects.push(Effect::Remove(*id));
@@ -527,23 +689,13 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             !due
         });
         effects
-    })
-}
+    }
 
-/// `text` chosen (`keep`: the picker stays open): the recent ones take it,
-/// and the compositor inserts it.
-pub fn chosen(emoji: &data::Emoji, text: String, keep: bool, effects: &mut Vec<Effect>) {
-    tracing::debug!(keep, "an emoji chosen");
-    store::change(|k| k.used(emoji.text));
-    effects.push(Effect::Tell(ToCompositor::Emoji { keep, text }));
-}
-
-/// Place `at` of the picker on `id` is chosen: inserted, and the picker
-/// closes unless `keep`.
-pub fn act(id: window::Id, at: usize, keep: bool) {
-    let effects = with(|p| {
+    /// Place `at` of the picker on `id` is chosen: inserted, and the
+    /// picker closes unless `keep`.
+    pub fn act(&mut self, id: window::Id, at: usize, keep: bool, now: Instant) -> Vec<Effect> {
         let mut effects = Vec::new();
-        let Some(open) = p.open_mut(id) else {
+        let Some(open) = self.open_mut(id) else {
             return effects;
         };
         if !open.holding {
@@ -559,18 +711,18 @@ pub fn act(id: window::Id, at: usize, keep: bool) {
             open.holding = false;
             effects.push(Effect::Keyboard(open.surface, KeyboardInteractivity::None));
         } else {
-            p.close(Instant::now(), &mut effects);
+            self.close(now, &mut effects);
         }
         chosen(emoji, text, keep, &mut effects);
         effects
-    });
-    crate::popover::send(effects);
-}
+    }
 
-/// The tones' row opens or closes, or tone `tone` is chosen (it closes).
-pub fn tones(id: window::Id, tone: Option<usize>) {
-    let effects = with(|p| {
-        let open = p.open_mut(id)?;
+    /// The tones' row opens or closes, or tone `tone` is chosen (it
+    /// closes).
+    pub fn tones(&mut self, id: window::Id, tone: Option<usize>) -> Vec<Effect> {
+        let Some(open) = self.open_mut(id) else {
+            return Vec::new();
+        };
         match tone {
             Some(tone) => {
                 store::change(|k| k.tone = tone);
@@ -582,17 +734,12 @@ pub fn tones(id: window::Id, tone: Option<usize>) {
         let place = place(open.at, size, open.screen);
         let margin = (place != open.place).then_some((place.1, 0, 0, place.0));
         open.place = place;
-        Some(vec![Effect::Resize { id, size, margin }])
-    });
-    if let Some(effects) = effects {
-        crate::popover::send(effects);
+        vec![Effect::Resize { id, size, margin }]
     }
-}
 
-/// A tab is chosen: the grid goes to its heading, the search cleared.
-pub fn tab(id: window::Id, heading: Heading) {
-    with(|p| {
-        let Some(open) = p.open_mut(id) else {
+    /// A tab is chosen: the grid goes to its heading, the search cleared.
+    pub fn tab(&mut self, id: window::Id, heading: Heading) {
+        let Some(open) = self.open_mut(id) else {
             return;
         };
         if !open.query.is_empty() {
@@ -613,33 +760,32 @@ pub fn tab(id: window::Id, heading: Heading) {
         } else {
             view::to_row(open, 0);
         }
-    });
-}
-
-/// A key on the open picker on `id`. Whether it was its.
-pub fn key_on(
-    id: window::Id,
-    key: &keyboard::Key,
-    modifiers: keyboard::Modifiers,
-    text: Option<&str>,
-) -> bool {
-    use keyboard::{Key, key::Named};
-    enum Then {
-        Nothing,
-        Close,
-        Act(usize, bool),
-        Draw,
-        Paste,
     }
-    let then = with(|p| {
-        let open = p.open_mut(id)?;
+
+    /// A key on the open picker on `id`: what it does, if it was its.
+    pub fn key_on(
+        &mut self,
+        id: window::Id,
+        key: &keyboard::Key,
+        modifiers: keyboard::Modifiers,
+        text: Option<&str>,
+        now: Instant,
+    ) -> Option<Vec<Effect>> {
+        use keyboard::{Key, key::Named};
+        enum Then {
+            Nothing,
+            Close,
+            Act(usize, bool),
+            Paste,
+        }
+        let open = self.open_mut(id)?;
         let held = modifiers.shift() || modifiers.control();
         let arrow = |arrow: Arrow, open: &mut Open| {
             open.selected = open.grid.step(open.selected, arrow);
             view::reveal(open);
-            Then::Draw
+            Then::Nothing
         };
-        Some(match key {
+        let then = match key {
             Key::Named(Named::Escape) => Then::Close,
             Key::Named(Named::Enter) => {
                 if open.grid.flat.is_empty() {
@@ -655,147 +801,117 @@ pub fn key_on(
             Key::Named(Named::ArrowDown) => arrow(Arrow::Down, open),
             Key::Named(Named::Tab) => Then::Nothing,
             _ => match open.query.key(key, modifiers, text) {
-                Took::No | Took::Same => Then::Nothing,
-                Took::Moved => Then::Draw,
+                Took::No | Took::Same | Took::Moved => Then::Nothing,
                 Took::Edited => {
                     open.regrid();
-                    Then::Draw
+                    Then::Nothing
                 }
                 Took::Paste => Then::Paste,
             },
+        };
+        Some(match then {
+            Then::Nothing => Vec::new(),
+            Then::Close => {
+                let mut effects = Vec::new();
+                self.close(now, &mut effects);
+                effects
+            }
+            Then::Act(at, keep) => self.act(id, at, keep, now),
+            Then::Paste => {
+                paste(id);
+                Vec::new()
+            }
         })
-    });
-    match then {
-        None => false,
-        Some(Then::Nothing | Then::Draw) => true,
-        Some(Then::Close) => {
-            close();
-            true
-        }
-        Some(Then::Act(at, keep)) => {
-            act(id, at, keep);
-            true
-        }
-        Some(Then::Paste) => {
-            paste(id);
-            true
-        }
     }
-}
 
-/// The field of the picker on `id` edited: its grid follows. Whether it
-/// draws again.
-fn edited(id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
-    with(|p| {
-        p.open_mut(id).is_some_and(|open| {
+    /// The field of the picker on `id` edited: its grid follows. Whether
+    /// it draws again.
+    fn edited(&mut self, id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
+        self.open_mut(id).is_some_and(|open| {
             let took = edit(&mut open.query);
             if took == Took::Edited {
                 open.regrid();
             }
             took.draws()
         })
-    })
+    }
+
+    /// What the search of the picker on `id` took of an input method or of
+    /// the pointer: its grid follows what was typed; a paste is asked for.
+    pub fn took(&mut self, id: window::Id, took: Took) {
+        match took {
+            Took::Edited => {
+                if let Some(open) = self.open_mut(id) {
+                    open.regrid();
+                }
+            }
+            Took::Paste => paste(id),
+            Took::No | Took::Same | Took::Moved => {}
+        }
+    }
+}
+
+impl Surface for Lent<Picker> {
+    type Message = Come;
+
+    fn update(&mut self, come: Come, now: Instant) -> Vec<Effect> {
+        self.get_mut().update(come, now)
+    }
+
+    fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
+        self.read(|p| p.is_surface(id))?
+            .then(|| view::view(self, id, words(), context.look.glass))
+    }
 }
 
 /// The clipboard's text, on one line, into the field of the picker on
-/// `id` at its caret, read off the loop.
+/// `id` at its caret, read off the loop and handed to it.
 fn paste(id: window::Id) {
     crate::paste::request(crate::paste::Clean::Spaced, move |pasted| {
         let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
             return;
         };
-        let pasted = |entry: &mut Entry| match entry.paste(pasted) {
-            true => Took::Edited,
-            false => Took::Same,
-        };
-        if edited(id, pasted) {
-            wake();
-        }
+        crate::surfaces::ask(Asked::Emoji(Come::Pasted(id, pasted.to_owned())));
     });
-}
-
-/// What the search of the picker on `id` took of an input method or of
-/// the pointer: its grid follows what was typed; a paste is asked for.
-pub fn took(id: window::Id, took: Took) {
-    match took {
-        Took::Edited => with(|p| {
-            if let Some(open) = p.open_mut(id) {
-                open.regrid();
-            }
-        }),
-        Took::Paste => paste(id),
-        Took::No | Took::Same | Took::Moved => {}
-    }
-}
-
-/// A key that reached another of the shell's surfaces while the picker is
-/// open (layershellev hands keys to the surface last created or clicked):
-/// its, and its surface draws again. Whether it was taken.
-pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>) -> bool {
-    let Some(id) = with(|p| match &p.phase {
-        Phase::Open(open) if open.holding => Some(open.surface),
-        _ => None,
-    }) else {
-        return false;
-    };
-    let taken = key_on(id, key, modifiers, text);
-    if taken {
-        wake();
-    }
-    taken
 }
 
 /// The open picker for screen readers: a dialog named "Emoji" holding
 /// what its controls declared (the search, the tone's button, the tabs,
 /// the emoji near the grid's view), the selected emoji holding the focus.
-pub fn a11y() -> Option<hocus_a11y::Window> {
+pub fn a11y(seen: &Seen) -> Option<hocus_a11y::Window> {
     use hocus_a11y::{Node, Role, Window};
-    with(|p| {
-        let Phase::Open(open) = &p.phase else {
-            return None;
-        };
-        let rows = crate::a11y::rows::of(open.surface)?;
-        let dialog = Node::new("dialog", Role::Dialog, "Emoji").children(rows.nodes);
-        let mut window = Window::new("emoji", "Emoji");
-        window.nodes = vec![dialog];
-        window.active = open.holding;
-        window.focus = Some(if open.grid.flat.is_empty() {
-            "emoji:Field".to_owned()
-        } else {
-            format!("emoji:Cell({})", open.selected)
-        });
-        let (w, h) = open.size();
-        window.size = Some((w as f32, h as f32));
-        Some(window)
-    })
+    let rows = crate::a11y::rows::of(seen.surface)?;
+    let dialog = Node::new("dialog", Role::Dialog, "Emoji").children(rows.nodes);
+    let mut window = Window::new("emoji", "Emoji");
+    window.nodes = vec![dialog];
+    window.active = seen.holding;
+    window.focus = Some(seen.focus.clone());
+    window.size = Some((seen.size.0 as f32, seen.size.1 as f32));
+    Some(window)
 }
 
 /// A screen reader clicks control `key` of the open picker: an emoji
-/// (`emoji:Cell(N)`), a tab, the tone's button or a tone.
+/// (`emoji:Cell(N)`), a tab, the tone's button or a tone. Asked of the
+/// loop.
 pub fn a11y_click(key: &str) {
-    let Some(id) = with(|p| match &p.phase {
-        Phase::Open(open) => Some(open.surface),
-        Phase::Closed => None,
-    }) else {
-        return;
-    };
     let arg = |prefix: &str| -> Option<usize> {
         key.strip_prefix(prefix)?.strip_suffix(')')?.parse().ok()
     };
-    if let Some(at) = arg("emoji:Cell(") {
-        act(id, at, false);
+    let clicked = if let Some(at) = arg("emoji:Cell(") {
+        Clicked::Cell(at)
     } else if let Some(i) = arg("emoji:Tab(") {
-        if let Some(heading) = Heading::tabs().get(i) {
-            tab(id, *heading);
+        match Heading::tabs().get(i) {
+            Some(heading) => Clicked::Tab(*heading),
+            None => return,
         }
     } else if let Some(tone) = arg("emoji:Tone(") {
-        tones(id, Some(tone));
+        Clicked::Tone(tone)
     } else if key == "emoji:Tones" {
-        tones(id, None);
+        Clicked::Tones
     } else {
         return;
-    }
-    wake();
+    };
+    crate::surfaces::ask(Asked::Emoji(Come::Clicked(clicked)));
 }
 
 #[cfg(test)]
@@ -863,5 +979,61 @@ mod tests {
         });
         assert_eq!(place(window, size, screen), (248, 147));
         assert_eq!(place(EmojiAt::Screen, size, screen), (708, 237));
+    }
+
+    /// The picker alone (#773): `Super+.` opens it, a key from elsewhere
+    /// searches as its view says, `Shift+Enter` inserts and keeps it open
+    /// until the emoji is in, `Escape` closes it and its tick takes the
+    /// surface away.
+    #[test]
+    fn the_picker_alone_searches_inserts_keeps_and_goes() {
+        use keyboard::{Key, Modifiers, key::Named};
+        let mut picker = Picker::default();
+        let now = Instant::now();
+        let effects = picker.update(
+            Come::Toggle {
+                output: "eDP-1".into(),
+                screen: (1920, 1080),
+                at: EmojiAt::Screen,
+            },
+            now,
+        );
+        let Some(Effect::Emoji { id, .. }) = effects.first() else {
+            panic!("its surface opened: {effects:?}");
+        };
+        let id = *id;
+        let words = Words::new(Lang::English);
+        let shows = |p: &Picker| p.open_on(id).map(|o| view::shows(o, words));
+        let all = shows(&picker).expect("open");
+        let typed = Pressed {
+            key: Key::Character("c".into()),
+            modifiers: Modifiers::empty(),
+            text: Some("c".into()),
+        };
+        picker.update(Come::Key(typed), now);
+        assert_ne!(
+            shows(&picker).expect("open"),
+            all,
+            "the grid follows the search"
+        );
+        let enter = Key::Named(Named::Enter);
+        let effects = picker
+            .key_on(id, &enter, Modifiers::SHIFT, None, now)
+            .expect("its key");
+        assert!(effects.contains(&Effect::Keyboard(id, KeyboardInteractivity::None)));
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::Tell(ToCompositor::Emoji { keep: true, .. })))
+        );
+        assert_eq!(picker.open_on(id).map(|o| o.holding), Some(false));
+        let effects = picker.update(Come::Inserted, now);
+        assert!(effects.contains(&Effect::Keyboard(id, KeyboardInteractivity::Exclusive)));
+        let escape = Key::Named(Named::Escape);
+        picker.key_on(id, &escape, Modifiers::empty(), None, now);
+        assert!(picker.open_on(id).is_none() && picker.is_surface(id));
+        let due = picker.due().expect("a tick due");
+        assert_eq!(picker.update(Come::Tick, due), vec![Effect::Remove(id)]);
+        assert!(!picker.is_surface(id));
     }
 }

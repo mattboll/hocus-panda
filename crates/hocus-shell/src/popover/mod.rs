@@ -2487,7 +2487,6 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
             let deadline = [
                 deadline,
                 crate::launcher::deadline(),
-                crate::emoji::deadline(),
                 crate::capture::thumb::deadline(),
                 crate::tray::tip::deadline(),
                 crate::tasks::deadline(),
@@ -2506,7 +2505,6 @@ pub fn effects() -> impl iced::futures::Stream<Item = crate::Message> {
                             let now = Instant::now();
                             let mut due = with(|c| c.tick(now));
                             due.extend(crate::launcher::tick(now));
-                            due.extend(crate::emoji::tick(now));
                             due.extend(crate::capture::thumb::tick(now));
                             due.extend(crate::tray::tip::tick(now));
                             due.extend(crate::tasks::tick(now));

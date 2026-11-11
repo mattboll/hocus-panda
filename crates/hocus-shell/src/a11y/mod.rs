@@ -67,6 +67,8 @@ pub enum Shown {
     Auth(Option<crate::auth::Seen>),
     /// The actions palette, while it is open.
     Actions(Option<crate::actions::Seen>),
+    /// The emoji picker, while it is open.
+    Emoji(Option<crate::emoji::Seen>),
 }
 
 /// What a surface the loop owns shows now, for this thread.
@@ -173,6 +175,7 @@ fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
             Some(Heard::Shown(Shown::Lock(lock))) => said.lock = lock,
             Some(Heard::Shown(Shown::Auth(seen))) => said.auth = seen,
             Some(Heard::Shown(Shown::Actions(seen))) => said.actions = seen,
+            Some(Heard::Shown(Shown::Emoji(seen))) => said.emoji = seen,
             Some(Heard::Dump) => {
                 for window in said.describe(Instant::now()) {
                     for line in window.dump().lines() {
@@ -239,6 +242,8 @@ struct Said {
     auth: Option<crate::auth::Seen>,
     /// The actions palette, as the loop last told it.
     actions: Option<crate::actions::Seen>,
+    /// The emoji picker, as the loop last told it.
+    emoji: Option<crate::emoji::Seen>,
 }
 
 impl Said {
@@ -376,7 +381,7 @@ impl Said {
             }
             windows.push(chooser);
         }
-        if let Some(picker) = crate::emoji::a11y() {
+        if let Some(picker) = self.emoji.as_ref().and_then(crate::emoji::a11y) {
             for node in picker.all() {
                 if node.key.starts_with("emoji:") {
                     self.targets.insert(

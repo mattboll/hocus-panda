@@ -417,6 +417,8 @@ struct Shell {
     auth: surfaces::Lent<auth::Auth>,
     /// The actions palette (#736).
     actions: surfaces::Lent<actions::Palette>,
+    /// The emoji picker (5.7).
+    emoji: surfaces::Lent<emoji::Picker>,
 }
 
 #[to_layer_message(multi)]
@@ -484,6 +486,7 @@ impl Shell {
             lock: surfaces::Lent::default(),
             auth: surfaces::Lent::default(),
             actions: surfaces::Lent::default(),
+            emoji: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -593,6 +596,7 @@ impl Shell {
                 }
                 surfaces::Asked::Auth(come) => self.auth_told(auth::Told::Come(come)),
                 surfaces::Asked::Actions(come) => self.actions_told(come),
+                surfaces::Asked::Emoji(come) => self.emoji_told(come),
             },
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
@@ -849,14 +853,12 @@ impl Shell {
                 width,
                 height,
                 at,
-            } => {
-                emoji::toggle(output, (width, height), at);
-                Task::none()
-            }
-            ToShell::EmojiInserted => {
-                emoji::inserted();
-                Task::none()
-            }
+            } => self.emoji_told(emoji::Come::Toggle {
+                output,
+                screen: (width, height),
+                at,
+            }),
+            ToShell::EmojiInserted => self.emoji_told(emoji::Come::Inserted),
             ToShell::Actions(shown) => self.actions_told(actions::Come::Toggle(shown)),
             ToShell::ActionsEnd => self.actions_told(actions::Come::Close),
             ToShell::Capture(bar) => {
@@ -1792,12 +1794,12 @@ impl Shell {
         )
     }
 
-    /// The emoji picker, if its surface is `id`.
-    fn emoji_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !emoji::is_surface(id) {
-            return None;
-        }
-        Some(emoji::view::view(id, emoji::words(), self.look.glass))
+    /// The emoji picker told `come`: what it does, and its next tick (a
+    /// surface faded out), if one is due.
+    fn emoji_told(&mut self, come: emoji::Come) -> Task<Message> {
+        let effects = self.emoji.update(come, self.now);
+        let due = self.emoji.get_mut().due();
+        Self::with_tick(effects, due, || surfaces::Asked::Emoji(emoji::Come::Tick))
     }
 
     /// The capture's toolbar (5.8), its thumbnail or its editor (5.9), if
@@ -1981,7 +1983,7 @@ impl Shell {
                 .or_else(|| tray::tip::view(id))
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
-                .or_else(|| self.emoji_view(id))
+                .or_else(|| self.emoji.view(id, &context))
                 .or_else(|| self.actions.view(id, &context))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth.view(id, &context))
@@ -2473,21 +2475,6 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::ClipboardClear => {
                             clipboard::clear();
-                            continue;
-                        }
-                        // The emoji picker: its own surface.
-                        ToShell::Emoji {
-                            output,
-                            scale: _,
-                            width,
-                            height,
-                            at,
-                        } => {
-                            emoji::toggle(output, (width, height), at);
-                            continue;
-                        }
-                        ToShell::EmojiInserted => {
-                            emoji::inserted();
                             continue;
                         }
                         // The capture's toolbar, and its toast: their own
