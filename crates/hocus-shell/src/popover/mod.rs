@@ -334,7 +334,10 @@ impl Item {
             Self::Keyboard | Self::Agent(_) => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) => agents::opening(),
             Self::Decline => {}
-            Self::Notifications => crate::notifications::history_open(true),
+            Self::Notifications => {
+                history::opening();
+                crate::notifications::history_open(true);
+            }
             Self::Clipboard => clipboard::opening(),
             Self::User => session::opening(),
             Self::InUse => in_use::opening(),

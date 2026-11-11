@@ -30,7 +30,7 @@ pub(crate) use app::app_tile;
 pub(crate) use input::{
     Input, Pointer, awaited, cycle, first_control, input, keys, opened_by_keyboard, step,
 };
-pub(crate) use list::{Clip, List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
+pub(crate) use list::{List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
 pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
 pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero_once};
 
@@ -216,28 +216,6 @@ pub(crate) fn label(f: &mut Frame, letters: &[(char, f32)], middle: f32) {
     }
 }
 
-/// `lines` from `top` at `x`, `size` px on lines `height` em apart, in
-/// `colour`.
-pub(crate) fn lines(
-    lines: &[String],
-    (x, top): (f32, f32),
-    size: f32,
-    height: f32,
-    colour: Color,
-) -> impl Iterator<Item = canvas::Text> {
-    lines.iter().enumerate().map(move |(i, line)| {
-        let mut said = text(
-            line.clone(),
-            Point::new(x, top + (i as f32 + 0.5) * size * height),
-            size,
-            colour,
-            Alignment::Left,
-        );
-        said.line_height = LineHeight::Relative(height);
-        said
-    })
-}
-
 /// `value` rounded, right-aligned on `at`, in tabular figures: each digit
 /// centred in a cell as wide as the font's `0`, `zero`.
 pub(crate) fn figures(f: &mut Frame, at: Point, value: f32, zero: f32, colour: Color) {
@@ -278,7 +256,7 @@ const SLIDE: Duration = Duration::from_millis(160);
 const SWITCH_ASKED_FOR: Duration = Duration::from_secs(3);
 
 /// The header's switch: what it asked and when, and its knob's slide.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Switch {
     asked: Option<(bool, Instant)>,
     /// From where (0 off, 1 on), since when.

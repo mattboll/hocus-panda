@@ -9,12 +9,10 @@ use iced::{
 };
 
 use super::{ICON, ICON_GAP, LEFT, RIGHT, ROW_GAP, ROW_OUT, ROW_PAD};
-use crate::levels::draw::{LINE, stroke};
-use crate::theme::Ink;
+use crate::levels::draw::stroke;
 
 /// A list's scrollbar, on the content's right.
 pub(crate) const SCROLLBAR: f32 = 6.0;
-const THUMB: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
 /// The spinners: 12 px, a turn in 900 ms.
 const SPINNER: f32 = 12.0;
 const TURN: Duration = Duration::from_millis(900);
@@ -58,28 +56,9 @@ impl List {
     }
 
     /// How far it can scroll.
+    #[cfg(test)]
     pub(crate) fn most_scroll(self) -> f32 {
         (self.content - self.view.height).max(0.0)
-    }
-
-    /// Its thumb, at `scroll`, from `left`: on a popover narrower than
-    /// the others, its content's right.
-    pub(crate) fn scrollbar_at(self, f: &mut Frame, scroll: f32, left: f32) {
-        if !self.scrolls() {
-            return;
-        }
-        let view = self.view;
-        let height = (view.height * view.height / self.content).max(20.0);
-        let travel = view.height - height;
-        let share = scroll / self.most_scroll().max(1.0);
-        let thumb = Rectangle::new(
-            Point::new(left, view.y + travel * share),
-            Size::new(SCROLLBAR, height),
-        );
-        f.fill(
-            &Path::rounded_rectangle(thumb.position(), thumb.size(), (SCROLLBAR / 2.0).into()),
-            THUMB.get(),
-        );
     }
 }
 
@@ -94,30 +73,6 @@ pub(crate) fn reveal((top, height): (f32, f32), view: f32, scroll: f32, most: f3
         scroll = top + height - view;
     }
     scroll.clamp(0.0, most)
-}
-
-/// Where a list's text shows: on the CPU, whose renderer does not cut text
-/// to a frame's bounds, a text in a list is drawn only when it shows whole.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Clip(Option<Rectangle>);
-
-impl Clip {
-    /// Text in the list `view`, cut on the CPU (`software`).
-    pub(crate) fn new(software: bool, view: Option<Rectangle>) -> Self {
-        Self(view.filter(|_| software))
-    }
-
-    pub(crate) fn fill(self, f: &mut Frame, text: canvas::Text) {
-        if let Some(view) = self.0 {
-            let half = text.size.0 * LINE / 2.0;
-            if text.position.y - half < view.y - 1.0
-                || text.position.y + half > view.y + view.height + 1.0
-            {
-                return;
-            }
-        }
-        f.fill_text(text);
-    }
 }
 
 /// The room a row's name has in a row `width` wide: past its icon, before

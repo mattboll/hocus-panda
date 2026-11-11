@@ -852,7 +852,7 @@ impl<Message> canvas::Program<Message> for Panel {
                 .then(|| canvas::Action::request_redraw().and_capture());
         }
         match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(_) => {
+            Input::Redraw => {
                 for pressed in kit::keys(self.id) {
                     let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
                 }

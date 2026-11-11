@@ -9,8 +9,8 @@ use crate::popover::{Event as Seen, Pressed, event};
 
 /// What a popover's canvas saw, as it handles it.
 pub(crate) enum Input<'a> {
-    /// It is about to draw, at `now`: what it shows is read afresh.
-    Redraw(Instant),
+    /// It is about to draw: what it shows is read afresh.
+    Redraw,
     /// The pointer, at a place on it (none: it left).
     Mouse(&'a mouse::Event, Option<Point>),
     Key(Pressed),
@@ -27,7 +27,7 @@ pub(crate) fn input<'a, T>(
     pointer: &mut Pointer<T>,
 ) -> Input<'a> {
     match event {
-        iced::Event::Window(window::Event::RedrawRequested(now)) => Input::Redraw(*now),
+        iced::Event::Window(window::Event::RedrawRequested(_)) => Input::Redraw,
         _ if !crate::popover::with(|c| c.is_open(id)) => Input::Nothing,
         iced::Event::Mouse(event) => {
             let at = crate::levels::draw::pointer(event, bounds, cursor, pointer.at);
@@ -105,7 +105,6 @@ pub(crate) struct Pointer<T> {
     pub at: Option<Point>,
     inside: bool,
     pub hover: Option<T>,
-    pub pressed: Option<T>,
 }
 
 impl<T> Default for Pointer<T> {
@@ -114,7 +113,6 @@ impl<T> Default for Pointer<T> {
             at: None,
             inside: false,
             hover: None,
-            pressed: None,
         }
     }
 }
@@ -133,31 +131,6 @@ impl<T: Copy + PartialEq> Pointer<T> {
         self.inside = false;
         event(Seen::PopoverLeave);
         self.hover = None;
-    }
-
-    /// It is over `target`: whether that changed.
-    pub(crate) fn over(&mut self, target: Option<T>) -> bool {
-        let changed = self.hover != target;
-        self.hover = target;
-        changed
-    }
-
-    /// The button released over `target`: what it clicked, pressed and
-    /// released on it.
-    pub(crate) fn release(&mut self, target: Option<T>) -> Option<T> {
-        self.pressed.take().filter(|p| Some(*p) == target)
-    }
-
-    /// The pointer's look: grabbing while a slider is dragged, a hand over
-    /// what can be acted on.
-    pub(crate) fn interaction(&self, dragging: bool) -> mouse::Interaction {
-        if dragging {
-            mouse::Interaction::Grabbing
-        } else if self.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 

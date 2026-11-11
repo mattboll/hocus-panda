@@ -1946,15 +1946,11 @@ impl Shell {
                 words: agents::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
             }),
-            popover::Item::Notifications => canvas(popover::history::Panel {
+            popover::Item::Notifications => popover::history::view(&popover::history::Panel {
                 id,
                 glass: self.look.glass,
                 motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Clipboard => popover::clipboard::view(&popover::clipboard::Panel {
                 id,
                 words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
