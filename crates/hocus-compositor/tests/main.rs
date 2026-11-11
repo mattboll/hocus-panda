@@ -85,6 +85,7 @@ mod music;
 mod night_light;
 mod notifications;
 mod overview;
+mod panic_hook;
 mod perf;
 mod pointer_focus;
 mod polkit;

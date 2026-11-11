@@ -18,6 +18,8 @@ workspace = true
 
 [dependencies]
 hocus-agents.workspace = true
+# A panic said in the log before the program ends (#778).
+hocus-panic.workspace = true
 # `hocus day planka-token`: a board's token kept where the shell reads it.
 hocus-day.workspace = true
 # `hocus perf day`: a day of the desktop's CPU and memory (#655).

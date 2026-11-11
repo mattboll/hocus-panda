@@ -707,6 +707,15 @@ impl State {
         }
     }
 
+    /// The compositor ends on a panic of its loop (#778): the last save
+    /// asked is written, and no new one is taken of a state the panic
+    /// left half changed.
+    pub(crate) fn session_end_as_saved(&self) {
+        if !self.session_flush(EXIT_PATIENCE) {
+            tracing::warn!("the session's last save was not written in time");
+        }
+    }
+
     /// Waits until what was asked of the saving thread is done, `patience`
     /// at most; whether it was.
     pub(crate) fn session_flush(&self, patience: Duration) -> bool {

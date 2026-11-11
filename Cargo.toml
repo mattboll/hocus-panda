@@ -26,6 +26,7 @@ hocus-geometry = { version = "1.0.0", path = "crates/hocus-geometry" }
 hocus-link = { version = "1.0.0", path = "crates/hocus-link" }
 hocus-network = { version = "1.0.0", path = "crates/hocus-network" }
 hocus-pandas = { version = "1.0.0", path = "crates/hocus-pandas" }
+hocus-panic = { version = "1.0.0", path = "crates/hocus-panic" }
 hocus-perf = { version = "1.0.0", path = "crates/hocus-perf" }
 hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
 hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }

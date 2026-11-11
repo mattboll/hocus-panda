@@ -21,6 +21,8 @@ hocus-config.workspace = true
 hocus-agents.workspace = true
 hocus-link.workspace = true
 hocus-pandas.workspace = true
+# A panic said in the log before the program ends (#778).
+hocus-panic.workspace = true
 # The Performances page: the days the compositor recorded, their peaks and
 # signals (#655).
 hocus-perf.workspace = true

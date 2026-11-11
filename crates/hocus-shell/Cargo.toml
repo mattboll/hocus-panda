@@ -17,6 +17,8 @@ workspace = true
 [dependencies]
 hocus-link.workspace = true
 hocus-pandas.workspace = true
+# A panic said in the log before the program ends (#778).
+hocus-panic.workspace = true
 # What the shell shows, for screen readers: AT-SPI through AccessKit.
 hocus-a11y.workspace = true
 # The desktop entries, read as the compositor and the Settings read them.

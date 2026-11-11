@@ -139,10 +139,16 @@ fn main() -> ExitCode {
         Ok(quiet) => filter.add_directive(quiet),
         Err(_) => filter,
     };
+    let filter = match hocus_panic::LOG.parse() {
+        Ok(panics) => filter.add_directive(panics),
+        Err(_) => filter,
+    };
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(filter)
         .init();
+    // A panic is in the log the compositor keeps of the shell (#778).
+    hocus_panic::install();
     // On a CPU, the CPU renderer: this may start the program again.
     let software = renderer::choose(handed);
     // From here, SIGTERM ends it once what it keeps is written.

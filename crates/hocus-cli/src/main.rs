@@ -256,6 +256,8 @@ enum DayCommand {
 }
 
 fn main() -> ExitCode {
+    // `hocus` has no log: a panic is said on stderr, as by default.
+    hocus_panic::install();
     let args = Args::parse();
     match args.command {
         Command::Settings { section, join } => settings(section.as_deref(), join.as_deref()),
