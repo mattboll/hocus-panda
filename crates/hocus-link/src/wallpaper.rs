@@ -14,8 +14,9 @@
 use std::{
     fmt,
     path::{Path, PathBuf},
-    str::FromStr,
 };
+
+use serde::{Deserialize, Serialize};
 
 use crate::{
     BadLine,
@@ -26,7 +27,8 @@ use crate::{
 
 /// `[wallpaper] picture`, or a screen's `wallpaper`: a built-in by its
 /// word, `"plain"`, or a picture's path (it holds a `/`; `~/` is the home).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Picture {
     Builtin(Backdrop),
     /// A built-in that moves (#433): the compositor's shader draws it,
@@ -108,7 +110,8 @@ pub fn folder() -> Option<PathBuf> {
 }
 
 /// `[wallpaper] fit`: how a picture of one's own fills its screen.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Fit {
     /// Scaled to cover the screen, centred; what overflows is cut.
     #[default]
@@ -136,7 +139,8 @@ impl Fit {
 }
 
 /// `[wallpaper] lock`: what the lock screen shows under its veil.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LockLook {
     /// Each screen's wallpaper, dimmed by the veil (as before 6.3).
     #[default]
@@ -201,7 +205,7 @@ pub struct Look {
 /// The wallpapers as the compositor tells the shell (the lock draws them):
 /// written `wallpaper LOCK\tLOCK-PICTURE\tPICTURE\tFIT\tRRGGBB`, then
 /// for each screen with its own a tab, its name, a tab, its picture.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Wallpapers {
     pub lock: LockLook,
     pub lock_picture: Picture,
@@ -258,45 +262,6 @@ impl fmt::Display for Wallpapers {
             write!(f, "\t{}\t{picture}", crate::screen_name(name))?;
         }
         Ok(())
-    }
-}
-
-impl FromStr for Wallpapers {
-    type Err = BadLine;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut fields = s.split('\t');
-        let mut next = |what: &str| {
-            fields
-                .next()
-                .ok_or_else(|| BadLine(format!("the wallpaper without its {what}")))
-        };
-        let lock = next("lock")?;
-        let lock = LockLook::of(lock).ok_or_else(|| BadLine(format!("no lock look {lock:?}")))?;
-        let lock_picture = Picture::of(next("lock's picture")?)?;
-        let picture = Picture::of(next("picture")?)?;
-        let fit = next("fit")?;
-        let fit = Fit::of(fit).ok_or_else(|| BadLine(format!("no fit {fit:?}")))?;
-        let color = next("colour")?;
-        let color = colour_of(&format!("#{color}"))
-            .ok_or_else(|| BadLine(format!("no colour {color:?}")))?;
-        let rest: Vec<&str> = fields.collect();
-        let (pairs, odd) = rest.as_chunks::<2>();
-        if !odd.is_empty() {
-            return Err(BadLine("a screen without its wallpaper".to_owned()));
-        }
-        let outputs = pairs
-            .iter()
-            .map(|[name, picture]| Ok(((*name).to_owned(), Picture::of(picture)?)))
-            .collect::<Result<_, BadLine>>()?;
-        Ok(Self {
-            lock,
-            lock_picture,
-            picture,
-            fit,
-            color,
-            outputs,
-        })
     }
 }
 
@@ -598,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wallpapers_go_on_the_line_and_back() {
+    fn a_screen_shows_its_own_wallpaper_or_everyones() {
         let wallpapers = Wallpapers {
             lock: LockLook::Blurred,
             lock_picture: Picture::Builtin(Backdrop::Dawn),
@@ -613,8 +578,6 @@ mod tests {
                 ),
             ],
         };
-        let line = wallpapers.to_string();
-        assert_eq!(line.parse::<Wallpapers>(), Ok(wallpapers.clone()));
         assert_eq!(
             wallpapers.lock_look("DP-2").picture,
             Picture::File("/home/alex/Mes images/Lac au matin.jpg".to_owned())

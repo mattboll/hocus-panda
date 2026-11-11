@@ -27,10 +27,13 @@
 
 use std::{fmt, str::FromStr};
 
+use serde::{Deserialize, Serialize};
+
 use crate::BadLine;
 
 /// `[appearance] theme`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Scheme {
     #[default]
     Dark,
@@ -118,7 +121,8 @@ impl FromStr for Scheme {
 
 /// `[appearance] accent`: six hues chosen not to be the bar's states
 /// (amber is `state.wait`, orange `state.stuck`), the pandas' green first.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Accent {
     #[default]
     Green,
@@ -136,7 +140,7 @@ pub enum Accent {
 
 /// An accent's three values: `base` fills the switches, the selection and
 /// the check; text in the accent is `on_dark` or `on_light`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AccentColours {
     pub base: [u8; 3],
     pub on_dark: [u8; 3],
@@ -199,20 +203,6 @@ impl AccentColours {
             hex(self.on_dark),
             hex(self.on_light)
         )
-    }
-
-    fn of_word(word: &str) -> Option<Self> {
-        let colour = |s: &str| -> Option<[u8; 3]> {
-            let n = u32::from_str_radix(s, 16).ok().filter(|_| s.len() == 6)?;
-            Some([(n >> 16) as u8, (n >> 8) as u8, n as u8])
-        };
-        let mut parts = word.split(',');
-        let colours = Self {
-            base: colour(parts.next()?)?,
-            on_dark: colour(parts.next()?)?,
-            on_light: colour(parts.next()?)?,
-        };
-        parts.next().is_none().then_some(colours)
     }
 }
 
@@ -372,44 +362,6 @@ impl fmt::Display for Choice {
     }
 }
 
-impl FromStr for Choice {
-    type Err = BadLine;
-
-    /// `SCHEME ACCENT [WALLPAPER] [contrast]`: without the wallpaper's
-    /// colours, Nuit's.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut words = s.split_whitespace();
-        let scheme = words
-            .next()
-            .ok_or_else(|| BadLine("no theme".to_owned()))?
-            .parse()?;
-        let accent = words
-            .next()
-            .ok_or_else(|| BadLine("no accent".to_owned()))?
-            .parse()?;
-        let mut next = words.next();
-        let wallpaper = match next {
-            None | Some("contrast") => AccentColours::default(),
-            Some(word) => {
-                next = words.next();
-                AccentColours::of_word(word)
-                    .ok_or_else(|| BadLine(format!("the wallpaper's accent {word:?}")))?
-            }
-        };
-        let contrast = match next {
-            None => false,
-            Some("contrast") => true,
-            Some(word) => return Err(BadLine(format!("after the theme, {word:?}"))),
-        };
-        Ok(Self {
-            scheme,
-            accent,
-            wallpaper,
-            contrast,
-        })
-    }
-}
-
 impl fmt::Display for Accent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.word())
@@ -431,7 +383,7 @@ impl FromStr for Accent {
 /// The theme the desktop draws in: written `theme SCHEME ACCENT
 /// WALLPAPER` on the line (the wallpaper's accent's three colours,
 /// [`AccentColours`]).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Choice {
     pub scheme: Scheme,
     pub accent: Accent,
@@ -1316,30 +1268,6 @@ mod tests {
         };
         assert_eq!(choice.tokens(), &DARK_CONTRAST);
         assert_eq!(choice.reads(DARK.dim), DARK_CONTRAST.dim);
-    }
-
-    #[test]
-    fn high_contrast_rides_on_the_line() {
-        for scheme in Scheme::ALL {
-            for contrast in [false, true] {
-                let choice = Choice {
-                    scheme,
-                    accent: Accent::Teal,
-                    contrast,
-                    ..Choice::default()
-                };
-                assert_eq!(choice.to_string().parse::<Choice>(), Ok(choice));
-            }
-        }
-        assert_eq!(
-            "dark green contrast".parse::<Choice>().map(|c| c.contrast),
-            Ok(true)
-        );
-        assert!(
-            "dark green 7ee0a0,7ee0a0,7ee0a0 loud"
-                .parse::<Choice>()
-                .is_err()
-        );
     }
 
     /// `over` at `alpha` over the opaque `under`.

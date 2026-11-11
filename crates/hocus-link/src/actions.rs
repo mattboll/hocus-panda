@@ -21,9 +21,11 @@
 //!   `ID` on window `WINDOW` (`-` none), with `ARG` (a desktop from 0, an
 //!   agent's id; `-` none).
 
-use std::{fmt, time::Duration};
+use std::time::Duration;
 
-use crate::{BadLine, screen_name, title_text, word};
+use serde::{Deserialize, Serialize};
+
+use crate::text::tidy;
 
 /// The palette's layer surface.
 pub const ACTIONS_NAMESPACE: &str = "hocus-actions";
@@ -1057,7 +1059,8 @@ pub fn of_shortcut(key: &str) -> Option<&'static Def> {
 }
 
 /// Why an action cannot run now.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Inert {
     /// It acts on a window, and none had the keyboard.
     NoWindow,
@@ -1139,23 +1142,17 @@ impl Inert {
             (Self::SessionOnly, false) => "with the session only",
         }
     }
-
-    fn read(word: &str) -> Result<Self, BadLine> {
-        Self::ALL
-            .into_iter()
-            .find(|i| i.name() == word)
-            .ok_or_else(|| BadLine(format!("no reason {word:?}")))
-    }
 }
 
 /// `Super+P`: the palette opens on `output` (its scale in 120ths), for
 /// window `window` (its title), else for that screen (its name); what is
 /// on, what cannot run, the shortcuts bound. Open, it closes.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionsShown {
     pub output: String,
     pub scale: u32,
     pub window: Option<u64>,
+    #[serde(serialize_with = "tidy::title")]
     pub title: String,
     /// The screen's work area across: its left from the screen's and its
     /// width (logical pixels), the palette centred in it.
@@ -1169,131 +1166,7 @@ pub struct ActionsShown {
     pub shortcuts: Vec<(String, Vec<String>)>,
 }
 
-/// A word of the line: no spaces, tabs, commas or semicolons.
-fn token(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c.is_whitespace() || c.is_control() || matches!(c, ',' | ';' | '=' | '|' | ':') {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
 impl ActionsShown {
-    pub(crate) fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "actions {} {} {} {} {}\t",
-            screen_name(&self.output).replace(' ', "_"),
-            self.scale,
-            self.window
-                .map_or_else(|| "-".to_owned(), |w| w.to_string()),
-            self.area.0,
-            self.area.1,
-        )?;
-        let list = |f: &mut fmt::Formatter<'_>, items: Vec<String>| {
-            if items.is_empty() {
-                f.write_str("-")
-            } else {
-                f.write_str(&items.join(","))
-            }
-        };
-        list(f, self.on.iter().map(|o| token(o)).collect())?;
-        f.write_str("\t")?;
-        list(
-            f,
-            self.inert
-                .iter()
-                .map(|(id, why)| format!("{}:{}", token(id), why.name()))
-                .collect(),
-        )?;
-        f.write_str("\t")?;
-        let shortcuts: Vec<String> = self
-            .shortcuts
-            .iter()
-            .map(|(key, chords)| {
-                let chords: Vec<String> = chords.iter().map(|c| token(c)).collect();
-                format!("{}={}", token(key), chords.join("|"))
-            })
-            .collect();
-        if shortcuts.is_empty() {
-            f.write_str("-")?;
-        } else {
-            f.write_str(&shortcuts.join(";"))?;
-        }
-        write!(f, "\t{}", title_text(&self.title).replace('\t', " "))
-    }
-
-    /// What follows `actions `.
-    pub(crate) fn read(rest: &str) -> Result<Self, BadLine> {
-        let mut fields = rest.splitn(5, '\t');
-        let mut words = word(&mut fields, "screen")?.split(' ');
-        let output = word(&mut words, "output")?.to_owned();
-        let scale = word(&mut words, "scale")?
-            .parse()
-            .map_err(|e| BadLine(format!("scale: {e}")))?;
-        let window = match word(&mut words, "window")? {
-            "-" => None,
-            w => Some(w.parse().map_err(|e| BadLine(format!("window: {e}")))?),
-        };
-        let mut number = |what: &str| -> Result<i32, BadLine> {
-            word(&mut words, what)?
-                .parse()
-                .map_err(|e| BadLine(format!("{what}: {e}")))
-        };
-        let area = (number("area's left")?, number("area's width")?);
-        let items = |field: &str| -> Vec<String> {
-            if field == "-" || field.is_empty() {
-                Vec::new()
-            } else {
-                field.split(',').map(str::to_owned).collect()
-            }
-        };
-        let on = items(word(&mut fields, "on")?);
-        let inert = items(word(&mut fields, "inert")?)
-            .into_iter()
-            .map(|item| {
-                let (id, why) = item
-                    .split_once(':')
-                    .ok_or_else(|| BadLine(format!("an inert action {item:?}")))?;
-                Ok((id.to_owned(), Inert::read(why)?))
-            })
-            .collect::<Result<_, BadLine>>()?;
-        let shortcuts_field = word(&mut fields, "shortcuts")?;
-        let shortcuts = if shortcuts_field == "-" {
-            Vec::new()
-        } else {
-            shortcuts_field
-                .split(';')
-                .map(|item| {
-                    let (key, chords) = item
-                        .split_once('=')
-                        .ok_or_else(|| BadLine(format!("a shortcut {item:?}")))?;
-                    let chords = if chords.is_empty() {
-                        Vec::new()
-                    } else {
-                        chords.split('|').map(str::to_owned).collect()
-                    };
-                    Ok((key.to_owned(), chords))
-                })
-                .collect::<Result<_, BadLine>>()?
-        };
-        let title = fields.next().unwrap_or_default().to_owned();
-        Ok(Self {
-            output,
-            scale,
-            window,
-            title,
-            area,
-            on,
-            inert,
-            shortcuts,
-        })
-    }
-
     /// Why action `id` cannot run, if it cannot.
     pub fn inert(&self, id: &str) -> Option<Inert> {
         self.inert
@@ -1324,43 +1197,12 @@ impl ActionsShown {
 }
 
 /// The shell runs action `id` on `window`, with `arg`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunAction {
     pub id: String,
     /// A desktop (from 0), an agent's id.
     pub arg: Option<u64>,
     pub window: Option<u64>,
-}
-
-impl RunAction {
-    pub(crate) fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let or_none = |n: Option<u64>| n.map_or_else(|| "-".to_owned(), |n| n.to_string());
-        write!(
-            f,
-            "action {} {} {}",
-            token(&self.id),
-            or_none(self.arg),
-            or_none(self.window)
-        )
-    }
-
-    /// What follows `action `.
-    pub(crate) fn read(rest: &str) -> Result<Self, BadLine> {
-        let mut words = rest.split(' ');
-        let id = word(&mut words, "action")?.to_owned();
-        let mut number = |what: &str| -> Result<Option<u64>, BadLine> {
-            match word(&mut words, what)? {
-                "-" => Ok(None),
-                n => n
-                    .parse()
-                    .map(Some)
-                    .map_err(|e| BadLine(format!("{what}: {e}"))),
-            }
-        };
-        let arg = number("arg")?;
-        let window = number("window")?;
-        Ok(Self { id, arg, window })
-    }
 }
 
 /// A chord as the file writes it (`Super+Shift+Left`) as keycaps, in the
@@ -1478,80 +1320,6 @@ mod tests {
         );
         assert_eq!(of_shortcut("desktop-0"), None);
         assert_eq!(of_shortcut("actions"), None);
-    }
-
-    #[test]
-    fn the_lines_read_back_as_written() {
-        let shown = ActionsShown {
-            output: "DP-2".into(),
-            scale: 120,
-            window: Some(7),
-            title: "kitty · herdr\tx".into(),
-            area: (8, 3360),
-            on: vec!["above".into(), "screen-reader".into()],
-            inert: vec![
-                ("move-to-screen-left".into(), Inert::OneScreen),
-                ("magnifier-off".into(), Inert::MagnifierOff),
-            ],
-            shortcuts: vec![
-                ("close".into(), vec!["Super+Q".into(), "Alt+F4".into()]),
-                ("focus-left".into(), Vec::new()),
-                ("send-to-desktop-1".into(), vec!["Super+Shift+1".into()]),
-            ],
-        };
-        let line = ToShell::Actions(shown.clone()).to_string();
-        let ToShell::Actions(back) = line.parse::<ToShell>().expect("reads") else {
-            panic!("{line}");
-        };
-        assert_eq!(back.title, "kitty · herdr x");
-        assert_eq!(
-            back,
-            ActionsShown {
-                title: back.title.clone(),
-                ..shown.clone()
-            }
-        );
-        let none = ActionsShown {
-            output: "HEADLESS-1".into(),
-            scale: 240,
-            ..ActionsShown::default()
-        };
-        assert_eq!(
-            ToShell::Actions(none.clone())
-                .to_string()
-                .parse::<ToShell>(),
-            Ok(ToShell::Actions(none))
-        );
-        assert_eq!("actions-end".parse::<ToShell>(), Ok(ToShell::ActionsEnd));
-        for run in [
-            RunAction {
-                id: "send-to-desktop".into(),
-                arg: Some(2),
-                window: Some(7),
-            },
-            RunAction {
-                id: "lock".into(),
-                arg: None,
-                window: None,
-            },
-        ] {
-            let line = ToCompositor::Action(run);
-            assert_eq!(line.to_string().parse::<ToCompositor>(), Ok(line));
-        }
-        assert!("action".parse::<ToCompositor>().is_err());
-        assert_eq!(
-            shown
-                .chords(find("close").expect("close"))
-                .map(|c| c.0.len()),
-            Some(2)
-        );
-        assert_eq!(shown.chords(find("focus-left").expect("focus")), None);
-        assert_eq!(
-            shown
-                .chords(find("send-to-desktop").expect("send"))
-                .map(|c| c.1),
-            Some(true)
-        );
     }
 
     #[test]
