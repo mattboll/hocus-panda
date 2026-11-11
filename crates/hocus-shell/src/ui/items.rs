@@ -130,7 +130,6 @@ impl Controls {
 
 /// What a press did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code, reason = "for the bar's items still to come")]
 pub enum Press {
     /// As the kit does: a left press acts on the control under it, or
     /// presses elsewhere for the popovers.
@@ -315,11 +314,13 @@ impl<P: Items> canvas::Program<Message> for Surface<P> {
                 let action = self
                     .0
                     .update(&mut state.inner, event, bounds, state.pointer);
-                // The control under the pointer went: nothing is lit.
+                // The control under the pointer went: nothing is lit, nor
+                // shown for it.
                 if let Some(item) = state.hover {
                     let controls = self.0.controls(&state.inner, bounds.size());
                     if !controls.controls.iter().any(|c| c.item == item) {
                         state.hover = None;
+                        self.0.hovered(&mut state.inner, None);
                     }
                 }
                 action

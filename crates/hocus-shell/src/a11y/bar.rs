@@ -8,8 +8,7 @@
 use hocus_a11y::{Act, Node, Rect, Role, Window};
 use hocus_bluetooth::model::Row as BluetoothRow;
 use hocus_link::{
-    AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE, TRAY_NAMESPACE,
-    WINDOWS_NAMESPACE,
+    AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE, WINDOWS_NAMESPACE,
 };
 use hocus_network::model::Link;
 
@@ -80,8 +79,6 @@ pub struct Facts {
     pub bluetooth: Option<BluetoothRow>,
     pub layout: Option<String>,
     pub levels: Snapshot,
-    /// The tray's icons, by their key: their names.
-    pub tray: Vec<(u32, String)>,
     /// What is said on its own now, and its number: a new number is a new
     /// announcement.
     pub announce: Option<(u64, String)>,
@@ -179,7 +176,6 @@ fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> 
             Some(Node::new("windows", Role::List, words.windows(n)))
         }
         DESKTOPS_NAMESPACE => Some(Node::new("desktops", Role::RadioGroup, words.desktops())),
-        TRAY_NAMESPACE => Some(Node::new("tray", Role::Toolbar, words.tray())),
         _ => None,
     };
     match container {
@@ -320,11 +316,8 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
         | Item::MeetingMark
         | Item::Join
         | Item::TodayLine(_)
-        | Item::TodayMore => return None,
-        Item::Tray(tray) => {
-            let name = facts.tray.iter().find(|(k, _)| *k == tray)?.1.clone();
-            button(name).act(Act::Menu)
-        }
+        | Item::TodayMore
+        | Item::Tray(_) => return None,
         // Not the bar's own: shown in a popover.
         Item::WindowMenu(_) => return None,
     };

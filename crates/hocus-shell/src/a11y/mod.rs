@@ -756,10 +756,6 @@ fn gather(
         bluetooth: (bluetooth != hocus_bluetooth::model::Row::Hidden).then_some(bluetooth),
         layout: crate::layouts::snapshot().shown().map(|l| l.name.clone()),
         levels: crate::levels::snapshot(),
-        tray: crate::tray::shown()
-            .into_iter()
-            .map(|s| (s.key, s.name))
-            .collect(),
         announce: None,
     }
 }
