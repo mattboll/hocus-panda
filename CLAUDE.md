@@ -78,7 +78,9 @@ sharing).
   trailers** (`Co-Authored-By`, `Claude-Session`, "Generated with…") in
   commits or pull requests.
 - Code, comments, docs, issues and PRs in English; user-facing strings
-  translatable, shipped in English and French.
+  in the catalogue (`crates/hocus-words/words/*.toml`, one file a
+  language, docs/design/settings.md "Words"), shipped in English and
+  French; one language type, `hocus_words::Lang`.
 - Ask when a product or design choice is unclear; do not guess.
 
 ## Style

@@ -92,6 +92,35 @@ Martian Mono; written 450 ms after it stops moving), the segmented
 control. A control that does not apply now (the slider while its switch is
 off; everything while the file does not read) is drawn at 45 % and inert.
 
+## Words
+
+Every program's words, the Settings' and the shell's alike, are in the
+catalogue of `crates/hocus-words` (decision 0006): `words/en.toml`, the
+reference, and one file for each other language (`words/fr.toml`). The
+build compiles them into `hocus_words::<section>::<KEY>` and
+`hocus_words::<section>::<key>(lang, …)`; `hocus_words::Lang` is the one
+language type.
+
+**To add a string**: add its key to `en.toml` and to every other file,
+in the section of the code that says it (`[settings.appearance]`,
+`[shell.lock]`, `[perf.signal]`). A plain text becomes a constant
+(`hocus_words::shell::lock::PASSWORD.get(lang)`; the Settings' tables wrap
+it in `w(…)`). Arguments are `{name}`, a function's parameters in the
+order of their names (`{{` and `}}` for braces). A count is `{ one = "…",
+other = "…" }` and its function takes `n` first: `one` is 1 in English,
+0 and 1 in French. A list (`["lundi", …]`) is the same length in every
+file. The build stops on a key a file lacks or has too many of, and on a
+placeholder English does not have.
+
+**To add a language**: copy `en.toml` to `words/<code>.toml` (`de`), set
+its `[language]` table (`code`, `variant = "German"`, `name =
+"Deutsch"`, `plural`: `n=1`, `n<2` or `none`), translate every value.
+`Lang::German` exists from then on, chosen by a locale starting with its
+code or by `[locale] language = "de"`. What still chooses between French
+and English in code is left: a `match lang` (and the Settings' `Words`)
+stops the build until it moves to the catalogue, while an `if … French
+… else` and the shell's surfaces that keep a `fr` flag say English.
+
 ## Énergie (6.10)
 
 Built 2026-11-06 (issue #410), from the approved spec (the issue's last
