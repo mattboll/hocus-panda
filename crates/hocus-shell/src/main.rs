@@ -73,6 +73,7 @@ mod renderer;
 mod setup;
 mod share;
 mod side;
+mod surfaces;
 mod tasks;
 mod theme;
 mod today;
@@ -287,14 +288,7 @@ fn clock_shift() -> Option<String> {
     Some(at)
 }
 
-/// How bars look, as the compositor says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Look {
-    /// The compositor blurs behind: the bar is a tint over it.
-    glass: bool,
-    /// The form switch animates.
-    motion: bool,
-}
+use surfaces::{Look, Surface};
 
 /// A bar on an output.
 #[derive(Debug, Clone)]
@@ -413,6 +407,8 @@ struct Shell {
     wall: clock::time::Wall,
     lang: clock::time::Lang,
     words: levels::model::Words,
+    /// The curtain's pill before the lock (7.2).
+    curtain: curtain::Curtain,
 }
 
 #[to_layer_message(multi)]
@@ -473,6 +469,7 @@ impl Shell {
             wall: clock::time::Wall { zone, shift },
             lang: clock::time::Lang::from_env(),
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
+            curtain: curtain::Curtain::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -932,11 +929,13 @@ impl Shell {
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::Curtain(shown) => {
-                let effects = curtain::set(shown);
+                let effects = self
+                    .curtain
+                    .update(curtain::Said::Shown(shown), Instant::now());
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::CurtainEnd => {
-                let effects = curtain::end();
+                let effects = self.curtain.update(curtain::Said::End, Instant::now());
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             // Taken by the link itself, without a message.
@@ -1718,23 +1717,6 @@ impl Shell {
         ))
     }
 
-    /// The curtain's pill (7.2), if its surface is `id`.
-    fn curtain_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !curtain::is_surface(id) {
-            return None;
-        }
-        Some(
-            canvas(curtain::draw::View {
-                id,
-                words: curtain::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
-    }
-
     /// The authentication dialog (7.5), if its surface is `id`.
     fn auth_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !auth::is_surface(id) {
@@ -1978,7 +1960,7 @@ impl Shell {
                 .or_else(|| self.auth_view(id))
                 .or_else(|| self.share_view(id))
                 .or_else(|| self.lock_view(id))
-                .or_else(|| self.curtain_view(id))
+                .or_else(|| self.curtain.view(id, self.look))
                 .or_else(|| self.in_use_view(id))
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))
