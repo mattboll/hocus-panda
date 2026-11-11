@@ -11,17 +11,17 @@
 //! Its surface is a layer surface of the shell's ([`EMOJI_NAMESPACE`]), in
 //! the overlay layer, as large as the panel, placed by its margins from
 //! the screen's top left corner. The compositor draws its glass and its
-//! shadow and moves it in and out, as a popover's. As for the launcher,
-//! nothing goes through iced's messages: keys and the pointer change its
-//! state and draw its surface alone ([`crate::popover::effects`] carries
-//! out the rest). The compositor inserts the emoji (`emoji insert TEXT`).
+//! shadow and moves it in and out, as a popover's. Its surface is the
+//! widget kit's ([`view`]): what its widgets ask is handled at once, and
+//! it alone draws again ([`crate::popover::effects`] carries out the
+//! rest). The compositor inserts the emoji (`emoji insert TEXT`).
 //!
 //! The emoji's data ([`data`]) are read once; the recent ones and the tone
 //! are kept on disk ([`store`]).
 
 pub mod data;
-pub mod draw;
 pub mod store;
+pub mod view;
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -46,7 +46,7 @@ const QUERY_MOST: usize = 100;
 /// The margin kept to the screen's edges, and between the caret and the
 /// picker (logical pixels).
 const EDGE: f32 = 8.0;
-const UNDER: f32 = 4.0 * draw::ZOOM;
+const UNDER: f32 = 4.0 * view::ZOOM;
 
 /// The picker's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +96,37 @@ impl Words {
         } else {
             format!("No emoji for \u{201c}{query}\u{201d}")
         }
+    }
+
+    /// The skin tone's button.
+    pub fn tones(self) -> &'static str {
+        if self.fr() {
+            "Teinte de peau"
+        } else {
+            "Skin tone"
+        }
+    }
+
+    /// Tone `i`'s name: yellow, then light to dark.
+    pub fn tone(self, i: usize) -> &'static str {
+        const FR: [&str; 6] = [
+            "Jaune",
+            "Claire",
+            "Moyennement claire",
+            "Moyenne",
+            "Moyennement foncée",
+            "Foncée",
+        ];
+        const EN: [&str; 6] = [
+            "Yellow",
+            "Light",
+            "Medium-light",
+            "Medium",
+            "Medium-dark",
+            "Dark",
+        ];
+        let names = if self.fr() { FR } else { EN };
+        names.get(i).copied().unwrap_or_default()
     }
 
     /// The launcher's emoji row's heading (5.7).
@@ -245,7 +276,6 @@ pub enum Arrow {
 #[derive(Debug)]
 pub struct Open {
     pub surface: window::Id,
-    pub scale: f32,
     /// Where it is asked to open, and the screen's size.
     pub at: EmojiAt,
     pub screen: (f32, f32),
@@ -254,14 +284,15 @@ pub struct Open {
     /// The search field (#771).
     pub query: Entry,
     pub grid: Grid,
-    /// The place selected, in [`Grid::flat`], and the first row shown.
+    /// The place selected, in [`Grid::flat`], and how far the grid is
+    /// scrolled, as it said or was told.
     pub selected: usize,
-    pub offset: usize,
+    pub scroll: f32,
     pub tones_open: bool,
-    /// What the pointer is over and pressed, and where it is.
-    pub hover: Option<draw::Target>,
-    pub pressed: Option<draw::Target>,
-    pub pointer: Option<iced::Point>,
+    /// `Shift` is held: a click inserts and keeps it open.
+    pub shift: bool,
+    /// What it last said it shows, in the log.
+    pub logged: String,
     /// It holds the keyboard; not while an emoji inserted with the picker
     /// kept open goes in.
     pub holding: bool,
@@ -273,7 +304,7 @@ impl Open {
         let recent = recent_of(table);
         self.grid = Grid::of(table, self.query.text(), &recent);
         self.selected = 0;
-        self.offset = 0;
+        view::to_row(self, 0);
     }
 
     /// The emoji of place `at`, as inserted: with the tone chosen.
@@ -284,7 +315,7 @@ impl Open {
 
     /// Its size, logical pixels.
     pub fn size(&self) -> (u32, u32) {
-        draw::size(self.tones_open)
+        view::size(self.tones_open)
     }
 }
 
@@ -356,8 +387,9 @@ pub fn start() {
     store::start();
 }
 
-/// Its surface draws again.
+/// Its surface is built again and draws.
 pub fn wake() {
+    crate::ui::touch();
     crate::popover::send(vec![Effect::Wake(EMOJI_NAMESPACE)]);
 }
 
@@ -398,7 +430,7 @@ pub fn is_surface(id: window::Id) -> bool {
 
 /// `Super+.` (the compositor's line): it opens on `output` at `at`, or
 /// closes when it is open.
-pub fn toggle(output: String, scale: u32, screen: (i32, i32), at: EmojiAt) {
+pub fn toggle(output: String, screen: (i32, i32), at: EmojiAt) {
     let now = Instant::now();
     let opened = with(|p| {
         let mut effects = Vec::new();
@@ -410,18 +442,16 @@ pub fn toggle(output: String, scale: u32, screen: (i32, i32), at: EmojiAt) {
         let screen = (screen.0 as f32, screen.1 as f32);
         let mut open = Open {
             surface,
-            scale: (scale as f32 / 120.0).max(0.5),
             at,
             screen,
             place: (0, 0),
             query: Entry::new(field::Kind::Line, QUERY_MOST),
             grid: Grid::default(),
             selected: 0,
-            offset: 0,
+            scroll: 0.0,
             tones_open: false,
-            hover: None,
-            pressed: None,
-            pointer: None,
+            shift: false,
+            logged: String::new(),
             holding: true,
         };
         open.regrid();
@@ -576,12 +606,12 @@ pub fn tab(id: window::Id, heading: Heading) {
             .find(|(h, _)| *h == heading)
             .map(|(_, r)| *r);
         if let Some(row) = row {
-            open.offset = row.min(draw::most_offset(&open.grid, open.tones_open));
+            view::to_row(open, row);
             if let Some(Row::Cells(range)) = open.grid.rows.get(row + 1) {
                 open.selected = range.start;
             }
         } else {
-            open.offset = 0;
+            view::to_row(open, 0);
         }
     });
 }
@@ -606,8 +636,7 @@ pub fn key_on(
         let held = modifiers.shift() || modifiers.control();
         let arrow = |arrow: Arrow, open: &mut Open| {
             open.selected = open.grid.step(open.selected, arrow);
-            open.offset =
-                draw::keep_in_view(&open.grid, open.selected, open.offset, open.tones_open);
+            view::reveal(open);
             Then::Draw
         };
         Some(match key {
@@ -685,10 +714,18 @@ fn paste(id: window::Id) {
     });
 }
 
-/// An input method's preedit or commit in the field of the picker on
-/// `id`: whether it draws again.
-pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
-    edited(id, |entry| entry.input_method(event))
+/// What the search of the picker on `id` took of an input method or of
+/// the pointer: its grid follows what was typed; a paste is asked for.
+pub fn took(id: window::Id, took: Took) {
+    match took {
+        Took::Edited => with(|p| {
+            if let Some(open) = p.open_mut(id) {
+                open.regrid();
+            }
+        }),
+        Took::Paste => paste(id),
+        Took::No | Took::Same | Took::Moved => {}
+    }
 }
 
 /// A key that reached another of the shell's surfaces while the picker is
@@ -706,6 +743,59 @@ pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&st
         wake();
     }
     taken
+}
+
+/// The open picker for screen readers: a dialog named "Emoji" holding
+/// what its controls declared (the search, the tone's button, the tabs,
+/// the emoji near the grid's view), the selected emoji holding the focus.
+pub fn a11y() -> Option<hocus_a11y::Window> {
+    use hocus_a11y::{Node, Role, Window};
+    with(|p| {
+        let Phase::Open(open) = &p.phase else {
+            return None;
+        };
+        let rows = crate::a11y::rows::of(open.surface)?;
+        let dialog = Node::new("dialog", Role::Dialog, "Emoji").children(rows.nodes);
+        let mut window = Window::new("emoji", "Emoji");
+        window.nodes = vec![dialog];
+        window.active = open.holding;
+        window.focus = Some(if open.grid.flat.is_empty() {
+            "emoji:Field".to_owned()
+        } else {
+            format!("emoji:Cell({})", open.selected)
+        });
+        let (w, h) = open.size();
+        window.size = Some((w as f32, h as f32));
+        Some(window)
+    })
+}
+
+/// A screen reader clicks control `key` of the open picker: an emoji
+/// (`emoji:Cell(N)`), a tab, the tone's button or a tone.
+pub fn a11y_click(key: &str) {
+    let Some(id) = with(|p| match &p.phase {
+        Phase::Open(open) => Some(open.surface),
+        Phase::Closed => None,
+    }) else {
+        return;
+    };
+    let arg = |prefix: &str| -> Option<usize> {
+        key.strip_prefix(prefix)?.strip_suffix(')')?.parse().ok()
+    };
+    if let Some(at) = arg("emoji:Cell(") {
+        act(id, at, false);
+    } else if let Some(i) = arg("emoji:Tab(") {
+        if let Some(heading) = Heading::tabs().get(i) {
+            tab(id, *heading);
+        }
+    } else if let Some(tone) = arg("emoji:Tone(") {
+        tones(id, Some(tone));
+    } else if key == "emoji:Tones" {
+        tones(id, None);
+    } else {
+        return;
+    }
+    wake();
 }
 
 #[cfg(test)]

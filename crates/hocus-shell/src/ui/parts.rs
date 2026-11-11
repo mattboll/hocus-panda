@@ -325,6 +325,38 @@ pub fn list_by<'a, M: Clone + 'a>(
     container(told).max_height(most).into()
 }
 
+/// A long list's rows, `heights` tall, of which only those near the view
+/// (`view` px from `scroll` down, and as much on each side) are built: the
+/// others are the room they take. For a list of hundreds of rows (the
+/// emoji) built again on each key.
+pub fn lazy<'a, M: 'a>(
+    heights: &[f32],
+    scroll: f32,
+    view: f32,
+    mut row: impl FnMut(usize) -> El<'a, M>,
+) -> El<'a, M> {
+    let mut column = iced::widget::Column::new();
+    let mut top = 0.0;
+    let mut room = 0.0;
+    for (i, height) in heights.iter().enumerate() {
+        let near = top + height >= scroll - view && top <= scroll + 2.0 * view;
+        if near {
+            if room > 0.0 {
+                column = column.push(Space::new().height(room));
+                room = 0.0;
+            }
+            column = column.push(row(i));
+        } else {
+            room += height;
+        }
+        top += height;
+    }
+    if room > 0.0 {
+        column = column.push(Space::new().height(room));
+    }
+    column.into()
+}
+
 /// "Réglages du …": the sliders in their tile, the words, a chevron; the
 /// control `id`, its divider above it.
 pub fn settings_link<'a, M: Clone + 'static>(

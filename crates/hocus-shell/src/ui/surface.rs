@@ -112,6 +112,8 @@ pub struct Around<'a, L> {
     pending: Option<El<'a, L>>,
     /// A surface of its own, not a popover of the bar's.
     own: Option<Own<'a>>,
+    /// Told the modifiers held, as they change (a click with `Shift`).
+    on_modifiers: Option<Box<dyn Fn(keyboard::Modifiers) + 'a>>,
 }
 
 /// A surface of the shell's own (the actions palette, the emoji picker,
@@ -159,7 +161,15 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
             rebuild: None,
             pending: None,
             own: None,
+            on_modifiers: None,
         }
+    }
+
+    /// Told the modifiers held as they change: what a click does with
+    /// `Shift` held. Nothing is built again for it.
+    pub fn modifiers(mut self, told: impl Fn(keyboard::Modifiers) + 'a) -> Self {
+        self.on_modifiers = Some(Box::new(told));
+        self
     }
 
     /// A surface of its own, `namespace`'s, open while `open` says, not a
@@ -559,6 +569,11 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
             shell.request_redraw_at(window::RedrawRequest::At(at));
         }
         let mut handled = false;
+        if let (Event::Keyboard(keyboard::Event::ModifiersChanged(held)), Some(told)) =
+            (event, &self.on_modifiers)
+        {
+            told(*held);
+        }
         // The tree built after what was handled: what waited for it.
         let kept = tree.state.downcast_mut::<Kept>();
         if kept.outdated.is_some_and(|build| build != self.build) {

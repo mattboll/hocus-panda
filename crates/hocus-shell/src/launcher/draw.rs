@@ -1053,7 +1053,7 @@ impl View {
             } else {
                 f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), CARD_FILL.get());
             }
-            crate::emoji::draw::emoji(f, &emoji.with_tone(tone), rect.center(), EMOJI_SIZE, 1.0);
+            crate::emoji::view::emoji(f, &emoji.with_tone(tone), rect.center(), EMOJI_SIZE, 1.0);
         }
     }
 

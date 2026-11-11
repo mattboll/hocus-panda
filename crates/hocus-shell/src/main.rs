@@ -823,12 +823,12 @@ impl Shell {
             }
             ToShell::Emoji {
                 output,
-                scale,
+                scale: _,
                 width,
                 height,
                 at,
             } => {
-                emoji::toggle(output, scale, (width, height), at);
+                emoji::toggle(output, (width, height), at);
                 Task::none()
             }
             ToShell::EmojiInserted => {
@@ -1829,16 +1829,7 @@ impl Shell {
         if !emoji::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(emoji::draw::View {
-                id,
-                words: emoji::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(emoji::view::view(id, emoji::words(), self.look.glass))
     }
 
     /// The capture's toolbar (5.8), its thumbnail or its editor (5.9), if
@@ -2529,12 +2520,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The emoji picker: its own surface.
                         ToShell::Emoji {
                             output,
-                            scale,
+                            scale: _,
                             width,
                             height,
                             at,
                         } => {
-                            emoji::toggle(output, scale, (width, height), at);
+                            emoji::toggle(output, (width, height), at);
                             continue;
                         }
                         ToShell::EmojiInserted => {
