@@ -3105,6 +3105,22 @@ fn the_reminder_brings_the_panda_out_once_more() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The peek out and still, saved under `HOCUS_KIT_SHOTS` for the widget
+/// kit's side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot_peek() -> anyhow::Result<()> {
+    let Some(mut bed) = peek_bed(false)? else {
+        return Ok(());
+    };
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    bed.agent_is("build", "waiting")?;
+    bed.peek_surface()?;
+    bed.peek_out_still()?;
+    common::layer_shot(&mut bed.hp, hocus_link::PEEK_NAMESPACE, "peek")
+}
+
 /// A click on the panda goes to the agent (its window, on another
 /// desktop, gets the keyboard; on a GPU the streak runs from the panda)
 /// and the panda goes back at once; a click on the bubble does too (a

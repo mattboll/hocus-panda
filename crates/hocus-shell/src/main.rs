@@ -1759,12 +1759,7 @@ impl Shell {
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = agents::peek::bar_of(id)?;
-        Some(
-            canvas(agents::peek::View { bar })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        )
+        Some(agents::peek::view(id, bar))
     }
 
     /// The launcher, or its toast, if its surface is `id`.

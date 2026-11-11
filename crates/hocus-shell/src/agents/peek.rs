@@ -53,7 +53,7 @@ use crate::pandas::{self, Burst, Mood};
 use crate::theme::Ink;
 use crate::{
     clock::time::Lang,
-    levels::draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, pointer, rgb},
+    levels::draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::{self, Effect, kit},
 };
 
@@ -389,6 +389,8 @@ struct Out {
     surfaces: HashMap<String, (window::Id, Placed)>,
     /// Its panda playing its mood, from its first frame (#649).
     burst: Option<Burst>,
+    /// Its bubble and its panda under the pointer: the bubble lights.
+    lit: [bool; 2],
 }
 
 static OUT: Mutex<Option<Out>> = Mutex::new(None);
@@ -529,8 +531,11 @@ fn show(shown: Shown, said: Said) {
             said,
             surfaces,
             burst: None,
+            lit: [false; 2],
         });
     });
+    // Its controls are built again for what it says.
+    crate::ui::touch();
     effects.push(Effect::Wake(PEEK_NAMESPACE));
     popover::send(effects);
 }
@@ -714,21 +719,21 @@ fn over(colour: Color, under: Color) -> Color {
     )
 }
 
-/// The peek's surface beside bar `bar`.
+/// What nothing holds on the peek beside bar `bar`: the bubble (lit
+/// while the pointer is on it or on the panda), what it says, the panda
+/// playing its mood. Its two controls are the kit's, over it ([`view`]).
 #[derive(Debug, Clone)]
-pub struct View {
+pub struct Back {
     pub bar: String,
 }
 
-/// What the surface keeps between draws: where the pointer is.
+/// What the canvas keeps between draws: when it last drew.
 #[derive(Debug, Default)]
 pub struct State {
-    pointer: Option<Point>,
-    hover: bool,
     now: Option<Instant>,
 }
 
-impl View {
+impl Back {
     /// Its panda's burst, started as the peek first draws (#649), when the
     /// pandas play: none drawn when they do not.
     fn burst(&self, now: Instant) -> Option<Burst> {
@@ -747,65 +752,42 @@ impl View {
 
     /// What it shows now, and where.
     fn shown(&self) -> Option<(Shown, Said, Placed)> {
-        out(|out| {
-            let out = out.as_ref()?;
-            let (_, placed) = out.surfaces.get(&self.bar)?;
-            Some((out.shown.clone(), out.said.clone(), *placed))
-        })
+        shown_on(&self.bar)
     }
 }
 
-impl<Message> canvas::Program<Message> for View {
+/// What the peek beside bar `bar` shows now, and where.
+fn shown_on(bar: &str) -> Option<(Shown, Said, Placed)> {
+    out(|out| {
+        let out = out.as_ref()?;
+        let (_, placed) = out.surfaces.get(bar)?;
+        Some((out.shown.clone(), out.said.clone(), *placed))
+    })
+}
+
+/// Whether the pointer is on the bubble or the panda.
+fn lit() -> bool {
+    out(|out| out.as_ref().is_some_and(|o| o.lit.iter().any(|l| *l)))
+}
+
+impl<Message> canvas::Program<Message> for Back {
     type State = State;
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
-        let event = match event {
-            iced::Event::Window(window::Event::RedrawRequested(now)) => {
-                state.now = Some(*now);
-                // Drawn again while its panda plays, never after.
-                return self
-                    .burst(*now)
-                    .filter(|b| b.plays(*now))
-                    .map(|_| canvas::Action::request_redraw());
-            }
-            iced::Event::Mouse(event) => event,
-            _ => return None,
+        let iced::Event::Window(window::Event::RedrawRequested(now)) = event else {
+            return None;
         };
-        let (shown, _, placed) = self.shown()?;
-        state.pointer = pointer(event, bounds, cursor, state.pointer);
-        let over = state
-            .pointer
-            .is_some_and(|at| regions(&placed).iter().any(|r| r.contains(at)));
-        match event {
-            mouse::Event::ButtonPressed(mouse::Button::Left) if over => {
-                match shown {
-                    Shown::Agent(peek) => {
-                        tracing::debug!(id = peek.id, "the peek goes to its agent");
-                        popover::send(vec![Effect::GoToAgent {
-                            id: peek.id,
-                            bar: self.bar.clone(),
-                            row: placed.in_bar,
-                        }]);
-                    }
-                    Shown::Screens => {
-                        tracing::debug!("the winking panda is clicked: it goes back");
-                        popover::send(vec![Effect::PeekClose]);
-                    }
-                }
-                Some(canvas::Action::capture())
-            }
-            _ if over != state.hover => {
-                state.hover = over;
-                Some(canvas::Action::request_redraw())
-            }
-            _ => None,
-        }
+        state.now = Some(*now);
+        // Drawn again while its panda plays, never after.
+        self.burst(*now)
+            .filter(|b| b.plays(*now))
+            .map(|_| canvas::Action::request_redraw())
     }
 
     fn draw(
@@ -821,7 +803,7 @@ impl<Message> canvas::Program<Message> for View {
             return vec![f.into_geometry()];
         };
         let pose = shown.pose();
-        let fill = match (pose, state.hover) {
+        let fill = match (pose, lit()) {
             (Pose::Wink, false) => BUBBLE_SCREENS,
             (Pose::Wink, true) => BUBBLE_SCREENS_HOVER,
             (_, false) => BUBBLE,
@@ -888,19 +870,100 @@ impl<Message> canvas::Program<Message> for View {
         f.draw_svg(drawn, svg::Svg::new(drawing));
         vec![f.into_geometry()]
     }
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
+// --- Its controls, on the widget kit (#772) ------------------------------------------
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// The bubble or the panda clicked: to the agent, or back.
+    Go,
+    /// The pointer comes on (or leaves) the bubble (0) or the panda (1).
+    Lit(usize, bool),
+    Stale,
+}
+
+/// The peek's surface `id` beside bar `bar`: what [`Back`] draws, and over
+/// it the bubble and the panda (the whole card on the CPU) to click.
+pub fn view<'a>(id: window::Id, bar: String) -> iced::Element<'a, crate::Message> {
+    let back = canvas::Canvas::new(Back { bar: bar.clone() })
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill);
+    let (built, handled) = (bar.clone(), bar.clone());
+    crate::ui::Around::new(id, build(&bar), move |m| handle(&handled, m), Msg::Stale)
+        .own(PEEK_NAMESPACE, move || bar_of(id).is_some())
+        .rebuild(move || build(&built))
+        .on(back)
+}
+
+fn handle(bar: &str, message: Msg) {
+    match message {
+        Msg::Go => {
+            let Some((shown, _, placed)) = shown_on(bar) else {
+                return;
+            };
+            match shown {
+                Shown::Agent(peek) => {
+                    tracing::debug!(id = peek.id, "the peek goes to its agent");
+                    popover::send(vec![Effect::GoToAgent {
+                        id: peek.id,
+                        bar: bar.to_owned(),
+                        row: placed.in_bar,
+                    }]);
+                }
+                Shown::Screens => {
+                    tracing::debug!("the winking panda is clicked: it goes back");
+                    popover::send(vec![Effect::PeekClose]);
+                }
+            }
         }
+        Msg::Lit(i, on) => out(|out| {
+            if let Some(lit) = out.as_mut().and_then(|o| o.lit.get_mut(i)) {
+                *lit = on;
+            }
+        }),
+        Msg::Stale => {}
     }
+}
+
+/// The bubble and the panda where they are placed, each a control.
+fn build<'a>(bar: &str) -> iced::Element<'a, Msg> {
+    use iced::widget::{Space, Stack, mouse_area, pin};
+    let Some((_, said, placed)) = shown_on(bar) else {
+        return Space::new().into();
+    };
+    let name: String = said
+        .pieces
+        .iter()
+        .map(|p| p.0.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let all: Vec<iced::Element<'a, Msg>> = regions(&placed)
+        .into_iter()
+        .enumerate()
+        .map(|(i, rect)| {
+            let spot = mouse_area(Space::new().width(rect.width).height(rect.height))
+                .on_press(Msg::Go)
+                .on_enter(Msg::Lit(i, true))
+                .on_exit(Msg::Lit(i, false))
+                .interaction(mouse::Interaction::Pointer);
+            let key = if i == 0 { "peek:Bubble" } else { "peek:Panda" };
+            pin(crate::ui::control(
+                spot,
+                key,
+                hocus_a11y::Role::Button,
+                name.clone(),
+            ))
+            .x(rect.x)
+            .y(rect.y)
+            .into()
+        })
+        .collect();
+    Stack::with_children(all)
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
+        .into()
 }
 
 /// A 1 px border inside `rect`, rounded as the bubble.
