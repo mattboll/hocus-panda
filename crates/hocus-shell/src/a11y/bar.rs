@@ -65,7 +65,6 @@ pub struct Facts {
     /// The item whose popover is open.
     pub open: Option<Item>,
     pub clock: Option<Shown>,
-    pub meeting: Option<crate::meeting::Card>,
     pub today: Vec<crate::today::Row>,
     pub tasks: Vec<Task>,
     pub open_tasks: usize,
@@ -212,10 +211,6 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
     let node = match item {
         Item::Calendar => button(facts.clock.as_ref().map(|c| words.clock(c))?),
         Item::Music => button(crate::music::Words::new(lang).music().to_owned()),
-        Item::Meeting | Item::MeetingMark => {
-            button(crate::meeting::Words::new(lang).name(facts.meeting.as_ref()?))
-        }
-        Item::Join => button(crate::meeting::Words::new(lang).join_call().to_owned()),
         Item::TodayLine(i) => {
             let line = facts
                 .today
@@ -346,9 +341,14 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
             None => button(words.power(&facts.levels)),
         },
         // Declared by their surfaces on the kit.
-        Item::Notifications | Item::Clipboard | Item::Menu | Item::User | Item::InUse => {
-            return None;
-        }
+        Item::Notifications
+        | Item::Clipboard
+        | Item::Menu
+        | Item::User
+        | Item::InUse
+        | Item::Meeting
+        | Item::MeetingMark
+        | Item::Join => return None,
         Item::Tray(tray) => {
             let name = facts.tray.iter().find(|(k, _)| *k == tray)?.1.clone();
             button(name).act(Act::Menu)

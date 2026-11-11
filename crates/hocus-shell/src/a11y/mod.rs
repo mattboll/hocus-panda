@@ -743,7 +743,6 @@ fn gather(
             &crate::notifications::wall(),
             lang,
         )),
-        meeting: crate::meeting::snapshot(),
         today: crate::today::shown(bar).0,
         open_tasks: lines.open(),
         more_tasks: lines.open().saturating_sub(shown_boxes),

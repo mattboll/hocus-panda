@@ -277,7 +277,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
