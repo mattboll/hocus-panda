@@ -299,6 +299,9 @@ fn the_page_shows_the_clock_the_zone_and_the_automatic_time() -> anyhow::Result<
     let Some(mut bed) = Bed::start(Some(State::default()))? else {
         return Ok(());
     };
+    // Read before the page is: its clock then says this hour, or the next
+    // when the hour changes meanwhile.
+    let there = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::get("Europe/Paris")?);
     let shown = bed.open()?;
     let paris = offset_now("Europe/Paris");
     let time = &shown["time"];
@@ -310,7 +313,6 @@ fn the_page_shows_the_clock_the_zone_and_the_automatic_time() -> anyhow::Result<
         "{line}"
     );
     // The clock in Paris's time, whatever the process's own zone (UTC).
-    let there = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::get("Europe/Paris")?);
     let clock = time["clock"].as_str().unwrap_or_default();
     assert_eq!(clock.len(), 5, "{clock}");
     assert!(
