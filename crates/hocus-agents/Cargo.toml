@@ -17,6 +17,8 @@ hocus-link.workspace = true
 # The tools' hooks' payloads, and Claude Code's settings, kept in their
 # order when written back.
 serde_json = { workspace = true, features = ["preserve_order"] }
+# `hocus mcp`'s line to the compositor (docs/design/mcp.md).
+serde = { workspace = true, features = ["derive"] }
 # Codex's config.toml edited without losing the user's comments and
 # layout (MIT or Apache-2.0).
 toml_edit.workspace = true

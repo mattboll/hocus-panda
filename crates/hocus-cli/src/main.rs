@@ -44,6 +44,11 @@
 //!   desktop's CPU and memory, its peaks and its signals, as recorded in
 //!   `$XDG_STATE_HOME/hocuspanda/perf` (docs/performance.md).
 //!
+//! - `hocus mcp --agent NAME`: a Model Context Protocol server on
+//!   standard input and output, through which agent NAME of the
+//!   configuration's `[[agents.mcp]]` reads and arranges the desktop
+//!   (docs/design/mcp.md).
+//!
 //! The line goes to the compositor's control socket: `--socket`, else
 //! `$HOCUS_SOCKET`, else beside `$WAYLAND_DISPLAY`'s socket.
 
@@ -59,6 +64,7 @@ use clap::{Parser, Subcommand};
 use hocus_agents::{ProgramAsk, Question, Report, Restart, Source, State, Supervised, hooks};
 
 mod day;
+mod mcp;
 mod perf;
 
 /// `hocus-settings`, in `PATH` or beside this program, which it becomes.
@@ -148,6 +154,14 @@ enum Command {
     Perf {
         #[command(subcommand)]
         command: PerfCommand,
+    },
+    /// A Model Context Protocol server on standard input and output, for
+    /// an agent to read and arrange the desktop (docs/design/mcp.md).
+    Mcp {
+        /// The agent, as the configuration's [[agents.mcp]] names it: what
+        /// the desktop shows it under, and what it may do.
+        #[arg(long)]
+        agent: String,
     },
     /// Asks the desktop what it knows.
     Msg {
@@ -330,6 +344,16 @@ fn main() -> ExitCode {
                     print!("{answer}");
                     ExitCode::SUCCESS
                 }
+                Err(err) => {
+                    eprintln!("hocus: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Command::Mcp { agent } => {
+            let mut bridge = mcp::Bridge::new(args.socket, agent);
+            match bridge.serve(std::io::stdin().lock(), std::io::stdout().lock()) {
+                Ok(()) => ExitCode::SUCCESS,
                 Err(err) => {
                     eprintln!("hocus: {err}");
                     ExitCode::FAILURE
