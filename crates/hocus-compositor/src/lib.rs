@@ -92,8 +92,6 @@ mod tray;
 mod wallpaper;
 mod windows;
 mod wobble;
-#[cfg(test)]
-mod words_before;
 mod xwayland;
 
 use std::path::{Path, PathBuf};
