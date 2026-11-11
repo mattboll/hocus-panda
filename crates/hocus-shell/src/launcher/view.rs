@@ -1,18 +1,23 @@
-//! The launcher's surface (5.1, variant C): its field and its grid as the
-//! mockup draws them, × [`ZOOM`] (#518), logical pixels, and what the
-//! pointer, the wheel and the keys do on it.
+//! The launcher's surface (5.1, variant C), on the widget kit (#772): its
+//! field and its grid as the mockup draws them, × [`ZOOM`] (#518),
+//! logical pixels.
 //!
 //! The panel is 1140 px wide (760 on the mockup), centred, its top 81 px
 //! from the screen's: the field (690 × 81, centred), 33 px, then the grid's
 //! area down to 147 px from the screen's bottom. The grid's rows are its
 //! headings (36 px) and its rows of eight 138 × 159 tiles, 9 px apart; the
-//! area shows the whole rows that fit from the first one scrolled to, and
-//! a thin mark on its right when there are more. A screen too narrow for
-//! eight columns has fewer, the tiles keeping their size.
+//! area shows the whole rows that fit from the first one scrolled to (the
+//! wheel scrolls by rows), and a thin mark on its right when there are
+//! more. A screen too narrow for eight columns has fewer, the tiles
+//! keeping their size.
 //!
 //! The cards (5.2, variant A) are rows of their own, as wide as the
 //! columns (1104 px for eight): a result's (102 px), an address's (81 px)
 //! above the grid, and the web search's (75 px) last, 12 px under each.
+//!
+//! Each tile, card and emoji is a button of the kit, placed where the grid
+//! lays it out; a tile's icon and name stay drawn. The field holds the
+//! keyboard throughout: every key goes to the launcher ([`super::key_on`]).
 
 use std::{
     collections::HashMap,
@@ -20,10 +25,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_a11y::Role;
+use hocus_link::LAUNCHER_NAMESPACE;
 use iced::{
-    Color, Pixels, Point, Rectangle, Renderer, Size, Theme, alignment, mouse,
+    Color, Element, Length, Padding, Pixels, Point, Rectangle, Renderer, Size, Theme, alignment,
+    alignment::Vertical,
+    mouse,
     widget::{
-        canvas::{self, Frame, Geometry, Path, Stroke, gradient},
+        Space, Stack, button, canvas,
+        canvas::{Frame, Geometry, Path, Stroke, gradient},
+        column, container, mouse_area, pin, row,
         text::{Alignment, LineHeight, Shaping},
     },
     window,
@@ -33,12 +44,24 @@ use super::{Card, Grid, Open, Row, Words};
 use crate::theme::Ink;
 use crate::{
     field::{
-        Place,
+        Entry, Took,
         view::{Look, Style},
     },
     levels::draw::{DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
-    popover::kit::{self, MANROPE_SEMIBOLD, Wheel},
+    popover::{
+        Pressed,
+        kit::{self, MANROPE_SEMIBOLD},
+    },
+    ui::{
+        self, Around, control,
+        field::Field,
+        parts::{drawn, gap, spaced_by},
+        sized::Sized,
+        style::{self, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes ---------------------------------------------------------
 //
@@ -393,27 +416,6 @@ impl Layout {
         }
     }
 
-    /// The tile or the card under `at`.
-    pub fn item_at(&self, at: Point) -> Option<usize> {
-        self.tiles
-            .iter()
-            .find(|(_, rect)| rect.contains(at))
-            .map(|(i, _)| *i)
-            .or_else(|| {
-                self.cards
-                    .iter()
-                    .find(|(_, _, rect)| rect.contains(at))
-                    .map(|(i, ..)| *i)
-            })
-            .or_else(|| {
-                let (_, cells) = self.emoji.as_ref()?;
-                cells
-                    .iter()
-                    .find(|(_, rect)| rect.contains(at))
-                    .map(|(i, _)| *i)
-            })
-    }
-
     fn rect_of(&self, tile: usize) -> Option<Rectangle> {
         self.tiles.iter().find(|(i, _)| *i == tile).map(|(_, r)| *r)
     }
@@ -511,602 +513,647 @@ fn measure_labels<'a>(names: impl IntoIterator<Item = &'a str>) {
     labels(|l| l.extend(made));
 }
 
-// --- The surface ------------------------------------------------------------------
-
-/// The launcher on its surface.
-#[derive(Debug, Clone)]
-pub struct View {
-    pub id: window::Id,
-    pub words: Words,
-    /// The shell draws on the CPU, whose surfaces have no transparency:
-    /// the desktop behind cannot show, an opaque dark shows instead.
-    pub software: bool,
-}
-
-/// What the surface keeps between draws: the hint's width and the
-/// wheel's notches.
-#[derive(Debug, Default)]
-pub struct State {
-    wheel: Wheel,
-    /// The hint's width.
-    hint: f32,
-    /// What was last logged of what it shows.
-    logged: String,
-}
-
-impl<Message> canvas::Program<Message> for View {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        let size = bounds.size();
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                self.prepare(state, size);
-                None
+/// What it shows, in words, for the log (and the tests).
+fn shows(open: &Open, words: Words, size: Size) -> String {
+    let layout = Layout::of(size, &open.grid, open.offset);
+    let px = super::icons::pixels(ICON as u32, open.scale);
+    let mut rows: Vec<String> = Vec::new();
+    let mut last_y = f32::NAN;
+    for (label, rect) in &layout.heads {
+        rows.push(format!("{}@{}", label, rect.y));
+    }
+    let mut tiles: Vec<(f32, String)> = Vec::new();
+    for (at, rect) in &layout.tiles {
+        let Some(app) = open.app(*at) else {
+            continue;
+        };
+        let label = label_of(&app.entry.name)
+            .map_or_else(|| app.entry.name.clone(), |l| l.lines.join(" / "));
+        let icon = match &app.entry.icon {
+            None => "letter",
+            Some(name) => match super::icons::of(name, px) {
+                Some(Some(_)) => "icon",
+                Some(None) => "letter",
+                None => "…",
+            },
+        };
+        let mark = if *at == open.selected { "*" } else { "" };
+        tiles.push((rect.y, format!("{mark}{label}[{icon}]")));
+    }
+    let mut lines: Vec<String> = Vec::new();
+    for (y, tile) in tiles {
+        if y != last_y {
+            lines.push(String::new());
+            last_y = y;
+        }
+        if let Some(line) = lines.last_mut() {
+            if !line.is_empty() {
+                line.push_str(", ");
             }
-            iced::Event::Mouse(seen) => self.mouse(state, seen, cursor.position_in(bounds), size),
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => super::key_on(self.id, key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            iced::Event::InputMethod(event) => super::input_method(self.id, event)
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
+            line.push_str(&tile);
         }
     }
+    let cards: Vec<String> = layout
+        .cards
+        .iter()
+        .map(|(at, card, _)| {
+            let (main, sub) = card_lines(words, open, *card);
+            let mark = if *at == open.selected { "*" } else { "" };
+            format!("{mark}{}: {main} | {sub}", card.word())
+        })
+        .collect();
+    let tooltip = tooltip_of(open).map(|(_, name)| name).unwrap_or_default();
+    let tone = crate::emoji::store::kept().tone;
+    let table = crate::emoji::data::table();
+    let emoji: Vec<String> = layout
+        .emoji
+        .iter()
+        .flat_map(|(_, cells)| cells)
+        .filter_map(|(at, _)| {
+            let super::Item::Emoji(e) = open.grid.flat.get(*at)? else {
+                return None;
+            };
+            let mark = if *at == open.selected { "*" } else { "" };
+            Some(format!("{mark}{}", table.emoji.get(*e)?.with_tone(tone)))
+        })
+        .collect();
+    format!(
+        "query={:?} heads={rows:?} tiles={lines:?} cards={cards:?} offset={} mark={} \
+         tooltip=\"{tooltip}\" emoji={emoji:?}",
+        open.query.text(),
+        open.offset,
+        layout.mark.is_some(),
+    )
+}
+
+/// A card's two lines: what it is, and under it what it says more.
+fn card_lines(words: Words, open: &Open, card: Card) -> (String, String) {
+    match card {
+        Card::Answer => open
+            .grid
+            .answer
+            .as_ref()
+            .map(|a| (a.main.clone(), a.sub.clone()))
+            .unwrap_or_default(),
+        Card::Address => open
+            .grid
+            .address
+            .as_ref()
+            .map(|a| (words.open(&a.typed), words.in_browser(&a.url)))
+            .unwrap_or_default(),
+        Card::Web => (
+            words.search_web(open.query.text().trim()),
+            words.web_engine().to_owned(),
+        ),
+    }
+}
+
+// --- The surface, on the widget kit ------------------------------------------------
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A tile, a card or an emoji clicked.
+    Act(usize),
+    /// The pointer came over one: it is selected.
+    Hover(usize),
+    /// The pointer left one.
+    Unhover(usize),
+    /// The wheel: the grid scrolls by rows.
+    Wheel(mouse::ScrollDelta),
+    /// A press off the field and the tiles: it closes.
+    Outside,
+    /// What the field took of an input method, or a press.
+    Took(Took),
+    /// A key: every one is the launcher's.
+    Key(Pressed),
+    /// What it shows changed under the view.
+    Stale,
+}
+
+/// A place's control: what tests and screen readers know it by.
+fn id_of(at: usize) -> String {
+    format!("launcher:Item({at})")
+}
+
+/// The launcher on its surface `id`; on the CPU (`software`), an opaque
+/// dark behind it.
+pub fn view<'a>(id: window::Id, words: Words, software: bool) -> Element<'a, crate::Message> {
+    let back: Element<'a, crate::Message> = if software {
+        canvas(Opaque)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        Space::new().into()
+    };
+    Around::new(
+        id,
+        build(id, words),
+        move |m| handle(id, words, m),
+        Msg::Stale,
+    )
+    .own(LAUNCHER_NAMESPACE, move || {
+        super::with(|l| l.open_on(id).is_some())
+    })
+    .rebuild(move || build(id, words))
+    .stale_when(move || super::with(|l| l.open_on(id).is_some_and(|o| o.size != o.built)))
+    .keys(|pressed| Some(Msg::Key(pressed.clone())))
+    .on(back)
+}
+
+fn handle(id: window::Id, words: Words, message: Msg) {
+    match message {
+        Msg::Act(at) => super::act(id, at),
+        Msg::Hover(at) => {
+            super::with(|l| {
+                if let Some(open) = l.open_mut(id) {
+                    hovered(open, Some(at), Instant::now());
+                }
+            });
+            // The effects' loop wakes the surface when the name is due.
+            crate::popover::send(Vec::new());
+        }
+        Msg::Unhover(at) => super::with(|l| {
+            if let Some(open) = l.open_mut(id)
+                && open.hover.is_some_and(|(h, _)| h == at)
+            {
+                hovered(open, None, Instant::now());
+            }
+        }),
+        Msg::Wheel(delta) => super::with(|l| {
+            if let Some(open) = l.open_mut(id) {
+                let notches = open.wheel.notches(&delta, open.scale);
+                if notches != 0 {
+                    open.offset = scrolled(&open.grid, open.offset, -notches, open.size);
+                }
+            }
+        }),
+        Msg::Outside => super::close(),
+        Msg::Took(took) => super::took(id, took, words),
+        Msg::Key(pressed) => {
+            super::key_on(id, &pressed.key, pressed.modifiers, pressed.text.as_deref());
+        }
+        Msg::Stale => {}
+    }
+}
+
+/// The pointer over `target`: it is selected, and its name shows whole a
+/// moment later when it is cut.
+fn hovered(open: &mut Open, target: Option<usize>, now: Instant) {
+    if open.hover.map(|(t, _)| t) == target {
+        return;
+    }
+    open.hover = target.map(|t| (t, now));
+    open.tooltip = None;
+    let Some(tile) = target else {
+        return;
+    };
+    open.selected = tile;
+    let cut = open
+        .app(tile)
+        .and_then(|a| label_of(&a.entry.name))
+        .is_some_and(|l| l.cut);
+    if cut {
+        open.tooltip = Some(now + TOOLTIP_AFTER);
+    }
+}
+
+/// The field, to the kit's field.
+fn query(with: &mut dyn FnMut(&mut Entry)) {
+    super::with(|l| {
+        if let super::Phase::Open(open) = &mut l.phase {
+            with(&mut open.query);
+        }
+    });
+}
+
+/// Its content as the launcher is now, laid out on its surface (once its
+/// size is known: built again then); said in the log when it changed.
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    let content = super::with(|l| {
+        let open = l.open_mut(id)?;
+        let size = open.size;
+        open.built = size;
+        if size.width > 0.0 {
+            open.fit(columns(size.width));
+        }
+        let layout = Layout::of(size, &open.grid, open.offset);
+        let names: Vec<String> = layout
+            .tiles
+            .iter()
+            .filter_map(|(at, _)| open.app(*at).map(|a| a.entry.name.clone()))
+            .collect();
+        measure_labels(names.iter().map(String::as_str));
+        let now = shows(open, words, size);
+        // Said once laid out on its surface.
+        if size.width > 0.0 && now != open.logged {
+            tracing::debug!(said = %now, "the launcher shows it");
+            open.logged = now;
+        }
+        Some(content(open, words, &layout, size))
+    });
+    let content = content.unwrap_or_else(|| Space::new().into());
+    Sized::new(content, move |room| {
+        super::with(|l| {
+            if let Some(open) = l.open_mut(id) {
+                open.size = room;
+            }
+        });
+    })
+    .into()
+}
+
+fn content<'a>(open: &Open, words: Words, layout: &Layout, size: Size) -> El<'a> {
+    let mut all: Vec<El<'a>> = vec![
+        mouse_area(Space::new().width(Length::Fill).height(Length::Fill))
+            .on_press(Msg::Outside)
+            .into(),
+    ];
+    let place =
+        |content: El<'a>, rect: Rectangle| -> El<'a> { pin(content).x(rect.x).y(rect.y).into() };
+    all.push(place(field_view(open, words, layout.field), layout.field));
+    for (label, rect) in &layout.heads {
+        all.push(place(
+            ui::line(
+                container(spaced_by(
+                    label,
+                    HEAD_TEXT,
+                    MANROPE_BOLD,
+                    PLACEHOLDER.get(),
+                    HEAD_SPACING / HEAD_TEXT,
+                ))
+                .padding(Padding {
+                    left: HEAD_LEFT,
+                    ..Padding::ZERO
+                })
+                .width(rect.width)
+                .height(HEAD)
+                .align_y(Vertical::Center),
+                *label,
+            )
+            .into(),
+            *rect,
+        ));
+    }
+    let px = super::icons::pixels(ICON as u32, open.scale);
+    for (at, rect) in &layout.tiles {
+        if let Some(tile) = tile_view(open, *at, *rect, px) {
+            all.push(place(tile, *rect));
+        }
+    }
+    for (at, card, rect) in &layout.cards {
+        all.push(place(card_view(open, words, *card, *at, *rect), *rect));
+    }
+    if let Some((card, cells)) = &layout.emoji {
+        all.push(place(emoji_view(open, words, *card, cells), *card));
+    }
+    if let Some(mark) = layout.mark {
+        all.push(place(
+            container(Space::new().width(mark.width).height(mark.height))
+                .style(|_| style::boxed(MARK.get(), MARK_WIDTH / 2.0))
+                .into(),
+            mark,
+        ));
+    }
+    // The full name of a tile whose name is cut, rested on.
+    if let Some((tile, name)) = tooltip_of(open)
+        && let Some(rect) = layout.rect_of(tile)
+    {
+        let width = kit::measure(name, TOOLTIP, MANROPE) + 2.0 * TOOLTIP_PAD.width;
+        let height = TOOLTIP * LINE + 2.0 * TOOLTIP_PAD.height;
+        let edge = TOOLTIP_UNDER;
+        let x = (rect.center_x() - width / 2.0).clamp(edge, (size.width - width - edge).max(edge));
+        let tip = Rectangle::new(
+            Point::new(x, rect.y + rect.height + TOOLTIP_UNDER),
+            Size::new(width, height),
+        );
+        all.push(place(
+            container(said(name.to_owned(), TOOLTIP, MANROPE, TEXT.get()))
+                .center_x(width)
+                .center_y(height)
+                .style(|_| container::Style {
+                    background: Some(TOOLTIP_FILL.get().into()),
+                    border: iced::Border {
+                        color: TOOLTIP_RIM.get(),
+                        width: 1.0,
+                        radius: TOOLTIP_RADIUS.into(),
+                    },
+                    ..container::Style::default()
+                })
+                .into(),
+            tip,
+        ));
+    }
+    mouse_area(
+        Stack::with_children(all)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .on_scroll(Msg::Wheel)
+    .into()
+}
+
+/// The field at `rect`: the magnifier, what is typed, "Échap".
+fn field_view<'a>(open: &Open, words: Words, rect: Rectangle) -> El<'a> {
+    let hint = words.escape();
+    let hint_width = kit::measure(hint, HINT, MANROPE_SEMIBOLD) + 2.0 * HINT_PAD + 2.0;
+    let typed = Field {
+        with: query,
+        style: Style::one(QUERY, MANROPE),
+        placeholder: words.placeholder().into(),
+        look: Look::of(TEXT.get(), PLACEHOLDER.get()),
+        focused: true,
+        left: FIELD_PAD_LEFT + MAGNIFIER + FIELD_GAP,
+        right: FIELD_GAP + hint_width + FIELD_PAD_RIGHT,
+        on_focus: Msg::Stale,
+        on_took: Msg::Took,
+    }
+    .view(rect.height);
+    let escape = container(said(hint, HINT, MANROPE_SEMIBOLD, PLACEHOLDER.get()))
+        .center_x(hint_width)
+        .center_y(HINT_HEIGHT)
+        .style(|_| container::Style {
+            border: iced::Border {
+                color: HINT_RIM.get(),
+                width: 1.0,
+                radius: HINT_RADIUS.into(),
+            },
+            ..container::Style::default()
+        });
+    let field = container(Stack::with_children([
+        pin(drawn(MAGNIFIER, MAGNIFIER, |f, _| {
+            magnifier(f, Point::ORIGIN)
+        }))
+        .x(FIELD_PAD_LEFT)
+        .y((rect.height - MAGNIFIER) / 2.0)
+        .into(),
+        typed,
+        pin(escape)
+            .x(rect.width - FIELD_PAD_RIGHT - hint_width)
+            .y((rect.height - HINT_HEIGHT) / 2.0)
+            .into(),
+    ]))
+    .width(rect.width)
+    .height(rect.height)
+    .style(|_| container::Style {
+        background: Some(FIELD_FILL.get().into()),
+        border: iced::Border {
+            color: FIELD_RIM.get(),
+            width: 1.0,
+            radius: FIELD_RADIUS.into(),
+        },
+        ..container::Style::default()
+    });
+    control(
+        field,
+        "launcher:Field",
+        Role::TextField,
+        words.placeholder(),
+    )
+    .node(|n| n.value(open.query.text().to_owned()))
+    .typing()
+    .into()
+}
+
+/// A selected thing's look: the green tint and border.
+fn chosen(fill: Ink, rim: Ink, radius: f32) -> button::Style {
+    button::Style {
+        background: Some(fill.get().into()),
+        border: iced::Border {
+            color: rim.get(),
+            width: 1.0,
+            radius: radius.into(),
+        },
+        ..style::clear()
+    }
+}
+
+/// Tile `at` at `rect`: its icon (or its letter) and its name, drawn; the
+/// pointer over it selects it, a click starts it.
+fn tile_view<'a>(open: &Open, at: usize, rect: Rectangle, px: u32) -> Option<El<'a>> {
+    let app = open.app(at)?;
+    let name = app.entry.name.clone();
+    let selected = at == open.selected;
+    // On the screen's pixels, so that the icon's show one for one.
+    let scale = open.scale;
+    let snap = |v: f32| (v * scale).round() / scale;
+    let icon = Rectangle::new(
+        Point::new(
+            snap(rect.center_x() - ICON / 2.0) - rect.x,
+            snap(rect.y + ICON_TOP) - rect.y,
+        ),
+        Size::new(ICON, ICON),
+    );
+    let image = match &app.entry.icon {
+        None => Some(None),
+        Some(icon) => super::icons::of(icon, px),
+    };
+    let lines = label_of(&name).map_or_else(|| vec![name.clone()], |l| l.lines);
+    let letter = name.clone();
+    let face = drawn(rect.width, rect.height, move |f, size| {
+        match &image {
+            Some(Some(handle)) => f.draw_image(icon, canvas::Image::new(handle.clone())),
+            Some(None) => letter_tile(f, icon, &letter),
+            // Not read yet: it comes in a moment.
+            None => {}
+        }
+        for (i, line) in lines.iter().enumerate() {
+            f.fill_text(canvas::Text {
+                content: line.clone(),
+                position: Point::new(size.width / 2.0, NAME_TOP + NAME_LINE * (i as f32 + 0.5)),
+                max_width: f32::INFINITY,
+                color: LABEL.get(),
+                size: Pixels(NAME),
+                line_height: LineHeight::Absolute(Pixels(NAME_LINE)),
+                font: MANROPE,
+                align_x: Alignment::Center,
+                align_y: alignment::Vertical::Center,
+                shaping: Shaping::Advanced,
+            });
+        }
+    });
+    let pressed = button(face)
+        .padding(0)
+        .style(move |_, _| {
+            if selected {
+                chosen(SELECTED_FILL, SELECTED_RIM, TILE_RADIUS)
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(at));
+    let tile = control(pressed, id_of(at), Role::Button, name).node(|n| n.selected(selected));
+    Some(
+        mouse_area(tile)
+            .on_enter(Msg::Hover(at))
+            .on_exit(Msg::Unhover(at))
+            .into(),
+    )
+}
+
+/// Card `card` (place `at`) at `rect`: its badge, its two lines, what
+/// `Enter` does while it is selected.
+fn card_view<'a>(open: &Open, words: Words, card: Card, at: usize, rect: Rectangle) -> El<'a> {
+    let selected = at == open.selected;
+    let size = card.badge();
+    // The hint keeps its room unselected, as the mockup's.
+    let hint = words.hint(card);
+    let hint_width = kit::measure(hint, CARD_HINT, MANROPE_SEMIBOLD);
+    let room =
+        (rect.width - CARD_PAD - hint_width - CARD_GAP - (CARD_PAD + size + CARD_GAP)).max(0.0);
+    let (main, sub) = card_lines(words, open, card);
+    let (font, main_size) = match card {
+        Card::Answer => (MONO, RESULT),
+        Card::Address | Card::Web => (MANROPE_SEMIBOLD, CARD_MAIN),
+    };
+    let main = kit::elide(&main, room, |t| kit::measure(t, main_size, font));
+    let sub = kit::elide(&sub, room, |t| kit::measure(t, CARD_SUB, MANROPE));
+    let mut line = row![
+        gap(CARD_PAD),
+        drawn(size, size, move |f, s| badge_of(
+            f,
+            card,
+            Rectangle::new(Point::ORIGIN, s)
+        )),
+        gap(CARD_GAP),
+        column![
+            said(main.clone(), main_size, font, TEXT.get()),
+            Space::new().height(CARD_LINES_GAP),
+            said(sub.clone(), CARD_SUB, MANROPE, CARD_SUB_INK.get()),
+        ],
+        iced::widget::space::horizontal(),
+    ]
+    .height(rect.height)
+    .align_y(Vertical::Center);
+    if selected {
+        line = line.push(said(hint, CARD_HINT, MANROPE_SEMIBOLD, CARD_HINT_INK.get()));
+    }
+    line = line.push(gap(CARD_PAD));
+    let pressed = button(line)
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, _| {
+            if selected {
+                chosen(SELECTED_FILL, SELECTED_RIM, CARD_RADIUS)
+            } else {
+                chosen(CARD_FILL, CARD_RIM, CARD_RADIUS)
+            }
+        })
+        .on_press(Msg::Act(at));
+    let control = control(pressed, id_of(at), Role::Button, main)
+        .node(|n| n.describe(sub).selected(selected));
+    mouse_area(control).on_enter(Msg::Hover(at)).into()
+}
+
+/// The emoji row's card (5.7) at `card`: green while one of its emoji is
+/// selected.
+fn emoji_view<'a>(
+    open: &Open,
+    words: Words,
+    card: Rectangle,
+    cells: &[(usize, Rectangle)],
+) -> El<'a> {
+    let lit = cells.iter().any(|(at, _)| *at == open.selected);
+    let heading = crate::emoji::Words::new(words.lang()).launcher_row();
+    let tone = crate::emoji::store::kept().tone;
+    let table = crate::emoji::data::table();
+    let mut row = row![].spacing(EMOJI_CELL_GAP);
+    for (at, _) in cells {
+        let Some(super::Item::Emoji(e)) = open.grid.flat.get(*at) else {
+            continue;
+        };
+        let Some(emoji) = table.emoji.get(*e) else {
+            continue;
+        };
+        let at = *at;
+        let selected = at == open.selected;
+        let glyph = iced::widget::text(emoji.with_tone(tone))
+            .size(EMOJI_SIZE)
+            .font(crate::emoji::view::EMOJI_FONT)
+            .line_height(LineHeight::Relative(1.0))
+            .shaping(Shaping::Advanced)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .color(TEXT.get());
+        let pressed = button(container(glyph).center(EMOJI_CELL))
+            .padding(0)
+            .width(EMOJI_CELL)
+            .height(EMOJI_CELL)
+            .style(move |_, _| {
+                if selected {
+                    chosen(SELECTED_FILL, SELECTED_RIM, EMOJI_CELL_RADIUS)
+                } else {
+                    style::filled(CARD_FILL.get(), EMOJI_CELL_RADIUS, TEXT.get())
+                }
+            })
+            .on_press(Msg::Act(at));
+        let cell = control(pressed, id_of(at), Role::Button, emoji.name(words.lang()))
+            .node(|n| n.selected(selected));
+        row = row.push(mouse_area(cell).on_enter(Msg::Hover(at)));
+    }
+    container(column![
+        ui::line(
+            container(spaced_by(
+                &heading.to_uppercase(),
+                EMOJI_HEAD,
+                MANROPE_BOLD,
+                CARD_HINT_INK.get(),
+                0.08,
+            ))
+            .height(EMOJI_HEAD_LINE)
+            .align_y(Vertical::Center),
+            heading,
+        ),
+        Space::new().height(EMOJI_HEAD_GAP),
+        row,
+    ])
+    .padding([EMOJI_PAD.height, EMOJI_PAD.width])
+    .width(card.width)
+    .height(card.height)
+    .style(move |_| {
+        let (fill, rim) = if lit {
+            (EMOJI_CARD_FILL, SELECTED_RIM)
+        } else {
+            (CARD_FILL, CARD_RIM)
+        };
+        container::Style {
+            background: Some(fill.get().into()),
+            border: iced::Border {
+                color: rim.get(),
+                width: 1.0,
+                radius: CARD_RADIUS.into(),
+            },
+            ..container::Style::default()
+        }
+    })
+    .into()
+}
+
+/// On the CPU: the bar's dark blue, opaque, top to bottom.
+#[derive(Debug, Clone, Copy)]
+struct Opaque;
+
+impl<M> canvas::Program<M> for Opaque {
+    type State = ();
 
     fn draw(
         &self,
-        state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        if self.software {
-            let fill = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, bounds.height))
-                .add_stop(0.0, OPAQUE.0.get())
-                .add_stop(1.0, OPAQUE.1.get());
-            frame.fill(
-                &Path::rectangle(Point::ORIGIN, bounds.size()),
-                canvas::Fill::from(fill),
-            );
-        }
-        super::with(|l| {
-            if let Some(open) = l.open_on(self.id) {
-                self.draw_open(&mut frame, state, open, bounds.size());
-            }
-        });
+        let fill = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, bounds.height))
+            .add_stop(0.0, OPAQUE.0.get())
+            .add_stop(1.0, OPAQUE.1.get());
+        frame.fill(
+            &Path::rectangle(Point::ORIGIN, bounds.size()),
+            canvas::Fill::from(fill),
+        );
         vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        _state: &State,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        let Some(at) = cursor.position_in(bounds) else {
-            return mouse::Interaction::default();
-        };
-        super::with(|l| {
-            let Some(open) = l.open_on(self.id) else {
-                return mouse::Interaction::default();
-            };
-            let layout = Layout::of(bounds.size(), &open.grid, open.offset);
-            if layout.item_at(at).is_some() {
-                mouse::Interaction::Pointer
-            } else if layout.field.contains(at) {
-                mouse::Interaction::Text
-            } else {
-                mouse::Interaction::default()
-            }
-        })
-    }
-}
-
-impl View {
-    /// Before it draws: its size kept, its columns fitted to it, the names
-    /// shown measured, and what it shows logged when it changed.
-    fn prepare(&self, state: &mut State, size: Size) {
-        let shown = super::with(|l| {
-            let open = l.open_mut(self.id)?;
-            open.size = size;
-            open.fit(columns(size.width));
-            let layout = Layout::of(size, &open.grid, open.offset);
-            let names: Vec<String> = layout
-                .tiles
-                .iter()
-                .filter_map(|(at, _)| open.app(*at).map(|a| a.entry.name.clone()))
-                .collect();
-            Some(names)
-        });
-        let Some(names) = shown else {
-            return;
-        };
-        measure_labels(names.iter().map(String::as_str));
-        if state.hint == 0.0 {
-            state.hint = kit::measure(self.words.escape(), HINT, MANROPE_SEMIBOLD);
-        }
-        let said = super::with(|l| l.open_on(self.id).map(|open| self.said(open, size)));
-        if let Some(said) = said
-            && said != state.logged
-        {
-            tracing::debug!(said = %said, "the launcher shows it");
-            state.logged = said;
-        }
-    }
-
-    /// What it shows, in words, for the log (and the tests).
-    fn said(&self, open: &Open, size: Size) -> String {
-        let layout = Layout::of(size, &open.grid, open.offset);
-        let px = super::icons::pixels(ICON as u32, open.scale);
-        let mut rows: Vec<String> = Vec::new();
-        let mut last_y = f32::NAN;
-        for (label, rect) in &layout.heads {
-            rows.push(format!("{}@{}", label, rect.y));
-        }
-        let mut tiles: Vec<(f32, String)> = Vec::new();
-        for (at, rect) in &layout.tiles {
-            let Some(app) = open.app(*at) else {
-                continue;
-            };
-            let label = label_of(&app.entry.name)
-                .map_or_else(|| app.entry.name.clone(), |l| l.lines.join(" / "));
-            let icon = match &app.entry.icon {
-                None => "letter",
-                Some(name) => match super::icons::of(name, px) {
-                    Some(Some(_)) => "icon",
-                    Some(None) => "letter",
-                    None => "…",
-                },
-            };
-            let mark = if *at == open.selected { "*" } else { "" };
-            tiles.push((rect.y, format!("{mark}{label}[{icon}]")));
-        }
-        let mut lines: Vec<String> = Vec::new();
-        for (y, tile) in tiles {
-            if y != last_y {
-                lines.push(String::new());
-                last_y = y;
-            }
-            if let Some(line) = lines.last_mut() {
-                if !line.is_empty() {
-                    line.push_str(", ");
-                }
-                line.push_str(&tile);
-            }
-        }
-        let cards: Vec<String> = layout
-            .cards
-            .iter()
-            .map(|(at, card, _)| {
-                let (main, sub) = self.lines(open, *card);
-                let mark = if *at == open.selected { "*" } else { "" };
-                format!("{mark}{}: {main} | {sub}", card.word())
-            })
-            .collect();
-        let tooltip = tooltip_of(open).map(|(_, name)| name).unwrap_or_default();
-        let tone = crate::emoji::store::kept().tone;
-        let table = crate::emoji::data::table();
-        let emoji: Vec<String> = layout
-            .emoji
-            .iter()
-            .flat_map(|(_, cells)| cells)
-            .filter_map(|(at, _)| {
-                let super::Item::Emoji(e) = open.grid.flat.get(*at)? else {
-                    return None;
-                };
-                let mark = if *at == open.selected { "*" } else { "" };
-                Some(format!("{mark}{}", table.emoji.get(*e)?.with_tone(tone)))
-            })
-            .collect();
-        format!(
-            "query={:?} heads={rows:?} tiles={lines:?} cards={cards:?} offset={} mark={} \
-             tooltip=\"{tooltip}\" emoji={emoji:?}",
-            open.query.text(),
-            open.offset,
-            layout.mark.is_some(),
-        )
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-        size: Size,
-    ) -> Option<canvas::Action<Message>> {
-        let now = Instant::now();
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        enum Then {
-            Nothing,
-            Draw,
-            DrawAt,
-            Close,
-            Act(usize),
-        }
-        let then = super::with(|l| {
-            let open = l.open_mut(self.id)?;
-            let layout = Layout::of(size, &open.grid, open.offset);
-            let target = at.and_then(|at| layout.item_at(at));
-            Some(match seen {
-                mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                    open.pointer = at;
-                    // A press held in the field selects as it drags.
-                    if open.query.pressed() {
-                        return Some(match at {
-                            Some(at) if open.query.drag(at) => Then::Draw,
-                            _ => Then::Nothing,
-                        });
-                    }
-                    hovered(open, target, now)
-                }
-                mouse::Event::CursorLeft => {
-                    open.pointer = None;
-                    open.hover = None;
-                    Then::Draw
-                }
-                mouse::Event::ButtonPressed(mouse::Button::Left) => match target {
-                    Some(tile) => {
-                        open.pressed = Some(tile);
-                        Then::Nothing
-                    }
-                    None => match at.filter(|at| layout.field.contains(*at)) {
-                        Some(at) => {
-                            open.query.press(at);
-                            Then::Draw
-                        }
-                        None => Then::Close,
-                    },
-                },
-                mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    open.query.release();
-                    match open.pressed.take().filter(|p| Some(*p) == target) {
-                        Some(tile) => Then::Act(tile),
-                        None => Then::Nothing,
-                    }
-                }
-                mouse::Event::WheelScrolled { delta } => {
-                    let notches = state.wheel.notches(delta, open.scale);
-                    if notches == 0 {
-                        return Some(Then::Nothing);
-                    }
-                    open.offset = scrolled(&open.grid, open.offset, -notches, size);
-                    // What is under the pointer now.
-                    let layout = Layout::of(size, &open.grid, open.offset);
-                    let target = open.pointer.and_then(|at| layout.item_at(at));
-                    match hovered(open, target, now) {
-                        Then::Nothing => Then::Draw,
-                        then => then,
-                    }
-                }
-                _ => Then::Nothing,
-            })
-        });
-        /// The pointer over `target`: it is selected, and its name shows
-        /// whole a moment later when it is cut.
-        fn hovered(open: &mut Open, target: Option<usize>, now: Instant) -> Then {
-            if open.hover.map(|(t, _)| t) == target {
-                return Then::Nothing;
-            }
-            open.hover = target.map(|t| (t, now));
-            open.tooltip = None;
-            let Some(tile) = target else {
-                return Then::Draw;
-            };
-            open.selected = tile;
-            let cut = open
-                .app(tile)
-                .and_then(|a| label_of(&a.entry.name))
-                .is_some_and(|l| l.cut);
-            if cut {
-                open.tooltip = Some(now + TOOLTIP_AFTER);
-                Then::DrawAt
-            } else {
-                Then::Draw
-            }
-        }
-        match then? {
-            Then::Nothing => None,
-            Then::Draw => redraw,
-            Then::DrawAt => {
-                // The effects' loop wakes the surface when it is due.
-                crate::popover::send(Vec::new());
-                redraw
-            }
-            Then::Close => {
-                super::close();
-                redraw
-            }
-            Then::Act(at) => {
-                super::act(self.id, at);
-                redraw
-            }
-        }
-    }
-
-    fn draw_open(&self, f: &mut Frame, state: &State, open: &Open, size: Size) {
-        let layout = Layout::of(size, &open.grid, open.offset);
-        self.draw_field(f, state, open, &layout);
-        for (label, rect) in &layout.heads {
-            head(f, label, *rect);
-        }
-        let px = super::icons::pixels(ICON as u32, open.scale);
-        for (at, rect) in &layout.tiles {
-            let Some(app) = open.app(*at) else {
-                continue;
-            };
-            if *at == open.selected {
-                f.fill(&kit::rounded(*rect, TILE_RADIUS), SELECTED_FILL.get());
-                f.stroke(
-                    &kit::rounded(inset(*rect, 0.5), TILE_RADIUS - 0.5),
-                    Stroke::default()
-                        .with_color(SELECTED_RIM.get())
-                        .with_width(1.0),
-                );
-            }
-            // On the screen's pixels, so that the icon's show one for one.
-            let snap = |v: f32| (v * open.scale).round() / open.scale;
-            let icon = Rectangle::new(
-                Point::new(snap(rect.center_x() - ICON / 2.0), snap(rect.y + ICON_TOP)),
-                Size::new(ICON, ICON),
-            );
-            match &app.entry.icon {
-                None => letter_tile(f, icon, &app.entry.name),
-                Some(name) => match super::icons::of(name, px) {
-                    Some(Some(handle)) => f.draw_image(icon, canvas::Image::new(handle)),
-                    Some(None) => letter_tile(f, icon, &app.entry.name),
-                    // Not read yet: it comes in a moment.
-                    None => {}
-                },
-            }
-            let lines =
-                label_of(&app.entry.name).map_or_else(|| vec![app.entry.name.clone()], |l| l.lines);
-            for (i, line) in lines.into_iter().enumerate() {
-                f.fill_text(canvas::Text {
-                    content: line,
-                    position: Point::new(
-                        rect.center_x(),
-                        rect.y + NAME_TOP + NAME_LINE * (i as f32 + 0.5),
-                    ),
-                    max_width: f32::INFINITY,
-                    color: LABEL.get(),
-                    size: Pixels(NAME),
-                    line_height: LineHeight::Absolute(Pixels(NAME_LINE)),
-                    font: MANROPE,
-                    align_x: Alignment::Center,
-                    align_y: alignment::Vertical::Center,
-                    shaping: Shaping::Advanced,
-                });
-            }
-        }
-        for (at, card, rect) in &layout.cards {
-            self.draw_card(f, open, *card, *rect, *at == open.selected);
-        }
-        if let Some((card, cells)) = &layout.emoji {
-            self.draw_emoji(f, open, *card, cells);
-        }
-        if let Some(mark) = layout.mark {
-            f.fill(&kit::rounded(mark, MARK_WIDTH / 2.0), MARK.get());
-        }
-        // The full name of a tile whose name is cut, rested on.
-        if let Some((tile, name)) = tooltip_of(open)
-            && let Some(rect) = layout.rect_of(tile)
-        {
-            tooltip(f, name, rect, size);
-        }
-    }
-
-    /// A card's two lines: what it is, and under it what it says more.
-    fn lines(&self, open: &Open, card: Card) -> (String, String) {
-        let words = self.words;
-        match card {
-            Card::Answer => open
-                .grid
-                .answer
-                .as_ref()
-                .map(|a| (a.main.clone(), a.sub.clone()))
-                .unwrap_or_default(),
-            Card::Address => open
-                .grid
-                .address
-                .as_ref()
-                .map(|a| (words.open(&a.typed), words.in_browser(&a.url)))
-                .unwrap_or_default(),
-            Card::Web => (
-                words.search_web(open.query.text().trim()),
-                words.web_engine().to_owned(),
-            ),
-        }
-    }
-
-    fn draw_card(&self, f: &mut Frame, open: &Open, card: Card, rect: Rectangle, selected: bool) {
-        let (fill, rim) = if selected {
-            (SELECTED_FILL, SELECTED_RIM)
-        } else {
-            (CARD_FILL, CARD_RIM)
-        };
-        f.fill(&kit::rounded(rect, CARD_RADIUS), fill.get());
-        f.stroke(
-            &kit::rounded(inset(rect, 0.5), CARD_RADIUS - 0.5),
-            Stroke::default().with_color(rim.get()).with_width(1.0),
-        );
-        let size = card.badge();
-        let badge = Rectangle::new(
-            Point::new(rect.x + CARD_PAD, rect.center_y() - size / 2.0),
-            Size::new(size, size),
-        );
-        badge_of(f, card, badge);
-        // The hint keeps its room unselected, as the mockup's.
-        let hint = self.words.hint(card);
-        let hint_width = kit::measure(hint, CARD_HINT, MANROPE_SEMIBOLD);
-        let right = rect.x + rect.width - CARD_PAD;
-        if selected {
-            f.fill_text(kit::text_in(
-                MANROPE_SEMIBOLD,
-                kit::text(
-                    hint.to_owned(),
-                    Point::new(right, rect.center_y()),
-                    CARD_HINT,
-                    CARD_HINT_INK.get(),
-                    Alignment::Right,
-                ),
-            ));
-        }
-        let x = badge.x + size + CARD_GAP;
-        let room = (right - hint_width - CARD_GAP - x).max(0.0);
-        let (main, sub) = self.lines(open, card);
-        let (font, main_size) = match card {
-            Card::Answer => (MONO, RESULT),
-            Card::Address | Card::Web => (MANROPE_SEMIBOLD, CARD_MAIN),
-        };
-        let main_height = main_size * LINE;
-        let sub_height = CARD_SUB * LINE;
-        let top = rect.center_y() - (main_height + CARD_LINES_GAP + sub_height) / 2.0;
-        let main = kit::elide(&main, room, |t| kit::measure(t, main_size, font));
-        let sub = kit::elide(&sub, room, |t| kit::measure(t, CARD_SUB, MANROPE));
-        f.fill_text(kit::text_in(
-            font,
-            kit::text(
-                main,
-                Point::new(x, top + main_height / 2.0),
-                main_size,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        f.fill_text(kit::text(
-            sub,
-            Point::new(x, top + main_height + CARD_LINES_GAP + sub_height / 2.0),
-            CARD_SUB,
-            CARD_SUB_INK.get(),
-            Alignment::Left,
-        ));
-    }
-
-    /// The emoji row's card (5.7): green while one of its emoji is
-    /// selected.
-    fn draw_emoji(
-        &self,
-        f: &mut Frame,
-        open: &Open,
-        card: Rectangle,
-        cells: &[(usize, Rectangle)],
-    ) {
-        let chosen = cells.iter().any(|(at, _)| *at == open.selected);
-        let (fill, rim) = if chosen {
-            (EMOJI_CARD_FILL, SELECTED_RIM)
-        } else {
-            (CARD_FILL, CARD_RIM)
-        };
-        f.fill(&kit::rounded(card, CARD_RADIUS), fill.get());
-        f.stroke(
-            &kit::rounded(inset(card, 0.5), CARD_RADIUS - 0.5),
-            Stroke::default().with_color(rim.get()).with_width(1.0),
-        );
-        let heading = crate::emoji::Words::new(self.words.lang()).launcher_row();
-        let mut x = card.x + EMOJI_PAD.width;
-        let middle = card.y + EMOJI_PAD.height + EMOJI_HEAD_LINE / 2.0;
-        for ch in heading.to_uppercase().chars() {
-            let letter = ch.to_string();
-            let width = kit::measure(&letter, EMOJI_HEAD, MANROPE_BOLD);
-            f.fill_text(kit::text_in(
-                MANROPE_BOLD,
-                kit::text(
-                    letter,
-                    Point::new(x, middle),
-                    EMOJI_HEAD,
-                    CARD_HINT_INK.get(),
-                    Alignment::Left,
-                ),
-            ));
-            x += width + 0.08 * EMOJI_HEAD;
-        }
-        let tone = crate::emoji::store::kept().tone;
-        let table = crate::emoji::data::table();
-        for (at, rect) in cells {
-            let Some(super::Item::Emoji(e)) = open.grid.flat.get(*at) else {
-                continue;
-            };
-            let Some(emoji) = table.emoji.get(*e) else {
-                continue;
-            };
-            if *at == open.selected {
-                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), SELECTED_FILL.get());
-                f.stroke(
-                    &kit::rounded(inset(*rect, 0.5), EMOJI_CELL_RADIUS - 0.5),
-                    Stroke::default()
-                        .with_color(SELECTED_RIM.get())
-                        .with_width(1.0),
-                );
-            } else {
-                f.fill(&kit::rounded(*rect, EMOJI_CELL_RADIUS), CARD_FILL.get());
-            }
-            crate::emoji::draw::emoji(f, &emoji.with_tone(tone), rect.center(), EMOJI_SIZE, 1.0);
-        }
-    }
-
-    fn draw_field(&self, f: &mut Frame, state: &State, open: &Open, layout: &Layout) {
-        let field = layout.field;
-        f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
-        f.stroke(
-            &kit::rounded(inset(field, 0.5), FIELD_RADIUS - 0.5),
-            Stroke::default()
-                .with_color(FIELD_RIM.get())
-                .with_width(1.0),
-        );
-        magnifier(
-            f,
-            Point::new(field.x + FIELD_PAD_LEFT, field.center_y() - MAGNIFIER / 2.0),
-        );
-        // What is typed, its selection and its caret: the field has the
-        // keyboard.
-        open.query.draw(
-            f,
-            Place {
-                left: field.x + FIELD_PAD_LEFT + MAGNIFIER + FIELD_GAP,
-                middle: field.center_y(),
-                width: text_room(field, state.hint),
-                style: Style::one(QUERY, MANROPE),
-            },
-            self.words.placeholder(),
-            &Look::of(TEXT.get(), PLACEHOLDER.get()),
-            true,
-        );
-        // "Échap" in its frame, on the right.
-        let width = state.hint + 2.0 * HINT_PAD + 2.0;
-        let hint = Rectangle::new(
-            Point::new(
-                field.x + field.width - FIELD_PAD_RIGHT - width,
-                field.center_y() - HINT_HEIGHT / 2.0,
-            ),
-            Size::new(width, HINT_HEIGHT),
-        );
-        f.stroke(
-            &kit::rounded(inset(hint, 0.5), HINT_RADIUS - 0.5),
-            Stroke::default().with_color(HINT_RIM.get()).with_width(1.0),
-        );
-        f.fill_text(kit::text_in(
-            MANROPE_SEMIBOLD,
-            kit::text(
-                self.words.escape().to_owned(),
-                hint.center(),
-                HINT,
-                PLACEHOLDER.get(),
-                Alignment::Center,
-            ),
-        ));
     }
 }
 
@@ -1121,18 +1168,6 @@ fn tooltip_of(open: &Open) -> Option<(usize, &str)> {
     label_of(&app.entry.name)
         .is_some_and(|l| l.cut)
         .then_some((tile, app.entry.name.as_str()))
-}
-
-/// The room the field's text has, between the magnifier and the hint
-/// `hint` wide.
-fn text_room(field: Rectangle, hint: f32) -> f32 {
-    field.width
-        - FIELD_PAD_LEFT
-        - MAGNIFIER
-        - FIELD_GAP
-        - FIELD_GAP
-        - (hint + 2.0 * HINT_PAD + 2.0)
-        - FIELD_PAD_RIGHT
 }
 
 fn inset(rect: Rectangle, by: f32) -> Rectangle {
@@ -1259,26 +1294,6 @@ fn link(f: &mut Frame, at: Point) {
     );
 }
 
-/// A heading: its letters spaced, [`HEAD_LEFT`] in, on its row's middle.
-fn head(f: &mut Frame, label: &str, rect: Rectangle) {
-    let mut x = rect.x + HEAD_LEFT;
-    for ch in label.chars() {
-        let letter = ch.to_string();
-        let width = kit::measure(&letter, HEAD_TEXT, MANROPE_BOLD);
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                letter,
-                Point::new(x, rect.center_y()),
-                HEAD_TEXT,
-                PLACEHOLDER.get(),
-                Alignment::Left,
-            ),
-        ));
-        x += width + HEAD_SPACING;
-    }
-}
-
 /// An application without an icon: a neutral rounded square and its first
 /// letter.
 fn letter_tile(f: &mut Frame, rect: Rectangle, name: &str) {
@@ -1310,32 +1325,6 @@ fn letter_tile(f: &mut Frame, rect: Rectangle, name: &str) {
             Color::WHITE,
             Alignment::Center,
         ),
-    ));
-}
-
-/// `name` whole in a small frame under `tile`, inside the surface `size`.
-fn tooltip(f: &mut Frame, name: &str, tile: Rectangle, size: Size) {
-    let width = kit::measure(name, TOOLTIP, MANROPE) + 2.0 * TOOLTIP_PAD.width;
-    let height = TOOLTIP * LINE + 2.0 * TOOLTIP_PAD.height;
-    let edge = TOOLTIP_UNDER;
-    let x = (tile.center_x() - width / 2.0).clamp(edge, (size.width - width - edge).max(edge));
-    let rect = Rectangle::new(
-        Point::new(x, tile.y + tile.height + TOOLTIP_UNDER),
-        Size::new(width, height),
-    );
-    f.fill(&kit::rounded(rect, TOOLTIP_RADIUS), TOOLTIP_FILL.get());
-    f.stroke(
-        &kit::rounded(inset(rect, 0.5), TOOLTIP_RADIUS - 0.5),
-        Stroke::default()
-            .with_color(TOOLTIP_RIM.get())
-            .with_width(1.0),
-    );
-    f.fill_text(kit::text(
-        name.to_owned(),
-        rect.center(),
-        TOOLTIP,
-        TEXT.get(),
-        Alignment::Center,
     ));
 }
 

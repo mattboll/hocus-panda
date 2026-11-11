@@ -184,6 +184,12 @@ enum Target {
     },
     /// A row of the actions palette, by its key (#736).
     Palette(String),
+    /// A control of the emoji picker, by its key.
+    Emoji(String),
+    /// A control of the share's chooser, by its key.
+    Share(String),
+    /// A tile, card or emoji of the launcher, by its key.
+    Launcher(String),
 }
 
 /// The thread's state: the announcer, the last announcement, and what each
@@ -258,7 +264,7 @@ impl Said {
         windows.extend(self.popover(words));
         if let Some(palette) = crate::actions::a11y() {
             for node in palette.all() {
-                if node.key.starts_with("row:") {
+                if node.key.starts_with("actions:Row(") {
                     self.targets.insert(
                         (palette.key.clone(), node.key.clone()),
                         Target::Palette(node.key.clone()),
@@ -266,6 +272,39 @@ impl Said {
                 }
             }
             windows.push(palette);
+        }
+        if let Some(launcher) = crate::launcher::a11y() {
+            for node in launcher.all() {
+                if node.key.starts_with("launcher:Item(") {
+                    self.targets.insert(
+                        (launcher.key.clone(), node.key.clone()),
+                        Target::Launcher(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(launcher);
+        }
+        if let Some(chooser) = crate::share::a11y() {
+            for node in chooser.all() {
+                if node.key.starts_with("share:") {
+                    self.targets.insert(
+                        (chooser.key.clone(), node.key.clone()),
+                        Target::Share(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(chooser);
+        }
+        if let Some(picker) = crate::emoji::a11y() {
+            for node in picker.all() {
+                if node.key.starts_with("emoji:") {
+                    self.targets.insert(
+                        (picker.key.clone(), node.key.clone()),
+                        Target::Emoji(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(picker);
         }
         windows.extend(self.bubbles(words));
         windows.extend(self.auth(words));
@@ -489,6 +528,9 @@ impl Said {
             }
             (Target::Row(row), act) => press_row(row, act),
             (Target::Palette(key), Act::Click) => crate::actions::a11y_click(key),
+            (Target::Emoji(key), Act::Click) => crate::emoji::a11y_click(key),
+            (Target::Share(key), Act::Click) => crate::share::a11y_click(key),
+            (Target::Launcher(key), Act::Click) => crate::launcher::a11y_click(key),
             (Target::Bubble { serial, action }, Act::Click) => {
                 crate::notifications::input(match action {
                     Some(key) => crate::notifications::Input::Action {

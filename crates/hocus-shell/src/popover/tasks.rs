@@ -291,7 +291,7 @@ fn content<'a>(
         let typed = Field {
             with: entry,
             style: Style::one(LINE_TEXT, MANROPE),
-            placeholder: words.placeholder(),
+            placeholder: words.placeholder().into(),
             look: FieldLook::of(TEXT.get(), FAINT.get()),
             focused: field.focused,
             left: FIELD_PAD,

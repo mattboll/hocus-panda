@@ -1151,3 +1151,24 @@ fn a_shared_window_closing_ends_its_share() -> anyhow::Result<()> {
     assert!(bed.shares().is_empty());
     Ok(())
 }
+
+/// The chooser in its main state (screens and windows asked, a window
+/// open), for the widget kit's side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell)?;
+    common::open(&mut bed.hp, "test.shared", (600, 400))?;
+    bed.idle(Duration::from_millis(200))?;
+    let session = bed.session(hocus_link::SHARE_MONITOR | hocus_link::SHARE_WINDOW, None)?;
+    let mut shot = Ok(());
+    bed.start(&session, |bed| {
+        bed.hp.pointer_move(1900.0, 1070.0);
+        shot = common::layer_shot(&mut bed.hp, hocus_link::SHARE_CHOOSER_NAMESPACE, "share");
+        bed.key(KEY_ESC);
+    })?;
+    shot
+}

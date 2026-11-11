@@ -1952,10 +1952,12 @@ brightness's, a desktop's list, the mini form's windows', a tray icon's
 menu, the in-use sign's, the session's, a window's menu, the next
 meeting's, the tasks', the calendar, the agents' briefing, Sources and
 the consent, the clipboard's history, the notifications' history and the
-day sources'), and the music player's tile. The bar's items, the
-launcher, the actions, the emoji picker, the captures, the lock, the
-notifications' bubbles, the share picker, the desktops' overview and the
-peek are still hand-drawn canvases (#772).
+day sources'), the music player's tile, and the surfaces of the shell's
+own: the actions palette, the emoji picker, the launcher and the share's
+chooser (`Around::own`: open while their model says, woken by their
+namespace, every key theirs). The bar's items, the authentication
+dialog, the captures, the lock, the notifications' bubbles, the
+desktops' overview and the peek are still hand-drawn canvases (#772).
 
 **How to build a surface with it.**
 
@@ -2038,7 +2040,13 @@ calendar's 0.06 %, the briefing's 0.39 % (her head's SVG), Sources'
 day sources' 0.17 %; by more than 24/255 only the meeting's divider,
 the briefing's head and the history's moon (SVGs drawn as widgets).
 Their tests find their controls in the dump, as said after what the
-surface last showed.
+surface last showed. Then the third batch, the surfaces of their own: the
+actions palette's 0.35 %, the emoji picker's 0.12 %, the launcher's
+0.02 %, the share's chooser's 0.13 %, none by more than 24/255 but a few
+of the emoji's glyph edges. A long grid builds only its rows near the
+view (`parts::lazy`, the emoji's); a surface as large as its screen is
+told its size (`ui::sized`); the launcher's and the chooser's wheel
+still scroll by rows.
 
 ### 3.9, the desktops (2026-10-30)
 

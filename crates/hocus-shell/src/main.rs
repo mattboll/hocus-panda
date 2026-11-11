@@ -823,12 +823,12 @@ impl Shell {
             }
             ToShell::Emoji {
                 output,
-                scale,
+                scale: _,
                 width,
                 height,
                 at,
             } => {
-                emoji::toggle(output, scale, (width, height), at);
+                emoji::toggle(output, (width, height), at);
                 Task::none()
             }
             ToShell::EmojiInserted => {
@@ -1765,16 +1765,7 @@ impl Shell {
         if !share::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(share::draw::View {
-                id,
-                words: share::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(share::view::view(id, share::words(), self.look.glass))
     }
 
     /// The panda peeking out (4.5), if its surface is `id`.
@@ -1804,16 +1795,11 @@ impl Shell {
         if !launcher::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(launcher::draw::View {
-                id,
-                words: launcher::Words::new(clock::time::Lang::of_messages()),
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(launcher::view::view(
+            id,
+            launcher::Words::new(clock::time::Lang::of_messages()),
+            self.software,
+        ))
     }
 
     /// The actions palette, if its surface is `id`.
@@ -1821,16 +1807,7 @@ impl Shell {
         if !actions::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(actions::draw::View {
-                id,
-                words: actions::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(actions::view::view(id, actions::words(), self.look.glass))
     }
 
     /// The emoji picker, if its surface is `id`.
@@ -1838,16 +1815,7 @@ impl Shell {
         if !emoji::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(emoji::draw::View {
-                id,
-                words: emoji::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(emoji::view::view(id, emoji::words(), self.look.glass))
     }
 
     /// The capture's toolbar (5.8), its thumbnail or its editor (5.9), if
@@ -2538,12 +2506,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The emoji picker: its own surface.
                         ToShell::Emoji {
                             output,
-                            scale,
+                            scale: _,
                             width,
                             height,
                             at,
                         } => {
-                            emoji::toggle(output, scale, (width, height), at);
+                            emoji::toggle(output, (width, height), at);
                             continue;
                         }
                         ToShell::EmojiInserted => {

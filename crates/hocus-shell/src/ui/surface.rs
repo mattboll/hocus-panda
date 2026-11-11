@@ -110,6 +110,19 @@ pub struct Around<'a, L> {
     rebuild: Option<Box<dyn Fn() -> El<'a, L> + 'a>>,
     /// Built again, to be laid out.
     pending: Option<El<'a, L>>,
+    /// A surface of its own, not a popover of the bar's.
+    own: Option<Own<'a>>,
+    /// Told the modifiers held, as they change (a click with `Shift`).
+    on_modifiers: Option<Box<dyn Fn(keyboard::Modifiers) + 'a>>,
+}
+
+/// A surface of the shell's own (the actions palette, the emoji picker,
+/// the launcher…), not one of the bar's popovers: open while `open` says,
+/// drawn again by its `namespace`. It takes its keys itself, `Escape`
+/// among them; the popovers' controller knows nothing of it.
+struct Own<'a> {
+    namespace: &'static str,
+    open: Box<dyn Fn() -> bool + 'a>,
 }
 
 impl<L> std::fmt::Debug for Around<'_, L> {
@@ -147,7 +160,26 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
             wake: Box::new(|| None),
             rebuild: None,
             pending: None,
+            own: None,
+            on_modifiers: None,
         }
+    }
+
+    /// Told the modifiers held as they change: what a click does with
+    /// `Shift` held. Nothing is built again for it.
+    pub fn modifiers(mut self, told: impl Fn(keyboard::Modifiers) + 'a) -> Self {
+        self.on_modifiers = Some(Box::new(told));
+        self
+    }
+
+    /// A surface of its own, `namespace`'s, open while `open` says, not a
+    /// popover of the bar's.
+    pub fn own(mut self, namespace: &'static str, open: impl Fn() -> bool + 'a) -> Self {
+        self.own = Some(Own {
+            namespace,
+            open: Box::new(open),
+        });
+        self
     }
 
     /// Stale too when `stale` says so.
@@ -296,7 +328,9 @@ impl<L: Clone + Send + 'static> Around<'_, L> {
                 Some(true)
             }
             Step::Escape => {
-                event(Seen::Escape);
+                if self.own.is_none() {
+                    event(Seen::Escape);
+                }
                 Some(false)
             }
             Step::Kept => Some(false),
@@ -458,8 +492,14 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
             tree.children[0].diff(self.content.as_widget());
         }
         let max = limits.max();
-        // All the height it wants: what the surface should be.
-        let free = layout::Limits::new(Size::ZERO, Size::new(max.width, f32::INFINITY));
+        // A popover: all the height it wants, what the surface should be.
+        // A surface of its own has its size.
+        let height = if self.own.is_some() {
+            max.height
+        } else {
+            f32::INFINITY
+        };
+        let free = layout::Limits::new(Size::ZERO, Size::new(max.width, height));
         let content = self
             .content
             .as_widget_mut()
@@ -523,7 +563,11 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        let open = crate::popover::with(|c| c.is_open(self.id));
+        let open = match &self.own {
+            Some(own) => (own.open)(),
+            None => crate::popover::with(|c| c.is_open(self.id)),
+        };
+        let popover = self.own.is_none();
         let drawing = matches!(event, Event::Window(window::Event::RedrawRequested(_)));
         // Asked on every event: a tree built again from one is drawn
         // without a request of its own.
@@ -531,6 +575,11 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
             shell.request_redraw_at(window::RedrawRequest::At(at));
         }
         let mut handled = false;
+        if let (Event::Keyboard(keyboard::Event::ModifiersChanged(held)), Some(told)) =
+            (event, &self.on_modifiers)
+        {
+            told(*held);
+        }
         // The tree built after what was handled: what waited for it.
         let kept = tree.state.downcast_mut::<Kept>();
         if kept.outdated.is_some_and(|build| build != self.build) {
@@ -554,12 +603,17 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
         }
         match event {
             Event::Window(window::Event::RedrawRequested(_)) if open => {
-                if STAMP.load(Ordering::Relaxed) != self.stamp || (self.stale)() {
+                // What was handled outdated this tree, and none was built
+                // since (a message from a resize, which iced builds no
+                // view for): built now, else the keys held wait for good.
+                let waits = tree.state.downcast_mut::<Kept>().outdated == Some(self.build);
+                if STAMP.load(Ordering::Relaxed) != self.stamp || (self.stale)() || waits {
                     (self.handle)(self.on_stale.clone());
                     handled = true;
                 }
                 // Opened by the keyboard: the ring's first place.
                 if let Some(first) = self.first.clone()
+                    && popover
                     && kit::first_control(self.id)
                 {
                     (self.handle)(first);
@@ -567,7 +621,11 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
                 }
                 // The keys that reached another of the shell's surfaces,
                 // and the `Tab` of a popover opened by the keyboard.
-                let keys = kit::keys(self.id);
+                let keys = if popover {
+                    kit::keys(self.id)
+                } else {
+                    Vec::new()
+                };
                 if !keys.is_empty() {
                     tree.state.downcast_mut::<Kept>().queued.extend(keys);
                     if tree.state.downcast_mut::<Kept>().outdated != Some(self.build) {
@@ -576,7 +634,7 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. } | mouse::Event::CursorEntered)
-                if open =>
+                if open && popover =>
             {
                 let kept = tree.state.downcast_mut::<Kept>();
                 if !kept.inside && cursor.position_over(layout.bounds()).is_some() {
@@ -584,7 +642,7 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
                     crate::popover::event(Seen::PopoverEnter);
                 }
             }
-            Event::Mouse(mouse::Event::CursorLeft) if open => {
+            Event::Mouse(mouse::Event::CursorLeft) if open && popover => {
                 tree.state.downcast_mut::<Kept>().inside = false;
                 crate::popover::event(Seen::PopoverLeave);
             }
@@ -624,7 +682,11 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
             }
         } else {
             shell.invalidate_widgets();
-            crate::popover::send(vec![Effect::Wake(hocus_link::POPOVER_NAMESPACE)]);
+            let namespace = self
+                .own
+                .as_ref()
+                .map_or(hocus_link::POPOVER_NAMESPACE, |own| own.namespace);
+            crate::popover::send(vec![Effect::Wake(namespace)]);
         }
     }
 

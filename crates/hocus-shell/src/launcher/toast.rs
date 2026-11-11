@@ -24,7 +24,7 @@ use iced::{
     window,
 };
 
-use super::draw::ZOOM;
+use super::view::ZOOM;
 use crate::theme::Ink;
 use crate::{
     levels::draw::{LINE, TEXT},

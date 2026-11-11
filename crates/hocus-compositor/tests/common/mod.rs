@@ -1848,15 +1848,23 @@ pub fn drawn_popovers(hp: &Headless) -> Vec<Rect> {
 /// `HOCUS_KIT_SHOTS` as `name.png` (the kit's side-by-sides, #770); nothing
 /// without the variable.
 pub fn popover_shot(hp: &mut Headless, name: &str) -> anyhow::Result<()> {
+    layer_shot(hp, hocus_link::POPOVER_NAMESPACE, name)
+}
+
+/// The shell's surface `namespace` as the first screen shows it, saved as
+/// [`popover_shot`] saves a popover.
+pub fn layer_shot(hp: &mut Headless, namespace: &str, name: &str) -> anyhow::Result<()> {
     let Ok(dir) = std::env::var("HOCUS_KIT_SHOTS") else {
         eprintln!("HOCUS_KIT_SHOTS is not set: no shot");
         return Ok(());
     };
     // Its hover, its spinners and its fades at rest.
     wait(hp, Duration::from_millis(800))?;
-    let rect = *drawn_popovers(hp)
+    let rect = hp
+        .drawn_layers(namespace)
         .first()
-        .ok_or_else(|| anyhow::anyhow!("{name}: no popover"))?;
+        .map(|(_, r)| *r)
+        .ok_or_else(|| anyhow::anyhow!("{name}: no {namespace}"))?;
     let (width, height, bytes) = hp.screenshot(0)?;
     let w = rect.width.min(width - rect.x);
     let h = rect.height.min(height - rect.y);

@@ -1,10 +1,10 @@
-//! A popover's rows for screen readers: each popover says, as it draws,
-//! what it shows by the kit's kinds (buttons, switches, sliders, radio
-//! buttons, fields, lines), the order its keyboard's ring goes through
-//! them, and which one the ring is on. Only one popover shows at a time;
-//! a screen reader's click on a row is the keys that would reach it (`Tab`
-//! to it, then `Enter`), so that every popover does what it does for the
-//! keyboard.
+//! A surface's rows for screen readers: each popover, and each surface of
+//! the widget kit's own, says as it draws what it shows by the kit's kinds
+//! (buttons, switches, sliders, radio buttons, fields, lines), the order
+//! its keyboard's ring goes through them, and which one the ring is on.
+//! Only one popover shows at a time; a screen reader's click on a row is
+//! the keys that would reach it (`Tab` to it, then `Enter`), so that every
+//! popover does what it does for the keyboard.
 
 use std::sync::{Mutex, PoisonError};
 
@@ -27,25 +27,38 @@ pub struct Rows {
     pub arrows: bool,
 }
 
-static ROWS: Mutex<Option<(window::Id, Rows)>> = Mutex::new(None);
+/// The surfaces that said what they show, the last last: a popover, and
+/// the kit's surfaces of their own (the actions palette, the emoji
+/// picker…), which may show beside it.
+static ROWS: Mutex<Vec<(window::Id, Rows)>> = Mutex::new(Vec::new());
 
-/// Popover `surface` shows `rows` now.
+/// How many surfaces' rows are kept: those closed go first.
+const KEPT: usize = 8;
+
+/// Surface `surface` shows `rows` now.
 pub fn publish(surface: window::Id, rows: Rows) {
     let mut kept = ROWS.lock().unwrap_or_else(PoisonError::into_inner);
-    if kept
-        .as_ref()
-        .is_none_or(|(s, r)| *s != surface || *r != rows)
-    {
-        *kept = Some((surface, rows));
+    match kept.iter_mut().find(|(s, _)| *s == surface) {
+        Some((_, shown)) => {
+            if *shown != rows {
+                *shown = rows;
+            }
+        }
+        None => {
+            if kept.len() >= KEPT {
+                kept.remove(0);
+            }
+            kept.push((surface, rows));
+        }
     }
 }
 
-/// What popover `surface` last said it shows.
+/// What surface `surface` last said it shows.
 pub fn of(surface: window::Id) -> Option<Rows> {
     ROWS.lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-        .filter(|(s, _)| *s == surface)
+        .iter()
+        .find(|(s, _)| *s == surface)
         .map(|(_, r)| r.clone())
 }
 
