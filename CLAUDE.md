@@ -136,7 +136,11 @@ runs everything, as main does: built once, then four jobs. So does
 every push to a sprint branch. After each merge, main runs the whole suite; a failure
 there is fixed at once; a test that fails by chance is quarantined from
 CI (`[profile.ci]` in `.config/nextest.toml`) until its issue's fix
-takes it out. Update this section as commands land.
+takes it out (docs/workflow.md, "A test that fails by chance": no
+retries, no fail-fast). A test fails, never skips, when a system program
+it runs is missing (`common::missing`); tests and the programs they start
+run with `TZ=UTC` and `LANG=C.UTF-8` (`.cargo/config.toml`). Update this
+section as commands land.
 
 Tests never draw on a GPU unless `HOCUS_TEST_GPU` names its render node
 (docs/performance.md): the compositor draws with pixman, or with GLES on

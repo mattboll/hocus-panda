@@ -15,7 +15,7 @@ archive.include = [
 
 # CI's runs. A test that fails by chance is quarantined here, in
 # `default-filter` below, while its issue is fixed, so it holds no one; the
-# fix takes it out again.
+# fix takes it out again (docs/workflow.md, "A test that fails by chance").
 # Run locally, the default profile still runs it. A line of the filter:
 #   | (package(CRATE) & test(=MODULE::TEST))   # its issue
 # (an integration test is named by its file: `settings_sound::the_test`, in
@@ -24,6 +24,12 @@ archive.include = [
 # A test still running after 3 min is stopped and fails: one that hangs once
 # held a pull request's run for more than half an hour (#645).
 slow-timeout = { period = "60s", terminate-after = 3 }
+# Every test runs whatever fails before it: a first failure hid the rest of
+# its shard, and the next run found the next one (#769).
+fail-fast = false
+# No retries: a test that passes at its second try has failed, and is
+# reported as such (docs/workflow.md, "A test that fails by chance").
+retries = 0
 # What CI's machines lack (.github/workflows/ci.yml installs neither
 # Xwayland, nor a terminal, nor AT-SPI's launcher and Python binding): a
 # test fails without the programs it needs, so these are left out there,
