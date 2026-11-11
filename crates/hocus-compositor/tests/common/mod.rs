@@ -161,10 +161,13 @@ fn is_fresh(program: &Path, name: &str) -> anyhow::Result<()> {
     // `target: source source…`, spaces in names escaped.
     let (_, sources) = text.split_once(": ").context("an unreadable list")?;
     let sources = sources.trim().replace("\\ ", "\0");
+    // What a build script generated (hocus-words' catalogue) is in the
+    // program's own target directory, beside its profile's.
+    let target = program.parent().and_then(Path::parent);
     for source in sources.split_whitespace() {
         let source = std::path::PathBuf::from(source.replace('\0', " "));
         anyhow::ensure!(
-            source.starts_with(workspace),
+            source.starts_with(workspace) || target.is_some_and(|t| source.starts_with(t)),
             "{name} was built from another checkout ({})",
             source.display()
         );
