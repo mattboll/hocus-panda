@@ -22,10 +22,16 @@ use hocus_link::{ToCompositor, ToShell, VERSION, wire};
 
 const WAIT: Duration = Duration::from_secs(30);
 
-/// A compositor whose shell's program only waits to be ended.
+/// A compositor whose shell's program only waits to be ended: by the
+/// compositor, or as the test's process goes (holding none of its output,
+/// so nothing outlives the test).
 fn compositor(dir: &Path) -> anyhow::Result<Headless> {
     let program = dir.join("shell");
-    std::fs::write(&program, "#!/bin/sh\nexec sleep 600\n")?;
+    std::fs::write(
+        &program,
+        "#!/bin/sh\nexec >/dev/null 2>&1 </dev/null\n\
+         while kill -0 \"$PPID\"; do sleep 0.2; done\n",
+    )?;
     std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))?;
     Headless::start_with_shell(
         HeadlessConfig {
@@ -147,9 +153,29 @@ fn started(hp: &mut Headless, before: Option<i32>) -> anyhow::Result<i32> {
     hp.shell_pid().context("no shell")
 }
 
+/// A shell of this compositor's version, past the hellos: what it is told
+/// as it connects, every line a message.
+fn fed(hp: &mut Headless) -> anyhow::Result<Speaks> {
+    let shell = Speaks::connect(hp, Some(&wire::hello()))?;
+    // The compositor's hello first, then what a shell is told as it
+    // connects.
+    assert_eq!(shell.hear(hp)?, wire::hello());
+    let look = shell.hear(hp)?;
+    assert!(
+        matches!(ToShell::read(&look), Ok(ToShell::Look { .. })),
+        "{look}"
+    );
+    let mut bars = 0;
+    while let Some(line) = shell.hears_more(hp, Duration::from_millis(500))? {
+        let message = ToShell::read(&line).map_err(|err| anyhow::anyhow!("{line}: {err}"))?;
+        bars += usize::from(matches!(message, ToShell::Bar { .. }));
+    }
+    assert_eq!(bars, 1, "one screen, one bar");
+    Ok(shell)
+}
+
 #[test]
-fn a_shell_of_the_same_version_is_fed_after_the_hellos_and_an_unknown_kind_is_skipped()
--> anyhow::Result<()> {
+fn a_shell_of_the_same_version_is_fed_after_the_hellos() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let mut hp = compositor(dir.path())?;
     started(&mut hp, None)?;
@@ -159,35 +185,42 @@ fn a_shell_of_the_same_version_is_fed_after_the_hellos_and_an_unknown_kind_is_sk
     assert!(!hp.shell_connected());
     drop(quiet);
 
-    let mut shell = Speaks::connect(&hp, Some(&wire::hello()))?;
-    // The compositor's hello first, then what a shell is told as it
-    // connects: every line a message.
-    assert_eq!(shell.hear(&mut hp)?, wire::hello());
-    let look = shell.hear(&mut hp)?;
-    assert!(
-        matches!(ToShell::read(&look), Ok(ToShell::Look { .. })),
-        "{look}"
-    );
+    let mut shell = fed(&mut hp)?;
     assert!(hp.shell_connected());
-    let mut bars = 0;
-    while let Some(line) = shell.hears_more(&mut hp, Duration::from_millis(500))? {
-        let message = ToShell::read(&line).map_err(|err| anyhow::anyhow!("{line}: {err}"))?;
-        bars += usize::from(matches!(message, ToShell::Bar { .. }));
-    }
-    assert_eq!(bars, 1, "one screen, one bar");
+    // And heard.
+    assert!(!hp.shell_on_cpu());
+    shell.say(&ToCompositor::Software.line())?;
+    let heard = hp.dispatch_until(WAIT, |hp| hp.shell_on_cpu())?;
+    assert!(heard, "the shell was not heard");
+    let status = status(&mut hp)?;
+    assert!(status.contains("state running\n"), "{status}");
+    assert!(status.contains("starts 1\n"), "{status}");
+    assert!(!status.contains("mismatch"), "{status}");
+    Ok(())
+}
 
-    // A kind this compositor does not know, a line that is no message:
-    // skipped, and the next one is heard.
+#[test]
+fn an_unknown_kind_from_a_shell_of_the_same_version_is_skipped() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut hp = compositor(dir.path())?;
+    started(&mut hp, None)?;
+    let mut shell = fed(&mut hp)?;
+
+    // A kind this compositor does not know (a newer shell's, of the same
+    // version), a known kind that does not read, a line that is no
+    // message: skipped, and the next one is heard.
     shell.say(r#"{"kind":"teleport","data":{"to":"Mars"}}"#)?;
+    shell.say(r#"{"kind":"bring","data":"forty-two"}"#)?;
     shell.say("not a message")?;
     assert!(!hp.shell_on_cpu());
     shell.say(&ToCompositor::Software.line())?;
     let heard = hp.dispatch_until(WAIT, |hp| hp.shell_on_cpu())?;
     assert!(heard, "the line after an unknown kind was not heard");
+    // The same connection, the same run.
     assert!(hp.shell_connected());
     let status = status(&mut hp)?;
     assert!(status.contains("state running\n"), "{status}");
-    assert!(!status.contains("mismatch"), "{status}");
+    assert!(status.contains("starts 1\n"), "{status}");
     Ok(())
 }
 
@@ -203,7 +236,9 @@ fn a_shell_of_another_version_is_not_fed_started_again_once_then_none_runs() -> 
     // heard.
     let mut newer = Speaks::connect(&hp, Some(&wire::hello_of(VERSION + 1)))?;
     assert_eq!(newer.hear(&mut hp)?, wire::hello());
-    newer.say(&ToCompositor::Software.line())?;
+    // Its connection may be gone already, its run ended: not heard
+    // either way.
+    let _ = newer.say(&ToCompositor::Software.line());
     assert_eq!(
         newer.hears_more(&mut hp, Duration::from_millis(300))?,
         None,
