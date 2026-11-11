@@ -1280,7 +1280,11 @@ mod tests {
             panic!("not listed again");
         };
         assert_eq!(agents.len(), AGENTS - 1);
-        assert!(fake.subscription().is_some());
+        // Kept until the test ends: let go, the fake's end of the new
+        // subscription closes, herdr is taken for gone and listed again,
+        // sometimes before the count below is read.
+        let again = fake.subscription();
+        assert!(again.is_some());
         assert_eq!(fake.asked("events.subscribe"), 2);
         assert_eq!(fake.asked("agent.list"), 3);
         Ok(())
