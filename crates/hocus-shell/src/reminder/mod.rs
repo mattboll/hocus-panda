@@ -48,7 +48,7 @@ use hocus_day::{
     reminders::{self, Settings},
 };
 use hocus_link::{BUBBLE_OUT, EDGE, Form, ToCompositor};
-use iced::{Element, Length, Rectangle, widget::canvas, window};
+use iced::{Element, Rectangle, window};
 use iced_layershell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
 };
@@ -963,6 +963,7 @@ fn show(tabs: Vec<Tab>) {
         let mut messages = s.settle();
         for serial in changed {
             if s.opened.keys().any(|(_, sr)| *sr == serial) {
+                crate::ui::touch();
                 crate::popover::tell(ToCompositor::Wake(hocus_link::reminder_namespace(serial)));
             }
         }
@@ -1091,6 +1092,7 @@ fn places_changed(change: impl FnOnce(&mut Places)) {
     });
     out(messages);
     for serial in woken {
+        crate::ui::touch();
         crate::popover::tell(ToCompositor::Wake(hocus_link::reminder_namespace(serial)));
     }
     // The thread's leaving surfaces, timed.
@@ -1200,16 +1202,7 @@ pub fn view<'a>(id: window::Id, glass: bool) -> Option<Element<'a, Message>> {
     if !is_tab(id) {
         return None;
     }
-    Some(
-        canvas(draw::View {
-            id,
-            glass,
-            words: Words::now(),
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into(),
-    )
+    Some(draw::view(id, glass, Words::now()))
 }
 
 #[cfg(test)]
