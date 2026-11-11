@@ -182,20 +182,6 @@ pub(crate) fn text_in(font: iced::Font, mut text: canvas::Text) -> canvas::Text 
     text
 }
 
-/// The header's title, on its left.
-pub(crate) fn title(f: &mut Frame, title: &str) {
-    f.fill_text(text_in(
-        MANROPE_BOLD,
-        text(
-            title.to_owned(),
-            Point::new(LEFT, HEADER_MIDDLE),
-            TITLE,
-            TEXT.get(),
-            Alignment::Left,
-        ),
-    ));
-}
-
 /// `word`'s letters and their places from the content's left, spaced as a
 /// label's, `width` measuring each in the label's font.
 pub(crate) fn spaced(word: &str, mut width: impl FnMut(&str) -> f32) -> Vec<(char, f32)> {

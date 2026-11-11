@@ -3656,14 +3656,14 @@ fn sources_opens_from_her_briefing() -> anyhow::Result<()> {
     assert_eq!((sources.width, sources.y), (300, 8 + 62));
     bed.logged_after(from, &["Trouvé, pas branché"])?;
     // "Ne rien brancher" stays the card's, under her (4.7b).
-    bed.logged_after(from, &["the agents' popover's items", "Plug(ClaudeCode)@"])?;
+    bed.logged_after(from, &[" shows {", "\"agents:Plug(ClaudeCode)\""])?;
     let items = plain(&bed.log);
     let items = items
         .lines()
         .rev()
-        .find(|l| l.contains("the agents' popover's items"))
+        .find(|l| l.contains(" shows {"))
         .unwrap_or_default();
-    assert!(!items.contains("Decline@"), "{items}");
+    assert!(!items.contains("\"agents:Decline\""), "{items}");
     Ok(())
 }
 
@@ -4046,8 +4046,8 @@ fn plugging_nothing_in_from_the_mini_forms_sources_hides_the_group_in_both_forms
     let from = bed.mark();
     bed.click(plus)?;
     let sources = bed.popover()?;
-    bed.logged_after(from, &["the agents' popover's items", "Decline@"])?;
-    let decline = bed.popover_item(sources, "the agents' popover's items", "Decline")?;
+    bed.logged_after(from, &[" shows {", "\"agents:Decline\""])?;
+    let decline = bed.popover_item(sources, "agents", "Decline")?;
     let from = bed.mark();
     bed.click(decline)?;
     bed.tool_becomes("claude-code", ToolState::Declined)?;

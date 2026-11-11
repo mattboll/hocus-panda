@@ -332,7 +332,8 @@ impl Item {
             Self::Desktop { .. } | Self::WindowsMore => desktop::opening(),
             Self::Secretary => briefing::opening(),
             Self::Keyboard | Self::Agent(_) => {}
-            Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
+            Self::Sources | Self::AnotherTool | Self::Plug(_) => agents::opening(),
+            Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
             Self::User => session::opening(),

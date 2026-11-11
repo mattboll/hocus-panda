@@ -1935,14 +1935,11 @@ impl Shell {
                 })
             }
             popover::Item::Sources | popover::Item::AnotherTool | popover::Item::Plug(_) => {
-                canvas(popover::agents::Panel {
+                popover::agents::view(&popover::agents::Panel {
                     id,
                     words: agents::Words::new(clock::time::Lang::of_messages()),
                     glass: self.look.glass,
                 })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
             }
             popover::Item::Secretary => popover::briefing::view(&popover::briefing::Panel {
                 id,
