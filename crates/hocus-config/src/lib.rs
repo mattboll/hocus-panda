@@ -14,6 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub mod defaults;
+
 pub use toml_edit;
 use toml_edit::DocumentMut;
 
