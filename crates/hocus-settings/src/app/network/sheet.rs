@@ -6,6 +6,7 @@
 //! typed goes to NetworkManager once (`Ask::Join`), saved with the
 //! connection; the sheet forgets it as it closes.
 
+use hocus_words::settings::app_network_sheet as words;
 use std::path::PathBuf;
 
 use hocus_network::{
@@ -151,9 +152,9 @@ impl Authority {
 
     fn label(self) -> Words {
         match self {
-            Self::System => w("Ceux du système", "The system's"),
-            Self::File => w("Choisir un fichier…", "Choose a file…"),
-            Self::Unchecked => w("Ne pas vérifier", "Do not check"),
+            Self::System => w(words::THE_SYSTEM_S),
+            Self::File => w(words::CHOOSE_A_FILE),
+            Self::Unchecked => w(words::DO_NOT_CHECK),
         }
     }
 }
@@ -490,12 +491,9 @@ impl App {
                 return Task::none();
             }
             Msg::Chosen(_, None, true) => {
-                let text = w(
-                    "Aucun sélecteur de fichiers ne répond : le portail du bureau n’est pas là.",
-                    "No file chooser answers: the desktop portal is not there.",
-                )
-                .get(lang)
-                .to_owned();
+                let text = w(words::NO_FILE_CHOOSER_ANSWERS_THE_DESKTOP)
+                    .get(lang)
+                    .to_owned();
                 return self.toast(text, super::super::ToastAction::None, super::super::TOAST);
             }
             _ => {}
@@ -553,18 +551,18 @@ impl App {
         let lang = self.lang;
         let (title, filter, globs): (Words, Words, &[&str]) = match what {
             FileFor::Authority => (
-                w("Certificat de l’autorité", "CA certificate"),
-                w("Certificats", "Certificates"),
+                w(words::CA_CERTIFICATE),
+                w(words::CERTIFICATES),
                 &["*.pem", "*.crt", "*.cer", "*.der"],
             ),
             FileFor::Certificate => (
-                w("Certificat personnel", "User certificate"),
-                w("Certificats", "Certificates"),
+                w(words::USER_CERTIFICATE),
+                w(words::CERTIFICATES),
                 &["*.pem", "*.crt", "*.cer", "*.der", "*.p12", "*.pfx"],
             ),
             FileFor::Key => (
-                w("Clé privée", "Private key"),
-                w("Clés", "Keys"),
+                w(words::PRIVATE_KEY),
+                w(words::KEYS),
                 &["*.pem", "*.key", "*.der", "*.p12", "*.pfx"],
             ),
         };
@@ -647,9 +645,7 @@ impl App {
                 Lang::French => format!("VPN « {} »", sheet.name),
                 Lang::English => format!("VPN \u{201c}{}\u{201d}", sheet.name),
             },
-            (true, _) => w("Rejoindre un réseau masqué", "Join a hidden network")
-                .get(lang)
-                .to_owned(),
+            (true, _) => w(words::JOIN_A_HIDDEN_NETWORK).get(lang).to_owned(),
             (false, Lang::French) => format!("Se connecter à « {} »", sheet.name),
             (false, Lang::English) => format!("Connect to \u{201c}{}\u{201d}", sheet.name),
         };
@@ -666,28 +662,18 @@ impl App {
         if sheet.vpn.is_some() {
             body = body.push(
                 t(
-                    w(
-                        "Ce fichier demande un identifiant et un mot de passe : ceux que te donne ton fournisseur. Ils sont gardés avec le VPN.",
-                        "This file asks for a user name and a password: those your provider gives you. They are kept with the VPN.",
-                    )
-                    .get(lang),
+                    w(words::THIS_FILE_ASKS_FOR_A_USER).get(lang),
                     13.0,
                     DIM.get(),
                 )
                 .line_height(1.5),
             );
-            body =
-                body.push(self.sheet_field(sheet, Field::Identity, w("Identifiant", "User name")));
-            body =
-                body.push(self.sheet_field(sheet, Field::Password, w("Mot de passe", "Password")));
+            body = body.push(self.sheet_field(sheet, Field::Identity, w(words::USER_NAME)));
+            body = body.push(self.sheet_field(sheet, Field::Password, w(words::PASSWORD)));
         } else if sheet.security == Security::Enterprise {
             body = body.push(
                 t(
-                    w(
-                        "Un réseau d’entreprise ou d’école : ce qu’il faut taper est donné par son service informatique.",
-                        "A company or school network: what to type comes from its IT department.",
-                    )
-                    .get(lang),
+                    w(words::A_COMPANY_OR_SCHOOL_NETWORK_WHAT).get(lang),
                     13.0,
                     DIM.get(),
                 )
@@ -695,10 +681,9 @@ impl App {
             );
         }
         if sheet.hidden {
-            body =
-                body.push(self.sheet_field(sheet, Field::Name, w("Nom du réseau", "Network name")));
+            body = body.push(self.sheet_field(sheet, Field::Name, w(words::NETWORK_NAME)));
             body = body.push(labelled(
-                w("Sécurité", "Security").get(lang),
+                w(words::SECURITY).get(lang),
                 menu_button(
                     security_label(sheet.security).get(lang).to_owned(),
                     MenuFor::Security,
@@ -710,11 +695,7 @@ impl App {
         }
         match sheet.security {
             Security::Psk { .. } | Security::Wep => {
-                body = body.push(self.sheet_field(
-                    sheet,
-                    Field::Password,
-                    w("Mot de passe", "Password"),
-                ));
+                body = body.push(self.sheet_field(sheet, Field::Password, w(words::PASSWORD)));
             }
             Security::Enterprise if sheet.vpn.is_none() => {
                 body = self.sheet_enterprise(sheet, body);
@@ -723,14 +704,8 @@ impl App {
         }
         if let Some(failure) = sheet.failed {
             let said = match failure {
-                Failure::Secret => w(
-                    "Mot de passe incorrect. Vérifie-le et réessaie.",
-                    "Wrong password. Check it and try again.",
-                ),
-                Failure::Other => w(
-                    "La connexion a échoué. Réessaie.",
-                    "Could not connect. Try again.",
-                ),
+                Failure::Secret => w(words::WRONG_PASSWORD_CHECK_IT_AND_TRY),
+                Failure::Other => w(words::COULD_NOT_CONNECT_TRY_AGAIN),
             };
             body = body
                 .push(container(t(said.get(lang), 12.0, PEACH.get())).id("sheet:error".to_owned()));
@@ -741,7 +716,7 @@ impl App {
             container(
                 row![
                     spinner(14.0, DEEP.get(), !self.reduced_motion),
-                    t(w("Connexion…", "Connecting…").get(lang), 13.0, DEEP.get()).font(BOLD)
+                    t(w(words::CONNECTING).get(lang), 13.0, DEEP.get()).font(BOLD)
                 ]
                 .spacing(7)
                 .align_y(Alignment::Center),
@@ -755,7 +730,7 @@ impl App {
             let mut b = button(
                 container(
                     t(
-                        w("Se connecter", "Connect").get(lang),
+                        w(words::CONNECT).get(lang),
                         13.0,
                         if filled {
                             DEEP.get()
@@ -792,7 +767,7 @@ impl App {
         let actions = row![
             Space::new().width(Length::Fill),
             container(secondary(
-                w("Annuler", "Cancel").get(lang).to_owned(),
+                w(words::CANCEL).get(lang).to_owned(),
                 Some(Message::Network(PageMsg::Sheet(Msg::Cancel))),
                 self.network_focused(Stop::SheetCancel),
                 false,
@@ -852,7 +827,7 @@ impl App {
         let lang = self.lang;
         let waiting = sheet.waiting();
         let mut two = row![labelled(
-            w("Méthode", "Method").get(lang),
+            w(words::METHOD).get(lang),
             menu_button(
                 sheet.method.label().to_owned(),
                 MenuFor::Method,
@@ -866,7 +841,7 @@ impl App {
             two = two.push(Space::new().width(Length::Fill));
         } else {
             two = two.push(labelled(
-                w("Authentification interne", "Inner authentication").get(lang),
+                w(words::INNER_AUTHENTICATION).get(lang),
                 menu_button(
                     sheet.inner.label().to_owned(),
                     MenuFor::Inner,
@@ -877,20 +852,20 @@ impl App {
             ));
         }
         body = body.push(two);
-        body = body.push(self.sheet_field(sheet, Field::Identity, w("Identifiant", "Identity")));
+        body = body.push(self.sheet_field(sheet, Field::Identity, w(words::IDENTITY)));
         if sheet.method == Method::Tls {
             body = body.push(
                 row![
                     self.sheet_file(
                         sheet.certificate.as_ref(),
                         FileFor::Certificate,
-                        w("Certificat personnel", "User certificate"),
+                        w(words::USER_CERTIFICATE),
                         waiting
                     ),
                     self.sheet_file(
                         sheet.key.as_ref(),
                         FileFor::Key,
-                        w("Clé privée", "Private key"),
+                        w(words::PRIVATE_KEY),
                         waiting
                     ),
                 ]
@@ -899,11 +874,10 @@ impl App {
             body = body.push(self.sheet_field(
                 sheet,
                 Field::KeyPassword,
-                w("Mot de passe de la clé", "Private key password"),
+                w(words::PRIVATE_KEY_PASSWORD),
             ));
         } else {
-            body =
-                body.push(self.sheet_field(sheet, Field::Password, w("Mot de passe", "Password")));
+            body = body.push(self.sheet_field(sheet, Field::Password, w(words::PASSWORD)));
         }
         let authority = match (sheet.authority, &sheet.authority_file) {
             (Authority::File, Some(file)) => file_name(file),
@@ -912,7 +886,7 @@ impl App {
         body = body.push(
             row![
                 labelled(
-                    w("Certificat de l’autorité", "CA certificate").get(lang),
+                    w(words::CA_CERTIFICATE).get(lang),
                     menu_button(
                         authority,
                         MenuFor::Authority,
@@ -921,31 +895,15 @@ impl App {
                     ),
                     "sheet:authority",
                 ),
-                container(self.sheet_field(
-                    sheet,
-                    Field::Domain,
-                    w("Domaine du serveur", "Server domain")
-                ))
-                .width(Length::Fill),
+                container(self.sheet_field(sheet, Field::Domain, w(words::SERVER_DOMAIN)))
+                    .width(Length::Fill),
             ]
             .spacing(10),
         );
         let hint: (Words, Color) = if sheet.authority == Authority::Unchecked {
-            (
-                w(
-                    "Sans vérification, un faux point d’accès peut lire ton mot de passe.",
-                    "Without a check, a fake access point can read your password.",
-                ),
-                AMBER.get(),
-            )
+            (w(words::WITHOUT_A_CHECK_A_FAKE_ACCESS), AMBER.get())
         } else {
-            (
-                w(
-                    "Le domaine vérifie qu’on parle au vrai serveur. Sans lui, un faux point d’accès pourrait lire le mot de passe.",
-                    "The domain checks that it is the real server. Without it, a fake access point could read the password.",
-                ),
-                FAINT.get(),
-            )
+            (w(words::THE_DOMAIN_CHECKS_THAT_IT_IS), FAINT.get())
         };
         body.push(
             container(t(hint.0.get(lang), 12.0, hint.1).line_height(1.4))
@@ -1027,11 +985,7 @@ impl App {
     ) -> El<'a> {
         let lang = self.lang;
         let said = chosen.map_or_else(
-            || {
-                w("Choisir un fichier…", "Choose a file…")
-                    .get(lang)
-                    .to_owned()
-            },
+            || w(words::CHOOSE_A_FILE).get(lang).to_owned(),
             |p| file_name(p),
         );
         let id = match what {
@@ -1076,11 +1030,11 @@ fn labelled<'a>(label: &'static str, control: El<'a>, id: &str) -> El<'a> {
 /// What the hidden network's security menu says of `security`.
 fn security_label(security: Security) -> Words {
     match security {
-        Security::Open => w("Aucune", "None"),
-        Security::Psk { sae: false } => w("WPA/WPA2 personnel", "WPA/WPA2 personal"),
-        Security::Psk { sae: true } => w("WPA3 personnel", "WPA3 personal"),
-        Security::Enterprise => w("WPA/WPA2 entreprise", "WPA/WPA2 enterprise"),
-        Security::Wep => w("WEP", "WEP"),
+        Security::Open => w(words::NONE),
+        Security::Psk { sae: false } => w(words::WPA_WPA2_PERSONAL),
+        Security::Psk { sae: true } => w(words::WPA3_PERSONAL),
+        Security::Enterprise => w(words::WPA_WPA2_ENTERPRISE),
+        Security::Wep => w(words::WEP),
     }
 }
 

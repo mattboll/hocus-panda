@@ -2,6 +2,7 @@
 //! switch's card, MES APPAREILS, AUTOUR and PLUS TARD; without an adapter,
 //! the info box alone.
 
+use hocus_words::settings::app_bluetooth_view as words;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock, PoisonError},
@@ -398,19 +399,11 @@ impl App {
                 row![
                     draw(INFO, 18.0, BLUE.get(), 2.0),
                     rich_text::<'_, (), _, _, _>([
-                        span(
-                            w("Aucun adaptateur Bluetooth.", "No Bluetooth adapter.").get(lang),
-                        )
-                        .font(BOLD)
-                        .color(INFO_TEXT.get()),
-                        span(
-                            w(
-                                " Cet ordinateur n’en a pas, ou le service Bluetooth (BlueZ) ne tourne pas. Une clé USB Bluetooth branchée apparaît ici aussitôt.",
-                                " This computer has none, or the Bluetooth service (BlueZ) is not running. A USB Bluetooth dongle plugged in shows here at once.",
-                            )
-                            .get(lang),
-                        )
-                        .color(INFO_TEXT.get()),
+                        span(w(words::NO_BLUETOOTH_ADAPTER).get(lang),)
+                            .font(BOLD)
+                            .color(INFO_TEXT.get()),
+                        span(w(words::THIS_COMPUTER_HAS_NONE_OR_THE).get(lang),)
+                            .color(INFO_TEXT.get()),
                     ])
                     .size(12.5)
                     .line_height(1.5)
@@ -463,22 +456,16 @@ impl App {
             (line, DIM.get())
         } else if bt.blocked {
             (
-                w(
-                    "Bloqué par l’interrupteur sans fil ou le mode avion.",
-                    "Blocked by the wireless switch or airplane mode.",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::BLOCKED_BY_THE_WIRELESS_SWITCH_OR)
+                    .get(lang)
+                    .to_owned(),
                 PEACH.get(),
             )
         } else {
             (
-                w(
-                    "Coupé. Tes appareils restent associés : ils reviennent quand tu le rallumes.",
-                    "Off. Your devices stay paired: they come back when you turn it on.",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::OFF_YOUR_DEVICES_STAY_PAIRED_THEY)
+                    .get(lang)
+                    .to_owned(),
                 DIM.get(),
             )
         };
@@ -531,7 +518,7 @@ impl App {
         if mine.is_empty() {
             rows = rows.push(
                 container(t(
-                    w("Aucun appareil associé.", "No paired device.").get(lang),
+                    w(words::NO_PAIRED_DEVICE).get(lang),
                     13.5,
                     fade(DIM.get(), alpha),
                 ))
@@ -545,12 +532,9 @@ impl App {
                 lines.push(failure_line(failure, lang));
             }
             let act = if device.connected {
-                (
-                    w("Déconnecter", "Disconnect"),
-                    Msg::Disconnect(device.path.clone()),
-                )
+                (w(words::DISCONNECT), Msg::Disconnect(device.path.clone()))
             } else {
-                (w("Connecter", "Connect"), Msg::Connect(device.path.clone()))
+                (w(words::CONNECT), Msg::Connect(device.path.clone()))
             };
             let enabled = bt.powered && running.is_none();
             let mut controls = row![].spacing(10).align_y(Alignment::Center);
@@ -625,15 +609,9 @@ impl App {
                     .id(format!("row:{}", model::MY_DEVICES)),
                 |inner, id| container(inner).id(format!("row:{id}")),
             );
-        container(
-            column![
-                group_head(w("MES APPAREILS", "MY DEVICES").get(lang), count),
-                card
-            ]
-            .spacing(8),
-        )
-        .id("group:bluetooth.mine".to_owned())
-        .into()
+        container(column![group_head(w(words::MY_DEVICES).get(lang), count), card].spacing(8))
+            .id("group:bluetooth.mine".to_owned())
+            .into()
     }
 
     /// A paired device's line: connected (and its battery), not
@@ -649,7 +627,7 @@ impl App {
         if asked.is_some() {
             return row![
                 spinner(turn),
-                t(w("Connexion…", "Connecting…").get(lang), 12.5, DIM.get())
+                t(w(words::CONNECTING).get(lang), 12.5, DIM.get())
             ]
             .spacing(6)
             .align_y(Alignment::Center)
@@ -699,12 +677,8 @@ impl App {
         let mut rows = column![];
         if nearby.is_empty() {
             rows = rows.push(
-                container(t(
-                    w("Aucun nouvel appareil trouvé.", "No new device found.").get(lang),
-                    13.5,
-                    DIM.get(),
-                ))
-                .padding([14, 16]),
+                container(t(w(words::NO_NEW_DEVICE_FOUND).get(lang), 13.5, DIM.get()))
+                    .padding([14, 16]),
             );
         }
         for (i, device) in nearby.iter().enumerate() {
@@ -714,7 +688,7 @@ impl App {
             let mut lines: Vec<El<'_>> = vec![if pairing {
                 row![
                     spinner(turn),
-                    t(w("Association…", "Pairing…").get(lang), 12.5, DIM.get())
+                    t(w(words::PAIRING).get(lang), 12.5, DIM.get())
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center)
@@ -732,7 +706,7 @@ impl App {
             }
             let controls = (!pairing).then(|| {
                 small_button(
-                    w("Associer", "Pair").get(lang).to_owned(),
+                    w(words::PAIR).get(lang).to_owned(),
                     (!inert).then(|| Message::Bluetooth(Msg::Pair(device.path.clone()))),
                     alpha,
                     format!("bt:pair:{}", device.name),
@@ -759,7 +733,7 @@ impl App {
         let searching = bt.searching.then(|| {
             row![
                 spinner(turn),
-                t(w("Recherche…", "Searching…").get(lang), 12.0, FAINT.get())
+                t(w(words::SEARCHING).get(lang), 12.0, FAINT.get())
             ]
             .spacing(7)
             .align_y(Alignment::Center)
@@ -774,15 +748,9 @@ impl App {
         .on_exit(Message::Bluetooth(Msg::Over(false)));
         container(
             column![
-                group_head(w("AUTOUR", "NEARBY").get(lang), searching),
+                group_head(w(words::NEARBY).get(lang), searching),
                 card,
-                note(
-                    w(
-                        "Un appareil à associer doit être en mode association : souvent un appui long sur son bouton. Les plus proches d’abord.",
-                        "A device to pair must be in pairing mode: often a long press on its button. Nearest first.",
-                    )
-                    .get(lang)
-                ),
+                note(w(words::A_DEVICE_TO_PAIR_MUST_BE).get(lang)),
             ]
             .spacing(8),
         )
@@ -801,7 +769,7 @@ impl App {
             .unwrap_or_default();
         let chip = || -> El<'_> {
             container(
-                text(w("Plus tard", "Later").get(lang))
+                text(w(words::LATER).get(lang))
                     .size(11.5)
                     .font(BOLD)
                     .color(fade(AMBER.get(), INERT)),
@@ -847,27 +815,19 @@ impl App {
         };
         let name = later(
             PENCIL,
-            w("Nom de l’ordinateur", "Computer name").get(lang),
-            w(
-                "Celui que voient les autres appareils ; aujourd’hui le nom de la machine.",
-                "The one other devices see; today the machine's name.",
-            )
-            .get(lang),
+            w(words::COMPUTER_NAME).get(lang),
+            w(words::THE_ONE_OTHER_DEVICES_SEE_TODAY).get(lang),
             t(alias, 13.5, fade(DIM.get(), INERT)).into(),
         );
         let files = later(
             FILE,
-            w("Recevoir des fichiers", "Receive files").get(lang),
-            w(
-                "Accepter une photo envoyée par un téléphone.",
-                "Accept a photo sent by a phone.",
-            )
-            .get(lang),
+            w(words::RECEIVE_FILES).get(lang),
+            w(words::ACCEPT_A_PHOTO_SENT_BY_A).get(lang),
             super::super::screens::switch(false, true, false, 1.0, None),
         );
         container(
             column![
-                group_head(w("PLUS TARD", "LATER").get(lang), None),
+                group_head(w(words::LATER_2).get(lang), None),
                 card_box(column![name, divided(true, files.into())].into()),
             ]
             .spacing(8),
@@ -893,7 +853,7 @@ impl App {
                     "name": d.name,
                     "connected": d.connected,
                     "line": if asked {
-                        w("Connexion…", "Connecting…").get(lang).to_owned()
+                        w(words::CONNECTING).get(lang).to_owned()
                     } else if d.connected {
                         format!(
                             "{}{}",
@@ -906,9 +866,9 @@ impl App {
                     "low": d.low(),
                     "trusted": d.trusted,
                     "button": (!asked).then(|| if d.connected {
-                        w("Déconnecter", "Disconnect").get(lang)
+                        w(words::DISCONNECT).get(lang)
                     } else {
-                        w("Connecter", "Connect").get(lang)
+                        w(words::CONNECT).get(lang)
                     }),
                     "failure": self.bluetooth.failure(&d.path).map(|f| failure_words(f, lang)),
                 })
@@ -923,7 +883,7 @@ impl App {
                 serde_json::json!({
                     "name": d.name,
                     "line": if pairing {
-                        w("Association…", "Pairing…").get(lang).to_owned()
+                        w(words::PAIRING).get(lang).to_owned()
                     } else {
                         model::nearby_line(d, lang)
                     },
@@ -986,17 +946,9 @@ impl App {
         let mut list = column![].spacing(0);
         for (i, item) in super::Item::ALL.into_iter().enumerate() {
             let (said, colour, checked) = match item {
-                super::Item::Rename => (w("Renommer…", "Rename…"), TEXT.get(), false),
-                super::Item::Trust => (
-                    w("Se connecter seul", "Connect automatically"),
-                    TEXT.get(),
-                    device.trusted,
-                ),
-                super::Item::Forget => (
-                    w("Oublier cet appareil", "Forget this device"),
-                    PEACH.get(),
-                    false,
-                ),
+                super::Item::Rename => (w(words::RENAME), TEXT.get(), false),
+                super::Item::Trust => (w(words::CONNECT_AUTOMATICALLY), TEXT.get(), device.trusted),
+                super::Item::Forget => (w(words::FORGET_THIS_DEVICE), PEACH.get(), false),
             };
             if item == super::Item::Forget {
                 list =
@@ -1087,11 +1039,7 @@ impl App {
             let body = column![
                 text(title).size(17).font(BOLD).color(TEXT),
                 t(
-                    w(
-                        "L’ordinateur efface la clé qu’ils partagent. Pour le reconnecter, il faudra l’associer à nouveau, des deux côtés.",
-                        "The computer erases the key they share. To connect it again, it must be paired again, on both sides.",
-                    )
-                    .get(lang),
+                    w(words::THE_COMPUTER_ERASES_THE_KEY_THEY).get(lang),
                     13.0,
                     DIM.get(),
                 )
@@ -1099,13 +1047,13 @@ impl App {
                 row![
                     Space::new().width(Length::Fill),
                     sheet_button(
-                        w("Annuler", "Cancel").get(lang),
+                        w(words::CANCEL).get(lang),
                         None,
                         Message::Bluetooth(Msg::ForgetCancel),
                         "sheet:cancel"
                     ),
                     sheet_button(
-                        w("Oublier", "Forget").get(lang),
+                        w(words::FORGET).get(lang),
                         Some(FORGET.get()),
                         Message::Bluetooth(Msg::ForgetConfirm),
                         "sheet:ok"
@@ -1198,8 +1146,8 @@ impl App {
         let buttons = |second: Option<El<'static>>| {
             let mut buttons = row![Space::new().width(Length::Fill)].spacing(8);
             let first = match request.asked {
-                Asked::Authorize => w("Refuser", "Refuse"),
-                _ => w("Annuler", "Cancel"),
+                Asked::Authorize => w(words::REFUSE),
+                _ => w(words::CANCEL),
             };
             buttons = buttons.push(cancel_button(first.get(lang)));
             if let Some(second) = second {
@@ -1256,7 +1204,7 @@ impl App {
                     ))
                     .center_x(Length::Fill),
                     buttons(Some(ok(
-                        w("Le code est le même", "The code matches").get(lang),
+                        w(words::THE_CODE_MATCHES).get(lang),
                         Message::Bluetooth(Msg::Answer(Answer::Yes)),
                     ))),
                 ]
@@ -1334,7 +1282,7 @@ impl App {
                 column![
                     title,
                     column![
-                        text(w("Code PIN", "PIN code").get(lang))
+                        text(w(words::PIN_CODE).get(lang))
                             .size(12)
                             .font(BOLD)
                             .color(DIM),
@@ -1347,18 +1295,14 @@ impl App {
                             .padding([8, 10])
                             .style(input_style),
                         t(
-                            w(
-                                "Souvent 0000 ou 1234, ou celui écrit dans sa notice.",
-                                "Often 0000 or 1234, or the one in its manual.",
-                            )
-                            .get(lang),
+                            w(words::OFTEN_0000_OR_1234_OR_THE).get(lang),
                             12.0,
                             FAINT.get()
                         ),
                     ]
                     .spacing(5),
                     buttons(Some(ok(
-                        w("Associer", "Pair").get(lang),
+                        w(words::PAIR).get(lang),
                         Message::Bluetooth(Msg::PinGive),
                     ))),
                 ]
@@ -1366,7 +1310,7 @@ impl App {
             Asked::Authorize => column![
                 title,
                 buttons(Some(ok(
-                    w("Associer", "Pair").get(lang),
+                    w(words::PAIR).get(lang),
                     Message::Bluetooth(Msg::Answer(Answer::Yes)),
                 ))),
             ],
@@ -1378,18 +1322,11 @@ impl App {
 /// What a failure says under its row.
 fn failure_words(failure: Failure, lang: Lang) -> &'static str {
     match failure {
-        Failure::NoAnswer => w(
-            "Il ne répond pas. Vérifie qu’il est allumé et à portée.",
-            "It does not answer. Check that it is on and in range.",
-        ),
-        Failure::Pairing | Failure::Code | Failure::Stopped => w(
-            "L’association a échoué. Mets l’appareil en mode association et réessaie.",
-            "Pairing failed. Put the device in pairing mode and try again.",
-        ),
-        Failure::Cancelled => w(
-            "L’appareil a annulé l’association.",
-            "The device cancelled the pairing.",
-        ),
+        Failure::NoAnswer => w(words::IT_DOES_NOT_ANSWER_CHECK_THAT),
+        Failure::Pairing | Failure::Code | Failure::Stopped => {
+            w(words::PAIRING_FAILED_PUT_THE_DEVICE_IN)
+        }
+        Failure::Cancelled => w(words::THE_DEVICE_CANCELLED_THE_PAIRING),
     }
     .get(lang)
 }

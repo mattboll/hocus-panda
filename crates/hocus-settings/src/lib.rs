@@ -82,5 +82,7 @@ pub mod time;
 pub mod timedate;
 pub mod trial;
 pub mod wallpaper;
+#[cfg(test)]
+mod words_before;
 pub mod worker;
 pub mod xkb;

@@ -21,6 +21,7 @@
 
 use crate::lang::French as _;
 use crate::lang::{Lang, Words, w};
+use hocus_words::settings::model as words;
 
 /// The five groups of the sidebar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,11 +44,11 @@ impl Group {
 
     pub fn label(self) -> Words {
         match self {
-            Self::Personalisation => w("PERSONNALISATION", "PERSONALISATION"),
-            Self::Devices => w("APPAREILS", "DEVICES"),
-            Self::Connections => w("CONNEXIONS", "CONNECTIONS"),
-            Self::Work => w("TRAVAIL", "WORK"),
-            Self::System => w("SYSTÈME", "SYSTEM"),
+            Self::Personalisation => w(words::PERSONALISATION),
+            Self::Devices => w(words::DEVICES),
+            Self::Connections => w(words::CONNECTIONS),
+            Self::Work => w(words::WORK),
+            Self::System => w(words::SYSTEM),
         }
     }
 }
@@ -131,209 +132,152 @@ impl SectionId {
             Self::Appearance => s(
                 "appearance",
                 Personalisation,
-                w("Apparence et langue", "Appearance and language"),
-                w(
-                    "Le thème, la couleur d’accent, le texte et la langue de tout le bureau.",
-                    "The theme, the accent colour, the text and the language of the whole desktop.",
-                ),
+                w(words::APPEARANCE_AND_LANGUAGE),
+                w(words::THE_THEME_THE_ACCENT_COLOUR_THE),
                 Icon::Appearance,
                 "6.2",
             ),
             Self::Wallpaper => s(
                 "wallpaper",
                 Personalisation,
-                w("Fond d’écran", "Wallpaper"),
-                w(
-                    "Le fond de chaque écran, et celui de l’écran de verrouillage.",
-                    "Each screen’s background, and the lock screen’s.",
-                ),
+                w(words::WALLPAPER),
+                w(words::EACH_SCREEN_S_BACKGROUND_AND_THE),
                 Icon::Wallpaper,
                 "6.3",
             ),
             Self::Bar => s(
                 "bar",
                 Personalisation,
-                w("La barre", "The bar"),
-                w(
-                    "Le côté où elle se tient, sa forme sur chaque écran, ce qu’elle montre de haut en bas, et son horloge.",
-                    "The side it stands on, its form on each screen, what it shows from top to bottom, and its clock.",
-                ),
+                w(words::THE_BAR),
+                w(words::THE_SIDE_IT_STANDS_ON_ITS),
                 Icon::Bar,
                 "6.4",
             ),
             Self::Accessibility => s(
                 "accessibility",
                 Personalisation,
-                w("Accessibilité", "Accessibility"),
-                w(
-                    "Voir plus grand, voir plus net, tout faire au clavier.",
-                    "See larger, see clearer, do everything from the keyboard.",
-                ),
+                w(words::ACCESSIBILITY),
+                w(words::SEE_LARGER_SEE_CLEARER_DO_EVERYTHING),
                 Icon::Accessibility,
                 "A.2–A.4",
             ),
             Self::Agenda => s(
                 "agenda",
                 Personalisation,
-                w("Agenda et tâches", "Calendar and tasks"),
-                w(
-                    "Ce que la barre montre de ta journée : tes réunions, tes rendez-vous et ce qu’il reste à faire.",
-                    "What the bar shows of your day: your meetings, your appointments and what is left to do.",
-                ),
+                w(words::CALENDAR_AND_TASKS),
+                w(words::WHAT_THE_BAR_SHOWS_OF_YOUR),
                 Icon::Agenda,
                 "Day.1",
             ),
             Self::Screens => s(
                 "screens",
                 Devices,
-                w("Écrans", "Screens"),
-                w(
-                    "La place de chaque écran, sa résolution, sa fréquence et son échelle ; l’écran où vont la barre et les nouvelles fenêtres.",
-                    "Where each screen sits, its resolution, refresh rate and scale; the screen the bar and new windows go to.",
-                ),
+                w(words::SCREENS),
+                w(words::WHERE_EACH_SCREEN_SITS_ITS_RESOLUTION),
                 Icon::Screens,
                 "6.9",
             ),
             Self::Sound => s(
                 "sound",
                 Devices,
-                w("Son", "Sound"),
-                w(
-                    "Les sorties, les entrées et leurs profils ; le volume de chaque application.",
-                    "Outputs, inputs and their profiles; each application's volume.",
-                ),
+                w(words::SOUND),
+                w(words::OUTPUTS_INPUTS_AND_THEIR_PROFILES_EACH),
                 Icon::Sound,
                 "6.5",
             ),
             Self::Keyboard => s(
                 "keyboard",
                 Devices,
-                w("Clavier et raccourcis", "Keyboard and shortcuts"),
-                w(
-                    "Les dispositions, la répétition des touches et les raccourcis.",
-                    "The layouts, the keys' repeat and the shortcuts.",
-                ),
+                w(words::KEYBOARD_AND_SHORTCUTS),
+                w(words::THE_LAYOUTS_THE_KEYS_REPEAT_AND),
                 Icon::Keyboard,
                 "6.8",
             ),
             Self::Mouse => s(
                 "mouse",
                 Devices,
-                w("Souris et pavé tactile", "Mouse and touchpad"),
-                w(
-                    "Le pointeur, les clics et le défilement de chaque appareil branché, et les gestes du pavé tactile.",
-                    "The pointer, clicks and scrolling of each device plugged in, and the touchpad's gestures.",
-                ),
+                w(words::MOUSE_AND_TOUCHPAD),
+                w(words::THE_POINTER_CLICKS_AND_SCROLLING_OF),
                 Icon::Mouse,
                 "6.12",
             ),
             Self::Network => s(
                 "network",
                 Connections,
-                w("Réseau", "Network"),
-                w(
-                    "Le Wi-Fi et ses réseaux enregistrés, les réseaux masqués et d’entreprise, le câble, les VPN et le mode avion.",
-                    "Wi-Fi and its saved networks, hidden and enterprise networks, the cable, VPNs and airplane mode.",
-                ),
+                w(words::NETWORK),
+                w(words::WI_FI_AND_ITS_SAVED_NETWORKS),
                 Icon::Network,
                 "6.6",
             ),
             Self::Bluetooth => s(
                 "bluetooth",
                 Connections,
-                w("Bluetooth", "Bluetooth"),
-                w(
-                    "Associer un appareil, avec ou sans code ; le connecter, le renommer, l’oublier.",
-                    "Pair a device, with or without a code; connect it, rename it, forget it.",
-                ),
+                w(words::BLUETOOTH),
+                w(words::PAIR_A_DEVICE_WITH_OR_WITHOUT),
                 Icon::Bluetooth,
                 "6.7",
             ),
             Self::Desktops => s(
                 "desktops",
                 Work,
-                w("Bureaux et fenêtres", "Desktops and windows"),
-                w(
-                    "Combien de bureaux et leurs noms, comment une fenêtre se déplace et s’ancre, Alt+Tab, l’encre, et des règles par application.",
-                    "How many desktops and their names, how a window moves and snaps, Alt+Tab, the ink, and rules per application.",
-                ),
+                w(words::DESKTOPS_AND_WINDOWS),
+                w(words::HOW_MANY_DESKTOPS_AND_THEIR_NAMES),
                 Icon::Desktops,
                 "6.14",
             ),
             Self::Apps => s(
                 "applications",
                 Work,
-                w("Applications", "Applications"),
-                w(
-                    "Celles qui ouvrent tes liens et tes fichiers, et celles qui démarrent avec la session.",
-                    "Those that open your links and files, and those that start with the session.",
-                ),
+                w(words::APPLICATIONS),
+                w(words::THOSE_THAT_OPEN_YOUR_LINKS_AND),
                 Icon::Apps,
                 "6.15",
             ),
             Self::Agents => s(
                 "agents",
                 Work,
-                w("Agents", "Agents"),
-                w(
-                    "D’où viennent les états de tes agents, quels outils suivre, et comment la barre t’appelle : le halo et les pandas.",
-                    "Where your agents’ states come from, which tools to follow, and how the bar calls you: the halo and the pandas.",
-                ),
+                w(words::AGENTS),
+                w(words::WHERE_YOUR_AGENTS_STATES_COME_FROM),
                 Icon::Agents,
                 "6.16",
             ),
             Self::Captures => s(
                 "captures",
                 Work,
-                w("Captures et presse-papiers", "Screenshots and clipboard"),
-                w(
-                    "Où vont tes captures et tes enregistrements de l’écran, et ce que garde l’historique du presse-papiers.",
-                    "Where your screenshots and screen recordings go, and what the clipboard’s history keeps.",
-                ),
+                w(words::SCREENSHOTS_AND_CLIPBOARD),
+                w(words::WHERE_YOUR_SCREENSHOTS_AND_SCREEN_RECORDINGS),
                 Icon::Captures,
                 "6.17",
             ),
             Self::Power => s(
                 "power",
                 System,
-                w("Énergie", "Power"),
-                w(
-                    "Quand l’écran s’assombrit, se verrouille et s’éteint, quand l’ordinateur se met en veille ; le couvercle, le bouton d’alimentation et l’économie d’énergie.",
-                    "When the screen dims, locks and turns off, when the computer sleeps; the lid, the power button and power saving.",
-                ),
+                w(words::POWER),
+                w(words::WHEN_THE_SCREEN_DIMS_LOCKS_AND),
                 Icon::Power,
                 "6.10",
             ),
             Self::Account => s(
                 "account",
                 System,
-                w("Compte", "Account"),
-                w(
-                    "Ton nom, ton avatar et ton mot de passe. Les autres comptes de l’ordinateur se gèrent avec les outils du système.",
-                    "Your name, avatar and password. The computer’s other accounts are managed with the system’s tools.",
-                ),
+                w(words::ACCOUNT),
+                w(words::YOUR_NAME_AVATAR_AND_PASSWORD_THE),
                 Icon::Account,
                 "6.11",
             ),
             Self::DateTime => s(
                 "date-and-time",
                 System,
-                w("Date et heure", "Date and time"),
-                w(
-                    "L’heure de l’ordinateur et son fuseau horaire. Leur format se règle dans Apparence et langue.",
-                    "The computer’s time and its time zone. Their format is set in Appearance and language.",
-                ),
+                w(words::DATE_AND_TIME),
+                w(words::THE_COMPUTER_S_TIME_AND_ITS),
                 Icon::DateTime,
                 "6.11",
             ),
             Self::Performance => s(
                 "performance",
                 System,
-                w("Performances", "Performance"),
-                w(
-                    "Ce que le bureau — le compositeur et le shell — a coûté à ta machine. Mesuré toutes les 10 s par un fil à part, sans réveiller le bureau ; gardé 14 jours.",
-                    "What the desktop — the compositor and the shell — cost your machine. Measured every 10 s on a thread of its own, without waking the desktop; kept 14 days.",
-                ),
+                w(words::PERFORMANCE),
+                w(words::WHAT_THE_DESKTOP_THE_COMPOSITOR_AND),
                 Icon::Performance,
                 "#655",
             ),
@@ -461,16 +405,16 @@ pub enum Source {
 impl Source {
     pub fn name(self) -> Words {
         match self {
-            Self::Battery => w("Sur batterie", "On battery"),
-            Self::Ac => w("Sur secteur", "On AC"),
+            Self::Battery => w(words::ON_BATTERY),
+            Self::Ac => w(words::ON_AC),
         }
     }
 
     /// As the toast says it: ", sur batterie".
     pub fn aside(self) -> Words {
         match self {
-            Self::Battery => w(", sur batterie", ", on battery"),
-            Self::Ac => w(", sur secteur", ", on AC"),
+            Self::Battery => w(words::ON_BATTERY_2),
+            Self::Ac => w(words::ON_AC_2),
         }
     }
 

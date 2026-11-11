@@ -7,6 +7,7 @@
 //! buckets along one time axis, the four tiles, the signals and the peaks
 //! in words. `hocus perf day` reads the same files with the same report.
 
+use hocus_words::settings::perf as words;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
@@ -24,7 +25,7 @@ use crate::{
 pub const RECORD: &str = "perf.record";
 
 const RECORDING: RowGroup = RowGroup {
-    label: w("ENREGISTREMENT", "RECORDING"),
+    label: w(words::RECORDING),
     per_source: false,
 };
 
@@ -36,11 +37,8 @@ pub fn settings() -> &'static [Setting] {
             id: RECORD,
             section: SectionId::Performance,
             group: RECORDING,
-            name: w("Mesurer la journée", "Record the day"),
-            line: Some(w(
-                "Toutes les 10 s : le CPU et la mémoire du compositeur et du shell, les images, les réveils, la puissance sur batterie.",
-                "Every 10 s: the compositor’s and the shell’s CPU and memory, the frames, the wakeups, the power on battery.",
-            )),
+            name: w(words::RECORD_THE_DAY),
+            line: Some(w(words::EVERY_10_S_THE_COMPOSITOR_S)),
             keywords: (
                 &[
                     "performances",
@@ -51,7 +49,14 @@ pub fn settings() -> &'static [Setting] {
                     "batterie",
                     "gourmand",
                 ],
-                &["performance", "cpu", "processor", "memory", "usage", "battery"],
+                &[
+                    "performance",
+                    "cpu",
+                    "processor",
+                    "memory",
+                    "usage",
+                    "battery",
+                ],
             ),
             kind: Kind::Switch,
             places: one(&["perf", "record"], Codec::Bool),
@@ -211,18 +216,18 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         value: text::percent(r.cpu.average_percent, l),
         line: format!(
             "{} · {}",
-            w("d’un cœur en moyenne", "of a core on average").get(lang),
+            w(words::OF_A_CORE_ON_AVERAGE).get(lang),
             text::cpu_time(cpu_ms)
         ),
         sub: format!(
             "{} {} · shell {}",
-            w("compositeur", "compositor").get(lang),
+            w(words::COMPOSITOR).get(lang),
             text::cpu_time(r.cpu.compositor_ms),
             text::cpu_time(r.cpu.shell_ms)
         ),
     };
     let memory = Tile {
-        label: w("Mémoire", "Memory").get(lang).to_owned(),
+        label: w(words::MEMORY).get(lang).to_owned(),
         value: text::megabytes(kb(r.memory.end_kb), l),
         line: match lang {
             Lang::French => format!(
@@ -240,13 +245,13 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         },
         sub: format!(
             "{} {} · shell {}",
-            w("compositeur", "compositor").get(lang),
+            w(words::COMPOSITOR).get(lang),
             mb(r.memory.end_kb[0]),
             mb(r.memory.end_kb[1])
         ),
     };
     let frames = Tile {
-        label: w("Images", "Frames").get(lang).to_owned(),
+        label: w(words::FRAMES).get(lang).to_owned(),
         value: text::count(r.drawing.frames, l),
         line: if r.locked_s > 0 {
             match lang {
@@ -279,7 +284,7 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         },
     };
     let motion = Tile {
-        label: w("Mouvements", "Motion").get(lang).to_owned(),
+        label: w(words::MOTION).get(lang).to_owned(),
         value: if r.moving_wallpaper_s > 0 {
             text::duration(r.moving_wallpaper_s as i64)
         } else {
@@ -297,12 +302,9 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
                 ),
             }
         } else {
-            w(
-                "images des animations du bureau",
-                "frames of the desktop’s motions",
-            )
-            .get(lang)
-            .to_owned()
+            w(words::FRAMES_OF_THE_DESKTOP_S_MOTIONS)
+                .get(lang)
+                .to_owned()
         },
         sub: match (&r.power, lang) {
             (Some(p), Lang::French) => format!(
@@ -313,12 +315,7 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
                 "on battery: {} W on average",
                 text::number(f64::from(p.average_mw) / 1000.0, 1, l)
             ),
-            (None, _) => w(
-                "sur secteur : puissance non mesurée",
-                "on AC: power not measured",
-            )
-            .get(lang)
-            .to_owned(),
+            (None, _) => w(words::ON_AC_POWER_NOT_MEASURED).get(lang).to_owned(),
         },
     };
     [cpu, memory, frames, motion]
@@ -332,9 +329,7 @@ pub fn session(r: &Report, lang: Lang, tz: &TimeZone) -> String {
             text::clock(from, tz),
             text::clock(to, tz)
         ),
-        _ => w("rien d’enregistré", "nothing recorded")
-            .get(lang)
-            .to_owned(),
+        _ => w(words::NOTHING_RECORDED).get(lang).to_owned(),
     }
 }
 

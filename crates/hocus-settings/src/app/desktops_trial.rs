@@ -4,6 +4,7 @@
 //! it; the real key works too when the host lets it through). Nothing in
 //! it is written.
 
+use hocus_words::settings::app_desktops_trial as words;
 use std::time::{Duration, Instant};
 
 use iced::{
@@ -218,20 +219,11 @@ impl App {
     fn trial_motion(&self) -> &'static str {
         let rules = self.trial_rules();
         let words = if rules.reduced {
-            w(
-                "Mouvements réduits : elle se déplace d’un bloc, et prend sa place aussitôt.",
-                "Reduced motion: it moves as one piece, and takes its place at once.",
-            )
+            w(words::REDUCED_MOTION_IT_MOVES_AS_ONE)
         } else if !rules.wobble {
-            w(
-                "Sans ondulation : elle se déplace d’un bloc.",
-                "Without the wobble: it moves as one piece.",
-            )
+            w(words::WITHOUT_THE_WOBBLE_IT_MOVES_AS)
         } else {
-            w(
-                "Elle ondule pendant le geste et se pose en 400 ms.",
-                "It wobbles as it moves and settles in 400 ms.",
-            )
+            w(words::IT_WOBBLES_AS_IT_MOVES_AND)
         };
         words.get(self.lang)
     }
@@ -288,12 +280,7 @@ impl App {
             hold = hold.on_press(Message::Desktops(Msg::Hold));
         }
         let line = match (none, lang) {
-            (true, _) => w(
-                "Sans touche, « Notes » se déplace par sa barre de titre.",
-                "With no key, “Notes” moves by its title bar.",
-            )
-            .get(lang)
-            .to_owned(),
+            (true, _) => w(words::WITH_NO_KEY_NOTES_MOVES_BY).get(lang).to_owned(),
             (false, Lang::French) => {
                 format!("Comme si tu tenais {key} : glisse « Notes » par son contenu.")
             }
@@ -345,7 +332,7 @@ impl App {
         let key = key_name(self.trial_key());
         let held = self.desktops.trial.held;
         match (key.is_empty(), held, lang) {
-            (true, _, _) => w("Aucune touche", "No key").get(lang).to_owned(),
+            (true, _, _) => w(words::NO_KEY).get(lang).to_owned(),
             (false, true, Lang::French) => format!("{key} tenue"),
             (false, true, Lang::English) => format!("{key} held"),
             (false, false, Lang::French) => format!("Tenir {key}"),

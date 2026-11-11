@@ -12,6 +12,7 @@
 //! offsets and changes are computed with jiff from the system's tzdata.
 
 use crate::lang::French as _;
+use hocus_words::settings::time as words;
 use std::sync::OnceLock;
 
 use jiff::{
@@ -25,9 +26,9 @@ use crate::{
     model::{Outside, SectionId},
 };
 
-const TIME: Words = w("HEURE", "TIME");
-const ZONE_GROUP: Words = w("FUSEAU HORAIRE", "TIME ZONE");
-const FORMAT_GROUP: Words = w("FORMAT", "FORMAT");
+const TIME: Words = w(words::TIME);
+const ZONE_GROUP: Words = w(words::TIME_ZONE);
+const FORMAT_GROUP: Words = w(words::FORMAT);
 
 /// The rows, by their search ids.
 pub const AUTO: &str = "time.auto";
@@ -59,31 +60,28 @@ pub fn outside() -> &'static [Outside] {
         o(
             AUTO,
             TIME,
-            w(
-                "Mettre à l’heure automatiquement",
-                "Set the time automatically",
-            ),
+            w(words::SET_THE_TIME_AUTOMATICALLY),
             &["ntp", "synchroniser", "internet"],
             &["automatic time", "sync", "ntp"],
         ),
         o(
             SET,
             TIME,
-            w("Date et heure", "Date and time"),
+            w(words::DATE_AND_TIME),
             &["régler", "changer l’heure"],
             &["set time", "clock"],
         ),
         o(
             ZONE,
             ZONE_GROUP,
-            w("Fuseau horaire", "Time zone"),
+            w(words::TIME_ZONE_2),
             &["pays", "ville", "utc", "gmt", "décalage"],
             &["time zone", "timezone", "offset"],
         ),
         o(
             FORMAT,
             FORMAT_GROUP,
-            w("Format de l’heure", "Time format"),
+            w(words::TIME_FORMAT),
             &["12 h", "24 h", "am", "pm", "format de la date"],
             &["time format", "date format"],
         ),
@@ -246,9 +244,7 @@ pub fn next_change(tz: &TimeZone, now: Timestamp, lang: Lang) -> String {
         .find(|t| t.offset() != offset)
         .map(|t| t.timestamp());
     let Some(at) = next else {
-        return w("pas de changement d’heure", "no clock change")
-            .get(lang)
-            .to_owned();
+        return w(words::NO_CLOCK_CHANGE).get(lang).to_owned();
     };
     let dst = tz.to_offset_info(now).dst() == Dst::Yes;
     // The day the change happens there; the year said only when it is

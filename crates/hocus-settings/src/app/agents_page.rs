@@ -18,6 +18,7 @@
 //! again when the pointer comes over it; the peek's panda comes up when it
 //! is let out: then nothing moves.
 
+use hocus_words::settings::app_agents_page as words;
 use std::{
     collections::HashMap,
     sync::OnceLock,
@@ -41,7 +42,7 @@ use super::{
 };
 use crate::{
     agents::{self as model, Played, Row, Tool, Tools},
-    lang::{Lang, w},
+    lang::{Lang, pair, w},
     model::{SectionId, Setting, Value},
     screens::Said,
     store::Slot,
@@ -590,7 +591,7 @@ impl App {
     fn agents_link<'a>(&self) -> El<'a> {
         let focused = self.agents_focused(Stop::Link);
         container(
-            button(t(self.say(w("La barre ›", "The bar ›")), 13.0, MINT.get()).font(BOLD))
+            button(t(self.say(w(words::THE_BAR)), 13.0, MINT.get()).font(BOLD))
                 .padding([1, 2])
                 .on_press(Message::Agents(Msg::Link))
                 .style(move |_, status| button::Style {
@@ -631,10 +632,7 @@ impl App {
             row![
                 super::view::icon(crate::model::Icon::Bar, 14.0, DIM.get()),
                 t(
-                    self.say(w(
-                        "Le groupe des agents dans la barre, et sa place, se règlent dans",
-                        "The agents’ group in the bar, and its place, are set in",
-                    )),
+                    self.say(w(words::THE_AGENTS_GROUP_IN_THE_BAR)),
                     13.0,
                     DIM.get()
                 ),
@@ -667,10 +665,7 @@ impl App {
             }
             None => column![
                 container(t(
-                    self.say(w(
-                        "Les outils ne sont pas connus : le bureau ne répond pas.",
-                        "The tools are not known: the desktop does not answer.",
-                    )),
+                    self.say(w(words::THE_TOOLS_ARE_NOT_KNOWN_THE)),
                     13.0,
                     DIM.get()
                 ))
@@ -687,8 +682,7 @@ impl App {
         page = page.push(
             self.agents_group(
                 model::HALO_GROUP.label.get(lang),
-                self.say(w("Les réunions gardent le leur", "Meetings keep theirs"))
-                    .to_owned(),
+                self.say(w(words::MEETINGS_KEEP_THEIRS)).to_owned(),
                 column![
                     model_row(model::HALO),
                     divided(true, model_row(model::REMIND)),
@@ -701,11 +695,7 @@ impl App {
         page = page.push(
             self.agents_group(
                 model::PANDAS_GROUP.label.get(lang),
-                self.say(w(
-                    "Ils ne bougent qu’à un changement",
-                    "They move only on a change",
-                ))
-                .to_owned(),
+                self.say(w(words::THEY_MOVE_ONLY_ON_A_CHANGE)).to_owned(),
                 column![
                     self.agents_peek_row(model_row(model::PEEK)),
                     divided(true, model_row(model::PANDAS)),
@@ -750,10 +740,7 @@ impl App {
         let mut rest = model::line(row_state, tool, &file, declined.as_deref(), lang);
         if tool == Tool::Herdr && row_state == Row::Stopped && tools.herdr_declined {
             rest = self
-                .say(w(
-                    "pas suivi ; « Suivre herdr » le reprend.",
-                    "not followed; “Follow herdr” brings it back.",
-                ))
+                .say(w(words::NOT_FOLLOWED_FOLLOW_HERDR_BRINGS_IT))
                 .to_owned();
         }
         let broken = !facts.reads && tool != Tool::Herdr && !absent;
@@ -791,31 +778,28 @@ impl App {
         let action: El<'_> = match (tool, self.agents_action(tools, tool)) {
             (Tool::Herdr, Some(on)) => self.agents_switch(on, focused),
             (_, Some(true)) => self.agents_button(
-                self.say(w("Brancher", "Plug in")),
+                self.say(w(words::PLUG_IN)),
                 true,
                 focused,
                 Some(Message::Agents(Msg::Plug(tool))),
             ),
             (_, Some(false)) => self.agents_button(
-                self.say(w("Débrancher", "Unplug")),
+                self.say(w(words::UNPLUG)),
                 false,
                 focused,
                 Some(Message::Agents(Msg::Unplug(tool))),
             ),
             (_, None) if broken => {
-                self.agents_button(self.say(w("Brancher", "Plug in")), true, false, None)
+                self.agents_button(self.say(w(words::PLUG_IN)), true, false, None)
             }
             (_, None) => Space::new().into(),
         };
         let action: El<'_> = container(action).id(format!("tool:{}", tool.word())).into();
         let action: El<'_> = if tool == Tool::Herdr && !absent {
-            row![
-                t(self.say(w("Suivre herdr", "Follow herdr")), 12.5, DIM.get()),
-                action
-            ]
-            .spacing(10)
-            .align_y(Alignment::Center)
-            .into()
+            row![t(self.say(w(words::FOLLOW_HERDR)), 12.5, DIM.get()), action]
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .into()
         } else {
             action
         };
@@ -919,9 +903,9 @@ impl App {
             button(
                 t(
                     if copied {
-                        self.say(w("Copié", "Copied"))
+                        self.say(w(words::COPIED))
                     } else {
-                        self.say(w("Copier", "Copy"))
+                        self.say(w(words::COPY))
                     },
                     12.5,
                     if copied { MINT.get() } else { TEXT.get() },
@@ -955,13 +939,9 @@ impl App {
         .style(boxed(crate::theme::ink(rgba(0, 0, 0, 0.25)), 9.0, None));
         container(
             column![
-                t(self.say(w("Un autre outil", "Another tool")), 14.0, TEXT.get()).font(SEMIBOLD),
+                t(self.say(w(words::ANOTHER_TOOL)), 14.0, TEXT.get()).font(SEMIBOLD),
                 t(
-                    w(
-                        "N’importe quel programme peut dire où en est son agent, d’une commande : travaille, attend, fini, échoue, repos.",
-                        "Any program can say where its agent is, with one command: working, waiting, done, failed, idle.",
-                    )
-                    .get(lang),
+                    w(words::ANY_PROGRAM_CAN_SAY_WHERE_ITS).get(lang),
                     12.5,
                     DIM.get()
                 ),
@@ -980,20 +960,13 @@ impl App {
         let words = container(
             column![
                 t(
-                    self.say(w(
-                        "Aucun outil d’agent sur cet ordinateur",
-                        "No agent tool on this computer"
-                    )),
+                    self.say(w(words::NO_AGENT_TOOL_ON_THIS_COMPUTER)),
                     14.0,
                     TEXT.get()
                 )
                 .font(SEMIBOLD),
                 t(
-                    w(
-                        "Claude Code, Codex et herdr sont cherchés tout seuls ; un autre outil peut le dire d’une commande.",
-                        "Claude Code, Codex and herdr are looked for by themselves; another tool can say it with a command.",
-                    )
-                    .get(lang),
+                    w(words::CLAUDE_CODE_CODEX_AND_HERDR_ARE).get(lang),
                     12.5,
                     DIM.get()
                 ),
@@ -1025,12 +998,9 @@ impl App {
         let played = self.agents.played;
         let shown = played.filter(|p| p.shown_by(halo));
         let line = match (played, shown) {
-            (Some(_), None) => self.say(w("Pas de halo pour ça", "No halo for that")),
+            (Some(_), None) => self.say(w(words::NO_HALO_FOR_THAT)),
             (Some(p), Some(_)) => p.said().get(lang),
-            (None, _) => self.say(w(
-                "Choisis un état : il se joue sur la barre, rien n’est écrit.",
-                "Choose a state: it plays on the bar, nothing is written.",
-            )),
+            (None, _) => self.say(w(words::CHOOSE_A_STATE_IT_PLAYS_ON)),
         };
         let focused = self.agents_focused(Stop::Preview);
         let option = |p: Played| -> El<'_> {
@@ -1089,7 +1059,7 @@ impl App {
             row![
                 container(bar).id("agents:preview-bar".to_owned()),
                 column![
-                    t(self.say(w("Aperçu", "Preview")), 14.0, TEXT.get()).font(SEMIBOLD),
+                    t(self.say(w(words::PREVIEW)), 14.0, TEXT.get()).font(SEMIBOLD),
                     container(t(
                         line,
                         12.5,
@@ -1195,7 +1165,7 @@ impl App {
             cells = cells.push(
                 mouse_area(
                     container(
-                        column![face, t(w(word.0, word.1).get(lang), 12.0, rgb(0xA9B2C2)),]
+                        column![face, t(pair(word.0, word.1).get(lang), 12.0, rgb(0xA9B2C2)),]
                             .spacing(4)
                             .align_x(Alignment::Center),
                     )
@@ -1229,21 +1199,16 @@ impl App {
         container(
             row![
                 column![
-                    t(self.say(w("Jamais au repos", "Never at rest")), 14.0, TEXT.get())
-                        .font(SEMIBOLD),
+                    t(self.say(w(words::NEVER_AT_REST)), 14.0, TEXT.get()).font(SEMIBOLD),
                     t(
-                        w(
-                            "Ils restent immobiles sur économie d’énergie et avec les mouvements réduits (Apparence et langue ›).",
-                            "They stay still on power saving and with reduced motion (Appearance and language ›).",
-                        )
-                        .get(lang),
+                        w(words::THEY_STAY_STILL_ON_POWER_SAVING).get(lang),
                         12.5,
                         DIM.get()
                     ),
                 ]
                 .spacing(2)
                 .width(Length::Fill),
-                t(self.say(w("Toujours", "Always")), 13.0, DIM.get()).font(SEMIBOLD),
+                t(self.say(w(words::ALWAYS)), 13.0, DIM.get()).font(SEMIBOLD),
             ]
             .spacing(16)
             .align_y(Alignment::Center),
@@ -1282,14 +1247,8 @@ impl App {
             Lang::English => format!("Plug in {}", tool.title()),
         };
         let what = match tool {
-            Tool::Codex => w(
-                "Hocuspanda ajoute ses crochets et sa notification aux réglages de Codex : il saura quand un agent travaille, t’attend (une permission) ou a fini son tour.",
-                "Hocuspanda adds its hooks and its notification to Codex’s settings: it will know when an agent works, waits for you (a permission) or has finished its turn.",
-            ),
-            _ => w(
-                "Hocuspanda ajoute ses crochets aux réglages de Claude Code : il saura quand un agent travaille, t’attend (une permission, une question) ou a fini.",
-                "Hocuspanda adds its hooks to Claude Code’s settings: it will know when an agent works, waits for you (a permission, a question) or is done.",
-            ),
+            Tool::Codex => w(words::HOCUSPANDA_ADDS_ITS_HOOKS_AND_ITS),
+            _ => w(words::HOCUSPANDA_ADDS_ITS_HOOKS_TO_CLAUDE),
         };
         let mut body = column![
             row![
@@ -1300,22 +1259,14 @@ impl App {
             .align_y(Alignment::Center),
             t(what.get(lang), 13.0, SOFT.get()).line_height(1.5),
             column![
-                t(
-                    self.say(w("FICHIER MODIFIÉ", "FILE CHANGED")),
-                    11.0,
-                    FAINT.get()
-                )
-                .font(BOLD),
+                t(self.say(w(words::FILE_CHANGED)), 11.0, FAINT.get()).font(BOLD),
                 container(t(file, 12.0, TEXT.get()).font(MONO))
                     .padding([6, 10])
                     .style(boxed(crate::theme::ink(rgba(0, 0, 0, 0.25)), 8.0, None)),
             ]
             .spacing(6),
             t(
-                self.say(w(
-                    "Une copie de l’original est gardée. « Débrancher » remet tout comme avant.",
-                    "A copy of the original is kept. “Unplug” puts everything back as it was.",
-                )),
+                self.say(w(words::A_COPY_OF_THE_ORIGINAL_IS)),
                 12.0,
                 DIM.get()
             ),
@@ -1323,10 +1274,7 @@ impl App {
         .spacing(14);
         if tool == Tool::Codex {
             body = body.push(t(
-                self.say(w(
-                    "Codex te demandera ensuite de les approuver avec /hooks.",
-                    "Codex will then ask you to approve them with /hooks.",
-                )),
+                self.say(w(words::CODEX_WILL_THEN_ASK_YOU_TO)),
                 12.0,
                 rgb(0xF5C46E),
             ));
@@ -1334,14 +1282,14 @@ impl App {
         let buttons = row![
             Space::new().width(Length::Fill),
             container(self.agents_button(
-                self.say(w("Annuler", "Cancel")),
+                self.say(w(words::CANCEL)),
                 false,
                 !consent.on_plug,
                 Some(Message::Agents(Msg::Consent(false))),
             ))
             .id("sheet:cancel".to_owned()),
             container(self.agents_button(
-                self.say(w("Brancher", "Plug in")),
+                self.say(w(words::PLUG_IN)),
                 true,
                 consent.on_plug,
                 Some(Message::Agents(Msg::Consent(true))),

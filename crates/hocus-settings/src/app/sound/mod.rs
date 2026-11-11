@@ -16,6 +16,7 @@
 
 mod view;
 
+use hocus_words::settings::app_sound as words;
 use std::{
     collections::HashMap,
     sync::{Arc, mpsc},
@@ -319,9 +320,7 @@ impl Sound {
             inputs.push(Input {
                 pick: Pick::Headset { card, profile },
                 sink: None,
-                name: w("Micro du casque", "Headset microphone")
-                    .get(lang)
-                    .to_owned(),
+                name: w(words::HEADSET_MICROPHONE).get(lang).to_owned(),
             });
         }
         inputs
@@ -1018,9 +1017,7 @@ impl App {
                 };
                 let chosen = self.sound_target_name(&row);
                 let mut options = vec![(
-                    w("Suit la sortie", "Follows the output")
-                        .get(self.lang)
-                        .to_owned(),
+                    w(words::FOLLOWS_THE_OUTPUT).get(self.lang).to_owned(),
                     graph.output().map(|s| s.description.clone()),
                     chosen.is_none(),
                     Msg::Target(key.clone(), None),
@@ -1189,10 +1186,7 @@ impl App {
                 };
                 (model::card_name(sink, graph), kept)
             }
-            _ => (
-                w("Aucune sortie", "No output").get(self.lang).to_owned(),
-                String::new(),
-            ),
+            _ => (w(words::NO_OUTPUT).get(self.lang).to_owned(), String::new()),
         }
     }
 }

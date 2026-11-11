@@ -18,6 +18,7 @@
 
 mod view;
 
+use hocus_words::settings::app_bluetooth as words;
 use std::{
     sync::OnceLock,
     time::{Duration, Instant},
@@ -319,9 +320,7 @@ impl App {
                 // Turned off: said, and taken back with "Annuler".
                 self.undo.push(super::Undo::Bluetooth(Choice::Power { on }));
                 self.redo.clear();
-                let text = w("Bluetooth coupé", "Bluetooth off")
-                    .get(self.lang)
-                    .to_owned();
+                let text = w(words::BLUETOOTH_OFF).get(self.lang).to_owned();
                 self.toast(text, ToastAction::Undo, TOAST)
             }
             Msg::Menu(path) => {
@@ -536,7 +535,7 @@ impl App {
                 self.bluetooth.ask(Ask::Rename(path.clone(), name.clone()));
                 // Empty: its own name again, which BlueZ says next.
                 let said = if name.is_empty() {
-                    w("son propre nom", "its own name").get(lang).to_owned()
+                    w(words::ITS_OWN_NAME).get(lang).to_owned()
                 } else {
                     match lang {
                         Lang::French => format!("« {name} »"),

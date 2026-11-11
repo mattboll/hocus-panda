@@ -9,6 +9,7 @@
 //! The power mode is power-profiles-daemon's: chosen here, it toasts with
 //! "Annuler" and joins `Ctrl+Z` as a file's change does.
 
+use hocus_words::settings::app_power_page as words;
 use std::time::Instant;
 
 use iced::{
@@ -300,30 +301,21 @@ impl App {
         let lang = self.lang;
         match id {
             model::SCREEN_OFF if !self.power_on(model::LOCK_ON_IDLE) => Some((
-                w(
-                    "Après l’assombrissement, s’il ne se passe toujours rien.",
-                    "After the dimming, if nothing happens still.",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::AFTER_THE_DIMMING_IF_NOTHING_HAPPENS)
+                    .get(lang)
+                    .to_owned(),
                 false,
             )),
             model::LID_CLOSED | model::BUTTON if !self.power_logind() => Some((
-                w(
-                    "Le système décide (logind indisponible).",
-                    "The system decides (logind unavailable).",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::THE_SYSTEM_DECIDES_LOGIND_UNAVAILABLE)
+                    .get(lang)
+                    .to_owned(),
                 true,
             )),
             model::AUTO_SAVER if self.power_no_modes() => Some((
-                w(
-                    "Elle passe par les modes : sans eux, rien à allumer.",
-                    "It works through the modes: without them, nothing to turn on.",
-                )
-                .get(lang)
-                .to_owned(),
+                w(words::IT_WORKS_THROUGH_THE_MODES_WITHOUT)
+                    .get(lang)
+                    .to_owned(),
                 false,
             )),
             _ => None,
@@ -404,10 +396,7 @@ impl App {
         .id("power:timeline".to_owned())
         .into();
         groups = groups.push(group(
-            head(
-                w("ÉCRAN ET VEILLE", "SCREEN AND SLEEP").get(lang),
-                segmented,
-            ),
+            head(w(words::SCREEN_AND_SLEEP).get(lang), segmented),
             vec![
                 model_row(model::IDLE),
                 model_row(model::SCREEN_OFF),
@@ -432,7 +421,7 @@ impl App {
             .into()
         });
         groups = groups.push(group(
-            head(w("VERROUILLAGE", "LOCKING").get(lang), note),
+            head(w(words::LOCKING).get(lang), note),
             vec![
                 model_row(model::LOCK_ON_IDLE),
                 model_row(model::LOCK_BEFORE_SLEEP),
@@ -448,9 +437,9 @@ impl App {
         groups = groups.push(group(
             head(
                 if self.power_lid() {
-                    w("COUVERCLE ET BOUTON", "LID AND BUTTON").get(lang)
+                    w(words::LID_AND_BUTTON).get(lang)
                 } else {
-                    w("BOUTON", "BUTTON").get(lang)
+                    w(words::BUTTON).get(lang)
                 },
                 None,
             ),
@@ -462,13 +451,10 @@ impl App {
             saving.push(model_row(model::AUTO_SAVER));
             saving.push(model_row(model::SAVER_BELOW));
         }
-        groups = groups.push(group(
-            head(w("ÉCONOMIE D’ÉNERGIE", "POWER SAVING").get(lang), None),
-            saving,
-        ));
+        groups = groups.push(group(head(w(words::POWER_SAVING).get(lang), None), saving));
         // PLUS TARD.
         groups = groups.push(group(
-            head(w("PLUS TARD", "LATER").get(lang), None),
+            head(w(words::LATER).get(lang), None),
             vec![self.charge_limit_row()],
         ));
         page = page.push(groups);
@@ -529,13 +515,9 @@ impl App {
                         ..container::Style::default()
                     }),
                 column![
-                    t(w("Sur secteur", "On AC").get(lang), 22.0, TEXT.get()).font(BOLD),
+                    t(w(words::ON_AC).get(lang), 22.0, TEXT.get()).font(BOLD),
                     t(
-                        w(
-                            "Cet ordinateur n’a pas de batterie : un seul jeu de délais, pas de couvercle.",
-                            "This computer has no battery: one set of delays, no lid.",
-                        )
-                        .get(lang),
+                        w(words::THIS_COMPUTER_HAS_NO_BATTERY_ONE).get(lang),
                         13.0,
                         DIM.get()
                     ),
@@ -565,14 +547,9 @@ impl App {
         let known = self.power_no_modes();
         let ink = if known { INERT } else { 1.0 };
         let name = row![
-            t(
-                w("Mode d’énergie", "Power mode").get(lang),
-                14.0,
-                fade(TEXT.get(), ink)
-            )
-            .font(SEMIBOLD),
+            t(w(words::POWER_MODE).get(lang), 14.0, fade(TEXT.get(), ink)).font(SEMIBOLD),
             chip(
-                w("Nouveau", "New").get(lang),
+                w(words::NEW).get(lang),
                 BLUE.get(),
                 rgba(143, 179, 255, 0.16)
             ),
@@ -583,22 +560,14 @@ impl App {
         match modes {
             None if known => {
                 words = words.push(t(
-                    w(
-                        "Les modes demandent le service power-profiles-daemon, absent de cet ordinateur.",
-                        "Power modes need the power-profiles-daemon service, missing on this computer.",
-                    )
-                    .get(lang),
+                    w(words::POWER_MODES_NEED_THE_POWER_PROFILES).get(lang),
                     12.5,
                     PEACH.get(),
                 ));
             }
             _ => {
                 words = words.push(t(
-                    w(
-                        "Le même que dans le panneau de la batterie.",
-                        "The same as in the battery popover.",
-                    )
-                    .get(lang),
+                    w(words::THE_SAME_AS_IN_THE_BATTERY).get(lang),
                     12.5,
                     DIM.get(),
                 ));
@@ -607,11 +576,7 @@ impl App {
         if let Some(modes) = modes {
             if !modes.available.iter().any(|m| m == "performance") {
                 words = words.push(t(
-                    w(
-                        "Le mode performance n’existe pas sur cet ordinateur.",
-                        "This computer has no performance mode.",
-                    )
-                    .get(lang),
+                    w(words::THIS_COMPUTER_HAS_NO_PERFORMANCE_MODE).get(lang),
                     12.5,
                     FAINT.get(),
                 ));
@@ -702,13 +667,13 @@ impl App {
         let lang = self.lang;
         let name = row![
             t(
-                w("Limiter la charge à 80 %", "Limit charging to 80 %").get(lang),
+                w(words::LIMIT_CHARGING_TO_80).get(lang),
                 14.0,
                 fade(TEXT.get(), INERT)
             )
             .font(SEMIBOLD),
             chip(
-                w("Plus tard", "Later").get(lang),
+                w(words::LATER_2).get(lang),
                 AMBER,
                 rgba(245, 196, 110, 0.16)
             ),
@@ -718,11 +683,7 @@ impl App {
         let words = column![
             name,
             t(
-                w(
-                    "Ménage la batterie d’un portable toujours branché ; dépend du matériel.",
-                    "Spares the battery of a laptop always plugged in; depends on the hardware.",
-                )
-                .get(lang),
+                w(words::SPARES_THE_BATTERY_OF_A_LAPTOP).get(lang),
                 12.5,
                 fade(DIM.get(), INERT)
             ),
