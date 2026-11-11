@@ -187,6 +187,15 @@ struct Bed {
 
 impl Bed {
     fn start(outputs: &[&str], clock_at: Option<&str>) -> anyhow::Result<Option<Self>> {
+        Self::start_with(outputs, clock_at, &["us"])
+    }
+
+    /// The same, with the keyboard's `layouts`.
+    fn start_with(
+        outputs: &[&str],
+        clock_at: Option<&str>,
+        layouts: &[&str],
+    ) -> anyhow::Result<Option<Self>> {
         let shell = shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
@@ -215,7 +224,7 @@ impl Bed {
         let text = text.replace("\"$@\"\n", &format!("\"$@\" 2>>'{}'\n", log.display()));
         std::fs::write(&script, text)?;
         let mut config = Config::default();
-        config.keyboard.layouts = vec!["us".to_owned()];
+        config.keyboard.layouts = layouts.iter().map(|l| (*l).to_owned()).collect();
         config.lock_auth = Authenticator::test(RIGHT);
         let outputs = outputs
             .iter()
@@ -823,4 +832,19 @@ fn tab_goes_round_and_the_layout_switches_while_locked() -> anyhow::Result<()> {
     assert_eq!(hp.lock_typed(), Some(1));
     assert!(hp.state().locked());
     Ok(())
+}
+
+/// The lock in its main state (the empty field, the layout's button, the
+/// clock held), for the widget kit's side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) =
+        Bed::start_with(&["1920x1080"], Some("2026-11-04T13:35:00"), &["us", "fr"])?
+    else {
+        return Ok(());
+    };
+    bed.lock()?;
+    bed.hp.pointer_move(1900.0, 1070.0);
+    common::layer_shot(&mut bed.hp, hocus_link::LOCK_NAMESPACE, "lock")
 }
