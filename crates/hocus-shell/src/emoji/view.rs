@@ -20,14 +20,14 @@
 
 use hocus_a11y::Role;
 use iced::{
-    Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme, alignment,
+    Color, Element, Font, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
     alignment::{Horizontal, Vertical},
     mouse,
     widget::{
         Space, Stack, button,
         canvas::{self, Frame, Path, Stroke},
         column, container, mouse_area, pin, row, scrollable,
-        text::{Alignment, LineHeight, Shaping, Wrapping},
+        text::{LineHeight, Shaping, Wrapping},
     },
     window,
 };
@@ -771,25 +771,6 @@ impl<M> canvas::Program<M> for Tint {
         );
         vec![f.into_geometry()]
     }
-}
-
-/// `text` in the colour emoji font, `size` px, centred on `at`.
-pub fn emoji(f: &mut Frame, text: &str, at: Point, size: f32, alpha: f32) {
-    f.fill_text(canvas::Text {
-        content: text.to_owned(),
-        position: at,
-        max_width: f32::INFINITY,
-        color: Color {
-            a: alpha,
-            ..TEXT.get()
-        },
-        size: iced::Pixels(size),
-        line_height: LineHeight::Relative(1.0),
-        font: EMOJI_FONT,
-        align_x: Alignment::Center,
-        align_y: alignment::Vertical::Center,
-        shaping: Shaping::Advanced,
-    });
 }
 
 /// The magnifier, the mockup's 24 px path at [`MAGNIFIER`].

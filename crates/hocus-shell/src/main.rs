@@ -1804,16 +1804,11 @@ impl Shell {
         if !launcher::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(launcher::draw::View {
-                id,
-                words: launcher::Words::new(clock::time::Lang::of_messages()),
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(launcher::view::view(
+            id,
+            launcher::Words::new(clock::time::Lang::of_messages()),
+            self.software,
+        ))
     }
 
     /// The actions palette, if its surface is `id`.

@@ -492,8 +492,14 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
             tree.children[0].diff(self.content.as_widget());
         }
         let max = limits.max();
-        // All the height it wants: what the surface should be.
-        let free = layout::Limits::new(Size::ZERO, Size::new(max.width, f32::INFINITY));
+        // A popover: all the height it wants, what the surface should be.
+        // A surface of its own has its size.
+        let height = if self.own.is_some() {
+            max.height
+        } else {
+            f32::INFINITY
+        };
+        let free = layout::Limits::new(Size::ZERO, Size::new(max.width, height));
         let content = self
             .content
             .as_widget_mut()

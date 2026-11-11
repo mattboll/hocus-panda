@@ -14,10 +14,10 @@
 //! ([`LAUNCHER_NAMESPACE`]), in the overlay layer, holding the keyboard.
 //! The compositor darkens and blurs what is behind it and moves it in and
 //! out; the shell draws it once for that motion, and again only for what
-//! changes (a key, the pointer on another tile, an icon read). As for the
-//! popovers, nothing goes through iced's messages, which would draw every
-//! surface: the effects are layer-shell actions and lines to the
-//! compositor, carried out by [`crate::popover::effects`].
+//! changes (a key, the pointer on another tile, an icon read). Its surface
+//! is the widget kit's ([`view`]): what its widgets ask is handled at once
+//! and it alone draws again; the effects are layer-shell actions and lines
+//! to the compositor, carried out by [`crate::popover::effects`].
 //!
 //! The applications ([`apps`]) and their icons ([`icons`]) are read on
 //! threads of their own.
@@ -37,11 +37,11 @@
 
 pub mod answers;
 pub mod apps;
-pub mod draw;
 pub mod entries;
 pub mod icons;
 pub mod search;
 pub mod toast;
+pub mod view;
 
 use std::{
     collections::HashMap,
@@ -388,15 +388,18 @@ pub struct Open {
     pub selected: usize,
     /// The first row shown.
     pub offset: usize,
-    /// The tile pressed, and the one under the pointer since when.
-    pub pressed: Option<usize>,
+    /// The tile under the pointer since when.
     pub hover: Option<(usize, Instant)>,
-    /// Where the pointer is on the surface, once it moved.
-    pub pointer: Option<iced::Point>,
-    /// The surface's size, once drawn: what the grid's rows fit in.
+    /// The surface's size, once laid out: what the grid's rows fit in;
+    /// and the size its view was built for.
     pub size: iced::Size,
+    pub built: iced::Size,
     /// When a cut name rested on shows whole.
     pub tooltip: Option<Instant>,
+    /// The wheel's notches.
+    pub wheel: crate::popover::kit::Wheel,
+    /// What it last said it shows, in the log.
+    pub logged: String,
 }
 
 impl Open {
@@ -430,7 +433,7 @@ impl Open {
         }
         tracing::debug!(columns, "the launcher's grid fits its screen");
         self.grid = self.grid_of(words(), columns);
-        self.offset = draw::keep_in_view(&self.grid, self.selected, 0, self.size);
+        self.offset = view::keep_in_view(&self.grid, self.selected, 0, self.size);
         self.hover = None;
         self.tooltip = None;
     }
@@ -477,6 +480,7 @@ pub fn start() {
 
 /// Its surface draws again.
 pub fn wake() {
+    crate::ui::touch();
     crate::popover::send(vec![Effect::Wake(LAUNCHER_NAMESPACE)]);
 }
 
@@ -491,7 +495,7 @@ pub fn changed() {
         Phase::Closed => None,
     });
     if let Some((names, scale)) = open {
-        icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        icons::want(names.iter().map(String::as_str), view::ICON as u32, scale);
         wake();
     }
 }
@@ -527,11 +531,12 @@ pub fn toggle(output: String, scale: u32) {
             counts,
             selected: 0,
             offset: 0,
-            pressed: None,
             hover: None,
-            pointer: None,
             size: iced::Size::ZERO,
+            built: iced::Size::ZERO,
             tooltip: None,
+            wheel: crate::popover::kit::Wheel::default(),
+            logged: String::new(),
         };
         open.regrid(words());
         let wanted = (icon_names(&open), scale);
@@ -547,7 +552,7 @@ pub fn toggle(output: String, scale: u32) {
         // One popover at a time, and not under the launcher.
         crate::popover::event(crate::popover::Event::PressElsewhere);
         crate::actions::close();
-        icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        icons::want(names.iter().map(String::as_str), view::ICON as u32, scale);
     }
     crate::popover::send(effects);
 }
@@ -569,7 +574,7 @@ pub fn open_with(output: String, scale: u32, query: &str) {
         Phase::Closed => None,
     });
     if let Some((names, scale)) = wanted {
-        icons::want(names.iter().map(String::as_str), draw::ICON as u32, scale);
+        icons::want(names.iter().map(String::as_str), view::ICON as u32, scale);
         wake();
     }
 }
@@ -648,6 +653,7 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             && open.tooltip.is_some_and(|at| at <= now)
         {
             open.tooltip = None;
+            crate::ui::touch();
             effects.push(Effect::Wake(LAUNCHER_NAMESPACE));
         }
         l.closing.retain(|(id, at)| {
@@ -799,7 +805,7 @@ pub fn key_on(
         let open = l.open_mut(id)?;
         let arrow = |arrow: Arrow, open: &mut Open| {
             open.selected = open.grid.step(open.selected, arrow);
-            open.offset = draw::keep_in_view(&open.grid, open.selected, open.offset, open.size);
+            open.offset = view::keep_in_view(&open.grid, open.selected, open.offset, open.size);
             Then::Draw
         };
         let held = modifiers.shift() || modifiers.control();
@@ -876,19 +882,18 @@ fn paste(id: window::Id) {
     });
 }
 
-/// An input method's preedit or commit in the field of the launcher on
-/// `id`: whether it draws again.
-pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
-    let words = words();
-    with(|l| {
-        l.open_mut(id).is_some_and(|open| {
-            let took = open.query.input_method(event);
-            if took == Took::Edited {
+/// What the field of the launcher on `id` took of an input method or of
+/// the pointer: its grid follows what was typed; a paste is asked for.
+pub fn took(id: window::Id, took: Took, words: Words) {
+    match took {
+        Took::Edited => with(|l| {
+            if let Some(open) = l.open_mut(id) {
                 open.regrid(words);
             }
-            took.draws()
-        })
-    })
+        }),
+        Took::Paste => paste(id),
+        Took::No | Took::Same | Took::Moved => {}
+    }
 }
 
 /// A key that reached another of the shell's surfaces while the launcher
@@ -906,6 +911,49 @@ pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&st
         wake();
     }
     taken
+}
+
+/// The open launcher for screen readers: a dialog holding what its
+/// controls declared (its field, the tiles, cards and emoji shown), the
+/// selected one holding the focus.
+pub fn a11y() -> Option<hocus_a11y::Window> {
+    use hocus_a11y::{Node, Role, Window};
+    with(|l| {
+        let Phase::Open(open) = &l.phase else {
+            return None;
+        };
+        let rows = crate::a11y::rows::of(open.surface)?;
+        let title = words().placeholder();
+        let dialog = Node::new("dialog", Role::Dialog, title).children(rows.nodes);
+        let mut window = Window::new("launcher", title);
+        window.nodes = vec![dialog];
+        window.active = true;
+        window.focus = Some(if open.grid.flat.is_empty() {
+            "launcher:Field".to_owned()
+        } else {
+            format!("launcher:Item({})", open.selected)
+        });
+        window.size = Some((open.size.width, open.size.height));
+        Some(window)
+    })
+}
+
+/// A screen reader clicks control `key` (`launcher:Item(N)`) of the open
+/// launcher.
+pub fn a11y_click(key: &str) {
+    let Some(at) = key
+        .strip_prefix("launcher:Item(")
+        .and_then(|k| k.strip_suffix(')'))
+        .and_then(|n| n.parse().ok())
+    else {
+        return;
+    };
+    if let Some(id) = with(|l| match &l.phase {
+        Phase::Open(open) => Some(open.surface),
+        Phase::Closed => None,
+    }) {
+        act(id, at);
+    }
 }
 
 #[cfg(test)]

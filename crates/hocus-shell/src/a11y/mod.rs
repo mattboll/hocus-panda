@@ -186,6 +186,8 @@ enum Target {
     Palette(String),
     /// A control of the emoji picker, by its key.
     Emoji(String),
+    /// A tile, card or emoji of the launcher, by its key.
+    Launcher(String),
 }
 
 /// The thread's state: the announcer, the last announcement, and what each
@@ -268,6 +270,17 @@ impl Said {
                 }
             }
             windows.push(palette);
+        }
+        if let Some(launcher) = crate::launcher::a11y() {
+            for node in launcher.all() {
+                if node.key.starts_with("launcher:Item(") {
+                    self.targets.insert(
+                        (launcher.key.clone(), node.key.clone()),
+                        Target::Launcher(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(launcher);
         }
         if let Some(picker) = crate::emoji::a11y() {
             for node in picker.all() {
@@ -503,6 +516,7 @@ impl Said {
             (Target::Row(row), act) => press_row(row, act),
             (Target::Palette(key), Act::Click) => crate::actions::a11y_click(key),
             (Target::Emoji(key), Act::Click) => crate::emoji::a11y_click(key),
+            (Target::Launcher(key), Act::Click) => crate::launcher::a11y_click(key),
             (Target::Bubble { serial, action }, Act::Click) => {
                 crate::notifications::input(match action {
                     Some(key) => crate::notifications::Input::Action {
