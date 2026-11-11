@@ -5,6 +5,7 @@
 //! shell's `layouts/catalog.rs`, whose reader this follows). Read once, on
 //! a thread, never the window's.
 
+use crate::lang::French as _;
 use std::path::PathBuf;
 
 use crate::lang::Lang;

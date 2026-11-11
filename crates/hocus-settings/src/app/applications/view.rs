@@ -2,6 +2,7 @@
 //! default applications' rows and their menus, the terminal's field, the
 //! start-up rows, the line under them and the sheet to add one.
 
+use crate::lang::French as _;
 use iced::{
     Alignment, Background, Color, Length, Padding, Shadow, Theme,
     widget::{

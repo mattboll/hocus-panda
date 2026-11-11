@@ -4,6 +4,7 @@
 //! rows, their saving and their search are the window's as on any page
 //! ([`crate::appearance`]); the window itself is the page's preview.
 
+use crate::lang::French as _;
 use hocus_link::theme::{Accent, Scheme};
 use iced::{
     Alignment, Background, Color, Point, Rectangle, Renderer, Shadow, Theme, Vector, mouse,

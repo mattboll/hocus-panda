@@ -2,6 +2,7 @@
 //! with its search, the content's header, the home and the sections'
 //! pages, the menus, the toast and the unreadable file's banner.
 
+use crate::lang::French as _;
 use std::time::{Duration, Instant, SystemTime};
 
 use iced::{

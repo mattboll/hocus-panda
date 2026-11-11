@@ -729,16 +729,13 @@ impl State {
     /// Whether the menu's words are French: `[locale] language`, else the
     /// session's locale.
     pub(crate) fn radial_french(&self) -> bool {
-        use hocus_link::locale::Language;
-        match self.config.locale.language {
-            Language::French => true,
-            Language::English => false,
-            Language::System => ["LC_ALL", "LC_MESSAGES", "LANG"]
-                .into_iter()
-                .filter_map(|name| std::env::var(name).ok())
-                .find(|value| !value.is_empty())
-                .is_some_and(|value| value.starts_with("fr")),
-        }
+        let lang = self
+            .config
+            .locale
+            .language
+            .lang()
+            .unwrap_or_else(hocus_words::Lang::of_messages);
+        lang == hocus_words::Lang::French
     }
 
     /// The radial menu on `output`, front first: the panda, the arc, the

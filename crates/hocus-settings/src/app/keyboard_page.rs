@@ -13,6 +13,7 @@
 //!   a combination another action holds opens a box under the row,
 //!   "Remplacer" or "Annuler"; "Rétablir" takes the line out of the file.
 
+use crate::lang::French as _;
 use std::{collections::BTreeSet, sync::mpsc};
 
 use iced::{

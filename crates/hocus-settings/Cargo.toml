@@ -15,6 +15,8 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+# The desktop's languages and the words said in them.
+hocus-words.workspace = true
 # The configuration file read, edited in place and written back.
 hocus-config.workspace = true
 # The mice and touchpads, followed on the desktop's control socket (6.12).

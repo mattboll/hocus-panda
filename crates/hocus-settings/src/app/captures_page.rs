@@ -10,6 +10,7 @@
 //! (`clipboard-clear`). Turned off, the history is erased by the shell once
 //! the toast is gone: "Annuler" within it brings everything back.
 
+use crate::lang::French as _;
 use std::time::{Duration, Instant};
 
 use iced::{

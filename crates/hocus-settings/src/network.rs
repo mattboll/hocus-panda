@@ -4,6 +4,7 @@
 //! profiles), airplane mode in rfkill. The window's side is
 //! `app::network`.
 
+use crate::lang::French as _;
 use hocus_network::model::{Current, Details, Saved, Security, Wifi, Wired};
 
 use crate::{

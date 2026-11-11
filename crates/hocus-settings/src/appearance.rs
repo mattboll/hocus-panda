@@ -9,6 +9,7 @@
 //! speaks the language too, as soon as the file says them: it is the
 //! page's own preview. `text-scale` sizes the Settings window.
 
+use crate::lang::French as _;
 use std::{path::PathBuf, sync::OnceLock};
 
 use hocus_link::theme::{Accent, Scheme};

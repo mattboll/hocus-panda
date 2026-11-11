@@ -11,6 +11,7 @@
 //! (`data/zones/zones.tsv`, made by `scripts/zones/generate.py`); their
 //! offsets and changes are computed with jiff from the system's tzdata.
 
+use crate::lang::French as _;
 use std::sync::OnceLock;
 
 use jiff::{

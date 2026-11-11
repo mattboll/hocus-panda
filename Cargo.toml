@@ -29,6 +29,7 @@ hocus-pandas = { version = "1.0.0", path = "crates/hocus-pandas" }
 hocus-panic = { version = "1.0.0", path = "crates/hocus-panic" }
 hocus-perf = { version = "1.0.0", path = "crates/hocus-perf" }
 hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
+hocus-words = { version = "1.0.0", path = "crates/hocus-words" }
 hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }
 
 # The others. iced and iced_tiny_skia are held at the exact versions

@@ -9,6 +9,7 @@
 //! [`crate::devices`]). The page names the devices by their kind and where
 //! they are plugged, never by their vendor's name.
 
+use crate::lang::French as _;
 use std::sync::OnceLock;
 
 use hocus_link::input::{Bus, DeviceKind, InputDevice, RightClick};

@@ -6,32 +6,43 @@
 
 use std::fmt;
 
+pub use hocus_words::Lang;
 use serde::{Deserialize, Serialize};
 
 /// `[locale] language`: the desktop's own words. `System` follows the
-/// session's locale (`LC_ALL`, `LC_MESSAGES`, `LANG`).
+/// session's locale (`LC_ALL`, `LC_MESSAGES`, `LANG`). Written as the
+/// file writes it: `system`, or the language's code (`fr`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(into = "String", try_from = "String")]
 pub enum Language {
     #[default]
     System,
-    French,
-    English,
+    Chosen(Lang),
 }
 
 impl Language {
-    pub const ALL: [Self; 3] = [Self::System, Self::French, Self::English];
+    /// `system`, then every language.
+    pub fn all() -> impl Iterator<Item = Self> {
+        std::iter::once(Self::System).chain(Lang::ALL.into_iter().map(Self::Chosen))
+    }
 
     pub const fn word(self) -> &'static str {
         match self {
             Self::System => "system",
-            Self::French => "fr",
-            Self::English => "en",
+            Self::Chosen(lang) => lang.code(),
         }
     }
 
     pub fn of(word: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|l| l.word() == word)
+        Self::all().find(|l| l.word() == word)
+    }
+
+    /// The language chosen, if one is.
+    pub const fn lang(self) -> Option<Lang> {
+        match self {
+            Self::System => None,
+            Self::Chosen(lang) => Some(lang),
+        }
     }
 
     /// What programs started afterwards are given as `LANGUAGE`, when the
@@ -39,9 +50,22 @@ impl Language {
     pub const fn env(self) -> Option<&'static str> {
         match self {
             Self::System => None,
-            Self::French => Some("fr"),
-            Self::English => Some("en"),
+            Self::Chosen(lang) => Some(lang.code()),
         }
+    }
+}
+
+impl From<Language> for String {
+    fn from(language: Language) -> Self {
+        language.word().to_owned()
+    }
+}
+
+impl TryFrom<String> for Language {
+    type Error = String;
+
+    fn try_from(word: String) -> Result<Self, Self::Error> {
+        Self::of(&word).ok_or_else(|| format!("no language {word:?}"))
     }
 }
 

@@ -1,6 +1,7 @@
 //! The Screens page drawn: its groups, rows, menus and dialog.
 
 use super::*;
+use crate::lang::French as _;
 // The widget macros by name: through the glob they would be ambiguous.
 use iced::widget::{column, row, stack};
 

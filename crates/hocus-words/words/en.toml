@@ -1,0 +1,16 @@
+# English, the reference: every other language's file has these keys, no
+# more, and only the placeholders these texts have. How to add a string or
+# a language: docs/design/settings.md, "Words".
+
+[language]
+code = "en"
+variant = "English"
+name = "English"
+# One for 1 only.
+plural = "n=1"
+
+[date]
+weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+short_weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+short_months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]

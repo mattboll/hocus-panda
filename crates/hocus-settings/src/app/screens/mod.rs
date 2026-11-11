@@ -13,6 +13,7 @@
 mod drawing;
 mod view;
 
+use crate::lang::French as _;
 use drawing::*;
 
 use std::time::{Duration, Instant};

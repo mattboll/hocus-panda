@@ -18,6 +18,7 @@
 //!   by aligned edges or middles within 120 px), the places of a size
 //!   changed, and how a place is said.
 
+use crate::lang::French as _;
 use std::{
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,

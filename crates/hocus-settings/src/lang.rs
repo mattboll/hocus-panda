@@ -1,37 +1,18 @@
 //! The window's language, French or English, and the words it says in
 //! both: every string the user reads is a [`Words`].
 
-/// The two languages shipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Lang {
-    French,
-    #[default]
-    English,
+/// The window's language: the workspace's one.
+pub use hocus_words::Lang;
+
+/// Whether a language is French: the sites that still choose between two
+/// languages in code, not in the catalogue (#775's next lot).
+pub trait French {
+    fn fr(self) -> bool;
 }
 
-impl Lang {
-    /// The messages' language: `LC_ALL`, `LC_MESSAGES`, then `LANG`, as
-    /// the shell reads it.
-    pub fn of_messages() -> Self {
-        let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
-            .into_iter()
-            .filter_map(|name| std::env::var(name).ok())
-            .find(|value| !value.is_empty())
-            .unwrap_or_default();
-        Self::of(&locale)
-    }
-
-    /// From a locale's name, `fr_FR.UTF-8`.
-    pub fn of(locale: &str) -> Self {
-        if locale.starts_with("fr") {
-            Self::French
-        } else {
-            Self::English
-        }
-    }
-
-    pub fn fr(self) -> bool {
-        self == Self::French
+impl French for Lang {
+    fn fr(self) -> bool {
+        self == Lang::French
     }
 }
 

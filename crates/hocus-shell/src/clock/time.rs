@@ -10,7 +10,7 @@
 use std::{path::Path, time::Duration};
 
 use hocus_link::locale::DateFormat;
-use jiff::{SignedDuration, Timestamp, Zoned, civil::Weekday, tz::TimeZone};
+use jiff::{SignedDuration, Timestamp, Zoned, tz::TimeZone};
 
 use crate::popover::calendar::words::Hours;
 
@@ -18,150 +18,34 @@ use crate::popover::calendar::words::Hours;
 /// just before the second would show the one before and look again at once.
 const PAST_THE_SECOND: Duration = Duration::from_millis(5);
 
-/// The language of the date, from the session's locale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Lang {
-    #[default]
-    English,
-    French,
-}
+/// The shell's language: one for the whole workspace. `[locale] language`
+/// chooses it when the file says one ([`crate::locale::set`]).
+pub use hocus_words::Lang;
 
-impl Lang {
-    /// `[locale] language` when the file chooses one (#402), else from
-    /// `LC_ALL`, `LC_TIME` and `LANG`, the first one set, as the C library
-    /// takes them; English unless French.
-    pub fn from_env() -> Self {
-        crate::locale::chosen_lang()
-            .unwrap_or_else(|| Self::from_vars(["LC_ALL", "LC_TIME", "LANG"]))
-    }
-
-    /// The messages' language: `[locale] language`, else `LC_ALL`,
-    /// `LC_MESSAGES`, then `LANG`.
-    pub fn of_messages() -> Self {
-        crate::locale::chosen_lang()
-            .unwrap_or_else(|| Self::from_vars(["LC_ALL", "LC_MESSAGES", "LANG"]))
-    }
-
-    /// How numbers are written: `[locale] language`, else `LC_ALL`,
-    /// `LC_NUMERIC`, then `LANG`.
-    pub fn of_numbers() -> Self {
-        crate::locale::chosen_lang()
-            .unwrap_or_else(|| Self::from_vars(["LC_ALL", "LC_NUMERIC", "LANG"]))
-    }
-
-    fn from_vars(names: [&str; 3]) -> Self {
-        let locale = names
-            .into_iter()
-            .filter_map(|name| std::env::var(name).ok())
-            .find(|value| !value.is_empty())
-            .unwrap_or_default();
-        Self::of(&locale)
-    }
-
-    /// From a locale's name, `fr_FR.UTF-8`.
-    pub fn of(locale: &str) -> Self {
-        if locale.starts_with("fr") {
-            Self::French
-        } else {
-            Self::English
+/// `date` as `format` writes it: "jeudi 5 novembre", "jeu. 5 nov.",
+/// "05/11/2026", "2026-11-05".
+pub fn date(lang: Lang, date: jiff::civil::Date, format: DateFormat) -> String {
+    let day = usize::from(date.weekday().to_monday_zero_offset().unsigned_abs());
+    let month = usize::from(date.month().unsigned_abs().clamp(1, 12)) - 1;
+    let name =
+        |list: hocus_words::List, i: usize| list.get(lang).get(i).copied().unwrap_or_default();
+    match format {
+        DateFormat::Long => format!(
+            "{} {} {}",
+            name(hocus_words::date::WEEKDAYS, day),
+            date.day(),
+            name(hocus_words::date::MONTHS, month)
+        ),
+        DateFormat::Short => format!(
+            "{} {} {}",
+            name(hocus_words::date::SHORT_WEEKDAYS, day),
+            date.day(),
+            name(hocus_words::date::SHORT_MONTHS, month)
+        ),
+        DateFormat::Numeric => {
+            format!("{:02}/{:02}/{}", date.day(), date.month(), date.year())
         }
-    }
-
-    /// The weekday and the month, short: "jeu.", "nov."; "Thu", "Nov".
-    fn short_weekday(self, day: Weekday) -> &'static str {
-        let i = usize::from(day.to_monday_zero_offset().unsigned_abs());
-        match self {
-            Self::English => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i],
-            Self::French => ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."][i],
-        }
-    }
-
-    fn short_month(self, month: i8) -> &'static str {
-        let i = usize::from(month.unsigned_abs().clamp(1, 12)) - 1;
-        match self {
-            Self::English => [
-                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-            ][i],
-            Self::French => [
-                "janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.",
-                "nov.", "déc.",
-            ][i],
-        }
-    }
-
-    /// `date` as `format` writes it: "jeudi 5 novembre", "jeu. 5 nov.",
-    /// "05/11/2026", "2026-11-05".
-    pub fn date(self, date: jiff::civil::Date, format: DateFormat) -> String {
-        match format {
-            DateFormat::Long => format!(
-                "{} {} {}",
-                self.weekday(date.weekday()),
-                date.day(),
-                self.month(date.month())
-            ),
-            DateFormat::Short => format!(
-                "{} {} {}",
-                self.short_weekday(date.weekday()),
-                date.day(),
-                self.short_month(date.month())
-            ),
-            DateFormat::Numeric => {
-                format!("{:02}/{:02}/{}", date.day(), date.month(), date.year())
-            }
-            DateFormat::Iso => format!("{}-{:02}-{:02}", date.year(), date.month(), date.day()),
-        }
-    }
-
-    fn weekday(self, day: Weekday) -> &'static str {
-        let i = usize::from(day.to_monday_zero_offset().unsigned_abs());
-        match self {
-            Self::English => [
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ][i],
-            Self::French => [
-                "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
-            ][i],
-        }
-    }
-
-    fn month(self, month: i8) -> &'static str {
-        let i = usize::from(month.unsigned_abs().clamp(1, 12)) - 1;
-        match self {
-            Self::English => [
-                "January",
-                "February",
-                "March",
-                "April",
-                "May",
-                "June",
-                "July",
-                "August",
-                "September",
-                "October",
-                "November",
-                "December",
-            ][i],
-            Self::French => [
-                "janvier",
-                "février",
-                "mars",
-                "avril",
-                "mai",
-                "juin",
-                "juillet",
-                "août",
-                "septembre",
-                "octobre",
-                "novembre",
-                "décembre",
-            ][i],
-        }
+        DateFormat::Iso => format!("{}-{:02}-{:02}", date.year(), date.month(), date.day()),
     }
 }
 
@@ -210,7 +94,7 @@ impl Shown {
             hm: [h1, h2, ':', m1, m2],
             ss: digits(time.second()),
             half,
-            date: lang.date(time.date(), date),
+            date: self::date(lang, time.date(), date),
         }
     }
 
@@ -403,15 +287,18 @@ mod tests {
     #[test]
     fn the_date_is_written_in_each_format() {
         let day = jiff::civil::date(2026, 11, 5);
-        assert_eq!(Lang::French.date(day, DateFormat::Long), "jeudi 5 novembre");
         assert_eq!(
-            Lang::English.date(day, DateFormat::Long),
+            date(Lang::French, day, DateFormat::Long),
+            "jeudi 5 novembre"
+        );
+        assert_eq!(
+            date(Lang::English, day, DateFormat::Long),
             "Thursday 5 November"
         );
-        assert_eq!(Lang::French.date(day, DateFormat::Short), "jeu. 5 nov.");
-        assert_eq!(Lang::English.date(day, DateFormat::Short), "Thu 5 Nov");
-        assert_eq!(Lang::French.date(day, DateFormat::Numeric), "05/11/2026");
-        assert_eq!(Lang::English.date(day, DateFormat::Iso), "2026-11-05");
+        assert_eq!(date(Lang::French, day, DateFormat::Short), "jeu. 5 nov.");
+        assert_eq!(date(Lang::English, day, DateFormat::Short), "Thu 5 Nov");
+        assert_eq!(date(Lang::French, day, DateFormat::Numeric), "05/11/2026");
+        assert_eq!(date(Lang::English, day, DateFormat::Iso), "2026-11-05");
     }
 
     #[test]

@@ -16,6 +16,7 @@
 //! ([`crate::mouse`]); this module only lays them out and keeps the test
 //! area's state.
 
+use crate::lang::French as _;
 use std::time::{Duration, Instant};
 
 use hocus_link::input::{DeviceKind, InputDevice};

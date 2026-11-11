@@ -6,6 +6,7 @@
 //! those with a window open first. The rules are written whole, as an
 //! array of tables, each change with its toast and "Annuler".
 
+use crate::lang::French as _;
 use std::time::Instant;
 
 use iced::{

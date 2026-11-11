@@ -23,6 +23,8 @@ hocus-config.workspace = true
 hocus-geometry.workspace = true
 hocus-link.workspace = true
 hocus-pandas.workspace = true
+# The desktop's languages and words.
+hocus-words.workspace = true
 # A panic said in the log before the program ends (#778).
 hocus-panic.workspace = true
 hocus-agents.workspace = true

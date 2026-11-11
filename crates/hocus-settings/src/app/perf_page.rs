@@ -186,13 +186,8 @@ impl App {
                 let Some(signal) = read.report.signals.get(n) else {
                     return iced::Task::none();
                 };
-                let report = text::signal_report(
-                    &read.report,
-                    signal,
-                    read.date,
-                    model::said_in(self.lang),
-                    &self.perf.tz,
-                );
+                let report =
+                    text::signal_report(&read.report, signal, read.date, self.lang, &self.perf.tz);
                 self.perf.copied = Some((n, Instant::now()));
                 tracing::info!(signal = ?signal.kind, "a signal's report copied");
                 return iced::Task::batch([
@@ -217,7 +212,7 @@ impl App {
         let Some(read) = self.perf.read.as_ref().filter(|r| r.date == date) else {
             return serde_json::json!({ "date": date.to_string(), "read": false });
         };
-        let lang = model::said_in(self.lang);
+        let lang = self.lang;
         let tz = &self.perf.tz;
         serde_json::json!({
             "date": date.to_string(),
@@ -488,7 +483,7 @@ impl App {
 
     fn perf_signals(&self, report: &Report) -> El<'_> {
         let lang = self.lang;
-        let said = model::said_in(lang);
+        let said = lang;
         let mut rows: Vec<El<'_>> = Vec::new();
         for (n, signal) in report.signals.iter().enumerate() {
             let (title, line) = text::signal(signal, said, &self.perf.tz);
@@ -569,7 +564,7 @@ impl App {
 
     fn perf_peaks(&self, report: &Report) -> El<'_> {
         let lang = self.lang;
-        let said = model::said_in(lang);
+        let said = lang;
         let tz = &self.perf.tz;
         let mut rows: Vec<El<'_>> = Vec::new();
         let head = row![
@@ -647,7 +642,7 @@ impl App {
 
     fn perf_week<'a>(&'a self, read: &'a Read) -> El<'a> {
         let lang = self.lang;
-        let said = model::said_in(lang);
+        let said = lang;
         let most = read
             .week
             .iter()
@@ -1261,7 +1256,7 @@ impl canvas::Program<Message> for Chart {
                             ),
                             dashed,
                         );
-                        let whose = text::who(who, model::said_in(lang));
+                        let whose = text::who(who, lang);
                         write(
                             &mut f,
                             match lang {

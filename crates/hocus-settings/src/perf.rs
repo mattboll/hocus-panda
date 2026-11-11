@@ -60,14 +60,6 @@ pub fn settings() -> &'static [Setting] {
     })
 }
 
-/// The language `hocus_perf` says things in.
-pub fn said_in(lang: Lang) -> text::Lang {
-    match lang {
-        Lang::French => text::Lang::French,
-        Lang::English => text::Lang::English,
-    }
-}
-
 /// The line that tells the compositor the window's page (`""`: none),
 /// with its process, measured with the desktop's.
 pub fn settings_line(page: &str) -> String {
@@ -210,7 +202,7 @@ pub struct Tile {
 
 /// The four tiles: CPU, memory, frames, motion.
 pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
-    let l = said_in(lang);
+    let l = lang;
     let kb = |kb: [u32; 2]| kb[0] + kb[1];
     let mb = |kb: u32| (f64::from(kb) / 1024.0).round();
     let cpu_ms = r.cpu.compositor_ms + r.cpu.shell_ms;
@@ -348,7 +340,7 @@ pub fn session(r: &Report, lang: Lang, tz: &TimeZone) -> String {
 
 /// The date said in full, "Aujourd’hui, " before today's.
 pub fn date_title(date: Date, today: Date, lang: Lang) -> String {
-    let said = text::date(date, said_in(lang));
+    let said = text::date(date, lang);
     let yesterday = today.checked_sub(jiff::Span::new().days(1)).ok();
     match (date == today, Some(date) == yesterday, lang) {
         (true, _, Lang::French) => format!("Aujourd’hui, {said}"),

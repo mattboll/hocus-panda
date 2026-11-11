@@ -19,6 +19,7 @@
 //! that one is not understood), writes a change at once with its undo, and
 //! finds settings by their words and their keys.
 
+use crate::lang::French as _;
 use crate::lang::{Lang, Words, w};
 
 /// The five groups of the sidebar.

@@ -480,7 +480,7 @@ impl Shell {
             clock: clock_style(&ClockLook::default()),
             clock_look: ClockLook::default(),
             wall: clock::time::Wall { zone, shift },
-            lang: clock::time::Lang::from_env(),
+            lang: clock::time::Lang::of_time(),
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
             curtain: curtain::Curtain::default(),
             share: surfaces::Lent::default(),
@@ -656,7 +656,7 @@ impl Shell {
             // The words and the formats: every surface draws again in them.
             ToShell::Locale(locale) => {
                 locale::set(locale);
-                self.lang = clock::time::Lang::from_env();
+                self.lang = clock::time::Lang::of_time();
                 self.words = levels::model::Words::new(clock::time::Lang::of_messages());
                 let lang = clock::time::Lang::of_messages();
                 tracing::info!(%locale, ?lang, "the language and formats");

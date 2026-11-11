@@ -10,32 +10,12 @@ use crate::{
 };
 
 /// The language said in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Lang {
-    French,
-    #[default]
-    English,
-}
+pub use hocus_words::Lang;
 
-impl Lang {
-    /// The messages' locale: `LC_ALL`, `LC_MESSAGES`, `LANG`.
-    pub fn from_env() -> Self {
-        let said = ["LC_ALL", "LC_MESSAGES", "LANG"]
-            .iter()
-            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
-            .unwrap_or_default();
-        if said.starts_with("fr") {
-            Self::French
-        } else {
-            Self::English
-        }
-    }
-
-    fn pick(self, fr: &'static str, en: &'static str) -> &'static str {
-        match self {
-            Self::French => fr,
-            Self::English => en,
-        }
+fn pick(lang: Lang, fr: &'static str, en: &'static str) -> &'static str {
+    match lang {
+        Lang::French => fr,
+        Lang::English => en,
     }
 }
 
@@ -66,7 +46,7 @@ pub fn megabytes(kb: u32, lang: Lang) -> String {
     format!(
         "{} {}",
         (f64::from(kb) / 1024.0).round(),
-        lang.pick("Mo", "MB")
+        pick(lang, "Mo", "MB")
     )
 }
 
@@ -186,9 +166,9 @@ fn capital(s: &str) -> String {
 /// Whose: the compositor, the shell, the Settings.
 pub fn who(who: Who, lang: Lang) -> &'static str {
     match who {
-        Who::Compositor => lang.pick("compositeur", "compositor"),
+        Who::Compositor => pick(lang, "compositeur", "compositor"),
         Who::Shell => "shell",
-        Who::Settings => lang.pick("Réglages", "Settings"),
+        Who::Settings => pick(lang, "Réglages", "Settings"),
     }
 }
 
@@ -211,14 +191,16 @@ pub fn event(e: &Event, lang: Lang) -> String {
         (EventKind::WallpaperMoving, Lang::French) => format!("fond animé en marche : {what}"),
         (EventKind::WallpaperMoving, Lang::English) => format!("moving wallpaper on: {what}"),
         (kind, lang) => match kind {
-            EventKind::Locked => lang.pick("session verrouillée", "session locked"),
-            EventKind::Unlocked => lang.pick("session déverrouillée", "session unlocked"),
-            EventKind::Suspend => lang.pick("mise en veille", "going to sleep"),
-            EventKind::Resume => lang.pick("sortie de veille", "woken from sleep"),
-            EventKind::OnBattery => lang.pick("sur batterie", "on battery"),
-            EventKind::OnAc => lang.pick("sur secteur", "on AC"),
-            EventKind::WallpaperStill => lang.pick("fond animé arrêté", "moving wallpaper stopped"),
-            _ => lang.pick("autre chose", "something else"),
+            EventKind::Locked => pick(lang, "session verrouillée", "session locked"),
+            EventKind::Unlocked => pick(lang, "session déverrouillée", "session unlocked"),
+            EventKind::Suspend => pick(lang, "mise en veille", "going to sleep"),
+            EventKind::Resume => pick(lang, "sortie de veille", "woken from sleep"),
+            EventKind::OnBattery => pick(lang, "sur batterie", "on battery"),
+            EventKind::OnAc => pick(lang, "sur secteur", "on AC"),
+            EventKind::WallpaperStill => {
+                pick(lang, "fond animé arrêté", "moving wallpaper stopped")
+            }
+            _ => pick(lang, "autre chose", "something else"),
         }
         .to_owned(),
     }
@@ -252,8 +234,12 @@ pub fn peak(p: &Peak, lang: Lang) -> (String, String) {
     {
         capital(&event(e, lang))
     } else if p.wallpaper {
-        lang.pick("Le fond animé en marche", "The moving wallpaper running")
-            .to_owned()
+        pick(
+            lang,
+            "Le fond animé en marche",
+            "The moving wallpaper running",
+        )
+        .to_owned()
     } else if opened > 1 {
         match lang {
             Lang::French => format!("{opened} fenêtres ouvertes"),
@@ -277,17 +263,21 @@ pub fn peak(p: &Peak, lang: Lang) -> (String, String) {
         capital(&event(e, lang))
     } else {
         match p.signal {
-            Some(SignalKind::SustainedCpu) => lang.pick("Un CPU soutenu", "Sustained CPU"),
-            Some(SignalKind::Wakeups) => {
-                lang.pick("La boucle réveillée au repos", "The loop woken at rest")
+            Some(SignalKind::SustainedCpu) => pick(lang, "Un CPU soutenu", "Sustained CPU"),
+            Some(SignalKind::Wakeups) => pick(
+                lang,
+                "La boucle réveillée au repos",
+                "The loop woken at rest",
+            ),
+            Some(SignalKind::SlowMoment) => pick(lang, "Un moment lent", "A slow moment"),
+            _ if p.inputs > 0 => pick(lang, "Le bureau en usage", "The desktop in use"),
+            _ if p.app_commits > 0 => {
+                pick(lang, "Des fenêtres qui se dessinent", "Windows drawing")
             }
-            Some(SignalKind::SlowMoment) => lang.pick("Un moment lent", "A slow moment"),
-            _ if p.inputs > 0 => lang.pick("Le bureau en usage", "The desktop in use"),
-            _ if p.app_commits > 0 => lang.pick("Des fenêtres qui se dessinent", "Windows drawing"),
             _ if p.motion_frames > 0 => {
-                lang.pick("Une animation du bureau", "A motion of the desktop")
+                pick(lang, "Une animation du bureau", "A motion of the desktop")
             }
-            _ => lang.pick("Rien de noté", "Nothing noted"),
+            _ => pick(lang, "Rien de noté", "Nothing noted"),
         }
         .to_owned()
     };
@@ -296,9 +286,9 @@ pub fn peak(p: &Peak, lang: Lang) -> (String, String) {
         Lang::English => format!("{} frames/s", number(fps, 0, lang)),
     };
     why.push_str(if p.inputs > 0 {
-        lang.pick(" · en usage", " · in use")
+        pick(lang, " · en usage", " · in use")
     } else {
-        lang.pick(" · sans geste", " · untouched")
+        pick(lang, " · sans geste", " · untouched")
     });
     if p.events.len() > 1 {
         let more = p.events.len() - 1;
@@ -499,23 +489,23 @@ pub fn totals(r: &Report, lang: Lang, tz: &TimeZone) -> Vec<(String, String)> {
     ));
     let sum = |kb: [u32; 2]| kb[0] + kb[1];
     lines.push((
-        lang.pick("Mémoire", "Memory").to_owned(),
+        pick(lang, "Mémoire", "Memory").to_owned(),
         format!(
             "{} → {} · {} {} {} {}",
             (f64::from(sum(r.memory.start_kb)) / 1024.0).round(),
             megabytes(sum(r.memory.end_kb), lang),
-            lang.pick("pic", "peak"),
+            pick(lang, "pic", "peak"),
             megabytes(r.memory.peak_kb, lang),
-            lang.pick("à", "at"),
+            pick(lang, "à", "at"),
             clock(r.memory.peak_at, tz)
         ),
     ));
     lines.push((
-        lang.pick("Images", "Frames").to_owned(),
+        pick(lang, "Images", "Frames").to_owned(),
         format!(
             "{} · {} {}/s",
             count(r.drawing.frames, lang),
-            lang.pick("réveils au repos", "wakeups at rest"),
+            pick(lang, "réveils au repos", "wakeups at rest"),
             number(r.drawing.rest_wakeups_per_s, 1, lang)
         ),
     ));
@@ -527,19 +517,19 @@ pub fn totals(r: &Report, lang: Lang, tz: &TimeZone) -> Vec<(String, String)> {
         if r.moving_wallpaper_s > 0 {
             said.push_str(&format!(
                 " · {} {}",
-                lang.pick("fond animé", "moving wallpaper"),
+                pick(lang, "fond animé", "moving wallpaper"),
                 duration(r.moving_wallpaper_s as i64)
             ));
         }
-        lines.push((lang.pick("Mouvements", "Motion").to_owned(), said));
+        lines.push((pick(lang, "Mouvements", "Motion").to_owned(), said));
     }
     if let Some(power) = &r.power {
         lines.push((
-            lang.pick("Batterie", "Battery").to_owned(),
+            pick(lang, "Batterie", "Battery").to_owned(),
             format!(
                 "{} W {} {}",
                 number(f64::from(power.average_mw) / 1000.0, 1, lang),
-                lang.pick("en moyenne sur", "on average over"),
+                pick(lang, "en moyenne sur", "on average over"),
                 duration(power.on_battery_s as i64)
             ),
         ));
@@ -552,7 +542,8 @@ pub fn day(r: &Report, on: Date, lang: Lang, tz: &TimeZone) -> String {
     let mut out = heading(r, on, lang, tz);
     out.push('\n');
     if r.from.is_none() {
-        out.push_str(lang.pick(
+        out.push_str(pick(
+            lang,
             "Rien d’enregistré ce jour-là.\n",
             "Nothing recorded that day.\n",
         ));
@@ -569,9 +560,9 @@ pub fn day(r: &Report, on: Date, lang: Lang, tz: &TimeZone) -> String {
         out.push_str(&format!("{key:width$}{said}\n"));
     }
     out.push('\n');
-    out.push_str(lang.pick("Pics\n", "Peaks\n"));
+    out.push_str(pick(lang, "Pics\n", "Peaks\n"));
     if r.peaks.is_empty() {
-        out.push_str(lang.pick("  aucun\n", "  none\n"));
+        out.push_str(pick(lang, "  aucun\n", "  none\n"));
     }
     for p in &r.peaks {
         let (what, _) = peak(p, lang);
@@ -584,9 +575,9 @@ pub fn day(r: &Report, on: Date, lang: Lang, tz: &TimeZone) -> String {
         ));
     }
     out.push('\n');
-    out.push_str(lang.pick("Signaux\n", "Signals\n"));
+    out.push_str(pick(lang, "Signaux\n", "Signals\n"));
     if r.signals.is_empty() {
-        out.push_str(lang.pick("  aucun\n", "  none\n"));
+        out.push_str(pick(lang, "  aucun\n", "  none\n"));
     }
     for s in &r.signals {
         let (title, line) = signal(s, lang, tz);
@@ -601,7 +592,7 @@ pub fn signal_report(r: &Report, s: &Signal, on: Date, lang: Lang, tz: &TimeZone
     format!(
         "Hocuspanda {} {}\n{title}\n{line}\n\n{}",
         env!("CARGO_PKG_VERSION"),
-        lang.pick("— performances", "— performance"),
+        pick(lang, "— performances", "— performance"),
         day(r, on, lang, tz)
     )
 }

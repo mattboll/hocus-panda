@@ -13,6 +13,7 @@
 //! listed, the desktop portal's file chooser asked, the chosen picture
 //! checked and copied, a picture removed and put back.
 
+use crate::lang::French as _;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},

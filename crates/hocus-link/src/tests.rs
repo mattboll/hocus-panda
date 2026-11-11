@@ -154,7 +154,7 @@ fn to_shell() -> Vec<ToShell> {
             outputs: vec![("eDP-1".into(), wallpaper::Picture::Plain)],
         }),
         ToShell::Locale(locale::Locale {
-            language: locale::Language::English,
+            language: locale::Language::Chosen(locale::Lang::English),
             date: locale::DateFormat::Short,
             time: Some(locale::TimeFormat::H12),
         }),

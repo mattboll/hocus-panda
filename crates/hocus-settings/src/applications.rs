@@ -21,6 +21,7 @@
 //! configuration's folder and the autostart folder). The window hears it
 //! through [`Heard`].
 
+use crate::lang::French as _;
 use std::{
     collections::HashMap,
     ffi::OsString,
