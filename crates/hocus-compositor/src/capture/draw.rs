@@ -698,7 +698,7 @@ impl State {
         )
         .intersection(screen)?;
         let blurred = renderer.frost(
-            &mut self.panes.borrow_mut(),
+            &mut self.graphics.panes.borrow_mut(),
             &crate::glass::capture_pane(&output.name()),
             around.to_physical_precise_round(scale),
             scale,

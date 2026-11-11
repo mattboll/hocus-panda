@@ -203,7 +203,7 @@ fn gles_outputs(
         .update_formats(renderer.shm_formats());
     let device = render_node_of(renderer.egl_context().display());
     dmabuf_global(state, renderer.dmabuf_formats(), device);
-    state.blur = true;
+    state.graphics.blur = true;
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 
@@ -231,7 +231,7 @@ fn software_outputs(
         .update_formats(renderer.shm_formats());
     dmabuf_global(state, renderer.dmabuf_formats(), None);
     // Its shaders, the glass's and the halo's among them, as on a GPU.
-    state.blur = true;
+    state.graphics.blur = true;
     Outputs::new(renderer, Fourcc::Abgr8888, specs, state)
 }
 

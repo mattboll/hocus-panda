@@ -1005,7 +1005,7 @@ impl State {
         let current = self.strip(output).current();
         let wall = (!self.config.plain_background)
             .then(|| {
-                let backgrounds = self.backgrounds.borrow();
+                let backgrounds = self.graphics.backgrounds.borrow();
                 backgrounds
                     .shown
                     .get(&name)

@@ -26,7 +26,7 @@ impl State {
         if now == old {
             return false;
         }
-        let wallpaper = self.backgrounds.borrow().accent;
+        let wallpaper = self.graphics.backgrounds.borrow().accent;
         if now.theme_choice(wallpaper) != old.theme_choice(wallpaper) {
             let choice = now.theme_choice(wallpaper);
             tracing::info!(theme = %choice.scheme, accent = %choice.accent, "the theme changed");

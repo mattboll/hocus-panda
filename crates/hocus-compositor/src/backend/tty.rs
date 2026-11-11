@@ -496,7 +496,7 @@ fn open_gles(fd: &DrmDeviceFd, node: DrmNode, state: &mut State) -> anyhow::Resu
         let gles: &mut GlesRenderer = renderer.as_mut();
         state.protocols.shm_state.update_formats(gles.shm_formats());
         dmabuf_global(state, gles.dmabuf_formats(), Some(render_node.dev_id()));
-        state.blur = true;
+        state.graphics.blur = true;
         gles.egl_context().dmabuf_render_formats().clone()
     };
     Ok((gbm, gpus, render_node, render_formats))

@@ -83,7 +83,7 @@ impl Env {
         Self {
             runtime_dir: state.runtime_dir.clone(),
             socket: state.socket_path.clone(),
-            xdisplay: state.xdisplay,
+            xdisplay: state.xwayland.display,
             activation: None,
             cursor: state.pointer.cursor_images.choice().clone(),
             session_bus: match &state.shell.bus {

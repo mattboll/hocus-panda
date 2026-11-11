@@ -47,8 +47,8 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
             } => match X11Wm::start_wm(app.state.loop_handle.clone(), x11_socket, client.clone()) {
                 Ok(wm) => {
                     tracing::info!(display = display_number, "XWayland ready");
-                    app.state.xwm = Some(wm);
-                    app.state.xdisplay = Some(display_number);
+                    app.state.xwayland.wm = Some(wm);
+                    app.state.xwayland.display = Some(display_number);
                 }
                 Err(err) => tracing::warn!(%err, "could not start the X11 window manager"),
             },

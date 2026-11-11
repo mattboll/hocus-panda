@@ -5,7 +5,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
     path::PathBuf,
-    time::Duration,
 };
 
 use anyhow::Context;
@@ -27,14 +26,15 @@ use smithay::{
         compositor::CompositorClientState, seat::WaylandFocus,
         selection::primary_selection::PrimarySelectionState,
     },
-    xwayland::X11Wm,
 };
 
+mod frames;
 mod input;
 mod menus;
 mod protocols;
 mod windows;
 
+pub use frames::{Frames, Graphics, XWayland};
 pub use input::{Gestures, Keyboard, Pointer};
 pub use menus::{RadialMenu, Switching};
 pub use protocols::Protocols;
@@ -61,13 +61,6 @@ pub struct State {
     pub loop_signal: LoopSignal,
     /// CLOCK_MONOTONIC, which frame callbacks and presentation times use.
     pub clock: Clock<Monotonic>,
-    /// The motions' time while a test holds it (`Headless::hold_clock`):
-    /// it moves only as the test steps it, so that a motion is seen at
-    /// the same moments however slowly a loaded machine draws.
-    pub held_clock: Option<Duration>,
-    /// How far ahead of `clock` the motions' time is since a test let it
-    /// go, having stepped it faster than it ran: it never goes back.
-    pub clock_ahead: Duration,
     pub socket_path: PathBuf,
     pub runtime_dir: PathBuf,
     pub config: Config,
@@ -98,16 +91,8 @@ pub struct State {
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
     pub wobble: Option<(WindowId, Jelly)>,
-    /// A frame is asked for at this time, after a pause.
-    pub wake: Option<Duration>,
-    /// When the last frame was drawn: motions are judged as of then (see
-    /// `tick`). Set while drawing, which borrows the state shared.
-    pub drawn_at: std::cell::Cell<Option<Duration>>,
     /// Something changed on screen since the last frame.
     pub redraw: bool,
-    /// Nothing moved as of the last frame drawn, as `tick` judged it then:
-    /// that frame shows every motion at its end (the tests' `at_rest`).
-    pub still: bool,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
     /// The bar's tiles, and a window moved over them (8.5 B).
@@ -158,9 +143,6 @@ pub struct State {
     /// What draws the switcher, the desktops' dots and their text.
     pub overlay: Overlay,
 
-    /// The X11 window manager once XWayland is ready, and its display.
-    pub xwm: Option<X11Wm>,
-    pub xdisplay: Option<u32>,
     pub programs: Programs,
     /// The session's start-up applications, once the bar shows (6.15).
     pub autostart: crate::session::autostart::Autostart,
@@ -180,17 +162,6 @@ pub struct State {
     pub input_devices: crate::input_devices::InputDevices,
     /// When the session is idle, and what holds it off (7.3).
     pub idle: crate::idle::Idleness,
-    /// The render node of the GPU the compositor draws with, which the
-    /// shell draws with too; `None` without one.
-    pub gpu: Option<crate::backend::DevId>,
-    /// The renderer can blur what is behind the bars (GLES).
-    pub blur: bool,
-    /// The glass behind each bar, as last blurred.
-    pub panes: std::cell::RefCell<crate::glass::Panes>,
-    /// The screens' wallpapers (6.3), drawn on a thread of their own.
-    pub backgrounds: std::cell::RefCell<crate::wallpaper::Backgrounds>,
-    /// The screens' wallpapers that move (#433).
-    pub walls: std::cell::RefCell<crate::moving::Walls>,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
     /// The lock screen (7.1, docs/design/lock.md).
@@ -219,6 +190,12 @@ pub struct State {
     pub switching: Switching,
     /// A window's radial menu while it is open, and as it goes (#723).
     pub radial_menu: RadialMenu,
+    /// The GPU, the glass behind the bars and the wallpapers.
+    pub graphics: Graphics,
+    /// The motions' time, and the frames drawn by it.
+    pub frames: Frames,
+    /// The X11 window manager once XWayland is ready, and its display.
+    pub xwayland: XWayland,
 }
 
 impl State {
@@ -303,8 +280,6 @@ impl State {
             loop_handle,
             loop_signal,
             clock: Clock::new(),
-            held_clock: None,
-            clock_ahead: Duration::ZERO,
             socket_path,
             runtime_dir,
             config,
@@ -322,9 +297,6 @@ impl State {
             levels: crate::levels::Levels::default(),
             moving: None,
             wobble: None,
-            wake: None,
-            drawn_at: std::cell::Cell::new(None),
-            still: false,
             redraw: true,
             strips: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),
@@ -349,8 +321,6 @@ impl State {
             screen_reader: crate::screen_reader::ScreenReader::default(),
             told_window_states: None,
             overlay: Overlay::new(),
-            xwm: None,
-            xdisplay: None,
             programs: Programs::default(),
             autostart: crate::session::autostart::Autostart::default(),
             session_restore: crate::session::restore::Restore::default(),
@@ -361,16 +331,14 @@ impl State {
             screen_sets,
             input_devices: crate::input_devices::InputDevices::default(),
             idle,
-            gpu: None,
-            blur: false,
-            panes: std::cell::RefCell::default(),
-            backgrounds: std::cell::RefCell::default(),
-            walls: std::cell::RefCell::default(),
             session: None,
             lock: crate::lock::Lock::new(dh),
             away: crate::away::Away::default(),
             leave: crate::leave::Leave::default(),
             ending: None,
+            xwayland: XWayland::default(),
+            frames: Frames::default(),
+            graphics: Graphics::default(),
             radial_menu: RadialMenu::default(),
             switching: Switching::default(),
             gestures: Gestures::default(),

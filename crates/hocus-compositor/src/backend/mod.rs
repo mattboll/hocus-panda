@@ -131,7 +131,7 @@ pub fn dmabuf_global(state: &mut State, formats: FormatSet, main_device: Option<
     };
     state.protocols.dmabuf_global = Some(global);
     // The shell draws on the same GPU.
-    state.gpu = main_device;
+    state.graphics.gpu = main_device;
 }
 
 /// The device number of an EGL display's render node, which dmabuf

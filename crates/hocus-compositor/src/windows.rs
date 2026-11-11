@@ -349,9 +349,9 @@ fn descends_from(pid: u32, ancestor: u32) -> bool {
 impl State {
     /// The motions' time: `CLOCK_MONOTONIC`, unless a test holds it.
     pub fn now(&self) -> Duration {
-        match self.held_clock {
+        match self.frames.held_clock {
             Some(held) => held,
-            None => Duration::from(self.clock.now()) + self.clock_ahead,
+            None => Duration::from(self.clock.now()) + self.frames.clock_ahead,
         }
     }
 
@@ -921,7 +921,7 @@ impl State {
             if let Some(managed) = self.windows.get(&id) {
                 let window = managed.window.clone();
                 self.space.raise_element(&window, false);
-                if let (Some(x11), Some(xwm)) = (window.x11_surface(), self.xwm.as_mut())
+                if let (Some(x11), Some(xwm)) = (window.x11_surface(), self.xwayland.wm.as_mut())
                     && let Err(err) = xwm.raise_window(x11)
                 {
                     tracing::debug!(%err, "could not raise an X11 window");
@@ -1359,7 +1359,7 @@ impl State {
         // gets a frame at its end, not left a step short (a panel at 97 %).
         // A frame long gone (nothing drawn: a paused session) is not waited
         // for.
-        let (now, as_of_frame) = match (self.now(), self.drawn_at.get()) {
+        let (now, as_of_frame) = match (self.now(), self.frames.drawn_at.get()) {
             (now, Some(drawn)) if drawn <= now && now - drawn < Duration::from_secs(1) => {
                 (drawn, true)
             }
@@ -1497,26 +1497,26 @@ impl State {
     /// 97 %). One more frame is drawn then, as of now, unless the last
     /// judgement already found everything still: nothing moved since.
     fn judge_still(&mut self, moving: bool, as_of_frame: bool) {
-        self.still = !moving && (as_of_frame || self.still);
-        if moving || !self.still {
+        self.frames.still = !moving && (as_of_frame || self.frames.still);
+        if moving || !self.frames.still {
             self.redraw = true;
         }
     }
 
     /// A frame at `at`, after a pause in which nothing moves.
     fn wake_at(&mut self, at: Duration) {
-        if self.wake.is_some_and(|w| w <= at) {
+        if self.frames.wake.is_some_and(|w| w <= at) {
             return;
         }
         let delay = at.saturating_sub(self.now());
         let timer = Timer::from_duration(delay);
         let inserted = self.loop_handle.insert_source(timer, |_, _, app| {
-            app.state.wake = None;
+            app.state.frames.wake = None;
             app.state.redraw = true;
             TimeoutAction::Drop
         });
         match inserted {
-            Ok(_) => self.wake = Some(at),
+            Ok(_) => self.frames.wake = Some(at),
             Err(err) => tracing::warn!(%err.error, "could not schedule a frame"),
         }
     }

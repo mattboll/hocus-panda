@@ -149,7 +149,7 @@ impl State {
     pub(crate) fn perf_frame(&self, output: &Output) {
         self.perf
             .counters
-            .frame(self.perf.slot(output), !self.still);
+            .frame(self.perf.slot(output), !self.frames.still);
     }
 
     /// A scene of `output` built and drawn (or found unchanged), in

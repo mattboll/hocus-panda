@@ -71,7 +71,10 @@ impl XwmHandler for State {
         // The window manager only calls back once it exists: it is the one
         // calling.
         #[allow(clippy::expect_used)]
-        self.xwm.as_mut().expect("an X11 window manager calls back")
+        self.xwayland
+            .wm
+            .as_mut()
+            .expect("an X11 window manager calls back")
     }
 
     fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}

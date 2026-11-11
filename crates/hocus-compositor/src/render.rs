@@ -657,7 +657,7 @@ impl State {
         // And in a themed theme's colours and accent (#431, #740).
         crate::contrast::set_theme(Some(self.theme_choice()));
         let now = self.now();
-        self.drawn_at.set(Some(now));
+        self.frames.drawn_at.set(Some(now));
         let mut elements: Vec<OutputElement<R>> = Vec::new();
         let Some(area) = self.space.output_geometry(output) else {
             return elements;
@@ -1504,7 +1504,7 @@ impl State {
         let region: Rectangle<i32, Physical> =
             Rectangle::<f64, Logical>::from_size(size.to_f64()).to_physical_precise_round(scale);
         let blurred = renderer.frost(
-            &mut self.panes.borrow_mut(),
+            &mut self.graphics.panes.borrow_mut(),
             &crate::glass::launcher_pane(&output.name()),
             region,
             scale,
@@ -1604,7 +1604,7 @@ impl State {
             scale: (output.current_scale().fractional_scale() * 1000.0).round() as u32,
         };
         let (buffer, (w, h)) = {
-            let mut backgrounds = self.backgrounds.borrow_mut();
+            let mut backgrounds = self.graphics.backgrounds.borrow_mut();
             backgrounds.want(&name, &key);
             // Until the screen's new one is drawn, its previous stays.
             let shown = backgrounds.shown.get(&name)?;
@@ -1677,7 +1677,7 @@ impl State {
         .intersection(screen)?;
         let region: Rectangle<i32, Physical> = around.to_physical_precise_round(scale);
         let blurred = renderer.frost(
-            &mut self.panes.borrow_mut(),
+            &mut self.graphics.panes.borrow_mut(),
             &output.name(),
             region,
             scale,
@@ -1740,7 +1740,7 @@ impl State {
                 continue;
             };
             let Some(blurred) = renderer.frost(
-                &mut self.panes.borrow_mut(),
+                &mut self.graphics.panes.borrow_mut(),
                 &if layer.namespace() == hocus_link::EMOJI_NAMESPACE {
                     crate::glass::emoji_pane(&output.name())
                 } else {

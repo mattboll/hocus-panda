@@ -173,7 +173,7 @@ impl Headless {
 
     /// XWayland's display number, once it is ready.
     pub fn xdisplay(&self) -> Option<u32> {
-        self.app.state.xdisplay
+        self.app.state.xwayland.display
     }
 
     /// The Wayland socket, for `WAYLAND_DISPLAY` or a client to connect to.
@@ -207,6 +207,7 @@ impl Headless {
     pub fn wall_ticks(&self, name: &str) -> u64 {
         self.app
             .state
+            .graphics
             .walls
             .borrow()
             .ticks
@@ -217,12 +218,12 @@ impl Headless {
 
     /// The times a moving wallpaper asked the loop to wake it.
     pub fn wall_wakes(&self) -> u64 {
-        self.app.state.walls.borrow().wakes
+        self.app.state.graphics.walls.borrow().wakes
     }
 
     /// Whether output `name`'s moving wallpaper runs now.
     pub fn wall_running(&self, name: &str) -> bool {
-        self.app.state.walls.borrow().running(name)
+        self.app.state.graphics.walls.borrow().running(name)
     }
 
     /// How much of output `name` the windows cover, from 0 to 1.
@@ -237,7 +238,7 @@ impl Headless {
 
     /// Times a pane of glass was blurred so far.
     pub fn glass_blurs(&self) -> u64 {
-        self.app.state.panes.borrow().1
+        self.app.state.graphics.panes.borrow().1
     }
 
     /// The windows' rains under way, opening and closing (#432).
@@ -555,21 +556,21 @@ impl Headless {
     /// Going to an agent (4.3): its streak as the last frame drew it.
     pub fn streak(&self) -> Option<crate::going::Streak> {
         let state = &self.app.state;
-        state.streak_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+        state.streak_at(state.frames.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
     /// The halo (4.4) as the last frame drew it: `None` when it showed
     /// nothing (or is not drawn: on Pixman, without a bar).
     pub fn halo(&self) -> Option<crate::halo::Shown> {
         let state = &self.app.state;
-        state.halo_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+        state.halo_at(state.frames.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
     /// The panda peeking out (4.5) as the last frame drew it: how opaque,
     /// and how far toward the bar; `None` when it showed none.
     pub fn peek(&self) -> Option<crate::peek::Look> {
         let state = &self.app.state;
-        state.peek_at(state.drawn_at.get().unwrap_or_else(|| state.now()))
+        state.peek_at(state.frames.drawn_at.get().unwrap_or_else(|| state.now()))
     }
 
     /// Which agent's panda is out, and why, drawn or not; and whether it
@@ -621,7 +622,7 @@ impl Headless {
         let managed = state.windows.values().find(|m| {
             m.pulse.is_some() && crate::windows::app_id(&m.window).as_deref() == Some(app_id)
         })?;
-        let pulse = managed.pulse_look(state.drawn_at.get().unwrap_or_else(|| state.now()));
+        let pulse = managed.pulse_look(state.frames.drawn_at.get().unwrap_or_else(|| state.now()));
         Some((pulse.rim, pulse.ring.map(|(width, _)| width)))
     }
 
@@ -677,7 +678,7 @@ impl Headless {
     /// late that comes on a loaded machine.
     pub fn launcher_at_rest(&self) -> bool {
         let state = &self.app.state;
-        let drawn = state.drawn_at.get();
+        let drawn = state.frames.drawn_at.get();
         drawn.is_some_and(|at| state.panel.launchers.at_rest(at))
     }
 
@@ -1091,8 +1092,8 @@ impl Headless {
     /// clients get stay on the real clock.
     pub fn hold_clock(&mut self) {
         let state = &mut self.app.state;
-        if state.held_clock.is_none() {
-            state.held_clock = Some(state.now());
+        if state.frames.held_clock.is_none() {
+            state.frames.held_clock = Some(state.now());
         }
     }
 
@@ -1100,9 +1101,9 @@ impl Headless {
     /// is ahead of the real one: it never goes back.
     pub fn release_clock(&mut self) {
         let state = &mut self.app.state;
-        if let Some(held) = state.held_clock.take() {
+        if let Some(held) = state.frames.held_clock.take() {
             let real = Duration::from(state.clock.now());
-            state.clock_ahead = held.saturating_sub(real);
+            state.frames.clock_ahead = held.saturating_sub(real);
         }
     }
 
@@ -1112,8 +1113,8 @@ impl Headless {
     pub fn step(&mut self, by: Duration) -> anyhow::Result<()> {
         self.hold_clock();
         let state = &mut self.app.state;
-        let at = state.held_clock.map(|t| t + by);
-        state.held_clock = at;
+        let at = state.frames.held_clock.map(|t| t + by);
+        state.frames.held_clock = at;
         // What falls due on the way: the idle countdown runs on this
         // clock, its timer on the real one.
         state.idle_check();
@@ -1139,7 +1140,7 @@ impl Headless {
         // with them (its allocations, tests/rain.rs).
         self.dispatch(Duration::ZERO)?;
         let until = std::time::Instant::now() + Duration::from_secs(30);
-        while self.app.state.drawn_at.get() != at {
+        while self.app.state.frames.drawn_at.get() != at {
             let left = until.saturating_duration_since(std::time::Instant::now());
             anyhow::ensure!(!left.is_zero(), "no frame drawn at {at:?}");
             self.dispatch(left)?;
@@ -1359,12 +1360,12 @@ impl Headless {
     /// When a frame is asked for after a pause, if one is: a wakeup to
     /// come.
     pub fn wake(&self) -> Option<Duration> {
-        self.app.state.wake
+        self.app.state.frames.wake
     }
 
     /// Whether nothing moved as of the last frame drawn (`tick`'s word).
     pub fn still(&self) -> bool {
-        self.app.state.still
+        self.app.state.frames.still
     }
 
     /// The motions' time now (held, or running).
@@ -1381,10 +1382,10 @@ impl Headless {
     /// this holds.
     pub fn at_rest(&self) -> bool {
         let state = &self.app.state;
-        state.still
+        state.frames.still
             && !state.redraw
-            && state.drawn_at.get().is_some()
-            && state.wake.is_none_or(|at| at > state.now())
+            && state.frames.drawn_at.get().is_some()
+            && state.frames.wake.is_none_or(|at| at > state.now())
     }
 
     /// The layer surfaces of `namespace` that show what was asked of them:

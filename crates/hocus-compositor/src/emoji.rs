@@ -501,7 +501,7 @@ impl State {
             ),
             _ => clear_data_device_selection(&self.display_handle, &self.seat),
         }
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.new_selection(SelectionTarget::Clipboard, types)
         {
             tracing::warn!(?err, "could not offer the clipboard to X11");

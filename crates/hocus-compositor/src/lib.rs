@@ -364,7 +364,7 @@ fn remove_sockets(state: &State) {
     let mut files = vec![state.socket_path.clone(), PathBuf::from(lock)];
     files.extend(state.shell.socket.clone());
     files.extend(state.agents.socket.clone());
-    if let Some(n) = state.xdisplay {
+    if let Some(n) = state.xwayland.display {
         files.push(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));
         files.push(PathBuf::from(format!("/tmp/.X{n}-lock")));
     }

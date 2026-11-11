@@ -83,7 +83,7 @@ impl SelectionHandler for State {
         {
             self.selection_taken(types.clone(), crate::clipboard::Source::Wayland);
         }
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.new_selection(ty, types)
         {
             tracing::warn!(?err, "could not offer the selection to X11");
@@ -112,7 +112,7 @@ impl SelectionHandler for State {
             });
             return;
         }
-        if let Some(xwm) = self.xwm.as_mut()
+        if let Some(xwm) = self.xwayland.wm.as_mut()
             && let Err(err) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone())
         {
             tracing::warn!(?err, "could not read the X11 selection");
