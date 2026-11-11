@@ -117,7 +117,13 @@ keys cannot reach (the clipboard's pin) has no action.
 
 Each popover says what it shows as it draws (`crate::a11y::rows`): its
 rows, the order of its ring and where the ring is. It costs nothing at
-rest: a popover draws only while it is open and changes.
+rest: a popover draws only while it is open and changes. The popovers
+built with the shell's widget kit (the Wi-Fi's, Bluetooth's, the sound's
+and the music player's, [bar.md, "The shell's widget kit"](bar.md))
+write no rows by hand: each control declares its role, name and state
+where it is built, and the kit reads them from the laid-out tree, with
+their bounds, their order and the ring; their keys are the controls' ids
+(`sound:Mute`).
 
 ## Orca with the session
 
@@ -152,10 +158,9 @@ tree").
   `at-spi2-registryd`), shows a bar, a popover, a lock and a bubble, reads
   them back with AT-SPI's own library and presses a button. Skipped
   without them.
-- The shell's tests (`a11y::*`, `popover::sound`) check the names, roles,
-  states and actions above in French and in English, the announcement
-  rule, the lock, the password dialog, a bubble and the sound popover's
-  rows.
+- The shell's tests (`a11y::*`) check the names, roles, states and
+  actions above in French and in English, the announcement rule, the
+  lock, the password dialog and a bubble; `ui::keys`, the ring's order.
 - `crates/hocus-compositor/tests/screen_reader.rs`: the real shell's tree
   through `hocus msg a11y` (the bar's sound a slider; its popover a
   dialog with its rows, holding the keyboard; `Tab` moving the focus;

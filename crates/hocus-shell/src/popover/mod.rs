@@ -2415,15 +2415,13 @@ pub fn toggle_clipboard(output: &str) {
 /// What `item`'s popover shows changed: if it is open, it draws again, to
 /// its new size if that changed.
 pub fn changed(item: Item) {
-    // The widgets' view is built again as its surface next draws (#770).
-    if item == Item::Wifi {
-        wifi::widgets::touch();
-    }
     let (open, mut effects) = with(|c| {
         let open = c.open_item() == Some(item);
         (open, if open { c.refit() } else { Vec::new() })
     });
     if open {
+        // A kit surface's view is built again as it next draws (#770).
+        crate::ui::touch();
         effects.push(Effect::Wake(POPOVER_NAMESPACE));
         send(effects);
     }

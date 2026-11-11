@@ -77,6 +77,7 @@ mod tasks;
 mod theme;
 mod today;
 mod tray;
+mod ui;
 mod user;
 mod wayland;
 mod windows;
@@ -1897,44 +1898,20 @@ impl Shell {
     fn popover_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let item = popover::with(|c| c.item_of(id))?;
         let panel: Element<'_, Message> = match item {
-            popover::Item::Sound => canvas(popover::sound::Panel {
+            popover::Item::Sound => popover::sound::view(id, self.words, self.look.glass),
+            popover::Item::Wifi => popover::wifi::view(&popover::wifi::Panel {
                 id,
                 words: self.words,
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Wifi if popover::wifi::widgets::on() => {
-                popover::wifi::widgets::view(&popover::wifi::Panel {
-                    id,
-                    words: self.words,
-                    glass: self.look.glass,
-                    motion: self.look.motion,
-                    software: self.software,
-                })
-            }
+                motion: self.look.motion,
+            }),
             popover::Item::Music => popover::music::view(id, self.look.glass),
-            popover::Item::Wifi => canvas(popover::wifi::Panel {
+            popover::Item::Bluetooth => popover::bluetooth::view(&popover::bluetooth::Panel {
                 id,
                 words: self.words,
                 glass: self.look.glass,
                 motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Bluetooth => canvas(popover::bluetooth::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-                motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Brightness => canvas(popover::brightness::Panel {
                 id,
                 words: self.words,

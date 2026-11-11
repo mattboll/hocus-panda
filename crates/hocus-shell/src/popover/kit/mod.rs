@@ -30,12 +30,9 @@ pub(crate) use app::app_tile;
 pub(crate) use input::{
     Input, Pointer, awaited, cycle, first_control, input, keys, opened_by_keyboard, step,
 };
-pub(crate) use list::{
-    Aside, Clip, List, SCROLLBAR, Spin, aside, list, name_room, reveal, row_fill, searching,
-    spinner, stack,
-};
+pub(crate) use list::{Clip, List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
 pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
-pub(crate) use text::{Widths, elide, measure, measure_in, wrap, wrapped, zero};
+pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero};
 
 use crate::levels::{
     draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, cell, rgb},
@@ -87,7 +84,6 @@ pub(crate) const SMALL: f32 = 12.0;
 const BLOCK: f32 = 48.0;
 pub(crate) const NAME: f32 = 14.0;
 pub(crate) const STATUS: f32 = 12.5;
-const SMALL_BUTTON: f32 = 28.0;
 pub(crate) const SMALL_PAD: f32 = 9.0;
 pub(crate) const SMALL_RADIUS: f32 = 7.0;
 /// The header's switch, its knob.
@@ -104,7 +100,6 @@ const RIM: Ink = Ink::Token(|t| t.bar_border);
 pub(crate) const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 pub(crate) const FILL_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const BLOCK_FILL: Ink = Ink::Accent(0.10);
 const SWITCH_OFF: Ink = Ink::Token(|t| t.switch_off);
 const KNOB_SHADOW: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.4));
 /// `gauge.critical`'s light end: failures, a low battery, a sign-in page.
@@ -261,17 +256,6 @@ pub(crate) fn label_middle(top: f32) -> f32 {
     top + LABEL_PAD + LABEL * LINE / 2.0
 }
 
-/// A note from `top`, in `text.faint`.
-pub(crate) fn note(said: String, top: f32) -> canvas::Text {
-    text(
-        said,
-        Point::new(LEFT, top + NOTE_TOP + NOTE * LINE / 2.0),
-        NOTE,
-        FAINT.get(),
-        Alignment::Left,
-    )
-}
-
 /// `lines` from `top` at `x`, `size` px on lines `height` em apart, in
 /// `colour`.
 pub(crate) fn lines(
@@ -324,63 +308,6 @@ pub(crate) fn block_height(lines: f32) -> f32 {
 /// its button, `button` wide.
 pub(crate) fn block_room(button: f32) -> f32 {
     RIGHT - button - ICON_GAP - (LEFT + ICON + ICON_GAP)
-}
-
-/// A connected block from `top`, `height` tall, lit green: where it is.
-pub(crate) fn block(f: &mut Frame, top: f32, height: f32) -> Rectangle {
-    let block = Rectangle::new(
-        Point::new(LEFT - ROW_OUT, top),
-        Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, height),
-    );
-    f.fill(&rounded(block, ROW_RADIUS), BLOCK_FILL.get());
-    block
-}
-
-/// A block's name (cut to fit already), in 600, and the middle of its
-/// state's first line: both centred on `middle`, its state `lines` long.
-pub(crate) fn block_name(f: &mut Frame, name: String, middle: f32, lines: f32) -> f32 {
-    let column = NAME * LINE + 1.0 + lines * STATUS * LINE;
-    let name_middle = middle - column / 2.0 + NAME * LINE / 2.0;
-    f.fill_text(text_in(
-        MANROPE_SEMIBOLD,
-        text(
-            name,
-            Point::new(LEFT + ICON + ICON_GAP, name_middle),
-            NAME,
-            TEXT.get(),
-            Alignment::Left,
-        ),
-    ));
-    name_middle + NAME * LINE / 2.0 + 1.0 + STATUS * LINE / 2.0
-}
-
-/// A block's button ("Déconnecter"), `width` wide, on its right: where it
-/// is, the block from `top` and `height` tall.
-pub(crate) fn block_button(top: f32, height: f32, width: f32) -> Rectangle {
-    Rectangle::new(
-        Point::new(RIGHT - width, top + (height - SMALL_BUTTON) / 2.0),
-        Size::new(width, SMALL_BUTTON),
-    )
-}
-
-/// A small button at `rect` saying `word`, lit under the pointer.
-pub(crate) fn small_button(f: &mut Frame, rect: Rectangle, word: &str, hover: bool) {
-    let path = rounded(rect, SMALL_RADIUS);
-    if hover && !crate::theme::contrast() {
-        f.fill(&path, FILL_HOVER);
-    } else {
-        f.fill(&path, FILL);
-        if hover {
-            crate::theme::hover(f, &path, FILL_HOVER);
-        }
-    }
-    f.fill_text(text(
-        word.to_owned(),
-        rect.center(),
-        STATUS,
-        if hover { TEXT.get() } else { DIM.get() },
-        Alignment::Center,
-    ));
 }
 
 // --- The header's switch -----------------------------------------------------------
