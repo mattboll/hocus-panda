@@ -77,7 +77,6 @@ impl Control {
     }
 
     /// Its node as `with` makes it: checked, selected, one of a set…
-    #[allow(dead_code, reason = "for the bar's items still to come")]
     pub fn node(mut self, with: impl FnOnce(Node) -> Node) -> Self {
         self.node = with(self.node);
         self
@@ -92,7 +91,6 @@ impl Control {
     }
 
     /// A part of the control before it.
-    #[allow(dead_code, reason = "for the bar's items still to come")]
     pub fn part(mut self) -> Self {
         self.part = true;
         self
@@ -118,14 +116,22 @@ pub struct Controls {
 }
 
 impl Controls {
-    /// The control under `at`, if any.
+    /// The control under `at`, if any: the innermost (a button in a
+    /// card, a line's ✕).
     fn under(&self, at: Point) -> Option<&Control> {
-        self.controls.iter().find(|c| c.rect.contains(at))
+        self.controls
+            .iter()
+            .filter(|c| c.rect.contains(at))
+            .min_by(|a, b| area(a.rect).total_cmp(&area(b.rect)))
     }
 
     fn in_bar(&self, rect: Rectangle) -> Rectangle {
         rect + self.to_bar
     }
+}
+
+fn area(rect: Rectangle) -> f32 {
+    rect.width * rect.height
 }
 
 /// What a press did.
@@ -405,5 +411,27 @@ pub fn pointer(
         mouse::Event::CursorEntered => cursor.position_in(bounds),
         mouse::Event::CursorLeft => None,
         _ => before,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pointer_takes_the_innermost_control_under_it() {
+        let line = Rectangle::new(Point::new(5.0, 5.0), Size::new(184.0, 30.0));
+        let close = Rectangle::new(Point::new(163.0, 9.0), Size::new(22.0, 22.0));
+        let controls = Controls {
+            controls: vec![
+                Control::new(Item::Window(1), line, Role::ListItem, "w1", 8.0),
+                Control::new(Item::WindowClose(1), close, Role::Button, "Fermer w1", 6.0).part(),
+            ],
+            ..Controls::default()
+        };
+        let under = |x, y| controls.under(Point::new(x, y)).map(|c| c.item);
+        assert_eq!(under(170.0, 20.0), Some(Item::WindowClose(1)));
+        assert_eq!(under(40.0, 20.0), Some(Item::Window(1)));
+        assert_eq!(under(40.0, 50.0), None);
     }
 }

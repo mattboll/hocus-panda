@@ -677,16 +677,6 @@ fn gather(
         .iter()
         .filter(|(_, item, _)| matches!(item, I::Task(_)))
         .count();
-    let windows = crate::windows::shown(bar);
-    let window_lines: Vec<crate::windows::Line> = windows
-        .rows
-        .iter()
-        .filter_map(|r| match r {
-            crate::windows::Row::Window(line) => Some(line.clone()),
-            crate::windows::Row::More(_) => None,
-        })
-        .collect();
-    let more_windows = windows.count.saturating_sub(window_lines.len());
     let mut desks = Vec::new();
     for (_, item, _) in &items {
         let I::Desktop { row, index } = *item else {
@@ -749,8 +739,6 @@ fn gather(
         agents: agents.to_vec(),
         now_us: crate::agents::now_us(),
         rows_shown: crate::agents::rows_shown(),
-        windows: window_lines,
-        more_windows,
         desks,
         link: (link != hocus_network::model::Link::Hidden).then_some(link),
         bluetooth: (bluetooth != hocus_bluetooth::model::Row::Hidden).then_some(bluetooth),

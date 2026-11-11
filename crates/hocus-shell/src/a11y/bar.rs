@@ -7,9 +7,7 @@
 
 use hocus_a11y::{Act, Node, Rect, Role, Window};
 use hocus_bluetooth::model::Row as BluetoothRow;
-use hocus_link::{
-    AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE, WINDOWS_NAMESPACE,
-};
+use hocus_link::{AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE};
 use hocus_network::model::Link;
 
 use super::words::{Words, plain};
@@ -71,8 +69,6 @@ pub struct Facts {
     /// Now, on the agents' `since`'s clock (microseconds).
     pub now_us: u64,
     pub rows_shown: usize,
-    pub windows: Vec<crate::windows::Line>,
-    pub more_windows: usize,
     /// Desktop `index` of row `row`.
     pub desks: Vec<((u8, u8), Desk)>,
     pub link: Option<Link>,
@@ -157,24 +153,6 @@ fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> 
             }
             Some(Node::new("agents", Role::List, "Agents"))
         }
-        WINDOWS_NAMESPACE if full => {
-            let n = facts.windows.len() + facts.more_windows;
-            // A line's ✕ is its child.
-            let mut lines: Vec<Node> = Vec::new();
-            for node in nodes {
-                let close = lines.last().is_some_and(|line: &Node| {
-                    node.key.starts_with("WindowClose(")
-                        && node.key.trim_start_matches("WindowClose")
-                            == line.key.trim_start_matches("Window")
-                });
-                match lines.last_mut() {
-                    Some(line) if close => line.children.push(node),
-                    _ => lines.push(node),
-                }
-            }
-            nodes = lines;
-            Some(Node::new("windows", Role::List, words.windows(n)))
-        }
         DESKTOPS_NAMESPACE => Some(Node::new("desktops", Role::RadioGroup, words.desktops())),
         _ => None,
     };
@@ -230,26 +208,6 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
             tool.title()
         )),
         Item::Decline => button(crate::agents::Words::new(lang).decline().to_owned()),
-        Item::Window(id) => {
-            let line = facts.windows.iter().find(|l| l.id == id)?;
-            Node::new(
-                key(item),
-                Role::ListItem,
-                crate::windows::Words::new(lang).name(line),
-            )
-            .selected(line.focused)
-            .bounds(Some(rect))
-            .act(Act::Click)
-            .act(Act::Menu)
-        }
-        Item::WindowClose(id) => {
-            let line = facts.windows.iter().find(|l| l.id == id)?;
-            button(crate::windows::Words::new(lang).close(&line.title))
-        }
-        Item::WindowsMore => button(words.more_windows(facts.more_windows)),
-        Item::Windows => {
-            button(crate::windows::Words::new(lang).item(facts.windows.len() + facts.more_windows))
-        }
         Item::Desktop { row, index } => {
             let desk = facts
                 .desks
@@ -317,7 +275,11 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
         | Item::Join
         | Item::TodayLine(_)
         | Item::TodayMore
-        | Item::Tray(_) => return None,
+        | Item::Tray(_)
+        | Item::Window(_)
+        | Item::WindowClose(_)
+        | Item::WindowsMore
+        | Item::Windows => return None,
         // Not the bar's own: shown in a popover.
         Item::WindowMenu(_) => return None,
     };
@@ -331,7 +293,10 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hocus_link::{CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, FOOTER_NAMESPACE, LEVELS_NAMESPACE};
+    use hocus_link::{
+        CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, FOOTER_NAMESPACE, LEVELS_NAMESPACE,
+        WINDOWS_NAMESPACE,
+    };
 
     use crate::levels::model::{Battery, Charge, Profile, Sound};
 
@@ -530,33 +495,39 @@ mod tests {
     }
 
     #[test]
-    fn a_window_line_holds_its_close_button() {
+    fn a_part_a_surface_declares_is_its_controls_child() {
         let mut facts = facts("jeudi 6 novembre");
         facts.items = vec![
             (WINDOWS_NAMESPACE, Item::Window(7), at(10.0)),
             (WINDOWS_NAMESPACE, Item::WindowClose(7), at(10.0)),
             (WINDOWS_NAMESPACE, Item::Window(8), at(40.0)),
         ];
-        facts.windows = vec![
-            crate::windows::Line {
-                id: 7,
-                app: "slack".to_owned(),
-                title: "Slack — #produit".to_owned(),
-                focused: true,
-                minimized: false,
-                above: false,
-                everywhere: false,
-            },
-            crate::windows::Line {
-                id: 8,
-                app: "foot".to_owned(),
-                title: "Terminal".to_owned(),
-                focused: false,
-                minimized: false,
-                above: false,
-                everywhere: false,
-            },
+        let node = |item: Item, role: Role, name: &str| Node::new(key(item), role, name);
+        facts.nodes = vec![
+            (
+                Item::Window(7),
+                node(Item::Window(7), Role::ListItem, "Slack — #produit").selected(true),
+                false,
+            ),
+            (
+                Item::WindowClose(7),
+                node(
+                    Item::WindowClose(7),
+                    Role::Button,
+                    "Fermer Slack — #produit",
+                ),
+                true,
+            ),
+            (
+                Item::Window(8),
+                node(Item::Window(8), Role::ListItem, "Terminal"),
+                false,
+            ),
         ];
+        facts.groups = vec![(
+            WINDOWS_NAMESPACE,
+            Node::new("windows", Role::List, "Fenêtres, 2"),
+        )];
         let window = super::window(&facts, FR);
         let list = window.find("windows").expect("the list");
         assert_eq!(list.role, Role::List);
@@ -565,6 +536,8 @@ mod tests {
         let slack = &list.children[0];
         assert_eq!(slack.selected, Some(true));
         assert_eq!(slack.children[0].name, "Fermer Slack — #produit");
+        // Placed where the bar shows it.
+        assert_eq!(slack.bounds, Some(at(10.0)));
     }
 
     #[test]
