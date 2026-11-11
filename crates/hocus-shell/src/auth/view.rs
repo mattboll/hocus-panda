@@ -10,10 +10,7 @@
 //! each drawing its look; the field is the shared one, masked. What
 //! nothing holds is drawn under them ([`Back`]).
 
-use std::{
-    sync::{Mutex, PoisonError},
-    time::Instant,
-};
+use std::time::Instant;
 
 use hocus_a11y::Role;
 use hocus_link::{AUTH_NAMESPACE, AUTH_RADIUS, AUTH_WIDTH};
@@ -28,7 +25,7 @@ use iced::{
     window,
 };
 
-use super::{Dialog, Phase, Target, Words};
+use super::{Auth, Dialog, Phase, Target, Words};
 use crate::theme::Ink;
 use crate::{
     Message,
@@ -41,6 +38,7 @@ use crate::{
         Pressed,
         kit::{self, MANROPE_SEMIBOLD},
     },
+    surfaces::Lent,
     ui::{
         self, Around, control,
         field::Field,
@@ -493,66 +491,96 @@ fn id_of(target: Target) -> String {
 
 /// The dialog on its surface `id`, on the glass (else opaque); its field
 /// shakes and Details' chevron turns with `motion`.
-pub fn view<'a>(id: window::Id, words: Words, glass: bool, motion: bool) -> Element<'a, Message> {
+pub fn view<'a>(
+    auth: &'a Lent<Auth>,
+    id: window::Id,
+    words: Words,
+    glass: bool,
+    motion: bool,
+) -> Element<'a, Message> {
     Around::new(
         id,
-        build(id, words, motion),
-        move |m| handle(id, m),
+        build(auth, id, words, motion),
+        move |m| handle(auth, id, m),
         Msg::Stale,
     )
-    .own(AUTH_NAMESPACE, move || !closing(id))
-    .rebuild(move || build(id, words, motion))
-    .keys(move |pressed| keys(id, pressed))
-    .on(iced::widget::canvas(Back { id, words, glass })
-        .width(Length::Fill)
-        .height(Length::Fill))
+    .own(AUTH_NAMESPACE, move || !closing(auth, id))
+    .rebuild(move || build(auth, id, words, motion))
+    .keys(move |pressed| keys(auth, id, pressed))
+    .on(iced::widget::canvas(Back {
+        auth,
+        id,
+        words,
+        glass,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill))
 }
 
 /// Whether surface `id` fades out: it takes nothing then.
-fn closing(id: window::Id) -> bool {
-    super::with_dialog(id, |_, _, _| ()).is_none()
+fn closing(auth: &Lent<Auth>, id: window::Id) -> bool {
+    auth.read(|a| a.closing(id)).unwrap_or(true)
 }
 
 /// The keys the dialog takes before the kit: `Escape`, and what is typed
 /// while the ring is not on the field (the field's, wherever the ring
 /// is). `Tab`, `Enter` and `Space` are the kit's.
-fn keys(id: window::Id, pressed: &Pressed) -> Option<Msg> {
+fn keys(auth: &Lent<Auth>, id: window::Id, pressed: &Pressed) -> Option<Msg> {
     use iced::keyboard::{Key, key::Named};
     match &pressed.key {
         Key::Named(Named::Escape) => Some(Msg::Escape),
         Key::Named(Named::Tab | Named::Enter | Named::Space) => None,
-        _ if super::types_elsewhere(id) => Some(Msg::Type(pressed.clone())),
+        _ if auth.read(|a| a.types_elsewhere(id)) == Some(true) => Some(Msg::Type(pressed.clone())),
         _ => None,
     }
 }
 
-fn handle(id: window::Id, message: Msg) {
-    match message {
-        Msg::Act(target) => super::act_on(id, target),
-        Msg::Focus(target) => super::focus_on(id, target),
-        Msg::Took(took) => super::took(id, took),
-        Msg::Type(pressed) => super::typed(id, &pressed),
-        Msg::Escape => super::escape(id),
-        Msg::Stale => {}
+fn handle(auth: &Lent<Auth>, id: window::Id, message: Msg) {
+    let now = Instant::now();
+    let effects = auth.change(|a| match message {
+        Msg::Act(target) => a.act_on(id, target, now),
+        Msg::Focus(target) => {
+            a.focus_on(id, target);
+            Vec::new()
+        }
+        Msg::Took(took) => {
+            a.took(id, took);
+            Vec::new()
+        }
+        Msg::Type(pressed) => {
+            a.typed(id, &pressed);
+            Vec::new()
+        }
+        Msg::Escape => a.escape(id, now),
+        Msg::Stale => Vec::new(),
+    });
+    if let Some(effects) = effects.filter(|e| !e.is_empty()) {
+        crate::popover::send(effects);
+    }
+    // Closed: the loop's tick takes its surface away once faded out, and
+    // opens the next request.
+    if auth.change(Auth::due).flatten().is_some() {
+        crate::surfaces::ask(crate::surfaces::Asked::Auth(super::Come::Tick));
     }
 }
 
-/// What the dialog last said it shows, for the log.
-static SAID: Mutex<Option<Vec<String>>> = Mutex::new(None);
-
 /// Its content, as the dialog is now; said in the log when it changed.
-fn build<'a>(id: window::Id, words: Words, motion: bool) -> El<'a> {
-    let Some((content, said)) = super::with_drawn(id, |dialog, caps, waiting| {
-        content(dialog, caps, waiting, words, motion)
-    }) else {
+fn build<'a>(auth: &'a Lent<Auth>, id: window::Id, words: Words, motion: bool) -> El<'a> {
+    let built = auth.read(|a| {
+        a.drawn(id, |dialog, caps, waiting| {
+            content(auth, dialog, caps, waiting, words, motion)
+        })
+    });
+    let Some(Some((content, said))) = built else {
         return Space::new().into();
     };
-    if !closing(id) {
-        let mut last = SAID.lock().unwrap_or_else(PoisonError::into_inner);
-        if last.as_ref() != Some(&said) {
-            tracing::debug!(?said, "the authentication dialog shows it");
-            *last = Some(said);
-        }
+    if !closing(auth, id) {
+        auth.change(|a| {
+            if a.said.as_ref() != Some(&said) {
+                tracing::debug!(?said, "the authentication dialog shows it");
+                a.said = Some(said);
+            }
+        });
     }
     content
 }
@@ -578,23 +606,11 @@ fn pressed<'a>(
     .on_press(Msg::Act(target))
 }
 
-/// The entry of the dialog shown (or fading out), for the field's widget.
-fn entry(with: &mut dyn FnMut(&mut Entry)) {
-    super::with(|auth| {
-        let dialog = auth
-            .shown
-            .as_mut()
-            .or_else(|| auth.closing.last_mut().map(|(_, _, d)| d));
-        if let Some(dialog) = dialog {
-            with(&mut dialog.field);
-        }
-    });
-}
-
 /// The dialog's controls where its layout places them, over what
 /// [`Back`] draws, in the keyboard's order; and what it says (never the
 /// password: its length only).
-fn content<'a>(
+pub(super) fn content<'a>(
+    auth: &'a Lent<Auth>,
     dialog: &Dialog,
     caps: bool,
     waiting: usize,
@@ -684,7 +700,9 @@ fn content<'a>(
         draw_field_box(f, field, border.get(), caps_shown);
     });
     let typed = Field {
-        with: entry,
+        with: Box::new(move |with: &mut dyn FnMut(&mut Entry)| {
+            auth.change(|a| a.entry(with));
+        }),
         style: Style {
             hint: (FIELD_TEXT, MANROPE),
             ..Style::one(FIELD_TEXT, MANROPE_BOLD)
@@ -862,13 +880,14 @@ fn busy(since: Option<Instant>, now: Instant, ms: f32) -> bool {
 /// accounts' list's box, the line under the field, the facts and the
 /// requests waiting. Nothing once it faded out.
 #[derive(Debug, Clone, Copy)]
-struct Back {
+struct Back<'a> {
+    auth: &'a Lent<Auth>,
     id: window::Id,
     words: Words,
     glass: bool,
 }
 
-impl<M> canvas::Program<M> for Back {
+impl<M> canvas::Program<M> for Back<'_> {
     type State = ();
 
     fn draw(
@@ -880,8 +899,10 @@ impl<M> canvas::Program<M> for Back {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        super::with_drawn(self.id, |dialog, caps, waiting| {
-            draw_back(&mut frame, dialog, caps, waiting, self.words, self.glass);
+        self.auth.read(|a| {
+            a.drawn(self.id, |dialog, caps, waiting| {
+                draw_back(&mut frame, dialog, caps, waiting, self.words, self.glass);
+            })
         });
         vec![frame.into_geometry()]
     }

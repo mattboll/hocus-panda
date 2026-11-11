@@ -673,7 +673,7 @@ fn content<'a>(laid: &Laid, words: Words, ui: &Ui, keyboard: bool) -> El<'a> {
     .align_y(Vertical::Center);
     let magnifier = drawn(MAGNIFIER, MAGNIFIER, |f, _| magnifier(f, Point::ORIGIN));
     let typed = Field {
-        with: query,
+        with: Box::new(query),
         style: Style::one(QUERY, MANROPE),
         placeholder: words.placeholder().into(),
         look: Look::of(TEXT.get(), QUIET.get()),

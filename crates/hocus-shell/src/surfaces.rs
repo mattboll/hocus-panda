@@ -13,9 +13,13 @@
 //! view. Another thread (the screen readers') asks through [`Asked`], a
 //! message for the loop.
 
-use std::{cell::RefCell, time::Instant};
+use std::{
+    cell::RefCell,
+    sync::{Mutex, PoisonError},
+    time::Instant,
+};
 
-use iced::{Element, window};
+use iced::{Element, futures::channel::mpsc::UnboundedSender, window};
 
 use crate::popover::Effect;
 
@@ -85,9 +89,35 @@ impl<T> Lent<T> {
     }
 }
 
-/// What another thread asks of a surface, as a message for the loop (a
-/// screen reader's click).
-#[derive(Debug, Clone, PartialEq)]
+/// What another thread asks of a surface, or tells it (a screen reader's
+/// click, polkit's request, the helper's answer), as a message for the
+/// loop ([`ask`], [`inbox`]).
+#[derive(Debug, Clone)]
 pub enum Asked {
     Share(crate::share::Act),
+    Auth(crate::auth::Come),
+    Actions(crate::actions::Come),
+    Emoji(crate::emoji::Come),
+}
+
+/// The loop's end of [`ask`]: a channel's end, made once, not state.
+static ASKS: Mutex<Option<UnboundedSender<Asked>>> = Mutex::new(None);
+
+/// `asked` for the loop, from any thread.
+pub fn ask(asked: Asked) {
+    let sent = ASKS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|asks| asks.unbounded_send(asked).is_ok());
+    if !sent {
+        tracing::debug!("asked of a surface before the shell runs: dropped");
+    }
+}
+
+/// What other threads ask of the surfaces, as messages.
+pub fn inbox() -> impl iced::futures::Stream<Item = crate::Message> {
+    let (asks, asked) = iced::futures::channel::mpsc::unbounded();
+    *ASKS.lock().unwrap_or_else(PoisonError::into_inner) = Some(asks);
+    iced::futures::StreamExt::map(asked, crate::Message::Surface)
 }

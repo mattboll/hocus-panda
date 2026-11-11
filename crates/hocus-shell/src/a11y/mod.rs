@@ -63,6 +63,12 @@ pub enum Shown {
     Share(Option<crate::share::Seen>),
     /// The lock, while the session is locked.
     Lock(Option<crate::lock::Lock>),
+    /// The authentication dialog, while it shows.
+    Auth(Option<crate::auth::Seen>),
+    /// The actions palette, while it is open.
+    Actions(Option<crate::actions::Seen>),
+    /// The emoji picker, while it is open.
+    Emoji(Option<crate::emoji::Seen>),
 }
 
 /// What a surface the loop owns shows now, for this thread.
@@ -167,6 +173,9 @@ fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
             Some(Heard::Bridge(Event::Asked(asked))) => said.carry_out(&asked),
             Some(Heard::Shown(Shown::Share(seen))) => said.share = seen,
             Some(Heard::Shown(Shown::Lock(lock))) => said.lock = lock,
+            Some(Heard::Shown(Shown::Auth(seen))) => said.auth = seen,
+            Some(Heard::Shown(Shown::Actions(seen))) => said.actions = seen,
+            Some(Heard::Shown(Shown::Emoji(seen))) => said.emoji = seen,
             Some(Heard::Dump) => {
                 for window in said.describe(Instant::now()) {
                     for line in window.dump().lines() {
@@ -229,6 +238,12 @@ struct Said {
     share: Option<crate::share::Seen>,
     /// The lock, as the loop last told it.
     lock: Option<crate::lock::Lock>,
+    /// The authentication dialog, as the loop last told it.
+    auth: Option<crate::auth::Seen>,
+    /// The actions palette, as the loop last told it.
+    actions: Option<crate::actions::Seen>,
+    /// The emoji picker, as the loop last told it.
+    emoji: Option<crate::emoji::Seen>,
 }
 
 impl Said {
@@ -291,7 +306,7 @@ impl Said {
             windows.push(window);
         }
         windows.extend(self.popover(words));
-        if let Some(palette) = crate::actions::a11y() {
+        if let Some(palette) = self.actions.as_ref().and_then(crate::actions::a11y) {
             for node in palette.all() {
                 if node.key.starts_with("actions:Row(") {
                     self.targets.insert(
@@ -366,7 +381,7 @@ impl Said {
             }
             windows.push(chooser);
         }
-        if let Some(picker) = crate::emoji::a11y() {
+        if let Some(picker) = self.emoji.as_ref().and_then(crate::emoji::a11y) {
             for node in picker.all() {
                 if node.key.starts_with("emoji:") {
                     self.targets.insert(
@@ -378,7 +393,7 @@ impl Said {
             windows.push(picker);
         }
         windows.extend(self.bubbles(words));
-        if let Some(dialog) = crate::auth::a11y() {
+        if let Some(dialog) = self.auth.as_ref().and_then(crate::auth::a11y) {
             for node in dialog.all() {
                 if node.key.starts_with("auth:") {
                     self.targets.insert(

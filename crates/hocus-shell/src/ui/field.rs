@@ -14,13 +14,13 @@ use crate::field::{
     view::{Look, Style},
 };
 
-/// The surface's field, reached through its lock: what is to be done
+/// The surface's field, reached through its state: what is to be done
 /// with it is handed in.
-pub type With = fn(&mut dyn FnMut(&mut Entry));
+pub type With<'a> = Box<dyn Fn(&mut dyn FnMut(&mut Entry)) + 'a>;
 
 /// A field: its text from `left` to `right` px in from its sides.
-pub struct Field<M> {
-    pub with: With,
+pub struct Field<'a, M> {
+    pub with: With<'a>,
     pub style: Style,
     pub placeholder: String,
     pub look: Look,
@@ -33,9 +33,9 @@ pub struct Field<M> {
     pub on_took: fn(Took) -> M,
 }
 
-impl<M: Clone + 'static> Field<M> {
+impl<'a, M: Clone + 'static> Field<'a, M> {
     /// As a widget, `height` tall across its room.
-    pub fn view<'a>(self, height: f32) -> Element<'a, M> {
+    pub fn view(self, height: f32) -> Element<'a, M> {
         canvas(self).width(Length::Fill).height(height).into()
     }
 
@@ -60,7 +60,7 @@ fn canvas<M, P: canvas::Program<M>>(program: P) -> canvas::Canvas<P, M> {
     iced::widget::canvas(program)
 }
 
-impl<M: Clone + 'static> canvas::Program<M> for Field<M> {
+impl<M: Clone + 'static> canvas::Program<M> for Field<'_, M> {
     type State = ();
 
     fn update(

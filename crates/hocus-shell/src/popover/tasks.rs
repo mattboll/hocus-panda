@@ -289,7 +289,7 @@ fn content<'a>(
     let mut all = column![header];
     if let Some(field) = field {
         let typed = Field {
-            with: entry,
+            with: Box::new(entry),
             style: Style::one(LINE_TEXT, MANROPE),
             placeholder: words.placeholder().into(),
             look: FieldLook::of(TEXT.get(), FAINT.get()),

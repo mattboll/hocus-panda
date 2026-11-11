@@ -32,7 +32,7 @@ use iced::{
     window,
 };
 
-use super::{Grid, Heading, Open, Phase, Row, Words};
+use super::{Grid, Heading, Open, Phase, Picker, Row, Words};
 use crate::theme::Ink;
 use crate::{
     field::{
@@ -41,6 +41,7 @@ use crate::{
     },
     levels::draw::{DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::{Pressed, kit},
+    surfaces::Lent,
     ui::{
         self, Around, Later, control,
         field::Field,
@@ -281,85 +282,116 @@ fn id_of(what: &str) -> String {
 }
 
 /// The picker on its surface `id`, on the glass (else opaque).
-pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
-    Around::new(id, build(id, words), move |m| handle(id, m), Msg::Stale)
-        .own(hocus_link::EMOJI_NAMESPACE, move || {
-            super::with(|p| p.open_on(id).is_some())
-        })
-        .rebuild(move || build(id, words))
-        .keys(move |pressed| {
-            super::with(|p| p.open_on(id).is_some_and(|o| o.holding))
-                .then(|| Msg::Key(pressed.clone()))
-        })
-        .modifiers(move |held| {
-            super::with(|p| {
-                if let Some(open) = p.open_mut(id) {
-                    open.shift = held.shift();
-                }
-            });
-        })
-        .later(&LATER)
-        .on(iced::widget::canvas(Tint(glass))
-            .width(Length::Fill)
-            .height(Length::Fill))
+pub fn view<'a>(
+    picker: &'a Lent<Picker>,
+    id: window::Id,
+    words: Words,
+    glass: bool,
+) -> Element<'a, crate::Message> {
+    Around::new(
+        id,
+        build(picker, id, words),
+        move |m| handle(picker, id, m),
+        Msg::Stale,
+    )
+    .own(hocus_link::EMOJI_NAMESPACE, move || {
+        picker.read(|p| p.open_on(id).is_some()).unwrap_or(false)
+    })
+    .rebuild(move || build(picker, id, words))
+    .keys(move |pressed| {
+        picker
+            .read(|p| p.open_on(id).is_some_and(|o| o.holding))
+            .unwrap_or(false)
+            .then(|| Msg::Key(pressed.clone()))
+    })
+    .modifiers(move |held| {
+        picker.change(|p| {
+            if let Some(open) = p.open_mut(id) {
+                open.shift = held.shift();
+            }
+        });
+    })
+    .later(&LATER)
+    .on(iced::widget::canvas(Tint(glass))
+        .width(Length::Fill)
+        .height(Length::Fill))
 }
 
-fn handle(id: window::Id, message: Msg) {
-    match message {
-        Msg::Act(at) => {
-            let keep = super::with(|p| p.open_on(id).is_some_and(|o| o.shift));
-            super::act(id, at, keep);
-        }
-        Msg::Hover(at) => super::with(|p| {
-            if let Some(open) = p.open_mut(id) {
-                open.selected = at;
+fn handle(picker: &Lent<Picker>, id: window::Id, message: Msg) {
+    let now = std::time::Instant::now();
+    let done = picker.change(|p| {
+        let effects = match message {
+            Msg::Act(at) => {
+                let keep = p.open_on(id).is_some_and(|o| o.shift);
+                p.act(id, at, keep, now)
             }
-        }),
-        Msg::Tab(i) => {
-            if let Some(heading) = Heading::tabs().get(i) {
-                super::tab(id, *heading);
+            Msg::Hover(at) => {
+                if let Some(open) = p.open_mut(id) {
+                    open.selected = at;
+                }
+                Vec::new()
             }
-        }
-        Msg::Tones(tone) => super::tones(id, tone),
-        Msg::Took(took) => super::took(id, took),
-        Msg::Scrolled(y) => super::with(|p| {
-            if let Some(open) = p.open_mut(id) {
-                open.scroll = y;
+            Msg::Tab(i) => {
+                if let Some(heading) = Heading::tabs().get(i) {
+                    p.tab(id, *heading);
+                }
+                Vec::new()
             }
-        }),
-        Msg::Key(pressed) => {
-            super::key_on(id, &pressed.key, pressed.modifiers, pressed.text.as_deref());
-        }
-        Msg::Stale => {}
+            Msg::Tones(tone) => p.tones(id, tone),
+            Msg::Took(took) => {
+                p.took(id, took);
+                Vec::new()
+            }
+            Msg::Scrolled(y) => {
+                if let Some(open) = p.open_mut(id) {
+                    open.scroll = y;
+                }
+                Vec::new()
+            }
+            Msg::Key(pressed) => p
+                .key_on(
+                    id,
+                    &pressed.key,
+                    pressed.modifiers,
+                    pressed.text.as_deref(),
+                    now,
+                )
+                .unwrap_or_default(),
+            Msg::Stale => return (Vec::new(), false),
+        };
+        p.said();
+        (effects, p.due().is_some())
+    });
+    let Some((effects, due)) = done else {
+        return;
+    };
+    if !effects.is_empty() {
+        crate::popover::send(effects);
+    }
+    // Closed: the loop's tick takes its surface away once faded out.
+    if due {
+        crate::surfaces::ask(crate::surfaces::Asked::Emoji(super::Come::Tick));
     }
 }
 
-/// The search, to the kit's field.
-fn query(with: &mut dyn FnMut(&mut Entry)) {
-    super::with(|p| {
-        if let Phase::Open(open) = &mut p.phase {
-            with(&mut open.query);
-        }
-    });
-}
-
 /// Its content, as the picker is now; said in the log when it changed.
-fn build<'a>(id: window::Id, words: Words) -> El<'a> {
-    super::with(|p| {
-        let Some(open) = p.open_mut(id) else {
-            return Space::new().into();
-        };
-        let now = shows(open, words);
-        if now != open.logged {
-            tracing::debug!(said = %now, "the emoji picker shows it");
-            open.logged = now;
-        }
-        content(open, words)
-    })
+fn build<'a>(picker: &'a Lent<Picker>, id: window::Id, words: Words) -> El<'a> {
+    picker
+        .change(|p| {
+            let open = p.open_mut(id)?;
+            let now = shows(open, words);
+            if now != open.logged {
+                tracing::debug!(said = %now, "the emoji picker shows it");
+                open.logged = now;
+            }
+            Some(content(picker, open, words))
+        })
+        .flatten()
+        .unwrap_or_else(|| Space::new().into())
 }
 
 /// What it shows, in words, for the log (and the tests).
-fn shows(open: &Open, words: Words) -> String {
+pub(super) fn shows(open: &Open, words: Words) -> String {
     let offset = offset_at(&open.grid, open.scroll);
     let shown = &open.grid.rows[offset.min(open.grid.rows.len())..end_of(&open.grid, offset)];
     let mut rows: Vec<String> = Vec::new();
@@ -420,11 +452,11 @@ fn glyph<'a>(text: String, size: f32, alpha: f32) -> iced::widget::Text<'a> {
         })
 }
 
-fn content<'a>(open: &Open, words: Words) -> El<'a> {
+fn content<'a>(picker: &'a Lent<Picker>, open: &Open, words: Words) -> El<'a> {
     let tone = super::store::kept().tone;
     let width = RIGHT - LEFT;
     let offset = offset_at(&open.grid, open.scroll);
-    let mut all = column![top_line(open, words, tone, width)];
+    let mut all = column![top_line(picker, open, words, tone, width)];
     if open.tones_open {
         let mut tones = row![].spacing(TONE_GAP);
         for (i, colour) in TONE_COLOURS.iter().copied().enumerate() {
@@ -563,10 +595,22 @@ fn said_in<'a>(text: String, size: f32, colour: Color) -> iced::widget::Text<'a>
 }
 
 /// The search and the tone's button.
-fn top_line<'a>(open: &Open, words: Words, tone: usize, width: f32) -> El<'a> {
+fn top_line<'a>(
+    picker: &'a Lent<Picker>,
+    open: &Open,
+    words: Words,
+    tone: usize,
+    width: f32,
+) -> El<'a> {
     let field_width = width - GAP - TONE_BUTTON;
     let typed = Field {
-        with: query,
+        with: Box::new(move |with: &mut dyn FnMut(&mut Entry)| {
+            picker.change(|p| {
+                if let Phase::Open(open) = &mut p.phase {
+                    with(&mut open.query);
+                }
+            });
+        }),
         style: Style::one(QUERY, MANROPE),
         placeholder: words.placeholder().into(),
         look: Look::of(TEXT.get(), QUIET.get()),

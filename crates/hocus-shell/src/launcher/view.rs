@@ -859,7 +859,7 @@ fn field_view<'a>(open: &Open, words: Words, rect: Rectangle) -> El<'a> {
     let hint = words.escape();
     let hint_width = kit::measure(hint, HINT, MANROPE_SEMIBOLD) + 2.0 * HINT_PAD + 2.0;
     let typed = Field {
-        with: query,
+        with: Box::new(query),
         style: Style::one(QUERY, MANROPE),
         placeholder: words.placeholder().into(),
         look: Look::of(TEXT.get(), PLACEHOLDER.get()),

@@ -1230,13 +1230,13 @@ fn part_of<'a>(
             } else {
                 FIELD_RIM
             };
-            let (with, placeholder, role): (ui::field::With, _, _) = match field {
+            let (with, placeholder, role): (EntryOf, _, _) = match field {
                 Field::Address => (address, "https://…/boards/…", Role::TextField),
                 Field::Token => (token, "accessToken=…; httpOnlyToken=…", Role::PasswordField),
             };
             let field = *field;
             let typed = ui::field::Field {
-                with,
+                with: Box::new(with),
                 style: Style::one(FIELD_TEXT, MANROPE),
                 placeholder: placeholder.into(),
                 look: field::view::Look::of(TEXT.get(), FAINT.get()),
@@ -1837,6 +1837,9 @@ fn spinner(f: &mut Frame, at: Point, colour: Color, motion: bool) {
     });
     f.stroke(&arc, line_stroke(1.8, colour));
 }
+
+/// A field's entry, reached by the setup's fields.
+type EntryOf = fn(&mut dyn FnMut(&mut crate::field::Entry));
 
 #[cfg(test)]
 mod tests {
