@@ -1,12 +1,13 @@
-//! The editor on its surface: the desktop darkened, the panel in its
-//! middle (its tools, its colours and undo; the image and its marks; the
-//! file's name and the buttons), the 5.9 mockup's sizes × the launcher's
-//! zoom, less on a screen too small for it.
+//! What the editor draws, the 5.9 mockup's sizes × the launcher's zoom,
+//! less on a screen too small for it: under its controls ([`Back`]) the
+//! desktop darkened, the panel, the image with its marks, the separator
+//! and the file's name; inside them (the kit's, [`super::view`]) each
+//! tool, colour and button, the mark being drawn and the text's box.
 
 use hocus_link::LAUNCHER_ZOOM;
 use iced::advanced::{image::Renderer as _, svg};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, Vector, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Theme, Vector, mouse,
     widget::{
         canvas::{self, Frame, Geometry, LineCap, LineDash, LineJoin, Path, Stroke, gradient},
         text::Alignment,
@@ -14,14 +15,10 @@ use iced::{
     window,
 };
 
-use super::{COLOURS, Drag, Editor, Phase, TEXT, TEXT_IN, Target, Tool, Typing, marks::Mark};
+use super::{COLOURS, Editor, Phase, Tool, marks::Mark};
 use crate::theme::Ink;
 use crate::{
     capture::{Words, marks},
-    field::{
-        Place,
-        view::{Look, Style},
-    },
     levels::draw::{MANROPE_BOLD, TEXT as TEXT_COLOUR, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD},
 };
@@ -50,20 +47,20 @@ const SEPARATOR_MARGIN: f32 = 6.0;
 const SWATCH: f32 = 22.0;
 const SWATCH_MARGIN: f32 = 2.0;
 const SWATCH_RIM: f32 = 2.0;
-const BUTTON_RADIUS: f32 = 9.0;
+pub const BUTTON_RADIUS: f32 = 9.0;
 /// The footer: its name 11.5 px; its buttons 12 in (the green one 16),
 /// 12.5 px, radius 10, 8 apart.
 const NAME: f32 = 11.5;
 const FOOT_PAD: f32 = 12.0;
 const GREEN_PAD: f32 = 16.0;
 const FOOT_TEXT: f32 = 12.5;
-const FOOT_RADIUS: f32 = 10.0;
+pub const FOOT_RADIUS: f32 = 10.0;
 const FOOT_GAP: f32 = 8.0;
 const PANEL_RADIUS: f32 = 16.0;
 const IMAGE_RADIUS: f32 = 10.0;
 /// The text's field: 220 × 30, radius 6.
-const FIELD: (f32, f32) = (220.0, 30.0);
-const FIELD_RADIUS: f32 = 6.0;
+pub const FIELD: (f32, f32) = (220.0, 30.0);
+pub const FIELD_RADIUS: f32 = 6.0;
 /// The icons' strokes: 1.9 of their 24.
 const STROKE: f32 = 1.9;
 
@@ -82,7 +79,7 @@ const FOOT_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
 const GREEN: Ink = Ink::Accent(1.0);
 const ON_GREEN: Ink = Ink::Dark(rgb(0x0B1020));
 const FIELD_BACK: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.35));
-const HINT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.6));
+pub const HINT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.6));
 
 /// Where the editor's pieces are on its surface.
 #[derive(Debug, Clone, PartialEq)]
@@ -199,29 +196,9 @@ impl Layout {
         }
     }
 
-    /// What is under `at`.
-    pub fn target(&self, at: Point) -> Option<Target> {
-        if let Some((tool, _)) = self.tools.iter().find(|(_, r)| r.contains(at)) {
-            return Some(Target::Tool(*tool));
-        }
-        if let Some(i) = self.colours.iter().position(|r| r.contains(at)) {
-            return Some(Target::Colour(i));
-        }
-        [
-            (self.undo, Target::Undo),
-            (self.delete, Target::Delete),
-            (self.save_as, Target::SaveAs),
-            (self.copy, Target::Copy),
-            (self.image, Target::Image),
-        ]
-        .into_iter()
-        .find(|(r, _)| r.contains(at))
-        .map(|(_, t)| t)
-    }
-
     /// Where the pieces are, as the editor's log says it (for tests):
     /// `name@x,y` (their middles), `image@x,y,w,h`.
-    fn said(&self) -> String {
+    pub fn said(&self) -> String {
         let at =
             |name: &str, r: Rectangle| format!("{name}@{:.0},{:.0}", r.center_x(), r.center_y());
         let mut said: Vec<String> = self
@@ -248,108 +225,29 @@ impl Layout {
     }
 }
 
-/// Which of the editor's two layers: iced draws a layer's images over its
-/// shapes, so what is drawn over the image (a mark being drawn, the
-/// text's field) goes in a layer over it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Layer {
-    /// The desktop darkened, the panel, the image with its marks.
-    Panel,
-    /// A mark being drawn, the text being typed; it takes the input.
-    Over,
-}
-
-/// The editor on its surface.
+/// What nothing holds, under the editor's controls: the desktop
+/// darkened, the panel, the image with its marks, the separator and the
+/// file's name.
 #[derive(Debug, Clone)]
-pub struct View {
+pub struct Back {
     pub id: window::Id,
     pub words: Words,
     /// The compositor blurs behind the shell: a shadow under the panel.
     pub glass: bool,
-    pub layer: Layer,
-}
-
-/// The canvas's own: its size, the pointer, and what its log said last.
-#[derive(Debug, Default)]
-pub struct State {
-    size: Size,
-    pointer: Option<Point>,
-    logged: String,
-}
-
-impl View {
-    fn layout(&self, size: Size) -> Option<Layout> {
-        super::with(|e| {
-            let e = e.as_ref().filter(|e| e.phase == Phase::Shown(self.id))?;
-            Some(Layout::of(size, self.words, logical(e)))
-        })
-    }
 }
 
 /// The editor's image's size, logical pixels of its screen.
-fn logical(e: &Editor) -> (f32, f32) {
+pub fn logical(e: &Editor) -> (f32, f32) {
     let s = e.scale.max(0.1);
     (e.image.width() as f32 / s, e.image.height() as f32 / s)
 }
 
-fn clamp(p: Point, r: Rectangle) -> Point {
-    Point::new(
-        p.x.clamp(r.x, r.x + r.width),
-        p.y.clamp(r.y, r.y + r.height),
-    )
-}
-
-impl<Message> canvas::Program<Message> for View {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        state.size = bounds.size();
-        if self.layer == Layer::Panel {
-            return None;
-        }
-        let layout = self.layout(bounds.size())?;
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                let said = layout.said();
-                if said != state.logged {
-                    tracing::debug!(places = %said, "the capture's editor is laid out");
-                    state.logged = said;
-                }
-                None
-            }
-            iced::Event::Mouse(seen) => {
-                state.pointer = crate::levels::draw::pointer(seen, bounds, cursor, state.pointer);
-                self.mouse(seen, state.pointer, &layout)
-            }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => super::key(
-                self.id,
-                key,
-                *modifiers,
-                text.as_deref(),
-                layout.image,
-                layout.z,
-            )
-            .then(|| canvas::Action::request_redraw().and_capture()),
-            iced::Event::InputMethod(event) => super::input_method(self.id, event)
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
-        }
-    }
+impl<Message> canvas::Program<Message> for Back {
+    type State = ();
 
     fn draw(
         &self,
-        _state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -358,44 +256,15 @@ impl<Message> canvas::Program<Message> for View {
         let mut frame = Frame::new(renderer, bounds.size());
         let shown = super::with(|e| {
             let e = e.as_mut().filter(|e| e.phase == Phase::Shown(self.id))?;
-            if self.layer == Layer::Panel {
-                hold(e, renderer);
-            }
+            hold(e, renderer);
             Some(e.clone())
         });
-        match (self.layer, shown) {
-            (Layer::Panel, editor) => {
-                frame.fill_rectangle(Point::ORIGIN, bounds.size(), SHADE.get());
-                if let Some(editor) = editor {
-                    let layout = Layout::of(bounds.size(), self.words, logical(&editor));
-                    self.draw_panel(&mut frame, &editor, &layout);
-                }
-            }
-            (Layer::Over, Some(editor)) => {
-                let layout = Layout::of(bounds.size(), self.words, logical(&editor));
-                self.draw_over(&mut frame, &editor, &layout);
-            }
-            (Layer::Over, None) => {}
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), SHADE.get());
+        if let Some(editor) = shown {
+            let layout = Layout::of(bounds.size(), self.words, logical(&editor));
+            self.draw_panel(&mut frame, &editor, &layout);
         }
         vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        let Some(layout) = self.layout(state.size) else {
-            return mouse::Interaction::default();
-        };
-        let tool = super::with(|e| e.as_ref().map(|e| e.tool));
-        match state.pointer.and_then(|p| layout.target(p)) {
-            Some(Target::Image) if tool == Some(Tool::Text) => mouse::Interaction::Text,
-            Some(Target::Image) => mouse::Interaction::Crosshair,
-            Some(_) => mouse::Interaction::Pointer,
-            None => mouse::Interaction::default(),
-        }
     }
 }
 
@@ -424,128 +293,14 @@ pub fn hold(e: &mut Editor, renderer: &Renderer) {
 }
 
 /// The frame of the text being typed: from where it was clicked.
-fn field_of(typing: &Typing, z: f32) -> Rectangle {
+pub fn field_of(at: Point, z: f32) -> Rectangle {
     Rectangle::new(
-        Point::new(typing.at.x, typing.at.y - FIELD.1 * z / 2.0),
+        Point::new(at.x, at.y - FIELD.1 * z / 2.0),
         Size::new(FIELD.0 * z, FIELD.1 * z),
     )
 }
 
-/// What a click asks that the editor does outside its lock.
-enum Then {
-    Nothing,
-    Draw,
-    Press(Target),
-}
-
-impl View {
-    fn mouse<Message>(
-        &self,
-        seen: &mouse::Event,
-        at: Option<Point>,
-        layout: &Layout,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|p| layout.target(p));
-        let (image, z) = (layout.image, layout.z);
-        let then = super::with(|editor| {
-            let Some(e) = editor.as_mut().filter(|e| e.phase == Phase::Shown(self.id)) else {
-                return Then::Nothing;
-            };
-            match seen {
-                mouse::Event::CursorMoved { .. } | mouse::Event::CursorEntered => {
-                    // A press held in the text selects as it drags.
-                    if let Some(typing) = e.typing.as_mut().filter(|t| t.text.pressed()) {
-                        return match at {
-                            Some(p) if typing.text.drag(p) => Then::Draw,
-                            _ => Then::Nothing,
-                        };
-                    }
-                    let mut drawn = e.hover != target;
-                    e.hover = target;
-                    if let (Some(drag), Some(p)) = (e.drag.as_mut(), at) {
-                        drag.to = clamp(p, image);
-                        drawn = true;
-                    }
-                    if drawn { Then::Draw } else { Then::Nothing }
-                }
-                mouse::Event::CursorLeft => {
-                    e.hover = None;
-                    Then::Draw
-                }
-                mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    let Some(p) = at else {
-                        return Then::Nothing;
-                    };
-                    if target == Some(Target::Image) {
-                        e.pressed = None;
-                        if e.tool == Tool::Text {
-                            // In the text being typed: its caret where the
-                            // press is. Elsewhere: it becomes a mark, and
-                            // another starts there.
-                            match e.typing.as_mut().filter(|t| field_of(t, z).contains(p)) {
-                                Some(typing) => typing.text.press(p),
-                                None => {
-                                    e.commit_text(image, z);
-                                    e.typing = Some(Typing::at(p));
-                                }
-                            }
-                        } else {
-                            e.drag = Some(Drag { from: p, to: p });
-                        }
-                    } else {
-                        e.pressed = target;
-                    }
-                    Then::Draw
-                }
-                mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    if let Some(typing) = e.typing.as_mut()
-                        && typing.text.release()
-                    {
-                        return Then::Draw;
-                    }
-                    if let Some(drag) = e.drag.take() {
-                        if let Some(mark) = e.mark_of(image, drag, z) {
-                            e.add(mark);
-                        }
-                        return Then::Draw;
-                    }
-                    let pressed = e.pressed.take();
-                    if pressed.is_none() || pressed != target {
-                        return Then::Draw;
-                    }
-                    match pressed {
-                        Some(Target::Tool(tool)) => {
-                            e.commit_text(image, z);
-                            e.tool = tool;
-                            Then::Draw
-                        }
-                        Some(Target::Colour(i)) => {
-                            e.colour = i;
-                            Then::Draw
-                        }
-                        Some(Target::Undo) => {
-                            e.undo();
-                            Then::Draw
-                        }
-                        Some(t @ (Target::Delete | Target::SaveAs | Target::Copy)) => {
-                            Then::Press(t)
-                        }
-                        _ => Then::Draw,
-                    }
-                }
-                _ => Then::Nothing,
-            }
-        });
-        match then {
-            Then::Nothing => None,
-            Then::Draw => Some(canvas::Action::request_redraw().and_capture()),
-            Then::Press(target) => {
-                super::press(target, image, z);
-                Some(canvas::Action::request_redraw().and_capture())
-            }
-        }
-    }
-
+impl Back {
     fn draw_panel(&self, f: &mut Frame, e: &Editor, layout: &Layout) {
         let z = layout.z;
         let panel = layout.panel;
@@ -572,7 +327,11 @@ impl View {
             &kit::rounded(inset(panel, 0.5), radius - 0.5),
             Stroke::default().with_color(RIM.get()).with_width(1.0),
         );
-        self.draw_toolbar(f, e, layout);
+        f.fill_rectangle(
+            layout.separator.position(),
+            layout.separator.size(),
+            RIM.get(),
+        );
         // The image, and its marks over it.
         let room = layout.room;
         let image_radius = IMAGE_RADIUS * z;
@@ -585,122 +344,10 @@ impl View {
             &kit::rounded(inset(room, 0.5), image_radius - 0.5),
             Stroke::default().with_color(RIM.get()).with_width(1.0),
         );
-        self.draw_footer(f, e, layout);
+        self.draw_name(f, e, layout);
     }
 
-    /// Over the image: the mark being drawn, the text being typed.
-    fn draw_over(&self, f: &mut Frame, e: &Editor, layout: &Layout) {
-        if let Some(drag) = e.drag
-            && let Some(mark) = e.mark_of(layout.image, drag, layout.z)
-        {
-            draw_mark(f, e, layout.image, &mark);
-        }
-        if let Some(typing) = &e.typing {
-            self.draw_field(f, e, typing, layout.z);
-        }
-    }
-
-    fn draw_toolbar(&self, f: &mut Frame, e: &Editor, layout: &Layout) {
-        let z = layout.z;
-        let radius = BUTTON_RADIUS * z;
-        for (tool, rect) in &layout.tools {
-            let shape = kit::rounded(*rect, radius);
-            if e.tool == *tool {
-                f.fill(&shape, CHOSEN.get());
-                f.stroke(
-                    &kit::rounded(inset(*rect, 0.5), radius - 0.5),
-                    Stroke::default()
-                        .with_color(CHOSEN_RING.get())
-                        .with_width(1.0),
-                );
-            } else if e.hover == Some(Target::Tool(*tool)) {
-                crate::theme::hover(f, &shape, HOVER.get());
-            }
-            let icon = Rectangle::new(
-                Point::new(rect.x + TOOL_PAD * z, rect.center_y() - ICON * z / 2.0),
-                Size::new(ICON * z, ICON * z),
-            );
-            draw_icon(f, Icon::Tool(*tool), icon);
-            f.fill_text(kit::text_in(
-                MANROPE_SEMIBOLD,
-                kit::text(
-                    self.words.tool(*tool).to_owned(),
-                    Point::new(icon.x + icon.width + ICON_GAP * z, rect.center_y()),
-                    LABEL * z,
-                    TEXT_COLOUR.get(),
-                    Alignment::Left,
-                ),
-            ));
-        }
-        f.fill_rectangle(
-            layout.separator.position(),
-            layout.separator.size(),
-            RIM.get(),
-        );
-        for (i, rect) in layout.colours.iter().enumerate() {
-            let [r, g, b] = COLOURS[i];
-            let centre = rect.center();
-            let side = rect.width / 2.0;
-            f.fill(&Path::circle(centre, side), Color::from_rgb8(r, g, b));
-            let rim = if e.colour == i {
-                TEXT_COLOUR
-            } else {
-                SWATCH_OFF
-            };
-            f.stroke(
-                &Path::circle(centre, side - SWATCH_RIM * z / 2.0),
-                Stroke::default()
-                    .with_color(rim.get())
-                    .with_width(SWATCH_RIM * z),
-            );
-        }
-        let undo = layout.undo;
-        if e.hover == Some(Target::Undo) {
-            crate::theme::hover(f, &kit::rounded(undo, radius), HOVER.get());
-        }
-        let icon = Rectangle::new(
-            Point::new(
-                undo.center_x() - ICON * z / 2.0,
-                undo.center_y() - ICON * z / 2.0,
-            ),
-            Size::new(ICON * z, ICON * z),
-        );
-        draw_icon(f, Icon::Undo, icon);
-    }
-
-    fn draw_field(&self, f: &mut Frame, e: &Editor, typing: &Typing, z: f32) {
-        let [r, g, b] = COLOURS[e.colour];
-        let colour = Color::from_rgb8(r, g, b);
-        let field = field_of(typing, z);
-        let shape = kit::rounded(field, FIELD_RADIUS * z);
-        f.fill(&shape, FIELD_BACK.get());
-        f.stroke(
-            &kit::rounded(inset(field, 0.5), FIELD_RADIUS * z - 0.5),
-            Stroke {
-                line_dash: LineDash {
-                    segments: &[4.0, 3.0],
-                    offset: 0,
-                },
-                ..Stroke::default().with_color(colour).with_width(1.0)
-            },
-        );
-        // What is typed, in the mark's colour and where the mark will be,
-        // past its frame when it is long; its selection and its caret.
-        typing.text.draw(
-            f,
-            Place {
-                left: typing.at.x + TEXT_IN * z,
-                middle: typing.at.y,
-                width: (f.width() - typing.at.x - TEXT_IN * z).max(0.0),
-                style: Style::one(TEXT.0 * z, MANROPE_BOLD),
-            },
-            self.words.text_hint(),
-            &Look::of(colour, HINT.get()),
-            true,
-        );
-    }
-
-    fn draw_footer(&self, f: &mut Frame, e: &Editor, layout: &Layout) {
+    fn draw_name(&self, f: &mut Frame, e: &Editor, layout: &Layout) {
         let z = layout.z;
         let said = match &e.saved_as {
             Some(name) => self.words.saved_as(name),
@@ -721,54 +368,136 @@ impl View {
             NAME_COLOUR.get(),
             Alignment::Left,
         ));
-        let radius = FOOT_RADIUS * z;
-        for (target, rect, word, colour) in [
-            (
-                Target::Delete,
-                layout.delete,
-                self.words.delete(),
-                DELETE.get(),
-            ),
-            (
-                Target::SaveAs,
-                layout.save_as,
-                self.words.save_as(),
-                TEXT_COLOUR.get(),
-            ),
-        ] {
-            if e.hover == Some(target) {
-                crate::theme::hover(f, &kit::rounded(rect, radius), HOVER.get());
-            }
-            f.stroke(
-                &kit::rounded(inset(rect, 0.5), radius - 0.5),
-                Stroke::default().with_color(FOOT_RIM.get()).with_width(1.0),
-            );
-            f.fill_text(kit::text_in(
-                MANROPE_SEMIBOLD,
-                kit::text(
-                    word.to_owned(),
-                    rect.center(),
-                    FOOT_TEXT * z,
-                    colour,
-                    Alignment::Center,
-                ),
-            ));
-        }
-        f.fill(&kit::rounded(layout.copy, radius), GREEN.get());
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                self.words.copy_and_close().to_owned(),
-                layout.copy.center(),
-                FOOT_TEXT * z,
-                ON_GREEN.get(),
-                Alignment::Center,
-            ),
-        ));
     }
 }
 
-fn inset(r: Rectangle, by: f32) -> Rectangle {
+/// A tool's button at `rect` (the surface's frame): chosen, else lit
+/// under the pointer; its icon and its label.
+pub fn draw_tool(
+    f: &mut Frame,
+    rect: Rectangle,
+    tool: Tool,
+    label: &str,
+    on: bool,
+    lit: bool,
+    z: f32,
+) {
+    let radius = BUTTON_RADIUS * z;
+    let shape = kit::rounded(rect, radius);
+    if on {
+        f.fill(&shape, CHOSEN.get());
+        f.stroke(
+            &kit::rounded(inset(rect, 0.5), radius - 0.5),
+            Stroke::default()
+                .with_color(CHOSEN_RING.get())
+                .with_width(1.0),
+        );
+    } else if lit {
+        crate::theme::hover(f, &shape, HOVER.get());
+    }
+    let icon = Rectangle::new(
+        Point::new(rect.x + TOOL_PAD * z, rect.center_y() - ICON * z / 2.0),
+        Size::new(ICON * z, ICON * z),
+    );
+    draw_icon(f, Icon::Tool(tool), icon);
+    f.fill_text(kit::text_in(
+        MANROPE_SEMIBOLD,
+        kit::text(
+            label.to_owned(),
+            Point::new(icon.x + icon.width + ICON_GAP * z, rect.center_y()),
+            LABEL * z,
+            TEXT_COLOUR.get(),
+            Alignment::Left,
+        ),
+    ));
+}
+
+/// Colour `i`'s swatch at `rect`, ringed white when chosen.
+pub fn draw_swatch(f: &mut Frame, rect: Rectangle, i: usize, on: bool, z: f32) {
+    let [r, g, b] = COLOURS[i];
+    let centre = rect.center();
+    let side = rect.width / 2.0;
+    f.fill(&Path::circle(centre, side), Color::from_rgb8(r, g, b));
+    let rim = if on { TEXT_COLOUR } else { SWATCH_OFF };
+    f.stroke(
+        &Path::circle(centre, side - SWATCH_RIM * z / 2.0),
+        Stroke::default()
+            .with_color(rim.get())
+            .with_width(SWATCH_RIM * z),
+    );
+}
+
+/// Undo's button at `rect`, lit under the pointer.
+pub fn draw_undo(f: &mut Frame, rect: Rectangle, lit: bool, z: f32) {
+    if lit {
+        crate::theme::hover(f, &kit::rounded(rect, BUTTON_RADIUS * z), HOVER.get());
+    }
+    let icon = Rectangle::new(
+        Point::new(
+            rect.center_x() - ICON * z / 2.0,
+            rect.center_y() - ICON * z / 2.0,
+        ),
+        Size::new(ICON * z, ICON * z),
+    );
+    draw_icon(f, Icon::Undo, icon);
+}
+
+/// "Supprimer" (`delete`, in its orange) or "Enregistrer sous…" at
+/// `rect`: its rim, lit under the pointer.
+pub fn draw_foot(f: &mut Frame, rect: Rectangle, word: &str, delete: bool, lit: bool, z: f32) {
+    let radius = FOOT_RADIUS * z;
+    if lit {
+        crate::theme::hover(f, &kit::rounded(rect, radius), HOVER.get());
+    }
+    f.stroke(
+        &kit::rounded(inset(rect, 0.5), radius - 0.5),
+        Stroke::default().with_color(FOOT_RIM.get()).with_width(1.0),
+    );
+    let colour = if delete { DELETE } else { TEXT_COLOUR };
+    f.fill_text(kit::text_in(
+        MANROPE_SEMIBOLD,
+        kit::text(
+            word.to_owned(),
+            rect.center(),
+            FOOT_TEXT * z,
+            colour.get(),
+            Alignment::Center,
+        ),
+    ));
+}
+
+/// "Copier et fermer" at `rect`, green.
+pub fn draw_copy(f: &mut Frame, rect: Rectangle, word: &str, z: f32) {
+    f.fill(&kit::rounded(rect, FOOT_RADIUS * z), GREEN.get());
+    f.fill_text(kit::text_in(
+        MANROPE_BOLD,
+        kit::text(
+            word.to_owned(),
+            rect.center(),
+            FOOT_TEXT * z,
+            ON_GREEN.get(),
+            Alignment::Center,
+        ),
+    ));
+}
+
+/// The text's box at `field`, dashed in the mark's `colour`.
+pub fn draw_field_box(f: &mut Frame, field: Rectangle, colour: Color, z: f32) {
+    let shape = kit::rounded(field, FIELD_RADIUS * z);
+    f.fill(&shape, FIELD_BACK.get());
+    f.stroke(
+        &kit::rounded(inset(field, 0.5), FIELD_RADIUS * z - 0.5),
+        Stroke {
+            line_dash: LineDash {
+                segments: &[4.0, 3.0],
+                offset: 0,
+            },
+            ..Stroke::default().with_color(colour).with_width(1.0)
+        },
+    );
+}
+
+pub fn inset(r: Rectangle, by: f32) -> Rectangle {
     Rectangle::new(
         Point::new(r.x + by, r.y + by),
         Size::new(
@@ -780,7 +509,7 @@ fn inset(r: Rectangle, by: f32) -> Rectangle {
 
 /// Mark `mark` (the image's pixels) drawn over the image shown at `image`,
 /// as [`marks::render`] draws it.
-fn draw_mark(f: &mut Frame, e: &Editor, image: Rectangle, mark: &Mark) {
+pub fn draw_mark(f: &mut Frame, e: &Editor, image: Rectangle, mark: &Mark) {
     let k = e.pixels_per(image).max(1e-3);
     let at = |p: (f32, f32)| Point::new(image.x + p.0 / k, image.y + p.1 / k);
     let colour = |c: marks::Rgb| Color::from_rgb8(c[0], c[1], c[2]);
@@ -991,16 +720,6 @@ mod tests {
             layout.copy.x + layout.copy.width,
             layout.panel.x + layout.panel.width - PAD * Z
         );
-        assert_eq!(layout.target(layout.copy.center()), Some(Target::Copy));
-        assert_eq!(
-            layout.target(layout.tools[3].1.center()),
-            Some(Target::Tool(Tool::Blur))
-        );
-        assert_eq!(
-            layout.target(layout.colours[2].center()),
-            Some(Target::Colour(2))
-        );
-        assert_eq!(layout.target(layout.image.center()), Some(Target::Image));
         assert!(layout.colours[4].x + layout.colours[4].width < layout.undo.x);
     }
 

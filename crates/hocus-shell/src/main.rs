@@ -1822,18 +1822,11 @@ impl Shell {
             );
         }
         if capture::editor::is_surface(id) {
-            let layer = |layer| {
-                canvas(capture::editor::draw::View {
-                    id,
-                    words: capture::words(),
-                    glass: self.look.glass,
-                    layer,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-            };
-            use capture::editor::draw::Layer;
-            return Some(stack![layer(Layer::Panel), layer(Layer::Over)].into());
+            return Some(capture::editor::view::view(
+                id,
+                capture::words(),
+                self.look.glass,
+            ));
         }
         if !capture::is_surface(id) {
             return None;

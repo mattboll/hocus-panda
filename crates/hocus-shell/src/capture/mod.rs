@@ -131,6 +131,26 @@ impl Words {
         self.pick("Texte", "Text")
     }
 
+    /// The editor's colours, for screen readers.
+    pub fn colour(self, i: usize) -> &'static str {
+        match i {
+            0 => self.pick("Rouge", "Red"),
+            1 => self.pick("Ambre", "Amber"),
+            2 => self.pick("Vert", "Green"),
+            3 => self.pick("Bleu", "Blue"),
+            _ => self.pick("Blanc", "White"),
+        }
+    }
+
+    pub fn undo(self) -> &'static str {
+        self.pick("Annuler", "Undo")
+    }
+
+    /// The editor, for screen readers.
+    pub fn editor(self) -> &'static str {
+        self.pick("Annoter la capture", "Annotate the capture")
+    }
+
     pub fn save_as(self) -> &'static str {
         self.pick("Enregistrer sous…", "Save as…")
     }
