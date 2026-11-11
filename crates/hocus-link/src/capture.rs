@@ -5,11 +5,11 @@
 //! editor, and asks the compositor for what is its own: the clipboard, the
 //! file's deletion, a drag of it into an application.
 
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BadLine, LAUNCHER_ZOOM};
+use crate::LAUNCHER_ZOOM;
 
 /// The namespace of the capture's toolbar, at the bottom of the screen
 /// under the pointer as the capture opens. The compositor fades it in
@@ -69,17 +69,6 @@ impl CaptureMode {
             Self::Screen => "screen",
             Self::All => "all",
         }
-    }
-}
-
-impl FromStr for CaptureMode {
-    type Err = BadLine;
-
-    fn from_str(word: &str) -> Result<Self, Self::Err> {
-        Self::ALL
-            .into_iter()
-            .find(|m| m.name() == word)
-            .ok_or_else(|| BadLine(format!("not a capture mode: {word:?}")))
     }
 }
 

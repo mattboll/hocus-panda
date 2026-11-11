@@ -111,6 +111,7 @@ pub struct Locale {
     pub time: Option<TimeFormat>,
 }
 
+/// For the log, not the line.
 impl fmt::Display for Locale {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

@@ -247,6 +247,7 @@ impl Wallpapers {
     }
 }
 
+/// For the log, not the line.
 impl fmt::Display for Wallpapers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let [r, g, b] = self.color;

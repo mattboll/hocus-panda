@@ -194,7 +194,7 @@ impl AccentColours {
         }
     }
 
-    /// Written on the line: `RRGGBB,RRGGBB,RRGGBB`.
+    /// For the log: `RRGGBB,RRGGBB,RRGGBB`.
     fn word(self) -> String {
         let hex = |[r, g, b]: [u8; 3]| format!("{r:02x}{g:02x}{b:02x}");
         format!(
@@ -345,8 +345,8 @@ impl Accent {
 }
 
 impl fmt::Display for Choice {
-    /// `SCHEME ACCENT WALLPAPER`, then `contrast` under high contrast, as
-    /// `theme` on the line carries it.
+    /// `SCHEME ACCENT WALLPAPER`, then `contrast` under high contrast: for
+    /// the log (the Settings' tests read it), not the line.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,

@@ -12,11 +12,11 @@
 //!   draws them over its surface), what was chosen, cancelled, and a
 //!   share stopped from the bar.
 
-use std::{fmt, str::FromStr, time::Duration};
+use std::{fmt, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BadLine, LAUNCHER_ZOOM, Rect, text::tidy};
+use crate::{LAUNCHER_ZOOM, Rect, text::tidy};
 
 /// The chooser's surface: the panel alone, centred on its screen, in the
 /// overlay layer, holding the keyboard. The compositor darkens the screen
@@ -50,29 +50,13 @@ pub enum ShareSource {
     Window(u64),
 }
 
+/// For the log, not the line.
 impl fmt::Display for ShareSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Screen(name) => write!(f, "screen:{name}"),
             Self::Window(id) => write!(f, "window:{id}"),
         }
-    }
-}
-
-impl FromStr for ShareSource {
-    type Err = BadLine;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(name) = s.strip_prefix("screen:").filter(|n| !n.is_empty()) {
-            return Ok(Self::Screen(name.to_owned()));
-        }
-        if let Some(id) = s.strip_prefix("window:") {
-            return id
-                .parse()
-                .map(Self::Window)
-                .map_err(|e| BadLine(format!("window: {e}")));
-        }
-        Err(BadLine(format!("not a source: {s:?}")))
     }
 }
 
