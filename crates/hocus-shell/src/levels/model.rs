@@ -223,7 +223,7 @@ impl Profile {
 /// The words of the levels in a language.
 #[derive(Debug, Clone, Copy)]
 pub struct Words {
-    lang: Lang,
+    pub(crate) lang: Lang,
 }
 
 impl Words {

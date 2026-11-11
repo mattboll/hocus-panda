@@ -677,46 +677,6 @@ fn gather(
         .iter()
         .filter(|(_, item, _)| matches!(item, I::Task(_)))
         .count();
-    let mut desks = Vec::new();
-    for (_, item, _) in &items {
-        let I::Desktop { row, index } = *item else {
-            continue;
-        };
-        let output = crate::desktops::output_of(bar, row);
-        let Some(said) = crate::desktops::snapshot(&output) else {
-            continue;
-        };
-        let titles = crate::desktops::titles(&output).unwrap_or_default();
-        let i = usize::from(index);
-        let name = crate::desktops::name(i);
-        let screen = (row > 0)
-            .then(|| crate::desktops::screen_of(bar, row))
-            .flatten()
-            .map(|s| levels_words.screen(s.built_in, s.inches, s.number));
-        desks.push((
-            (row, index),
-            bar::Desk {
-                title: levels_words.desktop_title(i + 1, name.as_deref()),
-                current: usize::from(said.current) == i,
-                windows: said
-                    .windows
-                    .iter()
-                    .filter(|w| {
-                        usize::from(w.desktop) == i && w.look != hocus_link::Look::Minimized
-                    })
-                    .filter_map(|w| {
-                        titles
-                            .titles
-                            .iter()
-                            .find(|(id, _)| *id == w.id)
-                            .map(|(_, t)| t.clone())
-                    })
-                    .collect(),
-                count: usize::from(said.count),
-                screen,
-            },
-        ));
-    }
     let link = crate::network::snapshot().link();
     let bluetooth = crate::bluetooth::snapshot().row();
     bar::Facts {
@@ -739,7 +699,6 @@ fn gather(
         agents: agents.to_vec(),
         now_us: crate::agents::now_us(),
         rows_shown: crate::agents::rows_shown(),
-        desks,
         link: (link != hocus_network::model::Link::Hidden).then_some(link),
         bluetooth: (bluetooth != hocus_bluetooth::model::Row::Hidden).then_some(bluetooth),
         layout: crate::layouts::snapshot().shown().map(|l| l.name.clone()),

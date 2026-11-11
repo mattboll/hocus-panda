@@ -7,7 +7,7 @@
 
 use hocus_a11y::{Act, Node, Rect, Role, Window};
 use hocus_bluetooth::model::Row as BluetoothRow;
-use hocus_link::{AGENTS_NAMESPACE, AgentShown, DESKTOPS_NAMESPACE, TASKS_NAMESPACE};
+use hocus_link::{AGENTS_NAMESPACE, AgentShown, TASKS_NAMESPACE};
 use hocus_network::model::Link;
 
 use super::words::{Words, plain};
@@ -17,20 +17,6 @@ use crate::{
     levels::model::Snapshot,
     popover::Item,
 };
-
-/// A desktop's tile as the bar shows it.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Desk {
-    /// Its name (6.14), else "Bureau N".
-    pub title: String,
-    pub current: bool,
-    /// Its windows' titles.
-    pub windows: Vec<String>,
-    /// How many desktops its screen has.
-    pub count: usize,
-    /// Another screen's row (8.4): that screen's name.
-    pub screen: Option<String>,
-}
 
 /// A task's line: its title, ticked.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,8 +55,6 @@ pub struct Facts {
     /// Now, on the agents' `since`'s clock (microseconds).
     pub now_us: u64,
     pub rows_shown: usize,
-    /// Desktop `index` of row `row`.
-    pub desks: Vec<((u8, u8), Desk)>,
     pub link: Option<Link>,
     pub bluetooth: Option<BluetoothRow>,
     pub layout: Option<String>,
@@ -153,7 +137,6 @@ fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> 
             }
             Some(Node::new("agents", Role::List, "Agents"))
         }
-        DESKTOPS_NAMESPACE => Some(Node::new("desktops", Role::RadioGroup, words.desktops())),
         _ => None,
     };
     match container {
@@ -208,22 +191,6 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
             tool.title()
         )),
         Item::Decline => button(crate::agents::Words::new(lang).decline().to_owned()),
-        Item::Desktop { row, index } => {
-            let desk = facts
-                .desks
-                .iter()
-                .find(|(at, _)| *at == (row, index))
-                .map(|(_, d)| d)?;
-            let mut name = words.desktop(&desk.title, desk.current, &desk.windows);
-            if let Some(screen) = &desk.screen {
-                name = format!("{screen}, {name}");
-            }
-            Node::new(key(item), Role::RadioButton, name)
-                .checked(desk.current)
-                .set(usize::from(index) + 1, desk.count)
-                .bounds(Some(rect))
-                .act(Act::Click)
-        }
         Item::Wifi => button(words.wifi(facts.link.as_ref()?)),
         Item::Bluetooth => button(words.bluetooth(facts.bluetooth.as_ref()?)),
         Item::Keyboard => button(words.layout(facts.layout.as_deref()?)),
@@ -279,7 +246,8 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
         | Item::Window(_)
         | Item::WindowClose(_)
         | Item::WindowsMore
-        | Item::Windows => return None,
+        | Item::Windows
+        | Item::Desktop { .. } => return None,
         // Not the bar's own: shown in a popover.
         Item::WindowMenu(_) => return None,
     };
@@ -294,8 +262,8 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
 mod tests {
     use super::*;
     use hocus_link::{
-        CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, FOOTER_NAMESPACE, LEVELS_NAMESPACE,
-        WINDOWS_NAMESPACE,
+        CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, FOOTER_NAMESPACE,
+        LEVELS_NAMESPACE, WINDOWS_NAMESPACE,
     };
 
     use crate::levels::model::{Battery, Charge, Profile, Sound};
@@ -338,12 +306,21 @@ mod tests {
         for i in 0..10 {
             agents.push(agent(10 + i, &format!("w{i}"), "working", 0));
         }
-        let desk = |title: &str, current: bool, windows: &[&str]| Desk {
-            title: title.to_owned(),
-            current,
-            windows: windows.iter().map(|w| (*w).to_owned()).collect(),
-            count: 4,
-            screen: None,
+        let words = if fr { FR } else { EN };
+        // The desktops' tiles as their surface declares them.
+        let desk = |index: u8, current: bool, windows: &[&str]| {
+            let item = Item::Desktop { row: 0, index };
+            let windows: Vec<String> = windows.iter().map(|w| (*w).to_owned()).collect();
+            let title = format!("{desktop} {}", index + 1);
+            let node = Node::new(
+                key(item),
+                Role::RadioButton,
+                words.desktop(&title, current, &windows),
+            )
+            .checked(current)
+            .set(usize::from(index) + 1, 4)
+            .act(Act::Click);
+            (item, node, false)
         };
         Facts {
             bar: "eDP-1".to_owned(),
@@ -383,13 +360,6 @@ mod tests {
             agents,
             now_us: 10 * minute,
             rows_shown: 2,
-            desks: vec![
-                (
-                    (0, 0),
-                    desk(&format!("{desktop} 1"), true, &["Terminal", "Firefox"]),
-                ),
-                ((0, 1), desk(&format!("{desktop} 2"), false, &["Firefox"])),
-            ],
             link: Some(Link::Connected {
                 name: "Livebox-A3F2".to_owned(),
                 bars: 4,
@@ -409,15 +379,25 @@ mod tests {
                 profile: Some(Profile::Balanced),
                 ..Snapshot::default()
             },
-            nodes: vec![(
-                Item::Notifications,
-                Node::new("Notifications", Role::Button, "Notifications, 2 non vues"),
-                false,
-            )],
-            groups: vec![(
-                FOOTER_NAMESPACE,
-                Node::new("footer", Role::Toolbar, "Pied de la barre"),
-            )],
+            nodes: vec![
+                desk(0, true, &["Terminal", "Firefox"]),
+                desk(1, false, &["Firefox"]),
+                (
+                    Item::Notifications,
+                    Node::new("Notifications", Role::Button, "Notifications, 2 non vues"),
+                    false,
+                ),
+            ],
+            groups: vec![
+                (
+                    DESKTOPS_NAMESPACE,
+                    Node::new("desktops", Role::RadioGroup, words.desktops()),
+                ),
+                (
+                    FOOTER_NAMESPACE,
+                    Node::new("footer", Role::Toolbar, "Pied de la barre"),
+                ),
+            ],
             ..Facts::default()
         }
     }
