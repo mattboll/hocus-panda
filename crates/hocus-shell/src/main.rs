@@ -1955,14 +1955,11 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::Clipboard => canvas(popover::clipboard::Panel {
+            popover::Item::Clipboard => popover::clipboard::view(&popover::clipboard::Panel {
                 id,
                 words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::InUse => popover::in_use::view(&popover::in_use::Panel {
                 id,
                 words: in_use::Words::new(clock::time::Lang::of_messages()),
