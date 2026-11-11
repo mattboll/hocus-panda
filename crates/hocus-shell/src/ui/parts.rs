@@ -164,17 +164,42 @@ pub fn label_as<'a, M: 'static>(
 /// `letter-spacing`, which iced's text has not: a letter a widget), as
 /// many as fit in `room`.
 pub fn spaced<'a, M: 'a>(word: &str, size: f32, colour: Color, room: f32) -> El<'a, M> {
-    let spacing = 0.08 * size;
+    spaced_in(word, size, MANROPE_BOLD, colour, 0.08, room)
+}
+
+/// `word` in `font` at `size`, its letters `em` apart (CSS's
+/// `letter-spacing`), all of it.
+pub fn spaced_by<'a, M: 'a>(
+    word: &str,
+    size: f32,
+    font: iced::Font,
+    colour: Color,
+    em: f32,
+) -> El<'a, M> {
+    spaced_in(word, size, font, colour, em, f32::INFINITY)
+}
+
+/// `word` in `font` at `size`, its letters `em` apart, as many as fit in
+/// `room`.
+fn spaced_in<'a, M: 'a>(
+    word: &str,
+    size: f32,
+    font: iced::Font,
+    colour: Color,
+    em: f32,
+    room: f32,
+) -> El<'a, M> {
+    let spacing = em * size;
     let mut letters = row![].spacing(spacing);
     let mut x = 0.0;
     for ch in word.chars() {
         let ch = ch.to_string();
-        let width = kit::measure(&ch, size, MANROPE_BOLD);
+        let width = kit::measure(&ch, size, font);
         if x + width > room {
             break;
         }
         x += width + spacing;
-        letters = letters.push(said(ch, size, MANROPE_BOLD, colour));
+        letters = letters.push(said(ch, size, font, colour));
     }
     letters.into()
 }

@@ -1991,14 +1991,11 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::MeetingMark => canvas(popover::meeting::Panel {
+            popover::Item::MeetingMark => popover::meeting::view(&popover::meeting::Panel {
                 id,
                 words: meeting::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::User => popover::session::view(&popover::session::Panel {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),

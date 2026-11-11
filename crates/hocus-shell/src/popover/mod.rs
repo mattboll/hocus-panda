@@ -337,7 +337,8 @@ impl Item {
             Self::User => session::opening(),
             Self::InUse => in_use::opening(),
             Self::Menu | Self::TaskAdd | Self::Task(_) => {}
-            Self::Meeting | Self::Join | Self::MeetingMark => {}
+            Self::MeetingMark => meeting::opening(),
+            Self::Meeting | Self::Join => {}
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
             Self::Tasks | Self::TasksMore => tasks::opening(),
