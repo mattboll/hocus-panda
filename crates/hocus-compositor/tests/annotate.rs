@@ -141,7 +141,7 @@ impl Bed {
         config.plain_background = true;
         config.pictures = Some(root.join("Images"));
         config.state_dir = Some(root.join("state/hocuspanda"));
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         let mut hp = Headless::start_on_bus(
             HeadlessConfig {
                 outputs: vec!["1920x1080".parse()?],

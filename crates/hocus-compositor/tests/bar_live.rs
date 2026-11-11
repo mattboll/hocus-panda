@@ -147,7 +147,7 @@ fn start(panel: &str) -> anyhow::Result<Option<Bed>> {
             state_dir: Some(home.join("state")),
         }),
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         ..Config::default()
     };
     config.keyboard.layouts = vec!["us".to_owned()];

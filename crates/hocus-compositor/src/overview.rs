@@ -22,6 +22,7 @@
 //! draws but what clients commit: the sleeping pandas take two breaths as
 //! it opens, then lie still; only a waiting agent's panda waves on.
 
+use hocus_words::compositor::overview as txt;
 use std::{collections::HashMap, time::Duration};
 
 use hocus_link::AgentShown;
@@ -137,23 +138,15 @@ pub struct Badge {
 
 impl Badge {
     /// What it says: "3 t'attendent", "3 waiting".
-    pub fn words(self, french: bool) -> String {
+    pub fn words(self, lang: hocus_words::Lang) -> String {
         let n = self.count;
-        let word = match (self.state, french, n > 1) {
-            (AgentState::Waiting, true, false) => "t’attend",
-            (AgentState::Waiting, true, true) => "t’attendent",
-            (AgentState::Waiting, false, _) => "waiting",
-            (AgentState::Failed, true, false) => "bloqué",
-            (AgentState::Failed, true, true) => "bloqués",
-            (AgentState::Failed, false, _) => "stuck",
-            (AgentState::Done, true, _) => "à voir",
-            (AgentState::Done, false, _) => "to see",
-            (AgentState::Working, true, _) => "au travail",
-            (AgentState::Working, false, _) => "working",
-            (AgentState::Idle, true, _) => "au repos",
-            (AgentState::Idle, false, _) => "resting",
-        };
-        format!("{n} {word}")
+        match self.state {
+            AgentState::Waiting => txt::badge_waiting(lang, n),
+            AgentState::Failed => txt::badge_stuck(lang, n),
+            AgentState::Done => txt::badge_done(lang, n),
+            AgentState::Working => txt::badge_working(lang, n),
+            AgentState::Idle => txt::badge_resting(lang, n),
+        }
     }
 }
 
@@ -1313,15 +1306,24 @@ mod tests {
                 count: 3
             })
         );
-        assert_eq!(b[&WindowId(7)].words(true), "3 t’attendent");
-        assert_eq!(b[&WindowId(7)].words(false), "3 waiting");
-        assert_eq!(b[&WindowId(9)].words(true), "1 au travail");
+        assert_eq!(
+            b[&WindowId(7)].words(hocus_words::Lang::French),
+            "3 t’attendent"
+        );
+        assert_eq!(
+            b[&WindowId(7)].words(hocus_words::Lang::English),
+            "3 waiting"
+        );
+        assert_eq!(
+            b[&WindowId(9)].words(hocus_words::Lang::French),
+            "1 au travail"
+        );
         assert_eq!(b.len(), 2);
         let one = Badge {
             state: AgentState::Waiting,
             count: 1,
         };
-        assert_eq!(one.words(true), "1 t’attend");
+        assert_eq!(one.words(hocus_words::Lang::French), "1 t’attend");
     }
 
     #[test]

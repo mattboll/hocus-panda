@@ -9,6 +9,7 @@
 //! every frame, each on a small picture of its own; the menu's motion in
 //! and out scales and fades the pictures as they are.
 
+use hocus_words::compositor::radial_draw as txt;
 use std::{
     cell::{OnceCell, RefCell},
     time::Duration,
@@ -105,7 +106,7 @@ struct LookKey {
     maximized: bool,
     /// The hub shows a panda.
     panda: bool,
-    french: bool,
+    lang: hocus_words::Lang,
     hub: String,
     app: String,
 }
@@ -153,27 +154,19 @@ pub fn screen_label(output: &Output) -> String {
 }
 
 /// The menu's words, French or English.
-pub fn label(sector: Sector, maximized: bool, french: bool) -> &'static [&'static str] {
-    match (sector, french) {
-        (Sector::Up, true) if maximized => &["Restaurer"],
-        (Sector::Up, false) if maximized => &["Restore"],
-        (Sector::Up, true) => &["Agrandir"],
-        (Sector::Up, false) => &["Maximise"],
-        (Sector::UpRight, true) => &["Au premier", "plan"],
-        (Sector::UpRight, false) => &["Always", "on top"],
-        (Sector::Right, true) => &["Bureau", "suivant"],
-        (Sector::Right, false) => &["Next", "desktop"],
-        (Sector::DownRight, true) => &["Autre", "écran"],
-        (Sector::DownRight, false) => &["Other", "screen"],
-        (Sector::Down, true) => &["Réduire"],
-        (Sector::Down, false) => &["Minimise"],
-        (Sector::DownLeft, true) => &["Fermer"],
-        (Sector::DownLeft, false) => &["Close"],
-        (Sector::Left, true) => &["Bureau", "précédent"],
-        (Sector::Left, false) => &["Previous", "desktop"],
-        (Sector::UpLeft, true) => &["Tous les", "bureaux"],
-        (Sector::UpLeft, false) => &["All", "desktops"],
+pub fn label(sector: Sector, maximized: bool, lang: hocus_words::Lang) -> &'static [&'static str] {
+    match sector {
+        Sector::Up if maximized => txt::RESTORE,
+        Sector::Up => txt::MAXIMISE,
+        Sector::UpRight => txt::ON_TOP,
+        Sector::Right => txt::NEXT_DESKTOP,
+        Sector::DownRight => txt::OTHER_SCREEN,
+        Sector::Down => txt::MINIMISE,
+        Sector::DownLeft => txt::CLOSE,
+        Sector::Left => txt::PREVIOUS_DESKTOP,
+        Sector::UpLeft => txt::ALL_DESKTOPS,
     }
+    .get(lang)
 }
 
 /// Where a sector's label goes, from the centre: its anchor's `x`, how
@@ -195,25 +188,24 @@ fn label_place(sector: Sector, lines: usize) -> (f64, i8, f64) {
 
 /// What the hub says while `radial`'s lit sector is lit: its shortcut,
 /// the desktop it sends to, the screen; for Close once armed, a click.
-pub fn hub_words(radial: &Radial, armed: bool, french: bool, names: &[String]) -> String {
+pub fn hub_words(
+    radial: &Radial,
+    armed: bool,
+    lang: hocus_words::Lang,
+    names: &[String],
+) -> String {
     let desktop = |n: usize| {
         names
             .get(n)
             .filter(|name| !name.is_empty())
             .cloned()
-            .unwrap_or_else(|| {
-                if french {
-                    format!("Bureau {}", n + 1)
-                } else {
-                    format!("Desktop {}", n + 1)
-                }
-            })
+            .unwrap_or_else(|| txt::desktop(lang, n + 1))
     };
     match radial.lit {
         Some(Sector::Up) if radial.maximized => "Super+↓".to_owned(),
         Some(Sector::Up) => "Super+↑".to_owned(),
         Some(Sector::Down) => "Super+H".to_owned(),
-        Some(Sector::DownLeft) if armed => if french { "clic" } else { "click" }.to_owned(),
+        Some(Sector::DownLeft) if armed => txt::CLICK.get(lang).to_owned(),
         Some(Sector::DownLeft) => "Super+Q".to_owned(),
         Some(Sector::Right) => desktop(radial.desktop + 1),
         Some(Sector::Left) => desktop(radial.desktop.saturating_sub(1)),
@@ -580,7 +572,7 @@ fn draw_main(fonts: &Fonts, key: &LookKey, scale: f64) -> Option<(Vec<u8>, i32)>
             pixmap.fill_path(&path, &paint(ON), FillRule::Winding, t, None);
         }
         // The label outside the ring.
-        let lines = label(sector, key.maximized, key.french);
+        let lines = label(sector, key.maximized, key.lang);
         let (ax, align, middle_baseline) = label_place(sector, lines.len());
         let font = if lit { &fonts.bold } else { &fonts.semibold };
         let ink = match (enabled, close, lit) {
@@ -728,14 +720,12 @@ pub(crate) fn argb_of(mut data: Vec<u8>) -> Vec<u8> {
 impl State {
     /// Whether the menu's words are French: `[locale] language`, else the
     /// session's locale.
-    pub(crate) fn radial_french(&self) -> bool {
-        let lang = self
-            .config
+    pub(crate) fn radial_lang(&self) -> hocus_words::Lang {
+        self.config
             .locale
             .language
             .lang()
-            .unwrap_or_else(hocus_words::Lang::of_messages);
-        lang == hocus_words::Lang::French
+            .unwrap_or_else(hocus_words::Lang::of_messages)
     }
 
     /// The radial menu on `output`, front first: the panda, the arc, the
@@ -764,7 +754,7 @@ impl State {
             return;
         };
         let scale = output.current_scale().fractional_scale();
-        let french = self.radial_french();
+        let lang = self.radial_lang();
         let armed = radial.armed(now);
         let names = self.config.desktops.shown_names();
         let key = LookKey {
@@ -776,8 +766,8 @@ impl State {
             on: radial.on,
             maximized: radial.maximized,
             panda: radial.agent.is_some(),
-            french,
-            hub: hub_words(radial, armed, french, &names),
+            lang,
+            hub: hub_words(radial, armed, lang, &names),
             app: radial.app.clone(),
         };
         // The centre on the output, in its pixels.
@@ -888,10 +878,10 @@ mod tests {
     #[test]
     fn every_label_stays_inside_the_menus_square_in_both_languages() {
         let fonts = fonts().expect("the shell's fonts");
-        for french in [true, false] {
+        for lang in hocus_words::Lang::ALL {
             for maximized in [true, false] {
                 for sector in Sector::ALL {
-                    let lines = label(sector, maximized, french);
+                    let lines = label(sector, maximized, lang);
                     let (ax, align, middle) = label_place(sector, lines.len());
                     let first = middle - LABEL_LINE / 2.0 * (lines.len() as f64 - 1.0);
                     for (n, line) in lines.iter().enumerate() {
@@ -937,7 +927,7 @@ mod tests {
             on: [false, true, false, false, false, false, false, false],
             maximized: false,
             panda: false,
-            french: true,
+            lang: hocus_words::Lang::French,
             hub: "Super+↑".into(),
             app: "foot".into(),
         };
@@ -982,17 +972,37 @@ mod tests {
             last: (0.0, 0.0),
             opened: Duration::ZERO,
         };
-        assert_eq!(hub_words(&radial, false, true, &[]), "Bureau 2");
         assert_eq!(
-            hub_words(&radial, false, false, &["Mail".into(), "Code".into()]),
+            hub_words(&radial, false, hocus_words::Lang::French, &[]),
+            "Bureau 2"
+        );
+        assert_eq!(
+            hub_words(
+                &radial,
+                false,
+                hocus_words::Lang::English,
+                &["Mail".into(), "Code".into()]
+            ),
             "Code"
         );
         radial.lit = Some(Sector::DownLeft);
-        assert_eq!(hub_words(&radial, false, true, &[]), "Super+Q");
-        assert_eq!(hub_words(&radial, true, true, &[]), "clic");
+        assert_eq!(
+            hub_words(&radial, false, hocus_words::Lang::French, &[]),
+            "Super+Q"
+        );
+        assert_eq!(
+            hub_words(&radial, true, hocus_words::Lang::French, &[]),
+            "clic"
+        );
         radial.lit = Some(Sector::DownRight);
-        assert_eq!(hub_words(&radial, false, true, &[]), "DP-2");
+        assert_eq!(
+            hub_words(&radial, false, hocus_words::Lang::French, &[]),
+            "DP-2"
+        );
         radial.lit = None;
-        assert_eq!(hub_words(&radial, false, true, &[]), "");
+        assert_eq!(
+            hub_words(&radial, false, hocus_words::Lang::French, &[]),
+            ""
+        );
     }
 }

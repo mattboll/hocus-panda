@@ -147,7 +147,7 @@ impl Bed {
         };
         let mut config = Config {
             plain_background: true,
-            french: true,
+            lang: hocus_words::Lang::French,
             pipewire_remote: Some(fakes.pw_socket()),
             ..Config::default()
         };

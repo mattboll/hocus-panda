@@ -165,11 +165,7 @@ fn main() -> ExitCode {
     if !matches!(backend, BackendArg::Headless) {
         config.sound_programs = hocus_compositor::SoundPrograms::Path;
     }
-    config.french = ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .find(|value| !value.is_empty())
-        .is_some_and(|locale| locale.starts_with("fr"));
+    config.lang = hocus_words::Lang::of_messages();
     let beside = |name: &str| {
         std::env::current_exe()
             .ok()

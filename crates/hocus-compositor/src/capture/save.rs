@@ -5,6 +5,7 @@
 //! or the pictures' folder's own; and where that folder is, what the
 //! file is named, and the area kept for next time.
 
+use hocus_words::compositor::capture_save as txt;
 use std::{
     path::{Path, PathBuf},
     time::SystemTime,
@@ -56,7 +57,7 @@ pub struct Job {
     pub chosen: Option<PathBuf>,
     /// The file's format.
     pub format: CaptureFormat,
-    pub french: bool,
+    pub lang: hocus_words::Lang,
 }
 
 /// What the thread made of it.
@@ -94,8 +95,8 @@ pub fn save(job: Job) -> anyhow::Result<Saved> {
             }
             job.pictures.as_ref().map(|pictures| {
                 (
-                    pictures.join(folder_name(job.french)),
-                    shown_folder(pictures, job.french),
+                    pictures.join(folder_name(job.lang)),
+                    shown_folder(pictures, job.lang),
                 )
             })
         }
@@ -108,7 +109,7 @@ pub fn save(job: Job) -> anyhow::Result<Saved> {
                     CaptureFormat::Png => png.clone(),
                     CaptureFormat::Jpeg => jpeg(&image)?,
                 };
-                let name = file_name(job.when, job.french, job.format.extension());
+                let name = file_name(job.when, job.lang, job.format.extension());
                 let path = unused(&dir, &name);
                 write_new(&path, &bytes)
                     .with_context(|| format!("could not write {}", path.display()))?;
@@ -259,42 +260,41 @@ fn rgba(piece: &Piece) -> Option<image::RgbaImage> {
 }
 
 /// The folder captures go in, in the pictures' folder.
-pub fn folder_name(french: bool) -> &'static str {
-    if french {
-        "Captures d'écran"
-    } else {
-        "Screenshots"
-    }
+pub fn folder_name(lang: hocus_words::Lang) -> &'static str {
+    txt::SCREENSHOTS.get(lang)
 }
 
 /// The folder as the toast says it: the pictures' folder's own name, then
 /// the captures'.
-fn shown_folder(pictures: &Path, french: bool) -> String {
+fn shown_folder(pictures: &Path, lang: hocus_words::Lang) -> String {
     let base = pictures
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     if base.is_empty() {
-        folder_name(french).to_owned()
+        folder_name(lang).to_owned()
     } else {
-        format!("{base}/{}", folder_name(french))
+        format!("{base}/{}", folder_name(lang))
     }
 }
 
 /// "Capture du 2026-11-03 à 14-32-05.png", "Screenshot from 2026-11-03
 /// 14-32-05.png", at `when` in the local time zone, its extension
 /// `extension`.
-pub fn file_name(when: SystemTime, french: bool, extension: &str) -> String {
+pub fn file_name(when: SystemTime, lang: hocus_words::Lang, extension: &str) -> String {
     let zoned = jiff::Timestamp::try_from(when)
         .map(|t| t.to_zoned(jiff::tz::TimeZone::system()))
         .unwrap_or_else(|_| jiff::Timestamp::UNIX_EPOCH.to_zoned(jiff::tz::TimeZone::UTC));
     let day = zoned.strftime("%Y-%m-%d");
     let time = zoned.strftime("%H-%M-%S");
-    if french {
-        format!("Capture du {day} à {time}.{extension}")
-    } else {
-        format!("Screenshot from {day} {time}.{extension}")
-    }
+    txt::screenshot_from(
+        lang,
+        txt::ScreenshotFrom {
+            day: &day,
+            extension: &extension,
+            time: &time,
+        },
+    )
 }
 
 /// `name` in `dir`, or with " (2)", " (3)"… before its extension when a
@@ -427,9 +427,9 @@ mod tests {
     #[test]
     fn the_files_name_says_when_in_the_users_language() {
         let when = SystemTime::UNIX_EPOCH;
-        let fr = file_name(when, true, "png");
+        let fr = file_name(when, hocus_words::Lang::French, "png");
         assert!(fr.starts_with("Capture du ") && fr.contains(" à ") && fr.ends_with(".png"));
-        let en = file_name(when, false, "png");
+        let en = file_name(when, hocus_words::Lang::English, "png");
         assert!(en.starts_with("Screenshot from ") && en.ends_with(".png"));
         // "2026-11-03 14-32-05": the date, then the time with dashes.
         let stamp = en
@@ -463,7 +463,7 @@ mod tests {
             None
         );
         assert_eq!(
-            shown_folder(Path::new("/home/alex/Images"), true),
+            shown_folder(Path::new("/home/alex/Images"), hocus_words::Lang::French),
             "Images/Captures d'écran"
         );
     }
@@ -478,7 +478,7 @@ mod tests {
             pictures: Some(dir.path().to_path_buf()),
             chosen: None,
             format: CaptureFormat::Png,
-            french: false,
+            lang: hocus_words::Lang::English,
         };
         let first = save(job())?;
         let second = save(job())?;

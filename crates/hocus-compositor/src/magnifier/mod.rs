@@ -244,14 +244,14 @@ pub fn showing(
 }
 
 /// The zoom as the pill writes it: `×8`, `×1,5` in French.
-pub fn zoom_words(zoom: f64, french: bool) -> String {
+pub fn zoom_words(zoom: f64, lang: hocus_words::Lang) -> String {
     let tenths = (zoom * 10.0).round() as i64;
     let text = if tenths % 10 == 0 {
         format!("×{}", tenths / 10)
     } else {
         format!("×{}.{}", tenths / 10, tenths % 10)
     };
-    if french { text.replace('.', ",") } else { text }
+    text.replace('.', hocus_words::number::DECIMAL.get(lang))
 }
 
 impl Magnifier {
@@ -726,7 +726,7 @@ impl State {
         let Some(zoom) = self.magnifier.on.as_ref().map(|on| on.zoom) else {
             return false;
         };
-        let words = draw::Words::of(zoom, self.radial_french());
+        let words = draw::Words::of(zoom, self.radial_lang());
         let Some(pill) = self.magnifier.paint.layout(&words, area.size) else {
             return false;
         };
@@ -902,9 +902,9 @@ mod tests {
 
     #[test]
     fn the_zoom_reads_in_either_language() {
-        assert_eq!(zoom_words(8.0, true), "×8");
-        assert_eq!(zoom_words(1.5, true), "×1,5");
-        assert_eq!(zoom_words(1.5, false), "×1.5");
-        assert_eq!(zoom_words(2.31, false), "×2.3");
+        assert_eq!(zoom_words(8.0, hocus_words::Lang::French), "×8");
+        assert_eq!(zoom_words(1.5, hocus_words::Lang::French), "×1,5");
+        assert_eq!(zoom_words(1.5, hocus_words::Lang::English), "×1.5");
+        assert_eq!(zoom_words(2.31, hocus_words::Lang::English), "×2.3");
     }
 }

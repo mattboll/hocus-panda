@@ -332,7 +332,7 @@ fn start(shell: &Path, config: &str, fixture: &str, form: FormChoice) -> anyhow:
     let mut settings = Config {
         file: Some(file),
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         ..Config::default()
     };
     settings.keyboard.layouts = vec!["us".to_owned()];

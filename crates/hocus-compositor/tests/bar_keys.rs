@@ -68,7 +68,7 @@ fn start(shell: &Path, outputs: &[&str]) -> anyhow::Result<Bed> {
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
     let mut config = Config {
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         state_dir: Some(root.join("state")),
         ..Config::default()
     };

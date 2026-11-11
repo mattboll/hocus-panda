@@ -1,6 +1,7 @@
 //! Where a recording goes and what it is named, and how ffmpeg is asked to
 //! encode it: pure functions, the recorder's thread runs them.
 
+use hocus_words::compositor::record_save as txt;
 use std::{
     path::{Path, PathBuf},
     time::SystemTime,
@@ -15,42 +16,41 @@ pub fn videos_dir() -> Option<PathBuf> {
 }
 
 /// The folder recordings go in, in the videos' folder.
-pub fn folder_name(french: bool) -> &'static str {
-    if french {
-        "Enregistrements d'écran"
-    } else {
-        "Screen recordings"
-    }
+pub fn folder_name(lang: hocus_words::Lang) -> &'static str {
+    txt::SCREEN_RECORDINGS.get(lang)
 }
 
 /// The folder as the thumbnail and the history say it: the videos'
 /// folder's own name, then the recordings'.
-pub fn shown_folder(videos: &Path, french: bool) -> String {
+pub fn shown_folder(videos: &Path, lang: hocus_words::Lang) -> String {
     let base = videos
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     if base.is_empty() {
-        folder_name(french).to_owned()
+        folder_name(lang).to_owned()
     } else {
-        format!("{base}/{}", folder_name(french))
+        format!("{base}/{}", folder_name(lang))
     }
 }
 
 /// "Enregistrement du 2026-11-03 à 14-32-05.mp4", "Screen recording from
 /// 2026-11-03 14-32-05.mp4", at `when` in the local time zone.
-pub fn file_name(when: SystemTime, french: bool, format: RecordFormat) -> String {
+pub fn file_name(when: SystemTime, lang: hocus_words::Lang, format: RecordFormat) -> String {
     let zoned = jiff::Timestamp::try_from(when)
         .map(|t| t.to_zoned(jiff::tz::TimeZone::system()))
         .unwrap_or_else(|_| jiff::Timestamp::UNIX_EPOCH.to_zoned(jiff::tz::TimeZone::UTC));
     let day = zoned.strftime("%Y-%m-%d");
     let time = zoned.strftime("%H-%M-%S");
     let ext = format.name();
-    if french {
-        format!("Enregistrement du {day} à {time}.{ext}")
-    } else {
-        format!("Screen recording from {day} {time}.{ext}")
-    }
+    txt::screen_recording_from(
+        lang,
+        txt::ScreenRecordingFrom {
+            day: &day,
+            ext: &ext,
+            time: &time,
+        },
+    )
 }
 
 /// `name` in `dir`, or with " (2)", " (3)"… before its extension when a
@@ -279,18 +279,29 @@ mod tests {
 
     #[test]
     fn the_files_name_says_when_in_the_users_language() {
-        let fr = file_name(SystemTime::UNIX_EPOCH, true, RecordFormat::Mp4);
+        let fr = file_name(
+            SystemTime::UNIX_EPOCH,
+            hocus_words::Lang::French,
+            RecordFormat::Mp4,
+        );
         assert!(fr.starts_with("Enregistrement du ") && fr.contains(" à ") && fr.ends_with(".mp4"));
-        let en = file_name(SystemTime::UNIX_EPOCH, false, RecordFormat::WebM);
+        let en = file_name(
+            SystemTime::UNIX_EPOCH,
+            hocus_words::Lang::English,
+            RecordFormat::WebM,
+        );
         assert!(en.starts_with("Screen recording from ") && en.ends_with(".webm"));
         let stamp = en
             .trim_start_matches("Screen recording from ")
             .trim_end_matches(".webm");
         assert_eq!(stamp.len(), 19);
         assert!(!stamp.contains(':'));
-        assert_eq!(folder_name(true), "Enregistrements d'écran");
         assert_eq!(
-            shown_folder(Path::new("/home/alex/Vidéos"), true),
+            folder_name(hocus_words::Lang::French),
+            "Enregistrements d'écran"
+        );
+        assert_eq!(
+            shown_folder(Path::new("/home/alex/Vidéos"), hocus_words::Lang::French),
             "Vidéos/Enregistrements d'écran"
         );
     }

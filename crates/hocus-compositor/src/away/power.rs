@@ -28,6 +28,7 @@
 //!   the profile it replaced comes back, unless the user chose another
 //!   meanwhile.
 
+use hocus_words::compositor::away_power as txt;
 use std::os::fd::OwnedFd;
 
 use hocus_link::{LeaveAsk, ToShell};
@@ -396,11 +397,7 @@ impl State {
             return;
         };
         let percent = level.round() as u32;
-        let summary = if self.config.french {
-            format!("Économie d’énergie activée : batterie à {percent} %.")
-        } else {
-            format!("Power saver on: battery at {percent} %.")
-        };
+        let summary = txt::power_saver_on_battery_at(self.config.lang, percent);
         crate::shell::notify(bus, "battery-caution", summary);
     }
 

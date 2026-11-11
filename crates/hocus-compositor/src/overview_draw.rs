@@ -625,7 +625,7 @@ impl State {
         let shown = overview.shown(now);
         let alpha = shown as f32;
         let reduced = overview.reduced;
-        let french = self.radial_french();
+        let lang = self.radial_lang();
         let c = &mut Canvas {
             renderer,
             out: &mut out,
@@ -683,7 +683,7 @@ impl State {
                 continue;
             }
             let at = glide(self, *id, *rect, shown, reduced, now);
-            self.overview_badge(c, overview, *id, at, alpha, french);
+            self.overview_badge(c, overview, *id, at, alpha, lang);
         }
         // The rim of the window under the pointer, the keyboard's ring.
         if settled {
@@ -850,7 +850,7 @@ impl State {
         id: WindowId,
         at: Area,
         alpha: f32,
-        french: bool,
+        lang: hocus_words::Lang,
     ) where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + Texture + 'static,
@@ -900,7 +900,7 @@ impl State {
             c,
             Place::Pill(id),
             &Pic::Pill {
-                words: badge.words(french),
+                words: badge.words(lang),
                 state: badge.state,
                 panda: panda as u32,
                 scale: milli(scale),
@@ -931,11 +931,8 @@ impl State {
         let name = name.to_owned();
         // Under it: its number, or what letting go there does.
         let (text, ink, bold) = if over {
-            let words = if french_of(self) {
-                format!("Lâcher : bureau {}", desktop + 1)
-            } else {
-                format!("Drop: desktop {}", desktop + 1)
-            };
+            let words =
+                hocus_words::compositor::overview_draw::drop_on_desktop(lang_of(self), desktop + 1);
             (words, DROP_INK, true)
         } else {
             let text = match names.get(desktop).filter(|n| !n.is_empty()) {
@@ -1111,8 +1108,8 @@ fn strip_moving(state: &State, output: &Output, now: Duration) -> bool {
     (strip.position(now) - strip.current() as f64).abs() > 1e-6
 }
 
-fn french_of(state: &State) -> bool {
-    state.radial_french()
+fn lang_of(state: &State) -> hocus_words::Lang {
+    state.radial_lang()
 }
 
 fn milli(scale: f64) -> u32 {

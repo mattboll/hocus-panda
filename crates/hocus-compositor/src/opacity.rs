@@ -8,6 +8,7 @@
 //! Nested, `Super` is `Alt+Super` already, and `Alt+Super` and the wheel
 //! is the magnifier's: the opacity has no wheel there.
 
+use hocus_words::compositor::opacity as txt;
 use std::{
     cell::{OnceCell, RefCell},
     time::Duration,
@@ -59,12 +60,8 @@ pub fn stepped(percent: u8, up: bool) -> u8 {
 
 /// `70 %` in French, `70%`: the pill's monospaced font has no narrow
 /// no-break space.
-pub fn percent_words(percent: u8, french: bool) -> String {
-    if french {
-        format!("{percent} %")
-    } else {
-        format!("{percent}%")
-    }
+pub fn percent_words(percent: u8, lang: hocus_words::Lang) -> String {
+    txt::text(lang, percent)
 }
 
 /// The wheel's pixels not yet a notch, the window they are for, and the
@@ -284,7 +281,7 @@ impl State {
             return;
         };
         let scale = output.current_scale().fractional_scale();
-        let words = percent_words(self.opacity_of(id), self.radial_french());
+        let words = percent_words(self.opacity_of(id), self.radial_lang());
         let w = width(fonts, &words);
         let centre = visual.loc + visual.size.downscale(2.0).to_point();
         let rect: Rectangle<f64, Logical> = Rectangle::new(
@@ -338,8 +335,8 @@ mod tests {
         assert_eq!(stepped(30, false), 20);
         assert_eq!(stepped(20, false), 20, "never under the floor");
         assert_eq!(stepped(20, true), 30);
-        assert_eq!(percent_words(70, true), "70 %");
-        assert_eq!(percent_words(70, false), "70%");
+        assert_eq!(percent_words(70, hocus_words::Lang::French), "70 %");
+        assert_eq!(percent_words(70, hocus_words::Lang::English), "70%");
     }
 
     #[test]

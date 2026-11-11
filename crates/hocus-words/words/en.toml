@@ -2489,3 +2489,51 @@ teal = "Teal"
 wallpaper = "From the wallpaper"
 ice = "Ice blue"
 phosphor = "Phosphor green"
+
+
+[compositor.away_power]
+power_saver_on_battery_at = "Power saver on: battery at {percent} %."
+
+[compositor.capture_save]
+screenshots = "Screenshots"
+screenshot_from = "Screenshot from {day} {time}.{extension}"
+
+[compositor.magnifier_draw]
+magnifier = "Magnifier"
+super_esc_to_exit = "Super+Esc to exit"
+
+[compositor.opacity]
+text = "{percent}%"
+
+[compositor.radial_draw]
+desktop = "Desktop {n_1}"
+click = "click"
+restore = ["Restore"]
+maximise = ["Maximise"]
+on_top = ["Always", "on top"]
+next_desktop = ["Next", "desktop"]
+other_screen = ["Other", "screen"]
+minimise = ["Minimise"]
+close = ["Close"]
+previous_desktop = ["Previous", "desktop"]
+all_desktops = ["All", "desktops"]
+
+[compositor.record_save]
+screen_recordings = "Screen recordings"
+screen_recording_from = "Screen recording from {day} {time}.{ext}"
+
+[compositor.session_restore]
+and = " and "
+not_reopened = { other = "{listed} could not be reopened." }
+
+
+[compositor.overview]
+badge_waiting = { other = "{n} waiting" }
+badge_stuck = { other = "{n} stuck" }
+badge_done = "{n} to see"
+badge_working = "{n} working"
+badge_resting = "{n} resting"
+
+
+[compositor.overview_draw]
+drop_on_desktop = "Drop: desktop {desktop}"

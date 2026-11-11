@@ -317,7 +317,7 @@ impl State {
             pipewire: self.config.pipewire_remote.clone(),
             videos: self.config.videos.clone(),
             chosen: self.config.chosen_folder(&self.config.recording.folder),
-            french: self.config.french,
+            lang: self.config.lang,
             when: SystemTime::now(),
             runtime: self.runtime_dir.clone(),
             ffmpeg: if self.config.ffmpeg.as_os_str().is_empty() {

@@ -159,7 +159,7 @@ impl Bed {
         config.keyboard.layouts = vec!["us".to_owned()];
         config.file = Some(file);
         config.home = Some(root.join("home"));
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         config.lock_auth = Authenticator::test("not a password");
         let mut hp = Headless::start_with_shell(
             HeadlessConfig {

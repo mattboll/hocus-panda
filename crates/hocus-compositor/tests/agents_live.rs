@@ -97,7 +97,7 @@ fn start(agents: &str) -> anyhow::Result<Option<Bed>> {
         // As the file says it at first: the compositor reads it at once.
         agents: toml::from_str::<Config>(agents)?.agents,
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         ..Config::default()
     };
     let mut hp = Headless::start_with_shell(

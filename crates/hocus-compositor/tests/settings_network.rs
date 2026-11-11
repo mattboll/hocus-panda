@@ -208,7 +208,7 @@ impl Bed {
         };
         let mut config = Config {
             plain_background: true,
-            french: true,
+            lang: hocus_words::Lang::French,
             ..Config::default()
         };
         config.keyboard.layouts = vec!["us".to_owned()];

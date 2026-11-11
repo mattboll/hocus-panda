@@ -90,7 +90,7 @@ pub struct Job {
     /// The folder `[recording] folder` names, if it does (6.17): used when
     /// it can be written, else the videos' folder's own is.
     pub chosen: Option<PathBuf>,
-    pub french: bool,
+    pub lang: hocus_words::Lang,
     pub when: SystemTime,
     /// Where its first frame's picture and its sound's pipe go.
     pub runtime: PathBuf,
@@ -309,13 +309,13 @@ fn record(
                 .clone()
                 .context("no videos' folder to save the recording in")?;
             (
-                videos.join(save::folder_name(job.french)),
-                save::shown_folder(&videos, job.french),
+                videos.join(save::folder_name(job.lang)),
+                save::shown_folder(&videos, job.lang),
             )
         }
     };
     std::fs::create_dir_all(&dir).with_context(|| format!("could not make {}", dir.display()))?;
-    let file = save::unused(&dir, &save::file_name(job.when, job.french, job.format));
+    let file = save::unused(&dir, &save::file_name(job.when, job.lang, job.format));
     // The sound's pipe, in a directory of its own in the runtime one.
     let pipes = tempfile::Builder::new()
         .prefix("hocuspanda-recording-")

@@ -40,7 +40,7 @@ fn config() -> Config {
     config.keyboard.layouts = vec!["us".to_owned()];
     config.plain_background = true;
     config.lock_auth = Authenticator::test("panda");
-    config.french = true;
+    config.lang = hocus_words::Lang::French;
     config
 }
 

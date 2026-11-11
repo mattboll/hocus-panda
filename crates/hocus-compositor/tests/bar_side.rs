@@ -477,7 +477,7 @@ fn with_shell(text: &str) -> anyhow::Result<Option<Bed>> {
         state_dir: Some(home.join("state")),
     });
     config.plain_background = true;
-    config.french = true;
+    config.lang = hocus_words::Lang::French;
     let hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec!["1920x1080".parse()?],

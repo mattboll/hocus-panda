@@ -2480,3 +2480,51 @@ teal = "Sarcelle"
 wallpaper = "Du fond d'écran"
 ice = "Bleu glacé"
 phosphor = "Vert phosphore"
+
+
+[compositor.away_power]
+power_saver_on_battery_at = "Économie d’énergie activée : batterie à {percent} %."
+
+[compositor.capture_save]
+screenshots = "Captures d'écran"
+screenshot_from = "Capture du {day} à {time}.{extension}"
+
+[compositor.magnifier_draw]
+magnifier = "Loupe"
+super_esc_to_exit = "Super+Échap quitte"
+
+[compositor.opacity]
+text = "{percent} %"
+
+[compositor.radial_draw]
+desktop = "Bureau {n_1}"
+click = "clic"
+restore = ["Restaurer"]
+maximise = ["Agrandir"]
+on_top = ["Au premier", "plan"]
+next_desktop = ["Bureau", "suivant"]
+other_screen = ["Autre", "écran"]
+minimise = ["Réduire"]
+close = ["Fermer"]
+previous_desktop = ["Bureau", "précédent"]
+all_desktops = ["Tous les", "bureaux"]
+
+[compositor.record_save]
+screen_recordings = "Enregistrements d'écran"
+screen_recording_from = "Enregistrement du {day} à {time}.{ext}"
+
+[compositor.session_restore]
+and = " et "
+not_reopened = { one = "{listed} n’a pas pu être rouverte.", other = "{listed} n’ont pas pu être rouvertes." }
+
+
+[compositor.overview]
+badge_waiting = { one = "{n} t’attend", other = "{n} t’attendent" }
+badge_stuck = { one = "{n} bloqué", other = "{n} bloqués" }
+badge_done = "{n} à voir"
+badge_working = "{n} au travail"
+badge_resting = "{n} au repos"
+
+
+[compositor.overview_draw]
+drop_on_desktop = "Lâcher : bureau {desktop}"
