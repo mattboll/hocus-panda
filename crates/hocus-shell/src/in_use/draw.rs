@@ -27,9 +27,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_a11y::Role;
 use hocus_link::{Form, IN_USE_NAMESPACE};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, Vector, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Vector,
     widget::{
         canvas::{self, Frame, Geometry, LineCap, LineJoin, Path, Stroke},
         text::Alignment,
@@ -40,8 +41,9 @@ use super::Kind;
 use crate::theme::Ink;
 use crate::{
     Message,
-    levels::draw::{faded, pointer, rgb, ring},
+    levels::draw::{faded, rgb},
     popover::{self, Item, kit},
+    ui::items::{Control, Controls, Items},
 };
 
 /// A kind's tile, and between two.
@@ -290,8 +292,6 @@ pub struct Sign {
 
 #[derive(Debug, Default)]
 pub struct State {
-    at: Option<Point>,
-    hover: bool,
     drawn: Option<Instant>,
 }
 
@@ -337,124 +337,100 @@ impl Sign {
             _ => None,
         }
     }
-
-    /// `rect` (the surface's) in the bar's frame: from its right edge
-    /// (negative inside it), from its top.
-    fn in_bar(&self, rect: Rectangle, size: Size, kinds: &[Kind]) -> Rectangle {
-        Rectangle::new(
-            Point::new(rect.x - size.width - 1.0, self.surface_top(kinds) + rect.y),
-            rect.size(),
-        )
-    }
 }
 
-impl canvas::Program<Message> for Sign {
+impl Items for Sign {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        IN_USE_NAMESPACE
+    }
+
+    fn controls(&self, _state: &State, size: Size) -> Controls {
+        let uses = super::snapshot();
+        let kinds = uses.kinds();
+        let to_bar = Vector::new(-size.width - 1.0, self.surface_top(&kinds));
+        let controls = self
+            .item(size, &kinds)
+            .map(|rect| {
+                let name =
+                    crate::a11y::Words::new(self.words.lang).in_use(&uses.used(), uses.muted);
+                Control::new(Item::InUse, rect, Role::Button, name, RADIUS)
+            })
+            .into_iter()
+            .collect();
+        Controls {
+            to_bar,
+            controls,
+            group: None,
+        }
+    }
+
+    /// Who uses what, which the sign does not show, read as it is read.
+    fn live(&self) -> Option<crate::ui::ring::Live> {
+        Some(|_, words, item| {
+            let uses = super::snapshot();
+            (item == Item::InUse).then(|| {
+                hocus_a11y::Node::new(
+                    crate::ui::items::key(item),
+                    Role::Button,
+                    words.in_use(&uses.used(), uses.muted),
+                )
+                .act(hocus_a11y::Act::Click)
+            })
+        })
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        let size = bounds.size();
-        match event {
-            iced::Event::Window(iced::window::Event::RedrawRequested(now)) => {
-                state.drawn = Some(*now);
-                let uses = super::snapshot();
-                // Popping in: drawn again until it is whole.
-                let popping = uses
-                    .appeared
-                    .filter(|appeared| now.saturating_duration_since(*appeared) < POP)
-                    .map(|_| *now + POP_STEP);
-                // Recording: as its time's second changes, and while its
-                // dot beats. Paused, ended or none: nothing wakes.
-                let recording = uses
-                    .live_recording()
-                    .filter(|rec| !rec.shown.paused)
-                    .map(|rec| next_draw(*now, rec.elapsed(*now), self.motion));
-                let next = match (popping, recording) {
-                    (Some(a), Some(b)) => Some(a.min(b)),
-                    (a, b) => a.or(b),
-                }?;
-                Some(canvas::Action::request_redraw_at(next))
-            }
-            iced::Event::Mouse(seen) => {
-                let at = pointer(seen, bounds, cursor, state.at);
-                state.at = at;
-                let kinds = super::snapshot().kinds();
-                let kinds = kinds.as_slice();
-                let rect = self.item(size, kinds)?;
-                let over = at.is_some_and(|at| rect.contains(at));
-                match seen {
-                    mouse::Event::CursorEntered
-                    | mouse::Event::CursorMoved { .. }
-                    | mouse::Event::CursorLeft => {
-                        if over == state.hover {
-                            return None;
-                        }
-                        state.hover = over;
-                        if over {
-                            popover::event(popover::Event::ItemEnter {
-                                bar: self.bar.clone(),
-                                item: Item::InUse,
-                                rect: self.in_bar(rect, size, kinds),
-                            });
-                        } else {
-                            let at = at.unwrap_or(Point::new(size.width / 2.0, size.height));
-                            popover::event(popover::Event::ItemLeave {
-                                at: self
-                                    .in_bar(Rectangle::new(at, Size::ZERO), size, kinds)
-                                    .position(),
-                            });
-                        }
-                        Some(canvas::Action::request_redraw())
-                    }
-                    mouse::Event::ButtonPressed(mouse::Button::Left) if over => {
-                        popover::event(popover::Event::ItemPress {
-                            bar: self.bar.clone(),
-                            item: Item::InUse,
-                            rect: self.in_bar(rect, size, kinds),
-                        });
-                        Some(canvas::Action::request_redraw().and_capture())
-                    }
-                    _ => None,
-                }
-            }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => popover::key(key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
-        }
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        state.drawn = Some(*now);
+        let uses = super::snapshot();
+        // Popping in: drawn again until it is whole.
+        let popping = uses
+            .appeared
+            .filter(|appeared| now.saturating_duration_since(*appeared) < POP)
+            .map(|_| *now + POP_STEP);
+        // Recording: as its time's second changes, and while its dot
+        // beats. Paused, ended or none: nothing wakes.
+        let recording = uses
+            .live_recording()
+            .filter(|rec| !rec.shown.paused)
+            .map(|rec| next_draw(*now, rec.elapsed(*now), self.motion));
+        let next = match (popping, recording) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }?;
+        Some(canvas::Action::request_redraw_at(next))
     }
 
     fn draw(
         &self,
         state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
         let under = crate::backdrop::under(renderer, size, self.backdrop);
         let uses = super::snapshot();
         let kinds = uses.kinds();
-        if let Some(rect) = self.item(size, &kinds) {
-            let in_bar = self.in_bar(rect, size, &kinds);
-            popover::with(|c| {
-                c.set_items(&self.bar, IN_USE_NAMESPACE, vec![(Item::InUse, in_bar)])
-            });
-        }
         if kinds.is_empty() {
             return crate::backdrop::over(under, frame);
         }
+        let hover = lit == Some(Item::InUse);
         let now = state.drawn.unwrap_or_else(Instant::now);
         let t = uses
             .appeared
@@ -465,19 +441,10 @@ impl canvas::Program<Message> for Sign {
             .as_ref()
             .map(|rec| RecShown::of(rec, now, self.words, self.motion));
         let still = self.forms.len() == 1;
-        let (open, focused) = if still {
-            popover::with(|c| {
-                (
-                    c.shows(&self.bar, Item::InUse),
-                    c.focused(&self.bar, Item::InUse),
-                )
-            })
-        } else {
-            (false, false)
-        };
+        let open = still && popover::with(|c| c.shows(&self.bar, Item::InUse));
         for &(form, alpha) in &self.forms {
             let rect = self.rect_of(form, size, &kinds);
-            let lit = still && (state.hover || open);
+            let lit = still && (hover || open);
             let centre = Vector::new(rect.center_x(), rect.center_y());
             frame.with_save(|f| {
                 f.translate(centre);
@@ -490,9 +457,6 @@ impl canvas::Program<Message> for Sign {
                 };
                 draw_sign(f, rect, form, &shown, lit, alpha * opacity);
             });
-            if focused {
-                ring(&mut frame, rect, RADIUS);
-            }
         }
         if let Some(rec) = rec.as_ref().filter(|_| still) {
             let mut read = READ.lock().unwrap_or_else(PoisonError::into_inner);
@@ -510,7 +474,7 @@ impl canvas::Program<Message> for Sign {
                 "{kinds:?} muted={} paused={:?} lit={}",
                 uses.muted,
                 rec.as_ref().map(|r| r.paused),
-                still && (state.hover || open)
+                still && (hover || open)
             );
             let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
             if kept.as_deref() != Some(said.as_str()) {
@@ -525,19 +489,6 @@ impl canvas::Program<Message> for Sign {
             }
         }
         crate::backdrop::over(under, frame)
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 

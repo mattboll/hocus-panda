@@ -14,7 +14,7 @@ use iced::{
 
 use crate::theme::Ink;
 use crate::{
-    levels::draw::{MANROPE_BOLD, faded, rgb, ring},
+    levels::draw::{MANROPE_BOLD, faded, rgb},
     popover::kit,
 };
 
@@ -77,12 +77,11 @@ pub struct Shows {
     pub dnd: bool,
     pub open: bool,
     pub hover: bool,
-    pub focused: bool,
 }
 
 /// A footer's button at `button`: lit while its popover shows (`open`),
-/// or under the pointer (`hover`), ringed while it holds the keyboard.
-pub fn lit(f: &mut Frame, button: Rectangle, open: bool, hover: bool, focused: bool) {
+/// or under the pointer (`hover`); the kit rings it.
+pub fn lit(f: &mut Frame, button: Rectangle, open: bool, hover: bool) {
     let lit = if open {
         Some(OPEN)
     } else if hover {
@@ -94,9 +93,6 @@ pub fn lit(f: &mut Frame, button: Rectangle, open: bool, hover: bool, focused: b
         Some(_) if open => f.fill(&kit::rounded(button, RADIUS), OPEN.get()),
         Some(_) => crate::theme::hover(f, &kit::rounded(button, RADIUS), HOVER.get()),
         None => {}
-    }
-    if focused {
-        ring(f, button, RADIUS);
     }
 }
 
@@ -119,7 +115,7 @@ pub fn glyph_in(f: &mut Frame, button: Rectangle, handle: svg::Handle, ink: Ink,
 /// The bell's button at `button` in frame `f`, as it `shows`, `alpha`
 /// opaque (two forms cross-fade while the bar switches).
 pub fn draw(f: &mut Frame, button: Rectangle, shows: Shows, alpha: f32) {
-    lit(f, button, shows.open, shows.hover, shows.focused);
+    lit(f, button, shows.open, shows.hover);
     let ink = if shows.dnd { AMBER_INK } else { GLYPH_INK };
     glyph_in(f, button, glyph(shows.dnd), ink, alpha);
     if shows.count == 0 {

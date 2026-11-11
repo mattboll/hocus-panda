@@ -1159,3 +1159,24 @@ fn kit_shot() -> anyhow::Result<()> {
     bed.logged_after(from, "the tray's menu shows it")?;
     common::popover_shot(&mut bed.hp, "tray")
 }
+
+/// The tray's icons at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FormChoice::Full)? else {
+        return Ok(());
+    };
+    let _item = bed.item("Active", pixmap(MAGENTA, None))?;
+    let tray = bed.tray()?;
+    let (x, y) = bed.icon(tray);
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::TRAY_NAMESPACE, "tray"),
+        (f64::from(x), f64::from(y)),
+        "Tray(",
+    )
+}

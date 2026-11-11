@@ -1959,8 +1959,8 @@ lock's controls (`Around::own`: open while their model says, woken by
 their namespace, every key theirs; `Around::own_by` when a closure wakes
 them, a bubble's namespace being its serial's), the capture's toolbar,
 thumbnail and editor, the peek and a meeting's reminder. The bar's own
-items stay hand-drawn canvases with their hit-testing, ring and screen
-readers' rows (see "What stays drawn", below).
+items are canvases that declare their controls to the kit (see "The
+bar's items", below).
 
 **How to build a surface with it.**
 
@@ -2076,21 +2076,46 @@ What changes outside a kit surface's messages (the compositor's
 capture line, a reminder's minute, a peek's words) calls `ui::touch`,
 else its controls stay as they were built.
 
-**What stays drawn** (#772): the bar's own items, on their surfaces: the
-clock's group (the bar's own surface's pointer), the levels, the
-connections, the desktops' tiles, the agents' group, Today, the tasks,
-the next meeting's card, the in-use sign, the windows, the tray's icons
-and the footer: twelve canvases, each with its hit-testing, its ring and
-its rows in `a11y::bar`. They are one keyboard ring across a dozen
-surfaces, which the popovers' controller walks (`Tab` from a surface to
-the next, the arrows along a row), and the pointer's every move feeds
-its cone and its 150 ms and 300 ms; the kit's ring and its
-declarations are a surface's. Moved as they are, each item's hover and
-press would be a message of the shell, which builds and draws every
-surface again, where a bar's surface now draws alone and nothing at
-rest. Moving them is moving that ring into the kit (a surface of the
-bar declaring its items, the controller stepping through declarations
-rather than rectangles): a change of its own, not this issue's.
+**The bar's items** (#785): the bar's own items stay drawn on their
+surfaces, a canvas each (a surface of its own draws alone, and nothing at
+rest), but what they hold is declared to the kit. The keyboard's ring
+across the bar is the kit's (`ui::ring`): every surface of the bar
+declares its controls as it draws (its item, its place in the bar's
+frame, its node for screen readers, the group they make), and `Tab`,
+`Shift+Tab`, the arrows, `Home` and `End` go through the declarations,
+from the bar's top to its bottom and along a row; the popovers'
+controller only moves the keyboard from a surface to the next as the
+ring goes. The hover cone (from where the pointer was to an open
+popover's near corners, its 150 ms and 300 ms) is the kit's too
+(`ui::cone`). Screen readers' bar (`a11y::bar`) is the declarations put
+together at their places: it names no item itself.
+
+- **On the kit's surface of items** (`ui::items`): the desktops' tiles,
+  the footer, the tray's icons, the windows, the tasks (and Day.1's
+  card), Today, the next meeting's card and the in-use sign. A surface
+  draws what it draws (`Items::draw`, handed the control under the
+  pointer to light it) and declares its controls once, where it lays
+  them out (`Items::controls`: `Control::new(item, rect, role, name,
+  radius)`, `.node(…)` for its state, `.part()` for a line's ✕). The kit
+  does the pointer's hit-testing (the innermost control under it), tells
+  the popovers' controller as it comes, goes and presses, draws the ring
+  round the control holding it, and publishes the nodes. What a surface
+  does besides goes through its hooks: `hovered` (a tooltip),
+  `pressed` (the tray's buttons, a window's menu), `before` (the tasks'
+  field: its keys, its drag, its caret), `update` (a frame's time, the
+  wheel). A hover or a press redraws that surface alone, as before.
+- **Their own hit-testing, declaring their controls**: the clock's group
+  (the bar's own surface's pointer), the levels, the connections, the
+  agents' group and the music player's tile, whose drawing is the point
+  (digits, gauges, pandas) or which is stock widgets already: they
+  declare their controls with their nodes to the kit's ring, and draw
+  their own ring with the kit's (`ui::ring::draw`).
+
+Measured against the hand-written surfaces, headless on the CPU, at
+rest, hovered and ringed (`bar_shot`, under `HOCUS_KIT_SHOTS`): every
+shot pixel-identical, but the tasks' ring, 0.05 % of its pixels (a row
+of 12): the ring is drawn over the next task's box's edge, which used to
+cover it.
 
 ### 3.9, the desktops (2026-10-30)
 

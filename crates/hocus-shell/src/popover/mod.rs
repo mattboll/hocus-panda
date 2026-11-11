@@ -80,6 +80,11 @@ use hocus_link::{
     TRAY_NAMESPACE, ToCompositor, WINDOWS_NAMESPACE,
 };
 use iced::{Point, Rectangle, Size, window};
+
+use crate::ui::{
+    cone::Cone,
+    ring::{Declared, Ring},
+};
 use iced_layershell::reexport::KeyboardInteractivity;
 
 /// Hovering a mini form's item this long opens its popover.
@@ -148,12 +153,10 @@ struct Open {
     /// The popover, and its item, in the bar's frame.
     rect: Rectangle,
     from: Rectangle,
-    /// Whether the pointer is on the item or the popover.
-    inside: bool,
-    /// Hovered: when it closes unless the pointer comes back, and where
-    /// the pointer was last seen.
+    /// Where the pointer goes, toward it or not (the kit's cone).
+    cone: Cone,
+    /// Hovered: when it closes unless the pointer comes back.
     leave: Option<Instant>,
-    last: Option<Point>,
     /// Opened by a shortcut (`Super+V`): `Esc` gives the keyboard back to
     /// the window that had it, not to the item.
     shortcut: bool,
@@ -165,13 +168,11 @@ pub struct Controller {
     phase: Phase,
     /// Surfaces fading out, what they show, and when they go.
     closing: Vec<(window::Id, Item, Instant)>,
-    /// The item holding the keyboard (after `Esc` in its popover): its bar,
-    /// and where it is.
-    focused: Option<(String, Item, Rectangle)>,
     bars: HashMap<String, Place>,
-    /// The items each bar's surfaces show, by namespace, from the top, and
-    /// where (the bar's frame): the keyboard steps through them.
-    items: HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
+    /// The controls each bar's surfaces declare, and the one holding the
+    /// keyboard's ring (after `Esc` in its popover, or `Super+B`): the
+    /// kit's ring across the bar's surfaces.
+    pub ring: Ring,
     /// The bars' surfaces whose height is known (their first size came).
     sized: std::collections::HashSet<window::Id>,
     /// Popovers move in and out (else they show and go at once).
@@ -183,9 +184,8 @@ impl Default for Controller {
         Self {
             phase: Phase::Closed,
             closing: Vec::new(),
-            focused: None,
             bars: HashMap::new(),
-            items: HashMap::new(),
+            ring: Ring::default(),
             sized: std::collections::HashSet::new(),
             motion: true,
         }
@@ -251,7 +251,7 @@ impl Controller {
             place.in_use = in_use;
         }
         if in_use.is_none() {
-            self.items.remove(&(bar.to_owned(), IN_USE_NAMESPACE));
+            self.ring.forget(bar, IN_USE_NAMESPACE, false);
         }
     }
 
@@ -261,14 +261,7 @@ impl Controller {
             place.meeting = meeting;
         }
         if meeting.is_none() {
-            self.items.remove(&(bar.to_owned(), MEETING_NAMESPACE));
-            if self
-                .focused
-                .as_ref()
-                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == MEETING_NAMESPACE)
-            {
-                self.focused = None;
-            }
+            self.ring.forget(bar, MEETING_NAMESPACE, true);
         }
     }
 
@@ -278,14 +271,7 @@ impl Controller {
             place.today = today;
         }
         if today.is_none() {
-            self.items.remove(&(bar.to_owned(), TODAY_NAMESPACE));
-            if self
-                .focused
-                .as_ref()
-                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == TODAY_NAMESPACE)
-            {
-                self.focused = None;
-            }
+            self.ring.forget(bar, TODAY_NAMESPACE, true);
         }
     }
 
@@ -295,14 +281,7 @@ impl Controller {
             place.windows = windows;
         }
         if windows.is_none() {
-            self.items.remove(&(bar.to_owned(), WINDOWS_NAMESPACE));
-            if self
-                .focused
-                .as_ref()
-                .is_some_and(|(b, i, _)| b == bar && i.namespace(Form::Full) == WINDOWS_NAMESPACE)
-            {
-                self.focused = None;
-            }
+            self.ring.forget(bar, WINDOWS_NAMESPACE, true);
         }
     }
 
@@ -342,7 +321,7 @@ impl Controller {
             self.sized.remove(&place.surface);
         }
         self.bars.remove(bar);
-        self.items.retain(|(b, _), _| b != bar);
+        self.ring.forget_bar(bar);
     }
 
     /// The bars, by their screen's name, and their forms.
@@ -359,33 +338,27 @@ impl Controller {
     }
 
     /// Bar `bar`'s surface of `namespace` shows `items` (in the bar's
-    /// frame).
-    pub fn set_items(
-        &mut self,
-        bar: &str,
-        namespace: &'static str,
-        mut items: Vec<(Item, Rectangle)>,
-    ) {
-        items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y));
-        // The item under the ring went (an agent ended, a desktop was
-        // removed): the ring goes to the item now in its place, else the
-        // one before it, on the same surface.
-        if let Some((b, item, at)) = &mut self.focused
-            && b == bar
-            && self
-                .bars
-                .get(bar)
-                .is_some_and(|p| item.namespace(p.form) == namespace)
-            && !items.iter().any(|(i, _)| i == item)
-            && let Some(&(next, rect)) = items
-                .iter()
-                .find(|(_, r)| r.y >= at.y)
-                .or_else(|| items.last())
-        {
-            tracing::debug!(gone = ?item, item = ?next, "the keyboard on an item");
-            (*item, *at) = (next, rect);
-        }
-        self.items.insert((bar.to_owned(), namespace), items);
+    /// frame), without their nodes: the tests' surfaces.
+    #[cfg(test)]
+    pub fn set_items(&mut self, bar: &str, namespace: &'static str, items: Vec<(Item, Rectangle)>) {
+        let spots = items
+            .into_iter()
+            .map(|(i, r)| crate::ui::ring::Spot::at(i, r))
+            .collect();
+        self.declare(
+            bar,
+            namespace,
+            Declared {
+                spots,
+                ..Declared::default()
+            },
+        );
+    }
+
+    /// Bar `bar`'s surface of `namespace` declares `declared` (the kit's
+    /// ring, [`crate::ui::items`]).
+    pub fn declare(&mut self, bar: &str, namespace: &'static str, declared: Declared) {
+        self.ring.declare(bar, namespace, declared);
     }
 
     /// What the popover's surface `id` shows, open or closing.
@@ -432,8 +405,8 @@ impl Controller {
     /// The item holding the keyboard (after `Esc` in its popover), and its
     /// bar.
     pub fn focused_on(&self) -> Option<(&str, Item)> {
-        self.focused
-            .as_ref()
+        self.ring
+            .holder()
             .map(|(bar, item, _)| (bar.as_str(), *item))
     }
 
@@ -441,16 +414,11 @@ impl Controller {
     /// and where it is in the bar's frame, from the top (screen readers'
     /// tree, crate::a11y).
     pub fn items_of(&self, bar: &str) -> Vec<(&'static str, Item, Rectangle)> {
-        let mut items: Vec<(&'static str, Item, Rectangle)> = self
-            .items
-            .iter()
-            .filter(|((b, _), _)| b == bar)
-            .flat_map(|((_, namespace), items)| {
-                items.iter().map(|(item, rect)| (*namespace, *item, *rect))
-            })
-            .collect();
-        items.sort_by(|a, b| a.2.y.total_cmp(&b.2.y).then(a.2.x.total_cmp(&b.2.x)));
-        items
+        self.ring
+            .spots(bar)
+            .into_iter()
+            .map(|(namespace, s)| (namespace, s.item, s.rect))
+            .collect()
     }
 
     /// The form of the bar whose popover `id` is open.
@@ -468,9 +436,7 @@ impl Controller {
 
     /// Whether `item` of `bar` holds the keyboard.
     pub fn focused(&self, bar: &str, item: Item) -> bool {
-        self.focused
-            .as_ref()
-            .is_some_and(|(b, i, _)| b == bar && *i == item)
+        self.ring.holds(bar, item)
     }
 
     /// When [`Self::tick`] has something to do.
@@ -498,7 +464,7 @@ impl Controller {
                     };
                 }
                 Phase::Open(open) if open.bar == bar && open.item == item => {
-                    open.inside = true;
+                    open.cone.entered();
                     open.leave = None;
                 }
                 // A desktop's list shows: another tile's, at once.
@@ -513,7 +479,7 @@ impl Controller {
                     tracing::debug!(?item, "the list shows another desktop");
                     open.item = item;
                     open.from = rect;
-                    open.inside = true;
+                    open.cone.entered();
                     open.leave = None;
                     effects.extend(self.refit());
                     effects.push(Effect::Wake(POPOVER_NAMESPACE));
@@ -527,16 +493,13 @@ impl Controller {
             },
             Event::PopoverEnter => {
                 if let Phase::Open(open) = &mut self.phase {
-                    open.inside = true;
+                    open.cone.entered();
                     open.leave = None;
                 }
             }
             Event::PopoverLeave => {
                 if let Phase::Open(open) = &mut self.phase {
-                    // Where it left is the popover's own: the next move seen
-                    // on the bar starts the cone again.
-                    open.inside = false;
-                    open.last = None;
+                    open.cone.left_popover();
                     if open.how == Opened::Hover {
                         open.leave = Some(now + LEAVE_CLOSE);
                     }
@@ -592,8 +555,7 @@ impl Controller {
                             item.surface(place),
                             KeyboardInteractivity::Exclusive,
                         ));
-                        tracing::debug!(?item, "the keyboard on an item");
-                        self.focused = Some((bar, item, from));
+                        self.ring.put(&bar, item, from);
                     }
                 }
             }
@@ -609,7 +571,7 @@ impl Controller {
                     ));
                 }
             }
-            Event::ItemActivate => match self.focused.clone() {
+            Event::ItemActivate => match self.ring.holder().cloned() {
                 Some((bar, item, from)) if !item.clicks() => {
                     effects.extend(acts(bar, item, from));
                 }
@@ -666,7 +628,7 @@ impl Controller {
                 if on_it {
                     self.close(now, &mut effects);
                 }
-                if self.focused.as_ref().is_some_and(|(b, _, _)| *b == bar) {
+                if self.ring.holder().is_some_and(|(b, _, _)| *b == bar) {
                     self.unfocus(&mut effects);
                 }
             }
@@ -754,9 +716,8 @@ impl Controller {
             surface,
             rect,
             from,
-            inside: true,
+            cone: Cone::inside(),
             leave: None,
-            last: None,
             shortcut: false,
         });
     }
@@ -794,10 +755,8 @@ impl Controller {
             }
         };
         let from = self
-            .items
-            .get(&(bar.clone(), FOOTER_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Clipboard))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, FOOTER_NAMESPACE, Item::Clipboard)
             .unwrap_or_else(|| {
                 let height = self.bar_height(&bar);
                 Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
@@ -839,10 +798,8 @@ impl Controller {
             }
         };
         let from = self
-            .items
-            .get(&(bar.clone(), FOOTER_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::User))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, FOOTER_NAMESPACE, Item::User)
             .unwrap_or_else(|| {
                 let height = self.bar_height(&bar);
                 Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
@@ -873,10 +830,8 @@ impl Controller {
             }
         };
         let from = self
-            .items
-            .get(&(bar.clone(), FOOTER_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Notifications))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, FOOTER_NAMESPACE, Item::Notifications)
             .unwrap_or_else(|| {
                 let height = self.bar_height(&bar);
                 Rectangle::new(Point::new(-50.0, height - 46.0), Size::new(40.0, 34.0))
@@ -907,10 +862,8 @@ impl Controller {
             return effects;
         }
         let from = self
-            .items
-            .get(&(bar.clone(), CLOCK_NAMESPACE))
-            .and_then(|items| items.iter().find(|(i, _)| *i == Item::Calendar))
-            .map(|(_, rect)| *rect)
+            .ring
+            .find(&bar, CLOCK_NAMESPACE, Item::Calendar)
             .unwrap_or_else(|| Rectangle::new(Point::new(-184.0, 14.0), Size::new(172.0, 77.0)));
         self.unfocus(&mut effects);
         self.close(now, &mut effects);
@@ -979,12 +932,7 @@ impl Controller {
         let size = (open.item.width(), height);
         let before = margins(place, open.rect);
         let anchor = anchor(
-            &self.items,
-            &open.bar,
-            place.form,
-            open.item,
-            open.from,
-            height,
+            &self.ring, &open.bar, place.form, open.item, open.from, height,
         );
         open.rect = placed(place, anchor, size, open.item.on_bottom());
         let margin = margins(place, open.rect);
@@ -1023,11 +971,11 @@ impl Controller {
 
     /// What a popover of `item` opened from `from` on `bar` lines up with.
     fn anchor(&self, bar: &str, form: Form, item: Item, from: Rectangle, height: u32) -> Rectangle {
-        anchor(&self.items, bar, form, item, from, height)
+        anchor(&self.ring, bar, form, item, from, height)
     }
 
     fn unfocus(&mut self, effects: &mut Vec<Effect>) {
-        if let Some((bar, item, _)) = self.focused.take()
+        if let Some((bar, item, _)) = self.ring.take()
             && let Some(place) = self.bars.get(&bar)
         {
             effects.push(Effect::Keyboard(
@@ -1041,58 +989,21 @@ impl Controller {
     /// The items of bar `bar`, in the drawing's order: top to bottom, and
     /// along a row left to right.
     fn bar_items(&self, bar: &str) -> Vec<(Item, Rectangle)> {
-        let mut items: Vec<(Item, Rectangle)> = self
-            .items
-            .iter()
-            .filter(|((b, _), _)| b == bar)
-            .flat_map(|(_, items)| items.iter().copied())
-            .collect();
-        items.sort_by(|a, b| a.1.y.total_cmp(&b.1.y).then(a.1.x.total_cmp(&b.1.x)));
-        items
+        self.ring.items(bar)
     }
 
-    /// The keyboard from the item holding it to the next item of the bar
-    /// (the previous, `back`), from its top to its bottom and round: the
-    /// next item's surface takes the keyboard when it is another (the
-    /// desktops' tiles, above the connections, are reached so). An item
-    /// gone meanwhile (an agent that ended) steps from where it was.
+    /// The keyboard to the next item of the bar (the previous, `back`),
+    /// as the kit's ring goes ([`Ring::step`]).
     fn step(&mut self, back: bool, effects: &mut Vec<Effect>) {
-        let Some((bar, item, at)) = self.focused.clone() else {
-            return;
-        };
-        let items = self.bar_items(&bar);
-        let order: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
-        let next = if order.contains(&item) {
-            kit::step(&order, Some(item), back)
-        } else {
-            // From where it was: the first item under it, or the last
-            // over it, round the ends.
-            let after = items.iter().position(|(_, r)| r.y >= at.y);
-            match (after, back) {
-                (Some(i), false) => order.get(i).copied(),
-                (Some(i), true) => i
-                    .checked_sub(1)
-                    .and_then(|i| order.get(i))
-                    .or(order.last())
-                    .copied(),
-                (None, false) => order.first().copied(),
-                (None, true) => order.last().copied(),
-            }
-        };
-        if let Some(next) = next {
-            self.focus_on(&bar, item, next, &items, effects);
+        if let Some(next) = self.ring.step(back) {
+            self.focus_on(next, effects);
         }
     }
 
     /// `Home` or `End` (`last`): the bar's first item, or its last.
     fn edge(&mut self, last: bool, effects: &mut Vec<Effect>) {
-        let Some((bar, item, _)) = self.focused.clone() else {
-            return;
-        };
-        let items = self.bar_items(&bar);
-        let to = if last { items.last() } else { items.first() };
-        if let Some(&(next, _)) = to {
-            self.focus_on(&bar, item, next, &items, effects);
+        if let Some(next) = self.ring.edge(last) {
+            self.focus_on(next, effects);
         }
     }
 
@@ -1101,7 +1012,7 @@ impl Controller {
     /// tray's icons), stopping at its ends.
     fn side(&mut self, right: bool, effects: &mut Vec<Effect>) {
         use hocus_link::LevelKey;
-        let Some((bar, item, at)) = self.focused.clone() else {
+        let Some(&(_, item, _)) = self.ring.holder() else {
             return;
         };
         match item {
@@ -1123,40 +1034,23 @@ impl Controller {
             }
             _ => {}
         }
-        let items = self.bar_items(&bar);
-        let middle = at.center_y();
-        let mut row: Vec<&(Item, Rectangle)> = items
-            .iter()
-            .filter(|(_, r)| r.y <= middle && middle <= r.y + r.height)
-            .collect();
-        row.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
-        let Some(here) = row.iter().position(|(i, _)| *i == item) else {
-            return;
-        };
-        let next = if right {
-            row.get(here + 1)
-        } else {
-            here.checked_sub(1).and_then(|i| row.get(i))
-        };
-        if let Some(&&(next, _)) = next {
-            self.focus_on(&bar, item, next, &items, effects);
+        if let Some(next) = self.ring.side(right) {
+            self.focus_on(next, effects);
         }
     }
 
-    /// The keyboard from `item` to `next` of bar `bar` (among `items`):
-    /// `next`'s surface takes it when it is another; both draw again.
+    /// The keyboard from the item holding it to `next` (its bar, its item,
+    /// where it is): `next`'s surface takes it when it is another; both
+    /// draw again.
     fn focus_on(
         &mut self,
-        bar: &str,
-        item: Item,
-        next: Item,
-        items: &[(Item, Rectangle)],
+        (bar, next, rect): (String, Item, Rectangle),
         effects: &mut Vec<Effect>,
     ) {
-        let Some(place) = self.bars.get(bar).copied() else {
+        let Some(place) = self.bars.get(&bar).copied() else {
             return;
         };
-        let Some(&(_, rect)) = items.iter().find(|(i, _)| *i == next) else {
+        let Some((_, item, _)) = self.ring.holder().cloned() else {
             return;
         };
         let (from, to) = (item.surface(&place), next.surface(&place));
@@ -1165,13 +1059,9 @@ impl Controller {
             effects.push(Effect::Keyboard(to, KeyboardInteractivity::Exclusive));
             effects.push(Effect::Wake(item.namespace(place.form)));
         }
-        tracing::debug!(item = ?next, "the keyboard on an item");
-        self.focused = Some((bar.to_owned(), next, rect));
+        self.ring.put(&bar, next, rect);
         effects.push(Effect::Wake(next.namespace(place.form)));
-        effects.push(Effect::Ring {
-            bar: bar.to_owned(),
-            rect,
-        });
+        effects.push(Effect::Ring { bar, rect });
     }
 
     /// `Super+B` (bar.md §11): the keyboard into bar `bar`, on the first
@@ -1188,14 +1078,7 @@ impl Controller {
         let Some(place) = self.bars.get(bar).copied() else {
             return effects;
         };
-        let items = self.bar_items(bar);
-        let find = |want: Item| items.iter().find(|(i, _)| *i == want);
-        let pick = wanted
-            .iter()
-            .find_map(|w| find(*w))
-            .or_else(|| find(Item::Calendar))
-            .or_else(|| items.first());
-        let Some(&(item, rect)) = pick else {
+        let Some((item, rect)) = self.ring.landing(bar, wanted, Item::Calendar) else {
             tracing::debug!(bar, "no item in the bar to take the keyboard");
             return effects;
         };
@@ -1204,7 +1087,7 @@ impl Controller {
             item.surface(&place),
             KeyboardInteractivity::Exclusive,
         ));
-        self.focused = Some((bar.to_owned(), item, rect));
+        self.ring.put(bar, item, rect);
         effects.push(Effect::Wake(item.namespace(place.form)));
         effects.push(Effect::Ring {
             bar: bar.to_owned(),
@@ -1229,7 +1112,7 @@ impl Controller {
 /// lines up with: the item, or for a desktop's list the tiles' top (their
 /// first row); a tray icon's menu has its bottom on the icon's.
 fn anchor(
-    items: &HashMap<(String, &'static str), Vec<(Item, Rectangle)>>,
+    ring: &Ring,
     bar: &str,
     form: Form,
     item: Item,
@@ -1248,9 +1131,8 @@ fn anchor(
     // group, wherever the bar's column puts the group (its first item's
     // top: her row, or the mini item).
     if item.agents() {
-        let group = items
-            .get(&(bar.to_owned(), AGENTS_NAMESPACE))
-            .and_then(|items| items.iter().map(|(_, r)| r.y).reduce(f32::min))
+        let group = ring
+            .top_of(bar, AGENTS_NAMESPACE)
             .unwrap_or_else(|| crate::column::start(form));
         return Rectangle {
             y: group + agents::TOP - crate::column::start(form),
@@ -1269,10 +1151,7 @@ fn anchor(
     if !matches!(item, Item::Desktop { .. }) {
         return from;
     }
-    let top = items
-        .get(&(bar.to_owned(), DESKTOPS_NAMESPACE))
-        .and_then(|tiles| tiles.iter().map(|(_, r)| r.y).reduce(f32::min))
-        .unwrap_or(from.y);
+    let top = ring.top_of(bar, DESKTOPS_NAMESPACE).unwrap_or(from.y);
     Rectangle { y: top, ..from }
 }
 
@@ -1336,52 +1215,22 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
 }
 
 impl Open {
-    /// The pointer left the item or the popover at `at`.
+    /// The pointer left the item at `at`.
     fn left(&mut self, at: Point, now: Instant) {
-        self.inside = false;
-        self.last = Some(at);
+        self.cone.left(at);
         if self.how == Opened::Hover {
             self.leave = Some(now + LEAVE_CLOSE);
         }
     }
 
     /// The pointer seen at `at`, off the item and the popover: moving
-    /// toward the popover, it keeps a hovered one open a while longer.
+    /// toward the popover, within the kit's cone, it keeps a hovered one
+    /// open a while longer.
     fn seen(&mut self, at: Point, now: Instant) {
-        if self.inside || self.how != Opened::Hover {
-            self.last = Some(at);
-            return;
-        }
-        if let Some(from) = self.last
-            && toward(from, at, self.rect)
-        {
+        if self.cone.seen(at, self.rect) && self.how == Opened::Hover {
             self.leave = Some(now + LEAVE_CLOSE);
         }
-        self.last = Some(at);
     }
-}
-
-/// Whether a move from `from` to `to` heads for `popover`, on the bar's
-/// inner side: `to` is within the cone from `from` to the popover's near
-/// corners (its right ones beside a bar on the right).
-pub fn toward(from: Point, to: Point, popover: Rectangle) -> bool {
-    let near = if crate::side::left() {
-        popover.x
-    } else {
-        popover.x + popover.width
-    };
-    let (a, b) = (
-        Point::new(near, popover.y),
-        Point::new(near, popover.y + popover.height),
-    );
-    if from == to {
-        return false;
-    }
-    let side = |p: Point, q: Point, r: Point| (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-    let (d1, d2, d3) = (side(from, a, to), side(a, b, to), side(b, from, to));
-    let negative = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-    let positive = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-    !(negative && positive)
 }
 
 /// A popover's layer-shell margins at `rect` (the bar's frame) on the bar
@@ -1487,7 +1336,7 @@ pub fn key(
     }
     let (menu, focused) = with(|c| {
         let menu = matches!(&c.phase, Phase::Open(open) if open.how == Opened::Click);
-        (menu, c.focused.is_some())
+        (menu, c.ring.holder().is_some())
     });
     if menu {
         KEYS.lock()
@@ -1543,12 +1392,7 @@ pub struct BarPointer {
 impl BarPointer {
     /// Where the clock's group is, in the bar's frame, while it shows.
     fn calendar(&self) -> Option<Rectangle> {
-        with(|c| {
-            c.items
-                .get(&(self.bar.clone(), CLOCK_NAMESPACE))
-                .and_then(|items| items.iter().find(|(i, _)| *i == Item::Calendar))
-                .map(|(_, rect)| *rect)
-        })
+        with(|c| c.ring.find(&self.bar, CLOCK_NAMESPACE, Item::Calendar))
     }
 
     /// `position` on the surface at `bounds`, in the bar's frame.
@@ -2166,20 +2010,6 @@ mod tests {
     }
 
     #[test]
-    fn the_cone_reaches_the_popovers_near_corners() {
-        let popover = Rectangle::new(Point::new(-344.0, 800.0), Size::new(280.0, 264.0));
-        let from = Point::new(-40.0, 1000.0);
-        // Left and a little up: in. Straight up, or right: out.
-        assert!(toward(from, Point::new(-50.0, 995.0), popover));
-        assert!(toward(from, Point::new(-50.0, 960.0), popover));
-        assert!(!toward(from, Point::new(-40.0, 950.0), popover));
-        assert!(!toward(from, Point::new(-30.0, 1000.0), popover));
-        // Up beyond its top corner's line: out.
-        assert!(!toward(from, Point::new(-45.0, 900.0), popover));
-        assert!(!toward(from, from, popover));
-    }
-
-    #[test]
     fn a_popover_sits_beside_its_item_and_inside_the_screen() {
         let place = Place {
             form: Form::Full,
@@ -2624,7 +2454,7 @@ mod tests {
         assert!(!Item::TodayLine(0).clicks() && !Item::TodayMore.clicks());
         assert!(!Item::TodayLine(0).hovers(Form::Full));
         // From the card (it had the keyboard), down Today's rows and round.
-        c.focused = Some((BAR.to_owned(), Item::Meeting, card));
+        c.ring.put(BAR, Item::Meeting, card);
         let effects = no_ring(c.handle(Event::ItemStep { back: false }, t));
         assert!(c.focused(BAR, Item::TodayLine(0)));
         assert!(effects.contains(&Effect::Keyboard(today, KeyboardInteractivity::Exclusive)));

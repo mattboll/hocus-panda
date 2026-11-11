@@ -20,9 +20,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use hocus_a11y::Role;
 use hocus_link::{Form, MEETING_NAMESPACE};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Vector,
     widget::{
         canvas::{self, Frame, Geometry, LineCap, LineJoin, Path, Stroke},
         text::Alignment,
@@ -33,8 +34,9 @@ use super::{Card, Look, Phase, Words};
 use crate::theme::Ink;
 use crate::{
     Message,
-    levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, faded, pointer, rgb, ring},
+    levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, faded, rgb},
     popover::{self, Item, kit},
+    ui::items::{Control, Controls, Items},
 };
 
 /// The surfaces' widths: the bar inside its rim.
@@ -171,6 +173,15 @@ impl Part {
             Self::Mark => Item::MeetingMark,
         }
     }
+
+    fn of(item: Item) -> Option<Self> {
+        match item {
+            Item::Meeting => Some(Self::Card),
+            Item::Join => Some(Self::Join),
+            Item::MeetingMark => Some(Self::Mark),
+            _ => None,
+        }
+    }
 }
 
 /// The next meeting of bar `bar` on its surface.
@@ -188,8 +199,6 @@ pub struct View {
 
 #[derive(Debug, Default)]
 pub struct State {
-    at: Option<Point>,
-    hover: Option<Part>,
     drawn: Option<Instant>,
     /// The look as last drawn, and the one it changes from, since when.
     look: Option<Look>,
@@ -246,14 +255,6 @@ impl View {
             _ => Vec::new(),
         }
     }
-
-    /// `rect` (the surface's) in the bar's frame.
-    fn in_bar(&self, rect: Rectangle, size: Size) -> Rectangle {
-        Rectangle::new(
-            Point::new(rect.x - size.width - 1.0, self.surface_top() + rect.y),
-            rect.size(),
-        )
-    }
 }
 
 /// The join button in the card at `card`.
@@ -267,104 +268,78 @@ fn join_rect(card: Rectangle) -> Rectangle {
     )
 }
 
-impl canvas::Program<Message> for View {
+impl Items for View {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        MEETING_NAMESPACE
+    }
+
+    fn controls(&self, _state: &State, size: Size) -> Controls {
+        let to_bar = Vector::new(-size.width - 1.0, self.surface_top());
+        let Some(card) = super::snapshot() else {
+            return Controls {
+                to_bar,
+                ..Controls::default()
+            };
+        };
+        let controls = self
+            .parts(size, &card)
+            .into_iter()
+            .map(|(part, rect)| {
+                let (name, radius) = match part {
+                    Part::Join => (self.words.join_call().to_owned(), JOIN_RADIUS),
+                    Part::Card => (self.words.name(&card), RADIUS),
+                    Part::Mark => (self.words.name(&card), MARK_RADIUS),
+                };
+                Control::new(part.item(), rect, Role::Button, name, radius)
+            })
+            .collect();
+        Controls {
+            to_bar,
+            controls,
+            group: None,
+        }
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        let size = bounds.size();
-        match event {
-            iced::Event::Window(iced::window::Event::RedrawRequested(now)) => {
-                state.drawn = Some(*now);
-                let look = super::snapshot().map(|c| c.phase.look());
-                if let (Some(before), Some(look)) = (state.look, look)
-                    && before != look
-                    && self.motion
-                {
-                    state.fade = Some((before, *now));
-                }
-                state.look = look;
-                let fading = state
-                    .fade
-                    .filter(|(_, since)| now.saturating_duration_since(*since) < FADE);
-                if fading.is_none() {
-                    state.fade = None;
-                }
-                fading.map(|_| canvas::Action::request_redraw_at(*now + FADE_STEP))
-            }
-            iced::Event::Mouse(seen) => {
-                let at = pointer(seen, bounds, cursor, state.at);
-                state.at = at;
-                let card = super::snapshot()?;
-                let parts = self.parts(size, &card);
-                let over = at.and_then(|at| {
-                    parts
-                        .iter()
-                        .find(|(_, r)| r.contains(at))
-                        .map(|(p, r)| (*p, *r))
-                });
-                match seen {
-                    mouse::Event::CursorEntered
-                    | mouse::Event::CursorMoved { .. }
-                    | mouse::Event::CursorLeft => {
-                        let part = over.map(|(p, _)| p);
-                        if part == state.hover {
-                            return None;
-                        }
-                        tracing::trace!(?part, ?at, "the pointer on the meeting card");
-                        state.hover = part;
-                        match over {
-                            Some((part, rect)) => popover::event(popover::Event::ItemEnter {
-                                bar: self.bar.clone(),
-                                item: part.item(),
-                                rect: self.in_bar(rect, size),
-                            }),
-                            None => {
-                                let at = at.unwrap_or(Point::new(size.width / 2.0, size.height));
-                                popover::event(popover::Event::ItemLeave {
-                                    at: self
-                                        .in_bar(Rectangle::new(at, Size::ZERO), size)
-                                        .position(),
-                                });
-                            }
-                        }
-                        Some(canvas::Action::request_redraw())
-                    }
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                        let (part, rect) = over?;
-                        popover::event(popover::Event::ItemPress {
-                            bar: self.bar.clone(),
-                            item: part.item(),
-                            rect: self.in_bar(rect, size),
-                        });
-                        Some(canvas::Action::request_redraw().and_capture())
-                    }
-                    _ => None,
-                }
-            }
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => popover::key(key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        state.drawn = Some(*now);
+        let look = super::snapshot().map(|c| c.phase.look());
+        if let (Some(before), Some(look)) = (state.look, look)
+            && before != look
+            && self.motion
+        {
+            state.fade = Some((before, *now));
         }
+        state.look = look;
+        let fading = state
+            .fade
+            .filter(|(_, since)| now.saturating_duration_since(*since) < FADE);
+        if fading.is_none() {
+            state.fade = None;
+        }
+        fading.map(|_| canvas::Action::request_redraw_at(*now + FADE_STEP))
     }
 
     fn draw(
         &self,
         state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
@@ -372,12 +347,7 @@ impl canvas::Program<Message> for View {
         let Some(card) = super::snapshot() else {
             return crate::backdrop::over(under, frame);
         };
-        let parts = self.parts(size, &card);
-        let items = parts
-            .iter()
-            .map(|(p, r)| (p.item(), self.in_bar(*r, size)))
-            .collect();
-        popover::with(|c| c.set_items(&self.bar, MEETING_NAMESPACE, items));
+        let hover = lit.and_then(Part::of);
         let now = state.drawn.unwrap_or_else(Instant::now);
         let look = card.phase.look();
         // Its colours, from the look before while they change.
@@ -390,18 +360,7 @@ impl canvas::Program<Message> for View {
             None => of(look),
         };
         let still = self.forms.len() == 1;
-        let (focused, open) = if still {
-            popover::with(|c| {
-                (
-                    [Item::Meeting, Item::Join, Item::MeetingMark]
-                        .into_iter()
-                        .find(|i| c.focused(&self.bar, *i)),
-                    c.shows(&self.bar, Item::MeetingMark),
-                )
-            })
-        } else {
-            (None, false)
-        };
+        let open = still && popover::with(|c| c.shows(&self.bar, Item::MeetingMark));
         for &(form, alpha) in &self.forms {
             match form {
                 Form::Full => {
@@ -410,21 +369,16 @@ impl canvas::Program<Message> for View {
                         card: &card,
                         fill: colour(&|l| card_colours(l).0),
                         border: colour(&|l| card_colours(l).1),
-                        join: colour(&|l| join_colours(l, state.hover == Some(Part::Join)).0),
-                        lit: still && state.hover == Some(Part::Card),
+                        join: colour(&|l| join_colours(l, hover == Some(Part::Join)).0),
+                        lit: still && hover == Some(Part::Card),
                     };
                     draw_card(&mut frame, rect, &shown, self.words, alpha);
-                    match focused {
-                        Some(Item::Meeting) => ring(&mut frame, rect, RADIUS),
-                        Some(Item::Join) => ring(&mut frame, join_rect(rect), JOIN_RADIUS),
-                        _ => {}
-                    }
                 }
                 Form::Mini => {
                     let rect = self.mark_rect(size);
                     if open {
                         frame.fill(&kit::rounded(rect, MARK_RADIUS), faded(OPEN.get(), alpha));
-                    } else if still && state.hover == Some(Part::Mark) {
+                    } else if still && hover == Some(Part::Mark) {
                         crate::theme::hover(
                             &mut frame,
                             &kit::rounded(rect, MARK_RADIUS),
@@ -432,9 +386,6 @@ impl canvas::Program<Message> for View {
                         );
                     }
                     draw_mark(&mut frame, rect.center(), card.phase, alpha);
-                    if focused == Some(Item::MeetingMark) {
-                        ring(&mut frame, rect, MARK_RADIUS);
-                    }
                 }
             }
         }
@@ -443,7 +394,7 @@ impl canvas::Program<Message> for View {
                 "{} form={:?} lit={:?}",
                 self.words.said(&card),
                 self.forms.first().map(|f| f.0),
-                state.hover
+                hover
             );
             let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
             if kept.as_deref() != Some(said.as_str()) {
@@ -458,19 +409,6 @@ impl canvas::Program<Message> for View {
             }
         }
         crate::backdrop::over(under, frame)
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 

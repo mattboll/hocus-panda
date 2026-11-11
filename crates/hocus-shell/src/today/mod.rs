@@ -411,7 +411,7 @@ pub fn open_more(bar: &str) -> Option<Effect> {
 /// Today's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    lang: Lang,
+    pub(crate) lang: Lang,
 }
 
 impl Words {

@@ -26,9 +26,10 @@ use std::{
     time::Duration,
 };
 
+use hocus_a11y::{Act, Node, Role};
 use hocus_link::{Form, WINDOWS_NAMESPACE};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Point, Rectangle, Renderer, Size, Vector, mouse,
     widget::{
         canvas::{self, Frame, Geometry, Path, Stroke},
         text::Alignment,
@@ -39,8 +40,10 @@ use iced::{
 use super::{ITEM, LINE, Line, MORE, Row, Words};
 use crate::theme::Ink;
 use crate::{
-    levels::draw::{DIM, FAINT, HOVER, MANROPE, OPEN, TEXT, faded, pointer, rgb, ring},
+    Message,
+    levels::draw::{DIM, FAINT, HOVER, MANROPE, OPEN, TEXT, faded, rgb},
     popover::{self, Item, kit},
+    ui::items::{Control, Controls, Items, Press},
 };
 
 /// The surfaces' widths: the bar inside its rim.
@@ -287,15 +290,6 @@ pub fn row_items(rows: &[Row], rects: &[Rectangle]) -> Vec<(Item, Rectangle)> {
     items
 }
 
-/// What is under `at` in `items`: a ✕ before its line.
-pub fn over(items: &[(Item, Rectangle)], at: Point) -> Option<(Item, Rectangle)> {
-    items
-        .iter()
-        .filter(|(_, r)| r.contains(at))
-        .min_by_key(|(item, _)| !matches!(item, Item::WindowClose(_)))
-        .copied()
-}
-
 /// The windows of one bar, on their surface.
 #[derive(Debug, Clone)]
 pub struct View {
@@ -313,9 +307,6 @@ pub struct View {
 /// What the surface keeps between draws.
 #[derive(Debug, Default)]
 pub struct State {
-    pointer: Option<Point>,
-    last: Option<Point>,
-    hover: Option<Item>,
     /// The cut title under the pointer, shown whole after a rest.
     tip: Option<u64>,
     /// What it shows, as last read: its rows, their titles as cut.
@@ -387,17 +378,10 @@ impl View {
         }
     }
 
-    /// A point of the surface in the bar's frame, from its bottom as its
-    /// lines are.
-    fn in_bar(&self, at: Point, size: Size, shown: &super::Shown) -> Point {
-        Point::new(
-            at.x - size.width - 1.0,
-            shown.surface_bottom - (size.height - at.y),
-        )
-    }
-
-    fn in_bar_rect(&self, r: Rectangle, size: Size, shown: &super::Shown) -> Rectangle {
-        Rectangle::new(self.in_bar(r.position(), size, shown), r.size())
+    /// From the surface to the bar's frame, from its bottom as its lines
+    /// are.
+    fn to_bar(&self, size: Size, shown: &super::Shown) -> Vector {
+        Vector::new(-size.width - 1.0, shown.surface_bottom - size.height)
     }
 
     /// What it shows, read afresh, its titles cut once.
@@ -415,28 +399,11 @@ impl View {
             })
             .collect();
         state.shown = shown;
-        if state.hover.is_some_and(|h| !self.has(state, h)) {
-            state.hover = None;
-        }
-    }
-
-    /// Whether `item` is still one of what it shows.
-    fn has(&self, state: &State, item: Item) -> bool {
-        match item {
-            Item::Window(id) | Item::WindowClose(id) => state
-                .shown
-                .rows
-                .iter()
-                .any(|r| matches!(r, Row::Window(l) if l.id == id)),
-            Item::WindowsMore => state.shown.rows.iter().any(|r| matches!(r, Row::More(_))),
-            Item::Windows => state.shown.item.is_some(),
-            _ => false,
-        }
     }
 
     /// What it shows, said once at rest, with its items' middles in the
     /// bar's frame (for tests, which click them).
-    fn say(&self, state: &State, items: &[(Item, Rectangle)]) {
+    fn say(&self, state: &State, items: &[(Item, Rectangle)], lit: Option<Item>) {
         let Some(form) = self.alone() else {
             return;
         };
@@ -467,7 +434,7 @@ impl View {
             form.name(),
             self.words.said(&state.shown.rows),
             item,
-            state.hover,
+            lit,
             at.join(" ")
         );
         let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
@@ -478,98 +445,9 @@ impl View {
         }
     }
 
-    fn mouse<M>(
-        &self,
-        state: &mut State,
-        event: &mouse::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<M>> {
-        let size = bounds.size();
-        let at = pointer(event, bounds, cursor, state.pointer);
-        state.pointer = at;
-        let shown = state.shown.clone();
-        let items = self.items(size, &shown);
-        let found = at.and_then(|at| over(&items, at));
-        match event {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                let at = at?;
-                let bar_at = self.in_bar(at, size, &shown);
-                state.last = Some(bar_at);
-                self.tip(state, found, size);
-                let now = found.map(|(i, _)| i);
-                if now == state.hover {
-                    if now.is_none() {
-                        popover::event(popover::Event::Pointer { at: bar_at });
-                    }
-                    return None;
-                }
-                if state.hover.take().is_some() {
-                    popover::event(popover::Event::ItemLeave { at: bar_at });
-                }
-                state.hover = now;
-                if let Some((item, r)) = found {
-                    popover::event(popover::Event::ItemEnter {
-                        bar: self.bar.clone(),
-                        item,
-                        rect: self.in_bar_rect(r, size, &shown),
-                    });
-                }
-                Some(canvas::Action::request_redraw())
-            }
-            mouse::Event::CursorLeft => {
-                if state.tip.take().is_some() {
-                    crate::tray::tip::leave();
-                }
-                state.hover.take()?;
-                let at = state.last.unwrap_or_default();
-                popover::event(popover::Event::ItemLeave { at });
-                Some(canvas::Action::request_redraw())
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                if state.tip.take().is_some() {
-                    crate::tray::tip::leave();
-                }
-                tracing::debug!(?found, ?at, ?size, bar = self.bar, "a press on the windows");
-                let event = match found {
-                    Some((item, r)) => popover::Event::ItemPress {
-                        bar: self.bar.clone(),
-                        item,
-                        rect: self.in_bar_rect(r, size, &shown),
-                    },
-                    None => popover::Event::PressElsewhere,
-                };
-                popover::event(event);
-                Some(canvas::Action::request_redraw().and_capture())
-            }
-            // A right click on a line (or the mini item): its window's
-            // menu beside the bar, its top on the line's (#723).
-            mouse::Event::ButtonPressed(mouse::Button::Right) => {
-                if state.tip.take().is_some() {
-                    crate::tray::tip::leave();
-                }
-                let (item, r) = found?;
-                let line = match item {
-                    Item::Window(id) | Item::WindowClose(id) => {
-                        shown.rows.iter().find_map(|row| match row {
-                            Row::Window(line) if line.id == id => Some(line.clone()),
-                            _ => None,
-                        })
-                    }
-                    Item::Windows => shown.item.clone(),
-                    _ => None,
-                }?;
-                let rect = self.in_bar_rect(r, size, &shown);
-                popover::window_menu::ask(&self.bar, line.id, Some(rect), &line.title, &line.app);
-                Some(canvas::Action::request_redraw().and_capture())
-            }
-            _ => None,
-        }
-    }
-
     /// A cut title under the pointer: shown whole after a rest; the mini
     /// item's title too.
-    fn tip(&self, state: &mut State, found: Option<(Item, Rectangle)>, size: Size) {
+    fn tip(&self, state: &mut State, found: Option<(Item, Rectangle)>) {
         let shown = &state.shown;
         let whole = match found {
             Some((Item::Window(id), rect)) => shown
@@ -589,13 +467,7 @@ impl View {
         };
         match whole {
             Some((id, title, rect)) if state.tip != Some(id) => {
-                crate::tray::tip::hover_text(
-                    &self.bar,
-                    self.in_bar_rect(rect, size, shown),
-                    TIP,
-                    title,
-                    String::new(),
-                );
+                crate::tray::tip::hover_text(&self.bar, rect, TIP, title, String::new());
                 state.tip = Some(id);
             }
             None if state.tip.take().is_some() => crate::tray::tip::leave(),
@@ -603,20 +475,15 @@ impl View {
         }
     }
 
-    fn group(&self, f: &mut Frame, state: &State, size: Size, alpha: f32) {
+    fn group(&self, f: &mut Frame, state: &State, size: Size, alpha: f32, hover: Option<Item>) {
         let shown = &state.shown;
         let rects = self.rects(size, shown);
-        let focused = popover::with(|c| {
-            row_items(&shown.rows, &rects)
-                .into_iter()
-                .find(|(item, _)| c.focused(&self.bar, *item))
-        });
         for ((row, rect), (title, _)) in shown.rows.iter().zip(&rects).zip(&state.titles) {
             match row {
                 Row::Window(line) => {
                     let lit = Lit {
-                        line: state.hover == Some(Item::Window(line.id)),
-                        close: state.hover == Some(Item::WindowClose(line.id)),
+                        line: hover == Some(Item::Window(line.id)),
+                        close: hover == Some(Item::WindowClose(line.id)),
                     };
                     draw_line(f, *rect, line, title, lit, alpha);
                 }
@@ -624,33 +491,20 @@ impl View {
                     f,
                     *rect,
                     title.clone(),
-                    state.hover == Some(Item::WindowsMore),
+                    hover == Some(Item::WindowsMore),
                     alpha,
                 ),
             }
         }
-        if let Some((item, rect)) = focused {
-            let radius = if matches!(item, Item::WindowClose(_)) {
-                CLOSE_RADIUS
-            } else {
-                RADIUS
-            };
-            ring(f, rect, radius);
-        }
     }
 
-    fn mini(&self, f: &mut Frame, state: &State, size: Size, alpha: f32) {
+    fn mini(&self, f: &mut Frame, state: &State, size: Size, alpha: f32, hover: Option<Item>) {
         let Some(line) = &state.shown.item else {
             return;
         };
         let rect = self.mini_rect(size, &state.shown);
-        let (open, focused) = popover::with(|c| {
-            (
-                c.shows(&self.bar, Item::Windows),
-                c.focused(&self.bar, Item::Windows),
-            )
-        });
-        match (open, state.hover == Some(Item::Windows)) {
+        let open = popover::with(|c| c.shows(&self.bar, Item::Windows));
+        match (open, hover == Some(Item::Windows)) {
             (true, _) => f.fill(&kit::rounded(rect, MINI_RADIUS), faded(OPEN.get(), alpha)),
             (false, true) => crate::theme::hover(
                 f,
@@ -658,9 +512,6 @@ impl View {
                 faded(HOVER.get(), alpha),
             ),
             (false, false) => {}
-        }
-        if focused {
-            ring(f, rect, MINI_RADIUS);
         }
         let icon = Rectangle::new(
             Point::new(
@@ -680,40 +531,129 @@ impl View {
     }
 }
 
-impl<Message> canvas::Program<Message> for View {
+impl Items for View {
     type State = State;
+
+    fn bar(&self) -> &str {
+        &self.bar
+    }
+
+    fn namespace(&self) -> &'static str {
+        WINDOWS_NAMESPACE
+    }
+
+    fn controls(&self, state: &State, size: Size) -> Controls {
+        let shown = &state.shown;
+        let said = crate::a11y::Words::new(self.words.lang);
+        let line = |id: u64| {
+            shown.rows.iter().find_map(|r| match r {
+                Row::Window(line) if line.id == id => Some(line),
+                _ => None,
+            })
+        };
+        let lines = shown
+            .rows
+            .iter()
+            .filter(|r| matches!(r, Row::Window(_)))
+            .count();
+        let controls: Vec<Control> = self
+            .items(size, shown)
+            .into_iter()
+            .map(|(item, rect)| match item {
+                Item::Window(id) => {
+                    let line = line(id);
+                    let name = line.map(|l| self.words.name(l)).unwrap_or_default();
+                    let focused = line.is_some_and(|l| l.focused);
+                    Control::new(item, rect, Role::ListItem, name, RADIUS)
+                        .node(|n| n.selected(focused).act(Act::Menu))
+                }
+                Item::WindowClose(id) => {
+                    let name = line(id).map(|l| self.words.close(&l.title));
+                    Control::new(
+                        item,
+                        rect,
+                        Role::Button,
+                        name.unwrap_or_default(),
+                        CLOSE_RADIUS,
+                    )
+                    .part()
+                }
+                Item::Windows => {
+                    let name = self.words.item(shown.count);
+                    Control::new(item, rect, Role::Button, name, MINI_RADIUS)
+                }
+                _ => {
+                    let name = said.more_windows(shown.count.saturating_sub(lines));
+                    Control::new(item, rect, Role::Button, name, RADIUS)
+                }
+            })
+            .collect();
+        Controls {
+            to_bar: self.to_bar(size, shown),
+            group: (controls.len() > 1)
+                .then(|| Node::new("windows", Role::List, said.windows(shown.count))),
+            controls,
+        }
+    }
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _at: Option<Point>,
     ) -> Option<canvas::Action<Message>> {
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                self.refresh(state);
-                None
-            }
-            iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => popover::key(key, *modifiers, text.as_deref())
-                .then(|| canvas::Action::request_redraw().and_capture()),
-            _ => None,
+        if let iced::Event::Window(window::Event::RedrawRequested(_)) = event {
+            self.refresh(state);
         }
+        None
+    }
+
+    fn hovered(&self, state: &mut State, on: Option<(Item, Rectangle)>) {
+        self.tip(state, on);
+    }
+
+    /// A right click on a line (or the mini item): its window's menu
+    /// beside the bar, its top on the line's (#723).
+    fn pressed(
+        &self,
+        state: &mut State,
+        button: mouse::Button,
+        on: Option<(Item, Rectangle)>,
+    ) -> Press {
+        if state.tip.take().is_some() {
+            crate::tray::tip::leave();
+        }
+        if button != mouse::Button::Right {
+            return Press::Kit;
+        }
+        let Some((item, rect)) = on else {
+            return Press::Passed;
+        };
+        let shown = &state.shown;
+        let line = match item {
+            Item::Window(id) | Item::WindowClose(id) => {
+                shown.rows.iter().find_map(|row| match row {
+                    Row::Window(line) if line.id == id => Some(line.clone()),
+                    _ => None,
+                })
+            }
+            Item::Windows => shown.item.clone(),
+            _ => None,
+        };
+        let Some(line) = line else {
+            return Press::Passed;
+        };
+        popover::window_menu::ask(&self.bar, line.id, Some(rect), &line.title, &line.app);
+        Press::Taken
     }
 
     fn draw(
         &self,
         state: &State,
         renderer: &Renderer,
-        _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        lit: Option<Item>,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
@@ -726,12 +666,12 @@ impl<Message> canvas::Program<Message> for View {
             backdrop.at(middle, bar)
         });
         let under = crate::backdrop::under(renderer, size, colour);
-        let items = self.items(size, shown);
-        let in_bar: Vec<(Item, Rectangle)> = items
-            .iter()
-            .map(|(item, r)| (*item, self.in_bar_rect(*r, size, shown)))
+        let to_bar = self.to_bar(size, shown);
+        let in_bar: Vec<(Item, Rectangle)> = self
+            .items(size, shown)
+            .into_iter()
+            .map(|(item, r)| (item, r + to_bar))
             .collect();
-        popover::with(|c| c.set_items(&self.bar, WINDOWS_NAMESPACE, in_bar.clone()));
         // The bar's inside, as wide as it is while it switches.
         let left = (size.width + 2.0 - self.bar_width).max(0.0);
         let column = Rectangle::new(
@@ -742,26 +682,13 @@ impl<Message> canvas::Program<Message> for View {
             for &(form, _) in &self.forms {
                 let alpha = self.alpha(form);
                 match form {
-                    Form::Full => self.group(f, state, size, alpha),
-                    Form::Mini => self.mini(f, state, size, alpha),
+                    Form::Full => self.group(f, state, size, alpha, lit),
+                    Form::Mini => self.mini(f, state, size, alpha, lit),
                 }
             }
         });
-        self.say(state, &in_bar);
+        self.say(state, &in_bar, lit);
         crate::backdrop::over(under, frame)
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if state.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 
@@ -805,7 +732,7 @@ mod tests {
             title_room(184.0),
             184.0 - 6.0 - 18.0 - 8.0 - 6.0 - 22.0 - 4.0
         );
-        // Its items: each line and its ✕, then "+ N"; the ✕ over its line.
+        // Its items: each line and its ✕, then "+ N".
         let items = row_items(&rows, &rects);
         assert_eq!(
             items.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
@@ -817,18 +744,5 @@ mod tests {
                 Item::WindowsMore
             ]
         );
-        assert_eq!(
-            over(&items, Point::new(170.0, 20.0)).map(|(i, _)| i),
-            Some(Item::WindowClose(1))
-        );
-        assert_eq!(
-            over(&items, Point::new(40.0, 20.0)).map(|(i, _)| i),
-            Some(Item::Window(1))
-        );
-        assert_eq!(
-            over(&items, Point::new(40.0, 70.0)).map(|(i, _)| i),
-            Some(Item::WindowsMore)
-        );
-        assert_eq!(over(&items, Point::new(40.0, 90.0)), None);
     }
 }

@@ -845,3 +845,33 @@ fn kit_shot() -> anyhow::Result<()> {
         .dispatch_until(common::WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
     common::popover_shot(&mut bed.hp, "meeting")
 }
+
+/// The next meeting's card at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        "14:00:00",
+        &day("now+8m", "now+38m"),
+        FormChoice::Full,
+    )?;
+    bed.card_since(0, &["look=Soon"])?;
+    let card = bed.card_surface()?;
+    let at = (
+        f64::from(card.x + card.width / 3),
+        f64::from(card.y + card.height / 2),
+    );
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (MEETING_NAMESPACE, "meeting"),
+        at,
+        "Meeting",
+    )
+}

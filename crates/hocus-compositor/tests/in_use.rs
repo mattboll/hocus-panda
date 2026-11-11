@@ -1348,3 +1348,28 @@ fn kit_shot() -> anyhow::Result<()> {
     drop(firefox);
     Ok(())
 }
+
+/// The in-use sign at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Full)?;
+    bed.speak("hocus-test-call", "Discord", "discord", "Appel vocal")?;
+    let sign = bed.sign("Microphone")?;
+    let at = (
+        f64::from(sign.x + sign.width / 2),
+        f64::from(sign.y + sign.height / 2),
+    );
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::IN_USE_NAMESPACE, "in-use"),
+        at,
+        "InUse",
+    )
+}

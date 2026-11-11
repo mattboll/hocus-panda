@@ -284,7 +284,7 @@ impl Said {
         let mut bars = crate::popover::with(|c| c.bar_forms());
         bars.sort_by(|a, b| a.0.cmp(&b.0));
         for (i, (bar, form)) in bars.iter().enumerate() {
-            let mut facts = gather(bar, *form, lang, &agents);
+            let mut facts = gather(bar, *form, lang);
             // Said once, from the first bar.
             if i == 0 {
                 facts.announce = self
@@ -295,7 +295,7 @@ impl Said {
             let window = bar::window(&facts, words);
             for (item, rect) in &facts.frame {
                 self.targets.insert(
-                    (window.key.clone(), bar::key(*item)),
+                    (window.key.clone(), crate::ui::items::key(*item)),
                     Target::Item {
                         bar: bar.clone(),
                         item: *item,
@@ -613,17 +613,35 @@ fn press_row(row: &str, act: Act) {
     }
 }
 
-/// What bar `bar` shows now, from the shell's model.
-fn gather(
-    bar: &str,
-    form: hocus_link::Form,
-    lang: Lang,
-    agents: &[hocus_link::AgentShown],
-) -> bar::Facts {
-    use crate::popover::Item as I;
-    let (shown, focused, open, height) = crate::popover::with(|c| {
+/// What bar `bar` shows now, as its surfaces declared it.
+fn gather(bar: &str, form: hocus_link::Form, lang: Lang) -> bar::Facts {
+    let (shown, declared, lives, groups, focused, open, height) = crate::popover::with(|c| {
+        let spots = c.ring.spots(bar);
+        let declared: Vec<(&'static str, Item, Option<Node>, bool)> = spots
+            .iter()
+            .map(|(namespace, s)| (*namespace, s.item, s.node.clone(), s.part))
+            .collect();
+        let mut lives = Vec::new();
+        for (namespace, _) in &spots {
+            if !lives.iter().any(|(n, _)| n == namespace)
+                && let Some(live) = c.ring.live(bar, namespace)
+            {
+                lives.push((*namespace, live));
+            }
+        }
+        let mut groups: Vec<(&'static str, Node)> = Vec::new();
+        for (namespace, _) in &spots {
+            if !groups.iter().any(|(n, _)| n == namespace)
+                && let Some(group) = c.ring.group(bar, namespace)
+            {
+                groups.push((namespace, group.clone()));
+            }
+        }
         (
             c.items_of(bar),
+            declared,
+            lives,
+            groups,
             c.focused_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
             c.open_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
             c.bar_height(bar),
@@ -643,140 +661,34 @@ fn gather(
         })
         .collect();
     let frame = shown.iter().map(|(_, item, r)| (*item, *r)).collect();
+    // Named as they are now where what their surface draws would age
+    // (read outside the controller's lock).
+    let words = Words::new(lang);
+    let declared: Vec<(Item, Node, bool)> = declared
+        .into_iter()
+        .filter_map(|(namespace, item, node, part)| {
+            let live = lives
+                .iter()
+                .find(|(n, _)| *n == namespace)
+                .and_then(|(_, live)| live(bar, words, item));
+            live.or(node).map(|node| (item, node, part))
+        })
+        .collect();
     let levels_words = crate::levels::model::Words::new(lang);
     let screen = crate::desktops::screen_of(bar, 0).map_or_else(
         || bar.to_owned(),
         |s| levels_words.screen(s.built_in, s.inches, s.number),
     );
-    let uses = crate::in_use::snapshot();
-    let mut used = Vec::new();
-    let apps = |media: &[crate::in_use::Seen<crate::in_use::Media>]| -> Vec<String> {
-        media
-            .iter()
-            .filter(|m| m.live())
-            .map(|m| m.what.app.clone())
-            .collect()
-    };
-    for (kind, apps) in [
-        (crate::in_use::Kind::Microphone, apps(&uses.microphone)),
-        (crate::in_use::Kind::Camera, apps(&uses.camera)),
-        (
-            crate::in_use::Kind::Screen,
-            uses.shares
-                .iter()
-                .filter(|s| s.live())
-                .map(|s| s.what.app.clone())
-                .collect(),
-        ),
-    ] {
-        if !apps.is_empty() {
-            used.push((kind, apps));
-        }
-    }
-    if uses.recording.as_ref().is_some_and(|r| r.live()) {
-        used.push((crate::in_use::Kind::Recording, Vec::new()));
-    }
-    let lines = crate::tasks::lines();
-    let tasks: Vec<bar::Task> = lines
-        .lines
-        .iter()
-        .filter(|l| l.going.is_none() && l.look != crate::tasks::Look::Adding)
-        .map(|l| bar::Task {
-            title: l.title.clone(),
-            ticked: l.look.ticked(),
-        })
-        .collect();
-    let shown_boxes = items
-        .iter()
-        .filter(|(_, item, _)| matches!(item, I::Task(_)))
-        .count();
-    let windows = crate::windows::shown(bar);
-    let window_lines: Vec<crate::windows::Line> = windows
-        .rows
-        .iter()
-        .filter_map(|r| match r {
-            crate::windows::Row::Window(line) => Some(line.clone()),
-            crate::windows::Row::More(_) => None,
-        })
-        .collect();
-    let more_windows = windows.count.saturating_sub(window_lines.len());
-    let mut desks = Vec::new();
-    for (_, item, _) in &items {
-        let I::Desktop { row, index } = *item else {
-            continue;
-        };
-        let output = crate::desktops::output_of(bar, row);
-        let Some(said) = crate::desktops::snapshot(&output) else {
-            continue;
-        };
-        let titles = crate::desktops::titles(&output).unwrap_or_default();
-        let i = usize::from(index);
-        let name = crate::desktops::name(i);
-        let screen = (row > 0)
-            .then(|| crate::desktops::screen_of(bar, row))
-            .flatten()
-            .map(|s| levels_words.screen(s.built_in, s.inches, s.number));
-        desks.push((
-            (row, index),
-            bar::Desk {
-                title: levels_words.desktop_title(i + 1, name.as_deref()),
-                current: usize::from(said.current) == i,
-                windows: said
-                    .windows
-                    .iter()
-                    .filter(|w| {
-                        usize::from(w.desktop) == i && w.look != hocus_link::Look::Minimized
-                    })
-                    .filter_map(|w| {
-                        titles
-                            .titles
-                            .iter()
-                            .find(|(id, _)| *id == w.id)
-                            .map(|(_, t)| t.clone())
-                    })
-                    .collect(),
-                count: usize::from(said.count),
-                screen,
-            },
-        ));
-    }
-    let link = crate::network::snapshot().link();
-    let bluetooth = crate::bluetooth::snapshot().row();
     bar::Facts {
         bar: bar.to_owned(),
         screen,
         size: Some((width, height)),
         items,
         frame,
+        nodes: declared,
+        groups,
         focused,
         open,
-        clock: Some(crate::clock::time::Shown::at(
-            &crate::notifications::wall(),
-            lang,
-        )),
-        meeting: crate::meeting::snapshot(),
-        uses: used,
-        microphone_muted: uses.muted,
-        today: crate::today::shown(bar).0,
-        open_tasks: lines.open(),
-        more_tasks: lines.open().saturating_sub(shown_boxes),
-        tasks,
-        agents: agents.to_vec(),
-        now_us: crate::agents::now_us(),
-        rows_shown: crate::agents::rows_shown(),
-        windows: window_lines,
-        more_windows,
-        desks,
-        link: (link != hocus_network::model::Link::Hidden).then_some(link),
-        bluetooth: (bluetooth != hocus_bluetooth::model::Row::Hidden).then_some(bluetooth),
-        layout: crate::layouts::snapshot().shown().map(|l| l.name.clone()),
-        levels: crate::levels::snapshot(),
-        unseen: crate::notifications::with(|c| c.stack.badge()),
-        user: crate::user::name(),
-        tray: crate::tray::shown()
-            .into_iter()
-            .map(|s| (s.key, s.name))
-            .collect(),
         announce: None,
     }
 }

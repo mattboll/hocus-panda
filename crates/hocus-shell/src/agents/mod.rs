@@ -514,7 +514,7 @@ pub fn set_agents(agents: Vec<AgentShown>) {
 /// The group's and its popovers' words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    lang: Lang,
+    pub(crate) lang: Lang,
 }
 
 impl Words {

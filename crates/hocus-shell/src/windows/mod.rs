@@ -608,7 +608,7 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The windows' words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    lang: Lang,
+    pub(crate) lang: Lang,
 }
 
 impl Words {

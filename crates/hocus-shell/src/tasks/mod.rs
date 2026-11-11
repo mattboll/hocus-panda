@@ -985,7 +985,7 @@ pub fn tick(now: Instant) -> Vec<Effect> {
 /// The list's words, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    lang: Lang,
+    pub(crate) lang: Lang,
 }
 
 impl Words {

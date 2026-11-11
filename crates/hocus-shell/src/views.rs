@@ -130,7 +130,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -183,7 +183,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -213,7 +213,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -245,7 +245,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -277,7 +277,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -303,7 +303,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -350,7 +350,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
@@ -375,6 +375,7 @@ impl Shell {
         });
         let program = tray::draw::Tray {
             id,
+            bar: bar.output.clone(),
             forms: bar.forms(at),
             bar_width: bar.width(at),
             motion: self.look.motion,
@@ -383,7 +384,7 @@ impl Shell {
         Some(in_bar(
             bar,
             at,
-            canvas(program)
+            canvas(ui::items::surface(program))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
