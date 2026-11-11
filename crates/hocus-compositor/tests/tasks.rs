@@ -601,11 +601,16 @@ fn enter_adds_the_task_at_the_top_and_esc_or_a_click_elsewhere_closes_the_empty_
     bed.field_opens(from)?;
     bed.group_height(18 + 30 + 3 * 22 + 20 + 10)?;
     bed.shot("field-empty")?;
+    // Counted before the keys: the commit that shows them may come before
+    // the shell's line is read, and waiting for one more after it took the
+    // whole wait.
+    let commits = bed.hp.tasks_commits();
     bed.type_text("acheter du pain");
     bed.logged_after(from, &["the tasks show", "«acheter du pain» focused=true"])?;
-    let commits = bed.hp.tasks_commits();
-    bed.hp
+    let drawn = bed
+        .hp
         .dispatch_until(WAIT, |hp| hp.tasks_commits() > commits)?;
+    anyhow::ensure!(drawn, "the field was not drawn again");
     bed.shot("field")?;
     // `Enter`: at the top of the column, no due date; the third goes into
     // "+ N".

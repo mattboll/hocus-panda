@@ -436,6 +436,19 @@ impl Bed {
         (f64::from(s.x) + 11.0, f64::from(s.y) + 5.0)
     }
 
+    /// Whether the group's items hold `item`, as the shell last logged
+    /// them: read at once, for what is not there once the shell rests
+    /// ([`Bed::settle`]). Waiting for it to come would take the whole wait
+    /// each time.
+    fn shows_item(&self, item: &str) -> bool {
+        let wanted = format!("{item}@");
+        plain(&self.log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the agents group's items"))
+            .is_some_and(|l| l.contains(&wanted))
+    }
+
     /// Where the group's `item` is (`Sources`, `Plug(ClaudeCode)`,
     /// `Decline`…), global, as the shell last logged its items' middles
     /// in the bar's frame (from its outer right edge, its top).
@@ -3912,7 +3925,7 @@ fn the_mini_item_shows_who_waits_the_longest_and_goes_to_it() -> anyhow::Result<
     bed.settle()?;
     // Nobody waits: her alone, the item as tall as without a panda.
     let id = bed.id_of("build")?;
-    assert!(bed.item(&format!("Agent({id})")).is_err());
+    assert!(!bed.shows_item(&format!("Agent({id})")));
     assert_eq!(bed.surface().height, (MINI_HEIGHT + 10.0).ceil() as i32);
     bed.agent_is("build", "waiting")?;
     let (x, y) = bed.item(&format!("Agent({id})"))?;
