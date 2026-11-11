@@ -1953,11 +1953,13 @@ menu, the in-use sign's, the session's, a window's menu, the next
 meeting's, the tasks', the calendar, the agents' briefing, Sources and
 the consent, the clipboard's history, the notifications' history and the
 day sources'), the music player's tile, and the surfaces of the shell's
-own: the actions palette, the emoji picker, the launcher and the share's
-chooser (`Around::own`: open while their model says, woken by their
-namespace, every key theirs). The bar's items, the authentication
-dialog, the captures, the lock, the notifications' bubbles, the
-desktops' overview and the peek are still hand-drawn canvases (#772).
+own: the actions palette, the emoji picker, the launcher, the share's
+chooser, the authentication dialog, the notifications' bubbles and the
+lock's controls (`Around::own`: open while their model says, woken by
+their namespace, every key theirs; `Around::own_by` when a closure wakes
+them, a bubble's namespace being its serial's). The bar's items, the
+captures, the desktops' overview and the peek are still hand-drawn
+canvases (#772).
 
 **How to build a surface with it.**
 
@@ -1980,7 +1982,10 @@ desktops' overview and the peek are still hand-drawn canvases (#772).
    `parts::drawn_lit` to draw it otherwise under the pointer, in a
    button; `parts::moving` for what moves by itself, a panda playing its
    mood, a switch's knob sliding: it draws again each frame while it
-   moves, and only then). Text that may hold a secret (what an agent's
+   moves, and only then; `parts::moving_lit` for both, a chevron turning
+   in a button; `ui::moved` to draw a control moved by an offset of the
+   moment, a field shaking at a wrong password, laid out and hit where it
+   rests). Text that may hold a secret (what an agent's
    tool said) is drawn and kept out of the dump (`ui::unsaid`). A
    scrollable lays its content out as wide as its viewport at least:
    rows of a width of their own go in a container. A surface whose parts a layout of its own places (the
@@ -2046,7 +2051,14 @@ actions palette's 0.35 %, the emoji picker's 0.12 %, the launcher's
 of the emoji's glyph edges. A long grid builds only its rows near the
 view (`parts::lazy`, the emoji's); a surface as large as its screen is
 told its size (`ui::sized`); the launcher's and the chooser's wheel
-still scroll by rows.
+still scroll by rows. Then the fourth batch: the authentication dialog,
+a notification's bubble and the lock, none: their looks are drawn as
+before inside the kit's controls (`ui::moved` for the shakes), and what
+nothing holds under them. A canvas' clip does not follow its
+translation, and its bounds cut a rim on a half pixel: a control draws
+in its own frame, a pixel past its bounds when its edge is on one. The
+dialog's field is the shared one, masked; the lock's dots stay the
+compositor's count, its keys the compositor's.
 
 ### 3.9, the desktops (2026-10-30)
 

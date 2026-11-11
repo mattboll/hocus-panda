@@ -1,5 +1,7 @@
-//! The shell's other windows for screen readers: the open popover, the
-//! notifications' bubbles, the lock screen and the authentication dialog.
+//! The shell's other windows for screen readers: the open popover and the
+//! notifications' bubbles, around what their controls declared (the lock
+//! and the authentication dialog are their own: `lock::view`,
+//! `auth::a11y`).
 
 use hocus_a11y::{Act, Node, Role, Window};
 
