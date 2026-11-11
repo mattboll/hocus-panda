@@ -198,7 +198,9 @@ windows' keys of docs/design/windows.md §13), `[programs]` (`terminal`), `[pane
 docs/design/idle.md), `[magnifier]` (docs/design/accessibility.md) and
 `[appearance]` (`reduced-motion`, `high-contrast`, `reduce-transparency`), `[accessibility]` (`screen-reader`), `[developer]` (`live-reload`, docs/workflow.md); the shell reads `[day]` from the same file
 (`HOCUS_CONFIG`, which the compositor sets), the day's accounts (docs/design/day.md). `packaging/config.toml` lists every setting
-with its default (a test checks it). `--session` is what display managers
+with its default, the one place defaults are defined (`hocus_config::defaults`):
+the compositor's and hocus-day's tests check their `Default`s against it, and
+the Settings' rows take theirs from it. `--session` is what display managers
 run (through `packaging/hocuspanda-session`): it tells the user's systemd
 and D-Bus where the session is, so never use it next to a live session. Headless tests
 start it in-process (`hocus_compositor::Headless`, see
