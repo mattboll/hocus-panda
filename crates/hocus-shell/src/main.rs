@@ -1913,16 +1913,12 @@ impl Shell {
                 motion: self.look.motion,
             }),
             popover::Item::Music => popover::music::view(id, self.look.glass),
-            popover::Item::Bluetooth => canvas(popover::bluetooth::Panel {
+            popover::Item::Bluetooth => popover::bluetooth::view(&popover::bluetooth::Panel {
                 id,
                 words: self.words,
                 glass: self.look.glass,
                 motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Brightness => canvas(popover::brightness::Panel {
                 id,
                 words: self.words,
