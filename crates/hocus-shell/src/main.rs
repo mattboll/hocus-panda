@@ -1919,15 +1919,14 @@ impl Shell {
                 words: windows::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
             }),
-            popover::Item::WindowMenu(window) => canvas(popover::window_menu::Panel {
-                id,
-                window,
-                words: popover::window_menu::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            popover::Item::WindowMenu(window) => {
+                popover::window_menu::view(&popover::window_menu::Panel {
+                    id,
+                    window,
+                    words: popover::window_menu::Words::new(clock::time::Lang::of_messages()),
+                    glass: self.look.glass,
+                })
+            }
             popover::Item::Desktop { .. } | popover::Item::WindowsMore => {
                 popover::desktop::view(&popover::desktop::Panel {
                     id,

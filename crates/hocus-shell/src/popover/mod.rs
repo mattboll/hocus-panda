@@ -346,7 +346,8 @@ impl Item {
             Self::Calendar => calendar::opening(),
             Self::Music => music::opening(),
             Self::Windows => windows::opening(),
-            Self::Window(_) | Self::WindowClose(_) | Self::WindowMenu(_) => {}
+            Self::WindowMenu(_) => window_menu::opening(),
+            Self::Window(_) | Self::WindowClose(_) => {}
         }
     }
 
