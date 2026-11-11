@@ -414,12 +414,10 @@ impl Words {
     /// "dans 5 min", "maintenant", "a commencé il y a 4 min".
     pub fn when(self, left: i64) -> String {
         let minutes = |m: i64| meeting::Words::minutes(m);
-        match (left, (self.lang == Lang::French)) {
-            (1.., true) => format!("dans {}", minutes(left)),
-            (1.., false) => format!("in {}", minutes(left)),
-            (0, _) => self.pick(txt::NOW).to_owned(),
-            (_, true) => format!("a commencé il y a {}", minutes(-left)),
-            (_, false) => format!("started {} ago", minutes(-left)),
+        match left {
+            1.. => txt::in_text(self.lang, minutes(left)),
+            0 => self.pick(txt::NOW).to_owned(),
+            _ => txt::started_ago(self.lang, minutes(-left)),
         }
     }
 
@@ -489,12 +487,10 @@ impl Words {
                 format!("{m} minutes")
             }
         };
-        let when = match (tab.left, (self.lang == Lang::French)) {
-            (1.., true) => format!("dans {}", long(tab.left)),
-            (1.., false) => format!("in {}", long(tab.left)),
-            (0, _) => self.pick(txt::NOW).to_owned(),
-            (_, true) => format!("a commencé il y a {}", long(-tab.left)),
-            (_, false) => format!("started {} ago", long(-tab.left)),
+        let when = match tab.left {
+            1.. => txt::in_text_2(self.lang, long(tab.left)),
+            0 => self.pick(txt::NOW).to_owned(),
+            _ => txt::started_ago_2(self.lang, long(-tab.left)),
         };
         let mut name = format!("{}, {when}", self.title(tab, shared));
         match (&tab.meeting.video, &tab.meeting.place) {

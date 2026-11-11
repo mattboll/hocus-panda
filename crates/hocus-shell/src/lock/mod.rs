@@ -256,11 +256,9 @@ impl Words {
 
     /// The agents waiting for the user: a count, no name.
     pub fn agents(self, count: u32) -> String {
-        match (count, (self.lang == Lang::French)) {
-            (1, true) => "1 agent t’attend".to_owned(),
-            (n, true) => format!("{n} agents t’attendent"),
-            (1, false) => "1 agent is waiting for you".to_owned(),
-            (n, false) => format!("{n} agents are waiting for you"),
+        match count {
+            1 => txt::N_1_AGENT_IS_WAITING_FOR_YOU.get(self.lang).to_owned(),
+            n => txt::agents_are_waiting_for_you(self.lang, n),
         }
     }
 

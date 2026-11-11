@@ -555,11 +555,9 @@ impl Words {
 
     /// "dans 25 min", "fin dans 18 min": the time line's after the start.
     pub fn relative(self, phase: Phase) -> String {
-        match (phase, (self.lang == Lang::French)) {
-            (Phase::Ahead { minutes }, true) => format!("dans {}", Self::minutes(minutes)),
-            (Phase::Ahead { minutes }, false) => format!("in {}", Self::minutes(minutes)),
-            (Phase::Under { left, .. }, true) => format!("fin dans {}", Self::minutes(left)),
-            (Phase::Under { left, .. }, false) => format!("ends in {}", Self::minutes(left)),
+        match phase {
+            Phase::Ahead { minutes } => txt::in_text(self.lang, Self::minutes(minutes)),
+            Phase::Under { left, .. } => txt::ends_in(self.lang, Self::minutes(left)),
         }
     }
 
@@ -594,11 +592,9 @@ impl Words {
         let long = |minutes: i64| {
             if minutes >= 60 {
                 let (h, m) = (minutes / 60, minutes % 60);
-                match ((self.lang == Lang::French), m) {
-                    (true, 0) => format!("{h} h"),
-                    (false, 0) => format!("{h} h"),
-                    (true, m) => format!("{h} h {m:02}"),
-                    (false, m) => format!("{h} h {m:02}"),
+                match m {
+                    0 => txt::h(self.lang, h),
+                    m => txt::h_2(self.lang, txt::H2 { h: &h, m: &m }),
                 }
             } else if minutes == 1 {
                 self.pick(txt::N_1_MINUTE).to_owned()
@@ -606,11 +602,9 @@ impl Words {
                 format!("{minutes} minutes")
             }
         };
-        let when = match (card.phase, (self.lang == Lang::French)) {
-            (Phase::Ahead { minutes }, true) => format!("dans {}", long(minutes)),
-            (Phase::Ahead { minutes }, false) => format!("in {}", long(minutes)),
-            (Phase::Under { left, .. }, true) => format!("fin dans {}", long(left)),
-            (Phase::Under { left, .. }, false) => format!("ends in {}", long(left)),
+        let when = match card.phase {
+            Phase::Ahead { minutes } => txt::in_text_2(self.lang, long(minutes)),
+            Phase::Under { left, .. } => txt::ends_in_2(self.lang, long(left)),
         };
         let heading = match card.phase {
             Phase::Ahead { .. } => self.pick(txt::NEXT_MEETING_2),

@@ -1027,11 +1027,9 @@ impl Words {
 
     /// A box's name: what a click does.
     pub fn tick(self, title: &str, ticked: bool) -> String {
-        match ((self.lang == Lang::French), ticked) {
-            (true, false) => format!("Cocher « {title} »"),
-            (true, true) => format!("Décocher « {title} »"),
-            (false, false) => format!("Tick \"{title}\""),
-            (false, true) => format!("Untick \"{title}\""),
+        match ticked {
+            false => txt::tick(self.lang, title),
+            true => txt::untick(self.lang, title),
         }
     }
 
@@ -1041,11 +1039,9 @@ impl Words {
 
     /// The mini item's name: how many tasks are open.
     pub fn count(self, n: usize) -> String {
-        match ((self.lang == Lang::French), n) {
-            (true, 1) => "À faire : 1 tâche".to_owned(),
-            (true, n) => format!("À faire : {n} tâches"),
-            (false, 1) => "To do: 1 task".to_owned(),
-            (false, n) => format!("To do: {n} tasks"),
+        match n {
+            1 => txt::TO_DO_1_TASK.get(self.lang).to_owned(),
+            n => txt::to_do_tasks(self.lang, n),
         }
     }
 }

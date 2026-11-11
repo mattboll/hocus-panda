@@ -268,11 +268,9 @@ impl Words {
             (Choice::Always, _) | (_, None) => self.pick(txt::UNTIL_YOU_TURN_IT_OFF).to_owned(),
             (_, Some(at)) => {
                 let tomorrow = now.date().tomorrow().ok() == Some(at.date());
-                match ((self.lang == Lang::French), tomorrow) {
-                    (true, true) => format!("Jusqu’à demain, {}", self.time(&at)),
-                    (true, false) => format!("Jusqu’à {}", self.time(&at)),
-                    (false, true) => format!("Until tomorrow, {}", self.time(&at)),
-                    (false, false) => format!("Until {}", self.time(&at)),
+                match tomorrow {
+                    true => txt::until_tomorrow(self.lang, self.time(&at)),
+                    false => txt::until(self.lang, self.time(&at)),
                 }
             }
         };
@@ -289,17 +287,12 @@ impl Words {
     }
 
     fn ago(self, ago: Ago) -> String {
-        match (ago, (self.lang == Lang::French)) {
-            (Ago::Now, true) => "maintenant".to_owned(),
-            (Ago::Now, false) => "now".to_owned(),
-            (Ago::Minutes(n), true) => format!("il y a {n}\u{a0}min"),
-            (Ago::Minutes(n), false) => format!("{n}\u{a0}min ago"),
-            (Ago::Hours(n), true) => format!("il y a {n}\u{a0}h"),
-            (Ago::Hours(n), false) => format!("{n}\u{a0}h ago"),
-            (Ago::Yesterday, true) => "hier".to_owned(),
-            (Ago::Yesterday, false) => "yesterday".to_owned(),
-            (Ago::Days(n), true) => format!("il y a {n}\u{a0}jours"),
-            (Ago::Days(n), false) => format!("{n}\u{a0}days ago"),
+        match ago {
+            Ago::Now => txt::NOW.get(self.lang).to_owned(),
+            Ago::Minutes(n) => txt::min_ago(self.lang, n),
+            Ago::Hours(n) => txt::h_ago(self.lang, n),
+            Ago::Yesterday => txt::YESTERDAY_2.get(self.lang).to_owned(),
+            Ago::Days(n) => txt::days_ago(self.lang, n),
         }
     }
 

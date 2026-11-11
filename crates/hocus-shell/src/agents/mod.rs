@@ -604,10 +604,9 @@ impl Words {
         } else {
             format!("{minutes}\u{a0}min")
         };
-        match (ago, (self.lang == Lang::French)) {
-            (false, _) => format!("· {time}"),
-            (true, true) => format!("· il y a {time}"),
-            (true, false) => format!("· {time} ago"),
+        match ago {
+            false => format!("· {time}"),
+            true => txt::ago(self.lang, &time),
         }
     }
 
@@ -622,16 +621,16 @@ impl Words {
     /// What a waiting or stuck agent's tool said, as the briefing words
     /// it: a request "Autoriser Bash : npm install ?", a text as it is.
     pub fn note(self, note: &Note) -> String {
-        match (note, (self.lang == Lang::French)) {
-            (Note::Says(text), _) => text.clone(),
-            (Note::Allow { tool, what }, true) if what.is_empty() => {
-                format!("Autoriser {tool}\u{a0}?")
-            }
-            (Note::Allow { tool, what }, true) => {
-                format!("Autoriser {tool}\u{a0}: {what}\u{a0}?")
-            }
-            (Note::Allow { tool, what }, false) if what.is_empty() => format!("Allow {tool}?"),
-            (Note::Allow { tool, what }, false) => format!("Allow {tool}: {what}?"),
+        match note {
+            Note::Says(text) => text.clone(),
+            Note::Allow { tool, what } if what.is_empty() => txt::allow(self.lang, tool),
+            Note::Allow { tool, what } => txt::allow_2(
+                self.lang,
+                txt::Allow2 {
+                    tool: &tool,
+                    what: &what,
+                },
+            ),
         }
     }
 
