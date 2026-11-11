@@ -128,6 +128,8 @@ pub struct Clock {
     /// Without glass: the bar's opaque colour behind the clock (its
     /// surface has no alpha on the CPU).
     pub backdrop: Option<Color>,
+    /// The session is locked (7.1): not shown, it waits.
+    pub locked: bool,
 }
 
 /// The clock's state between draws.
@@ -247,7 +249,7 @@ impl<Message> canvas::Program<Message> for Clock {
             return None;
         };
         // Locked (7.1): not shown, it waits; the lock wakes it as it goes.
-        if crate::lock::active() {
+        if self.locked {
             return None;
         }
         let now = *now;

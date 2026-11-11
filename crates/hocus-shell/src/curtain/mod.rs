@@ -17,7 +17,7 @@ use iced::{Element, Length, widget::canvas, window};
 use crate::{
     clock::time::Lang,
     popover::Effect,
-    surfaces::{Look, Surface},
+    surfaces::{Context, Surface},
 };
 
 /// The pill as the shell shows it.
@@ -133,9 +133,9 @@ impl Surface for Curtain {
         }
     }
 
-    fn view(&self, id: window::Id, look: Look) -> Option<Element<'_, crate::Message>> {
+    fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
         Some(
-            canvas(self.program(id, look.glass)?)
+            canvas(self.program(id, context.look.glass)?)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),

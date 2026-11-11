@@ -61,6 +61,8 @@ enum Heard {
 pub enum Shown {
     /// The share's chooser, while it shows.
     Share(Option<crate::share::Seen>),
+    /// The lock, while the session is locked.
+    Lock(Option<crate::lock::Lock>),
 }
 
 /// What a surface the loop owns shows now, for this thread.
@@ -164,6 +166,7 @@ fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
             }
             Some(Heard::Bridge(Event::Asked(asked))) => said.carry_out(&asked),
             Some(Heard::Shown(Shown::Share(seen))) => said.share = seen,
+            Some(Heard::Shown(Shown::Lock(lock))) => said.lock = lock,
             Some(Heard::Dump) => {
                 for window in said.describe(Instant::now()) {
                     for line in window.dump().lines() {
@@ -224,6 +227,8 @@ struct Said {
     targets: HashMap<(String, String), Target>,
     /// The share's chooser, as the loop last told it.
     share: Option<crate::share::Seen>,
+    /// The lock, as the loop last told it.
+    lock: Option<crate::lock::Lock>,
 }
 
 impl Said {
@@ -257,7 +262,7 @@ impl Said {
         }
         self.targets.clear();
         let mut windows = Vec::new();
-        if crate::lock::active() {
+        if self.lock.is_some() {
             windows.extend(self.locks(words));
             return windows;
         }
@@ -462,7 +467,7 @@ impl Said {
     }
 
     fn locks(&mut self, words: Words) -> Vec<Window> {
-        let Some(lock) = crate::lock::with(|l| l.clone()) else {
+        let Some(lock) = self.lock.clone() else {
             return Vec::new();
         };
         let lang = words.lang();
@@ -476,7 +481,7 @@ impl Said {
             .into_iter()
             .map(|(output, surface)| {
                 let clock = Node::new("clock", Role::Label, clock.clone());
-                let window = crate::lock::view::a11y(*surface, output, words, vec![clock]);
+                let window = crate::lock::view::a11y(&lock, *surface, output, words, vec![clock]);
                 for node in window.all() {
                     if node.key.starts_with("lock:") {
                         self.targets.insert(

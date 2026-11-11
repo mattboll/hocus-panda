@@ -21,11 +21,7 @@
 //!   holds the waiting panda (34 px), playing its mood meanwhile. Still
 //!   with reduced motion, in power saver or on the CPU.
 
-use std::{
-    collections::HashMap,
-    sync::{Mutex, PoisonError},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use hocus_link::{LOCK_SHAKE, LockFocus, LockPhase};
 use iced::{
@@ -39,8 +35,9 @@ use iced::{
     window,
 };
 
-use super::{Lock, Words};
+use super::{Lock, Locked, Words};
 use crate::pandas::{self, BREATH, Burst, Mood};
+use crate::surfaces::Lent;
 use crate::theme::Ink;
 use crate::{
     clock::time::{Lang, Shown, Wall},
@@ -142,7 +139,8 @@ pub enum Layer {
 /// What the lock on screen `output` draws under its controls
 /// ([`super::view`]).
 #[derive(Debug, Clone)]
-pub struct View {
+pub struct View<'a> {
+    pub locked: &'a Lent<Locked>,
     pub layer: Layer,
     pub output: String,
     pub wall: Wall,
@@ -310,7 +308,7 @@ fn until_next_minute(wall: &Wall) -> Duration {
     Duration::from_secs(60).saturating_sub(into) + Duration::from_millis(20)
 }
 
-impl<Message> canvas::Program<Message> for View {
+impl<Message> canvas::Program<Message> for View<'_> {
     type State = State;
 
     fn update(
@@ -335,14 +333,14 @@ impl<Message> canvas::Program<Message> for View {
                     state.shown = Some(*now);
                 }
                 let breathing = state.shown.is_some_and(|t| breaths(t).plays(*now));
-                let moving = super::with(|l| {
-                    let l = l.as_ref()?;
+                let moving = self.locked.read(|l| {
+                    let l = l.lock.as_ref()?;
                     let shaking = l.shake.is_some_and(|(_, since)| {
                         now.saturating_duration_since(since) < LOCK_SHAKE
                     });
                     let spinning = l.checking.is_some() && l.shown.motion;
                     Some(shaking || spinning || breathing)
-                })?;
+                })??;
                 Some(if moving {
                     canvas::Action::request_redraw()
                 } else {
@@ -364,7 +362,7 @@ impl<Message> canvas::Program<Message> for View {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        let Some(lock) = super::with(|l| l.clone()) else {
+        let Some(lock) = self.locked.read(|l| l.lock.clone()).flatten() else {
             return vec![frame.into_geometry()];
         };
         let size = bounds.size();
@@ -398,12 +396,12 @@ impl<Message> canvas::Program<Message> for View {
             hm: shown.time(),
             photo: super::avatar::photo().is_some(),
         };
-        let mut last = SAID.lock().unwrap_or_else(PoisonError::into_inner);
-        let last = last.get_or_insert_with(HashMap::new);
-        if last.get(&self.output) != Some(&said) {
-            tracing::debug!(?said, "the lock is drawn");
-            last.insert(self.output.clone(), said);
-        }
+        self.locked.change(|l| {
+            if l.said.get(&self.output) != Some(&said) {
+                tracing::debug!(?said, "the lock is drawn");
+                l.said.insert(self.output.clone(), said);
+            }
+        });
         vec![frame.into_geometry()]
     }
 }
@@ -412,7 +410,7 @@ impl<Message> canvas::Program<Message> for View {
 /// read it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
-struct Said {
+pub struct Said {
     output: String,
     form: bool,
     phase: LockPhase,
@@ -421,8 +419,6 @@ struct Said {
     hm: String,
     photo: bool,
 }
-
-static SAID: Mutex<Option<HashMap<String, Said>>> = Mutex::new(None);
 
 /// The screen's wallpaper, or the lock's own picture (6.3), drawn off
 /// this thread ([`super::wallpaper`]); plain until it is.

@@ -19,6 +19,15 @@ use iced::{Element, window};
 
 use crate::popover::Effect;
 
+/// What every surface's view is built with: how they look, the clock and
+/// the language.
+#[derive(Debug, Clone)]
+pub struct Context {
+    pub look: Look,
+    pub wall: crate::clock::time::Wall,
+    pub lang: crate::clock::time::Lang,
+}
+
 /// How the shell's surfaces look, as the compositor says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
@@ -39,7 +48,7 @@ pub trait Surface {
     fn update(&mut self, message: Self::Message, now: Instant) -> Vec<Effect>;
 
     /// What it shows on surface `id`, if `id` is one of its own.
-    fn view(&self, id: window::Id, look: Look) -> Option<Element<'_, crate::Message>>;
+    fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>>;
 }
 
 /// A surface's state, lent to its view's widgets, which change it as they

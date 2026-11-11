@@ -411,6 +411,8 @@ struct Shell {
     curtain: curtain::Curtain,
     /// The share's chooser (5.11).
     share: surfaces::Lent<share::Share>,
+    /// The lock (7.1).
+    lock: surfaces::Lent<lock::Locked>,
 }
 
 #[to_layer_message(multi)]
@@ -475,6 +477,7 @@ impl Shell {
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
             curtain: curtain::Curtain::default(),
             share: surfaces::Lent::default(),
+            lock: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -932,7 +935,9 @@ impl Shell {
             }
             ToShell::Lock(shown) => {
                 let screens = outputs::step();
-                let effects = lock::set(shown, &screens);
+                let effects = self
+                    .lock
+                    .update(lock::Told::Shown(shown, screens), self.now);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::A11y => {
@@ -940,7 +945,7 @@ impl Shell {
                 Task::none()
             }
             ToShell::Unlocked => {
-                let effects = lock::end();
+                let effects = self.lock.update(lock::Told::End, self.now);
                 Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::Curtain(shown) => {
@@ -1003,9 +1008,12 @@ impl Shell {
         let known = outputs::step();
         // Locked (7.1): a screen plugged in gets the clock.
         let lock = Task::batch(
-            popover::messages(lock::screens_known(&known))
-                .into_iter()
-                .map(Task::done),
+            popover::messages(
+                self.lock
+                    .update(lock::Told::Screens(known.clone()), self.now),
+            )
+            .into_iter()
+            .map(Task::done),
         );
         if self.waiting.is_empty() {
             return lock;
@@ -1362,6 +1370,7 @@ impl Shell {
             bar_width: bar.width(at),
             surface_width: width as f32,
             backdrop,
+            locked: self.lock.read(lock::Locked::active).unwrap_or(false),
         };
         Some(in_bar(
             bar,
@@ -1720,18 +1729,6 @@ impl Shell {
         ))
     }
 
-    /// The lock (7.1), if its surface is `id`.
-    fn lock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let output = lock::output_of(id)?;
-        Some(lock::view::view(
-            id,
-            output,
-            self.wall.clone(),
-            self.lang,
-            lock::words(),
-        ))
-    }
-
     /// The authentication dialog (7.5), if its surface is `id`.
     fn auth_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if !auth::is_surface(id) {
@@ -1947,8 +1944,18 @@ impl Shell {
         .into()
     }
 
+    /// What every surface's view is built with.
+    fn context(&self) -> surfaces::Context {
+        surfaces::Context {
+            look: self.look,
+            wall: self.wall.clone(),
+            lang: self.lang,
+        }
+    }
+
     fn surface_view(&self, id: window::Id) -> Element<'_, Message> {
         let Some(bar) = self.bars.get(&id) else {
+            let context = self.context();
             return self
                 .clock_view(id)
                 .or_else(|| self.levels_view(id))
@@ -1965,9 +1972,9 @@ impl Shell {
                 .or_else(|| self.actions_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
-                .or_else(|| self.share.view(id, self.look))
-                .or_else(|| self.lock_view(id))
-                .or_else(|| self.curtain.view(id, self.look))
+                .or_else(|| self.share.view(id, &context))
+                .or_else(|| self.lock.view(id, &context))
+                .or_else(|| self.curtain.view(id, &context))
                 .or_else(|| self.in_use_view(id))
                 .or_else(|| self.meeting_view(id))
                 .or_else(|| self.today_view(id))

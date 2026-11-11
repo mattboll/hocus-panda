@@ -25,7 +25,7 @@ use crate::{
     clock::time::Lang,
     launcher::entries::Entry,
     popover::Effect,
-    surfaces::{Asked, Lent, Look, Surface},
+    surfaces::{Asked, Context, Lent, Surface},
 };
 
 /// Two clicks on a card this close share it at once.
@@ -505,9 +505,9 @@ impl Surface for Lent<Share> {
         self.get_mut().update(said, now)
     }
 
-    fn view(&self, id: window::Id, look: Look) -> Option<Element<'_, crate::Message>> {
+    fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
         self.read(|s| s.is_surface(id))?
-            .then(|| view::view(self, id, words(), look.glass))
+            .then(|| view::view(self, id, words(), context.look.glass))
     }
 }
 
