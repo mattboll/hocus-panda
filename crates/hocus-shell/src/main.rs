@@ -2001,14 +2001,10 @@ impl Shell {
                 glass: self.look.glass,
                 motion: self.look.motion && !self.software,
             }),
-            popover::Item::Calendar => canvas(popover::calendar::Panel {
+            popover::Item::Calendar => popover::calendar::view(&popover::calendar::Panel {
                 id,
                 glass: self.look.glass,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             // They open none.
             popover::Item::Tray(key) => popover::tray::view(&popover::tray::Panel {
                 id,

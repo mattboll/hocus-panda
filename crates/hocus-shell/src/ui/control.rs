@@ -138,6 +138,13 @@ impl<M> Control<'_, M> {
         })
     }
 
+    /// Its own look says when it holds the ring (a calendar's day,
+    /// outlined): the kit draws none.
+    pub fn ringless(mut self) -> Self {
+        self.ring = false;
+        self
+    }
+
     /// What `Enter` on it does.
     pub fn activate(self, message: M) -> Self {
         self.declared(|d| d.on_activate = Some(message))

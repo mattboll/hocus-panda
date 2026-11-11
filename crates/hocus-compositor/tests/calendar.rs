@@ -2,10 +2,10 @@
 //! the CPU, headless, its day a fixture's file (docs/design/day.md) read
 //! against its clock (`HOCUS_CLOCK_AT`, Wednesday 4 November 2026, 09:47,
 //! in UTC), in French. The shell says what the calendar shows in its log
-//! ("the calendar shows it", "the calendar's targets", "the clock's group
-//! is drawn"), which is what these tests read, with the popover's surface,
-//! the screen's pixels and the addresses its `xdg-open` (the test's own)
-//! is given.
+//! ("the calendar shows it", the widget kit's dump of its controls, "the
+//! clock's group is drawn"), which is what these tests read, with the
+//! popover's surface, the screen's pixels and the addresses its
+//! `xdg-open` (the test's own) is given.
 //!
 //! One test per point of the spec that can be measured: opening by a
 //! click on the date or the clock, a second click closing it; in the mini
@@ -514,17 +514,20 @@ impl Bed {
         common::click(&mut self.hp, at)
     }
 
-    /// Where the last targets logged after `mark` put `target`, on the
-    /// popover.
+    /// Where the kit's dump logged after `mark` puts the control `target`
+    /// (`Next`, `Event(2)`), its middle on the popover.
     fn target(&mut self, mark: usize, target: &str) -> anyhow::Result<(f32, f32)> {
-        let line = self.logged_since(mark, "the calendar's targets", &[&format!("{target}@")])?;
+        let id = format!("calendar:{target}");
+        let line = self.logged_since(mark, " shows {", &[&format!("\"{id}\"")])?;
         let at = line
-            .split(&format!("{target}@"))
-            .nth(1)
-            .and_then(|rest| rest.split_whitespace().next())
-            .and_then(|xy| xy.split_once(','))
-            .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
-            .ok_or_else(|| anyhow::anyhow!("no {target} in {line}"))?;
+            .find(" shows {")
+            .and_then(|i| serde_json::from_str::<serde_json::Value>(&line[i + 7..]).ok())
+            .and_then(|dump| {
+                let at = dump.get(&id)?.get("at")?.clone();
+                let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+                Some(((n(0)? + n(2)? / 2.0) as f32, (n(1)? + n(3)? / 2.0) as f32))
+            })
+            .ok_or_else(|| anyhow::anyhow!("no {id} in {line}"))?;
         Ok(at)
     }
 
@@ -1110,14 +1113,7 @@ fn with_no_calendar_the_agenda_says_none_is_connected_and_offers_day_1s_popover(
     // "Choisir des agendas…" under it: Day.1's popover, at its first step,
     // in the calendar's place.
     assert!(shown.contains("choose=«Choisir des agendas…»"), "{shown}");
-    let targets = bed.logged_since(mark, "the calendar's targets", &["Choose@"])?;
-    let at = targets
-        .split(" Choose@")
-        .nth(1)
-        .and_then(|a| a.split_whitespace().next())
-        .and_then(|a| a.split_once(','))
-        .and_then(|(x, y)| Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?)))
-        .ok_or_else(|| anyhow::anyhow!("no Choose in {targets}"))?;
+    let at = bed.target(mark, "Choose")?;
     let mark = bed.mark();
     bed.click_in(popover, at)?;
     bed.logged_since(mark, "the sources' popover shows it", &["step=accounts"])?;
