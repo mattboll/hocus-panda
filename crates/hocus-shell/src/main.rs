@@ -415,6 +415,8 @@ struct Shell {
     lock: surfaces::Lent<lock::Locked>,
     /// The system's authentication dialog (7.5).
     auth: surfaces::Lent<auth::Auth>,
+    /// The actions palette (#736).
+    actions: surfaces::Lent<actions::Palette>,
 }
 
 #[to_layer_message(multi)]
@@ -481,6 +483,7 @@ impl Shell {
             share: surfaces::Lent::default(),
             lock: surfaces::Lent::default(),
             auth: surfaces::Lent::default(),
+            actions: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -589,6 +592,7 @@ impl Shell {
                     Task::batch(popover::messages(effects).into_iter().map(Task::done))
                 }
                 surfaces::Asked::Auth(come) => self.auth_told(auth::Told::Come(come)),
+                surfaces::Asked::Actions(come) => self.actions_told(come),
             },
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
@@ -853,14 +857,8 @@ impl Shell {
                 emoji::inserted();
                 Task::none()
             }
-            ToShell::Actions(shown) => {
-                actions::toggle(shown);
-                Task::none()
-            }
-            ToShell::ActionsEnd => {
-                actions::close();
-                Task::none()
-            }
+            ToShell::Actions(shown) => self.actions_told(actions::Come::Toggle(shown)),
+            ToShell::ActionsEnd => self.actions_told(actions::Come::Close),
             ToShell::Capture(bar) => {
                 capture::set(bar);
                 Task::none()
@@ -1732,17 +1730,8 @@ impl Shell {
     /// tick (a surface faded out, the next request), if one is due.
     fn auth_told(&mut self, told: auth::Told) -> Task<Message> {
         let effects = self.auth.update(told, self.now);
-        let tick = self.auth.get_mut().due().map_or_else(Task::none, |at| {
-            Task::perform(tokio::time::sleep_until(at.into()), |()| {
-                Message::Surface(surfaces::Asked::Auth(auth::Come::Tick))
-            })
-        });
-        Task::batch(
-            popover::messages(effects)
-                .into_iter()
-                .map(Task::done)
-                .chain([tick]),
-        )
+        let due = self.auth.get_mut().due();
+        Self::with_tick(effects, due, || surfaces::Asked::Auth(auth::Come::Tick))
     }
 
     /// The panda peeking out (4.5), if its surface is `id`.
@@ -1774,12 +1763,33 @@ impl Shell {
         ))
     }
 
-    /// The actions palette, if its surface is `id`.
-    fn actions_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !actions::is_surface(id) {
-            return None;
-        }
-        Some(actions::view::view(id, actions::words(), self.look.glass))
+    /// The actions palette told `come`: what it does, and its next tick
+    /// (a surface faded out, what was chosen carried out), if one is due.
+    fn actions_told(&mut self, come: actions::Come) -> Task<Message> {
+        let effects = self.actions.update(come, self.now);
+        let due = self.actions.get_mut().due();
+        Self::with_tick(effects, due, || {
+            surfaces::Asked::Actions(actions::Come::Tick)
+        })
+    }
+
+    /// `effects` carried out, and a tick asked for `due` if there is one.
+    fn with_tick(
+        effects: Vec<popover::Effect>,
+        due: Option<Instant>,
+        tick: impl FnOnce() -> surfaces::Asked + Send + 'static,
+    ) -> Task<Message> {
+        let tick = due.map_or_else(Task::none, |at| {
+            Task::perform(tokio::time::sleep_until(at.into()), move |()| {
+                Message::Surface(tick())
+            })
+        });
+        Task::batch(
+            popover::messages(effects)
+                .into_iter()
+                .map(Task::done)
+                .chain([tick]),
+        )
     }
 
     /// The emoji picker, if its surface is `id`.
@@ -1972,7 +1982,7 @@ impl Shell {
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji_view(id))
-                .or_else(|| self.actions_view(id))
+                .or_else(|| self.actions.view(id, &context))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth.view(id, &context))
                 .or_else(|| self.share.view(id, &context))
@@ -2478,15 +2488,6 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::EmojiInserted => {
                             emoji::inserted();
-                            continue;
-                        }
-                        // The actions palette: its own surface (#736).
-                        ToShell::Actions(shown) => {
-                            actions::toggle(shown);
-                            continue;
-                        }
-                        ToShell::ActionsEnd => {
-                            actions::close();
                             continue;
                         }
                         // The capture's toolbar, and its toast: their own

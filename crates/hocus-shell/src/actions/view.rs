@@ -41,7 +41,7 @@ use iced::{
 };
 
 use super::{
-    Open, Phase, Words,
+    Open, Palette, Phase, Words,
     list::{Elsewhere, Row, Target},
 };
 use crate::theme::Ink;
@@ -55,6 +55,7 @@ use crate::{
         Pressed,
         kit::{self, MANROPE_SEMIBOLD},
     },
+    surfaces::Lent,
     ui::{
         self, Around, Later, control,
         field::Field,
@@ -334,17 +335,22 @@ pub enum Msg {
 }
 
 /// The palette on its surface `id`, on the glass (else opaque).
-pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
+pub fn view<'a>(
+    palette: &'a Lent<Palette>,
+    id: window::Id,
+    words: Words,
+    glass: bool,
+) -> Element<'a, crate::Message> {
     Around::new(
         id,
-        build(id, words),
-        move |m| handle(id, words, m),
+        build(palette, id, words),
+        move |m| handle(palette, id, words, m),
         Msg::Stale,
     )
     .own(ACTIONS_NAMESPACE, move || {
-        super::with(|p| p.open_on(id).is_some())
+        palette.read(|p| p.open_on(id).is_some()).unwrap_or(false)
     })
-    .rebuild(move || build(id, words))
+    .rebuild(move || build(palette, id, words))
     .keys(|pressed| Some(Msg::Key(pressed.clone())))
     .later(&LATER)
     .on(iced::widget::canvas(Tint(glass))
@@ -352,54 +358,70 @@ pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate:
         .height(Length::Fill))
 }
 
-fn handle(id: window::Id, words: Words, message: Msg) {
-    match message {
-        Msg::Act(at) => super::act(id, at),
-        Msg::Hover(at) => super::with(|p| {
-            if let Some(open) = p.open_mut(id)
-                && open.rows.get(at).is_some_and(Row::selectable)
-            {
-                open.selected = at;
+fn handle(palette: &Lent<Palette>, id: window::Id, words: Words, message: Msg) {
+    let now = std::time::Instant::now();
+    let effects = palette.change(|p| {
+        let effects = match message {
+            Msg::Act(at) => p.act(id, at, now),
+            Msg::Hover(at) => {
+                if let Some(open) = p.open_mut(id)
+                    && open.rows.get(at).is_some_and(Row::selectable)
+                {
+                    open.selected = at;
+                }
+                Vec::new()
             }
-        }),
-        Msg::Took(took) => super::took(id, took, words),
-        Msg::Scrolled(y) => super::with(|p| {
-            if let Some(open) = p.open_mut(id) {
-                open.scroll = y;
+            Msg::Took(took) => p.took(id, took, words),
+            Msg::Scrolled(y) => {
+                if let Some(open) = p.open_mut(id) {
+                    open.scroll = y;
+                }
+                Vec::new()
             }
-        }),
-        Msg::Key(pressed) => {
-            super::key_on(id, &pressed.key, pressed.modifiers, pressed.text.as_deref());
-        }
-        Msg::Stale => {}
+            Msg::Key(pressed) => p
+                .key_on(
+                    id,
+                    &pressed.key,
+                    pressed.modifiers,
+                    pressed.text.as_deref(),
+                    now,
+                )
+                .unwrap_or_default(),
+            Msg::Stale => return (Vec::new(), false),
+        };
+        p.said();
+        (effects, p.due().is_some())
+    });
+    let Some((effects, due)) = effects else {
+        return;
+    };
+    if !effects.is_empty() {
+        crate::popover::send(effects);
+    }
+    // Closed: the loop's tick takes its surface away once faded out, and
+    // carries out what was chosen.
+    if due {
+        crate::surfaces::ask(crate::surfaces::Asked::Actions(super::Come::Tick));
     }
 }
 
-/// The field, to the kit's field.
-fn query(with: &mut dyn FnMut(&mut Entry)) {
-    super::with(|p| {
-        if let Phase::Open(open) = &mut p.phase {
-            with(&mut open.query);
-        }
-    });
-}
-
 /// Its content, as the palette is now; said in the log when it changed.
-fn build<'a>(id: window::Id, words: Words) -> El<'a> {
-    super::with(|p| {
-        let Some(open) = p.open_mut(id) else {
-            return Space::new().into();
-        };
-        let now = shows(open, words);
-        if now != open.logged {
-            tracing::debug!(said = %now, "the actions palette shows it");
-            open.logged = now;
-        }
-        content(open, words)
-    })
+fn build<'a>(palette: &'a Lent<Palette>, id: window::Id, words: Words) -> El<'a> {
+    palette
+        .change(|p| {
+            let open = p.open_mut(id)?;
+            let now = shows(open, words);
+            if now != open.logged {
+                tracing::debug!(said = %now, "the actions palette shows it");
+                open.logged = now;
+            }
+            Some(content(palette, open, words))
+        })
+        .flatten()
+        .unwrap_or_else(|| Space::new().into())
 }
 
-fn content<'a>(open: &Open, words: Words) -> El<'a> {
+fn content<'a>(palette: &'a Lent<Palette>, open: &Open, words: Words) -> El<'a> {
     let width = open.size.0 as f32;
     let inner = width - 2.0 * IN;
     let list = list_height(&open.rows);
@@ -437,7 +459,7 @@ fn content<'a>(open: &Open, words: Words) -> El<'a> {
         kit::measure(t, FOOT, MANROPE)
     });
     let all = column![
-        field(open, words, inner),
+        field(palette, open, words, inner),
         Space::new().height(LIST_GAP),
         Notched::new(scrolled, ROW + ROW_GAP),
         Space::new().height(FOOT_GAP),
@@ -465,7 +487,7 @@ fn content<'a>(open: &Open, words: Words) -> El<'a> {
 
 /// The field, `width` wide: the prompt, the step's chip, what is typed,
 /// the target's chip, "Échap".
-fn field<'a>(open: &Open, words: Words, width: f32) -> El<'a> {
+fn field<'a>(palette: &'a Lent<Palette>, open: &Open, words: Words, width: f32) -> El<'a> {
     let hint = words.escape();
     let hint_width = kit::measure(hint, HINT, MANROPE_SEMIBOLD) + 2.0 * HINT_PAD.width;
     let hint_height = HINT + 2.0 * HINT_PAD.height + 2.0;
@@ -562,7 +584,13 @@ fn field<'a>(open: &Open, words: Words, width: f32) -> El<'a> {
         kit::measure(t, PLACEHOLDER, MANROPE)
     });
     let typed = Field {
-        with: Box::new(query),
+        with: Box::new(move |with: &mut dyn FnMut(&mut Entry)| {
+            palette.change(|p| {
+                if let Phase::Open(open) = &mut p.phase {
+                    with(&mut open.query);
+                }
+            });
+        }),
         style: Style {
             hint: (PLACEHOLDER, MANROPE),
             ..Style::one(QUERY, MANROPE)

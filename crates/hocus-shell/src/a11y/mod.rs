@@ -65,6 +65,8 @@ pub enum Shown {
     Lock(Option<crate::lock::Lock>),
     /// The authentication dialog, while it shows.
     Auth(Option<crate::auth::Seen>),
+    /// The actions palette, while it is open.
+    Actions(Option<crate::actions::Seen>),
 }
 
 /// What a surface the loop owns shows now, for this thread.
@@ -170,6 +172,7 @@ fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
             Some(Heard::Shown(Shown::Share(seen))) => said.share = seen,
             Some(Heard::Shown(Shown::Lock(lock))) => said.lock = lock,
             Some(Heard::Shown(Shown::Auth(seen))) => said.auth = seen,
+            Some(Heard::Shown(Shown::Actions(seen))) => said.actions = seen,
             Some(Heard::Dump) => {
                 for window in said.describe(Instant::now()) {
                     for line in window.dump().lines() {
@@ -234,6 +237,8 @@ struct Said {
     lock: Option<crate::lock::Lock>,
     /// The authentication dialog, as the loop last told it.
     auth: Option<crate::auth::Seen>,
+    /// The actions palette, as the loop last told it.
+    actions: Option<crate::actions::Seen>,
 }
 
 impl Said {
@@ -296,7 +301,7 @@ impl Said {
             windows.push(window);
         }
         windows.extend(self.popover(words));
-        if let Some(palette) = crate::actions::a11y() {
+        if let Some(palette) = self.actions.as_ref().and_then(crate::actions::a11y) {
             for node in palette.all() {
                 if node.key.starts_with("actions:Row(") {
                     self.targets.insert(
