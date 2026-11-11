@@ -186,6 +186,8 @@ enum Target {
     Palette(String),
     /// A control of the emoji picker, by its key.
     Emoji(String),
+    /// A control of the share's chooser, by its key.
+    Share(String),
     /// A tile, card or emoji of the launcher, by its key.
     Launcher(String),
 }
@@ -281,6 +283,17 @@ impl Said {
                 }
             }
             windows.push(launcher);
+        }
+        if let Some(chooser) = crate::share::a11y() {
+            for node in chooser.all() {
+                if node.key.starts_with("share:") {
+                    self.targets.insert(
+                        (chooser.key.clone(), node.key.clone()),
+                        Target::Share(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(chooser);
         }
         if let Some(picker) = crate::emoji::a11y() {
             for node in picker.all() {
@@ -516,6 +529,7 @@ impl Said {
             (Target::Row(row), act) => press_row(row, act),
             (Target::Palette(key), Act::Click) => crate::actions::a11y_click(key),
             (Target::Emoji(key), Act::Click) => crate::emoji::a11y_click(key),
+            (Target::Share(key), Act::Click) => crate::share::a11y_click(key),
             (Target::Launcher(key), Act::Click) => crate::launcher::a11y_click(key),
             (Target::Bubble { serial, action }, Act::Click) => {
                 crate::notifications::input(match action {

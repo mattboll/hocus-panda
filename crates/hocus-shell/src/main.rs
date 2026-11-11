@@ -1765,16 +1765,7 @@ impl Shell {
         if !share::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(share::draw::View {
-                id,
-                words: share::words(),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(share::view::view(id, share::words(), self.look.glass))
     }
 
     /// The panda peeking out (4.5), if its surface is `id`.

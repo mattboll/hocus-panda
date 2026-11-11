@@ -4,23 +4,40 @@
 //! box (the compositor draws the thumbnail in it), a name and a line; "show
 //! the pointer"; Cancel and the blue Share. The compositor darkens the
 //! screen, draws its shadow and pops it in.
+//!
+//! On the widget kit (#772): each tab, card and button is the kit's,
+//! placed where the layout puts it (the compositor draws the thumbnails
+//! where it says they go).
 
-use hocus_link::{LAUNCHER_ZOOM, SHARE_CHOOSER_RADIUS, SHARE_THUMB_RADIUS};
+use hocus_a11y::Role;
+use hocus_link::{
+    LAUNCHER_ZOOM, SHARE_CHOOSER_NAMESPACE, SHARE_CHOOSER_RADIUS, SHARE_THUMB_RADIUS,
+};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, mouse,
+    Color, Element, Length, Point, Rectangle, Renderer, Size, Theme,
+    alignment::Vertical,
+    mouse,
     widget::{
-        canvas::{self, Frame, Geometry, LineCap, LineJoin, Path, Stroke, gradient},
+        Space, Stack, button, canvas,
+        canvas::{Frame, Geometry, LineCap, LineJoin, Path, Stroke, gradient},
+        container, mouse_area, pin, row,
         text::Alignment,
     },
     window,
 };
 
-use super::{Chooser, Pointing, Tab, Target, Words};
+use super::{Chooser, Tab, Words};
 use crate::theme::Ink;
 use crate::{
     levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, rgb},
-    popover::kit::{self, MANROPE_SEMIBOLD},
+    popover::{
+        Pressed,
+        kit::{self, MANROPE_SEMIBOLD},
+    },
+    ui::{self, Around, control, parts::drawn, style},
 };
+
+type El<'a> = Element<'a, Msg>;
 
 const Z: f32 = LAUNCHER_ZOOM as f32;
 /// 560 wide, 16 px in, 12 px between its parts, a 1 px rim.
@@ -244,142 +261,375 @@ impl Layout {
             self.size.height.ceil() as u32,
         )
     }
-
-    fn target(&self, at: Point) -> Option<Target> {
-        if self.share.contains(at) {
-            return Some(Target::Share);
-        }
-        if self.cancel.contains(at) {
-            return Some(Target::Cancel);
-        }
-        if self.check.contains(at) {
-            return Some(Target::Pointer);
-        }
-        if let Some((tab, _)) = self.tabs.iter().find(|(_, r)| r.contains(at)) {
-            return Some(Target::Tab(*tab));
-        }
-        self.cards
-            .iter()
-            .find(|c| c.rect.contains(at))
-            .map(|c| Target::Card(c.index))
-    }
 }
 
-/// The chooser on its surface.
+// --- The surface, on the widget kit ------------------------------------------------
+
+/// What a widget asks.
 #[derive(Debug, Clone)]
-pub struct View {
-    pub id: window::Id,
-    pub words: Words,
-    pub glass: bool,
+pub enum Msg {
+    /// A tab clicked.
+    Tab(Tab),
+    /// A card clicked (twice in a row: shared).
+    Card(usize),
+    /// "Montrer le pointeur".
+    Pointer,
+    Cancel,
+    Share,
+    /// The wheel, by rows (down positive).
+    Wheel(mouse::ScrollDelta),
+    /// A key: the chooser's own (`Tab` the other tab, `Space` the pointer).
+    Key(Pressed),
+    /// What it shows changed under the view.
+    Stale,
 }
 
-/// What the surface keeps between draws: where the pointer is.
-#[derive(Debug, Default)]
-pub struct State {
-    at: Option<Point>,
+/// A control's id: what tests and screen readers know it by.
+fn id_of(what: &str) -> String {
+    format!("share:{what}")
+}
+
+/// The chooser on its surface `id`, on the glass (else opaque).
+pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
+    Around::new(id, build(id, words), move |m| handle(id, m), Msg::Stale)
+        .own(SHARE_CHOOSER_NAMESPACE, move || super::is_surface(id))
+        .rebuild(move || build(id, words))
+        .keys(|pressed| Some(Msg::Key(pressed.clone())))
+        .on(canvas(Tint(glass)).width(Length::Fill).height(Length::Fill))
+}
+
+fn handle(id: window::Id, message: Msg) {
+    let now = std::time::Instant::now();
+    match message {
+        Msg::Tab(tab) => super::act(id, super::Act::Tab(tab), now),
+        Msg::Card(index) => super::act(id, super::Act::Card(index), now),
+        Msg::Pointer => super::act(id, super::Act::Pointer, now),
+        Msg::Cancel => super::act(id, super::Act::Cancel, now),
+        Msg::Share => super::act(id, super::Act::Share, now),
+        Msg::Wheel(delta) => {
+            let y = match delta {
+                mouse::ScrollDelta::Lines { y, .. } => y,
+                mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
+            };
+            if y != 0.0 {
+                super::act(id, super::Act::Wheel(if y > 0.0 { -1 } else { 1 }), now);
+            }
+        }
+        Msg::Key(pressed) => {
+            super::key_on(id, &pressed.key);
+        }
+        Msg::Stale => {}
+    }
 }
 
 /// What the chooser last said it shows, for the log.
 static SAID: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
 
-impl<Message> canvas::Program<Message> for View {
-    type State = State;
+/// Its content, as the chooser is now; said in the log when it changed.
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    let Some(chooser) = super::with(|c| c.as_ref().filter(|c| c.id == id).cloned()) else {
+        return Space::new().into();
+    };
+    let (content, said) = content(&chooser, words);
+    let mut last = SAID
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if last.as_ref() != Some(&said) {
+        tracing::debug!(?said, "the share's chooser shows it");
+        *last = Some(said);
+    }
+    content
+}
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        let now = std::time::Instant::now();
-        let layout = super::with(|c| c.as_ref().filter(|c| c.id == self.id).map(Layout::of))?;
-        let redraw = |draw: bool| draw.then(|| canvas::Action::request_redraw().and_capture());
-        match event {
-            iced::Event::Mouse(seen) => {
-                let at = crate::levels::draw::pointer(seen, bounds, cursor, state.at);
-                state.at = at;
-                let target = at.and_then(|at| layout.target(at));
-                let pointing = match seen {
-                    mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                        Pointing::Over(target)
-                    }
-                    mouse::Event::CursorLeft => Pointing::Over(None),
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => Pointing::Press(target),
-                    mouse::Event::ButtonReleased(mouse::Button::Left) => Pointing::Release(target),
-                    mouse::Event::WheelScrolled { delta } => {
-                        let y = match delta {
-                            mouse::ScrollDelta::Lines { y, .. } => *y,
-                            mouse::ScrollDelta::Pixels { y, .. } => *y / 40.0,
-                        };
-                        if y == 0.0 {
-                            return None;
-                        }
-                        Pointing::Wheel(if y > 0.0 { -1 } else { 1 })
-                    }
-                    _ => return None,
-                };
-                redraw(super::pointer(self.id, pointing, now))
+/// `content` placed at `at`.
+fn at<'a>(content: impl Into<El<'a>>, at: Point) -> El<'a> {
+    pin(content).x(at.x).y(at.y).into()
+}
+
+/// The chooser's widgets where its layout places them, and what it says.
+fn content<'a>(chooser: &Chooser, words: Words) -> (El<'a>, Vec<String>) {
+    let layout = Layout::of(chooser);
+    let mut said = Vec::new();
+    let mut all: Vec<El<'a>> = Vec::new();
+    // The header.
+    let app = super::app_name(&chooser.choose.app);
+    let icon_name = super::entry_of(&chooser.choose.app).and_then(|e| e.icon);
+    let scale = chooser.choose.scale as f32 / 120.0;
+    let px = crate::launcher::icons::pixels(ICON_PX, scale);
+    let handle = icon_name.and_then(|name| crate::launcher::icons::of(&name, px).flatten());
+    let initial = app.clone().unwrap_or_else(|| "?".to_owned());
+    all.push(at(
+        drawn(ICON, ICON, move |f, size| {
+            let rect = Rectangle::new(Point::ORIGIN, size);
+            match &handle {
+                Some(handle) => f.draw_image(rect, canvas::Image::new(handle.clone())),
+                None => letter(f, rect, &initial),
             }
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) => {
-                redraw(super::key_on(self.id, key))
+        }),
+        layout.icon.position(),
+    ));
+    let room = WIDTH - layout.title_at.x - PAD - BORDER;
+    let title = elided(&words.asks(app.as_deref()), room, TITLE, MANROPE_BOLD);
+    let sub = elided(&words.choose(&chooser.choose.detail), room, SUB, MANROPE);
+    all.push(at(
+        ui::line(
+            said_in(title.clone(), TITLE, MANROPE_BOLD, TEXT.get()),
+            title.clone(),
+        ),
+        Point::new(
+            layout.title_at.x,
+            layout.title_at.y - TITLE * LINE_HEIGHT / 2.0,
+        ),
+    ));
+    all.push(at(
+        ui::line(said_in(sub.clone(), SUB, MANROPE, DIM.get()), sub.clone()),
+        Point::new(layout.sub_at.x, layout.sub_at.y - SUB * LINE_HEIGHT / 2.0),
+    ));
+    said.push(title);
+    said.push(sub);
+    // The tabs.
+    all.push(at(
+        container(
+            Space::new()
+                .width(layout.tabs_box.width)
+                .height(layout.tabs_box.height),
+        )
+        .style(|_| style::boxed(TABS_FILL.get(), TABS_RADIUS)),
+        layout.tabs_box.position(),
+    ));
+    for (tab, rect) in &layout.tabs {
+        let on = chooser.tab == *tab;
+        let name = words.tab(*tab);
+        let pressed = button(
+            container(said_in(
+                name,
+                TAB_TEXT,
+                MANROPE_BOLD,
+                if on { TAB_ON_INK.get() } else { TAB_INK.get() },
+            ))
+            .center(Length::Fill),
+        )
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, _| {
+            if on {
+                style::filled(TAB_ON.get(), TAB_RADIUS, TAB_ON_INK.get())
+            } else {
+                style::clear()
             }
-            _ => None,
+        })
+        .on_press(Msg::Tab(*tab));
+        all.push(at(
+            control(
+                pressed,
+                id_of(&format!("Tab({tab:?})")),
+                Role::RadioButton,
+                name,
+            )
+            .node(|n| n.checked(on)),
+            rect.position(),
+        ));
+        if on {
+            said.push(format!("[{name}]"));
         }
     }
+    // The cards: the thumbnail's box (the compositor draws in it), the
+    // name and the line.
+    for card in &layout.cards {
+        let selected = chooser.selected == card.index;
+        let (name, line) = card_words(words, chooser, card.index);
+        let text_room = card.thumb.width;
+        let name = elided(&name, text_room, NAME, MANROPE_SEMIBOLD);
+        let line = elided(&line, text_room, LINE, MANROPE);
+        let thumb = card.thumb;
+        let inside = Point::new(thumb.x - card.rect.x, thumb.y - card.rect.y);
+        let name_top = inside.y + thumb.height + CARD_GAP;
+        let line_top = name_top + NAME * LINE_HEIGHT + CARD_GAP;
+        let thumb_radius = SHARE_THUMB_RADIUS as f32;
+        let face = Stack::with_children([
+            at(
+                container(Space::new().width(thumb.width).height(thumb.height)).style(move |_| {
+                    container::Style {
+                        background: Some(THUMB_FILL.get().into()),
+                        border: iced::Border {
+                            color: THUMB_RIM.get(),
+                            width: BORDER,
+                            radius: thumb_radius.into(),
+                        },
+                        ..container::Style::default()
+                    }
+                }),
+                inside,
+            ),
+            at(
+                said_in(name.clone(), NAME, MANROPE_SEMIBOLD, TEXT.get()),
+                Point::new(inside.x, name_top),
+            ),
+            at(
+                said_in(line.clone(), LINE, MANROPE, LINE_INK.get()),
+                Point::new(inside.x, line_top),
+            ),
+        ])
+        .width(card.rect.width)
+        .height(card.rect.height);
+        let pressed = button(face)
+            .padding(0)
+            .style(move |_, status| {
+                if selected {
+                    button::Style {
+                        background: Some(CHOSEN.get().into()),
+                        border: iced::Border {
+                            color: CHOSEN_RING.get(),
+                            width: BORDER,
+                            radius: CARD_RADIUS.into(),
+                        },
+                        ..style::clear()
+                    }
+                } else if style::lit(status) {
+                    style::hovered(CARD_HOVER.get(), CARD_RADIUS)
+                } else {
+                    style::clear()
+                }
+            })
+            .on_press(Msg::Card(card.index));
+        all.push(at(
+            control(
+                pressed,
+                id_of(&format!("Card({})", card.index)),
+                Role::ListItem,
+                name.clone(),
+            )
+            .node(|n| n.describe(line.clone()).selected(selected)),
+            card.rect.position(),
+        ));
+        said.push(if selected {
+            format!("({name} · {line})")
+        } else {
+            format!("{name} · {line}")
+        });
+    }
+    // Show the pointer.
+    let on = chooser.pointer;
+    let check = button(
+        row![
+            drawn(CHECK, CHECK, move |f, size| {
+                checkbox(f, Rectangle::new(Point::ORIGIN, size), on);
+            }),
+            Space::new().width(CHECK_GAP),
+            said_in(words.pointer(), CHECK_TEXT, MANROPE, CHECK_INK.get()),
+        ]
+        .align_y(Vertical::Center),
+    )
+    .padding(0)
+    .width(layout.check.width)
+    .height(layout.check.height)
+    .style(|_, _| style::clear())
+    .on_press(Msg::Pointer);
+    all.push(at(
+        control(check, id_of("Pointer"), Role::CheckBox, words.pointer()).node(|n| n.checked(on)),
+        layout.check.position(),
+    ));
+    said.push(format!(
+        "{} {}",
+        if on { "[x]" } else { "[ ]" },
+        words.pointer()
+    ));
+    // The buttons.
+    let cancel = button(
+        container(said_in(
+            words.cancel(),
+            BUTTON_TEXT,
+            MANROPE_SEMIBOLD,
+            TEXT.get(),
+        ))
+        .center(Length::Fill),
+    )
+    .padding(0)
+    .width(layout.cancel.width)
+    .height(layout.cancel.height)
+    .style(|_, status| {
+        let lit = style::lit(status);
+        button::Style {
+            background: (lit && !crate::theme::contrast()).then(|| CANCEL_HOVER.get().into()),
+            border: iced::Border {
+                color: if lit && crate::theme::contrast() {
+                    DIM.get()
+                } else {
+                    CANCEL_RIM.get()
+                },
+                width: BORDER,
+                radius: BUTTON_RADIUS.into(),
+            },
+            ..style::clear()
+        }
+    })
+    .on_press(Msg::Cancel);
+    all.push(at(
+        control(cancel, id_of("Cancel"), Role::Button, words.cancel()),
+        layout.cancel.position(),
+    ));
+    let share = button(
+        container(said_in(
+            words.share(),
+            BUTTON_TEXT,
+            MANROPE_BOLD,
+            Color::WHITE,
+        ))
+        .center(Length::Fill),
+    )
+    .padding(0)
+    .width(layout.share.width)
+    .height(layout.share.height)
+    .style(|_, _| style::filled(BLUE.get(), BUTTON_RADIUS, Color::WHITE))
+    .on_press(Msg::Share);
+    all.push(at(
+        control(share, id_of("Share"), Role::Button, words.share()),
+        layout.share.position(),
+    ));
+    said.push(words.cancel().to_owned());
+    said.push(words.share().to_owned());
+    let content = mouse_area(
+        Stack::with_children(all)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .on_scroll(Msg::Wheel)
+    .into();
+    (content, said)
+}
+
+fn said_in<'a>(
+    text: impl iced::widget::text::IntoFragment<'a>,
+    size: f32,
+    font: iced::Font,
+    colour: Color,
+) -> iced::widget::Text<'a> {
+    style::said(text, size, font, colour)
+}
+
+/// Its background: the mockup's panel (opaque without glass) and its rim.
+#[derive(Debug, Clone, Copy)]
+struct Tint(bool);
+
+impl<M> canvas::Program<M> for Tint {
+    type State = ();
 
     fn draw(
         &self,
-        _state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let shown = super::with(|c| c.as_ref().filter(|c| c.id == self.id).cloned());
-        if let Some(chooser) = shown {
-            let said = self.draw_chooser(&mut frame, &chooser);
-            let mut last = SAID
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if last.as_ref() != Some(&said) {
-                tracing::debug!(?said, "the share's chooser shows it");
-                *last = Some(said);
-            }
-        }
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        let over = super::with(|c| {
-            let c = c.as_ref().filter(|c| c.id == self.id)?;
-            state.at.and_then(|at| Layout::of(c).target(at))
-        });
-        if over.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
-    }
-}
-
-impl View {
-    /// The chooser drawn; what it says, for the log.
-    fn draw_chooser(&self, f: &mut Frame, chooser: &Chooser) -> Vec<String> {
-        let layout = Layout::of(chooser);
-        let size = f.size();
+        let mut f = Frame::new(renderer, bounds.size());
+        let size = bounds.size();
         let radius = SHARE_CHOOSER_RADIUS as f32;
-        let (top, bottom) = if self.glass { TINT } else { OPAQUE };
-        let (top, bottom) = (top.get(), bottom.get());
+        let (top, bottom) = if self.0 { TINT } else { OPAQUE };
         let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-            .add_stop(0.0, top)
-            .add_stop(1.0, bottom);
+            .add_stop(0.0, top.get())
+            .add_stop(1.0, bottom.get());
         f.fill(
             &Path::rounded_rectangle(Point::ORIGIN, size, radius.into()),
             canvas::Fill::from(tint),
@@ -392,187 +642,7 @@ impl View {
             ),
             Stroke::default().with_color(RIM.get()).with_width(BORDER),
         );
-        let mut said = Vec::new();
-        // The header.
-        let app = super::app_name(&chooser.choose.app);
-        let icon_name = super::entry_of(&chooser.choose.app).and_then(|e| e.icon);
-        let scale = chooser.choose.scale as f32 / 120.0;
-        let px = crate::launcher::icons::pixels(ICON_PX, scale);
-        match icon_name.and_then(|name| crate::launcher::icons::of(&name, px).flatten()) {
-            Some(handle) => f.draw_image(layout.icon, canvas::Image::new(handle)),
-            None => letter(f, layout.icon, app.as_deref().unwrap_or("?")),
-        }
-        let room = WIDTH - layout.title_at.x - PAD - BORDER;
-        let title = elided(&self.words.asks(app.as_deref()), room, TITLE, MANROPE_BOLD);
-        let sub = elided(
-            &self.words.choose(&chooser.choose.detail),
-            room,
-            SUB,
-            MANROPE,
-        );
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                title.clone(),
-                layout.title_at,
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        f.fill_text(kit::text(
-            sub.clone(),
-            layout.sub_at,
-            SUB,
-            DIM.get(),
-            Alignment::Left,
-        ));
-        said.push(title);
-        said.push(sub);
-        // The tabs.
-        f.fill(&kit::rounded(layout.tabs_box, TABS_RADIUS), TABS_FILL.get());
-        for (tab, rect) in &layout.tabs {
-            let on = chooser.tab == *tab;
-            if on {
-                f.fill(&kit::rounded(*rect, TAB_RADIUS), TAB_ON.get());
-            }
-            f.fill_text(kit::text_in(
-                MANROPE_BOLD,
-                kit::text(
-                    self.words.tab(*tab).to_owned(),
-                    rect.center(),
-                    TAB_TEXT,
-                    if on { TAB_ON_INK.get() } else { TAB_INK.get() },
-                    Alignment::Center,
-                ),
-            ));
-            if on {
-                said.push(format!("[{}]", self.words.tab(*tab)));
-            }
-        }
-        // The cards.
-        for card in &layout.cards {
-            let selected = chooser.selected == card.index;
-            let shape = kit::rounded(card.rect, CARD_RADIUS);
-            if selected {
-                f.fill(&shape, CHOSEN.get());
-                f.stroke(
-                    &kit::rounded(
-                        Rectangle::new(
-                            Point::new(card.rect.x + 0.5, card.rect.y + 0.5),
-                            Size::new(card.rect.width - 1.0, card.rect.height - 1.0),
-                        ),
-                        CARD_RADIUS - 0.5,
-                    ),
-                    Stroke::default()
-                        .with_color(CHOSEN_RING.get())
-                        .with_width(BORDER),
-                );
-            } else if chooser.hover == Some(Target::Card(card.index)) {
-                crate::theme::hover(f, &shape, CARD_HOVER.get());
-            }
-            let thumb_radius = SHARE_THUMB_RADIUS as f32;
-            f.fill(&kit::rounded(card.thumb, thumb_radius), THUMB_FILL.get());
-            f.stroke(
-                &kit::rounded(
-                    Rectangle::new(
-                        Point::new(card.thumb.x + 0.5, card.thumb.y + 0.5),
-                        Size::new(card.thumb.width - 1.0, card.thumb.height - 1.0),
-                    ),
-                    thumb_radius - 0.5,
-                ),
-                Stroke::default()
-                    .with_color(THUMB_RIM.get())
-                    .with_width(BORDER),
-            );
-            let (name, line) = card_words(self.words, chooser, card.index);
-            let text_room = card.thumb.width;
-            let name = elided(&name, text_room, NAME, MANROPE_SEMIBOLD);
-            let name_y = card.thumb.y + card.thumb.height + CARD_GAP + NAME * LINE_HEIGHT / 2.0;
-            f.fill_text(kit::text_in(
-                MANROPE_SEMIBOLD,
-                kit::text(
-                    name.clone(),
-                    Point::new(card.thumb.x, name_y),
-                    NAME,
-                    TEXT.get(),
-                    Alignment::Left,
-                ),
-            ));
-            let line_y = name_y + NAME * LINE_HEIGHT / 2.0 + CARD_GAP + LINE * LINE_HEIGHT / 2.0;
-            let line = elided(&line, text_room, LINE, MANROPE);
-            f.fill_text(kit::text(
-                line.clone(),
-                Point::new(card.thumb.x, line_y),
-                LINE,
-                LINE_INK.get(),
-                Alignment::Left,
-            ));
-            said.push(if selected {
-                format!("({name} · {line})")
-            } else {
-                format!("{name} · {line}")
-            });
-        }
-        // Show the pointer.
-        let box_rect = Rectangle::new(
-            Point::new(layout.check.x, layout.check.center_y() - CHECK / 2.0),
-            Size::new(CHECK, CHECK),
-        );
-        checkbox(f, box_rect, chooser.pointer);
-        f.fill_text(kit::text(
-            self.words.pointer().to_owned(),
-            Point::new(box_rect.x + CHECK + CHECK_GAP, layout.check.center_y()),
-            CHECK_TEXT,
-            CHECK_INK.get(),
-            Alignment::Left,
-        ));
-        said.push(format!(
-            "{} {}",
-            if chooser.pointer { "[x]" } else { "[ ]" },
-            self.words.pointer()
-        ));
-        // The buttons.
-        let cancel = kit::rounded(layout.cancel, BUTTON_RADIUS);
-        if chooser.hover == Some(Target::Cancel) {
-            crate::theme::hover(f, &cancel, CANCEL_HOVER.get());
-        }
-        f.stroke(
-            &kit::rounded(
-                Rectangle::new(
-                    Point::new(layout.cancel.x + 0.5, layout.cancel.y + 0.5),
-                    Size::new(layout.cancel.width - 1.0, layout.cancel.height - 1.0),
-                ),
-                BUTTON_RADIUS - 0.5,
-            ),
-            Stroke::default()
-                .with_color(CANCEL_RIM.get())
-                .with_width(BORDER),
-        );
-        f.fill_text(kit::text_in(
-            MANROPE_SEMIBOLD,
-            kit::text(
-                self.words.cancel().to_owned(),
-                layout.cancel.center(),
-                BUTTON_TEXT,
-                TEXT.get(),
-                Alignment::Center,
-            ),
-        ));
-        f.fill(&kit::rounded(layout.share, BUTTON_RADIUS), BLUE.get());
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                self.words.share().to_owned(),
-                layout.share.center(),
-                BUTTON_TEXT,
-                Color::WHITE,
-                Alignment::Center,
-            ),
-        ));
-        said.push(self.words.cancel().to_owned());
-        said.push(self.words.share().to_owned());
-        said
+        vec![f.into_geometry()]
     }
 }
 
