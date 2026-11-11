@@ -345,7 +345,14 @@ impl Controller {
             .into_iter()
             .map(|(i, r)| crate::ui::ring::Spot::at(i, r))
             .collect();
-        self.declare(bar, namespace, Declared { spots, group: None });
+        self.declare(
+            bar,
+            namespace,
+            Declared {
+                spots,
+                ..Declared::default()
+            },
+        );
     }
 
     /// Bar `bar`'s surface of `namespace` declares `declared` (the kit's

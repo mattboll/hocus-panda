@@ -615,12 +615,20 @@ fn press_row(row: &str, act: Act) {
 
 /// What bar `bar` shows now, as its surfaces declared it.
 fn gather(bar: &str, form: hocus_link::Form, lang: Lang) -> bar::Facts {
-    let (shown, declared, groups, focused, open, height) = crate::popover::with(|c| {
+    let (shown, declared, lives, groups, focused, open, height) = crate::popover::with(|c| {
         let spots = c.ring.spots(bar);
-        let declared: Vec<(Item, Node, bool)> = spots
+        let declared: Vec<(&'static str, Item, Option<Node>, bool)> = spots
             .iter()
-            .filter_map(|(_, s)| s.node.clone().map(|n| (s.item, n, s.part)))
+            .map(|(namespace, s)| (*namespace, s.item, s.node.clone(), s.part))
             .collect();
+        let mut lives = Vec::new();
+        for (namespace, _) in &spots {
+            if !lives.iter().any(|(n, _)| n == namespace)
+                && let Some(live) = c.ring.live(bar, namespace)
+            {
+                lives.push((*namespace, live));
+            }
+        }
         let mut groups: Vec<(&'static str, Node)> = Vec::new();
         for (namespace, _) in &spots {
             if !groups.iter().any(|(n, _)| n == namespace)
@@ -632,6 +640,7 @@ fn gather(bar: &str, form: hocus_link::Form, lang: Lang) -> bar::Facts {
         (
             c.items_of(bar),
             declared,
+            lives,
             groups,
             c.focused_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
             c.open_on().filter(|(b, _)| *b == bar).map(|(_, i)| i),
@@ -652,6 +661,19 @@ fn gather(bar: &str, form: hocus_link::Form, lang: Lang) -> bar::Facts {
         })
         .collect();
     let frame = shown.iter().map(|(_, item, r)| (*item, *r)).collect();
+    // Named as they are now where what their surface draws would age
+    // (read outside the controller's lock).
+    let words = Words::new(lang);
+    let declared: Vec<(Item, Node, bool)> = declared
+        .into_iter()
+        .filter_map(|(namespace, item, node, part)| {
+            let live = lives
+                .iter()
+                .find(|(n, _)| *n == namespace)
+                .and_then(|(_, live)| live(bar, words, item));
+            live.or(node).map(|node| (item, node, part))
+        })
+        .collect();
     let levels_words = crate::levels::model::Words::new(lang);
     let screen = crate::desktops::screen_of(bar, 0).map_or_else(
         || bar.to_owned(),

@@ -426,7 +426,10 @@ impl<Message> canvas::Program<Message> for Connections {
                 )
             })
             .collect();
-        let declared = crate::ui::ring::Declared { spots, group: None };
+        let declared = crate::ui::ring::Declared {
+            spots,
+            ..crate::ui::ring::Declared::default()
+        };
         popover::with(|c| c.declare(&self.bar, CONNECTIONS_NAMESPACE, declared));
         if state.shown.is_empty() {
             return crate::backdrop::over(under, frame);

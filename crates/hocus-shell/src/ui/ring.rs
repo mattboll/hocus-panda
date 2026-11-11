@@ -51,12 +51,19 @@ impl Spot {
     }
 }
 
-/// What a bar's surface declares: its controls, and the group they make
-/// for screen readers (a list, a toolbar), if they make one.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// How a surface names its item as screen readers read it, from what is
+/// now: for what its drawing does not show, which changes without it
+/// drawing (a desktop's windows' titles, how long an agent has waited).
+pub type Live = fn(bar: &str, words: crate::a11y::Words, item: Item) -> Option<Node>;
+
+/// What a bar's surface declares: its controls, the group they make for
+/// screen readers (a list, a toolbar), if they make one, and how its
+/// items are named as they are read, if their nodes as drawn would age.
+#[derive(Debug, Clone, Default)]
 pub struct Declared {
     pub spots: Vec<Spot>,
     pub group: Option<Node>,
+    pub live: Option<Live>,
 }
 
 /// The ring across the bars: what each of their surfaces declares, by
@@ -175,6 +182,12 @@ impl Ring {
                 .then(a.1.rect.x.total_cmp(&b.1.rect.x))
         });
         spots
+    }
+
+    /// How bar `bar`'s surface of `namespace` names its items as they are
+    /// read, if it does.
+    pub fn live(&self, bar: &str, namespace: &'static str) -> Option<Live> {
+        self.declared.get(&(bar.to_owned(), namespace))?.live
     }
 
     /// The group bar `bar`'s surface of `namespace` declared, if any.
@@ -316,7 +329,7 @@ mod tests {
     fn declared(spots: &[(Item, Rectangle)]) -> Declared {
         Declared {
             spots: spots.iter().map(|(i, r)| Spot::at(*i, *r)).collect(),
-            group: None,
+            ..Declared::default()
         }
     }
 

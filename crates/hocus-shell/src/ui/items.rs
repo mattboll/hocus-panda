@@ -162,6 +162,12 @@ pub trait Items {
         lit: Option<Item>,
     ) -> Vec<Geometry>;
 
+    /// How its items are named as screen readers read them, if their
+    /// nodes as drawn would age ([`super::ring::Live`]).
+    fn live(&self) -> Option<super::ring::Live> {
+        None
+    }
+
     /// What the surface takes before the kit, the pointer at `at` on the
     /// surface: a field's keys and its drag. `Some`: taken.
     fn before(
@@ -388,6 +394,7 @@ impl<P: Items> canvas::Program<Message> for Surface<P> {
         let declared = Declared {
             spots,
             group: controls.group.clone(),
+            live: program.live(),
         };
         // Declared before it draws: what the ring is on is as it shows.
         let ringed = popover::with(|c| {

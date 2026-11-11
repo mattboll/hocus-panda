@@ -917,6 +917,7 @@ impl<Message> canvas::Program<Message> for Group {
         let declared = crate::ui::ring::Declared {
             group: group(said, spots.len(), &agents, now_us, super::rows_shown()),
             spots,
+            live: Some(live),
         };
         popover::with(|c| c.declare(&self.bar, AGENTS_NAMESPACE, declared));
         let Some(layout) = layout().filter(|l| l.height > 0.0) else {
@@ -1709,6 +1710,12 @@ pub fn node(
         _ => return None,
     };
     Some(Node::new(crate::ui::items::key(item), Role::Button, name).act(Act::Click))
+}
+
+/// An item of the agents' group as screen readers read it now: how long
+/// an agent has waited goes on without the group drawing.
+fn live(_bar: &str, words: crate::a11y::Words, item: Item) -> Option<hocus_a11y::Node> {
+    node(words, item, &super::said().agents, super::now_us())
 }
 
 /// The list the agents' `controls` rows make for screen readers, with

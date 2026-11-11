@@ -370,6 +370,21 @@ impl Items for Sign {
         }
     }
 
+    /// Who uses what, which the sign does not show, read as it is read.
+    fn live(&self) -> Option<crate::ui::ring::Live> {
+        Some(|_, words, item| {
+            let uses = super::snapshot();
+            (item == Item::InUse).then(|| {
+                hocus_a11y::Node::new(
+                    crate::ui::items::key(item),
+                    Role::Button,
+                    words.in_use(&uses.used(), uses.muted),
+                )
+                .act(hocus_a11y::Act::Click)
+            })
+        })
+    }
+
     fn update(
         &self,
         state: &mut State,

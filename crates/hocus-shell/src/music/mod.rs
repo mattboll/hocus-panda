@@ -380,7 +380,10 @@ fn fit_all() -> bool {
                     ..crate::ui::ring::Spot::at(item, rect)
                 })
                 .collect();
-            let declared = crate::ui::ring::Declared { spots, group: None };
+            let declared = crate::ui::ring::Declared {
+                spots,
+                ..crate::ui::ring::Declared::default()
+            };
             c.declare(&bar, MUSIC_NAMESPACE, declared);
         }
     });

@@ -514,6 +514,20 @@ impl Items for Tray {
         }
     }
 
+    fn live(&self) -> Option<crate::ui::ring::Live> {
+        Some(|_, _, item| {
+            let Item::Tray(key) = item else {
+                return None;
+            };
+            let name = super::shown().into_iter().find(|s| s.key == key)?.name;
+            Some(
+                Node::new(crate::ui::items::key(item), Role::Button, name)
+                    .act(Act::Click)
+                    .act(Act::Menu),
+            )
+        })
+    }
+
     fn update(
         &self,
         state: &mut State,

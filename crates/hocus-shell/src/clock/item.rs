@@ -149,7 +149,10 @@ pub fn refresh(clock: &Clock, state: &mut State, size: Size) {
         })
         .into_iter()
         .collect();
-    let declared = crate::ui::ring::Declared { spots, group: None };
+    let declared = crate::ui::ring::Declared {
+        spots,
+        ..crate::ui::ring::Declared::default()
+    };
     let (open, focused) = popover::with(|c| {
         c.declare(&clock.bar, CLOCK_NAMESPACE, declared);
         (

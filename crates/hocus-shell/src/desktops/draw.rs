@@ -605,28 +605,16 @@ impl Items for Tiles {
             _ => TILE_RADIUS,
         };
         let said = crate::a11y::Words::new(self.words.lang);
-        // Each screen's windows' titles, read once.
-        let titles: Vec<super::Titles> = state
-            .shown
-            .iter()
-            .map(|s| super::titles(&s.screen.output).unwrap_or_default())
-            .collect();
         let controls = self
             .items(state, size)
             .into_iter()
             .map(|(item, rect)| {
-                let (name, current, count) = match item {
-                    Item::Desktop { row, index } => {
-                        self.desk(state, titles.get(usize::from(row)), row, index, said)
-                    }
-                    _ => (String::new(), false, 0),
-                };
-                let at = match item {
-                    Item::Desktop { index, .. } => usize::from(index) + 1,
-                    _ => 0,
-                };
-                Control::new(item, rect, Role::RadioButton, name, radius)
-                    .node(|n| n.checked(current).set(at, count))
+                let node = node(&self.bar, said, item);
+                let name = node.as_ref().map(|n| n.name.clone()).unwrap_or_default();
+                Control::new(item, rect, Role::RadioButton, name, radius).node(|n| match node {
+                    Some(node) => node,
+                    None => n,
+                })
             })
             .collect();
         Controls {
@@ -634,6 +622,10 @@ impl Items for Tiles {
             controls,
             group: Some(Node::new("desktops", Role::RadioGroup, said.desktops())),
         }
+    }
+
+    fn live(&self) -> Option<crate::ui::ring::Live> {
+        Some(node)
     }
 
     fn update(
@@ -970,51 +962,6 @@ impl Tiles {
         )
     }
 
-    /// Desktop `index` of row `row` as screen readers read it: its name
-    /// (its title, whether it is the current one, its windows' titles, and
-    /// on another screen's row that screen's), whether it is current, how
-    /// many its screen has.
-    fn desk(
-        &self,
-        state: &State,
-        titles: Option<&super::Titles>,
-        row: u8,
-        index: u8,
-        said: crate::a11y::Words,
-    ) -> (String, bool, usize) {
-        let Some(shown) = state.shown.get(usize::from(row)) else {
-            return (String::new(), false, 0);
-        };
-        let Some(desktops) = &shown.desktops else {
-            return (String::new(), false, 0);
-        };
-        let i = usize::from(index);
-        let name = state.names.get(i).cloned().flatten();
-        let title = self.words.desktop_title(i + 1, name.as_deref());
-        let current = usize::from(desktops.current) == i;
-        let windows: Vec<String> = desktops
-            .windows
-            .iter()
-            .filter(|w| usize::from(w.desktop) == i && w.look != Look::Minimized)
-            .filter_map(|w| {
-                titles?
-                    .titles
-                    .iter()
-                    .find(|(id, _)| *id == w.id)
-                    .map(|(_, t)| t.clone())
-            })
-            .collect();
-        let mut words = said.desktop(&title, current, &windows);
-        if row > 0 {
-            let s = &shown.screen;
-            words = format!(
-                "{}, {words}",
-                self.words.screen(s.built_in, s.inches, s.number)
-            );
-        }
-        (words, current, usize::from(desktops.count))
-    }
-
     /// What the compositor said last: a screen's ring sets off when its
     /// current desktop changed, from where it is.
     fn refresh(&self, state: &mut State, size: Size, now: Instant) {
@@ -1130,6 +1077,49 @@ impl Tiles {
         }
         Some(canvas::Action::capture())
     }
+}
+
+/// Desktop `item` of bar `bar` as screen readers read it, as it is now: a
+/// radio button named with its title, whether it is the current one, its
+/// windows' titles (which its tile does not show: read as it is read) and,
+/// on another screen's row, that screen's name; one of its screen's.
+pub fn node(bar: &str, words: crate::a11y::Words, item: Item) -> Option<Node> {
+    use hocus_a11y::Act;
+    let Item::Desktop { row, index } = item else {
+        return None;
+    };
+    let screen = super::screens(bar).into_iter().nth(usize::from(row))?;
+    let desktops = super::snapshot(&screen.output)?;
+    let titles = super::titles(&screen.output).unwrap_or_default();
+    let levels = Words::new(words.lang());
+    let i = usize::from(index);
+    let title = levels.desktop_title(i + 1, super::name(i).as_deref());
+    let current = usize::from(desktops.current) == i;
+    let windows: Vec<String> = desktops
+        .windows
+        .iter()
+        .filter(|w| usize::from(w.desktop) == i && w.look != Look::Minimized)
+        .filter_map(|w| {
+            titles
+                .titles
+                .iter()
+                .find(|(id, _)| *id == w.id)
+                .map(|(_, t)| t.clone())
+        })
+        .collect();
+    let mut name = words.desktop(&title, current, &windows);
+    if row > 0 {
+        name = format!(
+            "{}, {name}",
+            levels.screen(screen.built_in, screen.inches, screen.number)
+        );
+    }
+    Some(
+        Node::new(crate::ui::items::key(item), Role::RadioButton, name)
+            .checked(current)
+            .set(i + 1, usize::from(desktops.count))
+            .act(Act::Click),
+    )
 }
 
 #[cfg(test)]

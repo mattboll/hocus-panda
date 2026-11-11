@@ -358,7 +358,10 @@ impl<Message> canvas::Program<Message> for Levels {
                 ..crate::ui::ring::Spot::at(item, rect)
             })
             .collect();
-        let declared = crate::ui::ring::Declared { spots, group: None };
+        let declared = crate::ui::ring::Declared {
+            spots,
+            ..crate::ui::ring::Declared::default()
+        };
         popover::with(|c| c.declare(&self.bar, hocus_link::LEVELS_NAMESPACE, declared));
         // Under the signs and gauges, which are drawn in the column's clip.
         crate::backdrop::layer(&mut frame, Rectangle::with_size(size), |f| {
