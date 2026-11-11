@@ -32,7 +32,7 @@ pub(crate) use input::{
 };
 pub(crate) use list::{Clip, List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
 pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
-pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero};
+pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero_once};
 
 use crate::levels::{
     draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, cell, rgb},
@@ -193,17 +193,6 @@ pub(crate) fn title(f: &mut Frame, title: &str) {
             TEXT.get(),
             Alignment::Left,
         ),
-    ));
-}
-
-/// The word on the header's right: what the popover is about.
-pub(crate) fn title_aside(f: &mut Frame, word: String) {
-    f.fill_text(text(
-        word,
-        Point::new(RIGHT, HEADER_MIDDLE),
-        ASIDE,
-        FAINT.get(),
-        Alignment::Right,
     ));
 }
 

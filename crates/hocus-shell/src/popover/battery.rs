@@ -265,9 +265,14 @@ pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate:
     let subtitle = levels
         .battery
         .map(|b| words.plugged(b.charge.plugged()).to_owned());
-    let content = ui(|ui| content(words, &levels, ui));
+    let (content, until) = ui(|ui| {
+        let until = ui.asked.map(|(_, since)| since + ASKED_FOR);
+        (content(words, &levels, ui), until)
+    });
+    // Asked and not said: the surface wakes when it stops showing.
     Around::new(id, content, handle, Msg::Stale)
         .stale_when(|| ui(|ui| expired(ui, Instant::now())))
+        .wake_at(until)
         .keys(arrows)
         .press(Msg::Pressed)
         .subtitle(subtitle)
@@ -353,10 +358,6 @@ fn content<'a>(words: Words, levels: &Snapshot, ui: &mut Ui) -> El<'a> {
     }
     if let Some((_, lines)) = &layout.health {
         all.push(parts::block(GAP + HEALTH_PAD, Some(note(lines, LINE))));
-    }
-    // Asked and not said: the surface wakes when it stops showing.
-    if let Some((_, since)) = ui.asked {
-        all.push(parts::wake_at(since + ASKED_FOR));
     }
     parts::content(all)
 }

@@ -104,6 +104,8 @@ pub struct Around<'a, L> {
     natural: Box<dyn Fn(f32) + 'a>,
     /// The line under its title, for screen readers.
     subtitle: Option<String>,
+    /// When what it shows ends by itself (a value asked and not said).
+    wake: Option<std::time::Instant>,
 }
 
 impl<L> std::fmt::Debug for Around<'_, L> {
@@ -138,6 +140,7 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
             later: None,
             natural: Box::new(|_| {}),
             subtitle: None,
+            wake: None,
         }
     }
 
@@ -177,6 +180,13 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
 
     pub fn subtitle(mut self, subtitle: Option<String>) -> Self {
         self.subtitle = subtitle;
+        self
+    }
+
+    /// Drawn again at `at`, if any: what it shows ends then by itself,
+    /// which `stale_when` then says.
+    pub fn wake_at(mut self, at: Option<std::time::Instant>) -> Self {
+        self.wake = at;
         self
     }
 
@@ -495,6 +505,14 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
     ) {
         let open = crate::popover::with(|c| c.is_open(self.id));
         let drawing = matches!(event, Event::Window(window::Event::RedrawRequested(_)));
+        // Asked on every event: a tree built again from one is drawn
+        // without a request of its own.
+        if let Some(at) = self
+            .wake
+            .filter(|at| open && *at > std::time::Instant::now())
+        {
+            shell.request_redraw_at(window::RedrawRequest::At(at));
+        }
         let mut handled = false;
         // The tree built after what was handled: what waited for it.
         let kept = tree.state.downcast_mut::<Kept>();

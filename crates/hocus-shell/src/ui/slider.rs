@@ -1,21 +1,22 @@
-//! A volume's slider: the levels' track, fill and knob (the canvas's
+//! A slider: the levels' track, fill and knob (the canvas's
 //! [`kit::slider`], whose look iced's stock slider has not: a gradient to
 //! the knob, the knob's shadow), taken by the pointer from anywhere in its
 //! height and dragged.
 
 use iced::{
-    Length, Rectangle, Renderer, Theme, mouse,
+    Color, Length, Rectangle, Renderer, Theme, mouse,
     widget::canvas::{self, Action, Frame},
 };
 
-use crate::{levels::draw::SOUND, popover::kit};
+use crate::popover::kit;
 
-/// A slider at `volume` (0 to 100), grey when what it sets is `grey`;
-/// its track `track` tall, its knob `knob`. Dragging tells `on_change`
-/// each volume, then `on_release`.
+/// A slider at `share` of its travel (0 to 1), filled with `fill`'s
+/// gradient (none: grey, what it sets is off); its track `track` tall,
+/// its knob `knob`. Dragging tells `on_change` each share, then
+/// `on_release`.
 pub struct Slider<'a, M> {
-    pub volume: f32,
-    pub grey: bool,
+    pub share: f32,
+    pub fill: Option<(Color, Color)>,
     pub track: f32,
     pub knob: f32,
     pub on_change: Box<dyn Fn(f32) -> M + 'a>,
@@ -58,11 +59,11 @@ impl<M: Clone> canvas::Program<M> for Slider<'_, M> {
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?;
                 *dragging = true;
-                Some(Action::publish((self.on_change)(track.volume_at(at.x))).and_capture())
+                Some(Action::publish((self.on_change)(track.share_at(at.x))).and_capture())
             }
             iced::Event::Mouse(mouse::Event::CursorMoved { .. }) if *dragging => {
                 let at = cursor.position_from(bounds.position())?;
-                Some(Action::publish((self.on_change)(track.volume_at(at.x))).and_capture())
+                Some(Action::publish((self.on_change)(track.share_at(at.x))).and_capture())
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if *dragging => {
                 *dragging = false;
@@ -81,12 +82,7 @@ impl<M: Clone> canvas::Program<M> for Slider<'_, M> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut f = Frame::new(renderer, bounds.size());
-        kit::slider(
-            &mut f,
-            self.track(bounds),
-            self.volume / 100.0,
-            (!self.grey).then_some(SOUND),
-        );
+        kit::slider(&mut f, self.track(bounds), self.share, self.fill);
         vec![f.into_geometry()]
     }
 

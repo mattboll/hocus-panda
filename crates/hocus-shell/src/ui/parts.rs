@@ -387,42 +387,6 @@ pub fn polyline(
     f.stroke(&path, stroke(width * scale, colour));
 }
 
-/// Nothing to see: wakes its surface at `at`, when what it shows ends
-/// (a volume asked and not said).
-pub fn wake_at<'a, M: 'a>(at: Instant) -> El<'a, M> {
-    canvas(WakeAt(at)).width(0.0).height(0.0).into()
-}
-
-struct WakeAt(Instant);
-
-impl<M> canvas::Program<M> for WakeAt {
-    type State = ();
-
-    fn update(
-        &self,
-        _state: &mut (),
-        event: &iced::Event,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<M>> {
-        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
-            return None;
-        };
-        (*now < self.0).then(|| canvas::Action::request_redraw_at(self.0))
-    }
-
-    fn draw(
-        &self,
-        _state: &(),
-        _renderer: &Renderer,
-        _theme: &Theme,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        Vec::new()
-    }
-}
-
 /// A spinner, turning: its surface alone draws again each frame.
 pub fn spinner<'a, M: 'a>(colour: Color) -> El<'a, M> {
     canvas(Spinner(colour))

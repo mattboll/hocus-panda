@@ -1912,14 +1912,7 @@ impl Shell {
                 glass: self.look.glass,
                 motion: self.look.motion,
             }),
-            popover::Item::Brightness => canvas(popover::brightness::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            popover::Item::Brightness => popover::brightness::view(id, self.words, self.look.glass),
             popover::Item::Battery => popover::battery::view(id, self.words, self.look.glass),
             popover::Item::Windows => canvas(popover::windows::Panel {
                 id,
