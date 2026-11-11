@@ -31,29 +31,15 @@ use smithay::{
     },
     utils::{Clock, Logical, Monotonic, Point, Rectangle},
     wayland::{
-        compositor::{CompositorClientState, CompositorState},
-        cursor_shape::CursorShapeManagerState,
-        dmabuf::{DmabufGlobal, DmabufState},
-        fractional_scale::FractionalScaleManagerState,
-        keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
-        output::OutputManagerState,
-        pointer_gestures::PointerGesturesState,
-        presentation::PresentationState,
-        relative_pointer::RelativePointerManagerState,
-        seat::WaylandFocus,
-        selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
-        shell::{
-            kde::decoration::KdeDecorationState,
-            wlr_layer::WlrLayerShellState,
-            xdg::{XdgShellState, decoration::XdgDecorationState},
-        },
-        shm::ShmState,
-        viewporter::ViewporterState,
-        xdg_activation::XdgActivationState,
-        xwayland_shell::XWaylandShellState,
+        compositor::CompositorClientState, seat::WaylandFocus,
+        selection::primary_selection::PrimarySelectionState,
     },
     xwayland::X11Wm,
 };
+
+mod protocols;
+
+pub use protocols::Protocols;
 
 use crate::{
     App, Config,
@@ -95,32 +81,8 @@ pub struct State {
     /// (docs/design/windows.md §13).
     pub nested: bool,
 
-    pub compositor_state: CompositorState,
-    pub xdg_shell_state: XdgShellState,
-    pub xdg_decoration_state: XdgDecorationState,
-    /// KDE's server decoration protocol, which GTK 3 clients use, having
-    /// no xdg-decoration (#716).
-    pub kde_decoration_state: KdeDecorationState,
-    pub layer_shell_state: WlrLayerShellState,
-    pub shm_state: ShmState,
-    pub dmabuf_state: DmabufState,
-    /// The backend's linux-dmabuf global, made once it knows its renderer.
-    pub dmabuf_global: Option<DmabufGlobal>,
-    pub output_manager_state: OutputManagerState,
-    pub seat_state: SeatState<State>,
-    pub data_device_state: DataDeviceState,
-    pub primary_selection_state: PrimarySelectionState,
-    pub activation_state: XdgActivationState,
-    pub fractional_scale_state: FractionalScaleManagerState,
-    pub presentation_state: PresentationState,
-    pub xwayland_shell_state: XWaylandShellState,
-    _viewporter: ViewporterState,
-    _cursor_shape: CursorShapeManagerState,
-    _pointer_gestures: PointerGesturesState,
-    _relative_pointer: RelativePointerManagerState,
-    /// Clients that take every key, the desktop's shortcuts with them
-    /// (the Settings while they record one, 6.8).
-    pub shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
+    /// The Wayland protocols' states, which smithay's handlers ask for.
+    pub protocols: Protocols,
 
     pub seat: Seat<State>,
     pub space: Space<Window>,
@@ -393,6 +355,7 @@ impl State {
         let idle = crate::idle::Idleness::new(dh, config.idle.delay);
         let halo = crate::halo::Halo::with(crate::halo::Rules::of(&config.agents));
         Self::foreign_globals(dh);
+        let protocols = Protocols::new(dh, seat_state, primary_selection_state);
 
         Ok(Self {
             display_handle: dh.clone(),
@@ -405,34 +368,7 @@ impl State {
             runtime_dir,
             config,
             nested,
-            // Version 6: a surface is told the scale to draw at
-            // (`preferred_buffer_scale`), the largest of the screens it is
-            // on (docs/design/windows.md §12, #419).
-            compositor_state: CompositorState::new_v6::<Self>(dh),
-            xdg_shell_state: XdgShellState::new::<Self>(dh),
-            xdg_decoration_state: XdgDecorationState::new::<Self>(dh),
-            kde_decoration_state: KdeDecorationState::new::<Self>(
-                dh,
-                smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode::Server,
-            ),
-            layer_shell_state: WlrLayerShellState::new::<Self>(dh),
-            shm_state: ShmState::new::<Self>(dh, vec![]),
-            dmabuf_state: DmabufState::new(),
-            dmabuf_global: None,
-            output_manager_state: OutputManagerState::new_with_xdg_output::<Self>(dh),
-            seat_state,
-            data_device_state: DataDeviceState::new::<Self>(dh),
-            primary_selection_state,
-            activation_state: XdgActivationState::new::<Self>(dh),
-            fractional_scale_state: FractionalScaleManagerState::new::<Self>(dh),
-            // CLOCK_MONOTONIC, as the frame times.
-            presentation_state: PresentationState::new::<Self>(dh, 1),
-            xwayland_shell_state: XWaylandShellState::new::<Self>(dh),
-            _viewporter: ViewporterState::new::<Self>(dh),
-            _cursor_shape: CursorShapeManagerState::new::<Self>(dh),
-            _pointer_gestures: PointerGesturesState::new::<Self>(dh),
-            _relative_pointer: RelativePointerManagerState::new::<Self>(dh),
-            shortcuts_inhibit_state: KeyboardShortcutsInhibitState::new::<Self>(dh),
+            protocols,
             seat,
             space: Space::default(),
             popups: PopupManager::default(),

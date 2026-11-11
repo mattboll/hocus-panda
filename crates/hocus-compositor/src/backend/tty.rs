@@ -433,7 +433,10 @@ fn open_primary(
             (Outputs::Gles(outputs), drawing, Some(render_node))
         }
         Chosen::Pixman(renderer) => {
-            state.shm_state.update_formats(renderer.shm_formats());
+            state
+                .protocols
+                .shm_state
+                .update_formats(renderer.shm_formats());
             dmabuf_global(state, renderer.dmabuf_formats(), None);
             let outputs = DrmOutputManager::new(
                 drm,
@@ -491,7 +494,7 @@ fn open_gles(fd: &DrmDeviceFd, node: DrmNode, state: &mut State) -> anyhow::Resu
             .map_err(|err| anyhow::anyhow!("{err}"))
             .context("could not start GLES")?;
         let gles: &mut GlesRenderer = renderer.as_mut();
-        state.shm_state.update_formats(gles.shm_formats());
+        state.protocols.shm_state.update_formats(gles.shm_formats());
         dmabuf_global(state, gles.dmabuf_formats(), Some(render_node.dev_id()));
         state.blur = true;
         gles.egl_context().dmabuf_render_formats().clone()

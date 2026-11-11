@@ -28,7 +28,7 @@ static NO_CLIENT_STATE: std::sync::LazyLock<CompositorClientState> =
 
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
-        &mut self.compositor_state
+        &mut self.protocols.compositor_state
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
@@ -88,7 +88,7 @@ impl BufferHandler for State {
 
 impl ShmHandler for State {
     fn shm_state(&self) -> &ShmState {
-        &self.shm_state
+        &self.protocols.shm_state
     }
 }
 
@@ -97,7 +97,7 @@ delegate_shm!(State);
 
 impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
-        &mut self.dmabuf_state
+        &mut self.protocols.dmabuf_state
     }
 
     /// Taken as given: the global offers only what the renderer reads, and

@@ -38,7 +38,7 @@ impl SeatHandler for State {
     type TouchFocus = WlSurface;
 
     fn seat_state(&mut self) -> &mut SeatState<State> {
-        &mut self.seat_state
+        &mut self.protocols.seat_state
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
@@ -122,7 +122,7 @@ impl SelectionHandler for State {
 
 impl DataDeviceHandler for State {
     fn data_device_state(&self) -> &DataDeviceState {
-        &self.data_device_state
+        &self.protocols.data_device_state
     }
 }
 impl ClientDndGrabHandler for State {}
@@ -144,7 +144,7 @@ delegate_data_device!(State);
 
 impl PrimarySelectionHandler for State {
     fn primary_selection_state(&self) -> &PrimarySelectionState {
-        &self.primary_selection_state
+        &self.protocols.primary_selection_state
     }
 }
 delegate_primary_selection!(State);

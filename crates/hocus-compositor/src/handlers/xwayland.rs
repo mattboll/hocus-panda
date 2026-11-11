@@ -287,7 +287,7 @@ impl XwmHandler for State {
 
 impl XWaylandShellHandler for State {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.xwayland_shell_state
+        &mut self.protocols.xwayland_shell_state
     }
 
     /// An X11 window maps before XWayland gives it a surface: the keyboard
@@ -394,7 +394,7 @@ impl XwmHandler for App {
 
 impl XWaylandShellHandler for App {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.state.xwayland_shell_state
+        &mut self.state.protocols.xwayland_shell_state
     }
 
     fn surface_associated(&mut self, xwm: XwmId, wl_surface: WlSurface, surface: X11Surface) {

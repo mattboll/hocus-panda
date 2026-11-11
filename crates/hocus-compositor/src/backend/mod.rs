@@ -113,16 +113,23 @@ pub fn dmabuf_global(state: &mut State, formats: FormatSet, main_device: Option<
     let global = match main_device {
         Some(device) => match DmabufFeedbackBuilder::new(device, formats.clone()).build() {
             Ok(feedback) => state
+                .protocols
                 .dmabuf_state
                 .create_global_with_default_feedback::<State>(&display, &feedback),
             Err(err) => {
                 tracing::warn!(%err, "no dmabuf feedback; linux-dmabuf version 3");
-                state.dmabuf_state.create_global::<State>(&display, formats)
+                state
+                    .protocols
+                    .dmabuf_state
+                    .create_global::<State>(&display, formats)
             }
         },
-        None => state.dmabuf_state.create_global::<State>(&display, formats),
+        None => state
+            .protocols
+            .dmabuf_state
+            .create_global::<State>(&display, formats),
     };
-    state.dmabuf_global = Some(global);
+    state.protocols.dmabuf_global = Some(global);
     // The shell draws on the same GPU.
     state.gpu = main_device;
 }

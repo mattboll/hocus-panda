@@ -43,7 +43,7 @@ use crate::{
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.xdg_shell_state
+        &mut self.protocols.xdg_shell_state
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
@@ -306,7 +306,7 @@ fn set_kde_mode(surface: &WlSurface, mode: Option<KdeMode>) {
 /// is made, as the protocol asks.
 impl KdeDecorationHandler for State {
     fn kde_decoration_state(&self) -> &KdeDecorationState {
-        &self.kde_decoration_state
+        &self.protocols.kde_decoration_state
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {

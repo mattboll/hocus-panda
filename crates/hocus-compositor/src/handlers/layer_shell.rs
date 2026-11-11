@@ -39,7 +39,7 @@ pub enum Stand {
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
-        &mut self.layer_shell_state
+        &mut self.protocols.layer_shell_state
     }
 
     /// On the output asked for; asked for on none, one of the bar's own

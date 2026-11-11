@@ -2284,6 +2284,6 @@ impl Headless {
 
     /// Whether the backend made the linux-dmabuf global.
     pub fn has_dmabuf(&self) -> bool {
-        self.app.state.dmabuf_global.is_some()
+        self.app.state.protocols.dmabuf_global.is_some()
     }
 }

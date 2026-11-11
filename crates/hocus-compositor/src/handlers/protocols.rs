@@ -32,7 +32,7 @@ const TOKEN_FOCUSES: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl XdgActivationHandler for State {
     fn activation_state(&mut self) -> &mut XdgActivationState {
-        &mut self.activation_state
+        &mut self.protocols.activation_state
     }
 
     /// A client asks for a token: it may focus a window if the client had
@@ -65,7 +65,7 @@ impl XdgActivationHandler for State {
             .activation_tokens
             .remove(token.as_str())
             .is_some_and(|(made, valid)| valid && now.saturating_sub(made) < TOKEN_FOCUSES);
-        self.activation_state.remove_token(&token);
+        self.protocols.activation_state.remove_token(&token);
         let allowed = if by_token {
             self.tray_token_used(token.as_str());
             true
@@ -95,14 +95,15 @@ impl State {
             .retain(|_, (made, _): &mut (std::time::Duration, bool)| now - *made < TOKEN_KEPT);
         self.activation_tokens.insert(token, (now, valid));
         let kept = &self.activation_tokens;
-        self.activation_state
+        self.protocols
+            .activation_state
             .retain_tokens(|t, _| kept.contains_key(t.as_str()));
     }
 
     /// A token for a program the user starts through the desktop: its
     /// first window takes the focus with it.
     pub fn activation_token(&mut self) -> String {
-        let (token, _) = self.activation_state.create_external_token(None);
+        let (token, _) = self.protocols.activation_state.create_external_token(None);
         let token = token.to_string();
         self.keep_token(token.clone(), true);
         token
@@ -139,7 +140,7 @@ delegate_relative_pointer!(State);
 /// its surface has the keyboard, and come back when it lets go.
 impl KeyboardShortcutsInhibitHandler for State {
     fn keyboard_shortcuts_inhibit_state(&mut self) -> &mut KeyboardShortcutsInhibitState {
-        &mut self.shortcuts_inhibit_state
+        &mut self.protocols.shortcuts_inhibit_state
     }
 
     fn new_inhibitor(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
