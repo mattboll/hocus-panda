@@ -1,7 +1,7 @@
 //! The shell's other windows for screen readers: the open popover, the
 //! notifications' bubbles, the lock screen and the authentication dialog.
 
-use hocus_a11y::{Act, Node, Rect, Role, Window};
+use hocus_a11y::{Act, Node, Role, Window};
 use hocus_link::{LockFocus, LockPhase, LockShown};
 
 use super::words::Words;
@@ -189,124 +189,6 @@ pub fn lock(l: &Lock, words: Words) -> Window {
     window
 }
 
-/// The authentication dialog, as it shows.
-#[derive(Debug, Clone, Default)]
-pub struct Auth {
-    /// "Autorisation nécessaire : Mises à jour".
-    pub name: String,
-    pub message: String,
-    pub accounts: Vec<String>,
-    pub chosen: usize,
-    /// The chooser's list is open.
-    pub chooser: bool,
-    /// "Mot de passe d'Alex".
-    pub field: String,
-    /// The line under the field: wrong, Caps Lock, what PAM said.
-    pub note: String,
-    pub checking: bool,
-    pub details: bool,
-    /// "1 autre demande en attente".
-    pub waiting: String,
-    pub cancel: String,
-    pub authorize: String,
-    pub change: String,
-    /// What holds the keyboard.
-    pub focus: Option<crate::auth::Target>,
-    pub places: AuthPlaces,
-    pub size: (f32, f32),
-}
-
-/// Where the dialog's parts are, on its surface.
-#[derive(Debug, Clone, Default)]
-pub struct AuthPlaces {
-    pub change: Option<Rect>,
-    pub people: Vec<Rect>,
-    pub field: Option<Rect>,
-    pub details: Option<Rect>,
-    pub cancel: Option<Rect>,
-    pub authorize: Option<Rect>,
-}
-
-/// A target's key in the dialog's window.
-pub fn auth_key(target: crate::auth::Target) -> String {
-    format!("{target:?}")
-}
-
-pub fn auth(a: &Auth, words: Words) -> Window {
-    use crate::auth::Target;
-    let mut dialog = Node::new("dialog", Role::Dialog, a.name.clone()).describe(a.message.clone());
-    if let Some(change) = &a.places.change {
-        dialog = dialog.child(
-            Node::new(auth_key(Target::Change), Role::Button, a.change.clone())
-                .describe(a.accounts.get(a.chosen).cloned().unwrap_or_default())
-                .bounds(Some(*change))
-                .act(Act::Click),
-        );
-    }
-    if a.chooser {
-        let n = a.accounts.len();
-        for (i, account) in a.accounts.iter().enumerate() {
-            dialog = dialog.child(
-                Node::new(
-                    auth_key(Target::Account(i)),
-                    Role::RadioButton,
-                    account.clone(),
-                )
-                .checked(i == a.chosen)
-                .set(i + 1, n)
-                .bounds(a.places.people.get(i).copied())
-                .act(Act::Click),
-            );
-        }
-    }
-    dialog = dialog.child(
-        Node::new(
-            auth_key(Target::Field),
-            Role::PasswordField,
-            a.field.clone(),
-        )
-        .describe(a.note.clone())
-        .disabled(a.checking)
-        .bounds(a.places.field)
-        .act(Act::Focus),
-    );
-    dialog = dialog.child(
-        Node::new(
-            auth_key(Target::Details),
-            Role::ToggleButton,
-            words.details(),
-        )
-        .checked(a.details)
-        .bounds(a.places.details)
-        .act(Act::Click),
-    );
-    if !a.waiting.is_empty() {
-        dialog = dialog.child(Node::new("waiting", Role::Label, a.waiting.clone()));
-    }
-    dialog = dialog
-        .child(
-            Node::new(auth_key(Target::Cancel), Role::Button, a.cancel.clone())
-                .bounds(a.places.cancel)
-                .act(Act::Click),
-        )
-        .child(
-            Node::new(
-                auth_key(Target::Authorize),
-                Role::Button,
-                a.authorize.clone(),
-            )
-            .disabled(a.checking)
-            .bounds(a.places.authorize)
-            .act(Act::Click),
-        );
-    let mut window = Window::new("auth", a.name.clone());
-    window.nodes = vec![dialog];
-    window.focus = a.focus.map(auth_key);
-    window.active = true;
-    window.size = Some(a.size);
-    window
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,41 +326,5 @@ mod tests {
         );
         assert_eq!(other.nodes.len(), 1);
         assert!(!other.active);
-    }
-
-    #[test]
-    fn the_password_dialog_is_a_dialog_with_a_password_field() {
-        let a = Auth {
-            name: "Autorisation nécessaire : Mises à jour".to_owned(),
-            message: "Installer des mises à jour".to_owned(),
-            accounts: vec!["Alex".to_owned()],
-            field: "Mot de passe d'Alex".to_owned(),
-            cancel: "Annuler".to_owned(),
-            authorize: "Autoriser".to_owned(),
-            change: "Changer".to_owned(),
-            focus: Some(crate::auth::Target::Field),
-            ..Auth::default()
-        };
-        let window = auth(&a, FR);
-        let dump = window.dump();
-        assert!(
-            dump.contains(
-                "dialog \"Autorisation nécessaire : Mises à jour\" — \"Installer des mises à jour\""
-            ),
-            "{dump}"
-        );
-        assert!(
-            dump.contains("password text \"Mot de passe d'Alex\""),
-            "{dump}"
-        );
-        assert!(dump.contains("button \"Annuler\" <click>"), "{dump}");
-        assert!(dump.contains("button \"Autoriser\" <click>"), "{dump}");
-        assert!(
-            dump.contains("toggle button \"Détails\" [not pressed]"),
-            "{dump}"
-        );
-        assert_eq!(window.focus.as_deref(), Some("Field"));
-        // One account: nothing to change.
-        assert!(window.find("Change").is_none());
     }
 }

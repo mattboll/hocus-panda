@@ -16,14 +16,15 @@
 //! another account. Granted, the dialog closes; wrong, the field shakes
 //! and empties; after three wrong passwords in a row, the request is
 //! refused and the dialog closes. Cancelled (`Esc`, Annuler), or polkit
-//! cancelling, the same. As for the launcher, nothing goes through iced's
-//! messages: the dialog's state is here, the keys, the pointer and the
-//! helper change it and draw its surface alone.
+//! cancelling, the same. The dialog's state is here; its surface is the
+//! widget kit's ([`view`]): its controls declared there, its keys, its
+//! ring and its screen readers' rows the kit's; the helper changes it and
+//! draws its surface alone.
 
 mod accounts;
 mod agent;
-pub mod draw;
 mod helper;
+pub mod view;
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -32,7 +33,7 @@ use std::{
 };
 
 use hocus_link::{AUTH_NAMESPACE, AUTH_NEXT, AUTH_OUT, AUTH_TOP, AuthAsk, AuthAt, ToCompositor};
-use iced::{keyboard, window};
+use iced::window;
 use iced_layershell::reexport::KeyboardInteractivity;
 use tokio::sync::oneshot;
 
@@ -43,7 +44,7 @@ use crate::{
     clock::time::Lang,
     field::{self, Entry, Took},
     network::secret::Secret,
-    popover::Effect,
+    popover::{Effect, Pressed},
 };
 
 /// Wrong passwords in a row before the request is refused.
@@ -128,8 +129,6 @@ pub struct Dialog {
     pub details: bool,
     pub chooser: bool,
     pub focus: Target,
-    pub hover: Option<Target>,
-    pub pressed: Option<Target>,
     /// Since when the field shakes, and Details' chevron turns.
     pub shake: Option<Instant>,
     pub turned: Option<Instant>,
@@ -155,8 +154,6 @@ impl Dialog {
             details: false,
             chooser: false,
             focus: Target::Field,
-            hover: None,
-            pressed: None,
             shake: None,
             turned: None,
             size: (0, 0),
@@ -169,24 +166,6 @@ impl Dialog {
     /// Whether more than one account can answer.
     pub fn several(&self) -> bool {
         self.request.accounts.len() > 1
-    }
-
-    /// What holds the keyboard in turn, as `Tab` goes.
-    pub fn order(&self) -> Vec<Target> {
-        let mut order = Vec::new();
-        if self.several() {
-            order.push(Target::Change);
-            if self.chooser {
-                order.extend((0..self.request.accounts.len()).map(Target::Account));
-            }
-        }
-        order.extend([
-            Target::Field,
-            Target::Details,
-            Target::Cancel,
-            Target::Authorize,
-        ]);
-        order
     }
 
     /// A new conversation with the helper, for the account chosen.
@@ -219,8 +198,9 @@ impl Dialog {
 struct Auth {
     waiting: VecDeque<Request>,
     shown: Option<Dialog>,
-    /// Surfaces fading out, and when they go.
-    closing: Vec<(window::Id, Instant)>,
+    /// Surfaces fading out, when they go, and the dialog they show as it
+    /// closed.
+    closing: Vec<(window::Id, Instant, Dialog)>,
     /// When the next request opens.
     next: Option<Instant>,
     caps: bool,
@@ -255,14 +235,20 @@ pub fn with_dialog<T>(
     })
 }
 
-/// `with` on the dialog shown on its surface, with Caps Lock's state and
-/// the requests waiting (screen readers' tree, crate::a11y).
-pub fn with_shown<T>(with: impl FnOnce(&Dialog, bool, usize) -> T) -> Option<T> {
+/// `with` on the dialog surface `id` shows, open or fading out as it
+/// closed, with Caps Lock's state and the requests waiting.
+pub fn with_drawn<T>(id: window::Id, with: impl FnOnce(&Dialog, bool, usize) -> T) -> Option<T> {
     self::with(|auth| {
         let (caps, waiting) = (auth.caps, auth.waiting.len());
         auth.shown
             .as_ref()
-            .filter(|d| d.surface.is_some())
+            .filter(|d| d.surface == Some(id))
+            .or_else(|| {
+                auth.closing
+                    .iter()
+                    .find(|(c, _, _)| *c == id)
+                    .map(|(_, _, d)| d)
+            })
             .map(|d| with(d, caps, waiting))
     })
 }
@@ -271,15 +257,21 @@ pub fn with_shown<T>(with: impl FnOnce(&Dialog, bool, usize) -> T) -> Option<T> 
 pub fn is_surface(id: window::Id) -> bool {
     with(|auth| {
         auth.shown.as_ref().is_some_and(|d| d.surface == Some(id))
-            || auth.closing.iter().any(|(c, _)| *c == id)
+            || auth.closing.iter().any(|(c, _, _)| *c == id)
     })
 }
 
-/// Its surface draws again (something it shows changed).
+/// Its view is built again and draws (something it shows changed).
 pub fn wake() {
     if with(|auth| auth.shown.as_ref().is_some_and(|d| d.surface.is_some())) {
-        crate::popover::send(vec![Effect::Wake(AUTH_NAMESPACE)]);
+        woken();
     }
+}
+
+/// Its view is built again as it next draws, and it draws.
+fn woken() {
+    crate::ui::touch();
+    crate::popover::send(vec![Effect::Wake(AUTH_NAMESPACE)]);
 }
 
 /// The dialog's words, in the shell's language.
@@ -433,6 +425,7 @@ fn begin(request: Request, answer: oneshot::Sender<Outcome>) {
         let opened = !effects.is_empty();
         if !opened && auth.shown.as_ref().is_some_and(|d| d.surface.is_some()) {
             // The footer counts it.
+            crate::ui::touch();
             effects.push(Effect::Wake(AUTH_NAMESPACE));
         }
         (effects, opened)
@@ -461,6 +454,7 @@ fn cancel_cookie(cookie: &str) {
             if let Some(request) = auth.waiting.remove(at) {
                 auth.answer(request.id, Outcome::Cancelled);
             }
+            crate::ui::touch();
             return vec![Effect::Wake(AUTH_NAMESPACE)];
         }
         if auth
@@ -526,11 +520,11 @@ impl Auth {
         let top = (f64::from(at.height) / 2.0 - AUTH_TOP).max(8.0).round() as i32;
         let output = at.output.clone();
         dialog.at = Some(at);
-        dialog.size = draw::Layout::of(dialog, words(), self.waiting.len(), self.caps).surface();
-        let app = draw::who(dialog).0;
-        if let Some(icon) = draw::who(dialog).1 {
+        dialog.size = view::Layout::of(dialog, words(), self.waiting.len(), self.caps).surface();
+        let app = view::who(dialog).0;
+        if let Some(icon) = view::who(dialog).1 {
             let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
-            crate::launcher::icons::want([icon.as_str()], draw::ICON_PX, scale);
+            crate::launcher::icons::want([icon.as_str()], view::ICON_PX, scale);
         }
         tracing::debug!(
             id = dialog.request.id,
@@ -565,7 +559,8 @@ impl Auth {
         }))];
         if let Some(surface) = dialog.surface {
             effects.push(Effect::Keyboard(surface, KeyboardInteractivity::None));
-            self.closing.push((surface, now + AUTH_OUT));
+            // It shows what it showed as it closed while it fades out.
+            self.closing.push((surface, now + AUTH_OUT, dialog));
         }
         if !self.waiting.is_empty() {
             self.next = Some(now + AUTH_NEXT);
@@ -582,7 +577,7 @@ impl Auth {
         let Some(id) = dialog.surface else {
             return Vec::new();
         };
-        let size = draw::Layout::of(dialog, words(), waiting, caps).surface();
+        let size = view::Layout::of(dialog, words(), waiting, caps).surface();
         if size == dialog.size {
             return Vec::new();
         }
@@ -718,6 +713,7 @@ fn heard(id: u64, generation: u64, said: Said) {
             }
         }
         let mut effects = auth.refit();
+        crate::ui::touch();
         effects.push(Effect::Wake(AUTH_NAMESPACE));
         effects
     });
@@ -743,7 +739,7 @@ pub fn deadline() -> Option<Instant> {
     with(|auth| {
         auth.closing
             .iter()
-            .map(|(_, at)| *at)
+            .map(|(_, at, _)| *at)
             .chain(auth.next)
             .min()
     })
@@ -754,7 +750,7 @@ pub fn deadline() -> Option<Instant> {
 pub fn tick(now: Instant) -> Vec<Effect> {
     let (effects, opened) = with(|auth| {
         let mut effects = Vec::new();
-        auth.closing.retain(|(id, at)| {
+        auth.closing.retain(|(id, at, _)| {
             let due = *at <= now;
             if due {
                 effects.push(Effect::Remove(*id));
@@ -773,134 +769,100 @@ pub fn tick(now: Instant) -> Vec<Effect> {
     effects
 }
 
-/// What the pointer does on the dialog.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Pointing {
-    /// Over a target, at a place on the surface.
-    Over(Option<Target>, Option<iced::Point>),
-    Press(Option<Target>, Option<iced::Point>),
-    Release(Option<Target>),
+/// Target `target` of the dialog on `id` acts (clicked, `Enter`, a
+/// screen reader).
+pub fn act_on(id: window::Id, target: Target) {
+    let now = Instant::now();
+    let effects = with(|auth| {
+        auth.shown.as_ref().filter(|d| d.surface == Some(id))?;
+        Some(auth.act(target, now))
+    });
+    if let Some(effects) = effects {
+        crate::popover::send(effects);
+    }
 }
 
-/// What the pointer did on surface `id`, at `now`: whether to draw.
-pub fn pointer(id: window::Id, event: Pointing, now: Instant) -> bool {
-    let effects = with(|auth| {
-        let dialog = auth.shown.as_mut().filter(|d| d.surface == Some(id))?;
-        match event {
-            Pointing::Over(target, at) => {
-                // A press held in the field selects as it drags.
-                if dialog.field.pressed() {
-                    let dragged = at.is_some_and(|at| dialog.field.drag(at));
-                    return Some((Vec::new(), dragged));
-                }
-                if dialog.hover == target {
-                    return Some((Vec::new(), false));
-                }
-                dialog.hover = target;
-                Some((Vec::new(), true))
-            }
-            Pointing::Press(target, at) => {
-                dialog.pressed = target;
-                // In the field: its caret where the press is.
-                match at.filter(|_| target == Some(Target::Field)) {
-                    Some(at) if dialog.phase == Phase::Typing => {
-                        dialog.field.press(at);
-                        dialog.focus = Target::Field;
-                        Some((Vec::new(), true))
-                    }
-                    _ => Some((Vec::new(), false)),
-                }
-            }
-            Pointing::Release(target) => {
-                dialog.field.release();
-                let clicked = dialog.pressed.take().filter(|p| Some(*p) == target);
-                match clicked {
-                    Some(target) => Some((auth.act(target, now), true)),
-                    None => Some((Vec::new(), false)),
-                }
-            }
+/// The ring comes to `target` (`Tab`, a press in the field).
+pub fn focus_on(id: window::Id, target: Target) {
+    with(|auth| {
+        if let Some(dialog) = auth.shown.as_mut().filter(|d| d.surface == Some(id)) {
+            dialog.focus = target;
         }
     });
-    let Some((effects, draw)) = effects else {
-        return false;
-    };
-    crate::popover::send(effects);
-    draw
 }
 
-/// A key pressed on surface `id`: whether the dialog took it.
-pub fn key_on(
-    id: window::Id,
-    key: &keyboard::Key,
-    modifiers: keyboard::Modifiers,
-    text: Option<&str>,
-    now: Instant,
-) -> bool {
-    use keyboard::{Key, key::Named};
-    let mut pastes = false;
+/// `Escape`: the accounts' list folds, else the dialog is cancelled.
+pub fn escape(id: window::Id) {
+    let now = Instant::now();
     let effects = with(|auth| {
         let dialog = auth.shown.as_mut().filter(|d| d.surface == Some(id))?;
-        let typing = dialog.phase == Phase::Typing;
-        let mut effects = Vec::new();
-        match key {
-            Key::Named(Named::Escape) => {
-                if dialog.chooser {
-                    dialog.chooser = false;
-                    dialog.focus = Target::Change;
-                    effects = auth.refit();
-                } else {
-                    effects = auth.finish(Outcome::Cancelled, now);
-                }
-            }
-            Key::Named(Named::Tab) => {
-                let order = dialog.order();
-                let at = order.iter().position(|t| *t == dialog.focus).unwrap_or(0);
-                let n = order.len();
-                let next = if modifiers.shift() {
-                    (at + n - 1) % n
-                } else {
-                    (at + 1) % n
-                };
-                dialog.focus = order[next];
-            }
-            Key::Named(Named::Enter) => {
-                let focus = dialog.focus;
-                effects = auth.act(
-                    if focus == Target::Field {
-                        Target::Authorize
-                    } else {
-                        focus
-                    },
-                    now,
-                );
-            }
-            Key::Named(Named::Space) if dialog.focus != Target::Field => {
-                let focus = dialog.focus;
-                effects = auth.act(focus, now);
-            }
-            // The rest is the field's, wherever the ring is.
-            _ if typing => match dialog.field.key(key, modifiers, text) {
-                Took::No => return None,
-                Took::Same => {}
-                Took::Moved => dialog.focus = Target::Field,
-                Took::Edited => {
-                    dialog.focus = Target::Field;
-                    dialog.wrong_note = false;
-                }
-                Took::Paste => pastes = true,
-            },
-            _ => return None,
+        if dialog.chooser {
+            dialog.chooser = false;
+            dialog.focus = Target::Change;
+            Some(auth.refit())
+        } else {
+            Some(auth.finish(Outcome::Cancelled, now))
         }
-        Some(effects)
     });
-    if pastes {
+    if let Some(effects) = effects {
+        crate::popover::send(effects);
+    }
+}
+
+/// What the field of the dialog on `id` did with a key, a press or the
+/// input method.
+pub fn took(id: window::Id, took: Took) {
+    if took == Took::Paste {
+        paste(id);
+        return;
+    }
+    with(|auth| {
+        if let Some(dialog) = auth.shown.as_mut().filter(|d| d.surface == Some(id)) {
+            noted(dialog, took);
+        }
+    });
+}
+
+/// What the field took moves the ring to it; an edit clears the line
+/// saying the last password was wrong.
+fn noted(dialog: &mut Dialog, took: Took) {
+    match took {
+        Took::Moved => dialog.focus = Target::Field,
+        Took::Edited => {
+            dialog.focus = Target::Field;
+            dialog.wrong_note = false;
+        }
+        Took::No | Took::Same | Took::Paste => {}
+    }
+}
+
+/// A key typed while the ring is not on the field: it is the field's,
+/// wherever the ring is, while the password is typed.
+pub fn typed(id: window::Id, pressed: &Pressed) {
+    let took = with(|auth| {
+        let dialog = auth
+            .shown
+            .as_mut()
+            .filter(|d| d.surface == Some(id) && d.phase == Phase::Typing)?;
+        let took = dialog
+            .field
+            .key(&pressed.key, pressed.modifiers, pressed.text.as_deref());
+        noted(dialog, took);
+        Some(took)
+    });
+    if took == Some(Took::Paste) {
         paste(id);
     }
-    let Some(effects) = effects else {
-        return false;
-    };
-    crate::popover::send(effects);
-    true
+}
+
+/// Whether a key pressed now goes to the field though the ring is not on
+/// it.
+pub fn types_elsewhere(id: window::Id) -> bool {
+    with(|auth| {
+        auth.shown.as_ref().is_some_and(|d| {
+            d.surface == Some(id) && d.phase == Phase::Typing && d.focus != Target::Field
+        })
+    })
 }
 
 /// The field of the dialog on `id` edited by `edit`, while it is typed
@@ -915,10 +877,7 @@ fn edited(id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
             return false;
         };
         let took = edit(&mut dialog.field);
-        if took == Took::Edited {
-            dialog.focus = Target::Field;
-            dialog.wrong_note = false;
-        }
+        noted(dialog, took);
         took.draws()
     })
 }
@@ -940,10 +899,52 @@ fn paste(id: window::Id) {
     });
 }
 
-/// An input method's preedit or commit in the field of the dialog on
-/// `id`: whether it draws again.
-pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
-    edited(id, |entry| entry.input_method(event))
+/// The dialog for screen readers: named by who asks, described by why,
+/// holding what its controls declared (the accounts, the field, Details,
+/// the buttons), the ring where it is.
+pub fn a11y() -> Option<hocus_a11y::Window> {
+    use hocus_a11y::{Node, Role, Window};
+    let words = words();
+    with(|auth| {
+        let dialog = auth.shown.as_ref()?;
+        let id = dialog.surface?;
+        let rows = crate::a11y::rows::of(id)?;
+        let name = words.name(&view::who(dialog).0);
+        let node = Node::new("dialog", Role::Dialog, name.clone())
+            .describe(dialog.request.message.trim().to_owned())
+            .children(rows.nodes);
+        let mut window = Window::new("auth", name);
+        window.nodes = vec![node];
+        window.active = true;
+        window.focus = rows.focus;
+        window.size = Some((dialog.size.0 as f32, dialog.size.1 as f32));
+        Some(window)
+    })
+}
+
+/// A screen reader acts on control `key` of the dialog.
+pub fn a11y_click(key: &str) {
+    let Some(id) = with(|auth| auth.shown.as_ref().and_then(|d| d.surface)) else {
+        return;
+    };
+    let target = match key.strip_prefix("auth:") {
+        Some("Change") => Target::Change,
+        Some("Field") => Target::Field,
+        Some("Details") => Target::Details,
+        Some("Cancel") => Target::Cancel,
+        Some("Authorize") => Target::Authorize,
+        Some(other) => match other
+            .strip_prefix("Account(")
+            .and_then(|k| k.strip_suffix(')'))
+            .and_then(|n| n.parse().ok())
+        {
+            Some(i) => Target::Account(i),
+            None => return,
+        },
+        None => return,
+    };
+    act_on(id, target);
+    wake();
 }
 
 #[cfg(test)]
@@ -976,53 +977,5 @@ mod tests {
             "Autorisation nécessaire : Mises à jour"
         );
         assert_eq!(en.name("Updates"), "Authorization required: Updates");
-    }
-
-    fn dialog(accounts: usize) -> Dialog {
-        Dialog::new(Request {
-            id: 1,
-            cookie: "c".into(),
-            action: "org.example.updates.install".into(),
-            message: "m".into(),
-            icon: String::new(),
-            accounts: (0..accounts)
-                .map(|i| Account {
-                    uid: 1000 + i as u32,
-                    login: format!("u{i}"),
-                    name: format!("U{i}"),
-                })
-                .collect(),
-            chosen: 0,
-            pid: None,
-            pids: Vec::new(),
-            program: String::new(),
-            started_by: None,
-        })
-    }
-
-    #[test]
-    fn the_keyboard_goes_through_what_shows() {
-        let one = dialog(1);
-        assert_eq!(
-            one.order(),
-            [
-                Target::Field,
-                Target::Details,
-                Target::Cancel,
-                Target::Authorize
-            ]
-        );
-        let mut two = dialog(2);
-        assert_eq!(two.order()[0], Target::Change);
-        two.chooser = true;
-        assert_eq!(
-            &two.order()[..4],
-            &[
-                Target::Change,
-                Target::Account(0),
-                Target::Account(1),
-                Target::Field
-            ]
-        );
     }
 }

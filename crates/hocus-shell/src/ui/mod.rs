@@ -25,6 +25,7 @@
 pub mod control;
 pub mod field;
 pub mod keys;
+pub mod moved;
 pub mod notched;
 pub mod parts;
 pub mod sized;
@@ -35,6 +36,7 @@ pub mod unsaid;
 pub mod walk;
 
 pub use control::{control, line, ring};
+pub use moved::moved;
 pub use surface::{Around, Later, touch};
 pub use unsaid::unsaid;
 pub use walk::reveal;

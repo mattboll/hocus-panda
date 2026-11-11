@@ -1747,17 +1747,12 @@ impl Shell {
         if !auth::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(auth::draw::View {
-                id,
-                words: auth::words(),
-                glass: self.look.glass,
-                motion: self.look.motion,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(auth::view::view(
+            id,
+            auth::words(),
+            self.look.glass,
+            self.look.motion,
+        ))
     }
 
     /// The share's chooser (5.11), if its surface is `id`.

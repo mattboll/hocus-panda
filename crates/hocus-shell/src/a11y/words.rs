@@ -440,10 +440,6 @@ impl Words {
         self.pick("Session verrouillée", "Session locked")
     }
 
-    pub fn details(self) -> &'static str {
-        self.pick("Détails", "Details")
-    }
-
     pub fn mute(self) -> &'static str {
         self.pick("Couper le son", "Mute")
     }

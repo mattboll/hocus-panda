@@ -178,10 +178,8 @@ enum Target {
         surface: window::Id,
         target: crate::lock::Target,
     },
-    Auth {
-        surface: window::Id,
-        target: crate::auth::Target,
-    },
+    /// A control of the authentication dialog, by its key.
+    Auth(String),
     /// A row of the actions palette, by its key (#736).
     Palette(String),
     /// A control of the emoji picker, by its key.
@@ -307,7 +305,17 @@ impl Said {
             windows.push(picker);
         }
         windows.extend(self.bubbles(words));
-        windows.extend(self.auth(words));
+        if let Some(dialog) = crate::auth::a11y() {
+            for node in dialog.all() {
+                if node.key.starts_with("auth:") {
+                    self.targets.insert(
+                        (dialog.key.clone(), node.key.clone()),
+                        Target::Auth(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(dialog);
+        }
         windows
     }
 
@@ -423,65 +431,6 @@ impl Said {
             .collect()
     }
 
-    fn auth(&mut self, words: Words) -> Option<Window> {
-        use crate::auth::Target as T;
-        let auth_words = crate::auth::words();
-        let (shown, surface) = crate::auth::with_shown(|dialog, caps, waiting| {
-            let laid = crate::auth::draw::Layout::of(dialog, auth_words, waiting, caps);
-            let rect = |r: Rectangle| Rect::new(r.x, r.y, r.width, r.height);
-            let (who, _) = crate::auth::draw::who(dialog);
-            let account = dialog.request.account();
-            let shown = surfaces::Auth {
-                name: auth_words.name(&who),
-                message: dialog.request.message.trim().to_owned(),
-                accounts: dialog
-                    .request
-                    .accounts
-                    .iter()
-                    .map(|a| a.name.clone())
-                    .collect(),
-                chosen: dialog.request.chosen,
-                chooser: dialog.chooser,
-                field: account.map_or_else(
-                    || auth_words.password().to_owned(),
-                    |a| auth_words.password_of(&a.name),
-                ),
-                note: laid.note.join(" "),
-                checking: dialog.phase == crate::auth::Phase::Checking,
-                details: dialog.details,
-                waiting: laid.waiting.clone(),
-                cancel: auth_words.cancel().to_owned(),
-                authorize: auth_words.authorize().to_owned(),
-                change: auth_words.change().to_owned(),
-                focus: Some(dialog.focus),
-                places: surfaces::AuthPlaces {
-                    change: laid.change.map(rect),
-                    people: laid.people.iter().copied().map(rect).collect(),
-                    field: Some(rect(laid.field)),
-                    details: Some(rect(laid.details)),
-                    cancel: Some(rect(laid.cancel)),
-                    authorize: Some(rect(laid.authorize)),
-                },
-                size: {
-                    let (w, h) = laid.surface();
-                    (w as f32, h as f32)
-                },
-            };
-            (shown, dialog.surface)
-        })?;
-        let surface = surface?;
-        let window = surfaces::auth(&shown, words);
-        let mut targets = vec![T::Change, T::Field, T::Details, T::Cancel, T::Authorize];
-        targets.extend((0..shown.accounts.len()).map(T::Account));
-        for target in targets {
-            self.targets.insert(
-                (window.key.clone(), surfaces::auth_key(target)),
-                Target::Auth { surface, target },
-            );
-        }
-        Some(window)
-    }
-
     /// Does what a screen reader asked, as the pointer or the keys would.
     fn carry_out(&self, asked: &Asked) {
         let Some(target) = self
@@ -544,16 +493,7 @@ impl Said {
                 crate::lock::pointer(*surface, crate::lock::Pointing::Press(Some(*target)));
                 crate::lock::pointer(*surface, crate::lock::Pointing::Release(Some(*target)));
             }
-            (Target::Auth { surface, target }, Act::Click | Act::Focus) => {
-                let now = Instant::now();
-                crate::auth::pointer(
-                    *surface,
-                    crate::auth::Pointing::Press(Some(*target), None),
-                    now,
-                );
-                crate::auth::pointer(*surface, crate::auth::Pointing::Release(Some(*target)), now);
-                crate::auth::wake();
-            }
+            (Target::Auth(key), Act::Click | Act::Focus) => crate::auth::a11y_click(key),
             (_, act) => tracing::debug!(?act, "not done from a screen reader"),
         }
     }
