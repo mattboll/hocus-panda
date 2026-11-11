@@ -32,6 +32,10 @@ use iced::{
 use super::{Card, Grid, Open, Row, Words};
 use crate::theme::Ink;
 use crate::{
+    field::{
+        Place,
+        view::{Look, Style},
+    },
     levels::draw::{DIM, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD, Wheel},
 };
@@ -519,17 +523,13 @@ pub struct View {
     pub software: bool,
 }
 
-/// What the surface keeps between draws: the field's text as it fits, and
-/// the wheel's notches.
+/// What the surface keeps between draws: the hint's width and the
+/// wheel's notches.
 #[derive(Debug, Default)]
 pub struct State {
     wheel: Wheel,
-    /// The query, how it shows, and where the caret is after it.
-    field: (String, String, f32),
     /// The hint's width.
     hint: f32,
-    /// The field's width its text was fitted to.
-    room: f32,
     /// What was last logged of what it shows.
     logged: String,
 }
@@ -557,6 +557,8 @@ impl<Message> canvas::Program<Message> for View {
                 text,
                 ..
             }) => super::key_on(self.id, key, *modifiers, text.as_deref())
+                .then(|| canvas::Action::request_redraw().and_capture()),
+            iced::Event::InputMethod(event) => super::input_method(self.id, event)
                 .then(|| canvas::Action::request_redraw().and_capture()),
             _ => None,
         }
@@ -615,8 +617,7 @@ impl<Message> canvas::Program<Message> for View {
 
 impl View {
     /// Before it draws: its size kept, its columns fitted to it, the names
-    /// shown measured, the field's text fitted, and what it shows logged
-    /// when it changed.
+    /// shown measured, and what it shows logged when it changed.
     fn prepare(&self, state: &mut State, size: Size) {
         let shown = super::with(|l| {
             let open = l.open_mut(self.id)?;
@@ -628,29 +629,14 @@ impl View {
                 .iter()
                 .filter_map(|(at, _)| open.app(*at).map(|a| a.entry.name.clone()))
                 .collect();
-            Some((open.query.clone(), names, layout.field))
+            Some(names)
         });
-        let Some((query, names, field)) = shown else {
+        let Some(names) = shown else {
             return;
         };
         measure_labels(names.iter().map(String::as_str));
         if state.hint == 0.0 {
             state.hint = kit::measure(self.words.escape(), HINT, MANROPE_SEMIBOLD);
-        }
-        if state.field.0 != query
-            || state.field.1.is_empty() != query.is_empty()
-            || state.room != field.width
-        {
-            state.room = field.width;
-            let room = text_room(field, state.hint);
-            let width = |t: &str| kit::measure(t, QUERY, MANROPE);
-            let fitted = tail(&query, room, width);
-            let caret = if query.is_empty() {
-                0.0
-            } else {
-                width(&fitted)
-            };
-            state.field = (query, fitted, caret);
         }
         let said = super::with(|l| l.open_on(self.id).map(|open| self.said(open, size)));
         if let Some(said) = said
@@ -728,7 +714,7 @@ impl View {
         format!(
             "query={:?} heads={rows:?} tiles={lines:?} cards={cards:?} offset={} mark={} \
              tooltip=\"{tooltip}\" emoji={emoji:?}",
-            open.query,
+            open.query.text(),
             open.offset,
             layout.mark.is_some(),
         )
@@ -757,6 +743,13 @@ impl View {
             Some(match seen {
                 mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
                     open.pointer = at;
+                    // A press held in the field selects as it drags.
+                    if open.query.pressed() {
+                        return Some(match at {
+                            Some(at) if open.query.drag(at) => Then::Draw,
+                            _ => Then::Nothing,
+                        });
+                    }
                     hovered(open, target, now)
                 }
                 mouse::Event::CursorLeft => {
@@ -769,10 +762,16 @@ impl View {
                         open.pressed = Some(tile);
                         Then::Nothing
                     }
-                    None if at.is_some_and(|at| layout.field.contains(at)) => Then::Nothing,
-                    None => Then::Close,
+                    None => match at.filter(|at| layout.field.contains(*at)) {
+                        Some(at) => {
+                            open.query.press(at);
+                            Then::Draw
+                        }
+                        None => Then::Close,
+                    },
                 },
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    open.query.release();
                     match open.pressed.take().filter(|p| Some(*p) == target) {
                         Some(tile) => Then::Act(tile),
                         None => Then::Nothing,
@@ -839,7 +838,7 @@ impl View {
 
     fn draw_open(&self, f: &mut Frame, state: &State, open: &Open, size: Size) {
         let layout = Layout::of(size, &open.grid, open.offset);
-        self.draw_field(f, state, &layout);
+        self.draw_field(f, state, open, &layout);
         for (label, rect) in &layout.heads {
             head(f, label, *rect);
         }
@@ -926,7 +925,7 @@ impl View {
                 .map(|a| (words.open(&a.typed), words.in_browser(&a.url)))
                 .unwrap_or_default(),
             Card::Web => (
-                words.search_web(open.query.trim()),
+                words.search_web(open.query.text().trim()),
                 words.web_engine().to_owned(),
             ),
         }
@@ -1058,7 +1057,7 @@ impl View {
         }
     }
 
-    fn draw_field(&self, f: &mut Frame, state: &State, layout: &Layout) {
+    fn draw_field(&self, f: &mut Frame, state: &State, open: &Open, layout: &Layout) {
         let field = layout.field;
         f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
         f.stroke(
@@ -1071,33 +1070,20 @@ impl View {
             f,
             Point::new(field.x + FIELD_PAD_LEFT, field.center_y() - MAGNIFIER / 2.0),
         );
-        let x = field.x + FIELD_PAD_LEFT + MAGNIFIER + FIELD_GAP;
-        let (query, shown, caret) = &state.field;
-        let (content, colour) = if query.is_empty() {
-            (self.words.placeholder().to_owned(), PLACEHOLDER)
-        } else {
-            (shown.clone(), TEXT)
-        };
-        f.fill_text(kit::text(
-            content,
-            Point::new(x, field.center_y()),
-            QUERY,
-            colour.get(),
-            Alignment::Left,
-        ));
-        // The caret after what is typed: the field has the keyboard.
-        // Just before the placeholder's first letter, never on it; just
-        // after the last one typed.
-        let caret_x = if query.is_empty() {
-            x - z(2.0)
-        } else {
-            x + caret + z(1.0)
-        };
-        let caret = Rectangle::new(
-            Point::new(caret_x, field.center_y() - QUERY * 0.6),
-            Size::new(1.0, QUERY * 1.2),
+        // What is typed, its selection and its caret: the field has the
+        // keyboard.
+        open.query.draw(
+            f,
+            Place {
+                left: field.x + FIELD_PAD_LEFT + MAGNIFIER + FIELD_GAP,
+                middle: field.center_y(),
+                width: text_room(field, state.hint),
+                style: Style::one(QUERY, MANROPE),
+            },
+            self.words.placeholder(),
+            &Look::of(TEXT.get(), PLACEHOLDER.get()),
+            true,
         );
-        f.fill_rectangle(caret.position(), caret.size(), TEXT.get());
         // "Échap" in its frame, on the right.
         let width = state.hint + 2.0 * HINT_PAD + 2.0;
         let hint = Rectangle::new(
@@ -1147,24 +1133,6 @@ fn text_room(field: Rectangle, hint: f32) -> f32 {
         - FIELD_GAP
         - (hint + 2.0 * HINT_PAD + 2.0)
         - FIELD_PAD_RIGHT
-}
-
-/// `text`'s end that fits `room`, after "…" when its start is left out:
-/// what is typed last shows.
-fn tail(text: &str, room: f32, width: impl Fn(&str) -> f32) -> String {
-    if width(text) <= room {
-        return text.to_owned();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    for skip in 1..chars.len() {
-        let cut: String = std::iter::once('…')
-            .chain(chars[skip..].iter().copied())
-            .collect();
-        if width(&cut) <= room {
-            return cut;
-        }
-    }
-    "…".to_owned()
 }
 
 fn inset(rect: Rectangle, by: f32) -> Rectangle {
@@ -1503,11 +1471,5 @@ mod tests {
         assert_eq!(keep_in_view(&grid, 2, 2, size), 0);
         assert_eq!(keep_in_view(&grid, 9, 4, size), 2);
         assert_eq!(keep_in_view(&grid, 9, 3, size), 3);
-    }
-
-    #[test]
-    fn the_field_shows_what_was_typed_last() {
-        assert_eq!(tail("firefox", 100.0, six), "firefox");
-        assert_eq!(tail("abcdefghij", 30.0, six), "…ghij");
     }
 }

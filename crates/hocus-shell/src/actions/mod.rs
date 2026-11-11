@@ -34,7 +34,11 @@ use iced::{keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
 
 use self::list::{Elsewhere, Row, Target};
-use crate::{clock::time::Lang, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    field::{self, Entry, Took},
+    popover::Effect,
+};
 
 /// The characters the field keeps at most.
 const QUERY_MOST: usize = 120;
@@ -180,7 +184,8 @@ pub struct Open {
     pub surface: window::Id,
     pub shown: ActionsShown,
     pub scale: f32,
-    pub query: String,
+    /// The filter's field (#771).
+    pub query: Entry,
     pub step: Option<StepOpen>,
     pub rows: Vec<Row>,
     /// The row selected, in [`Open::rows`].
@@ -213,10 +218,10 @@ impl Open {
         self.rows = match &self.step {
             Some(step) => {
                 let mut rows = vec![Row::Head(words.step_head(step.def, &self.shown.title))];
-                rows.extend(list::targets(step.def, &self.query, &seen));
+                rows.extend(list::targets(step.def, self.query.text(), &seen));
                 rows
             }
-            None => list::actions(&self.query, &seen),
+            None => list::actions(self.query.text(), &seen),
         };
         self.selected = self.first();
         self.offset = 0;
@@ -433,7 +438,7 @@ pub fn toggle(shown: ActionsShown) {
             surface,
             scale: (shown.scale as f32 / 120.0).max(0.5),
             shown,
-            query: String::new(),
+            query: Entry::new(field::Kind::Line, QUERY_MOST),
             step: None,
             rows: Vec::new(),
             selected: 0,
@@ -637,7 +642,7 @@ pub fn act(id: window::Id, at: usize) {
             }
             Row::Elsewhere(to) => Then::Elsewhere {
                 to,
-                query: open.query.trim().to_owned(),
+                query: open.query.text().trim().to_owned(),
                 output: output.clone(),
                 scale: open.shown.scale,
             },
@@ -652,7 +657,8 @@ pub fn act(id: window::Id, at: usize) {
 /// The list turns into `def`'s targets.
 fn enter_step(open: &mut Open, def: &'static Def, words: Words) {
     tracing::debug!(action = def.id, "the palette asks for a target");
-    let before = std::mem::take(&mut open.query);
+    let before = open.query.text().to_owned();
+    open.query.clear();
     open.step = Some(StepOpen { def, before });
     open.relist(words);
 }
@@ -660,7 +666,7 @@ fn enter_step(open: &mut Open, def: &'static Def, words: Words) {
 /// Back from a step to the actions, the query as it was.
 fn leave_step(open: &mut Open, words: Words) {
     if let Some(step) = open.step.take() {
-        open.query = step.before;
+        open.query.set(&step.before);
         open.relist(words);
     }
 }
@@ -678,6 +684,7 @@ pub fn key_on(
         Close,
         Act(usize),
         Draw(Option<Effect>),
+        Paste,
     }
     let words = words();
     let then = with(|p| {
@@ -700,65 +707,57 @@ pub fn key_on(
                 }
             }
             Key::Named(Named::Enter) => Then::Act(open.selected),
-            Key::Named(Named::Tab | Named::ArrowRight) => match open.rows.get(open.selected) {
+            Key::Named(Named::Tab) => match open.rows.get(open.selected) {
                 Some(Row::Action(a)) if a.def.step.is_some() && a.arg.is_none() => {
                     Then::Act(open.selected)
                 }
                 _ => Then::Nothing,
             },
+            // Right goes into a step once the caret has nowhere to go.
+            Key::Named(Named::ArrowRight)
+                if modifiers.is_empty()
+                    && open.query.at_end()
+                    && matches!(
+                        open.rows.get(open.selected),
+                        Some(Row::Action(a)) if a.def.step.is_some() && a.arg.is_none()
+                    ) =>
+            {
+                Then::Act(open.selected)
+            }
             Key::Named(Named::ArrowDown) => moved(open, 1),
             Key::Named(Named::ArrowUp) => moved(open, -1),
             Key::Named(Named::PageDown) => moved(open, draw::MOST_ROWS as i32),
             Key::Named(Named::PageUp) => moved(open, -(draw::MOST_ROWS as i32)),
-            Key::Named(Named::Backspace) => {
-                if open.query.is_empty() {
-                    if open.step.is_some() {
-                        leave_step(open, words);
-                        Then::Draw(open.refit())
-                    } else {
-                        Then::Nothing
-                    }
-                } else {
-                    if modifiers.control() {
-                        let kept = open.query.trim_end().rfind(' ').map_or(0, |at| at + 1);
-                        open.query.truncate(kept);
-                    } else {
-                        open.query.pop();
-                    }
-                    changed(open)
+            // In a step's empty field: back to the actions.
+            Key::Named(Named::Backspace) if open.query.is_empty() && open.step.is_some() => {
+                leave_step(open, words);
+                Then::Draw(open.refit())
+            }
+            _ => {
+                // A digit picks a desktop at once.
+                if let Some(step) = &open.step
+                    && step.def.step == Some(Step::Desktop)
+                    && !(modifiers.control() || modifiers.alt() || modifiers.logo())
+                    && let Some(digit) = text
+                        .and_then(|t| t.parse::<u8>().ok())
+                        .filter(|d| (1..=9).contains(d))
+                {
+                    let at = open
+                        .rows
+                        .iter()
+                        .position(|r| matches!(r, Row::Target(t) if t.digit == Some(digit)));
+                    return Some(match at {
+                        Some(at) => Then::Act(at),
+                        None => Then::Nothing,
+                    });
+                }
+                match open.query.key(key, modifiers, text) {
+                    Took::No | Took::Same => Then::Nothing,
+                    Took::Moved => Then::Draw(None),
+                    Took::Edited => changed(open),
+                    Took::Paste => Then::Paste,
                 }
             }
-            _ => match text {
-                Some(typed)
-                    if !modifiers.control()
-                        && !modifiers.alt()
-                        && !modifiers.logo()
-                        && !typed.is_empty()
-                        && !typed.chars().any(char::is_control) =>
-                {
-                    // A digit picks a desktop at once.
-                    if let Some(step) = &open.step
-                        && step.def.step == Some(Step::Desktop)
-                        && let Some(digit) =
-                            typed.parse::<u8>().ok().filter(|d| (1..=9).contains(d))
-                    {
-                        let at = open
-                            .rows
-                            .iter()
-                            .position(|r| matches!(r, Row::Target(t) if t.digit == Some(digit)));
-                        return Some(match at {
-                            Some(at) => Then::Act(at),
-                            None => Then::Nothing,
-                        });
-                    }
-                    if open.query.chars().count() + typed.chars().count() > QUERY_MOST {
-                        return Some(Then::Nothing);
-                    }
-                    open.query.push_str(typed);
-                    changed(open)
-                }
-                _ => Then::Nothing,
-            },
         })
     });
     match then {
@@ -778,7 +777,57 @@ pub fn key_on(
             }
             true
         }
+        Some(Then::Paste) => {
+            paste(id);
+            true
+        }
     }
+}
+
+/// The field of the palette on `id` edited: its list follows, and its
+/// surface its height.
+fn edited(id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
+    let words = words();
+    let (draws, resize) = with(|p| {
+        let Some(open) = p.open_mut(id) else {
+            return (false, None);
+        };
+        let took = edit(&mut open.query);
+        let resize = if took == Took::Edited {
+            open.relist(words);
+            open.refit()
+        } else {
+            None
+        };
+        (took.draws(), resize)
+    });
+    if let Some(effect) = resize {
+        crate::popover::send(vec![effect]);
+    }
+    draws
+}
+
+/// The clipboard's text, on one line, into the field of the palette on
+/// `id` at its caret, read off the loop.
+fn paste(id: window::Id) {
+    crate::paste::request(crate::paste::Clean::Spaced, move |pasted| {
+        let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+            return;
+        };
+        let pasted = |entry: &mut Entry| match entry.paste(pasted) {
+            true => Took::Edited,
+            false => Took::Same,
+        };
+        if edited(id, pasted) {
+            wake();
+        }
+    });
+}
+
+/// An input method's preedit or commit in the field of the palette on
+/// `id`: whether it draws again.
+pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
+    edited(id, |entry| entry.input_method(event))
 }
 
 /// A key that reached another of the shell's surfaces while the palette
@@ -815,7 +864,7 @@ pub fn a11y() -> Option<hocus_a11y::Window> {
         };
         let layout = draw::Layout::of(open);
         let mut field =
-            Node::new("field", Role::TextField, words.search()).value(open.query.clone());
+            Node::new("field", Role::TextField, words.search()).value(open.query.text().to_owned());
         if let Some(step) = &open.step {
             field = field.describe(format!("{} ›", step.def.stem(words.fr)));
         }

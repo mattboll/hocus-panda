@@ -28,8 +28,8 @@ use std::{
 
 use anyhow::Context as _;
 use common::{
-    ClientHandle, Command, KEY_ESC, KEY_LEFTMETA, KEY_LEFTSHIFT, Shows, WAIT, chord, open_showing,
-    wait,
+    ClientHandle, Command, KEY_ESC, KEY_LEFT, KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTSHIFT, Shows,
+    WAIT, chord, open_showing, wait,
 };
 use hocus_compositor::{
     Config, Headless, HeadlessConfig, OutputSpec, RendererChoice,
@@ -727,6 +727,43 @@ fn the_target_going_or_reduced_motion_and_the_down_arrow() -> anyhow::Result<()>
     let from = bed.mark();
     chord(&mut bed.hp, &[KEY_LEFTSHIFT, key_of('f').context("f")?]);
     bed.shows_after(from, "query=\"F\"")?;
+    Ok(())
+}
+
+/// The filter is the shell's text field (#771): the caret moves in it,
+/// what is typed goes in there, a selection is replaced, and the list
+/// follows each time.
+#[test]
+fn the_caret_moves_in_the_field_and_the_list_follows_what_is_typed_there() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::one_screen()? else {
+        return Ok(());
+    };
+    bed.window("kitty", "kitty")?;
+    bed.open()?;
+    let shows = bed.typed("brea")?;
+    assert!(
+        !rows(&shows).iter().any(|r| r.contains("Bureau de droite")),
+        "{shows}"
+    );
+    // Three to the left, between « b » and « rea »: the letter goes there.
+    let from = bed.mark();
+    for _ in 0..3 {
+        bed.press(KEY_LEFT);
+    }
+    bed.type_text("u")?;
+    let shows = bed.shows_after(from, "query=\"burea\"")?;
+    assert!(
+        rows(&shows).iter().any(|r| r.contains("Bureau de droite")),
+        "{shows}"
+    );
+    // It all selected: what is typed replaces it; Ctrl+Z brings it back.
+    let from = bed.mark();
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, key_of('a').context("a")?]);
+    bed.type_text("f")?;
+    bed.shows_after(from, "query=\"f\"")?;
+    let from = bed.mark();
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, key_of('z').context("z")?]);
+    bed.shows_after(from, "query=\"burea\"")?;
     Ok(())
 }
 

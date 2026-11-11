@@ -36,6 +36,23 @@ pub struct Style {
     pub measure: Measure,
     /// The placeholder's size and font.
     pub hint: (f32, Font),
+    /// A secret shown as typed, on purpose (a password's eye).
+    pub reveal: bool,
+}
+
+impl Style {
+    /// One row of `size` in `font`, its placeholder set the same.
+    pub fn one(size: f32, font: Font) -> Self {
+        Self {
+            size,
+            line: (size * 1.45).round(),
+            font,
+            rows: 1,
+            measure: crate::popover::kit::measure,
+            hint: (size, font),
+            reveal: false,
+        }
+    }
 }
 
 /// What a secret shows for each of its characters.
@@ -133,7 +150,7 @@ impl Laid {
         }
         let text = field.text();
         let caret = field.caret();
-        let masked = field.kind() == Kind::Secret;
+        let masked = field.kind() == Kind::Secret && !style.reveal;
         let show = |part: &str| -> String {
             if masked {
                 std::iter::repeat_n(MASK, part.chars().count()).collect()
@@ -160,7 +177,7 @@ impl Laid {
         let measure = |s: &str| (style.measure)(s, style.size, style.font);
         let rows = match field.kind() {
             Kind::Lines => wrap(&shown, width, measure),
-            Kind::Secret => std::iter::once(0..shown.len()).collect(),
+            Kind::Line | Kind::Secret => std::iter::once(0..shown.len()).collect(),
         };
         let shown_caret = match preedit {
             Some(p) => at + p.cursor.as_ref().map_or(p.text.len(), |c| c.start),
@@ -172,7 +189,7 @@ impl Laid {
             preedit: preedit.map(|p| at..at + p.text.len()),
             shown,
             rows,
-            scroll: field.scroll,
+            scroll: field.scroll.get(),
             origin: Point::ORIGIN,
             width,
             style,
@@ -180,7 +197,7 @@ impl Laid {
             caret: shown_caret,
             map,
         };
-        laid.scroll = laid.scrolled(field.scroll);
+        laid.scroll = laid.scrolled(field.scroll.get());
         laid
     }
 
@@ -423,6 +440,19 @@ pub struct Look {
     pub selection: Color,
 }
 
+impl Look {
+    /// A field's text in `text`, its caret too, its placeholder in
+    /// `faint`; the selection in the theme's.
+    pub fn of(text: Color, faint: Color) -> Self {
+        Self {
+            text,
+            faint,
+            caret: text,
+            selection: crate::theme::SELECTION.get(),
+        }
+    }
+}
+
 impl Lines for Laid {
     fn line_of(&self, at: usize) -> usize {
         self.row_of(self.map.to_shown(at))
@@ -515,6 +545,7 @@ mod tests {
             rows,
             measure,
             hint: (14.0, Font::DEFAULT),
+            reveal: false,
         }
     }
 

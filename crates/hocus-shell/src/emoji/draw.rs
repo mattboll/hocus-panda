@@ -26,6 +26,10 @@ use iced::{
 use super::{Grid, Heading, Open, Row, Words, data};
 use crate::theme::Ink;
 use crate::{
+    field::{
+        Place,
+        view::{Look, Style},
+    },
     levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, Wheel},
 };
@@ -318,8 +322,6 @@ pub struct View {
 pub struct State {
     wheel: Wheel,
     shift: bool,
-    /// The query and how it shows, and where the caret is after it.
-    field: (String, String, f32),
     logged: String,
 }
 
@@ -358,13 +360,15 @@ impl<Message> canvas::Program<Message> for View {
                 ..
             }) => super::key_on(self.id, key, *modifiers, text.as_deref())
                 .then(|| canvas::Action::request_redraw().and_capture()),
+            iced::Event::InputMethod(event) => super::input_method(self.id, event)
+                .then(|| canvas::Action::request_redraw().and_capture()),
             _ => None,
         }
     }
 
     fn draw(
         &self,
-        state: &State,
+        _state: &State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -374,7 +378,7 @@ impl<Message> canvas::Program<Message> for View {
         self.background(&mut frame, bounds.size());
         super::with(|p| {
             if let Some(open) = p.open_on(self.id) {
-                self.draw_open(&mut frame, state, open);
+                self.draw_open(&mut frame, open);
             }
         });
         vec![frame.into_geometry()]
@@ -418,20 +422,12 @@ impl View {
         );
     }
 
-    /// Before it draws: the field's text fitted, and what it shows logged
-    /// when it changed.
+    /// Before it draws: what it shows logged when it changed.
     fn prepare(&self, state: &mut State) {
-        let shown = super::with(|p| p.open_on(self.id).map(|o| (o.query.clone(), self.said(o))));
-        let Some((query, said)) = shown else {
+        let said = super::with(|p| p.open_on(self.id).map(|o| self.said(o)));
+        let Some(said) = said else {
             return;
         };
-        if state.field.0 != query || (state.field.1.is_empty() && !query.is_empty()) {
-            let room = RIGHT - LEFT - GAP - TONE_BUTTON - 2.0 * FIELD_PAD - MAGNIFIER - FIELD_GAP;
-            let width = |t: &str| kit::measure(t, QUERY, MANROPE);
-            let shown = tail(&query, room, width);
-            let caret = if query.is_empty() { 0.0 } else { width(&shown) };
-            state.field = (query, shown, caret);
-        }
         if said != state.logged {
             tracing::debug!(said = %said, "the emoji picker shows it");
             state.logged = said;
@@ -478,7 +474,7 @@ impl View {
         format!(
             "query={:?} place={},{} tone={} tones={} lit={:?} heads={heads:?} rows={rows:?} \
              footer={footer:?} empty={} holding={}",
-            open.query,
+            open.query.text(),
             open.place.0,
             open.place.1,
             super::store::kept().tone,
@@ -509,6 +505,13 @@ impl View {
             let target = at.and_then(|at| layout.target_at(at));
             Some(match seen {
                 mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
+                    // A press held in the field selects as it drags.
+                    if open.query.pressed() {
+                        return Some(match at {
+                            Some(at) if open.query.drag(at) => Then::Draw,
+                            _ => Then::Nothing,
+                        });
+                    }
                     hovered(open, target)
                 }
                 mouse::Event::CursorLeft => {
@@ -517,9 +520,16 @@ impl View {
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     open.pressed = target;
-                    Then::Nothing
+                    match at.filter(|_| target == Some(Target::Field)) {
+                        Some(at) => {
+                            open.query.press(at);
+                            Then::Draw
+                        }
+                        None => Then::Nothing,
+                    }
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    open.query.release();
                     match open.pressed.take().filter(|p| Some(*p) == target) {
                         Some(Target::Cell(place)) => Then::Act(place, state.shift),
                         Some(Target::Tab(i)) => match Heading::tabs().get(i) {
@@ -576,10 +586,10 @@ impl View {
         }
     }
 
-    fn draw_open(&self, f: &mut Frame, state: &State, open: &Open) {
+    fn draw_open(&self, f: &mut Frame, open: &Open) {
         let layout = Layout::of(open);
         let tone = super::store::kept().tone;
-        self.field(f, state, open, &layout);
+        self.field(f, open, &layout);
         // The tone's button: its colour in a round.
         let b = layout.tone_button;
         f.fill(&Path::circle(b.center(), b.width / 2.0), FIELD_FILL.get());
@@ -650,7 +660,7 @@ impl View {
         }
         if open.grid.flat.is_empty() {
             f.fill_text(kit::text(
-                self.words.none(open.query.trim()),
+                self.words.none(open.query.text().trim()),
                 Point::new(
                     layout.grid.center_x(),
                     layout.grid.y + EMPTY_TOP + EMPTY * crate::levels::draw::LINE / 2.0,
@@ -699,7 +709,7 @@ impl View {
         }
     }
 
-    fn field(&self, f: &mut Frame, state: &State, open: &Open, layout: &Layout) {
+    fn field(&self, f: &mut Frame, open: &Open, layout: &Layout) {
         let field = layout.field;
         f.fill(&kit::rounded(field, FIELD_RADIUS), FIELD_FILL.get());
         f.stroke(
@@ -712,32 +722,20 @@ impl View {
             f,
             Point::new(field.x + FIELD_PAD, field.center_y() - MAGNIFIER / 2.0),
         );
-        let x = field.x + FIELD_PAD + MAGNIFIER + FIELD_GAP;
-        let (query, shown, caret) = &state.field;
-        let (content, colour) = if open.query.is_empty() || query.is_empty() {
-            (self.words.placeholder().to_owned(), QUIET)
-        } else {
-            (shown.clone(), TEXT)
-        };
-        f.fill_text(kit::text(
-            content,
-            Point::new(x, field.center_y()),
-            QUERY,
-            colour.get(),
-            Alignment::Left,
-        ));
-        if open.holding {
-            let caret_x = if open.query.is_empty() {
-                x - z(2.0)
-            } else {
-                x + caret + z(1.0)
-            };
-            f.fill_rectangle(
-                Point::new(caret_x, field.center_y() - QUERY * 0.6),
-                Size::new(1.0, QUERY * 1.2),
-                TEXT.get(),
-            );
-        }
+        // What is typed, its selection, and its caret while the picker
+        // holds the keyboard.
+        open.query.draw(
+            f,
+            Place {
+                left: field.x + FIELD_PAD + MAGNIFIER + FIELD_GAP,
+                middle: field.center_y(),
+                width: field.width - 2.0 * FIELD_PAD - MAGNIFIER - FIELD_GAP,
+                style: Style::one(QUERY, MANROPE),
+            },
+            self.words.placeholder(),
+            &Look::of(TEXT.get(), QUIET.get()),
+            open.holding,
+        );
     }
 }
 
@@ -778,23 +776,6 @@ fn head(f: &mut Frame, label: &str, rect: Rectangle) {
         ));
         x += width + HEAD_SPACING;
     }
-}
-
-/// `query`'s end that fits `room`: what was typed last shows.
-fn tail(query: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
-    if width(query) <= room {
-        return query.to_owned();
-    }
-    let chars: Vec<char> = query.chars().collect();
-    for skip in 1..chars.len() {
-        let cut: String = std::iter::once('…')
-            .chain(chars[skip..].iter().copied())
-            .collect();
-        if width(&cut) <= room {
-            return cut;
-        }
-    }
-    "…".to_owned()
 }
 
 fn inset(rect: Rectangle, by: f32) -> Rectangle {
