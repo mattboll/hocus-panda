@@ -1970,14 +1970,11 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::InUse => canvas(popover::in_use::Panel {
+            popover::Item::InUse => popover::in_use::view(&popover::in_use::Panel {
                 id,
                 words: in_use::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Tasks | popover::Item::TasksMore => canvas(popover::tasks::Panel {
                 id,
                 words: tasks::Words::new(clock::time::Lang::of_messages()),

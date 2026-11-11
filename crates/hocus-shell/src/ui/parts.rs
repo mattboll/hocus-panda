@@ -371,7 +371,21 @@ pub fn drawn<'a, M: 'a>(
     height: f32,
     draw: impl Fn(&mut canvas::Frame, Size) + 'a,
 ) -> El<'a, M> {
-    canvas(Drawn(Box::new(draw)))
+    canvas(Drawn(Box::new(draw), 0.0))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// A canvas `width` × `height` drawn by `draw` as [`drawn`], which may
+/// draw `out` px past its bounds (a ring around an icon).
+pub fn drawn_out<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    out: f32,
+    draw: impl Fn(&mut canvas::Frame, Size) + 'a,
+) -> El<'a, M> {
+    canvas(Drawn(Box::new(draw), out))
         .width(width)
         .height(height)
         .into()
@@ -380,7 +394,8 @@ pub fn drawn<'a, M: 'a>(
 /// What draws a canvas: its frame, its size.
 type Draw<'a> = Box<dyn Fn(&mut canvas::Frame, Size) + 'a>;
 
-struct Drawn<'a>(Draw<'a>);
+/// What draws a canvas, and how far past its bounds.
+struct Drawn<'a>(Draw<'a>, f32);
 
 impl<M> canvas::Program<M> for Drawn<'_> {
     type State = ();
@@ -393,7 +408,16 @@ impl<M> canvas::Program<M> for Drawn<'_> {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut f = canvas::Frame::new(renderer, bounds.size());
+        let out = self.1;
+        let mut f = if out > 0.0 {
+            let reach = Rectangle::new(
+                Point::new(-out, -out),
+                Size::new(bounds.width + 2.0 * out, bounds.height + 2.0 * out),
+            );
+            canvas::Frame::with_bounds(renderer, reach)
+        } else {
+            canvas::Frame::new(renderer, bounds.size())
+        };
         (self.0)(&mut f, bounds.size());
         vec![f.into_geometry()]
     }

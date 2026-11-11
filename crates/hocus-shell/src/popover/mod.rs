@@ -335,7 +335,8 @@ impl Item {
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
             Self::User => session::opening(),
-            Self::Menu | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
+            Self::InUse => in_use::opening(),
+            Self::Menu | Self::TaskAdd | Self::Task(_) => {}
             Self::Meeting | Self::Join | Self::MeetingMark => {}
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
