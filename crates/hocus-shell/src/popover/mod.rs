@@ -347,7 +347,10 @@ impl Item {
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
             Self::Tasks | Self::TasksMore => tasks::opening(),
-            Self::DayChoose => crate::setup::opening(),
+            Self::DayChoose => {
+                setup::opening();
+                crate::setup::opening();
+            }
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
             Self::Music => music::opening(),

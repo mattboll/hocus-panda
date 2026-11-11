@@ -1968,15 +1968,12 @@ impl Shell {
                     glass: self.look.glass,
                 })
             }
-            popover::Item::DayChoose => canvas(popover::setup::Panel {
+            popover::Item::DayChoose => popover::setup::view(&popover::setup::Panel {
                 id,
                 words: setup::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
                 motion: self.look.motion && !self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::MeetingMark => popover::meeting::view(&popover::meeting::Panel {
                 id,
                 words: meeting::Words::new(clock::time::Lang::of_messages()),

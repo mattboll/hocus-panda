@@ -278,19 +278,30 @@ impl Bed {
     /// Where the popover's `target` is on the screen, as last logged, once
     /// the popover is drawn at its size.
     fn target(&mut self, target: &str) -> anyhow::Result<(f64, f64)> {
-        let wanted = format!(" {target}@");
+        let id = format!("setup:{target}");
         let log = self.log.clone();
-        let found = |text: &str| {
-            text.lines()
-                .rev()
-                .find(|l| l.contains("the sources' popover's targets"))
-                .and_then(|l| at_of(&l.replace("targets=", "targets= "), &wanted))
+        let found = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
         };
-        let done = self
-            .hp
-            .dispatch_until(WAIT, |_| found(&plain(&log)).is_some())?;
+        // The dump said after what the popover last showed: its places
+        // are the tree's that shows it (a while at most, as a tree that
+        // shows the same places says nothing new).
+        let fresh = |log: &Path| {
+            let text = plain(log);
+            let shown = text.rfind("the sources' popover shows it");
+            let dumped = text.rfind(" shows {");
+            dumped >= shown
+        };
+        self.hp
+            .dispatch_until(Duration::from_secs(3), |_| fresh(&log))?;
+        let done = self.hp.dispatch_until(WAIT, |_| found(&log).is_some())?;
         anyhow::ensure!(done, "no {target} in the popover: {}", plain(&log));
-        let (x, y) = found(&plain(&log)).unwrap_or_default();
+        let (x, y) = found(&log).unwrap_or_default();
         let pop = self.popover()?;
         Ok((f64::from(pop.x) + x, f64::from(pop.y) + y))
     }
@@ -659,13 +670,13 @@ fn choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disable
         "title=«Ajouter un compte»",
     ])?;
     assert!(line.contains("buttons=«Fermer»"), "{line}");
-    let targets = bed.lines_since(0, "the sources' popover's targets");
-    let last = targets.last().cloned().unwrap_or_default();
+    bed.target("Planka")?;
+    let dump = common::last_json(&bed.log, " shows {").unwrap_or_default();
+    let last = dump.to_string();
     assert!(
-        !last.contains("Online@") && !last.contains("Account("),
+        !last.contains("\"setup:Online\"") && !last.contains("\"setup:Account("),
         "{last}"
     );
-    assert!(last.contains("Planka@"), "{last}");
     // The card's "Choisir…" lit while it shows.
     bed.shot("step-1-no-online-accounts")?;
     // ✕ closes it.

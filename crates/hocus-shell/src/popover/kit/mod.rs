@@ -27,15 +27,13 @@ use iced::{
 };
 
 pub(crate) use app::app_tile;
-pub(crate) use input::{
-    Input, Pointer, awaited, cycle, first_control, input, keys, opened_by_keyboard, step,
-};
+pub(crate) use input::{awaited, cycle, first_control, keys, opened_by_keyboard, step};
 pub(crate) use list::{List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
 pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
 pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero_once};
 
 use crate::levels::{
-    draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, cell, rgb},
+    draw::{ACCENT, FAINT, LINE, MANROPE, TEXT, VALUE, cell, rgb},
     model::Words,
 };
 use crate::theme::Ink;
@@ -193,27 +191,6 @@ pub(crate) fn spaced(word: &str, mut width: impl FnMut(&str) -> f32) -> Vec<(cha
             (ch, at)
         })
         .collect()
-}
-
-/// A label's letters, spaced, measured in its font.
-pub(crate) fn label_letters(word: &str) -> Vec<(char, f32)> {
-    spaced(word, |ch| measure(ch, LABEL, MANROPE_BOLD))
-}
-
-/// A label's `letters`, their line centred on `middle`.
-pub(crate) fn label(f: &mut Frame, letters: &[(char, f32)], middle: f32) {
-    for (ch, x) in letters {
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                ch.to_string(),
-                Point::new(*x, middle),
-                LABEL,
-                DIM.get(),
-                Alignment::Left,
-            ),
-        ));
-    }
 }
 
 /// `value` rounded, right-aligned on `at`, in tabular figures: each digit

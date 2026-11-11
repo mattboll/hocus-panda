@@ -416,6 +416,50 @@ pub fn drawn_out<'a, M: 'a>(
         .into()
 }
 
+/// A canvas `width` × `height` drawn by `draw` (its frame, its size, and
+/// whether the pointer is over it), which may draw `out` px past its
+/// bounds: in a button, which draws it again as the pointer comes and
+/// goes (a swatch's ring under the pointer).
+pub fn drawn_lit<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    out: f32,
+    draw: impl Fn(&mut canvas::Frame, Size, bool) + 'a,
+) -> El<'a, M> {
+    canvas(Lit(Box::new(draw), out))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// What draws a canvas, as the pointer is over it or not.
+type DrawLit<'a> = Box<dyn Fn(&mut canvas::Frame, Size, bool) + 'a>;
+
+/// What draws a canvas under the pointer, and how far past its bounds.
+struct Lit<'a>(DrawLit<'a>, f32);
+
+impl<M> canvas::Program<M> for Lit<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let out = self.1;
+        let reach = Rectangle::new(
+            Point::new(-out, -out),
+            Size::new(bounds.width + 2.0 * out, bounds.height + 2.0 * out),
+        );
+        let mut f = canvas::Frame::with_bounds(renderer, reach);
+        (self.0)(&mut f, bounds.size(), cursor.is_over(bounds));
+        vec![f.into_geometry()]
+    }
+}
+
 /// What draws a canvas: its frame, its size.
 type Draw<'a> = Box<dyn Fn(&mut canvas::Frame, Size) + 'a>;
 
