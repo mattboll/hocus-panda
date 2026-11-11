@@ -1947,8 +1947,11 @@ field (a secret is one word).
 Decision [0005](../decisions/0005-shell-widgets.md). A surface of the
 kit (`hocus-shell/src/ui/`) is iced's stock widgets, a few of ours and
 canvases only for what the look draws. Built that way: the Wi-Fi's,
-Bluetooth's, the sound's and the music player's popovers, and the music
-player's tile. The other surfaces are still hand-drawn canvases (#772).
+Bluetooth's, the sound's, the music player's, the battery's, the
+brightness's, a desktop's list, the mini form's windows', a tray icon's
+menu, the in-use sign's, the session's and a window's menu popovers, and
+the music player's tile. The other surfaces are still hand-drawn
+canvases (#772).
 
 **How to build a surface with it.**
 
@@ -1961,10 +1964,15 @@ player's tile. The other surfaces are still hand-drawn canvases (#772).
    …), …])`, at the mockup's sizes (`popover::kit`'s constants). The
    shared parts: the header, dividers, notes, spaced labels
    (`parts::label`), the small button, a connected block, a list's row
-   (`parts::row_button`), a list that scrolls (`parts::list`), the
+   (`parts::row_button`), a list that scrolls (`parts::list`; a notch of
+   the wheel two rows and a touchpad's logical pixels with
+   `parts::list_by`), spaced capitals cut to a room (`parts::spaced`), the
    Settings' link, the header's switch (`parts::Knob`), a spinner, a
    glyph (`parts::drawn(w, h, |frame, size| …)`, the canvas's own
-   drawing). Styles from the theme's tokens: `ui::style`.
+   drawing; `parts::drawn_out` to draw past its bounds, a ring round an
+   icon). A surface whose parts a layout of its own places (the
+   session's, a window's menu) pins them there (iced's `pin` in a
+   `stack`). Styles from the theme's tokens: `ui::style`.
 3. **Every control is declared where it is built**:
    `ui::control(widget, target.id(), Role::Button, name)`, then
    `.node(|n| n.checked(…))` for its state, `.focus(focused,
@@ -1979,7 +1987,11 @@ player's tile. The other surfaces are still hand-drawn canvases (#772).
    slider's arrows), `.press(Msg::Pressed)`, `.first(…)` for where the
    ring goes when it is opened by the keyboard, `.subtitle(…)`,
    `.later(&LATER)` for what waits for the next tree (a list scrolled to
-   a row: `ui::reveal`), then `.on_glass(glass)`.
+   a row: `ui::reveal`), `.rebuild(…)` (how its content is built, so
+   that a change seen as it draws builds it again in place, this
+   surface alone drawn), `.wake_at(…)` (when what it shows ends by
+   itself: a value asked and not said, a time that goes on), then
+   `.on_glass(glass)`.
 5. **`handle`** changes the model at once; the surface's view alone is
    built again and drawn. What changes outside it (a network, a mixer)
    reaches it through `popover::changed`, which marks the kit's views
@@ -2002,6 +2014,10 @@ main state: the Wi-Fi's 0.50 % of pixels off (0.63 % with a row unfolded
 and its field typed in), Bluetooth's 0.81 %, the sound's 0.91 %, none by
 more than 24/255: rounded corners' and dividers' anti-aliasing. Their
 tests pass unchanged, but the screen reader's, which reads the ids.
+Then (#772): the battery's 0.44 %, the brightness's 0.14 %, the
+in-use's 0.20 %, a window's menu 0.30 %, the session's 0.01 %, a
+desktop's list, the windows' and a tray menu's none; the session's and
+the window menu's tests read the ring and the places from the dump.
 
 ### 3.9, the desktops (2026-10-30)
 

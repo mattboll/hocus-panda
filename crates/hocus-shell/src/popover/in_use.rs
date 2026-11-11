@@ -421,9 +421,12 @@ fn app_name(words: Words, app: &str) -> String {
     crate::share::app_name(app).unwrap_or_else(|| words.an_app().to_owned())
 }
 
+/// What draws an icon at a place.
+type Draw = Box<dyn Fn(&mut Frame, Rectangle)>;
+
 /// What draws line `line`'s application's icon at a place.
-fn icon(words: Words, uses: &Uses, line: Line) -> Box<dyn Fn(&mut Frame, Rectangle)> {
-    let tile = |icon: Option<Icon>, name: String| -> Box<dyn Fn(&mut Frame, Rectangle)> {
+fn icon(words: Words, uses: &Uses, line: Line) -> Draw {
+    let tile = |icon: Option<Icon>, name: String| -> Draw {
         Box::new(move |f, rect| {
             app_tile(f, rect, (icon.as_ref(), &name), (ICON_RADIUS, 12.0), 1.0);
         })
