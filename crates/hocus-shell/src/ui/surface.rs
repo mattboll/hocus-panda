@@ -117,11 +117,12 @@ pub struct Around<'a, L> {
 }
 
 /// A surface of the shell's own (the actions palette, the emoji picker,
-/// the launcher…), not one of the bar's popovers: open while `open` says,
-/// drawn again by its `namespace`. It takes its keys itself, `Escape`
-/// among them; the popovers' controller knows nothing of it.
+/// the launcher, a notification's bubble…), not one of the bar's
+/// popovers: open while `open` says, drawn again by `wake`. It takes its
+/// keys itself, `Escape` among them; the popovers' controller knows
+/// nothing of it.
 struct Own<'a> {
-    namespace: &'static str,
+    wake: Box<dyn Fn() + 'a>,
     open: Box<dyn Fn() -> bool + 'a>,
 }
 
@@ -174,9 +175,18 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
 
     /// A surface of its own, `namespace`'s, open while `open` says, not a
     /// popover of the bar's.
-    pub fn own(mut self, namespace: &'static str, open: impl Fn() -> bool + 'a) -> Self {
+    pub fn own(self, namespace: &'static str, open: impl Fn() -> bool + 'a) -> Self {
+        self.own_by(
+            move || crate::popover::send(vec![Effect::Wake(namespace)]),
+            open,
+        )
+    }
+
+    /// A surface of its own, drawn again by `wake` (a namespace of its
+    /// own, a bubble's), open while `open` says.
+    pub fn own_by(mut self, wake: impl Fn() + 'a, open: impl Fn() -> bool + 'a) -> Self {
         self.own = Some(Own {
-            namespace,
+            wake: Box::new(wake),
             open: Box::new(open),
         });
         self
@@ -682,11 +692,12 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
             }
         } else {
             shell.invalidate_widgets();
-            let namespace = self
-                .own
-                .as_ref()
-                .map_or(hocus_link::POPOVER_NAMESPACE, |own| own.namespace);
-            crate::popover::send(vec![Effect::Wake(namespace)]);
+            match &self.own {
+                Some(own) => (own.wake)(),
+                None => {
+                    crate::popover::send(vec![Effect::Wake(hocus_link::POPOVER_NAMESPACE)]);
+                }
+            }
         }
     }
 

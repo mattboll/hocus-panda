@@ -27,7 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_a11y::{Act, Asked, Bridge, Event, Rect, Window};
+use hocus_a11y::{Act, Asked, Bridge, Event, Node, Rect, Role, Window};
 use hocus_link::LevelKey;
 use iced::{Rectangle, window};
 
@@ -172,16 +172,13 @@ enum Target {
     },
     /// A row of the open popover, by its key.
     Row(String),
-    /// A bubble's action, or the bubble itself (`None`: its default).
-    Bubble { serial: u64, action: Option<String> },
-    Lock {
-        surface: window::Id,
-        target: crate::lock::Target,
-    },
-    Auth {
-        surface: window::Id,
-        target: crate::auth::Target,
-    },
+    /// A bubble's control by its key, or the bubble itself (`note`: its
+    /// default).
+    Bubble { serial: u64, key: String },
+    /// A control of a lock, by its key.
+    Lock(String),
+    /// A control of the authentication dialog, by its key.
+    Auth(String),
     /// A row of the actions palette, by its key (#736).
     Palette(String),
     /// A control of the emoji picker, by its key.
@@ -307,7 +304,17 @@ impl Said {
             windows.push(picker);
         }
         windows.extend(self.bubbles(words));
-        windows.extend(self.auth(words));
+        if let Some(dialog) = crate::auth::a11y() {
+            for node in dialog.all() {
+                if node.key.starts_with("auth:") {
+                    self.targets.insert(
+                        (dialog.key.clone(), node.key.clone()),
+                        Target::Auth(node.key.clone()),
+                    );
+                }
+            }
+            windows.push(dialog);
+        }
         windows
     }
 
@@ -338,41 +345,45 @@ impl Said {
     }
 
     fn bubbles(&mut self, words: Words) -> Vec<Window> {
-        let bubbles: Vec<surfaces::Bubble> = crate::notifications::with(|c| {
+        let bubbles: Vec<(window::Id, surfaces::Bubble)> = crate::notifications::with(|c| {
             c.stack
                 .bubbles()
                 .iter()
-                .map(|b| surfaces::Bubble {
-                    serial: b.serial,
-                    app: b.note.app.clone(),
-                    summary: b.note.summary.clone(),
-                    body: b.note.body.clone(),
-                    urgent: b.note.urgency == crate::notifications::note::Urgency::Critical,
-                    actions: b.note.actions.clone(),
-                    default: b.note.default,
-                    progress: b.note.progress,
+                .map(|b| {
+                    (
+                        b.id,
+                        surfaces::Bubble {
+                            serial: b.serial,
+                            app: b.note.app.clone(),
+                            summary: b.note.summary.clone(),
+                            body: b.note.body.clone(),
+                            urgent: b.note.urgency == crate::notifications::note::Urgency::Critical,
+                            default: b.note.default,
+                            nodes: Vec::new(),
+                        },
+                    )
                 })
                 .collect()
         });
         bubbles
-            .iter()
-            .map(|b| {
-                let window = surfaces::bubble(b, words);
-                if b.default {
-                    self.targets.insert(
-                        (window.key.clone(), "note".to_owned()),
-                        Target::Bubble {
-                            serial: b.serial,
-                            action: None,
-                        },
+            .into_iter()
+            .map(|(id, mut b)| {
+                b.nodes = rows::of(id).map(|r| r.nodes).unwrap_or_default();
+                let window = surfaces::bubble(&b, words);
+                let keys = std::iter::once("note".to_owned())
+                    .filter(|_| b.default)
+                    .chain(
+                        b.nodes
+                            .iter()
+                            .filter(|n| !n.acts.is_empty())
+                            .map(|n| n.key.clone()),
                     );
-                }
-                for (action, _) in &b.actions {
+                for key in keys {
                     self.targets.insert(
-                        (window.key.clone(), format!("action:{action}")),
+                        (window.key.clone(), key.clone()),
                         Target::Bubble {
                             serial: b.serial,
-                            action: Some(action.clone()),
+                            key,
                         },
                     );
                 }
@@ -390,96 +401,24 @@ impl Said {
             &crate::notifications::wall(),
             lang,
         ));
-        let layout = crate::layouts::snapshot().shown().map(|l| l.name.clone());
         let mut screens: Vec<(&String, &window::Id)> = lock.surfaces.iter().collect();
         screens.sort();
         screens
             .into_iter()
             .map(|(output, surface)| {
-                let window = surfaces::lock(
-                    &surfaces::Lock {
-                        output: output.clone(),
-                        shown: lock.shown.clone(),
-                        clock: Some(clock.clone()),
-                        layout: layout.clone(),
-                    },
-                    words,
-                );
-                for (key, target) in [
-                    ("field", crate::lock::Target::Field),
-                    ("unlock", crate::lock::Target::Button),
-                    ("layout", crate::lock::Target::Layout),
-                ] {
-                    self.targets.insert(
-                        (window.key.clone(), key.to_owned()),
-                        Target::Lock {
-                            surface: *surface,
-                            target,
-                        },
-                    );
+                let clock = Node::new("clock", Role::Label, clock.clone());
+                let window = crate::lock::view::a11y(*surface, output, words, vec![clock]);
+                for node in window.all() {
+                    if node.key.starts_with("lock:") {
+                        self.targets.insert(
+                            (window.key.clone(), node.key.clone()),
+                            Target::Lock(node.key.clone()),
+                        );
+                    }
                 }
                 window
             })
             .collect()
-    }
-
-    fn auth(&mut self, words: Words) -> Option<Window> {
-        use crate::auth::Target as T;
-        let auth_words = crate::auth::words();
-        let (shown, surface) = crate::auth::with_shown(|dialog, caps, waiting| {
-            let laid = crate::auth::draw::Layout::of(dialog, auth_words, waiting, caps);
-            let rect = |r: Rectangle| Rect::new(r.x, r.y, r.width, r.height);
-            let (who, _) = crate::auth::draw::who(dialog);
-            let account = dialog.request.account();
-            let shown = surfaces::Auth {
-                name: auth_words.name(&who),
-                message: dialog.request.message.trim().to_owned(),
-                accounts: dialog
-                    .request
-                    .accounts
-                    .iter()
-                    .map(|a| a.name.clone())
-                    .collect(),
-                chosen: dialog.request.chosen,
-                chooser: dialog.chooser,
-                field: account.map_or_else(
-                    || auth_words.password().to_owned(),
-                    |a| auth_words.password_of(&a.name),
-                ),
-                note: laid.note.join(" "),
-                checking: dialog.phase == crate::auth::Phase::Checking,
-                details: dialog.details,
-                waiting: laid.waiting.clone(),
-                cancel: auth_words.cancel().to_owned(),
-                authorize: auth_words.authorize().to_owned(),
-                change: auth_words.change().to_owned(),
-                focus: Some(dialog.focus),
-                places: surfaces::AuthPlaces {
-                    change: laid.change.map(rect),
-                    people: laid.people.iter().copied().map(rect).collect(),
-                    field: Some(rect(laid.field)),
-                    details: Some(rect(laid.details)),
-                    cancel: Some(rect(laid.cancel)),
-                    authorize: Some(rect(laid.authorize)),
-                },
-                size: {
-                    let (w, h) = laid.surface();
-                    (w as f32, h as f32)
-                },
-            };
-            (shown, dialog.surface)
-        })?;
-        let surface = surface?;
-        let window = surfaces::auth(&shown, words);
-        let mut targets = vec![T::Change, T::Field, T::Details, T::Cancel, T::Authorize];
-        targets.extend((0..shown.accounts.len()).map(T::Account));
-        for target in targets {
-            self.targets.insert(
-                (window.key.clone(), surfaces::auth_key(target)),
-                Target::Auth { surface, target },
-            );
-        }
-        Some(window)
     }
 
     /// Does what a screen reader asked, as the pointer or the keys would.
@@ -531,29 +470,11 @@ impl Said {
             (Target::Emoji(key), Act::Click) => crate::emoji::a11y_click(key),
             (Target::Share(key), Act::Click) => crate::share::a11y_click(key),
             (Target::Launcher(key), Act::Click) => crate::launcher::a11y_click(key),
-            (Target::Bubble { serial, action }, Act::Click) => {
-                crate::notifications::input(match action {
-                    Some(key) => crate::notifications::Input::Action {
-                        serial: *serial,
-                        key: key.clone(),
-                    },
-                    None => crate::notifications::Input::Card(*serial),
-                });
+            (Target::Bubble { serial, key }, Act::Click) => {
+                crate::notifications::bubble::a11y_click(*serial, key);
             }
-            (Target::Lock { surface, target }, Act::Click | Act::Focus) => {
-                crate::lock::pointer(*surface, crate::lock::Pointing::Press(Some(*target)));
-                crate::lock::pointer(*surface, crate::lock::Pointing::Release(Some(*target)));
-            }
-            (Target::Auth { surface, target }, Act::Click | Act::Focus) => {
-                let now = Instant::now();
-                crate::auth::pointer(
-                    *surface,
-                    crate::auth::Pointing::Press(Some(*target), None),
-                    now,
-                );
-                crate::auth::pointer(*surface, crate::auth::Pointing::Release(Some(*target)), now);
-                crate::auth::wake();
-            }
+            (Target::Lock(key), Act::Click | Act::Focus) => crate::lock::view::a11y_click(key),
+            (Target::Auth(key), Act::Click | Act::Focus) => crate::auth::a11y_click(key),
             (_, act) => tracing::debug!(?act, "not done from a screen reader"),
         }
     }

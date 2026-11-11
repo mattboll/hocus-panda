@@ -5,8 +5,8 @@
 //! The compositor keeps the keyboard and the password; this draws what it
 //! says: the phase, how many dots, Caps Lock, where `Tab` is, how many
 //! agents wait. The pointer's clicks on the arrow, the field and the
-//! layout's button go back to it (`lock submit`, `lock focus`,
-//! `next-layout`). The screen the compositor names shows the form, the
+//! layout's button, the kit's controls ([`view`]), go back to it (`lock
+//! submit`, `lock focus`, `next-layout`). The screen the compositor names shows the form, the
 //! status row and the sleeping pandas; the others the clock alone.
 //!
 //! At rest a lock surface draws once a minute, as the minute changes; it
@@ -15,6 +15,7 @@
 
 pub mod avatar;
 pub mod draw;
+pub mod view;
 pub mod wallpaper;
 
 use std::{
@@ -23,7 +24,7 @@ use std::{
     time::Instant,
 };
 
-use hocus_link::{LOCK_NAMESPACE, LockAsk, LockFocus, LockPhase, LockShown, ToCompositor};
+use hocus_link::{LOCK_NAMESPACE, LockPhase, LockShown};
 use iced::window;
 
 use crate::{clock::time::Lang, popover::Effect};
@@ -38,17 +39,6 @@ pub struct Lock {
     pub shake: Option<(u32, Instant)>,
     /// When the check started, for the spinner.
     pub checking: Option<Instant>,
-    /// What the pointer is over, and what it pressed, on which surface.
-    pub hover: Option<(window::Id, Target)>,
-    pub pressed: Option<(window::Id, Target)>,
-}
-
-/// What can be clicked on the lock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
-    Field,
-    Button,
-    Layout,
 }
 
 static LOCK: Mutex<Option<Lock>> = Mutex::new(None);
@@ -88,8 +78,6 @@ pub fn set(shown: LockShown, screens: &crate::outputs::Known) -> Vec<Effect> {
                 surfaces: HashMap::new(),
                 shake: None,
                 checking: None,
-                hover: None,
-                pressed: None,
             }
         });
         // A new wrong password shakes the field again.
@@ -105,6 +93,8 @@ pub fn set(shown: LockShown, screens: &crate::outputs::Known) -> Vec<Effect> {
             lock.checking = None;
         }
         lock.shown = shown;
+        // Its controls are built again for what it now shows.
+        crate::ui::touch();
         let mut effects = surfaces(lock, screens);
         effects.push(Effect::Wake(LOCK_NAMESPACE));
         effects
@@ -193,7 +183,6 @@ impl Words {
     }
 
     /// The arrow's name, for a screen reader (11, accessibility).
-    #[allow(dead_code)]
     pub fn unlock(self) -> &'static str {
         self.pick("Déverrouiller", "Unlock")
     }
@@ -240,7 +229,6 @@ impl Words {
 
     /// The layout's button's name, for a screen reader (11,
     /// accessibility).
-    #[allow(dead_code)]
     pub fn layout(self, name: &str) -> String {
         if self.fr {
             format!("Disposition du clavier : {name}. Changer")
@@ -254,61 +242,10 @@ pub fn words() -> Words {
     Words::new(Lang::of_messages())
 }
 
-/// What the pointer did on lock surface `id`: whether to draw again.
-pub fn pointer(id: window::Id, event: Pointing) -> bool {
-    let (draw, ask) = with(|slot| {
-        let Some(lock) = slot.as_mut() else {
-            return (false, None);
-        };
-        match event {
-            Pointing::Over(target) => {
-                let over = target.map(|t| (id, t));
-                if lock.hover == over {
-                    return (false, None);
-                }
-                lock.hover = over;
-                (true, None)
-            }
-            Pointing::Press(target) => {
-                lock.pressed = target.map(|t| (id, t));
-                (false, None)
-            }
-            Pointing::Release(target) => {
-                let clicked = lock
-                    .pressed
-                    .take()
-                    .filter(|(on, t)| *on == id && Some(*t) == target)
-                    .map(|(_, t)| t);
-                let ask = match clicked {
-                    Some(Target::Button) => Some(ToCompositor::Lock(LockAsk::Submit)),
-                    Some(Target::Field) => {
-                        Some(ToCompositor::Lock(LockAsk::Focus(LockFocus::Field)))
-                    }
-                    Some(Target::Layout) => Some(ToCompositor::NextLayout),
-                    None => None,
-                };
-                (false, ask)
-            }
-        }
-    });
-    if let Some(ask) = ask {
-        tracing::debug!(?ask, "the lock's click");
-        crate::popover::tell(ask);
-    }
-    draw
-}
-
-/// What the pointer does on a lock surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pointing {
-    Over(Option<Target>),
-    Press(Option<Target>),
-    Release(Option<Target>),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hocus_link::LockFocus;
 
     #[test]
     fn its_words() {
@@ -352,8 +289,6 @@ mod tests {
             surfaces: HashMap::new(),
             shake: None,
             checking: None,
-            hover: None,
-            pressed: None,
         };
         let two = crate::outputs::Known::Names(vec!["eDP-1".into(), "HDMI-A-1".into()]);
         let opened = surfaces(&mut lock, &two);

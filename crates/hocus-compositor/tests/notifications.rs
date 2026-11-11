@@ -1360,3 +1360,28 @@ fn kit_shot() -> anyhow::Result<()> {
     bed.hp.pointer_move(400.0, 300.0);
     common::popover_shot(&mut bed.hp, "history")
 }
+
+/// A bubble in its main state (its actions, no countdown: what it draws
+/// at rest), shot under `HOCUS_KIT_SHOTS` (#772's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bubble_kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    bed.notify(Notice {
+        actions: &["reply", "Répondre", "later", "Plus tard"],
+        timeout: 0,
+        ..Notice::default()
+    })?;
+    bed.shows(1)?;
+    bed.hp.pointer_move(400.0, 600.0);
+    let namespace = bed
+        .hp
+        .bubble_surfaces()
+        .first()
+        .map(|(namespace, _, _)| namespace.clone())
+        .ok_or_else(|| anyhow::anyhow!("no bubble"))?;
+    common::layer_shot(&mut bed.hp, &namespace, "bubble")
+}

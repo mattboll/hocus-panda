@@ -1709,20 +1709,13 @@ impl Shell {
     /// The lock (7.1), if its surface is `id`.
     fn lock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let output = lock::output_of(id)?;
-        let layer = |layer| {
-            canvas(lock::draw::View {
-                layer,
-                id,
-                output: output.clone(),
-                wall: self.wall.clone(),
-                lang: self.lang,
-                words: lock::words(),
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-        };
-        use lock::draw::Layer;
-        Some(stack![layer(Layer::Back), layer(Layer::Front)].into())
+        Some(lock::view::view(
+            id,
+            output,
+            self.wall.clone(),
+            self.lang,
+            lock::words(),
+        ))
     }
 
     /// The curtain's pill (7.2), if its surface is `id`.
@@ -1747,17 +1740,12 @@ impl Shell {
         if !auth::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(auth::draw::View {
-                id,
-                words: auth::words(),
-                glass: self.look.glass,
-                motion: self.look.motion,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(auth::view::view(
+            id,
+            auth::words(),
+            self.look.glass,
+            self.look.motion,
+        ))
     }
 
     /// The share's chooser (5.11), if its surface is `id`.

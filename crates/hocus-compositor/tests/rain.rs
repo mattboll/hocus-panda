@@ -315,10 +315,13 @@ fn a_rain_allocates_little_on_the_loop() -> anyhow::Result<()> {
         total(standard),
         total(rain)
     );
-    // Frame by frame, not their totals: either opening's frames take 7
-    // allocations more or fewer as the client's commits fall in them or
-    // not, which over 22 frames is as much as the rain's own. Its first
-    // two frames make its picture; then each as the standard's most.
+    // Frame by frame, not their totals: the standard's opening draws
+    // differently as it scales in, which over 22 frames is as much as the
+    // rain's own. A step's turns of the loop are the same on any machine
+    // (`Headless::step`): each turn more costs 7 allocations, and polled
+    // every 5 ms, a loaded machine (CI's) took a turn fewer than a fast one
+    // in frames of its own choosing. Its first two frames make its picture;
+    // then each as the standard's most.
     let first = |c: &[u64]| c[..2].iter().sum::<u64>();
     assert!(
         first(rain) <= first(standard) + 100,
@@ -330,13 +333,10 @@ fn a_rain_allocates_little_on_the_loop() -> anyhow::Result<()> {
         "the rain's frames: {rain:?} against {standard:?}"
     );
     // Nothing grows frame after frame: the last frames as the first ones.
-    // The least of each, a frame no commit of the client's fell in: which
-    // frames those fall in is the client's thread's, and four early frames
-    // without one against a late frame with one is 7 more, not a growth.
     let rain = &costs[1];
-    let early = rain[2..6].iter().min().copied().unwrap_or(0);
-    let late = rain[16..20].iter().min().copied().unwrap_or(0);
-    assert!(late <= early + 2, "{rain:?}");
+    let early = rain[2..6].iter().max().copied().unwrap_or(0);
+    let late = rain[16..20].iter().max().copied().unwrap_or(0);
+    assert!(late <= early, "{rain:?}");
     Ok(())
 }
 

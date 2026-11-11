@@ -598,6 +598,63 @@ impl<M> canvas::Program<M> for Moving<'_> {
     }
 }
 
+/// A canvas as [`moving`], told too whether the pointer is over it: in a
+/// button, which draws it again as the pointer comes and goes (a
+/// chevron turning in a button lit under the pointer).
+pub fn moving_lit<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    draw: impl Fn(&mut canvas::Frame, Size, Instant, bool) + 'a,
+    playing: impl Fn(Instant) -> bool + 'a,
+) -> El<'a, M> {
+    canvas(MovingLit(Box::new(draw), Box::new(playing)))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// What draws a canvas at a moment, under the pointer or not.
+type DrawLitAt<'a> = Box<dyn Fn(&mut canvas::Frame, Size, Instant, bool) + 'a>;
+
+struct MovingLit<'a>(DrawLitAt<'a>, Playing<'a>);
+
+impl<M> canvas::Program<M> for MovingLit<'_> {
+    /// The moment of the frame it draws.
+    type State = Option<Instant>;
+
+    fn update(
+        &self,
+        state: &mut Option<Instant>,
+        event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<M>> {
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        *state = Some(*now);
+        (self.1)(*now).then(canvas::Action::request_redraw)
+    }
+
+    fn draw(
+        &self,
+        state: &Option<Instant>,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut f = canvas::Frame::new(renderer, bounds.size());
+        (self.0)(
+            &mut f,
+            bounds.size(),
+            state.unwrap_or_else(Instant::now),
+            cursor.is_over(bounds),
+        );
+        vec![f.into_geometry()]
+    }
+}
+
 /// A spinner, turning: its surface alone draws again each frame.
 pub fn spinner<'a, M: 'a>(colour: Color) -> El<'a, M> {
     canvas(Spinner(colour))

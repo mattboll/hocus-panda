@@ -1,8 +1,9 @@
-//! The shell's other windows for screen readers: the open popover, the
-//! notifications' bubbles, the lock screen and the authentication dialog.
+//! The shell's other windows for screen readers: the open popover and the
+//! notifications' bubbles, around what their controls declared (the lock
+//! and the authentication dialog are their own: `lock::view`,
+//! `auth::a11y`).
 
-use hocus_a11y::{Act, Node, Rect, Role, Window};
-use hocus_link::{LockFocus, LockPhase, LockShown};
+use hocus_a11y::{Act, Node, Role, Window};
 
 use super::words::Words;
 use crate::popover::Item;
@@ -80,8 +81,9 @@ pub fn popover_title(item: Item, words: Words) -> String {
     }
 }
 
-/// A notification's bubble: its application and summary, its body, its
-/// actions as buttons; said as it comes.
+/// A notification's bubble: its application and summary, its body, and
+/// what its controls declared (its ✕, its actions, its progress); said as
+/// it comes.
 #[derive(Debug, Clone, Default)]
 pub struct Bubble {
     pub serial: u64,
@@ -89,11 +91,10 @@ pub struct Bubble {
     pub summary: String,
     pub body: String,
     pub urgent: bool,
-    /// Its actions, by their key: their labels.
-    pub actions: Vec<(String, String)>,
     /// A click on it does its default action.
     pub default: bool,
-    pub progress: Option<u8>,
+    /// Its controls, as the kit read them.
+    pub nodes: Vec<Node>,
 }
 
 pub fn bubble(b: &Bubble, words: Words) -> Window {
@@ -101,209 +102,12 @@ pub fn bubble(b: &Bubble, words: Words) -> Window {
     let mut window = Window::new(format!("bubble:{}", b.serial), name.clone());
     let mut note = Node::new("note", Role::Notification, name)
         .describe(b.body.clone())
-        .polite();
+        .polite()
+        .children(b.nodes.clone());
     if b.default {
         note = note.act(Act::Click);
     }
-    if let Some(progress) = b.progress {
-        note = note.child(
-            Node::new("progress", Role::ProgressBar, "")
-                .value(words.percent(f32::from(progress)))
-                .range(f64::from(progress), 0.0, 100.0, None),
-        );
-    }
-    for (action, label) in &b.actions {
-        note = note.child(
-            Node::new(format!("action:{action}"), Role::Button, label.clone()).act(Act::Click),
-        );
-    }
     window.nodes = vec![note];
-    window
-}
-
-/// The lock on one screen: the screen with the form shows the clock, the
-/// password's field, its button, the layout's and how many agents wait;
-/// the others the clock alone.
-#[derive(Debug, Clone)]
-pub struct Lock {
-    pub output: String,
-    pub shown: LockShown,
-    /// "14 h 32, jeudi 6 novembre".
-    pub clock: Option<String>,
-    /// The keyboard's layout, when there is a choice.
-    pub layout: Option<String>,
-}
-
-pub fn lock(l: &Lock, words: Words) -> Window {
-    let lock_words = crate::lock::Words::new(words.lang());
-    let mut window = Window::new(format!("lock:{}", l.output), words.lock());
-    if let Some(clock) = &l.clock {
-        window
-            .nodes
-            .push(Node::new("clock", Role::Label, clock.clone()));
-    }
-    if l.output != l.shown.output {
-        return window;
-    }
-    let said = match l.shown.phase {
-        LockPhase::Checking | LockPhase::Opening => lock_words.checking().to_owned(),
-        LockPhase::Wrong => lock_words.wrong(l.shown.caps),
-        LockPhase::Waiting(seconds) => lock_words.wait(seconds),
-        LockPhase::Idle | LockPhase::Typing if l.shown.caps => lock_words.caps().to_owned(),
-        LockPhase::Idle | LockPhase::Typing => String::new(),
-    };
-    window.nodes.push(
-        Node::new("field", Role::PasswordField, lock_words.password())
-            .describe(said)
-            .disabled(matches!(
-                l.shown.phase,
-                LockPhase::Checking | LockPhase::Opening | LockPhase::Waiting(_)
-            ))
-            .act(Act::Focus),
-    );
-    window
-        .nodes
-        .push(Node::new("unlock", Role::Button, lock_words.unlock()).act(Act::Click));
-    if let Some(layout) = &l.layout {
-        window
-            .nodes
-            .push(Node::new("layout", Role::Button, lock_words.layout(layout)).act(Act::Click));
-    }
-    if l.shown.agents > 0 {
-        window.nodes.push(Node::new(
-            "agents",
-            Role::Label,
-            lock_words.agents(l.shown.agents),
-        ));
-    }
-    window.focus = Some(
-        match l.shown.focus {
-            LockFocus::Field => "field",
-            LockFocus::Button => "unlock",
-            LockFocus::Layout if l.layout.is_some() => "layout",
-            LockFocus::Layout => "field",
-        }
-        .to_owned(),
-    );
-    window.active = true;
-    window
-}
-
-/// The authentication dialog, as it shows.
-#[derive(Debug, Clone, Default)]
-pub struct Auth {
-    /// "Autorisation nécessaire : Mises à jour".
-    pub name: String,
-    pub message: String,
-    pub accounts: Vec<String>,
-    pub chosen: usize,
-    /// The chooser's list is open.
-    pub chooser: bool,
-    /// "Mot de passe d'Alex".
-    pub field: String,
-    /// The line under the field: wrong, Caps Lock, what PAM said.
-    pub note: String,
-    pub checking: bool,
-    pub details: bool,
-    /// "1 autre demande en attente".
-    pub waiting: String,
-    pub cancel: String,
-    pub authorize: String,
-    pub change: String,
-    /// What holds the keyboard.
-    pub focus: Option<crate::auth::Target>,
-    pub places: AuthPlaces,
-    pub size: (f32, f32),
-}
-
-/// Where the dialog's parts are, on its surface.
-#[derive(Debug, Clone, Default)]
-pub struct AuthPlaces {
-    pub change: Option<Rect>,
-    pub people: Vec<Rect>,
-    pub field: Option<Rect>,
-    pub details: Option<Rect>,
-    pub cancel: Option<Rect>,
-    pub authorize: Option<Rect>,
-}
-
-/// A target's key in the dialog's window.
-pub fn auth_key(target: crate::auth::Target) -> String {
-    format!("{target:?}")
-}
-
-pub fn auth(a: &Auth, words: Words) -> Window {
-    use crate::auth::Target;
-    let mut dialog = Node::new("dialog", Role::Dialog, a.name.clone()).describe(a.message.clone());
-    if let Some(change) = &a.places.change {
-        dialog = dialog.child(
-            Node::new(auth_key(Target::Change), Role::Button, a.change.clone())
-                .describe(a.accounts.get(a.chosen).cloned().unwrap_or_default())
-                .bounds(Some(*change))
-                .act(Act::Click),
-        );
-    }
-    if a.chooser {
-        let n = a.accounts.len();
-        for (i, account) in a.accounts.iter().enumerate() {
-            dialog = dialog.child(
-                Node::new(
-                    auth_key(Target::Account(i)),
-                    Role::RadioButton,
-                    account.clone(),
-                )
-                .checked(i == a.chosen)
-                .set(i + 1, n)
-                .bounds(a.places.people.get(i).copied())
-                .act(Act::Click),
-            );
-        }
-    }
-    dialog = dialog.child(
-        Node::new(
-            auth_key(Target::Field),
-            Role::PasswordField,
-            a.field.clone(),
-        )
-        .describe(a.note.clone())
-        .disabled(a.checking)
-        .bounds(a.places.field)
-        .act(Act::Focus),
-    );
-    dialog = dialog.child(
-        Node::new(
-            auth_key(Target::Details),
-            Role::ToggleButton,
-            words.details(),
-        )
-        .checked(a.details)
-        .bounds(a.places.details)
-        .act(Act::Click),
-    );
-    if !a.waiting.is_empty() {
-        dialog = dialog.child(Node::new("waiting", Role::Label, a.waiting.clone()));
-    }
-    dialog = dialog
-        .child(
-            Node::new(auth_key(Target::Cancel), Role::Button, a.cancel.clone())
-                .bounds(a.places.cancel)
-                .act(Act::Click),
-        )
-        .child(
-            Node::new(
-                auth_key(Target::Authorize),
-                Role::Button,
-                a.authorize.clone(),
-            )
-            .disabled(a.checking)
-            .bounds(a.places.authorize)
-            .act(Act::Click),
-        );
-    let mut window = Window::new("auth", a.name.clone());
-    window.nodes = vec![dialog];
-    window.focus = a.focus.map(auth_key);
-    window.active = true;
-    window.size = Some(a.size);
     window
 }
 
@@ -364,9 +168,10 @@ mod tests {
             summary: "Léa Martin".to_owned(),
             body: "On se voit à 15 h ?".to_owned(),
             urgent: false,
-            actions: vec![("reply".to_owned(), "Répondre".to_owned())],
             default: true,
-            progress: None,
+            nodes: vec![
+                Node::new("bubble:Action(reply)", Role::Button, "Répondre").act(Act::Click),
+            ],
         };
         let window = bubble(&b, FR);
         assert_eq!(window.key, "bubble:4");
@@ -375,110 +180,11 @@ mod tests {
         assert_eq!(note.name, "Slack : Léa Martin");
         assert_eq!(note.description.as_deref(), Some("On se voit à 15 h ?"));
         assert!(note.polite);
-        let reply = window.find("action:reply").expect("its action");
+        let reply = window.find("bubble:Action(reply)").expect("its action");
         assert_eq!(reply.role, Role::Button);
         assert_eq!(reply.name, "Répondre");
         assert_eq!(reply.acts, vec![Act::Click]);
         let urgent = bubble(&Bubble { urgent: true, ..b }, FR);
         assert_eq!(urgent.name, "Slack : Léa Martin, urgent");
-    }
-
-    fn shown(phase: LockPhase, focus: LockFocus) -> LockShown {
-        LockShown {
-            phase,
-            chars: 3,
-            caps: false,
-            shake: 0,
-            focus,
-            agents: 2,
-            wallpaper: true,
-            motion: true,
-            output: "eDP-1".to_owned(),
-        }
-    }
-
-    #[test]
-    fn the_lock_has_a_password_field_and_its_button() {
-        let l = Lock {
-            output: "eDP-1".to_owned(),
-            shown: shown(LockPhase::Typing, LockFocus::Field),
-            clock: Some("14 h 32, jeudi 6 novembre".to_owned()),
-            layout: Some("Français".to_owned()),
-        };
-        let window = lock(&l, FR);
-        let dump = window.dump();
-        assert!(
-            dump.contains("label \"14 h 32, jeudi 6 novembre\""),
-            "{dump}"
-        );
-        let field = window.find("field").expect("the field");
-        assert_eq!(field.role, Role::PasswordField);
-        assert_eq!(field.name, "Mot de passe");
-        // Never what is typed.
-        assert_eq!(field.value, None);
-        let unlock = window.find("unlock").expect("the button");
-        assert_eq!(unlock.name, "Déverrouiller");
-        assert_eq!(unlock.acts, vec![Act::Click]);
-        assert!(dump.contains("label \"2 agents t’attendent\""), "{dump}");
-        assert_eq!(window.focus.as_deref(), Some("field"));
-        assert!(window.active);
-        let wrong = lock(
-            &Lock {
-                shown: shown(LockPhase::Wrong, LockFocus::Button),
-                ..l.clone()
-            },
-            FR,
-        );
-        assert_eq!(
-            wrong.find("field").and_then(|f| f.description.as_deref()),
-            Some("Mot de passe incorrect.")
-        );
-        assert_eq!(wrong.focus.as_deref(), Some("unlock"));
-        // Another screen: the clock alone.
-        let other = lock(
-            &Lock {
-                output: "HDMI-1".to_owned(),
-                ..l
-            },
-            FR,
-        );
-        assert_eq!(other.nodes.len(), 1);
-        assert!(!other.active);
-    }
-
-    #[test]
-    fn the_password_dialog_is_a_dialog_with_a_password_field() {
-        let a = Auth {
-            name: "Autorisation nécessaire : Mises à jour".to_owned(),
-            message: "Installer des mises à jour".to_owned(),
-            accounts: vec!["Alex".to_owned()],
-            field: "Mot de passe d'Alex".to_owned(),
-            cancel: "Annuler".to_owned(),
-            authorize: "Autoriser".to_owned(),
-            change: "Changer".to_owned(),
-            focus: Some(crate::auth::Target::Field),
-            ..Auth::default()
-        };
-        let window = auth(&a, FR);
-        let dump = window.dump();
-        assert!(
-            dump.contains(
-                "dialog \"Autorisation nécessaire : Mises à jour\" — \"Installer des mises à jour\""
-            ),
-            "{dump}"
-        );
-        assert!(
-            dump.contains("password text \"Mot de passe d'Alex\""),
-            "{dump}"
-        );
-        assert!(dump.contains("button \"Annuler\" <click>"), "{dump}");
-        assert!(dump.contains("button \"Autoriser\" <click>"), "{dump}");
-        assert!(
-            dump.contains("toggle button \"Détails\" [not pressed]"),
-            "{dump}"
-        );
-        assert_eq!(window.focus.as_deref(), Some("Field"));
-        // One account: nothing to change.
-        assert!(window.find("Change").is_none());
     }
 }

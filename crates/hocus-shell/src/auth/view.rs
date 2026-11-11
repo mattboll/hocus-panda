@@ -4,29 +4,53 @@
 //! others to choose from); the password's field, the line under it; the
 //! details, folded; the requests waiting, Annuler and Autoriser. Its glass
 //! is drawn here; the compositor draws its shadow, the dim and its motion.
+//!
+//! On the widget kit (#772): Changer, the accounts, the field, Details and
+//! the buttons are the kit's controls, placed where the layout puts them,
+//! each drawing its look; the field is the shared one, masked. What
+//! nothing holds is drawn under them ([`Back`]).
 
-use std::sync::{Mutex, PoisonError};
+use std::{
+    sync::{Mutex, PoisonError},
+    time::Instant,
+};
 
-use hocus_link::{AUTH_RADIUS, AUTH_WIDTH};
+use hocus_a11y::Role;
+use hocus_link::{AUTH_NAMESPACE, AUTH_RADIUS, AUTH_WIDTH};
 use iced::{
-    Color, Font, Point, Radians, Rectangle, Renderer, Size, Theme, mouse,
+    Color, Element, Font, Length, Point, Radians, Rectangle, Renderer, Size, Theme, Vector, mouse,
     widget::{
+        Space, Stack, button,
         canvas::{self, Frame, Geometry, Path, Stroke, gradient, path::arc::Elliptical},
+        pin,
         text::Alignment,
     },
     window,
 };
 
-use super::{Dialog, Phase, Pointing, Target, Words};
+use super::{Dialog, Phase, Target, Words};
 use crate::theme::Ink;
 use crate::{
+    Message,
     field::{
-        Place,
+        Entry, Took,
         view::{Look, Style},
     },
     levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, stroke},
-    popover::kit::{self, MANROPE_SEMIBOLD},
+    popover::{
+        Pressed,
+        kit::{self, MANROPE_SEMIBOLD},
+    },
+    ui::{
+        self, Around, control,
+        field::Field,
+        moved,
+        parts::{drawn_lit, drawn_out, moving_lit},
+        style,
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 const WIDTH: f32 = AUTH_WIDTH as f32;
 const RADIUS: f32 = AUTH_RADIUS as f32;
@@ -150,7 +174,6 @@ const VALUE_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
 const INK: Ink = Ink::Dark(rgb(0x0B1020));
 const READY_OFF: Ink = Ink::Accent(0.18);
 const CHECKING_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
-const FOCUS: Ink = ACCENT;
 const AVATAR_FROM: Ink = Ink::Accent(1.0);
 const AVATAR_TO: Ink = Ink::Dark(rgb(0x3E8FBF));
 const OTHER_FROM: Ink = Ink::Dark(rgb(0xC792EA));
@@ -400,22 +423,6 @@ impl Layout {
     pub fn surface(&self) -> (u32, u32) {
         (WIDTH as u32, self.height.ceil() as u32)
     }
-
-    /// What is at `at`.
-    pub fn target(&self, at: Point) -> Option<Target> {
-        if let Some(i) = self.people.iter().position(|r| r.contains(at)) {
-            return Some(Target::Account(i));
-        }
-        [
-            (self.change, Target::Change),
-            (Some(self.field), Target::Field),
-            (Some(self.details), Target::Details),
-            (Some(self.cancel), Target::Cancel),
-            (Some(self.authorize), Target::Authorize),
-        ]
-        .into_iter()
-        .find_map(|(rect, target)| rect.filter(|r| r.contains(at)).map(|_| target))
-    }
 }
 
 /// The line under the field, and its colour.
@@ -461,124 +468,422 @@ fn facts(dialog: &Dialog, words: Words) -> Vec<(&'static str, String)> {
     ]
 }
 
-/// The dialog's surface, as iced draws it.
-#[derive(Debug, Clone, Copy)]
-pub struct View {
-    pub id: window::Id,
-    pub words: Words,
-    pub glass: bool,
-    pub motion: bool,
+// --- The surface, on the widget kit ------------------------------------------------
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A control acts: clicked, `Enter` or `Space` on it.
+    Act(Target),
+    /// The ring comes to a control.
+    Focus(Target),
+    /// What the field did with a key, a press or the input method.
+    Took(Took),
+    /// A key typed while the ring is elsewhere: the field's.
+    Type(Pressed),
+    Escape,
+    /// What it shows changed under the view.
+    Stale,
 }
 
-#[derive(Debug, Default)]
-pub struct State {
-    at: Option<Point>,
+/// A control's id: what tests and screen readers know it by.
+fn id_of(target: Target) -> String {
+    format!("auth:{target:?}")
+}
+
+/// The dialog on its surface `id`, on the glass (else opaque); its field
+/// shakes and Details' chevron turns with `motion`.
+pub fn view<'a>(id: window::Id, words: Words, glass: bool, motion: bool) -> Element<'a, Message> {
+    Around::new(
+        id,
+        build(id, words, motion),
+        move |m| handle(id, m),
+        Msg::Stale,
+    )
+    .own(AUTH_NAMESPACE, move || !closing(id))
+    .rebuild(move || build(id, words, motion))
+    .keys(move |pressed| keys(id, pressed))
+    .on(iced::widget::canvas(Back { id, words, glass })
+        .width(Length::Fill)
+        .height(Length::Fill))
+}
+
+/// Whether surface `id` fades out: it takes nothing then.
+fn closing(id: window::Id) -> bool {
+    super::with_dialog(id, |_, _, _| ()).is_none()
+}
+
+/// The keys the dialog takes before the kit: `Escape`, and what is typed
+/// while the ring is not on the field (the field's, wherever the ring
+/// is). `Tab`, `Enter` and `Space` are the kit's.
+fn keys(id: window::Id, pressed: &Pressed) -> Option<Msg> {
+    use iced::keyboard::{Key, key::Named};
+    match &pressed.key {
+        Key::Named(Named::Escape) => Some(Msg::Escape),
+        Key::Named(Named::Tab | Named::Enter | Named::Space) => None,
+        _ if super::types_elsewhere(id) => Some(Msg::Type(pressed.clone())),
+        _ => None,
+    }
+}
+
+fn handle(id: window::Id, message: Msg) {
+    match message {
+        Msg::Act(target) => super::act_on(id, target),
+        Msg::Focus(target) => super::focus_on(id, target),
+        Msg::Took(took) => super::took(id, took),
+        Msg::Type(pressed) => super::typed(id, &pressed),
+        Msg::Escape => super::escape(id),
+        Msg::Stale => {}
+    }
 }
 
 /// What the dialog last said it shows, for the log.
 static SAID: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
-impl<Message> canvas::Program<Message> for View {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        let now = std::time::Instant::now();
-        let redraw = |draw: bool| draw.then(|| canvas::Action::request_redraw().and_capture());
-        match event {
-            iced::Event::Window(window::Event::RedrawRequested(_)) => {
-                let moving = self.motion
-                    && super::with_dialog(self.id, |d, _, _| {
-                        let busy = |since: Option<std::time::Instant>, ms: f32| {
-                            since.is_some_and(|s| {
-                                now.saturating_duration_since(s).as_secs_f32() * 1000.0 < ms
-                            })
-                        };
-                        busy(d.shake, SHAKE_MS) || busy(d.turned, TURN_MS)
-                    })
-                    .unwrap_or(false);
-                moving.then(canvas::Action::request_redraw)
-            }
-            iced::Event::Mouse(seen) => {
-                let at = crate::levels::draw::pointer(seen, bounds, cursor, state.at);
-                state.at = at;
-                let target = super::with_dialog(self.id, |d, caps, waiting| {
-                    let layout = Layout::of(d, self.words, waiting, caps);
-                    at.and_then(|at| layout.target(at))
-                })
-                .flatten();
-                let pointing = match seen {
-                    mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                        Pointing::Over(target, at)
-                    }
-                    mouse::Event::CursorLeft => Pointing::Over(None, None),
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => Pointing::Press(target, at),
-                    mouse::Event::ButtonReleased(mouse::Button::Left) => Pointing::Release(target),
-                    _ => return None,
-                };
-                redraw(super::pointer(self.id, pointing, now))
-            }
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                text,
-                ..
-            }) => redraw(super::key_on(
-                self.id,
-                key,
-                *modifiers,
-                text.as_deref(),
-                now,
-            )),
-            iced::Event::InputMethod(event) => redraw(super::input_method(self.id, event)),
-            _ => None,
+/// Its content, as the dialog is now; said in the log when it changed.
+fn build<'a>(id: window::Id, words: Words, motion: bool) -> El<'a> {
+    let Some((content, said)) = super::with_drawn(id, |dialog, caps, waiting| {
+        content(dialog, caps, waiting, words, motion)
+    }) else {
+        return Space::new().into();
+    };
+    if !closing(id) {
+        let mut last = SAID.lock().unwrap_or_else(PoisonError::into_inner);
+        if last.as_ref() != Some(&said) {
+            tracing::debug!(?said, "the authentication dialog shows it");
+            *last = Some(said);
         }
     }
+    content
+}
+
+/// `content` placed at `at`.
+fn at<'a>(content: impl Into<El<'a>>, at: Point) -> El<'a> {
+    pin(content).x(at.x).y(at.y).into()
+}
+
+/// A button `rect` large drawn by `draw` in the surface's frame (and
+/// whether the pointer is over it), doing `target`.
+fn pressed<'a>(
+    rect: Rectangle,
+    target: Target,
+    draw: impl Fn(&mut Frame, bool) + 'a,
+) -> button::Button<'a, Msg> {
+    button(drawn_lit(rect.width, rect.height, 0.0, move |f, _, lit| {
+        f.translate(Vector::new(-rect.x, -rect.y));
+        draw(f, lit);
+    }))
+    .padding(0)
+    .style(|_, _| style::clear())
+    .on_press(Msg::Act(target))
+}
+
+/// The entry of the dialog shown (or fading out), for the field's widget.
+fn entry(with: &mut dyn FnMut(&mut Entry)) {
+    super::with(|auth| {
+        let dialog = auth
+            .shown
+            .as_mut()
+            .or_else(|| auth.closing.last_mut().map(|(_, _, d)| d));
+        if let Some(dialog) = dialog {
+            with(&mut dialog.field);
+        }
+    });
+}
+
+/// The dialog's controls where its layout places them, over what
+/// [`Back`] draws, in the keyboard's order; and what it says (never the
+/// password: its length only).
+fn content<'a>(
+    dialog: &Dialog,
+    caps: bool,
+    waiting: usize,
+    w: Words,
+    motion: bool,
+) -> (El<'a>, Vec<String>) {
+    let layout = Layout::of(dialog, w, waiting, caps);
+    let mut said = Vec::new();
+    let mut all: Vec<El<'a>> = Vec::new();
+    let checking = dialog.phase == Phase::Checking;
+    let ring = |target: Target| dialog.focus == target;
+    said.push(w.name(&layout.app));
+    said.push(layout.message.join(" "));
+    let account = dialog.request.account();
+    if let Some(account) = account {
+        let x = LEFT + AVATAR + AVATAR_GAP;
+        let room = layout.change.map_or(RIGHT, |c| c.x - 8.0) - x;
+        said.push(kit::elide(&account.name, room, |t| {
+            width(t, NAME, MANROPE_BOLD)
+        }));
+        said.push(w.administrator().to_owned());
+    }
+    let name = account.map(|a| a.name.clone()).unwrap_or_default();
+    // Changer, and the accounts' list.
+    if let Some(change) = layout.change {
+        let chooser = dialog.chooser;
+        let button = pressed(change, Target::Change, move |f, lit| {
+            draw_change(f, change, w, chooser, lit && !checking);
+        });
+        all.push(at(
+            control(button, id_of(Target::Change), Role::Button, w.change())
+                .node(|n| n.describe(name.clone()))
+                .focus(
+                    ring(Target::Change),
+                    Msg::Focus(Target::Change),
+                    CHANGE_RADIUS,
+                )
+                .activate(Msg::Act(Target::Change)),
+            change.position(),
+        ));
+        said.push(format!("[{}]", w.change()));
+    }
+    let n = dialog.request.accounts.len();
+    for (i, (row, account)) in layout
+        .people
+        .iter()
+        .copied()
+        .zip(&dialog.request.accounts)
+        .enumerate()
+    {
+        let on = i == dialog.request.chosen;
+        let person = account.name.clone();
+        let button = pressed(row, Target::Account(i), move |f, lit| {
+            draw_person(f, row, &person, on, lit);
+        });
+        let target = Target::Account(i);
+        all.push(at(
+            control(
+                button,
+                id_of(target),
+                Role::RadioButton,
+                account.name.clone(),
+            )
+            .node(|node| node.checked(on).set(i + 1, n))
+            .focus(ring(target), Msg::Focus(target), PERSON_RADIUS)
+            .activate(Msg::Act(target)),
+            row.position(),
+        ));
+        said.push(format!(
+            "{}{}",
+            if on { "(x) " } else { "( ) " },
+            account.name
+        ));
+    }
+    // The field: its box and Caps Lock's sign drawn, the shared field over
+    // them, shaking together.
+    let field = layout.field;
+    let caps_shown = caps && dialog.phase == Phase::Typing;
+    let border = match dialog.phase {
+        Phase::Checking => FIELD_CHECKING,
+        Phase::Typing if dialog.wrong_note => FIELD_WRONG,
+        Phase::Typing => FIELD_ON,
+    };
+    // A pixel past its bounds: its rim on a half pixel is not cut.
+    let look = drawn_out(field.width, field.height, 1.0, move |f, _| {
+        f.translate(Vector::new(-field.x, -field.y));
+        draw_field_box(f, field, border.get(), caps_shown);
+    });
+    let typed = Field {
+        with: entry,
+        style: Style {
+            hint: (FIELD_TEXT, MANROPE),
+            ..Style::one(FIELD_TEXT, MANROPE_BOLD)
+        },
+        placeholder: w.password().to_owned(),
+        look: Look::of(TEXT.get(), FAINT.get()),
+        focused: ring(Target::Field) && !checking,
+        left: FIELD_LEFT + 2.0,
+        right: FIELD_RIGHT + if caps_shown { CAPS + 6.0 } else { 0.0 },
+        on_focus: Msg::Focus(Target::Field),
+        on_took: Msg::Took,
+    }
+    .view(field.height);
+    let shake = dialog.shake.filter(|_| motion);
+    let shaken = moved(
+        Stack::with_children([look, typed])
+            .width(field.width)
+            .height(field.height),
+        move |now| {
+            let dx = shake.map_or(0.0, |s| {
+                shake_at(now.saturating_duration_since(s).as_secs_f32() * 1000.0)
+            });
+            Vector::new(dx, 0.0)
+        },
+        move |now| busy(shake, now, SHAKE_MS),
+    );
+    if caps_shown {
+        said.push("[caps]".to_owned());
+    }
+    let note = layout.note.join(" ");
+    all.push(at(
+        control(
+            shaken,
+            id_of(Target::Field),
+            Role::PasswordField,
+            w.password_of(&name),
+        )
+        .node(|n| n.describe(note.clone()).disabled(checking))
+        .focus(ring(Target::Field), Msg::Focus(Target::Field), FIELD_RADIUS)
+        .activate(Msg::Act(Target::Authorize))
+        .typing(),
+        field.position(),
+    ));
+    said.push(format!(
+        "{}: {}",
+        w.password_of(&name),
+        dialog.field.chars()
+    ));
+    if !layout.note.is_empty() {
+        said.push(note);
+    }
+    // Details, its chevron turning as it unfolds.
+    let details = layout.details;
+    let (open, turned) = (dialog.details, dialog.turned.filter(|_| motion));
+    let chevron = moving_lit(
+        details.width,
+        details.height,
+        move |f, _, now, lit| {
+            f.translate(Vector::new(-details.x, -details.y));
+            let turn = turned.map_or(1.0, |t| {
+                (now.saturating_duration_since(t).as_secs_f32() * 1000.0 / TURN_MS).clamp(0.0, 1.0)
+            });
+            draw_details(f, details, w, if open { turn } else { 1.0 - turn }, lit);
+        },
+        move |now| busy(turned, now, TURN_MS),
+    );
+    let button = button(chevron)
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(Target::Details));
+    all.push(at(
+        control(
+            button,
+            id_of(Target::Details),
+            Role::ToggleButton,
+            w.details(),
+        )
+        .node(|n| n.checked(open))
+        .focus(
+            ring(Target::Details),
+            Msg::Focus(Target::Details),
+            DETAILS_RADIUS,
+        )
+        .activate(Msg::Act(Target::Details)),
+        details.position(),
+    ));
+    said.push(format!(
+        "[{}{}]",
+        if open { "v " } else { "> " },
+        w.details()
+    ));
+    for fact in &layout.facts {
+        let value = fact.lines.concat();
+        let line = format!("{}: {value}", fact.label);
+        let height = (fact.lines.len() as f32 * VALUE * VALUE_LINE).max(LABEL * LINE);
+        all.push(at(
+            ui::line(
+                Space::new()
+                    .width(RIGHT - LEFT - 2.0 * FACTS_PAD_X)
+                    .height(height),
+                line.clone(),
+            ),
+            Point::new(LEFT + FACTS_PAD_X, fact.top),
+        ));
+        said.push(line);
+    }
+    // The footer.
+    let middle = layout.footer + BUTTON / 2.0;
+    if !layout.waiting.is_empty() {
+        let room = layout.cancel.x - LEFT;
+        all.push(at(
+            ui::line(
+                Space::new().width(room).height(BUTTON),
+                layout.waiting.clone(),
+            ),
+            Point::new(LEFT, layout.footer),
+        ));
+        said.push(layout.waiting.clone());
+    }
+    let cancel = layout.cancel;
+    let button = pressed(cancel, Target::Cancel, move |f, lit| {
+        draw_cancel(f, cancel, w, lit);
+    });
+    all.push(at(
+        control(button, id_of(Target::Cancel), Role::Button, w.cancel())
+            .focus(
+                ring(Target::Cancel),
+                Msg::Focus(Target::Cancel),
+                BUTTON_RADIUS,
+            )
+            .activate(Msg::Act(Target::Cancel)),
+        cancel.position(),
+    ));
+    let ready = !dialog.field.is_empty() && !checking;
+    let authorize = layout.authorize;
+    let button = pressed(authorize, Target::Authorize, move |f, _| {
+        draw_authorize(f, authorize, middle, w, checking, ready);
+    });
+    all.push(at(
+        control(
+            button,
+            id_of(Target::Authorize),
+            Role::Button,
+            w.authorize(),
+        )
+        .node(|n| n.disabled(checking))
+        .focus(
+            ring(Target::Authorize),
+            Msg::Focus(Target::Authorize),
+            BUTTON_RADIUS,
+        )
+        .activate(Msg::Act(Target::Authorize)),
+        authorize.position(),
+    ));
+    said.push(format!("[{}]", w.cancel()));
+    said.push(format!(
+        "[{}{}]",
+        w.authorize(),
+        if ready { "" } else { " (inert)" }
+    ));
+    let content = Stack::with_children(all)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
+    (content, said)
+}
+
+/// Whether what started at `since` still moves at `now`, `ms` long.
+fn busy(since: Option<Instant>, now: Instant, ms: f32) -> bool {
+    since.is_some_and(|s| now.saturating_duration_since(s).as_secs_f32() * 1000.0 < ms)
+}
+
+/// What the dialog draws under its controls, as it is when it draws: its
+/// glass (else opaque) and rim, who asks and why, the account, the
+/// accounts' list's box, the line under the field, the facts and the
+/// requests waiting. Nothing once it faded out.
+#[derive(Debug, Clone, Copy)]
+struct Back {
+    id: window::Id,
+    words: Words,
+    glass: bool,
+}
+
+impl<M> canvas::Program<M> for Back {
+    type State = ();
 
     fn draw(
         &self,
-        _state: &State,
+        _state: &(),
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        let said = super::with_dialog(self.id, |dialog, caps, waiting| {
-            self.draw_dialog(&mut frame, dialog, caps, waiting)
+        super::with_drawn(self.id, |dialog, caps, waiting| {
+            draw_back(&mut frame, dialog, caps, waiting, self.words, self.glass);
         });
-        if let Some(said) = said {
-            let mut last = SAID.lock().unwrap_or_else(PoisonError::into_inner);
-            if last.as_ref() != Some(&said) {
-                tracing::debug!(?said, "the authentication dialog shows it");
-                *last = Some(said);
-            }
-        }
         vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        let over = super::with_dialog(self.id, |d, caps, waiting| {
-            state
-                .at
-                .and_then(|at| Layout::of(d, self.words, waiting, caps).target(at))
-        })
-        .flatten();
-        match over {
-            Some(Target::Field) => mouse::Interaction::Text,
-            Some(_) => mouse::Interaction::Pointer,
-            None => mouse::Interaction::default(),
-        }
     }
 }
 
@@ -807,441 +1112,332 @@ fn check(f: &mut Frame, at: Point) {
     f.stroke(&path, stroke(2.6, ACCENT.get()));
 }
 
-/// The focus ring around `rect`.
-fn focus_ring(f: &mut Frame, rect: Rectangle, radius: f32) {
-    let out = Rectangle::new(
-        Point::new(rect.x - 3.0, rect.y - 3.0),
-        Size::new(rect.width + 6.0, rect.height + 6.0),
+/// What [`Back`] draws, in the surface's frame.
+fn draw_back(f: &mut Frame, dialog: &Dialog, caps: bool, waiting: usize, w: Words, glass: bool) {
+    let layout = Layout::of(dialog, w, waiting, caps);
+    let size = f.size();
+    let (top, bottom) = if glass { GLASS } else { OPAQUE };
+    let (top, bottom) = (top.get(), bottom.get());
+    let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
+        .add_stop(0.0, top)
+        .add_stop(1.0, bottom);
+    f.fill(
+        &Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into()),
+        canvas::Fill::from(tint),
     );
-    rim(f, out, radius + 3.0, FOCUS.get(), 2.0);
+    rim(
+        f,
+        Rectangle::new(Point::ORIGIN, size),
+        RADIUS,
+        RIM.get(),
+        BORDER,
+    );
+    // The header.
+    let (_, icon) = who(dialog);
+    let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
+    let px = crate::launcher::icons::pixels(ICON_PX, scale);
+    match icon.and_then(|name| crate::launcher::icons::of(&name, px).flatten()) {
+        Some(handle) => {
+            fill_rounded(f, layout.tile, TILE_RADIUS, FILL.get());
+            let inset = (TILE - ICON_PX as f32) / 2.0;
+            let rect = Rectangle::new(
+                Point::new(layout.tile.x + inset, layout.tile.y + inset),
+                Size::new(ICON_PX as f32, ICON_PX as f32),
+            );
+            f.draw_image(rect, canvas::Image::new(handle));
+        }
+        None => gear(f, layout.tile),
+    }
+    badge(f, layout.tile);
+    text(
+        f,
+        &layout.app,
+        layout.app_at,
+        APP,
+        DIM.get(),
+        MANROPE_SEMIBOLD,
+    );
+    text(
+        f,
+        w.title(),
+        layout.title_at,
+        TITLE,
+        TEXT.get(),
+        MANROPE_BOLD,
+    );
+    // The message.
+    for (i, line) in layout.message.iter().enumerate() {
+        let middle = layout.message_top + (i as f32 + 0.5) * MESSAGE * MESSAGE_LINE;
+        f.fill_text(canvas::Text {
+            line_height: iced::widget::text::LineHeight::Relative(MESSAGE_LINE),
+            ..kit::text(
+                line.clone(),
+                Point::new(LEFT, middle),
+                MESSAGE,
+                TEXT.get(),
+                Alignment::Left,
+            )
+        });
+    }
+    // The account.
+    let me = rustix::process::getuid().as_raw();
+    if let Some(account) = dialog.request.account() {
+        let centre = Point::new(LEFT + AVATAR / 2.0, layout.account + AVATAR / 2.0);
+        avatar(f, centre, account.uid == me, &account.name);
+        let x = LEFT + AVATAR + AVATAR_GAP;
+        let room = layout.change.map_or(RIGHT, |c| c.x - 8.0) - x;
+        let name = kit::elide(&account.name, room, |t| width(t, NAME, MANROPE_BOLD));
+        let block = NAME * LINE + ROLE * LINE;
+        let top = layout.account + (AVATAR - block) / 2.0;
+        text(
+            f,
+            &name,
+            Point::new(x, top + NAME * LINE / 2.0),
+            NAME,
+            TEXT.get(),
+            MANROPE_BOLD,
+        );
+        text(
+            f,
+            w.administrator(),
+            Point::new(x, top + NAME * LINE + ROLE * LINE / 2.0),
+            ROLE,
+            FAINT.get(),
+            MANROPE,
+        );
+    }
+    if let Some(list) = layout.list {
+        fill_rounded(f, list, LIST_RADIUS, LIST_FILL.get());
+        rim(f, list, LIST_RADIUS, LIST_RIM.get(), BORDER);
+    }
+    // The line under the field.
+    for (i, line) in layout.note.iter().enumerate() {
+        let middle = layout.note_top + (i as f32 + 0.5) * NOTE * NOTE_LINE;
+        f.fill_text(canvas::Text {
+            line_height: iced::widget::text::LineHeight::Relative(NOTE_LINE),
+            ..kit::text(
+                line.clone(),
+                Point::new(LEFT, middle),
+                NOTE,
+                layout.note_colour,
+                Alignment::Left,
+            )
+        });
+    }
+    // The facts.
+    if let Some(rect) = layout.facts_box {
+        fill_rounded(f, rect, FACTS_RADIUS, LIST_FILL.get());
+        for fact in &layout.facts {
+            text(
+                f,
+                fact.label,
+                Point::new(LEFT + FACTS_PAD_X, fact.top + VALUE * VALUE_LINE / 2.0),
+                LABEL,
+                FAINT.get(),
+                MANROPE,
+            );
+            for (i, line) in fact.lines.iter().enumerate() {
+                let middle = fact.top + (i as f32 + 0.5) * VALUE * VALUE_LINE;
+                f.fill_text(canvas::Text {
+                    line_height: iced::widget::text::LineHeight::Relative(VALUE_LINE),
+                    ..kit::text_in(
+                        MARTIAN,
+                        kit::text(
+                            line.clone(),
+                            Point::new(LEFT + FACTS_PAD_X + LABEL_COLUMN + LABEL_GAP, middle),
+                            VALUE,
+                            VALUE_INK.get(),
+                            Alignment::Left,
+                        ),
+                    )
+                });
+            }
+        }
+    }
+    // The requests waiting.
+    if !layout.waiting.is_empty() {
+        text(
+            f,
+            &layout.waiting,
+            Point::new(LEFT, layout.footer + BUTTON / 2.0),
+            WAITING,
+            FAINT.get(),
+            MANROPE,
+        );
+    }
 }
 
-impl View {
-    /// The dialog drawn; what it says, for the log (never the password:
-    /// its length only).
-    fn draw_dialog(
-        &self,
-        f: &mut Frame,
-        dialog: &Dialog,
-        caps: bool,
-        waiting: usize,
-    ) -> Vec<String> {
-        let w = self.words;
-        let layout = Layout::of(dialog, w, waiting, caps);
-        let size = f.size();
-        let now = std::time::Instant::now();
-        let mut said = Vec::new();
-        let (top, bottom) = if self.glass { GLASS } else { OPAQUE };
-        let (top, bottom) = (top.get(), bottom.get());
-        let tint = gradient::Linear::new(Point::ORIGIN, Point::new(0.0, size.height))
-            .add_stop(0.0, top)
-            .add_stop(1.0, bottom);
-        f.fill(
-            &Path::rounded_rectangle(Point::ORIGIN, size, RADIUS.into()),
-            canvas::Fill::from(tint),
-        );
-        rim(
-            f,
-            Rectangle::new(Point::ORIGIN, size),
-            RADIUS,
-            RIM.get(),
-            BORDER,
-        );
-        // The header.
-        let (_, icon) = who(dialog);
-        let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
-        let px = crate::launcher::icons::pixels(ICON_PX, scale);
-        match icon.and_then(|name| crate::launcher::icons::of(&name, px).flatten()) {
-            Some(handle) => {
-                fill_rounded(f, layout.tile, TILE_RADIUS, FILL.get());
-                let inset = (TILE - ICON_PX as f32) / 2.0;
-                let rect = Rectangle::new(
-                    Point::new(layout.tile.x + inset, layout.tile.y + inset),
-                    Size::new(ICON_PX as f32, ICON_PX as f32),
-                );
-                f.draw_image(rect, canvas::Image::new(handle));
-            }
-            None => gear(f, layout.tile),
-        }
-        badge(f, layout.tile);
-        text(
-            f,
-            &layout.app,
-            layout.app_at,
-            APP,
-            DIM.get(),
-            MANROPE_SEMIBOLD,
-        );
-        text(
-            f,
-            w.title(),
-            layout.title_at,
-            TITLE,
-            TEXT.get(),
-            MANROPE_BOLD,
-        );
-        said.push(w.name(&layout.app));
-        // The message.
-        for (i, line) in layout.message.iter().enumerate() {
-            let middle = layout.message_top + (i as f32 + 0.5) * MESSAGE * MESSAGE_LINE;
-            f.fill_text(canvas::Text {
-                line_height: iced::widget::text::LineHeight::Relative(MESSAGE_LINE),
-                ..kit::text(
-                    line.clone(),
-                    Point::new(LEFT, middle),
-                    MESSAGE,
-                    TEXT.get(),
-                    Alignment::Left,
-                )
-            });
-        }
-        said.push(layout.message.join(" "));
-        // The account.
-        let checking = dialog.phase == Phase::Checking;
-        let me = rustix::process::getuid().as_raw();
-        if let Some(account) = dialog.request.account() {
-            let centre = Point::new(LEFT + AVATAR / 2.0, layout.account + AVATAR / 2.0);
-            avatar(f, centre, account.uid == me, &account.name);
-            let x = LEFT + AVATAR + AVATAR_GAP;
-            let room = layout.change.map_or(RIGHT, |c| c.x - 8.0) - x;
-            let name = kit::elide(&account.name, room, |t| width(t, NAME, MANROPE_BOLD));
-            let block = NAME * LINE + ROLE * LINE;
-            let top = layout.account + (AVATAR - block) / 2.0;
-            text(
-                f,
-                &name,
-                Point::new(x, top + NAME * LINE / 2.0),
-                NAME,
-                TEXT.get(),
-                MANROPE_BOLD,
-            );
-            text(
-                f,
-                w.administrator(),
-                Point::new(x, top + NAME * LINE + ROLE * LINE / 2.0),
-                ROLE,
-                FAINT.get(),
-                MANROPE,
-            );
-            said.push(name);
-            said.push(w.administrator().to_owned());
-        }
-        if let Some(change) = layout.change {
-            let lit = dialog.hover == Some(Target::Change) && !checking;
-            fill_rounded(
-                f,
-                change,
-                CHANGE_RADIUS,
-                if lit { HOVER.get() } else { FILL.get() },
-            );
-            text(
-                f,
-                w.change(),
-                Point::new(change.x + CHANGE_PAD, change.center_y()),
-                CHANGE_TEXT,
-                DIM.get(),
-                MANROPE_SEMIBOLD,
-            );
-            chevron(
-                f,
-                Point::new(
-                    change.x + change.width - CHANGE_PAD - CHEVRON,
-                    change.center_y() - CHEVRON / 2.0,
-                ),
-                CHEVRON,
-                if dialog.chooser {
-                    -std::f32::consts::FRAC_PI_2
-                } else {
-                    std::f32::consts::FRAC_PI_2
-                },
-                DIM.get(),
-                2.2,
-            );
-            if dialog.focus == Target::Change {
-                focus_ring(f, change, CHANGE_RADIUS);
-            }
-            said.push(format!("[{}]", w.change()));
-        }
-        if let Some(list) = layout.list {
-            fill_rounded(f, list, LIST_RADIUS, LIST_FILL.get());
-            rim(f, list, LIST_RADIUS, LIST_RIM.get(), BORDER);
-            for (i, (row, account)) in layout
-                .people
-                .iter()
-                .zip(&dialog.request.accounts)
-                .enumerate()
-            {
-                let on = i == dialog.request.chosen;
-                let lit = dialog.hover == Some(Target::Account(i));
-                if on || lit {
-                    fill_rounded(
-                        f,
-                        *row,
-                        PERSON_RADIUS,
-                        if lit { HOVER.get() } else { FILL.get() },
-                    );
-                }
-                text(
-                    f,
-                    &account.name,
-                    Point::new(row.x + PERSON_PAD, row.center_y()),
-                    PERSON_TEXT,
-                    TEXT.get(),
-                    MANROPE_SEMIBOLD,
-                );
-                if on {
-                    check(
-                        f,
-                        Point::new(
-                            row.x + row.width - PERSON_PAD - CHECK,
-                            row.center_y() - CHECK / 2.0,
-                        ),
-                    );
-                }
-                if dialog.focus == Target::Account(i) {
-                    focus_ring(f, *row, PERSON_RADIUS);
-                }
-                said.push(format!(
-                    "{}{}",
-                    if on { "(x) " } else { "( ) " },
-                    account.name
-                ));
-            }
-        }
-        // The field.
-        let shake = if self.motion {
-            dialog.shake.map_or(0.0, |s| {
-                shake_at(now.saturating_duration_since(s).as_secs_f32() * 1000.0)
-            })
+/// "Changer" at `change`, its chevron down (up while the list is open).
+fn draw_change(f: &mut Frame, change: Rectangle, w: Words, chooser: bool, lit: bool) {
+    fill_rounded(
+        f,
+        change,
+        CHANGE_RADIUS,
+        if lit { HOVER.get() } else { FILL.get() },
+    );
+    text(
+        f,
+        w.change(),
+        Point::new(change.x + CHANGE_PAD, change.center_y()),
+        CHANGE_TEXT,
+        DIM.get(),
+        MANROPE_SEMIBOLD,
+    );
+    chevron(
+        f,
+        Point::new(
+            change.x + change.width - CHANGE_PAD - CHEVRON,
+            change.center_y() - CHEVRON / 2.0,
+        ),
+        CHEVRON,
+        if chooser {
+            -std::f32::consts::FRAC_PI_2
         } else {
-            0.0
-        };
-        let field = Rectangle::new(
-            Point::new(layout.field.x + shake, layout.field.y),
-            layout.field.size(),
-        );
-        fill_rounded(f, field, FIELD_RADIUS, FIELD_FILL.get());
-        let wrong = dialog.wrong_note;
-        let border = match dialog.phase {
-            Phase::Checking => FIELD_CHECKING,
-            Phase::Typing if wrong => FIELD_WRONG,
-            Phase::Typing => FIELD_ON,
-        };
-        rim(f, field, FIELD_RADIUS, border.get(), BORDER);
-        let middle = field.center_y();
-        let left = field.x + FIELD_LEFT;
-        let caps_shown = caps && dialog.phase == Phase::Typing;
-        let room =
-            field.width - FIELD_LEFT - FIELD_RIGHT - if caps_shown { CAPS + 6.0 } else { 0.0 };
-        // What is typed, as dots, its selection, and its caret while it
-        // has the keyboard.
-        let typed = dialog.field.chars();
-        dialog.field.draw(
-            f,
-            Place {
-                left: left + 2.0,
-                middle,
-                width: room - 2.0,
-                style: Style {
-                    hint: (FIELD_TEXT, MANROPE),
-                    ..Style::one(FIELD_TEXT, MANROPE_BOLD)
-                },
-            },
-            w.password(),
-            &Look::of(TEXT.get(), FAINT.get()),
-            dialog.focus == Target::Field && !checking,
-        );
-        if caps_shown {
-            let sign = Rectangle::new(
-                Point::new(
-                    field.x + field.width - FIELD_RIGHT - CAPS,
-                    middle - CAPS / 2.0,
-                ),
-                Size::new(CAPS, CAPS),
-            );
-            fill_rounded(f, sign, CAPS_RADIUS, AMBER_FILL.get());
-            caps_arrow(f, Point::new(sign.x + 4.0, sign.y + 4.0));
-            said.push("[caps]".to_owned());
-        }
-        let name = dialog
-            .request
-            .account()
-            .map(|a| a.name.clone())
-            .unwrap_or_default();
-        said.push(format!("{}: {typed}", w.password_of(&name)));
-        // The line under it.
-        for (i, line) in layout.note.iter().enumerate() {
-            let middle = layout.note_top + (i as f32 + 0.5) * NOTE * NOTE_LINE;
-            f.fill_text(canvas::Text {
-                line_height: iced::widget::text::LineHeight::Relative(NOTE_LINE),
-                ..kit::text(
-                    line.clone(),
-                    Point::new(LEFT, middle),
-                    NOTE,
-                    layout.note_colour,
-                    Alignment::Left,
-                )
-            });
-        }
-        if !layout.note.is_empty() {
-            said.push(layout.note.join(" "));
-        }
-        // Details.
-        let lit = dialog.hover == Some(Target::Details);
-        if lit {
-            fill_rounded(f, layout.details, DETAILS_RADIUS, FILL.get());
-        }
-        let turned = dialog.turned.map_or(1.0, |t| {
-            if self.motion {
-                (now.saturating_duration_since(t).as_secs_f32() * 1000.0 / TURN_MS).clamp(0.0, 1.0)
-            } else {
-                1.0
-            }
-        });
-        let turn = if dialog.details { turned } else { 1.0 - turned };
-        chevron(
-            f,
-            Point::new(
-                layout.details.x + 4.0,
-                layout.details.center_y() - DETAILS_CHEVRON / 2.0,
-            ),
-            DETAILS_CHEVRON,
-            turn * std::f32::consts::FRAC_PI_2,
-            DIM.get(),
-            2.4,
-        );
-        text(
-            f,
-            w.details(),
-            Point::new(
-                layout.details.x + 4.0 + DETAILS_CHEVRON + 4.0,
-                layout.details.center_y(),
-            ),
-            DETAILS_TEXT,
-            DIM.get(),
-            MANROPE_SEMIBOLD,
-        );
-        if dialog.focus == Target::Details {
-            focus_ring(f, layout.details, DETAILS_RADIUS);
-        }
-        said.push(format!(
-            "[{}{}]",
-            if dialog.details { "v " } else { "> " },
-            w.details()
-        ));
-        if let Some(rect) = layout.facts_box {
-            fill_rounded(f, rect, FACTS_RADIUS, LIST_FILL.get());
-            for fact in &layout.facts {
-                text(
-                    f,
-                    fact.label,
-                    Point::new(LEFT + FACTS_PAD_X, fact.top + VALUE * VALUE_LINE / 2.0),
-                    LABEL,
-                    FAINT.get(),
-                    MANROPE,
-                );
-                for (i, line) in fact.lines.iter().enumerate() {
-                    let middle = fact.top + (i as f32 + 0.5) * VALUE * VALUE_LINE;
-                    f.fill_text(canvas::Text {
-                        line_height: iced::widget::text::LineHeight::Relative(VALUE_LINE),
-                        ..kit::text_in(
-                            MARTIAN,
-                            kit::text(
-                                line.clone(),
-                                Point::new(LEFT + FACTS_PAD_X + LABEL_COLUMN + LABEL_GAP, middle),
-                                VALUE,
-                                VALUE_INK.get(),
-                                Alignment::Left,
-                            ),
-                        )
-                    });
-                }
-                said.push(format!("{}: {}", fact.label, fact.lines.concat()));
-            }
-        }
-        // The footer.
-        let footer_middle = layout.footer + BUTTON / 2.0;
-        if !layout.waiting.is_empty() {
-            text(
-                f,
-                &layout.waiting,
-                Point::new(LEFT, footer_middle),
-                WAITING,
-                FAINT.get(),
-                MANROPE,
-            );
-            said.push(layout.waiting.clone());
-        }
-        let lit = dialog.hover == Some(Target::Cancel);
+            std::f32::consts::FRAC_PI_2
+        },
+        DIM.get(),
+        2.2,
+    );
+}
+
+/// An account's row of the list at `row`, checked when `on`.
+fn draw_person(f: &mut Frame, row: Rectangle, name: &str, on: bool, lit: bool) {
+    if on || lit {
         fill_rounded(
             f,
-            layout.cancel,
-            BUTTON_RADIUS,
+            row,
+            PERSON_RADIUS,
             if lit { HOVER.get() } else { FILL.get() },
         );
-        centred(
-            f,
-            w.cancel(),
-            layout.cancel.center(),
-            BUTTON_TEXT,
-            TEXT.get(),
-            MANROPE_SEMIBOLD,
-        );
-        if dialog.focus == Target::Cancel {
-            focus_ring(f, layout.cancel, BUTTON_RADIUS);
-        }
-        let ready = !dialog.field.is_empty() && !checking;
-        let (fill, ink) = if checking {
-            (CHECKING_FILL, TEXT)
-        } else if ready {
-            (ACCENT, INK)
-        } else {
-            (READY_OFF, FAINT)
-        };
-        fill_rounded(f, layout.authorize, BUTTON_RADIUS, fill.get());
-        let mut word_x = layout.authorize.x + BUTTON_PAD;
-        if checking {
-            let c = Point::new(word_x + SPINNER / 2.0, footer_middle);
-            f.stroke(
-                &Path::circle(c, SPINNER / 2.0 - 1.0),
-                stroke(
-                    2.0,
-                    Color {
-                        a: 0.22,
-                        ..TEXT.get()
-                    },
-                ),
-            );
-            let arc = Path::new(|b| {
-                b.arc(canvas::path::Arc {
-                    center: c,
-                    radius: SPINNER / 2.0 - 1.0,
-                    start_angle: Radians(-std::f32::consts::FRAC_PI_2),
-                    end_angle: Radians(0.0),
-                });
-            });
-            f.stroke(&arc, stroke(2.0, TEXT.get()));
-            word_x += SPINNER + 8.0;
-        }
-        text(
-            f,
-            w.authorize(),
-            Point::new(word_x, footer_middle),
-            BUTTON_TEXT,
-            ink.get(),
-            MANROPE_BOLD,
-        );
-        if dialog.focus == Target::Authorize {
-            focus_ring(f, layout.authorize, BUTTON_RADIUS);
-        }
-        said.push(format!("[{}]", w.cancel()));
-        said.push(format!(
-            "[{}{}]",
-            w.authorize(),
-            if ready { "" } else { " (inert)" }
-        ));
-        said
     }
+    text(
+        f,
+        name,
+        Point::new(row.x + PERSON_PAD, row.center_y()),
+        PERSON_TEXT,
+        TEXT.get(),
+        MANROPE_SEMIBOLD,
+    );
+    if on {
+        check(
+            f,
+            Point::new(
+                row.x + row.width - PERSON_PAD - CHECK,
+                row.center_y() - CHECK / 2.0,
+            ),
+        );
+    }
+}
+
+/// The field's box at `field`, its rim `border`, and Caps Lock's sign.
+fn draw_field_box(f: &mut Frame, field: Rectangle, border: Color, caps: bool) {
+    fill_rounded(f, field, FIELD_RADIUS, FIELD_FILL.get());
+    rim(f, field, FIELD_RADIUS, border, BORDER);
+    if caps {
+        let sign = Rectangle::new(
+            Point::new(
+                field.x + field.width - FIELD_RIGHT - CAPS,
+                field.center_y() - CAPS / 2.0,
+            ),
+            Size::new(CAPS, CAPS),
+        );
+        fill_rounded(f, sign, CAPS_RADIUS, AMBER_FILL.get());
+        caps_arrow(f, Point::new(sign.x + 4.0, sign.y + 4.0));
+    }
+}
+
+/// "Détails" at `details`, its chevron turned by `turn` (0 right, 1
+/// down).
+fn draw_details(f: &mut Frame, details: Rectangle, w: Words, turn: f32, lit: bool) {
+    if lit {
+        fill_rounded(f, details, DETAILS_RADIUS, FILL.get());
+    }
+    chevron(
+        f,
+        Point::new(details.x + 4.0, details.center_y() - DETAILS_CHEVRON / 2.0),
+        DETAILS_CHEVRON,
+        turn * std::f32::consts::FRAC_PI_2,
+        DIM.get(),
+        2.4,
+    );
+    text(
+        f,
+        w.details(),
+        Point::new(details.x + 4.0 + DETAILS_CHEVRON + 4.0, details.center_y()),
+        DETAILS_TEXT,
+        DIM.get(),
+        MANROPE_SEMIBOLD,
+    );
+}
+
+/// Annuler at `cancel`.
+fn draw_cancel(f: &mut Frame, cancel: Rectangle, w: Words, lit: bool) {
+    fill_rounded(
+        f,
+        cancel,
+        BUTTON_RADIUS,
+        if lit { HOVER.get() } else { FILL.get() },
+    );
+    centred(
+        f,
+        w.cancel(),
+        cancel.center(),
+        BUTTON_TEXT,
+        TEXT.get(),
+        MANROPE_SEMIBOLD,
+    );
+}
+
+/// Autoriser at `authorize`, its words' middle at `middle`: the accent
+/// when a password is typed, faint before, a spinner while it is checked.
+fn draw_authorize(
+    f: &mut Frame,
+    authorize: Rectangle,
+    middle: f32,
+    w: Words,
+    checking: bool,
+    ready: bool,
+) {
+    let (fill, ink) = if checking {
+        (CHECKING_FILL, TEXT)
+    } else if ready {
+        (ACCENT, INK)
+    } else {
+        (READY_OFF, FAINT)
+    };
+    fill_rounded(f, authorize, BUTTON_RADIUS, fill.get());
+    let mut word_x = authorize.x + BUTTON_PAD;
+    if checking {
+        let c = Point::new(word_x + SPINNER / 2.0, middle);
+        f.stroke(
+            &Path::circle(c, SPINNER / 2.0 - 1.0),
+            stroke(
+                2.0,
+                Color {
+                    a: 0.22,
+                    ..TEXT.get()
+                },
+            ),
+        );
+        let arc = Path::new(|b| {
+            b.arc(canvas::path::Arc {
+                center: c,
+                radius: SPINNER / 2.0 - 1.0,
+                start_angle: Radians(-std::f32::consts::FRAC_PI_2),
+                end_angle: Radians(0.0),
+            });
+        });
+        f.stroke(&arc, stroke(2.0, TEXT.get()));
+        word_x += SPINNER + 8.0;
+    }
+    text(
+        f,
+        w.authorize(),
+        Point::new(word_x, middle),
+        BUTTON_TEXT,
+        ink.get(),
+        MANROPE_BOLD,
+    );
 }
 
 #[cfg(test)]

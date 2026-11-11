@@ -39,7 +39,7 @@ use iced::{
     window,
 };
 
-use super::{Lock, Pointing, Target, Words};
+use super::{Lock, Words};
 use crate::pandas::{self, BREATH, Burst, Mood};
 use crate::theme::Ink;
 use crate::{
@@ -139,21 +139,20 @@ pub enum Layer {
     Front,
 }
 
-/// The lock on surface `id`, on screen `output`.
+/// What the lock on screen `output` draws under its controls
+/// ([`super::view`]).
 #[derive(Debug, Clone)]
 pub struct View {
     pub layer: Layer,
-    pub id: window::Id,
     pub output: String,
     pub wall: Wall,
     pub lang: Lang,
     pub words: Words,
 }
 
-/// The canvas' state: the pointer, the clock's font measured.
+/// The canvas' state: the clock's font measured.
 #[derive(Debug, Default)]
 pub struct State {
-    at: Option<Point>,
     zero: Option<f32>,
     /// Since when the pandas breathe, from the lock's first frame (#649).
     shown: Option<Instant>,
@@ -166,20 +165,20 @@ fn breaths(since: Instant) -> Burst {
 
 /// Where everything is on a screen `size` large.
 #[derive(Debug, Clone, Copy)]
-struct Layout {
+pub struct Layout {
     clock_top: f32,
     avatar: Rectangle,
     name_top: f32,
-    field: Rectangle,
-    button: Rectangle,
+    pub field: Rectangle,
+    pub button: Rectangle,
     caps: Rectangle,
-    message: Rectangle,
-    agents_top: f32,
-    row_centre: f32,
+    pub message: Rectangle,
+    pub agents_top: f32,
+    pub row_centre: f32,
 }
 
 impl Layout {
-    fn of(size: Size, form: bool) -> Self {
+    pub fn of(size: Size, form: bool) -> Self {
         let cx = (size.width / 2.0).round();
         let cy = (size.height / 2.0).round();
         let clock_top = cy - if form { CLOCK_ABOVE } else { CLOCK_ALONE_ABOVE };
@@ -225,15 +224,34 @@ impl Layout {
     }
 }
 
-/// The status row's items, right to left: the Wi-Fi, the battery, the
-/// layout's button.
-struct Row {
-    wifi: Option<(Rectangle, crate::network::model::Link)>,
-    battery: Option<(Rectangle, crate::levels::model::Battery, String)>,
-    layout: Option<(Rectangle, String)>,
+impl Layout {
+    /// The same, in a frame whose origin is `origin` (a control's): a
+    /// canvas' clip does not follow its translation.
+    pub fn from(&self, origin: Point) -> Self {
+        let by = Vector::new(-origin.x, -origin.y);
+        Self {
+            clock_top: self.clock_top - origin.y,
+            avatar: self.avatar + by,
+            name_top: self.name_top - origin.y,
+            field: self.field + by,
+            button: self.button + by,
+            caps: self.caps + by,
+            message: self.message + by,
+            agents_top: self.agents_top - origin.y,
+            row_centre: self.row_centre - origin.y,
+        }
+    }
 }
 
-fn row(size: Size, centre: f32) -> Row {
+/// The status row's items, right to left: the Wi-Fi, the battery, the
+/// layout's button.
+pub struct Row {
+    wifi: Option<(Rectangle, crate::network::model::Link)>,
+    battery: Option<(Rectangle, crate::levels::model::Battery, String)>,
+    pub layout: Option<(Rectangle, String)>,
+}
+
+pub fn row(size: Size, centre: f32) -> Row {
     use crate::network::model::Link;
     let mut right = size.width - ROW_RIGHT;
     let link = crate::network::snapshot().link();
@@ -272,35 +290,16 @@ fn row(size: Size, centre: f32) -> Row {
     }
 }
 
-impl View {
-    /// Whether this screen shows the form: the one the compositor names,
-    /// else the first screen when that one has no surface.
-    fn form(&self, lock: &Lock) -> bool {
-        if self.output == lock.shown.output {
-            return true;
-        }
-        if lock.surfaces.contains_key(&lock.shown.output) {
-            return false;
-        }
-        lock.surfaces.keys().min() == Some(&self.output)
+/// Whether screen `output` shows the form: the one the compositor names,
+/// else the first screen when that one has no surface.
+pub fn form(lock: &Lock, output: &str) -> bool {
+    if output == lock.shown.output {
+        return true;
     }
-
-    fn target(&self, lock: &Lock, size: Size, at: Point) -> Option<Target> {
-        if !self.form(lock) {
-            return None;
-        }
-        let layout = Layout::of(size, true);
-        if layout.button.contains(at) {
-            return Some(Target::Button);
-        }
-        if layout.field.contains(at) {
-            return Some(Target::Field);
-        }
-        row(size, layout.row_centre)
-            .layout
-            .filter(|(rect, _)| rect.contains(at))
-            .map(|_| Target::Layout)
+    if lock.surfaces.contains_key(&lock.shown.output) {
+        return false;
     }
+    lock.surfaces.keys().min().map(String::as_str) == Some(output)
 }
 
 /// The next minute's start, a little past it, from `now`.
@@ -318,8 +317,8 @@ impl<Message> canvas::Program<Message> for View {
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         if self.layer == Layer::Back {
             return None;
@@ -352,25 +351,6 @@ impl<Message> canvas::Program<Message> for View {
                     )
                 })
             }
-            iced::Event::Mouse(seen) => {
-                let at = crate::levels::draw::pointer(seen, bounds, cursor, state.at);
-                state.at = at;
-                let target = super::with(|l| {
-                    let l = l.as_ref()?;
-                    at.and_then(|at| self.target(l, bounds.size(), at))
-                });
-                let pointing = match seen {
-                    mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                        Pointing::Over(target)
-                    }
-                    mouse::Event::CursorLeft => Pointing::Over(None),
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => Pointing::Press(target),
-                    mouse::Event::ButtonReleased(mouse::Button::Left) => Pointing::Release(target),
-                    _ => return None,
-                };
-                super::pointer(self.id, pointing)
-                    .then(|| canvas::Action::request_redraw().and_capture())
-            }
             _ => None,
         }
     }
@@ -394,7 +374,7 @@ impl<Message> canvas::Program<Message> for View {
             return vec![frame.into_geometry()];
         }
         frame.fill_rectangle(Point::ORIGIN, size, VEIL.get());
-        let form = self.form(&lock);
+        let form = form(&lock, &self.output);
         let layout = Layout::of(size, form);
         let shown = Shown::at(&self.wall.now(), self.lang);
         draw_clock(
@@ -406,7 +386,7 @@ impl<Message> canvas::Program<Message> for View {
         );
         if form {
             draw_form(&mut frame, &lock, &layout, self.words, (now, state.shown));
-            draw_row(&mut frame, &lock, size, layout.row_centre, self.id);
+            draw_row(&mut frame, size, layout.row_centre);
             draw_pandas(&mut frame, size, now, state.shown);
         }
         let said = Said {
@@ -425,26 +405,6 @@ impl<Message> canvas::Program<Message> for View {
             last.insert(self.output.clone(), said);
         }
         vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        if self.layer == Layer::Back {
-            return mouse::Interaction::default();
-        }
-        let over = super::with(|l| {
-            let l = l.as_ref()?;
-            state.at.and_then(|at| self.target(l, bounds.size(), at))
-        });
-        match over {
-            Some(Target::Field) => mouse::Interaction::Text,
-            Some(_) => mouse::Interaction::Pointer,
-            None => mouse::Interaction::default(),
-        }
     }
 }
 
@@ -583,19 +543,78 @@ fn draw_form(
         TEXT.get(),
         Alignment::Center,
     ));
-    // The field, shaken after a wrong password.
-    let dx = lock
-        .shake
-        .filter(|(shake, _)| *shake == shown.shake && shown.phase == LockPhase::Wrong)
+    // The line under the field.
+    let (message, colour) = message(lock, words);
+    if !message.is_empty() {
+        let mut line = text(
+            message,
+            Point::new(layout.message.center_x(), layout.message.y),
+            MESSAGE,
+            MANROPE,
+            colour.get(),
+            Alignment::Center,
+        );
+        line.line_height = LineHeight::Relative(MESSAGE_LINE);
+        line.max_width = layout.message.width;
+        f.fill_text(line);
+    }
+    if shown.agents > 0 {
+        draw_agents(
+            f,
+            words.agents(shown.agents),
+            (layout.message.center_x(), layout.agents_top),
+            now,
+            breathing.map(|t| Burst::of(Mood::Waiting, t)),
+        );
+    }
+}
+
+/// The line under the field, and its colour: wrong, checked, the wait,
+/// Caps Lock.
+pub fn message(lock: &Lock, words: Words) -> (String, Ink) {
+    let shown = &lock.shown;
+    match shown.phase {
+        LockPhase::Wrong => (words.wrong(shown.caps), WRONG_TEXT),
+        LockPhase::Checking => (words.checking().to_owned(), FAINT),
+        LockPhase::Waiting(seconds) => (words.wait(seconds), AMBER),
+        _ if caps_shown(lock) => (words.caps().to_owned(), AMBER),
+        _ => (String::new(), DIM),
+    }
+}
+
+/// Whether Caps Lock's sign shows in the field.
+fn caps_shown(lock: &Lock) -> bool {
+    lock.shown.caps
+        && matches!(
+            lock.shown.phase,
+            LockPhase::Idle | LockPhase::Typing | LockPhase::Wrong
+        )
+}
+
+/// The field shaken after a wrong password, `now`: its offset.
+pub fn shaken(lock: &Lock, now: Instant) -> f32 {
+    lock.shake
+        .filter(|(shake, _)| *shake == lock.shown.shake && lock.shown.phase == LockPhase::Wrong)
         .map_or(0.0, |(_, since)| {
             shake_at(now.saturating_duration_since(since))
-        });
-    let waiting = matches!(shown.phase, LockPhase::Waiting(_));
-    let alpha = if waiting { 0.55 } else { 1.0 };
-    let field = Rectangle {
-        x: layout.field.x + dx,
-        ..layout.field
-    };
+        })
+}
+
+/// While it waits, the field and its button are faded.
+fn alpha(lock: &Lock) -> f32 {
+    if matches!(lock.shown.phase, LockPhase::Waiting(_)) {
+        0.55
+    } else {
+        1.0
+    }
+}
+
+/// The field at `layout`'s, in the screen's frame: its box, its border by
+/// state, a dot a character (or its placeholder) and Caps Lock's sign.
+pub fn draw_field(f: &mut Frame, lock: &Lock, layout: &Layout, words: Words) {
+    let shown = &lock.shown;
+    let alpha = alpha(lock);
+    let field = layout.field;
     let keys = shown.focus == LockFocus::Field && shown.phase.takes_keys();
     let border = match shown.phase {
         LockPhase::Wrong => BORDER_WRONG,
@@ -616,23 +635,11 @@ fn draw_form(
             .with_color(faded(border.get(), alpha))
             .with_width(1.0),
     );
-    let button = Rectangle {
-        x: layout.button.x + dx,
-        ..layout.button
-    };
-    let caps_rect = Rectangle {
-        x: layout.caps.x + dx,
-        ..layout.caps
-    };
-    let caps = shown.caps
-        && matches!(
-            shown.phase,
-            LockPhase::Idle | LockPhase::Typing | LockPhase::Wrong
-        );
+    let caps = caps_shown(lock);
     let room_right = if caps {
-        caps_rect.x - GAP
+        layout.caps.x - GAP
     } else {
-        button.x - GAP
+        layout.button.x - GAP
     };
     let inside = Rectangle::new(
         Point::new(field.x + FIELD_PAD, field.y),
@@ -661,43 +668,29 @@ fn draw_form(
         }
     }
     if caps {
-        draw_caps(f, caps_rect);
+        draw_caps(f, layout.caps);
     }
-    draw_button(f, lock, button, now, alpha);
-    // Where Tab put the keyboard: a 3 px accent ring 2 px out.
-    if shown.focus == LockFocus::Button && shown.phase.takes_keys() {
-        focus_ring(f, button, BUTTON_RADIUS);
-    }
-    // The line under it.
-    let (message, colour) = match shown.phase {
-        LockPhase::Wrong => (words.wrong(shown.caps), WRONG_TEXT),
-        LockPhase::Checking => (words.checking().to_owned(), FAINT),
-        LockPhase::Waiting(seconds) => (words.wait(seconds), AMBER),
-        _ if caps => (words.caps().to_owned(), AMBER),
-        _ => (String::new(), DIM),
-    };
-    if !message.is_empty() {
-        let mut line = text(
-            message,
-            Point::new(layout.message.center_x(), layout.message.y),
-            MESSAGE,
-            MANROPE,
-            colour.get(),
-            Alignment::Center,
-        );
-        line.line_height = LineHeight::Relative(MESSAGE_LINE);
-        line.max_width = layout.message.width;
-        f.fill_text(line);
-    }
-    if shown.agents > 0 {
-        draw_agents(
-            f,
-            words.agents(shown.agents),
-            (layout.message.center_x(), layout.agents_top),
-            now,
-            breathing.map(|t| Burst::of(Mood::Waiting, t)),
-        );
-    }
+}
+
+/// Whether the button's spinner turns.
+pub fn spinning(lock: &Lock) -> bool {
+    lock.checking.is_some() && lock.shown.motion
+}
+
+/// The layout's button at `rect`, its code, lit under the pointer.
+pub fn draw_layout(f: &mut Frame, rect: Rectangle, code: &str, lit: bool) {
+    f.fill(
+        &Path::rounded_rectangle(rect.position(), rect.size(), LAYOUT_RADIUS.into()),
+        if lit { LIT } else { FIELD_FILL },
+    );
+    f.fill_text(text(
+        code.to_owned(),
+        Point::new(rect.center_x(), rect.center_y() - ROW_TEXT * LINE / 2.0),
+        ROW_TEXT,
+        MANROPE_BOLD,
+        TEXT.get(),
+        Alignment::Center,
+    ));
 }
 
 /// The field's shake at `t`: 10, 9, 6, 4 px side to side over
@@ -794,20 +787,10 @@ fn faded(colour: Color, alpha: f32) -> Color {
     }
 }
 
-fn focus_ring(f: &mut Frame, rect: Rectangle, radius: f32) {
-    let out = 2.0 + 1.5;
-    let ring = Path::rounded_rectangle(
-        Point::new(rect.x - out, rect.y - out),
-        Size::new(rect.width + 2.0 * out, rect.height + 2.0 * out),
-        (radius + out).into(),
-    );
-    f.stroke(
-        &ring,
-        Stroke::default().with_color(ACCENT.get()).with_width(3.0),
-    );
-}
-
-fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant, alpha: f32) {
+/// The button at `rect`, at `now`: the arrow, or the spinner while the
+/// password is checked.
+pub fn draw_button(f: &mut Frame, lock: &Lock, rect: Rectangle, now: Instant) {
+    let alpha = alpha(lock);
     let shown = &lock.shown;
     let has = shown.chars > 0;
     let checking = shown.phase == LockPhase::Checking;
@@ -1164,7 +1147,7 @@ fn draw_agents(
 }
 
 /// The status row: the layout's button, the battery, the Wi-Fi.
-fn draw_row(f: &mut Frame, lock: &Lock, size: Size, centre: f32, id: window::Id) {
+fn draw_row(f: &mut Frame, size: Size, centre: f32) {
     use crate::levels::model::Band;
     let items = row(size, centre);
     if let Some((rect, link)) = &items.wifi {
@@ -1214,24 +1197,6 @@ fn draw_row(f: &mut Frame, lock: &Lock, size: Size, centre: f32, id: window::Id)
             text_colour,
             Alignment::Left,
         ));
-    }
-    if let Some((rect, code)) = &items.layout {
-        let hovered = lock.hover == Some((id, Target::Layout));
-        f.fill(
-            &Path::rounded_rectangle(rect.position(), rect.size(), LAYOUT_RADIUS.into()),
-            if hovered { LIT } else { FIELD_FILL },
-        );
-        f.fill_text(text(
-            code.clone(),
-            Point::new(rect.center_x(), rect.center_y() - ROW_TEXT * LINE / 2.0),
-            ROW_TEXT,
-            MANROPE_BOLD,
-            TEXT.get(),
-            Alignment::Center,
-        ));
-        if lock.shown.focus == LockFocus::Layout {
-            focus_ring(f, *rect, LAYOUT_RADIUS);
-        }
     }
 }
 
