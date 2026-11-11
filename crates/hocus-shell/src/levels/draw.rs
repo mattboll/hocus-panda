@@ -108,8 +108,7 @@ pub(crate) const ACCENT: Ink = crate::theme::ACCENT;
 /// The keyboard's ring (bar.md §11): 2 px wide, 3 px out from what holds
 /// the keyboard; with what it rings, it never reaches further than their
 /// sum, which the items' places leave room for.
-pub(crate) const RING: f32 = 2.0;
-pub(crate) const RING_OUT: f32 = 3.0;
+pub(crate) use crate::ui::ring::{RING, RING_OUT};
 
 pub(crate) const fn rgb(hex: u32) -> Color {
     Color::from_rgb8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -717,39 +716,8 @@ fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
     }
 }
 
-/// The keyboard's ring around `rect` (bar.md §11): 2 px of the accent as
-/// text, 3 px out, its radius the item's and as much again. Under high
-/// contrast, 3 px, 2 px out, the background's colour between: the same
-/// room.
-pub(crate) fn ring(f: &mut Frame, rect: Rectangle, radius: f32) {
-    let colour = crate::theme::ACCENT_TEXT.get();
-    if crate::theme::contrast() {
-        let gap = RING_OUT - 1.0;
-        let back = crate::theme::Ink::Token(|t| t.popover_opaque_bottom).get();
-        stroke_around(f, rect, radius, 0.0, gap, back);
-        stroke_around(f, rect, radius, gap, RING + 1.0, colour);
-    } else {
-        stroke_around(f, rect, radius, RING_OUT, RING, colour);
-    }
-}
-
-/// A stroke `width` wide around `rect`, `out` px from it.
-fn stroke_around(f: &mut Frame, rect: Rectangle, radius: f32, out: f32, width: f32, colour: Color) {
-    let middle = out + width / 2.0;
-    let path = Path::rounded_rectangle(
-        Point::new(rect.x - middle, rect.y - middle),
-        Size::new(rect.width + 2.0 * middle, rect.height + 2.0 * middle),
-        (radius + middle).into(),
-    );
-    f.stroke(
-        &path,
-        Stroke {
-            style: Style::Solid(colour),
-            width,
-            ..Stroke::default()
-        },
-    );
-}
+/// The keyboard's ring around `rect` (bar.md §11): the kit's.
+pub(crate) use crate::ui::ring::draw as ring;
 
 /// One draw of the levels.
 struct Drawn<'a> {

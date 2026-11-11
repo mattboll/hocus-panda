@@ -22,12 +22,14 @@
 //! How a surface is built with it: docs/design/bar.md, "The shell's widget
 //! kit".
 
+pub mod cone;
 pub mod control;
 pub mod field;
 pub mod keys;
 pub mod moved;
 pub mod notched;
 pub mod parts;
+pub mod ring;
 pub mod sized;
 pub mod slider;
 pub mod style;
