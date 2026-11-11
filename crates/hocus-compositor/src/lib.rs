@@ -1,10 +1,15 @@
-//! The Hocuspanda compositor: smithay's protocols, the backends (nested in
-//! a window, the real screens on a virtual terminal, offscreen for tests),
-//! rendering, input and XWayland.
+//! The Hocuspanda compositor (docs/architecture.md): smithay's protocols,
+//! the backends (nested in a window, the real screens on a virtual
+//! terminal, offscreen for tests), rendering, input and XWayland, the
+//! window model ([`model`]), the lock, captures and recordings, screen
+//! sharing, idleness, and the shell it starts and supervises (`shell.rs`).
 //!
-//! The calloop event loop owns every piece of state ([`State`] and the
-//! backend, together in [`App`]); nothing else holds a reference to it.
-//! Work that could block (starting programs) runs on threads of its own.
+//! The calloop event loop owns every piece of state ([`State`], grouped in
+//! `state/`, and the backend, together in [`App`]); nothing else holds a
+//! reference to it. What could block runs on threads of its own (starting
+//! programs, the control socket, the configuration's file, D-Bus, PipeWire,
+//! the tools' watcher) and hands the loop owned values through channels.
+//! [`Headless`] runs it in-process for the tests.
 
 mod actions;
 mod agents;

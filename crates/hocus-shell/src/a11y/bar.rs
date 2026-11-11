@@ -2,7 +2,7 @@
 //! places its surfaces show them, gathered in the groups they make (Today,
 //! To do, the agents, the windows, the desktops, the footer). Each surface
 //! declares its items' nodes and its group to the kit's ring as it draws
-//! ([`crate::ui::ring`], [`crate::ui::items`]): here they are only put
+//! ([`crate::ui::ring`](mod@crate::ui::ring), [`crate::ui::items`]): here they are only put
 //! together, at their places, the one holding the ring the focus.
 
 use hocus_a11y::{Node, Rect, Role, Window};

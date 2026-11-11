@@ -4,7 +4,7 @@
 //! (a glyph, a switch's knob, a slider's track).
 //!
 //! A surface builds its controls once per view, each declared where it is
-//! built ([`control`]: its id, its role and name for screen readers, its
+//! built ([`control`](mod@control): its id, its role and name for screen readers, its
 //! state, what the keyboard's ring does on it). From that one tree:
 //!
 //! - the pointer's hit-testing and hover are the stock widgets';

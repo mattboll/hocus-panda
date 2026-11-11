@@ -30,7 +30,7 @@ client process that draws layer-shell surfaces.
 | Restarting the shell keeps every window: the "hot reload in a real GDM session" the user asked for | A protocol between the two to design and keep stable |
 | A crash in the shell no longer ends the session | Effects that need both (blur behind the bar, the streak across windows) need compositor support |
 | The shell can use a mainstream toolkit and its widgets | Two processes to start, supervise and test |
-| The same split as the field's working desktops (COSMIC's panel and applets, layer-shell bars) | Changes decision "one process" in `docs/architecture.md` |
+| The same split as the field's working desktops (COSMIC's panel and applets, layer-shell bars) | Supersedes the first build's "one process" decision (decision 0003; the processes as built: [architecture.md](../architecture.md)) |
 
 What crosses the boundary:
 
@@ -45,7 +45,7 @@ What crosses the boundary:
 
 The compositor supervises the shell: it starts it, restarts it on a crash
 (with a back-off), and a `hocus shell restart` command restarts it on
-purpose. While the shell is down, the windows keep their places and the
+purpose (as built: `hocus msg shell restart`, docs/workflow.md). While the shell is down, the windows keep their places and the
 bar's space stays reserved, so nothing jumps.
 
 ## Decision 2 — the shell's toolkit: iced
@@ -60,7 +60,9 @@ bar's space stays reserved, so nothing jumps.
 
 **Proposal:** iced 0.14 with iced_layershell for the shell, our own theme
 (the spec's tokens), our own few widgets where the design needs them (the
-halo, the gauges, the pandas). The pandas stay vector drawings, rendered by
+halo, the gauges, the pandas). The shell was first drawn whole on
+canvases; decision 0005 moved it to iced's widgets, canvases only where
+the look draws. The pandas stay vector drawings, rendered by
 iced's canvas or as SVG.
 
 ## Decision 3 — what we keep
@@ -80,9 +82,9 @@ iced's canvas or as SVG.
 
 ## The development loop
 
-- The shell restarts in a few seconds after a build
-  (`cargo watch -x 'run -p hocus-shell'` against the running session), in
-  the user's real GDM session, keeping every window.
+- The shell restarts in a few seconds after a build, in the user's real
+  GDM session, keeping every window (as built: `scripts/dev/live.sh
+  shell`, in developer mode; docs/workflow.md, "Development loop").
 - The compositor is installed as a `.deb` for the real session and run
   nested for compositor work, with a different modifier so the host's
   shortcuts don't get in the way.

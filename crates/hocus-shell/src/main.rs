@@ -1,30 +1,28 @@
-//! The Hocuspanda shell: the bar (docs/design/bar.md), drawn with iced as a
-//! wlr-layer-shell client of the compositor, which starts it and restarts
-//! it when it ends.
+//! The Hocuspanda shell (docs/architecture.md): every surface the desktop
+//! draws itself, as wlr-layer-shell surfaces of a client of the
+//! compositor's, drawn with iced. The compositor starts it, hands it its
+//! Wayland connection and its line ([`hocus_link`]), and starts it again
+//! when it ends; the windows stay.
 //!
-//! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5),
-//! the day's groups and its agents' group under it in their order (§4
-//! groups 2 to 5, [`column`], [`agents`]), its desktops (§4 group 8, §5), its connections (§4 group 9, §5) and its
-//! levels (§4 group 10, §5): a glass tint and a rim against the right edge
-//! of each output the compositor names, in its full or its mini form, the
-//! time at its top, the screen's desktops ([`desktops`]) over the Wi-Fi
-//! ([`network`]), Bluetooth ([`bluetooth`]) and the keyboard's layout
-//! ([`layouts`]), above the sound, the brightness and the battery near its
-//! bottom ([`levels`]).
-//! The compositor blurs what is behind it; the shell draws the tint over
-//! that blur, or an opaque background when there is no blur. The line
-//! between the two is `hocus-link`.
+//! The bar (docs/design/bar.md) is a column against each screen's edge in
+//! its full or its mini form ([`column`](mod@column)), with surfaces of its own for
+//! what draws often: the clock ([`clock`]), the levels ([`levels`]), the
+//! connections ([`network`], [`bluetooth`], [`layouts`]), the desktops
+//! ([`desktops`]), the footer ([`footer`]), and the popovers opened from
+//! its items ([`popover`]); the day's and the agents' groups ([`day`],
+//! [`agents`], the panda peeking out of the bar's edge). Beside it: the
+//! launcher, the actions palette, the emoji picker, the clipboard's
+//! history, the notifications' bubbles and their server, the tray, the
+//! music, captures' and sharing's surfaces, the lock screen's and the
+//! authentication dialog's interface, the session menu.
 //!
-//! Each bar's surface is the bar itself, 8 px from the screen's edges: as
-//! wide as its form, and as the full form while a switch is under way, so
-//! that the bar has room to move. The compositor takes the clicks on the
-//! bar's edge, which switch the form. The clock has a small surface of its
-//! own over the bar's top ([`clock`]): it draws every second, and iced
-//! presents a surface whole, so that only its region is drawn again. The
-//! levels have theirs, for the same reason, the connections and the
-//! desktops theirs, the footer along its bottom ([`footer`]), and so has a
-//! popover beside the bar ([`popover`]), opened from an item, and the panda
-//! peeking out of the bar's edge ([`agents::peek`]).
+//! Each surface's state is a value of its own, changed by messages and
+//! viewed as a function of it ([`surfaces`]); surfaces are built from
+//! iced's widgets and the shell's kit ([`ui`], decision 0005), canvases
+//! only where the look draws. Talking to the system (D-Bus, PipeWire, the
+//! day's accounts) runs on workers that send owned results back; the view
+//! never waits. The compositor blurs behind the bar; the shell draws the
+//! tint over that blur, or an opaque background when there is none.
 
 // What is left of #778 here: 197 indexed places, most in drawing code
 // (pixels, glyphs, fixed tables). A panic ends the bar, which the

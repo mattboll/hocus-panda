@@ -298,3 +298,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: scripts/vendor.sh --check
+
+  # CLAUDE.md and docs/ name no crate nor `hocus msg` subcommand that is
+  # gone (#779).
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/ci/docs-names.sh

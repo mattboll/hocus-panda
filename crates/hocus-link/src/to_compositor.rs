@@ -48,7 +48,7 @@ pub enum MeetingNear {
 pub enum ToCompositor {
     /// The shell draws on the CPU: its bars are opaque, nothing to blur.
     Software,
-    /// A line of what the shell shows, for screen readers ([`ToShell::A11y`]),
+    /// A line of what the shell shows, for screen readers ([`ToShell::A11y`](crate::ToShell::A11y)),
     /// its control characters made spaces.
     A11yLine(#[serde(serialize_with = "tidy::a11y")] String),
     /// The last of them.
@@ -60,13 +60,13 @@ pub enum ToCompositor {
     /// alone (bar.md, as built, 3.3).
     Wake(String),
     /// The shell's surfaces of this namespace (a popover) are closing: the
-    /// compositor fades them out over [`POPOVER_CLOSE`] (at once without
+    /// compositor fades them out over [`POPOVER_CLOSE`](crate::POPOVER_CLOSE) (at once without
     /// motion), and they are no longer a menu; the shell removes them
     /// after that.
     Closing(String),
     /// The user asks for the next keyboard layout (the bar's row): the
     /// compositor switches the seat's keyboard to it, then says which is
-    /// active ([`ToShell::Layout`]).
+    /// active ([`ToShell::Layout`](crate::ToShell::Layout)).
     NextLayout,
     /// The user asks for a desktop of `output` (a tile clicked, the wheel over
     /// them): the compositor switches as its shortcuts do.
@@ -94,7 +94,7 @@ pub enum ToCompositor {
     Ring(Row),
     /// The user plugs an agents' tool in (`claude-code`, `codex`), having read
     /// what it changes: the compositor writes its hooks, off its loop, then
-    /// says [`ToShell::AgentTools`].
+    /// says [`ToShell::AgentTools`](crate::ToShell::AgentTools).
     Plug(String),
     /// The user unplugs it.
     Unplug(String),
@@ -108,7 +108,7 @@ pub enum ToCompositor {
     /// shows through it.
     Briefing { open: bool },
     /// The user clicked the panda that says screens moved
-    /// ([`ToShell::ScreensMoved`]): it goes back.
+    /// ([`ToShell::ScreensMoved`](crate::ToShell::ScreensMoved)): it goes back.
     PeekClose,
     /// How near the next meeting is (bar.md §6, Day.2), for the halo: in 10 min
     /// or less, in 2 min or less, or neither (none, further, in progress, or
@@ -142,7 +142,7 @@ pub enum ToCompositor {
     /// An emoji chosen in the picker or the launcher (5.7): it goes into the
     /// window that had the keyboard, through its text input when it has one,
     /// else pasted, the clipboard given back after. With `keep` the picker
-    /// stays open, and is told when it is in ([`ToShell::EmojiInserted`]).
+    /// stays open, and is told when it is in ([`ToShell::EmojiInserted`](crate::ToShell::EmojiInserted)).
     Emoji { keep: bool, text: String },
     /// The user acts on the capture's toolbar (5.8, [`CaptureAsk`]).
     Capture(CaptureAsk),
@@ -155,7 +155,7 @@ pub enum ToCompositor {
     /// The user clicked a tray icon (5.14b): the shell is about to call the
     /// item's `Activate` or `SecondaryActivate`. `pid` is the process of the
     /// item's D-Bus connection (0: not known). The compositor answers at once
-    /// with an activation token made for that click ([`ToShell::TrayToken`]),
+    /// with an activation token made for that click ([`ToShell::TrayToken`](crate::ToShell::TrayToken)),
     /// and lets that process's application focus one window shortly after, with
     /// a token of its own or none.
     TrayClick { ask: u64, pid: u32 },
@@ -165,7 +165,7 @@ pub enum ToCompositor {
     /// The shell is about to ask the desktop portal for a dialog over its
     /// surface of `namespace` (the capture's editor's "Enregistrer sous…",
     /// #595). The compositor exports that surface through xdg-foreign and
-    /// answers at once with its handle ([`ToShell::Exported`]); a window that
+    /// answers at once with its handle ([`ToShell::Exported`](crate::ToShell::Exported)); a window that
     /// the portal's backend maps as that handle's child comes in front, with
     /// the keyboard.
     Export { ask: u64, namespace: String },
@@ -186,7 +186,7 @@ pub enum ToCompositor {
         desktop: u8,
     },
     /// The bar's menu of window `id` is about to open: the compositor answers
-    /// at once with what it shows ([`ToShell::WindowMenu`]).
+    /// at once with what it shows ([`ToShell::WindowMenu`](crate::ToShell::WindowMenu)).
     WindowMenu(u64),
     /// The palette (#736) runs an action ([`RunAction`]).
     Action(RunAction),

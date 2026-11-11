@@ -14,7 +14,7 @@
 //! `#6A7384`) on the right.
 //!
 //! The search holds the keyboard while the picker does: every key goes to
-//! the picker ([`super::key_on`]). The pointer over an emoji selects it, a
+//! the picker ([`key_on`](super::Picker::key_on)). The pointer over an emoji selects it, a
 //! click inserts it (with `Shift`, the picker stays). Only the grid's rows
 //! near its view are built ([`parts::lazy`]).
 

@@ -1,43 +1,26 @@
 //! The private line between the compositor and its shell (docs/design/bar.md
-//! §2, §3): the bar's measures both draw by, and the few messages they
-//! exchange.
+//! §2, §3, docs/architecture.md): every message either side sends the
+//! other ([`ToShell`], [`ToCompositor`]), and what both draw by: the
+//! shell's surfaces' namespaces, their measures and durations, the
+//! theme's tokens ([`theme`]).
 //!
 //! The compositor starts the shell with [`SOCKET_ENV`] naming a Unix socket
-//! in the session's runtime directory, which only it listens on. Each
-//! message is one JSON object on a line, `{"kind":…,"data":…}`, after a
-//! hello each way that names the protocol's [`VERSION`] ([`wire`]): two
-//! sides of different versions do not read each other. The compositor
-//! decides where bars are and in which
-//! form, reserves their space and takes the clicks on their edge, passes on
-//! the theme and the clock's settings, the level keys (volume, brightness) pressed, the
-//! presses outside the shell's surfaces while a popover shows, the
-//! names of the screens besides the built-in one, the keyboard's layouts
-//! and which one is active, the bars' screens' desktops with a sketch of
-//! their windows, their applications and their titles, the agents'
-//! tools and the agents, the agent whose panda peeks out of the bar,
-//! `Super+Space` for the launcher, what clients copy and `Super+V` for the
-//! clipboard's history, `Super+.` for the emoji picker and where it opens,
-//! what the screen capture's toolbar shows and what was captured, the
-//! screen the notifications' bubbles show on, a request to share the screen
-//! and what is shared, where the system's authentication dialog goes and
-//! Caps Lock's state, the lock, the session menu's confirmation and what
-//! logind allows, and a change asked of the day's tasks (for tests);
-//! the shell draws the bars, their popovers, the peek, the launcher and the
-//! bubbles, keeps the levels and the clipboard's history, and says when it
-//! draws on the CPU, when a popover, the launcher or a bubble closes, and
-//! when the user asks for the next layout, another desktop or a window,
-//! plugs a tool in or out, declines them, copies a text, pastes or copies
-//! an item of the clipboard's history, inserts an emoji, starts an
-//! application, clicks a bubble (its application's window), the
-//! capture's toolbar, chooses what to share, opens and closes the
-//! authentication dialog, or chooses in the session menu.
-//! Neither
-//! side waits for the other: a message is a fact or a request, never a
-//! question. Two requests have an answer: a click on a tray icon asks for
-//! an activation token, and a dialog of the desktop portal's over a shell
-//! surface asks for that surface's xdg-foreign handle; the compositor
-//! sends either at once, and only the thread that asked waits for it,
-//! briefly, never the loop nor the shell's surfaces.
+//! beside its Wayland socket (`<socket>.shell`), which only it listens on.
+//! Each message is one JSON object on a line, `{"kind":…,"data":…}`,
+//! written and read by serde, after a hello each way that names the
+//! protocol's [`VERSION`] ([`wire`]): two sides of different versions do
+//! not read each other. The compositor says what it decides (where bars
+//! are and in which form, the theme, the screens, desktops and windows,
+//! the agents, the keys meant for the shell, the lock, captures, sharing);
+//! the shell says what the user did on its surfaces and what it asks of
+//! the session.
+//!
+//! Neither side waits for the other: a message is a fact or a request,
+//! never a question. Two requests have an answer: a click on a tray icon
+//! asks for an activation token, and a dialog of the desktop portal's over
+//! a shell surface asks for that surface's xdg-foreign handle; the
+//! compositor sends either at once, and only the thread that asked waits
+//! for it, briefly, never the loop nor the shell's surfaces.
 //!
 //! The form switch is one motion, which both sides compute from the same
 //! start on the same clock (`CLOCK_MONOTONIC`, in microseconds): the

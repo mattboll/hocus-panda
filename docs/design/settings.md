@@ -1019,7 +1019,7 @@ window is the preview.
   and choose with `←` and `→`; the link opens with `Enter`.
 - **The search** finds the rows by the spec's nearby words and their keys
   (`theme`, `accent`, `text-scale`, `cursor-size`…).
-- **The language** (`src/lang.rs`'s words hold both): the window and the
+- **The language** (`src/lang.rs`: the catalogue's words, decision 0006): the window and the
   shell switch at once; `[locale] language` wins over `LC_ALL`,
   `LC_MESSAGES` and `LANG` for the desktop's own words, and is given as
   `LANGUAGE` to programs started afterwards.
@@ -2013,7 +2013,7 @@ pub struct Setting {
     pub id: &'static str,                     // "power.suspend-after"
     pub section: SectionId,
     pub group: RowGroup,                      // its group's label; per_source: one value on battery, one on AC
-    pub name: Words,                          // w("Mettre en veille après", "Suspend after")
+    pub name: Words,                          // a catalogue text: words::SUSPEND_AFTER (hocus_words::settings::power)
     pub line: Option<Words>,                  // the line under the name
     pub keywords: (&'static [&'static str], &'static [&'static str]), // nearby words, French then English
     pub kind: Kind,                           // Switch | Menu(Vec<Choice>) | Slider { min, max, step, unit } | Text

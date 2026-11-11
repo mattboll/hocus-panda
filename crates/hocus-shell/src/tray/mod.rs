@@ -13,7 +13,7 @@
 //! while an icon shows; a change of icon draws it alone, an icon coming or
 //! going places the bar's groups again ([`effects`]). A click asks the
 //! thread ([`ask`]): `Activate`, `SecondaryActivate`, `Scroll`, the menu
-//! (`com.canonical.dbusmenu`, [`menu`]) read before its popover opens
+//! (`com.canonical.dbusmenu`, [`menu`](mod@menu)) read before its popover opens
 //! ([`crate::popover::tray`]). Hovering an icon 400 ms shows its tooltip
 //! ([`tip`]).
 //!

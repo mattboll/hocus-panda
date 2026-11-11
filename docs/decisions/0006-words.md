@@ -33,10 +33,10 @@ A generated table, in the crate `hocus-words`:
   `[language]` table names the language (`code`, `variant`, `name`) and
   its plural rule (`n=1`, `n<2`, `none`). The `Lang` enum is generated
   from the files: adding a language is adding a file.
-- A plain text is a constant (`hocus_words::perf::MEMORY.get(lang)`); a
-  text with `{placeholders}` or plural forms (`{ one = …, other = … }`) a
+- A plain text is a constant (`hocus_words::perf::totals::MEMORY.get(lang)`);
+  a text with `{placeholders}` or plural forms (`{ one = …, other = … }`) a
   function taking the language and its argument
-  (`hocus_words::perf::windows_opened(lang, 3)`), or, with several, a
+  (`hocus_words::perf::peak::windows_opened(lang, 3)`), or, with several, a
   struct of named fields, so that two of one type cannot be swapped
   (`perf::signal::MemoryLine { end, rate, since, start }`); a list (the
   months) a constant of one length in every language.
