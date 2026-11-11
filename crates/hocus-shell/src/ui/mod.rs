@@ -19,7 +19,8 @@
 //! at once and builds its own view again, not the bar's. The shared text
 //! field ([`crate::field`]) is a widget here ([`field::Field`]).
 //!
-//! How a surface is built with it: docs/design/shell-widgets.md.
+//! How a surface is built with it: docs/design/bar.md, "The shell's widget
+//! kit".
 
 pub mod control;
 pub mod field;

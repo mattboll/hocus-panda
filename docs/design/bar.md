@@ -1942,6 +1942,67 @@ field (a secret is one word).
 - **Double and triple clicks** take the word and the line
   (`field::word_around`, `field::line_around`).
 
+### The shell's widget kit (#770, 2026-11-11)
+
+Decision [0005](../decisions/0005-shell-widgets.md). A surface of the
+kit (`hocus-shell/src/ui/`) is iced's stock widgets, a few of ours and
+canvases only for what the look draws. Built that way: the Wi-Fi's,
+Bluetooth's, the sound's and the music player's popovers, and the music
+player's tile. The other surfaces are still hand-drawn canvases (#772).
+
+**How to build a surface with it.**
+
+1. **The model** stays the surface's (a `Ui` behind a lock, as before),
+   with what its controls are (`enum Target`) and one message type
+   (`Msg`): `Act(Target)`, `Focus(Target)`, `Pressed`, `Stale`, and what
+   its widgets ask (`Took` from a field, `Slide` from a slider…).
+2. **The view** is a function of the model, built again whenever it
+   changes: `parts::content(vec![parts::header(…), parts::block(GAP,
+   …), …])`, at the mockup's sizes (`popover::kit`'s constants). The
+   shared parts: the header, dividers, notes, spaced labels
+   (`parts::label`), the small button, a connected block, a list's row
+   (`parts::row_button`), a list that scrolls (`parts::list`), the
+   Settings' link, the header's switch (`parts::Knob`), a spinner, a
+   glyph (`parts::drawn(w, h, |frame, size| …)`, the canvas's own
+   drawing). Styles from the theme's tokens: `ui::style`.
+3. **Every control is declared where it is built**:
+   `ui::control(widget, target.id(), Role::Button, name)`, then
+   `.node(|n| n.checked(…))` for its state, `.focus(focused,
+   Msg::Focus(target), radius)` if the ring can come to it,
+   `.activate(Msg::Act(target))` for `Enter`, `.rows(group)` if the
+   arrows go through its group, `.typing()` for a field. Lines that
+   nothing holds: `ui::line(widget, text)`. The id
+   (`wifi:Row(2)`, `sound:Mute`) is what tests and screen readers find
+   it by.
+4. **The surface**: `Around::new(id, content, handle, Msg::Stale)`, with
+   `.keys(…)` for the keys it takes before the kit (a field's `Esc`, a
+   slider's arrows), `.press(Msg::Pressed)`, `.first(…)` for where the
+   ring goes when it is opened by the keyboard, `.subtitle(…)`,
+   `.later(&LATER)` for what waits for the next tree (a list scrolled to
+   a row: `ui::reveal`), then `.on_glass(glass)`.
+5. **`handle`** changes the model at once; the surface's view alone is
+   built again and drawn. What changes outside it (a network, a mixer)
+   reaches it through `popover::changed`, which marks the kit's views
+   stale.
+
+What the kit then does, the same for every surface: the pointer's
+hit-testing and hover are the stock widgets'; `Tab`, `Shift+Tab`, the
+arrows, `Enter`, `Space` and `Escape` go through the declared controls in
+the tree's order (`ui::keys`); the ring is drawn by the control holding
+it, 3 px outside its bounds; screen readers' rows are the declarations
+with the bounds they were laid out at (`ui::walk`, published as
+`a11y::rows`); the log says the tree for tests
+(`RUST_LOG=hocuspanda_shell::shows=debug`: `shows {"wifi:Switch": {"at":
+[…], "says": […]}, "focus": "wifi:Row(0)"}`). The shared text field is
+`ui::field::Field` over the surface's `field::Entry`; a volume's slider,
+`ui::slider::Slider`. Text measures are cached (`kit::measure`).
+
+**Measured** against the canvas, headless on the CPU, dark, ×1, in their
+main state: the Wi-Fi's 0.50 % of pixels off (0.63 % with a row unfolded
+and its field typed in), Bluetooth's 0.81 %, the sound's 0.91 %, none by
+more than 24/255: rounded corners' and dividers' anti-aliasing. Their
+tests pass unchanged, but the screen reader's, which reads the ids.
+
 ### 3.9, the desktops (2026-10-30)
 
 What the approved mockup of 3.9 shows, variant A for the mini form (§4
