@@ -1810,16 +1810,7 @@ impl Shell {
     /// its surface is `id`.
     fn capture_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if capture::thumb::is_surface(id) {
-            return Some(
-                canvas(capture::thumb::View {
-                    id,
-                    words: capture::words(),
-                    software: self.software,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            );
+            return Some(capture::thumb::view(id, capture::words(), self.software));
         }
         if capture::editor::is_surface(id) {
             return Some(capture::editor::view::view(
