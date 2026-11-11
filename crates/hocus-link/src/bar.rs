@@ -59,6 +59,18 @@ impl Form {
     }
 }
 
+impl FromStr for Form {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "full" => Ok(Self::Full),
+            "mini" => Ok(Self::Mini),
+            _ => Err(BadLine(format!("no form {s:?}"))),
+        }
+    }
+}
+
 /// The side of the screens the bar stands on (`[panel] side`, 6.4): its
 /// edge zone, the room kept for it and what opens from it go with it, the
 /// popovers on its inner side.
@@ -173,6 +185,21 @@ impl Transition {
             Self::Neon => "neon",
             Self::None => "none",
         }
+    }
+}
+
+impl FromStr for Transition {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|t| t.name() == s)
+            .ok_or_else(|| {
+                BadLine(format!(
+                    "no transition {s:?}: odometer, roll, flip, neon or none"
+                ))
+            })
     }
 }
 

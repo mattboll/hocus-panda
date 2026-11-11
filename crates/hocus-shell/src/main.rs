@@ -418,7 +418,7 @@ struct Shell {
 #[derive(Debug, Clone)]
 enum Message {
     Linked(mpsc::UnboundedSender<String>),
-    FromCompositor(String),
+    FromCompositor(Box<ToShell>),
     Unlinked,
     Frame,
     /// The system's time zone changed.
@@ -513,7 +513,7 @@ impl Shell {
         match message {
             Message::Linked(sender) => {
                 if self.software {
-                    let _ = sender.unbounded_send(ToCompositor::Software.to_string());
+                    let _ = sender.unbounded_send(ToCompositor::Software.line());
                 }
                 popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
@@ -521,13 +521,7 @@ impl Shell {
                 clipboard::linked();
                 Task::none()
             }
-            Message::FromCompositor(line) => match line.parse::<ToShell>() {
-                Ok(message) => self.compositor_says(message),
-                Err(err) => {
-                    tracing::warn!(%err, "a line from the compositor that does not read");
-                    Task::none()
-                }
-            },
+            Message::FromCompositor(message) => self.compositor_says(*message),
             Message::Unlinked => {
                 tracing::info!("the compositor went: the shell ends");
                 iced::exit()
@@ -2370,6 +2364,42 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
             }
         };
         let (read, mut write) = stream.into_split();
+        let mut lines = BufReader::new(read).lines();
+        // The hello (`hocus_link::wire`): this shell's version, then the
+        // compositor's. On another version (a package upgraded under the
+        // session) nothing more is said nor read: its messages would be
+        // misread. The compositor ends this shell, or the session does.
+        let hello = format!("{}\n", hocus_link::wire::hello());
+        if let Err(err) = write.write_all(hello.as_bytes()).await {
+            tracing::warn!(%err, "could not write to the compositor");
+            let _ = output.send(Message::Unlinked).await;
+            return;
+        }
+        match lines.next_line().await {
+            Ok(Some(first)) => {
+                let theirs = hocus_link::wire::said_version(&first);
+                if theirs != Some(hocus_link::VERSION) {
+                    tracing::error!(
+                        compositor = ?theirs,
+                        shell = hocus_link::VERSION,
+                        "the compositor speaks another version of the line: \
+                         nothing is read from it nor said to it"
+                    );
+                    while let Ok(Some(_)) = lines.next_line().await {}
+                    let _ = output.send(Message::Unlinked).await;
+                    return;
+                }
+            }
+            Ok(None) => {
+                let _ = output.send(Message::Unlinked).await;
+                return;
+            }
+            Err(err) => {
+                tracing::warn!(%err, "could not read from the compositor");
+                let _ = output.send(Message::Unlinked).await;
+                return;
+            }
+        }
         let (sender, mut outgoing) = mpsc::unbounded::<String>();
         // A change of level wakes the levels' surfaces through the
         // compositor, without a message that would draw every surface.
@@ -2379,7 +2409,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
             popover::changed(popover::Item::Brightness);
             popover::changed(popover::Item::Battery);
             let wake = ToCompositor::Wake(LEVELS_NAMESPACE.to_owned());
-            waker.unbounded_send(wake.to_string()).is_ok()
+            waker.unbounded_send(wake.line()).is_ok()
         });
         // A change of network wakes the connections' surface when the row
         // changes (resized when it comes or goes), and the Wi-Fi's popover
@@ -2394,7 +2424,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                 return true;
             }
             let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
-            waker.unbounded_send(wake.to_string()).is_ok()
+            waker.unbounded_send(wake.line()).is_ok()
         });
         let waker = sender.clone();
         bluetooth::on_change(move |change| {
@@ -2406,7 +2436,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                 return true;
             }
             let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
-            waker.unbounded_send(wake.to_string()).is_ok()
+            waker.unbounded_send(wake.line()).is_ok()
         });
         let _ = output.send(Message::Linked(sender)).await;
         tokio::spawn(async move {
@@ -2417,20 +2447,28 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                 }
             }
         });
-        let mut lines = BufReader::new(read).lines();
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
                     // A level key goes to its service: no message, no
                     // drawing; the gauge shows what the service then reads.
-                    match line.parse() {
-                        Ok(ToShell::Level(key)) => {
+                    let message = match ToShell::read(&line) {
+                        Ok(message) => message,
+                        // A kind this shell does not know, or a line that
+                        // does not read: said and skipped.
+                        Err(err) => {
+                            tracing::warn!(%err, "a line from the compositor is skipped");
+                            continue;
+                        }
+                    };
+                    match message {
+                        ToShell::Level(key) => {
                             levels::key(key);
                             continue;
                         }
                         // A press outside closes the popover: no message
                         // either, the controller draws what changes.
-                        Ok(ToShell::Outside) => {
+                        ToShell::Outside => {
                             popover::event(popover::Event::Outside);
                             launcher::outside();
                             emoji::outside();
@@ -2438,20 +2476,20 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.
-                        Ok(ToShell::Launcher { output, scale }) => {
+                        ToShell::Launcher { output, scale } => {
                             launcher::toggle(output, scale);
                             continue;
                         }
                         // The other screens: only an open brightness's
                         // popover draws for them.
-                        Ok(ToShell::Screens(names)) => {
+                        ToShell::Screens(names) => {
                             screens(names);
                             continue;
                         }
                         // The layouts' names in the bar's language, read
                         // from XKB's catalog off the loop; then a message,
                         // once a connection: the surfaces take their sizes.
-                        Ok(ToShell::Layouts(list)) => {
+                        ToShell::Layouts(list) => {
                             let lang = clock::time::Lang::of_messages();
                             let made =
                                 tokio::task::spawn_blocking(move || layouts::made(&list, lang))
@@ -2461,218 +2499,218 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             continue;
                         }
                         // The active layout: only the row draws.
-                        Ok(ToShell::Layout(index)) => {
+                        ToShell::Layout(index) => {
                             layouts::activate(index);
                             continue;
                         }
                         // A screen's desktops: only their surface draws
                         // (resized when their rows change).
-                        Ok(ToShell::Desktops(screen)) => {
+                        ToShell::Desktops(screen) => {
                             desktops::set(screen);
                             continue;
                         }
                         // Its windows' titles: only an open list draws,
                         // and the windows over the tiles if they list it.
-                        Ok(ToShell::Titles(titles)) => {
+                        ToShell::Titles(titles) => {
                             desktops::set_titles(titles);
                             continue;
                         }
                         // Its windows' order, and whether the bar shows
                         // them (#604): only their surface draws.
-                        Ok(ToShell::Recent(recent)) => {
+                        ToShell::Recent(recent) => {
                             desktops::set_recent(recent);
                             continue;
                         }
                         // The screens a bar shows the desktops of (8.4):
                         // only their surface draws, resized to their rows.
-                        Ok(ToShell::DeskScreens { bar, screens }) => {
+                        ToShell::DeskScreens { bar, screens } => {
                             desktops::set_screens(bar, screens);
                             continue;
                         }
                         // A window moved over a tile (8.5 B): only the
                         // tiles draw, that one lit.
-                        Ok(ToShell::DropOver { bar, over }) => {
+                        ToShell::DropOver { bar, over } => {
                             desktops::set_drop(bar, over);
                             continue;
                         }
-                        Ok(ToShell::BarWindows(shown)) => {
+                        ToShell::BarWindows(shown) => {
                             windows::set_shown(shown);
                             continue;
                         }
                         // The desktops' names (6.14): the tiles and an
                         // open list draw.
-                        Ok(ToShell::DesktopNames(names)) => {
+                        ToShell::DesktopNames(names) => {
                             desktops::set_names(names);
                             continue;
                         }
                         // What the column shows (6.4): only its parts draw.
-                        Ok(ToShell::BarGroups(groups)) => {
+                        ToShell::BarGroups(groups) => {
                             column::set_groups(groups);
                             continue;
                         }
                         // The agents' tools and the agents: only their
                         // group draws (resized when its height changes),
                         // and an open Sources or consent popover.
-                        Ok(ToShell::AgentTools(tools)) => {
+                        ToShell::AgentTools(tools) => {
                             agents::set_tools(tools);
                             continue;
                         }
-                        Ok(ToShell::Agents(list)) => {
+                        ToShell::Agents(list) => {
                             agents::set_agents(list);
                             continue;
                         }
                         // The panda peeking out: its own surfaces only.
-                        Ok(ToShell::Peek(peek)) => {
+                        ToShell::Peek(peek) => {
                             agents::peek::peek(peek);
                             continue;
                         }
-                        Ok(ToShell::NoPeek) => {
+                        ToShell::NoPeek => {
                             agents::peek::back();
                             continue;
                         }
                         // A developer's program let go of: a bubble, the
                         // notifications' own surface.
-                        Ok(ToShell::FellBack { which, program }) => {
+                        ToShell::FellBack { which, program } => {
                             notifications::fell_back(which, &program);
                             continue;
                         }
-                        Ok(ToShell::ScreensMoved(moved)) => {
+                        ToShell::ScreensMoved(moved) => {
                             agents::peek::screens(moved);
                             continue;
                         }
                         // The rows' pandas or dots (6.16): their group
                         // alone draws.
-                        Ok(ToShell::AgentPandas(pandas)) => {
+                        ToShell::AgentPandas(pandas) => {
                             agents::set_pandas(pandas);
                             continue;
                         }
                         // The bubbles' screen: their stack alone.
-                        Ok(ToShell::Focus(screen)) => {
+                        ToShell::Focus(screen) => {
                             notifications::focus(screen);
                             continue;
                         }
                         // A copy for the clipboard's history, kept off
                         // this task; `Super+V`: the history's surface.
-                        Ok(ToShell::Copied { app, clip }) => {
+                        ToShell::Copied { app, clip } => {
                             clipboard::copied(app, clip);
                             continue;
                         }
-                        Ok(ToShell::CaptureCopied { capture, clip }) => {
+                        ToShell::CaptureCopied { capture, clip } => {
                             clipboard::captured(capture, clip);
                             continue;
                         }
-                        Ok(ToShell::Clipboard { output }) => {
+                        ToShell::Clipboard { output } => {
                             popover::toggle_clipboard(&output);
                             continue;
                         }
                         // What the history keeps (6.17), and the
                         // Settings' clear: on its own thread.
-                        Ok(ToShell::ClipboardRules(rules)) => {
+                        ToShell::ClipboardRules(rules) => {
                             clipboard::rules(rules);
                             continue;
                         }
-                        Ok(ToShell::ClipboardClear) => {
+                        ToShell::ClipboardClear => {
                             clipboard::clear();
                             continue;
                         }
                         // The emoji picker: its own surface.
-                        Ok(ToShell::Emoji {
+                        ToShell::Emoji {
                             output,
                             scale,
                             width,
                             height,
                             at,
-                        }) => {
+                        } => {
                             emoji::toggle(output, scale, (width, height), at);
                             continue;
                         }
-                        Ok(ToShell::EmojiInserted) => {
+                        ToShell::EmojiInserted => {
                             emoji::inserted();
                             continue;
                         }
                         // The actions palette: its own surface (#736).
-                        Ok(ToShell::Actions(shown)) => {
+                        ToShell::Actions(shown) => {
                             actions::toggle(shown);
                             continue;
                         }
-                        Ok(ToShell::ActionsEnd) => {
+                        ToShell::ActionsEnd => {
                             actions::close();
                             continue;
                         }
                         // The capture's toolbar, and its toast: their own
                         // surfaces (5.8).
-                        Ok(ToShell::Capture(bar)) => {
+                        ToShell::Capture(bar) => {
                             capture::set(bar);
                             continue;
                         }
-                        Ok(ToShell::CaptureEnd) => {
+                        ToShell::CaptureEnd => {
                             capture::end();
                             continue;
                         }
-                        Ok(ToShell::Captured(captured)) => {
+                        ToShell::Captured(captured) => {
                             capture::captured(captured);
                             continue;
                         }
                         // Sharing (5.11): the chooser's surface, the sign's.
-                        Ok(ToShell::ShareChoose(choose)) => {
+                        ToShell::ShareChoose(choose) => {
                             share::set(choose);
                             continue;
                         }
-                        Ok(ToShell::ShareChooseEnd(request)) => {
+                        ToShell::ShareChooseEnd(request) => {
                             share::end(request);
                             continue;
                         }
                         // The authentication dialog (7.5): its place, and
                         // Caps Lock.
-                        Ok(ToShell::AuthAt(at)) => {
+                        ToShell::AuthAt(at) => {
                             auth::placed(at);
                             continue;
                         }
-                        Ok(ToShell::CapsLock(on)) => {
+                        ToShell::CapsLock(on) => {
                             auth::caps(on);
                             continue;
                         }
-                        Ok(ToShell::Shares(shares)) => {
+                        ToShell::Shares(shares) => {
                             in_use::set_shares(shares);
                             continue;
                         }
                         // Recording (5.10): the bar's item, the thumbnail.
-                        Ok(ToShell::Recording(shown)) => {
+                        ToShell::Recording(shown) => {
                             in_use::set_recording(Some(shown));
                             continue;
                         }
-                        Ok(ToShell::RecordingEnd) => {
+                        ToShell::RecordingEnd => {
                             in_use::set_recording(None);
                             continue;
                         }
-                        Ok(ToShell::Recorded(recorded)) => {
+                        ToShell::Recorded(recorded) => {
                             capture::recorded(recorded);
                             continue;
                         }
                         // A tray click's token: to the tray's thread.
-                        Ok(ToShell::TrayToken { ask, token }) => {
+                        ToShell::TrayToken { ask, token } => {
                             tray::token(ask, token);
                             continue;
                         }
                         // A portal dialog's parent: to the thread asking.
-                        Ok(ToShell::Exported { ask, handle }) => {
+                        ToShell::Exported { ask, handle } => {
                             foreign::exported(ask, handle);
                             continue;
                         }
                         // The session menu (7.4): its popover alone.
-                        Ok(ToShell::LeaveCan(can)) => {
+                        ToShell::LeaveCan(can) => {
                             popover::session::set_can(can);
                             continue;
                         }
-                        Ok(ToShell::Leave(shown)) => {
+                        ToShell::Leave(shown) => {
                             popover::session::set_shown(Some(shown));
                             continue;
                         }
-                        Ok(ToShell::LeaveEnd) => {
+                        ToShell::LeaveEnd => {
                             popover::session::set_shown(None);
                             continue;
                         }
-                        Ok(ToShell::SessionMenu { output }) => {
+                        ToShell::SessionMenu { output } => {
                             popover::session::open(&output);
                             continue;
                         }
@@ -2681,9 +2719,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // a message (`Super+Shift+B` just before), and the
                         // form, coming after, would take the keyboard back
                         // from the bar. It goes as a message, in its turn.
-                        _ => {}
+                        other => {
+                            let _ = output.send(Message::FromCompositor(Box::new(other))).await;
+                        }
                     }
-                    let _ = output.send(Message::FromCompositor(line)).await;
                 }
                 Ok(None) => break,
                 Err(err) => {

@@ -2464,7 +2464,7 @@ pub(crate) fn tell(message: ToCompositor) -> bool {
     LINK.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
-        .is_some_and(|link| link.unbounded_send(message.to_string()).is_ok())
+        .is_some_and(|link| link.unbounded_send(message.line()).is_ok())
 }
 
 /// Carries out the controller's effects, and its deadlines: layer-shell

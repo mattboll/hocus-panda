@@ -2588,9 +2588,11 @@ mod tests {
         assert_eq!(config.appearance.theme, Scheme::Frost);
         assert_eq!(config.appearance.accent, Accent::Ice);
         let choice = config.appearance.theme_choice(Default::default());
+        // What the shell is told reads back the same.
+        let line = hocus_link::ToShell::Theme(choice).line();
         assert_eq!(
-            choice.to_string().parse::<hocus_link::theme::Choice>(),
-            Ok(choice)
+            hocus_link::ToShell::read(&line),
+            Ok(hocus_link::ToShell::Theme(choice))
         );
         let config: Config = toml::from_str("")?;
         assert_eq!(
@@ -2740,9 +2742,9 @@ mod tests {
         assert_eq!(clock.transition, hocus_link::Transition::Flip);
         assert!(!clock.seconds);
         // What the shell is told reads back the same.
-        let line = hocus_link::ToShell::Clock(clock.look()).to_string();
+        let line = hocus_link::ToShell::Clock(clock.look()).line();
         assert_eq!(
-            line.parse::<hocus_link::ToShell>(),
+            hocus_link::ToShell::read(&line),
             Ok(hocus_link::ToShell::Clock(clock.look()))
         );
         let empty: Config = toml::from_str("[panel.clock]\nfont = \"\"\n")?;

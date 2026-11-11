@@ -66,6 +66,17 @@ impl ToolState {
     }
 }
 
+impl FromStr for ToolState {
+    type Err = BadLine;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|t| t.name() == s)
+            .ok_or_else(|| BadLine(format!("no tool state {s:?}")))
+    }
+}
+
 /// An agent as the bar shows it. Then a tab and its [`Note`], empty when it has
 /// none.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

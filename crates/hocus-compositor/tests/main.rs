@@ -77,6 +77,7 @@ mod ink;
 mod launcher;
 mod layouts;
 mod levels;
+mod link;
 mod live_reload;
 mod lock;
 mod lock_external;
