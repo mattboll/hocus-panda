@@ -664,11 +664,9 @@ fn an_inhibitors_reason_shows_and_holds_the_countdown() -> anyhow::Result<()> {
     bed.hp.hold_clock();
     let mark = bed.mark();
     bed.click(Bed::row(menu, SHUT_DOWN))?;
-    let line = bed.logged_after(mark, "Firefox retient l’arrêt")?;
-    assert!(
-        line.contains("Firefox: Un téléchargement est en cours"),
-        "{line}"
-    );
+    // The popover's own line: the kit's dump says the same words too.
+    let line = bed.logged_after(mark, "Firefox: Un téléchargement est en cours")?;
+    assert!(line.contains("Firefox retient l’arrêt"), "{line}");
     assert!(!line.contains("Mises à jour"), "{line}");
     let shown = bed.hp.leave_shown().expect("a confirmation");
     let LeaveStep::Held(holders) = &shown.step else {
@@ -714,11 +712,9 @@ fn a_window_that_does_not_close_is_listed_and_fermer_quand_meme_closes_it() -> a
         Some(LeaveStep::Closing)
     ));
     bed.step(Duration::from_millis(200))?;
-    let line = bed.logged_after(mark, "Notes retient la déconnexion")?;
-    assert!(
-        line.contains("Notes: Sa fenêtre ne s’est pas fermée."),
-        "{line}"
-    );
+    // The popover's own line: the kit's dump says the same words too.
+    let line = bed.logged_after(mark, "Notes: Sa fenêtre ne s’est pas fermée.")?;
+    assert!(line.contains("Notes retient la déconnexion"), "{line}");
     assert_eq!(bed.hp.ending(), None);
     // The keyboard on "Annuler"; round to "Revenir à Notes", then
     // "Fermer quand même".
