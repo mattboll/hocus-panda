@@ -245,6 +245,10 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
+        if let iced::Event::InputMethod(event) = event {
+            return tasks::field_input_method(&At::Popover, event)
+                .then(|| canvas::Action::request_redraw().and_capture());
+        }
         match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
             Input::Redraw(_) => {
                 for pressed in kit::keys(self.id) {
@@ -295,11 +299,11 @@ impl<Message> canvas::Program<Message> for Panel {
             ring(f, add, ADD_RADIUS);
         }
         let laid = &state.laid;
-        if let (Some(rect), Some(open)) = (laid.field, tasks::field()) {
+        if let Some(rect) = laid.field {
             tasks::draw::field(
                 f,
+                &At::Popover,
                 rect,
-                (&open.text, open.focused),
                 (LINE_TEXT, FIELD_RADIUS, FIELD_PAD),
                 self.words,
                 1.0,
@@ -503,6 +507,17 @@ impl Panel {
         let target = at.and_then(|at| state.target(at));
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
+            // A press held in the field selects as it drags.
+            mouse::Event::CursorMoved { .. } if tasks::field_drag(None).is_some() => {
+                tasks::field_drag(at)
+                    .unwrap_or(false)
+                    .then_some(redraw)
+                    .flatten()
+            }
+            mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                tasks::field_release();
+                None
+            }
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
                 state.pointer.moved();
                 if state.over == target {
@@ -519,6 +534,13 @@ impl Panel {
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
                 state.focus = None;
                 match target {
+                    // In the field: its caret where the press is.
+                    Some(Target::Field) => {
+                        Self::act(target);
+                        if let Some(at) = at {
+                            tasks::field_press(&At::Popover, at);
+                        }
+                    }
                     Some(target) => Self::act(Some(target)),
                     // A press elsewhere in it: the field, empty, closes.
                     None => tasks::pressed_elsewhere(),

@@ -51,6 +51,7 @@ use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
+    field::{self, view::Style},
     levels::draw::{
         DIM, FAINT, HOVER, MANROPE, MANROPE_BOLD, OPEN, TEXT, faded, pointer, rgb, ring,
     },
@@ -731,12 +732,12 @@ pub fn unsaved(f: &mut Frame, words: Words, at: Point, alpha: f32) {
     ));
 }
 
-/// The field at `rect`: what was typed (its end when it is too long) and
-/// the caret while it holds the keyboard, else the placeholder.
+/// The field at `rect`, open at `at`: what was typed, its selection and
+/// its caret while it holds the keyboard, else the placeholder.
 pub fn field(
     f: &mut Frame,
+    at: &super::At,
     rect: Rectangle,
-    (text, focused): (&str, bool),
     (size, radius, pad): (f32, f32, f32),
     words: Words,
     alpha: f32,
@@ -756,45 +757,20 @@ pub fn field(
                 .with_width(1.0),
         );
     });
-    let room = rect.width - 2.0 * pad;
-    let left = rect.x + pad;
-    let middle = rect.center_y();
-    if text.is_empty() {
-        f.fill_text(kit::text(
-            words.placeholder().to_owned(),
-            Point::new(left, middle),
-            size,
-            faded(FAINT.get(), alpha),
-            Alignment::Left,
-        ));
-    }
-    let width = if text.is_empty() {
-        0.0
-    } else {
-        kit::measure(text, size, MANROPE)
-    };
-    // Its end shows: the text slides left past the field's room.
-    let x = left + (room - width - 1.0).min(0.0);
-    let inner = Rectangle::new(Point::new(left, rect.y), Size::new(room, rect.height));
-    f.with_clip(inner, |f| {
-        if !text.is_empty() {
-            f.fill_text(kit::text(
-                text.to_owned(),
-                Point::new(x, middle),
-                size,
-                faded(TEXT.get(), alpha),
-                Alignment::Left,
-            ));
-        }
-        if focused {
-            let caret = size + 1.0;
-            f.fill_rectangle(
-                Point::new(x + width, middle - caret / 2.0),
-                Size::new(1.0, caret),
-                faded(TEXT.get(), alpha),
-            );
-        }
-    });
+    let mut look = field::view::Look::of(faded(TEXT.get(), alpha), faded(FAINT.get(), alpha));
+    look.selection = faded(look.selection, alpha);
+    super::draw_field(
+        at,
+        f,
+        field::Place {
+            left: rect.x + pad,
+            middle: rect.center_y(),
+            width: rect.width - 2.0 * pad,
+            style: Style::one(size, MANROPE),
+        },
+        words.placeholder(),
+        &look,
+    );
 }
 
 /// The mini form's box: a 16 px rounded square and its check, `text.dim`.
@@ -1098,11 +1074,11 @@ impl Group {
         if focused(Item::TaskAdd) {
             ring(f, add, ADD_RADIUS);
         }
-        if let (Some(rect), Some(open)) = (laid.field, super::field()) {
+        if let Some(rect) = laid.field {
             field(
                 f,
+                &At::Group(self.bar.clone()),
                 at(rect),
-                (&open.text, open.focused),
                 (TITLE, FIELD_RADIUS, FIELD_PAD),
                 self.words,
                 alpha,
@@ -1191,6 +1167,16 @@ impl Group {
             _ => None,
         });
         match event {
+            // A press held in the field selects as it drags.
+            mouse::Event::CursorMoved { .. } if super::field_drag(None).is_some() => {
+                super::field_drag(at)
+                    .unwrap_or(false)
+                    .then(canvas::Action::request_redraw)
+            }
+            mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                super::field_release();
+                None
+            }
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
                 let at = at?;
                 let bar_at = self.in_bar(at, size);
@@ -1256,8 +1242,15 @@ impl Group {
                             rect: self.in_bar_rect(r, size),
                         });
                     }
-                    // In the field: it takes the keyboard again.
-                    Some((Over::Field, _)) => super::open_field(At::Group(self.bar.clone())),
+                    // In the field: it takes the keyboard again, its caret
+                    // where the press is.
+                    Some((Over::Field, _)) => {
+                        let field = At::Group(self.bar.clone());
+                        super::open_field(field.clone());
+                        if let Some(at) = at {
+                            super::field_press(&field, at);
+                        }
+                    }
                     _ => popover::event(popover::Event::PressElsewhere),
                 }
                 Some(canvas::Action::request_redraw().and_capture())
@@ -1350,6 +1343,10 @@ impl canvas::Program<Message> for Group {
                 let mine = super::field_key(&At::Group(self.bar.clone()), &pressed)
                     || popover::key(key, *modifiers, text.as_deref());
                 mine.then(|| canvas::Action::request_redraw().and_capture())
+            }
+            iced::Event::InputMethod(event) => {
+                super::field_input_method(&At::Group(self.bar.clone()), event)
+                    .then(|| canvas::Action::request_redraw().and_capture())
             }
             _ => None,
         }

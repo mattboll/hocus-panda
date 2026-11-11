@@ -657,8 +657,7 @@ pub fn act(id: window::Id, at: usize) {
 /// The list turns into `def`'s targets.
 fn enter_step(open: &mut Open, def: &'static Def, words: Words) {
     tracing::debug!(action = def.id, "the palette asks for a target");
-    let before = open.query.text().to_owned();
-    open.query.clear();
+    let before = open.query.take();
     open.step = Some(StepOpen { def, before });
     open.relist(words);
 }

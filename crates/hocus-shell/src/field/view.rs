@@ -311,16 +311,6 @@ impl Laid {
             .then(|| self.origin.y + n as f32 * self.style.line + self.style.line / 2.0)
     }
 
-    /// The rows in view: where each starts and ends across, and its
-    /// middle.
-    pub fn rows_in_view(&self) -> impl Iterator<Item = (f32, f32, f32)> + '_ {
-        self.rows.iter().enumerate().filter_map(|(n, row)| {
-            let middle = self.middle(n)?;
-            let x0 = self.origin.x - self.scroll.across;
-            Some((x0, middle, x0 + self.measure(&self.shown[row.clone()])))
-        })
-    }
-
     /// Where the caret is drawn, a little taller than the text.
     pub fn caret_rect(&self) -> Rectangle {
         let row = self.row_of(self.caret);

@@ -102,7 +102,7 @@ impl Lines for OneLine {
 }
 
 /// A field on a surface. See the module.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     field: Field,
     /// Where it was last drawn.
@@ -143,6 +143,13 @@ impl Entry {
     /// `text` in place of what it holds, its caret at its end.
     pub fn set(&mut self, text: &str) {
         self.field.set(text);
+    }
+
+    /// Its text taken (kept aside, sent): it empties and forgets its
+    /// history.
+    pub fn take(&mut self) -> String {
+        self.clicks = None;
+        self.field.take()
     }
 
     /// Emptied, what it held overwritten and its history forgotten.
@@ -240,6 +247,12 @@ impl Entry {
         let held = self.pressed();
         self.field.release();
         held
+    }
+
+    /// Its selection gone, the caret where it is: a press in another
+    /// field of its surface.
+    pub fn deselect(&mut self) {
+        self.field.deselect();
     }
 
     /// The place in its text nearest `p`, as it was last drawn.

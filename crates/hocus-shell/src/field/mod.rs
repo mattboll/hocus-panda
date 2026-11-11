@@ -129,11 +129,14 @@ pub trait Lines {
 }
 
 /// A text's lines between its line breaks, each character one unit wide:
-/// for a field not laid out yet.
+/// for a field on lines not laid out yet. No surface has one since the
+/// secretary's drawer went.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct Paragraphs<'a>(pub &'a str);
 
 impl Paragraphs<'_> {
+    #[allow(dead_code)]
     fn ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
         let mut start = 0;
         self.0.split('\n').map(move |p| {
@@ -317,10 +320,6 @@ impl Field {
 
     pub fn caret(&self) -> usize {
         self.caret
-    }
-
-    pub fn anchor(&self) -> usize {
-        self.anchor
     }
 
     /// What is selected, in order; empty if nothing.

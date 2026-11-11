@@ -756,9 +756,15 @@ fn the_caret_moves_in_the_field_and_the_list_follows_what_is_typed_there() -> an
         rows(&shows).iter().any(|r| r.contains("Bureau de droite")),
         "{shows}"
     );
-    // It all selected: what is typed replaces it; Ctrl+Z brings it back.
+    // It all selected: Ctrl+C copies it, what is typed replaces it, and
+    // Ctrl+Z brings it back.
     let from = bed.mark();
     chord(&mut bed.hp, &[KEY_LEFTCTRL, key_of('a').context("a")?]);
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, key_of('c').context("c")?]);
+    let copied = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.clipboard().as_deref() == Some("burea"))?;
+    anyhow::ensure!(copied, "the clipboard holds {:?}", bed.hp.clipboard());
     bed.type_text("f")?;
     bed.shows_after(from, "query=\"f\"")?;
     let from = bed.mark();
