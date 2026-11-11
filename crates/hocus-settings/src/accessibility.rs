@@ -63,6 +63,7 @@ fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
 }
 
 /// The page's settings, in its order.
+// Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {

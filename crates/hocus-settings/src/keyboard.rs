@@ -151,6 +151,7 @@ const fn a(
     }
 }
 
+// Over 200 lines: a table, one entry per action that takes a shortcut.
 fn actions() -> Vec<Action> {
     let mut list = vec![
         a(

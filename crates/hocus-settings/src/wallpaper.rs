@@ -79,6 +79,7 @@ fn page(key: &'static [&'static str]) -> Places {
 
 /// The page's settings, in its order: what the search finds; the page
 /// draws them itself, but `fit` and `color`, rows of the window's.
+// Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
