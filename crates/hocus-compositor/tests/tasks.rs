@@ -938,3 +938,20 @@ fn the_group_goes_14_px_under_today_when_today_lists_something() -> anyhow::Resu
     bed.shot("under-today")?;
     Ok(())
 }
+
+/// The popover in its main state (seven tasks, from "+ 4 autres"), shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("kit", "1920x1080", WITH_TASKS, SEVEN)? else {
+        return Ok(());
+    };
+    bed.group_after(0, &["form=full", "more=+ 4 autres"])?;
+    let from = bed.mark();
+    bed.click_item("TasksMore")?;
+    bed.popover()?;
+    bed.logged_after(from, &["the tasks' popover shows it", "count=7"])?;
+    bed.hp.pointer_move(400.0, 300.0);
+    common::popover_shot(&mut bed.hp, "tasks")
+}

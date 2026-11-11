@@ -8,7 +8,7 @@
 
 use std::sync::{Mutex, PoisonError};
 
-use hocus_a11y::{Act, Node, Rect, Role};
+use hocus_a11y::{Node, Rect};
 use iced::{Rectangle, window};
 
 /// What a popover shows, for screen readers.
@@ -52,34 +52,6 @@ pub fn of(surface: window::Id) -> Option<Rows> {
 /// A rectangle of the popover's, as a node's bounds.
 pub fn at(rect: Rectangle) -> Option<Rect> {
     Some(Rect::new(rect.x, rect.y, rect.width, rect.height))
-}
-
-/// A target's key: its debug form.
-pub fn key(target: impl std::fmt::Debug) -> String {
-    format!("{target:?}")
-}
-
-/// A row the keyboard's ring goes to (`target`), `Enter` acting on it.
-pub fn act(
-    target: impl std::fmt::Debug,
-    role: Role,
-    name: impl Into<String>,
-    rect: Rectangle,
-) -> Node {
-    Node::new(key(target), role, name)
-        .bounds(at(rect))
-        .act(Act::Click)
-}
-
-/// A line of text that nothing holds: a note, a section's label.
-pub fn line(text: impl Into<String>) -> Node {
-    let text = text.into();
-    Node::new(format!("line:{text}"), Role::Label, text)
-}
-
-/// The keys of `targets`, the ring's order.
-pub fn order<T: std::fmt::Debug>(targets: impl IntoIterator<Item = T>) -> Vec<String> {
-    targets.into_iter().map(key).collect()
 }
 
 /// The `Tab`s that take the ring from `focus` to `to` in `order` (round

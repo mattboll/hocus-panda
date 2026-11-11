@@ -510,17 +510,19 @@ fn after_6_s_the_capture_goes_to_the_history() -> anyhow::Result<()> {
         "{shows}"
     );
     // Its first action, "Annoter".
-    let items = bed.logged_since(mark, "the history's items")?;
+    let items = bed.logged_since(mark, "\"history:Action(")?;
     let popover = bed.hp.popover_surfaces()[0].1;
     let at = items
-        .split_whitespace()
-        .find_map(|w| {
-            let w = w.strip_prefix("items=").unwrap_or(w);
-            let (who, xy) = w.rsplit_once('@')?;
-            who.starts_with("Action(").then_some(())?;
-            who.ends_with(",0)").then_some(())?;
-            let (x, y) = xy.split_once(',')?;
-            Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))
+        .find(" shows {")
+        .and_then(|i| serde_json::from_str::<serde_json::Value>(&items[i + 7..]).ok())
+        .and_then(|dump| {
+            let (_, place) = dump
+                .as_object()?
+                .iter()
+                .find(|(id, _)| id.starts_with("history:Action(") && id.ends_with(",0)"))?;
+            let at = place.get("at")?;
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
         })
         .context("no action")?;
     let mark = bed.mark();

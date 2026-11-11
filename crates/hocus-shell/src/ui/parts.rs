@@ -164,17 +164,42 @@ pub fn label_as<'a, M: 'static>(
 /// `letter-spacing`, which iced's text has not: a letter a widget), as
 /// many as fit in `room`.
 pub fn spaced<'a, M: 'a>(word: &str, size: f32, colour: Color, room: f32) -> El<'a, M> {
-    let spacing = 0.08 * size;
+    spaced_in(word, size, MANROPE_BOLD, colour, 0.08, room)
+}
+
+/// `word` in `font` at `size`, its letters `em` apart (CSS's
+/// `letter-spacing`), all of it.
+pub fn spaced_by<'a, M: 'a>(
+    word: &str,
+    size: f32,
+    font: iced::Font,
+    colour: Color,
+    em: f32,
+) -> El<'a, M> {
+    spaced_in(word, size, font, colour, em, f32::INFINITY)
+}
+
+/// `word` in `font` at `size`, its letters `em` apart, as many as fit in
+/// `room`.
+fn spaced_in<'a, M: 'a>(
+    word: &str,
+    size: f32,
+    font: iced::Font,
+    colour: Color,
+    em: f32,
+    room: f32,
+) -> El<'a, M> {
+    let spacing = em * size;
     let mut letters = row![].spacing(spacing);
     let mut x = 0.0;
     for ch in word.chars() {
         let ch = ch.to_string();
-        let width = kit::measure(&ch, size, MANROPE_BOLD);
+        let width = kit::measure(&ch, size, font);
         if x + width > room {
             break;
         }
         x += width + spacing;
-        letters = letters.push(said(ch, size, MANROPE_BOLD, colour));
+        letters = letters.push(said(ch, size, font, colour));
     }
     letters.into()
 }
@@ -391,6 +416,50 @@ pub fn drawn_out<'a, M: 'a>(
         .into()
 }
 
+/// A canvas `width` × `height` drawn by `draw` (its frame, its size, and
+/// whether the pointer is over it), which may draw `out` px past its
+/// bounds: in a button, which draws it again as the pointer comes and
+/// goes (a swatch's ring under the pointer).
+pub fn drawn_lit<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    out: f32,
+    draw: impl Fn(&mut canvas::Frame, Size, bool) + 'a,
+) -> El<'a, M> {
+    canvas(Lit(Box::new(draw), out))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// What draws a canvas, as the pointer is over it or not.
+type DrawLit<'a> = Box<dyn Fn(&mut canvas::Frame, Size, bool) + 'a>;
+
+/// What draws a canvas under the pointer, and how far past its bounds.
+struct Lit<'a>(DrawLit<'a>, f32);
+
+impl<M> canvas::Program<M> for Lit<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let out = self.1;
+        let reach = Rectangle::new(
+            Point::new(-out, -out),
+            Size::new(bounds.width + 2.0 * out, bounds.height + 2.0 * out),
+        );
+        let mut f = canvas::Frame::with_bounds(renderer, reach);
+        (self.0)(&mut f, bounds.size(), cursor.is_over(bounds));
+        vec![f.into_geometry()]
+    }
+}
+
 /// What draws a canvas: its frame, its size.
 type Draw<'a> = Box<dyn Fn(&mut canvas::Frame, Size) + 'a>;
 
@@ -442,6 +511,59 @@ pub fn polyline(
         }
     });
     f.stroke(&path, stroke(width * scale, colour));
+}
+
+/// A canvas `width` × `height` drawn by `draw` at the moment it draws
+/// (its frame, its size, the moment), drawn again each frame while
+/// `playing` says so then (a panda playing its mood): its surface alone.
+pub fn moving<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    draw: impl Fn(&mut canvas::Frame, Size, Instant) + 'a,
+    playing: impl Fn(Instant) -> bool + 'a,
+) -> El<'a, M> {
+    canvas(Moving(Box::new(draw), Box::new(playing)))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// What draws a canvas at a moment, and whether it moves then.
+type DrawAt<'a> = Box<dyn Fn(&mut canvas::Frame, Size, Instant) + 'a>;
+type Playing<'a> = Box<dyn Fn(Instant) -> bool + 'a>;
+
+struct Moving<'a>(DrawAt<'a>, Playing<'a>);
+
+impl<M> canvas::Program<M> for Moving<'_> {
+    /// The moment of the frame it draws.
+    type State = Option<Instant>;
+
+    fn update(
+        &self,
+        state: &mut Option<Instant>,
+        event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<M>> {
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        *state = Some(*now);
+        (self.1)(*now).then(canvas::Action::request_redraw)
+    }
+
+    fn draw(
+        &self,
+        state: &Option<Instant>,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut f = canvas::Frame::new(renderer, bounds.size());
+        (self.0)(&mut f, bounds.size(), state.unwrap_or_else(Instant::now));
+        vec![f.into_geometry()]
+    }
 }
 
 /// A spinner, turning: its surface alone draws again each frame.

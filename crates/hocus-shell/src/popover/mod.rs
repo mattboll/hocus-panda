@@ -330,18 +330,27 @@ impl Item {
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
             Self::Desktop { .. } | Self::WindowsMore => desktop::opening(),
-            Self::Keyboard | Self::Agent(_) | Self::Secretary => {}
-            Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
-            Self::Notifications => crate::notifications::history_open(true),
+            Self::Secretary => briefing::opening(),
+            Self::Keyboard | Self::Agent(_) => {}
+            Self::Sources | Self::AnotherTool | Self::Plug(_) => agents::opening(),
+            Self::Decline => {}
+            Self::Notifications => {
+                history::opening();
+                crate::notifications::history_open(true);
+            }
             Self::Clipboard => clipboard::opening(),
             Self::User => session::opening(),
             Self::InUse => in_use::opening(),
             Self::Menu | Self::TaskAdd | Self::Task(_) => {}
-            Self::Meeting | Self::Join | Self::MeetingMark => {}
+            Self::MeetingMark => meeting::opening(),
+            Self::Meeting | Self::Join => {}
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
             Self::Tasks | Self::TasksMore => tasks::opening(),
-            Self::DayChoose => crate::setup::opening(),
+            Self::DayChoose => {
+                setup::opening();
+                crate::setup::opening();
+            }
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
             Self::Music => music::opening(),

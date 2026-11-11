@@ -27,15 +27,13 @@ use iced::{
 };
 
 pub(crate) use app::app_tile;
-pub(crate) use input::{
-    Input, Pointer, awaited, cycle, first_control, input, keys, opened_by_keyboard, step,
-};
-pub(crate) use list::{Clip, List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
+pub(crate) use input::{awaited, cycle, first_control, keys, opened_by_keyboard, step};
+pub(crate) use list::{List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
 pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
 pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero_once};
 
 use crate::levels::{
-    draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, cell, rgb},
+    draw::{ACCENT, FAINT, LINE, MANROPE, TEXT, VALUE, cell, rgb},
     model::Words,
 };
 use crate::theme::Ink;
@@ -182,20 +180,6 @@ pub(crate) fn text_in(font: iced::Font, mut text: canvas::Text) -> canvas::Text 
     text
 }
 
-/// The header's title, on its left.
-pub(crate) fn title(f: &mut Frame, title: &str) {
-    f.fill_text(text_in(
-        MANROPE_BOLD,
-        text(
-            title.to_owned(),
-            Point::new(LEFT, HEADER_MIDDLE),
-            TITLE,
-            TEXT.get(),
-            Alignment::Left,
-        ),
-    ));
-}
-
 /// `word`'s letters and their places from the content's left, spaced as a
 /// label's, `width` measuring each in the label's font.
 pub(crate) fn spaced(word: &str, mut width: impl FnMut(&str) -> f32) -> Vec<(char, f32)> {
@@ -207,49 +191,6 @@ pub(crate) fn spaced(word: &str, mut width: impl FnMut(&str) -> f32) -> Vec<(cha
             (ch, at)
         })
         .collect()
-}
-
-/// A label's letters, spaced, measured in its font.
-pub(crate) fn label_letters(word: &str) -> Vec<(char, f32)> {
-    spaced(word, |ch| measure(ch, LABEL, MANROPE_BOLD))
-}
-
-/// A label's `letters`, their line centred on `middle`.
-pub(crate) fn label(f: &mut Frame, letters: &[(char, f32)], middle: f32) {
-    for (ch, x) in letters {
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                ch.to_string(),
-                Point::new(*x, middle),
-                LABEL,
-                DIM.get(),
-                Alignment::Left,
-            ),
-        ));
-    }
-}
-
-/// `lines` from `top` at `x`, `size` px on lines `height` em apart, in
-/// `colour`.
-pub(crate) fn lines(
-    lines: &[String],
-    (x, top): (f32, f32),
-    size: f32,
-    height: f32,
-    colour: Color,
-) -> impl Iterator<Item = canvas::Text> {
-    lines.iter().enumerate().map(move |(i, line)| {
-        let mut said = text(
-            line.clone(),
-            Point::new(x, top + (i as f32 + 0.5) * size * height),
-            size,
-            colour,
-            Alignment::Left,
-        );
-        said.line_height = LineHeight::Relative(height);
-        said
-    })
 }
 
 /// `value` rounded, right-aligned on `at`, in tabular figures: each digit
@@ -292,7 +233,7 @@ const SLIDE: Duration = Duration::from_millis(160);
 const SWITCH_ASKED_FOR: Duration = Duration::from_secs(3);
 
 /// The header's switch: what it asked and when, and its knob's slide.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Switch {
     asked: Option<(bool, Instant)>,
     /// From where (0 off, 1 on), since when.

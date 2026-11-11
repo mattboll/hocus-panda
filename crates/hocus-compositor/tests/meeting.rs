@@ -821,3 +821,27 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// The mini form's popover in its main state (a meeting in 8 min, a call,
+/// what comes next), shot under `HOCUS_KIT_SHOTS` (#772's side-by-sides;
+/// see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        "14:00:00",
+        &day("now+8m", "now+38m"),
+        FormChoice::Mini,
+    )?;
+    bed.card_since(0, &["look=Soon", "form=Some(Mini)"])?;
+    let from = bed.mark();
+    common::over(&mut bed.hp, (1884.0, 84.0), MEETING_NAMESPACE)?;
+    bed.logged_since(from, "the meeting's popover shows it", &[])?;
+    bed.hp
+        .dispatch_until(common::WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+    common::popover_shot(&mut bed.hp, "meeting")
+}

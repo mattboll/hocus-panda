@@ -28,28 +28,38 @@
 //! arrows through a list's rows, `Space` ticks, `Enter` chooses, `Esc`
 //! goes back a step, then closes.
 
+use std::sync::{Mutex, PoisonError};
+
+use hocus_a11y::Role;
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+    Color, Element, Length, Point, Rectangle, Size,
+    alignment::{Horizontal, Vertical},
+    keyboard,
     widget::{
-        canvas::{self, Frame, Geometry, Path, Stroke},
-        text::Alignment,
+        Space, Stack, button,
+        canvas::{self, Frame, Path, Stroke},
+        container, pin,
     },
     window,
 };
 
-use super::{
-    Event as Seen, Pressed, event,
-    kit::{self, Input, Pointer},
-};
+use super::{Event as Seen, Pressed, event, kit};
 use crate::theme::Ink;
 use crate::{
-    field::{self, Place, Took, view::Style},
-    levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, faded, rgb, ring},
+    field::{self, Took, view::Style},
+    levels::draw::{DIM, FAINT, LINE as EM, MANROPE, MANROPE_BOLD, TEXT, faded, rgb},
     setup::{
         self, CHOICES, Calendars, Field, Online, PALETTE, Refusal, Show, Step, Unfold, Words,
         card::{BLUE, GREEN, INK},
     },
+    ui::{
+        self, Around, control,
+        parts::{drawn, drawn_lit, moving, spaced},
+        style::{self, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 pub const WIDTH: u32 = 320;
 const BORDER: f32 = 1.0;
@@ -114,7 +124,7 @@ const STAR: Ink = Ink::Dark(rgb(0xF5C46E));
 
 /// What can be acted on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub enum Target {
     Back,
     Close,
     /// Google's row with no account: Online Accounts' panel.
@@ -137,6 +147,11 @@ enum Target {
 }
 
 impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("setup:{self:?}").replace(' ', "")
+    }
+
     /// Whether it is a list's row, which the arrows go through.
     fn row(self) -> bool {
         matches!(
@@ -800,898 +815,873 @@ pub struct Panel {
     pub motion: bool,
 }
 
+/// What it keeps while it is open.
 #[derive(Debug, Default)]
-pub struct State {
-    pointer: Pointer<u8>,
-    over: Option<Target>,
+struct Ui {
     focus: Option<Target>,
-    laid: Laid,
-    /// The address as last read, for screen readers.
-    address: String,
-    /// The field a press is held in: a drag selects.
-    pressed: Option<Field>,
+    /// The step last shown: a new one puts the keyboard on its first field.
+    step: Option<Step>,
     said: Option<String>,
-    targets_said: Option<String>,
 }
 
-impl State {
-    fn target(&self, at: Point) -> Option<Target> {
-        // The last laid out on top: a colour over its calendar's row, an
-        // option over what is under it.
-        self.laid
-            .targets
-            .iter()
-            .rev()
-            .filter(|(t, _)| !matches!(t, Target::Calendar(_)))
-            .find(|(_, r)| r.contains(at))
-            .or_else(|| self.laid.targets.iter().find(|(_, r)| r.contains(at)))
-            .map(|(t, _)| *t)
-    }
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
-    fn order(&self) -> Vec<Target> {
-        self.laid.targets.iter().map(|(t, _)| *t).collect()
-    }
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+/// It opens: nothing holds the keyboard yet.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        if let iced::Event::InputMethod(event) = event {
-            let Some(Target::Field(field)) = state.focus else {
-                return None;
-            };
-            return setup::edit(field, |entry| entry.input_method(event))
-                .draws()
-                .then(|| canvas::Action::request_redraw().and_capture());
-        }
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(_) => {
-                for pressed in kit::keys(self.id) {
-                    let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-                }
-                self.refresh(state);
-                None
-            }
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
-    }
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A control pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it (a field: the keyboard).
+    Focus(Target),
+    /// What a field took of the pointer, a key or an input method.
+    Took(Field, Took),
+    /// `Escape`: a field lets the keyboard go and the step goes back; else
+    /// back a step, then closed.
+    Escape,
+    /// `Enter` in a field: signing in.
+    Enter,
+    /// `↓` (`true`) or `↑`: through a list's rows.
+    Arrow(bool),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// What it shows changed under the view.
+    Stale,
+}
 
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let f = &mut frame;
-        let laid = &state.laid;
-        let lit = |t: Target| state.over == Some(t);
-        let focused = |t: Target| state.focus == Some(t);
-        // The header.
-        let title_x = if laid.back {
-            let rect = back_rect();
-            square(f, rect, lit(Target::Back), focused(Target::Back));
-            arrow(f, rect.center());
-            LEFT + BUTTON_SQUARE + 4.0
-        } else {
-            LEFT
-        };
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                laid.title.to_owned(),
-                Point::new(title_x, HEADER_TOP + HEADER / 2.0),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        let close = close_rect();
-        square(f, close, lit(Target::Close), focused(Target::Close));
-        cross(f, close.center());
-        for part in &laid.parts {
-            self.part(f, state, part);
-        }
-        self.tell_readers(state);
-        vec![frame.into_geometry()]
-    }
+/// The popover on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (words, motion) = (panel.words, panel.motion);
+    Around::new(panel.id, build(words, motion), handle, Msg::Stale)
+        .rebuild(move || build(words, motion))
+        .keys(key)
+        .subtitle(setup::with(|flow| title_of(flow.step, words).to_owned()))
+        .press(Msg::Pressed)
+        .on_glass(panel.glass)
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        match state.over {
-            Some(Target::Field(_)) => mouse::Interaction::Text,
-            Some(_) => mouse::Interaction::Pointer,
-            None => mouse::Interaction::default(),
-        }
+fn title_of(step: Step, words: Words) -> &'static str {
+    match step {
+        Step::Accounts => words.add_account(),
+        Step::Planka => words.planka(),
+        Step::Show => words.what_to_show(),
     }
 }
 
-impl Panel {
-    /// What it shows, read afresh while it is open.
-    fn refresh(&self, state: &mut State) {
-        if !super::with(|c| c.is_open(self.id)) {
-            return;
-        }
-        let read = setup::with(|flow| {
-            (
-                lay_out(flow, self.words, measure),
-                flow.address.text().to_owned(),
-            )
-        });
-        let Some((laid, address)) = read else {
-            return;
-        };
+/// Its keys before the kit's: `Escape`; in a field, `Enter`; the arrows
+/// through a list's rows.
+fn key(pressed: &Pressed) -> Option<Msg> {
+    use keyboard::{Key as K, key::Named};
+    let in_field = ui(|ui| matches!(ui.focus, Some(Target::Field(_))));
+    match &pressed.key {
+        K::Named(Named::Escape) => Some(Msg::Escape),
+        K::Named(Named::Enter) if in_field => Some(Msg::Enter),
+        K::Named(Named::ArrowDown) if !in_field => Some(Msg::Arrow(true)),
+        K::Named(Named::ArrowUp) if !in_field => Some(Msg::Arrow(false)),
+        _ => None,
+    }
+}
+
+/// Its content, as the flow is now.
+fn build<'a>(words: Words, motion: bool) -> El<'a> {
+    let Some(laid) = setup::with(|flow| lay_out(flow, words, measure)) else {
+        return Space::new().into();
+    };
+    ui(|ui| {
         // A new step: the keyboard on its first field, else on nothing.
-        if laid.step != state.laid.step {
-            state.focus = match laid.step {
+        if laid.step != ui.step {
+            ui.focus = match laid.step {
                 Some(Step::Planka) => Some(Target::Field(Field::Address)),
                 _ => None,
             };
+            ui.step = laid.step;
         }
-        state.laid = laid;
-        state.address = address;
-        if let Some(focus) = state.focus
-            && !state.order().contains(&focus)
+        if let Some(focus) = ui.focus
+            && !laid.targets.iter().any(|(t, _)| *t == focus)
         {
-            state.focus = None;
+            ui.focus = None;
         }
-        // Its height follows what it shows.
-        super::refit(super::Item::DayChoose);
-        // The header's buttons' names, for screen readers to come (§11).
-        let names = if state.laid.back {
-            format!("«{}» «{}»", self.words.back(), self.words.close())
-        } else {
-            format!("«{}»", self.words.close())
-        };
-        let said = format!(
-            "{} focus={} title=«{}» buttons={names}",
-            state.laid.said,
-            state.focus.map_or("none".to_owned(), |t| format!("{t:?}")),
-            state.laid.title,
-        );
-        if state.said.as_ref() != Some(&said) {
-            tracing::debug!("the sources' popover shows it: {said}");
-            state.said = Some(said);
-        }
-        let targets: Vec<String> = state
-            .laid
-            .targets
-            .iter()
-            .map(|(t, r)| {
-                let c = r.center();
-                format!(
-                    "{}@{:.0},{:.0}",
-                    format!("{t:?}").replace(' ', ""),
-                    c.x,
-                    c.y
-                )
-            })
-            .collect();
-        let targets = targets.join(" ");
-        if state.targets_said.as_ref() != Some(&targets) {
-            tracing::debug!(targets = %targets, "the sources' popover's targets");
-            state.targets_said = Some(targets);
-        }
-    }
+        say(&laid, words, ui);
+        content(&laid, words, ui.focus, motion)
+    })
+}
 
-    /// What it shows, for screen readers (crate::a11y::rows): its header's
-    /// buttons, then its parts by their kinds; the token's field never
-    /// says what is typed.
-    fn tell_readers(&self, state: &State) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::{Node, Role};
-        let laid = &state.laid;
-        let fr = self.words.back() == "Retour";
-        let rect_of = |t: Target| laid.targets.iter().find(|(x, _)| *x == t).map(|(_, r)| *r);
-        let mut nodes = Vec::new();
-        if laid.back {
-            nodes.push(rows::act(
-                Target::Back,
-                Role::Button,
-                self.words.back(),
-                back_rect(),
-            ));
-        }
-        nodes.push(rows::act(
-            Target::Close,
-            Role::Button,
-            self.words.close(),
-            close_rect(),
-        ));
-        let mut caption: Option<&str> = None;
-        for part in &laid.parts {
-            match part {
-                Part::Kind {
-                    rect,
-                    target,
-                    name,
-                    lines,
-                    ..
-                } => nodes.push(match target {
-                    Some(t) => rows::act(*t, Role::Button, *name, *rect).describe(lines.join(" ")),
-                    None => rows::line(format!("{name}, {}", lines.join(" "))),
-                }),
-                Part::Account { rect, target, name } => {
-                    nodes.push(rows::act(*target, Role::Button, name.clone(), *rect));
-                }
-                Part::Text { lines, .. } => nodes.push(rows::line(lines.join(" "))),
-                Part::Caption { text, .. } => {
-                    caption = Some(text);
-                    nodes.push(rows::line(*text));
-                }
-                Part::Field {
-                    field,
-                    rect,
-                    refused,
-                } => {
-                    let name = caption.unwrap_or_default().to_owned();
-                    let node = match field {
-                        Field::Token => {
-                            Node::new(rows::key(Target::Field(*field)), Role::PasswordField, name)
-                        }
-                        Field::Address => {
-                            Node::new(rows::key(Target::Field(*field)), Role::TextField, name)
-                                .value(state.address.clone())
-                        }
-                    };
-                    nodes.push(
-                        node.bounds(rows::at(*rect))
-                            .act(hocus_a11y::Act::Focus)
-                            .describe(if *refused {
-                                if fr { "Refusé" } else { "Refused" }
-                            } else {
-                                ""
-                            }),
-                    );
-                }
-                Part::Button {
-                    rect,
-                    target,
-                    word,
-                    busy,
-                    ..
-                } => nodes.push(match target {
-                    Some(t) => rows::act(*t, Role::Button, *word, *rect).disabled(*busy),
-                    None => rows::line(*word),
-                }),
-                Part::Calendar {
-                    index,
-                    rect,
-                    name,
-                    colour,
-                    shown,
-                    featured,
-                    read_only,
-                } => {
-                    let mut node = rows::act(
-                        Target::Calendar(*index),
-                        Role::CheckBox,
-                        name.clone(),
-                        *rect,
-                    )
-                    .checked(*shown);
-                    if *read_only {
-                        node = node.describe(if fr { "lecture seule" } else { "read only" });
-                    }
-                    nodes.push(node);
-                    if let Some(at) = rect_of(Target::Swatch(*index)) {
-                        let word = if fr { "Couleur" } else { "Colour" };
-                        nodes.push(rows::act(
-                            Target::Swatch(*index),
-                            Role::Button,
-                            format!("{word} {}, {name}", colour + 1),
-                            at,
-                        ));
-                    }
-                    if let Some(at) = rect_of(Target::Star(*index)) {
-                        let word = self.words.feature();
-                        nodes.push(
-                            rows::act(
-                                Target::Star(*index),
-                                Role::ToggleButton,
-                                format!("{word} {name}"),
-                                at,
-                            )
-                            .checked(*featured),
-                        );
-                    }
-                }
-                Part::Colours { index, chosen, .. } => {
-                    let word = if fr { "Couleur" } else { "Colour" };
-                    let colours: Vec<(Target, Rectangle)> = laid
-                        .targets
-                        .iter()
-                        .filter(|(t, _)| matches!(t, Target::Colour(i, _) if i == index))
-                        .copied()
-                        .collect();
-                    for (n, (t, r)) in colours.iter().enumerate() {
-                        let Target::Colour(_, j) = t else {
-                            continue;
-                        };
-                        nodes.push(
-                            rows::act(*t, Role::RadioButton, format!("{word} {}", j + 1), *r)
-                                .checked(j == chosen)
-                                .set(n + 1, colours.len()),
-                        );
-                    }
-                }
-                Part::Choice {
-                    target,
-                    rect,
-                    label,
-                    value,
-                } => {
-                    nodes
-                        .push(rows::act(*target, Role::Button, *label, *rect).value(value.clone()));
-                }
-                Part::Option {
-                    target,
-                    rect,
-                    name,
-                    chosen,
-                } => {
-                    nodes.push(
-                        rows::act(*target, Role::RadioButton, name.clone(), *rect).checked(*chosen),
-                    );
-                }
-            }
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: Some(laid.title.to_owned()),
-                nodes,
-                order: rows::order(state.order()),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    fn act(state: &mut State, target: Option<Target>) {
-        let Some(target) = target else {
-            return;
-        };
-        tracing::debug!(?target, "the sources' popover acts");
-        match target {
-            Target::Back | Target::Cancel => {
-                setup::back();
-            }
-            Target::Close => {
-                let shows = setup::with(|flow| flow.step == Step::Show).unwrap_or(false);
-                if shows {
-                    // ✕ in step 3 keeps the account with what is ticked.
-                    setup::done();
-                } else {
-                    event(Seen::Chosen);
-                }
-            }
-            Target::Online => {
-                if let Some(effect) = setup::open_panel() {
-                    super::send(vec![effect]);
-                }
-            }
-            Target::Account(i) => setup::choose_google(i),
-            Target::Planka => setup::choose_planka(),
-            Target::Field(_) => state.focus = Some(target),
-            Target::SignIn => setup::sign_in(),
-            Target::Calendar(i) => setup::toggle(i),
-            Target::Swatch(i) => setup::unfold(Unfold::Colours(i)),
-            Target::Star(i) => setup::feature(i),
-            Target::Colour(i, c) => setup::colour(i, c),
-            Target::Board => setup::unfold(Unfold::Boards),
-            Target::BoardOption(i) => setup::board(i),
-            Target::Choice(which) => setup::unfold(Unfold::Columns(which)),
-            Target::Option(which, i) => setup::column(which, i),
-            Target::Done => setup::done(),
-        }
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| state.target(at));
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                // A press held in a field selects as it drags.
-                if let Some(field) = state.pressed {
-                    return at
-                        .is_some_and(|at| setup::edit(field, |e| drag(e, at)).draws())
-                        .then_some(redraw)
-                        .flatten();
-                }
-                state.pointer.moved();
-                if state.over == target {
-                    return None;
-                }
-                state.over = target;
-                redraw
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                state.over = None;
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                if !matches!(target, Some(Target::Field(_))) {
-                    state.focus = None;
-                }
-                Self::act(state, target);
-                // In a field: its caret where the press is.
-                if let (Some(Target::Field(field)), Some(at)) = (target, at) {
-                    state.pressed = Some(field);
-                    let other = match field {
-                        Field::Address => Field::Token,
-                        Field::Token => Field::Address,
-                    };
-                    setup::edit(other, |entry| {
-                        entry.deselect();
-                        Took::Same
-                    });
-                    setup::edit(field, |entry| {
-                        entry.press(at);
-                        Took::Moved
-                    });
-                }
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                let field = state.pressed.take()?;
-                setup::edit(field, |entry| {
-                    entry.release();
-                    Took::Same
-                });
-                None
-            }
-            _ => None,
-        }
-    }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key as K, key::Named};
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        let modifiers = pressed.modifiers;
-        if let Some(Target::Field(field)) = state.focus {
-            match &pressed.key {
-                K::Named(Named::Escape) => {
-                    state.focus = None;
-                    setup::back();
-                    return redraw;
-                }
-                K::Named(Named::Enter) => {
-                    setup::sign_in();
-                    return redraw;
-                }
-                K::Named(Named::Tab) => {}
-                key => {
-                    let took = setup::edit(field, |entry| {
-                        entry.key(key, modifiers, pressed.text.as_deref())
-                    });
-                    return match took {
-                        Took::No => None,
-                        Took::Same | Took::Paste => Some(canvas::Action::capture()),
-                        Took::Moved | Took::Edited => redraw,
-                    };
-                }
-            }
-        }
-        match &pressed.key {
-            K::Named(Named::Escape) => {
-                if !setup::back() {
-                    event(Seen::Escape);
-                }
-                return Some(canvas::Action::capture());
-            }
-            K::Named(Named::Tab) => {
-                let order = state.order();
-                state.focus = kit::step(&order, state.focus, modifiers.shift());
-            }
-            K::Named(Named::ArrowDown | Named::ArrowUp) => {
-                let rows: Vec<Target> = state.order().into_iter().filter(|t| t.row()).collect();
-                let down = matches!(pressed.key, K::Named(Named::ArrowDown));
-                state.focus = match state.focus.filter(|f| f.row()) {
-                    Some(focus) => kit::cycle(&rows, focus, down),
-                    None => kit::step(&rows, None, !down),
-                };
-            }
-            K::Named(Named::Space) => match state.focus {
-                Some(Target::Calendar(i)) => setup::toggle(i),
-                focus => Self::act(state, focus),
-            },
-            K::Named(Named::Enter) => {
-                let focus = state.focus;
-                Self::act(state, focus);
-            }
-            _ => return None,
-        }
-        redraw
-    }
-
-    fn part(&self, f: &mut Frame, state: &State, part: &Part) {
-        let lit = |t: Option<Target>| t.is_some() && state.over == t;
-        let focused = |t: Option<Target>| t.is_some() && state.focus == t;
-        match part {
-            Part::Kind {
-                rect,
-                target,
-                letter,
-                tint,
-                name,
-                lines,
-                dim,
-                chevron,
-            } => {
-                let alpha = if *dim { 0.5 } else { 1.0 };
-                let fill = if lit(*target) { ROW_HOVER } else { ROW_FILL };
-                f.fill(&kit::rounded(*rect, ROW_RADIUS), fill.get());
-                if focused(*target) {
-                    ring(f, *rect, ROW_RADIUS);
-                }
-                let tile = Rectangle::new(
-                    Point::new(rect.x + TILE_IN, rect.y + TILE_IN),
-                    Size::new(TILE, TILE),
-                );
-                f.fill(
-                    &kit::rounded(tile, 8.0),
-                    faded(Color { a: 0.16, ..*tint }, alpha),
-                );
-                f.fill_text(kit::text_in(
-                    MANROPE_BOLD,
-                    kit::text(
-                        letter.to_string(),
-                        tile.center(),
-                        15.0,
-                        faded(*tint, alpha),
-                        Alignment::Center,
-                    ),
-                ));
-                f.fill_text(kit::text_in(
-                    kit::MANROPE_SEMIBOLD,
-                    kit::text(
-                        (*name).to_owned(),
-                        Point::new(rect.x + NAME_X, rect.y + 19.0),
-                        NAME,
-                        faded(TEXT.get(), alpha),
-                        Alignment::Left,
-                    ),
-                ));
-                for (i, line) in lines.iter().enumerate() {
-                    f.fill_text(kit::text(
-                        line.clone(),
-                        Point::new(rect.x + NAME_X, rect.y + 30.0 + LINE * (i as f32 + 0.5)),
-                        LINE_TEXT,
-                        faded(DIM.get(), alpha),
-                        Alignment::Left,
-                    ));
-                }
-                if *chevron {
-                    chevron_right(
-                        f,
-                        Point::new(rect.x + rect.width - 16.0, rect.y + ROW / 2.0),
-                    );
-                }
-            }
-            Part::Account { rect, target, name } => {
-                let target = Some(*target);
-                if lit(target) {
-                    crate::theme::hover(f, &kit::rounded(*rect, 8.0), ROW_HOVER.get());
-                }
-                if focused(target) {
-                    ring(f, *rect, 8.0);
-                }
-                let room = rect.width - (NAME_X - 4.0) - 28.0;
-                let shown = kit::elide(name, room, |t| measure(t, 13.0, MANROPE));
-                f.fill_text(kit::text(
-                    shown,
-                    Point::new(rect.x + NAME_X - 4.0, rect.center_y()),
-                    13.0,
-                    TEXT.get(),
-                    Alignment::Left,
-                ));
-                chevron_right(f, Point::new(rect.x + rect.width - 12.0, rect.center_y()));
-            }
-            Part::Text {
-                lines,
-                top,
-                size,
-                line,
-                colour,
-                bold,
-            } => {
-                for (i, said) in lines.iter().enumerate() {
-                    let text = kit::text(
-                        said.clone(),
-                        Point::new(LEFT, top + line * (i as f32 + 0.5)),
-                        *size,
-                        *colour,
-                        Alignment::Left,
-                    );
-                    f.fill_text(if *bold {
-                        kit::text_in(kit::MANROPE_SEMIBOLD, text)
-                    } else {
-                        text
-                    });
-                }
-            }
-            Part::Caption { text, top } => {
-                let letters = kit::label_letters(text);
-                kit::label(f, &letters, top + CAPTION_HEIGHT / 2.0);
-                let _ = CAPTION;
-            }
-            Part::Field {
-                field,
-                rect,
-                refused,
-            } => self.field(f, state, *field, *rect, *refused),
-            Part::Button {
-                rect,
-                target,
-                word,
-                look,
-                busy,
-            } => {
-                let enabled = target.is_some() || *busy;
-                let (fill, ink, font) = match look {
-                    Look::Plain => (
-                        if lit(*target) { PLAIN_HOVER } else { PLAIN },
-                        DIM,
-                        kit::MANROPE_SEMIBOLD,
-                    ),
-                    Look::Green => (
-                        if lit(*target) { GREEN_HOVER } else { GREEN },
-                        INK,
-                        MANROPE_BOLD,
-                    ),
-                };
-                let alpha = if enabled { 1.0 } else { 0.45 };
-                f.fill(
-                    &kit::rounded(*rect, BUTTON_RADIUS),
-                    faded(fill.get(), alpha),
-                );
-                if focused(*target) {
-                    ring(f, *rect, BUTTON_RADIUS);
-                }
-                let mut centre = rect.center();
-                if *busy {
-                    let w = measure(word, BUTTON_TEXT, font);
-                    let spin = Point::new(centre.x - (w + 18.0) / 2.0 + 6.0, centre.y);
-                    spinner(f, spin, ink.get(), self.motion);
-                    centre.x += 9.0;
-                }
-                f.fill_text(kit::text_in(
-                    font,
-                    kit::text(
-                        (*word).to_owned(),
-                        centre,
-                        BUTTON_TEXT,
-                        faded(ink.get(), alpha),
-                        Alignment::Center,
-                    ),
-                ));
-            }
-            Part::Calendar {
-                index,
-                rect,
-                name,
-                colour,
-                shown,
-                featured,
-                read_only,
-            } => {
-                let target = Some(Target::Calendar(*index));
-                if lit(target) {
-                    crate::theme::hover(f, &kit::rounded(*rect, 8.0), ROW_HOVER.get());
-                }
-                if focused(target) {
-                    ring(f, *rect, 8.0);
-                }
-                let middle = rect.center_y();
-                tick(f, Point::new(LEFT, middle - BOX / 2.0), *shown);
-                let swatch = swatch_rect(rect.y);
-                let inner = Rectangle::new(
-                    Point::new(swatch.x + 4.0, swatch.y + 4.0),
-                    Size::new(BOX, BOX),
-                );
-                f.fill(&kit::rounded(inner, 4.0), PALETTE_COLOURS[*colour]);
-                let swatch_target = Some(Target::Swatch(*index));
-                if lit(swatch_target) {
-                    f.stroke(
-                        &kit::rounded(swatch, 6.0),
-                        Stroke::default().with_color(DIM.get()).with_width(1.0),
-                    );
-                }
-                if focused(swatch_target) {
-                    ring(f, swatch, 6.0);
-                }
-                let star = star_rect(rect.y);
-                // A star on a calendar not shown counts for nothing: dim.
-                star_mark(f, star.center(), *featured, *shown);
-                let star_target = Some(Target::Star(*index));
-                if lit(star_target) {
-                    f.stroke(
-                        &kit::rounded(star, 6.0),
-                        Stroke::default().with_color(DIM.get()).with_width(1.0),
-                    );
-                }
-                if focused(star_target) {
-                    ring(f, star, 6.0);
-                }
-                let x = star.x + star.width - 4.0 + 10.0;
-                let aside = read_only.then(|| setup::Words::read_only(self.words));
-                let aside_width = aside.map_or(0.0, |a| measure(a, 11.5, MANROPE) + 8.0);
-                let room = RIGHT - x - aside_width;
-                let shown_name = kit::elide(name, room, |t| measure(t, 13.0, MANROPE));
-                f.fill_text(kit::text(
-                    shown_name,
-                    Point::new(x, middle),
-                    13.0,
-                    if *shown { TEXT.get() } else { DIM.get() },
-                    Alignment::Left,
-                ));
-                if let Some(aside) = aside {
-                    f.fill_text(kit::text(
-                        aside.to_owned(),
-                        Point::new(RIGHT, middle),
-                        11.5,
-                        FAINT.get(),
-                        Alignment::Right,
-                    ));
-                }
-            }
-            Part::Colours { index, top, chosen } => {
-                for (c, colour) in PALETTE_COLOURS.iter().enumerate() {
-                    let rect = colour_rect(*top, c);
-                    let centre = rect.center();
-                    f.fill(&Path::circle(centre, SWATCH / 2.0), *colour);
-                    let target = Some(Target::Colour(*index, c));
-                    if c == *chosen || lit(target) {
-                        f.stroke(
-                            &Path::circle(centre, SWATCH / 2.0 + 2.5),
-                            Stroke::default()
-                                .with_color(if c == *chosen { TEXT.get() } else { DIM.get() })
-                                .with_width(1.5),
-                        );
-                    }
-                    if focused(target) {
-                        ring(f, rect, SWATCH / 2.0);
-                    }
-                }
-            }
-            Part::Choice {
-                target,
-                rect,
-                label,
-                value,
-            } => {
-                let target = Some(*target);
-                if lit(target) {
-                    crate::theme::hover(f, &kit::rounded(*rect, 8.0), ROW_HOVER.get());
-                }
-                if focused(target) {
-                    ring(f, *rect, 8.0);
-                }
-                let middle = rect.center_y();
-                f.fill_text(kit::text(
-                    (*label).to_owned(),
-                    Point::new(LEFT, middle),
-                    13.0,
-                    DIM.get(),
-                    Alignment::Left,
-                ));
-                let label_width = measure(label, 13.0, MANROPE) + 12.0;
-                let room = CONTENT - label_width - 18.0;
-                let shown = kit::elide(value, room, |t| measure(t, 13.0, MANROPE));
-                f.fill_text(kit::text(
-                    shown,
-                    Point::new(RIGHT - 16.0, middle),
-                    13.0,
-                    TEXT.get(),
-                    Alignment::Right,
-                ));
-                chevron_down(f, Point::new(RIGHT - 5.0, middle));
-            }
-            Part::Option {
-                target,
-                rect,
-                name,
-                chosen,
-            } => {
-                let target = Some(*target);
-                if lit(target) {
-                    crate::theme::hover(f, &kit::rounded(*rect, 7.0), ROW_HOVER.get());
-                }
-                if focused(target) {
-                    ring(f, *rect, 7.0);
-                }
-                let middle = rect.center_y();
-                if *chosen {
-                    check(f, Point::new(rect.x + 12.0, middle), GREEN.get(), 12.0);
-                }
-                let room = rect.width - 34.0;
-                let shown = kit::elide(name, room, |t| measure(t, 13.0, MANROPE));
-                f.fill_text(kit::text(
-                    shown,
-                    Point::new(rect.x + 26.0, middle),
-                    13.0,
-                    if *chosen { TEXT.get() } else { DIM.get() },
-                    Alignment::Left,
-                ));
-            }
-        }
-    }
-
-    /// A field: its frame, and its text (the token as dots).
-    fn field(&self, f: &mut Frame, state: &State, field: Field, rect: Rectangle, refused: bool) {
-        let focused = state.focus == Some(Target::Field(field));
-        f.fill(&kit::rounded(rect, FIELD_RADIUS), FIELD_FILL.get());
-        let rim = Rectangle::new(
-            Point::new(rect.x + 0.5, rect.y + 0.5),
-            Size::new(rect.width - 1.0, rect.height - 1.0),
-        );
-        let colour = if refused {
-            FIELD_REFUSED
-        } else if focused {
-            FIELD_FOCUS
-        } else {
-            FIELD_RIM
-        };
-        f.stroke(
-            &kit::rounded(rim, FIELD_RADIUS - 0.5),
-            Stroke::default().with_color(colour.get()).with_width(1.0),
-        );
-        // What is typed (the token masked), its selection, and its caret
-        // while it holds the keyboard.
-        let placeholder = match field {
-            Field::Address => "https://…/boards/…",
-            Field::Token => "accessToken=…; httpOnlyToken=…",
-        };
-        setup::with(|flow| {
-            flow.entry(field).draw(
-                f,
-                Place {
-                    left: rect.x + FIELD_PAD,
-                    middle: rect.center_y(),
-                    width: rect.width - 2.0 * FIELD_PAD,
-                    style: Style::one(FIELD_TEXT, MANROPE),
-                },
-                placeholder,
-                &field::view::Look::of(TEXT.get(), FAINT.get()),
-                focused,
-            );
-        });
+/// What it shows, for the log, when it changed.
+fn say(laid: &Laid, words: Words, ui: &mut Ui) {
+    // The header's buttons' names, for screen readers (§11).
+    let names = if laid.back {
+        format!("«{}» «{}»", words.back(), words.close())
+    } else {
+        format!("«{}»", words.close())
+    };
+    let said = format!(
+        "{} focus={} title=«{}» buttons={names}",
+        laid.said,
+        ui.focus.map_or("none".to_owned(), |t| format!("{t:?}")),
+        laid.title,
+    );
+    if ui.said.as_ref() != Some(&said) {
+        tracing::debug!("the sources' popover shows it: {said}");
+        ui.said = Some(said);
     }
 }
 
-/// The press held in `entry` dragged to `at`.
-fn drag(entry: &mut field::Entry, at: Point) -> Took {
-    if entry.drag(at) {
-        Took::Moved
+/// `content` with its top left corner at `point`.
+fn at<'a>(content: impl Into<El<'a>>, point: Point) -> El<'a> {
+    pin(content).x(point.x).y(point.y).into()
+}
+
+/// A text's line, `size` px in `font`, on `middle`, from `x` on the side
+/// `align` says, within `room` px that way.
+fn text_at<'a>(
+    content: impl Into<String>,
+    (size, font, ink): (f32, iced::Font, Color),
+    (x, middle): (f32, f32),
+    align: Horizontal,
+) -> El<'a> {
+    let height = size * EM;
+    let width = WIDTH as f32;
+    let (left, room) = match align {
+        Horizontal::Right => (0.0, x),
+        _ => (x, width - x),
+    };
+    at(
+        container(said(content.into(), size, font, ink))
+            .width(room)
+            .height(height)
+            .align_x(align)
+            .align_y(Vertical::Center),
+        Point::new(left, middle - height / 2.0),
+    )
+}
+
+/// A button over `rect`'s size, `face` on it, lit under the pointer with
+/// `lit` (a fill, or under high contrast an edge).
+fn pressable<'a>(
+    face: impl Into<El<'a>>,
+    rect: Rectangle,
+    target: Target,
+    fill: Option<Ink>,
+    lit: Ink,
+    radius: f32,
+) -> button::Button<'a, Msg> {
+    button(face)
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, status| {
+            if style::lit(status) {
+                style::hovered(lit.get(), radius)
+            } else {
+                match fill {
+                    Some(fill) => style::filled(fill.get(), radius, TEXT.get()),
+                    None => style::clear(),
+                }
+            }
+        })
+        .on_press(Msg::Act(target))
+}
+
+/// Control `target`, its ring of `radius` when it holds it.
+fn declared<'a>(
+    widget: impl Into<El<'a>>,
+    target: Target,
+    role: Role,
+    name: impl Into<String>,
+    focus: Option<Target>,
+    radius: f32,
+) -> ui::control::Control<'a, Msg> {
+    control(widget, target.id(), role, name)
+        .focus(focus == Some(target), Msg::Focus(target), radius)
+        .activate(Msg::Act(target))
+        .node(|n| n)
+}
+
+fn content<'a>(laid: &Laid, words: Words, focus: Option<Target>, motion: bool) -> El<'a> {
+    let mut layers: Vec<El<'a>> = Vec::new();
+    // The header.
+    let title_x = if laid.back {
+        let rect = back_rect();
+        let face = drawn(rect.width, rect.height, |f, s| {
+            arrow(f, Point::new(s.width / 2.0, s.height / 2.0));
+        });
+        layers.push(at(
+            declared(
+                pressable(face, rect, Target::Back, None, ROW_HOVER, 7.0),
+                Target::Back,
+                Role::Button,
+                words.back(),
+                focus,
+                7.0,
+            ),
+            rect.position(),
+        ));
+        LEFT + BUTTON_SQUARE + 4.0
     } else {
-        Took::Same
+        LEFT
+    };
+    layers.push(text_at(
+        laid.title,
+        (TITLE, MANROPE_BOLD, TEXT.get()),
+        (title_x, HEADER_TOP + HEADER / 2.0),
+        Horizontal::Left,
+    ));
+    let mut caption: Option<&str> = None;
+    for part in &laid.parts {
+        part_of(&mut layers, part, words, focus, motion, &mut caption);
+    }
+    // ✕ last, as `Tab` goes.
+    let rect = close_rect();
+    let face = drawn(rect.width, rect.height, |f, s| {
+        cross(f, Point::new(s.width / 2.0, s.height / 2.0));
+    });
+    layers.push(at(
+        declared(
+            pressable(face, rect, Target::Close, None, ROW_HOVER, 7.0),
+            Target::Close,
+            Role::Button,
+            words.close(),
+            focus,
+            7.0,
+        ),
+        rect.position(),
+    ));
+    Stack::with_children(layers)
+        .width(WIDTH as f32)
+        .height(laid.end + 14.0 + BORDER)
+        .into()
+}
+
+/// The entries of the Planka step's fields, to the kit's field.
+fn address(with: &mut dyn FnMut(&mut field::Entry)) {
+    setup::with(|flow| with(flow.entry(Field::Address)));
+}
+
+fn token(with: &mut dyn FnMut(&mut field::Entry)) {
+    setup::with(|flow| with(flow.entry(Field::Token)));
+}
+
+#[allow(clippy::too_many_lines)]
+fn part_of<'a>(
+    layers: &mut Vec<El<'a>>,
+    part: &Part,
+    words: Words,
+    focus: Option<Target>,
+    motion: bool,
+    caption: &mut Option<&'static str>,
+) {
+    let fr = words.back() == "Retour";
+    match part {
+        Part::Kind {
+            rect,
+            target,
+            letter,
+            tint,
+            name,
+            lines,
+            dim,
+            chevron,
+        } => {
+            let alpha = if *dim { 0.5 } else { 1.0 };
+            let tint = *tint;
+            let letter = letter.to_string();
+            let tile = container(said(letter, 15.0, MANROPE_BOLD, faded(tint, alpha)))
+                .center(TILE)
+                .style(move |_| style::boxed(faded(Color { a: 0.16, ..tint }, alpha), 8.0));
+            let mut face: Vec<El<'a>> = vec![
+                at(tile, Point::new(TILE_IN, TILE_IN)),
+                text_at(
+                    *name,
+                    (NAME, kit::MANROPE_SEMIBOLD, faded(TEXT.get(), alpha)),
+                    (NAME_X, 19.0),
+                    Horizontal::Left,
+                ),
+            ];
+            for (i, line) in lines.iter().enumerate() {
+                face.push(text_at(
+                    line.clone(),
+                    (LINE_TEXT, MANROPE, faded(DIM.get(), alpha)),
+                    (NAME_X, 30.0 + LINE * (i as f32 + 0.5)),
+                    Horizontal::Left,
+                ));
+            }
+            if *chevron {
+                face.push(at(
+                    drawn(CHEVRON, CHEVRON, |f, s| {
+                        chevron_right(f, Point::new(s.width / 2.0, s.height / 2.0));
+                    }),
+                    Point::new(rect.width - 16.0 - CHEVRON / 2.0, ROW / 2.0 - CHEVRON / 2.0),
+                ));
+            }
+            let face = Stack::with_children(face)
+                .width(rect.width)
+                .height(rect.height);
+            let said_lines = lines.join(" ");
+            let shown: El<'a> = match target {
+                Some(target) => declared(
+                    pressable(face, *rect, *target, Some(ROW_FILL), ROW_HOVER, ROW_RADIUS),
+                    *target,
+                    Role::Button,
+                    *name,
+                    focus,
+                    ROW_RADIUS,
+                )
+                .node(|n| n.describe(said_lines))
+                .into(),
+                None => ui::line(
+                    container(face).style(|_| style::boxed(ROW_FILL.get(), ROW_RADIUS)),
+                    format!("{name}, {said_lines}"),
+                )
+                .into(),
+            };
+            layers.push(at(shown, rect.position()));
+        }
+        Part::Account { rect, target, name } => {
+            let room = rect.width - (NAME_X - 4.0) - 28.0;
+            let shown = kit::elide(name, room, |t| measure(t, 13.0, MANROPE));
+            let face = Stack::with_children([
+                text_at(
+                    shown,
+                    (13.0, MANROPE, TEXT.get()),
+                    (NAME_X - 4.0, rect.height / 2.0),
+                    Horizontal::Left,
+                ),
+                at(
+                    drawn(CHEVRON, CHEVRON, |f, s| {
+                        chevron_right(f, Point::new(s.width / 2.0, s.height / 2.0));
+                    }),
+                    Point::new(
+                        rect.width - 12.0 - CHEVRON / 2.0,
+                        (rect.height - CHEVRON) / 2.0,
+                    ),
+                ),
+            ])
+            .width(rect.width)
+            .height(rect.height);
+            layers.push(at(
+                declared(
+                    pressable(face, *rect, *target, None, ROW_HOVER, 8.0),
+                    *target,
+                    Role::Button,
+                    name.clone(),
+                    focus,
+                    8.0,
+                ),
+                rect.position(),
+            ));
+        }
+        Part::Text {
+            lines,
+            top,
+            size,
+            line,
+            colour,
+            bold,
+        } => {
+            let font = if *bold {
+                kit::MANROPE_SEMIBOLD
+            } else {
+                MANROPE
+            };
+            let mut all: Vec<El<'a>> = Vec::new();
+            for (i, said_line) in lines.iter().enumerate() {
+                all.push(text_at(
+                    said_line.clone(),
+                    (*size, font, *colour),
+                    (LEFT, top + line * (i as f32 + 0.5)),
+                    Horizontal::Left,
+                ));
+            }
+            layers.push(ui::line(Stack::with_children(all), lines.join(" ")).into());
+        }
+        Part::Caption { text, top } => {
+            *caption = Some(text);
+            layers.push(at(
+                ui::line(
+                    container(spaced(text, kit::LABEL, DIM.get(), f32::INFINITY))
+                        .height(CAPTION_HEIGHT)
+                        .align_y(Vertical::Center),
+                    *text,
+                ),
+                Point::new(LEFT, *top),
+            ));
+            let _ = CAPTION;
+        }
+        Part::Field {
+            field,
+            rect,
+            refused,
+        } => {
+            let target = Target::Field(*field);
+            let focused = focus == Some(target);
+            let rim = if *refused {
+                FIELD_REFUSED
+            } else if focused {
+                FIELD_FOCUS
+            } else {
+                FIELD_RIM
+            };
+            let (with, placeholder, role): (ui::field::With, _, _) = match field {
+                Field::Address => (address, "https://…/boards/…", Role::TextField),
+                Field::Token => (token, "accessToken=…; httpOnlyToken=…", Role::PasswordField),
+            };
+            let field = *field;
+            let typed = ui::field::Field {
+                with,
+                style: Style::one(FIELD_TEXT, MANROPE),
+                placeholder,
+                look: field::view::Look::of(TEXT.get(), FAINT.get()),
+                focused,
+                left: FIELD_PAD,
+                right: FIELD_PAD,
+                on_focus: Msg::Focus(target),
+                on_took: match field {
+                    Field::Address => |took| Msg::Took(Field::Address, took),
+                    Field::Token => |took| Msg::Took(Field::Token, took),
+                },
+            }
+            .view(FIELD);
+            let boxed = container(typed)
+                .width(rect.width)
+                .style(move |_| container::Style {
+                    background: Some(FIELD_FILL.get().into()),
+                    border: iced::Border {
+                        color: rim.get(),
+                        width: 1.0,
+                        radius: FIELD_RADIUS.into(),
+                    },
+                    ..container::Style::default()
+                });
+            let value = match field {
+                Field::Address => setup::with(|flow| flow.address.text().to_owned()),
+                Field::Token => None,
+            };
+            let refused = *refused;
+            layers.push(at(
+                control(boxed, target.id(), role, caption.unwrap_or_default())
+                    .node(|n| {
+                        let n = match value {
+                            Some(value) => n.value(value),
+                            None => n,
+                        };
+                        if refused {
+                            n.describe(if fr { "Refusé" } else { "Refused" })
+                        } else {
+                            n
+                        }
+                    })
+                    .focus(focused, Msg::Focus(target), FIELD_RADIUS)
+                    .typing(),
+                rect.position(),
+            ));
+        }
+        Part::Button {
+            rect,
+            target,
+            word,
+            look,
+            busy,
+        } => {
+            let (target, busy) = (*target, *busy);
+            let enabled = target.is_some() || busy;
+            let (fill, lit, ink, font) = match look {
+                Look::Plain => (PLAIN, PLAIN_HOVER, DIM, kit::MANROPE_SEMIBOLD),
+                Look::Green => (GREEN, GREEN_HOVER, INK, MANROPE_BOLD),
+            };
+            let alpha = if enabled { 1.0 } else { 0.45 };
+            let mut face = iced::widget::row![].align_y(Vertical::Center);
+            if busy {
+                let spin = moving(
+                    12.0,
+                    12.0,
+                    move |f, _, _| spinner(f, Point::new(1.0, 6.0), ink.get(), motion),
+                    move |_| motion,
+                );
+                face = face.push(spin).push(Space::new().width(6.0));
+            }
+            face = face.push(said(*word, BUTTON_TEXT, font, faded(ink.get(), alpha)));
+            let face = container(face).center(Length::Fill);
+            let style = move |status| {
+                let fill = if target.is_some() && style::lit(status) {
+                    lit
+                } else {
+                    fill
+                };
+                style::filled(faded(fill.get(), alpha), BUTTON_RADIUS, ink.get())
+            };
+            let pressed = button(face)
+                .padding(0)
+                .width(rect.width)
+                .height(rect.height)
+                .style(move |_, status| style(status))
+                .on_press_maybe(target.map(Msg::Act));
+            let shown: El<'a> = match target {
+                Some(t) => declared(pressed, t, Role::Button, *word, focus, BUTTON_RADIUS)
+                    .node(|n| n.disabled(busy))
+                    .into(),
+                None => ui::line(pressed, *word).into(),
+            };
+            layers.push(at(shown, rect.position()));
+        }
+        Part::Calendar {
+            index,
+            rect,
+            name,
+            colour,
+            shown,
+            featured,
+            read_only,
+        } => {
+            let (index, colour, shown, featured) = (*index, *colour, *shown, *featured);
+            let middle = rect.height / 2.0;
+            let swatch = swatch_rect(rect.y);
+            let star = star_rect(rect.y);
+            let x = star.x + star.width - 4.0 + 10.0 - rect.x;
+            let aside = read_only.then(|| setup::Words::read_only(words));
+            let aside_width = aside.map_or(0.0, |a| measure(a, 11.5, MANROPE) + 8.0);
+            let room = RIGHT - rect.x - x - aside_width;
+            let shown_name = kit::elide(name, room, |t| measure(t, 13.0, MANROPE));
+            let mut face: Vec<El<'a>> = vec![
+                at(
+                    drawn(BOX, BOX, move |f, _| tick(f, Point::ORIGIN, shown)),
+                    Point::new(LEFT - rect.x, middle - BOX / 2.0),
+                ),
+                text_at(
+                    shown_name,
+                    (13.0, MANROPE, if shown { TEXT.get() } else { DIM.get() }),
+                    (x, middle),
+                    Horizontal::Left,
+                ),
+            ];
+            if let Some(aside) = aside {
+                face.push(text_at(
+                    aside,
+                    (11.5, MANROPE, FAINT.get()),
+                    (RIGHT - rect.x, middle),
+                    Horizontal::Right,
+                ));
+            }
+            let face = Stack::with_children(face)
+                .width(rect.width)
+                .height(rect.height);
+            let target = Target::Calendar(index);
+            let mut row = declared(
+                pressable(face, *rect, target, None, ROW_HOVER, 8.0),
+                target,
+                Role::CheckBox,
+                name.clone(),
+                focus,
+                8.0,
+            )
+            .node(|n| n.checked(shown));
+            if *read_only {
+                row = row.node(|n| n.describe(if fr { "lecture seule" } else { "read only" }));
+            }
+            layers.push(at(row, rect.position()));
+            // Its swatch, then its star, over the row.
+            let tint = PALETTE_COLOURS[colour];
+            let face = drawn_lit(swatch.width, swatch.height, 0.0, move |f, s, lit| {
+                let inner = Rectangle::new(Point::new(4.0, 4.0), Size::new(BOX, BOX));
+                f.fill(&kit::rounded(inner, 4.0), tint);
+                if lit {
+                    f.stroke(
+                        &kit::rounded(Rectangle::new(Point::ORIGIN, s), 6.0),
+                        Stroke::default().with_color(DIM.get()).with_width(1.0),
+                    );
+                }
+            });
+            let word = if fr { "Couleur" } else { "Colour" };
+            let swatch_target = Target::Swatch(index);
+            layers.push(at(
+                declared(
+                    pressable(
+                        face,
+                        swatch,
+                        swatch_target,
+                        None,
+                        Ink::Dark(Color::TRANSPARENT),
+                        6.0,
+                    ),
+                    swatch_target,
+                    Role::Button,
+                    format!("{word} {}, {name}", colour + 1),
+                    focus,
+                    6.0,
+                ),
+                swatch.position(),
+            ));
+            let face = drawn_lit(star.width, star.height, 0.0, move |f, s, lit| {
+                // A star on a calendar not shown counts for nothing: dim.
+                star_mark(
+                    f,
+                    Point::new(s.width / 2.0, s.height / 2.0),
+                    featured,
+                    shown,
+                );
+                if lit {
+                    f.stroke(
+                        &kit::rounded(Rectangle::new(Point::ORIGIN, s), 6.0),
+                        Stroke::default().with_color(DIM.get()).with_width(1.0),
+                    );
+                }
+            });
+            let star_target = Target::Star(index);
+            layers.push(at(
+                declared(
+                    pressable(
+                        face,
+                        star,
+                        star_target,
+                        None,
+                        Ink::Dark(Color::TRANSPARENT),
+                        6.0,
+                    ),
+                    star_target,
+                    Role::ToggleButton,
+                    format!("{} {name}", words.feature()),
+                    focus,
+                    6.0,
+                )
+                .node(|n| n.checked(featured)),
+                star.position(),
+            ));
+        }
+        Part::Colours { index, top, chosen } => {
+            let word = if fr { "Couleur" } else { "Colour" };
+            for (c, colour) in PALETTE_COLOURS.iter().enumerate() {
+                let rect = colour_rect(*top, c);
+                let (colour, picked) = (*colour, c == *chosen);
+                let face = drawn_lit(SWATCH, SWATCH, 4.0, move |f, s, lit| {
+                    let centre = Point::new(s.width / 2.0, s.height / 2.0);
+                    f.fill(&Path::circle(centre, SWATCH / 2.0), colour);
+                    if picked || lit {
+                        f.stroke(
+                            &Path::circle(centre, SWATCH / 2.0 + 2.5),
+                            Stroke::default()
+                                .with_color(if picked { TEXT.get() } else { DIM.get() })
+                                .with_width(1.5),
+                        );
+                    }
+                });
+                let target = Target::Colour(*index, c);
+                layers.push(at(
+                    declared(
+                        pressable(
+                            face,
+                            rect,
+                            target,
+                            None,
+                            Ink::Dark(Color::TRANSPARENT),
+                            SWATCH / 2.0,
+                        ),
+                        target,
+                        Role::RadioButton,
+                        format!("{word} {}", c + 1),
+                        focus,
+                        SWATCH / 2.0,
+                    )
+                    .node(|n| n.checked(picked).set(c + 1, PALETTE_COLOURS.len())),
+                    rect.position(),
+                ));
+            }
+        }
+        Part::Choice {
+            target,
+            rect,
+            label,
+            value,
+        } => {
+            let middle = rect.height / 2.0;
+            let label_width = measure(label, 13.0, MANROPE) + 12.0;
+            let room = CONTENT - label_width - 18.0;
+            let shown = kit::elide(value, room, |t| measure(t, 13.0, MANROPE));
+            let face = Stack::with_children([
+                text_at(
+                    *label,
+                    (13.0, MANROPE, DIM.get()),
+                    (LEFT - rect.x, middle),
+                    Horizontal::Left,
+                ),
+                text_at(
+                    shown,
+                    (13.0, MANROPE, TEXT.get()),
+                    (RIGHT - 16.0 - rect.x, middle),
+                    Horizontal::Right,
+                ),
+                at(
+                    drawn(CHEVRON, CHEVRON, |f, s| {
+                        chevron_down(f, Point::new(s.width / 2.0, s.height / 2.0));
+                    }),
+                    Point::new(RIGHT - 5.0 - rect.x - CHEVRON / 2.0, middle - CHEVRON / 2.0),
+                ),
+            ])
+            .width(rect.width)
+            .height(rect.height);
+            layers.push(at(
+                declared(
+                    pressable(face, *rect, *target, None, ROW_HOVER, 8.0),
+                    *target,
+                    Role::Button,
+                    *label,
+                    focus,
+                    8.0,
+                )
+                .node(|n| n.value(value.clone())),
+                rect.position(),
+            ));
+        }
+        Part::Option {
+            target,
+            rect,
+            name,
+            chosen,
+        } => {
+            let middle = rect.height / 2.0;
+            let room = rect.width - 34.0;
+            let shown = kit::elide(name, room, |t| measure(t, 13.0, MANROPE));
+            let chosen = *chosen;
+            let face = Stack::with_children([
+                at(
+                    drawn(12.0, 12.0, move |f, s| {
+                        if chosen {
+                            check(f, Point::new(0.0, s.height / 2.0), GREEN.get(), 12.0);
+                        }
+                    }),
+                    Point::new(12.0, middle - 6.0),
+                ),
+                text_at(
+                    shown,
+                    (13.0, MANROPE, if chosen { TEXT.get() } else { DIM.get() }),
+                    (26.0, middle),
+                    Horizontal::Left,
+                ),
+            ])
+            .width(rect.width)
+            .height(rect.height);
+            layers.push(at(
+                declared(
+                    pressable(face, *rect, *target, None, ROW_HOVER, 7.0),
+                    *target,
+                    Role::RadioButton,
+                    name.clone(),
+                    focus,
+                    7.0,
+                )
+                .node(|n| n.checked(chosen)),
+                rect.position(),
+            ));
+        }
+    }
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| {
+            if !matches!(ui.focus, Some(Target::Field(_))) {
+                ui.focus = None;
+            }
+        }),
+        Msg::Focus(target) => {
+            // A field takes the keyboard: the other's selection goes.
+            if let Target::Field(field) = target {
+                let other = match field {
+                    Field::Address => Field::Token,
+                    Field::Token => Field::Address,
+                };
+                setup::edit(other, |entry| {
+                    entry.deselect();
+                    Took::Same
+                });
+            }
+            ui(|ui| ui.focus = Some(target));
+        }
+        // What the field took: what was refused goes with an edit, a paste
+        // is asked for.
+        Msg::Took(field, took) => {
+            setup::edit(field, |_| took);
+        }
+        Msg::Escape => {
+            let in_field = ui(|ui| {
+                let in_field = matches!(ui.focus, Some(Target::Field(_)));
+                if in_field {
+                    ui.focus = None;
+                }
+                in_field
+            });
+            if !setup::back() && !in_field {
+                event(Seen::Escape);
+            }
+        }
+        Msg::Enter => setup::sign_in(),
+        Msg::Arrow(down) => {
+            let words = Words::new(crate::clock::time::Lang::of_messages());
+            let rows: Vec<Target> = setup::with(|flow| lay_out(flow, words, measure))
+                .map(|laid| {
+                    laid.targets
+                        .into_iter()
+                        .map(|(t, _)| t)
+                        .filter(|t| t.row())
+                        .collect()
+                })
+                .unwrap_or_default();
+            ui(|ui| {
+                ui.focus = match ui.focus.filter(|f| f.row()) {
+                    Some(focus) => kit::cycle(&rows, focus, down),
+                    None => kit::step(&rows, None, !down),
+                };
+            });
+        }
+        Msg::Act(target) => act(target),
+    }
+    // Its height follows what it shows.
+    super::refit(super::Item::DayChoose);
+}
+
+fn act(target: Target) {
+    tracing::debug!(?target, "the sources' popover acts");
+    match target {
+        Target::Back | Target::Cancel => {
+            setup::back();
+        }
+        Target::Close => {
+            let shows = setup::with(|flow| flow.step == Step::Show).unwrap_or(false);
+            if shows {
+                // ✕ in step 3 keeps the account with what is ticked.
+                setup::done();
+            } else {
+                event(Seen::Chosen);
+            }
+        }
+        Target::Online => {
+            if let Some(effect) = setup::open_panel() {
+                super::send(vec![effect]);
+            }
+        }
+        Target::Account(i) => setup::choose_google(i),
+        Target::Planka => setup::choose_planka(),
+        Target::Field(_) => ui(|ui| ui.focus = Some(target)),
+        Target::SignIn => setup::sign_in(),
+        Target::Calendar(i) => setup::toggle(i),
+        Target::Swatch(i) => setup::unfold(Unfold::Colours(i)),
+        Target::Star(i) => setup::feature(i),
+        Target::Colour(i, c) => setup::colour(i, c),
+        Target::Board => setup::unfold(Unfold::Boards),
+        Target::BoardOption(i) => setup::board(i),
+        Target::Choice(which) => setup::unfold(Unfold::Columns(which)),
+        Target::Option(which, i) => setup::column(which, i),
+        Target::Done => setup::done(),
     }
 }
 
@@ -1705,17 +1695,6 @@ const PALETTE_COLOURS: [Color; 8] = {
     }
     out
 };
-
-/// A 26 × 26 header button: lit under the pointer, ringed with the
-/// keyboard.
-fn square(f: &mut Frame, rect: Rectangle, lit: bool, focused: bool) {
-    if lit {
-        crate::theme::hover(f, &kit::rounded(rect, 7.0), ROW_HOVER.get());
-    }
-    if focused {
-        ring(f, rect, 7.0);
-    }
-}
 
 fn line_stroke(width: f32, colour: Color) -> Stroke<'static> {
     Stroke {

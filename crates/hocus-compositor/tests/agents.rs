@@ -518,37 +518,32 @@ impl Bed {
     }
 
     /// Where the briefing's `item` is (`Sources`, `Agent(3)`), global, as
-    /// the shell last logged its items' middles in the popover `popover`.
+    /// the kit's dump last placed it in the popover `popover`.
     fn briefing_item(&mut self, popover: Rect, item: &str) -> anyhow::Result<(f64, f64)> {
-        self.popover_item(popover, "the briefing's items", item)
+        self.popover_item(popover, "briefing", item)
     }
 
-    /// Where `item` of the popover `popover` is, global, as the shell last
-    /// logged its items' middles (on a line saying `items`).
+    /// Where the control `surface:item` of the popover `popover` is,
+    /// global, its middle as the kit's dump last placed it.
     fn popover_item(
         &mut self,
         popover: Rect,
-        items: &str,
+        surface: &str,
         item: &str,
     ) -> anyhow::Result<(f64, f64)> {
-        let wanted = format!("{item}@");
+        let id = format!("{surface}:{item}");
         let log = self.log.clone();
-        let found = |text: &str| {
-            text.lines()
-                .rev()
-                .find(|l| l.contains(items))
-                .and_then(|l| {
-                    let at = l.split(&wanted).nth(1)?;
-                    let at = at.split_whitespace().next()?;
-                    let (x, y) = at.split_once(',')?;
-                    Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))
-                })
+        let found = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
         };
-        let done = self
-            .hp
-            .dispatch_until(WAIT, |_| found(&plain(&log)).is_some())?;
-        anyhow::ensure!(done, "no {item} in {items:?}");
-        let (x, y) = found(&plain(&log)).unwrap_or_default();
+        let done = self.hp.dispatch_until(WAIT, |_| found(&log).is_some())?;
+        anyhow::ensure!(done, "no {id} in the kit's dump");
+        let (x, y) = found(&log).unwrap_or_default();
         Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
     }
 
@@ -562,7 +557,7 @@ impl Bed {
                 .any(|(_, r)| r.width == 320 && r.height > 0)
         })?;
         anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
-        self.logged("the briefing's items")?;
+        self.logged("\"briefing:Sources\"")?;
         let popover = self.hp.popover_surfaces();
         Ok(popover
             .iter()
@@ -3661,14 +3656,14 @@ fn sources_opens_from_her_briefing() -> anyhow::Result<()> {
     assert_eq!((sources.width, sources.y), (300, 8 + 62));
     bed.logged_after(from, &["Trouvé, pas branché"])?;
     // "Ne rien brancher" stays the card's, under her (4.7b).
-    bed.logged_after(from, &["the agents' popover's items", "Plug(ClaudeCode)@"])?;
+    bed.logged_after(from, &[" shows {", "\"agents:Plug(ClaudeCode)\""])?;
     let items = plain(&bed.log);
     let items = items
         .lines()
         .rev()
-        .find(|l| l.contains("the agents' popover's items"))
+        .find(|l| l.contains(" shows {"))
         .unwrap_or_default();
-    assert!(!items.contains("Decline@"), "{items}");
+    assert!(!items.contains("\"agents:Decline\""), "{items}");
     Ok(())
 }
 
@@ -3747,7 +3742,7 @@ impl Bed {
                 .any(|(_, r)| r.width == 320 && r.height > 0)
         })?;
         anyhow::ensure!(shown, "no briefing: {:?}", self.hp.popover_surfaces());
-        self.logged_after(from, &["the briefing's items"])?;
+        self.logged_after(from, &["\"briefing:Sources\""])?;
         Ok(self
             .hp
             .popover_surfaces()
@@ -4051,8 +4046,8 @@ fn plugging_nothing_in_from_the_mini_forms_sources_hides_the_group_in_both_forms
     let from = bed.mark();
     bed.click(plus)?;
     let sources = bed.popover()?;
-    bed.logged_after(from, &["the agents' popover's items", "Decline@"])?;
-    let decline = bed.popover_item(sources, "the agents' popover's items", "Decline")?;
+    bed.logged_after(from, &[" shows {", "\"agents:Decline\""])?;
+    let decline = bed.popover_item(sources, "agents", "Decline")?;
     let from = bed.mark();
     bed.click(decline)?;
     bed.tool_becomes("claude-code", ToolState::Declined)?;
@@ -4228,4 +4223,54 @@ fn screenshots_of_the_pandas() -> anyhow::Result<()> {
     anyhow::ensure!(back, "the peek stays out");
     pandas_shot(&mut bed, &folder, "mini", 260)?;
     Ok(())
+}
+
+/// The briefing in its main state (one waits, one is stuck, one to see),
+/// and Sources (Claude Code found, not plugged in), shot under
+/// `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            claude: true,
+            ..Machine::default()
+        },
+    )?;
+    bed.claude(
+        "s1",
+        "site-web",
+        "PermissionRequest",
+        ",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm install\",\
+         \"description\":\"Install the dependencies\"}",
+    )?;
+    bed.agent_becomes("site-web", Some("waiting"))?;
+    bed.claude(
+        "s2",
+        "migration",
+        "StopFailure",
+        ",\"error\":\"rate_limit\",\"error_details\":\"429 Too Many Requests\",\
+         \"last_assistant_message\":\"API Error: Rate limit reached\"",
+    )?;
+    bed.agent_becomes("migration", Some("failed"))?;
+    bed.claude("s3", "api", "Stop", ",\"stop_hook_active\":false")?;
+    bed.agent_becomes("api", Some("done"))?;
+    bed.settle()?;
+    let briefing = bed.open_briefing()?;
+    bed.hp.pointer_move(400.0, 600.0);
+    common::popover_shot(&mut bed.hp, "briefing")?;
+    let sources = bed.briefing_item(briefing, "Sources")?;
+    bed.click(sources)?;
+    let shown = bed.hp.dispatch_until(WAIT, |hp| {
+        let popovers = hp.popover_surfaces();
+        popovers.len() == 1 && popovers[0].1.width == 300 && popovers[0].1.height > 0
+    })?;
+    anyhow::ensure!(shown, "no Sources: {:?}", bed.hp.popover_surfaces());
+    bed.hp.pointer_move(400.0, 600.0);
+    common::popover_shot(&mut bed.hp, "agents")
 }

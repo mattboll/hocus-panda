@@ -1,52 +1,12 @@
-//! What a popover's canvas sees: the pointer, the keys, and the order the
-//! keyboard goes through what can hold it.
+//! What reaches a popover of the keyboard: the keys that came to another
+//! of the shell's surfaces, its opening by the keyboard, and the order
+//! the keyboard goes through what can hold it.
 
 use std::time::{Duration, Instant};
 
-use iced::{Point, Rectangle, keyboard, mouse, window};
+use iced::{keyboard, window};
 
-use crate::popover::{Event as Seen, Pressed, event};
-
-/// What a popover's canvas saw, as it handles it.
-pub(crate) enum Input<'a> {
-    /// It is about to draw, at `now`: what it shows is read afresh.
-    Redraw(Instant),
-    /// The pointer, at a place on it (none: it left).
-    Mouse(&'a mouse::Event, Option<Point>),
-    Key(Pressed),
-    Nothing,
-}
-
-/// `event` on the canvas of popover `id` at `bounds`, the pointer where it
-/// is as of it: only drawing while the popover fades out.
-pub(crate) fn input<'a, T>(
-    id: window::Id,
-    event: &'a iced::Event,
-    bounds: Rectangle,
-    cursor: mouse::Cursor,
-    pointer: &mut Pointer<T>,
-) -> Input<'a> {
-    match event {
-        iced::Event::Window(window::Event::RedrawRequested(now)) => Input::Redraw(*now),
-        _ if !crate::popover::with(|c| c.is_open(id)) => Input::Nothing,
-        iced::Event::Mouse(event) => {
-            let at = crate::levels::draw::pointer(event, bounds, cursor, pointer.at);
-            pointer.at = at;
-            Input::Mouse(event, at)
-        }
-        iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key,
-            modifiers,
-            text,
-            ..
-        }) => Input::Key(Pressed {
-            key: key.clone(),
-            modifiers: *modifiers,
-            text: text.as_deref().map(str::to_owned),
-        }),
-        _ => Input::Nothing,
-    }
-}
+use crate::popover::Pressed;
 
 /// The popover opened by the keyboard (`Enter` on its item, bar.md §11),
 /// whose first control is yet to take the ring.
@@ -95,69 +55,6 @@ pub(crate) fn keys(id: window::Id) -> Vec<Pressed> {
         keys
     } else {
         Vec::new()
-    }
-}
-
-/// The pointer on a popover: where it is, what it is over and what it
-/// pressed. The controller hears as it comes in and as it leaves.
-#[derive(Debug)]
-pub(crate) struct Pointer<T> {
-    pub at: Option<Point>,
-    inside: bool,
-    pub hover: Option<T>,
-    pub pressed: Option<T>,
-}
-
-impl<T> Default for Pointer<T> {
-    fn default() -> Self {
-        Self {
-            at: None,
-            inside: false,
-            hover: None,
-            pressed: None,
-        }
-    }
-}
-
-impl<T: Copy + PartialEq> Pointer<T> {
-    /// It moved, or came in: the controller hears that it came in.
-    pub(crate) fn moved(&mut self) {
-        if !self.inside && self.at.is_some() {
-            self.inside = true;
-            event(Seen::PopoverEnter);
-        }
-    }
-
-    /// It left: nothing is under it.
-    pub(crate) fn left(&mut self) {
-        self.inside = false;
-        event(Seen::PopoverLeave);
-        self.hover = None;
-    }
-
-    /// It is over `target`: whether that changed.
-    pub(crate) fn over(&mut self, target: Option<T>) -> bool {
-        let changed = self.hover != target;
-        self.hover = target;
-        changed
-    }
-
-    /// The button released over `target`: what it clicked, pressed and
-    /// released on it.
-    pub(crate) fn release(&mut self, target: Option<T>) -> Option<T> {
-        self.pressed.take().filter(|p| Some(*p) == target)
-    }
-
-    /// The pointer's look: grabbing while a slider is dragged, a hand over
-    /// what can be acted on.
-    pub(crate) fn interaction(&self, dragging: bool) -> mouse::Interaction {
-        if dragging {
-            mouse::Interaction::Grabbing
-        } else if self.hover.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
     }
 }
 

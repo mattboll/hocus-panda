@@ -16,27 +16,33 @@
 //! `Tab` goes through their buttons, `Enter` or `Space` acts, `Esc`
 //! closes. "Brancher" in Sources replaces it with the consent popover.
 
-use std::time::Instant;
+use std::sync::{Mutex, PoisonError};
 
+use hocus_a11y::Role;
 use hocus_link::{Form, ToolState};
 use iced::{
-    Color, Font, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry},
-        text::{Alignment, LineHeight},
-    },
+    Color, Element, Font, Length, Point, Rectangle, Size,
+    alignment::Vertical,
+    widget::{Space, Stack, button, column, container, pin, text::LineHeight},
     window,
 };
 
 use super::{
-    Effect, Event as Seen, Item, Pressed, event,
-    kit::{self, FILL, FILL_HOVER, Input, Pointer, text, text_in},
+    Effect, Event as Seen, Item, event,
+    kit::{self, FILL, FILL_HOVER},
 };
 use crate::theme::Ink;
 use crate::{
     agents::{self, HERDR_MARK, LINK, MARK_INK, Shows, Tool, Words},
-    levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE_BOLD, TEXT, ring},
+    levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT},
+    ui::{
+        Around, control, line,
+        parts::{drawn, spaced},
+        style::{self, boxed, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 --------------------------------------------------
 
@@ -98,7 +104,7 @@ const ROWS: [Row; 3] = [
 
 /// What can be clicked in them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub enum Target {
     Plug(Tool),
     Unplug(Tool),
     /// herdr, declined, followed again.
@@ -108,6 +114,13 @@ enum Target {
     Copy,
     Cancel,
     Confirm,
+}
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("agents:{self:?}")
+    }
 }
 
 fn words() -> Words {
@@ -308,548 +321,465 @@ pub struct Panel {
     pub glass: bool,
 }
 
-/// What the surface keeps between draws.
+/// What the surface keeps from a build of its view to the next.
 #[derive(Debug, Default)]
-pub struct State {
+struct Ui {
     /// Whose popover it is (closing, it shows what it showed).
     item: Option<Item>,
     said: agents::Said,
-    pointer: Pointer<Target>,
     focus: Option<Target>,
     copied: bool,
     /// The form of its bar, as it last read it.
     form: Option<Form>,
+    /// What was said last, for the log.
+    told: Option<(Item, agents::Said, Option<Form>)>,
 }
 
-impl State {
-    fn sources_layout(&self, words: Words) -> SourcesLayout {
-        let decline = declines(&self.said, self.form);
-        sources_layout(&self.said, words, self.copied, decline)
-    }
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
-    fn targets(&self, words: Words) -> Vec<(Target, Rectangle)> {
-        match self.item {
-            Some(Item::Plug(tool)) => {
-                let l = consent_layout(tool, &self.said, words);
-                vec![(Target::Cancel, l.cancel), (Target::Confirm, l.confirm)]
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// One opens: nothing holds the ring, nothing copied.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A button pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The tools changed under the view.
+    Stale,
+}
+
+/// One of the agents' popovers on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (id, words) = (panel.id, panel.words);
+    Around::new(id, build(id, words), handle, Msg::Stale)
+        .rebuild(move || build(id, words))
+        .subtitle(ui(|ui| match ui.item {
+            Some(Item::Plug(tool)) => Some(words.plug_title(tool)),
+            _ => None,
+        }))
+        .press(Msg::Pressed)
+        .on_glass(panel.glass)
+}
+
+/// Its content, as the tools are now.
+fn build<'a>(id: window::Id, words: Words) -> Element<'a, Msg> {
+    let open = super::with(|c| {
+        c.is_open(id)
+            .then(|| c.open_item().map(|item| (item, c.form_of(id))))
+            .flatten()
+    });
+    ui(|ui| {
+        if let Some((item, form)) = open {
+            ui.item = Some(item);
+            ui.said = agents::said();
+            ui.form = form;
+            let told = (item, ui.said.clone(), form);
+            if ui.told.as_ref() != Some(&told) {
+                tracing::debug!(
+                    ?item,
+                    tools = ?ui.said.tools.iter().map(|t| (t.tool.as_str(), words.tool_state(t.state).0)).collect::<Vec<_>>(),
+                    "the agents' popover shows it"
+                );
+                ui.told = Some(told);
             }
-            Some(Item::Sources | Item::AnotherTool) => {
-                let l = self.sources_layout(words);
-                l.rows
-                    .into_iter()
-                    .filter_map(|(_, _, t)| t)
-                    .chain(l.decline.map(|r| (Target::Decline, r)))
-                    .chain([(Target::Copy, l.copy)])
-                    .collect()
-            }
-            _ => Vec::new(),
         }
-    }
+        match ui.item {
+            Some(Item::Plug(tool)) => consent(tool, words, ui),
+            Some(Item::Sources | Item::AnotherTool) => sources(words, ui),
+            _ => Space::new().into(),
+        }
+    })
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
-
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
-    }
-
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let f = &mut frame;
-        match state.item {
-            Some(Item::Plug(tool)) => self.consent(f, state, tool),
-            Some(Item::Sources | Item::AnotherTool) => self.sources(f, state),
-            _ => {}
-        }
-        if let Some((_, rect)) = state.focus.and_then(|focus| {
-            state
-                .targets(self.words)
-                .into_iter()
-                .find(|(t, _)| *t == focus)
-        }) {
-            ring(f, rect, 8.0);
-        }
-        self.tell_readers(state);
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
+/// `content` with its top left corner at `point` on the popover.
+fn at<'a>(content: impl Into<El<'a>>, point: Point) -> El<'a> {
+    pin(content).x(point.x).y(point.y).into()
 }
 
-/// `lines` from `top` at `x`, `size` px on lines `height` em apart.
-fn lines(
-    f: &mut Frame,
-    lines: &[String],
-    (x, top): (f32, f32),
-    size: f32,
-    height: f32,
-    colour: Color,
-) {
-    for (i, line) in lines.iter().enumerate() {
-        let mut said = text(
-            line.clone(),
-            Point::new(x, top + (i as f32 + 0.5) * size * height),
-            size,
-            colour,
-            Alignment::Left,
+/// `lines` from `top` at `x`, `size` px on lines `height` em apart, in
+/// `colour`.
+fn lines<'a>(lines: &[String], size: f32, height: f32, colour: Color) -> El<'a> {
+    let mut all = column![];
+    for said_line in lines {
+        all = all.push(
+            said(said_line.clone(), size, MANROPE, colour)
+                .line_height(LineHeight::Relative(height)),
         );
-        said.line_height = LineHeight::Relative(height);
-        f.fill_text(said);
     }
+    all.into()
 }
 
-/// A button at `rect` saying `word`.
-fn button(
-    f: &mut Frame,
+/// The popover's title, as the others'.
+fn title<'a>(title: String) -> El<'a> {
+    at(
+        container(said(title, kit::TITLE, MANROPE_BOLD, TEXT.get()))
+            .height(kit::HEADER)
+            .align_y(Vertical::Center),
+        Point::new(kit::LEFT, kit::HEADER_TOP),
+    )
+}
+
+/// A tool's mark, `size` px.
+fn mark<'a>(
+    (letter, colour): (&'static str, Color),
+    (size, radius, letter_size): (f32, f32, f32),
+    alpha: f32,
+) -> El<'a> {
+    drawn(size, size, move |f, _| {
+        agents::draw::mark(
+            f,
+            Point::ORIGIN,
+            (letter, colour),
+            (size, radius, letter_size),
+            alpha,
+        );
+    })
+}
+
+/// A button at `rect` saying `word` (`size`, bold or not): its fills and
+/// its words' colours at rest and under the pointer.
+#[allow(clippy::too_many_arguments)]
+fn button_at<'a>(
+    target: Target,
+    name: String,
     rect: Rectangle,
     word: &str,
     (size, bold): (f32, bool),
-    (fill, ink): (Color, Color),
+    rest: (Color, Color),
+    lit: (Color, Color),
     radius: f32,
-) {
-    f.fill(&kit::rounded(rect, radius), fill);
-    let said = text(word.to_owned(), rect.center(), size, ink, Alignment::Center);
-    f.fill_text(if bold {
-        text_in(MANROPE_BOLD, said)
-    } else {
-        said
-    });
+    focus: Option<Target>,
+) -> El<'a> {
+    let font = if bold { MANROPE_BOLD } else { MANROPE };
+    let face = container(
+        iced::widget::text(word.to_owned())
+            .size(size)
+            .font(font)
+            .line_height(LineHeight::Relative(LINE))
+            .shaping(iced::widget::text::Shaping::Advanced)
+            .wrapping(iced::widget::text::Wrapping::None),
+    )
+    .center(Length::Fill);
+    let pressed = button(face)
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, status| {
+            let (fill, ink) = if style::lit(status) { lit } else { rest };
+            style::filled(fill, radius, ink)
+        })
+        .on_press(Msg::Act(target));
+    at(
+        control(pressed, target.id(), Role::Button, name)
+            .focus(focus == Some(target), Msg::Focus(target), 8.0)
+            .activate(Msg::Act(target))
+            .rows(0),
+        rect.position(),
+    )
 }
 
-impl Panel {
-    fn sources(&self, f: &mut Frame, state: &State) {
-        let words = self.words;
-        let hover = state.pointer.hover;
-        kit::title(f, words.sources_title());
-        let l = state.sources_layout(words);
-        for (row, rect, target) in &l.rows {
-            let (name, mark, tool_state) = match row {
-                Row::Tool(tool) => (tool.title(), tool.mark(), state.said.state(tool.word())),
-                Row::Herdr => ("herdr", HERDR_MARK, state.said.state("herdr")),
-            };
-            let there = !matches!(tool_state, ToolState::Absent | ToolState::Stopped);
-            let opacity = if there { 1.0 } else { 0.4 };
-            let middle = rect.center_y();
-            agents::draw::mark(
-                f,
-                Point::new(LEFT, middle - SOURCE_MARK / 2.0),
-                mark,
-                (SOURCE_MARK, 5.0, 11.0),
-                opacity,
-            );
-            let column = 14.0 * LINE + 1.0 + SMALL * LINE;
-            let name_middle = middle - column / 2.0 + 14.0 * LINE / 2.0;
-            let x = LEFT + SOURCE_MARK + 10.0;
-            f.fill_text(text(
+/// A quiet button's fills and words: at rest, under the pointer.
+fn quiet() -> [(Color, Color); 2] {
+    [(FILL.get(), DIM.get()), (FILL_HOVER.get(), TEXT.get())]
+}
+
+fn sources<'a>(words: Words, ui: &Ui) -> El<'a> {
+    let decline = declines(&ui.said, ui.form);
+    let l = sources_layout(&ui.said, words, ui.copied, decline);
+    let mut layers = vec![title(words.sources_title().to_owned())];
+    for (row, rect, target) in &l.rows {
+        let (name, glyph, tool_state) = match row {
+            Row::Tool(tool) => (tool.title(), tool.mark(), ui.said.state(tool.word())),
+            Row::Herdr => ("herdr", HERDR_MARK, ui.said.state("herdr")),
+        };
+        let there = !matches!(tool_state, ToolState::Absent | ToolState::Stopped);
+        let opacity = if there { 1.0 } else { 0.4 };
+        let middle = rect.center_y();
+        layers.push(at(
+            mark(glyph, (SOURCE_MARK, 5.0, 11.0), opacity),
+            Point::new(LEFT, middle - SOURCE_MARK / 2.0),
+        ));
+        let (state_said, green) = words.tool_state(tool_state);
+        let column_height = 14.0 * LINE + 1.0 + SMALL * LINE;
+        let texts = column![
+            said(
                 name.to_owned(),
-                Point::new(x, name_middle),
                 14.0,
-                if there { TEXT.get() } else { FAINT.get() },
-                Alignment::Left,
-            ));
-            let (said, green) = words.tool_state(tool_state);
-            f.fill_text(text(
-                said.to_owned(),
-                Point::new(
-                    x,
-                    name_middle + 14.0 * LINE / 2.0 + 1.0 + SMALL * LINE / 2.0,
-                ),
+                MANROPE,
+                if there { TEXT.get() } else { FAINT.get() }
+            ),
+            Space::new().height(1.0),
+            said(
+                state_said.to_owned(),
                 SMALL,
-                if green { ACCENT.get() } else { FAINT.get() },
-                Alignment::Left,
-            ));
-            match target {
-                Some((t @ (Target::Plug(_) | Target::Follow), rect)) => {
-                    let fill = if hover == Some(*t) { PLUG_HOVER } else { PLUG };
-                    let word = if *t == Target::Follow {
-                        words.follow()
-                    } else {
-                        words.plug()
-                    };
-                    button(
-                        f,
-                        *rect,
-                        word,
-                        (12.5, true),
-                        (fill.get(), crate::theme::ACCENT_TEXT.get()),
-                        13.0,
-                    );
-                }
-                Some((t @ Target::Unplug(_), rect)) => {
-                    let lit = hover == Some(*t);
-                    let colours = if lit {
-                        (FILL_HOVER.get(), TEXT.get())
-                    } else {
-                        (FILL.get(), DIM.get())
-                    };
-                    button(f, *rect, words.unplug(), (12.5, false), colours, 7.0);
-                }
-                _ => {}
-            }
-        }
-        if let Some(rect) = l.decline {
-            let lit = hover == Some(Target::Decline);
-            f.fill_text(text(
-                words.decline().to_owned(),
-                Point::new(rect.x, rect.center_y()),
-                LINK,
-                if lit { TEXT.get() } else { FAINT.get() },
-                Alignment::Left,
-            ));
-        }
-        f.fill_rectangle(Point::new(LEFT, l.rule), Size::new(ROOM, 1.0), RULE.get());
-        let letters = kit::label_letters(words.another_label());
-        kit::label(f, &letters, l.label + kit::LABEL * LINE / 2.0);
-        lines(f, &l.any.1, (LEFT, l.any.0), NOTE, NOTE_LINE, DIM.get());
-        f.fill(&kit::rounded(l.code, 8.0), CODE_FILL.get());
-        f.fill_text(text_in(
-            MONO,
-            text(
-                words.command().to_owned(),
-                Point::new(l.code.x + 10.0, l.code.center_y()),
-                CODE,
-                TEXT.get(),
-                Alignment::Left,
+                MANROPE,
+                if green { ACCENT.get() } else { FAINT.get() }
             ),
-        ));
-        let lit = hover == Some(Target::Copy);
-        let colours = if lit {
-            (FILL_HOVER.get(), TEXT.get())
-        } else {
-            (FILL.get(), DIM.get())
-        };
-        button(
-            f,
-            l.copy,
-            words.copy(state.copied),
-            (SMALL, false),
-            colours,
-            6.0,
-        );
-        lines(
-            f,
-            &l.note.1,
-            (LEFT, l.note.0),
-            SMALL,
-            NOTE_LINE,
-            FAINT.get(),
-        );
-    }
-
-    /// What it shows, for screen readers (crate::a11y::rows): Sources' tools
-    /// with their state and button, the command to copy; or the consent's
-    /// words, file and buttons.
-    fn tell_readers(&self, state: &State) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let words = self.words;
-        let targets = state.targets(words);
-        let mut nodes = Vec::new();
-        let mut subtitle = None;
-        match state.item {
-            Some(Item::Plug(tool)) => {
-                let l = consent_layout(tool, &state.said, words);
-                subtitle = Some(words.plug_title(tool));
-                nodes.push(rows::line(l.what.1.join(" ")));
-                nodes.push(rows::line(format!("{} {}", words.file_changed(), l.file)));
-                nodes.push(rows::line(l.kept.join(" ")));
-                nodes.push(rows::act(
-                    Target::Cancel,
-                    Role::Button,
-                    words.cancel(),
-                    l.cancel,
-                ));
-                nodes.push(rows::act(
-                    Target::Confirm,
-                    Role::Button,
-                    words.plug(),
-                    l.confirm,
-                ));
-            }
-            Some(Item::Sources | Item::AnotherTool) => {
-                let l = state.sources_layout(words);
-                for (row, _, target) in &l.rows {
-                    let (name, tool_state) = match row {
-                        Row::Tool(tool) => (tool.title(), state.said.state(tool.word())),
-                        Row::Herdr => ("herdr", state.said.state("herdr")),
-                    };
-                    let (said, _) = words.tool_state(tool_state);
-                    match target {
-                        Some((t, rect)) => {
-                            let word = match t {
-                                Target::Follow => words.follow(),
-                                Target::Unplug(_) => words.unplug(),
-                                _ => words.plug(),
-                            };
-                            nodes.push(
-                                rows::act(*t, Role::Button, format!("{word} {name}"), *rect)
-                                    .describe(said),
-                            );
-                        }
-                        None => nodes.push(rows::line(format!("{name}, {said}"))),
-                    }
-                }
-                if let Some(rect) = l.decline {
-                    nodes.push(rows::act(
-                        Target::Decline,
-                        Role::Button,
-                        words.decline(),
-                        rect,
-                    ));
-                }
-                nodes.push(rows::line(l.any.1.join(" ")));
-                nodes.push(rows::line(words.command()));
-                nodes.push(rows::act(
-                    Target::Copy,
-                    Role::Button,
-                    words.copy(state.copied),
-                    l.copy,
-                ));
-                nodes.push(rows::line(l.note.1.join(" ")));
-            }
-            _ => {}
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle,
-                nodes,
-                order: rows::order(targets.into_iter().map(|(t, _)| t)),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    fn consent(&self, f: &mut Frame, state: &State, tool: Tool) {
-        let words = self.words;
-        let hover = state.pointer.hover;
-        let header_middle = HEADER_TOP + HEADER / 2.0;
-        agents::draw::mark(
-            f,
-            Point::new(LEFT, header_middle - CONSENT_MARK / 2.0),
-            tool.mark(),
-            (CONSENT_MARK, 6.0, 13.0),
-            1.0,
-        );
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                words.plug_title(tool),
-                Point::new(LEFT + CONSENT_MARK + 10.0, header_middle),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        let l = consent_layout(tool, &state.said, words);
-        lines(f, &l.what.1, (LEFT, l.what.0), WHAT, WHAT_LINE, DIM.get());
-        f.fill(&kit::rounded(l.block, 8.0), BLOCK.get());
-        let x = l.block.x + BLOCK_PAD.1;
-        let mut y = l.block.y + BLOCK_PAD.0;
-        f.fill_text(text(
-            words.file_changed().to_owned(),
-            Point::new(x, y + SMALL * LINE / 2.0),
-            SMALL,
-            FAINT.get(),
-            Alignment::Left,
-        ));
-        y += SMALL * LINE + BLOCK_GAP;
-        f.fill_text(text_in(
-            MONO,
-            text(
-                l.file.clone(),
-                Point::new(x, y + CODE * LINE / 2.0),
-                CODE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        y += CODE * LINE + BLOCK_GAP;
-        lines(f, &l.kept, (x, y), SMALL, LINE, FAINT.get());
-        let lit = hover == Some(Target::Cancel);
-        let colours = if lit {
-            (FILL_HOVER.get(), TEXT.get())
-        } else {
-            (FILL.get(), DIM.get())
-        };
-        button(f, l.cancel, words.cancel(), (13.0, false), colours, 8.0);
-        let fill = if hover == Some(Target::Confirm) {
-            crate::levels::draw::rgb(0x7FD198)
-        } else {
-            ACCENT.get()
-        };
-        button(
-            f,
-            l.confirm,
-            words.plug(),
-            (13.0, true),
-            (fill, MARK_INK.get()),
-            8.0,
-        );
-    }
-
-    /// What it shows, read afresh.
-    fn refresh<Message>(
-        &self,
-        state: &mut State,
-        _now: Instant,
-    ) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-        }
-        let open = super::with(|c| {
-            c.is_open(self.id)
-                .then(|| c.open_item().map(|item| (item, c.form_of(self.id))))
-                .flatten()
-        });
-        if let Some((item, form)) = open {
-            state.item = Some(item);
-            let said = agents::said();
-            if said != state.said || form != state.form {
-                tracing::debug!(
-                    ?item,
-                    tools = ?said.tools.iter().map(|t| (t.tool.as_str(), self.words.tool_state(t.state).0)).collect::<Vec<_>>(),
-                    "the agents' popover shows it"
-                );
-                state.said = said;
-                state.form = form;
-                let items: Vec<String> = state
-                    .targets(self.words)
-                    .iter()
-                    .map(|(t, r)| format!("{t:?}@{:.0},{:.0}", r.center().x, r.center().y))
-                    .collect();
-                tracing::debug!(items = %items.join(" "), "the agents' popover's items");
-                super::refit(item);
-            }
-        }
-        None
-    }
-
-    fn act(&self, state: &mut State, target: Target) {
-        tracing::debug!(?target, "the agents' popover");
+        ];
+        let texts_at = Point::new(LEFT + SOURCE_MARK + 10.0, middle - column_height / 2.0);
         match target {
-            Target::Plug(tool) => event(Seen::Replace(Item::Plug(tool))),
-            Target::Unplug(tool) => super::send(vec![Effect::Unplug(tool)]),
-            Target::Follow => super::send(vec![Effect::FollowHerdr]),
-            // As the card's: the group goes, its item with it in the mini
-            // form, and Sources with them.
-            Target::Decline => {
-                super::send(vec![Effect::Decline]);
-                event(Seen::Chosen);
+            Some((t, button_rect)) => {
+                layers.push(at(texts, texts_at));
+                let word = match t {
+                    Target::Follow => words.follow(),
+                    Target::Unplug(_) => words.unplug(),
+                    _ => words.plug(),
+                };
+                let name = format!("{word} {name}");
+                let button = match t {
+                    Target::Unplug(_) => {
+                        let [rest, lit] = quiet();
+                        button_at(
+                            *t,
+                            name,
+                            *button_rect,
+                            word,
+                            (12.5, false),
+                            rest,
+                            lit,
+                            7.0,
+                            ui.focus,
+                        )
+                    }
+                    _ => {
+                        let ink = crate::theme::ACCENT_TEXT.get();
+                        button_at(
+                            *t,
+                            name,
+                            *button_rect,
+                            word,
+                            (12.5, true),
+                            (PLUG.get(), ink),
+                            (PLUG_HOVER.get(), ink),
+                            13.0,
+                            ui.focus,
+                        )
+                    }
+                };
+                layers.push(button);
             }
-            Target::Copy => {
-                state.copied = true;
-                super::send(vec![
-                    Effect::Copy(self.words.command().to_owned()),
-                    Effect::Wake(hocus_link::POPOVER_NAMESPACE),
-                ]);
-            }
-            Target::Cancel => event(Seen::Chosen),
-            Target::Confirm => {
-                if let Some(Item::Plug(tool)) = state.item {
-                    super::send(vec![Effect::Plug(tool)]);
-                }
-                event(Seen::Chosen);
-            }
+            None => layers.push(at(line(texts, format!("{name}, {state_said}")), texts_at)),
         }
     }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| {
-            state
-                .targets(self.words)
-                .into_iter()
-                .find(|(_, r)| r.contains(at))
-                .map(|(t, _)| t)
-        });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    self.act(state, target);
-                }
-                redraw
-            }
-            _ => None,
-        }
+    if let Some(rect) = l.decline {
+        let link = button(
+            iced::widget::text(words.decline())
+                .size(LINK)
+                .font(MANROPE)
+                .line_height(LineHeight::Relative(LINE))
+                .shaping(iced::widget::text::Shaping::Advanced)
+                .wrapping(iced::widget::text::Wrapping::None),
+        )
+        .padding(0)
+        .style(|_, status| {
+            let mut quiet = style::clear();
+            quiet.text_color = if style::lit(status) {
+                TEXT.get()
+            } else {
+                FAINT.get()
+            };
+            quiet
+        })
+        .on_press(Msg::Act(Target::Decline));
+        layers.push(at(
+            control(link, Target::Decline.id(), Role::Button, words.decline())
+                .focus(
+                    ui.focus == Some(Target::Decline),
+                    Msg::Focus(Target::Decline),
+                    8.0,
+                )
+                .activate(Msg::Act(Target::Decline))
+                .rows(0),
+            rect.position(),
+        ));
     }
+    layers.push(at(
+        container(Space::new().width(ROOM).height(1.0)).style(|_| boxed(RULE.get(), 0.0)),
+        Point::new(LEFT, l.rule),
+    ));
+    layers.push(at(
+        line(
+            container(spaced(
+                words.another_label(),
+                kit::LABEL,
+                DIM.get(),
+                f32::INFINITY,
+            ))
+            .height(kit::LABEL * LINE)
+            .align_y(Vertical::Center),
+            words.another_label(),
+        ),
+        Point::new(LEFT, l.label),
+    ));
+    layers.push(at(
+        line(
+            lines(&l.any.1, NOTE, NOTE_LINE, DIM.get()),
+            l.any.1.join(" "),
+        ),
+        Point::new(LEFT, l.any.0),
+    ));
+    layers.push(at(
+        container(Space::new().width(ROOM).height(CODE_BOX)).style(|_| boxed(CODE_FILL.get(), 8.0)),
+        l.code.position(),
+    ));
+    layers.push(at(
+        line(
+            container(said(words.command(), CODE, MONO, TEXT.get()))
+                .height(CODE_BOX)
+                .align_y(Vertical::Center),
+            words.command(),
+        ),
+        Point::new(l.code.x + 10.0, l.code.y),
+    ));
+    let [rest, lit] = quiet();
+    layers.push(button_at(
+        Target::Copy,
+        words.copy(ui.copied).to_owned(),
+        l.copy,
+        words.copy(ui.copied),
+        (SMALL, false),
+        rest,
+        lit,
+        6.0,
+        ui.focus,
+    ));
+    layers.push(at(
+        line(
+            lines(&l.note.1, SMALL, NOTE_LINE, FAINT.get()),
+            l.note.1.join(" "),
+        ),
+        Point::new(LEFT, l.note.0),
+    ));
+    Stack::with_children(layers)
+        .width(WIDTH as f32)
+        .height(l.end + PAD_BOTTOM + BORDER)
+        .into()
+}
 
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let order: Vec<Target> = state
-            .targets(self.words)
-            .into_iter()
-            .map(|(t, _)| t)
-            .collect();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(arrow @ (Named::ArrowDown | Named::ArrowUp)) => {
-                state.focus = kit::step(&order, state.focus, *arrow == Named::ArrowUp);
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(target) = state.focus.filter(|t| order.contains(t)) {
-                    self.act(state, target);
-                }
-            }
-            _ => return None,
+fn consent<'a>(tool: Tool, words: Words, ui: &Ui) -> El<'a> {
+    let header_middle = HEADER_TOP + HEADER / 2.0;
+    let l = consent_layout(tool, &ui.said, words);
+    let mut layers = vec![
+        at(
+            mark(tool.mark(), (CONSENT_MARK, 6.0, 13.0), 1.0),
+            Point::new(LEFT, header_middle - CONSENT_MARK / 2.0),
+        ),
+        at(
+            container(said(
+                words.plug_title(tool),
+                TITLE,
+                MANROPE_BOLD,
+                TEXT.get(),
+            ))
+            .height(HEADER)
+            .align_y(Vertical::Center),
+            Point::new(LEFT + CONSENT_MARK + 10.0, HEADER_TOP),
+        ),
+        at(
+            line(
+                lines(&l.what.1, WHAT, WHAT_LINE, DIM.get()),
+                l.what.1.join(" "),
+            ),
+            Point::new(LEFT, l.what.0),
+        ),
+    ];
+    let block = column![
+        line(
+            said(words.file_changed(), SMALL, MANROPE, FAINT.get()),
+            format!("{} {}", words.file_changed(), l.file),
+        ),
+        Space::new().height(BLOCK_GAP),
+        said(l.file.clone(), CODE, MONO, TEXT.get()),
+        Space::new().height(BLOCK_GAP),
+        line(lines(&l.kept, SMALL, LINE, FAINT.get()), l.kept.join(" ")),
+    ];
+    layers.push(at(
+        container(block)
+            .padding([BLOCK_PAD.0, BLOCK_PAD.1])
+            .width(l.block.width)
+            .height(l.block.height)
+            .style(|_| boxed(BLOCK.get(), 8.0)),
+        l.block.position(),
+    ));
+    let [rest, lit] = quiet();
+    layers.push(button_at(
+        Target::Cancel,
+        words.cancel().to_owned(),
+        l.cancel,
+        words.cancel(),
+        (13.0, false),
+        rest,
+        lit,
+        8.0,
+        ui.focus,
+    ));
+    let ink = MARK_INK.get();
+    layers.push(button_at(
+        Target::Confirm,
+        words.plug().to_owned(),
+        l.confirm,
+        words.plug(),
+        (13.0, true),
+        (ACCENT.get(), ink),
+        (crate::levels::draw::rgb(0x7FD198), ink),
+        8.0,
+        ui.focus,
+    ));
+    Stack::with_children(layers)
+        .width(WIDTH as f32)
+        .height(l.end + PAD_BOTTOM + BORDER)
+        .into()
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Act(target) => act(target),
+    }
+    if let Some(item) = ui(|ui| ui.item) {
+        super::refit(item);
+    }
+}
+
+fn act(target: Target) {
+    tracing::debug!(?target, "the agents' popover");
+    match target {
+        Target::Plug(tool) => event(Seen::Replace(Item::Plug(tool))),
+        Target::Unplug(tool) => super::send(vec![Effect::Unplug(tool)]),
+        Target::Follow => super::send(vec![Effect::FollowHerdr]),
+        // As the card's: the group goes, its item with it in the mini
+        // form, and Sources with them.
+        Target::Decline => {
+            super::send(vec![Effect::Decline]);
+            event(Seen::Chosen);
         }
-        Some(canvas::Action::request_redraw().and_capture())
+        Target::Copy => {
+            ui(|ui| ui.copied = true);
+            super::send(vec![Effect::Copy(words().command().to_owned())]);
+        }
+        Target::Cancel => event(Seen::Chosen),
+        Target::Confirm => {
+            if let Some(Item::Plug(tool)) = ui(|ui| ui.item) {
+                super::send(vec![Effect::Plug(tool)]);
+            }
+            event(Seen::Chosen);
+        }
     }
 }
 

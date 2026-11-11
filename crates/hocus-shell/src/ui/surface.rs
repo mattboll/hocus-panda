@@ -206,13 +206,15 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
 
     /// On the popovers' glass (else opaque), filling the surface.
     pub fn on_glass(self, glass: bool) -> El<'a, Message> {
-        iced::widget::stack![
-            canvas(Glass(glass))
-                .width(Length::Fill)
-                .height(Length::Fill),
-            Element::new(self),
-        ]
-        .into()
+        self.on(canvas(Glass(glass))
+            .width(Length::Fill)
+            .height(Length::Fill))
+    }
+
+    /// On a background of its own (the clipboard's tint), filling the
+    /// surface.
+    pub fn on(self, background: impl Into<El<'a, Message>>) -> El<'a, Message> {
+        iced::widget::stack![background.into(), Element::new(self)].into()
     }
 }
 

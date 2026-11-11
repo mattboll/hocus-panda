@@ -1935,84 +1935,60 @@ impl Shell {
                 })
             }
             popover::Item::Sources | popover::Item::AnotherTool | popover::Item::Plug(_) => {
-                canvas(popover::agents::Panel {
+                popover::agents::view(&popover::agents::Panel {
                     id,
                     words: agents::Words::new(clock::time::Lang::of_messages()),
                     glass: self.look.glass,
                 })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
             }
-            popover::Item::Secretary => canvas(popover::briefing::Panel {
+            popover::Item::Secretary => popover::briefing::view(&popover::briefing::Panel {
                 id,
                 words: agents::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Notifications => canvas(popover::history::Panel {
+            }),
+            popover::Item::Notifications => popover::history::view(&popover::history::Panel {
                 id,
                 glass: self.look.glass,
                 motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Clipboard => canvas(popover::clipboard::Panel {
+            }),
+            popover::Item::Clipboard => popover::clipboard::view(&popover::clipboard::Panel {
                 id,
                 words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::InUse => popover::in_use::view(&popover::in_use::Panel {
                 id,
                 words: in_use::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
             }),
-            popover::Item::Tasks | popover::Item::TasksMore => canvas(popover::tasks::Panel {
-                id,
-                words: tasks::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::DayChoose => canvas(popover::setup::Panel {
+            popover::Item::Tasks | popover::Item::TasksMore => {
+                popover::tasks::view(&popover::tasks::Panel {
+                    id,
+                    words: tasks::Words::new(clock::time::Lang::of_messages()),
+                    glass: self.look.glass,
+                })
+            }
+            popover::Item::DayChoose => popover::setup::view(&popover::setup::Panel {
                 id,
                 words: setup::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
                 motion: self.look.motion && !self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::MeetingMark => canvas(popover::meeting::Panel {
+            }),
+            popover::Item::MeetingMark => popover::meeting::view(&popover::meeting::Panel {
                 id,
                 words: meeting::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::User => popover::session::view(&popover::session::Panel {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
                 motion: self.look.motion && !self.software,
             }),
-            popover::Item::Calendar => canvas(popover::calendar::Panel {
+            popover::Item::Calendar => popover::calendar::view(&popover::calendar::Panel {
                 id,
                 glass: self.look.glass,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             // They open none.
             popover::Item::Tray(key) => popover::tray::view(&popover::tray::Panel {
                 id,

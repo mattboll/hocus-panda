@@ -13,34 +13,42 @@
 //! and "ENSUITE" with the next event's time and title on one line. 14 px
 //! in, its parts 10 px apart.
 
+use std::sync::{Mutex, PoisonError};
+
+use hocus_a11y::Role;
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry},
-        text::Alignment,
-    },
+    Color, Element, Length, Point, Rectangle, Size,
+    alignment::Vertical,
+    widget::{Space, button, column, container, row},
     window,
 };
 
 use super::{
-    Event as Seen, Pressed, event,
-    kit::{self, Input, MANROPE_SEMIBOLD, Pointer, text, text_in},
+    Event as Seen, event,
+    kit::{self, MANROPE_SEMIBOLD},
 };
 use crate::theme::Ink;
 use crate::{
-    levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, ring},
+    levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT},
     meeting::{
         Card, Words,
         draw::{JOIN_BLUE, MONO, camera, pin, relative_style},
     },
+    ui::{
+        Around, control,
+        parts::{drawn, gap, spaced_by},
+        style::{self, boxed, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 pub const WIDTH: u32 = 280;
 const BORDER: f32 = 1.0;
 const PAD: f32 = 14.0;
 const GAP: f32 = 10.0;
 const LABEL: f32 = 11.0;
-const LABEL_SPACING: f32 = 0.1 * LABEL;
+const LABEL_SPACING: f32 = 0.1;
 const STRIPE: f32 = 6.0;
 const STRIPE_GAP: f32 = 10.0;
 const TITLE: f32 = 15.0;
@@ -71,19 +79,23 @@ pub enum Target {
     Calendar,
 }
 
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("meeting:{self:?}")
+    }
+}
+
 /// Where everything is, for the card now.
 #[derive(Debug, Clone, PartialEq)]
 struct Layout {
-    label: f32,
-    /// The details' block: its top and height; the title's lines, the
-    /// times' line and the place's.
+    /// The details' block (the title's lines, the times' line and the
+    /// place's): its top and height; the title's lines.
     block: (f32, f32),
-    title: Vec<(String, f32)>,
-    times: f32,
-    place: Option<f32>,
+    title: Vec<String>,
     buttons: Vec<(Target, Rectangle)>,
-    /// The divider and "ENSUITE"'s line.
-    then: Option<(f32, f32)>,
+    /// "ENSUITE"'s line: the divider's top.
+    then: Option<f32>,
     height: f32,
 }
 
@@ -91,7 +103,6 @@ fn layout(card: &Card) -> Layout {
     let left = BORDER + PAD;
     let room = WIDTH as f32 - 2.0 * left;
     let mut y = left;
-    let label = y + LABEL * LINE / 2.0;
     y += LABEL * LINE + GAP;
     let block_top = y;
     let title_room = room - STRIPE - STRIPE_GAP;
@@ -105,20 +116,10 @@ fn layout(card: &Card) -> Layout {
             kit::measure(t, TITLE, MANROPE_BOLD)
         }));
     }
-    let mut title = Vec::new();
-    for line in lines {
-        title.push((line, y + TITLE * LINE / 2.0));
-        y += TITLE * LINE;
+    y += lines.len() as f32 * TITLE * LINE + DETAILS_GAP + DETAIL * LINE;
+    if where_of(card).is_some() {
+        y += DETAILS_GAP + DETAIL * LINE;
     }
-    y += DETAILS_GAP;
-    let times = y + DETAIL * LINE / 2.0;
-    y += DETAIL * LINE;
-    let place = where_of(card).map(|_| {
-        y += DETAILS_GAP;
-        let middle = y + DETAIL * LINE / 2.0;
-        y += DETAIL * LINE;
-        middle
-    });
     let block = (block_top, y - block_top);
     let mut buttons = Vec::new();
     if card.video.is_some() {
@@ -139,17 +140,12 @@ fn layout(card: &Card) -> Layout {
     let then = card.then.as_ref().map(|_| {
         y += GAP;
         let rule = y;
-        y += 1.0 + GAP;
-        let middle = y + DETAIL * LINE / 2.0;
-        y += DETAIL * LINE;
-        (rule, middle)
+        y += 1.0 + GAP + DETAIL * LINE;
+        rule
     });
     Layout {
-        label,
         block,
-        title,
-        times,
-        place,
+        title: lines,
         buttons,
         then,
         height: y + PAD + BORDER,
@@ -186,386 +182,275 @@ pub struct Panel {
 }
 
 #[derive(Debug, Default)]
-pub struct State {
-    pointer: Pointer<Target>,
-    focused: Option<Target>,
+struct Ui {
+    focus: Option<Target>,
     said: Option<String>,
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(_) => {
-                for pressed in kit::keys(self.id) {
-                    let _: Option<canvas::Action<Message>> = Self::key(state, &pressed);
-                }
-                self.say(state);
-                None
-            }
-            Input::Mouse(seen, at) => Self::mouse(state, seen, at),
-            Input::Key(pressed) => Self::key(state, &pressed),
-            Input::Nothing => None,
-        }
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// The popover opens: nothing holds the ring, nothing said yet.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A button pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The card changed under the view.
+    Stale,
+}
+
+/// The popover on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let words = panel.words;
+    Around::new(panel.id, build(words), handle, Msg::Stale)
+        .rebuild(move || build(words))
+        .press(Msg::Pressed)
+        .on_glass(panel.glass)
+}
+
+/// Its content, as the card is now.
+fn build<'a>(words: Words) -> El<'a> {
+    let Some(card) = crate::meeting::snapshot() else {
+        return Space::new().into();
+    };
+    let layout = layout(&card);
+    ui(|ui| {
+        say(words, &card, &layout, ui);
+        content(words, &card, &layout, ui.focus)
+    })
+}
+
+fn content<'a>(words: Words, card: &Card, layout: &Layout, focus: Option<Target>) -> El<'a> {
+    let room = WIDTH as f32 - 2.0 * (BORDER + PAD);
+    let label = container(spaced_by(
+        words.heading(card.phase),
+        LABEL,
+        MANROPE_BOLD,
+        FAINT.get(),
+        LABEL_SPACING,
+    ))
+    .height(LABEL * LINE)
+    .align_y(Vertical::Center);
+    let mut all = column![label].spacing(GAP);
+    // The details: the title's lines, the times, the place; the stripe
+    // beside them.
+    let mut details = column![];
+    for line in &layout.title {
+        details = details.push(said(line.clone(), TITLE, MANROPE_BOLD, TEXT.get()));
     }
-
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let Some(card) = crate::meeting::snapshot() else {
-            return vec![frame.into_geometry()];
-        };
-        let f = &mut frame;
-        let layout = layout(&card);
-        let left = BORDER + PAD;
-        let room = WIDTH as f32 - 2.0 * left;
-        spaced(f, self.words.heading(card.phase), left, layout.label);
-        let [r, g, b] = card.colour;
-        let (top, height) = layout.block;
-        f.fill(
-            &kit::rounded(
-                Rectangle::new(Point::new(left, top), Size::new(STRIPE, height)),
-                STRIPE / 2.0,
-            ),
-            Color::from_rgb8(r, g, b),
-        );
-        let x = left + STRIPE + STRIPE_GAP;
-        for (line, middle) in &layout.title {
-            f.fill_text(text_in(
-                MANROPE_BOLD,
-                text(
-                    line.clone(),
-                    Point::new(x, *middle),
-                    TITLE,
-                    TEXT.get(),
-                    Alignment::Left,
-                ),
-            ));
-        }
-        // "14:00 – 14:30" then " · dans 25 min".
-        let times = format!("{} – {}", card.start, card.end);
-        f.fill_text(text_in(
-            MONO,
-            text(
-                times.clone(),
-                Point::new(x, layout.times),
-                TIMES,
-                DIM.get(),
-                Alignment::Left,
-            ),
-        ));
-        let mut at = x + kit::measure(&times, TIMES, MONO);
-        f.fill_text(text(
-            " · ".to_owned(),
-            Point::new(at, layout.times),
-            DETAIL,
-            DIM.get(),
-            Alignment::Left,
-        ));
-        at += kit::measure(" · ", DETAIL, MANROPE);
-        let (colour, font) = relative_style(card.phase.look());
-        f.fill_text(text_in(
-            font,
-            text(
-                self.words.relative(card.phase),
-                Point::new(at, layout.times),
-                DETAIL,
-                colour,
-                Alignment::Left,
-            ),
-        ));
-        if let (Some(middle), Some((said, call))) = (layout.place, where_of(&card)) {
-            let icon = Rectangle::new(Point::new(x, middle - ICON / 2.0), Size::new(ICON, ICON));
+    let times = format!("{} – {}", card.start, card.end);
+    let (colour, font) = relative_style(card.phase.look());
+    details = details.push(Space::new().height(DETAILS_GAP)).push(
+        row![
+            said(times, TIMES, MONO, DIM.get()),
+            said(" · ", DETAIL, MANROPE, DIM.get()),
+            said(words.relative(card.phase), DETAIL, font, colour),
+        ]
+        .height(DETAIL * LINE)
+        .align_y(Vertical::Center),
+    );
+    let x = STRIPE + STRIPE_GAP;
+    if let Some((place, call)) = where_of(card) {
+        let icon = drawn(ICON, ICON, move |f, s| {
+            let at = Rectangle::new(Point::ORIGIN, s);
             if call {
-                camera(f, icon, FAINT.get());
+                camera(f, at, FAINT.get());
             } else {
-                pin(f, icon, FAINT.get());
+                pin(f, at, FAINT.get());
             }
-            let tx = x + ICON + ICON_GAP;
-            let said = kit::elide(&said, left + room - tx, |t| {
-                kit::measure(t, DETAIL, MANROPE)
-            });
-            f.fill_text(text(
-                said,
-                Point::new(tx, middle),
-                DETAIL,
-                FAINT.get(),
-                Alignment::Left,
-            ));
-        }
-        for (target, rect) in &layout.buttons {
-            let hover = state.pointer.hover == Some(*target);
-            match target {
-                Target::Join => {
-                    let fill = if hover { JOIN_HOVER } else { JOIN_BLUE };
-                    f.fill(&kit::rounded(*rect, JOIN_RADIUS), fill.get());
-                    let word = self.words.join();
-                    let wide =
-                        JOIN_ICON + JOIN_ICON_GAP + kit::measure(word, JOIN_TEXT, MANROPE_BOLD);
-                    let x0 = rect.center_x() - wide / 2.0;
-                    camera(
-                        f,
-                        Rectangle::new(
-                            Point::new(x0, rect.center_y() - JOIN_ICON / 2.0),
-                            Size::new(JOIN_ICON, JOIN_ICON),
-                        ),
-                        Color::WHITE,
-                    );
-                    f.fill_text(text_in(
-                        MANROPE_BOLD,
-                        text(
-                            word.to_owned(),
-                            Point::new(x0 + JOIN_ICON + JOIN_ICON_GAP, rect.center_y()),
-                            JOIN_TEXT,
-                            Color::WHITE,
-                            Alignment::Left,
-                        ),
-                    ));
-                    if state.focused == Some(*target) {
-                        ring(f, *rect, JOIN_RADIUS);
-                    }
-                }
-                Target::Calendar => {
-                    let fill = if hover { CALENDAR_HOVER } else { CALENDAR_FILL };
-                    f.fill(&kit::rounded(*rect, CALENDAR_RADIUS), fill.get());
-                    f.fill_text(text_in(
-                        MANROPE_SEMIBOLD,
-                        text(
-                            self.words.show_in_calendar().to_owned(),
-                            rect.center(),
-                            DETAIL,
-                            DIM.get(),
-                            Alignment::Center,
-                        ),
-                    ));
-                    if state.focused == Some(*target) {
-                        ring(f, *rect, CALENDAR_RADIUS);
-                    }
-                }
-            }
-        }
-        if let (Some((rule, middle)), Some((time, title))) = (layout.then, &card.then) {
-            f.fill_rectangle(Point::new(left, rule), Size::new(room, 1.0), RULE.get());
-            let mut at = spaced(f, self.words.then(), left, middle) + THEN_GAP;
-            f.fill_text(text_in(
-                MONO,
-                text(
-                    time.clone(),
-                    Point::new(at, middle),
-                    THEN_TIME,
-                    DIM.get(),
-                    Alignment::Left,
-                ),
-            ));
-            at += kit::measure(time, THEN_TIME, MONO) + THEN_GAP;
-            let title = kit::elide(title, (left + room - at).max(0.0), |t| {
-                kit::measure(t, DETAIL, MANROPE)
-            });
-            f.fill_text(text(
-                title,
-                Point::new(at, middle),
-                DETAIL,
-                DIM.get(),
-                Alignment::Left,
-            ));
-        }
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
-    }
-}
-
-/// `word` spaced 0.1 em in `text.faint` (11 px, 700) from `x`, its line
-/// centred on `middle`: where it ends.
-fn spaced(f: &mut Frame, word: &str, x: f32, middle: f32) -> f32 {
-    let mut at = x;
-    for ch in word.chars() {
-        let ch = ch.to_string();
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                ch.clone(),
-                Point::new(at, middle),
-                LABEL,
-                FAINT.get(),
-                Alignment::Left,
-            ),
-        ));
-        at += kit::measure(&ch, LABEL, MANROPE_BOLD) + LABEL_SPACING;
-    }
-    at - LABEL_SPACING
-}
-
-impl Panel {
-    /// What it shows, for the log, when it changed.
-    fn say(&self, state: &mut State) {
-        let Some(card) = crate::meeting::snapshot() else {
-            return;
-        };
-        let layout = layout(&card);
-        let mut said = vec![
-            self.words.heading(card.phase).to_owned(),
-            layout
-                .title
-                .iter()
-                .map(|(l, _)| l.as_str())
-                .collect::<Vec<_>>()
-                .join(" / "),
-            format!(
-                "{} – {} · {}",
-                card.start,
-                card.end,
-                self.words.relative(card.phase)
-            ),
-        ];
-        if let Some((place, _)) = where_of(&card) {
-            said.push(place);
-        }
-        for (target, _) in &layout.buttons {
-            said.push(match target {
-                Target::Join => self.words.join().to_owned(),
-                Target::Calendar => self.words.show_in_calendar().to_owned(),
-            });
-        }
-        if let Some((time, title)) = &card.then {
-            said.push(format!("{} {time} {title}", self.words.then()));
-        }
-        let said = said.join(" | ");
-        if state.said.as_deref() != Some(said.as_str()) {
-            tracing::debug!(%said, "the meeting's popover shows it");
-            state.said = Some(said);
-        }
-        // For screen readers (crate::a11y::rows): the card's name, its
-        // place, its buttons, what comes next.
-        use crate::a11y::rows::{self, Rows};
-        let mut nodes = vec![rows::line(self.words.name(&card))];
-        for (target, rect) in &layout.buttons {
-            let name = match target {
-                Target::Join => self.words.join_call(),
-                Target::Calendar => self.words.show_in_calendar(),
-            };
-            nodes.push(rows::act(*target, hocus_a11y::Role::Button, name, *rect));
-        }
-        if let Some((time, title)) = &card.then {
-            let then = if self.words.fr() { "Ensuite" } else { "Next" };
-            nodes.push(rows::line(format!("{then} : {time}, {title}")));
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(layout.buttons.iter().map(|(t, _)| *t)),
-                focus: state.focused.map(rows::key),
-                arrows: false,
-            },
+        });
+        let place = kit::elide(&place, room - x - ICON - ICON_GAP, |t| {
+            kit::measure(t, DETAIL, MANROPE)
+        });
+        details = details.push(Space::new().height(DETAILS_GAP)).push(
+            row![
+                icon,
+                gap(ICON_GAP),
+                said(place, DETAIL, MANROPE, FAINT.get())
+            ]
+            .height(DETAIL * LINE)
+            .align_y(Vertical::Center),
         );
     }
-
-    fn act(target: Target) {
-        match target {
-            Target::Join => {
-                super::send(crate::meeting::join().into_iter().collect());
-                event(Seen::Chosen);
-            }
-            // The calendar takes this popover's place (it closes it).
-            Target::Calendar => {
-                let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
-                if let Some(bar) = bar {
-                    super::send(crate::meeting::open_in_calendar(&bar).into_iter().collect());
-                }
-            }
-        }
+    let [r, g, b] = card.colour;
+    let stripe = container(Space::new().width(STRIPE).height(layout.block.1))
+        .style(move |_| boxed(Color::from_rgb8(r, g, b), STRIPE / 2.0));
+    all = all.push(crate::ui::line(
+        row![stripe, gap(STRIPE_GAP), details],
+        words.name(card),
+    ));
+    for (target, _) in &layout.buttons {
+        all = all.push(button_of(words, *target, focus));
     }
-
-    fn targets() -> Vec<Target> {
-        crate::meeting::snapshot()
-            .map(|card| layout(&card).buttons.into_iter().map(|(t, _)| t).collect())
-            .unwrap_or_default()
-    }
-
-    fn mouse<Message>(
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let buttons = crate::meeting::snapshot()
-            .map(|card| layout(&card).buttons)
-            .unwrap_or_default();
-        let target = at.and_then(|at| {
-            buttons
-                .iter()
-                .find(|(_, r)| r.contains(at))
-                .map(|(t, _)| *t)
+    if let Some((time, title)) = &card.then {
+        all = all.push(
+            container(Space::new().width(Length::Fill).height(1.0))
+                .style(|_| boxed(RULE.get(), 0.0)),
+        );
+        let label = spaced_by(
+            words.then(),
+            LABEL,
+            MANROPE_BOLD,
+            FAINT.get(),
+            LABEL_SPACING,
+        );
+        let used = kit::measure(words.then(), LABEL, MANROPE_BOLD)
+            + LABEL_SPACING * LABEL * (words.then().chars().count() as f32 - 1.0)
+            + THEN_GAP
+            + kit::measure(time, THEN_TIME, MONO)
+            + THEN_GAP;
+        let shown = kit::elide(title, (room - used).max(0.0), |t| {
+            kit::measure(t, DETAIL, MANROPE)
         });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focused = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    Self::act(target);
-                }
-                redraw
-            }
-            _ => None,
-        }
+        let then = if words.fr() { "Ensuite" } else { "Next" };
+        all = all.push(crate::ui::line(
+            row![
+                label,
+                gap(THEN_GAP),
+                said(time.clone(), THEN_TIME, MONO, DIM.get()),
+                gap(THEN_GAP),
+                said(shown, DETAIL, MANROPE, DIM.get()),
+            ]
+            .height(DETAIL * LINE)
+            .align_y(Vertical::Center),
+            format!("{then} : {time}, {title}"),
+        ));
     }
+    container(all).padding(BORDER + PAD).into()
+}
 
-    fn key<Message>(state: &mut State, pressed: &Pressed) -> Option<canvas::Action<Message>> {
-        use iced::keyboard::{Key, key::Named};
-        let targets = Self::targets();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab | Named::ArrowDown) => {
-                state.focused = kit::step(&targets, state.focused, pressed.modifiers.shift());
-            }
-            Key::Named(Named::ArrowUp) => {
-                state.focused = kit::step(&targets, state.focused, true);
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(target) = state.focused.filter(|t| targets.contains(t)) {
-                    Self::act(target);
-                }
-            }
-            _ => return None,
+/// Button `target`: "Rejoindre", blue, with its camera; "Voir dans le
+/// calendrier", quiet.
+fn button_of<'a>(words: Words, target: Target, focus: Option<Target>) -> El<'a> {
+    let (face, height, radius, name): (El<'a>, f32, f32, &str) = match target {
+        Target::Join => {
+            let camera = drawn(JOIN_ICON, JOIN_ICON, |f, s| {
+                camera(f, Rectangle::new(Point::ORIGIN, s), Color::WHITE);
+            });
+            (
+                container(
+                    row![
+                        camera,
+                        gap(JOIN_ICON_GAP),
+                        said(words.join(), JOIN_TEXT, MANROPE_BOLD, Color::WHITE)
+                    ]
+                    .align_y(Vertical::Center),
+                )
+                .center(Length::Fill)
+                .into(),
+                JOIN,
+                JOIN_RADIUS,
+                words.join_call(),
+            )
         }
-        Some(canvas::Action::request_redraw().and_capture())
+        Target::Calendar => (
+            container(said(
+                words.show_in_calendar(),
+                DETAIL,
+                MANROPE_SEMIBOLD,
+                DIM.get(),
+            ))
+            .center(Length::Fill)
+            .into(),
+            CALENDAR,
+            CALENDAR_RADIUS,
+            words.show_in_calendar(),
+        ),
+    };
+    let pressed = button(face)
+        .padding(0)
+        .width(Length::Fill)
+        .height(height)
+        .style(move |_, status| {
+            let lit = style::lit(status);
+            let fill = match (target, lit) {
+                (Target::Join, false) => JOIN_BLUE,
+                (Target::Join, true) => JOIN_HOVER,
+                (Target::Calendar, false) => CALENDAR_FILL,
+                (Target::Calendar, true) => CALENDAR_HOVER,
+            };
+            button::Style {
+                background: Some(fill.get().into()),
+                border: style::round(radius),
+                ..button::Style::default()
+            }
+        })
+        .on_press(Msg::Act(target));
+    control(pressed, target.id(), Role::Button, name)
+        .focus(focus == Some(target), Msg::Focus(target), radius)
+        .activate(Msg::Act(target))
+        .rows(0)
+        .into()
+}
+
+/// What it shows, for the log, when it changed.
+fn say(words: Words, card: &Card, layout: &Layout, ui: &mut Ui) {
+    let mut said = vec![
+        words.heading(card.phase).to_owned(),
+        layout.title.join(" / "),
+        format!(
+            "{} – {} · {}",
+            card.start,
+            card.end,
+            words.relative(card.phase)
+        ),
+    ];
+    if let Some((place, _)) = where_of(card) {
+        said.push(place);
+    }
+    for (target, _) in &layout.buttons {
+        said.push(match target {
+            Target::Join => words.join().to_owned(),
+            Target::Calendar => words.show_in_calendar().to_owned(),
+        });
+    }
+    if let Some((time, title)) = &card.then {
+        said.push(format!("{} {time} {title}", words.then()));
+    }
+    let said = said.join(" | ");
+    if ui.said.as_deref() != Some(said.as_str()) {
+        tracing::debug!(%said, "the meeting's popover shows it");
+        ui.said = Some(said);
+    }
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Act(target) => act(target),
+    }
+}
+
+fn act(target: Target) {
+    match target {
+        Target::Join => {
+            super::send(crate::meeting::join().into_iter().collect());
+            event(Seen::Chosen);
+        }
+        // The calendar takes this popover's place (it closes it).
+        Target::Calendar => {
+            let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
+            if let Some(bar) = bar {
+                super::send(crate::meeting::open_in_calendar(&bar).into_iter().collect());
+            }
+        }
     }
 }
 

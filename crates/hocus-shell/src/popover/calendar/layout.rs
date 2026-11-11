@@ -354,6 +354,7 @@ pub struct Viewport {
 }
 
 impl Viewport {
+    #[cfg(test)]
     pub fn scrolls(self) -> bool {
         self.content > self.view.height + 0.5
     }
@@ -388,6 +389,13 @@ pub enum Target {
     Event(usize),
     /// "Choisir des agendas…": Day.1's popover, at its first step.
     Choose,
+}
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    pub fn id(self) -> String {
+        format!("calendar:{self:?}")
+    }
 }
 
 /// The popover laid out.
@@ -874,6 +882,7 @@ pub fn host_and_path(address: &str) -> String {
 impl Laid {
     /// What can be clicked, where (on the popover): the event rows within
     /// the list only, scrolled.
+    #[cfg(test)]
     pub fn targets(&self) -> Vec<(Target, Rectangle)> {
         let mut targets = vec![
             (Target::Today, self.today_button),
@@ -897,6 +906,7 @@ impl Laid {
     }
 
     /// `row` on the popover, scrolled.
+    #[cfg(test)]
     pub fn row_rect(&self, list: Viewport, row: &Row) -> Rectangle {
         Rectangle::new(
             Point::new(list.view.x, list.view.y + row.top - self.scroll),

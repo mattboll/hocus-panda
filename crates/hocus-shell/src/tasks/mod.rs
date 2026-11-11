@@ -663,6 +663,16 @@ pub fn draw_field(
     });
 }
 
+/// `with` the popover's field, if it is open there (the kit's field,
+/// [`crate::ui::field::Field`]).
+pub fn popover_entry(with: &mut dyn FnMut(&mut Entry)) {
+    ui(|ui| {
+        if let Some(open) = ui.field.as_mut().filter(|open| open.at == At::Popover) {
+            with(&mut open.entry);
+        }
+    });
+}
+
 /// A press at `p` in the field at `at`, as it was drawn: its caret goes
 /// there.
 pub fn field_press(at: &At, p: iced::Point) {

@@ -1946,12 +1946,16 @@ field (a secret is one word).
 
 Decision [0005](../decisions/0005-shell-widgets.md). A surface of the
 kit (`hocus-shell/src/ui/`) is iced's stock widgets, a few of ours and
-canvases only for what the look draws. Built that way: the Wi-Fi's,
+canvases only for what the look draws. Built that way: every popover (the Wi-Fi's,
 Bluetooth's, the sound's, the music player's, the battery's, the
 brightness's, a desktop's list, the mini form's windows', a tray icon's
-menu, the in-use sign's, the session's and a window's menu popovers, and
-the music player's tile. The other surfaces are still hand-drawn
-canvases (#772).
+menu, the in-use sign's, the session's, a window's menu, the next
+meeting's, the tasks', the calendar, the agents' briefing, Sources and
+the consent, the clipboard's history, the notifications' history and the
+day sources'), and the music player's tile. The bar's items, the
+launcher, the actions, the emoji picker, the captures, the lock, the
+notifications' bubbles, the share picker, the desktops' overview and the
+peek are still hand-drawn canvases (#772).
 
 **How to build a surface with it.**
 
@@ -1966,11 +1970,18 @@ canvases (#772).
    (`parts::label`), the small button, a connected block, a list's row
    (`parts::row_button`), a list that scrolls (`parts::list`; a notch of
    the wheel two rows and a touchpad's logical pixels with
-   `parts::list_by`), spaced capitals cut to a room (`parts::spaced`), the
-   Settings' link, the header's switch (`parts::Knob`), a spinner, a
-   glyph (`parts::drawn(w, h, |frame, size| …)`, the canvas's own
-   drawing; `parts::drawn_out` to draw past its bounds, a ring round an
-   icon). A surface whose parts a layout of its own places (the
+   `parts::list_by`), spaced capitals cut to a room (`parts::spaced`;
+   any spacing, any font: `parts::spaced_by`), the Settings' link, the
+   header's switch (`parts::Knob`), a spinner, a glyph
+   (`parts::drawn(w, h, |frame, size| …)`, the canvas's own drawing;
+   `parts::drawn_out` to draw past its bounds, a ring round an icon;
+   `parts::drawn_lit` to draw it otherwise under the pointer, in a
+   button; `parts::moving` for what moves by itself, a panda playing its
+   mood, a switch's knob sliding: it draws again each frame while it
+   moves, and only then). Text that may hold a secret (what an agent's
+   tool said) is drawn and kept out of the dump (`ui::unsaid`). A
+   scrollable lays its content out as wide as its viewport at least:
+   rows of a width of their own go in a container. A surface whose parts a layout of its own places (the
    session's, a window's menu) pins them there (iced's `pin` in a
    `stack`). Styles from the theme's tokens: `ui::style`.
 3. **Every control is declared where it is built**:
@@ -1987,11 +1998,14 @@ canvases (#772).
    slider's arrows), `.press(Msg::Pressed)`, `.first(…)` for where the
    ring goes when it is opened by the keyboard, `.subtitle(…)`,
    `.later(&LATER)` for what waits for the next tree (a list scrolled to
-   a row: `ui::reveal`), `.rebuild(…)` (how its content is built, so
-   that a change seen as it draws builds it again in place, this
-   surface alone drawn), `.wake_at(…)` (when what it shows ends by
-   itself: a value asked and not said, a time that goes on), then
-   `.on_glass(glass)`.
+   a row: `ui::reveal`, or to an offset its layout computed),
+   `.rebuild(…)` (how its content is built, so that a change seen as it
+   draws builds it again in place, this surface alone drawn),
+   `.wake_at(…)` (when what it shows ends by itself: a value asked and
+   not said, a time that goes on), then `.on_glass(glass)`, or
+   `.on(background)` for a tint of its own (the clipboard's, the
+   notifications' history). A control whose own look says it holds the
+   ring (a calendar's day, outlined) is `.ringless()`.
 5. **`handle`** changes the model at once; the surface's view alone is
    built again and drawn. What changes outside it (a network, a mixer)
    reaches it through `popover::changed`, which marks the kit's views
@@ -2018,6 +2032,13 @@ Then (#772): the battery's 0.44 %, the brightness's 0.14 %, the
 in-use's 0.20 %, a window's menu 0.30 %, the session's 0.01 %, a
 desktop's list, the windows' and a tray menu's none; the session's and
 the window menu's tests read the ring and the places from the dump.
+Then the second batch: the next meeting's 0.86 %, the tasks' 0.01 %, the
+calendar's 0.06 %, the briefing's 0.39 % (her head's SVG), Sources'
+0.08 %, the clipboard's 0.15 %, the notifications' history's 0.14 %, the
+day sources' 0.17 %; by more than 24/255 only the meeting's divider,
+the briefing's head and the history's moon (SVGs drawn as widgets).
+Their tests find their controls in the dump, as said after what the
+surface last showed.
 
 ### 3.9, the desktops (2026-10-30)
 
