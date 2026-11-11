@@ -19,7 +19,7 @@ use smithay::{
             MotionEvent, RelativeMotionEvent,
         },
     },
-    utils::{Logical, Point, SERIAL_COUNTER},
+    utils::{Logical, Point, SERIAL_COUNTER, Serial},
 };
 
 use crate::grabs::EdgesExt as _;
@@ -1015,35 +1015,7 @@ impl State {
                 }
                 return;
             } else if let Some(id) = self.grip_hit(at) {
-                self.focus(Some(id));
-                if button == BTN_LEFT {
-                    let now = self.now();
-                    let double = self
-                        .pointer
-                        .last_grip_press
-                        .take()
-                        .is_some_and(|(w, t)| w == id && now.saturating_sub(t) < DOUBLE_CLICK);
-                    if double {
-                        self.toggle_maximized(id);
-                        self.pointer.kept_buttons.insert(button);
-                    } else {
-                        self.pointer.last_grip_press = Some((id, now));
-                        self.start_move(id, button, None, serial);
-                    }
-                } else {
-                    // A right click on the grip: the window's radial menu,
-                    // as it is let go (#723).
-                    if button == BTN_RIGHT {
-                        self.radial_menu.press = Some(crate::radial::Press {
-                            window: id,
-                            at,
-                            button,
-                            serial,
-                            resizes: false,
-                        });
-                    }
-                    self.pointer.kept_buttons.insert(button);
-                }
+                self.grip_press(id, button, at, serial);
                 return;
             } else if let Some(id) = self.window_under(at) {
                 self.focus(Some(id));
@@ -1077,6 +1049,41 @@ impl State {
             },
         );
         pointer.frame(self);
+    }
+
+    /// A press on window `id`'s grip: the left button moves it, twice
+    /// quickly maximises it; the right one opens its radial menu as it is
+    /// let go.
+    fn grip_press(&mut self, id: WindowId, button: u32, at: Point<f64, Logical>, serial: Serial) {
+        self.focus(Some(id));
+        if button == BTN_LEFT {
+            let now = self.now();
+            let double = self
+                .pointer
+                .last_grip_press
+                .take()
+                .is_some_and(|(w, t)| w == id && now.saturating_sub(t) < DOUBLE_CLICK);
+            if double {
+                self.toggle_maximized(id);
+                self.pointer.kept_buttons.insert(button);
+            } else {
+                self.pointer.last_grip_press = Some((id, now));
+                self.start_move(id, button, None, serial);
+            }
+        } else {
+            // A right click on the grip: the window's radial menu,
+            // as it is let go (#723).
+            if button == BTN_RIGHT {
+                self.radial_menu.press = Some(crate::radial::Press {
+                    window: id,
+                    at,
+                    button,
+                    serial,
+                    resizes: false,
+                });
+            }
+            self.pointer.kept_buttons.insert(button);
+        }
     }
 
     fn on_pointer_axis<I: InputBackend>(&mut self, event: &I::PointerAxisEvent) {
