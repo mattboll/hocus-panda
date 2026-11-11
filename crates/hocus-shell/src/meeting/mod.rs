@@ -327,6 +327,9 @@ pub fn linked() {
         s.told = Some(near);
         near
     });
+    // Said as `halo` says it: linked before the day is read, the card that
+    // comes with nothing near changes nothing, and nothing else says so.
+    tracing::debug!(?near, "the next meeting's halo");
     popover::tell(ToCompositor::Meeting(near));
 }
 
