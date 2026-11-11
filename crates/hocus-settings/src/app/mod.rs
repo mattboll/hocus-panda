@@ -2341,6 +2341,30 @@ enum TryPart {
 
 /// The places of what the window draws, after it is laid out, with the
 /// wheels it had taken then and the serial of the last "shows" line.
+/// `folder` opened in the user's file manager (`xdg-open`), made first
+/// when `make`: on a thread of its own, which the window never waits for.
+fn open_folder(folder: PathBuf, make: bool) {
+    let started = std::thread::Builder::new()
+        .name("settings: folder".to_owned())
+        .spawn(move || {
+            if make {
+                let _ = std::fs::create_dir_all(&folder);
+            }
+            let opened = std::process::Command::new("xdg-open")
+                .arg(&folder)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if let Err(err) = opened {
+                tracing::warn!(%err, "xdg-open does not run");
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "no thread to open the folder from");
+    }
+}
+
 fn places(wheels: u64, shown: u64) -> Task<Message> {
     iced::advanced::widget::operate(places::Collect::after(wheels, shown)).map(Message::Placed)
 }

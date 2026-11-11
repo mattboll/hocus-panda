@@ -176,17 +176,7 @@ impl App {
             Msg::Open(folder) => {
                 let path = self.folder_used(folder).0;
                 tracing::info!(folder = %path.display(), "the folder is opened");
-                std::thread::spawn(move || {
-                    let opened = std::process::Command::new("xdg-open")
-                        .arg(&path)
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status();
-                    if let Err(err) = opened {
-                        tracing::warn!(%err, "xdg-open does not run");
-                    }
-                });
+                super::open_folder(path, false);
                 iced::Task::none()
             }
             Msg::Change(folder) => {
