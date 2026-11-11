@@ -45,7 +45,7 @@ impl State {
     pub fn tray_clicked(&mut self, ask: u64, pid: u32) {
         let token = self.activation_token();
         tracing::debug!(ask, pid, "a tray click");
-        self.tray_click = Some(TrayClick {
+        self.arrivals.tray_click = Some(TrayClick {
             pid,
             token: token.clone(),
             at: self.now(),
@@ -57,11 +57,11 @@ impl State {
     /// the focus now; it does once.
     pub fn tray_click_focuses(&mut self, pid: Option<u32>) -> bool {
         let now = self.now();
-        let Some(click) = &self.tray_click else {
+        let Some(click) = &self.arrivals.tray_click else {
             return false;
         };
         if now.saturating_sub(click.at) >= CLICK_FOCUSES {
-            self.tray_click = None;
+            self.arrivals.tray_click = None;
             return false;
         }
         let ours = std::process::id();
@@ -70,15 +70,20 @@ impl State {
         });
         if mine {
             tracing::debug!(?pid, "a tray click focuses its window");
-            self.tray_click = None;
+            self.arrivals.tray_click = None;
         }
         mine
     }
 
     /// A token was used: the click it was made for is spent.
     pub fn tray_token_used(&mut self, token: &str) {
-        if self.tray_click.as_ref().is_some_and(|c| c.token == token) {
-            self.tray_click = None;
+        if self
+            .arrivals
+            .tray_click
+            .as_ref()
+            .is_some_and(|c| c.token == token)
+        {
+            self.arrivals.tray_click = None;
         }
     }
 

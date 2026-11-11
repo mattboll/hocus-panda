@@ -311,6 +311,7 @@ impl PointerGrab<State> for MoveGrab {
         state.bar_front_dropped();
         let now = state.now();
         let zone = state
+            .snap
             .preview
             .as_ref()
             .filter(|p| p.shown(now))
@@ -755,7 +756,7 @@ impl State {
         } else {
             floats = matches!(mode, Mode::Snapped(_));
             // The handle goes with the pair.
-            self.seam_handle = None;
+            self.snap.seam_handle = None;
         }
         let (min, max) = crate::windows::size_limits(&window);
         let min = (min.0.max(MIN_SIZE.0), min.1.max(MIN_SIZE.1));

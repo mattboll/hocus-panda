@@ -646,7 +646,7 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
-        self.grabber.ready(renderer);
+        self.departures.grabber.ready(renderer);
         // What the compositor draws itself, in high contrast if it is on.
         crate::contrast::set(
             self.config
@@ -948,7 +948,7 @@ impl State {
         // The handle of a pair's seam, where the pair is now: right above
         // the front one of the two, so that a window over the seam covers
         // it (§8).
-        let mut handle = self.seam_handle.and_then(|(seam, handle)| {
+        let mut handle = self.snap.seam_handle.and_then(|(seam, handle)| {
             let live = self.live_seam(seam.first, seam.second)?;
             let (x, y) = live.centre();
             area.to_f64()
@@ -964,7 +964,7 @@ impl State {
                     handle_element(
                         renderer,
                         &self.textures,
-                        &self.seam_handle_id,
+                        &self.snap.seam_handle_id,
                         Point::from((x, y)) - origin,
                         seam.vertical,
                         scale,
@@ -1090,12 +1090,14 @@ impl State {
         let glass_at = elements.len();
         // Where a dragged window would snap, above the windows.
         let preview = self
+            .snap
             .preview
             .as_ref()
             .filter(|p| p.shown(now))
             .map(|p| (p.rect, p.alpha(now)))
             .or_else(|| {
-                self.preview_out
+                self.snap
+                    .preview_out
                     .as_ref()
                     .map(|(rect, t)| (*rect, 1.0 - t.at(now) as f32))
             });
@@ -1103,13 +1105,20 @@ impl State {
             let r = crate::windows::rectangle(rect).to_f64();
             let r = Rectangle::new(r.loc - origin, r.size);
             elements.extend(
-                preview_elements(renderer, &self.textures, &self.preview_ids, r, scale, alpha)
-                    .into_iter()
-                    .map(OutputElements::Frame),
+                preview_elements(
+                    renderer,
+                    &self.textures,
+                    &self.snap.preview_ids,
+                    r,
+                    scale,
+                    alpha,
+                )
+                .into_iter()
+                .map(OutputElements::Frame),
             );
         }
         // Windows leaving, from their last frame.
-        for leaving in self.leaving.iter().rev() {
+        for leaving in self.departures.leaving.iter().rev() {
             let p = leaving.tween.at(now);
             let rect = Rectangle::<f64, Logical>::new(
                 (

@@ -38,7 +38,7 @@ impl State {
         self.windows
             .values()
             .map(|m| &m.window)
-            .chain(self.unmapped.iter())
+            .chain(self.arrivals.unmapped.iter())
             .find(|w| w.x11_surface() == Some(surface))
             .cloned()
     }

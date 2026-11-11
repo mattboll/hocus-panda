@@ -280,13 +280,13 @@ fn the_handle_shows_near_a_snapped_pairs_seam_only_and_then_rests() -> anyhow::R
     wait_for_rect(&mut hp, "test.left", Zone::Left.rect(AREA))?;
     let (x, y) = seam_centre();
     hp.pointer_move(x, y);
-    assert!(hp.state().seam_handle.is_none(), "no pair, no handle");
+    assert!(hp.state().snap.seam_handle.is_none(), "no pair, no handle");
     // With its pair: near the seam, anywhere along it, the handle shows.
     open(&mut hp, "test.right", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
     wait_for_rect(&mut hp, "test.right", Zone::Right.rect(AREA))?;
     hp.pointer_move(x + 10.0, 200.0);
-    let (seam, _) = hp.state().seam_handle.expect("the handle shows");
+    let (seam, _) = hp.state().snap.seam_handle.expect("the handle shows");
     assert!(seam.vertical);
     assert_eq!(
         hp.state().frame_cursor,
@@ -296,7 +296,7 @@ fn the_handle_shows_near_a_snapped_pairs_seam_only_and_then_rests() -> anyhow::R
     // Away: it fades, and nothing more is drawn once it has.
     hp.pointer_move(300.0, 300.0);
     wait(&mut hp, Duration::from_millis(700))?;
-    assert!(hp.state().seam_handle.is_none(), "faded");
+    assert!(hp.state().snap.seam_handle.is_none(), "faded");
     let frames = hp.frames();
     wait(&mut hp, Duration::from_millis(300))?;
     assert_eq!(hp.frames(), frames, "no frame at rest");

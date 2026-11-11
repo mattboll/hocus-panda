@@ -487,11 +487,11 @@ impl State {
     pub fn map_window(&mut self, window: Window) {
         let Some(output) = self.output_under_pointer() else {
             tracing::warn!("a window with no output to show on");
-            self.unmapped.push(window);
+            self.arrivals.unmapped.push(window);
             return;
         };
         let Some(area) = self.work_area(&output) else {
-            self.unmapped.push(window);
+            self.arrivals.unmapped.push(window);
             return;
         };
         let app = app_id(&window).unwrap_or_default();
@@ -634,10 +634,14 @@ impl State {
                 None
             };
         }
-        self.opens_as.retain(|(s, _)| s.is_alive());
+        self.arrivals.opens_as.retain(|(s, _)| s.is_alive());
         let surface = window.wl_surface()?;
-        let at = self.opens_as.iter().position(|(s, _)| *s == *surface)?;
-        Some(self.opens_as.remove(at).1)
+        let at = self
+            .arrivals
+            .opens_as
+            .iter()
+            .position(|(s, _)| *s == *surface)?;
+        Some(self.arrivals.opens_as.remove(at).1)
     }
 
     /// Where a window opening as `mode` on `output` goes.
@@ -660,11 +664,15 @@ impl State {
     /// opens behind, and its activation token, if it shows one, brings it
     /// forward.
     fn takes_focus(&mut self, window: &Window) -> bool {
-        self.activate_on_map.retain(|s| s.is_alive());
+        self.arrivals.activate_on_map.retain(|s| s.is_alive());
         if let Some(surface) = window.wl_surface()
-            && let Some(at) = self.activate_on_map.iter().position(|s| *s == *surface)
+            && let Some(at) = self
+                .arrivals
+                .activate_on_map
+                .iter()
+                .position(|s| *s == *surface)
         {
-            self.activate_on_map.remove(at);
+            self.arrivals.activate_on_map.remove(at);
             return true;
         }
         if window.wl_surface().is_some_and(|s| self.dialog_focuses(&s)) {
@@ -682,7 +690,7 @@ impl State {
         let now = self.now();
         // An X11 program the desktop started names its token.
         if let Some(token) = window.x11_surface().and_then(|x| x.startup_id())
-            && let Some((made, valid)) = self.activation_tokens.remove(&token)
+            && let Some((made, valid)) = self.arrivals.activation_tokens.remove(&token)
             && valid
             && now.saturating_sub(made) < SPAWN_FOCUS
         {
@@ -692,6 +700,7 @@ impl State {
             return true;
         };
         if self
+            .arrivals
             .spawned_at
             .take()
             .is_some_and(|at| now.saturating_sub(at) < SPAWN_FOCUS)
@@ -724,7 +733,7 @@ impl State {
 
     /// A window went, or its client hid it: it fades from its last frame.
     pub fn unmap_window(&mut self, window: &Window) {
-        self.unmapped.retain(|w| w != window);
+        self.arrivals.unmapped.retain(|w| w != window);
         let Some(id) = self.id_of(window) else {
             return;
         };
@@ -749,7 +758,7 @@ impl State {
         self.record_window_gone(id);
         self.overlay.forget(id);
         self.windows.remove(&id);
-        self.pictures.remove(&id);
+        self.departures.pictures.remove(&id);
         self.space.unmap_elem(window);
         if self.wobble.as_ref().is_some_and(|(w, _)| *w == id) {
             self.wobble = None;
@@ -778,8 +787,12 @@ impl State {
         let geometry = window.geometry();
         window
             .wl_surface()
-            .and_then(|s| self.grabber.take(&s, geometry.loc, geometry.size))
-            .or_else(|| self.pictures.get(&id).cloned())
+            .and_then(|s| {
+                self.departures
+                    .grabber
+                    .take(&s, geometry.loc, geometry.size)
+            })
+            .or_else(|| self.departures.pictures.get(&id).cloned())
     }
 
     /// A window's surface is going: its picture, while its textures are
@@ -794,7 +807,7 @@ impl State {
             return;
         };
         if let Some(picture) = self.picture_of(id) {
-            self.pictures.insert(id, picture);
+            self.departures.pictures.insert(id, picture);
         }
     }
 
@@ -834,7 +847,7 @@ impl State {
             Some(rain) => Tween::new(now, rain.duration(), Bezier::LINEAR),
             None => Tween::new(now, duration, curve),
         };
-        self.leaving.push(Leaving {
+        self.departures.leaving.push(Leaving {
             picture,
             from,
             to,
@@ -1409,14 +1422,14 @@ impl State {
                 managed.grip = Grip::Hidden;
             }
         }
-        if let Some((_, handle)) = self.seam_handle {
+        if let Some((_, handle)) = self.snap.seam_handle {
             let (handle_moving, handle_next) = handle.moving(now);
             moving |= handle_moving;
             if let Some(at) = handle_next {
                 wake(at);
             }
             if handle.gone(now) {
-                self.seam_handle = None;
+                self.snap.seam_handle = None;
             }
         }
         for strip in self.strips.values_mut() {
@@ -1443,18 +1456,18 @@ impl State {
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
-        self.leaving.retain(|l| !l.tween.done(now));
-        moving |= !self.leaving.is_empty();
-        if let Some(preview) = &self.preview {
+        self.departures.leaving.retain(|l| !l.tween.done(now));
+        moving |= !self.departures.leaving.is_empty();
+        if let Some(preview) = &self.snap.preview {
             if preview.shown(now) {
                 moving |= preview.alpha(now) < 1.0;
             } else {
                 wake(preview.entered + motion::PREVIEW_DELAY);
             }
         }
-        if let Some((_, t)) = &self.preview_out {
+        if let Some((_, t)) = &self.snap.preview_out {
             if t.done(now) {
-                self.preview_out = None;
+                self.snap.preview_out = None;
             } else {
                 moving = true;
             }
@@ -1511,7 +1524,7 @@ impl State {
     /// Shows where a dragged window would snap, or nothing.
     pub fn set_preview(&mut self, zone: Option<(Zone, Rect, Output)>) {
         let now = self.now();
-        let same = match (&self.preview, &zone) {
+        let same = match (&self.snap.preview, &zone) {
             // The same zone of another screen is another place.
             (Some(p), Some((z, _, o))) => p.zone == *z && p.output == *o,
             (None, None) => true,
@@ -1520,18 +1533,18 @@ impl State {
         if same {
             return;
         }
-        if let Some(old) = self.preview.take()
+        if let Some(old) = self.snap.preview.take()
             && old.shown(now)
         {
             let alpha = f64::from(old.alpha(now));
             // Fades from where it got to.
             let start = now.saturating_sub(motion::PREVIEW.mul_f64(1.0 - alpha));
-            self.preview_out = Some((
+            self.snap.preview_out = Some((
                 old.rect,
                 Tween::new(start, motion::PREVIEW, Bezier::EASE_IN),
             ));
         }
-        self.preview = zone.map(|(zone, rect, output)| Preview {
+        self.snap.preview = zone.map(|(zone, rect, output)| Preview {
             zone,
             output,
             rect,
@@ -1603,6 +1616,7 @@ impl State {
     pub fn hover_seam(&mut self, near: Option<model::Seam>) {
         let now = self.now();
         let current = self
+            .snap
             .seam_handle
             .filter(|(s, _)| self.live_seam(s.first, s.second).is_some());
         let next = match (current, near) {
@@ -1613,8 +1627,8 @@ impl State {
             (Some((s, handle)), None) => Some((s, handle.towards(false, now).unwrap_or(handle))),
             (None, None) => None,
         };
-        if next != self.seam_handle {
-            self.seam_handle = next;
+        if next != self.snap.seam_handle {
+            self.snap.seam_handle = next;
             self.redraw = true;
         }
     }

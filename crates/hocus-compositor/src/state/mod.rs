@@ -10,10 +10,7 @@ use std::{
 
 use anyhow::Context;
 use smithay::{
-    backend::{
-        renderer::element::Id,
-        session::{Session, libseat::LibSeatSession},
-    },
+    backend::session::{Session, libseat::LibSeatSession},
     desktop::{PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
     input::{
         Seat, SeatState,
@@ -38,8 +35,10 @@ use smithay::{
 };
 
 mod protocols;
+mod windows;
 
 pub use protocols::Protocols;
+pub use windows::{Arrivals, Departures, Snap};
 
 use crate::{
     App, Config,
@@ -52,9 +51,8 @@ use crate::{
     popups::PopupGrab,
     programs::Programs,
     shortcuts::Ending,
-    snapshot::{Grabber, Snapshot},
     switcher::Switcher,
-    windows::{Leaving, Managed, Preview, rect_of},
+    windows::{Managed, rect_of},
     wobble::Jelly,
 };
 
@@ -92,44 +90,14 @@ pub struct State {
     /// The mapped windows (and the minimised ones), by their id in the
     /// model, with their motions.
     pub windows: BTreeMap<WindowId, Managed>,
-    /// Toplevels whose first buffer has not come: mapped once it does.
-    pub unmapped: Vec<Window>,
-    /// Activation tokens handed out, when, and whether they may focus a
-    /// window (made from the user's input, or by the desktop).
-    pub activation_tokens: HashMap<String, (Duration, bool)>,
-    /// The user started a program through the desktop then: its window
-    /// takes the focus.
-    pub spawned_at: Option<Duration>,
     /// Commits of the windows' surfaces so far, for tests: none at rest.
     pub window_commits: u64,
     /// The day's performance: what the loop counts, the recorder (#655).
     pub perf: crate::perf::Perf,
-    /// Windows not mapped yet that asked for the focus with a valid token.
-    pub activate_on_map: Vec<WlSurface>,
     /// xdg-foreign's handles and the dialogs made through them (#595).
     pub foreign: crate::foreign::Foreign,
-    /// The last click on a tray icon, while its application may still
-    /// focus a window with it (5.14b).
-    pub tray_click: Option<crate::tray::TrayClick>,
-    /// Windows not mapped yet that asked to open maximised or fullscreen
-    /// (§10): they show so from their first frame.
-    pub opens_as: Vec<(WlSurface, model::Mode)>,
     /// What draws windows' frames, and their pictures as they leave.
     pub textures: Textures,
-    pub grabber: Grabber,
-    /// Windows' pictures taken as their surfaces went.
-    pub pictures: HashMap<WindowId, Snapshot>,
-    pub leaving: Vec<Leaving>,
-    /// The windows' rains so far, for their seeds (#432).
-    pub rain_seeds: u32,
-    /// Where a dragged window would snap, and the one fading out.
-    pub preview: Option<Preview>,
-    pub preview_out: Option<(Rect, Tween)>,
-    pub preview_ids: [Id; 9],
-    /// The handle shown on the seam of a pair near the pointer,
-    /// fading like a grip (§8).
-    pub seam_handle: Option<(model::Seam, crate::windows::Grip)>,
-    pub seam_handle_id: Id,
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
     /// The pointer and the overview's hot corners (#727).
@@ -278,6 +246,13 @@ pub struct State {
     pub leave: crate::leave::Leave,
     /// Set once the compositor is asked to end, and why.
     pub ending: Option<Ending>,
+    /// Windows on their way in: before their first buffer, and whether
+    /// they may take the focus as they come.
+    pub arrivals: Arrivals,
+    /// The windows going: their pictures, taken as their surfaces went.
+    pub departures: Departures,
+    /// Where a dragged window would snap, and the seam's handle.
+    pub snap: Snap,
 }
 
 impl State {
@@ -374,27 +349,12 @@ impl State {
             popups: PopupManager::default(),
             model: Model::default(),
             windows: BTreeMap::new(),
-            unmapped: Vec::new(),
-            activation_tokens: HashMap::new(),
-            spawned_at: None,
             window_commits: 0,
             perf: crate::perf::Perf::default(),
-            activate_on_map: Vec::new(),
             foreign: crate::foreign::Foreign::default(),
-            tray_click: None,
-            opens_as: Vec::new(),
             textures: Textures::default(),
-            grabber: Grabber::default(),
-            pictures: HashMap::new(),
-            leaving: Vec::new(),
-            rain_seeds: 0,
-            preview: None,
-            preview_out: None,
             switcher_repeat: None,
             levels: crate::levels::Levels::default(),
-            preview_ids: std::array::from_fn(|_| Id::new()),
-            seam_handle: None,
-            seam_handle_id: Id::new(),
             moving: None,
             hot_corner: crate::hot_corner::HotCorner::default(),
             pointer_placed: false,
@@ -465,6 +425,9 @@ impl State {
             away: crate::away::Away::default(),
             leave: crate::leave::Leave::default(),
             ending: None,
+            snap: Snap::default(),
+            departures: Departures::default(),
+            arrivals: Arrivals::default(),
         })
     }
 
@@ -514,7 +477,7 @@ impl State {
         self.windows
             .values()
             .map(|m| &m.window)
-            .chain(self.unmapped.iter())
+            .chain(self.arrivals.unmapped.iter())
             .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
     }

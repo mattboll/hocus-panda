@@ -565,13 +565,18 @@ impl State {
             && pointer.is_grabbed()
         {
             // No snap where the preview was.
-            self.preview = None;
-            self.preview_out = None;
+            self.snap.preview = None;
+            self.snap.preview_out = None;
             let time = self.input_time();
             pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), time);
         }
-        if self.preview.as_ref().is_some_and(|p| p.output == *output) {
-            self.preview = None;
+        if self
+            .snap
+            .preview
+            .as_ref()
+            .is_some_and(|p| p.output == *output)
+        {
+            self.snap.preview = None;
         }
         if self.switcher.as_ref().is_some_and(|s| s.output == *output) {
             self.end_switcher(false);
@@ -590,7 +595,7 @@ impl State {
             self.close_radial(None);
         }
         self.radial_out = None;
-        self.seam_handle = None;
+        self.snap.seam_handle = None;
     }
 
     /// The screen still there nearest to `geometry` (a screen gone).
