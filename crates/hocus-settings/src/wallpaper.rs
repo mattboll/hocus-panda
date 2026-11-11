@@ -13,7 +13,6 @@
 //! listed, the desktop portal's file chooser asked, the chosen picture
 //! checked and copied, a picture removed and put back.
 
-use crate::lang::French as _;
 use hocus_words::settings::wallpaper as words;
 use std::{
     collections::HashMap,
@@ -32,24 +31,24 @@ use iced::widget::image::Handle;
 use toml_edit::{DocumentMut, Item};
 
 use crate::{
-    lang::{Lang, pair, w},
+    lang::Lang,
     model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const PREVIEW: RowGroup = RowGroup {
-    label: w(words::PREVIEW),
+    label: words::PREVIEW,
     per_source: false,
 };
 pub const BACKGROUNDS: RowGroup = RowGroup {
-    label: w(words::BACKGROUNDS),
+    label: words::BACKGROUNDS,
     per_source: false,
 };
 pub const ANIMATION: RowGroup = RowGroup {
-    label: w(words::ANIMATION),
+    label: words::ANIMATION,
     per_source: false,
 };
 pub const LOCK: RowGroup = RowGroup {
-    label: w(words::LOCK_SCREEN),
+    label: words::LOCK_SCREEN,
     per_source: false,
 };
 
@@ -100,7 +99,7 @@ pub fn settings() -> &'static [Setting] {
             own(
                 PER_SCREEN,
                 PREVIEW,
-                w(words::A_BACKGROUND_PER_SCREEN),
+                words::A_BACKGROUND_PER_SCREEN,
                 (
                     &["chaque écran", "tous les écrans", "moniteur"],
                     &["each screen", "all screens", "monitor", "per-screen"],
@@ -110,7 +109,7 @@ pub fn settings() -> &'static [Setting] {
             own(
                 PICTURE,
                 BACKGROUNDS,
-                w(words::DESKTOP_BACKGROUND),
+                words::DESKTOP_BACKGROUND,
                 (
                     &[
                         "image",
@@ -126,7 +125,7 @@ pub fn settings() -> &'static [Setting] {
             own(
                 BUILTINS,
                 BACKGROUNDS,
-                w(words::BUILT_IN_BACKGROUNDS),
+                words::BUILT_IN_BACKGROUNDS,
                 (
                     &["nuit", "brume", "aube", "forêt", "dégradé"],
                     &["night", "mist", "dawn", "forest", "gradient"],
@@ -136,7 +135,7 @@ pub fn settings() -> &'static [Setting] {
             own(
                 MOVING,
                 BACKGROUNDS,
-                w(words::ANIMATED_BACKGROUNDS),
+                words::ANIMATED_BACKGROUNDS,
                 (
                     &[
                         "animé",
@@ -164,7 +163,7 @@ pub fn settings() -> &'static [Setting] {
             own(
                 CHOOSE,
                 BACKGROUNDS,
-                w(words::CHOOSE_A_PICTURE),
+                words::CHOOSE_A_PICTURE,
                 (&["fichier", "ajouter", "photo"], &["file", "add", "photo"]),
                 &["wallpaper", "picture"],
             ),
@@ -172,7 +171,7 @@ pub fn settings() -> &'static [Setting] {
                 id: FIT,
                 section: SectionId::Wallpaper,
                 group: BACKGROUNDS,
-                name: w(words::FIT),
+                name: words::FIT,
                 line: None,
                 keywords: (
                     &["couvrir", "ajuster", "centrer", "recadrer"],
@@ -180,15 +179,15 @@ pub fn settings() -> &'static [Setting] {
                 ),
                 kind: Kind::Menu(vec![
                     Choice {
-                        label: w(words::COVER_THE_SCREEN),
+                        label: words::COVER_THE_SCREEN,
                         value: Value::Word("cover"),
                     },
                     Choice {
-                        label: w(words::THE_WHOLE_PICTURE),
+                        label: words::THE_WHOLE_PICTURE,
                         value: Value::Word("contain"),
                     },
                     Choice {
-                        label: w(words::CENTRE_UNSCALED),
+                        label: words::CENTRE_UNSCALED,
                         value: Value::Word("center"),
                     },
                 ]),
@@ -199,14 +198,21 @@ pub fn settings() -> &'static [Setting] {
                 id: COLOR,
                 section: SectionId::Wallpaper,
                 group: BACKGROUNDS,
-                name: w(words::SOLID_COLOUR),
+                name: words::SOLID_COLOUR,
                 line: None,
                 keywords: (&["couleur", "uni", "unie"], &["color", "colour", "plain"]),
                 kind: Kind::Menu(
                     SWATCHES
                         .iter()
-                        .map(|(rgb, fr, en)| Choice {
-                            label: pair(fr, en),
+                        .enumerate()
+                        .map(|(i, (rgb, _, _))| Choice {
+                            label: hocus_words::Text::per_lang(|lang| {
+                                hocus_words::link::wallpaper::SWATCHES
+                                    .get(lang)
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or_default()
+                            }),
                             value: Value::Text(hocus_link::wallpaper::colour_word(*rgb)),
                         })
                         .collect(),
@@ -218,8 +224,8 @@ pub fn settings() -> &'static [Setting] {
                 id: ANIMATE,
                 section: SectionId::Wallpaper,
                 group: ANIMATION,
-                name: w(words::ANIMATE_THE_BACKGROUND),
-                line: Some(w(words::THE_RAIN_AT_15_FRAMES_A)),
+                name: words::ANIMATE_THE_BACKGROUND,
+                line: Some(words::THE_RAIN_AT_15_FRAMES_A),
                 keywords: (
                     &["animé", "animation", "pluie", "étoiles", "mouvement"],
                     &["animated", "animation", "rain", "stars", "moving"],
@@ -232,7 +238,7 @@ pub fn settings() -> &'static [Setting] {
                 id: ON_BATTERY,
                 section: SectionId::Wallpaper,
                 group: ANIMATION,
-                name: w(words::ON_BATTERY),
+                name: words::ON_BATTERY,
                 line: None,
                 keywords: (
                     &["batterie", "animé"],
@@ -240,15 +246,15 @@ pub fn settings() -> &'static [Setting] {
                 ),
                 kind: Kind::Menu(vec![
                     Choice {
-                        label: w(words::SLOWED_HALF),
+                        label: words::SLOWED_HALF,
                         value: Value::Word("half"),
                     },
                     Choice {
-                        label: w(words::STOPPED),
+                        label: words::STOPPED,
                         value: Value::Word("still"),
                     },
                     Choice {
-                        label: w(words::AS_ON_MAINS_POWER),
+                        label: words::AS_ON_MAINS_POWER,
                         value: Value::Word("full"),
                     },
                 ]),
@@ -259,7 +265,7 @@ pub fn settings() -> &'static [Setting] {
                 id: LOCK_ID,
                 section: SectionId::Wallpaper,
                 group: LOCK,
-                name: w(words::LOCK_SCREEN_2),
+                name: words::LOCK_SCREEN_2,
                 line: None,
                 keywords: (
                     &["verrouiller", "flou", "assombri", "verrouillage"],
@@ -267,15 +273,15 @@ pub fn settings() -> &'static [Setting] {
                 ),
                 kind: Kind::Menu(vec![
                     Choice {
-                        label: w(words::THE_DESKTOP_S_BACKGROUND_DIMMED),
+                        label: words::THE_DESKTOP_S_BACKGROUND_DIMMED,
                         value: Value::Word("dimmed"),
                     },
                     Choice {
-                        label: w(words::THE_DESKTOP_S_BACKGROUND_BLURRED),
+                        label: words::THE_DESKTOP_S_BACKGROUND_BLURRED,
                         value: Value::Word("blurred"),
                     },
                     Choice {
-                        label: w(words::ANOTHER_PICTURE),
+                        label: words::ANOTHER_PICTURE,
                         value: Value::Word("picture"),
                     },
                 ]),
@@ -285,7 +291,7 @@ pub fn settings() -> &'static [Setting] {
             own(
                 LOCK_PICTURE,
                 LOCK,
-                w(words::LOCK_SCREEN_PICTURE),
+                words::LOCK_SCREEN_PICTURE,
                 (
                     &["verrouillage", "image"],
                     &["lock", "picture", "lock-picture"],
@@ -404,15 +410,9 @@ impl File {
 /// unie", a file's name.
 pub fn name_of(picture: &Picture, lang: Lang) -> String {
     match picture {
-        Picture::Builtin(b) => {
-            let (fr, en) = b.names();
-            if lang.fr() { fr } else { en }.to_owned()
-        }
-        Picture::Moving(m) => {
-            let (fr, en) = m.names();
-            if lang.fr() { fr } else { en }.to_owned()
-        }
-        Picture::Plain => w(words::SOLID_COLOUR).get(lang).to_owned(),
+        Picture::Builtin(b) => b.name(lang).to_owned(),
+        Picture::Moving(m) => m.name(lang).to_owned(),
+        Picture::Plain => words::SOLID_COLOUR.get(lang).to_owned(),
         Picture::File(text) => Path::new(text)
             .file_name()
             .map_or_else(|| text.clone(), |n| n.to_string_lossy().into_owned()),

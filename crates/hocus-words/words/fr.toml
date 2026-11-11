@@ -281,6 +281,11 @@ unplugged = "{name} débranché"
 undone = "Annulé : {said}."
 redone = "Rétabli : {said}."
 plug_in_2 = "Brancher {tool_title}"
+family_working = "au travail"
+family_waiting = "t’attend"
+family_done = "a fini"
+family_stuck = "bloqué"
+family_resting = "au repos"
 
 [settings.app_appearance_page]
 switches_selection_the_keyboard_s_ring = "Les interrupteurs, la sélection, l’anneau du clavier."
@@ -946,6 +951,7 @@ its_place_and_settings_are_kept = "Sa place ({place_unwrap_or_default}) et ses r
 the_laptop_screen_is_off_the = "L’écran du portable est éteint ; la session continue sur l’{other}, et la barre y est passée. Ses réglages reviennent quand tu rouvres le couvercle."
 off_2 = "{title} éteint"
 it_stays_plugged_in_and_keeps = "Il reste branché et garde sa place ; ses fenêtres sont passées sur l’{other}."
+now_shows = "L’{title} affiche maintenant {now}. Sans réponse, il revient à {then} dans {left} s."
 
 [settings.app_sound]
 headset_microphone = "Micro du casque"
@@ -1210,6 +1216,25 @@ at_session_start_2 = "Au démarrage de la session"
 the_type = "Le type {other}"
 open_with = "{what} s’ouvrent avec {app}"
 opens_with = "{what} s’ouvre avec {app}"
+http_links = "Les liens http:"
+https_links = "Les liens https:"
+html_pages = "Les pages HTML"
+xhtml_pages = "Les pages XHTML"
+mp4_videos = "Les vidéos MP4"
+webm_videos = "Les vidéos WebM"
+mkv_videos = "Les vidéos MKV"
+quicktime_videos = "Les vidéos QuickTime"
+avi_videos = "Les vidéos AVI"
+mpeg_videos = "Les vidéos MPEG"
+ogg_videos = "Les vidéos Ogg"
+png_images = "Les images PNG"
+jpeg_images = "Les images JPEG"
+webp_images = "Les images WebP"
+gif_images = "Les images GIF"
+svg_images = "Les images SVG"
+avif_images = "Les images AVIF"
+bmp_images = "Les images BMP"
+tiff_images = "Les images TIFF"
 
 [settings.bar]
 place = "EMPLACEMENT"
@@ -1475,6 +1500,9 @@ none = "Aucune"
 right_alt = "Alt droite"
 menu = "Menu"
 right_ctrl = "Ctrl droite"
+go_to_desktop_n = "Aller au bureau"
+send_to_desktop_n = "Envoyer au bureau"
+take_to_desktop_n = "Emmener au bureau"
 
 [settings.model]
 personalisation = "PERSONNALISATION"
@@ -1799,6 +1827,8 @@ time_format = "Format de l’heure"
 no_clock_change = "pas de changement d’heure"
 standard_time_until = "heure d’hiver jusqu’au {said}"
 summer_time_until = "heure d’été jusqu’au {said}"
+first_of_month = "1er {month}"
+day_of_month = "{day} {month}"
 
 [settings.wallpaper]
 preview = "APERÇU"
@@ -2299,6 +2329,7 @@ enter_inserts = "Entrée insère"
 no_emoji_for = "Aucun emoji pour « {query} »"
 skin_tone = "Teinte de peau"
 emoji_enter_inserts_the_first_the = "Emoji · Entrée insère le premier, les flèches choisissent"
+tones = ["Jaune", "Claire", "Moyennement claire", "Moyenne", "Moyennement foncée", "Foncée"]
 
 [shell.levels_model]
 muted = "muet"
@@ -2329,6 +2360,32 @@ charging_2 = "en charge"
 plugged_in_full_2 = "branché, plein"
 plugged_in = "branché"
 plug_in_the_charger_2 = "branche le chargeur"
+n_1_more_application = "+1 autre application"
+more_applications = "+{x_n} autres applications"
+power_saver = "économie"
+balanced = "équilibré"
+battery = "Batterie"
+power = "Énergie"
+plugged_in_2 = "Branché"
+power_saver_2 = "Économie"
+balanced_2 = "Équilibré"
+performance_reduced_the_computer_is_on = "Performance réduite : l'ordinateur est sur tes genoux."
+performance_reduced_the_computer_is_too = "Performance réduite : l'ordinateur est trop chaud."
+performance_reduced_by_the_system = "Performance réduite par le système."
+no_windows = "{title}, aucune fenêtre"
+n_1_window = "{title}, 1 fenêtre"
+windows = "{title}, {x_n} fenêtres"
+laptop_screen = "Écran du portable"
+screen = "Écran {number}"
+inch_external_screen = "Écran externe {i} pouces"
+n_1_window_2 = "1 fenêtre"
+windows_2 = "{x_n} fenêtres"
+keyboard_levels_2 = ["Éteint", "Allumé"]
+keyboard_levels_3 = ["Éteint", "Faible", "Fort"]
+keyboard_levels_4 = ["Éteint", "Faible", "Moyen", "Fort"]
+on_the_screen = "sur l’{screen}"
+on_screen = "sur l’{screen}"
+desktop_n = "Bureau {number}"
 
 [shell.network_model]
 connecting = "Connexion…"
@@ -2398,3 +2455,28 @@ this_desktop_s_windows = "Fenêtres du bureau : {count}"
 [shell.notifications]
 dev_shell_stopped = "Le shell de développement s’est arrêté"
 dev_shell_stopped_body = "{program} n’a pas démarré ou s’arrêtait sans cesse. Le shell installé a repris."
+
+
+[link.wallpaper]
+swatches = ["Nuit", "Ardoise", "Bleu profond", "Sapin", "Terre", "Graphite"]
+
+[link.backdrop]
+night = "Nuit"
+mist = "Brume"
+dawn = "Aube"
+forest = "Forêt"
+
+[link.moving]
+rain = "Pluie"
+stars = "Étoiles"
+aurora = "Aurore"
+
+[link.theme]
+green = "Vert des pandas"
+blue = "Bleu"
+violet = "Violet"
+rose = "Rose"
+teal = "Sarcelle"
+wallpaper = "Du fond d'écran"
+ice = "Bleu glacé"
+phosphor = "Vert phosphore"

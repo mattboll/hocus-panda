@@ -5086,6 +5086,120 @@ pub const BEFORE: &[(&str, &str, &str)] = &[
     ("settings.power.suspend", "Mettre en veille", "Suspend"),
     ("settings.power.power_off", "Éteindre", "Power off"),
     ("settings.power.do_nothing", "Ne rien faire", "Do nothing"),
+    ("link.backdrop.night", "Nuit", "Night"),
+    ("link.backdrop.mist", "Brume", "Mist"),
+    ("link.backdrop.dawn", "Aube", "Dawn"),
+    ("link.backdrop.forest", "Forêt", "Forest"),
+    ("link.moving.rain", "Pluie", "Rain"),
+    ("link.moving.stars", "Étoiles", "Stars"),
+    ("link.moving.aurora", "Aurore", "Aurora"),
+    ("link.theme.green", "Vert des pandas", "Panda green"),
+    ("link.theme.blue", "Bleu", "Blue"),
+    ("link.theme.violet", "Violet", "Violet"),
+    ("link.theme.rose", "Rose", "Pink"),
+    ("link.theme.teal", "Sarcelle", "Teal"),
+    (
+        "link.theme.wallpaper",
+        "Du fond d'écran",
+        "From the wallpaper",
+    ),
+    ("link.theme.ice", "Bleu glacé", "Ice blue"),
+    ("link.theme.phosphor", "Vert phosphore", "Phosphor green"),
+    (
+        "settings.applications.http_links",
+        "Les liens http:",
+        "http: links",
+    ),
+    (
+        "settings.applications.https_links",
+        "Les liens https:",
+        "https: links",
+    ),
+    (
+        "settings.applications.html_pages",
+        "Les pages HTML",
+        "HTML pages",
+    ),
+    (
+        "settings.applications.xhtml_pages",
+        "Les pages XHTML",
+        "XHTML pages",
+    ),
+    (
+        "settings.applications.mp4_videos",
+        "Les vidéos MP4",
+        "MP4 videos",
+    ),
+    (
+        "settings.applications.webm_videos",
+        "Les vidéos WebM",
+        "WebM videos",
+    ),
+    (
+        "settings.applications.mkv_videos",
+        "Les vidéos MKV",
+        "MKV videos",
+    ),
+    (
+        "settings.applications.quicktime_videos",
+        "Les vidéos QuickTime",
+        "QuickTime videos",
+    ),
+    (
+        "settings.applications.avi_videos",
+        "Les vidéos AVI",
+        "AVI videos",
+    ),
+    (
+        "settings.applications.mpeg_videos",
+        "Les vidéos MPEG",
+        "MPEG videos",
+    ),
+    (
+        "settings.applications.ogg_videos",
+        "Les vidéos Ogg",
+        "Ogg videos",
+    ),
+    (
+        "settings.applications.png_images",
+        "Les images PNG",
+        "PNG images",
+    ),
+    (
+        "settings.applications.jpeg_images",
+        "Les images JPEG",
+        "JPEG images",
+    ),
+    (
+        "settings.applications.webp_images",
+        "Les images WebP",
+        "WebP images",
+    ),
+    (
+        "settings.applications.gif_images",
+        "Les images GIF",
+        "GIF images",
+    ),
+    (
+        "settings.applications.svg_images",
+        "Les images SVG",
+        "SVG images",
+    ),
+    (
+        "settings.applications.avif_images",
+        "Les images AVIF",
+        "AVIF images",
+    ),
+    (
+        "settings.applications.bmp_images",
+        "Les images BMP",
+        "BMP images",
+    ),
+    (
+        "settings.applications.tiff_images",
+        "Les images TIFF",
+        "TIFF images",
+    ),
 ];
 
 /// The format strings of arms moved, placeholders aside.

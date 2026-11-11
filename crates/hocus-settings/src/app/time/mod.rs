@@ -27,7 +27,6 @@ use iced::{
 
 use super::{App, Doing, Focus, Message, Page, TOAST, ToastAction, UNDONE};
 use crate::{
-    lang::w,
     model::SectionId,
     time::{self as model, Found},
     timedate::{self, Ask, Asks, Heard, TimeDate},
@@ -347,7 +346,7 @@ impl App {
                     }
                 };
                 if refused {
-                    let text = self.say(w(words::THE_SYSTEM_REFUSED)).to_owned();
+                    let text = self.say(words::THE_SYSTEM_REFUSED).to_owned();
                     return self.toast(text, ToastAction::None, TOAST);
                 }
                 task

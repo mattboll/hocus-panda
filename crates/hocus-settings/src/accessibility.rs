@@ -12,29 +12,26 @@
 use hocus_words::settings::accessibility as words;
 use std::sync::OnceLock;
 
-use crate::{
-    lang::{pair, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
-};
+use crate::model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one};
 
 /// The magnifier's rows (#424).
 pub const MAGNIFIER: RowGroup = RowGroup {
-    label: w(words::MAGNIFIER),
+    label: words::MAGNIFIER,
     per_source: false,
 };
 /// What the desktop looks like (#423).
 pub const VIEW: RowGroup = RowGroup {
-    label: w(words::VIEW),
+    label: words::VIEW,
     per_source: false,
 };
 /// The screen reader (#421, #734).
 pub const READER: RowGroup = RowGroup {
-    label: w(words::SCREEN_READER),
+    label: words::SCREEN_READER,
     per_source: false,
 };
 /// The bar by the keyboard (#422).
 pub const KEYBOARD: RowGroup = RowGroup {
-    label: w(words::KEYBOARD),
+    label: words::KEYBOARD,
     per_source: false,
 };
 
@@ -50,7 +47,7 @@ const FOLLOWS: &[&str] = &["edge", "centre", "proportional"];
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: crate::lang::w(text),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -65,8 +62,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.enabled",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w(words::MAGNIFIER_2),
-                line: Some(w(words::THE_SCREEN_UNDER_THE_POINTER_MAGNIFIED)),
+                name: words::MAGNIFIER_2,
+                line: Some(words::THE_SCREEN_UNDER_THE_POINTER_MAGNIFIED),
                 keywords: (
                     &[
                         "loupe",
@@ -92,8 +89,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.zoom",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w(words::ZOOM),
-                line: Some(w(words::THE_ONE_IT_TURNS_ON_AT)),
+                name: words::ZOOM,
+                line: Some(words::THE_ONE_IT_TURNS_ON_AT),
                 keywords: (&["loupe", "grossissement"], &["magnifier", "magnification"]),
                 kind: Kind::Menu(ZOOMS.iter().map(|&z| zoom(z)).collect()),
                 places: one(
@@ -109,8 +106,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.follow-pointer",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w(words::THE_VIEW_FOLLOWS_THE_POINTER),
-                line: Some(w(words::AT_THE_EDGE_IT_MOVES_ONLY)),
+                name: words::THE_VIEW_FOLLOWS_THE_POINTER,
+                line: Some(words::AT_THE_EDGE_IT_MOVES_ONLY),
                 keywords: (&["loupe", "souris"], &["magnifier", "mouse", "tracking"]),
                 kind: Kind::Menu(vec![
                     word(words::AT_THE_EDGE, "edge"),
@@ -124,8 +121,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.follow-keyboard",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w(words::FOLLOW_THE_KEYBOARD),
-                line: Some(w(words::THE_VIEW_JUMPS_TO_WHAT_TAKES)),
+                name: words::FOLLOW_THE_KEYBOARD,
+                line: Some(words::THE_VIEW_JUMPS_TO_WHAT_TAKES),
                 keywords: (
                     &["loupe", "focus", "curseur"],
                     &["magnifier", "focus", "caret"],
@@ -138,8 +135,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "magnifier.smooth",
                 section: SectionId::Accessibility,
                 group: MAGNIFIER,
-                name: w(words::SMOOTHING),
-                line: Some(w(words::WITHOUT_HARD_PIXELS)),
+                name: words::SMOOTHING,
+                line: Some(words::WITHOUT_HARD_PIXELS),
                 keywords: (
                     &["loupe", "flou", "pixels"],
                     &["magnifier", "smooth", "pixels"],
@@ -152,8 +149,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.high-contrast",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w(words::HIGH_CONTRAST),
-                line: Some(w(words::THE_CHOSEN_THEME_REINFORCED_TEXT_AT)),
+                name: words::HIGH_CONTRAST,
+                line: Some(words::THE_CHOSEN_THEME_REINFORCED_TEXT_AT),
                 keywords: (
                     &["contraste", "malvoyant", "accessibilité"],
                     &["contrast", "low vision", "accessibility"],
@@ -166,8 +163,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.reduce-transparency",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w(words::REDUCED_TRANSPARENCY),
-                line: Some(w(words::THE_BAR_ITS_MENUS_AND_THE)),
+                name: words::REDUCED_TRANSPARENCY,
+                line: Some(words::THE_BAR_ITS_MENUS_AND_THE),
                 keywords: (
                     &["verre", "flou", "opacité", "transparence"],
                     &["glass", "blur", "opacity", "transparency"],
@@ -180,8 +177,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "appearance.reduced-motion",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w(words::REDUCED_MOTION),
-                line: Some(w(words::WINDOWS_AND_DESKTOPS_FADE_INSTEAD_OF)),
+                name: words::REDUCED_MOTION,
+                line: Some(words::WINDOWS_AND_DESKTOPS_FADE_INSTEAD_OF),
                 keywords: (
                     &["animation", "onduler", "mouvement"],
                     &["animation", "motion", "wobbly", "reduce motion"],
@@ -194,8 +191,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "accessibility.text-and-cursor",
                 section: SectionId::Accessibility,
                 group: VIEW,
-                name: w(words::TEXT_AND_CURSOR_SIZE),
-                line: Some(w(words::IN_APPEARANCE_AND_LANGUAGE)),
+                name: words::TEXT_AND_CURSOR_SIZE,
+                line: Some(words::IN_APPEARANCE_AND_LANGUAGE),
                 keywords: (
                     &["texte", "police", "curseur", "pointeur", "grand"],
                     &["text", "font", "cursor", "pointer", "large"],
@@ -212,8 +209,8 @@ pub fn settings() -> &'static [Setting] {
                 id: SCREEN_READER,
                 section: SectionId::Accessibility,
                 group: READER,
-                name: w(words::SCREEN_READER_2),
-                line: Some(w(words::ORCA_STARTS_WITH_THE_SESSION_SUPER)),
+                name: words::SCREEN_READER_2,
+                line: Some(words::ORCA_STARTS_WITH_THE_SESSION_SUPER),
                 keywords: (
                     &[
                         "lecteur d’écran",
@@ -232,8 +229,8 @@ pub fn settings() -> &'static [Setting] {
                 id: "accessibility.focus-bar",
                 section: SectionId::Accessibility,
                 group: KEYBOARD,
-                name: w(words::GO_TO_THE_BAR),
-                line: Some(w(words::SUPER_B_THEN_TAB_AND_THE)),
+                name: words::GO_TO_THE_BAR,
+                line: Some(words::SUPER_B_THEN_TAB_AND_THE),
                 keywords: (
                     &["clavier", "barre", "super+b", "focus", "sans souris"],
                     &["keyboard", "bar", "super+b", "focus", "without a mouse"],
@@ -265,7 +262,7 @@ fn zoom(hundredths: i64) -> Choice {
         }
     };
     Choice {
-        label: pair(label(","), label(".")),
+        label: hocus_words::Text::per_lang(|lang| label(hocus_words::number::DECIMAL.get(lang))),
         value: Value::Int(hundredths),
     }
 }
@@ -276,7 +273,10 @@ mod tests {
 
     #[test]
     fn the_page_has_its_groups_in_order() {
-        let mut groups: Vec<&str> = settings().iter().map(|s| s.group.label.fr).collect();
+        let mut groups: Vec<&str> = settings()
+            .iter()
+            .map(|s| s.group.label.get(hocus_words::Lang::French))
+            .collect();
         groups.dedup();
         assert_eq!(groups, ["LOUPE", "VUE", "LECTEUR D’ÉCRAN", "CLAVIER"]);
         let ids: Vec<&str> = settings()
@@ -318,7 +318,8 @@ mod tests {
         assert!(
             reader
                 .line
-                .is_some_and(|l| l.fr.contains("Super+Alt+S") && l.en.contains("Super+Alt+S"))
+                .is_some_and(|l| l.get(hocus_words::Lang::French).contains("Super+Alt+S")
+                    && l.get(hocus_words::Lang::English).contains("Super+Alt+S"))
         );
         let places = reader.places.all();
         assert_eq!(places.len(), 1);
@@ -340,9 +341,9 @@ mod tests {
         let Kind::Menu(choices) = &zoom.kind else {
             panic!("a menu");
         };
-        assert_eq!(choices[0].label.fr, "×1,5");
-        assert_eq!(choices[0].label.en, "×1.5");
-        assert_eq!(choices[7].label.en, "×16");
+        assert_eq!(choices[0].label.get(hocus_words::Lang::French), "×1,5");
+        assert_eq!(choices[0].label.get(hocus_words::Lang::English), "×1.5");
+        assert_eq!(choices[7].label.get(hocus_words::Lang::English), "×16");
         for place in zoom.places.all() {
             assert!(place.codec.write(&Value::Int(150)).is_some());
             assert!(place.codec.write(&place.default).is_some());

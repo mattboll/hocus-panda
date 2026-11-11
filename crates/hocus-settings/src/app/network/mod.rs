@@ -32,11 +32,7 @@ use iced::{
 };
 
 use super::{App, Doing, Focus, Message, Page, TOAST, ToastAction, UNDONE, Undo};
-use crate::{
-    lang::{Lang, w},
-    model::SectionId,
-    network as model,
-};
+use crate::{lang::Lang, model::SectionId, network as model};
 
 /// A saved network's password field's id.
 pub(super) const PASSWORD_FIELD: &str = "network-password";
@@ -1073,21 +1069,21 @@ impl App {
 /// What a change's toast says, done, undone or redone.
 fn network_said(choice: &Choice, lang: Lang, doing: Doing) -> String {
     let said = match choice {
-        Choice::Airplane(true) => w(words::AIRPLANE_MODE_ON),
-        Choice::Airplane(false) => w(words::AIRPLANE_MODE_OFF),
-        Choice::Wifi { on: true, .. } => w(words::WI_FI_ON),
-        Choice::Wifi { on: false, .. } => w(words::WI_FI_OFF),
-        Choice::Forget(_) => w(words::NETWORK_FORGOTTEN),
-        Choice::Imported { .. } => w(words::VPN_ADDED),
+        Choice::Airplane(true) => words::AIRPLANE_MODE_ON,
+        Choice::Airplane(false) => words::AIRPLANE_MODE_OFF,
+        Choice::Wifi { on: true, .. } => words::WI_FI_ON,
+        Choice::Wifi { on: false, .. } => words::WI_FI_OFF,
+        Choice::Forget(_) => words::NETWORK_FORGOTTEN,
+        Choice::Imported { .. } => words::VPN_ADDED,
     }
     .get(lang);
     let back = match choice {
-        Choice::Airplane(true) => w(words::AIRPLANE_MODE_OFF_2),
-        Choice::Airplane(false) => w(words::AIRPLANE_MODE_ON_2),
-        Choice::Wifi { on: true, .. } => w(words::WI_FI_OFF),
-        Choice::Wifi { on: false, .. } => w(words::WI_FI_ON),
-        Choice::Forget(_) => w(words::NETWORK_BACK),
-        Choice::Imported { .. } => w(words::VPN_REMOVED),
+        Choice::Airplane(true) => words::AIRPLANE_MODE_OFF_2,
+        Choice::Airplane(false) => words::AIRPLANE_MODE_ON_2,
+        Choice::Wifi { on: true, .. } => words::WI_FI_OFF,
+        Choice::Wifi { on: false, .. } => words::WI_FI_ON,
+        Choice::Forget(_) => words::NETWORK_BACK,
+        Choice::Imported { .. } => words::VPN_REMOVED,
     }
     .get(lang);
     match doing {

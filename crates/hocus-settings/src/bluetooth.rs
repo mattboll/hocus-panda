@@ -8,13 +8,13 @@ use hocus_bluetooth::{Device, Kind};
 use hocus_words::settings::bluetooth as words;
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Outside, SectionId},
 };
 
-const POWER: Words = w(words::BLUETOOTH);
-const MINE: Words = w(words::MY_DEVICES);
-const NEARBY: Words = w(words::NEARBY);
+const POWER: Words = words::BLUETOOTH;
+const MINE: Words = words::MY_DEVICES;
+const NEARBY: Words = words::NEARBY;
 
 /// The switch's row, the paired devices' and those around, by their
 /// search ids.
@@ -44,14 +44,14 @@ pub fn outside() -> &'static [Outside] {
         o(
             SWITCH,
             POWER,
-            w(words::BLUETOOTH_2),
+            words::BLUETOOTH_2,
             &["bt", "sans fil"],
             &["bt", "wireless"],
         ),
         o(
             MY_DEVICES,
             MINE,
-            w(words::MY_DEVICES_2),
+            words::MY_DEVICES_2,
             &[
                 "casque",
                 "écouteurs",
@@ -72,35 +72,35 @@ pub fn outside() -> &'static [Outside] {
         o(
             PAIR,
             NEARBY,
-            w(words::PAIR_A_DEVICE),
+            words::PAIR_A_DEVICE,
             &["appairer", "jumeler", "ajouter", "code", "pin"],
             &["pair", "add", "pairing"],
         ),
         o(
             "bluetooth.forget",
             MINE,
-            w(words::FORGET_A_DEVICE),
+            words::FORGET_A_DEVICE,
             &["supprimer", "dissocier"],
             &["forget", "remove", "unpair"],
         ),
         o(
             "bluetooth.rename",
             MINE,
-            w(words::RENAME_A_DEVICE),
+            words::RENAME_A_DEVICE,
             &["nom"],
             &["rename"],
         ),
         o(
             "bluetooth.trust",
             MINE,
-            w(words::CONNECT_AUTOMATICALLY),
+            words::CONNECT_AUTOMATICALLY,
             &["automatique", "confiance"],
             &["trusted", "auto-connect"],
         ),
         o(
             "bluetooth.visible",
             POWER,
-            w(words::VISIBLE),
+            words::VISIBLE,
             &["découvrable", "nom de l’ordinateur"],
             &["discoverable"],
         ),
@@ -121,16 +121,16 @@ pub fn row_of(id: &str) -> &str {
 /// What a kind is called, under a device around.
 pub fn kind_name(kind: Kind) -> Words {
     match kind {
-        Kind::Earbuds => w(words::EARBUDS),
-        Kind::Headphones => w(words::HEADPHONES),
-        Kind::Speaker => w(words::SPEAKER),
-        Kind::Mouse => w(words::MOUSE),
-        Kind::Keyboard => w(words::KEYBOARD),
-        Kind::Gamepad => w(words::GAMEPAD),
-        Kind::Phone => w(words::PHONE),
-        Kind::Tablet => w(words::TABLET),
-        Kind::Computer => w(words::COMPUTER),
-        Kind::Other => w(words::DEVICE),
+        Kind::Earbuds => words::EARBUDS,
+        Kind::Headphones => words::HEADPHONES,
+        Kind::Speaker => words::SPEAKER,
+        Kind::Mouse => words::MOUSE,
+        Kind::Keyboard => words::KEYBOARD,
+        Kind::Gamepad => words::GAMEPAD,
+        Kind::Phone => words::PHONE,
+        Kind::Tablet => words::TABLET,
+        Kind::Computer => words::COMPUTER,
+        Kind::Other => words::DEVICE,
     }
 }
 
@@ -185,7 +185,7 @@ pub fn battery(percent: u8, lang: Lang) -> String {
 pub fn nearby_line(device: &Device, lang: Lang) -> String {
     let mut said = kind_name(device.kind).get(lang).to_owned();
     if device.kind.asks_a_code() {
-        said.push_str(w(words::A_CODE_WILL_BE_CHECKED).get(lang));
+        said.push_str(words::A_CODE_WILL_BE_CHECKED.get(lang));
     }
     said
 }
@@ -198,10 +198,10 @@ pub fn paired_count(count: usize, lang: Lang) -> String {
 /// The home's card: how many are connected, or that it is off.
 pub fn card(bt: Option<&hocus_bluetooth::Bluetooth>, lang: Lang) -> String {
     let Some(bt) = bt.filter(|b| b.adapter) else {
-        return w(words::NO_ADAPTER).get(lang).to_owned();
+        return words::NO_ADAPTER.get(lang).to_owned();
     };
     if !bt.powered {
-        return w(words::OFF).get(lang).to_owned();
+        return words::OFF.get(lang).to_owned();
     }
     match bt.connected.len() {
         0 => words::NO_DEVICE_CONNECTED.get(lang).to_owned(),

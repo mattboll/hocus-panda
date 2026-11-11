@@ -17,24 +17,24 @@ use hocus_link::BarGroup;
 use toml_edit::{DocumentMut, Item};
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words},
     model::{Choice, Codec, Kind, Outside, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const PLACE: RowGroup = RowGroup {
-    label: w(words::PLACE),
+    label: words::PLACE,
     per_source: false,
 };
 pub const FORM: RowGroup = RowGroup {
-    label: w(words::FORM),
+    label: words::FORM,
     per_source: false,
 };
 pub const SHOWS: RowGroup = RowGroup {
-    label: w(words::WHAT_IT_SHOWS_TOP_TO_BOTTOM),
+    label: words::WHAT_IT_SHOWS_TOP_TO_BOTTOM,
     per_source: false,
 };
 pub const CLOCK: RowGroup = RowGroup {
-    label: w(words::THE_CLOCK),
+    label: words::THE_CLOCK,
     per_source: false,
 };
 
@@ -60,10 +60,10 @@ pub const BUNDLED: &str = hocus_link::ClockLook::DEFAULT_FONT;
 /// The clock's colours offered, `#RRGGBB` in lower case as the model
 /// holds them.
 pub const COLOURS: [(&str, Words); 4] = [
-    ("#eef1f6", w(words::SOFT_WHITE)),
-    ("#7ee0a0", w(words::GREEN)),
-    ("#8fb3ff", w(words::BLUE)),
-    ("#f5c46e", w(words::AMBER)),
+    ("#eef1f6", words::SOFT_WHITE),
+    ("#7ee0a0", words::GREEN),
+    ("#8fb3ff", words::BLUE),
+    ("#f5c46e", words::AMBER),
 ];
 
 const TRANSITIONS: &[&str] = &["odometer", "roll", "flip", "neon", "none"];
@@ -82,9 +82,9 @@ pub fn group_setting(group: BarGroup) -> &'static str {
 /// A group's name, as its row says it.
 pub fn group_name(group: BarGroup) -> Words {
     match group {
-        BarGroup::Today => w(words::TODAY),
-        BarGroup::Tasks => w(words::TO_DO),
-        BarGroup::Agents => w(words::THE_AGENTS),
+        BarGroup::Today => words::TODAY,
+        BarGroup::Tasks => words::TO_DO,
+        BarGroup::Agents => words::THE_AGENTS,
     }
 }
 
@@ -249,7 +249,7 @@ fn fonts() -> &'static [&'static str] {
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: crate::lang::w(text),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -281,11 +281,11 @@ pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
         let mut fonts = vec![Choice {
-            label: w(words::MARTIAN_MONO_BUNDLED),
+            label: words::MARTIAN_MONO_BUNDLED,
             value: Value::Text(BUNDLED.to_owned()),
         }];
         fonts.extend(self::fonts().iter().map(|name| Choice {
-            label: pair(name, name),
+            label: Words::same(name),
             value: Value::Text((*name).to_owned()),
         }));
         vec![
@@ -293,8 +293,8 @@ pub fn settings() -> &'static [Setting] {
                 id: SIDE,
                 section: SectionId::Bar,
                 group: PLACE,
-                name: w(words::SIDE_OF_THE_SCREEN),
-                line: Some(w(words::THE_BAR_ITS_EDGE_TO_CLICK)),
+                name: words::SIDE_OF_THE_SCREEN,
+                line: Some(words::THE_BAR_ITS_EDGE_TO_CLICK),
                 keywords: (
                     &["gauche", "droite", "côté", "bord", "side"],
                     &["left", "right", "side", "edge"],
@@ -307,7 +307,7 @@ pub fn settings() -> &'static [Setting] {
                 id: SCREENS,
                 section: SectionId::Bar,
                 group: PLACE,
-                name: w(words::ON_WHICH_SCREENS),
+                name: words::ON_WHICH_SCREENS,
                 line: None,
                 keywords: (
                     &["plusieurs écrans", "moniteur", "tous", "principal", "écran"],
@@ -323,8 +323,8 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 MEETING,
                 SHOWS,
-                w(words::THE_NEXT_MEETING),
-                w(words::ITS_CARD_UNDER_THE_CLOCK_AND),
+                words::THE_NEXT_MEETING,
+                words::ITS_CARD_UNDER_THE_CLOCK_AND,
                 (
                     &["réunion", "agenda", "rendez-vous"],
                     &["meeting", "calendar"],
@@ -334,8 +334,8 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 TODAY,
                 SHOWS,
-                w(words::TODAY),
-                w(words::THE_EVENTS_AFTER_THE_MEETING_THE),
+                words::TODAY,
+                words::THE_EVENTS_AFTER_THE_MEETING_THE,
                 (
                     &["agenda", "journée", "rendez-vous"],
                     &["today", "calendar", "events"],
@@ -345,16 +345,16 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 TASKS,
                 SHOWS,
-                w(words::TO_DO),
-                w(words::THE_OPEN_TASKS_THREE_AT_MOST),
+                words::TO_DO,
+                words::THE_OPEN_TASKS_THREE_AT_MOST,
                 (&["tâches", "kanban", "liste"], &["tasks", "todo", "kanban"]),
                 &["panel", "tasks"],
             ),
             switch(
                 AGENTS,
                 SHOWS,
-                w(words::THE_AGENTS),
-                w(words::THOSE_WAITING_FOR_YOU_FIRST_IN),
+                words::THE_AGENTS,
+                words::THOSE_WAITING_FOR_YOU_FIRST_IN,
                 (
                     &["agents", "secrétaire", "pandas"],
                     &["agents", "secretary"],
@@ -364,8 +364,8 @@ pub fn settings() -> &'static [Setting] {
             switch(
                 WINDOWS,
                 SHOWS,
-                w(words::THE_WINDOWS),
-                w(words::THE_CURRENT_DESKTOP_S_OVER_THE),
+                words::THE_WINDOWS,
+                words::THE_CURRENT_DESKTOP_S_OVER_THE,
                 (&["fenêtres", "liste"], &["windows", "list"]),
                 &["panel", "windows"],
             ),
@@ -373,8 +373,8 @@ pub fn settings() -> &'static [Setting] {
                 id: SECONDS,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w(words::SECONDS),
-                line: Some(w(words::BESIDE_THE_MINUTES_IN_THE_FULL)),
+                name: words::SECONDS,
+                line: Some(words::BESIDE_THE_MINUTES_IN_THE_FULL),
                 keywords: (&["secondes", "horloge", "heure"], &["seconds", "clock"]),
                 kind: Kind::Switch,
                 places: one(&["panel", "clock", "seconds"], Codec::Bool),
@@ -384,8 +384,8 @@ pub fn settings() -> &'static [Setting] {
                 id: TRANSITION,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w(words::WHEN_THE_MINUTE_CHANGES),
-                line: Some(w(words::WHAT_THE_DIGITS_DO_NOTHING_MOVES)),
+                name: words::WHEN_THE_MINUTE_CHANGES,
+                line: Some(words::WHAT_THE_DIGITS_DO_NOTHING_MOVES),
                 keywords: (
                     &[
                         "animation",
@@ -411,8 +411,8 @@ pub fn settings() -> &'static [Setting] {
                 id: FONT,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w(words::CLOCK_FONT),
-                line: Some(w(words::A_FONT_THAT_IS_NOT_INSTALLED)),
+                name: words::CLOCK_FONT,
+                line: Some(words::A_FONT_THAT_IS_NOT_INSTALLED),
                 keywords: (
                     &["police", "chiffres", "horloge"],
                     &["font", "typeface", "clock"],
@@ -425,7 +425,7 @@ pub fn settings() -> &'static [Setting] {
                 id: COLOR,
                 section: SectionId::Bar,
                 group: CLOCK,
-                name: w(words::CLOCK_COLOUR),
+                name: words::CLOCK_COLOUR,
                 line: None,
                 keywords: (
                     &["couleur", "teinte", "horloge"],
@@ -469,7 +469,7 @@ pub fn outside() -> &'static [Outside] {
         o(
             FORM_ROW,
             FORM.label,
-            w(words::THE_BAR_S_FORM),
+            words::THE_BAR_S_FORM,
             &[
                 "forme",
                 "pleine",
@@ -483,14 +483,14 @@ pub fn outside() -> &'static [Outside] {
         o(
             BY_HAND,
             FORM.label,
-            w(words::CHANGE_FORM_BY_HAND),
+            words::CHANGE_FORM_BY_HAND,
             &["super+shift+b", "toggle-bar", "clic", "bord", "raccourci"],
             &["super+shift+b", "toggle-bar", "click", "edge", "shortcut"],
         ),
         o(
             ORDER,
             SHOWS.label,
-            w(words::ORDER_OF_THE_GROUPS),
+            words::ORDER_OF_THE_GROUPS,
             &["ordre", "monter", "descendre", "ranger", "order"],
             &["order", "move up", "move down", "arrange", "sort"],
         ),

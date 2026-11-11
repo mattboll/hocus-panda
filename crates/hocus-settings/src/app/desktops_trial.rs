@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     desktops as model,
-    lang::{Lang, w},
+    lang::Lang,
     model::Value,
     trial::{self, Rules, Said, Trial},
 };
@@ -177,11 +177,11 @@ impl App {
     fn trial_motion(&self) -> &'static str {
         let rules = self.trial_rules();
         let words = if rules.reduced {
-            w(words::REDUCED_MOTION_IT_MOVES_AS_ONE)
+            words::REDUCED_MOTION_IT_MOVES_AS_ONE
         } else if !rules.wobble {
-            w(words::WITHOUT_THE_WOBBLE_IT_MOVES_AS)
+            words::WITHOUT_THE_WOBBLE_IT_MOVES_AS
         } else {
-            w(words::IT_WOBBLES_AS_IT_MOVES_AND)
+            words::IT_WOBBLES_AS_IT_MOVES_AND
         };
         words.get(self.lang)
     }
@@ -238,7 +238,7 @@ impl App {
             hold = hold.on_press(Message::Desktops(Msg::Hold));
         }
         let line = match none {
-            true => w(words::WITH_NO_KEY_NOTES_MOVES_BY).get(lang).to_owned(),
+            true => words::WITH_NO_KEY_NOTES_MOVES_BY.get(lang).to_owned(),
             false => words::as_if_you_held_drag_notes(lang, key),
         };
         let now = self.desktops.trial.at(self.now);
@@ -285,7 +285,7 @@ impl App {
         let key = key_name(self.trial_key());
         let held = self.desktops.trial.held;
         match (key.is_empty(), held) {
-            (true, _) => w(words::NO_KEY).get(lang).to_owned(),
+            (true, _) => words::NO_KEY.get(lang).to_owned(),
             (false, true) => words::held(lang, key),
             (false, false) => words::hold(lang, key),
         }

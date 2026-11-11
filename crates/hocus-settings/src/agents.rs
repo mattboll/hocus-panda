@@ -15,20 +15,20 @@ use std::sync::OnceLock;
 use hocus_link::ToolState;
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const TOOLS: RowGroup = RowGroup {
-    label: w(words::FOLLOWED_TOOLS),
+    label: words::FOLLOWED_TOOLS,
     per_source: false,
 };
 pub const HALO_GROUP: RowGroup = RowGroup {
-    label: w(words::THE_HALO),
+    label: words::THE_HALO,
     per_source: false,
 };
 pub const PANDAS_GROUP: RowGroup = RowGroup {
-    label: w(words::THE_PANDAS),
+    label: words::THE_PANDAS,
     per_source: false,
 };
 
@@ -238,14 +238,14 @@ impl Row {
     /// Its state's words and colour.
     pub fn state(self) -> (Words, u32) {
         match self {
-            Self::Plugged => (w(words::PLUGGED_IN), 0x7EE0A0),
-            Self::ToApprove => (w(words::PLUGGED_IN_TO_APPROVE), 0xF5C46E),
-            Self::Found => (w(words::FOUND_NOT_PLUGGED_IN), 0x8C96A8),
-            Self::Declined => (w(words::DECLINED), 0x8C96A8),
-            Self::Absent => (w(words::NOT_ON_THIS_COMPUTER), 0x8C96A8),
-            Self::Running => (w(words::RUNNING), 0x7EE0A0),
-            Self::RunningIgnored => (w(words::RUNNING_NOT_FOLLOWED), 0x8C96A8),
-            Self::Stopped => (w(words::NOT_RUNNING), 0x8C96A8),
+            Self::Plugged => (words::PLUGGED_IN, 0x7EE0A0),
+            Self::ToApprove => (words::PLUGGED_IN_TO_APPROVE, 0xF5C46E),
+            Self::Found => (words::FOUND_NOT_PLUGGED_IN, 0x8C96A8),
+            Self::Declined => (words::DECLINED, 0x8C96A8),
+            Self::Absent => (words::NOT_ON_THIS_COMPUTER, 0x8C96A8),
+            Self::Running => (words::RUNNING, 0x7EE0A0),
+            Self::RunningIgnored => (words::RUNNING_NOT_FOLLOWED, 0x8C96A8),
+            Self::Stopped => (words::NOT_RUNNING, 0x8C96A8),
         }
     }
 }
@@ -327,9 +327,9 @@ impl Played {
 
     pub fn label(self) -> Words {
         match self {
-            Self::Waiting => w(words::WAITING),
-            Self::Stuck => w(words::STUCK),
-            Self::Done => w(words::DONE),
+            Self::Waiting => words::WAITING,
+            Self::Stuck => words::STUCK,
+            Self::Done => words::DONE,
         }
     }
 
@@ -345,9 +345,9 @@ impl Played {
     /// What the preview's line says of it.
     pub fn said(self) -> Words {
         match self {
-            Self::Waiting => w(words::AN_AGENT_WAITS_FOR_YOU_A),
-            Self::Stuck => w(words::AN_AGENT_IS_STUCK_THE_ORANGE),
-            Self::Done => w(words::AN_AGENT_IS_DONE_A_SOFT),
+            Self::Waiting => words::AN_AGENT_WAITS_FOR_YOU_A,
+            Self::Stuck => words::AN_AGENT_IS_STUCK_THE_ORANGE,
+            Self::Done => words::AN_AGENT_IS_DONE_A_SOFT,
         }
     }
 
@@ -368,7 +368,7 @@ pub fn outside() -> &'static [Outside] {
             id: TOOLS_ROW,
             section: SectionId::Agents,
             group: TOOLS.label,
-            name: w(words::FOLLOWED_TOOLS_2),
+            name: words::FOLLOWED_TOOLS_2,
             keywords: (
                 &[
                     "outils",
@@ -404,7 +404,7 @@ pub fn outside() -> &'static [Outside] {
             id: ANOTHER,
             section: SectionId::Agents,
             group: TOOLS.label,
-            name: w(words::ANOTHER_TOOL),
+            name: words::ANOTHER_TOOL,
             keywords: (
                 &["commande", "hocus agent", "programme", "état"],
                 &["command", "hocus agent", "program", "state"],
@@ -414,7 +414,7 @@ pub fn outside() -> &'static [Outside] {
             id: PREVIEW,
             section: SectionId::Agents,
             group: HALO_GROUP.label,
-            name: w(words::PREVIEW),
+            name: words::PREVIEW,
             keywords: (
                 &["halo", "lueur", "vague", "aperçu"],
                 &["halo", "glow", "wave", "preview"],
@@ -424,7 +424,7 @@ pub fn outside() -> &'static [Outside] {
             id: REST,
             section: SectionId::Agents,
             group: PANDAS_GROUP.label,
-            name: w(words::NEVER_AT_REST),
+            name: words::NEVER_AT_REST,
             keywords: (
                 &["panda", "pandas", "mouvement", "repos", "économie"],
                 &["panda", "pandas", "motion", "rest", "power saving"],
@@ -436,7 +436,7 @@ pub fn outside() -> &'static [Outside] {
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: crate::lang::w(text),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -467,9 +467,9 @@ fn setting(
 pub fn button_said(id: &str, value: &Value, lang: Lang) -> Option<&'static str> {
     Some(match (id, value) {
         (HALO, Value::Word("waiting")) | (PEEK, Value::Word("waiting")) => {
-            w(words::WHEN_IT_WAITS_FOR_YOU).get(lang)
+            words::WHEN_IT_WAITS_FOR_YOU.get(lang)
         }
-        (PEEK, Value::Word("waiting-and-done")) => w(words::WAITS_OR_IS_DONE).get(lang),
+        (PEEK, Value::Word("waiting-and-done")) => words::WAITS_OR_IS_DONE.get(lang),
         _ => return None,
     })
 }
@@ -477,7 +477,7 @@ pub fn button_said(id: &str, value: &Value, lang: Lang) -> Option<&'static str> 
 /// What a choice says beside it in its menu.
 pub fn aside(id: &str, value: &Value, lang: Lang) -> Option<&'static str> {
     match (id, value) {
-        (HALO, Value::Word("all")) => Some(w(words::WAITS_STUCK_DONE).get(lang)),
+        (HALO, Value::Word("all")) => Some(words::WAITS_STUCK_DONE.get(lang)),
         _ => None,
     }
 }
@@ -490,8 +490,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 HALO,
                 HALO_GROUP,
-                w(words::THE_HALO_2),
-                w(words::THE_BAR_LIGHTS_UP_AMBER_WHEN),
+                words::THE_HALO_2,
+                words::THE_BAR_LIGHTS_UP_AMBER_WHEN,
                 (
                     &["halo", "lueur", "vague", "barre", "illumine"],
                     &["halo", "glow", "wave", "bar", "lights"],
@@ -506,8 +506,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 REMIND,
                 HALO_GROUP,
-                w(words::REMIND_ME_OF_A_WAITING_AGENT),
-                w(words::ONE_MORE_WAVE_ONCE_IF_IT),
+                words::REMIND_ME_OF_A_WAITING_AGENT,
+                words::ONE_MORE_WAVE_ONCE_IF_IT,
                 (
                     &["rappel", "rappeler", "vague", "attend"],
                     &["reminder", "remind", "wave", "waits"],
@@ -523,8 +523,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 PEEK,
                 PANDAS_GROUP,
-                w(words::THE_PANDA_PEEKING_OUT_OF_THE),
-                w(words::IT_COMES_OUT_FOR_8_S),
+                words::THE_PANDA_PEEKING_OUT_OF_THE,
+                words::IT_COMES_OUT_FOR_8_S,
                 (
                     &["panda", "peek", "bulle", "sort", "secrétaire"],
                     &["panda", "peek", "bubble", "peeking", "secretary"],
@@ -539,8 +539,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 PANDAS,
                 PANDAS_GROUP,
-                w(words::PANDAS_IN_THE_AGENTS_ROWS),
-                w(words::A_PANDA_PER_AGENT_SHOWING_ITS),
+                words::PANDAS_IN_THE_AGENTS_ROWS,
+                words::A_PANDA_PER_AGENT_SHOWING_ITS,
                 (
                     &["panda", "pandas", "rond", "couleur", "lignes"],
                     &["panda", "pandas", "dot", "colour", "rows"],

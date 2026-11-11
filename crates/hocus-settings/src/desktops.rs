@@ -16,28 +16,28 @@ use hocus_words::settings::desktops as words;
 use std::sync::OnceLock;
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Choice, Codec, Kind, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const DESKTOPS: RowGroup = RowGroup {
-    label: w(words::DESKTOPS),
+    label: words::DESKTOPS,
     per_source: false,
 };
 pub const MOVE: RowGroup = RowGroup {
-    label: w(words::MOVE_AND_SNAP),
+    label: words::MOVE_AND_SNAP,
     per_source: false,
 };
 pub const ALT_TAB: RowGroup = RowGroup {
-    label: w(words::ALT_TAB),
+    label: words::ALT_TAB,
     per_source: false,
 };
 pub const OVERVIEW: RowGroup = RowGroup {
-    label: w(words::OVERVIEW),
+    label: words::OVERVIEW,
     per_source: false,
 };
 pub const DRAW: RowGroup = RowGroup {
-    label: w(words::DRAW_ON_THE_SCREEN),
+    label: words::DRAW_ON_THE_SCREEN,
     per_source: false,
 };
 
@@ -57,7 +57,7 @@ pub const INK: &str = "ink.enabled";
 /// The rules per application, a row of the page's own (6.14).
 pub const RULES: &str = "desktops.rules";
 pub const RULES_GROUP: RowGroup = RowGroup {
-    label: w(words::RULES_PER_APPLICATION),
+    label: words::RULES_PER_APPLICATION,
     per_source: false,
 };
 /// Keyboard's "Raccourcis du bureau", the page's link lights it.
@@ -169,11 +169,11 @@ pub struct Rules(pub Vec<Rule>);
 
 /// The sizes a rule may give, as written, and said.
 pub const SIZES: [(&str, Words); 5] = [
-    ("last", w(words::ITS_LAST_SIZE)),
-    ("maximized", w(words::MAXIMISED)),
-    ("left", w(words::LEFT_HALF)),
-    ("right", w(words::RIGHT_HALF)),
-    ("fullscreen", w(words::FULL_SCREEN)),
+    ("last", words::ITS_LAST_SIZE),
+    ("maximized", words::MAXIMISED),
+    ("left", words::LEFT_HALF),
+    ("right", words::RIGHT_HALF),
+    ("fullscreen", words::FULL_SCREEN),
 ];
 
 /// The rules the file holds, in its order (those without an app id left
@@ -273,10 +273,10 @@ pub fn rule_said(rule: &Rule, names: &[String], lang: Lang) -> String {
         parts.push(words::opens(lang, said.to_lowercase()));
     }
     if rule.above {
-        parts.push(w(words::ABOVE_THE_OTHERS).get(lang).to_owned());
+        parts.push(words::ABOVE_THE_OTHERS.get(lang).to_owned());
     }
     if parts.is_empty() {
-        return w(words::NO_RULE_YET_IT_OPENS_LIKE).get(lang).to_owned();
+        return words::NO_RULE_YET_IT_OPENS_LIKE.get(lang).to_owned();
     }
     let said = parts.join(" · ");
     let mut chars = said.chars();
@@ -292,7 +292,7 @@ pub fn outside() -> &'static [crate::model::Outside] {
         id: RULES,
         section: SectionId::Desktops,
         group: RULES_GROUP.label,
-        name: w(words::RULES_PER_APPLICATION_2),
+        name: words::RULES_PER_APPLICATION_2,
         keywords: (
             &[
                 "règle",
@@ -310,7 +310,7 @@ pub fn outside() -> &'static [crate::model::Outside] {
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: crate::lang::w(text),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -347,8 +347,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 COUNT,
                 DESKTOPS,
-                w(words::NUMBER_OF_DESKTOPS),
-                w(words::ON_EVERY_SCREEN_1_TO_9),
+                words::NUMBER_OF_DESKTOPS,
+                words::ON_EVERY_SCREEN_1_TO_9,
                 (
                     &["bureaux virtuels", "espaces de travail", "combien"],
                     &["virtual desktops", "workspaces", "how many"],
@@ -370,8 +370,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 NAMES,
                 DESKTOPS,
-                w(words::THEIR_NAMES),
-                w(words::CLICK_A_NAME_TO_CHANGE_IT),
+                words::THEIR_NAMES,
+                words::CLICK_A_NAME_TO_CHANGE_IT,
                 (
                     &["nommer", "renommer", "étiquette", "espaces de travail"],
                     &["name", "rename", "label", "workspaces"],
@@ -382,8 +382,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 MOVE_KEY,
                 MOVE,
-                w(words::MOVE_FROM_ANYWHERE),
-                w(words::HOLD_THE_KEY_AND_DRAG_ANYWHERE),
+                words::MOVE_FROM_ANYWHERE,
+                words::HOLD_THE_KEY_AND_DRAG_ANYWHERE,
                 (
                     &["déplacer", "glisser", "saisir", "alt", "super", "fenêtre"],
                     &["move", "drag", "grab", "alt", "super", "window"],
@@ -398,8 +398,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 RESIZE_KEY,
                 MOVE,
-                w(words::RESIZE_FROM_ANYWHERE),
-                w(words::THE_EDGE_NEAREST_THE_POINTER_FOLLOWS),
+                words::RESIZE_FROM_ANYWHERE,
+                words::THE_EDGE_NEAREST_THE_POINTER_FOLLOWS,
                 (
                     &["redimensionner", "taille", "clic droit", "agrandir"],
                     &["resize", "size", "right click", "enlarge"],
@@ -414,8 +414,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 MAGNET,
                 MOVE,
-                w(words::MAGNETIC_EDGES),
-                w(words::WITHIN_12_PX_OF_ANOTHER_WINDOW),
+                words::MAGNETIC_EDGES,
+                words::WITHIN_12_PX_OF_ANOTHER_WINDOW,
                 (&["aimant", "coller", "bord"], &["magnet", "stick", "edge"]),
                 Kind::Switch,
                 switch(&["windows", "magnet"]),
@@ -423,8 +423,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SNAP,
                 MOVE,
-                w(words::SNAP_BY_DRAGGING_TO_AN_EDGE),
-                w(words::AGAINST_A_SIDE_A_HALF_IN),
+                words::SNAP_BY_DRAGGING_TO_AN_EDGE,
+                words::AGAINST_A_SIDE_A_HALF_IN,
                 (
                     &["ancrer", "moitié", "quart", "maximiser", "pavage"],
                     &["snap", "half", "quarter", "maximise", "tiling"],
@@ -435,8 +435,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 WOBBLE,
                 MOVE,
-                w(words::WOBBLY_WINDOWS),
-                w(words::A_MOVED_WINDOW_WOBBLES_THEN_SETTLES),
+                words::WOBBLY_WINDOWS,
+                words::A_MOVED_WINDOW_WOBBLES_THEN_SETTLES,
                 (
                     &["ondule", "ondulantes", "gelée", "animation"],
                     &["wobbly", "wobble", "jelly", "animation"],
@@ -447,8 +447,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 ANIMATION,
                 MOVE,
-                w(words::OPEN_AND_CLOSE),
-                w(words::RAIN_COLUMNS_OF_GLYPHS_FALL_THROUGH),
+                words::OPEN_AND_CLOSE,
+                words::RAIN_COLUMNS_OF_GLYPHS_FALL_THROUGH,
                 (
                     &["ouvrir", "fermer", "animation", "pluie", "matrix", "givre"],
                     &["open", "close", "animation", "rain", "matrix", "frost"],
@@ -463,8 +463,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 ALT_TAB_ROW,
                 ALT_TAB,
-                w(words::ALT_TAB_SHOWS),
-                w(words::ALL_THIS_DESKTOP_FIRST_THEN_THE),
+                words::ALT_TAB_SHOWS,
+                words::ALL_THIS_DESKTOP_FIRST_THEN_THE,
                 (
                     &["alt+tab", "passer", "fenêtres", "bureau"],
                     &["alt+tab", "switcher", "windows", "desktop"],
@@ -478,8 +478,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 HOT_CORNER,
                 OVERVIEW,
-                w(words::TOP_LEFT_CORNER_OVERVIEW),
-                w(words::THE_POINTER_PUSHED_FOR_A_MOMENT),
+                words::TOP_LEFT_CORNER_OVERVIEW,
+                words::THE_POINTER_PUSHED_FOR_A_MOMENT,
                 (
                     &["coin actif", "coin", "vue d’ensemble", "aperçu", "bureaux"],
                     &["hot corner", "corner", "overview", "activities", "desktops"],
@@ -490,8 +490,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 INK,
                 DRAW,
-                w(words::DRAW_ON_THE_SCREEN_2),
-                w(words::SUPER_DRAG_DRAWS_A_STROKE_SUPER),
+                words::DRAW_ON_THE_SCREEN_2,
+                words::SUPER_DRAG_DRAWS_A_STROKE_SUPER,
                 (
                     &["encre", "laser", "flèche", "annoter", "trait"],
                     &["ink", "laser", "arrow", "annotate", "stroke"],

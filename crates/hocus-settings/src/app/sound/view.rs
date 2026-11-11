@@ -22,7 +22,6 @@ use crate::{
         style::{self, *},
         view::{El, card_box, divided, ease_out, label, t},
     },
-    lang::w,
     sound as model,
 };
 
@@ -172,14 +171,10 @@ impl App {
             return card_box(
                 container(
                     column![
+                        t(words::PIPEWIRE_DOES_NOT_ANSWER.get(lang), 14.0, TEXT.get())
+                            .font(SEMIBOLD),
                         t(
-                            w(words::PIPEWIRE_DOES_NOT_ANSWER).get(lang),
-                            14.0,
-                            TEXT.get()
-                        )
-                        .font(SEMIBOLD),
-                        t(
-                            w(words::THE_SOUND_SHOWS_HERE_AS_SOON).get(lang),
+                            words::THE_SOUND_SHOWS_HERE_AS_SOON.get(lang),
                             12.5,
                             DIM.get(),
                         ),
@@ -194,33 +189,31 @@ impl App {
         let focused = |stop: Stop| matches!(self.focus, Focus::Control(i) if controls.get(i) == Some(&Control::Sound(stop)));
         let mut page = column![].spacing(18);
         // SORTIE.
-        let mut output = column![group_head(w(words::OUTPUT).get(lang), None)].spacing(8);
+        let mut output = column![group_head(words::OUTPUT.get(lang), None)].spacing(8);
         output = output.push(self.output_devices(focused(Stop::Outputs)));
         if let Some(sink) = self.sound.output() {
             output = output.push(self.output_card(sink, &focused));
         }
         page = page.push(container(output).id("group:sound.output".to_owned()));
         // ENTRÉE.
-        let mut input = column![group_head(w(words::INPUT).get(lang), None)].spacing(8);
+        let mut input = column![group_head(words::INPUT.get(lang), None)].spacing(8);
         input = input.push(self.input_devices(focused(Stop::Inputs)));
         if let Some(source) = self.sound.input() {
             input = input.push(self.input_card(source, &focused));
         }
-        input = input.push(note(
-            w(words::THE_METER_LISTENS_TO_THE_MICROPHONE).get(lang),
-        ));
+        input = input.push(note(words::THE_METER_LISTENS_TO_THE_MICROPHONE.get(lang)));
         page = page.push(container(input).id("group:sound.input".to_owned()));
         // APPLICATIONS.
         let apps = self.sound.apps();
         let count = (!apps.is_empty()).then(|| words::active(lang, apps.len()));
-        let mut group = column![group_head(w(words::APPLICATIONS).get(lang), count)].spacing(8);
+        let mut group = column![group_head(words::APPLICATIONS.get(lang), count)].spacing(8);
         group = group.push(
             container(card_box(self.app_rows(&apps, &focused)))
                 .style(lit_style(self.lit("sound.apps")))
                 .id("row:sound.apps".to_owned()),
         );
         group = group.push(note(
-            w(words::THOSE_PLAYING_OR_RECORDING_NOW_PIPEWIRE).get(lang),
+            words::THOSE_PLAYING_OR_RECORDING_NOW_PIPEWIRE.get(lang),
         ));
         page = page.push(container(group).id("group:sound.apps".to_owned()));
         page.into()
@@ -234,7 +227,7 @@ impl App {
         let outputs = self.sound.outputs();
         if outputs.is_empty() {
             rows = rows.push(plain_row(
-                w(words::NO_OUTPUT).get(lang).to_owned(),
+                words::NO_OUTPUT.get(lang).to_owned(),
                 None,
                 Space::new().into(),
                 None,
@@ -271,7 +264,7 @@ impl App {
         let mut rows = column![];
         if inputs.is_empty() {
             rows = rows.push(plain_row(
-                w(words::NO_INPUT).get(lang).to_owned(),
+                words::NO_INPUT.get(lang).to_owned(),
                 None,
                 Space::new().into(),
                 None,
@@ -338,7 +331,7 @@ impl App {
         let lang = self.lang;
         let mut rows = column![caption(kind_glyph(sink.kind), sink.description.clone())];
         rows = rows.push(plain_row(
-            w(words::VOLUME).get(lang).to_owned(),
+            words::VOLUME.get(lang).to_owned(),
             None,
             self.volume_control(
                 Which::Output,
@@ -378,7 +371,7 @@ impl App {
             rows = rows.push(divided(
                 true,
                 plain_row(
-                    w(words::PROFILE).get(lang).to_owned(),
+                    words::PROFILE.get(lang).to_owned(),
                     line,
                     control,
                     Some("sound.profile"),
@@ -389,9 +382,9 @@ impl App {
         // The balance and the test.
         let mono = sink.mono();
         let line = if mono {
-            w(words::THIS_OUTPUT_IS_MONO_TEST_PLAYS)
+            words::THIS_OUTPUT_IS_MONO_TEST_PLAYS
         } else {
-            w(words::TEST_PLAYS_A_SOUND_ON_THE)
+            words::TEST_PLAYS_A_SOUND_ON_THE
         };
         let control = row![
             self.balance_control(mono, focused(Stop::Balance)),
@@ -403,7 +396,7 @@ impl App {
         rows = rows.push(divided(
             true,
             plain_row(
-                w(words::BALANCE).get(lang).to_owned(),
+                words::BALANCE.get(lang).to_owned(),
                 Some(t(line.get(lang), 12.5, DIM.get()).into()),
                 control.into(),
                 Some("sound.balance"),
@@ -423,7 +416,7 @@ impl App {
         };
         let mut rows = column![caption(path, source.description.clone())];
         rows = rows.push(plain_row(
-            w(words::VOLUME).get(lang).to_owned(),
+            words::VOLUME.get(lang).to_owned(),
             None,
             self.volume_control(
                 Which::Input,
@@ -439,10 +432,10 @@ impl App {
         rows = rows.push(divided(
             true,
             plain_row(
-                w(words::LEVEL).get(lang).to_owned(),
+                words::LEVEL.get(lang).to_owned(),
                 Some(
                     t(
-                        w(words::SPEAK_THE_METER_FOLLOWS_YOUR_VOICE).get(lang),
+                        words::SPEAK_THE_METER_FOLLOWS_YOUR_VOICE.get(lang),
                         12.5,
                         DIM.get(),
                     )
@@ -477,11 +470,7 @@ impl App {
             bar =
                 bar.push(container(Space::new().width(7).height(10)).style(boxed(fill, 1.0, None)));
         }
-        let said = if muted {
-            w(words::OFF).get(self.lang)
-        } else {
-            ""
-        };
+        let said = if muted { words::OFF.get(self.lang) } else { "" };
         row![
             container(bar).width(220).id("meter".to_owned()),
             container(text(said).size(12.5).font(MONO).color(FAINT))
@@ -585,13 +574,9 @@ impl App {
             },
         });
         let said = if muted {
-            if input {
-                w(words::OFF)
-            } else {
-                w(words::MUTED)
-            }
-            .get(lang)
-            .to_owned()
+            if input { words::OFF } else { words::MUTED }
+                .get(lang)
+                .to_owned()
         } else {
             format!("{} %", volume.round() as i32)
         };
@@ -700,10 +685,10 @@ impl App {
         let lang = self.lang;
         let testing = self.sound.testing;
         let words = match testing {
-            Some(Side::Left) => w(words::ON_THE_LEFT),
-            Some(Side::Right) => w(words::ON_THE_RIGHT),
-            Some(Side::Middle) => w(words::IN_THE_MIDDLE),
-            None => w(words::TEST),
+            Some(Side::Left) => words::ON_THE_LEFT,
+            Some(Side::Right) => words::ON_THE_RIGHT,
+            Some(Side::Middle) => words::IN_THE_MIDDLE,
+            None => words::TEST,
         };
         let dot = |on: bool| {
             container(Space::new().width(7).height(7)).style(boxed(
@@ -826,15 +811,11 @@ impl App {
         if apps.is_empty() {
             return container(
                 column![
-                    text(w(words::NO_APPLICATION_IS_PLAYING_SOUND).get(lang))
+                    text(words::NO_APPLICATION_IS_PLAYING_SOUND.get(lang))
                         .size(14)
                         .font(SEMIBOLD)
                         .color(DIM),
-                    t(
-                        w(words::THEY_SHOW_HERE_AS_SOON_AS).get(lang),
-                        12.5,
-                        DIM.get(),
-                    ),
+                    t(words::THEY_SHOW_HERE_AS_SOON_AS.get(lang), 12.5, DIM.get(),),
                 ]
                 .spacing(2),
             )
@@ -884,7 +865,7 @@ impl App {
                     .and_then(|name| graph.and_then(|g| g.sinks.iter().find(|s| s.name == name)))
                 {
                     Some(sink) => sink.description.clone(),
-                    None => w(words::FOLLOWS_THE_OUTPUT).get(lang).to_owned(),
+                    None => words::FOLLOWS_THE_OUTPUT.get(lang).to_owned(),
                 };
                 controls = controls.push(self.menu_button(
                     said,

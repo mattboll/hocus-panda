@@ -21,7 +21,6 @@
 //! configuration's folder and the autostart folder). The window hears it
 //! through [`Heard`].
 
-use crate::lang::French as _;
 use hocus_words::settings::applications as words;
 use std::{
     collections::HashMap,
@@ -38,7 +37,7 @@ use hocus_xdg::{
 };
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Codec, Kind, Outside, RowGroup, SectionId, Setting, one},
 };
 
@@ -56,11 +55,11 @@ pub const RESTORE: &str = "session.restore";
 pub const ADDED: &str = "applications.startup.added";
 
 pub const DEFAULTS_GROUP: RowGroup = RowGroup {
-    label: w(words::DEFAULT_APPLICATIONS),
+    label: words::DEFAULT_APPLICATIONS,
     per_source: false,
 };
 pub const STARTUP_GROUP: RowGroup = RowGroup {
-    label: w(words::AT_SESSION_START),
+    label: words::AT_SESSION_START,
     per_source: false,
 };
 
@@ -95,39 +94,39 @@ impl Opens {
 
     pub fn name(self) -> Words {
         match self {
-            Self::Browser => w(words::WEB_BROWSER),
-            Self::Mail => w(words::MAIL),
-            Self::Videos => w(words::VIDEOS),
-            Self::Images => w(words::IMAGES),
+            Self::Browser => words::WEB_BROWSER,
+            Self::Mail => words::MAIL,
+            Self::Videos => words::VIDEOS,
+            Self::Images => words::IMAGES,
         }
     }
 
     pub fn line(self) -> Words {
         match self {
-            Self::Browser => w(words::LINKS_AND_ADDRESSES_TYPED_IN_THE),
-            Self::Mail => w(words::MAILTO_LINKS_TO_WRITE_TO_AN),
-            Self::Videos => w(words::VIDEOS_AND_YOUR_SCREEN_RECORDINGS_WHEN),
-            Self::Images => w(words::IMAGES_OPENED_FROM_A_FOLDER_A),
+            Self::Browser => words::LINKS_AND_ADDRESSES_TYPED_IN_THE,
+            Self::Mail => words::MAILTO_LINKS_TO_WRITE_TO_AN,
+            Self::Videos => words::VIDEOS_AND_YOUR_SCREEN_RECORDINGS_WHEN,
+            Self::Images => words::IMAGES_OPENED_FROM_A_FOLDER_A,
         }
     }
 
     /// Under the menu's last application.
     pub fn hint(self) -> Words {
         match self {
-            Self::Browser => w(words::THOSE_THAT_OPEN_WEB_PAGES),
-            Self::Mail => w(words::THOSE_THAT_OPEN_MAILTO_LINKS),
-            Self::Videos => w(words::THOSE_THAT_OPEN_VIDEOS),
-            Self::Images => w(words::THOSE_THAT_OPEN_IMAGES),
+            Self::Browser => words::THOSE_THAT_OPEN_WEB_PAGES,
+            Self::Mail => words::THOSE_THAT_OPEN_MAILTO_LINKS,
+            Self::Videos => words::THOSE_THAT_OPEN_VIDEOS,
+            Self::Images => words::THOSE_THAT_OPEN_IMAGES,
         }
     }
 
     /// The row's line when no application opens its types.
     pub fn none(self) -> Words {
         match self {
-            Self::Browser => w(words::NO_INSTALLED_APPLICATION_OPENS_WEB_PAGES),
-            Self::Mail => w(words::NO_INSTALLED_APPLICATION_OPENS_MAILTO_LINKS),
-            Self::Videos => w(words::NO_INSTALLED_APPLICATION_OPENS_VIDEOS),
-            Self::Images => w(words::NO_INSTALLED_APPLICATION_OPENS_IMAGES),
+            Self::Browser => words::NO_INSTALLED_APPLICATION_OPENS_WEB_PAGES,
+            Self::Mail => words::NO_INSTALLED_APPLICATION_OPENS_MAILTO_LINKS,
+            Self::Videos => words::NO_INSTALLED_APPLICATION_OPENS_VIDEOS,
+            Self::Images => words::NO_INSTALLED_APPLICATION_OPENS_IMAGES,
         }
     }
 
@@ -166,31 +165,31 @@ impl Opens {
 
 /// A type as a sentence says it: "Les vidéos WebM" / "WebM videos".
 pub fn type_said(mime: &str, lang: Lang) -> String {
-    let (fr, en): (&str, &str) = match mime {
-        "x-scheme-handler/http" => ("Les liens http:", "http: links"),
-        "x-scheme-handler/https" => ("Les liens https:", "https: links"),
-        "text/html" => ("Les pages HTML", "HTML pages"),
-        "application/xhtml+xml" => ("Les pages XHTML", "XHTML pages"),
-        "video/mp4" => ("Les vidéos MP4", "MP4 videos"),
-        "video/webm" => ("Les vidéos WebM", "WebM videos"),
-        "video/x-matroska" => ("Les vidéos MKV", "MKV videos"),
-        "video/quicktime" => ("Les vidéos QuickTime", "QuickTime videos"),
-        "video/x-msvideo" => ("Les vidéos AVI", "AVI videos"),
-        "video/mpeg" => ("Les vidéos MPEG", "MPEG videos"),
-        "video/ogg" => ("Les vidéos Ogg", "Ogg videos"),
-        "image/png" => ("Les images PNG", "PNG images"),
-        "image/jpeg" => ("Les images JPEG", "JPEG images"),
-        "image/webp" => ("Les images WebP", "WebP images"),
-        "image/gif" => ("Les images GIF", "GIF images"),
-        "image/svg+xml" => ("Les images SVG", "SVG images"),
-        "image/avif" => ("Les images AVIF", "AVIF images"),
-        "image/bmp" => ("Les images BMP", "BMP images"),
-        "image/tiff" => ("Les images TIFF", "TIFF images"),
+    let text = match mime {
+        "x-scheme-handler/http" => words::HTTP_LINKS,
+        "x-scheme-handler/https" => words::HTTPS_LINKS,
+        "text/html" => words::HTML_PAGES,
+        "application/xhtml+xml" => words::XHTML_PAGES,
+        "video/mp4" => words::MP4_VIDEOS,
+        "video/webm" => words::WEBM_VIDEOS,
+        "video/x-matroska" => words::MKV_VIDEOS,
+        "video/quicktime" => words::QUICKTIME_VIDEOS,
+        "video/x-msvideo" => words::AVI_VIDEOS,
+        "video/mpeg" => words::MPEG_VIDEOS,
+        "video/ogg" => words::OGG_VIDEOS,
+        "image/png" => words::PNG_IMAGES,
+        "image/jpeg" => words::JPEG_IMAGES,
+        "image/webp" => words::WEBP_IMAGES,
+        "image/gif" => words::GIF_IMAGES,
+        "image/svg+xml" => words::SVG_IMAGES,
+        "image/avif" => words::AVIF_IMAGES,
+        "image/bmp" => words::BMP_IMAGES,
+        "image/tiff" => words::TIFF_IMAGES,
         other => {
             return words::the_type(lang, other);
         }
     };
-    if lang.fr() { fr } else { en }.to_owned()
+    text.get(lang).to_owned()
 }
 
 /// "Les vidéos WebM s’ouvrent avec VLC" / "WebM videos open with VLC".
@@ -213,8 +212,8 @@ pub fn settings() -> &'static [Setting] {
                 id: TERMINAL,
                 section: SectionId::Apps,
                 group: DEFAULTS_GROUP,
-                name: w(words::TERMINAL),
-                line: Some(w(words::SUPER_RETURN_AND_APPLICATIONS_THAT_OPEN)),
+                name: words::TERMINAL,
+                line: Some(words::SUPER_RETURN_AND_APPLICATIONS_THAT_OPEN),
                 keywords: (
                     &[
                         "terminal",
@@ -239,8 +238,8 @@ pub fn settings() -> &'static [Setting] {
                 id: RESTORE,
                 section: SectionId::Apps,
                 group: STARTUP_GROUP,
-                name: w(words::REOPEN_THE_APPLICATIONS_OF_THE_LAST),
-                line: Some(w(words::THOSE_OPEN_AT_LOG_OUT_COME)),
+                name: words::REOPEN_THE_APPLICATIONS_OF_THE_LAST,
+                line: Some(words::THOSE_OPEN_AT_LOG_OUT_COME),
                 keywords: (
                     &[
                         "session",
@@ -274,7 +273,7 @@ pub fn outside() -> &'static [Outside] {
             id: BROWSER,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w(words::WEB_BROWSER),
+            name: words::WEB_BROWSER,
             keywords: (
                 &[
                     "navigateur",
@@ -300,7 +299,7 @@ pub fn outside() -> &'static [Outside] {
             id: MAIL,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w(words::MAIL),
+            name: words::MAIL,
             keywords: (
                 &["courriel", "mail", "e-mail", "mailto", "messagerie"],
                 &["mail", "e-mail", "email", "mailto"],
@@ -310,7 +309,7 @@ pub fn outside() -> &'static [Outside] {
             id: VIDEOS,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w(words::VIDEOS),
+            name: words::VIDEOS,
             keywords: (
                 &["vidéos", "lecteur", "film", "enregistrement"],
                 &["videos", "player", "movie", "recording"],
@@ -320,7 +319,7 @@ pub fn outside() -> &'static [Outside] {
             id: IMAGES,
             section: SectionId::Apps,
             group: DEFAULTS_GROUP.label,
-            name: w(words::IMAGES),
+            name: words::IMAGES,
             keywords: (
                 &["images", "photos", "visionneuse"],
                 &["images", "photos", "pictures", "viewer"],
@@ -330,7 +329,7 @@ pub fn outside() -> &'static [Outside] {
             id: STARTUP,
             section: SectionId::Apps,
             group: STARTUP_GROUP.label,
-            name: w(words::AT_SESSION_START_2),
+            name: words::AT_SESSION_START_2,
             keywords: (
                 &[
                     "démarrage",

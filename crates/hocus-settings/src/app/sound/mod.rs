@@ -32,7 +32,7 @@ use iced::{
 
 use super::{App, Message, Page, TOAST, ToastAction, UNDONE};
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::SectionId,
     sound::{self as model, Graph},
 };
@@ -320,7 +320,7 @@ impl Sound {
             inputs.push(Input {
                 pick: Pick::Headset { card, profile },
                 sink: None,
-                name: w(words::HEADSET_MICROPHONE).get(lang).to_owned(),
+                name: words::HEADSET_MICROPHONE.get(lang).to_owned(),
             });
         }
         inputs
@@ -990,7 +990,7 @@ impl App {
                 };
                 let chosen = self.sound_target_name(&row);
                 let mut options = vec![(
-                    w(words::FOLLOWS_THE_OUTPUT).get(self.lang).to_owned(),
+                    words::FOLLOWS_THE_OUTPUT.get(self.lang).to_owned(),
                     graph.output().map(|s| s.description.clone()),
                     chosen.is_none(),
                     Msg::Target(key.clone(), None),
@@ -1159,7 +1159,7 @@ impl App {
                 };
                 (model::card_name(sink, graph), kept)
             }
-            _ => (w(words::NO_OUTPUT).get(self.lang).to_owned(), String::new()),
+            _ => (words::NO_OUTPUT.get(self.lang).to_owned(), String::new()),
         }
     }
 }

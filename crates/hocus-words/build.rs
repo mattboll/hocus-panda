@@ -195,6 +195,14 @@ fn head(out: &mut String, langs: &[Language]) {
         .map(|l| format!("{}: &'static [&'static str],", field_name(&l.code)))
         .collect();
     let gets = arms(&|l| format!("self.{}", field_name(&l.code)));
+    let same: String = langs
+        .iter()
+        .map(|l| format!("{}: text,", field_name(&l.code)))
+        .collect();
+    let per_lang: String = langs
+        .iter()
+        .map(|l| format!("{}: said(Lang::{}),", field_name(&l.code), l.variant))
+        .collect();
     let count = langs.len();
     let _ = write!(
         out,
@@ -231,6 +239,18 @@ pub struct Text {{ {fields} }}
 impl Text {{
     pub const fn get(self, lang: Lang) -> &'static str {{
         match lang {{ {gets} }}
+    }}
+
+    /// One text in every language: a name, not a word (a font's, a
+    /// screen's mode).
+    pub const fn same(text: &'static str) -> Self {{
+        Self {{ {same} }}
+    }}
+
+    /// A text made in code for each language from the catalogue's
+    /// (`"{{}} 3"` of each language's word).
+    pub fn per_lang(mut said: impl FnMut(Lang) -> &'static str) -> Self {{
+        Self {{ {per_lang} }}
     }}
 }}
 

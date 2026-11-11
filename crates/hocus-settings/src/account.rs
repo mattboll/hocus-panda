@@ -8,12 +8,12 @@ use hocus_words::settings::account as words;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    lang::{Words, w},
+    lang::Words,
     model::{Outside, SectionId},
 };
 
-const PROFILE: Words = w(words::PROFILE);
-const SECURITY: Words = w(words::SECURITY);
+const PROFILE: Words = words::PROFILE;
+const SECURITY: Words = words::SECURITY;
 
 /// The rows, by their search ids.
 pub const AVATAR: &str = "account.avatar";
@@ -44,35 +44,35 @@ pub fn outside() -> &'static [Outside] {
         o(
             AVATAR,
             PROFILE,
-            w(words::AVATAR),
+            words::AVATAR,
             &["photo", "image", "panda", "profil"],
             &["picture", "profile", "panda"],
         ),
         o(
             NAME,
             PROFILE,
-            w(words::DISPLAY_NAME),
+            words::DISPLAY_NAME,
             &["nom", "prénom"],
             &["name", "full name"],
         ),
         o(
             LOGIN,
             PROFILE,
-            w(words::LOGIN_NAME),
+            words::LOGIN_NAME,
             &["login", "utilisateur"],
             &["user name", "login"],
         ),
         o(
             PASSWORD,
             SECURITY,
-            w(words::PASSWORD),
+            words::PASSWORD,
             &["changer", "sécurité", "passwd"],
             &["password", "change", "passwd"],
         ),
         o(
             KIND,
             PROFILE,
-            w(words::ACCOUNT_TYPE),
+            words::ACCOUNT_TYPE,
             &["administrateur", "sudo"],
             &["admin", "administrator"],
         ),

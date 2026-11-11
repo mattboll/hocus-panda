@@ -29,7 +29,7 @@ use crate::{
         style::{self, *},
         view::{El, card_box, divided, label, t},
     },
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
 };
 
 /// The field a VPN is renamed in.
@@ -88,15 +88,15 @@ fn kind_name(kind: &VpnKind) -> String {
 /// Why a VPN failed, from NetworkManager's reason.
 fn reason(code: u32) -> Words {
     match code {
-        3 => w(words::THE_DEVICE_DISCONNECTED),
-        4 => w(words::THE_VPN_SERVICE_STOPPED),
-        5 => w(words::NO_ADDRESS_RECEIVED),
-        6 => w(words::THE_SERVER_DOES_NOT_ANSWER),
-        7 => w(words::THE_VPN_SERVICE_DID_NOT_START),
-        8 => w(words::THE_VPN_SERVICE_DID_NOT_START_2),
-        9 => w(words::SECRETS_ARE_MISSING),
-        10 => w(words::USER_NAME_OR_PASSWORD_REFUSED),
-        _ => w(words::UNKNOWN_REASON),
+        3 => words::THE_DEVICE_DISCONNECTED,
+        4 => words::THE_VPN_SERVICE_STOPPED,
+        5 => words::NO_ADDRESS_RECEIVED,
+        6 => words::THE_SERVER_DOES_NOT_ANSWER,
+        7 => words::THE_VPN_SERVICE_DID_NOT_START,
+        8 => words::THE_VPN_SERVICE_DID_NOT_START_2,
+        9 => words::SECRETS_ARE_MISSING,
+        10 => words::USER_NAME_OR_PASSWORD_REFUSED,
+        _ => words::UNKNOWN_REASON,
     }
 }
 
@@ -118,19 +118,19 @@ pub(super) fn vpn_line(vpn: &Vpn, lang: Lang) -> (String, Color) {
         VpnState::On { since, address } => {
             let mut parts = vec![match since.and_then(clock) {
                 Some(at) => words::connected_since(lang, &at),
-                None => w(words::CONNECTED).get(lang).to_owned(),
+                None => words::CONNECTED.get(lang).to_owned(),
             }];
             parts.push(kind);
             parts.extend(address.clone());
             (parts.join(" · "), GREEN.get())
         }
-        VpnState::Connecting => (w(words::CONNECTING).get(lang).to_owned(), DIM.get()),
+        VpnState::Connecting => (words::CONNECTING.get(lang).to_owned(), DIM.get()),
         VpnState::Off => match vpn.failed {
             Some(code) => (
                 words::the_connection_failed(lang, reason(code).get(lang)),
                 PEACH.get(),
             ),
-            None => (format!("{kind} · {}", w(words::OFF).get(lang)), DIM.get()),
+            None => (format!("{kind} · {}", words::OFF.get(lang)), DIM.get()),
         },
     }
 }
@@ -220,7 +220,7 @@ impl App {
                 Task::none()
             }
             Msg::Chosen(None, true) => {
-                let text = w(words::NO_FILE_CHOOSER_ANSWERS_THE_DESKTOP)
+                let text = words::NO_FILE_CHOOSER_ANSWERS_THE_DESKTOP
                     .get(self.lang)
                     .to_owned();
                 self.toast(text, super::super::ToastAction::None, super::super::TOAST)
@@ -243,7 +243,7 @@ impl App {
                     Task::none()
                 }
                 None => {
-                    let text = w(words::THIS_FILE_IS_NEITHER_WIREGUARD_S)
+                    let text = words::THIS_FILE_IS_NEITHER_WIREGUARD_S
                         .get(self.lang)
                         .to_owned();
                     self.toast(text, super::super::ToastAction::None, super::super::TOAST)
@@ -266,8 +266,8 @@ impl App {
             .name("network: VPN file".to_owned())
             .spawn(move || {
                 let chosen = crate::portal::open_file_of(
-                    w(words::IMPORT_A_VPN).get(lang),
-                    w(words::WIREGUARD_OR_OPENVPN).get(lang),
+                    words::IMPORT_A_VPN.get(lang),
+                    words::WIREGUARD_OR_OPENVPN.get(lang),
                     &[(0, "*.conf"), (0, "*.ovpn")],
                     &folder,
                 );
@@ -294,13 +294,13 @@ impl App {
         }
         let add = super::view::page_row(
             super::view::tile(|c| draw(PLUS, 18.0, c), super::view::Tone::Plain, 1.0),
-            super::view::name(w(words::ADD_A_VPN).get(lang).to_owned(), 1.0, None),
+            super::view::name(words::ADD_A_VPN.get(lang).to_owned(), 1.0, None),
             vec![super::view::line(
-                w(words::FROM_A_WIREGUARD_CONF_OR_OPENVPN).get(lang),
+                words::FROM_A_WIREGUARD_CONF_OR_OPENVPN.get(lang),
                 DIM.get(),
             )],
             container(import_button(
-                w(words::IMPORT_A_FILE).get(lang).to_owned(),
+                words::IMPORT_A_FILE.get(lang).to_owned(),
                 self.network_focused(Stop::Import),
             ))
             .id("network:import".to_owned())
@@ -313,7 +313,7 @@ impl App {
         rows = rows.push(divided(!vpns.is_empty(), add));
         container(
             column![
-                container(label(w(words::VPN).get(lang)))
+                container(label(words::VPN.get(lang)))
                     .height(28)
                     .center_y(28),
                 card_box(rows.into())
@@ -478,14 +478,14 @@ impl App {
         let list = column![
             option(
                 0,
-                w(words::RENAME).get(lang),
+                words::RENAME.get(lang),
                 TEXT.get(),
                 false,
                 Msg::Rename(vpn.uuid.clone())
             ),
             option(
                 1,
-                w(words::CONNECT_AUTOMATICALLY).get(lang),
+                words::CONNECT_AUTOMATICALLY.get(lang),
                 TEXT.get(),
                 vpn.autoconnect,
                 Msg::Autoconnect(vpn.uuid.clone())
@@ -500,7 +500,7 @@ impl App {
             .padding([4, 6]),
             option(
                 2,
-                w(words::DELETE).get(lang),
+                words::DELETE.get(lang),
                 PEACH.get(),
                 false,
                 Msg::Delete(vpn.uuid.clone())

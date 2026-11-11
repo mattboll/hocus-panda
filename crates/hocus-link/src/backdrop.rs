@@ -12,6 +12,7 @@
 //! screen's pixels (the gradients are smooth: drawn larger, they stay so),
 //! and drawn stretched.
 
+use hocus_words::link::backdrop as txt;
 use serde::{Deserialize, Serialize};
 
 /// The picture is this many times smaller than the screen's pixels.
@@ -142,13 +143,14 @@ impl Backdrop {
     }
 
     /// Its name, in French then English.
-    pub const fn names(self) -> (&'static str, &'static str) {
+    pub fn name(self, lang: hocus_words::Lang) -> &'static str {
         match self {
-            Self::Night => ("Nuit", "Night"),
-            Self::Mist => ("Brume", "Mist"),
-            Self::Dawn => ("Aube", "Dawn"),
-            Self::Forest => ("Forêt", "Forest"),
+            Self::Night => txt::NIGHT,
+            Self::Mist => txt::MIST,
+            Self::Dawn => txt::DAWN,
+            Self::Forest => txt::FOREST,
         }
+        .get(lang)
     }
 
     const fn palette(self) -> &'static Palette {

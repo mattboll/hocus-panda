@@ -290,6 +290,11 @@ unplugged = "{name} unplugged"
 undone = "Undone: {said}."
 redone = "Redone: {said}."
 plug_in_2 = "Plug in {tool_title}"
+family_working = "at work"
+family_waiting = "waiting"
+family_done = "done"
+family_stuck = "stuck"
+family_resting = "resting"
 
 [settings.app_appearance_page]
 switches_selection_the_keyboard_s_ring = "Switches, selection, the keyboard’s ring."
@@ -955,6 +960,7 @@ its_place_and_settings_are_kept = "Its place ({place_unwrap_or_default}) and set
 the_laptop_screen_is_off_the = "The laptop screen is off; the session goes on on the {other}, and the bar moved there. Its settings come back when you open the lid."
 off_2 = "{title} off"
 it_stays_plugged_in_and_keeps = "It stays plugged in and keeps its place; its windows went to the {other}."
+now_shows = "The {title} now shows {now}. Without an answer it goes back to {then} in {left} s."
 
 [settings.app_sound]
 headset_microphone = "Headset microphone"
@@ -1219,6 +1225,25 @@ at_session_start_2 = "At session start"
 the_type = "The type {other}"
 open_with = "{what} open with {app}"
 opens_with = "{what} opens with {app}"
+http_links = "http: links"
+https_links = "https: links"
+html_pages = "HTML pages"
+xhtml_pages = "XHTML pages"
+mp4_videos = "MP4 videos"
+webm_videos = "WebM videos"
+mkv_videos = "MKV videos"
+quicktime_videos = "QuickTime videos"
+avi_videos = "AVI videos"
+mpeg_videos = "MPEG videos"
+ogg_videos = "Ogg videos"
+png_images = "PNG images"
+jpeg_images = "JPEG images"
+webp_images = "WebP images"
+gif_images = "GIF images"
+svg_images = "SVG images"
+avif_images = "AVIF images"
+bmp_images = "BMP images"
+tiff_images = "TIFF images"
 
 [settings.bar]
 place = "PLACE"
@@ -1484,6 +1509,9 @@ none = "None"
 right_alt = "Right Alt"
 menu = "Menu"
 right_ctrl = "Right Ctrl"
+go_to_desktop_n = "Go to desktop"
+send_to_desktop_n = "Send to desktop"
+take_to_desktop_n = "Take to desktop"
 
 [settings.model]
 personalisation = "PERSONALISATION"
@@ -1808,6 +1836,8 @@ time_format = "Time format"
 no_clock_change = "no clock change"
 standard_time_until = "standard time until {said}"
 summer_time_until = "summer time until {said}"
+first_of_month = "1 {month}"
+day_of_month = "{day} {month}"
 
 [settings.wallpaper]
 preview = "PREVIEW"
@@ -2308,6 +2338,7 @@ enter_inserts = "Enter inserts"
 no_emoji_for = "No emoji for “{query}”"
 skin_tone = "Skin tone"
 emoji_enter_inserts_the_first_the = "Emoji · Enter inserts the first, the arrows choose"
+tones = ["Yellow", "Light", "Medium-light", "Medium", "Medium-dark", "Dark"]
 
 [shell.levels_model]
 muted = "muted"
@@ -2338,6 +2369,32 @@ charging_2 = "charging"
 plugged_in_full_2 = "plugged in, full"
 plugged_in = "plugged in"
 plug_in_the_charger_2 = "plug in the charger"
+n_1_more_application = "+1 more application"
+more_applications = "+{x_n} more applications"
+power_saver = "power saver"
+balanced = "balanced"
+battery = "Battery"
+power = "Power"
+plugged_in_2 = "Plugged in"
+power_saver_2 = "Power saver"
+balanced_2 = "Balanced"
+performance_reduced_the_computer_is_on = "Performance reduced: the computer is on a lap."
+performance_reduced_the_computer_is_too = "Performance reduced: the computer is too hot."
+performance_reduced_by_the_system = "Performance reduced by the system."
+no_windows = "{title}, no windows"
+n_1_window = "{title}, 1 window"
+windows = "{title}, {x_n} windows"
+laptop_screen = "Laptop screen"
+screen = "Screen {number}"
+inch_external_screen = "{i}-inch external screen"
+n_1_window_2 = "1 window"
+windows_2 = "{x_n} windows"
+keyboard_levels_2 = ["Off", "On"]
+keyboard_levels_3 = ["Off", "Low", "High"]
+keyboard_levels_4 = ["Off", "Low", "Medium", "High"]
+on_the_screen = "on the {screen}"
+on_screen = "on {screen}"
+desktop_n = "Desktop {number}"
 
 [shell.network_model]
 connecting = "Connecting…"
@@ -2407,3 +2464,28 @@ this_desktop_s_windows = "This desktop's windows: {count}"
 [shell.notifications]
 dev_shell_stopped = "The development shell stopped"
 dev_shell_stopped_body = "{program} did not start or kept ending. The installed shell runs again."
+
+
+[link.wallpaper]
+swatches = ["Night", "Slate", "Deep blue", "Fir", "Earth", "Graphite"]
+
+[link.backdrop]
+night = "Night"
+mist = "Mist"
+dawn = "Dawn"
+forest = "Forest"
+
+[link.moving]
+rain = "Rain"
+stars = "Stars"
+aurora = "Aurora"
+
+[link.theme]
+green = "Panda green"
+blue = "Blue"
+violet = "Violet"
+rose = "Pink"
+teal = "Teal"
+wallpaper = "From the wallpaper"
+ice = "Ice blue"
+phosphor = "Phosphor green"

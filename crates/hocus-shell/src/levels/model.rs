@@ -231,10 +231,6 @@ impl Words {
         Self { lang }
     }
 
-    pub(crate) fn fr(self) -> bool {
-        self.lang == Lang::French
-    }
-
     /// The language its words are said in.
     pub(crate) fn lang(self) -> Lang {
         self.lang
@@ -282,21 +278,17 @@ impl Words {
 
     /// Under the applications listed, the others' number.
     pub fn more_applications(self, more: usize) -> String {
-        match (self.fr(), more) {
-            (true, 1) => "+1 autre application".to_owned(),
-            (true, n) => format!("+{n} autres applications"),
-            (false, 1) => "+1 more application".to_owned(),
-            (false, n) => format!("+{n} more applications"),
+        match more {
+            1 => txt::N_1_MORE_APPLICATION.get(self.lang()).to_owned(),
+            n => txt::more_applications(self.lang(), n),
         }
     }
 
     pub fn profile(self, profile: Profile) -> &'static str {
-        match (profile, self.fr()) {
-            (Profile::PowerSaver, true) => "économie",
-            (Profile::PowerSaver, false) => "power saver",
-            (Profile::Balanced, true) => "équilibré",
-            (Profile::Balanced, false) => "balanced",
-            (Profile::Performance, _) => "performance",
+        match profile {
+            Profile::PowerSaver => txt::POWER_SAVER.get(self.lang()),
+            Profile::Balanced => txt::BALANCED.get(self.lang()),
+            Profile::Performance => "performance",
         }
     }
 
@@ -317,33 +309,27 @@ impl Words {
     /// The keyboard's backlight's levels' names, from off: two, three or
     /// four of them.
     pub fn keyboard_levels(self, levels: u32) -> &'static [&'static str] {
-        match (self.fr(), levels) {
-            (true, 2) => &["Éteint", "Allumé"],
-            (true, 3) => &["Éteint", "Faible", "Fort"],
-            (true, _) => &["Éteint", "Faible", "Moyen", "Fort"],
-            (false, 2) => &["Off", "On"],
-            (false, 3) => &["Off", "Low", "High"],
-            (false, _) => &["Off", "Low", "Medium", "High"],
+        match levels {
+            2 => txt::KEYBOARD_LEVELS_2,
+            3 => txt::KEYBOARD_LEVELS_3,
+            _ => txt::KEYBOARD_LEVELS_4,
         }
+        .get(self.lang)
     }
 
     /// The battery's popover's title; without a battery, the modes'.
     pub fn battery_title(self, battery: bool) -> &'static str {
-        match (battery, self.fr()) {
-            (true, true) => "Batterie",
-            (true, false) => "Battery",
-            (false, true) => "Énergie",
-            (false, false) => "Power",
+        match battery {
+            true => txt::BATTERY.get(self.lang()),
+            false => txt::POWER.get(self.lang()),
         }
     }
 
     /// Beside the title: on battery, or plugged in.
     pub fn plugged(self, on_ac: bool) -> &'static str {
-        match (on_ac, self.fr()) {
-            (true, true) => "Branché",
-            (true, false) => "Plugged in",
-            (false, true) => "Sur batterie",
-            (false, false) => "On battery",
+        match on_ac {
+            true => txt::PLUGGED_IN_2.get(self.lang()),
+            false => txt::ON_BATTERY.get(self.lang()),
         }
     }
 
@@ -359,12 +345,10 @@ impl Words {
 
     /// A mode's tile.
     pub fn mode(self, profile: Profile) -> &'static str {
-        match (profile, self.fr()) {
-            (Profile::PowerSaver, true) => "Économie",
-            (Profile::PowerSaver, false) => "Power saver",
-            (Profile::Balanced, true) => "Équilibré",
-            (Profile::Balanced, false) => "Balanced",
-            (Profile::Performance, _) => "Performance",
+        match profile {
+            Profile::PowerSaver => txt::POWER_SAVER_2.get(self.lang()),
+            Profile::Balanced => txt::BALANCED_2.get(self.lang()),
+            Profile::Performance => "Performance",
         }
     }
 
@@ -374,13 +358,10 @@ impl Words {
 
     /// Why performance is held back.
     pub fn degraded(self, why: Degraded) -> &'static str {
-        match (why, self.fr()) {
-            (Degraded::Lap, true) => "Performance réduite\u{a0}: l'ordinateur est sur tes genoux.",
-            (Degraded::Lap, false) => "Performance reduced: the computer is on a lap.",
-            (Degraded::Hot, true) => "Performance réduite\u{a0}: l'ordinateur est trop chaud.",
-            (Degraded::Hot, false) => "Performance reduced: the computer is too hot.",
-            (Degraded::Other, true) => "Performance réduite par le système.",
-            (Degraded::Other, false) => "Performance reduced by the system.",
+        match why {
+            Degraded::Lap => txt::PERFORMANCE_REDUCED_THE_COMPUTER_IS_ON.get(self.lang()),
+            Degraded::Hot => txt::PERFORMANCE_REDUCED_THE_COMPUTER_IS_TOO.get(self.lang()),
+            Degraded::Other => txt::PERFORMANCE_REDUCED_BY_THE_SYSTEM.get(self.lang()),
         }
     }
 
@@ -393,26 +374,26 @@ impl Words {
     /// number (from 1), and how many windows it has.
     pub fn desktop(self, number: usize, name: Option<&str>, windows: usize) -> String {
         let title = self.desktop_title(number, name);
-        match (self.fr(), windows) {
-            (true, 0) => format!("{title}, aucune fenêtre"),
-            (true, 1) => format!("{title}, 1 fenêtre"),
-            (true, n) => format!("{title}, {n} fenêtres"),
-            (false, 0) => format!("{title}, no windows"),
-            (false, 1) => format!("{title}, 1 window"),
-            (false, n) => format!("{title}, {n} windows"),
+        match windows {
+            0 => txt::no_windows(self.lang(), &title),
+            1 => txt::n_1_window(self.lang(), &title),
+            n => txt::windows(
+                self.lang(),
+                txt::Windows {
+                    title: &title,
+                    x_n: &n,
+                },
+            ),
         }
     }
 
     /// A screen as the Settings' Écrans page names it (6.9): "Écran du
     /// portable", "Écran externe 34 pouces", "Écran 2".
     pub fn screen(self, built_in: bool, inches: u32, number: u32) -> String {
-        match (built_in, inches, self.fr()) {
-            (true, _, true) => "Écran du portable".to_owned(),
-            (true, _, false) => "Laptop screen".to_owned(),
-            (false, 0, true) => format!("Écran {number}"),
-            (false, 0, false) => format!("Screen {number}"),
-            (false, i, true) => format!("Écran externe {i} pouces"),
-            (false, i, false) => format!("{i}-inch external screen"),
+        match (built_in, inches) {
+            (true, _) => txt::LAPTOP_SCREEN.get(self.lang()).to_owned(),
+            (false, 0) => txt::screen(self.lang(), number),
+            (false, i) => txt::inch_external_screen(self.lang(), i),
         }
     }
 
@@ -426,10 +407,10 @@ impl Words {
                 c.to_lowercase().chain(chars).collect::<String>()
             })
         };
-        match (built_in, inches, self.fr()) {
-            (_, _, true) => format!("sur l’{}", lower(&name)),
-            (false, 0, false) => format!("on {}", lower(&name)),
-            (_, _, false) => format!("on the {}", lower(&name)),
+        let screen = lower(&name);
+        match (built_in, inches) {
+            (false, 0) => txt::on_screen(self.lang, &screen),
+            _ => txt::on_the_screen(self.lang, &screen),
         }
     }
 
@@ -454,19 +435,16 @@ impl Words {
     pub fn desktop_title(self, number: usize, name: Option<&str>) -> String {
         match name {
             Some(name) => name.to_owned(),
-            None if self.fr() => format!("Bureau {number}"),
-            None => format!("Desktop {number}"),
+            None => txt::desktop_n(self.lang, number),
         }
     }
 
     /// A desktop's list's count, on its header's right; none when empty.
     pub fn windows(self, windows: usize) -> Option<String> {
-        match (self.fr(), windows) {
-            (_, 0) => None,
-            (true, 1) => Some("1 fenêtre".to_owned()),
-            (true, n) => Some(format!("{n} fenêtres")),
-            (false, 1) => Some("1 window".to_owned()),
-            (false, n) => Some(format!("{n} windows")),
+        match windows {
+            0 => None,
+            1 => Some(txt::N_1_WINDOW_2.get(self.lang()).to_owned()),
+            n => Some(txt::windows_2(self.lang(), n)),
         }
     }
 

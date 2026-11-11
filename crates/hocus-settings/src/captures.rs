@@ -18,20 +18,20 @@ use std::{
 };
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const CAPTURES: RowGroup = RowGroup {
-    label: w(words::SCREENSHOTS),
+    label: words::SCREENSHOTS,
     per_source: false,
 };
 pub const RECORDING: RowGroup = RowGroup {
-    label: w(words::SCREEN_RECORDING),
+    label: words::SCREEN_RECORDING,
     per_source: false,
 };
 pub const CLIPBOARD: RowGroup = RowGroup {
-    label: w(words::CLIPBOARD_HISTORY),
+    label: words::CLIPBOARD_HISTORY,
     per_source: false,
 };
 
@@ -281,7 +281,7 @@ pub fn items_said(n: u32, lang: Lang) -> String {
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: crate::lang::w(text),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -314,8 +314,8 @@ fn setting(
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
-        let folder = w(words::FOLDER);
-        let format = w(words::FORMAT);
+        let folder = words::FOLDER;
+        let format = words::FORMAT;
         vec![
             setting(
                 CAPTURE_FOLDER,
@@ -346,8 +346,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SOUND,
                 CAPTURES,
-                w(words::SHUTTER_SOUND),
-                Some(w(words::A_DISCREET_CLICK_WHEN_THE_PICTURE)),
+                words::SHUTTER_SOUND,
+                Some(words::A_DISCREET_CLICK_WHEN_THE_PICTURE),
                 (
                     &["son", "obturateur", "déclic", "capture"],
                     &["sound", "shutter", "click", "screenshot"],
@@ -385,8 +385,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 HISTORY,
                 CLIPBOARD,
-                w(words::KEEP_WHAT_I_COPY),
-                Some(w(words::SUPER_V_SHOWS_IT_TO_PASTE)),
+                words::KEEP_WHAT_I_COPY,
+                Some(words::SUPER_V_SHOWS_IT_TO_PASTE),
                 (
                     &["presse-papiers", "historique", "super+v", "copier"],
                     &["clipboard", "history", "super+v", "copy"],
@@ -398,8 +398,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 KEEP,
                 CLIPBOARD,
-                w(words::KEEP_FOR),
-                Some(w(words::PINNED_ITEMS_ALWAYS_STAY_200_ITEMS)),
+                words::KEEP_FOR,
+                Some(words::PINNED_ITEMS_ALWAYS_STAY_200_ITEMS),
                 (
                     &["durée", "garder", "presse-papiers", "historique"],
                     &["duration", "keep", "clipboard", "history"],
@@ -419,8 +419,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SECRETS,
                 CLIPBOARD,
-                w(words::LEAVE_PASSWORDS_OUT),
-                Some(w(words::WHAT_A_PASSWORD_MANAGER_MARKS_SECRET)),
+                words::LEAVE_PASSWORDS_OUT,
+                Some(words::WHAT_A_PASSWORD_MANAGER_MARKS_SECRET),
                 (
                     &[
                         "mots de passe",
@@ -438,7 +438,7 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 IGNORE,
                 CLIPBOARD,
-                w(words::APPLICATIONS_LEFT_OUT),
+                words::APPLICATIONS_LEFT_OUT,
                 None,
                 (
                     &["ignorer", "mots de passe", "application"],
@@ -458,7 +458,7 @@ pub fn outside() -> &'static [Outside] {
         id: CLEAR,
         section: SectionId::Captures,
         group: CLIPBOARD.label,
-        name: w(words::CLEAR_THE_HISTORY),
+        name: words::CLEAR_THE_HISTORY,
         keywords: (
             &["effacer", "vider", "presse-papiers", "historique"],
             &["clear", "empty", "clipboard", "history"],

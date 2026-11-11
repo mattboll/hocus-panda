@@ -25,6 +25,7 @@
 //! No toolkit here: colours are red, green, blue and an opacity, which each
 //! program turns into its own.
 
+use hocus_words::link::theme as txt;
 use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
@@ -289,17 +290,18 @@ impl Accent {
     }
 
     /// Its name, in French then English.
-    pub const fn names(self) -> (&'static str, &'static str) {
+    pub fn name(self, lang: hocus_words::Lang) -> &'static str {
         match self {
-            Self::Green => ("Vert des pandas", "Panda green"),
-            Self::Blue => ("Bleu", "Blue"),
-            Self::Violet => ("Violet", "Violet"),
-            Self::Rose => ("Rose", "Pink"),
-            Self::Teal => ("Sarcelle", "Teal"),
-            Self::Wallpaper => ("Du fond d'écran", "From the wallpaper"),
-            Self::Ice => ("Bleu glacé", "Ice blue"),
-            Self::Phosphor => ("Vert phosphore", "Phosphor green"),
+            Self::Green => txt::GREEN,
+            Self::Blue => txt::BLUE,
+            Self::Violet => txt::VIOLET,
+            Self::Rose => txt::ROSE,
+            Self::Teal => txt::TEAL,
+            Self::Wallpaper => txt::WALLPAPER,
+            Self::Ice => txt::ICE,
+            Self::Phosphor => txt::PHOSPHOR,
         }
+        .get(lang)
     }
 
     pub const fn colours(self) -> AccentColours {

@@ -56,7 +56,7 @@ pub use places::Places;
 
 use crate::{
     activate,
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Kind, SectionId, Setting, Source, Value, settings_of},
     search::{self, Found},
     single::Again,
@@ -577,7 +577,7 @@ impl App {
     }
 
     pub fn title(&self) -> String {
-        w(words::SETTINGS).get(self.lang).to_owned()
+        words::SETTINGS.get(self.lang).to_owned()
     }
 
     fn say(&self, words: Words) -> &'static str {
@@ -977,7 +977,7 @@ impl App {
                 if let Some(id) = id {
                     self.pending.remove(&id);
                 }
-                let text = format!("{} {why}", self.say(w(words::NOTHING_IS_WRITTEN)));
+                let text = format!("{} {why}", self.say(words::NOTHING_IS_WRITTEN));
                 self.toast(text, ToastAction::None, TOAST)
             }
             Heard::Read {
@@ -1017,7 +1017,7 @@ impl App {
                     Why::ByHand(changed) => self.by_hand(&changed, was_broken),
                     Why::Restored => {
                         let text = self
-                            .say(w(words::THE_LAST_READABLE_VERSION_IS_BACK))
+                            .say(words::THE_LAST_READABLE_VERSION_IS_BACK)
                             .to_owned();
                         self.toast(text, ToastAction::None, TOAST)
                     }
@@ -1154,9 +1154,9 @@ impl App {
             _ => ToastAction::None,
         };
         let text = if was_broken {
-            w(words::CONFIG_TOML_READS_AGAIN_EDITABLE_AGAIN)
+            words::CONFIG_TOML_READS_AGAIN_EDITABLE_AGAIN
         } else {
-            w(words::CONFIG_TOML_CHANGED_READ_AGAIN)
+            words::CONFIG_TOML_CHANGED_READ_AGAIN
         };
         self.toast(self.say(text).to_owned(), action, TOAST)
     }

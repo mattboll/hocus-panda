@@ -31,7 +31,7 @@ use super::{
 };
 use crate::{
     bar as model,
-    lang::{Lang, w},
+    lang::Lang,
     model::{Icon, SectionId, Setting, Value},
     store::{KeyEdit, Slot},
 };
@@ -534,7 +534,7 @@ impl App {
                     .find(|(hex, _)| *hex == colour)
                     .map(|(_, name)| name.get(lang));
                 Some(match name {
-                    Some(_) => w(words::THE_HOURS_AND_MINUTES).get(lang).to_owned(),
+                    Some(_) => words::THE_HOURS_AND_MINUTES.get(lang).to_owned(),
                     None => words::a_colour_from_the_file_it(lang, colour.to_uppercase()),
                 })
             }
@@ -564,7 +564,7 @@ impl App {
         }
         Some(format!(
             "{} · {}",
-            w(words::CUSTOM).get(self.lang),
+            words::CUSTOM.get(self.lang),
             hex.to_uppercase()
         ))
     }
@@ -576,7 +576,7 @@ impl App {
         match setting.id {
             model::SCREENS => Some(self.bar_link(
                 crate::screens::PRIMARY,
-                w(words::THE_PRIMARY_SCREEN_IS_CHOSEN_IN).get(lang),
+                words::THE_PRIMARY_SCREEN_IS_CHOSEN_IN.get(lang),
                 ink,
             )),
             model::MEETING | model::TODAY | model::TASKS => {
@@ -592,11 +592,11 @@ impl App {
                 Some(
                     row![
                         t(
-                            w(words::NOTHING_TO_SHOW_NO_CALENDAR_OR).get(lang),
+                            words::NOTHING_TO_SHOW_NO_CALENDAR_OR.get(lang),
                             12.5,
                             fade(PEACH.get(), ink),
                         ),
-                        self.bar_link("agenda", w(words::CALENDAR_AND_TASKS).get(lang), ink),
+                        self.bar_link("agenda", words::CALENDAR_AND_TASKS.get(lang), ink),
                     ]
                     .spacing(4)
                     .align_y(Alignment::Center)
@@ -615,7 +615,7 @@ impl App {
             return None;
         }
         Some(
-            container(t(w(words::NEW).get(self.lang).to_owned(), 10.5, BLUE.get()).font(BOLD))
+            container(t(words::NEW.get(self.lang).to_owned(), 10.5, BLUE.get()).font(BOLD))
                 .padding([1, 6])
                 .style(|_: &Theme| container::Style {
                     background: Some(Background::Color(crate::theme::ink(rgba(
@@ -704,13 +704,13 @@ impl App {
             row![
                 icon(Icon::Accessibility, 14.0, FAINT.get()),
                 t(
-                    w(words::THE_BAR_S_TRANSPARENCY_AND_REDUCED).get(lang),
+                    words::THE_BAR_S_TRANSPARENCY_AND_REDUCED.get(lang),
                     13.0,
                     FAINT.get()
                 ),
                 self.bar_link(
                     "appearance.reduce-transparency",
-                    w(words::ACCESSIBILITY).get(lang),
+                    words::ACCESSIBILITY.get(lang),
                     1.0
                 ),
             ]
@@ -758,17 +758,17 @@ impl App {
         rows = rows.push(group(
             head(
                 model::FORM.label.get(lang),
-                Some(w(words::FULL_196_PX_MINI_56_PX).get(lang).to_owned()),
+                Some(words::FULL_196_PX_MINI_56_PX.get(lang).to_owned()),
             ),
             forms,
         ));
         // CE QU'ELLE MONTRE, in the bar's order.
         let mut shows: Vec<El<'_>> = vec![
-            self.always_row(w(words::THE_CLOCK_AND_THE_DATE), None),
+            self.always_row(words::THE_CLOCK_AND_THE_DATE, None),
             model_row(model::MEETING),
             self.always_row(
-                w(words::MICROPHONE_CAMERA_OR_SCREEN_IN_USE),
-                Some(w(words::THE_SIGN_OF_WHAT_LISTENS_FILMS)),
+                words::MICROPHONE_CAMERA_OR_SCREEN_IN_USE,
+                Some(words::THE_SIGN_OF_WHAT_LISTENS_FILMS),
             ),
         ];
         for (i, g) in self.bar_file().order().into_iter().enumerate() {
@@ -780,11 +780,11 @@ impl App {
             });
         }
         shows.push(model_row(model::WINDOWS));
-        shows.push(self.always_row(w(words::DESKTOPS_CONNECTIONS_LEVELS_BOTTOM_BUTTONS), None));
+        shows.push(self.always_row(words::DESKTOPS_CONNECTIONS_LEVELS_BOTTOM_BUTTONS, None));
         rows = rows.push(group(
             head(
                 model::SHOWS.label.get(lang),
-                Some(w(words::AN_EMPTY_GROUP_TAKES_NO_ROOM).get(lang).to_owned()),
+                Some(words::AN_EMPTY_GROUP_TAKES_NO_ROOM.get(lang).to_owned()),
             ),
             shows,
         ));
@@ -821,7 +821,7 @@ impl App {
         container(
             row![
                 words,
-                t(w(words::ALWAYS).get(lang).to_owned(), 13.0, FAINT.get()),
+                t(words::ALWAYS.get(lang).to_owned(), 13.0, FAINT.get()),
             ]
             .spacing(16)
             .align_y(Alignment::Center),
@@ -841,9 +841,7 @@ impl App {
     fn form_line(&self, r: &FormRow) -> String {
         let lang = self.lang;
         if !r.plugged {
-            return w(words::UNPLUGGED_ITS_FORM_IS_KEPT_FOR)
-                .get(lang)
-                .to_owned();
+            return words::UNPLUGGED_ITS_FORM_IS_KEPT_FOR.get(lang).to_owned();
         }
         let mut line = match (r.asked, r.chosen, lang) {
             ("auto", Some(c), _) => {
@@ -873,7 +871,7 @@ impl App {
             self.bar_slot(model::SCREENS).and_then(|s| self.value(s)) == Some(Value::Word("all"));
         if r.bar.is_none() && !screens_all {
             line.push(' ');
-            line.push_str(w(words::THE_BAR_ONLY_COMES_HERE_IF).get(lang));
+            line.push_str(words::THE_BAR_ONLY_COMES_HERE_IF.get(lang));
         }
         line
     }
@@ -890,7 +888,7 @@ impl App {
             let focused = self.bar_focused(&Stop::Auto(r.name.clone()));
             let mut back = button(
                 t(
-                    w(words::BACK_TO_THE_FORM_OF_ITS).get(lang).to_owned(),
+                    words::BACK_TO_THE_FORM_OF_ITS.get(lang).to_owned(),
                     12.5,
                     MINT.get(),
                 )
@@ -912,9 +910,9 @@ impl App {
         }
         let focused = self.bar_focused(&Stop::Form(r.name.clone()));
         let choices = [
-            ("auto", w(words::AUTO)),
-            ("full", w(words::FULL)),
-            ("mini", w(words::MINI)),
+            ("auto", words::AUTO),
+            ("full", words::FULL),
+            ("mini", words::MINI),
         ];
         let mut segments = row![];
         for (word, said) in choices {
@@ -992,7 +990,7 @@ impl App {
             _ => vec!["Super+Shift+B".to_owned()],
         };
         let said = if chords.is_empty() {
-            w(words::NONE).get(lang).to_owned()
+            words::NONE.get(lang).to_owned()
         } else {
             chords
                 .iter()
@@ -1002,13 +1000,13 @@ impl App {
         };
         let words = column![
             t(
-                w(words::CHANGE_FORM_BY_HAND).get(lang).to_owned(),
+                words::CHANGE_FORM_BY_HAND.get(lang).to_owned(),
                 14.0,
                 TEXT.get()
             )
             .font(SEMIBOLD),
             t(
-                w(words::A_CLICK_ON_THE_BAR_S)
+                words::A_CLICK_ON_THE_BAR_S
                     .get(lang)
                     .replace("SHORTCUT", &said),
                 12.5,
@@ -1016,7 +1014,7 @@ impl App {
             ),
             self.bar_link(
                 "shortcuts.toggle-bar",
-                w(words::CHANGE_THE_SHORTCUT_IN_KEYBOARD_AND).get(lang),
+                words::CHANGE_THE_SHORTCUT_IN_KEYBOARD_AND.get(lang),
                 1.0
             ),
         ]
@@ -1143,7 +1141,7 @@ impl App {
             (t < PLAY && !self.reduced_motion).then(|| (word, t.as_secs_f32() / PLAY.as_secs_f32()))
         });
         Preview {
-            label: w(words::PREVIEW).get(lang).to_owned(),
+            label: words::PREVIEW.get(lang).to_owned(),
             caption,
             screens,
             screens_high,
@@ -1165,7 +1163,7 @@ impl App {
             lang,
             left: self.bar_slot(model::SIDE).and_then(|s| self.value(s))
                 == Some(Value::Word("left")),
-            hint: w(words::THE_LAPTOP_SCREEN_S_BAR_AT).get(lang).to_owned(),
+            hint: words::THE_LAPTOP_SCREEN_S_BAR_AT.get(lang).to_owned(),
         }
     }
 

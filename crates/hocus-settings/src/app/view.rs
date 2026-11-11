@@ -21,7 +21,7 @@ use super::{
     style::{self, *},
 };
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::{Group, Icon, Kind, SectionId, Setting, Source, settings_of},
     search::Target,
     store::{FileState, Reading, Slot},
@@ -170,7 +170,7 @@ impl App {
         .align_y(Alignment::Center)
         .height(HEADER)
         .padding(Padding::default().left(16));
-        let field = text_input(self.say(w(words::SEARCH_SETTINGS)), &self.query)
+        let field = text_input(self.say(words::SEARCH_SETTINGS), &self.query)
             .id(SEARCH)
             .on_input(Message::Query)
             .on_submit(Message::Submit)
@@ -305,7 +305,7 @@ impl App {
     fn nav(&self) -> El<'_> {
         let mut list = column![self.nav_row(
             Icon::Home,
-            self.say(w(words::HOME)),
+            self.say(words::HOME),
             self.page == Page::Home,
             self.focus == Focus::Nav(0),
             Message::Home,
@@ -381,7 +381,7 @@ impl App {
                     .into(),
             };
             let mut path = match found.target {
-                Target::Section(_) => w(words::THE_WHOLE_PAGE).get(lang).to_owned(),
+                Target::Section(_) => words::THE_WHOLE_PAGE.get(lang).to_owned(),
                 Target::Outside(outside) => format!(
                     "{} › {}",
                     section.name.get(lang),
@@ -390,7 +390,7 @@ impl App {
                 Target::Setting(setting) if setting.kind == Kind::Shortcut => format!(
                     "{} › {} › {}",
                     section.name.get(lang),
-                    w(words::SHORTCUTS).get(lang),
+                    words::SHORTCUTS.get(lang),
                     capitalised(setting.group.label.get(lang))
                 ),
                 Target::Setting(setting) => format!(
@@ -441,27 +441,25 @@ impl App {
                 "{} › {} › {}",
                 self.title(),
                 SectionId::Keyboard.name(lang),
-                w(words::SHORTCUTS).get(lang)
+                words::SHORTCUTS.get(lang)
             ),
             Page::Section(SectionId::Network) if self.network.sub => format!(
                 "{} › {} › {}",
                 self.title(),
                 SectionId::Network.name(lang),
-                w(words::SAVED_NETWORKS).get(lang)
+                words::SAVED_NETWORKS.get(lang)
             ),
             Page::Section(id) => format!("{} › {}", self.title(), id.name(lang)),
         };
         let (dot, state) = match self.snapshot.as_ref().map(|s| &s.state) {
-            _ if self.screens_to_confirm() => {
-                (crate::theme::ink(rgb(0xF5B44A)), w(words::TO_CONFIRM))
-            }
+            _ if self.screens_to_confirm() => (crate::theme::ink(rgb(0xF5B44A)), words::TO_CONFIRM),
             // The clipboard's history cleared (6.17): said, then saved again.
             Some(FileState::Reads) | None if self.captures_cleared() => {
-                (ACCENT.get(), w(words::CLEARED))
+                (ACCENT.get(), words::CLEARED)
             }
-            Some(FileState::Reads) | None => (ACCENT.get(), w(words::SAVED)),
-            Some(FileState::Broken { .. }) => (ORANGE.get(), w(words::READ_ONLY)),
-            Some(FileState::NoFile) => (ORANGE.get(), w(words::NO_FILE)),
+            Some(FileState::Reads) | None => (ACCENT.get(), words::SAVED),
+            Some(FileState::Broken { .. }) => (ORANGE.get(), words::READ_ONLY),
+            Some(FileState::NoFile) => (ORANGE.get(), words::NO_FILE),
         };
         let header = mouse_area(
             row![
@@ -546,7 +544,7 @@ impl App {
         let title = banner_title(*line, lang);
         let restore = self.restore_label();
         let mut buttons = row![
-            button(t(w(words::OPEN_THE_FILE).get(lang), 12.5, TEXT.get()).font(SEMIBOLD))
+            button(t(words::OPEN_THE_FILE.get(lang), 12.5, TEXT.get()).font(SEMIBOLD))
                 .height(28)
                 .padding([5, 12])
                 .on_press(Message::OpenFile)
@@ -578,7 +576,7 @@ impl App {
                         t(title, 13.5, PEACH.get()).font(BOLD),
                         t(message.clone(), 12.5, SOFT.get()),
                         t(
-                            w(words::THE_DESKTOP_KEEPS_THE_LAST_READABLE).get(lang),
+                            words::THE_DESKTOP_KEEPS_THE_LAST_READABLE.get(lang),
                             12.5,
                             SOFT.get(),
                         ),
@@ -634,11 +632,7 @@ impl App {
             avatar,
             column![
                 text(hello).size(22).font(BOLD).color(TEXT),
-                t(
-                    w(words::WHAT_YOU_SET_HERE_IS_SAVED).get(lang),
-                    13.5,
-                    DIM.get(),
-                ),
+                t(words::WHAT_YOU_SET_HERE_IS_SAVED.get(lang), 13.5, DIM.get(),),
             ]
             .spacing(4),
         ]
@@ -668,7 +662,7 @@ impl App {
             let name = self.slot_name(setting, change.slot);
             let value = setting.say(&change.value, lang);
             let when = if change.by_hand {
-                w(words::BY_HAND).get(lang).to_owned()
+                words::BY_HAND.get(lang).to_owned()
             } else {
                 when(change.at, lang)
             };
@@ -692,20 +686,15 @@ impl App {
         let mut page = column![greeting, grid].spacing(22);
         if !self.recent.is_empty() {
             page = page.push(group_box(
-                label(w(words::CHANGED_RECENTLY).get(lang)),
+                label(words::CHANGED_RECENTLY.get(lang)),
                 card_box(recent.into()),
             ));
         }
         let path = self.file.as_ref().map_or_else(String::new, |p| tilde(p));
         let file = column![
             text(path).size(12).font(MONO).color(TEXT),
-            t(
-                w(words::YOU_CAN_STILL_EDIT_IT_BY).get(lang),
-                12.5,
-                DIM.get(),
-            )
-            .line_height(1.5),
-            button(t(w(words::OPEN_THE_FILE).get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
+            t(words::YOU_CAN_STILL_EDIT_IT_BY.get(lang), 12.5, DIM.get(),).line_height(1.5),
+            button(t(words::OPEN_THE_FILE.get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
                 .height(32)
                 .padding([7, 14])
                 .on_press(Message::OpenFile)
@@ -717,7 +706,7 @@ impl App {
         ]
         .spacing(8);
         page = page.push(group_box(
-            label(w(words::THE_FILE).get(lang)),
+            label(words::THE_FILE.get(lang)),
             card_box(container(file).padding([14, 16]).into()),
         ));
         container(page).padding(Padding::default().top(14)).into()
@@ -817,8 +806,8 @@ impl App {
             SectionId::Sound => return self.sound_card(),
             SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
-            SectionId::Appearance => w(words::DARK_ENGLISH).get(lang).to_owned(),
-            _ => w(words::COMING).get(lang).to_owned(),
+            SectionId::Appearance => words::DARK_ENGLISH.get(lang).to_owned(),
+            _ => words::COMING.get(lang).to_owned(),
         };
         (whole, String::new())
     }
@@ -891,9 +880,9 @@ impl App {
             page = page.push(card_box(
                 container(
                     column![
-                        t(w(words::COMING).get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+                        t(words::COMING.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
                         t(
-                            w(words::THIS_PAGE_S_SETTINGS_COME_SOON).get(lang),
+                            words::THIS_PAGE_S_SETTINGS_COME_SOON.get(lang),
                             12.5,
                             DIM.get(),
                         ),
@@ -1032,7 +1021,7 @@ impl App {
             words = words.push(t(line, 12.5, colour));
         } else if self.implied(setting) {
             // High contrast holds it on (#423).
-            let said = w(words::INCLUDED_IN_HIGH_CONTRAST);
+            let said = words::INCLUDED_IN_HIGH_CONTRAST;
             words = words.push(t(said.get(lang), 12.5, fade(DIM.get(), ink)));
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
@@ -1452,8 +1441,8 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center);
         let action = match toast.action {
-            ToastAction::Undo => Some(w(words::UNDO).get(lang).to_owned()),
-            ToastAction::Show(_) => Some(w(words::SHOW).get(lang).to_owned()),
+            ToastAction::Undo => Some(words::UNDO.get(lang).to_owned()),
+            ToastAction::Show(_) => Some(words::SHOW.get(lang).to_owned()),
             ToastAction::Sound(act) => Some(self.sound_act_label(act)),
             ToastAction::None => None,
         };

@@ -1231,6 +1231,48 @@ pub const BEFORE: &[(&str, &str, &str)] = &[
     ("shell.tasks.not_saved", "Pas enregistré", "Not saved"),
     ("shell.today.today", "AUJOURD'HUI", "TODAY"),
     ("shell.today.video_call", ", visio", ", video call"),
+    (
+        "shell.levels_model.n_1_more_application",
+        "+1 autre application",
+        "+1 more application",
+    ),
+    ("shell.levels_model.power_saver", "économie", "power saver"),
+    ("shell.levels_model.balanced", "équilibré", "balanced"),
+    ("shell.levels_model.battery", "Batterie", "Battery"),
+    ("shell.levels_model.power", "Énergie", "Power"),
+    ("shell.levels_model.plugged_in_2", "Branché", "Plugged in"),
+    (
+        "shell.levels_model.on_battery",
+        "Sur batterie",
+        "On battery",
+    ),
+    (
+        "shell.levels_model.power_saver_2",
+        "Économie",
+        "Power saver",
+    ),
+    ("shell.levels_model.balanced_2", "Équilibré", "Balanced"),
+    (
+        "shell.levels_model.performance_reduced_the_computer_is_on",
+        "Performance réduite\u{a0}: l'ordinateur est sur tes genoux.",
+        "Performance reduced: the computer is on a lap.",
+    ),
+    (
+        "shell.levels_model.performance_reduced_the_computer_is_too",
+        "Performance réduite\u{a0}: l'ordinateur est trop chaud.",
+        "Performance reduced: the computer is too hot.",
+    ),
+    (
+        "shell.levels_model.performance_reduced_by_the_system",
+        "Performance réduite par le système.",
+        "Performance reduced by the system.",
+    ),
+    (
+        "shell.levels_model.laptop_screen",
+        "Écran du portable",
+        "Laptop screen",
+    ),
+    ("shell.levels_model.n_1_window_2", "1 fenêtre", "1 window"),
 ];
 
 /// Every key the shell's surfaces moved to the catalogue says, byte for
@@ -1242,6 +1284,41 @@ fn the_catalogue_says_what_the_code_said() {
 
 /// The format strings of arms moved, placeholders aside.
 pub const FORMATS: &[(&str, &str, &str)] = &[
+    (
+        "shell.levels_model.more_applications",
+        "+{n} autres applications",
+        "+{n} more applications",
+    ),
+    (
+        "shell.levels_model.no_windows",
+        "{title}, aucune fenêtre",
+        "{title}, no windows",
+    ),
+    (
+        "shell.levels_model.n_1_window",
+        "{title}, 1 fenêtre",
+        "{title}, 1 window",
+    ),
+    (
+        "shell.levels_model.windows",
+        "{title}, {n} fenêtres",
+        "{title}, {n} windows",
+    ),
+    (
+        "shell.levels_model.screen",
+        "Écran {number}",
+        "Screen {number}",
+    ),
+    (
+        "shell.levels_model.inch_external_screen",
+        "Écran externe {i} pouces",
+        "{i}-inch external screen",
+    ),
+    (
+        "shell.levels_model.windows_2",
+        "{n} fenêtres",
+        "{n} windows",
+    ),
     (
         "shell.a11y_words.connected_to",
         "connecté à {name}, {signal}",

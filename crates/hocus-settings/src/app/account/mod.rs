@@ -746,5 +746,5 @@ impl App {
 }
 
 fn w_owned(text: hocus_words::Text, lang: Lang) -> String {
-    crate::lang::w(text).get(lang).to_owned()
+    text.get(lang).to_owned()
 }

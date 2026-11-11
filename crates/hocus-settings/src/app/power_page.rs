@@ -25,7 +25,7 @@ use super::{
     view::{El, card_box, divided, label, t},
 };
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::{SectionId, Setting, Source, Value},
     power::{self as model, Step, StepKind},
     power_bus::{self, Battery, Charge, Now},
@@ -296,19 +296,19 @@ impl App {
         let lang = self.lang;
         match id {
             model::SCREEN_OFF if !self.power_on(model::LOCK_ON_IDLE) => Some((
-                w(words::AFTER_THE_DIMMING_IF_NOTHING_HAPPENS)
+                words::AFTER_THE_DIMMING_IF_NOTHING_HAPPENS
                     .get(lang)
                     .to_owned(),
                 false,
             )),
             model::LID_CLOSED | model::BUTTON if !self.power_logind() => Some((
-                w(words::THE_SYSTEM_DECIDES_LOGIND_UNAVAILABLE)
+                words::THE_SYSTEM_DECIDES_LOGIND_UNAVAILABLE
                     .get(lang)
                     .to_owned(),
                 true,
             )),
             model::AUTO_SAVER if self.power_no_modes() => Some((
-                w(words::IT_WORKS_THROUGH_THE_MODES_WITHOUT)
+                words::IT_WORKS_THROUGH_THE_MODES_WITHOUT
                     .get(lang)
                     .to_owned(),
                 false,
@@ -391,7 +391,7 @@ impl App {
         .id("power:timeline".to_owned())
         .into();
         groups = groups.push(group(
-            head(w(words::SCREEN_AND_SLEEP).get(lang), segmented),
+            head(words::SCREEN_AND_SLEEP.get(lang), segmented),
             vec![
                 model_row(model::IDLE),
                 model_row(model::SCREEN_OFF),
@@ -407,7 +407,7 @@ impl App {
         let note = chord
             .map(|c| -> El<'a> { t(words::locks_at_any_time(lang, &c), 12.0, FAINT.get()).into() });
         groups = groups.push(group(
-            head(w(words::LOCKING).get(lang), note),
+            head(words::LOCKING.get(lang), note),
             vec![
                 model_row(model::LOCK_ON_IDLE),
                 model_row(model::LOCK_BEFORE_SLEEP),
@@ -423,9 +423,9 @@ impl App {
         groups = groups.push(group(
             head(
                 if self.power_lid() {
-                    w(words::LID_AND_BUTTON).get(lang)
+                    words::LID_AND_BUTTON.get(lang)
                 } else {
-                    w(words::BUTTON).get(lang)
+                    words::BUTTON.get(lang)
                 },
                 None,
             ),
@@ -437,10 +437,10 @@ impl App {
             saving.push(model_row(model::AUTO_SAVER));
             saving.push(model_row(model::SAVER_BELOW));
         }
-        groups = groups.push(group(head(w(words::POWER_SAVING).get(lang), None), saving));
+        groups = groups.push(group(head(words::POWER_SAVING.get(lang), None), saving));
         // PLUS TARD.
         groups = groups.push(group(
-            head(w(words::LATER).get(lang), None),
+            head(words::LATER.get(lang), None),
             vec![self.charge_limit_row()],
         ));
         page = page.push(groups);
@@ -494,9 +494,9 @@ impl App {
                         ..container::Style::default()
                     }),
                 column![
-                    t(w(words::ON_AC).get(lang), 22.0, TEXT.get()).font(BOLD),
+                    t(words::ON_AC.get(lang), 22.0, TEXT.get()).font(BOLD),
                     t(
-                        w(words::THIS_COMPUTER_HAS_NO_BATTERY_ONE).get(lang),
+                        words::THIS_COMPUTER_HAS_NO_BATTERY_ONE.get(lang),
                         13.0,
                         DIM.get()
                     ),
@@ -526,12 +526,8 @@ impl App {
         let known = self.power_no_modes();
         let ink = if known { INERT } else { 1.0 };
         let name = row![
-            t(w(words::POWER_MODE).get(lang), 14.0, fade(TEXT.get(), ink)).font(SEMIBOLD),
-            chip(
-                w(words::NEW).get(lang),
-                BLUE.get(),
-                rgba(143, 179, 255, 0.16)
-            ),
+            t(words::POWER_MODE.get(lang), 14.0, fade(TEXT.get(), ink)).font(SEMIBOLD),
+            chip(words::NEW.get(lang), BLUE.get(), rgba(143, 179, 255, 0.16)),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -539,14 +535,14 @@ impl App {
         match modes {
             None if known => {
                 words = words.push(t(
-                    w(words::POWER_MODES_NEED_THE_POWER_PROFILES).get(lang),
+                    words::POWER_MODES_NEED_THE_POWER_PROFILES.get(lang),
                     12.5,
                     PEACH.get(),
                 ));
             }
             _ => {
                 words = words.push(t(
-                    w(words::THE_SAME_AS_IN_THE_BATTERY).get(lang),
+                    words::THE_SAME_AS_IN_THE_BATTERY.get(lang),
                     12.5,
                     DIM.get(),
                 ));
@@ -555,7 +551,7 @@ impl App {
         if let Some(modes) = modes {
             if !modes.available.iter().any(|m| m == "performance") {
                 words = words.push(t(
-                    w(words::THIS_COMPUTER_HAS_NO_PERFORMANCE_MODE).get(lang),
+                    words::THIS_COMPUTER_HAS_NO_PERFORMANCE_MODE.get(lang),
                     12.5,
                     FAINT.get(),
                 ));
@@ -646,23 +642,19 @@ impl App {
         let lang = self.lang;
         let name = row![
             t(
-                w(words::LIMIT_CHARGING_TO_80).get(lang),
+                words::LIMIT_CHARGING_TO_80.get(lang),
                 14.0,
                 fade(TEXT.get(), INERT)
             )
             .font(SEMIBOLD),
-            chip(
-                w(words::LATER_2).get(lang),
-                AMBER,
-                rgba(245, 196, 110, 0.16)
-            ),
+            chip(words::LATER_2.get(lang), AMBER, rgba(245, 196, 110, 0.16)),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
         let words = column![
             name,
             t(
-                w(words::SPARES_THE_BATTERY_OF_A_LAPTOP).get(lang),
+                words::SPARES_THE_BATTERY_OF_A_LAPTOP.get(lang),
                 12.5,
                 fade(DIM.get(), INERT)
             ),

@@ -18,7 +18,6 @@
 //!   by aligned edges or middles within 120 px), the places of a size
 //!   changed, and how a place is said.
 
-use crate::lang::French as _;
 use hocus_words::settings::screens as words;
 use std::{
     io::{BufRead, BufReader, Write},
@@ -28,7 +27,7 @@ use std::{
 };
 
 use crate::{
-    lang::{Lang, pair, w},
+    lang::Lang,
     model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
@@ -905,7 +904,7 @@ pub fn say_rate(mhz: i32, lang: Lang) -> String {
     } else {
         let hz = format!("{:.2}", f64::from(mhz) / 1000.0);
         let hz = hz.trim_end_matches('0').trim_end_matches('.').to_owned();
-        if lang.fr() { hz.replace('.', ",") } else { hz }
+        hz.replace('.', hocus_words::number::DECIMAL.get(lang))
     };
     format!("{hz} Hz")
 }
@@ -926,24 +925,24 @@ pub const SCALES: [f64; 5] = [1.0, 1.25, 1.5, 1.75, 2.0];
 // --- The page's settings, for the search ------------------------------------------------
 
 const ARRANGEMENT: RowGroup = RowGroup {
-    label: w(words::ARRANGEMENT),
+    label: words::ARRANGEMENT,
     per_source: false,
 };
 /// The selected screen's group: its label is the screen's name.
 pub const SCREEN: RowGroup = RowGroup {
-    label: w(words::THIS_SCREEN),
+    label: words::THIS_SCREEN,
     per_source: false,
 };
 const ALL: RowGroup = RowGroup {
-    label: w(words::ALL_SCREENS),
+    label: words::ALL_SCREENS,
     per_source: false,
 };
 const SETS_GROUP: RowGroup = RowGroup {
-    label: w(words::SCREEN_SETS),
+    label: words::SCREEN_SETS,
     per_source: false,
 };
 const NIGHT: RowGroup = RowGroup {
-    label: w(words::NIGHT_LIGHT),
+    label: words::NIGHT_LIGHT,
     per_source: false,
 };
 
@@ -986,7 +985,7 @@ fn hours(list: &'static [&'static str]) -> Kind {
     Kind::Menu(
         list.iter()
             .map(|h| Choice {
-                label: pair(h, h),
+                label: hocus_words::Text::same(h),
                 value: Value::Word(h),
             })
             .collect(),
@@ -1016,7 +1015,7 @@ pub fn settings() -> &'static [Setting] {
             s(
                 ARRANGE,
                 ARRANGEMENT,
-                w(words::SCREENS_ARRANGEMENT),
+                words::SCREENS_ARRANGEMENT,
                 (
                     &["position", "placer", "gauche", "au-dessus", "glisser"],
                     &["layout", "arrange", "place", "left", "above", "drag"],
@@ -1026,35 +1025,35 @@ pub fn settings() -> &'static [Setting] {
             s(
                 IDENTIFY,
                 ARRANGEMENT,
-                w(words::IDENTIFY_THE_SCREENS),
+                words::IDENTIFY_THE_SCREENS,
                 (&["numéro"], &["identify", "number"]),
                 &["outputs", "NAME"],
             ),
             s(
                 USE,
                 SCREEN,
-                w(words::USE_THIS_SCREEN),
+                words::USE_THIS_SCREEN,
                 (&["éteindre", "allumer"], &["enable", "disable", "turn off"]),
                 &["outputs", "NAME", "enabled"],
             ),
             s(
                 RESOLUTION,
                 SCREEN,
-                w(words::RESOLUTION),
+                words::RESOLUTION,
                 (&["définition", "pixels", "taille"], &["mode", "size"]),
                 &["outputs", "NAME", "mode"],
             ),
             s(
                 RATE,
                 SCREEN,
-                w(words::REFRESH_RATE),
+                words::REFRESH_RATE,
                 (&["hz", "rafraîchissement"], &["hz", "refresh"]),
                 &["outputs", "NAME", "mode"],
             ),
             s(
                 SCALE,
                 SCREEN,
-                w(words::SCALE),
+                words::SCALE,
                 (
                     &[
                         "hidpi",
@@ -1071,7 +1070,7 @@ pub fn settings() -> &'static [Setting] {
             s(
                 VRR,
                 SCREEN,
-                w(words::VARIABLE_REFRESH_RATE_VRR),
+                words::VARIABLE_REFRESH_RATE_VRR,
                 (
                     &["saccades", "jeux"],
                     &[
@@ -1087,21 +1086,21 @@ pub fn settings() -> &'static [Setting] {
             s(
                 ROTATION,
                 SCREEN,
-                w(words::ROTATION),
+                words::ROTATION,
                 (&["pivoter", "portrait"], &["rotate", "orientation"]),
                 &["outputs", "NAME", "transform"],
             ),
             s(
                 PRIMARY,
                 ALL,
-                w(words::PRIMARY_SCREEN),
+                words::PRIMARY_SCREEN,
                 (&["primaire", "barre"], &["primary", "main display", "bar"]),
                 &["panel", "output"],
             ),
             s(
                 MIRROR,
                 ALL,
-                w(words::MIRRORING),
+                words::MIRRORING,
                 (
                     &["miroir", "dupliquer", "projecteur", "cloner"],
                     &["mirror", "duplicate", "projector", "clone"],
@@ -1111,7 +1110,7 @@ pub fn settings() -> &'static [Setting] {
             s(
                 SETS,
                 SETS_GROUP,
-                w(words::SCREEN_SETS_2),
+                words::SCREEN_SETS_2,
                 (
                     &["oublier", "brancher", "bureau", "maison", "disposition"],
                     &["forget", "dock", "office", "home", "arrangement", "profile"],
@@ -1122,8 +1121,8 @@ pub fn settings() -> &'static [Setting] {
                 id: NIGHT_LIGHT,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w(words::NIGHT_LIGHT_2),
-                line: Some(w(words::WARMER_COLOURS_IN_THE_EVENING_LESS)),
+                name: words::NIGHT_LIGHT_2,
+                line: Some(words::WARMER_COLOURS_IN_THE_EVENING_LESS),
                 keywords: (
                     &["nuit", "lumière bleue", "chaud", "soir", "yeux"],
                     &["night light", "blue light", "warm", "evening", "eyes"],
@@ -1136,8 +1135,8 @@ pub fn settings() -> &'static [Setting] {
                 id: NIGHT_FROM,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w(words::FROM),
-                line: Some(w(words::THE_COLOURS_WARM_UP_OVER_30)),
+                name: words::FROM,
+                line: Some(words::THE_COLOURS_WARM_UP_OVER_30),
                 keywords: (
                     &["nuit", "horaires", "heure", "soir"],
                     &["night light", "schedule", "time", "evening"],
@@ -1150,8 +1149,8 @@ pub fn settings() -> &'static [Setting] {
                 id: NIGHT_TO,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w(words::UNTIL),
-                line: Some(w(words::THEN_THEY_COME_BACK_OVER_30)),
+                name: words::UNTIL,
+                line: Some(words::THEN_THEY_COME_BACK_OVER_30),
                 keywords: (
                     &["nuit", "horaires", "heure", "matin"],
                     &["night light", "schedule", "time", "morning"],
@@ -1164,8 +1163,8 @@ pub fn settings() -> &'static [Setting] {
                 id: NIGHT_TEMPERATURE,
                 section: SectionId::Screens,
                 group: NIGHT,
-                name: w(words::TEMPERATURE),
-                line: Some(w(words::LOWER_IS_WARMER_6500_K_THE)),
+                name: words::TEMPERATURE,
+                line: Some(words::LOWER_IS_WARMER_6500_K_THE),
                 keywords: (
                     &["nuit", "chaud", "kelvin", "couleur"],
                     &["night light", "warm", "kelvin", "colour"],

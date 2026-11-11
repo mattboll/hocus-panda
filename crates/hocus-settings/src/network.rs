@@ -4,19 +4,18 @@
 //! profiles), airplane mode in rfkill. The window's side is
 //! `app::network`.
 
-use crate::lang::French as _;
 use hocus_network::model::{Current, Details, Saved, Security, Wifi, Wired};
 use hocus_words::settings::network as words;
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Outside, SectionId},
 };
 
-const AIRPLANE: Words = w(words::AIRPLANE_MODE);
-const WIFI: Words = w(words::WI_FI);
-const CABLE: Words = w(words::CABLE);
-const VPN: Words = w(words::VPN);
+const AIRPLANE: Words = words::AIRPLANE_MODE;
+const WIFI: Words = words::WI_FI;
+const CABLE: Words = words::CABLE;
+const VPN: Words = words::VPN;
 
 /// The page's settings, for the search: each lights its row.
 pub fn outside() -> &'static [Outside] {
@@ -39,35 +38,35 @@ pub fn outside() -> &'static [Outside] {
         o(
             "network.airplane",
             AIRPLANE,
-            w(words::AIRPLANE_MODE_2),
+            words::AIRPLANE_MODE_2,
             &["avion", "radio", "hors ligne", "rfkill"],
             &["airplane", "flight mode", "radio", "rfkill"],
         ),
         o(
             "network.wifi",
             WIFI,
-            w(words::WI_FI_2),
+            words::WI_FI_2,
             &["sans fil", "wlan", "internet"],
             &["wireless", "wlan", "internet"],
         ),
         o(
             "network.saved",
             WIFI,
-            w(words::SAVED_NETWORKS),
+            words::SAVED_NETWORKS,
             &["oublier", "supprimer", "mot de passe", "connus"],
             &["forget", "saved", "known", "password"],
         ),
         o(
             "network.hidden",
             WIFI,
-            w(words::HIDDEN_NETWORK),
+            words::HIDDEN_NETWORK,
             &["caché", "ssid"],
             &["hidden", "ssid"],
         ),
         o(
             "network.enterprise",
             WIFI,
-            w(words::ENTERPRISE_NETWORK),
+            words::ENTERPRISE_NETWORK,
             &[
                 "802.1x",
                 "eduroam",
@@ -88,25 +87,25 @@ pub fn outside() -> &'static [Outside] {
                 "radius",
             ],
         ),
-        o("network.wep", WIFI, w(words::WEP), &["wep"], &["wep"]),
+        o("network.wep", WIFI, words::WEP, &["wep"], &["wep"]),
         o(
             "network.cable",
             CABLE,
-            w(words::CABLE_2),
+            words::CABLE_2,
             &["ethernet", "filaire", "rj45"],
             &["ethernet", "wired", "rj45"],
         ),
         o(
             "network.vpn",
             VPN,
-            w(words::VPN),
+            words::VPN,
             &["wireguard", "openvpn", "tunnel", "importer"],
             &["wireguard", "openvpn", "tunnel", "import"],
         ),
         o(
             "network.address",
             WIFI,
-            w(words::IP_ADDRESS),
+            words::IP_ADDRESS,
             &["ip", "dns", "passerelle", "mac"],
             &["address", "gateway", "dns", "mac"],
         ),
@@ -119,8 +118,8 @@ pub fn security(security: Security, lang: Lang) -> &'static str {
     match security {
         Security::Psk { sae: false } => "WPA2",
         Security::Psk { sae: true } => "WPA3",
-        Security::Open => w(words::OPEN).get(lang),
-        Security::Enterprise => w(words::ENTERPRISE_802_1X).get(lang),
+        Security::Open => words::OPEN.get(lang),
+        Security::Enterprise => words::ENTERPRISE_802_1X.get(lang),
         Security::Wep => "WEP",
     }
 }
@@ -129,15 +128,13 @@ pub fn security(security: Security, lang: Lang) -> &'static str {
 /// enregistré", "Ouvert · une page de connexion peut s'afficher".
 pub fn around(wifi: &Wifi, lang: Lang) -> (String, bool) {
     let mut line = match wifi.security {
-        Security::Open => w(words::OPEN_A_SIGN_IN_PAGE_MAY).get(lang).to_owned(),
-        Security::Enterprise => w(words::ENTERPRISE_802_1X_USER_NAME_AND)
-            .get(lang)
-            .to_owned(),
-        Security::Wep => w(words::WEP_AN_OLD_PROTECTION_EASY_TO).get(lang).to_owned(),
+        Security::Open => words::OPEN_A_SIGN_IN_PAGE_MAY.get(lang).to_owned(),
+        Security::Enterprise => words::ENTERPRISE_802_1X_USER_NAME_AND.get(lang).to_owned(),
+        Security::Wep => words::WEP_AN_OLD_PROTECTION_EASY_TO.get(lang).to_owned(),
         Security::Psk { .. } => security(wifi.security, lang).to_owned(),
     };
     if wifi.saved {
-        line.push_str(w(words::SAVED).get(lang));
+        line.push_str(words::SAVED.get(lang));
     }
     (line, wifi.security == Security::Wep)
 }
@@ -150,10 +147,10 @@ pub fn joins_at_once(wifi: &Wifi) -> bool {
 /// "signal fort", "bon signal", "signal moyen", "signal faible".
 pub fn signal(strength: u8, lang: Lang) -> &'static str {
     match strength {
-        70.. => w(words::STRONG_SIGNAL),
-        50..=69 => w(words::GOOD_SIGNAL),
-        30..=49 => w(words::FAIR_SIGNAL),
-        _ => w(words::WEAK_SIGNAL),
+        70.. => words::STRONG_SIGNAL,
+        50..=69 => words::GOOD_SIGNAL,
+        30..=49 => words::FAIR_SIGNAL,
+        _ => words::WEAK_SIGNAL,
     }
     .get(lang)
 }
@@ -161,7 +158,7 @@ pub fn signal(strength: u8, lang: Lang) -> &'static str {
 /// "2,4 GHz", "5 GHz", "6 GHz", from a frequency in MHz.
 pub fn band(frequency: u32, lang: Lang) -> &'static str {
     match frequency {
-        0..3000 => w(words::N_2_4_GHZ).get(lang),
+        0..3000 => words::N_2_4_GHZ.get(lang),
         3000..5925 => "5 GHz",
         _ => "6 GHz",
     }
@@ -170,7 +167,7 @@ pub fn band(frequency: u32, lang: Lang) -> &'static str {
 /// The connected network's line: "Connecté · WPA2 · 5 GHz · signal fort".
 pub fn connected(wifi: &Wifi, current: Option<&Current>, lang: Lang) -> String {
     let mut parts = vec![
-        w(words::CONNECTED).get(lang).to_owned(),
+        words::CONNECTED.get(lang).to_owned(),
         security(wifi.security, lang).to_owned(),
     ];
     if let Some(frequency) = current.and_then(|c| c.frequency) {
@@ -193,7 +190,7 @@ pub fn address(current: &Current, lang: Lang) -> Option<String> {
 /// "Il y a 2 h", "Hier", "Il y a 12 jours", "Jamais utilisé".
 pub fn ago(timestamp: u64, now: u64, lang: Lang) -> String {
     if timestamp == 0 {
-        return w(words::NEVER_USED).get(lang).to_owned();
+        return words::NEVER_USED.get(lang).to_owned();
     }
     let seconds = now.saturating_sub(timestamp);
     let (minutes, hours, days) = (seconds / 60, seconds / 3600, seconds / 86_400);
@@ -210,12 +207,12 @@ pub fn ago(timestamp: u64, now: u64, lang: Lang) -> String {
 /// WPA2", "Il y a 12 jours · ouvert", "Jamais utilisé".
 pub fn saved_line(saved: &Saved, now: u64, lang: Lang) -> String {
     let when = if saved.connected {
-        w(words::CONNECTED_NOW).get(lang).to_owned()
+        words::CONNECTED_NOW.get(lang).to_owned()
     } else {
         ago(saved.timestamp, now, lang)
     };
     let kind = match saved.security {
-        Security::Open => w(words::OPEN_2).get(lang),
+        Security::Open => words::OPEN_2.get(lang),
         Security::Enterprise => "802.1X",
         other => security(other, lang),
     };
@@ -239,14 +236,14 @@ pub fn by_recent(saved: &[Saved]) -> Vec<Saved> {
 /// · débranché".
 pub fn wired_line(wired: &Wired, lang: Lang) -> String {
     let device = if wired.usb {
-        w(words::USB_ETHERNET_ADAPTER)
+        words::USB_ETHERNET_ADAPTER
     } else {
-        w(words::ETHERNET_PORT)
+        words::ETHERNET_PORT
     };
     let state = if wired.connected {
-        w(words::CONNECTED_2)
+        words::CONNECTED_2
     } else {
-        w(words::UNPLUGGED)
+        words::UNPLUGGED
     };
     format!("{} · {}", device.get(lang), state.get(lang))
 }
@@ -254,15 +251,15 @@ pub fn wired_line(wired: &Wired, lang: Lang) -> String {
 /// The cable's value: "Débranché", or "Connecté · 1 Gb/s · 192.168.1.30".
 pub fn wired_value(wired: &Wired, lang: Lang) -> String {
     if !wired.connected {
-        return w(words::UNPLUGGED_2).get(lang).to_owned();
+        return words::UNPLUGGED_2.get(lang).to_owned();
     }
-    let mut parts = vec![w(words::CONNECTED).get(lang).to_owned()];
+    let mut parts = vec![words::CONNECTED.get(lang).to_owned()];
     if let Some(speed) = wired.speed {
         parts.push(match speed {
             s if s >= 1000 && s % 1000 == 0 => format!("{} Gb/s", s / 1000),
             s if s >= 1000 => {
                 let gb = format!("{:.1}", f64::from(s) / 1000.0);
-                let gb = if lang.fr() { gb.replace('.', ",") } else { gb };
+                let gb = gb.replace('.', hocus_words::number::DECIMAL.get(lang));
                 format!("{gb} Gb/s")
             }
             s => format!("{s} Mb/s"),
@@ -278,17 +275,17 @@ pub fn wired_value(wired: &Wired, lang: Lang) -> String {
 /// avion".
 pub fn card(details: Option<&Details>, airplane: bool, lang: Lang) -> String {
     if airplane {
-        return w(words::AIRPLANE_MODE_2).get(lang).to_owned();
+        return words::AIRPLANE_MODE_2.get(lang).to_owned();
     }
     let Some(details) = details.filter(|d| d.network.manager) else {
-        return w(words::UNKNOWN).get(lang).to_owned();
+        return words::UNKNOWN.get(lang).to_owned();
     };
     if details.network.wired {
-        return w(words::CABLE_2).get(lang).to_owned();
+        return words::CABLE_2.get(lang).to_owned();
     }
     match &details.network.current {
         Some(current) => format!("Wi-Fi · {}", current.name),
-        None => w(words::OFFLINE).get(lang).to_owned(),
+        None => words::OFFLINE.get(lang).to_owned(),
     }
 }
 

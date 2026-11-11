@@ -26,7 +26,6 @@ use super::{
 };
 use crate::{
     captures::{self as model, Folder, Writable},
-    lang::w,
     model::{Icon, SectionId, Setting, Value},
     screens::Said,
     store::Slot,
@@ -360,7 +359,7 @@ impl App {
     /// warns.
     pub(super) fn captures_line(&self, id: &str) -> Option<(String, bool)> {
         let lang = self.lang;
-        let said = |text: hocus_words::Text| crate::lang::w(text).get(lang).to_owned();
+        let said = |text: hocus_words::Text| text.get(lang).to_owned();
         Some(match id {
             model::CAPTURE_FORMAT => match self.captures_word(id) {
                 Some("jpeg") => (said(words::LIGHTER_FOR_PHOTOS_THE_CLIPBOARD_ALWAYS), false),
@@ -402,7 +401,7 @@ impl App {
 
     /// "Nouveau" (10.5/700, `#8FB3FF` on its 16 %, radius 5).
     pub(super) fn new_chip<'a>(&self) -> El<'a> {
-        container(t(w(words::NEW).get(self.lang).to_owned(), 10.5, BLUE.get()).font(BOLD))
+        container(t(words::NEW.get(self.lang).to_owned(), 10.5, BLUE.get()).font(BOLD))
             .padding([1, 6])
             .style(|_: &Theme| container::Style {
                 background: Some(Background::Color(crate::theme::ink(rgba(
@@ -446,11 +445,11 @@ impl App {
             row![
                 icon(Icon::Keyboard, 15.0, FAINT.get()),
                 t(
-                    w(words::PRINT_SUPER_SHIFT_R_AND_SUPER).get(lang),
+                    words::PRINT_SUPER_SHIFT_R_AND_SUPER.get(lang),
                     13.0,
                     FAINT.get()
                 ),
-                self.captures_link(model::SHORTCUTS, w(words::KEYBOARD_AND_SHORTCUTS).get(lang),),
+                self.captures_link(model::SHORTCUTS, words::KEYBOARD_AND_SHORTCUTS.get(lang),),
             ]
             .spacing(6)
             .align_y(Alignment::Center)
@@ -483,7 +482,7 @@ impl App {
         page = page.push(group(
             head(
                 model::CAPTURES.label.get(lang),
-                w(words::COPIED_AND_SAVED).get(lang).to_owned(),
+                words::COPIED_AND_SAVED.get(lang).to_owned(),
             ),
             vec![
                 self.folder_row(Folder::Captures),
@@ -494,7 +493,7 @@ impl App {
         page = page.push(group(
             head(
                 model::RECORDING.label.get(lang),
-                w(words::SOUND_AND_MICROPHONE_ARE_CHOSEN_EACH)
+                words::SOUND_AND_MICROPHONE_ARE_CHOSEN_EACH
                     .get(lang)
                     .to_owned(),
             ),
@@ -518,9 +517,9 @@ impl App {
             ],
         );
         let foot = if self.key_in_a_file() {
-            w(words::KEPT_ENCRYPTED_ON_THIS_COMPUTER_ITS)
+            words::KEPT_ENCRYPTED_ON_THIS_COMPUTER_ITS
         } else {
-            w(words::KEPT_ENCRYPTED_ON_THIS_COMPUTER_ITS_2)
+            words::KEPT_ENCRYPTED_ON_THIS_COMPUTER_ITS_2
         };
         page = page.push(
             column![
@@ -592,12 +591,12 @@ impl App {
                 true,
             ),
             None if folder == Folder::Recordings && self.captures.recording => {
-                (w(words::FOR_THE_NEXT_RECORDING).get(lang).to_owned(), false)
+                (words::FOR_THE_NEXT_RECORDING.get(lang).to_owned(), false)
             }
             None => (folder.sample((&day, &time), extension, lang), false),
         };
         let words = column![
-            t(w(words::FOLDER).get(lang).to_owned(), 14.0, TEXT.get()).font(SEMIBOLD),
+            t(words::FOLDER.get(lang).to_owned(), 14.0, TEXT.get()).font(SEMIBOLD),
             t(line, 12.5, if warn { PEACH.get() } else { DIM.get() }),
         ]
         .spacing(2)
@@ -627,7 +626,7 @@ impl App {
         .id(format!("{}:open", folder.word()));
         let change_focused = self.captures_focused(&Stop::Change(folder));
         let mut change = button(
-            container(t(w(words::CHANGE).get(lang).to_owned(), 13.0, TEXT.get()).font(SEMIBOLD))
+            container(t(words::CHANGE.get(lang).to_owned(), 13.0, TEXT.get()).font(SEMIBOLD))
                 .height(Length::Fill)
                 .center_y(Length::Fill),
         )
@@ -717,7 +716,7 @@ impl App {
         let mut add = button(
             container(
                 t(
-                    w(words::ADD).get(lang).to_owned(),
+                    words::ADD.get(lang).to_owned(),
                     12.5,
                     fade(MINT.get(), alpha),
                 )
@@ -753,13 +752,13 @@ impl App {
                 p => words::but_the_pinned(lang, words::ButThePinned { p, x_n: &n }),
             }
         } else {
-            w(words::EVERYTHING_BUT_THE_PINNED_ITEMS_ON)
+            words::EVERYTHING_BUT_THE_PINNED_ITEMS_ON
                 .get(lang)
                 .to_owned()
         };
         let words = column![
             t(
-                w(words::CLEAR_THE_HISTORY).get(lang).to_owned(),
+                words::CLEAR_THE_HISTORY.get(lang).to_owned(),
                 14.0,
                 fade(TEXT.get(), alpha)
             )
@@ -835,7 +834,7 @@ impl App {
             });
             row![
                 plain(
-                    w(words::KEEP).get(lang).to_owned(),
+                    words::KEEP.get(lang).to_owned(),
                     Stop::Keep,
                     Msg::Keep,
                     true
@@ -846,7 +845,7 @@ impl App {
             .into()
         } else {
             plain(
-                w(words::CLEAR).get(lang).to_owned(),
+                words::CLEAR.get(lang).to_owned(),
                 Stop::Clear,
                 Msg::Clear,
                 false,
@@ -920,7 +919,7 @@ impl App {
         if choices.is_empty() {
             list = list.push(
                 container(t(
-                    w(words::NO_OTHER_APPLICATION_INSTALLED).get(self.lang),
+                    words::NO_OTHER_APPLICATION_INSTALLED.get(self.lang),
                     13.0,
                     FAINT.get(),
                 ))

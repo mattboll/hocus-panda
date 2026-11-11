@@ -23,7 +23,6 @@ use super::{
 };
 use crate::{
     desktops::{self as model, Rule},
-    lang::w,
     model::Icon,
     store::KeyEdit,
 };
@@ -104,7 +103,7 @@ impl App {
         match menu {
             RuleMenu::Desktop(_) => {
                 let names = self.desktop_names_now();
-                let mut out = vec![w(words::WHERE_YOU_OPEN_IT).get(lang).to_owned()];
+                let mut out = vec![words::WHERE_YOU_OPEN_IT.get(lang).to_owned()];
                 for i in 0..self.desktop_count_now() {
                     out.push(format!("{} · {}", i + 1, model::name_of(&names, i, lang)));
                 }
@@ -382,7 +381,7 @@ impl App {
         let edit_focused = self.rules_focused(&Stop::RuleEdit(i));
         let mut edit = button(
             t(
-                if open { w(words::FOLD) } else { w(words::EDIT) }
+                if open { words::FOLD } else { words::EDIT }
                     .get(lang)
                     .to_owned(),
                 13.0,
@@ -471,13 +470,13 @@ impl App {
         };
         let above_focused = self.rules_focused(&Stop::RuleAbove(i));
         column![
-            menu_row(w(words::DESKTOP).get(lang), RuleMenu::Desktop(i)),
-            menu_row(w(words::WHEN_IT_OPENS).get(lang), RuleMenu::Size(i)),
+            menu_row(words::DESKTOP.get(lang), RuleMenu::Desktop(i)),
+            menu_row(words::WHEN_IT_OPENS.get(lang), RuleMenu::Size(i)),
             row![
                 column![
-                    t(w(words::ABOVE_THE_OTHERS).get(lang), 13.5, TEXT.get()),
+                    t(words::ABOVE_THE_OTHERS.get(lang), 13.5, TEXT.get()),
                     t(
-                        w(words::EVEN_WITHOUT_THE_FOCUS_A_FULL).get(lang),
+                        words::EVEN_WITHOUT_THE_FOCUS_A_FULL.get(lang),
                         12.0,
                         DIM.get()
                     ),
@@ -515,12 +514,8 @@ impl App {
             .is_some_and(|(m, _)| m == RuleMenu::Add);
         let focused = self.rules_focused(&Stop::RuleMenu(RuleMenu::Add));
         let words = column![
-            t(w(words::ANOTHER_APPLICATION).get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
-            t(
-                w(words::ALWAYS_ON_A_DESKTOP_AT_A).get(lang),
-                12.5,
-                DIM.get()
-            ),
+            t(words::ANOTHER_APPLICATION.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+            t(words::ALWAYS_ON_A_DESKTOP_AT_A.get(lang), 12.5, DIM.get()),
         ]
         .spacing(2)
         .width(Length::Fill);
@@ -529,7 +524,7 @@ impl App {
             row![
                 words,
                 container(menu_button(
-                    w(words::ADD_A_RULE).get(lang).to_owned(),
+                    words::ADD_A_RULE.get(lang).to_owned(),
                     !self.writable(),
                     focused,
                     open,
@@ -596,7 +591,7 @@ impl App {
         if empty {
             list = list.push(
                 container(t(
-                    w(words::EVERY_INSTALLED_APPLICATION_HAS_ITS_RULE).get(self.lang),
+                    words::EVERY_INSTALLED_APPLICATION_HAS_ITS_RULE.get(self.lang),
                     13.0,
                     FAINT.get(),
                 ))

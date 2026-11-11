@@ -25,7 +25,7 @@ use crate::{
         view::{El, card_box, divided, label, t},
     },
     bluetooth as model,
-    lang::{Lang, w},
+    lang::Lang,
     theme::Ink,
 };
 
@@ -399,10 +399,10 @@ impl App {
                 row![
                     draw(INFO, 18.0, BLUE.get(), 2.0),
                     rich_text::<'_, (), _, _, _>([
-                        span(w(words::NO_BLUETOOTH_ADAPTER).get(lang),)
+                        span(words::NO_BLUETOOTH_ADAPTER.get(lang),)
                             .font(BOLD)
                             .color(INFO_TEXT.get()),
-                        span(w(words::THIS_COMPUTER_HAS_NONE_OR_THE).get(lang),)
+                        span(words::THIS_COMPUTER_HAS_NONE_OR_THE.get(lang),)
                             .color(INFO_TEXT.get()),
                     ])
                     .size(12.5)
@@ -448,14 +448,14 @@ impl App {
             (line, DIM.get())
         } else if bt.blocked {
             (
-                w(words::BLOCKED_BY_THE_WIRELESS_SWITCH_OR)
+                words::BLOCKED_BY_THE_WIRELESS_SWITCH_OR
                     .get(lang)
                     .to_owned(),
                 PEACH.get(),
             )
         } else {
             (
-                w(words::OFF_YOUR_DEVICES_STAY_PAIRED_THEY)
+                words::OFF_YOUR_DEVICES_STAY_PAIRED_THEY
                     .get(lang)
                     .to_owned(),
                 DIM.get(),
@@ -510,7 +510,7 @@ impl App {
         if mine.is_empty() {
             rows = rows.push(
                 container(t(
-                    w(words::NO_PAIRED_DEVICE).get(lang),
+                    words::NO_PAIRED_DEVICE.get(lang),
                     13.5,
                     fade(DIM.get(), alpha),
                 ))
@@ -524,9 +524,9 @@ impl App {
                 lines.push(failure_line(failure, lang));
             }
             let act = if device.connected {
-                (w(words::DISCONNECT), Msg::Disconnect(device.path.clone()))
+                (words::DISCONNECT, Msg::Disconnect(device.path.clone()))
             } else {
-                (w(words::CONNECT), Msg::Connect(device.path.clone()))
+                (words::CONNECT, Msg::Connect(device.path.clone()))
             };
             let enabled = bt.powered && running.is_none();
             let mut controls = row![].spacing(10).align_y(Alignment::Center);
@@ -601,7 +601,7 @@ impl App {
                     .id(format!("row:{}", model::MY_DEVICES)),
                 |inner, id| container(inner).id(format!("row:{id}")),
             );
-        container(column![group_head(w(words::MY_DEVICES).get(lang), count), card].spacing(8))
+        container(column![group_head(words::MY_DEVICES.get(lang), count), card].spacing(8))
             .id("group:bluetooth.mine".to_owned())
             .into()
     }
@@ -619,7 +619,7 @@ impl App {
         if asked.is_some() {
             return row![
                 spinner(turn),
-                t(w(words::CONNECTING).get(lang), 12.5, DIM.get())
+                t(words::CONNECTING.get(lang), 12.5, DIM.get())
             ]
             .spacing(6)
             .align_y(Alignment::Center)
@@ -669,7 +669,7 @@ impl App {
         let mut rows = column![];
         if nearby.is_empty() {
             rows = rows.push(
-                container(t(w(words::NO_NEW_DEVICE_FOUND).get(lang), 13.5, DIM.get()))
+                container(t(words::NO_NEW_DEVICE_FOUND.get(lang), 13.5, DIM.get()))
                     .padding([14, 16]),
             );
         }
@@ -678,13 +678,10 @@ impl App {
             let inert = running.is_some() && !pairing;
             let alpha = if inert { INERT } else { 1.0 };
             let mut lines: Vec<El<'_>> = vec![if pairing {
-                row![
-                    spinner(turn),
-                    t(w(words::PAIRING).get(lang), 12.5, DIM.get())
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .into()
+                row![spinner(turn), t(words::PAIRING.get(lang), 12.5, DIM.get())]
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .into()
             } else {
                 t(
                     model::nearby_line(device, lang),
@@ -698,7 +695,7 @@ impl App {
             }
             let controls = (!pairing).then(|| {
                 small_button(
-                    w(words::PAIR).get(lang).to_owned(),
+                    words::PAIR.get(lang).to_owned(),
                     (!inert).then(|| Message::Bluetooth(Msg::Pair(device.path.clone()))),
                     alpha,
                     format!("bt:pair:{}", device.name),
@@ -725,7 +722,7 @@ impl App {
         let searching = bt.searching.then(|| {
             row![
                 spinner(turn),
-                t(w(words::SEARCHING).get(lang), 12.0, FAINT.get())
+                t(words::SEARCHING.get(lang), 12.0, FAINT.get())
             ]
             .spacing(7)
             .align_y(Alignment::Center)
@@ -740,9 +737,9 @@ impl App {
         .on_exit(Message::Bluetooth(Msg::Over(false)));
         container(
             column![
-                group_head(w(words::NEARBY).get(lang), searching),
+                group_head(words::NEARBY.get(lang), searching),
                 card,
-                note(w(words::A_DEVICE_TO_PAIR_MUST_BE).get(lang)),
+                note(words::A_DEVICE_TO_PAIR_MUST_BE.get(lang)),
             ]
             .spacing(8),
         )
@@ -761,7 +758,7 @@ impl App {
             .unwrap_or_default();
         let chip = || -> El<'_> {
             container(
-                text(w(words::LATER).get(lang))
+                text(words::LATER.get(lang))
                     .size(11.5)
                     .font(BOLD)
                     .color(fade(AMBER.get(), INERT)),
@@ -807,19 +804,19 @@ impl App {
         };
         let name = later(
             PENCIL,
-            w(words::COMPUTER_NAME).get(lang),
-            w(words::THE_ONE_OTHER_DEVICES_SEE_TODAY).get(lang),
+            words::COMPUTER_NAME.get(lang),
+            words::THE_ONE_OTHER_DEVICES_SEE_TODAY.get(lang),
             t(alias, 13.5, fade(DIM.get(), INERT)).into(),
         );
         let files = later(
             FILE,
-            w(words::RECEIVE_FILES).get(lang),
-            w(words::ACCEPT_A_PHOTO_SENT_BY_A).get(lang),
+            words::RECEIVE_FILES.get(lang),
+            words::ACCEPT_A_PHOTO_SENT_BY_A.get(lang),
             super::super::screens::switch(false, true, false, 1.0, None),
         );
         container(
             column![
-                group_head(w(words::LATER_2).get(lang), None),
+                group_head(words::LATER_2.get(lang), None),
                 card_box(column![name, divided(true, files.into())].into()),
             ]
             .spacing(8),
@@ -845,7 +842,7 @@ impl App {
                     "name": d.name,
                     "connected": d.connected,
                     "line": if asked {
-                        w(words::CONNECTING).get(lang).to_owned()
+                        words::CONNECTING.get(lang).to_owned()
                     } else if d.connected {
                         format!(
                             "{}{}",
@@ -858,9 +855,9 @@ impl App {
                     "low": d.low(),
                     "trusted": d.trusted,
                     "button": (!asked).then(|| if d.connected {
-                        w(words::DISCONNECT).get(lang)
+                        words::DISCONNECT.get(lang)
                     } else {
-                        w(words::CONNECT).get(lang)
+                        words::CONNECT.get(lang)
                     }),
                     "failure": self.bluetooth.failure(&d.path).map(|f| failure_words(f, lang)),
                 })
@@ -875,7 +872,7 @@ impl App {
                 serde_json::json!({
                     "name": d.name,
                     "line": if pairing {
-                        w(words::PAIRING).get(lang).to_owned()
+                        words::PAIRING.get(lang).to_owned()
                     } else {
                         model::nearby_line(d, lang)
                     },
@@ -938,9 +935,9 @@ impl App {
         let mut list = column![].spacing(0);
         for (i, item) in super::Item::ALL.into_iter().enumerate() {
             let (said, colour, checked) = match item {
-                super::Item::Rename => (w(words::RENAME), TEXT.get(), false),
-                super::Item::Trust => (w(words::CONNECT_AUTOMATICALLY), TEXT.get(), device.trusted),
-                super::Item::Forget => (w(words::FORGET_THIS_DEVICE), PEACH.get(), false),
+                super::Item::Rename => (words::RENAME, TEXT.get(), false),
+                super::Item::Trust => (words::CONNECT_AUTOMATICALLY, TEXT.get(), device.trusted),
+                super::Item::Forget => (words::FORGET_THIS_DEVICE, PEACH.get(), false),
             };
             if item == super::Item::Forget {
                 list =
@@ -1028,7 +1025,7 @@ impl App {
             let body = column![
                 text(title).size(17).font(BOLD).color(TEXT),
                 t(
-                    w(words::THE_COMPUTER_ERASES_THE_KEY_THEY).get(lang),
+                    words::THE_COMPUTER_ERASES_THE_KEY_THEY.get(lang),
                     13.0,
                     DIM.get(),
                 )
@@ -1036,13 +1033,13 @@ impl App {
                 row![
                     Space::new().width(Length::Fill),
                     sheet_button(
-                        w(words::CANCEL).get(lang),
+                        words::CANCEL.get(lang),
                         None,
                         Message::Bluetooth(Msg::ForgetCancel),
                         "sheet:cancel"
                     ),
                     sheet_button(
-                        w(words::FORGET).get(lang),
+                        words::FORGET.get(lang),
                         Some(FORGET.get()),
                         Message::Bluetooth(Msg::ForgetConfirm),
                         "sheet:ok"
@@ -1129,8 +1126,8 @@ impl App {
         let buttons = |second: Option<El<'static>>| {
             let mut buttons = row![Space::new().width(Length::Fill)].spacing(8);
             let first = match request.asked {
-                Asked::Authorize => w(words::REFUSE),
-                _ => w(words::CANCEL),
+                Asked::Authorize => words::REFUSE,
+                _ => words::CANCEL,
             };
             buttons = buttons.push(cancel_button(first.get(lang)));
             if let Some(second) = second {
@@ -1170,7 +1167,7 @@ impl App {
                     container(t(words::s_left(lang, left), 12.0, FAINT.get()))
                         .center_x(Length::Fill),
                     buttons(Some(ok(
-                        w(words::THE_CODE_MATCHES).get(lang),
+                        words::THE_CODE_MATCHES.get(lang),
                         Message::Bluetooth(Msg::Answer(Answer::Yes)),
                     ))),
                 ]
@@ -1247,7 +1244,7 @@ impl App {
                 column![
                     title,
                     column![
-                        text(w(words::PIN_CODE).get(lang))
+                        text(words::PIN_CODE.get(lang))
                             .size(12)
                             .font(BOLD)
                             .color(DIM),
@@ -1260,14 +1257,14 @@ impl App {
                             .padding([8, 10])
                             .style(input_style),
                         t(
-                            w(words::OFTEN_0000_OR_1234_OR_THE).get(lang),
+                            words::OFTEN_0000_OR_1234_OR_THE.get(lang),
                             12.0,
                             FAINT.get()
                         ),
                     ]
                     .spacing(5),
                     buttons(Some(ok(
-                        w(words::PAIR).get(lang),
+                        words::PAIR.get(lang),
                         Message::Bluetooth(Msg::PinGive),
                     ))),
                 ]
@@ -1275,7 +1272,7 @@ impl App {
             Asked::Authorize => column![
                 title,
                 buttons(Some(ok(
-                    w(words::PAIR).get(lang),
+                    words::PAIR.get(lang),
                     Message::Bluetooth(Msg::Answer(Answer::Yes)),
                 ))),
             ],
@@ -1287,11 +1284,11 @@ impl App {
 /// What a failure says under its row.
 fn failure_words(failure: Failure, lang: Lang) -> &'static str {
     match failure {
-        Failure::NoAnswer => w(words::IT_DOES_NOT_ANSWER_CHECK_THAT),
+        Failure::NoAnswer => words::IT_DOES_NOT_ANSWER_CHECK_THAT,
         Failure::Pairing | Failure::Code | Failure::Stopped => {
-            w(words::PAIRING_FAILED_PUT_THE_DEVICE_IN)
+            words::PAIRING_FAILED_PUT_THE_DEVICE_IN
         }
-        Failure::Cancelled => w(words::THE_DEVICE_CANCELLED_THE_PAIRING),
+        Failure::Cancelled => words::THE_DEVICE_CANCELLED_THE_PAIRING,
     }
     .get(lang)
 }
