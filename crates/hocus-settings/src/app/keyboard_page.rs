@@ -613,11 +613,7 @@ impl App {
         .width(Length::Fill);
         let mut line = row![words].spacing(10).align_y(Alignment::Center);
         if changed > 0 {
-            line = line.push(chip(match (lang, changed) {
-                (Lang::French, 1) => "1 modifié".to_owned(),
-                (Lang::French, n) => format!("{n} modifiés"),
-                (Lang::English, n) => format!("{n} changed"),
-            }));
+            line = line.push(chip(words::changed_count(lang, changed)));
         }
         line = line.push(
             container(icon(Icon::Chevron, 14.0, DIM.get()))
@@ -918,12 +914,9 @@ impl App {
         let shown = self.shown_shortcuts();
         let changed = model::shortcuts().filter(|s| self.changed(s.id)).count();
         let count = if self.keys.query.trim().is_empty() {
-            match (lang, changed) {
-                (Lang::French, 0) => "64 raccourcis".to_owned(),
-                (Lang::French, 1) => "64 raccourcis · 1 modifié".to_owned(),
-                (Lang::French, n) => format!("64 raccourcis · {n} modifiés"),
-                (Lang::English, 0) => "64 shortcuts".to_owned(),
-                (Lang::English, n) => format!("64 shortcuts · {n} changed"),
+            match changed {
+                0 => words::ALL_SHORTCUTS.get(lang).to_owned(),
+                n => words::all_shortcuts_changed(lang, n),
             }
         } else {
             match shown.len() {

@@ -535,9 +535,7 @@ impl canvas::Program<Message> for Drawing {
                 f,
                 self.notes,
                 self.shear,
-                match self.lang {
-                    Lang::French | Lang::English => "Notes",
-                },
+                words::NOTES.get(self.lang),
                 ACCENT.get(),
                 Color::from_rgb8(0x24, 0x2d, 0x3e),
                 Color::from_rgb8(0x2c, 0x36, 0x49),

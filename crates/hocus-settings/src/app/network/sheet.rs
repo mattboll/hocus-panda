@@ -29,7 +29,7 @@ use crate::{
         style::{self, *},
         view::{El, t},
     },
-    lang::{Lang, Words, w},
+    lang::{Words, w},
 };
 
 /// A text field of the sheet.
@@ -641,10 +641,7 @@ impl App {
         let sheet = self.network.sheet.as_ref()?;
         let lang = self.lang;
         let title = match sheet.hidden {
-            _ if sheet.vpn.is_some() => match lang {
-                Lang::French => format!("VPN « {} »", sheet.name),
-                Lang::English => format!("VPN \u{201c}{}\u{201d}", sheet.name),
-            },
+            _ if sheet.vpn.is_some() => words::vpn(lang, &sheet.name),
             true => w(words::JOIN_A_HIDDEN_NETWORK).get(lang).to_owned(),
             false => words::connect_to(lang, &sheet.name),
         };

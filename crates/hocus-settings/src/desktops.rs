@@ -16,7 +16,7 @@ use hocus_words::settings::desktops as words;
 use std::sync::OnceLock;
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words, w},
     model::{Choice, Codec, Kind, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
@@ -308,9 +308,9 @@ pub fn outside() -> &'static [crate::model::Outside] {
     &ALL
 }
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -389,9 +389,9 @@ pub fn settings() -> &'static [Setting] {
                     &["move", "drag", "grab", "alt", "super", "window"],
                 ),
                 Kind::Menu(vec![
-                    word("Alt + glisser", "Alt + drag", "alt"),
-                    word("Super + glisser", "Super + drag", "super"),
-                    word("Aucune touche", "No key", "none"),
+                    word(words::ALT_DRAG, "alt"),
+                    word(words::SUPER_DRAG, "super"),
+                    word(words::NO_KEY, "none"),
                 ]),
                 one(&["windows", "move-modifier"], Codec::Word(DRAG_KEYS)),
             ),
@@ -405,9 +405,9 @@ pub fn settings() -> &'static [Setting] {
                     &["resize", "size", "right click", "enlarge"],
                 ),
                 Kind::Menu(vec![
-                    word("Super + clic droit glissé", "Super + right-drag", "super"),
-                    word("Alt + clic droit glissé", "Alt + right-drag", "alt"),
-                    word("Aucune touche", "No key", "none"),
+                    word(words::SUPER_RIGHT_DRAG, "super"),
+                    word(words::ALT_RIGHT_DRAG, "alt"),
+                    word(words::NO_KEY, "none"),
                 ]),
                 one(&["windows", "resize-modifier"], Codec::Word(DRAG_KEYS)),
             ),
@@ -454,9 +454,9 @@ pub fn settings() -> &'static [Setting] {
                     &["open", "close", "animation", "rain", "matrix", "frost"],
                 ),
                 Kind::Menu(vec![
-                    word("Standard", "Standard", "standard"),
-                    word("Pluie", "Rain", "rain"),
-                    word("Givre", "Frost", "frost"),
+                    word(words::STANDARD, "standard"),
+                    word(words::RAIN, "rain"),
+                    word(words::FROST, "frost"),
                 ]),
                 one(&["windows", "animation"], Codec::Word(ANIMATIONS)),
             ),
@@ -470,8 +470,8 @@ pub fn settings() -> &'static [Setting] {
                     &["alt+tab", "switcher", "windows", "desktop"],
                 ),
                 Kind::Menu(vec![
-                    word("Tous les bureaux", "All desktops", "all"),
-                    word("Ce bureau seulement", "This desktop only", "desktop"),
+                    word(words::ALL_DESKTOPS, "all"),
+                    word(words::THIS_DESKTOP_ONLY, "desktop"),
                 ]),
                 one(&["windows", "alt-tab"], Codec::Word(ALT_TAB_WORDS)),
             ),

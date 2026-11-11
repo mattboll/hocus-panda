@@ -437,54 +437,34 @@ impl App {
                 let other = laptop
                     .map(|l| screens::lower_first(&l.title(lang)))
                     .unwrap_or_default();
-                match lang {
-                    Lang::French => (
-                        format!("{title} débranché à {at}"),
-                        format!(
-                            "Sa place ({}) et ses réglages sont gardés : il les reprend dès qu’il revient. Ses fenêtres sont passées sur l’{other}.",
-                            place.unwrap_or_default()
-                        ),
+                (
+                    words::unplugged_at(
+                        lang,
+                        words::UnpluggedAt {
+                            at: &at,
+                            title: &title,
+                        },
                     ),
-                    Lang::English => (
-                        format!("{title} unplugged at {at}"),
-                        format!(
-                            "Its place ({}) and settings are kept: it takes them back as soon as it returns. Its windows went to the {other}.",
-                            place.unwrap_or_default()
-                        ),
+                    words::its_place_and_settings_are_kept(
+                        lang,
+                        words::ItsPlaceAndSettingsAreKept {
+                            other: &other,
+                            place_unwrap_or_default: place.unwrap_or_default(),
+                        },
                     ),
-                }
+                )
             } else if s.lid_closed && known.on().count() > 0 {
                 let other = other_name(s);
-                match lang {
-                    Lang::French => (
-                        "Couvercle fermé".to_owned(),
-                        format!(
-                            "L’écran du portable est éteint ; la session continue sur l’{other}, et la barre y est passée. Ses réglages reviennent quand tu rouvres le couvercle."
-                        ),
-                    ),
-                    Lang::English => (
-                        "Lid closed".to_owned(),
-                        format!(
-                            "The laptop screen is off; the session goes on on the {other}, and the bar moved there. Its settings come back when you open the lid."
-                        ),
-                    ),
-                }
+                (
+                    words::LID_CLOSED.get(lang).to_owned(),
+                    words::the_laptop_screen_is_off_the(lang, &other),
+                )
             } else if !s.enabled {
                 let other = other_name(s);
-                match lang {
-                    Lang::French => (
-                        format!("{title} éteint"),
-                        format!(
-                            "Il reste branché et garde sa place ; ses fenêtres sont passées sur l’{other}."
-                        ),
-                    ),
-                    Lang::English => (
-                        format!("{title} off"),
-                        format!(
-                            "It stays plugged in and keeps its place; its windows went to the {other}."
-                        ),
-                    ),
-                }
+                (
+                    words::off_2(lang, &title),
+                    words::it_stays_plugged_in_and_keeps(lang, &other),
+                )
             } else {
                 continue;
             };

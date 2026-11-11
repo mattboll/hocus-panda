@@ -372,13 +372,14 @@ const ACCENT_TEXT_INK: Ink = Ink::AccentText;
 /// "(français)": the session's language, as the window would speak it
 /// without the file's choice.
 fn system_language(lang: Lang) -> String {
-    let name = match (Lang::of_messages(), lang) {
-        (Lang::French, Lang::French) => "français",
-        (Lang::French, Lang::English) => "French",
-        (Lang::English, Lang::French) => "anglais",
-        (Lang::English, Lang::English) => "English",
+    // A language the catalogue has no name for in `lang`: its own name.
+    let name = match Lang::of_messages() {
+        Lang::French => words::FRENCH_NAME.get(lang),
+        Lang::English => words::ENGLISH_NAME.get(lang),
+        #[allow(unreachable_patterns, reason = "a language added by its file alone")]
+        other => other.name(),
     };
-    format!("({name})")
+    words::in_parentheses(lang, name)
 }
 
 /// The cursor at `pixels`: a 72 × 72 tile with the arrow drawn at that

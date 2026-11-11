@@ -846,14 +846,13 @@ impl App {
                 .to_owned();
         }
         let mut line = match (r.asked, r.chosen, lang) {
-            ("auto", Some(c), Lang::French) => {
-                format!(
-                    "Automatique : {}, choisie d’un clic sur son bord.",
-                    if c == "mini" { "mini" } else { "pleine" }
-                )
-            }
-            ("auto", Some(c), Lang::English) => {
-                format!("Automatic: {c}, chosen with a click on its edge.")
+            ("auto", Some(c), _) => {
+                let form = if c == "mini" {
+                    words::FORM_MINI
+                } else {
+                    words::FORM_FULL_CHOSEN
+                };
+                words::automatic_chosen(lang, form.get(lang))
             }
             ("auto", None, _) => {
                 let form = form_word(Form::default_for(r.width), lang);
@@ -867,18 +866,8 @@ impl App {
                     },
                 )
             }
-            ("full", _, Lang::French) => {
-                "Toujours pleine ; un clic sur son bord change pour la session.".to_owned()
-            }
-            ("full", _, Lang::English) => {
-                "Always full; a click on its edge changes it for the session.".to_owned()
-            }
-            (_, _, Lang::French) => {
-                "Toujours mini ; un clic sur son bord change pour la session.".to_owned()
-            }
-            (_, _, Lang::English) => {
-                "Always mini; a click on its edge changes it for the session.".to_owned()
-            }
+            ("full", _, _) => words::ALWAYS_FULL.get(lang).to_owned(),
+            (_, _, _) => words::ALWAYS_MINI.get(lang).to_owned(),
         };
         let screens_all =
             self.bar_slot(model::SCREENS).and_then(|s| self.value(s)) == Some(Value::Word("all"));
@@ -1265,60 +1254,16 @@ impl App {
 
 /// "jeudi 5 novembre", as the bar's date line.
 fn say_date(now: &jiff::Zoned, lang: Lang) -> String {
-    const DAYS_FR: [&str; 7] = [
-        "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
-    ];
-    const DAYS_EN: [&str; 7] = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ];
-    const MONTHS_FR: [&str; 12] = [
-        "janvier",
-        "février",
-        "mars",
-        "avril",
-        "mai",
-        "juin",
-        "juillet",
-        "août",
-        "septembre",
-        "octobre",
-        "novembre",
-        "décembre",
-    ];
-    const MONTHS_EN: [&str; 12] = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
     let day = usize::from(now.weekday().to_monday_zero_offset().unsigned_abs());
     let month = usize::try_from(now.month() - 1).unwrap_or(0);
-    match lang {
-        Lang::French => format!(
-            "{} {} {}",
-            DAYS_FR[day % 7],
-            now.day(),
-            MONTHS_FR[month % 12]
-        ),
-        Lang::English => format!(
-            "{} {} {}",
-            DAYS_EN[day % 7],
-            now.day(),
-            MONTHS_EN[month % 12]
-        ),
-    }
+    let name =
+        |list: hocus_words::List, i: usize| list.get(lang).get(i).copied().unwrap_or_default();
+    words::weekday_day_month(
+        lang,
+        words::WeekdayDayMonth {
+            weekday: name(hocus_words::date::WEEKDAYS, day % 7),
+            day: now.day(),
+            month: name(hocus_words::date::MONTHS, month % 12),
+        },
+    )
 }

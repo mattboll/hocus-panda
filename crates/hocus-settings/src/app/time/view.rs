@@ -18,7 +18,7 @@ use crate::{
         style::*,
         view::{El, card_box, divided, icon, label, t},
     },
-    lang::{Lang, pair, w},
+    lang::{Lang, w},
     model::{Icon, SectionId},
     theme::Ink,
     time as model,
@@ -127,44 +127,21 @@ impl App {
     /// The automatic time's line, and its colour.
     pub(super) fn time_auto_line(&self) -> (String, Color) {
         let lang = self.lang;
-        let said = |fr: &'static str, en: &'static str| pair(fr, en).get(lang).to_owned();
+        let said = |text: hocus_words::Text| crate::lang::w(text).get(lang).to_owned();
         match self.time.heard.as_ref() {
             None => (String::new(), DIM.get()),
             Some(None) => (
-                said(
-                    "Le service de l’heure du système (timedated) ne répond pas.",
-                    "The system’s time service (timedated) does not answer.",
-                ),
+                said(words::THE_SYSTEM_S_TIME_SERVICE_TIMEDATED),
                 FAINT.get(),
             ),
-            Some(Some(td)) if !td.can_ntp => (
-                said(
-                    "Aucun service de mise à l’heure sur cet ordinateur.",
-                    "No time service on this computer.",
-                ),
-                FAINT.get(),
-            ),
-            Some(Some(_)) if !self.time_ntp() => (
-                said(
-                    "Coupé : l’heure ne se corrige plus seule.",
-                    "Off: the time no longer corrects itself.",
-                ),
-                DIM.get(),
-            ),
-            Some(Some(td)) if td.synced => (
-                said(
-                    "Par Internet (NTP) · à l’heure",
-                    "Over the Internet (NTP) · on time",
-                ),
-                MINT.get(),
-            ),
-            Some(Some(_)) => (
-                said(
-                    "Par Internet (NTP) · pas encore à l’heure",
-                    "Over the Internet (NTP) · not on time yet",
-                ),
-                AMBER.get(),
-            ),
+            Some(Some(td)) if !td.can_ntp => {
+                (said(words::NO_TIME_SERVICE_ON_THIS_COMPUTER), FAINT.get())
+            }
+            Some(Some(_)) if !self.time_ntp() => {
+                (said(words::OFF_THE_TIME_NO_LONGER_CORRECTS), DIM.get())
+            }
+            Some(Some(td)) if td.synced => (said(words::OVER_THE_INTERNET_NTP_ON_TIME), MINT.get()),
+            Some(Some(_)) => (said(words::OVER_THE_INTERNET_NTP_NOT_ON), AMBER.get()),
         }
     }
 

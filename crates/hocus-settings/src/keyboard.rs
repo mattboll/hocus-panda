@@ -489,9 +489,9 @@ fn actions() -> Vec<Action> {
     list
 }
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -557,11 +557,11 @@ pub fn settings() -> &'static [Setting] {
                     &["layout", "switch", "group"],
                 ),
                 Kind::Menu(vec![
-                    word("Aucun raccourci", "No shortcut", ""),
-                    word("Alt + Maj", "Alt + Shift", "grp:alt_shift_toggle"),
-                    word("Ctrl + Maj", "Ctrl + Shift", "grp:ctrl_shift_toggle"),
-                    word("Les deux Maj", "Both Shift keys", "grp:shifts_toggle"),
-                    word("Super + Espace", "Super + Space", "grp:win_space_toggle"),
+                    word(words::NO_SHORTCUT, ""),
+                    word(words::ALT_SHIFT, "grp:alt_shift_toggle"),
+                    word(words::CTRL_SHIFT, "grp:ctrl_shift_toggle"),
+                    word(words::BOTH_SHIFT_KEYS, "grp:shifts_toggle"),
+                    word(words::SUPER_SPACE, "grp:win_space_toggle"),
                 ]),
                 one(&["keyboard", "options"], Codec::XkbOption(SWITCHES)),
             ),
@@ -612,9 +612,9 @@ pub fn settings() -> &'static [Setting] {
                     &["caps lock", "capitals"],
                 ),
                 Kind::Menu(vec![
-                    word("Comme d’habitude", "As usual", ""),
-                    word("Comme Ctrl", "As Ctrl", "caps:ctrl_modifier"),
-                    word("Comme Échap", "As Escape", "caps:escape"),
+                    word(words::AS_USUAL, ""),
+                    word(words::AS_CTRL, "caps:ctrl_modifier"),
+                    word(words::AS_ESCAPE, "caps:escape"),
                 ]),
                 one(&["keyboard", "options"], Codec::XkbOption(CAPS)),
             ),
@@ -628,11 +628,11 @@ pub fn settings() -> &'static [Setting] {
                     &["compose", "accents", "characters"],
                 ),
                 Kind::Menu(vec![
-                    word("Aucune", "None", ""),
-                    word("Alt droite", "Right Alt", "compose:ralt"),
-                    word("Menu", "Menu", "compose:menu"),
-                    word("Ctrl droite", "Right Ctrl", "compose:rctrl"),
-                    word("Verr. Maj.", "Caps Lock", "compose:caps"),
+                    word(words::NONE, ""),
+                    word(words::RIGHT_ALT, "compose:ralt"),
+                    word(words::MENU, "compose:menu"),
+                    word(words::RIGHT_CTRL, "compose:rctrl"),
+                    word(words::CAPS_LOCK, "compose:caps"),
                 ]),
                 one(&["keyboard", "options"], Codec::XkbOption(COMPOSE)),
             ),

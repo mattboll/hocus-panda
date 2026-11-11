@@ -641,10 +641,9 @@ impl App {
             } else {
                 String::new()
             };
-            let flags = match (r.signals.len(), lang) {
-                (0, _) => String::new(),
-                (n, Lang::French) => format!("⚠ {n} signa{}", if n > 1 { "ux" } else { "l" }),
-                (n, Lang::English) => format!("⚠ {n} signal{}", if n > 1 { "s" } else { "" }),
+            let flags = match r.signals.len() {
+                0 => String::new(),
+                n => words::signals_count(lang, n),
             };
             let line = button(
                 row![

@@ -48,9 +48,9 @@ pub const SCREEN_READER: &str = "accessibility.screen-reader";
 const ZOOMS: [i64; 8] = [150, 200, 300, 400, 600, 800, 1200, 1600];
 const FOLLOWS: &[&str] = &["edge", "centre", "proportional"];
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -113,9 +113,9 @@ pub fn settings() -> &'static [Setting] {
                 line: Some(w(words::AT_THE_EDGE_IT_MOVES_ONLY)),
                 keywords: (&["loupe", "souris"], &["magnifier", "mouse", "tracking"]),
                 kind: Kind::Menu(vec![
-                    word("Au bord", "At the edge", "edge"),
-                    word("Au centre", "Centred", "centre"),
-                    word("Proportionnellement", "Proportionally", "proportional"),
+                    word(words::AT_THE_EDGE, "edge"),
+                    word(words::CENTRED, "centre"),
+                    word(words::PROPORTIONALLY, "proportional"),
                 ]),
                 places: one(&["magnifier", "follow-pointer"], Codec::Word(FOLLOWS)),
                 needs: None,

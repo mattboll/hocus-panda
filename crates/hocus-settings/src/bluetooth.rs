@@ -144,27 +144,33 @@ fn feminine(kind: Kind) -> bool {
 
 /// "Connecté" / "Connectée" / "Connected".
 pub fn connected(kind: Kind, lang: Lang) -> &'static str {
-    match (lang, feminine(kind)) {
-        (Lang::French, false) => "Connecté",
-        (Lang::French, true) => "Connectée",
-        (Lang::English, _) => "Connected",
+    if feminine(kind) {
+        words::CONNECTED_F
+    } else {
+        words::CONNECTED_M
     }
+    .get(lang)
 }
 
 /// "Pas connecté", and how it comes back when it does by itself.
 pub fn not_connected(device: &Device, lang: Lang) -> String {
-    let mut said = match (lang, feminine(device.kind)) {
-        (Lang::French, false) => "Pas connecté",
-        (Lang::French, true) => "Pas connectée",
-        (Lang::English, _) => "Not connected",
+    let feminine = feminine(device.kind);
+    let mut said = if feminine {
+        words::NOT_CONNECTED_F
+    } else {
+        words::NOT_CONNECTED_M
     }
+    .get(lang)
     .to_owned();
     if device.trusted && device.kind.input() {
-        said.push_str(match (lang, feminine(device.kind)) {
-            (Lang::French, false) => " · se connecte seul quand il s’allume",
-            (Lang::French, true) => " · se connecte seule quand elle s’allume",
-            (Lang::English, _) => " · connects by itself when switched on",
-        });
+        said.push_str(
+            if feminine {
+                words::RECONNECTS_F
+            } else {
+                words::RECONNECTS_M
+            }
+            .get(lang),
+        );
     }
     said
 }
@@ -186,11 +192,7 @@ pub fn nearby_line(device: &Device, lang: Lang) -> String {
 
 /// "4 associés".
 pub fn paired_count(count: usize, lang: Lang) -> String {
-    match (lang, count) {
-        (Lang::French, 1) => "1 associé".to_owned(),
-        (Lang::French, n) => format!("{n} associés"),
-        (Lang::English, n) => format!("{n} paired"),
-    }
+    words::paired_count(lang, count)
 }
 
 /// The home's card: how many are connected, or that it is off.

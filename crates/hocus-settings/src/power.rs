@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words, w},
     model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
     power_bus::Charge,
 };
@@ -60,16 +60,16 @@ pub const CHARGE_LIMIT: &str = "power.charge-limit";
 const LIDS: &[&str] = &["suspend", "lock", "screen-off", "nothing"];
 const BUTTONS: &[&str] = &["ask", "suspend", "power-off", "nothing"];
 
-fn minutes(fr: &'static str, en: &'static str, seconds: Option<u64>) -> Choice {
+fn minutes(text: hocus_words::Text, seconds: Option<u64>) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Seconds(seconds),
     }
 }
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -79,7 +79,7 @@ fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
-        let never = minutes("Jamais", "Never", None);
+        let never = minutes(words::NEVER_2, None);
         vec![
             Setting {
                 id: IDLE,
@@ -107,13 +107,13 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 kind: Kind::Menu(vec![
-                    minutes("1 min", "1 min", Some(60)),
-                    minutes("2 min", "2 min", Some(120)),
-                    minutes("3 min", "3 min", Some(180)),
-                    minutes("5 min", "5 min", Some(300)),
-                    minutes("10 min", "10 min", Some(600)),
-                    minutes("15 min", "15 min", Some(900)),
-                    minutes("30 min", "30 min", Some(1800)),
+                    minutes(words::N_1_MIN, Some(60)),
+                    minutes(words::N_2_MIN, Some(120)),
+                    minutes(words::N_3_MIN, Some(180)),
+                    minutes(words::N_5_MIN, Some(300)),
+                    minutes(words::N_10_MIN, Some(600)),
+                    minutes(words::N_15_MIN, Some(900)),
+                    minutes(words::N_30_MIN, Some(1800)),
                     never.clone(),
                 ]),
                 places: Places::PerSource {
@@ -135,11 +135,11 @@ pub fn settings() -> &'static [Setting] {
                     &["screen off", "display off", "dpms", "blank"],
                 ),
                 kind: Kind::Menu(vec![
-                    minutes("Aussitôt", "At once", Some(0)),
-                    minutes("10 s après", "10 s after", Some(10)),
-                    minutes("30 s après", "30 s after", Some(30)),
-                    minutes("1 min après", "1 min after", Some(60)),
-                    minutes("5 min après", "5 min after", Some(300)),
+                    minutes(words::AT_ONCE, Some(0)),
+                    minutes(words::N_10_S_AFTER, Some(10)),
+                    minutes(words::N_30_S_AFTER, Some(30)),
+                    minutes(words::N_1_MIN_AFTER, Some(60)),
+                    minutes(words::N_5_MIN_AFTER, Some(300)),
                 ]),
                 places: Places::PerSource {
                     battery: Place::new(&["power", "battery", "screen-off-after"], Codec::Delay),
@@ -158,11 +158,11 @@ pub fn settings() -> &'static [Setting] {
                     &["sleep", "suspend", "standby", "hibernate", "idle"],
                 ),
                 kind: Kind::Menu(vec![
-                    minutes("5 min", "5 min", Some(300)),
-                    minutes("15 min", "15 min", Some(900)),
-                    minutes("30 min", "30 min", Some(1800)),
-                    minutes("1 h", "1 h", Some(3600)),
-                    minutes("2 h", "2 h", Some(7200)),
+                    minutes(words::N_5_MIN, Some(300)),
+                    minutes(words::N_15_MIN, Some(900)),
+                    minutes(words::N_30_MIN, Some(1800)),
+                    minutes(words::N_1_H, Some(3600)),
+                    minutes(words::N_2_H, Some(7200)),
                     never,
                 ]),
                 places: Places::PerSource {
@@ -210,10 +210,10 @@ pub fn settings() -> &'static [Setting] {
                     &["lid", "laptop", "close", "sleep"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("Mettre en veille", "Suspend", "suspend"),
-                    word("Verrouiller", "Lock", "lock"),
-                    word("Éteindre l’écran", "Turn the screen off", "screen-off"),
-                    word("Ne rien faire", "Do nothing", "nothing"),
+                    word(words::SUSPEND, "suspend"),
+                    word(words::LOCK, "lock"),
+                    word(words::TURN_THE_SCREEN_OFF, "screen-off"),
+                    word(words::DO_NOTHING, "nothing"),
                 ]),
                 places: Places::One(Place::new(&["power", "lid"], Codec::Word(LIDS))),
                 needs: None,
@@ -246,10 +246,10 @@ pub fn settings() -> &'static [Setting] {
                     &["power", "shut down", "power off", "sleep"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("Demander quoi faire", "Ask what to do", "ask"),
-                    word("Mettre en veille", "Suspend", "suspend"),
-                    word("Éteindre", "Power off", "power-off"),
-                    word("Ne rien faire", "Do nothing", "nothing"),
+                    word(words::ASK_WHAT_TO_DO, "ask"),
+                    word(words::SUSPEND, "suspend"),
+                    word(words::POWER_OFF, "power-off"),
+                    word(words::DO_NOTHING, "nothing"),
                 ]),
                 places: Places::One(Place::new(&["power", "power-button"], Codec::Word(BUTTONS))),
                 needs: None,

@@ -58,9 +58,9 @@ const TIMES: &[&str] = &["24h", "12h"];
 /// The cursor's sizes offered; the compositor takes 8 to 256.
 pub const CURSOR_SIZES: [i64; 4] = [24, 32, 48, 64];
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -395,10 +395,10 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 kind: Kind::Segmented(vec![
-                    word("Sombre", "Dark", "dark"),
-                    word("Clair", "Light", "light"),
-                    word("Givre", "Frost", "frost"),
-                    word("Matrix", "Matrix", "matrix"),
+                    word(words::DARK, "dark"),
+                    word(words::LIGHT, "light"),
+                    word(words::FROST, "frost"),
+                    word(words::MATRIX, "matrix"),
                 ]),
                 places: one(&["appearance", "theme"], Codec::Word(SCHEMES)),
                 needs: None,
@@ -526,9 +526,9 @@ pub fn settings() -> &'static [Setting] {
                     &["english", "french", "translation", "locale", "language"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("Celle du système", "The system’s", "system"),
-                    word("Français", "Français", "fr"),
-                    word("English", "English", "en"),
+                    word(words::THE_SYSTEM_S_2, "system"),
+                    word(words::FRAN_AIS, "fr"),
+                    word(words::ENGLISH, "en"),
                 ]),
                 places: one(&["locale", "language"], Codec::Word(LANGUAGES)),
                 needs: None,
@@ -544,10 +544,10 @@ pub fn settings() -> &'static [Setting] {
                     &["format", "day", "month", "dd/mm"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("En toutes lettres", "In words", "long"),
-                    word("Abrégée", "Short", "short"),
-                    word("En chiffres", "In numbers", "numeric"),
-                    word("Année d’abord", "Year first", "iso"),
+                    word(words::IN_WORDS, "long"),
+                    word(words::SHORT, "short"),
+                    word(words::IN_NUMBERS, "numeric"),
+                    word(words::YEAR_FIRST, "iso"),
                 ]),
                 places: one(&["locale", "date"], Codec::Word(DATES)),
                 needs: None,
@@ -563,8 +563,8 @@ pub fn settings() -> &'static [Setting] {
                     &["12 h", "24 h", "am", "pm", "time format"],
                 ),
                 kind: Kind::Segmented(vec![
-                    word("14:05", "14:05", "24h"),
-                    word("2:05 PM", "2:05 PM", "12h"),
+                    word(words::N_14_05, "24h"),
+                    word(words::N_2_05_PM, "12h"),
                 ]),
                 places: Places::One(Place::unset(
                     &["locale", "time"],

@@ -104,9 +104,12 @@ pub struct City {
 
 impl City {
     pub fn name(&self, lang: Lang) -> &'static str {
-        match lang {
-            Lang::French => self.fr,
-            Lang::English => self.en,
+        // Cities are named in French and English; other languages take
+        // the English name, as the time zone database writes it.
+        if lang == Lang::French {
+            self.fr
+        } else {
+            self.en
         }
     }
 

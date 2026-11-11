@@ -22,7 +22,7 @@ use crate::{
         style::{self, *},
         view::{El, card_box, divided, ease_out, label, t},
     },
-    lang::{Lang, w},
+    lang::w,
     sound as model,
 };
 
@@ -674,10 +674,7 @@ impl App {
                 .font(BOLD)
                 .color(fade(FAINT.get(), alpha))
         };
-        let (left, right) = match lang {
-            Lang::French => ("G", "D"),
-            Lang::English => ("L", "R"),
-        };
+        let (left, right) = (words::L.get(lang), words::R.get(lang));
         row![
             letter(left),
             container(stack![track, bar])

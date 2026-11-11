@@ -797,11 +797,11 @@ impl App {
                 let slot =
                     crate::model::setting("power.suspend-after").map(|s| Slot::of(s, self.source));
                 let suspend = slot.map(|slot| self.said_value(slot)).unwrap_or_default();
-                let suspend = match lang {
-                    Lang::French if suspend == "Jamais" => "jamais de veille".to_owned(),
-                    Lang::French => format!("veille après {suspend}"),
-                    Lang::English if suspend == "Never" => "never sleeps".to_owned(),
-                    Lang::English => format!("sleeps after {suspend}"),
+                // As the power page's menu says it (power.rs, "Never").
+                let suspend = if suspend == words::NEVER_VALUE.get(lang) {
+                    words::NEVER_SLEEPS.get(lang).to_owned()
+                } else {
+                    words::sleeps_after(lang, &suspend)
                 };
                 match self.battery {
                     Some(b) => words::battery(

@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use hocus_link::input::{Bus, DeviceKind, InputDevice, RightClick};
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words, w},
     model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
@@ -45,9 +45,9 @@ const PROFILES: &[&str] = &["adaptive", "flat"];
 const SPEED: Kind = Kind::Speed { min: -10, max: 10 };
 const TENTHS: Codec = Codec::Tenths { min: -10, max: 10 };
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -141,8 +141,8 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 Kind::Menu(vec![
-                    word("À deux doigts", "With two fingers", "two-fingers"),
-                    word("Coin inférieur droit", "Bottom-right corner", "corner"),
+                    word(words::WITH_TWO_FINGERS, "two-fingers"),
+                    word(words::BOTTOM_RIGHT_CORNER, "corner"),
                 ]),
                 // Without the key, the touchpad's own (libinput's default
                 // for it): the window shows the device's.
@@ -189,8 +189,8 @@ pub fn settings() -> &'static [Setting] {
                     &["scroll", "two fingers", "edge", "touchpad"],
                 ),
                 Kind::Menu(vec![
-                    word("À deux doigts", "With two fingers", "two-fingers"),
-                    word("Sur le bord droit", "On the right edge", "edge"),
+                    word(words::WITH_TWO_FINGERS, "two-fingers"),
+                    word(words::ON_THE_RIGHT_EDGE, "edge"),
                 ]),
                 one(&["touchpad", "scroll"], Codec::Word(SCROLLS)),
                 None,
@@ -228,8 +228,8 @@ pub fn settings() -> &'static [Setting] {
                     &["acceleration", "flat", "precision", "mouse"],
                 ),
                 Kind::Menu(vec![
-                    word("Adaptative", "Adaptive", "adaptive"),
-                    word("Aucune", "None", "flat"),
+                    word(words::ADAPTIVE, "adaptive"),
+                    word(words::NONE, "flat"),
                 ]),
                 one(&["pointer", "acceleration"], Codec::Word(PROFILES)),
                 None,

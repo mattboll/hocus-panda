@@ -18,7 +18,7 @@ use std::{
 };
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words, w},
     model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
@@ -254,13 +254,9 @@ pub fn writable(dir: &Path) -> Writable {
 
 /// The history's count, as the group's label says it.
 pub fn count_said(items: u32, pinned: u32, lang: Lang) -> String {
-    let items_word = match (items, lang) {
-        (0, Lang::French) => return "Vide".to_owned(),
-        (0, Lang::English) => return "Empty".to_owned(),
-        (1, Lang::French) => "1 élément".to_owned(),
-        (1, Lang::English) => "1 item".to_owned(),
-        (n, Lang::French) => format!("{n} éléments"),
-        (n, Lang::English) => format!("{n} items"),
+    let items_word = match items {
+        0 => return words::EMPTY.get(lang).to_owned(),
+        n => words::item_count(lang, n),
     };
     match pinned {
         0 => items_word,
@@ -283,9 +279,9 @@ pub fn items_said(n: u32, lang: Lang) -> String {
     }
 }
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -343,10 +339,7 @@ pub fn settings() -> &'static [Setting] {
                     &["capture", "png", "jpeg", "jpg", "image"],
                     &["screenshot", "png", "jpeg", "jpg", "image"],
                 ),
-                Kind::Segmented(vec![
-                    word("PNG", "PNG", "png"),
-                    word("JPEG", "JPEG", "jpeg"),
-                ]),
+                Kind::Segmented(vec![word(words::PNG, "png"), word(words::JPEG, "jpeg")]),
                 one(&["capture", "format"], Codec::Word(&["png", "jpeg"])),
                 None,
             ),
@@ -385,10 +378,7 @@ pub fn settings() -> &'static [Setting] {
                     &["enregistrement", "vidéo", "mp4", "webm"],
                     &["recording", "video", "mp4", "webm"],
                 ),
-                Kind::Segmented(vec![
-                    word("MP4", "MP4", "mp4"),
-                    word("WebM", "WebM", "webm"),
-                ]),
+                Kind::Segmented(vec![word(words::MP4, "mp4"), word(words::WEBM, "webm")]),
                 one(&["recording", "format"], Codec::Word(&["mp4", "webm"])),
                 None,
             ),
@@ -415,14 +405,10 @@ pub fn settings() -> &'static [Setting] {
                     &["duration", "keep", "clipboard", "history"],
                 ),
                 Kind::Menu(vec![
-                    word(
-                        "Jusqu’à la fin de la session",
-                        "Until the session ends",
-                        "session",
-                    ),
-                    word("1 jour", "1 day", "1d"),
-                    word("7 jours", "7 days", "7d"),
-                    word("30 jours", "30 days", "30d"),
+                    word(words::UNTIL_THE_SESSION_ENDS, "session"),
+                    word(words::N_1_DAY, "1d"),
+                    word(words::N_7_DAYS, "7d"),
+                    word(words::N_30_DAYS, "30d"),
                 ]),
                 one(
                     &["clipboard", "keep"],

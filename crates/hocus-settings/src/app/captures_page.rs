@@ -26,7 +26,7 @@ use super::{
 };
 use crate::{
     captures::{self as model, Folder, Writable},
-    lang::{pair, w},
+    lang::w,
     model::{Icon, SectionId, Setting, Value},
     screens::Said,
     store::Slot,
@@ -360,51 +360,22 @@ impl App {
     /// warns.
     pub(super) fn captures_line(&self, id: &str) -> Option<(String, bool)> {
         let lang = self.lang;
-        let said = |fr: &'static str, en: &'static str| pair(fr, en).get(lang).to_owned();
+        let said = |text: hocus_words::Text| crate::lang::w(text).get(lang).to_owned();
         Some(match id {
             model::CAPTURE_FORMAT => match self.captures_word(id) {
-                Some("jpeg") => (
-                    said(
-                        "Plus léger, pour les photos ; le presse-papiers reçoit toujours du PNG.",
-                        "Lighter, for photos; the clipboard always gets PNG.",
-                    ),
-                    false,
-                ),
-                _ => (
-                    said(
-                        "Sans perte : net pour du texte et du code.",
-                        "Lossless: sharp for text and code.",
-                    ),
-                    false,
-                ),
+                Some("jpeg") => (said(words::LIGHTER_FOR_PHOTOS_THE_CLIPBOARD_ALWAYS), false),
+                _ => (said(words::LOSSLESS_SHARP_FOR_TEXT_AND_CODE), false),
             },
-            model::RECORD_FORMAT if self.captures.recording => (
-                said("Pour le prochain enregistrement", "For the next recording"),
-                false,
-            ),
+            model::RECORD_FORMAT if self.captures.recording => {
+                (said(words::FOR_THE_NEXT_RECORDING), false)
+            }
             model::RECORD_FORMAT => match self.captures_word(id) {
-                Some("webm") => (
-                    said(
-                        "WebM (VP9 et Opus) : libre, plus léger, moins lu par les téléphones.",
-                        "WebM (VP9 and Opus): free, lighter, less played by phones.",
-                    ),
-                    false,
-                ),
-                _ => (
-                    said(
-                        "MP4 (H.264 et AAC) : se lit et s’envoie partout.",
-                        "MP4 (H.264 and AAC): plays and sends anywhere.",
-                    ),
-                    false,
-                ),
+                Some("webm") => (said(words::WEBM_VP9_AND_OPUS_FREE_LIGHTER), false),
+                _ => (said(words::MP4_H_264_AND_AAC_PLAYS), false),
             },
-            model::HISTORY if !self.history_on() => (
-                said(
-                    "Coupé : Super+V ne montre que les épinglés.",
-                    "Off: Super+V shows the pinned items only.",
-                ),
-                false,
-            ),
+            model::HISTORY if !self.history_on() => {
+                (said(words::OFF_SUPER_V_SHOWS_THE_PINNED), false)
+            }
             model::SECRETS if !self.captures_bool(id) => {
                 let keep = match self.captures_word(model::KEEP) {
                     Some("session") => words::UNTIL_THE_SESSION_ENDS.get(lang),

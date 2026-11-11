@@ -236,7 +236,6 @@ impl KnownSet {
     /// gardée", "Hier, 18:04 · 2 fenêtres l’attendent", "Lundi"; `now`
     /// and the user's time zone `zone` for the day.
     pub fn line(&self, lang: Lang, now: i64, zone: &jiff::tz::TimeZone) -> String {
-        let fr = lang == Lang::French;
         let mut parts: Vec<String> = Vec::new();
         if self.current {
             parts.push(words::NOW.get(lang).to_owned());
@@ -246,12 +245,10 @@ impl KnownSet {
         } else if let Some(seen) = self.seen {
             parts.push(when(seen, now, lang, zone));
         }
-        match (self.waiting, fr) {
-            (0, _) => {}
-            (1, true) => parts.push("1 fenêtre l’attend".to_owned()),
-            (1, false) => parts.push("1 window waits for it".to_owned()),
-            (n, true) => parts.push(format!("{n} fenêtres l’attendent")),
-            (n, false) => parts.push(format!("{n} windows wait for it")),
+        match self.waiting {
+            0 => {}
+            1 => parts.push(words::N_1_WINDOW_WAITS_FOR_IT.get(lang).to_owned()),
+            n => parts.push(words::windows_wait_for_it(lang, n)),
         }
         parts.join(" · ")
     }
@@ -260,7 +257,6 @@ impl KnownSet {
 /// When a set was last in use, as its row says it: "Aujourd’hui, 09:12",
 /// "Hier, 18:04", the weekday within a week, else the date.
 pub fn when(at: i64, now: i64, lang: Lang, zone: &jiff::tz::TimeZone) -> String {
-    let fr = lang == Lang::French;
     let (Ok(at), Ok(now)) = (
         jiff::Timestamp::from_second(at),
         jiff::Timestamp::from_second(now),
@@ -271,28 +267,18 @@ pub fn when(at: i64, now: i64, lang: Lang, zone: &jiff::tz::TimeZone) -> String 
     let now = now.to_zoned(zone.clone());
     let days = (now.date() - at.date()).get_days();
     let time = at.strftime("%H:%M").to_string();
-    const JOURS: [&str; 7] = [
-        "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche",
-    ];
-    const DAYS: [&str; 7] = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ];
     let weekday = usize::try_from(at.weekday().to_monday_zero_offset()).unwrap_or(0);
-    match (days, fr) {
-        (..=0, true) => format!("Aujourd’hui, {time}"),
-        (..=0, false) => format!("Today, {time}"),
-        (1, true) => format!("Hier, {time}"),
-        (1, false) => format!("Yesterday, {time}"),
-        (2..=6, true) => JOURS[weekday].to_owned(),
-        (2..=6, false) => DAYS[weekday].to_owned(),
-        (_, true) => at.strftime("%d/%m/%Y").to_string(),
-        (_, false) => at.strftime("%Y-%m-%d").to_string(),
+    match days {
+        ..=0 => words::today_at(lang, &time),
+        1 => words::yesterday_at(lang, &time),
+        2..=6 => upper_first(
+            hocus_words::date::WEEKDAYS
+                .get(lang)
+                .get(weekday)
+                .copied()
+                .unwrap_or_default(),
+        ),
+        _ => at.strftime(words::NUMERIC_DATE.get(lang)).to_string(),
     }
 }
 
@@ -872,40 +858,21 @@ pub fn normalised(places: &[(String, (i32, i32))]) -> Vec<(String, (i32, i32))> 
 pub fn say_place(side: Side, align: Align, other: &str, lang: Lang) -> String {
     let other = lower_first(other);
     let beside = matches!(side, Side::Left | Side::Right);
-    let (where_, how) = match lang {
-        Lang::French => (
-            match side {
-                Side::Left => format!("à gauche de l’{other}"),
-                Side::Right => format!("à droite de l’{other}"),
-                Side::Above => format!("au-dessus de l’{other}"),
-                Side::Below => format!("au-dessous de l’{other}"),
-            },
-            match (align, beside) {
-                (Align::Start, true) => Some("hauts alignés"),
-                (Align::End, true) => Some("bas alignés"),
-                (Align::Start, false) => Some("gauches alignées"),
-                (Align::End, false) => Some("droites alignées"),
-                (Align::Middle, _) => Some("centrés"),
-                (Align::Off(_), _) => None,
-            },
-        ),
-        Lang::English => (
-            match side {
-                Side::Left => format!("to the left of the {other}"),
-                Side::Right => format!("to the right of the {other}"),
-                Side::Above => format!("above the {other}"),
-                Side::Below => format!("below the {other}"),
-            },
-            match (align, beside) {
-                (Align::Start, true) => Some("tops aligned"),
-                (Align::End, true) => Some("bottoms aligned"),
-                (Align::Start, false) => Some("lefts aligned"),
-                (Align::End, false) => Some("rights aligned"),
-                (Align::Middle, _) => Some("centred"),
-                (Align::Off(_), _) => None,
-            },
-        ),
+    let where_ = match side {
+        Side::Left => words::left_of(lang, &other),
+        Side::Right => words::right_of(lang, &other),
+        Side::Above => words::above(lang, &other),
+        Side::Below => words::below(lang, &other),
     };
+    let how = match (align, beside) {
+        (Align::Start, true) => Some(words::TOPS_ALIGNED),
+        (Align::End, true) => Some(words::BOTTOMS_ALIGNED),
+        (Align::Start, false) => Some(words::LEFTS_ALIGNED),
+        (Align::End, false) => Some(words::RIGHTS_ALIGNED),
+        (Align::Middle, _) => Some(words::CENTRED),
+        (Align::Off(_), _) => None,
+    }
+    .map(|how| how.get(lang));
     match how {
         Some(how) => format!("{where_}, {how}"),
         None => where_,

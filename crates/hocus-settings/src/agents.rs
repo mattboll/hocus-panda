@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use hocus_link::ToolState;
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words, w},
     model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
@@ -258,40 +258,18 @@ pub fn line(row: Row, tool: Tool, file: &str, declined: Option<&str>, lang: Lang
         Tool::Codex => "~/.codex",
         Tool::Herdr => "",
     };
-    match (row, lang) {
-        (Row::Plugged, Lang::French) => format!("ses crochets sont dans {file}"),
-        (Row::Plugged, Lang::English) => format!("its hooks are in {file}"),
-        (Row::ToApprove, Lang::French) => {
-            "dans Codex avec /hooks ; d’ici là, seule la fin de chaque tour arrive.".to_owned()
-        }
-        (Row::ToApprove, Lang::English) => {
-            "in Codex with /hooks; until then only the end of each turn arrives.".to_owned()
-        }
-        (Row::Found, Lang::French) => format!("trouvé dans {dir}"),
-        (Row::Found, Lang::English) => format!("found in {dir}"),
-        (Row::Declined, Lang::French) => match declined {
-            Some(day) => format!("avec « Ne rien brancher » le {day} · trouvé dans {dir}"),
-            None => format!("avec « Ne rien brancher » · trouvé dans {dir}"),
+    match row {
+        Row::Plugged => words::hooks_in(lang, file),
+        Row::ToApprove => words::TO_APPROVE.get(lang).to_owned(),
+        Row::Found => words::found_in(lang, dir),
+        Row::Declined => match declined {
+            Some(day) => words::declined_on(lang, words::DeclinedOn { day, dir }),
+            None => words::declined_found_in(lang, dir),
         },
-        (Row::Declined, Lang::English) => match declined {
-            Some(day) => format!("with “Plug nothing in” on {day} · found in {dir}"),
-            None => format!("with “Plug nothing in” · found in {dir}"),
-        },
-        (Row::Running, Lang::French) => {
-            "lu tout seul, rien à brancher ; ses noms d’onglets nomment les agents.".to_owned()
-        }
-        (Row::Running, Lang::English) => {
-            "read by itself, nothing to plug in; its tab names name the agents.".to_owned()
-        }
-        (Row::RunningIgnored, Lang::French) => {
-            "ses agents ne sont pas suivis ; « Suivre herdr » les reprend.".to_owned()
-        }
-        (Row::RunningIgnored, Lang::English) => {
-            "its agents are not followed; “Follow herdr” brings them back.".to_owned()
-        }
-        (Row::Stopped, Lang::French) => "suivi dès qu’il démarre".to_owned(),
-        (Row::Stopped, Lang::English) => "followed as soon as it starts".to_owned(),
-        (Row::Absent, _) => String::new(),
+        Row::Running => words::HERDR_RUNNING.get(lang).to_owned(),
+        Row::RunningIgnored => words::HERDR_IGNORED.get(lang).to_owned(),
+        Row::Stopped => words::HERDR_STOPPED.get(lang).to_owned(),
+        Row::Absent => String::new(),
     }
 }
 
@@ -307,11 +285,7 @@ pub fn count_said(followed: usize, running: usize, lang: Lang) -> String {
         1 => words::N_1_AGENT_RUNNING.get(lang).to_owned(),
         n => words::agents_running(lang, n),
     };
-    let followed = match (lang, followed) {
-        (Lang::French, n) if n <= 1 => format!("{n} suivi"),
-        (Lang::French, n) => format!("{n} suivis"),
-        (Lang::English, n) => format!("{n} followed"),
-    };
+    let followed = words::followed(lang, followed);
     format!("{followed} · {running}")
 }
 
@@ -321,39 +295,15 @@ pub fn day_said(at: i64, lang: Lang) -> Option<String> {
     let zoned = jiff::Timestamp::from_second(at)
         .ok()?
         .to_zoned(jiff::tz::TimeZone::system());
-    let months_fr = [
-        "janvier",
-        "février",
-        "mars",
-        "avril",
-        "mai",
-        "juin",
-        "juillet",
-        "août",
-        "septembre",
-        "octobre",
-        "novembre",
-        "décembre",
-    ];
-    let months_en = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ];
     let month = usize::try_from(zoned.month() - 1).ok()?;
-    Some(match lang {
-        Lang::French => format!("{} {}", zoned.day(), months_fr.get(month)?),
-        Lang::English => format!("{} {}", zoned.day(), months_en.get(month)?),
-    })
+    let month = hocus_words::date::MONTHS.get(lang).get(month)?;
+    Some(words::day_month(
+        lang,
+        words::DayMonth {
+            day: zoned.day(),
+            month,
+        },
+    ))
 }
 
 /// A state the preview plays.
@@ -484,9 +434,9 @@ pub fn outside() -> &'static [Outside] {
     &ALL
 }
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -547,13 +497,9 @@ pub fn settings() -> &'static [Setting] {
                     &["halo", "glow", "wave", "bar", "lights"],
                 ),
                 Kind::Menu(vec![
-                    word("Pour tout", "For everything", "all"),
-                    word(
-                        "Quand un agent t’attend",
-                        "When an agent waits for you",
-                        "waiting",
-                    ),
-                    word("Jamais", "Never", "off"),
+                    word(words::FOR_EVERYTHING, "all"),
+                    word(words::WHEN_AN_AGENT_WAITS_FOR_YOU, "waiting"),
+                    word(words::NEVER, "off"),
                 ]),
                 one(&["agents", "halo"], Codec::Word(HALO_WORDS)),
             ),
@@ -567,10 +513,10 @@ pub fn settings() -> &'static [Setting] {
                     &["reminder", "remind", "wave", "waits"],
                 ),
                 Kind::Menu(vec![
-                    word("Après 2 min", "After 2 min", "2m"),
-                    word("Après 5 min", "After 5 min", "5m"),
-                    word("Après 10 min", "After 10 min", "10m"),
-                    word("Jamais", "Never", "never"),
+                    word(words::AFTER_2_MIN, "2m"),
+                    word(words::AFTER_5_MIN, "5m"),
+                    word(words::AFTER_10_MIN, "10m"),
+                    word(words::NEVER, "never"),
                 ]),
                 one(&["agents", "remind"], Codec::Word(REMIND_WORDS)),
             ),
@@ -584,17 +530,9 @@ pub fn settings() -> &'static [Setting] {
                     &["panda", "peek", "bubble", "peeking", "secretary"],
                 ),
                 Kind::Menu(vec![
-                    word(
-                        "Quand un agent t’attend ou a fini",
-                        "When an agent waits for you or is done",
-                        "waiting-and-done",
-                    ),
-                    word(
-                        "Quand un agent t’attend",
-                        "When an agent waits for you",
-                        "waiting",
-                    ),
-                    word("Jamais", "Never", "off"),
+                    word(words::WHEN_AN_AGENT_WAITS_FOR_YOU_2, "waiting-and-done"),
+                    word(words::WHEN_AN_AGENT_WAITS_FOR_YOU, "waiting"),
+                    word(words::NEVER, "off"),
                 ]),
                 one(&["agents", "peek"], Codec::Word(PEEK_WORDS)),
             ),

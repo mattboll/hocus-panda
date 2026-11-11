@@ -247,9 +247,9 @@ fn fonts() -> &'static [&'static str] {
     })
 }
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: crate::lang::w(text),
         value: Value::Word(word),
     }
 }
@@ -299,10 +299,7 @@ pub fn settings() -> &'static [Setting] {
                     &["gauche", "droite", "côté", "bord", "side"],
                     &["left", "right", "side", "edge"],
                 ),
-                kind: Kind::Segmented(vec![
-                    word("Droite", "Right", "right"),
-                    word("Gauche", "Left", "left"),
-                ]),
+                kind: Kind::Segmented(vec![word(words::RIGHT, "right"), word(words::LEFT, "left")]),
                 places: one(&["panel", "side"], Codec::Word(SIDES)),
                 needs: None,
             },
@@ -317,8 +314,8 @@ pub fn settings() -> &'static [Setting] {
                     &["several screens", "monitor", "all", "primary", "screen"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("L’écran principal", "The primary screen", "primary"),
-                    word("Tous les écrans", "Every screen", "all"),
+                    word(words::THE_PRIMARY_SCREEN, "primary"),
+                    word(words::EVERY_SCREEN, "all"),
                 ]),
                 places: one(&["panel", "screens"], Codec::Word(SCREENS_WORDS)),
                 needs: None,
@@ -401,11 +398,11 @@ pub fn settings() -> &'static [Setting] {
                     &["animation", "odometer", "roll", "flip", "neon", "clock"],
                 ),
                 kind: Kind::Menu(vec![
-                    word("Compteur", "Odometer", "odometer"),
-                    word("Rouleau", "Roll", "roll"),
-                    word("Volet", "Flip", "flip"),
-                    word("Néon", "Neon", "neon"),
-                    word("Sans mouvement", "No motion", "none"),
+                    word(words::ODOMETER, "odometer"),
+                    word(words::ROLL, "roll"),
+                    word(words::FLIP, "flip"),
+                    word(words::NEON, "neon"),
+                    word(words::NO_MOTION, "none"),
                 ]),
                 places: one(&["panel", "clock", "transition"], Codec::Word(TRANSITIONS)),
                 needs: None,
