@@ -39,7 +39,12 @@ use tokio::sync::oneshot;
 pub use accounts::Account;
 use helper::{Conversation, Said};
 
-use crate::{clock::time::Lang, network::secret::Secret, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    field::{self, Entry, Took},
+    network::secret::Secret,
+    popover::Effect,
+};
 
 /// Wrong passwords in a row before the request is refused.
 pub const TRIES: u32 = 3;
@@ -112,7 +117,9 @@ pub struct Dialog {
     pub surface: Option<window::Id>,
     pub at: Option<AuthAt>,
     pub phase: Phase,
-    pub field: Secret,
+    /// The password's field: the shell's text field (#771) as a secret,
+    /// masked, never copied out.
+    pub field: Entry,
     /// Wrong passwords in a row, and whether the line says the last was.
     pub wrong: u32,
     pub wrong_note: bool,
@@ -141,7 +148,7 @@ impl Dialog {
             surface: None,
             at: None,
             phase: Phase::Typing,
-            field: Secret::longest(LONGEST),
+            field: Entry::new(field::Kind::Secret, LONGEST),
             wrong: 0,
             wrong_note: false,
             said: None,
@@ -603,7 +610,10 @@ impl Auth {
         dialog.wrong_note = false;
         dialog.chooser = false;
         if let Some(conversation) = &dialog.conversation {
-            conversation.answer(dialog.field.duplicate());
+            // A copy for the helper, made on purpose.
+            let mut secret = Secret::longest(LONGEST);
+            secret.push(dialog.field.text());
+            conversation.answer(secret);
         }
         true
     }
@@ -764,10 +774,11 @@ pub fn tick(now: Instant) -> Vec<Effect> {
 }
 
 /// What the pointer does on the dialog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Pointing {
-    Over(Option<Target>),
-    Press(Option<Target>),
+    /// Over a target, at a place on the surface.
+    Over(Option<Target>, Option<iced::Point>),
+    Press(Option<Target>, Option<iced::Point>),
     Release(Option<Target>),
 }
 
@@ -776,18 +787,32 @@ pub fn pointer(id: window::Id, event: Pointing, now: Instant) -> bool {
     let effects = with(|auth| {
         let dialog = auth.shown.as_mut().filter(|d| d.surface == Some(id))?;
         match event {
-            Pointing::Over(target) => {
+            Pointing::Over(target, at) => {
+                // A press held in the field selects as it drags.
+                if dialog.field.pressed() {
+                    let dragged = at.is_some_and(|at| dialog.field.drag(at));
+                    return Some((Vec::new(), dragged));
+                }
                 if dialog.hover == target {
                     return Some((Vec::new(), false));
                 }
                 dialog.hover = target;
                 Some((Vec::new(), true))
             }
-            Pointing::Press(target) => {
+            Pointing::Press(target, at) => {
                 dialog.pressed = target;
-                Some((Vec::new(), false))
+                // In the field: its caret where the press is.
+                match at.filter(|_| target == Some(Target::Field)) {
+                    Some(at) if dialog.phase == Phase::Typing => {
+                        dialog.field.press(at);
+                        dialog.focus = Target::Field;
+                        Some((Vec::new(), true))
+                    }
+                    _ => Some((Vec::new(), false)),
+                }
             }
             Pointing::Release(target) => {
+                dialog.field.release();
                 let clicked = dialog.pressed.take().filter(|p| Some(*p) == target);
                 match clicked {
                     Some(target) => Some((auth.act(target, now), true)),
@@ -812,6 +837,7 @@ pub fn key_on(
     now: Instant,
 ) -> bool {
     use keyboard::{Key, key::Named};
+    let mut pastes = false;
     let effects = with(|auth| {
         let dialog = auth.shown.as_mut().filter(|d| d.surface == Some(id))?;
         let typing = dialog.phase == Phase::Typing;
@@ -852,31 +878,72 @@ pub fn key_on(
                 let focus = dialog.focus;
                 effects = auth.act(focus, now);
             }
-            Key::Named(Named::Backspace) if typing => {
-                if modifiers.control() {
-                    dialog.field.clear();
-                } else {
-                    dialog.field.pop();
-                }
-                dialog.focus = Target::Field;
-                dialog.wrong_note = false;
-            }
-            _ if typing && !(modifiers.control() || modifiers.logo() || modifiers.alt()) => {
-                let text = text.filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()))?;
-                if dialog.field.push(text) {
+            // The rest is the field's, wherever the ring is.
+            _ if typing => match dialog.field.key(key, modifiers, text) {
+                Took::No => return None,
+                Took::Same => {}
+                Took::Moved => dialog.focus = Target::Field,
+                Took::Edited => {
                     dialog.focus = Target::Field;
                     dialog.wrong_note = false;
                 }
-            }
+                Took::Paste => pastes = true,
+            },
             _ => return None,
         }
         Some(effects)
     });
+    if pastes {
+        paste(id);
+    }
     let Some(effects) = effects else {
         return false;
     };
     crate::popover::send(effects);
     true
+}
+
+/// The field of the dialog on `id` edited by `edit`, while it is typed
+/// in: whether it draws again.
+fn edited(id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
+    with(|auth| {
+        let Some(dialog) = auth
+            .shown
+            .as_mut()
+            .filter(|d| d.surface == Some(id) && d.phase == Phase::Typing)
+        else {
+            return false;
+        };
+        let took = edit(&mut dialog.field);
+        if took == Took::Edited {
+            dialog.focus = Target::Field;
+            dialog.wrong_note = false;
+        }
+        took.draws()
+    })
+}
+
+/// The clipboard's text, its line breaks dropped, into the field at its
+/// caret, read off the loop: never in a `String` of ours but the field's.
+fn paste(id: window::Id) {
+    crate::paste::request(crate::paste::Clean::Dropped, move |pasted| {
+        let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+            return;
+        };
+        let pasted = |entry: &mut Entry| match entry.paste(pasted) {
+            true => Took::Edited,
+            false => Took::Same,
+        };
+        if edited(id, pasted) {
+            wake();
+        }
+    });
+}
+
+/// An input method's preedit or commit in the field of the dialog on
+/// `id`: whether it draws again.
+pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
+    edited(id, |entry| entry.input_method(event))
 }
 
 #[cfg(test)]

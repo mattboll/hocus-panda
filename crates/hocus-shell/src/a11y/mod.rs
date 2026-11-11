@@ -504,7 +504,11 @@ impl Said {
             }
             (Target::Auth { surface, target }, Act::Click | Act::Focus) => {
                 let now = Instant::now();
-                crate::auth::pointer(*surface, crate::auth::Pointing::Press(Some(*target)), now);
+                crate::auth::pointer(
+                    *surface,
+                    crate::auth::Pointing::Press(Some(*target), None),
+                    now,
+                );
                 crate::auth::pointer(*surface, crate::auth::Pointing::Release(Some(*target)), now);
                 crate::auth::wake();
             }

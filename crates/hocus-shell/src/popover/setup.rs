@@ -43,6 +43,7 @@ use super::{
 };
 use crate::theme::Ink;
 use crate::{
+    field::{self, Place, Took, view::Style},
     levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, faded, rgb, ring},
     setup::{
         self, CHOICES, Calendars, Field, Online, PALETTE, Refusal, Show, Step, Unfold, Words,
@@ -85,8 +86,6 @@ const ERROR_LINE: f32 = 17.0;
 const BUTTON: f32 = 32.0;
 const BUTTON_RADIUS: f32 = 8.0;
 const BUTTON_TEXT: f32 = 12.5;
-const DOT: f32 = 2.4;
-const DOT_ADVANCE: f32 = 7.0;
 /// Step 3's rows: 32 px; the box and the swatch 16 px; options 28 px; the
 /// eight colours 20 px, 6 px apart.
 const CHECK_ROW: f32 = 32.0;
@@ -432,7 +431,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
             let cancel = Rectangle::new(Point::new(LEFT, y), Size::new(half, BUTTON));
             let sign_in = Rectangle::new(Point::new(RIGHT - half, y), Size::new(half, BUTTON));
             let busy = flow.checking.is_some();
-            let ready = !flow.address.trim().is_empty() && !flow.token.is_empty();
+            let ready = !flow.address.text().trim().is_empty() && !flow.token.is_empty();
             laid.parts.push(Part::Button {
                 rect: cancel,
                 target: Some(Target::Cancel),
@@ -459,7 +458,7 @@ fn lay_out(flow: &setup::Flow, words: Words, width: impl Fn(&str, f32, iced::Fon
             y += BUTTON;
             laid.said = format!(
                 "step=planka address=«{}» token={} checking={busy} refused={}",
-                flow.address,
+                flow.address.text(),
                 if flow.token.is_empty() {
                     "none"
                 } else {
@@ -807,9 +806,10 @@ pub struct State {
     over: Option<Target>,
     focus: Option<Target>,
     laid: Laid,
-    /// The flow's text fields as last read, to draw.
+    /// The address as last read, for screen readers.
     address: String,
-    token: usize,
+    /// The field a press is held in: a drag selects.
+    pressed: Option<Field>,
     said: Option<String>,
     targets_said: Option<String>,
 }
@@ -843,6 +843,14 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
+        if let iced::Event::InputMethod(event) = event {
+            let Some(Target::Field(field)) = state.focus else {
+                return None;
+            };
+            return setup::edit(field, |entry| entry.input_method(event))
+                .draws()
+                .then(|| canvas::Action::request_redraw().and_capture());
+        }
         match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
             Input::Redraw(_) => {
                 for pressed in kit::keys(self.id) {
@@ -923,11 +931,10 @@ impl Panel {
         let read = setup::with(|flow| {
             (
                 lay_out(flow, self.words, measure),
-                flow.address.clone(),
-                flow.token.chars(),
+                flow.address.text().to_owned(),
             )
         });
-        let Some((laid, address, token)) = read else {
+        let Some((laid, address)) = read else {
             return;
         };
         // A new step: the keyboard on its first field, else on nothing.
@@ -939,7 +946,6 @@ impl Panel {
         }
         state.laid = laid;
         state.address = address;
-        state.token = token;
         if let Some(focus) = state.focus
             && !state.order().contains(&focus)
         {
@@ -1207,6 +1213,13 @@ impl Panel {
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
+                // A press held in a field selects as it drags.
+                if let Some(field) = state.pressed {
+                    return at
+                        .is_some_and(|at| setup::edit(field, |e| drag(e, at)).draws())
+                        .then_some(redraw)
+                        .flatten();
+                }
                 state.pointer.moved();
                 if state.over == target {
                     return None;
@@ -1224,7 +1237,31 @@ impl Panel {
                     state.focus = None;
                 }
                 Self::act(state, target);
+                // In a field: its caret where the press is.
+                if let (Some(Target::Field(field)), Some(at)) = (target, at) {
+                    state.pressed = Some(field);
+                    let other = match field {
+                        Field::Address => Field::Token,
+                        Field::Token => Field::Address,
+                    };
+                    setup::edit(other, |entry| {
+                        entry.deselect();
+                        Took::Same
+                    });
+                    setup::edit(field, |entry| {
+                        entry.press(at);
+                        Took::Moved
+                    });
+                }
                 redraw
+            }
+            mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                let field = state.pressed.take()?;
+                setup::edit(field, |entry| {
+                    entry.release();
+                    Took::Same
+                });
+                None
             }
             _ => None,
         }
@@ -1249,27 +1286,17 @@ impl Panel {
                     setup::sign_in();
                     return redraw;
                 }
-                K::Named(Named::Backspace) => {
-                    setup::erase(field, modifiers.control());
-                    return redraw;
-                }
                 K::Named(Named::Tab) => {}
-                key if crate::paste::asks(key, modifiers) => {
-                    setup::paste(field);
-                    return redraw;
+                key => {
+                    let took = setup::edit(field, |entry| {
+                        entry.key(key, modifiers, pressed.text.as_deref())
+                    });
+                    return match took {
+                        Took::No => None,
+                        Took::Same | Took::Paste => Some(canvas::Action::capture()),
+                        Took::Moved | Took::Edited => redraw,
+                    };
                 }
-                _ if !(modifiers.control() || modifiers.logo() || modifiers.alt()) => {
-                    if let Some(text) = pressed
-                        .text
-                        .as_deref()
-                        .filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()))
-                    {
-                        setup::type_in(field, text);
-                        return redraw;
-                    }
-                    return None;
-                }
-                _ => return None,
             }
         }
         match &pressed.key {
@@ -1617,8 +1644,7 @@ impl Panel {
         }
     }
 
-    /// A field: its text (the token as dots), its end in view; the caret
-    /// while it holds the keyboard.
+    /// A field: its frame, and its text (the token as dots).
     fn field(&self, f: &mut Frame, state: &State, field: Field, rect: Rectangle, refused: bool) {
         let focused = state.focus == Some(Target::Field(field));
         f.fill(&kit::rounded(rect, FIELD_RADIUS), FIELD_FILL.get());
@@ -1637,68 +1663,35 @@ impl Panel {
             &kit::rounded(rim, FIELD_RADIUS - 0.5),
             Stroke::default().with_color(colour.get()).with_width(1.0),
         );
-        let left = rect.x + FIELD_PAD;
-        let room = rect.width - 2.0 * FIELD_PAD;
-        let middle = rect.center_y();
-        let end = match field {
-            Field::Address if state.address.is_empty() => {
-                f.fill_text(kit::text(
-                    "https://…/boards/…".to_owned(),
-                    Point::new(left, middle),
-                    FIELD_TEXT,
-                    FAINT.get(),
-                    Alignment::Left,
-                ));
-                left
-            }
-            Field::Address => {
-                // Its end, as a field scrolls to its caret.
-                let chars: Vec<char> = state.address.chars().collect();
-                let mut from = 0;
-                let mut shown: String = chars.iter().collect();
-                while from < chars.len() && measure(&shown, FIELD_TEXT, MANROPE) > room - 2.0 {
-                    from += 1;
-                    shown = std::iter::once('…')
-                        .chain(chars[from..].iter().copied())
-                        .collect();
-                }
-                let width = measure(&shown, FIELD_TEXT, MANROPE);
-                f.fill_text(kit::text(
-                    shown,
-                    Point::new(left, middle),
-                    FIELD_TEXT,
-                    TEXT.get(),
-                    Alignment::Left,
-                ));
-                left + width
-            }
-            Field::Token if state.token == 0 => {
-                f.fill_text(kit::text(
-                    "accessToken=…; httpOnlyToken=…".to_owned(),
-                    Point::new(left, middle),
-                    FIELD_TEXT,
-                    FAINT.get(),
-                    Alignment::Left,
-                ));
-                left
-            }
-            Field::Token => {
-                let fit = ((room - 2.0) / DOT_ADVANCE).floor().max(0.0) as usize;
-                let n = state.token.min(fit);
-                for i in 0..n {
-                    let centre = Point::new(left + DOT_ADVANCE * (i as f32 + 0.5), middle);
-                    f.fill(&Path::circle(centre, DOT), TEXT.get());
-                }
-                left + n as f32 * DOT_ADVANCE
-            }
+        // What is typed (the token masked), its selection, and its caret
+        // while it holds the keyboard.
+        let placeholder = match field {
+            Field::Address => "https://…/boards/…",
+            Field::Token => "accessToken=…; httpOnlyToken=…",
         };
-        if focused {
-            f.fill_rectangle(
-                Point::new(end + 1.0, middle - 8.0),
-                Size::new(1.0, 16.0),
-                TEXT.get(),
+        setup::with(|flow| {
+            flow.entry(field).draw(
+                f,
+                Place {
+                    left: rect.x + FIELD_PAD,
+                    middle: rect.center_y(),
+                    width: rect.width - 2.0 * FIELD_PAD,
+                    style: Style::one(FIELD_TEXT, MANROPE),
+                },
+                placeholder,
+                &field::view::Look::of(TEXT.get(), FAINT.get()),
+                focused,
             );
-        }
+        });
+    }
+}
+
+/// The press held in `entry` dragged to `at`.
+fn drag(entry: &mut field::Entry, at: Point) -> Took {
+    if entry.drag(at) {
+        Took::Moved
+    } else {
+        Took::Same
     }
 }
 
@@ -1997,8 +1990,8 @@ mod tests {
                 Target::Close
             ]
         );
-        flow.address = "https://planka.example.org/boards/1".to_owned();
-        assert!(flow.token.push("tok"));
+        flow.address.set("https://planka.example.org/boards/1");
+        assert!(flow.token.paste("tok"));
         flow.refused = Some(Refusal::Token);
         let laid = lay_out(&flow, words, width);
         assert!(laid.targets.iter().any(|(t, _)| *t == Target::SignIn));
