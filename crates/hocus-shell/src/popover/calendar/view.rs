@@ -192,7 +192,9 @@ pub(super) fn calendar<'a>(laid: &Laid, view: &View, words: Words, days: String)
                 end = shown.top + shown.height;
                 all = all.push(event_row(i, shown, view, words));
             }
-            let scrolled = scrollable(all)
+            // In a container: a scrollable lays its content out as wide as
+            // its viewport at least.
+            let scrolled = scrollable(container(all))
                 .id(Id::new(LIST_ID))
                 .direction(scrollable::Direction::Vertical(
                     scrollable::Scrollbar::new()
