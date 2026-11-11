@@ -65,8 +65,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     };
     let shell = common::shell_program();
     if !fakes::available() {
-        eprintln!("the fakes' programs are missing: skipped");
-        return Ok(());
+        common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
     }
     std::fs::create_dir_all(&out)?;
     let fakes = Fakes::start()?;

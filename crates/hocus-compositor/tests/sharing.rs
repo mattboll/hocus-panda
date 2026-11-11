@@ -20,7 +20,7 @@
 //! Pixman here (and GLES on Mesa's software device for the GPU's way of
 //! handing frames over), the shell on the CPU (tiny-skia): nothing here
 //! draws on a GPU, which may be the live session's. Without the
-//! shell built, dbus-daemon or pipewire, the tests skip.
+//! shell built, dbus-daemon or pipewire, the tests fail.
 //!
 //! No session manager: the consumer asks for no linking and the test
 //! links it to the stream's node itself (PipeWire's link factory), as
@@ -41,6 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::Context;
 use common::{KEY_ESC, WINDOW_COLOUR};
 use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, ShareInfo};
 use hocus_link::ShareSource;
@@ -63,8 +64,7 @@ fn has(program: &str) -> bool {
 fn ready() -> Option<PathBuf> {
     let shell = common::shell_program();
     if !has("dbus-daemon") || !has("pipewire") {
-        eprintln!("dbus-daemon or pipewire missing: skipped");
-        return None;
+        common::missing("dbus-daemon and pipewire");
     }
     Some(shell)
 }
@@ -967,13 +967,8 @@ fn on_gles_the_read_back_thread_hands_the_frames_over() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
-    let mut bed = match start_on(&shell, SCREEN, RendererChoice::GlesSoftware) {
-        Ok(bed) => bed,
-        Err(err) => {
-            eprintln!("no GLES on Mesa's software device ({err:#}): skipped");
-            return Ok(());
-        }
-    };
+    let mut bed = start_on(&shell, SCREEN, RendererChoice::GlesSoftware)
+        .context("this test needs GLES on Mesa's software device (libegl-mesa0, libgles2)")?;
     let (_, started) = bed.share_screen()?;
     let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
     let start = Instant::now();

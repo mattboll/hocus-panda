@@ -3,8 +3,8 @@
 //! `at-spi2-registryd`), a program showing a window through the bridge,
 //! and AT-SPI's own library (its Python binding) walking it and pressing a
 //! button. Never the session's buses: everything has a runtime directory,
-//! a home and a bus of its own. Skipped without dbus-daemon, the launcher
-//! or the binding.
+//! a home and a bus of its own. Fails without dbus-daemon, the launcher
+//! or the binding (CI has neither, and leaves it out by name).
 
 use std::{
     io::{BufRead, BufReader, Read},
@@ -277,8 +277,12 @@ fn a_screen_reader_reads_the_tree_and_presses_a_button() {
         return;
     }
     if !found("dbus-daemon") || !Path::new(LAUNCHER).exists() || !has_binding() {
-        eprintln!("skipped: needs dbus-daemon, {LAUNCHER} and AT-SPI's Python binding");
-        return;
+        // Never passed without them: CI's machines have neither, and leave
+        // this test out by name (`.config/nextest.toml`).
+        panic!(
+            "this test needs dbus-daemon, {LAUNCHER} (at-spi2-core) and AT-SPI's Python \
+             binding (python3-gi, gir1.2-atspi-2.0), which this machine lacks: install them"
+        );
     }
     // Short: a socket's path has a limit.
     let dir = tempfile::Builder::new()

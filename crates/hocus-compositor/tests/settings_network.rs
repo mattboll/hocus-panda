@@ -132,8 +132,7 @@ impl Bed {
     ) -> anyhow::Result<Option<Self>> {
         let program = common::settings_program();
         if !fakes::available() {
-            eprintln!("dbus-daemon or PipeWire's tools missing: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
         }
         let mut fakes = Fakes::empty()?;
         fakes.start_bus()?;

@@ -320,18 +320,6 @@ impl Bed {
     }
 }
 
-/// Waits until the machine has been up `time`: its clock (`CLOCK_MONOTONIC`,
-/// the agents' starts) counts from boot, and an agent cannot be backdated
-/// before it.
-fn up_for(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
-    let up = Duration::from(hp.state().clock.now());
-    if up < time {
-        eprintln!("up for {up:?} only: waiting until {time:?}");
-        wait(hp, time - up)?;
-    }
-    Ok(())
-}
-
 /// Agent `name` (the only one, or the first) as if it had waited `waited`
 /// by now.
 fn waited(hp: &mut Headless, name: &str, waited: Duration) {
@@ -433,15 +421,27 @@ fn the_reminder_comes_after_the_time_chosen_or_never() -> anyhow::Result<()> {
     };
     bed.agent_is("build", "waiting")?;
     bed.peeks_are(1)?;
-    // As if it had waited 1 min 59 s by now. The agents' starts are on
-    // the machine's clock, which counts from boot: on a machine up for
-    // less than that, the test waits until it has been.
-    up_for(&mut bed.hp, Duration::from_secs(125))?;
-    waited(&mut bed.hp, "build", Duration::from_secs(119));
-    let again = bed
-        .hp
-        .dispatch_until(Duration::from_secs(4), |hp| hp.peeks_told() == 2)?;
-    anyhow::ensure!(again, "no reminder at 2 min");
+    // At 1 min 59 s of waiting, then over its second minute: the motions'
+    // clock held and moved on. The clock moves, not the agent's start:
+    // that is on the machine's clock, which counts from boot, and a test
+    // may run less than 2 min after it (CI's machines do).
+    bed.hp.hold_clock();
+    let since = Duration::from_micros(bed.hp.agents_peek()[0].since);
+    let to = (since + Duration::from_secs(119)).saturating_sub(bed.hp.now());
+    let stepped = (|| {
+        bed.hp.step(to)?;
+        anyhow::ensure!(bed.hp.peeks_told() == 1, "reminded before 2 min");
+        let start = bed.hp.now();
+        while bed.hp.peeks_told() < 2 && bed.hp.now() - start < Duration::from_millis(2500) {
+            bed.hp.step(common::STEP)?;
+        }
+        anyhow::Ok(())
+    })();
+    // From here the compositor's clock runs 2 min ahead of the machine's:
+    // the agents that come start past it, and can be backdated that far.
+    bed.hp.release_clock();
+    stepped?;
+    anyhow::ensure!(bed.hp.peeks_told() == 2, "no reminder at 2 min");
     // Never: a new one waiting an hour, nothing.
     bed.write("[agents]\nremind = \"never\"\n")?;
     bed.agent_is("api", "waiting")?;

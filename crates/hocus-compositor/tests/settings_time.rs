@@ -79,8 +79,7 @@ impl Bed {
             .status()
             .is_ok_and(|s| s.success());
         if !bus {
-            eprintln!("dbus-daemon missing: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let mut fakes = Fakes::empty()?;
         fakes.start_bus()?;
@@ -300,6 +299,9 @@ fn the_page_shows_the_clock_the_zone_and_the_automatic_time() -> anyhow::Result<
     let Some(mut bed) = Bed::start(Some(State::default()))? else {
         return Ok(());
     };
+    // Read before the page is: its clock then says this hour, or the next
+    // when the hour changes meanwhile.
+    let there = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::get("Europe/Paris")?);
     let shown = bed.open()?;
     let paris = offset_now("Europe/Paris");
     let time = &shown["time"];
@@ -311,7 +313,6 @@ fn the_page_shows_the_clock_the_zone_and_the_automatic_time() -> anyhow::Result<
         "{line}"
     );
     // The clock in Paris's time, whatever the process's own zone (UTC).
-    let there = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::get("Europe/Paris")?);
     let clock = time["clock"].as_str().unwrap_or_default();
     assert_eq!(clock.len(), 5, "{clock}");
     assert!(
@@ -589,8 +590,13 @@ fn at_rest_the_page_draws_once_a_minute_only() -> anyhow::Result<()> {
         }
     }
     anyhow::ensure!(still >= 30, "the window never came to rest");
+    // The page's clock draws at the minute, and the window says its places
+    // after: two commits, whenever the machine's minute changes. The 1.5 s
+    // looked at keep clear of it, as the bar page's test does.
+    let look = Duration::from_millis(1500);
+    common::clear_of_the_minute(&mut bed.hp, look)?;
     let before = bed.hp.window_commits();
-    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    wait(&mut bed.hp, look)?;
     assert!(
         bed.hp.window_commits() <= before + 1,
         "the page drew at rest: {} commits",

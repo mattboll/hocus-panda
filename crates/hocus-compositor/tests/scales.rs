@@ -667,8 +667,7 @@ fn an_x11_window_on_the_screen_at_2_shows_at_its_size_enlarged() -> anyhow::Resu
         .status()
         .is_ok_and(|s| s.success());
     if !has {
-        eprintln!("no Xwayland: skipped");
-        return Ok(());
+        common::missing("Xwayland");
     }
     let mut hp = Headless::start_with_xwayland(HeadlessConfig {
         outputs: vec![

@@ -219,8 +219,7 @@ impl Bed {
             .status()
             .is_ok_and(|s| s.success());
         if !daemon {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let root = dir.path();

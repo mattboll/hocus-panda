@@ -72,8 +72,7 @@ fn ready() -> Option<PathBuf> {
         .status()
         .is_ok_and(|s| s.success());
     if !daemon {
-        eprintln!("no dbus-daemon: skipped");
-        return None;
+        common::missing("dbus-daemon");
     }
     Some(shell)
 }

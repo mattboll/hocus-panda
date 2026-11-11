@@ -330,9 +330,12 @@ fn a_rain_allocates_little_on_the_loop() -> anyhow::Result<()> {
         "the rain's frames: {rain:?} against {standard:?}"
     );
     // Nothing grows frame after frame: the last frames as the first ones.
+    // The least of each, a frame no commit of the client's fell in: which
+    // frames those fall in is the client's thread's, and four early frames
+    // without one against a late frame with one is 7 more, not a growth.
     let rain = &costs[1];
-    let early = rain[2..6].iter().max().copied().unwrap_or(0);
-    let late = rain[16..20].iter().max().copied().unwrap_or(0);
+    let early = rain[2..6].iter().min().copied().unwrap_or(0);
+    let late = rain[16..20].iter().min().copied().unwrap_or(0);
     assert!(late <= early + 2, "{rain:?}");
     Ok(())
 }
@@ -485,8 +488,7 @@ fn brighter_than_window_and_ice(shot: &(i32, i32, Vec<u8>), rect: Rect) -> usize
 fn the_pane_thaws_its_text_steady_from_200_ms_its_edges_never_wavering() -> anyhow::Result<()> {
     let mut hp = Headless::start_with(on(common::gles(), 1), frosting())?;
     if hp.renderer() != "gles" {
-        eprintln!("no GLES here: the pane does not thaw");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     common::at_rest(&mut hp)?;
     hp.hold_clock();

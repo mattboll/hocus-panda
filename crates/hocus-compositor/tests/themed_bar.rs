@@ -1,6 +1,6 @@
 //! The bar over a wallpaper that moves, in Givre and Matrix (bar.md §13,
 //! #433): the real shell drawing on wgpu, as on a GPU (over Mesa's
-//! software Vulkan driver, lavapipe; skipped without it or without the
+//! software Vulkan driver, lavapipe; failing without it or without the
 //! shell built), the compositor on GLES (Mesa's software device), the
 //! screen as the maintainer's laptop's, 2560×1600 at 1.25. Frame after
 //! frame on the held clock, the bar's empty middle (its glass and tint,
@@ -17,6 +17,7 @@ use crate::common;
 
 use std::{path::Path, time::Duration};
 
+use anyhow::Context;
 use hocus_compositor::{Config, Headless, HeadlessConfig, model::Rect};
 
 const STEP: Duration = Duration::from_micros(16_667);
@@ -79,8 +80,7 @@ impl Bed {
     fn start(theme: &str) -> anyhow::Result<Option<Self>> {
         let shell = common::shell_program();
         let Some(manifest) = lavapipe() else {
-            eprintln!("no software Vulkan driver (Mesa's lavapipe): skipped");
-            return Ok(None);
+            common::missing("Mesa's software Vulkan driver, lavapipe (mesa-vulkan-drivers)");
         };
         let dir = tempfile::tempdir()?;
         let root = dir.path();
@@ -117,15 +117,27 @@ impl Bed {
             Some(script),
         )?;
         if hp.renderer() != "gles" {
-            eprintln!("no GLES here: the wallpapers do not move");
-            return Ok(None);
+            common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
         }
-        let up = hp.dispatch_until(Duration::from_secs(60), |hp| hp.bar_commits() > 0)?;
-        anyhow::ensure!(up, "no bar");
-        // Its surfaces drawn, the glass under them.
-        common::wait(&mut hp, Duration::from_secs(2))?;
+        // The bar drawn at its place: its surface commits once before it
+        // has a size, and software Vulkan takes its time for the first
+        // frame. Without its place, the middle looked at below is empty,
+        // and every check of it holds.
+        let placed = |hp: &Headless| {
+            hp.drawn_layers(hocus_link::NAMESPACE)
+                .first()
+                .map(|(_, r)| *r)
+                .filter(|r| r.width > 22 && r.y + r.height >= MIDDLE.1)
+        };
+        let up = hp.dispatch_until(Duration::from_secs(60), |hp| placed(hp).is_some())?;
+        anyhow::ensure!(
+            up,
+            "no bar: {:?}, {} commits",
+            hp.bar_surfaces(),
+            hp.bar_commits()
+        );
         anyhow::ensure!(hp.glass_on(), "the shell draws on the CPU: no glass");
-        let bar = hp.bar_surfaces()[0].1;
+        let bar = placed(&hp).context("no bar")?;
         hp.hold_clock();
         hp.pointer_move(300.0, 300.0);
         for _ in 0..10 {
@@ -157,6 +169,7 @@ impl Bed {
                 out.push(((x, y), [shot[at + 2], shot[at + 1], shot[at]]));
             }
         }
+        anyhow::ensure!(!out.is_empty(), "nothing of the bar to look at: {bar:?}");
         Ok(out)
     }
 
@@ -282,8 +295,10 @@ fn matrixs_bar_stays_whole_over_the_rain() -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     let mut after = 0;
     while after < 60 {
+        // As long as its first frame may take: only a shell that never
+        // draws reaches it.
         anyhow::ensure!(
-            start.elapsed() < Duration::from_secs(30),
+            start.elapsed() < Duration::from_secs(60),
             "the shell never drew in Matrix"
         );
         bed.hp.step(STEP)?;

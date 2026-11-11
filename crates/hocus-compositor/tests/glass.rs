@@ -51,8 +51,7 @@ fn the_glass_shows_a_dragged_window_where_it_is() -> anyhow::Result<()> {
             config.clone(),
         )?;
         if hp.renderer() != "gles" {
-            eprintln!("no GLES here: no glass to see");
-            return Ok(());
+            common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
         }
         std::mem::forget(client(hp.socket(), Some(Shows::ClearBar))?);
         let barred = hp.dispatch_until(WAIT, |hp| {

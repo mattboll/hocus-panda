@@ -750,8 +750,7 @@ impl Portal {
             .status()
             .is_ok_and(|s| s.success());
         if !has {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let file = dir.path().join("config.toml");

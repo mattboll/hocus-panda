@@ -84,8 +84,8 @@ impl Drop for Bed {
     }
 }
 
-/// The shell's program, or `None` (the test skips) when it is not built
-/// or there is no `dbus-daemon`.
+/// The shell's program; the test fails when it is not built or there is
+/// no `dbus-daemon`.
 fn ready() -> Option<PathBuf> {
     let shell = common::shell_program();
     let daemon = std::process::Command::new("sh")
@@ -94,8 +94,7 @@ fn ready() -> Option<PathBuf> {
         .status()
         .is_ok_and(|s| s.success());
     if !daemon {
-        eprintln!("no dbus-daemon: skipped");
-        return None;
+        common::missing("dbus-daemon");
     }
     Some(shell)
 }

@@ -1011,8 +1011,7 @@ impl System {
             .output()
             .is_err()
         {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let system_dir = dir.path().join("system");

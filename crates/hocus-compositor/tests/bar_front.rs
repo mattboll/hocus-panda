@@ -9,7 +9,7 @@
 //! Plain layer surfaces of the test's stand for the shell's, each of its
 //! own colour, in the bar's, a popover's and a bubble's namespaces: what
 //! shows at a point says what is in front there. Pixman, as in CI; the
-//! halo on the GPU (its shaders), skipped without one.
+//! halo on GLES (its shaders), failing without it.
 
 use crate::common;
 
@@ -359,8 +359,7 @@ fn the_halo_stays_above_a_window_over_the_bar() -> anyhow::Result<()> {
         Some(shell),
     )?;
     if hp.renderer() != "gles" {
-        eprintln!("no GLES here: no halo to see");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| {
         hp.shell_connected()

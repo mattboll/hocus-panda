@@ -41,8 +41,7 @@ const MINI_GAUGE: (i32, i32) = (MINI.x + 27, MINI.y + 57);
 fn ready() -> Option<std::path::PathBuf> {
     let shell = shell_program();
     if !fakes::available() {
-        eprintln!("dbus-daemon, pipewire, pw-dump, wpctl or pw-metadata missing: skipped");
-        return None;
+        common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
     }
     Some(shell)
 }

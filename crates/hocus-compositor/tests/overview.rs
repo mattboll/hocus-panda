@@ -222,7 +222,11 @@ fn a_click_on_a_window_focuses_it_and_closes_the_overview() -> anyhow::Result<()
     assert_eq!(focused(&hp).as_deref(), Some("test.wide"));
     opened(&mut hp)?;
     let at = slot(&hp, "test.left")?;
-    click(&mut hp, at)?;
+    // Seen closing before the loop turns: after the click's 50 ms, a
+    // loaded machine had already closed it.
+    hp.pointer_move(at.0, at.1);
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
     assert_eq!(hp.overview(), Some(false));
     closed(&mut hp)?;
     assert_eq!(focused(&hp).as_deref(), Some("test.left"));

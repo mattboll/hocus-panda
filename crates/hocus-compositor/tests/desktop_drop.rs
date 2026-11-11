@@ -354,8 +354,7 @@ fn an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there() -> anyhow::Re
         .status()
         .is_ok_and(|s| s.success());
     if !has {
-        eprintln!("no Xwayland: skipped");
-        return Ok(());
+        common::missing("Xwayland");
     }
     let hp = Headless::start_with_xwayland(hocus_compositor::HeadlessConfig {
         outputs: vec!["1920x1080".parse()?, "2560x1440".parse()?],

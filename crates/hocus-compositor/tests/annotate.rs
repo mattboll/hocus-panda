@@ -87,8 +87,7 @@ fn ready() -> Option<PathBuf> {
         .status()
         .is_ok_and(|s| s.success());
     if !daemon {
-        eprintln!("no dbus-daemon: skipped");
-        return None;
+        common::missing("dbus-daemon");
     }
     Some(shell)
 }
@@ -1013,12 +1012,11 @@ fn the_picture_stays_while_an_arrow_is_drawn_on_the_cpu() -> anyhow::Result<()> 
 }
 
 /// The same with iced's GPU renderer, wgpu, on Mesa's software Vulkan
-/// driver: the one that lost the picture (#594). Skipped without it.
+/// driver: the one that lost the picture (#594). Fails without it.
 #[test]
 fn the_picture_stays_while_an_arrow_is_drawn_on_wgpu() -> anyhow::Result<()> {
     let Some(manifest) = lavapipe() else {
-        eprintln!("no software Vulkan driver (Mesa's lavapipe): skipped");
-        return Ok(());
+        common::missing("Mesa's software Vulkan driver, lavapipe (mesa-vulkan-drivers)");
     };
     the_picture_stays_while_an_arrow_is_drawn(Draws::SoftwareVulkan(manifest))
 }

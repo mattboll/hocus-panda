@@ -713,11 +713,12 @@ impl Drop for Started {
 
 /// `program` (a terminal) on the second screen keeps running as it is
 /// unplugged, its window going to the first, and when it is plugged
-/// back, its window going back. Skipped when it is not installed.
+/// back, its window going back. Fails when it is not installed: CI's
+/// machines have neither, and leave these tests out by name
+/// (`.config/nextest.toml`).
 fn a_terminal_survives(program: &str, args: &[&str], app_id: &str) -> anyhow::Result<()> {
     let Some(path) = installed(program) else {
-        eprintln!("{program} is not installed: skipped");
-        return Ok(());
+        common::missing(program);
     };
     let mut hp = screens()?;
     hp.pointer_move(1920.0 + 640.0, 360.0);
@@ -1017,7 +1018,7 @@ fn a_bar_surface_asked_on_no_screen_goes_to_the_screen_lacking_it() -> anyhow::R
 
 /// The shell's bar on the screen unplugged is closed there and drawn on
 /// the screen left; plugged back, the bar is that screen's again. The
-/// shell stays linked throughout. Skipped without the shell built.
+/// shell stays linked throughout.
 #[test]
 fn the_shells_bar_closed_with_its_screen_is_drawn_on_the_other() -> anyhow::Result<()> {
     let shell = common::shell_program();

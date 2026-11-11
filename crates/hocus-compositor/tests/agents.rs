@@ -28,8 +28,8 @@
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of the compositor's shaders (the streak, the halo)
 //! run on GLES: on the GPU `HOCUS_TEST_GPU` names, else on Mesa's software
-//! device, and are skipped without it. The tests of the shell's motion run
-//! on that GPU alone, and are skipped without it. The shell runs away from
+//! device, and fail without it. The tests of the shell's motion run on
+//! that GPU alone, and are run on purpose (`#[ignore]`). The shell runs away from
 //! the machine's services (no session bus, no system bus, no PipeWire).
 
 use crate::common;
@@ -434,6 +434,19 @@ impl Bed {
     fn origin(&self) -> (f64, f64) {
         let s = self.surface();
         (f64::from(s.x) + 11.0, f64::from(s.y) + 5.0)
+    }
+
+    /// Whether the group's items hold `item`, as the shell last logged
+    /// them: read at once, for what is not there once the shell rests
+    /// ([`Bed::settle`]). Waiting for it to come would take the whole wait
+    /// each time.
+    fn shows_item(&self, item: &str) -> bool {
+        let wanted = format!("{item}@");
+        plain(&self.log)
+            .lines()
+            .rev()
+            .find(|l| l.contains("the agents group's items"))
+            .is_some_and(|l| l.contains(&wanted))
     }
 
     /// Where the group's `item` is (`Sources`, `Plug(ClaudeCode)`,
@@ -1530,8 +1543,7 @@ fn going_to_an_agent_runs_the_streak_then_pulses_its_rim_then_rests() -> anyhow:
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
     bed.hocus(&["agent", "build", "working"], None)?;
@@ -1612,8 +1624,7 @@ fn going_to_an_agent_on_another_desktop_slides_there_first() -> anyhow::Result<(
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
     common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
@@ -1703,8 +1714,7 @@ fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "infra", "waiting"], None)?;
@@ -1769,8 +1779,7 @@ fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "build", "working"], None)?;
@@ -1840,8 +1849,7 @@ fn a_second_click_replaces_the_first_streak_at_once() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "infra", "waiting"], None)?;
@@ -2443,7 +2451,7 @@ impl Bed {
 }
 
 /// A bed on GLES, the GPU's or Mesa's software device (the halo is its
-/// shaders'); `None`, and the test is skipped, without it. Its clock far
+/// shaders'); the test fails without it. Its clock far
 /// from a minute's change: the clock's odometer would draw while nothing
 /// else should.
 fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
@@ -2461,8 +2469,7 @@ fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no halo");
-        return Ok(None);
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     Ok(Some(bed))
 }
@@ -3918,7 +3925,7 @@ fn the_mini_item_shows_who_waits_the_longest_and_goes_to_it() -> anyhow::Result<
     bed.settle()?;
     // Nobody waits: her alone, the item as tall as without a panda.
     let id = bed.id_of("build")?;
-    assert!(bed.item(&format!("Agent({id})")).is_err());
+    assert!(!bed.shows_item(&format!("Agent({id})")));
     assert_eq!(bed.surface().height, (MINI_HEIGHT + 10.0).ceil() as i32);
     bed.agent_is("build", "waiting")?;
     let (x, y) = bed.item(&format!("Agent({id})"))?;
