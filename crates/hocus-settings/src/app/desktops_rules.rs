@@ -294,7 +294,13 @@ impl App {
         let said_now = model::rule_said(now, &names, lang);
         let said_then = model::rule_said(then, &names, lang);
         let said = KeysSaid {
-            done: words::s_rule(lang, &name, &said_now),
+            done: words::s_rule(
+                lang,
+                words::SRule {
+                    name: &name,
+                    said_now: &said_now,
+                },
+            ),
             undone: words::undone(lang, &said_then),
             redone: words::redone(lang, &said_now),
             row: model::RULES,

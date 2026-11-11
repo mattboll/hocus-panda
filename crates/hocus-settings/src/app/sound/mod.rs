@@ -623,7 +623,13 @@ impl App {
         if let Some(gone) = gone
             && let Some(to) = now.output()
         {
-            let text = words::disconnected_sound_goes_to(lang, &gone.description, &to.description);
+            let text = words::disconnected_sound_goes_to(
+                lang,
+                words::DisconnectedSoundGoesTo {
+                    gone_description: &gone.description,
+                    to_description: &to.description,
+                },
+            );
             return self.toast(text, ToastAction::None, TOAST);
         }
         let came = now
@@ -638,7 +644,13 @@ impl App {
             let text = words::connected_sound_goes_back_to_it(lang, &came.description);
             self.toast(text, ToastAction::Sound(Act::Default(was.id)), TOAST)
         } else {
-            let text = words::connected_sound_stays_on(lang, &came.description, &was.description);
+            let text = words::connected_sound_stays_on(
+                lang,
+                words::ConnectedSoundStaysOn {
+                    came_description: &came.description,
+                    was_description: &was.description,
+                },
+            );
             self.toast(text, ToastAction::Sound(Act::Default(came.id)), TOAST)
         }
     }
@@ -775,7 +787,13 @@ impl App {
                     index: *after,
                 });
                 Some(match back {
-                    false => words::s_profile(lang, &card.description, &profile.description),
+                    false => words::s_profile(
+                        lang,
+                        words::SProfile {
+                            card_description: &card.description,
+                            profile_description: &profile.description,
+                        },
+                    ),
                     true => words::the_profile_is_back_to(lang, &profile.description),
                 })
             }
@@ -792,7 +810,13 @@ impl App {
                     });
                 }
                 Some(match sink {
-                    Some(s) => words::plays_on(lang, &row.name, &s.description),
+                    Some(s) => words::plays_on(
+                        lang,
+                        words::PlaysOn {
+                            row_name: &row.name,
+                            s_description: &s.description,
+                        },
+                    ),
                     None => words::follows_the_output_2(lang, &row.name),
                 })
             }

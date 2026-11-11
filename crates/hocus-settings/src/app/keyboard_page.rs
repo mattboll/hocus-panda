@@ -278,9 +278,11 @@ impl App {
                 let batch = self.serial;
                 let said = words::has_none_left(
                     self.lang,
-                    keys::shown(&conflict.chord, self.lang),
-                    self.name_of(conflict.setting),
-                    self.name_of(other),
+                    words::HasNoneLeft {
+                        keys_shown_conflict_chor: keys::shown(&conflict.chord, self.lang),
+                        self_name_of_conflict_se: self.name_of(conflict.setting),
+                        self_name_of_other: self.name_of(other),
+                    },
                 );
                 if let (Some(theirs), Some(ours)) = (slot(other), slot(conflict.setting)) {
                     // Its toast is ours: one for both.
@@ -1166,7 +1168,13 @@ impl App {
         let lang = self.lang;
         let shown = keys::shown(&conflict.chord, lang);
         let other = self.name_of(conflict.other);
-        let said = words::is_already_used_by_replacing_it(lang, other, &shown);
+        let said = words::is_already_used_by_replacing_it(
+            lang,
+            words::IsAlreadyUsedByReplacingIt {
+                other,
+                shown: &shown,
+            },
+        );
         let amber = crate::theme::ink(rgb(0xF5B44A));
         container(
             row![

@@ -184,7 +184,7 @@ pub fn connected(wifi: &Wifi, current: Option<&Current>, lang: Lang) -> String {
 pub fn address(current: &Current, lang: Lang) -> Option<String> {
     let address = current.address.as_deref()?;
     Some(match current.gateway.as_deref() {
-        Some(gateway) => words::address_via(lang, address, gateway),
+        Some(gateway) => words::address_via(lang, words::AddressVia { address, gateway }),
         None => words::address(lang, address),
     })
 }

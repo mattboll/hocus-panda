@@ -198,8 +198,8 @@ pub fn differs_said(mime: &str, app: &str, lang: Lang) -> String {
     let what = type_said(mime, lang);
     let plural = !what.starts_with("Le type") && !what.starts_with("The type");
     match plural {
-        true => words::open_with(lang, app, &what),
-        false => words::opens_with(lang, app, &what),
+        true => words::open_with(lang, words::OpenWith { app, what: &what }),
+        false => words::opens_with(lang, words::OpensWith { app, what: &what }),
     }
 }
 

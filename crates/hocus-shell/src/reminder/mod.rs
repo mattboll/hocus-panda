@@ -510,7 +510,13 @@ impl Words {
 
     /// The history's line: "Revue de sprint · a commencé à 10:00".
     pub fn started(self, m: &Meeting) -> String {
-        txt::started_at(self.lang, &m.hhmm, &m.title)
+        txt::started_at(
+            self.lang,
+            txt::StartedAt {
+                m_hhmm: &m.hhmm,
+                m_title: &m.title,
+            },
+        )
     }
 
     /// The history's application.

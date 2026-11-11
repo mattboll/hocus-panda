@@ -627,7 +627,7 @@ impl App {
         let said = KeysSaid {
             done: match &whose {
                 None => words::wallpaper_2(lang, &now),
-                Some(s) => words::background_of_the(lang, &now, s),
+                Some(s) => words::background_of_the(lang, words::BackgroundOfThe { now: &now, s }),
             },
             undone: words::undone_the_background_is_back_to(lang, &then),
             redone: words::redone_2(lang, &now),
@@ -801,7 +801,13 @@ impl App {
             },
             Ok(_) => None,
         }?;
-        Some(words::in_the_file_night_is_drawn(lang, not_found, &word))
+        Some(words::in_the_file_night_is_drawn(
+            lang,
+            words::InTheFileNightIsDrawn {
+                not_found,
+                word: &word,
+            },
+        ))
     }
 
     // --- What it draws ----------------------------------------------------------------

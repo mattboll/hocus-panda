@@ -324,7 +324,13 @@ impl App {
         let hours = if self.time_twelve() { "12 h" } else { "24 h" };
         let today =
             crate::appearance::today_as(self.time_date_format(), self.time_now().date(), self.lang);
-        words::once_for_the_whole_desktop_the(self.lang, hours, &today)
+        words::once_for_the_whole_desktop_the(
+            self.lang,
+            words::OnceForTheWholeDesktopThe {
+                hours,
+                today: &today,
+            },
+        )
     }
 
     /// A row of the page: its name, its line, its control, lit when found.

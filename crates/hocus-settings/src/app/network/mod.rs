@@ -581,7 +581,13 @@ impl App {
             Reply::Restored(kept) => {
                 let doing = take(&mut self.network.restoring, &kept.uuid).unwrap_or(Doing::Undo);
                 let vpn = if kept.vpn { "VPN " } else { "" };
-                let name = words::text(lang, &kept.name, vpn);
+                let name = words::text(
+                    lang,
+                    words::TextArgs {
+                        kept_name: &kept.name,
+                        vpn,
+                    },
+                );
                 let secrets = kept.secrets;
                 if doing == Doing::Undo {
                     self.redo.push(Undo::Network(Choice::Forget(Forgot(kept))));

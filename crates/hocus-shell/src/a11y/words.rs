@@ -245,7 +245,7 @@ impl Words {
                     (3, false) => "good signal",
                     (_, false) => "strong signal",
                 };
-                txt::connected_to(self.lang, name, signal)
+                txt::connected_to(self.lang, txt::ConnectedTo { name, signal })
             }
         };
         format!("Wi-Fi, {state}")

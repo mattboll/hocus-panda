@@ -100,7 +100,13 @@ impl App {
         let then = self.said_value(slot);
         let done = said.join(" · ");
         let keys_said = KeysSaid {
-            undone: words::undone_is_back_to(lang, theme_name, &then),
+            undone: words::undone_is_back_to(
+                lang,
+                words::UndoneIsBackTo {
+                    theme_name,
+                    then: &then,
+                },
+            ),
             redone: words::redone(lang, &done),
             done,
             row: appearance::THEME_ID,
@@ -116,7 +122,7 @@ impl App {
         };
         let name = setting.name.get(self.lang);
         let now = setting.say(value, self.lang);
-        words::text(self.lang, name, &now)
+        words::text(self.lang, words::TextArgs { name, now: &now })
     }
 
     /// What a theme's toast says of `key` set to `word` (`None`: its

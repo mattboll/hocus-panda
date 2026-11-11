@@ -290,7 +290,13 @@ impl App {
         let after = model::trimmed(model::renamed(&names, index, &text), count);
         let lang = self.lang;
         let said = match text.is_empty() {
-            false => words::desktop_s_name(lang, index + 1, &text),
+            false => words::desktop_s_name(
+                lang,
+                words::DesktopSName {
+                    index_1: index + 1,
+                    text: &text,
+                },
+            ),
             true => words::desktop_s_name_none(lang, index + 1),
         };
         if self.writable() {

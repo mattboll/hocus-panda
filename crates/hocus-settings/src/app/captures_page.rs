@@ -779,7 +779,7 @@ impl App {
             match pinned {
                 0 => words::on_this_computer(lang, &n),
                 1 => words::but_the_pinned_one(lang, &n),
-                p => words::but_the_pinned(lang, p, &n),
+                p => words::but_the_pinned(lang, words::ButThePinned { p, x_n: &n }),
             }
         } else {
             w(words::EVERYTHING_BUT_THE_PINNED_ITEMS_ON)

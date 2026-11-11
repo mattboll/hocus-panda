@@ -231,9 +231,11 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         value: text::megabytes(kb(r.memory.end_kb), l),
         line: words::at_the_start_peak_at(
             lang,
-            mb(kb(r.memory.start_kb)),
-            mb(r.memory.peak_kb),
-            text::clock(r.memory.peak_at, tz),
+            words::AtTheStartPeakAt {
+                mb_kb_r_memory_start_kb: mb(kb(r.memory.start_kb)),
+                mb_r_memory_peak_kb: mb(r.memory.peak_kb),
+                text_clock_r_memory_peak: text::clock(r.memory.peak_at, tz),
+            },
         ),
         sub: format!(
             "{} {} · shell {}",
@@ -248,8 +250,10 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         line: if r.locked_s > 0 {
             words::in_locked(
                 lang,
-                r.drawing.locked_frames,
-                text::duration(r.locked_s as i64),
+                words::InLocked {
+                    r_drawing_locked_frames: r.drawing.locked_frames,
+                    text_duration_r_locked_s: text::duration(r.locked_s as i64),
+                },
             )
         } else {
             words::scenes(lang, text::count(r.drawing.scenes, l))

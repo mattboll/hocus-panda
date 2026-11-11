@@ -1176,7 +1176,13 @@ impl canvas::Program<Message> for Chart {
                     );
                     write(
                         &mut f,
-                        words::shell_mb(lang, s0.round(), s1.round()),
+                        words::shell_mb(
+                            lang,
+                            words::ShellMb {
+                                s0_round: s0.round(),
+                                s1_round: s1.round(),
+                            },
+                        ),
                         Point::new(LEFT + 6.0, (bottom - s0 / max * h + 3.0).min(bottom - 13.0)),
                         10.5,
                         SHELL,

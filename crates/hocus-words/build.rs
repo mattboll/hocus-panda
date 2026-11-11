@@ -386,6 +386,18 @@ fn placeholders(template: &str, at: &str, file: &str) -> BTreeSet<String> {
     names
 }
 
+/// `memory_line` → `MemoryLine`: a key's arguments' struct.
+fn camel(key: &str) -> String {
+    key.split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 fn unescape(template: &str) -> String {
     template.replace("{{", "{").replace("}}", "}")
 }
@@ -514,18 +526,65 @@ fn entry(
         ordered.push("n".to_owned());
     }
     ordered.extend(params.iter().filter(|p| !plural || *p != "n").cloned());
-    let args: String = ordered
-        .iter()
-        .map(|p| {
-            if plural && p == "n" {
-                ", n: impl Count".to_owned()
-            } else {
-                format!(", {}: impl ::std::fmt::Display", raw(p))
-            }
-        })
-        .collect();
+    // One argument: a parameter. More: a struct of named fields, so that
+    // two of one type cannot be swapped at the call.
+    let named = ordered.len() > 1;
+    let bound = |p: &str| {
+        if plural && p == "n" {
+            "Count"
+        } else {
+            "::std::fmt::Display"
+        }
+    };
+    let types: Vec<String> = (0..ordered.len()).map(|i| format!("T{i}")).collect();
+    let mut camel = camel(key);
+    if ["Lang", "Plural", "Text", "List", "Count"].contains(&camel.as_str()) {
+        camel.push_str("Args");
+    }
     doc(out, &english);
-    let _ = writeln!(out, "pub fn {}(lang: Lang{args}) -> String {{", raw(key));
+    if named {
+        let fields: String = ordered
+            .iter()
+            .zip(&types)
+            .map(|(p, t)| format!("pub {}: {t},", raw(p)))
+            .collect();
+        let _ = writeln!(
+            out,
+            "#[derive(Debug, Clone, Copy)]\npub struct {camel}<{}> {{ {fields} }}",
+            types.join(", ")
+        );
+        let generics: String = ordered
+            .iter()
+            .zip(&types)
+            .map(|(p, t)| format!("{t}: {}", bound(p)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let names: String = ordered
+            .iter()
+            .map(|p| raw(p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        doc(out, &english);
+        let _ = writeln!(
+            out,
+            "pub fn {}<{generics}>(lang: Lang, args: {camel}<{}>) -> String {{\nlet {camel} {{ {names} }} = args;",
+            raw(key),
+            types.join(", ")
+        );
+    } else {
+        let p = ordered.first().map_or("", String::as_str);
+        let kind = if bound(p) == "Count" {
+            "impl Count"
+        } else {
+            "impl ::std::fmt::Display"
+        };
+        let _ = writeln!(
+            out,
+            "pub fn {}(lang: Lang, {}: {kind}) -> String {{",
+            raw(key),
+            raw(p)
+        );
+    }
     let _ = writeln!(out, "match lang {{");
     for (said, (f, lang)) in all.iter().zip(forms.iter().zip(langs)) {
         let one = f.get("one").map_or("", String::as_str);
@@ -541,22 +600,35 @@ fn entry(
         }
     }
     out.push_str("}\n}\n");
-    let symbolic: String = ordered
-        .iter()
-        .filter(|p| !plural || *p != "n")
-        .map(|p| format!(", \"{{{p}}}\""))
-        .collect();
+    let value = |p: &String| {
+        if plural && p == "n" {
+            "n".to_owned()
+        } else {
+            format!("\"{{{p}}}\"")
+        }
+    };
+    let call = if named {
+        let fields: String = ordered
+            .iter()
+            .map(|p| format!("{}: {}, ", raw(p), value(p)))
+            .collect();
+        format!(
+            "{module}::{}(lang, {module}::{camel} {{ {fields} }})",
+            raw(key)
+        )
+    } else {
+        format!(
+            "{module}::{}(lang, {})",
+            raw(key),
+            ordered.first().map(value).unwrap_or_default()
+        )
+    };
     if plural {
         let _ = writeln!(
             every,
-            "for n in [0u64, 1, 2] {{ all.push((format!(\"{at}[{{n}}]\"), {module}::{}(lang, n{symbolic}))); }}",
-            raw(key)
+            "for n in [0u64, 1, 2] {{ all.push((format!(\"{at}[{{n}}]\"), {call})); }}"
         );
     } else {
-        let _ = writeln!(
-            every,
-            "all.push((\"{at}\".to_owned(), {module}::{}(lang{symbolic})));",
-            raw(key)
-        );
+        let _ = writeln!(every, "all.push((\"{at}\".to_owned(), {call}));");
     }
 }

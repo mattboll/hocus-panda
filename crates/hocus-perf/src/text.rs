@@ -216,18 +216,32 @@ pub fn signal(s: &Signal, lang: Lang, tz: &TimeZone) -> (String, String) {
             w::sustained_cpu(lang, &span),
             w::sustained_cpu_line(
                 lang,
-                &long,
-                percent(s.value, lang),
-                percent(signals::CPU_PERCENT, lang),
+                w::SustainedCpuLine {
+                    long: &long,
+                    percent: percent(s.value, lang),
+                    threshold: percent(signals::CPU_PERCENT, lang),
+                },
             ),
         ),
         SignalKind::FramesAtRest => (
             w::frames_at_rest(lang, &span),
-            w::frames_at_rest_line(lang, number(s.value, 0, lang), &long),
+            w::frames_at_rest_line(
+                lang,
+                w::FramesAtRestLine {
+                    fps: number(s.value, 0, lang),
+                    long: &long,
+                },
+            ),
         ),
         SignalKind::Wakeups => (
             w::wakeups(lang, &span),
-            w::wakeups_line(lang, &long, number(s.value, 1, lang)),
+            w::wakeups_line(
+                lang,
+                w::WakeupsLine {
+                    long: &long,
+                    rate: number(s.value, 1, lang),
+                },
+            ),
         ),
         SignalKind::MemoryGrowing => {
             let whose = who(s.who.unwrap_or(Who::Shell), lang);
@@ -236,10 +250,12 @@ pub fn signal(s: &Signal, lang: Lang, tz: &TimeZone) -> (String, String) {
                 w::memory(lang, whose),
                 w::memory_line(
                     lang,
-                    megabytes(b, lang),
-                    number(s.value, 1, lang),
-                    clock(s.from, tz),
-                    (f64::from(a) / 1024.0).round(),
+                    w::MemoryLine {
+                        end: megabytes(b, lang),
+                        rate: number(s.value, 1, lang),
+                        since: clock(s.from, tz),
+                        start: (f64::from(a) / 1024.0).round(),
+                    },
                 ),
             )
         }
@@ -255,16 +271,36 @@ pub fn notification(s: &Signal, lang: Lang, tz: &TimeZone) -> String {
     use words::notification as w;
     let at = clock(s.from, tz);
     match s.kind {
-        SignalKind::SustainedCpu => w::sustained_cpu(lang, &at, percent(s.value, lang)),
-        SignalKind::FramesAtRest => w::frames_at_rest(lang, &at, number(s.value, 0, lang)),
+        SignalKind::SustainedCpu => w::sustained_cpu(
+            lang,
+            w::SustainedCpu {
+                at: &at,
+                percent: percent(s.value, lang),
+            },
+        ),
+        SignalKind::FramesAtRest => w::frames_at_rest(
+            lang,
+            w::FramesAtRest {
+                at: &at,
+                fps: number(s.value, 0, lang),
+            },
+        ),
         SignalKind::Wakeups => w::wakeups(lang, number(s.value, 1, lang)),
         SignalKind::MemoryGrowing => w::memory(
             lang,
-            &at,
-            number(s.value, 1, lang),
-            who(s.who.unwrap_or(Who::Shell), lang),
+            w::Memory {
+                at: &at,
+                rate: number(s.value, 1, lang),
+                whose: who(s.who.unwrap_or(Who::Shell), lang),
+            },
         ),
-        SignalKind::SlowMoment => w::slow_moment(lang, &at, number(s.value, 0, lang)),
+        SignalKind::SlowMoment => w::slow_moment(
+            lang,
+            w::SlowMoment {
+                at: &at,
+                ms: number(s.value, 0, lang),
+            },
+        ),
     }
 }
 
@@ -295,9 +331,11 @@ pub fn totals(r: &Report, lang: Lang, tz: &TimeZone) -> Vec<(String, String)> {
         "CPU".to_owned(),
         w::cpu(
             lang,
-            cpu_time(r.cpu.compositor_ms),
-            percent(r.cpu.average_percent, lang),
-            cpu_time(r.cpu.shell_ms),
+            w::Cpu {
+                compositor: cpu_time(r.cpu.compositor_ms),
+                percent: percent(r.cpu.average_percent, lang),
+                shell: cpu_time(r.cpu.shell_ms),
+            },
         ),
     ));
     let sum = |kb: [u32; 2]| kb[0] + kb[1];

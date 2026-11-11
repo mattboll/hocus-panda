@@ -143,8 +143,11 @@ pub fn windows_said(n: usize, lang: Lang) -> String {
 pub fn removed_said(name: &str, moved: usize, to: &str, lang: Lang) -> String {
     match moved {
         0 => words::removed(lang, name),
-        1 => words::removed_its_window_goes_to(lang, name, to),
-        n => words::removed_its_windows_go_to(lang, name, to, n),
+        1 => words::removed_its_window_goes_to(lang, words::RemovedItsWindowGoesTo { name, to }),
+        n => words::removed_its_windows_go_to(
+            lang,
+            words::RemovedItsWindowsGoTo { name, to, x_n: n },
+        ),
     }
 }
 

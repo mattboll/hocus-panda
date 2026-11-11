@@ -804,7 +804,13 @@ impl App {
                     Lang::English => format!("sleeps after {suspend}"),
                 };
                 match self.battery {
-                    Some(b) => words::battery(lang, b, &suspend),
+                    Some(b) => words::battery(
+                        lang,
+                        words::Battery {
+                            b,
+                            suspend: &suspend,
+                        },
+                    ),
                     None => words::on_ac(lang, &suspend),
                 }
             }
@@ -1092,7 +1098,11 @@ impl App {
         };
         let applies = setting.say(&self.default_of(slot)?, self.lang);
         Some(words::in_the_file_not_understood_applies(
-            self.lang, &applies, &raw,
+            self.lang,
+            words::InTheFileNotUnderstoodApplies {
+                applies: &applies,
+                raw: &raw,
+            },
         ))
     }
 

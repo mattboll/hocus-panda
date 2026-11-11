@@ -182,7 +182,7 @@ impl Words {
     /// The name a copy saved without a file chooser takes, beside the
     /// capture, in its format: "Capture du … (annotée).png".
     pub fn annotated_name(self, stem: &str, extension: &str) -> String {
-        txt::annotated(self.lang, extension, stem)
+        txt::annotated(self.lang, txt::Annotated { extension, stem })
     }
 
     /// The capture in the notifications' history: its application's name.

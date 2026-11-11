@@ -437,8 +437,14 @@ impl App {
                 let row = opens.name().get(lang);
                 let said = Said {
                     done: format!("{row}{}{name}", sep(lang)),
-                    undone: words::undone(lang, &before, row),
-                    redone: words::redone(lang, &name, row),
+                    undone: words::undone(
+                        lang,
+                        words::Undone {
+                            before: &before,
+                            row,
+                        },
+                    ),
+                    redone: words::redone(lang, words::Redone { name: &name, row }),
                     row: Row::Default(opens),
                 };
                 self.apps.ask(

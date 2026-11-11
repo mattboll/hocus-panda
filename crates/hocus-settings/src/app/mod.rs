@@ -1085,7 +1085,13 @@ impl App {
                 let text = match pending.say {
                     Some(said) if said.is_empty() => return Task::none(),
                     Some(said) => said,
-                    None => words::text(self.lang, &name, &now),
+                    None => words::text(
+                        self.lang,
+                        words::TextArgs {
+                            name: &name,
+                            now: &now,
+                        },
+                    ),
                 };
                 self.toast(text, ToastAction::Undo, TOAST)
             }
@@ -1099,9 +1105,21 @@ impl App {
                 if let Some(source) = slot.source {
                     self.source = source;
                 }
-                let text = words::undone_is_back_to(self.lang, &name, &now);
+                let text = words::undone_is_back_to(
+                    self.lang,
+                    words::UndoneIsBackTo {
+                        name: &name,
+                        now: &now,
+                    },
+                );
                 let text = if pending.doing == Doing::Redo {
-                    words::redone(self.lang, &name, &now)
+                    words::redone(
+                        self.lang,
+                        words::Redone {
+                            name: &name,
+                            now: &now,
+                        },
+                    )
                 } else {
                     text
                 };

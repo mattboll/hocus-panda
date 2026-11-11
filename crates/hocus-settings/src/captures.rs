@@ -102,8 +102,22 @@ impl Folder {
     /// `extension` its.
     pub fn sample(self, (day, time): (&str, &str), extension: &str, lang: Lang) -> String {
         match self {
-            Self::Captures => words::screenshot_from(lang, day, extension, time),
-            Self::Recordings => words::screen_recording_from(lang, day, extension, time),
+            Self::Captures => words::screenshot_from(
+                lang,
+                words::ScreenshotFrom {
+                    day,
+                    extension,
+                    time,
+                },
+            ),
+            Self::Recordings => words::screen_recording_from(
+                lang,
+                words::ScreenRecordingFrom {
+                    day,
+                    extension,
+                    time,
+                },
+            ),
         }
     }
 
@@ -131,8 +145,14 @@ impl Folder {
             Self::Recordings => words::RECORDINGS.get(lang),
         };
         match gone {
-            true => words::this_folder_no_longer_exists_usb(lang, default, what),
-            false => words::this_folder_cannot_be_written_go(lang, default, what),
+            true => words::this_folder_no_longer_exists_usb(
+                lang,
+                words::ThisFolderNoLongerExistsUsb { default, what },
+            ),
+            false => words::this_folder_cannot_be_written_go(
+                lang,
+                words::ThisFolderCannotBeWrittenGo { default, what },
+            ),
         }
     }
 }
@@ -245,7 +265,13 @@ pub fn count_said(items: u32, pinned: u32, lang: Lang) -> String {
     match pinned {
         0 => items_word,
         1 => words::n_1_pinned(lang, &items_word),
-        n => words::pinned(lang, &items_word, n),
+        n => words::pinned(
+            lang,
+            words::Pinned {
+                items_word: &items_word,
+                x_n: n,
+            },
+        ),
     }
 }
 

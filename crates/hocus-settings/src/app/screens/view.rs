@@ -564,7 +564,13 @@ impl App {
             .filter(|_| !screen.mode_offered)
             .map(|m| {
                 let applies = screen.mode.map(|m| say_mode3(m, lang)).unwrap_or_default();
-                words::in_the_file_which_the_screen(lang, &applies, m)
+                words::in_the_file_which_the_screen(
+                    lang,
+                    words::InTheFileWhichTheScreen {
+                        applies: &applies,
+                        m,
+                    },
+                )
             });
         let rates = size.map(|s| screen.rates(s)).unwrap_or_default();
         let rate_line =
@@ -659,7 +665,13 @@ impl App {
             let there = known.plugged().find(|s| s.primary)?;
             let named = self.say_primary(Some(&name));
             let there = screens::lower_first(&there.title(self.lang));
-            Some(words::is_not_there_the_bar_is(self.lang, &named, &there))
+            Some(words::is_not_there_the_bar_is(
+                self.lang,
+                words::IsNotThereTheBarIs {
+                    named: &named,
+                    there: &there,
+                },
+            ))
         });
         (line, warn)
     }

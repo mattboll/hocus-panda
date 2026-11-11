@@ -315,7 +315,7 @@ impl App {
         };
         let whose = crate::screens::lower_first(&row.title);
         let (now, then) = (said(form), said(row.asked));
-        let done = words::the_bar_s_form(lang, now, &whose);
+        let done = words::the_bar_s_form(lang, words::TheBarSForm { now, whose: &whose });
         let said = KeysSaid {
             done,
             undone: words::undone_the_form_is_back_to(lang, then),
@@ -858,7 +858,14 @@ impl App {
             ("auto", None, _) => {
                 let form = form_word(Form::default_for(r.width), lang);
                 let from = hocus_link::FULL_FROM + Form::Full.width();
-                words::automatic_the_screen_is_px_wide(lang, form, from, r.width)
+                words::automatic_the_screen_is_px_wide(
+                    lang,
+                    words::AutomaticTheScreenIsPxWide {
+                        form,
+                        from,
+                        r_width: r.width,
+                    },
+                )
             }
             ("full", _, Lang::French) => {
                 "Toujours pleine ; un clic sur son bord change pour la session.".to_owned()

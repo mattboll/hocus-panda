@@ -1223,7 +1223,13 @@ impl App {
                 if let Some(typed) = typed {
                     body = body.push(
                         container(t(
-                            words::of_digits_typed(lang, code.len(), typed),
+                            words::of_digits_typed(
+                                lang,
+                                words::OfDigitsTyped {
+                                    code_len: code.len(),
+                                    typed,
+                                },
+                            ),
                             12.0,
                             FAINT.get(),
                         ))

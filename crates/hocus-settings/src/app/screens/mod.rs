@@ -470,9 +470,27 @@ impl App {
         let then = say_mode_text(&trial.before, lang);
         let title = screens::lower_first(&screen.title(lang));
         let said = super::KeysSaid {
-            done: words::kept_on_the(lang, &now, &title),
-            undone: words::undone_the_is_back_to(lang, &then, &title),
-            redone: words::redone_on_the(lang, &now, &title),
+            done: words::kept_on_the(
+                lang,
+                words::KeptOnThe {
+                    now: &now,
+                    title: &title,
+                },
+            ),
+            undone: words::undone_the_is_back_to(
+                lang,
+                words::UndoneTheIsBackTo {
+                    then: &then,
+                    title: &title,
+                },
+            ),
+            redone: words::redone_on_the(
+                lang,
+                words::RedoneOnThe {
+                    now: &now,
+                    title: &title,
+                },
+            ),
             row: if trial.what == RATE { RATE } else { RESOLUTION },
         };
         self.ask_keys(edits, said, Doing::New, None);
@@ -554,8 +572,20 @@ impl App {
                     true => words::ON.get(lang),
                     false => words::OFF.get(lang),
                 };
-                let done = words::variable_refresh_rate_of_the(lang, &lower, yes(on));
-                let undone = words::undone_variable_refresh_rate_of_the(lang, &lower, yes(!on));
+                let done = words::variable_refresh_rate_of_the(
+                    lang,
+                    words::VariableRefreshRateOfThe {
+                        lower: &lower,
+                        yes_on: yes(on),
+                    },
+                );
+                let undone = words::undone_variable_refresh_rate_of_the(
+                    lang,
+                    words::UndoneVariableRefreshRateOfThe {
+                        lower: &lower,
+                        yes_on: yes(!on),
+                    },
+                );
                 (vec![edit], done, undone)
             }
             _ => return iced::Task::none(),
@@ -612,10 +642,22 @@ impl App {
                 let said_now = self.say_scale_choice(scale, &screen);
                 let said_then =
                     self.say_scale_choice((!screen.scale_auto).then_some(screen.scale), &screen);
-                let done = words::scale_of_the(lang, &lower, &said_now);
+                let done = words::scale_of_the(
+                    lang,
+                    words::ScaleOfThe {
+                        lower: &lower,
+                        said_now: &said_now,
+                    },
+                );
                 let said = super::KeysSaid {
                     redone: redone_of(&done, lang),
-                    undone: words::undone_the_s_scale_is_back(lang, &lower, &said_then),
+                    undone: words::undone_the_s_scale_is_back(
+                        lang,
+                        words::UndoneTheSScaleIsBack {
+                            lower: &lower,
+                            said_then: &said_then,
+                        },
+                    ),
                     done,
                     row: SCALE,
                 };
