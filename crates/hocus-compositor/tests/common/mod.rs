@@ -1748,6 +1748,22 @@ pub fn wait(hp: &mut Headless, time: Duration) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Waits, if need be, until the machine's clock is clear of a minute's
+/// change for the `look` to come: from 2 s past a minute to 2 s before the
+/// next. For the tests that count what a program showing the real time
+/// draws at rest: it draws at the minute, whenever the test happens to
+/// run, and a look that crosses it counts that draw.
+pub fn clear_of_the_minute(hp: &mut Headless, look: Duration) -> anyhow::Result<()> {
+    let second = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs_f64()
+        % 60.0;
+    if !(2.0..58.0 - look.as_secs_f64()).contains(&second) {
+        wait(hp, Duration::from_secs_f64((62.0 - second) % 60.0))?;
+    }
+    Ok(())
+}
+
 /// The pointer at `at`, once the shell's surface of `namespace` takes it
 /// there. A layer surface maps (and has its place) before the shell has
 /// drawn it, and until it has a buffer it takes no pointer: a press then

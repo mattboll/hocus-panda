@@ -590,8 +590,13 @@ fn at_rest_the_page_draws_once_a_minute_only() -> anyhow::Result<()> {
         }
     }
     anyhow::ensure!(still >= 30, "the window never came to rest");
+    // The page's clock draws at the minute, and the window says its places
+    // after: two commits, whenever the machine's minute changes. The 1.5 s
+    // looked at keep clear of it, as the bar page's test does.
+    let look = Duration::from_millis(1500);
+    common::clear_of_the_minute(&mut bed.hp, look)?;
     let before = bed.hp.window_commits();
-    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    wait(&mut bed.hp, look)?;
     assert!(
         bed.hp.window_commits() <= before + 1,
         "the page drew at rest: {} commits",
