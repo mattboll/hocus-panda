@@ -13,7 +13,7 @@
 //!   300 ms) and pressed; the control under the pointer is handed to the
 //!   drawing to light it, and the pointer's look is a hand there;
 //! - the keyboard's ring: the controls join the bar's ring
-//!   ([`super::ring`]), which goes through every surface of the bar, and
+//!   ([`super::ring`](mod@super::ring)), which goes through every surface of the bar, and
 //!   the ring is drawn around the control holding it;
 //! - the screen readers' rows: the declared nodes, with their places.
 //!

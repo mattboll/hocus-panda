@@ -4,7 +4,7 @@
 //! - [`record`]: the counters the compositor's loop only increments, the
 //!   ring its events go into, and the thread that wakes every 10 s to
 //!   append one sample to the day's file, never touching the loop.
-//! - [`format`]: that file, one JSON line per sample, readable after a
+//! - [`format`](mod@format): that file, one JSON line per sample, readable after a
 //!   crash; [`files`] where the days are kept, 14 of them.
 //! - [`signals`]: what counts as a problem, judged sample after sample the
 //!   same way while recording and when a day is read.

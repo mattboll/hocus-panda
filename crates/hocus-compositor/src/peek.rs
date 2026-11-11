@@ -10,7 +10,7 @@
 //! The halo says what began ([`crate::halo::Halo::take_news`]); the
 //! compositor tells the shell (`peek`), which draws the panda and its
 //! bubble once on a layer surface of its own beside each bar
-//! ([`PEEK_NAMESPACE`]), taking the pointer only where it draws. The
+//! ([`PEEK_NAMESPACE`](hocus_link::PEEK_NAMESPACE)), taking the pointer only where it draws. The
 //! compositor moves it, as it does the popovers: from that surface's first
 //! frame it slides out in 320 ms and fades in over 260 ms, from under the
 //! bar (cut at the bar's edge, under the bar's surfaces and its halo), and

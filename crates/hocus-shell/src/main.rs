@@ -4,7 +4,7 @@
 //!
 //! So far the bar is its column (§2, §3, §13), its clock (§4 group 1, §5),
 //! the day's groups and its agents' group under it in their order (§4
-//! groups 2 to 5, [`column`], [`agents`]), its desktops (§4 group 8, §5), its connections (§4 group 9, §5) and its
+//! groups 2 to 5, [`column`](mod@column), [`agents`]), its desktops (§4 group 8, §5), its connections (§4 group 9, §5) and its
 //! levels (§4 group 10, §5): a glass tint and a rim against the right edge
 //! of each output the compositor names, in its full or its mini form, the
 //! time at its top, the screen's desktops ([`desktops`]) over the Wi-Fi

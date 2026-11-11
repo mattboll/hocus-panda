@@ -197,7 +197,7 @@ pub const CONFIG_ENV: &str = "HOCUS_CONFIG";
 
 /// A popover's width, its distance from the bar, and how far it slides from
 /// the bar as it opens and closes (logical pixels). Its corners are the
-/// bar's ([`RADIUS`]).
+/// bar's ([`RADIUS`](crate::RADIUS)).
 pub const POPOVER_WIDTH: i32 = 280;
 pub const POPOVER_SHIFT: f64 = 8.0;
 /// A popover fades and slides in over this, CSS's `ease-out` (`cubic-bezier(0,

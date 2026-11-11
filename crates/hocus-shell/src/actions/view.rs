@@ -10,7 +10,7 @@
 //! rows' room at most, scrolling past it, then the footer under a line.
 //!
 //! The field holds the keyboard throughout: every key goes to the palette
-//! ([`super::key_on`]), which moves the selection, runs it, or edits the
+//! ([`key_on`](super::Palette::key_on)), which moves the selection, runs it, or edits the
 //! field. The pointer over a row selects it, a click runs it; the wheel
 //! scrolls the list a row a notch. What it shows is said in the log
 //! ("the actions palette shows it") and to screen readers, from its

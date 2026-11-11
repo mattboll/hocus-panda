@@ -91,7 +91,7 @@ type OnKey<'a, L> = Box<dyn Fn(&Pressed) -> Option<L> + 'a>;
 /// looked at, the view of this surface alone is built again, and the
 /// compositor is asked to have it drawn, as the canvases are woken.
 ///
-/// Its controls' declarations ([`super::control`]) give it the rest: the
+/// Its controls' declarations ([`super::control`](mod@super::control)) give it the rest: the
 /// keyboard's ring goes through them ([`keys`]), screen readers read them
 /// ([`crate::a11y::rows`]) and the log says them for tests (`shows {…}`,
 /// with `RUST_LOG=hocuspanda_shell::shows=debug`). The pointer coming in

@@ -15,8 +15,8 @@ use crate::{
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 pub enum ToShell {
     /// Says what the shell shows, for screen readers (`hocus msg a11y`,
-    /// docs/design/screen-reader.md): answered by [`ToCompositor::A11yLine`]s
-    /// and an [`ToCompositor::A11yEnd`].
+    /// docs/design/screen-reader.md): answered by [`ToCompositor::A11yLine`](crate::ToCompositor::A11yLine)s
+    /// and an [`ToCompositor::A11yEnd`](crate::ToCompositor::A11yEnd).
     A11y,
     /// How bars look: on glass the compositor blurs behind (else opaque),
     /// whether they move (else reduced motion), and whether the pandas play
@@ -70,7 +70,7 @@ pub enum ToShell {
     /// The keyboard's layouts, in the keymap's order (XKB's groups): sent as
     /// the shell connects.
     Layouts(Vec<KeyLayout>),
-    /// The active layout, its index in [`ToShell::Layouts`]' list: sent as the
+    /// The active layout, its index in [`ToShell::Layouts`](crate::ToShell::Layouts)' list: sent as the
     /// shell connects and whenever it changes (the bar's row, an XKB
     /// group-switch option).
     Layout(u32),
@@ -78,7 +78,7 @@ pub enum ToShell {
     /// change, at most once a frame (bar.md, 3.9).
     Desktops(Desktops),
     /// The titles of a bar's screen's windows, for the list a desktop's tile
-    /// opens on hover (3.9b): apart from [`ToShell::Desktops`], so that a title
+    /// opens on hover (3.9b): apart from [`ToShell::Desktops`](crate::ToShell::Desktops), so that a title
     /// that changes often (a terminal's) draws only an open list, never the
     /// tiles. Sent as the shell connects, and when one changes, at most once a
     /// frame.
@@ -127,7 +127,7 @@ pub enum ToShell {
     Agents(Vec<AgentShown>),
     /// An agent's panda peeks out of the bar's edge (4.5): it started waiting,
     /// finished, or waits still at its reminder. Sent after the
-    /// [`ToShell::Agents`] line that says so; the latest replaces the one out.
+    /// [`ToShell::Agents`](crate::ToShell::Agents) line that says so; the latest replaces the one out.
     Peek(Peek),
     /// The panda is back in the bar: its surfaces go.
     NoPeek,
@@ -145,7 +145,7 @@ pub enum ToShell {
     /// it changes.
     Focus(String),
     /// `Super+Space` (5.1): the launcher opens on `output`, the screen under
-    /// the pointer, whose scale is `scale` (120ths, as [`ToShell::Bar`]'s);
+    /// the pointer, whose scale is `scale` (120ths, as [`ToShell::Bar`](crate::ToShell::Bar)'s);
     /// open, it closes.
     Launcher { output: String, scale: u32 },
     /// A client took the clipboard (5.6): what it offered, read off the
@@ -155,7 +155,7 @@ pub enum ToShell {
     Copied { app: String, clip: Clip },
     /// A capture (5.8b) for the clipboard's history: its PNG, the compositor's
     /// `capture`th of the session. The history lists it as copied from
-    /// [`CAPTURE_APP`]; the same capture told again (its annotated image, 5.9)
+    /// [`CAPTURE_APP`](crate::CAPTURE_APP); the same capture told again (its annotated image, 5.9)
     /// replaces the item it made.
     CaptureCopied { capture: u64, clip: Clip },
     /// `Super+V` (5.6): the clipboard's history opens on `output`'s bar, the
@@ -213,11 +213,11 @@ pub enum ToShell {
     /// A recording saved: its thumbnail ([`Recorded`]).
     Recorded(Recorded),
     /// The activation token for the tray's click `ask`
-    /// ([`ToCompositor::TrayClick`], 5.14b): the shell gives it to the item
+    /// ([`ToCompositor::TrayClick`](crate::ToCompositor::TrayClick), 5.14b): the shell gives it to the item
     /// before activating it.
     TrayToken { ask: u64, token: String },
     /// The xdg-foreign handle made for the shell's surface asked for in `ask`
-    /// ([`ToCompositor::Export`], #595), `None` without such a surface: the
+    /// ([`ToCompositor::Export`](crate::ToCompositor::Export), #595), `None` without such a surface: the
     /// shell names it to the desktop portal as its dialog's parent
     /// (`wayland:HANDLE`).
     Exported { ask: u64, handle: Option<String> },
@@ -243,7 +243,7 @@ pub enum ToShell {
     /// the shell connects and when they change.
     Fullscreen(#[serde(serialize_with = "tidy::names")] Vec<String>),
     /// The screens shared now (5.11), by their connectors' names: a meeting's
-    /// reminder hides its title on them (Day.6). Sent with [`ToShell::Shares`].
+    /// reminder hides its title on them (Day.6). Sent with [`ToShell::Shares`](crate::ToShell::Shares).
     SharedScreens(#[serde(serialize_with = "tidy::names")] Vec<String>),
     /// The session is locked (7.1, [`LockShown`]): the lock's surfaces on
     /// every screen, as told. Sent as it locks, on each change, and as the
@@ -271,7 +271,7 @@ pub enum ToShell {
     /// user opens it.
     SessionMenu { output: String },
     /// What the bar's menu of a window shows (#723), the answer to
-    /// [`ToCompositor::WindowMenu`] ([`WindowMenu`]).
+    /// [`ToCompositor::WindowMenu`](crate::ToCompositor::WindowMenu) ([`WindowMenu`]).
     WindowMenu(WindowMenu),
     /// The windows kept above the others and those on all desktops, for
     /// the marks after their titles in the bar ([`WindowStates`]).
@@ -338,7 +338,7 @@ impl Supervised {
     }
 }
 
-/// What [`ToShell::Day`] asks.
+/// What [`ToShell::Day`](crate::ToShell::Day) asks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DayAsk {
@@ -385,7 +385,7 @@ pub struct Peek {
     pub name: String,
 }
 
-/// Windows that moved with a screen ([`ToShell::ScreensMoved`]).
+/// Windows that moved with a screen ([`ToShell::ScreensMoved`](crate::ToShell::ScreensMoved)).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScreensMoved {
     /// The screen went (else it came back).

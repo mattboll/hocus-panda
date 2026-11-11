@@ -20,7 +20,7 @@ pub struct DeskWindow {
     /// Left, top, width, height, in [`SHARE`]s of the screen, inside it.
     pub rect: [u16; 4],
     pub look: Look,
-    /// The compositor's id for it: what [`ToCompositor::Bring`] names.
+    /// The compositor's id for it: what [`ToCompositor::Bring`](crate::ToCompositor::Bring) names.
     pub id: u64,
     /// Its application's id, for its icon (empty: none).
     pub app: String,
@@ -71,7 +71,7 @@ pub struct Titles {
     pub titles: Vec<(u64, String)>,
 }
 
-/// A screen's windows, the most recently focused first ([`ToShell::Recent`]).
+/// A screen's windows, the most recently focused first ([`ToShell::Recent`](crate::ToShell::Recent)).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Recent {
     pub output: String,
