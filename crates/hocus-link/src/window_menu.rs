@@ -11,8 +11,6 @@
 //!   kept above the others and those on all desktops, for the marks after
 //!   their titles, sent as the shell connects and when they change.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 use crate::text::tidy;

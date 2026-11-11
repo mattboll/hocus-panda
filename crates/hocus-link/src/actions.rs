@@ -1280,7 +1280,6 @@ pub fn key_shown(key: &str, fr: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ToCompositor, ToShell};
 
     #[test]
     fn the_catalogue_is_by_category_each_id_once() {
@@ -1320,6 +1319,31 @@ mod tests {
         );
         assert_eq!(of_shortcut("desktop-0"), None);
         assert_eq!(of_shortcut("actions"), None);
+    }
+
+    #[test]
+    fn an_actions_chords_are_found_by_its_shortcut() {
+        let shown = ActionsShown {
+            shortcuts: vec![
+                ("close".into(), vec!["Super+Q".into(), "Alt+F4".into()]),
+                ("focus-left".into(), Vec::new()),
+                ("send-to-desktop-1".into(), vec!["Super+Shift+1".into()]),
+            ],
+            ..ActionsShown::default()
+        };
+        assert_eq!(
+            shown
+                .chords(find("close").expect("close"))
+                .map(|c| c.0.len()),
+            Some(2)
+        );
+        assert_eq!(shown.chords(find("focus-left").expect("focus")), None);
+        assert_eq!(
+            shown
+                .chords(find("send-to-desktop").expect("send"))
+                .map(|c| c.1),
+            Some(true)
+        );
     }
 
     #[test]

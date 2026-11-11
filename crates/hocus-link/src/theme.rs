@@ -1136,12 +1136,8 @@ mod tests {
             wallpaper: AccentColours::lifted([0x1D, 0x3A, 0x2E]),
             contrast: false,
         };
-        assert_eq!(choice.to_string().parse::<Choice>(), Ok(choice));
         assert_eq!(choice.accent(), choice.wallpaper);
-        assert_eq!(
-            "dark green".parse::<Choice>().map(|c| c.wallpaper),
-            Ok(BACKDROP_ACCENT)
-        );
+        assert_eq!(Choice::default().wallpaper, BACKDROP_ACCENT);
     }
 
     /// Every accent, the wallpaper's among them (a few hues of their own).
@@ -1374,9 +1370,8 @@ mod tests {
         };
         assert_eq!(contrast.tokens(), &DARK_CONTRAST);
         assert_eq!(contrast.reads(DARK.dim), DARK_CONTRAST.dim);
-        // On the line and in the file.
+        // In the log and in the file.
         assert_eq!(frost.to_string(), "frost ice 7a96e0,a4b8f0,3a58b0");
-        assert_eq!(frost.to_string().parse::<Choice>(), Ok(frost));
         assert_eq!("frost".parse::<Scheme>(), Ok(Scheme::Frost));
         assert_eq!("ice".parse::<Accent>(), Ok(Accent::Ice));
         assert!("givre".parse::<Scheme>().is_err());
@@ -1449,7 +1444,6 @@ mod tests {
             .tokens(),
             &DARK_CONTRAST
         );
-        assert_eq!(matrix.to_string().parse::<Choice>(), Ok(matrix));
         assert_eq!("matrix".parse::<Scheme>(), Ok(Scheme::Matrix));
         assert_eq!("phosphor".parse::<Accent>(), Ok(Accent::Phosphor));
         assert!(Scheme::Matrix.themed());

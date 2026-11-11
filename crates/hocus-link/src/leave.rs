@@ -174,7 +174,6 @@ pub enum LeaveAsk {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ToCompositor, ToShell};
 
     #[test]
     fn logging_out_is_always_allowed() {

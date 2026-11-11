@@ -343,10 +343,10 @@ impl Supervised {
 #[serde(rename_all = "kebab-case")]
 pub enum DayAsk {
     /// A task titled so, at the top of the tasks' add column.
-    Add(String),
+    Add(#[serde(serialize_with = "tidy::name")] String),
     /// The task of that id ticked, or unticked.
-    Tick(String),
-    Untick(String),
+    Tick(#[serde(serialize_with = "tidy::name")] String),
+    Untick(#[serde(serialize_with = "tidy::name")] String),
     /// Every account read again now.
     Refresh,
     /// Tests only, and only when the shell's clock reads a time of its own
