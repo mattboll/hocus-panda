@@ -236,7 +236,7 @@ impl crate::State {
     /// The Settings' line's line for `counts`.
     pub(crate) fn desktops_line((count, windows): Counts) -> String {
         serde_json::json!({
-            "desktops": { "count": count, "windows": &windows[..count] }
+            "desktops": { "count": count, "windows": windows.get(..count).unwrap_or(&windows) }
         })
         .to_string()
     }

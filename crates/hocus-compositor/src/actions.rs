@@ -476,7 +476,13 @@ fn write_appearance(file: PathBuf, key: &'static str, on: bool) {
             let written = hocus_config::edit(
                 &file,
                 |doc| {
-                    doc["appearance"][key] = hocus_config::toml_edit::value(on);
+                    use hocus_config::toml_edit::{Item, Table, value};
+                    // The user's file: `appearance` may be anything there.
+                    doc.entry("appearance")
+                        .or_insert_with(|| Item::Table(Table::new()))
+                        .as_table_like_mut()
+                        .ok_or("appearance is not a table")?
+                        .insert(key, value(on));
                     Ok(())
                 },
                 |_| Ok(()),

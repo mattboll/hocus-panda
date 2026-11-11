@@ -361,9 +361,10 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
     let waiting = state
         .unmapped
         .iter()
-        .position(|w| w.wl_surface().is_some_and(|s| *s == *surface));
-    if let Some(index) = waiting {
-        let window = state.unmapped[index].clone();
+        .enumerate()
+        .find(|(_, w)| w.wl_surface().is_some_and(|s| *s == *surface))
+        .map(|(index, w)| (index, w.clone()));
+    if let Some((index, window)) = waiting {
         if let Some(toplevel) = window.toplevel() {
             if !toplevel.is_initial_configure_sent() {
                 state.rule_size_first(&window, toplevel);

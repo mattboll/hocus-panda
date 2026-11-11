@@ -86,8 +86,8 @@ impl FromStr for Colour {
             }
             6 => {
                 let mut rgb = [0; 3];
-                for (out, pair) in rgb.iter_mut().zip(bytes.chunks(2)) {
-                    *out = (digit(pair[0])? * 16 + digit(pair[1])?) as u8;
+                for (out, [high, low]) in rgb.iter_mut().zip(bytes.as_chunks::<2>().0) {
+                    *out = (digit(*high)? * 16 + digit(*low)?) as u8;
                 }
                 Ok(Self(rgb))
             }

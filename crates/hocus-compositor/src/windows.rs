@@ -1580,7 +1580,7 @@ impl State {
         let pairable = self.pairable();
         let mut seams = Vec::new();
         for (i, (a, ra, oa)) in pairable.iter().enumerate() {
-            for (b, rb, ob) in &pairable[i + 1..] {
+            for (b, rb, ob) in pairable.iter().skip(i + 1) {
                 if oa == ob
                     && let Some(seam) = model::seam((*a, *ra), (*b, *rb))
                 {

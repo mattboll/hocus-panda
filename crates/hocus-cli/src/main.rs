@@ -488,7 +488,8 @@ fn follow(socket: Option<PathBuf>, question: Question) -> ExitCode {
             match stream.read(&mut buffer).map_err(place)? {
                 0 => return Ok(()),
                 n => {
-                    out.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
+                    out.write_all(buffer.get(..n).unwrap_or(&buffer))
+                        .map_err(|e| e.to_string())?;
                     out.flush().map_err(|e| e.to_string())?;
                 }
             }

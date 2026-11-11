@@ -170,6 +170,11 @@ impl Jelly {
         }
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "the points' vectors were all made with (gx + 1) × (gy + 1) entries, and k \
+                  and its neighbours are points of that grid"
+    )]
     fn step(&mut self, dt: f64) {
         let n = self.gx + 1;
         let (mx, my) = (self.w * MAX_BEND, self.h * MAX_BEND);
@@ -232,6 +237,11 @@ impl Jelly {
 
     /// The displacement at (`u`, `v`) across the window, from 0 to 1,
     /// between the grid's points.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "i < gx and j < gy: the four corners are points of the grid, which has \
+                  (gx + 1) × (gy + 1)"
+    )]
     pub fn at(&self, u: f64, v: f64) -> (f64, f64) {
         let x = (u * self.gx as f64).clamp(0.0, self.gx as f64);
         let y = (v * self.gy as f64).clamp(0.0, self.gy as f64);
@@ -323,6 +333,10 @@ fn mesh(jelly: &Jelly, picture: &Picture, flip_v: bool) -> (Vec<f32>, Rectangle<
         lo = (lo.0.min(p.0), lo.1.min(p.1));
         hi = (hi.0.max(p.0), hi.1.max(p.1));
     }
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "asked with i ≤ nx and j ≤ ny, which the grid was filled for just above"
+    )]
     let at = |i: usize, j: usize| grid[j * (nx + 1) + i];
     for j in 0..ny {
         for i in 0..nx {
@@ -614,6 +628,10 @@ impl Bend for GlesRenderer {
 
 /// The frame's `projection` (3×3, by columns) after the mesh's vertices,
 /// laid out over `geometry`, are moved and stretched onto `dst`.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "3×3 matrices in arrays of 9: col, row and i are under 3"
+)]
 pub(crate) fn placed(
     projection: &[f32; 9],
     geometry: Rectangle<i32, Physical>,

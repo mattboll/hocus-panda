@@ -96,7 +96,7 @@ impl Sector {
     pub fn toward(dx: f64, dy: f64) -> Self {
         let degrees = dy.atan2(dx).to_degrees() + 90.0;
         let index = (degrees / 45.0).round().rem_euclid(8.0) as usize;
-        Self::ALL[index % 8]
+        Self::ALL.get(index % 8).copied().unwrap_or(Self::Up)
     }
 
     /// What it does.
@@ -212,11 +212,11 @@ pub struct Radial {
 
 impl Radial {
     fn enabled(&self, sector: Sector) -> bool {
-        self.enabled[sector.index()]
+        self.enabled.get(sector.index()).copied().unwrap_or(false)
     }
 
     pub fn is_on(&self, sector: Sector) -> bool {
-        self.on[sector.index()]
+        self.on.get(sector.index()).copied().unwrap_or(false)
     }
 
     fn relative(&self, at: (f64, f64)) -> (f64, f64) {
@@ -355,7 +355,7 @@ impl Radial {
                     (Some(p), false) => (p + 1) % n,
                     (Some(p), true) => (p + n - 1) % n,
                 };
-                self.light(Some(order[next]), now);
+                self.light(order.get(next).copied(), now);
                 Outcome::Nothing
             }
             Key::Enter => self.lit.map_or(Outcome::Nothing, Outcome::Pick),
@@ -444,13 +444,18 @@ impl State {
         let strip = self.strip(&home);
         let desktop = self.model.desktop(id);
         let other = self.next_screen(&home);
-        let mut enabled = [true; 8];
-        enabled[Sector::Left.index()] = desktop > 0;
-        enabled[Sector::Right.index()] = desktop + 1 < strip.count();
-        enabled[Sector::DownRight.index()] = other.is_some();
-        let mut on = [false; 8];
-        on[Sector::UpRight.index()] = self.model.is_above(id);
-        on[Sector::UpLeft.index()] = self.model.is_everywhere(id);
+        // In the sectors' order, as `Sector::index` reads them.
+        let enabled = Sector::ALL.map(|sector| match sector {
+            Sector::Left => desktop > 0,
+            Sector::Right => desktop + 1 < strip.count(),
+            Sector::DownRight => other.is_some(),
+            _ => true,
+        });
+        let on = Sector::ALL.map(|sector| match sector {
+            Sector::UpRight => self.model.is_above(id),
+            Sector::UpLeft => self.model.is_everywhere(id),
+            _ => false,
+        });
         let agent = self
             .agents_shown()
             .iter()
@@ -669,7 +674,8 @@ impl State {
         }
         outputs.sort_by_key(|(_, at)| *at);
         let at = outputs.iter().position(|(o, _)| o == output)?;
-        Some(outputs[(at + 1) % outputs.len()].0.clone())
+        let (next, _) = outputs.get((at + 1) % outputs.len())?;
+        Some(next.clone())
     }
 
     /// Runs `action` on window `id`, from its radial menu or the bar's.

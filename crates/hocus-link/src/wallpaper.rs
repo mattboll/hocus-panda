@@ -470,7 +470,9 @@ pub fn dominant(picture: &image::DynamicImage) -> AccentColours {
             60.0 * ((r - g) / d + 4.0)
         };
         let weight = (d / max) * max;
-        let bin = &mut bins[((hue / 30.0) as usize).min(11)];
+        let Some(bin) = bins.get_mut(((hue / 30.0) as usize).min(11)) else {
+            continue;
+        };
         bin.0 += weight;
         for (sum, v) in bin.1.iter_mut().zip([r, g, b]) {
             *sum += v * weight;

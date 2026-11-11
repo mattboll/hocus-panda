@@ -238,7 +238,10 @@ pub fn lit(index: usize, x: usize, y: usize) -> bool {
     if x >= w || y >= h {
         return false;
     }
-    DRAWN[index % GLYPHS].as_bytes().get(y * w + x) == Some(&b'#')
+    DRAWN
+        .get(index % GLYPHS)
+        .and_then(|glyph| glyph.as_bytes().get(y * w + x))
+        == Some(&b'#')
 }
 
 /// The atlas the shaders read the glyphs from: an 8 × 8 grid of 8 × 8
@@ -254,7 +257,9 @@ pub fn atlas() -> (i32, i32, Vec<u8>) {
             for x in 0..GLYPH_DOTS.0 {
                 if lit(g, x, y) {
                     let at = ((gy + y) * SIDE + gx + x) * 4;
-                    pixels[at..at + 4].copy_from_slice(&[255, 255, 255, 255]);
+                    if let Some(texel) = pixels.get_mut(at..at + 4) {
+                        texel.copy_from_slice(&[255, 255, 255, 255]);
+                    }
                 }
             }
         }
@@ -330,7 +335,11 @@ pub fn rain_glyph(column: f64, row: f64, tick: f64, head: bool) -> usize {
 pub const GLYPH_BOX: ([f64; 2], [f64; 2]) = ([0.12, 0.14], [0.88, 0.86]);
 
 fn mix(a: [u8; 3], b: [u8; 3], t: f64) -> [f64; 3] {
-    std::array::from_fn(|i| f64::from(a[i]) + (f64::from(b[i]) - f64::from(a[i])) * t)
+    let mut out = a.map(f64::from);
+    for (out, b) in out.iter_mut().zip(b) {
+        *out += (f64::from(b) - *out) * t;
+    }
+    out
 }
 
 /// The still picture of `moving` for a screen `size` physical pixels large
@@ -412,9 +421,10 @@ fn fill(
             let cx = (x1.min(px as f64 + 1.0) - x.max(px as f64)).clamp(0.0, 1.0);
             let a = cx * cy * alpha;
             let at = (py * w + px) * 4;
-            for i in 0..3 {
-                let under = f64::from(pixels[at + i]);
-                pixels[at + i] = (under + (f64::from(colour[i]) - under) * a).round() as u8;
+            let pixel = pixels.get_mut(at..at + 3).unwrap_or_default();
+            for (pixel, colour) in pixel.iter_mut().zip(colour) {
+                let under = f64::from(*pixel);
+                *pixel = (under + (f64::from(colour) - under) * a).round() as u8;
             }
         }
     }
@@ -526,7 +536,7 @@ pub const AURORA_WEIGHTS: [f64; 3] = [0.42, 0.72, 0.36];
 pub fn aurora(u: f64, v: f64, aspect: f64, time: f64) -> [f64; 3] {
     let mut colour = mix(AURORA_TOP, AURORA_BOTTOM, v).map(|c| c / 255.0);
     let x = u * aspect;
-    for (i, veil) in AURORA_VEILS.iter().enumerate() {
+    for (i, (veil, weight)) in AURORA_VEILS.iter().zip(AURORA_WEIGHTS).enumerate() {
         let f = i as f64;
         let xs = x + time * 0.012 * (1.0 + 0.5 * f);
         let centre = 0.28
@@ -541,7 +551,7 @@ pub fn aurora(u: f64, v: f64, aspect: f64, time: f64) -> [f64; 3] {
         let t = ((d + 0.03) / 0.06).clamp(0.0, 1.0);
         let curtain = above + (below - above) * t * t * (3.0 - 2.0 * t);
         let shimmer = 0.8 + 0.2 * (time * 0.5 + xs * 1.5 + f).sin();
-        let a = curtain * shimmer * AURORA_WEIGHTS[i];
+        let a = curtain * shimmer * weight;
         for (c, v) in colour.iter_mut().zip(veil) {
             *c += f64::from(*v) / 255.0 * a;
         }
@@ -596,7 +606,11 @@ pub fn haze(u: f64, v: f64) -> [f64; 3] {
         (1.0 - d).max(0.0).powi(2)
     };
     let a = (0.35 * cloud(0.3, 0.35, 0.45) + 0.25 * cloud(0.75, 0.7, 0.4)).min(1.0);
-    std::array::from_fn(|i| base[i] + (f64::from(STARS_HAZE[i]) - base[i]) * a)
+    let mut out = base;
+    for (out, haze) in out.iter_mut().zip(STARS_HAZE) {
+        *out += (f64::from(haze) - *out) * a;
+    }
+    out
 }
 
 #[cfg(test)]

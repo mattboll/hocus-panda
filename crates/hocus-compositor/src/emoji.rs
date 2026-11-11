@@ -146,7 +146,11 @@ impl State {
         let at = match focused {
             Some(id) => match self.caret_of(id) {
                 Some(caret) => EmojiAt::Caret(local(caret)),
-                None => match self.space.element_geometry(&self.windows[&id].window) {
+                None => match self
+                    .windows
+                    .get(&id)
+                    .and_then(|w| self.space.element_geometry(&w.window))
+                {
                     Some(rect) => EmojiAt::Window(local(rect)),
                     None => EmojiAt::Screen,
                 },

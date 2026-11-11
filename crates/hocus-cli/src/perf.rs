@@ -41,7 +41,9 @@ pub fn day(date: Option<&str>, json: bool) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        value["date"] = date.to_string().into();
+        if let Some(report) = value.as_object_mut() {
+            report.insert("date".to_owned(), date.to_string().into());
+        }
         println!("{value:#}");
     } else {
         print!("{}", text::day(&report, date, text::Lang::from_env(), &tz));

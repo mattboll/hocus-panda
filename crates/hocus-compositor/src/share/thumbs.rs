@@ -100,18 +100,21 @@ pub fn shrink(
             let x1 = ((tx + 1) * sw / tw).max(x0 + 1).min(sw);
             let mut sum = [0u32; 4];
             for y in y0..y1 {
-                let row = &pixels[(y * sw + x0) * 4..(y * sw + x1) * 4];
+                let row = pixels
+                    .get((y * sw + x0) * 4..(y * sw + x1) * 4)
+                    .unwrap_or_default();
                 for px in row.as_chunks::<4>().0 {
-                    for k in 0..4 {
-                        sum[k] += u32::from(px[k]);
+                    for (sum, value) in sum.iter_mut().zip(px) {
+                        *sum += u32::from(*value);
                     }
                 }
             }
             let n = ((y1 - y0) * (x1 - x0)) as u32;
             let cover = corner_cover(tx, ty, tw, th, radius);
             let at = (ty * tw + tx) * 4;
-            for k in 0..4 {
-                out[at + k] = ((f64::from(sum[k] / n.max(1))) * cover).round() as u8;
+            let to = out.get_mut(at..at + 4).unwrap_or_default();
+            for (to, sum) in to.iter_mut().zip(sum) {
+                *to = ((f64::from(sum / n.max(1))) * cover).round() as u8;
             }
         }
     }

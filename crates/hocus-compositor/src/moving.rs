@@ -136,8 +136,7 @@ fn union_area(rects: &[(f64, f64, f64, f64)]) -> f64 {
     xs.dedup();
     let mut area = 0.0;
     let mut spans: Vec<(f64, f64)> = Vec::with_capacity(rects.len());
-    for pair in xs.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
+    for (&a, &b) in xs.iter().zip(xs.iter().skip(1)) {
         spans.clear();
         spans.extend(
             rects

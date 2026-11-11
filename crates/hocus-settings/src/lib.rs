@@ -37,6 +37,14 @@
 //!   compositor's recorder writes (#655).
 //! - [`app`]: the window, drawn with iced as the shell is.
 
+// What is left of #778 here: 87 indexed places, most on the pages'
+// fixed lists. A panic ends the Settings' window alone; the lint is on
+// everywhere else.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "#778: the Settings' 87 sites are still to be gone through"
+)]
+
 pub mod accessibility;
 pub mod account;
 pub mod accounts;

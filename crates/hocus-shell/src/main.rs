@@ -26,6 +26,14 @@
 //! popover beside the bar ([`popover`]), opened from an item, and the panda
 //! peeking out of the bar's edge ([`agents::peek`]).
 
+// What is left of #778 here: 197 indexed places, most in drawing code
+// (pixels, glyphs, fixed tables). A panic ends the bar, which the
+// compositor starts again; the lint is on everywhere else.
+#![allow(
+    clippy::indexing_slicing,
+    reason = "#778: the shell's 197 sites are still to be gone through"
+)]
+
 mod a11y;
 mod actions;
 mod agents;

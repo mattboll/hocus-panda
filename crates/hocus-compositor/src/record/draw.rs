@@ -38,10 +38,10 @@ pub struct Drawn {
 impl Drawn {
     fn id(&self, at: usize) -> Id {
         let mut ids = self.ids.borrow_mut();
-        while ids.len() <= at {
-            ids.push(Id::new());
+        if ids.len() <= at {
+            ids.resize_with(at + 1, Id::new);
         }
-        ids[at].clone()
+        ids.get(at).cloned().unwrap_or_else(Id::new)
     }
 }
 

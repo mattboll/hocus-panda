@@ -89,6 +89,11 @@ all = { level = "warn", priority = -1 }
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
+# A panic ends the session, or the bar: what could panic is handled, or
+# says why it cannot (`#[expect(…, reason = "…")]`). Tests may (clippy.toml).
+expect_used = "warn"
+indexing_slicing = "warn"
+panic = "warn"
 
 [profile.dev]
 # Keep debug builds usable: the compositor draws every frame.

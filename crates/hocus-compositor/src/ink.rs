@@ -260,7 +260,7 @@ impl Ink {
                     return false;
                 }
                 mark.points.truncate(1);
-                if mark.points[0] != at {
+                if mark.points.first() != Some(&at) {
                     mark.points.push(at);
                 }
             }
@@ -495,11 +495,14 @@ impl Mark {
     fn segments(&self, scale: f64, from: usize) -> Vec<Seg> {
         let px = |p: (f64, f64)| (p.0 * scale, p.1 * scale);
         match self.shape {
-            Shape::Stroke => self.points[from.saturating_sub(1)..]
-                .windows(2)
-                .map(|w| Seg {
-                    a: px(w[0]),
-                    b: px(w[1]),
+            Shape::Stroke => self
+                .points
+                .iter()
+                .zip(self.points.iter().skip(1))
+                .skip(from.saturating_sub(1))
+                .map(|(a, b)| Seg {
+                    a: px(*a),
+                    b: px(*b),
                 })
                 .collect(),
             Shape::Arrow => match self.points.as_slice() {
@@ -800,7 +803,7 @@ fn paint(
                 let Some(old) = pixels.get_mut(at..at + 4) else {
                     continue;
                 };
-                match (old[3] != 0, value[3] != 0) {
+                match (old.last() != Some(&0), value[3] != 0) {
                     (false, true) => *inked += 1,
                     (true, false) => *inked = inked.saturating_sub(1),
                     _ => {}
@@ -839,14 +842,18 @@ fn sprite(size: f64, sigma: f64, box_size: f64, scale: f64) -> (MemoryRenderBuff
             let core = (radius + 0.5 - d).clamp(0.0, 1.0);
             let glow = LASER_GLOW_ALPHA * band(radius, d, sigma) * (1.0 - core);
             let alpha = core + glow;
-            let channel = |c: usize| {
-                ((core * LASER[c] + glow * LASER_GLOW[c]).round()).clamp(0.0, 255.0) as u8
+            let channel = |laser: f64, laser_glow: f64| {
+                ((core * laser + glow * laser_glow).round()).clamp(0.0, 255.0) as u8
             };
+            let ([r, g, b], [glow_r, glow_g, glow_b]) = (LASER, LASER_GLOW);
             let at = ((y * px + x) * 4) as usize;
-            pixels[at..at + 4].copy_from_slice(&[
-                channel(2),
-                channel(1),
-                channel(0),
+            let Some(pixel) = pixels.get_mut(at..at + 4) else {
+                continue;
+            };
+            pixel.copy_from_slice(&[
+                channel(b, glow_b),
+                channel(g, glow_g),
+                channel(r, glow_r),
                 (alpha * 255.0).round().clamp(0.0, 255.0) as u8,
             ]);
         }

@@ -181,12 +181,14 @@ impl CursorImages {
             return None;
         };
         let (index, _) = theme::frame_at(loaded, now);
+        // A theme's file may hold no frame at this size.
+        let frame = loaded.get(index)?;
         let at_scale = (scale * 1000.0).round() as u32;
         let placed = self
             .placed
             .borrow_mut()
             .entry((icon, key, at_scale, index))
-            .or_insert_with(|| place(&loaded[index], scale))
+            .or_insert_with(|| place(frame, scale))
             .clone();
         Some(placed)
     }
@@ -341,7 +343,9 @@ fn place(frame: &Frame, scale: f64) -> Placed {
     let row = (frame.width * 4) as usize;
     for (y, line) in frame.pixels.chunks_exact(row).enumerate() {
         let at = y * cw as usize * 4;
-        pixels[at..at + row].copy_from_slice(line);
+        if let Some(to) = pixels.get_mut(at..at + row) {
+            to.copy_from_slice(line);
+        }
     }
     Placed {
         buffer: MemoryRenderBuffer::from_slice(

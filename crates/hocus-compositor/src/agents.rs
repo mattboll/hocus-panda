@@ -473,7 +473,7 @@ impl Compositor {
                     a.pids.contains(&pid) && !a.keys.iter().any(|(s, _)| *s == report.source)
                 })
             });
-        let index = match at {
+        let at = match at {
             Some(index) => index,
             None => {
                 agents.next_id += 1;
@@ -500,7 +500,9 @@ impl Compositor {
             agents.codex_heard = true;
             watcher.ask(hocus_agents::watch::Ask::CodexHeard);
         }
-        let agent = &mut agents.list[index];
+        let Some(agent) = agents.list.get_mut(at) else {
+            return;
+        };
         if !agent.keys.contains(&key) {
             agent.keys.push(key);
         }

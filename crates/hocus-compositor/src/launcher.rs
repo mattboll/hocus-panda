@@ -299,12 +299,14 @@ fn tint_pixels() -> Vec<u8> {
             let t = (row as f32 + 0.5) / TINT_ROWS as f32;
             let mix = |a: f32, b: f32| a + (b - a) * t;
             let alpha = mix(top_alpha, bottom_alpha);
-            let channel =
-                |i: usize| (mix(f32::from(top[i]), f32::from(bottom[i])) * alpha).round() as u8;
+            let channel = |top: u8, bottom: u8| {
+                (mix(f32::from(top), f32::from(bottom)) * alpha).round() as u8
+            };
+            let ([r, g, b], [r2, g2, b2]) = (top, bottom);
             [
-                channel(2),
-                channel(1),
-                channel(0),
+                channel(b, b2),
+                channel(g, g2),
+                channel(r, r2),
                 (alpha * 255.0).round() as u8,
             ]
         })

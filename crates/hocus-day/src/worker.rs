@@ -888,13 +888,16 @@ fn runs(months: &[Date]) -> Vec<&[Date]> {
     let mut runs = Vec::new();
     let mut start = 0;
     for i in 1..=months.len() {
-        let follows = months.get(i).is_some_and(|month| {
-            months[i - 1]
-                .checked_add(jiff::Span::new().months(1))
-                .is_ok_and(|next| next == *month)
-        });
+        let follows = months
+            .get(i - 1)
+            .zip(months.get(i))
+            .is_some_and(|(before, month)| {
+                before
+                    .checked_add(jiff::Span::new().months(1))
+                    .is_ok_and(|next| next == *month)
+            });
         if !follows {
-            runs.push(&months[start..i]);
+            runs.push(months.get(start..i).unwrap_or_default());
             start = i;
         }
     }

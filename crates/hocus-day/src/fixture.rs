@@ -361,7 +361,10 @@ pub fn read(text: &str, account: &AccountId, now: &Zoned) -> std::result::Result
                     Some(name) => board
                         .column(name)
                         .ok_or_else(|| format!("card {:?}: no column {name:?}", card.title))?,
-                    None => &board.columns[0],
+                    None => board
+                        .columns
+                        .first()
+                        .ok_or_else(|| format!("card {:?}: the board has no column", card.title))?,
                 };
                 let due = match &card.due {
                     None => None,

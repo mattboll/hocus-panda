@@ -624,7 +624,7 @@ pub(crate) fn read_all(
                 if data.len() + n > most {
                     return Err("too large");
                 }
-                data.extend_from_slice(&chunk[..n]);
+                data.extend_from_slice(chunk.get(..n).unwrap_or(&chunk));
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return Err("could not read it"),

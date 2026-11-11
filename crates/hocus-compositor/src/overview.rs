@@ -228,19 +228,21 @@ pub fn arrange(sizes: &[(f64, f64)], area: Area) -> Vec<Area> {
         .collect();
     let label = LABEL_GAP + LABEL_LINE;
     let mut best: Option<(f64, Vec<std::ops::Range<usize>>)> = None;
+    // A row's windows: `split_rows` cuts within `sizes`.
+    let row = |r: &std::ops::Range<usize>| sizes.get(r.clone()).unwrap_or_default();
     for rows in 1..=n {
         let split = split_rows(&sizes, rows);
         let widest = split
             .iter()
             .map(|r| {
-                let w: f64 = sizes[r.clone()].iter().map(|s| s.0).sum();
+                let w: f64 = row(r).iter().map(|s| s.0).sum();
                 (w, r.len())
             })
             .map(|(w, k)| (area.w - (k as f64 - 1.0) * WINDOW_GAP).max(1.0) / w)
             .fold(f64::INFINITY, f64::min);
         let heights: f64 = split
             .iter()
-            .map(|r| sizes[r.clone()].iter().map(|s| s.1).fold(0.0, f64::max))
+            .map(|r| row(r).iter().map(|s| s.1).fold(0.0, f64::max))
             .sum();
         let room = area.h - rows as f64 * label - (rows as f64 - 1.0) * WINDOW_GAP;
         let k = widest.min(room.max(1.0) / heights).min(1.0);
@@ -252,17 +254,17 @@ pub fn arrange(sizes: &[(f64, f64)], area: Area) -> Vec<Area> {
         return Vec::new();
     };
     let row_height =
-        |r: &std::ops::Range<usize>| sizes[r.clone()].iter().map(|s| s.1).fold(0.0, f64::max) * k;
+        |r: &std::ops::Range<usize>| row(r).iter().map(|s| s.1).fold(0.0, f64::max) * k;
     let total: f64 = split.iter().map(|r| row_height(r) + label).sum::<f64>()
         + (split.len() as f64 - 1.0) * WINDOW_GAP;
     let mut y = area.y + ((area.h - total) / 2.0).max(0.0);
     let mut out = Vec::with_capacity(n);
     for r in &split {
         let height = row_height(r);
-        let width: f64 = sizes[r.clone()].iter().map(|s| s.0 * k).sum::<f64>()
-            + (r.len() as f64 - 1.0) * WINDOW_GAP;
+        let width: f64 =
+            row(r).iter().map(|s| s.0 * k).sum::<f64>() + (r.len() as f64 - 1.0) * WINDOW_GAP;
         let mut x = area.x + (area.w - width) / 2.0;
-        for &(w, h) in &sizes[r.clone()] {
+        for &(w, h) in row(r) {
             let (w, h) = (w * k, h * k);
             out.push(Area {
                 x,
@@ -288,8 +290,10 @@ fn split_rows(sizes: &[(f64, f64)], rows: usize) -> Vec<std::ops::Range<usize>> 
         let target = total * row as f64 / rows as f64;
         let mut end = start;
         // At least one window a row, and one left for each row after.
-        while end < sizes.len() - (rows - row) {
-            let next = sum + sizes[end].0;
+        while end < sizes.len() - (rows - row)
+            && let Some(size) = sizes.get(end)
+        {
+            let next = sum + size.0;
             if end > start && (next - target).abs() > (sum - target).abs() {
                 break;
             }

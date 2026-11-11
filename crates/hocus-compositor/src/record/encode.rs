@@ -505,7 +505,7 @@ fn collect_errors(child: &mut Child) -> Arc<Mutex<String>> {
                         break;
                     }
                     let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
-                    kept.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    kept.push_str(&String::from_utf8_lossy(buf.get(..n).unwrap_or(&buf)));
                     let extra = kept.len().saturating_sub(2000);
                     if extra > 0 {
                         let at = kept.ceil_char_boundary(extra);
@@ -580,7 +580,7 @@ impl Frames {
         for y in 0..(size.1.min(h) as usize) {
             let from = y * stride as usize;
             let src = pixels.get(from..from + take)?;
-            frame[y * row..y * row + take].copy_from_slice(src);
+            frame.get_mut(y * row..y * row + take)?.copy_from_slice(src);
         }
         Some(frame)
     }

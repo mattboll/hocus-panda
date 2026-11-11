@@ -154,17 +154,17 @@ impl Reader {
             }
         })?;
         let (new, fbo) = made;
-        let pbo = match at {
-            Some(at) => &pbos[at],
-            None => {
-                pbos.push(Pbo {
-                    name: new,
-                    len,
-                    free: Arc::new(AtomicBool::new(true)),
-                });
-                &pbos[pbos.len() - 1]
-            }
-        };
+        let at = at.unwrap_or_else(|| {
+            pbos.push(Pbo {
+                name: new,
+                len,
+                free: Arc::new(AtomicBool::new(true)),
+            });
+            pbos.len() - 1
+        });
+        let pbo = pbos
+            .get(at)
+            .ok_or_else(|| anyhow::anyhow!("no buffer to read into"))?;
         let name = pbo.name;
         let free = pbo.free.clone();
         let read = renderer.with_context(|gl| {
