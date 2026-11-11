@@ -22,7 +22,7 @@ use iced::{
 use super::Words;
 use crate::theme::Ink;
 use crate::{
-    levels::draw::{DIM, FAINT, HOVER, MANROPE_BOLD, faded, rgb, ring},
+    levels::draw::{DIM, FAINT, HOVER, MANROPE_BOLD, faded, rgb},
     popover::kit,
 };
 
@@ -36,10 +36,10 @@ const TITLE: f32 = 13.5;
 const TEXT: f32 = 12.0;
 const TEXT_LINE: f32 = 12.0 * 1.45;
 const CHOOSE: f32 = 30.0;
-const CHOOSE_RADIUS: f32 = 8.0;
+pub const CHOOSE_RADIUS: f32 = 8.0;
 const CHOOSE_TEXT: f32 = 12.5;
 const LATER: f32 = 24.0;
-const LATER_RADIUS: f32 = 7.0;
+pub const LATER_RADIUS: f32 = 7.0;
 const LATER_TEXT: f32 = 12.5;
 
 const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
@@ -82,8 +82,6 @@ pub fn lay(words: Words, mut width: impl FnMut(&str, f32) -> f32) -> Card {
 pub struct Lit {
     pub choose: bool,
     pub later: bool,
-    pub choose_ring: bool,
-    pub later_ring: bool,
 }
 
 /// The card at `o` (its top left), `alpha` faded.
@@ -135,9 +133,6 @@ pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha:
         &kit::rounded(choose, CHOOSE_RADIUS),
         faded(fill.get(), alpha),
     );
-    if lit.choose_ring {
-        ring(f, choose, CHOOSE_RADIUS);
-    }
     f.fill_text(kit::text_in(
         MANROPE_BOLD,
         kit::text(
@@ -154,9 +149,6 @@ pub fn draw(f: &mut Frame, card: &Card, words: Words, o: Point, lit: Lit, alpha:
             &kit::rounded(later, LATER_RADIUS),
             faded(HOVER.get(), alpha),
         );
-    }
-    if lit.later_ring {
-        ring(f, later, LATER_RADIUS);
     }
     f.fill_text(kit::text(
         words.later().to_owned(),

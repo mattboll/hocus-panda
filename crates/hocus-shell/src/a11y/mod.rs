@@ -620,7 +620,6 @@ fn gather(
     lang: Lang,
     agents: &[hocus_link::AgentShown],
 ) -> bar::Facts {
-    use crate::popover::Item as I;
     let (shown, declared, groups, focused, open, height) = crate::popover::with(|c| {
         let spots = c.ring.spots(bar);
         let declared: Vec<(Item, Node, bool)> = spots
@@ -663,20 +662,6 @@ fn gather(
         || bar.to_owned(),
         |s| levels_words.screen(s.built_in, s.inches, s.number),
     );
-    let lines = crate::tasks::lines();
-    let tasks: Vec<bar::Task> = lines
-        .lines
-        .iter()
-        .filter(|l| l.going.is_none() && l.look != crate::tasks::Look::Adding)
-        .map(|l| bar::Task {
-            title: l.title.clone(),
-            ticked: l.look.ticked(),
-        })
-        .collect();
-    let shown_boxes = items
-        .iter()
-        .filter(|(_, item, _)| matches!(item, I::Task(_)))
-        .count();
     let link = crate::network::snapshot().link();
     let bluetooth = crate::bluetooth::snapshot().row();
     bar::Facts {
@@ -693,9 +678,6 @@ fn gather(
             &crate::notifications::wall(),
             lang,
         )),
-        open_tasks: lines.open(),
-        more_tasks: lines.open().saturating_sub(shown_boxes),
-        tasks,
         agents: agents.to_vec(),
         now_us: crate::agents::now_us(),
         rows_shown: crate::agents::rows_shown(),

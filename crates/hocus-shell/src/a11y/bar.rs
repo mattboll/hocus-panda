@@ -7,7 +7,7 @@
 
 use hocus_a11y::{Act, Node, Rect, Role, Window};
 use hocus_bluetooth::model::Row as BluetoothRow;
-use hocus_link::{AGENTS_NAMESPACE, AgentShown, TASKS_NAMESPACE};
+use hocus_link::{AGENTS_NAMESPACE, AgentShown};
 use hocus_network::model::Link;
 
 use super::words::{Words, plain};
@@ -17,13 +17,6 @@ use crate::{
     levels::model::Snapshot,
     popover::Item,
 };
-
-/// A task's line: its title, ticked.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Task {
-    pub title: String,
-    pub ticked: bool,
-}
 
 /// What a bar shows, gathered from the shell's model (or made by a test).
 #[derive(Debug, Clone, Default)]
@@ -48,9 +41,6 @@ pub struct Facts {
     /// The item whose popover is open.
     pub open: Option<Item>,
     pub clock: Option<Shown>,
-    pub tasks: Vec<Task>,
-    pub open_tasks: usize,
-    pub more_tasks: usize,
     pub agents: Vec<AgentShown>,
     /// Now, on the agents' `since`'s clock (microseconds).
     pub now_us: u64,
@@ -121,11 +111,6 @@ fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> 
     }
     let full = nodes.len() > 1;
     let container = match namespace {
-        TASKS_NAMESPACE if full => Some(Node::new(
-            "tasks",
-            Role::List,
-            words.tasks(facts.open_tasks),
-        )),
         AGENTS_NAMESPACE if full || facts.agents.len() > facts.rows_shown => {
             let lines = Lines::of_at_most(&facts.agents, facts.now_us, facts.rows_shown);
             if lines.hidden > 0 {
@@ -156,18 +141,6 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
     let node = match item {
         Item::Calendar => button(facts.clock.as_ref().map(|c| words.clock(c))?),
         Item::Music => button(crate::music::Words::new(lang).music().to_owned()),
-        Item::Tasks => button(words.tasks(facts.open_tasks)),
-        Item::TasksMore => button(words.more_tasks(facts.more_tasks)),
-        Item::TaskAdd => button(words.add_task().to_owned()),
-        Item::Task(slot) => {
-            let task = facts.tasks.get(usize::from(slot))?;
-            Node::new(key(item), Role::CheckBox, task.title.clone())
-                .checked(task.ticked)
-                .bounds(Some(rect))
-                .act(Act::Click)
-        }
-        Item::DayChoose => button(words.choose_sources().to_owned()),
-        Item::DayLater => button(words.later().to_owned()),
         Item::Secretary => {
             let brief = Brief::of(&facts.agents);
             button(words.agents(
@@ -247,7 +220,13 @@ fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node
         | Item::WindowClose(_)
         | Item::WindowsMore
         | Item::Windows
-        | Item::Desktop { .. } => return None,
+        | Item::Desktop { .. }
+        | Item::Tasks
+        | Item::TasksMore
+        | Item::TaskAdd
+        | Item::Task(_)
+        | Item::DayChoose
+        | Item::DayLater => return None,
         // Not the bar's own: shown in a popover.
         Item::WindowMenu(_) => return None,
     };

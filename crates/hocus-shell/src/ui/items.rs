@@ -82,14 +82,6 @@ impl Control {
         self
     }
 
-    /// The ring round `rect` with corners of `radius`, not round where
-    /// the pointer takes it.
-    #[allow(dead_code, reason = "for the bar's items still to come")]
-    pub fn ring(mut self, rect: Rectangle, radius: f32) -> Self {
-        self.ring = Some((rect, radius));
-        self
-    }
-
     /// A part of the control before it.
     pub fn part(mut self) -> Self {
         self.part = true;
@@ -170,6 +162,18 @@ pub trait Items {
         lit: Option<Item>,
     ) -> Vec<Geometry>;
 
+    /// What the surface takes before the kit, the pointer at `at` on the
+    /// surface: a field's keys and its drag. `Some`: taken.
+    fn before(
+        &self,
+        _state: &mut Self::State,
+        _event: &iced::Event,
+        _bounds: Rectangle,
+        _at: Option<Point>,
+    ) -> Option<canvas::Action<Message>> {
+        None
+    }
+
     /// Any event the kit does not take (a frame to draw, the wheel), the
     /// pointer at `at` on the surface.
     fn update(
@@ -217,6 +221,19 @@ pub struct State<S> {
     pointer: Option<Point>,
     /// Where it was last seen, in the bar's frame.
     last: Option<Point>,
+}
+
+#[cfg(test)]
+impl<S> State<S> {
+    /// The kit's state around the surface's `inner` (a test's).
+    pub fn of(inner: S) -> Self {
+        Self {
+            inner,
+            hover: None,
+            pointer: None,
+            last: None,
+        }
+    }
 }
 
 impl<P: Items> Surface<P> {
@@ -307,6 +324,16 @@ impl<P: Items> canvas::Program<Message> for Surface<P> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
+        let at = match event {
+            iced::Event::Mouse(seen) => pointer(seen, bounds, cursor, state.pointer),
+            _ => state.pointer,
+        };
+        if let Some(taken) = self.0.before(&mut state.inner, event, bounds, at) {
+            if let iced::Event::Mouse(_) = event {
+                state.pointer = at;
+            }
+            return Some(taken);
+        }
         match event {
             iced::Event::Mouse(seen) => self.mouse(state, seen, bounds, cursor, event),
             iced::Event::Keyboard(keyboard::Event::KeyPressed {
