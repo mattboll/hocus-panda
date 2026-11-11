@@ -206,3 +206,35 @@ pub fn reveal<T: 'static>(list: Id, target: Id) -> impl Operation<T> {
         found: None,
     }
 }
+
+/// The controls `element` declares, laid out `width` wide, with their
+/// bounds: what a surface's tests read of its declarations. Laid out on
+/// the CPU's renderer, never a GPU.
+#[cfg(test)]
+pub fn declared<M: Clone + Send + 'static>(
+    element: iced::Element<'_, M>,
+    width: f32,
+) -> Vec<(Rectangle, Declared<M>)> {
+    use iced::{
+        Font, Pixels, Size,
+        advanced::{Layout, layout::Limits, renderer::Headless, widget::Tree},
+    };
+    let renderer = iced::futures::executor::block_on(<iced::Renderer as Headless>::new(
+        Font::default(),
+        Pixels(16.0),
+        Some("tiny-skia"),
+    ))
+    .expect("the CPU's renderer");
+    let mut element = element;
+    let mut tree = Tree::new(&element);
+    let node = element.as_widget_mut().layout(
+        &mut tree,
+        &renderer,
+        &Limits::new(Size::ZERO, Size::new(width, f32::INFINITY)),
+    );
+    let mut walk = Walk::default();
+    element
+        .as_widget_mut()
+        .operate(&mut tree, Layout::new(&node), &renderer, &mut walk);
+    walk.controls
+}

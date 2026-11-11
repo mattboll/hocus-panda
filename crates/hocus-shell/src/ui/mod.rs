@@ -25,6 +25,7 @@
 pub mod control;
 pub mod field;
 pub mod keys;
+pub mod notched;
 pub mod parts;
 pub mod slider;
 pub mod style;

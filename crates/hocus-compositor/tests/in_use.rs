@@ -1323,3 +1323,28 @@ fn screenshots_of_the_recording_for_the_pull_request() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// The popover in its main state (two applications on the microphone),
+/// shot under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see
+/// `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell, (1920, 1080), FormChoice::Mini)?;
+    let (_, firefox) = common::open_with(&mut bed.hp, "firefox", (600, 400), false)?;
+    firefox
+        .commands
+        .send(common::Command::Title("Réunion d'équipe — Meet"))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    bed.speak("hocus-test-meet", "Firefox", "firefox", "AudioStream")?;
+    bed.speak("hocus-test-call", "Discord", "discord", "Appel vocal")?;
+    let sign = bed.sign("Microphone")?;
+    bed.hp.pointer_move(400.0, 300.0);
+    bed.popover(sign)?;
+    common::popover_shot(&mut bed.hp, "in-use")?;
+    drop(firefox);
+    Ok(())
+}

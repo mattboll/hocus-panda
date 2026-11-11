@@ -6,7 +6,7 @@ use std::{
 };
 
 use iced::{
-    Color, Point, Rectangle, Size, mouse,
+    Color, Point, Size, mouse,
     widget::canvas::{self, Frame, Path, gradient},
 };
 
@@ -27,25 +27,10 @@ pub(crate) struct Track {
 }
 
 impl Track {
-    /// Its volume at `x`, in percent: the knob's centre under the pointer,
-    /// its travel the track less the knob.
-    pub(crate) fn volume_at(self, x: f32) -> f32 {
-        (self.share_at(x) * 100.0).round()
-    }
-
     /// The share of its travel at `x`, from 0 to 1.
     pub(crate) fn share_at(self, x: f32) -> f32 {
         let travel = self.right - self.left - self.knob;
         ((x - self.left - self.knob / 2.0) / travel).clamp(0.0, 1.0)
-    }
-
-    /// What the pointer takes and the keyboard's ring goes round: the
-    /// track's length, `height` tall.
-    pub(crate) fn rect(self, height: f32) -> Rectangle {
-        Rectangle::new(
-            Point::new(self.left, self.middle - height / 2.0),
-            Size::new(self.right - self.left, height),
-        )
     }
 }
 

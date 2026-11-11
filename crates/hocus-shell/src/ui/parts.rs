@@ -37,7 +37,6 @@ const BLOCK_FILL: Ink = Ink::Accent(0.10);
 const SMALL_BUTTON: f32 = 28.0;
 const RULE: f32 = 4.0;
 const RULE_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const LABEL_SPACING: f32 = 0.08 * LABEL;
 /// The Settings' link (6.5): its row, its tile, its words.
 const LINK: f32 = 36.0;
 const LINK_TILE: f32 = 24.0;
@@ -100,14 +99,19 @@ pub fn gap<'a, M: 'a>(width: f32) -> El<'a, M> {
 
 /// A divider: 1 px across the content, `RULE` px above and below.
 pub fn rule<'a, M: 'a>() -> El<'a, M> {
+    rule_of(RULE)
+}
+
+/// A divider: 1 px across the content, `around` px above and below.
+pub fn rule_of<'a, M: 'a>(around: f32) -> El<'a, M> {
     container(
         container(Space::new().width(Length::Fill).height(1.0))
             .style(|_| boxed(RULE_FILL.get(), 0.0)),
     )
     .padding(Padding {
-        top: RULE,
+        top: around,
         right: ROW_OUT,
-        bottom: RULE,
+        bottom: around,
         left: ROW_OUT,
     })
     .into()
@@ -134,19 +138,45 @@ pub fn note<'a, M: 'static>(note: &str) -> El<'a, M> {
 /// 0.08em`, which iced's text has not: a letter a widget), `height` tall,
 /// `aside` on its right; a line for screen readers.
 pub fn label<'a, M: 'static>(word: &str, height: f32, aside: Option<El<'a, M>>) -> El<'a, M> {
-    let mut letters = row![].spacing(LABEL_SPACING);
-    for ch in word.chars() {
-        letters = letters.push(said(ch.to_string(), LABEL, MANROPE_BOLD, DIM.get()));
-    }
+    label_as(word, word, height, aside)
+}
+
+/// A section's label drawn as `word`, read as `said` (not in capitals).
+pub fn label_as<'a, M: 'static>(
+    word: &str,
+    said_as: &str,
+    height: f32,
+    aside: Option<El<'a, M>>,
+) -> El<'a, M> {
+    let letters = spaced(word, LABEL, DIM.get(), f32::INFINITY);
     let mut line = row![letters, space::horizontal()].align_y(Vertical::Center);
     if let Some(aside) = aside {
         line = line.push(aside);
     }
     super::line(
         inset(container(line).height(height).align_y(Vertical::Center)),
-        word,
+        said_as,
     )
     .into()
+}
+
+/// `word`'s capitals in bold at `size`, spaced 0.08 em (CSS's
+/// `letter-spacing`, which iced's text has not: a letter a widget), as
+/// many as fit in `room`.
+pub fn spaced<'a, M: 'a>(word: &str, size: f32, colour: Color, room: f32) -> El<'a, M> {
+    let spacing = 0.08 * size;
+    let mut letters = row![].spacing(spacing);
+    let mut x = 0.0;
+    for ch in word.chars() {
+        let ch = ch.to_string();
+        let width = kit::measure(&ch, size, MANROPE_BOLD);
+        if x + width > room {
+            break;
+        }
+        x += width + spacing;
+        letters = letters.push(said(ch, size, MANROPE_BOLD, colour));
+    }
+    letters.into()
 }
 
 /// A word in a button, in the middle of its height, in the button's
@@ -233,6 +263,19 @@ pub fn list<'a, M: Clone + 'a>(
     most: f32,
     over: fn(bool) -> M,
 ) -> El<'a, M> {
+    list_by(rows, id, most, Some(over), None)
+}
+
+/// A list as [`list`], the pointer over it told if asked, a notch of the
+/// wheel scrolling `notch` px when given ([`super::notched`]), else
+/// iced's 60.
+pub fn list_by<'a, M: Clone + 'a>(
+    rows: El<'a, M>,
+    id: &'static str,
+    most: f32,
+    over: Option<fn(bool) -> M>,
+    notch: Option<f32>,
+) -> El<'a, M> {
     let scrolled = scrollable(rows)
         .id(id)
         .direction(scrollable::Direction::Vertical(
@@ -243,13 +286,18 @@ pub fn list<'a, M: Clone + 'a>(
                 .spacing(0),
         ))
         .style(|_, _| style::scrollbar(SCROLLBAR));
-    container(
-        mouse_area(scrolled)
+    let scrolled: El<'a, M> = match notch {
+        Some(notch) => super::notched::Notched::new(scrolled, notch).into(),
+        None => scrolled.into(),
+    };
+    let told: El<'a, M> = match over {
+        Some(over) => mouse_area(scrolled)
             .on_enter(over(true))
-            .on_exit(over(false)),
-    )
-    .max_height(most)
-    .into()
+            .on_exit(over(false))
+            .into(),
+        None => scrolled,
+    };
+    container(told).max_height(most).into()
 }
 
 /// "Réglages du …": the sliders in their tile, the words, a chevron; the
@@ -323,7 +371,21 @@ pub fn drawn<'a, M: 'a>(
     height: f32,
     draw: impl Fn(&mut canvas::Frame, Size) + 'a,
 ) -> El<'a, M> {
-    canvas(Drawn(Box::new(draw)))
+    canvas(Drawn(Box::new(draw), 0.0))
+        .width(width)
+        .height(height)
+        .into()
+}
+
+/// A canvas `width` × `height` drawn by `draw` as [`drawn`], which may
+/// draw `out` px past its bounds (a ring around an icon).
+pub fn drawn_out<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    out: f32,
+    draw: impl Fn(&mut canvas::Frame, Size) + 'a,
+) -> El<'a, M> {
+    canvas(Drawn(Box::new(draw), out))
         .width(width)
         .height(height)
         .into()
@@ -332,7 +394,8 @@ pub fn drawn<'a, M: 'a>(
 /// What draws a canvas: its frame, its size.
 type Draw<'a> = Box<dyn Fn(&mut canvas::Frame, Size) + 'a>;
 
-struct Drawn<'a>(Draw<'a>);
+/// What draws a canvas, and how far past its bounds.
+struct Drawn<'a>(Draw<'a>, f32);
 
 impl<M> canvas::Program<M> for Drawn<'_> {
     type State = ();
@@ -345,7 +408,16 @@ impl<M> canvas::Program<M> for Drawn<'_> {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut f = canvas::Frame::new(renderer, bounds.size());
+        let out = self.1;
+        let mut f = if out > 0.0 {
+            let reach = Rectangle::new(
+                Point::new(-out, -out),
+                Size::new(bounds.width + 2.0 * out, bounds.height + 2.0 * out),
+            );
+            canvas::Frame::with_bounds(renderer, reach)
+        } else {
+            canvas::Frame::new(renderer, bounds.size())
+        };
         (self.0)(&mut f, bounds.size());
         vec![f.into_geometry()]
     }
@@ -370,42 +442,6 @@ pub fn polyline(
         }
     });
     f.stroke(&path, stroke(width * scale, colour));
-}
-
-/// Nothing to see: wakes its surface at `at`, when what it shows ends
-/// (a volume asked and not said).
-pub fn wake_at<'a, M: 'a>(at: Instant) -> El<'a, M> {
-    canvas(WakeAt(at)).width(0.0).height(0.0).into()
-}
-
-struct WakeAt(Instant);
-
-impl<M> canvas::Program<M> for WakeAt {
-    type State = ();
-
-    fn update(
-        &self,
-        _state: &mut (),
-        event: &iced::Event,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<M>> {
-        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
-            return None;
-        };
-        (*now < self.0).then(|| canvas::Action::request_redraw_at(self.0))
-    }
-
-    fn draw(
-        &self,
-        _state: &(),
-        _renderer: &Renderer,
-        _theme: &Theme,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        Vec::new()
-    }
 }
 
 /// A spinner, turning: its surface alone draws again each frame.

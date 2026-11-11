@@ -517,14 +517,19 @@ impl Bed {
     /// `Tile{screen:0,desktop:1}`) is on the screen, once its popover is
     /// drawn.
     fn menu_at(&mut self, target: &str) -> anyhow::Result<(f64, f64)> {
-        let line = self.last_is(MENU, &[&format!("{target}@")])?;
-        let at = line
-            .split(&format!("{target}@"))
-            .nth(1)
-            .and_then(|r| r.split_whitespace().next())
-            .and_then(|r| r.split_once(','))
-            .ok_or_else(|| anyhow::anyhow!("no {target} in {line:?}"))?;
-        let (x, y): (f64, f64) = (at.0.parse()?, at.1.parse()?);
+        let id = format!("window_menu:{target}");
+        let log = self.log.clone();
+        let place = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
+        };
+        let found = self.hp.dispatch_until(WAIT, |_| place(&log).is_some())?;
+        anyhow::ensure!(found, "no {id} in the menu's dump\n{}", self.windows_log());
+        let (x, y) = place(&log).unwrap_or_default();
         let popover = self.menu()?;
         Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
     }
@@ -1270,4 +1275,40 @@ fn the_radial_menu_opens_over_a_window_never_over_the_bar() -> anyhow::Result<()
     chord(&mut bed.hp, &[KEY_ESC]);
     assert!(bed.hp.radial().is_none());
     Ok(())
+}
+
+/// The mini form's popover and a window's menu in their main state, shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine {
+        form: FormChoice::Mini,
+        ..Machine::default()
+    })?
+    else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    bed.open("org.gnome.Nautilus", "Téléchargements")?;
+    bed.open("org.gnome.TextEditor", "Notes de réunion")?;
+    bed.last_is(AT_REST, &["form=mini", "item=Some(\"Notes de réunion\")"])?;
+    bed.click("Windows")?;
+    bed.last_is(
+        "the windows' popover shows it",
+        &["shows=«Notes de réunion»*"],
+    )?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "windows")?;
+    drop(bed);
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    let id = bed.id_of(FOOT.0)?;
+    bed.right_click(&format!("Window({id})"))?;
+    bed.last_is(MENU, &[&format!("window={id} ")])?;
+    bed.menu()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "window-menu")
 }

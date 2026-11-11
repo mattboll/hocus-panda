@@ -55,6 +55,21 @@ pub(crate) fn zero(system: &mut FontSystem) -> Option<f32> {
     crate::clock::measure(system, MANROPE, VALUE, VALUE * LINE).map(|m| m.zero)
 }
 
+/// The `0`'s advance of the values' font, measured once.
+pub(crate) fn zero_once() -> f32 {
+    static ZERO: std::sync::Mutex<Option<f32>> = std::sync::Mutex::new(None);
+    let mut known = ZERO
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *known.get_or_insert_with(|| {
+        iced::advanced::graphics::text::font_system()
+            .write()
+            .ok()
+            .and_then(|mut system| zero(system.raw()))
+            .unwrap_or(super::ZERO)
+    })
+}
+
 /// `text` cut with an ellipsis to fit `room` px as `width` measures it.
 pub(crate) fn elide(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
     if width(text) <= room {

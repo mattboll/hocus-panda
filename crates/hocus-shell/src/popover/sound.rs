@@ -57,7 +57,9 @@ use super::{
 };
 use crate::levels::{
     self,
-    draw::{ACCENT, DIM, FAINT, HOVER, LINE, MANROPE, MANROPE_BOLD, TEXT, VALUE, rgb, stroke},
+    draw::{
+        ACCENT, DIM, FAINT, HOVER, LINE, MANROPE, MANROPE_BOLD, SOUND, TEXT, VALUE, rgb, stroke,
+    },
     model::{STEP, Sound, Words},
     sound::{App, Ask, Kind, Mixer, Set},
 };
@@ -406,8 +408,10 @@ pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate:
         .find(|s| s.default)
         .map(|s| s.description.clone());
     let content = ui(|ui| content(words, &shown, ui));
+    // Asked and not said: the surface wakes when it stops showing.
     Around::new(id, content, handle, Msg::Stale)
         .stale_when(|| ui(|ui| expired(ui, Instant::now())))
+        .wake_at(|| ui(|ui| until(ui)))
         .keys(arrows)
         .press(Msg::Pressed)
         .first(Msg::Focus(Target::Slider))
@@ -415,13 +419,16 @@ pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate:
         .on_glass(glass)
 }
 
+/// Until when the volume asked shows without PipeWire saying it, once
+/// let go.
+fn until(ui: &Ui) -> Option<Instant> {
+    let (_, since) = ui.asked.as_ref().filter(|_| !ui.dragging)?;
+    Some(*since + ASKED_FOR)
+}
+
 /// Whether the volume asked showed long enough without PipeWire saying it.
 fn expired(ui: &Ui, now: Instant) -> bool {
-    !ui.dragging
-        && ui
-            .asked
-            .as_ref()
-            .is_some_and(|(_, since)| now >= *since + ASKED_FOR)
+    until(ui).is_some_and(|until| now >= until)
 }
 
 /// An arrow on a slider holding the ring steps it (5 %).
@@ -556,12 +563,6 @@ fn content<'a>(words: Words, shown: &Shown, ui: &Ui) -> El<'a> {
     );
     all.push(rule);
     all.push(link);
-    // Asked and not said: the surface wakes when it stops showing.
-    if !ui.dragging
-        && let Some((_, since)) = &ui.asked
-    {
-        all.push(parts::wake_at(*since + ASKED_FOR));
-    }
     parts::content(all)
 }
 
@@ -677,11 +678,11 @@ fn volume_row<'a>(row_of: VolumeRow, shown: &Shown, ui: &Ui, a11y: crate::a11y::
 fn slider_of<'a>(which: &Slider, volume: f32, grey: bool, track: f32, knob: f32) -> Track<'a, Msg> {
     let which = which.clone();
     Track {
-        volume,
-        grey,
+        share: volume / 100.0,
+        fill: (!grey).then_some(SOUND),
         track,
         knob,
-        on_change: Box::new(move |volume| Msg::Slide(which.clone(), volume)),
+        on_change: Box::new(move |share: f32| Msg::Slide(which.clone(), (share * 100.0).round())),
         on_release: Msg::Release,
     }
 }
@@ -711,21 +712,8 @@ fn value(
             ));
             return;
         }
-        kit::figures(f, at, volume, zero(), colour);
+        kit::figures(f, at, volume, kit::zero_once(), colour);
     }
-}
-
-/// The `0`'s advance of the values' font, measured once.
-fn zero() -> f32 {
-    static ZERO: Mutex<Option<f32>> = Mutex::new(None);
-    let mut zero = ZERO.lock().unwrap_or_else(PoisonError::into_inner);
-    *zero.get_or_insert_with(|| {
-        iced::advanced::graphics::text::font_system()
-            .write()
-            .ok()
-            .and_then(|mut system| kit::zero(system.raw()))
-            .unwrap_or(kit::ZERO)
-    })
 }
 
 /// An output's row, or a microphone's: what is before its name, its name

@@ -948,3 +948,23 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
     }
     anyhow::bail!("the clock ticked through every try")
 }
+
+/// Both popovers in their main state (the brightness's with the
+/// keyboard's three levels), shot under `HOCUS_KIT_SHOTS` (#772's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start_full(&shell, |p| p.keyboard = Some((1, 2)))?;
+    bed.click_row(BATTERY_ROW)?;
+    bed.opened()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "battery")?;
+    bed.click_row(LIGHT_ROW)?;
+    bed.popover_is(Some(popover(WITH_KEYS)))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "brightness")
+}

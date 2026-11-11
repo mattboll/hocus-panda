@@ -725,7 +725,7 @@ fn a_window_that_does_not_close_is_listed_and_fermer_quand_meme_closes_it() -> a
     let mark = bed.mark();
     bed.press(KEY_TAB);
     bed.press(KEY_TAB);
-    bed.logged_after(mark, "focus=Some(Force(0))")?;
+    bed.logged_after(mark, "\"focus\":\"session:Force(0)\"")?;
     bed.press(KEY_ENTER);
     let ended = bed.hp.dispatch_until(WAIT, |hp| hp.ending().is_some())?;
     anyhow::ensure!(ended, "the session did not end");
@@ -793,8 +793,8 @@ fn the_keyboard_lands_on_maintenant() -> anyhow::Result<()> {
     };
     let mark = bed.mark();
     common::chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_E]);
-    let line = bed.logged_after(mark, "Se déconnecter ?")?;
-    assert!(line.contains("focus=Some(Now)"), "{line}");
+    bed.logged_after(mark, "Se déconnecter ?")?;
+    bed.logged_after(mark, "\"focus\":\"session:Now\"")?;
     bed.popover_of(CONFIRM_HEIGHT)?;
     // Enter logs out at once, without waiting out the count.
     bed.press(KEY_ENTER);
@@ -946,4 +946,17 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         shoot(&mut bed, &out, "held-window")?;
     }
     Ok(())
+}
+
+/// The menu, then a confirmation, shot under `HOCUS_KIT_SHOTS` (#772's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(Logind::default())? else {
+        return Ok(());
+    };
+    bed.open_menu()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    common::popover_shot(&mut bed.hp, "session")
 }

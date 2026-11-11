@@ -1912,49 +1912,27 @@ impl Shell {
                 glass: self.look.glass,
                 motion: self.look.motion,
             }),
-            popover::Item::Brightness => canvas(popover::brightness::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Battery => canvas(popover::battery::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::Windows => canvas(popover::windows::Panel {
+            popover::Item::Brightness => popover::brightness::view(id, self.words, self.look.glass),
+            popover::Item::Battery => popover::battery::view(id, self.words, self.look.glass),
+            popover::Item::Windows => popover::windows::view(&popover::windows::Panel {
                 id,
                 words: windows::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            popover::Item::WindowMenu(window) => canvas(popover::window_menu::Panel {
-                id,
-                window,
-                words: popover::window_menu::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
+            popover::Item::WindowMenu(window) => {
+                popover::window_menu::view(&popover::window_menu::Panel {
+                    id,
+                    window,
+                    words: popover::window_menu::Words::new(clock::time::Lang::of_messages()),
+                    glass: self.look.glass,
+                })
+            }
             popover::Item::Desktop { .. } | popover::Item::WindowsMore => {
-                canvas(popover::desktop::Panel {
+                popover::desktop::view(&popover::desktop::Panel {
                     id,
                     words: self.words,
                     glass: self.look.glass,
-                    software: self.software,
                 })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
             }
             popover::Item::Sources | popover::Item::AnotherTool | popover::Item::Plug(_) => {
                 canvas(popover::agents::Panel {
@@ -1991,14 +1969,11 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::InUse => canvas(popover::in_use::Panel {
+            popover::Item::InUse => popover::in_use::view(&popover::in_use::Panel {
                 id,
                 words: in_use::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Tasks | popover::Item::TasksMore => canvas(popover::tasks::Panel {
                 id,
                 words: tasks::Words::new(clock::time::Lang::of_messages()),
@@ -2024,15 +1999,12 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::User => canvas(popover::session::Panel {
+            popover::Item::User => popover::session::view(&popover::session::Panel {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
                 motion: self.look.motion && !self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Calendar => canvas(popover::calendar::Panel {
                 id,
                 glass: self.look.glass,
@@ -2042,14 +2014,11 @@ impl Shell {
             .height(Length::Fill)
             .into(),
             // They open none.
-            popover::Item::Tray(key) => canvas(popover::tray::Panel {
+            popover::Item::Tray(key) => popover::tray::view(&popover::tray::Panel {
                 id,
                 key,
                 glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Keyboard
             | popover::Item::Decline
             | popover::Item::Agent(_)

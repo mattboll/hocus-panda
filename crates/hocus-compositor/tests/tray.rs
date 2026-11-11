@@ -1142,3 +1142,20 @@ fn an_application_hidden_in_the_tray_opens_its_window_focused() -> anyhow::Resul
     scene.click()?;
     scene.forward()
 }
+
+/// Its menu in its main state, shot under `HOCUS_KIT_SHOTS` (#772's
+/// side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FormChoice::Full)? else {
+        return Ok(());
+    };
+    let _item = bed.item("Active", pixmap(MAGENTA, None))?;
+    let tray = bed.tray()?;
+    bed.over_icon(tray)?;
+    let from = bed.plain().len();
+    bed.press(BTN_RIGHT);
+    bed.logged_after(from, "the tray's menu shows it")?;
+    common::popover_shot(&mut bed.hp, "tray")
+}

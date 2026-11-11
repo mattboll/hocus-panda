@@ -361,14 +361,6 @@ impl Layout {
         }
     }
 
-    /// What is under `point`.
-    pub fn at(&self, point: Point) -> Option<Target> {
-        self.targets()
-            .into_iter()
-            .find(|(_, r)| r.contains(point))
-            .map(|(t, _)| t)
-    }
-
     /// The order the keyboard goes through.
     pub fn order(&self) -> Vec<Target> {
         self.targets().into_iter().map(|(t, _)| t).collect()

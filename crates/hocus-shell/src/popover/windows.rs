@@ -10,27 +10,32 @@
 //! `Tab`, `Shift+Tab` and the arrows go through the lines, their ✕ and
 //! "+ N" once it holds the keyboard; `Enter` or `Space` acts, `Esc`
 //! closes it.
+//!
+//! Built with the shell's widget kit ([`crate::ui`]); its lines drawn as
+//! the full form's group draws them.
 
-use std::time::Instant;
+use std::sync::{Mutex, PoisonError};
 
+use hocus_a11y::Role;
 use hocus_link::ToCompositor;
 use iced::{
-    Point, Rectangle, Renderer, Theme, keyboard, mouse,
-    widget::canvas::{self, Frame, Geometry},
+    Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme,
+    alignment::{Horizontal, Vertical},
+    keyboard, mouse,
+    widget::{Space, button, canvas, column, container, mouse_area, stack},
     window,
 };
 
-use super::{
-    Effect, Event as Seen, Item, Pressed, event,
-    kit::{self, Input, Pointer},
-};
+use super::{Effect, Event as Seen, Item, Pressed, event};
 use crate::{
-    levels::draw::ring,
+    ui::{Around, control, style},
     windows::{
-        self, Row, Words,
-        draw::{Lit, OUT, RADIUS, cut, draw_line, draw_more, row_items, row_rects},
+        self, LINE, Line, MORE, Row, Words,
+        draw::{Lit, OUT, RADIUS, close_rect, cut, draw_line, draw_more},
     },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 pub const WIDTH: u32 = 240;
 const BORDER: f32 = 1.0;
@@ -38,6 +43,8 @@ const PAD: f32 = 8.0;
 /// The lines' sides: the popover's 12 px padding, 6 px past it.
 const SIDE: f32 = BORDER + 12.0 - OUT;
 const TOP: f32 = BORDER + PAD;
+/// The ✕'s ring's corners.
+const CLOSE_RADIUS: f32 = 6.0;
 
 /// What it lists for bar `bar`: the group's rows, as many as there are.
 fn rows_of(bar: &str) -> Vec<Row> {
@@ -54,8 +61,9 @@ pub fn height(bar: &str) -> u32 {
     height_of(&rows_of(bar))
 }
 
-fn rects(rows: &[Row]) -> Vec<Rectangle> {
-    row_rects(rows, SIDE, TOP, WIDTH as f32 - 2.0 * SIDE)
+/// A line's width.
+const fn width() -> f32 {
+    WIDTH as f32 - 2.0 * SIDE
 }
 
 /// The windows' popover on its surface.
@@ -66,298 +74,360 @@ pub struct Panel {
     pub glass: bool,
 }
 
-#[derive(Debug, Default)]
-pub struct State {
-    bar: Option<String>,
-    rows: Vec<Row>,
-    titles: Vec<String>,
-    pointer: Pointer<Item>,
-    focus: Option<Item>,
+/// What can hold the keyboard's ring, and be acted on: a line, its ✕,
+/// "+ N".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Window(u64),
+    Close(u64),
+    More,
 }
 
-impl State {
-    fn items(&self) -> Vec<(Item, Rectangle)> {
-        row_items(&self.rows, &rects(&self.rows))
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("windows:{self:?}")
     }
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+#[derive(Debug, Default)]
+struct Ui {
+    focus: Option<Target>,
+    /// Whose windows it shows, and which (closing, what it showed).
+    bar: Option<String>,
+    rows: Vec<Row>,
+}
+
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// The popover opens: nothing holds the ring.
+pub fn opening() {
+    ui(|ui| ui.focus = None);
+}
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A line, its ✕ or "+ N" pressed, or `Enter` on it.
+    Act(Target),
+    /// A right click on a line: its window's menu, in the popover's place
+    /// (#723).
+    Menu(u64),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// The windows changed under the view.
+    Stale,
+}
+
+/// Whose windows it shows now, as the controller says (none once
+/// closing).
+fn bar_of(id: window::Id) -> Option<String> {
+    super::with(|c| match c.open_on() {
+        Some((bar, Item::Windows)) if c.is_open(id) => Some(bar.to_owned()),
+        _ => None,
+    })
+}
+
+/// The popover on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (id, words) = (panel.id, panel.words);
+    let content = build(id, words);
+    let order = ui(|ui| targets(&ui.rows));
+    Around::new(id, content, handle, Msg::Stale)
+        .rebuild(move || build(id, words))
+        .stale_when(move || {
+            bar_of(id).is_some_and(|bar| {
+                let rows = rows_of(&bar);
+                ui(|ui| ui.bar.as_deref() != Some(bar.as_str()) || ui.rows != rows)
+            })
+        })
+        .keys(move |pressed| arrows(pressed, &order))
+        .press(Msg::Pressed)
+        .on_glass(panel.glass)
+}
+
+/// What can hold the ring, in its order.
+fn targets(rows: &[Row]) -> Vec<Target> {
+    let mut order = Vec::new();
+    for row in rows {
+        match row {
+            Row::Window(line) => {
+                order.push(Target::Window(line.id));
+                order.push(Target::Close(line.id));
+            }
+            Row::More(_) => order.push(Target::More),
+        }
+    }
+    order
+}
+
+/// The arrows with nothing holding the ring: the first (down), or the
+/// last (up); the kit takes them round after.
+fn arrows(pressed: &Pressed, order: &[Target]) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    let down = match &pressed.key {
+        Key::Named(Named::ArrowDown) => true,
+        Key::Named(Named::ArrowUp) => false,
+        _ => return None,
+    };
+    if ui(|ui| ui.focus.is_some()) {
+        return None;
+    }
+    let target = if down { order.first() } else { order.last() };
+    target.map(|t| Msg::Focus(*t))
+}
+
+/// Its content, from bar's windows now (closing, what it showed).
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    let bar = bar_of(id);
+    ui(|ui| {
+        if let Some(bar) = bar {
+            let rows = rows_of(&bar);
+            if ui.bar.as_deref() != Some(bar.as_str()) || ui.rows != rows {
+                tracing::debug!(
+                    bar = %bar,
+                    shows = %words.said(&rows),
+                    "the windows' popover shows it"
+                );
+                ui.bar = Some(bar);
+                ui.rows = rows;
+                super::refit(Item::Windows);
+            }
+        }
+        content(words, ui)
+    })
+}
+
+fn content<'a>(words: Words, ui: &Ui) -> El<'a> {
+    let mut lines = column![];
+    for row in &ui.rows {
+        lines = lines.push(match row {
+            Row::Window(line) => line_of(words, line, ui.focus),
+            Row::More(n) => more(words, *n, ui.focus),
+        });
+    }
+    container(lines)
+        .padding(Padding {
+            top: TOP,
+            right: SIDE,
+            bottom: PAD + BORDER,
+            left: SIDE,
+        })
+        .into()
+}
+
+/// A window's line: drawn as the full form's, a button over it, its ✕ a
+/// button of its own.
+fn line_of<'a>(words: Words, line: &Line, focus: Option<Target>) -> El<'a> {
+    let (window, close) = (Target::Window(line.id), Target::Close(line.id));
+    let title = cut(line, width()).0;
+    let art = canvas(LineArt {
+        line: line.clone(),
+        title,
+    })
+    .width(Length::Fill)
+    .height(LINE);
+    let pressed = button(Space::new().width(Length::Fill).height(LINE))
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(window));
+    let pressed = control(pressed, window.id(), Role::ListItem, words.name(line))
+        .node(|n| n.selected(line.focused))
+        .focus(focus == Some(window), Msg::Focus(window), RADIUS)
+        .activate(Msg::Act(window))
+        .rows(0);
+    let cross = close_rect(Rectangle::new(Point::ORIGIN, Size::new(width(), LINE)));
+    let x = button(Space::new().width(cross.width).height(cross.height))
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(close));
+    let x = control(x, close.id(), Role::Button, words.close(&line.title))
+        .focus(focus == Some(close), Msg::Focus(close), CLOSE_RADIUS)
+        .activate(Msg::Act(close))
+        .rows(0);
+    let x = container(x)
+        .width(Length::Fill)
+        .height(LINE)
+        .align_x(Horizontal::Right)
+        .align_y(Vertical::Center)
+        .padding(Padding {
+            right: width() - cross.x - cross.width,
+            ..Padding::ZERO
+        });
+    mouse_area(stack![art, pressed, x])
+        .on_right_press(Msg::Menu(line.id))
+        .into()
+}
+
+/// "+ N autres".
+fn more<'a>(words: Words, n: usize, focus: Option<Target>) -> El<'a> {
+    let said = words.more(n);
+    let art = canvas(MoreArt(said.clone()))
+        .width(Length::Fill)
+        .height(MORE);
+    let pressed = button(Space::new().width(Length::Fill).height(MORE))
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(Target::More));
+    let pressed = control(pressed, Target::More.id(), Role::Button, said)
+        .focus(
+            focus == Some(Target::More),
+            Msg::Focus(Target::More),
+            RADIUS,
+        )
+        .activate(Msg::Act(Target::More))
+        .rows(0);
+    stack![art, pressed].into()
+}
+
+/// What lights a line: the pointer on it (off its ✕), or on its ✕.
+fn lit(cursor: mouse::Cursor, bounds: Rectangle) -> Lit {
+    let at = cursor.land().position();
+    let close = close_rect(bounds);
+    let on_close = at.is_some_and(|at| close.contains(at));
+    Lit {
+        line: at.is_some_and(|at| bounds.contains(at)) && !on_close,
+        close: on_close,
+    }
+}
+
+/// A line as the full form draws it, lit as the pointer is.
+struct LineArt {
+    line: Line,
+    title: String,
+}
+
+impl<M> canvas::Program<M> for LineArt {
+    type State = Lit;
 
     fn update(
         &self,
-        state: &mut State,
+        state: &mut Lit,
         event: &iced::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
-        }
+    ) -> Option<canvas::Action<M>> {
+        let iced::Event::Mouse(_) = event else {
+            return None;
+        };
+        let now = lit(cursor, bounds);
+        (now != *state).then(|| {
+            *state = now;
+            canvas::Action::request_redraw()
+        })
     }
 
     fn draw(
         &self,
-        state: &State,
+        _state: &Lit,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let f = &mut frame;
-        let rects = rects(&state.rows);
-        for ((row, rect), title) in state.rows.iter().zip(&rects).zip(&state.titles) {
-            match row {
-                Row::Window(line) => {
-                    let lit = Lit {
-                        line: state.pointer.hover == Some(Item::Window(line.id)),
-                        close: state.pointer.hover == Some(Item::WindowClose(line.id)),
-                    };
-                    draw_line(f, *rect, line, title, lit, 1.0);
-                }
-                Row::More(_) => draw_more(
-                    f,
-                    *rect,
-                    title.clone(),
-                    state.pointer.hover == Some(Item::WindowsMore),
-                    1.0,
-                ),
-            }
-        }
-        if let Some((item, rect)) = state
-            .focus
-            .and_then(|focus| state.items().into_iter().find(|(i, _)| *i == focus))
-        {
-            let radius = if matches!(item, Item::WindowClose(_)) {
-                6.0
-            } else {
-                RADIUS
-            };
-            ring(f, rect, radius);
-        }
-        self.say(state);
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
+        cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut f = canvas::Frame::new(renderer, bounds.size());
+        let local = Rectangle::new(Point::ORIGIN, bounds.size());
+        let lit = lit(cursor, bounds);
+        draw_line(&mut f, local, &self.line, &self.title, lit, 1.0);
+        vec![f.into_geometry()]
     }
 }
 
-impl Panel {
-    /// What it shows, for screen readers (crate::a11y::rows): a line per
-    /// window, its ✕ in it, then "+ N".
-    fn say(&self, state: &State) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let items = state.items();
-        let rect = |item: Item| items.iter().find(|(i, _)| *i == item).map(|(_, r)| *r);
-        let mut nodes = Vec::new();
-        for row in &state.rows {
-            match row {
-                Row::Window(line) => {
-                    let Some(at) = rect(Item::Window(line.id)) else {
-                        continue;
-                    };
-                    let mut node = rows::act(
-                        Item::Window(line.id),
-                        Role::ListItem,
-                        self.words.name(line),
-                        at,
-                    )
-                    .selected(line.focused);
-                    if let Some(close) = rect(Item::WindowClose(line.id)) {
-                        node = node.child(rows::act(
-                            Item::WindowClose(line.id),
-                            Role::Button,
-                            self.words.close(&line.title),
-                            close,
-                        ));
-                    }
-                    nodes.push(node);
-                }
-                Row::More(n) => {
-                    if let Some(at) = rect(Item::WindowsMore) {
-                        nodes.push(rows::act(
-                            Item::WindowsMore,
-                            Role::Button,
-                            self.words.more(*n),
-                            at,
-                        ));
-                    }
-                }
-            }
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(items.iter().map(|(i, _)| *i)),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
+/// "+ N autres" as the full form draws it, lit under the pointer.
+struct MoreArt(String);
 
-    /// What it shows, read afresh (closing, what it showed).
-    fn refresh<Message>(
+impl<M> canvas::Program<M> for MoreArt {
+    type State = bool;
+
+    fn update(
         &self,
-        state: &mut State,
-        _now: Instant,
-    ) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
-        }
-        let bar = super::with(|c| match c.open_on() {
-            Some((bar, Item::Windows)) if c.is_open(self.id) => Some(bar.to_owned()),
-            _ => None,
-        })?;
-        let rows = rows_of(&bar);
-        if state.bar.as_deref() == Some(bar.as_str()) && state.rows == rows {
+        state: &mut bool,
+        event: &iced::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<M>> {
+        let iced::Event::Mouse(_) = event else {
             return None;
-        }
-        let width = WIDTH as f32 - 2.0 * SIDE;
-        state.titles = rows
-            .iter()
-            .map(|row| match row {
-                Row::Window(line) => cut(line, width).0,
-                Row::More(n) => self.words.more(*n),
-            })
-            .collect();
-        tracing::debug!(
-            bar = %bar,
-            shows = %self.words.said(&rows),
-            "the windows' popover shows it"
-        );
-        state.bar = Some(bar);
-        state.rows = rows;
-        let items: Vec<Item> = state.items().into_iter().map(|(i, _)| i).collect();
-        if state.focus.is_some_and(|f| !items.contains(&f)) {
-            state.focus = None;
-        }
-        state.pointer.hover = None;
-        super::refit(Item::Windows);
-        None
+        };
+        let now = cursor.land().is_over(bounds);
+        (now != *state).then(|| {
+            *state = now;
+            canvas::Action::request_redraw()
+        })
     }
 
-    /// What `item` does: a line brings its window and the popover closes;
-    /// a ✕ asks its window to close; "+ N", the overview (8.5 A), the
-    /// popover closing.
-    fn act(item: Item) {
-        match item {
-            Item::Window(id) => {
-                tracing::debug!(window = id, "the windows' popover brings a window");
-                super::send(vec![Effect::Bring(id)]);
-                event(Seen::Chosen);
-            }
-            Item::WindowClose(id) => {
-                tracing::debug!(window = id, "the windows' popover asks a window to close");
-                super::send(vec![Effect::Tell(ToCompositor::Close(id))]);
-            }
-            Item::WindowsMore => {
-                tracing::debug!("the windows' popover asks for the overview");
-                super::send(vec![Effect::Tell(ToCompositor::Overview)]);
-                event(Seen::Chosen);
-            }
-            _ => {}
-        }
-    }
-
-    fn mouse<Message>(
+    fn draw(
         &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target =
-            at.and_then(|at| crate::windows::draw::over(&state.items(), at).map(|(i, _)| i));
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(item) = state.pointer.release(target) {
-                    Self::act(item);
-                }
-                redraw
-            }
-            // A right click on a line: its window's menu, in the
-            // popover's place (#723).
-            mouse::Event::ButtonPressed(mouse::Button::Right) => {
-                let (Item::Window(id) | Item::WindowClose(id)) = target? else {
-                    return None;
-                };
-                let bar = state.bar.clone()?;
-                let line = state.rows.iter().find_map(|row| match row {
+        _state: &bool,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut f = canvas::Frame::new(renderer, bounds.size());
+        let local = Rectangle::new(Point::ORIGIN, bounds.size());
+        draw_more(
+            &mut f,
+            local,
+            self.0.clone(),
+            cursor.land().is_over(bounds),
+            1.0,
+        );
+        vec![f.into_geometry()]
+    }
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Act(Target::Window(id)) => {
+            tracing::debug!(window = id, "the windows' popover brings a window");
+            super::send(vec![Effect::Bring(id)]);
+            event(Seen::Chosen);
+        }
+        Msg::Act(Target::Close(id)) => {
+            tracing::debug!(window = id, "the windows' popover asks a window to close");
+            super::send(vec![Effect::Tell(ToCompositor::Close(id))]);
+        }
+        Msg::Act(Target::More) => {
+            tracing::debug!("the windows' popover asks for the overview");
+            super::send(vec![Effect::Tell(ToCompositor::Overview)]);
+            event(Seen::Chosen);
+        }
+        Msg::Menu(id) => {
+            let (bar, line) = ui(|ui| {
+                let line = ui.rows.iter().find_map(|row| match row {
                     Row::Window(line) if line.id == id => Some(line.clone()),
                     _ => None,
-                })?;
+                });
+                (ui.bar.clone(), line)
+            });
+            if let (Some(bar), Some(line)) = (bar, line) {
                 super::window_menu::ask(&bar, id, None, &line.title, &line.app);
-                redraw
             }
-            _ => None,
         }
     }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let order: Vec<Item> = state.items().into_iter().map(|(i, _)| i).collect();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(arrow @ (Named::ArrowDown | Named::ArrowUp)) => {
-                let down = *arrow == Named::ArrowDown;
-                state.focus = match state.focus {
-                    Some(focus) => kit::cycle(&order, focus, down),
-                    None => kit::step(&order, None, !down),
-                };
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(item) = state.focus {
-                    Self::act(item);
-                }
-            }
-            _ => return None,
+    // A line gone takes the ring with it.
+    ui(|ui| {
+        if ui.focus.is_some_and(|f| !targets(&ui.rows).contains(&f)) {
+            ui.focus = None;
         }
-        Some(canvas::Action::request_redraw().and_capture())
-    }
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use iced::Size;
-
     use super::*;
     use crate::windows::Line;
 
@@ -378,10 +448,10 @@ mod tests {
             1 + 8 + 110 + 8 + 1
         );
         // The lines span the popover less 7 px each side.
-        let r = rects(&[line(1)]);
+        assert_eq!((SIDE, width()), (7.0, 226.0));
         assert_eq!(
-            r[0],
-            Rectangle::new(Point::new(7.0, 9.0), Size::new(226.0, 30.0))
+            targets(&[line(1), Row::More(2)]),
+            [Target::Window(1), Target::Close(1), Target::More]
         );
     }
 }

@@ -13,33 +13,49 @@
 //! sharing, how many notifications wait for its end. 290 wide, 12 px in,
 //! its parts 8 px apart. A use that ended keeps its line while it
 //! lingers, without its button.
+//!
+//! Built with the shell's widget kit ([`crate::ui`]).
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
+use hocus_a11y::Role;
 use hocus_link::{RecordAsk, ShareAsk, ToCompositor};
 use iced::{
-    Color, Point, Rectangle, Renderer, Size, Theme, mouse,
+    Border, Color, Element, Length, Point, Rectangle, Size,
+    alignment::Vertical,
+    keyboard,
     widget::{
-        canvas::{self, Frame, Geometry, Path, Stroke},
-        text::Alignment,
+        Space, button,
+        canvas::{self, Frame, Path, Stroke},
+        column, container, row,
     },
     window,
 };
 
 use super::{
-    Effect, Event as Seen, Pressed, event,
-    kit::{self, Input, MANROPE_SEMIBOLD, Pointer, app_tile, text, text_in},
+    Effect, Pressed,
+    kit::{self, MANROPE_SEMIBOLD, app_tile},
 };
 use crate::theme::Ink;
 use crate::{
     in_use::{Kind, Media, Uses, Words, draw::colour},
     levels::{
         self,
-        draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring},
+        draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
         icons::Icon,
         sound::{Ask, Set},
     },
+    ui::{
+        self, Around, control,
+        parts::{drawn, drawn_out, gap},
+        style::{self, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 pub const WIDTH: u32 = 290;
 const BORDER: f32 = 1.0;
@@ -73,6 +89,9 @@ const REC_STOP: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.85));
 const REC_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const REC_ICON: Ink = Ink::Dark(rgb(0xEEF1F6));
 
+/// Its times go on while it shows: built again each second.
+const TICK: Duration = Duration::from_secs(1);
+
 /// A use's line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Line {
@@ -99,6 +118,13 @@ pub enum Target {
     Stop(u64),
     Pause,
     StopRecording,
+}
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("in_use:{self:?}")
+    }
 }
 
 /// Where everything is, for the uses now.
@@ -190,11 +216,36 @@ pub struct Panel {
 }
 
 #[derive(Debug, Default)]
-pub struct State {
-    pointer: Pointer<Target>,
-    focused: Option<Target>,
-    drawn: Option<Instant>,
+struct Ui {
+    focus: Option<Target>,
+    /// When its content was built: its times are of then.
+    built: Option<Instant>,
     said: Option<Vec<String>>,
+}
+
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
+
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
+}
+
+/// The popover opens: nothing holds the ring, nothing said yet.
+pub fn opening() {
+    ui(|ui| *ui = Ui::default());
+}
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A button pressed, or `Enter` on it.
+    Act(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// What is used changed under the view, or a second passed.
+    Stale,
 }
 
 /// A line's words and colour.
@@ -204,129 +255,435 @@ struct Said {
     colour: Color,
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+/// The popover on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let words = panel.words;
+    let order: Vec<Target> = layout(&crate::in_use::snapshot())
+        .buttons
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+    let next = || ui(|ui| ui.built.map(|at| at + TICK));
+    Around::new(panel.id, build(words), handle, Msg::Stale)
+        .rebuild(move || build(words))
+        .stale_when(move || next().is_some_and(|at| Instant::now() >= at))
+        .wake_at(next)
+        .keys(move |pressed| arrows(pressed, &order))
+        .press(Msg::Pressed)
+        .on_glass(panel.glass)
+}
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => {
-                state.drawn = Some(now);
-                for pressed in kit::keys(self.id) {
-                    let _: Option<canvas::Action<Message>> = Self::key(state, &pressed);
-                }
-                self.say(state, now);
-                // The times go on while it shows: drawn again each second.
-                super::with(|c| c.is_open(self.id))
-                    .then(|| canvas::Action::request_redraw_at(now + Duration::from_secs(1)))
-            }
-            Input::Mouse(seen, at) => Self::mouse(state, seen, at),
-            Input::Key(pressed) => Self::key(state, &pressed),
-            Input::Nothing => None,
-        }
+/// The arrows with no button holding the ring: the first (down), or the
+/// last (up); the kit takes them round after.
+fn arrows(pressed: &Pressed, order: &[Target]) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    let down = match &pressed.key {
+        Key::Named(Named::ArrowDown) => true,
+        Key::Named(Named::ArrowUp) => false,
+        _ => return None,
+    };
+    if ui(|ui| ui.focus.is_some()) {
+        return None;
     }
+    let target = if down { order.first() } else { order.last() };
+    target.map(|t| Msg::Focus(*t))
+}
 
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let f = &mut frame;
-        let now = state.drawn.unwrap_or_else(Instant::now);
-        let uses = crate::in_use::snapshot();
-        let layout = layout(&uses);
-        let left = BORDER + PAD;
-        let room = WIDTH as f32 - 2.0 * left - ICON - ICON_GAP;
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                self.words.right_now().to_owned(),
-                Point::new(left, layout.title),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
-        ));
-        for (line, top) in &layout.lines {
-            let Some(said) = self.said(&uses, *line, now) else {
-                continue;
-            };
-            let icon = Rectangle::new(
-                Point::new(left, top + (line_height() - ICON) / 2.0),
+/// Its content, as what is used is now.
+fn build<'a>(words: Words) -> El<'a> {
+    let now = Instant::now();
+    let uses = crate::in_use::snapshot();
+    let layout = layout(&uses);
+    ui(|ui| {
+        ui.built = Some(now);
+        say(words, &uses, &layout, now, ui);
+        content(words, &uses, &layout, now, ui.focus)
+    })
+}
+
+fn content<'a>(
+    words: Words,
+    uses: &Uses,
+    layout: &Layout,
+    now: Instant,
+    focus: Option<Target>,
+) -> El<'a> {
+    let mut all = column![
+        container(said(words.right_now(), TITLE, MANROPE_BOLD, TEXT.get()))
+            .height(TITLE * LINE)
+            .align_y(Vertical::Center)
+    ]
+    .spacing(GAP);
+    let room = WIDTH as f32 - 2.0 * (BORDER + PAD) - ICON - ICON_GAP;
+    for (line, _) in &layout.lines {
+        let Some(said_of) = said_of(words, uses, *line, now) else {
+            continue;
+        };
+        let (app, what) = elided(&said_of, room);
+        let ring = said_of.colour;
+        let tile = icon(words, uses, *line);
+        let mark = drawn_out(ICON, line_height(), RING, move |f, s| {
+            let at = Rectangle::new(
+                Point::new(0.0, (s.height - ICON) / 2.0),
                 Size::new(ICON, ICON),
             );
-            self.icon(f, &uses, *line, icon);
+            tile(f, at);
             // Ringed 2 px outside it.
             f.stroke(
                 &kit::rounded(
                     Rectangle::new(
-                        Point::new(icon.x - RING / 2.0, icon.y - RING / 2.0),
+                        Point::new(at.x - RING / 2.0, at.y - RING / 2.0),
                         Size::new(ICON + RING, ICON + RING),
                     ),
                     ICON_RADIUS + RING / 2.0,
                 ),
-                Stroke::default().with_color(said.colour).with_width(RING),
+                Stroke::default().with_color(ring).with_width(RING),
             );
-            let x = left + ICON + ICON_GAP;
-            let middle = top + line_height() / 2.0;
-            let app_middle = middle - (1.0 + WHAT * LINE) / 2.0;
-            let what_middle = middle + (APP * LINE + 1.0) / 2.0;
-            let (app, what) = elided(&said, room);
-            f.fill_text(text_in(
-                MANROPE_SEMIBOLD,
-                text(
-                    app,
-                    Point::new(x, app_middle),
-                    APP,
-                    TEXT.get(),
-                    Alignment::Left,
+        });
+        let texts = column![
+            said(app, APP, MANROPE_SEMIBOLD, TEXT.get()),
+            Space::new().height(1.0),
+            said(what, WHAT, MANROPE, said_of.colour),
+        ];
+        let line = row![mark, gap(ICON_GAP), texts]
+            .height(line_height())
+            .align_y(Vertical::Center);
+        all = all.push(ui::line(line, format!("{}, {}", said_of.app, said_of.what)));
+    }
+    if layout.held.is_some() {
+        let held = words.held(crate::notifications::with(|c| c.stack.held_while_sharing()));
+        let line = container(said(held.clone(), HELD, MANROPE, FAINT.get()))
+            .height(HELD * LINE)
+            .align_y(Vertical::Center);
+        all = all.push(ui::line(line, held));
+    }
+    let mut buttons = layout.buttons.iter().map(|(t, _)| *t).peekable();
+    while let Some(target) = buttons.next() {
+        let shown = button_of(words, uses, target, focus);
+        if target == Target::Pause
+            && let Some(stop) = buttons.next_if_eq(&Target::StopRecording)
+        {
+            all = all.push(
+                row![shown, gap(PAUSE_GAP), button_of(words, uses, stop, focus)]
+                    .width(Length::Fill),
+            );
+        } else {
+            all = all.push(shown);
+        }
+    }
+    container(all).padding(BORDER + PAD).into()
+}
+
+/// Line `line`'s words and colour at `now`.
+fn said_of(words: Words, uses: &Uses, line: Line, now: Instant) -> Option<Said> {
+    let kind = line.kind();
+    let muted = kind == Kind::Microphone && uses.muted;
+    let colour = colour(kind, muted);
+    let media = |seen: &crate::in_use::Seen<Media>| Said {
+        app: seen.what.app.clone(),
+        what: words.line(
+            kind,
+            muted,
+            detail(&seen.what).as_deref(),
+            now.saturating_duration_since(seen.since),
+        ),
+        colour,
+    };
+    match line {
+        Line::Microphone(i) => uses.microphone.get(i).map(media),
+        Line::Camera(i) => uses.camera.get(i).map(media),
+        Line::Recording => {
+            let rec = uses.recording.as_ref()?;
+            Some(Said {
+                app: words.recording().to_owned(),
+                what: words.recording_line(rec.what.shown.paused, rec.what.elapsed(now)),
+                colour,
+            })
+        }
+        Line::Share(id) => {
+            let share = uses.shares.iter().find(|s| s.what.id == id)?;
+            Some(Said {
+                app: app_name(words, &share.what.app),
+                what: words.line(
+                    kind,
+                    false,
+                    Some(&words.shares(&share.what.thing)),
+                    now.saturating_duration_since(share.since),
                 ),
-            ));
-            f.fill_text(text(
-                what,
-                Point::new(x, what_middle),
-                WHAT,
-                said.colour,
-                Alignment::Left,
-            ));
+                colour,
+            })
         }
-        if let Some(middle) = layout.held {
-            let held = crate::notifications::with(|c| c.stack.held_while_sharing());
-            f.fill_text(text(
-                self.words.held(held),
-                Point::new(left, middle),
-                HELD,
-                FAINT.get(),
-                Alignment::Left,
-            ));
-        }
-        for (target, rect) in &layout.buttons {
-            let hover = state.pointer.hover == Some(*target);
-            self.button(f, &uses, *target, *rect, hover);
-            if state.focused == Some(*target) {
-                ring(f, *rect, BUTTON_RADIUS);
+    }
+}
+
+/// The name of the application of id `app` (a share's).
+fn app_name(words: Words, app: &str) -> String {
+    crate::share::app_name(app).unwrap_or_else(|| words.an_app().to_owned())
+}
+
+/// What draws an icon at a place.
+type Draw = Box<dyn Fn(&mut Frame, Rectangle)>;
+
+/// What draws line `line`'s application's icon at a place.
+fn icon(words: Words, uses: &Uses, line: Line) -> Draw {
+    let tile = |icon: Option<Icon>, name: String| -> Draw {
+        Box::new(move |f, rect| {
+            app_tile(f, rect, (icon.as_ref(), &name), (ICON_RADIUS, 12.0), 1.0);
+        })
+    };
+    match line {
+        Line::Microphone(i) | Line::Camera(i) => {
+            let list = if matches!(line, Line::Microphone(_)) {
+                &uses.microphone
+            } else {
+                &uses.camera
+            };
+            match list.get(i) {
+                Some(seen) => tile(seen.what.icon.clone(), seen.what.app.clone()),
+                None => Box::new(|_, _| {}),
             }
         }
-        vec![frame.into_geometry()]
+        Line::Recording => {
+            // 5.10's item: its tint, its dot (amber while paused).
+            let paused = uses.recording.as_ref().is_some_and(|r| r.what.shown.paused);
+            Box::new(move |f, rect| {
+                f.fill(&kit::rounded(rect, ICON_RADIUS), REC_FILL.get());
+                let dot = if paused { REC_AMBER } else { REC_RED };
+                f.fill(&Path::circle(rect.center(), 5.0), dot.get());
+            })
+        }
+        Line::Share(id) => {
+            let Some(share) = uses.shares.iter().find(|s| s.what.id == id) else {
+                return Box::new(|_, _| {});
+            };
+            let scale = kit::popover_scale();
+            let px = crate::launcher::icons::pixels(ICON as u32, scale);
+            let handle = crate::share::entry_of(&share.what.app)
+                .and_then(|e| e.icon)
+                .and_then(|icon| match crate::launcher::icons::of(&icon, px) {
+                    Some(found) => found,
+                    None => {
+                        crate::launcher::icons::want([icon.as_str()], ICON as u32, scale);
+                        None
+                    }
+                });
+            match handle {
+                Some(handle) => Box::new(move |f, rect| {
+                    f.draw_image(rect, canvas::Image::new(handle.clone()));
+                }),
+                None => tile(None, app_name(words, &share.what.app)),
+            }
+        }
     }
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
+/// `top` over `under`, as the canvas laid one fill over another.
+fn over(top: Color, under: Color) -> Color {
+    let a = top.a + under.a * (1.0 - top.a);
+    if a <= 0.0 {
+        return Color::TRANSPARENT;
+    }
+    let mix = |t: f32, u: f32| (t * top.a + u * under.a * (1.0 - top.a)) / a;
+    Color {
+        r: mix(top.r, under.r),
+        g: mix(top.g, under.g),
+        b: mix(top.b, under.b),
+        a,
+    }
+}
+
+/// Button `target`: its fill (lit under the pointer), its edge, its word
+/// or its icon.
+fn button_of<'a>(words: Words, uses: &Uses, target: Target, focus: Option<Target>) -> El<'a> {
+    let muted = uses.muted;
+    let paused = uses.live_recording().is_some_and(|r| r.shown.paused);
+    let word = |said_as: String, ink: Color| -> El<'a> {
+        container(said(said_as, BUTTON_TEXT, MANROPE_BOLD, ink))
+            .center(Length::Fill)
+            .into()
+    };
+    let (face, name, role, width): (El<'a>, String, Role, Length) = match target {
+        Target::Mute => (
+            word(words.mute(muted).to_owned(), TEXT.get()),
+            words.mute(muted).to_owned(),
+            Role::ToggleButton,
+            Length::Fill,
+        ),
+        Target::Stop(id) => {
+            let said_as = stop_word(words, uses, id);
+            (
+                word(said_as.clone(), Color::WHITE),
+                said_as,
+                Role::Button,
+                Length::Fill,
+            )
+        }
+        Target::Pause => (
+            drawn(PAUSE, BUTTON, move |f, s| {
+                pause_icon(f, Rectangle::new(Point::ORIGIN, s), paused);
+            }),
+            words.pause_recording(paused).to_owned(),
+            Role::Button,
+            Length::Fixed(PAUSE),
+        ),
+        Target::StopRecording => (
+            word(words.stop_recording().to_owned(), Color::WHITE),
+            words.stop_recording().to_owned(),
+            Role::Button,
+            Length::Fill,
+        ),
+    };
+    let pressed = button(face)
+        .padding(0)
+        .width(width)
+        .height(BUTTON)
+        .style(move |_, status| {
+            let lit = style::lit(status);
+            let contrast = crate::theme::contrast();
+            let (fill, hover, edge) = match target {
+                Target::Mute => (
+                    (!muted).then(|| MUTE_FILL.get()),
+                    HOVER,
+                    Some(if muted { UNMUTE_RING } else { MUTE_RING }),
+                ),
+                Target::Stop(_) => {
+                    let blue = if lit { BLUE_HOVER } else { BLUE };
+                    (Some(blue.get()), HOVER, None)
+                }
+                Target::Pause => (Some(REC_PAUSE.get()), REC_HOVER, None),
+                Target::StopRecording => (Some(REC_STOP.get()), REC_HOVER, None),
+            };
+            let lit_fill = !matches!(target, Target::Stop(_)) && lit;
+            let background = match (fill, lit_fill && !contrast) {
+                (Some(fill), true) => Some(over(hover.get(), fill)),
+                (None, true) => Some(hover.get()),
+                (fill, false) => fill,
+            };
+            let border = match edge {
+                Some(edge) => Border {
+                    color: edge.get(),
+                    width: 1.0,
+                    radius: BUTTON_RADIUS.into(),
+                },
+                // Under high contrast a hover is a 1 px border in
+                // `text.dim` (bar.md §13).
+                None if lit_fill && contrast => {
+                    style::hovered(Color::TRANSPARENT, BUTTON_RADIUS).border
+                }
+                None => style::round(BUTTON_RADIUS),
+            };
+            button::Style {
+                background: background.map(Into::into),
+                border,
+                ..button::Style::default()
+            }
+        })
+        .on_press(Msg::Act(target));
+    control(pressed, target.id(), role, name)
+        .node(|n| {
+            if target == Target::Mute {
+                n.checked(muted)
+            } else {
+                n
+            }
+        })
+        .focus(focus == Some(target), Msg::Focus(target), BUTTON_RADIUS)
+        .activate(Msg::Act(target))
+        .rows(0)
+        .into()
+}
+
+/// Share `id`'s button: with several shares, each names its application.
+fn stop_word(words: Words, uses: &Uses, id: u64) -> String {
+    if uses.live_shares().count() < 2 {
+        return words.stop(None);
+    }
+    let app = uses
+        .live_shares()
+        .find(|s| s.id == id)
+        .map(|s| app_name(words, &s.app));
+    words.stop(app.as_deref())
+}
+
+/// What it shows, for the log: when something other than its times
+/// changed.
+fn say(words: Words, uses: &Uses, layout: &Layout, now: Instant, ui: &mut Ui) {
+    let mut said: Vec<String> = vec![words.right_now().to_owned()];
+    for (line, _) in &layout.lines {
+        if let Some(line) = said_of(words, uses, *line, now) {
+            said.push(line.app);
+            said.push(line.what);
+        }
+    }
+    if layout.held.is_some() {
+        let held = crate::notifications::with(|c| c.stack.held_while_sharing());
+        said.push(words.held(held));
+    }
+    for (target, _) in &layout.buttons {
+        said.push(match target {
+            Target::Mute => words.mute(uses.muted).to_owned(),
+            Target::Stop(id) => stop_word(words, uses, *id),
+            Target::Pause => "⏸".to_owned(),
+            Target::StopRecording => words.stop_recording().to_owned(),
+        });
+    }
+    let changed = ui.said.as_ref().is_none_or(|before| {
+        before.len() != said.len()
+            || before
+                .iter()
+                .zip(&said)
+                .any(|(a, b)| untimed(a) != untimed(b))
+    });
+    if changed {
+        tracing::debug!(?said, "the in-use popover shows it");
+    }
+    ui.said = Some(said);
+}
+
+// --- What a message does -------------------------------------------------------
+
+fn handle(message: Msg) {
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Act(target) => act(target),
+    }
+}
+
+fn act(target: Target) {
+    match target {
+        Target::Mute => {
+            // The default source, as the sound's button mutes it.
+            let mixer = levels::sound::mixer();
+            if let Some(mic) = mixer.microphone() {
+                let muted = !mic.sound.is_some_and(|s| s.muted);
+                tracing::info!(id = mic.id, muted, "the microphone from the bar");
+                levels::ask(Ask::Node(mic.id, Set::Mute(muted)));
+            }
+        }
+        Target::Stop(id) => {
+            tracing::info!(id, "sharing stopped from the bar");
+            super::send(vec![Effect::Tell(ToCompositor::Share(ShareAsk::Stop {
+                id,
+            }))]);
+        }
+        Target::Pause => {
+            let paused = crate::in_use::snapshot()
+                .live_recording()
+                .is_some_and(|r| r.shown.paused);
+            let ask = if paused {
+                RecordAsk::Resume
+            } else {
+                RecordAsk::Pause
+            };
+            tracing::debug!(?ask, "the recording from the bar");
+            super::tell(ToCompositor::Record(ask));
+        }
+        Target::StopRecording => {
+            tracing::debug!(ask = ?RecordAsk::Stop, "the recording from the bar");
+            super::tell(ToCompositor::Record(RecordAsk::Stop));
+        }
     }
 }
 
@@ -369,361 +726,6 @@ fn fit_detail(line: &str, room: f32, width: &mut impl FnMut(&str) -> f32) -> Str
 /// media name.
 fn detail(media: &Media) -> Option<String> {
     crate::desktops::title_of_app(&media.ids).or_else(|| media.media.clone())
-}
-
-impl Panel {
-    /// Line `line`'s words and colour at `now`.
-    fn said(&self, uses: &Uses, line: Line, now: Instant) -> Option<Said> {
-        let words = self.words;
-        let kind = line.kind();
-        let muted = kind == Kind::Microphone && uses.muted;
-        let colour = colour(kind, muted);
-        let media = |seen: &crate::in_use::Seen<Media>| Said {
-            app: seen.what.app.clone(),
-            what: words.line(
-                kind,
-                muted,
-                detail(&seen.what).as_deref(),
-                now.saturating_duration_since(seen.since),
-            ),
-            colour,
-        };
-        match line {
-            Line::Microphone(i) => uses.microphone.get(i).map(media),
-            Line::Camera(i) => uses.camera.get(i).map(media),
-            Line::Recording => {
-                let rec = uses.recording.as_ref()?;
-                Some(Said {
-                    app: words.recording().to_owned(),
-                    what: words.recording_line(rec.what.shown.paused, rec.what.elapsed(now)),
-                    colour,
-                })
-            }
-            Line::Share(id) => {
-                let share = uses.shares.iter().find(|s| s.what.id == id)?;
-                Some(Said {
-                    app: self.app_name(&share.what.app),
-                    what: words.line(
-                        kind,
-                        false,
-                        Some(&words.shares(&share.what.thing)),
-                        now.saturating_duration_since(share.since),
-                    ),
-                    colour,
-                })
-            }
-        }
-    }
-
-    /// The name of the application of id `app` (a share's).
-    fn app_name(&self, app: &str) -> String {
-        crate::share::app_name(app).unwrap_or_else(|| self.words.an_app().to_owned())
-    }
-
-    /// Line `line`'s application's icon at `rect`.
-    fn icon(&self, f: &mut Frame, uses: &Uses, line: Line, rect: Rectangle) {
-        let tile = |f: &mut Frame, icon: Option<&Icon>, name: &str| {
-            app_tile(f, rect, (icon, name), (ICON_RADIUS, 12.0), 1.0);
-        };
-        match line {
-            Line::Microphone(i) | Line::Camera(i) => {
-                let list = if matches!(line, Line::Microphone(_)) {
-                    &uses.microphone
-                } else {
-                    &uses.camera
-                };
-                if let Some(seen) = list.get(i) {
-                    tile(f, seen.what.icon.as_ref(), &seen.what.app);
-                }
-            }
-            Line::Recording => {
-                // 5.10's item: its tint, its dot (amber while paused).
-                f.fill(&kit::rounded(rect, ICON_RADIUS), REC_FILL.get());
-                let paused = uses.recording.as_ref().is_some_and(|r| r.what.shown.paused);
-                let dot = if paused { REC_AMBER } else { REC_RED };
-                f.fill(&Path::circle(rect.center(), 5.0), dot.get());
-            }
-            Line::Share(id) => {
-                let Some(share) = uses.shares.iter().find(|s| s.what.id == id) else {
-                    return;
-                };
-                let scale = kit::popover_scale();
-                let px = crate::launcher::icons::pixels(ICON as u32, scale);
-                let handle = crate::share::entry_of(&share.what.app)
-                    .and_then(|e| e.icon)
-                    .and_then(|icon| match crate::launcher::icons::of(&icon, px) {
-                        Some(found) => found,
-                        None => {
-                            crate::launcher::icons::want([icon.as_str()], ICON as u32, scale);
-                            None
-                        }
-                    });
-                match handle {
-                    Some(handle) => f.draw_image(rect, canvas::Image::new(handle)),
-                    None => tile(f, None, &self.app_name(&share.what.app)),
-                }
-            }
-        }
-    }
-
-    /// Button `target` at `rect`.
-    fn button(&self, f: &mut Frame, uses: &Uses, target: Target, rect: Rectangle, hover: bool) {
-        let shape = kit::rounded(rect, BUTTON_RADIUS);
-        let word = |f: &mut Frame, said: String, ink: Color| {
-            f.fill_text(text_in(
-                MANROPE_BOLD,
-                text(said, rect.center(), BUTTON_TEXT, ink, Alignment::Center),
-            ));
-        };
-        match target {
-            Target::Mute => {
-                if !uses.muted {
-                    f.fill(&shape, MUTE_FILL.get());
-                }
-                if hover {
-                    crate::theme::hover(f, &shape, HOVER.get());
-                }
-                let edge = if uses.muted { UNMUTE_RING } else { MUTE_RING };
-                f.stroke(
-                    &kit::rounded(
-                        Rectangle::new(
-                            Point::new(rect.x + 0.5, rect.y + 0.5),
-                            Size::new(rect.width - 1.0, rect.height - 1.0),
-                        ),
-                        BUTTON_RADIUS - 0.5,
-                    ),
-                    Stroke::default().with_color(edge.get()).with_width(1.0),
-                );
-                word(f, self.words.mute(uses.muted).to_owned(), TEXT.get());
-            }
-            Target::Stop(id) => {
-                f.fill(&shape, if hover { BLUE_HOVER } else { BLUE });
-                word(f, self.stop_word(uses, id), Color::WHITE);
-            }
-            Target::Pause => {
-                f.fill(&shape, REC_PAUSE.get());
-                if hover {
-                    crate::theme::hover(f, &shape, REC_HOVER.get());
-                }
-                let paused = uses.live_recording().is_some_and(|r| r.shown.paused);
-                pause_icon(f, rect, paused);
-            }
-            Target::StopRecording => {
-                f.fill(&shape, REC_STOP.get());
-                if hover {
-                    crate::theme::hover(f, &shape, REC_HOVER.get());
-                }
-                word(f, self.words.stop_recording().to_owned(), Color::WHITE);
-            }
-        }
-    }
-
-    /// Share `id`'s button: with several shares, each names its
-    /// application.
-    fn stop_word(&self, uses: &Uses, id: u64) -> String {
-        if uses.live_shares().count() < 2 {
-            return self.words.stop(None);
-        }
-        let app = uses
-            .live_shares()
-            .find(|s| s.id == id)
-            .map(|s| self.app_name(&s.app));
-        self.words.stop(app.as_deref())
-    }
-
-    /// What it shows, for the log: when something other than its times
-    /// changed.
-    fn say(&self, state: &mut State, now: Instant) {
-        let uses = crate::in_use::snapshot();
-        let layout = layout(&uses);
-        let mut said: Vec<String> = vec![self.words.right_now().to_owned()];
-        for (line, _) in &layout.lines {
-            if let Some(line) = self.said(&uses, *line, now) {
-                said.push(line.app);
-                said.push(line.what);
-            }
-        }
-        if layout.held.is_some() {
-            let held = crate::notifications::with(|c| c.stack.held_while_sharing());
-            said.push(self.words.held(held));
-        }
-        for (target, _) in &layout.buttons {
-            said.push(match target {
-                Target::Mute => self.words.mute(uses.muted).to_owned(),
-                Target::Stop(id) => self.stop_word(&uses, *id),
-                Target::Pause => "⏸".to_owned(),
-                Target::StopRecording => self.words.stop_recording().to_owned(),
-            });
-        }
-        let changed = state.said.as_ref().is_none_or(|before| {
-            before.len() != said.len()
-                || before
-                    .iter()
-                    .zip(&said)
-                    .any(|(a, b)| untimed(a) != untimed(b))
-        });
-        if changed {
-            tracing::debug!(?said, "the in-use popover shows it");
-        }
-        state.said = Some(said);
-        // For screen readers (crate::a11y::rows): each use's line, then the
-        // buttons.
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let mut nodes = Vec::new();
-        for (line, _) in &layout.lines {
-            if let Some(line) = self.said(&uses, *line, now) {
-                nodes.push(rows::line(format!("{}, {}", line.app, line.what)));
-            }
-        }
-        if layout.held.is_some() {
-            let held = crate::notifications::with(|c| c.stack.held_while_sharing());
-            nodes.push(rows::line(self.words.held(held)));
-        }
-        for (target, rect) in &layout.buttons {
-            let node = match target {
-                Target::Mute => rows::act(
-                    *target,
-                    Role::ToggleButton,
-                    self.words.mute(uses.muted),
-                    *rect,
-                )
-                .checked(uses.muted),
-                Target::Stop(id) => {
-                    rows::act(*target, Role::Button, self.stop_word(&uses, *id), *rect)
-                }
-                Target::Pause => {
-                    let paused = uses.live_recording().is_some_and(|r| r.shown.paused);
-                    rows::act(
-                        *target,
-                        Role::Button,
-                        self.words.pause_recording(paused),
-                        *rect,
-                    )
-                }
-                Target::StopRecording => {
-                    rows::act(*target, Role::Button, self.words.stop_recording(), *rect)
-                }
-            };
-            nodes.push(node);
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: None,
-                nodes,
-                order: rows::order(layout.buttons.iter().map(|(t, _)| *t)),
-                focus: state.focused.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
-
-    fn act(target: Target) {
-        match target {
-            Target::Mute => {
-                // The default source, as the sound's button mutes it.
-                let mixer = levels::sound::mixer();
-                if let Some(mic) = mixer.microphone() {
-                    let muted = !mic.sound.is_some_and(|s| s.muted);
-                    tracing::info!(id = mic.id, muted, "the microphone from the bar");
-                    levels::ask(Ask::Node(mic.id, Set::Mute(muted)));
-                }
-            }
-            Target::Stop(id) => {
-                tracing::info!(id, "sharing stopped from the bar");
-                super::send(vec![Effect::Tell(ToCompositor::Share(ShareAsk::Stop {
-                    id,
-                }))]);
-            }
-            Target::Pause => {
-                let paused = crate::in_use::snapshot()
-                    .live_recording()
-                    .is_some_and(|r| r.shown.paused);
-                let ask = if paused {
-                    RecordAsk::Resume
-                } else {
-                    RecordAsk::Pause
-                };
-                tracing::debug!(?ask, "the recording from the bar");
-                super::tell(ToCompositor::Record(ask));
-            }
-            Target::StopRecording => {
-                tracing::debug!(ask = ?RecordAsk::Stop, "the recording from the bar");
-                super::tell(ToCompositor::Record(RecordAsk::Stop));
-            }
-        }
-    }
-
-    fn targets() -> Vec<Target> {
-        layout(&crate::in_use::snapshot())
-            .buttons
-            .into_iter()
-            .map(|(t, _)| t)
-            .collect()
-    }
-
-    fn mouse<Message>(
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let layout = layout(&crate::in_use::snapshot());
-        let target = at.and_then(|at| {
-            layout
-                .buttons
-                .iter()
-                .find(|(_, r)| r.contains(at))
-                .map(|(t, _)| *t)
-        });
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focused = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(target) = state.pointer.release(target) {
-                    Self::act(target);
-                }
-                redraw
-            }
-            _ => None,
-        }
-    }
-
-    fn key<Message>(state: &mut State, pressed: &Pressed) -> Option<canvas::Action<Message>> {
-        use iced::keyboard::{Key, key::Named};
-        let targets = Self::targets();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab | Named::ArrowDown) => {
-                state.focused = kit::step(&targets, state.focused, pressed.modifiers.shift());
-            }
-            Key::Named(Named::ArrowUp) => {
-                state.focused = kit::step(&targets, state.focused, true);
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(target) = state.focused.filter(|t| targets.contains(t)) {
-                    Self::act(target);
-                }
-            }
-            _ => return None,
-        }
-        Some(canvas::Action::request_redraw().and_capture())
-    }
 }
 
 /// A line without its time, to log what changes and not the seconds.

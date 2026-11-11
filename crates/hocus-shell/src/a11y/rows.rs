@@ -71,23 +71,6 @@ pub fn act(
         .act(Act::Click)
 }
 
-/// A slider the ring goes to: its value as words and as a number, 0 to
-/// 100, the arrows' step `step`.
-pub fn slider(
-    target: impl std::fmt::Debug,
-    name: impl Into<String>,
-    value: f32,
-    step: f32,
-    rect: Rectangle,
-) -> Node {
-    Node::new(key(target), Role::Slider, name)
-        .value(format!("{}\u{a0}%", value.round().max(0.0) as u32))
-        .range(f64::from(value), 0.0, 100.0, Some(f64::from(step)))
-        .bounds(at(rect))
-        .act(Act::Increment)
-        .act(Act::Decrement)
-}
-
 /// A line of text that nothing holds: a note, a section's label.
 pub fn line(text: impl Into<String>) -> Node {
     let text = text.into();

@@ -329,12 +329,14 @@ impl Item {
             Self::Bluetooth => bluetooth::opening(),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
-            Self::Keyboard | Self::Desktop { .. } | Self::Agent(_) | Self::Secretary => {}
+            Self::Desktop { .. } | Self::WindowsMore => desktop::opening(),
+            Self::Keyboard | Self::Agent(_) | Self::Secretary => {}
             Self::Sources | Self::AnotherTool | Self::Plug(_) | Self::Decline => {}
             Self::Notifications => crate::notifications::history_open(true),
             Self::Clipboard => clipboard::opening(),
             Self::User => session::opening(),
-            Self::Menu | Self::InUse | Self::TaskAdd | Self::Task(_) => {}
+            Self::InUse => in_use::opening(),
+            Self::Menu | Self::TaskAdd | Self::Task(_) => {}
             Self::Meeting | Self::Join | Self::MeetingMark => {}
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
@@ -343,11 +345,9 @@ impl Item {
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
             Self::Music => music::opening(),
-            Self::Window(_)
-            | Self::WindowClose(_)
-            | Self::WindowsMore
-            | Self::Windows
-            | Self::WindowMenu(_) => {}
+            Self::Windows => windows::opening(),
+            Self::WindowMenu(_) => window_menu::opening(),
+            Self::Window(_) | Self::WindowClose(_) => {}
         }
     }
 
