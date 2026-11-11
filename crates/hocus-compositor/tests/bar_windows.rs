@@ -1312,3 +1312,19 @@ fn kit_shot() -> anyhow::Result<()> {
     bed.hp.pointer_move(600.0, 500.0);
     common::popover_shot(&mut bed.hp, "window-menu")
 }
+
+/// The windows' lines at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    let id = bed.id_of(FOOT.0)?;
+    let item = format!("Window({id})");
+    let at = bed.item_at(&item, SCREEN.0)?;
+    let log = bed.log.clone();
+    common::bar_shots(&mut bed.hp, &log, (WINDOWS_NAMESPACE, "windows"), at, &item)
+}

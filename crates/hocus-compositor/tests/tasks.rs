@@ -955,3 +955,23 @@ fn kit_shot() -> anyhow::Result<()> {
     bed.hp.pointer_move(400.0, 300.0);
     common::popover_shot(&mut bed.hp, "tasks")
 }
+
+/// The tasks' group at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("kit", "1920x1080", WITH_TASKS, SEVEN)? else {
+        return Ok(());
+    };
+    bed.group_after(0, &["form=full", "more=+ 4 autres"])?;
+    let at = bed.item("Task(0)")?;
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::TASKS_NAMESPACE, "tasks"),
+        at,
+        "Task(1)",
+    )
+}

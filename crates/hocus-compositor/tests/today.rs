@@ -744,3 +744,31 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     shoot(&mut bed, "none", (1920 - 420, 0, 420, 420), None)?;
     Ok(())
 }
+
+/// Today at rest, hovered and ringed, shot under `HOCUS_KIT_SHOTS`
+/// (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        (1920, 1080),
+        "14:00:00",
+        &ordinary(),
+        FormChoice::Full,
+    )?;
+    bed.today_from(0, "AUJOURD'HUI 15:00")?;
+    let top = bed.surface()?.y + 5;
+    let at = (f64::from(LINE_X + 80), f64::from(line_middle(top, 0)));
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (TODAY_NAMESPACE, "today"),
+        at,
+        "TodayLine(1)",
+    )
+}

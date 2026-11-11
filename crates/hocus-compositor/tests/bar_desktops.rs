@@ -1525,3 +1525,26 @@ fn kit_shot() -> anyhow::Result<()> {
     bed.logged_after(mark, "rows=[\"Beta\", \"Alpha\"]")?;
     common::popover_shot(&mut bed.hp, "desktop")
 }
+
+/// The desktops' tiles at rest, hovered and ringed, shot under
+/// `HOCUS_KIT_SHOTS` (#785's side-by-sides).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn bar_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let _alpha = bed.open_titled("test.red", "Alpha", (800, 500))?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    let at = bed.middle(1);
+    let log = bed.log.clone();
+    common::bar_shots(
+        &mut bed.hp,
+        &log,
+        (hocus_link::DESKTOPS_NAMESPACE, "desktops"),
+        at,
+        "Desktop { row: 0, index: 2 }",
+    )
+}

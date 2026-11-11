@@ -1854,6 +1854,63 @@ pub fn popover_shot(hp: &mut Headless, name: &str) -> anyhow::Result<()> {
     layer_shot(hp, hocus_link::POPOVER_NAMESPACE, name)
 }
 
+/// The keyboard's ring onto the bar's item `item`, as the shell logs it
+/// (`Clipboard`, `Desktop { row: 0, index: 1 }`; ending in `(`, the first
+/// of its kind, `Tray(`): `Super+B`, then `Tab` until the shell's log at
+/// `log` says the keyboard is on it.
+pub fn ring_on(hp: &mut Headless, log: &Path, item: &str) -> anyhow::Result<()> {
+    const KEY_B: u32 = 48;
+    let on = |text: &str| -> Option<bool> {
+        let line = text.lines().rev().find(|l| {
+            l.contains("the keyboard on an item") || l.contains("the keyboard into the bar")
+        })?;
+        let value = line.rsplit("item=").next()?.trim_end();
+        Some(value == item || (item.ends_with('(') && value.starts_with(item)))
+    };
+    let mark = logged(log).len();
+    chord(hp, &[KEY_LEFTMETA, KEY_B]);
+    for _ in 0..80 {
+        wait(hp, Duration::from_millis(150))?;
+        let text = logged(log);
+        match on(text.get(mark..).unwrap_or_default()) {
+            Some(true) => return Ok(()),
+            Some(false) => {
+                hp.key(KEY_TAB, true);
+                hp.key(KEY_TAB, false);
+            }
+            None => {}
+        }
+    }
+    anyhow::bail!("the keyboard never reached {item}")
+}
+
+/// A bar's surface `namespace` shot as [`layer_shot`] does, at rest
+/// (`name-rest`), the pointer on `at` (`name-hover`), and the keyboard's
+/// ring on `item` ([`ring_on`], `name-ring`): the side-by-sides of its
+/// items on the widget kit (#785).
+pub fn bar_shots(
+    hp: &mut Headless,
+    log: &Path,
+    (namespace, name): (&str, &str),
+    at: (f64, f64),
+    item: &str,
+) -> anyhow::Result<()> {
+    let away = (400.0, 300.0);
+    hp.pointer_move(away.0, away.1);
+    layer_shot(hp, namespace, &format!("{name}-rest"))?;
+    over(hp, at, namespace)?;
+    layer_shot(hp, namespace, &format!("{name}-hover"))?;
+    hp.pointer_move(away.0, away.1);
+    wait(hp, Duration::from_millis(500))?;
+    ring_on(hp, log, item)?;
+    layer_shot(hp, namespace, &format!("{name}-ring"))?;
+    for _ in 0..2 {
+        hp.key(KEY_ESC, true);
+        hp.key(KEY_ESC, false);
+    }
+    Ok(())
+}
+
 /// The shell's surface `namespace` as the first screen shows it, saved as
 /// [`popover_shot`] saves a popover.
 pub fn layer_shot(hp: &mut Headless, namespace: &str, name: &str) -> anyhow::Result<()> {
