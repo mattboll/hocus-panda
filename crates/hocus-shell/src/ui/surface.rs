@@ -43,6 +43,20 @@ pub fn touch() {
     STAMP.fetch_add(1, Ordering::Relaxed);
 }
 
+thread_local! {
+    /// The stamp as a view began to be built: what a surface's content was
+    /// built from. Read after its content, the stamp would take in a change
+    /// told meanwhile from another thread (Online Accounts listed as the
+    /// popover is built), and the content built before it would never be
+    /// built again.
+    static VIEWED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A view begins to be built ([`Around::new`] takes the stamp from here).
+pub fn viewing() {
+    VIEWED.set(STAMP.load(Ordering::Relaxed));
+}
+
 /// Operations that wait for the tree built after what a surface handled
 /// (a list scrolled to the row the ring went to).
 pub struct Later(Mutex<Vec<Box<dyn Operation>>>);
@@ -147,7 +161,7 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
         Self {
             id,
             build: BUILDS.fetch_add(1, Ordering::Relaxed),
-            stamp: STAMP.load(Ordering::Relaxed),
+            stamp: VIEWED.get().min(STAMP.load(Ordering::Relaxed)),
             content: content.into(),
             handle: Box::new(handle),
             stale: Box::new(|| false),
@@ -273,6 +287,28 @@ struct Kept {
     queued: Vec<Pressed>,
     /// What the tree showed when last said in the log.
     said: String,
+    /// Where the pointer is, as the events themselves say it.
+    pointer: Option<iced::Point>,
+}
+
+/// The pointer as of `event`, kept in `kept`: iced hands every event of a
+/// batch the cursor as it is after the batch, so that a press and a
+/// release read together with a move away (a slow frame) found the
+/// pointer gone from the button pressed, and the click was lost. The
+/// widgets get, with each event, the pointer where that event has it.
+fn pointer_of(kept: &mut Kept, event: &Event, cursor: mouse::Cursor) -> mouse::Cursor {
+    match event {
+        Event::Mouse(mouse::Event::CursorMoved { position }) => kept.pointer = Some(*position),
+        Event::Mouse(mouse::Event::CursorEntered) => kept.pointer = cursor.land().position(),
+        Event::Mouse(mouse::Event::CursorLeft) => kept.pointer = None,
+        _ => {}
+    }
+    match (event, kept.pointer, cursor) {
+        (Event::Mouse(_), Some(at), mouse::Cursor::Levitating(_)) => mouse::Cursor::Levitating(at),
+        (Event::Mouse(_), Some(at), _) => mouse::Cursor::Available(at),
+        (Event::Mouse(mouse::Event::CursorLeft), None, _) => mouse::Cursor::Unavailable,
+        _ => cursor,
+    }
 }
 
 fn child(layout: Layout<'_>) -> Layout<'_> {
@@ -592,6 +628,7 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
         }
         // The tree built after what was handled: what waited for it.
         let kept = tree.state.downcast_mut::<Kept>();
+        let cursor = pointer_of(kept, event, cursor);
         if kept.outdated.is_some_and(|build| build != self.build) {
             kept.outdated = None;
             let held = std::mem::take(&mut kept.held);
@@ -680,9 +717,11 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
                 // Swapped in as it is laid out again: until then the
                 // tree and its layout are the old content's (a stack
                 // around asks the pointer's look of them).
+                // The stamp before the content: a change told while it is
+                // built is seen next time.
+                self.stamp = STAMP.load(Ordering::Relaxed);
                 self.pending = Some(rebuild());
                 self.build = BUILDS.fetch_add(1, Ordering::Relaxed);
-                self.stamp = STAMP.load(Ordering::Relaxed);
                 shell.invalidate_layout();
                 shell.request_redraw();
             } else {

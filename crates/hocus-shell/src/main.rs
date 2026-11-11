@@ -1759,12 +1759,7 @@ impl Shell {
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = agents::peek::bar_of(id)?;
-        Some(
-            canvas(agents::peek::View { bar })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-        )
+        Some(agents::peek::view(id, bar))
     }
 
     /// The launcher, or its toast, if its surface is `id`.
@@ -1810,44 +1805,23 @@ impl Shell {
     /// its surface is `id`.
     fn capture_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         if capture::thumb::is_surface(id) {
-            return Some(
-                canvas(capture::thumb::View {
-                    id,
-                    words: capture::words(),
-                    software: self.software,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            );
+            return Some(capture::thumb::view(id, capture::words(), self.software));
         }
         if capture::editor::is_surface(id) {
-            let layer = |layer| {
-                canvas(capture::editor::draw::View {
-                    id,
-                    words: capture::words(),
-                    glass: self.look.glass,
-                    layer,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill)
-            };
-            use capture::editor::draw::Layer;
-            return Some(stack![layer(Layer::Panel), layer(Layer::Over)].into());
+            return Some(capture::editor::view::view(
+                id,
+                capture::words(),
+                self.look.glass,
+            ));
         }
         if !capture::is_surface(id) {
             return None;
         }
-        Some(
-            canvas(capture::draw::View {
-                id,
-                words: capture::Words::new(clock::time::Lang::of_messages()),
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        )
+        Some(capture::toolbar::view(
+            id,
+            capture::Words::new(clock::time::Lang::of_messages()),
+            self.look.glass,
+        ))
     }
 
     /// The popover whose surface is `id`.
@@ -1975,6 +1949,7 @@ impl Shell {
     /// compositor gives their surface ([`keys`]), and an input method while
     /// a field of theirs has the keyboard ([`field::ime`]).
     fn view(&self, id: window::Id) -> Element<'_, Message> {
+        ui::surface::viewing();
         keys::Held::new(
             id,
             field::ime::Asking::new(pointer::Entered::new(self.surface_view(id))),

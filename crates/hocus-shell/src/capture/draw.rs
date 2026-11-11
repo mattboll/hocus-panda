@@ -5,7 +5,7 @@
 //! behind it, draws its shadow and fades it in; the shell draws its tint,
 //! its rim and its buttons.
 
-use hocus_link::{CAPTURE_DELAYS, CAPTURE_TOOLBAR_RADIUS, CaptureMode, LAUNCHER_ZOOM};
+use hocus_link::{CAPTURE_DELAYS, CAPTURE_TOOLBAR_RADIUS, CaptureBar, CaptureMode, LAUNCHER_ZOOM};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme, mouse,
     widget::{
@@ -180,77 +180,19 @@ impl Layout {
             size: Size::new(width.ceil(), (2.0 * (BORDER + PAD) + BUTTON).ceil()),
         }
     }
-
-    fn button_at(&self, at: Point) -> Option<Button> {
-        self.buttons
-            .iter()
-            .find(|(_, r)| r.contains(at))
-            .map(|(b, _)| *b)
-    }
 }
 
-/// The toolbar on its surface.
+/// What nothing holds on the toolbar, under its buttons: its tint, its
+/// rim, the separator and the switch's tint.
 #[derive(Debug, Clone)]
-pub struct View {
+pub struct Back {
     pub id: window::Id,
     pub words: Words,
     pub glass: bool,
 }
 
-impl<Message> canvas::Program<Message> for View {
+impl<Message> canvas::Program<Message> for Back {
     type State = ();
-
-    fn update(
-        &self,
-        _state: &mut (),
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        let iced::Event::Mouse(seen) = event else {
-            return None;
-        };
-        let video = super::with(|t| {
-            t.as_ref()
-                .filter(|t| t.id == self.id)
-                .is_some_and(|t| t.bar.video)
-        });
-        let layout = Layout::of(self.words, video);
-        let target = cursor
-            .position_in(bounds)
-            .and_then(|at| layout.button_at(at));
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        let clicked = super::with(|toolbar| {
-            let toolbar = toolbar.as_mut().filter(|t| t.id == self.id)?;
-            match seen {
-                mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                    (toolbar.hover != target).then(|| {
-                        toolbar.hover = target;
-                        None
-                    })
-                }
-                mouse::Event::CursorLeft => {
-                    toolbar.hover = None;
-                    toolbar.pressed = None;
-                    Some(None)
-                }
-                mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    toolbar.pressed = target;
-                    Some(None)
-                }
-                mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    let pressed = toolbar.pressed.take();
-                    Some(pressed.filter(|p| Some(*p) == target))
-                }
-                _ => None,
-            }
-        });
-        let clicked = clicked?;
-        if let Some(button) = clicked {
-            super::clicked(self.id, button);
-        }
-        redraw
-    }
 
     fn draw(
         &self,
@@ -260,40 +202,18 @@ impl<Message> canvas::Program<Message> for View {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let shown = super::with(|t| t.as_ref().filter(|t| t.id == self.id).cloned());
-        if let Some(toolbar) = shown {
-            self.draw_toolbar(&mut frame, &toolbar, bounds.size());
+        let mut f = Frame::new(renderer, bounds.size());
+        let video = super::with(|t| t.as_ref().filter(|t| t.id == self.id).map(|t| t.bar.video));
+        if let Some(video) = video {
+            self.draw_back(&mut f, video, bounds.size());
         }
-        vec![frame.into_geometry()]
-    }
-
-    fn mouse_interaction(
-        &self,
-        _state: &(),
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        let video = super::with(|t| {
-            t.as_ref()
-                .filter(|t| t.id == self.id)
-                .is_some_and(|t| t.bar.video)
-        });
-        let on = cursor
-            .position_in(bounds)
-            .and_then(|at| Layout::of(self.words, video).button_at(at));
-        if on.is_some() {
-            mouse::Interaction::Pointer
-        } else {
-            mouse::Interaction::default()
-        }
+        vec![f.into_geometry()]
     }
 }
 
-impl View {
-    fn draw_toolbar(&self, f: &mut Frame, toolbar: &super::Toolbar, size: Size) {
-        let bar = &toolbar.bar;
-        let layout = Layout::of(self.words, bar.video);
+impl Back {
+    fn draw_back(&self, f: &mut Frame, video: bool, size: Size) {
+        let layout = Layout::of(self.words, video);
         let radius = CAPTURE_TOOLBAR_RADIUS as f32;
         let (top, bottom) = if self.glass { GLASS } else { OPAQUE };
         let (top, bottom) = (top.get(), bottom.get());
@@ -318,174 +238,183 @@ impl View {
             RULE.get(),
         );
         f.fill(&kit::rounded(layout.switch, SWITCH_RADIUS), SWITCH.get());
-        for (button, rect) in &layout.buttons {
-            let hovered = toolbar.hover == Some(*button);
-            let shape = kit::rounded(*rect, BUTTON_RADIUS);
-            match button {
-                Button::Kind(kind) => {
-                    let on = bar.video == *kind;
-                    let (back, ink) = match (on, kind) {
-                        (true, true) => (Some(RED.get()), WHITE),
-                        (true, false) => (Some(PHOTO_ON.get()), ON_GREEN.get()),
-                        (false, _) => (hovered.then_some(HOVER.get()), TAB_TEXT.get()),
-                    };
-                    if let Some(back) = back {
-                        f.fill(&kit::rounded(*rect, TAB_RADIUS), back);
-                    }
-                    f.fill_text(kit::text_in(
-                        MANROPE_BOLD,
-                        kit::text(
-                            self.words.kind(*kind).to_owned(),
-                            rect.center(),
-                            LABEL,
-                            ink,
-                            Alignment::Center,
-                        ),
-                    ));
-                    continue;
-                }
-                Button::Shoot if bar.video => {
-                    f.fill(&shape, RED.get());
-                    let text = kit::measure(self.words.start(), SHOOT_TEXT, MANROPE_BOLD);
-                    let left = rect.center_x() - (START_DOT + START_GAP + text) / 2.0;
-                    f.fill(
-                        &Path::circle(
-                            Point::new(left + START_DOT / 2.0, rect.center_y()),
-                            START_DOT / 2.0,
-                        ),
-                        WHITE,
-                    );
-                    f.fill_text(kit::text_in(
-                        MANROPE_BOLD,
-                        kit::text(
-                            self.words.start().to_owned(),
-                            Point::new(left + START_DOT + START_GAP, rect.center_y()),
-                            SHOOT_TEXT,
-                            WHITE,
-                            Alignment::Left,
-                        ),
-                    ));
-                    continue;
-                }
-                Button::Sound | Button::Micro => {
-                    let on = if *button == Button::Sound {
-                        bar.sound
-                    } else {
-                        bar.micro
-                    };
-                    if on {
-                        f.fill(&shape, CHOSEN.get());
-                        let ring = Rectangle::new(
-                            Point::new(rect.x + 0.5, rect.y + 0.5),
-                            Size::new(rect.width - 1.0, rect.height - 1.0),
-                        );
-                        f.stroke(
-                            &kit::rounded(ring, BUTTON_RADIUS - 0.5),
-                            Stroke::default()
-                                .with_color(CHOSEN_RING.get())
-                                .with_width(1.0),
-                        );
-                    } else if hovered {
-                        crate::theme::hover(f, &shape, HOVER.get());
-                    }
-                    let alpha = if on { 1.0 } else { OFF };
-                    let middle = rect.center_y();
-                    let icon = Rectangle::new(
-                        Point::new(rect.x + BUTTON_PAD, middle - TOGGLE_ICON / 2.0),
-                        Size::new(TOGGLE_ICON, TOGGLE_ICON),
-                    );
-                    toggle_icon(
-                        f,
-                        *button,
-                        icon,
-                        Color {
-                            a: alpha,
-                            ..TEXT.get()
-                        },
-                    );
-                    let said = if *button == Button::Sound {
-                        self.words.sound()
-                    } else {
-                        self.words.micro()
-                    };
-                    f.fill_text(kit::text_in(
-                        MANROPE_SEMIBOLD,
-                        kit::text(
-                            said.to_owned(),
-                            Point::new(icon.x + TOGGLE_ICON + ICON_GAP, middle),
-                            LABEL,
-                            Color {
-                                a: alpha,
-                                ..TEXT.get()
-                            },
-                            Alignment::Left,
-                        ),
-                    ));
-                    continue;
-                }
-                Button::Shoot => {
-                    f.fill(&shape, GREEN.get());
-                    f.fill_text(kit::text_in(
-                        MANROPE_BOLD,
-                        kit::text(
-                            self.words.shoot().to_owned(),
-                            rect.center(),
-                            SHOOT_TEXT,
-                            ON_GREEN.get(),
-                            Alignment::Center,
-                        ),
-                    ));
-                    continue;
-                }
-                Button::Mode(mode) if bar.mode == *mode => {
-                    f.fill(&shape, CHOSEN.get());
-                    let ring = Rectangle::new(
-                        Point::new(rect.x + 0.5, rect.y + 0.5),
-                        Size::new(rect.width - 1.0, rect.height - 1.0),
-                    );
-                    f.stroke(
-                        &kit::rounded(ring, BUTTON_RADIUS - 0.5),
-                        Stroke::default()
-                            .with_color(CHOSEN_RING.get())
-                            .with_width(1.0),
-                    );
-                }
-                Button::Pointer if bar.pointer => f.fill(&shape, CHOSEN.get()),
-                _ if hovered => crate::theme::hover(f, &shape, HOVER.get()),
-                _ => {}
+    }
+}
+
+/// Button `button` at `rect` (the surface's frame) as the toolbar `bar`
+/// shows it, lit (`hovered`) under the pointer.
+pub fn draw_button(
+    f: &mut Frame,
+    button: &Button,
+    rect: &Rectangle,
+    bar: &CaptureBar,
+    words: Words,
+    hovered: bool,
+) {
+    let shape = kit::rounded(*rect, BUTTON_RADIUS);
+    match button {
+        Button::Kind(kind) => {
+            let on = bar.video == *kind;
+            let (back, ink) = match (on, kind) {
+                (true, true) => (Some(RED.get()), WHITE),
+                (true, false) => (Some(PHOTO_ON.get()), ON_GREEN.get()),
+                (false, _) => (hovered.then_some(HOVER.get()), TAB_TEXT.get()),
+            };
+            if let Some(back) = back {
+                f.fill(&kit::rounded(*rect, TAB_RADIUS), back);
             }
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                kit::text(
+                    words.kind(*kind).to_owned(),
+                    rect.center(),
+                    LABEL,
+                    ink,
+                    Alignment::Center,
+                ),
+            ));
+            return;
+        }
+        Button::Shoot if bar.video => {
+            f.fill(&shape, RED.get());
+            let text = kit::measure(words.start(), SHOOT_TEXT, MANROPE_BOLD);
+            let left = rect.center_x() - (START_DOT + START_GAP + text) / 2.0;
+            f.fill(
+                &Path::circle(
+                    Point::new(left + START_DOT / 2.0, rect.center_y()),
+                    START_DOT / 2.0,
+                ),
+                WHITE,
+            );
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                kit::text(
+                    words.start().to_owned(),
+                    Point::new(left + START_DOT + START_GAP, rect.center_y()),
+                    SHOOT_TEXT,
+                    WHITE,
+                    Alignment::Left,
+                ),
+            ));
+            return;
+        }
+        Button::Sound | Button::Micro => {
+            let on = if *button == Button::Sound {
+                bar.sound
+            } else {
+                bar.micro
+            };
+            if on {
+                f.fill(&shape, CHOSEN.get());
+                let ring = Rectangle::new(
+                    Point::new(rect.x + 0.5, rect.y + 0.5),
+                    Size::new(rect.width - 1.0, rect.height - 1.0),
+                );
+                f.stroke(
+                    &kit::rounded(ring, BUTTON_RADIUS - 0.5),
+                    Stroke::default()
+                        .with_color(CHOSEN_RING.get())
+                        .with_width(1.0),
+                );
+            } else if hovered {
+                crate::theme::hover(f, &shape, HOVER.get());
+            }
+            let alpha = if on { 1.0 } else { OFF };
             let middle = rect.center_y();
-            let (icon, label) = match button {
-                Button::Mode(mode) => (MODE_ICON, Some(self.words.mode(*mode).to_owned())),
-                Button::Delay => (DELAY_ICON, Some(self.words.delay(bar.delay))),
-                Button::Pointer => (DELAY_ICON, None),
-                Button::Shoot | Button::Kind(_) | Button::Sound | Button::Micro => continue,
-            };
-            let icon_x = match label {
-                Some(_) => rect.x + BUTTON_PAD,
-                None => rect.center_x() - icon / 2.0,
-            };
-            draw_icon(
+            let icon = Rectangle::new(
+                Point::new(rect.x + BUTTON_PAD, middle - TOGGLE_ICON / 2.0),
+                Size::new(TOGGLE_ICON, TOGGLE_ICON),
+            );
+            toggle_icon(
                 f,
                 *button,
-                Rectangle::new(
-                    Point::new(icon_x, middle - icon / 2.0),
-                    Size::new(icon, icon),
-                ),
+                icon,
+                Color {
+                    a: alpha,
+                    ..TEXT.get()
+                },
             );
-            if let Some(label) = label {
-                f.fill_text(kit::text_in(
-                    MANROPE_SEMIBOLD,
-                    kit::text(
-                        label,
-                        Point::new(icon_x + icon + ICON_GAP, middle),
-                        LABEL,
-                        TEXT.get(),
-                        Alignment::Left,
-                    ),
-                ));
-            }
+            let said = if *button == Button::Sound {
+                words.sound()
+            } else {
+                words.micro()
+            };
+            f.fill_text(kit::text_in(
+                MANROPE_SEMIBOLD,
+                kit::text(
+                    said.to_owned(),
+                    Point::new(icon.x + TOGGLE_ICON + ICON_GAP, middle),
+                    LABEL,
+                    Color {
+                        a: alpha,
+                        ..TEXT.get()
+                    },
+                    Alignment::Left,
+                ),
+            ));
+            return;
         }
+        Button::Shoot => {
+            f.fill(&shape, GREEN.get());
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                kit::text(
+                    words.shoot().to_owned(),
+                    rect.center(),
+                    SHOOT_TEXT,
+                    ON_GREEN.get(),
+                    Alignment::Center,
+                ),
+            ));
+            return;
+        }
+        Button::Mode(mode) if bar.mode == *mode => {
+            f.fill(&shape, CHOSEN.get());
+            let ring = Rectangle::new(
+                Point::new(rect.x + 0.5, rect.y + 0.5),
+                Size::new(rect.width - 1.0, rect.height - 1.0),
+            );
+            f.stroke(
+                &kit::rounded(ring, BUTTON_RADIUS - 0.5),
+                Stroke::default()
+                    .with_color(CHOSEN_RING.get())
+                    .with_width(1.0),
+            );
+        }
+        Button::Pointer if bar.pointer => f.fill(&shape, CHOSEN.get()),
+        _ if hovered => crate::theme::hover(f, &shape, HOVER.get()),
+        _ => {}
+    }
+    let middle = rect.center_y();
+    let (icon, label) = match button {
+        Button::Mode(mode) => (MODE_ICON, Some(words.mode(*mode).to_owned())),
+        Button::Delay => (DELAY_ICON, Some(words.delay(bar.delay))),
+        Button::Pointer => (DELAY_ICON, None),
+        Button::Shoot | Button::Kind(_) | Button::Sound | Button::Micro => return,
+    };
+    let icon_x = match label {
+        Some(_) => rect.x + BUTTON_PAD,
+        None => rect.center_x() - icon / 2.0,
+    };
+    draw_icon(
+        f,
+        *button,
+        Rectangle::new(
+            Point::new(icon_x, middle - icon / 2.0),
+            Size::new(icon, icon),
+        ),
+    );
+    if let Some(label) = label {
+        f.fill_text(kit::text_in(
+            MANROPE_SEMIBOLD,
+            kit::text(
+                label,
+                Point::new(icon_x + icon + ICON_GAP, middle),
+                LABEL,
+                TEXT.get(),
+                Alignment::Left,
+            ),
+        ));
     }
 }
 

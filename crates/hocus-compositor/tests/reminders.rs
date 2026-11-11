@@ -810,3 +810,18 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     shoot(&mut bed, "tab-mini")?;
     Ok(())
 }
+
+/// A tab at rest, saved under `HOCUS_KIT_SHOTS` for the widget kit's
+/// side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, "14:25:00", &day(""), Options::default())?;
+    bed.tab_since(0, &["«Point produit»"])?;
+    let namespace = bed.tabs(1)?[0].0.clone();
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(&mut bed.hp, &namespace, "reminder")
+}

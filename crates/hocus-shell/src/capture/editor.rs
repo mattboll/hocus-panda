@@ -18,6 +18,7 @@
 //! compositor blurs the desktop behind it and fades it in.
 
 pub mod draw;
+pub mod view;
 
 use std::{
     path::{Path, PathBuf},
@@ -28,12 +29,12 @@ use hocus_link::CaptureAsk;
 use iced::{
     Point, Rectangle,
     advanced::image::{Allocation, Handle},
-    keyboard, window,
+    window,
 };
 
 use super::{Shot, marks, marks::Mark, words};
 use crate::{
-    field::{self, Entry, Took},
+    field::{self, Entry},
     popover::Effect,
 };
 
@@ -71,16 +72,18 @@ pub const LEAST: f32 = 8.0;
 /// The text's field: its text 7 in from where it was clicked.
 pub const TEXT_IN: f32 = 7.0;
 
-/// Something to press in the editor.
+/// The editor's controls (the kit's, [`view`]): what tests and screen
+/// readers know them by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
+pub enum Control {
     Tool(Tool),
     Colour(usize),
     Undo,
+    /// The text being typed.
+    Text,
     Delete,
     SaveAs,
     Copy,
-    Image,
 }
 
 /// A drag on the image, from where to where (the surface's frame).
@@ -145,8 +148,10 @@ pub struct Editor {
     pub undone: Vec<Mark>,
     pub drag: Option<Drag>,
     pub typing: Option<Typing>,
-    pub hover: Option<Target>,
-    pub pressed: Option<Target>,
+    /// Where the keyboard's ring is.
+    pub focus: Option<Control>,
+    /// Where its pieces are, as its log last said it (for tests).
+    pub laid: String,
     /// Where "Enregistrer sous…" last wrote it.
     pub saved_as: Option<String>,
 }
@@ -248,8 +253,8 @@ fn shown(shot: Shot, image: Arc<marks::Image>, made: Made, scale: f32) {
             undone: Vec::new(),
             drag: None,
             typing: None,
-            hover: None,
-            pressed: None,
+            focus: None,
+            laid: String::new(),
             saved_as: None,
         });
         true
@@ -373,111 +378,24 @@ impl Editor {
     }
 }
 
-/// What a key does in the editor: whether it drew something.
-pub fn key(
-    id: window::Id,
-    key: &keyboard::Key,
-    modifiers: keyboard::Modifiers,
-    text: Option<&str>,
-    image: Rectangle,
-    z: f32,
-) -> bool {
-    use keyboard::key::Named;
-    enum Then {
-        Nothing,
-        Drawn,
-        Close,
-        Paste,
-    }
-    let then = with(|editor| {
-        let Some(editor) = editor.as_mut().filter(|e| e.phase == Phase::Shown(id)) else {
-            return Then::Nothing;
-        };
-        if let Some(typing) = editor.typing.as_mut() {
-            return match key {
-                keyboard::Key::Named(Named::Escape) => {
-                    editor.typing = None;
-                    Then::Drawn
-                }
-                keyboard::Key::Named(Named::Enter) => {
-                    editor.commit_text(image, z);
-                    Then::Drawn
-                }
-                // The rest is the text's: it edits as everywhere.
-                _ => match typing.text.key(key, modifiers, text) {
-                    Took::No | Took::Same => Then::Nothing,
-                    Took::Moved | Took::Edited => Then::Drawn,
-                    Took::Paste => Then::Paste,
-                },
-            };
-        }
-        let z_key = matches!(key, keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z"));
-        match key {
-            _ if z_key && modifiers.control() && modifiers.shift() => {
-                if editor.redo() {
-                    Then::Drawn
-                } else {
-                    Then::Nothing
-                }
-            }
-            _ if z_key && modifiers.control() => {
-                if editor.undo() {
-                    Then::Drawn
-                } else {
-                    Then::Nothing
-                }
-            }
-            keyboard::Key::Named(Named::Escape) => Then::Close,
-            _ => Then::Nothing,
-        }
-    });
-    match then {
-        Then::Nothing => false,
-        Then::Drawn => true,
-        Then::Close => {
-            close(Closed::Kept);
-            true
-        }
-        Then::Paste => {
-            paste(id);
-            false
-        }
-    }
-}
-
-/// The text being typed in the editor on `id` edited by `edit`: whether
-/// it draws again.
-fn edited(id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
-    with(|editor| {
-        editor
-            .as_mut()
-            .filter(|e| e.phase == Phase::Shown(id))
-            .and_then(|e| e.typing.as_mut())
-            .is_some_and(|typing| edit(&mut typing.text).draws())
-    })
-}
-
 /// The clipboard's text, on one line, into the text being typed at its
 /// caret, read off the loop.
-fn paste(id: window::Id) {
+pub fn paste() {
     crate::paste::request(crate::paste::Clean::Spaced, move |pasted| {
         let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
             return;
         };
-        let pasted = |entry: &mut Entry| match entry.paste(pasted) {
-            true => Took::Edited,
-            false => Took::Same,
-        };
-        if edited(id, pasted) {
+        let pasted = with(|editor| {
+            editor
+                .as_mut()
+                .and_then(|e| e.typing.as_mut())
+                .is_some_and(|typing| typing.text.paste(pasted))
+        });
+        if pasted {
+            crate::ui::touch();
             crate::popover::send(vec![Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE)]);
         }
     });
-}
-
-/// An input method's preedit or commit in the text being typed: whether
-/// it draws again.
-pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
-    edited(id, |entry| entry.input_method(event))
 }
 
 /// How the editor closes.
@@ -532,9 +450,9 @@ pub fn close(how: Closed) {
 }
 
 /// "Copier et fermer", "Supprimer", "Enregistrer sous…".
-pub fn press(target: Target, image: Rectangle, z: f32) {
-    match target {
-        Target::Copy => {
+pub fn press(control: Control, image: Rectangle, z: f32) {
+    match control {
+        Control::Copy => {
             with(|e| {
                 if let Some(e) = e.as_mut() {
                     e.commit_text(image, z);
@@ -542,8 +460,8 @@ pub fn press(target: Target, image: Rectangle, z: f32) {
             });
             close(Closed::Annotated);
         }
-        Target::Delete => close(Closed::Deleted),
-        Target::SaveAs => save_as(image, z),
+        Control::Delete => close(Closed::Deleted),
+        Control::SaveAs => save_as(image, z),
         _ => {}
     }
 }
@@ -631,14 +549,17 @@ fn back_from_choosing(saved: Option<String>) {
             Phase::Choosing => {
                 let id = window::Id::unique();
                 editor.phase = Phase::Shown(id);
-                editor.hover = None;
-                editor.pressed = None;
+                editor.focus = None;
+                editor.laid.clear();
                 Some(Effect::CaptureEditor {
                     id,
                     output: editor.shot.output.clone(),
                 })
             }
-            Phase::Shown(_) => Some(Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE)),
+            Phase::Shown(_) => {
+                crate::ui::touch();
+                Some(Effect::Wake(hocus_link::CAPTURE_EDITOR_NAMESPACE))
+            }
         }
     });
     if let Some(effect) = reopen {
@@ -744,8 +665,8 @@ mod tests {
             undone: Vec::new(),
             drag: None,
             typing: None,
-            hover: None,
-            pressed: None,
+            focus: None,
+            laid: String::new(),
             saved_as: None,
         }
     }

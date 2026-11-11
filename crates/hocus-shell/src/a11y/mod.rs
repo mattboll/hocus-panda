@@ -187,6 +187,9 @@ enum Target {
     Share(String),
     /// A tile, card or emoji of the launcher, by its key.
     Launcher(String),
+    /// A control of a surface of the kit's, by its key, and what a click
+    /// on it does.
+    Kit { key: String, click: fn(&str) },
 }
 
 /// The thread's state: the announcer, the last announcement, and what each
@@ -280,6 +283,48 @@ impl Said {
                 }
             }
             windows.push(launcher);
+        }
+        if let Some(editor) = crate::capture::editor::view::a11y() {
+            for node in editor.all() {
+                if node.key.starts_with("capture:") {
+                    self.targets.insert(
+                        (editor.key.clone(), node.key.clone()),
+                        Target::Kit {
+                            key: node.key.clone(),
+                            click: crate::capture::editor::view::a11y_click,
+                        },
+                    );
+                }
+            }
+            windows.push(editor);
+        }
+        if let Some(thumb) = crate::capture::thumb::a11y() {
+            for node in thumb.all() {
+                if node.key.starts_with("thumb:") {
+                    self.targets.insert(
+                        (thumb.key.clone(), node.key.clone()),
+                        Target::Kit {
+                            key: node.key.clone(),
+                            click: crate::capture::thumb::a11y_click,
+                        },
+                    );
+                }
+            }
+            windows.push(thumb);
+        }
+        if let Some(toolbar) = crate::capture::toolbar::a11y() {
+            for node in toolbar.all() {
+                if node.key.starts_with("toolbar:") {
+                    self.targets.insert(
+                        (toolbar.key.clone(), node.key.clone()),
+                        Target::Kit {
+                            key: node.key.clone(),
+                            click: crate::capture::toolbar::a11y_click,
+                        },
+                    );
+                }
+            }
+            windows.push(toolbar);
         }
         if let Some(chooser) = crate::share::a11y() {
             for node in chooser.all() {
@@ -469,6 +514,7 @@ impl Said {
             (Target::Palette(key), Act::Click) => crate::actions::a11y_click(key),
             (Target::Emoji(key), Act::Click) => crate::emoji::a11y_click(key),
             (Target::Share(key), Act::Click) => crate::share::a11y_click(key),
+            (Target::Kit { key, click }, Act::Click) => click(key),
             (Target::Launcher(key), Act::Click) => crate::launcher::a11y_click(key),
             (Target::Bubble { serial, key }, Act::Click) => {
                 crate::notifications::bubble::a11y_click(*serial, key);

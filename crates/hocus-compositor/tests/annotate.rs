@@ -1022,3 +1022,58 @@ fn the_picture_stays_while_an_arrow_is_drawn_on_wgpu() -> anyhow::Result<()> {
     };
     the_picture_stays_while_an_arrow_is_drawn(Draws::SoftwareVulkan(manifest))
 }
+
+/// The toolbar, the thumbnail and the editor (a mark drawn, then a text
+/// being typed), saved under `HOCUS_KIT_SHOTS` for the widget kit's
+/// side-by-sides (#772).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell)?;
+    bed.hp.pointer_move(300.0, 150.0);
+    chord(&mut bed.hp, &[KEY_PRINT]);
+    bed.idle(Duration::from_millis(100))?;
+    let (x, y, w, h) = AREA;
+    bed.drag((x, y), (x + w, y + h))?;
+    bed.hp.pointer_move(100.0, 100.0);
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(
+        &mut bed.hp,
+        hocus_link::CAPTURE_TOOLBAR_NAMESPACE,
+        "toolbar",
+    )?;
+    chord(&mut bed.hp, &[KEY_ENTER]);
+    let shown = bed.hp.dispatch_until(Duration::from_secs(10), |hp| {
+        hp.capture_thumb_surfaces()
+            .first()
+            .is_some_and(|(_, r)| r.height > 0)
+    })?;
+    anyhow::ensure!(shown, "no thumbnail");
+    let thumb = bed.hp.capture_thumb_surfaces()[0].1;
+    // On its image: its countdown held.
+    let image = (
+        f64::from(thumb.x + thumb.width / 2),
+        f64::from(thumb.y + 100),
+    );
+    bed.over(image, hocus_link::CAPTURE_THUMB_NAMESPACE)?;
+    common::layer_shot(&mut bed.hp, hocus_link::CAPTURE_THUMB_NAMESPACE, "thumb")?;
+    let places = bed.edit(thumb)?;
+    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    bed.hp.pointer_move(5.0, 5.0);
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(&mut bed.hp, hocus_link::CAPTURE_EDITOR_NAMESPACE, "editor")?;
+    bed.click(places.at("text"))?;
+    bed.click(places.image(40.0, 300.0))?;
+    bed.key(&[KEY_O])?;
+    bed.key(&[KEY_K])?;
+    bed.hp.pointer_move(5.0, 5.0);
+    common::at_rest(&mut bed.hp)?;
+    common::layer_shot(
+        &mut bed.hp,
+        hocus_link::CAPTURE_EDITOR_NAMESPACE,
+        "editor-text",
+    )
+}

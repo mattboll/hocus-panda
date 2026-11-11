@@ -258,15 +258,6 @@ fn icon(capture: &marks::Image, side: u32) -> Icon {
     Icon::Raster(Handle::from_rgba(side, side, small.into_raw()))
 }
 
-/// Where a press on the card goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Spot {
-    Image,
-    Annotate,
-    Close,
-    Card,
-}
-
 /// Its countdown.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Countdown {
@@ -292,9 +283,8 @@ pub struct Thumb {
     pub shot: Shot,
     pub made: Made,
     pub countdown: Countdown,
-    pub hover: Option<Spot>,
-    /// Pressed where, and from where; whether it was dragged since.
-    pressed: Option<(Spot, Point)>,
+    /// Its image pressed, from where; whether it was dragged since.
+    pressed: Option<Point>,
     dragged: bool,
 }
 
@@ -341,7 +331,6 @@ pub fn show(shot: Shot, made: Made, now: Instant) {
             shot,
             made,
             countdown: Countdown::Running { until: now + LIFE },
-            hover: None,
             pressed: None,
             dragged: false,
         });
@@ -432,23 +421,13 @@ impl Layout {
             row_middle: top + ROW / 2.0,
         }
     }
-
-    fn spot(&self, at: Point) -> Spot {
-        if self.image.contains(at) {
-            Spot::Image
-        } else if self.annotate.contains(at) {
-            Spot::Annotate
-        } else if self.close.contains(at) {
-            Spot::Close
-        } else {
-            Spot::Card
-        }
-    }
 }
 
-/// The thumbnail on its surface.
+/// What nothing holds on the thumbnail, under its controls: its card,
+/// the image, its status and its countdown, which draws again a pixel at
+/// a time while it runs.
 #[derive(Debug, Clone)]
-pub struct View {
+pub struct Back {
     pub id: window::Id,
     pub words: Words,
     /// On the CPU, whose surfaces have no transparency: opaque, the
@@ -462,15 +441,15 @@ pub struct State {
     drawn: Option<Instant>,
 }
 
-impl<Message> canvas::Program<Message> for View {
+impl<Message> canvas::Program<Message> for Back {
     type State = State;
 
     fn update(
         &self,
         state: &mut State,
         event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(now)) => {
@@ -486,7 +465,6 @@ impl<Message> canvas::Program<Message> for View {
                     canvas::Action::request_redraw_at(*now + pixel.max(COUNTDOWN_STEP))
                 })
             }
-            iced::Event::Mouse(seen) => self.mouse(seen, bounds, cursor),
             _ => None,
         }
     }
@@ -521,19 +499,6 @@ impl<Message> canvas::Program<Message> for View {
         }
         std::iter::once(frame.into_geometry()).chain(over).collect()
     }
-
-    fn mouse_interaction(
-        &self,
-        _state: &State,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        let layout = Layout::of(self.words, shows_video(self.id));
-        match cursor.position_in(bounds).map(|at| layout.spot(at)) {
-            Some(Spot::Image | Spot::Annotate | Spot::Close) => mouse::Interaction::Pointer,
-            _ => mouse::Interaction::default(),
-        }
-    }
 }
 
 /// Whether thumbnail `id` is a recording's.
@@ -544,138 +509,335 @@ fn shows_video(id: window::Id) -> bool {
     })
 }
 
-/// What a click on the thumbnail does.
+// --- The surface, on the widget kit (#772) -------------------------------------------
+
+type El<'a> = iced::Element<'a, Msg>;
+
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// The image or "Annoter" ("Ouvrir") clicked: the editor (the player).
+    Edit,
+    /// ✕: the capture deleted.
+    Delete,
+    /// The image pressed (the surface's frame), the pointer moved while
+    /// it is (a drag drops its file), released.
+    Press(Point),
+    Move(Point),
+    /// Released, over the image or not.
+    Release(bool),
+    /// The pointer on the card holds it; gone, its countdown goes on.
+    Held,
+    Left,
+    Stale,
+}
+
+/// A control's id: what tests and screen readers know it by.
+fn id_of(name: &str) -> String {
+    format!("thumb:{name}")
+}
+
+/// The thumbnail on its surface `id`; opaque on the CPU (`software`).
+pub fn view<'a>(id: window::Id, words: Words, software: bool) -> iced::Element<'a, crate::Message> {
+    let back = canvas::Canvas::new(Back {
+        id,
+        words,
+        software,
+    })
+    .width(iced::Length::Fill)
+    .height(iced::Length::Fill);
+    crate::ui::Around::new(id, build(id, words), move |m| handle(id, m), Msg::Stale)
+        .own(hocus_link::CAPTURE_THUMB_NAMESPACE, move || is_surface(id))
+        .rebuild(move || build(id, words))
+        .on(back)
+}
+
+/// What a message asks that is done outside the thumbnail's lock.
 enum Act {
     Edit(Thumb),
     Delete(Thumb),
     Drag(Shot),
 }
 
-impl View {
-    fn mouse<Message>(
+fn handle(id: window::Id, message: Msg) {
+    let now = Instant::now();
+    let mut resumed = false;
+    let act = with(|thumb| {
+        let thumb = thumb.as_mut().filter(|t| t.id == id)?;
+        match message {
+            Msg::Held => {
+                if let Countdown::Running { until } = thumb.countdown {
+                    thumb.countdown = Countdown::Paused {
+                        left: until.saturating_duration_since(now),
+                    };
+                    tracing::debug!(capture = thumb.shot.id, "the capture's thumbnail is held");
+                }
+                None
+            }
+            Msg::Left => {
+                thumb.pressed = None;
+                thumb.dragged = false;
+                if let Countdown::Paused { left } = thumb.countdown {
+                    thumb.countdown = Countdown::Running { until: now + left };
+                    resumed = true;
+                    tracing::debug!(capture = thumb.shot.id, "the capture's thumbnail goes on");
+                }
+                None
+            }
+            Msg::Press(p) => {
+                thumb.pressed = Some(p);
+                thumb.dragged = false;
+                None
+            }
+            Msg::Move(p) => {
+                let from = thumb.pressed?;
+                if thumb.dragged || (p.x - from.x).hypot(p.y - from.y) < DRAG {
+                    return None;
+                }
+                thumb.dragged = true;
+                Some(Act::Drag(thumb.shot.clone()))
+            }
+            Msg::Release(over) => {
+                let pressed = thumb.pressed.take();
+                let dragged = std::mem::take(&mut thumb.dragged);
+                (pressed.is_some() && !dragged && over).then(|| Act::Edit(thumb.clone()))
+            }
+            Msg::Edit => Some(Act::Edit(thumb.clone())),
+            Msg::Delete => Some(Act::Delete(thumb.clone())),
+            Msg::Stale => None,
+        }
+    });
+    if resumed {
+        // The effects' loop waits for its new deadline.
+        crate::popover::send(Vec::new());
+    }
+    match act {
+        Some(Act::Drag(shot)) => match shot.recording() {
+            Some(recording) => {
+                tracing::debug!(recording, "the recording's thumbnail is dragged");
+                crate::popover::tell(hocus_link::ToCompositor::Record(
+                    hocus_link::RecordAsk::Drag(recording),
+                ));
+            }
+            None => {
+                tracing::debug!(capture = shot.id, "the capture's thumbnail is dragged");
+                super::tell(CaptureAsk::Drag(shot.id));
+            }
+        },
+        // A recording's opens in its player; it goes to the history.
+        Some(Act::Edit(shown)) if shown.shot.video.is_some() => {
+            if let Some(gone) = take(shown.id) {
+                tracing::debug!(
+                    recording = ?shown.shot.recording(),
+                    "the recording's thumbnail opens it"
+                );
+                crate::popover::send(vec![Effect::Remove(shown.id)]);
+                super::open_file(&gone.shot.file);
+                to_history(&gone);
+            }
+        }
+        Some(Act::Edit(shown)) if take(shown.id).is_some() => {
+            tracing::debug!(
+                capture = shown.shot.id,
+                "the capture's thumbnail opens the editor"
+            );
+            crate::popover::send(vec![Effect::Remove(shown.id)]);
+            super::editor::open(shown.shot);
+        }
+        Some(Act::Delete(shown)) if take(shown.id).is_some() => {
+            crate::popover::send(vec![Effect::Remove(shown.id)]);
+            super::delete(shown.shot.id);
+        }
+        Some(Act::Edit(_) | Act::Delete(_)) | None => {}
+    }
+}
+
+/// The image, "Annoter" (or "Ouvrir") and ✕ where the card's layout puts
+/// them, the whole card holding it under the pointer.
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    use hocus_a11y::Role;
+    use iced::widget::{Stack, button, mouse_area, pin};
+    let Some(name) = with(|t| t.as_ref().filter(|t| t.id == id).map(|t| t.shot.name())) else {
+        return iced::widget::Space::new().into();
+    };
+    let video = shows_video(id);
+    let layout = Layout::of(words, video);
+    let word = if video {
+        words.open()
+    } else {
+        words.annotate()
+    };
+    let image = layout.image;
+    let picture = crate::ui::control(
+        canvas::Canvas::new(Spot)
+            .width(image.width)
+            .height(image.height),
+        id_of("Image"),
+        Role::Button,
+        name,
+    )
+    .node(|n| n.describe(word));
+    let clear = |content: El<'a>, message: Msg| {
+        button(content)
+            .padding(0)
+            .style(|_, _| crate::ui::style::clear())
+            .on_press(message)
+    };
+    let annotate = layout.annotate;
+    let look =
+        crate::ui::parts::drawn_lit(annotate.width, annotate.height, 1.0, move |f, size, lit| {
+            draw_annotate(f, Rectangle::new(Point::ORIGIN, size), word, lit);
+        });
+    let annotate_button = crate::ui::control(
+        clear(look, Msg::Edit),
+        id_of("Annotate"),
+        Role::Button,
+        word,
+    );
+    let close = layout.close;
+    let look = crate::ui::parts::drawn_lit(close.width, close.height, 1.0, move |f, size, lit| {
+        draw_close(f, Rectangle::new(Point::ORIGIN, size), lit);
+    });
+    let close_button = crate::ui::control(
+        clear(look, Msg::Delete),
+        id_of("Close"),
+        Role::Button,
+        words.delete(),
+    );
+    let at = |content: El<'a>, at: Rectangle| -> El<'a> { pin(content).x(at.x).y(at.y).into() };
+    let all = Stack::with_children([
+        at(picture.into(), image),
+        at(annotate_button.into(), annotate),
+        at(close_button.into(), close),
+    ])
+    .width(iced::Length::Fill)
+    .height(iced::Length::Fill);
+    mouse_area(all)
+        .on_enter(Msg::Held)
+        .on_exit(Msg::Left)
+        .into()
+}
+
+/// The image's place: a click opens the editor, a drag drops its file.
+/// The image is drawn under it ([`Back`]).
+struct Spot;
+
+impl canvas::Program<Msg> for Spot {
+    type State = ();
+
+    fn update(
         &self,
-        seen: &mouse::Event,
+        _state: &mut (),
+        event: &iced::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        let layout = Layout::of(self.words, shows_video(self.id));
-        let at = cursor.position_in(bounds);
-        let spot = at.map(|p| layout.spot(p));
-        let now = Instant::now();
-        let mut act = None;
-        let mut resumed = false;
-        let redraw = with(|thumb| {
-            let thumb = thumb.as_mut().filter(|t| t.id == self.id)?;
-            match seen {
-                mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                    let mut changed = thumb.hover != spot;
-                    thumb.hover = spot;
-                    // The pointer on it holds it.
-                    if spot.is_some()
-                        && let Countdown::Running { until } = thumb.countdown
-                    {
-                        thumb.countdown = Countdown::Paused {
-                            left: until.saturating_duration_since(now),
-                        };
-                        tracing::debug!(capture = thumb.shot.id, "the capture's thumbnail is held");
-                        changed = true;
-                    }
-                    if let (Some((Spot::Image, from)), Some(p)) = (thumb.pressed, at)
-                        && !thumb.dragged
-                        && (p.x - from.x).hypot(p.y - from.y) >= DRAG
-                    {
-                        thumb.dragged = true;
-                        act = Some(Act::Drag(thumb.shot.clone()));
-                    }
-                    Some(changed)
-                }
-                mouse::Event::CursorLeft => {
-                    thumb.hover = None;
-                    thumb.pressed = None;
-                    thumb.dragged = false;
-                    if let Countdown::Paused { left } = thumb.countdown {
-                        thumb.countdown = Countdown::Running { until: now + left };
-                        resumed = true;
-                        tracing::debug!(capture = thumb.shot.id, "the capture's thumbnail goes on");
-                    }
-                    Some(true)
-                }
-                mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    thumb.pressed = spot.zip(at);
-                    thumb.dragged = false;
-                    Some(false)
-                }
-                mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    let pressed = thumb.pressed.take().map(|(s, _)| s);
-                    let dragged = std::mem::take(&mut thumb.dragged);
-                    if !dragged && pressed.is_some() && pressed == spot {
-                        act = match pressed {
-                            Some(Spot::Image | Spot::Annotate) => Some(Act::Edit(thumb.clone())),
-                            Some(Spot::Close) => Some(Act::Delete(thumb.clone())),
-                            _ => None,
-                        };
-                    }
-                    Some(false)
-                }
-                _ => None,
+    ) -> Option<canvas::Action<Msg>> {
+        let iced::Event::Mouse(seen) = event else {
+            return None;
+        };
+        match seen {
+            mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                let p = cursor.position_over(bounds)?;
+                Some(canvas::Action::publish(Msg::Press(p)).and_capture())
             }
-        });
-        if resumed {
-            // The effects' loop waits for its new deadline.
-            crate::popover::send(Vec::new());
-        }
-        match act {
-            Some(Act::Drag(shot)) => match shot.recording() {
-                Some(recording) => {
-                    tracing::debug!(recording, "the recording's thumbnail is dragged");
-                    crate::popover::tell(hocus_link::ToCompositor::Record(
-                        hocus_link::RecordAsk::Drag(recording),
-                    ));
-                }
-                None => {
-                    tracing::debug!(capture = shot.id, "the capture's thumbnail is dragged");
-                    super::tell(CaptureAsk::Drag(shot.id));
-                }
-            },
-            // A recording's opens in its player; it goes to the history.
-            Some(Act::Edit(shown)) if shown.shot.video.is_some() => {
-                if let Some(gone) = take(shown.id) {
-                    tracing::debug!(
-                        recording = ?shown.shot.recording(),
-                        "the recording's thumbnail opens it"
-                    );
-                    crate::popover::send(vec![Effect::Remove(shown.id)]);
-                    super::open_file(&gone.shot.file);
-                    to_history(&gone);
-                }
-                return Some(canvas::Action::capture());
+            mouse::Event::CursorMoved { position } if pressed() => {
+                Some(canvas::Action::publish(Msg::Move(*position)))
             }
-            Some(Act::Edit(shown)) => {
-                if take(shown.id).is_some() {
-                    tracing::debug!(
-                        capture = shown.shot.id,
-                        "the capture's thumbnail opens the editor"
-                    );
-                    crate::popover::send(vec![Effect::Remove(shown.id)]);
-                    super::editor::open(shown.shot);
-                }
-                return Some(canvas::Action::capture());
+            mouse::Event::ButtonReleased(mouse::Button::Left) if pressed() => {
+                // A release off the image clicks nothing.
+                let over = cursor.position_over(bounds).is_some();
+                Some(canvas::Action::publish(Msg::Release(over)))
             }
-            Some(Act::Delete(shown)) => {
-                if take(shown.id).is_some() {
-                    crate::popover::send(vec![Effect::Remove(shown.id)]);
-                    super::delete(shown.shot.id);
-                }
-                return Some(canvas::Action::capture());
-            }
-            None => {}
-        }
-        match redraw? {
-            true => Some(canvas::Action::request_redraw()),
-            false => None,
+            _ => None,
         }
     }
 
+    fn draw(
+        &self,
+        _state: &(),
+        _renderer: &Renderer,
+        _theme: &Theme,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        Vec::new()
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &(),
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if cursor.is_over(bounds) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+}
+
+/// Whether the thumbnail's image is pressed.
+fn pressed() -> bool {
+    with(|t| t.as_ref().is_some_and(|t| t.pressed.is_some()))
+}
+
+/// "Annoter" (or "Ouvrir", `word`) at `rect`, lit under the pointer.
+fn draw_annotate(f: &mut Frame, rect: Rectangle, word: &str, lit: bool) {
+    f.fill(&kit::rounded(rect, BUTTON_RADIUS), GREEN_TINT.get());
+    if lit {
+        crate::theme::hover(f, &kit::rounded(rect, BUTTON_RADIUS), HOVER.get());
+    }
+    f.fill_text(kit::text_in(
+        MANROPE_BOLD,
+        kit::text(
+            word.to_owned(),
+            rect.center(),
+            BUTTON_TEXT,
+            TEXT.get(),
+            Alignment::Center,
+        ),
+    ));
+}
+
+/// ✕ at `rect`, lit under the pointer.
+fn draw_close(f: &mut Frame, rect: Rectangle, lit: bool) {
+    if lit {
+        crate::theme::hover(f, &kit::rounded(rect, BUTTON_RADIUS), HOVER.get());
+    }
+    cross(f, rect.center(), CLOSE_SIZE * 0.6, CLOSE_COLOUR.get());
+}
+
+/// The thumbnail for screen readers: what its controls declared.
+pub fn a11y() -> Option<hocus_a11y::Window> {
+    let words = super::words();
+    let (id, video) = with(|t| t.as_ref().map(|t| (t.id, t.shot.video.is_some())))?;
+    let rows = crate::a11y::rows::of(id)?;
+    let mut window = hocus_a11y::Window::new(
+        "capture-thumb",
+        if video {
+            words.screen_recording()
+        } else {
+            words.screenshot()
+        },
+    );
+    window.nodes = rows.nodes;
+    Some(window)
+}
+
+/// A screen reader clicks control `key` of the thumbnail.
+pub fn a11y_click(key: &str) {
+    let Some(id) = with(|t| t.as_ref().map(|t| t.id)) else {
+        return;
+    };
+    match key {
+        "thumb:Image" | "thumb:Annotate" => handle(id, Msg::Edit),
+        "thumb:Close" => handle(id, Msg::Delete),
+        _ => {}
+    }
+}
+
+impl Back {
     fn draw_card(&self, f: &mut Frame, thumb: &Thumb, now: Instant) {
         let size = Size::new(WIDTH, HEIGHT);
         let radius = CAPTURE_THUMB_RADIUS as f32;
@@ -725,11 +887,10 @@ impl View {
                 .with_color(IMAGE_RIM.get())
                 .with_width(1.0),
         );
-        // "Copiée · enregistrée", "Annoter", ✕; a recording's "Enregistrée ·
-        // MP4" and "Ouvrir".
-        let (status, button) = match video {
-            Some(video) => (self.words.recorded(video.format), self.words.open()),
-            None => (self.words.kept().to_owned(), self.words.annotate()),
+        // "Copiée · enregistrée"; a recording's "Enregistrée · MP4".
+        let status = match video {
+            Some(video) => self.words.recorded(video.format),
+            None => self.words.kept().to_owned(),
         };
         f.fill_text(kit::text(
             status,
@@ -738,26 +899,6 @@ impl View {
             STATUS_COLOUR.get(),
             Alignment::Left,
         ));
-        let annotate = layout.annotate;
-        f.fill(&kit::rounded(annotate, BUTTON_RADIUS), GREEN_TINT.get());
-        if thumb.hover == Some(Spot::Annotate) {
-            crate::theme::hover(f, &kit::rounded(annotate, BUTTON_RADIUS), HOVER.get());
-        }
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(
-                button.to_owned(),
-                annotate.center(),
-                BUTTON_TEXT,
-                TEXT.get(),
-                Alignment::Center,
-            ),
-        ));
-        let close = layout.close;
-        if thumb.hover == Some(Spot::Close) {
-            crate::theme::hover(f, &kit::rounded(close, BUTTON_RADIUS), HOVER.get());
-        }
-        cross(f, close.center(), CLOSE_SIZE * 0.6, CLOSE_COLOUR.get());
         // The countdown.
         let left = thumb.countdown.left(now);
         let full = WIDTH - 2.0 * COUNTDOWN_IN;
@@ -842,10 +983,6 @@ mod tests {
         );
         assert_eq!(layout.close.x + layout.close.width, WIDTH - PAD);
         assert!(layout.annotate.x + layout.annotate.width <= layout.close.x);
-        assert_eq!(layout.spot(Point::new(100.0, 100.0)), Spot::Image);
-        assert_eq!(layout.spot(layout.close.center()), Spot::Close);
-        assert_eq!(layout.spot(layout.annotate.center()), Spot::Annotate);
-        assert_eq!(layout.spot(Point::new(20.0, 230.0)), Spot::Card);
     }
 
     #[test]
