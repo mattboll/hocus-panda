@@ -11,7 +11,7 @@ use smithay::{
         PointerButtonEvent, PointerMotionEvent,
     },
     input::{
-        keyboard::{FilterResult, Keysym, ModifiersState},
+        keyboard::{FilterResult, Keycode, Keysym, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -237,183 +237,7 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let kept =
             keyboard.input::<Kept, _>(self, code, state, serial, time, |this, mods, keysym| {
-                // Locked (7.1): the lock decides first, every key.
-                if let Some(kept) =
-                    this.lock_key_filter(code, state == KeyState::Pressed, mods, &keysym)
-                {
-                    return kept;
-                }
-                // Another key than a modifier with `Super`+`Alt`: a
-                // shortcut's, not the laser.
-                if state == KeyState::Pressed
-                    && !is_modifier(keysym.modified_sym())
-                    && this.ink.other_key()
-                {
-                    this.redraw = true;
-                }
-                // The magnifier's keys work whatever is open (#424): the
-                // radial menu, the overview, Alt+Tab, the capture.
-                if state == KeyState::Pressed
-                    && !this.shortcuts_inhibited()
-                    && let Some((action, chord)) = this.magnifier_chord(mods, &keysym)
-                {
-                    this.keyboard.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Shortcut(action, chord));
-                }
-                // The authentication dialog holds the keyboard (7.5): of
-                // the compositor's keys, only the virtual terminals', the
-                // levels' and the magnifier's work; everything else goes
-                // to the dialog.
-                let auth = this.auth_holds();
-                // A window's radial menu open (#723): its keys are its
-                // own, the modifiers go on.
-                if this.radial_menu.open.is_some() && !auth {
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    if state != KeyState::Pressed {
-                        return if this.keyboard.kept_keys.remove(&code) {
-                            FilterResult::Intercept(Kept::Release)
-                        } else {
-                            FilterResult::Forward
-                        };
-                    }
-                    this.keyboard.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Radial(crate::radial::Key::of(
-                        sym, mods.shift,
-                    )));
-                }
-                // The overview open (8.5 A): its keys are its own, the
-                // modifiers go on.
-                if this.overview_open() && !auth {
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    if state != KeyState::Pressed {
-                        return if this.keyboard.kept_keys.remove(&code) {
-                            FilterResult::Intercept(Kept::Release)
-                        } else {
-                            FilterResult::Forward
-                        };
-                    }
-                    this.keyboard.kept_keys.insert(code);
-                    let shortcuts = &this.config.shortcuts;
-                    let action = keysym
-                        .raw_latin_sym_or_raw_current_sym()
-                        .and_then(|key| shortcuts.action(mods, key, this.nested))
-                        .or_else(|| {
-                            digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
-                        })
-                        .map(|(action, _)| action);
-                    return FilterResult::Intercept(Kept::Overview(crate::overview::Key::of(
-                        sym, mods.shift, action,
-                    )));
-                }
-                if let Some(switcher_key) = this
-                    .switching
-                    .open
-                    .as_ref()
-                    .map(|s| s.key)
-                    .filter(|_| !auth)
-                {
-                    // Alt+Tab held: its keys are its own, the modifiers
-                    // go on to the application.
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    if state != KeyState::Pressed {
-                        return if this.keyboard.kept_keys.remove(&code) {
-                            FilterResult::Intercept(Kept::Release)
-                        } else {
-                            FilterResult::Forward
-                        };
-                    }
-                    let key = keysym.raw_latin_sym_or_raw_current_sym().unwrap_or(sym);
-                    this.keyboard.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Switch(switch_key(
-                        switcher_key,
-                        key,
-                        sym,
-                        mods.shift,
-                    )));
-                }
-                if state != KeyState::Pressed {
-                    return if this.keyboard.kept_keys.remove(&code) {
-                        FilterResult::Intercept(Kept::Release)
-                    } else {
-                        FilterResult::Forward
-                    };
-                }
-                // The capture open keeps the keys (5.8), the modifiers
-                // going on, as Alt+Tab's.
-                if this.capture.choosing() && !auth {
-                    let sym = keysym.modified_sym();
-                    if is_modifier(sym) {
-                        return FilterResult::Forward;
-                    }
-                    this.keyboard.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Capture(crate::capture::Key::of(
-                        sym, mods.shift,
-                    )));
-                }
-                // No key is logged, not even at trace level: what is typed
-                // may be a password (a terminal's, the Wi-Fi's).
-                let sym = keysym.modified_sym().raw();
-                if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym)
-                {
-                    let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
-                    return FilterResult::Intercept(Kept::Vt(vt));
-                }
-                // `Esc` clears the strokes while they show, with whatever
-                // modifiers are still held from drawing; otherwise it goes
-                // to the window.
-                // `Esc` while a window is moved puts it back (8.5 B).
-                if sym == Keysym::Escape.raw() && this.moving.is_some() && !auth {
-                    this.keyboard.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::CancelMove);
-                }
-                if sym == Keysym::Escape.raw() && this.ink.shows() && !auth {
-                    this.keyboard.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::InkClear);
-                }
-                // A client that takes every key (the Settings recording a
-                // shortcut, 6.8): none of the desktop's, the media keys too
-                // (they are shortcuts the user may record). The virtual
-                // terminal's switch above stays.
-                let inhibited = this.shortcuts_inhibited();
-                // The key of the layout's first level, Latin when the keyboard
-                // has a Latin layout: a shortcut stays on its key whatever the
-                // active layout.
-                let shortcuts = &this.config.shortcuts;
-                let action = keysym
-                    .raw_latin_sym_or_raw_current_sym()
-                    .and_then(|key| shortcuts.action(mods, key, this.nested))
-                    .or_else(|| {
-                        digit_key(code).and_then(|key| shortcuts.action(mods, key, this.nested))
-                    })
-                    .or_else(|| {
-                        // A key the layout types with Shift (`.` on
-                        // AZERTY): the chord without Shift, Shift held.
-                        let typed = keysym.modified_sym();
-                        let raw = keysym.raw_latin_sym_or_raw_current_sym()?;
-                        if !mods.shift || typed == raw || typed == Keysym::NoSymbol {
-                            return None;
-                        }
-                        let mut unshifted = *mods;
-                        unshifted.shift = false;
-                        shortcuts.action(&unshifted, typed, this.nested)
-                    });
-                let action = action.filter(|(a, _)| {
-                    !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
-                });
-                if let Some((action, chord)) = action {
-                    this.keyboard.kept_keys.insert(code);
-                    return FilterResult::Intercept(Kept::Shortcut(action, chord));
-                }
-                FilterResult::Forward
+                this.filter_key(code, state, mods, &keysym)
             });
         if state == KeyState::Released && self.switching.repeat.is_some_and(|(c, _)| c == code) {
             self.stop_switcher_repeat();
@@ -474,6 +298,203 @@ impl State {
         self.layout_maybe_changed();
         // Caps Lock, for the authentication dialog's sign (7.5).
         self.auth_caps(mods.caps_lock);
+    }
+
+    /// What becomes of a key before the focused client hears it: kept for
+    /// the desktop (`Intercept`), or forwarded.
+    fn filter_key(
+        &mut self,
+        code: Keycode,
+        state: KeyState,
+        mods: &ModifiersState,
+        keysym: &KeysymHandle<'_>,
+    ) -> FilterResult<Kept> {
+        if let Some(kept) = self.lock_key_filter(code, state == KeyState::Pressed, mods, keysym) {
+            return kept;
+        }
+        // Another key than a modifier with `Super`+`Alt`: a
+        // shortcut's, not the laser.
+        if state == KeyState::Pressed && !is_modifier(keysym.modified_sym()) && self.ink.other_key()
+        {
+            self.redraw = true;
+        }
+        // The magnifier's keys work whatever is open (#424): the
+        // radial menu, the overview, Alt+Tab, the capture.
+        if state == KeyState::Pressed
+            && !self.shortcuts_inhibited()
+            && let Some((action, chord)) = self.magnifier_chord(mods, keysym)
+        {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::Shortcut(action, chord));
+        }
+        // The authentication dialog holds the keyboard (7.5): of
+        // the compositor's keys, only the virtual terminals', the
+        // levels' and the magnifier's work; everything else goes
+        // to the dialog.
+        let auth = self.auth_holds();
+        if let Some(kept) = self.modal_key(code, state, mods, keysym, auth) {
+            return kept;
+        }
+        // No key is logged, not even at trace level: what is typed
+        // may be a password (a terminal's, the Wi-Fi's).
+        let sym = keysym.modified_sym().raw();
+        if (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw()).contains(&sym) {
+            let vt = (sym - Keysym::XF86_Switch_VT_1.raw() + 1) as i32;
+            return FilterResult::Intercept(Kept::Vt(vt));
+        }
+        // `Esc` clears the strokes while they show, with whatever
+        // modifiers are still held from drawing; otherwise it goes
+        // to the window.
+        // `Esc` while a window is moved puts it back (8.5 B).
+        if sym == Keysym::Escape.raw() && self.moving.is_some() && !auth {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::CancelMove);
+        }
+        if sym == Keysym::Escape.raw() && self.ink.shows() && !auth {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::InkClear);
+        }
+        // A client that takes every key (the Settings recording a
+        // shortcut, 6.8): none of the desktop's, the media keys too
+        // (they are shortcuts the user may record). The virtual
+        // terminal's switch above stays.
+        let inhibited = self.shortcuts_inhibited();
+        // The key of the layout's first level, Latin when the keyboard
+        // has a Latin layout: a shortcut stays on its key whatever the
+        // active layout.
+        let shortcuts = &self.config.shortcuts;
+        let action = keysym
+            .raw_latin_sym_or_raw_current_sym()
+            .and_then(|key| shortcuts.action(mods, key, self.nested))
+            .or_else(|| digit_key(code).and_then(|key| shortcuts.action(mods, key, self.nested)))
+            .or_else(|| {
+                // A key the layout types with Shift (`.` on
+                // AZERTY): the chord without Shift, Shift held.
+                let typed = keysym.modified_sym();
+                let raw = keysym.raw_latin_sym_or_raw_current_sym()?;
+                if !mods.shift || typed == raw || typed == Keysym::NoSymbol {
+                    return None;
+                }
+                let mut unshifted = *mods;
+                unshifted.shift = false;
+                shortcuts.action(&unshifted, typed, self.nested)
+            });
+        let action = action.filter(|(a, _)| {
+            !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
+        });
+        if let Some((action, chord)) = action {
+            self.keyboard.kept_keys.insert(code);
+            return FilterResult::Intercept(Kept::Shortcut(action, chord));
+        }
+        FilterResult::Forward
+    }
+
+    /// The keys of what holds the keyboard while it is open: the radial
+    /// menu, the overview, Alt+Tab, the capture; the release of a key kept.
+    /// `None`: on to the desktop's keys.
+    fn modal_key(
+        &mut self,
+        code: Keycode,
+        state: KeyState,
+        mods: &ModifiersState,
+        keysym: &KeysymHandle<'_>,
+        auth: bool,
+    ) -> Option<FilterResult<Kept>> {
+        // A window's radial menu open (#723): its keys are its
+        // own, the modifiers go on.
+        if self.radial_menu.open.is_some() && !auth {
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            if state != KeyState::Pressed {
+                return Some(if self.keyboard.kept_keys.remove(&code) {
+                    FilterResult::Intercept(Kept::Release)
+                } else {
+                    FilterResult::Forward
+                });
+            }
+            self.keyboard.kept_keys.insert(code);
+            return Some(FilterResult::Intercept(Kept::Radial(
+                crate::radial::Key::of(sym, mods.shift),
+            )));
+        }
+        // The overview open (8.5 A): its keys are its own, the
+        // modifiers go on.
+        if self.overview_open() && !auth {
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            if state != KeyState::Pressed {
+                return Some(if self.keyboard.kept_keys.remove(&code) {
+                    FilterResult::Intercept(Kept::Release)
+                } else {
+                    FilterResult::Forward
+                });
+            }
+            self.keyboard.kept_keys.insert(code);
+            let shortcuts = &self.config.shortcuts;
+            let action = keysym
+                .raw_latin_sym_or_raw_current_sym()
+                .and_then(|key| shortcuts.action(mods, key, self.nested))
+                .or_else(|| {
+                    digit_key(code).and_then(|key| shortcuts.action(mods, key, self.nested))
+                })
+                .map(|(action, _)| action);
+            return Some(FilterResult::Intercept(Kept::Overview(
+                crate::overview::Key::of(sym, mods.shift, action),
+            )));
+        }
+        if let Some(switcher_key) = self
+            .switching
+            .open
+            .as_ref()
+            .map(|s| s.key)
+            .filter(|_| !auth)
+        {
+            // Alt+Tab held: its keys are its own, the modifiers
+            // go on to the application.
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            if state != KeyState::Pressed {
+                return Some(if self.keyboard.kept_keys.remove(&code) {
+                    FilterResult::Intercept(Kept::Release)
+                } else {
+                    FilterResult::Forward
+                });
+            }
+            let key = keysym.raw_latin_sym_or_raw_current_sym().unwrap_or(sym);
+            self.keyboard.kept_keys.insert(code);
+            return Some(FilterResult::Intercept(Kept::Switch(switch_key(
+                switcher_key,
+                key,
+                sym,
+                mods.shift,
+            ))));
+        }
+        if state != KeyState::Pressed {
+            return Some(if self.keyboard.kept_keys.remove(&code) {
+                FilterResult::Intercept(Kept::Release)
+            } else {
+                FilterResult::Forward
+            });
+        }
+        // The capture open keeps the keys (5.8), the modifiers
+        // going on, as Alt+Tab's.
+        if self.capture.choosing() && !auth {
+            let sym = keysym.modified_sym();
+            if is_modifier(sym) {
+                return Some(FilterResult::Forward);
+            }
+            self.keyboard.kept_keys.insert(code);
+            return Some(FilterResult::Intercept(Kept::Capture(
+                crate::capture::Key::of(sym, mods.shift),
+            )));
+        }
+        None
     }
 
     /// Whether the modifiers held move a window under the pointer with its
