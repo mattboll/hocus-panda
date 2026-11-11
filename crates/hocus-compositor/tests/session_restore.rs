@@ -386,7 +386,7 @@ fn those_that_do_not_come_back_are_named_in_one_notification() -> anyhow::Result
     ))?;
     let notifications = Notifications::start(&tree)?;
     let mut config = tree.config();
-    config.french = true;
+    config.lang = hocus_words::Lang::French;
     let mut hp = match &notifications {
         Some(n) => {
             let mut hp =

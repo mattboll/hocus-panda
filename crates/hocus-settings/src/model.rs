@@ -19,8 +19,7 @@
 //! that one is not understood), writes a change at once with its undo, and
 //! finds settings by their words and their keys.
 
-use crate::lang::French as _;
-use crate::lang::{Lang, Words, w};
+use crate::lang::{Lang, Words};
 use hocus_words::settings::model as words;
 
 /// The five groups of the sidebar.
@@ -44,11 +43,11 @@ impl Group {
 
     pub fn label(self) -> Words {
         match self {
-            Self::Personalisation => w(words::PERSONALISATION),
-            Self::Devices => w(words::DEVICES),
-            Self::Connections => w(words::CONNECTIONS),
-            Self::Work => w(words::WORK),
-            Self::System => w(words::SYSTEM),
+            Self::Personalisation => words::PERSONALISATION,
+            Self::Devices => words::DEVICES,
+            Self::Connections => words::CONNECTIONS,
+            Self::Work => words::WORK,
+            Self::System => words::SYSTEM,
         }
     }
 }
@@ -132,152 +131,152 @@ impl SectionId {
             Self::Appearance => s(
                 "appearance",
                 Personalisation,
-                w(words::APPEARANCE_AND_LANGUAGE),
-                w(words::THE_THEME_THE_ACCENT_COLOUR_THE),
+                words::APPEARANCE_AND_LANGUAGE,
+                words::THE_THEME_THE_ACCENT_COLOUR_THE,
                 Icon::Appearance,
                 "6.2",
             ),
             Self::Wallpaper => s(
                 "wallpaper",
                 Personalisation,
-                w(words::WALLPAPER),
-                w(words::EACH_SCREEN_S_BACKGROUND_AND_THE),
+                words::WALLPAPER,
+                words::EACH_SCREEN_S_BACKGROUND_AND_THE,
                 Icon::Wallpaper,
                 "6.3",
             ),
             Self::Bar => s(
                 "bar",
                 Personalisation,
-                w(words::THE_BAR),
-                w(words::THE_SIDE_IT_STANDS_ON_ITS),
+                words::THE_BAR,
+                words::THE_SIDE_IT_STANDS_ON_ITS,
                 Icon::Bar,
                 "6.4",
             ),
             Self::Accessibility => s(
                 "accessibility",
                 Personalisation,
-                w(words::ACCESSIBILITY),
-                w(words::SEE_LARGER_SEE_CLEARER_DO_EVERYTHING),
+                words::ACCESSIBILITY,
+                words::SEE_LARGER_SEE_CLEARER_DO_EVERYTHING,
                 Icon::Accessibility,
                 "A.2–A.4",
             ),
             Self::Agenda => s(
                 "agenda",
                 Personalisation,
-                w(words::CALENDAR_AND_TASKS),
-                w(words::WHAT_THE_BAR_SHOWS_OF_YOUR),
+                words::CALENDAR_AND_TASKS,
+                words::WHAT_THE_BAR_SHOWS_OF_YOUR,
                 Icon::Agenda,
                 "Day.1",
             ),
             Self::Screens => s(
                 "screens",
                 Devices,
-                w(words::SCREENS),
-                w(words::WHERE_EACH_SCREEN_SITS_ITS_RESOLUTION),
+                words::SCREENS,
+                words::WHERE_EACH_SCREEN_SITS_ITS_RESOLUTION,
                 Icon::Screens,
                 "6.9",
             ),
             Self::Sound => s(
                 "sound",
                 Devices,
-                w(words::SOUND),
-                w(words::OUTPUTS_INPUTS_AND_THEIR_PROFILES_EACH),
+                words::SOUND,
+                words::OUTPUTS_INPUTS_AND_THEIR_PROFILES_EACH,
                 Icon::Sound,
                 "6.5",
             ),
             Self::Keyboard => s(
                 "keyboard",
                 Devices,
-                w(words::KEYBOARD_AND_SHORTCUTS),
-                w(words::THE_LAYOUTS_THE_KEYS_REPEAT_AND),
+                words::KEYBOARD_AND_SHORTCUTS,
+                words::THE_LAYOUTS_THE_KEYS_REPEAT_AND,
                 Icon::Keyboard,
                 "6.8",
             ),
             Self::Mouse => s(
                 "mouse",
                 Devices,
-                w(words::MOUSE_AND_TOUCHPAD),
-                w(words::THE_POINTER_CLICKS_AND_SCROLLING_OF),
+                words::MOUSE_AND_TOUCHPAD,
+                words::THE_POINTER_CLICKS_AND_SCROLLING_OF,
                 Icon::Mouse,
                 "6.12",
             ),
             Self::Network => s(
                 "network",
                 Connections,
-                w(words::NETWORK),
-                w(words::WI_FI_AND_ITS_SAVED_NETWORKS),
+                words::NETWORK,
+                words::WI_FI_AND_ITS_SAVED_NETWORKS,
                 Icon::Network,
                 "6.6",
             ),
             Self::Bluetooth => s(
                 "bluetooth",
                 Connections,
-                w(words::BLUETOOTH),
-                w(words::PAIR_A_DEVICE_WITH_OR_WITHOUT),
+                words::BLUETOOTH,
+                words::PAIR_A_DEVICE_WITH_OR_WITHOUT,
                 Icon::Bluetooth,
                 "6.7",
             ),
             Self::Desktops => s(
                 "desktops",
                 Work,
-                w(words::DESKTOPS_AND_WINDOWS),
-                w(words::HOW_MANY_DESKTOPS_AND_THEIR_NAMES),
+                words::DESKTOPS_AND_WINDOWS,
+                words::HOW_MANY_DESKTOPS_AND_THEIR_NAMES,
                 Icon::Desktops,
                 "6.14",
             ),
             Self::Apps => s(
                 "applications",
                 Work,
-                w(words::APPLICATIONS),
-                w(words::THOSE_THAT_OPEN_YOUR_LINKS_AND),
+                words::APPLICATIONS,
+                words::THOSE_THAT_OPEN_YOUR_LINKS_AND,
                 Icon::Apps,
                 "6.15",
             ),
             Self::Agents => s(
                 "agents",
                 Work,
-                w(words::AGENTS),
-                w(words::WHERE_YOUR_AGENTS_STATES_COME_FROM),
+                words::AGENTS,
+                words::WHERE_YOUR_AGENTS_STATES_COME_FROM,
                 Icon::Agents,
                 "6.16",
             ),
             Self::Captures => s(
                 "captures",
                 Work,
-                w(words::SCREENSHOTS_AND_CLIPBOARD),
-                w(words::WHERE_YOUR_SCREENSHOTS_AND_SCREEN_RECORDINGS),
+                words::SCREENSHOTS_AND_CLIPBOARD,
+                words::WHERE_YOUR_SCREENSHOTS_AND_SCREEN_RECORDINGS,
                 Icon::Captures,
                 "6.17",
             ),
             Self::Power => s(
                 "power",
                 System,
-                w(words::POWER),
-                w(words::WHEN_THE_SCREEN_DIMS_LOCKS_AND),
+                words::POWER,
+                words::WHEN_THE_SCREEN_DIMS_LOCKS_AND,
                 Icon::Power,
                 "6.10",
             ),
             Self::Account => s(
                 "account",
                 System,
-                w(words::ACCOUNT),
-                w(words::YOUR_NAME_AVATAR_AND_PASSWORD_THE),
+                words::ACCOUNT,
+                words::YOUR_NAME_AVATAR_AND_PASSWORD_THE,
                 Icon::Account,
                 "6.11",
             ),
             Self::DateTime => s(
                 "date-and-time",
                 System,
-                w(words::DATE_AND_TIME),
-                w(words::THE_COMPUTER_S_TIME_AND_ITS),
+                words::DATE_AND_TIME,
+                words::THE_COMPUTER_S_TIME_AND_ITS,
                 Icon::DateTime,
                 "6.11",
             ),
             Self::Performance => s(
                 "performance",
                 System,
-                w(words::PERFORMANCE),
-                w(words::WHAT_THE_DESKTOP_THE_COMPOSITOR_AND),
+                words::PERFORMANCE,
+                words::WHAT_THE_DESKTOP_THE_COMPOSITOR_AND,
                 Icon::Performance,
                 "#655",
             ),
@@ -405,16 +404,16 @@ pub enum Source {
 impl Source {
     pub fn name(self) -> Words {
         match self {
-            Self::Battery => w(words::ON_BATTERY),
-            Self::Ac => w(words::ON_AC),
+            Self::Battery => words::ON_BATTERY,
+            Self::Ac => words::ON_AC,
         }
     }
 
     /// As the toast says it: ", sur batterie".
     pub fn aside(self) -> Words {
         match self {
-            Self::Battery => w(words::ON_BATTERY_2),
-            Self::Ac => w(words::ON_AC_2),
+            Self::Battery => words::ON_BATTERY_2,
+            Self::Ac => words::ON_AC_2,
         }
     }
 
@@ -860,8 +859,7 @@ impl Setting {
             && let Value::Word(word) = value
             && let Some(accent) = hocus_link::theme::Accent::of(word)
         {
-            let (fr, en) = accent.names();
-            return if lang.fr() { fr } else { en }.to_owned();
+            return accent.name(lang).to_owned();
         }
         match value {
             Value::Bool(true) => words::ON.get(lang).to_owned(),
@@ -1022,8 +1020,8 @@ mod tests {
         for (id, (slug, fr, en)) in SectionId::ALL.into_iter().zip(pages) {
             let section = id.section();
             assert_eq!(section.slug, slug);
-            assert_eq!(section.name.fr, fr, "{slug}");
-            assert_eq!(section.name.en, en, "{slug}");
+            assert_eq!(section.name.get(hocus_words::Lang::French), fr, "{slug}");
+            assert_eq!(section.name.get(hocus_words::Lang::English), en, "{slug}");
         }
     }
 

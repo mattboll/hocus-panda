@@ -96,31 +96,18 @@ impl Words {
 
     /// A step's heading: what goes where.
     pub fn step_head(self, def: &Def, title: &str) -> String {
-        match (def.id, (self.lang == Lang::French)) {
-            ("send-to-desktop" | "take-to-desktop", true) if !title.is_empty() => {
-                format!("{title} part sur…")
-            }
-            ("send-to-desktop" | "take-to-desktop", false) if !title.is_empty() => {
-                format!("{title} goes to…")
+        match def.id {
+            "send-to-desktop" | "take-to-desktop" if !title.is_empty() => {
+                txt::goes_to(self.lang, title)
             }
             _ => def.name(self.lang == Lang::French).to_owned(),
         }
     }
 
     pub fn elsewhere(self, to: Elsewhere, query: &str) -> String {
-        match (to, (self.lang == Lang::French)) {
-            (Elsewhere::Launcher, true) => {
-                format!("Chercher «\u{a0}{query}\u{a0}» dans le lanceur")
-            }
-            (Elsewhere::Launcher, false) => {
-                format!("Search the launcher for \u{201c}{query}\u{201d}")
-            }
-            (Elsewhere::Settings, true) => {
-                format!("Chercher «\u{a0}{query}\u{a0}» dans les Réglages")
-            }
-            (Elsewhere::Settings, false) => {
-                format!("Search the Settings for \u{201c}{query}\u{201d}")
-            }
+        match to {
+            Elsewhere::Launcher => txt::search_the_launcher_for(self.lang, query),
+            Elsewhere::Settings => txt::search_the_settings_for(self.lang, query),
         }
     }
 

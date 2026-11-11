@@ -30,7 +30,6 @@ use super::{
     view::{El, card_box, divided, icon, label, t},
 };
 use crate::{
-    lang::w,
     model::{Icon, SectionId, Value},
     store::{KeyEdit, Slot},
     wallpaper::{self as model, Heard, Mine, Picked, Thumb, Thumbs},
@@ -181,7 +180,7 @@ impl App {
         let Some(known) = self.screens_list() else {
             return vec![Drawn {
                 name: String::new(),
-                title: w(words::SCREEN).get(lang).to_owned(),
+                title: words::SCREEN.get(lang).to_owned(),
                 size: (1600.0, 1000.0),
                 primary: true,
                 plugged: true,
@@ -459,9 +458,7 @@ impl App {
                     self.wallpaper.selected = Some(name);
                     iced::Task::none()
                 } else {
-                    let text = self
-                        .say(w(words::CHOOSE_EACH_SCREEN_TO_GIVE_THIS))
-                        .to_owned();
+                    let text = self.say(words::CHOOSE_EACH_SCREEN_TO_GIVE_THIS).to_owned();
                     self.toast(text, ToastAction::None, super::TOAST)
                 }
             }
@@ -555,7 +552,7 @@ impl App {
                 self.toast(text, ToastAction::None, super::UNDONE)
             }
             Heard::Failed(why) => {
-                let text = format!("{} {why}", self.say(w(words::NOTHING_IS_CHANGED)));
+                let text = format!("{} {why}", self.say(words::NOTHING_IS_CHANGED));
                 self.toast(text, ToastAction::None, super::TOAST)
             }
         }
@@ -595,9 +592,9 @@ impl App {
         }
         let lang = self.lang;
         let (now, then) = if each {
-            (w(words::EACH_SCREEN), w(words::ALL_SCREENS))
+            (words::EACH_SCREEN, words::ALL_SCREENS)
         } else {
-            (w(words::ALL_SCREENS), w(words::EACH_SCREEN))
+            (words::ALL_SCREENS, words::EACH_SCREEN)
         };
         let said = KeysSaid {
             done: words::wallpaper(lang, now.get(lang).to_lowercase()),
@@ -627,7 +624,7 @@ impl App {
         let said = KeysSaid {
             done: match &whose {
                 None => words::wallpaper_2(lang, &now),
-                Some(s) => words::background_of_the(lang, &now, s),
+                Some(s) => words::background_of_the(lang, words::BackgroundOfThe { now: &now, s }),
             },
             undone: words::undone_the_background_is_back_to(lang, &then),
             redone: words::redone_2(lang, &now),
@@ -706,12 +703,12 @@ impl App {
             }
             Picked::NoPortal => {
                 let text = self
-                    .say(w(words::NO_FILE_CHOOSER_ANSWERS_THE_DESKTOP))
+                    .say(words::NO_FILE_CHOOSER_ANSWERS_THE_DESKTOP)
                     .to_owned();
                 self.toast(text, ToastAction::None, super::TOAST)
             }
             Picked::Failed(why) => {
-                let text = format!("{} {why}", self.say(w(words::NOTHING_IS_WRITTEN)));
+                let text = format!("{} {why}", self.say(words::NOTHING_IS_WRITTEN));
                 self.toast(text, ToastAction::None, super::TOAST)
             }
         }
@@ -801,7 +798,13 @@ impl App {
             },
             Ok(_) => None,
         }?;
-        Some(words::in_the_file_night_is_drawn(lang, not_found, &word))
+        Some(words::in_the_file_night_is_drawn(
+            lang,
+            words::InTheFileNightIsDrawn {
+                not_found,
+                word: &word,
+            },
+        ))
     }
 
     // --- What it draws ----------------------------------------------------------------
@@ -867,8 +870,8 @@ impl App {
             ))
         };
         let scope = container(row![
-            segment(false, w(words::ALL_SCREENS)),
-            segment(true, w(words::EACH_SCREEN)),
+            segment(false, words::ALL_SCREENS),
+            segment(true, words::EACH_SCREEN),
         ])
         .padding(2)
         .style(move |_: &Theme| container::Style {
@@ -883,7 +886,7 @@ impl App {
             ..container::Style::default()
         });
         let head = row![
-            label(w(words::PREVIEW).get(lang)),
+            label(words::PREVIEW.get(lang)),
             Space::new().width(Length::Fill),
             scope
         ]
@@ -928,7 +931,7 @@ impl App {
                 }
                 layers.width(sw).height(sh).into()
             } else {
-                container(t(w(words::UNPLUGGED).get(lang), 11.0, FAINT.get()))
+                container(t(words::UNPLUGGED.get(lang), 11.0, FAINT.get()))
                     .width(sw)
                     .height(sh)
                     .center_x(sw)
@@ -992,9 +995,9 @@ impl App {
                 ..container::Style::default()
             });
         let line = if file.per_screen {
-            w(words::CLICK_A_SCREEN_TO_CHOOSE_ITS)
+            words::CLICK_A_SCREEN_TO_CHOOSE_ITS
         } else {
-            w(words::THE_SAME_BACKGROUND_ON_EVERY_SCREEN)
+            words::THE_SAME_BACKGROUND_ON_EVERY_SCREEN
         };
         let body = column![area, t(line.get(lang), 12.0, FAINT.get())]
             .spacing(8)
@@ -1020,7 +1023,7 @@ impl App {
             Some(s) => words::for_the(lang, crate::screens::lower_first(&s.title)),
         };
         let head = row![
-            label(w(words::BACKGROUNDS).get(lang)),
+            label(words::BACKGROUNDS.get(lang)),
             Space::new().width(Length::Fill),
             t(whom, 12.5, SOFT.get()),
         ]
@@ -1100,7 +1103,7 @@ impl App {
             Tile::Moving(m) => (model::name_of(&Picture::Moving(*m), lang), true),
             Tile::Plain => (model::name_of(&Picture::Plain, lang), false),
             Tile::Mine(word) => (model::name_of(&Picture::File(word.clone()), lang), false),
-            Tile::Choose => (w(words::CHOOSE_A_PICTURE).get(lang).to_owned(), false),
+            Tile::Choose => (words::CHOOSE_A_PICTURE.get(lang).to_owned(), false),
         };
         let thumbnail: El<'a> = match tile.picture() {
             Some(picture) => {
@@ -1209,9 +1212,9 @@ impl App {
         if fresh {
             // A wallpaper that moves says so; the other new ones are new.
             let badge = if matches!(tile, Tile::Moving(_)) {
-                w(words::ANIMATED)
+                words::ANIMATED
             } else {
-                w(words::NEW)
+                words::NEW
             };
             words = words.push(
                 container(t(badge.get(lang), 10.0, BLUE.get()).font(SEMIBOLD))
@@ -1253,7 +1256,7 @@ impl App {
     /// and when they stop by themselves.
     fn animation_group(&self) -> El<'_> {
         let lang = self.lang;
-        let head = row![label(w(words::ANIMATION).get(lang))]
+        let head = row![label(words::ANIMATION.get(lang))]
             .align_y(Alignment::Center)
             .height(28);
         let controls = self.controls();
@@ -1263,7 +1266,7 @@ impl App {
                 rows = rows.push(divided(i > 0, self.row(setting, &controls)));
             }
         }
-        let stops = w(words::IT_STOPS_BY_ITSELF_A_FULLSCREEN);
+        let stops = words::IT_STOPS_BY_ITSELF_A_FULLSCREEN;
         let card = column![
             rows,
             divided(
@@ -1280,7 +1283,7 @@ impl App {
         let lang = self.lang;
         let file = self.file();
         let inert = !self.writable();
-        let head = row![label(w(words::LOCK_SCREEN).get(lang))]
+        let head = row![label(words::LOCK_SCREEN.get(lang))]
             .align_y(Alignment::Center)
             .height(28);
         // The drawing: the source, the veil, the clock.
@@ -1297,7 +1300,7 @@ impl App {
                 column![
                     text("14:02").size(26).font(MONO).color(Color::WHITE),
                     t(
-                        w(words::THURSDAY_5_NOVEMBER).get(lang),
+                        words::THURSDAY_5_NOVEMBER.get(lang),
                         9.0,
                         rgba(238, 241, 246, 0.8)
                     ),
@@ -1317,20 +1320,20 @@ impl App {
         for (look, name, line, fresh) in [
             (
                 LockLook::Dimmed,
-                w(words::THE_DESKTOP_S_BACKGROUND_DIMMED),
-                w(words::AS_TODAY),
+                words::THE_DESKTOP_S_BACKGROUND_DIMMED,
+                words::AS_TODAY,
                 false,
             ),
             (
                 LockLook::Blurred,
-                w(words::THE_DESKTOP_S_BACKGROUND_BLURRED),
-                w(words::THE_BACKGROUND_ALONE_NEVER_THE_WINDOWS),
+                words::THE_DESKTOP_S_BACKGROUND_BLURRED,
+                words::THE_BACKGROUND_ALONE_NEVER_THE_WINDOWS,
                 true,
             ),
             (
                 LockLook::Picture,
-                w(words::ANOTHER_PICTURE),
-                w(words::CHOSEN_FOR_THE_LOCK_SCREEN_ONLY),
+                words::ANOTHER_PICTURE,
+                words::CHOSEN_FOR_THE_LOCK_SCREEN_ONLY,
                 true,
             ),
         ] {
@@ -1369,7 +1372,7 @@ impl App {
                 .align_y(Alignment::Center);
             if fresh {
                 title = title.push(
-                    container(t(w(words::NEW).get(lang), 10.0, BLUE.get()).font(SEMIBOLD))
+                    container(t(words::NEW.get(lang), 10.0, BLUE.get()).font(SEMIBOLD))
                         .padding([1, 5])
                         .style(|_: &Theme| container::Style {
                             background: Some(Background::Color(rgba(143, 179, 255, 0.16))),
@@ -1451,7 +1454,7 @@ impl App {
             menu = menu.on_press(Message::Wallpaper(Msg::LockMenu));
         }
         let head = row![
-            column![t(w(words::LOCK_SCREEN_PICTURE).get(lang), 14.0, TEXT.get()).font(SEMIBOLD)]
+            column![t(words::LOCK_SCREEN_PICTURE.get(lang), 14.0, TEXT.get()).font(SEMIBOLD)]
                 .width(Length::Fill),
             container(menu).id("control:wallpaper.lock-picture".to_owned()),
         ]
@@ -1478,7 +1481,7 @@ impl App {
                         .align_y(Alignment::Center)
                         .into()
                     }
-                    None => t(w(words::CHOOSE_A_PICTURE).get(lang), 13.0, MINT.get())
+                    None => t(words::CHOOSE_A_PICTURE.get(lang), 13.0, MINT.get())
                         .font(SEMIBOLD)
                         .into(),
                 };
@@ -1573,17 +1576,17 @@ impl App {
     /// The colour's row: its line says what it fills.
     pub(super) fn colour_line(&self) -> &'static str {
         match self.target_picture() {
-            Picture::File(_) => self.say(w(words::AROUND_THE_PICTURE)),
-            _ => self.say(w(words::THE_WHOLE_BACKGROUND)),
+            Picture::File(_) => self.say(words::AROUND_THE_PICTURE),
+            _ => self.say(words::THE_WHOLE_BACKGROUND),
         }
     }
 
     /// The fit's row: its line says what it does.
     pub(super) fn fit_line(&self) -> &'static str {
         match self.file().fit() {
-            Fit::Cover => self.say(w(words::THE_PICTURE_COVERS_THE_SCREEN_WHAT)),
-            Fit::Contain => self.say(w(words::THE_WHOLE_PICTURE_THE_SOLID_COLOUR)),
-            Fit::Center => self.say(w(words::AT_ITS_SIZE_IN_THE_MIDDLE)),
+            Fit::Cover => self.say(words::THE_PICTURE_COVERS_THE_SCREEN_WHAT),
+            Fit::Contain => self.say(words::THE_WHOLE_PICTURE_THE_SOLID_COLOUR),
+            Fit::Center => self.say(words::AT_ITS_SIZE_IN_THE_MIDDLE),
         }
     }
 

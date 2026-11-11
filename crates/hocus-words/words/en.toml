@@ -134,6 +134,9 @@ screen_reader_2 = "Screen reader"
 orca_starts_with_the_session_super = "Orca starts with the session. Super+Alt+S starts or stops it, on the lock screen too."
 go_to_the_bar = "Go to the bar"
 super_b_then_tab_and_the = "Super+B, then Tab and the arrows; Enter opens, Esc goes back. The shortcut is changed in Keyboard and shortcuts."
+at_the_edge = "At the edge"
+centred = "Centred"
+proportionally = "Proportionally"
 
 [settings.account]
 profile = "PROFILE"
@@ -184,6 +187,22 @@ does_not_read_it_is_left = "{file} does not read: it is left alone."
 no_agent_running = "no agent running"
 n_1_agent_running = "1 agent running"
 agents_running = "{x_n} agents running"
+hooks_in = "its hooks are in {file}"
+to_approve = "in Codex with /hooks; until then only the end of each turn arrives."
+declined_on = "with “Plug nothing in” on {day} · found in {dir}"
+declined_found_in = "with “Plug nothing in” · found in {dir}"
+herdr_running = "read by itself, nothing to plug in; its tab names name the agents."
+herdr_ignored = "its agents are not followed; “Follow herdr” brings them back."
+herdr_stopped = "followed as soon as it starts"
+followed = { other = "{n} followed" }
+day_month = "{day} {month}"
+for_everything = "For everything"
+when_an_agent_waits_for_you = "When an agent waits for you"
+never = "Never"
+after_2_min = "After 2 min"
+after_5_min = "After 5 min"
+after_10_min = "After 10 min"
+when_an_agent_waits_for_you_2 = "When an agent waits for you or is done"
 
 [settings.app]
 settings = "Settings"
@@ -271,6 +290,11 @@ unplugged = "{name} unplugged"
 undone = "Undone: {said}."
 redone = "Redone: {said}."
 plug_in_2 = "Plug in {tool_title}"
+family_working = "at work"
+family_waiting = "waiting"
+family_done = "done"
+family_stuck = "stuck"
+family_resting = "resting"
 
 [settings.app_appearance_page]
 switches_selection_the_keyboard_s_ring = "Switches, selection, the keyboard’s ring."
@@ -278,6 +302,9 @@ undone_is_back_to = "Undone: {theme_name} is back to {then}."
 redone = "Redone: {done}."
 text = "{name}: {now}"
 wallpaper = "Wallpaper: {name}"
+french_name = "French"
+english_name = "English"
+in_parentheses = "({name})"
 
 [settings.app_applications_view]
 other_applications_use_them_too = "Other applications use them too"
@@ -350,6 +377,12 @@ a_colour_from_the_file_it = "A colour from the file, {colour_to_uppercase}; it s
 automatic_the_screen_is_px_wide = "Automatic: {form}, the screen is {r_width} px wide (full from {from})."
 unplugged = "unplugged"
 no_bar = "no bar"
+automatic_chosen = "Automatic: {form}, chosen with a click on its edge."
+form_mini = "mini"
+form_full_chosen = "full"
+always_full = "Always full; a click on its edge changes it for the session."
+always_mini = "Always mini; a click on its edge changes it for the session."
+weekday_day_month = "{weekday} {day} {month}"
 
 [settings.app_bar_page_preview]
 team_check_in = "Team check-in"
@@ -464,6 +497,11 @@ but_the_pinned_one = "{x_n}, but the pinned one."
 but_the_pinned = "{x_n}, but the {p} pinned."
 clear_2 = "Clear {model_items_said_erasabl}"
 en = "en"
+lighter_for_photos_the_clipboard_always = "Lighter, for photos; the clipboard always gets PNG."
+lossless_sharp_for_text_and_code = "Lossless: sharp for text and code."
+webm_vp9_and_opus_free_lighter = "WebM (VP9 and Opus): free, lighter, less played by phones."
+mp4_h_264_and_aac_plays = "MP4 (H.264 and AAC): plays and sends anywhere."
+off_super_v_shows_the_pinned = "Off: Super+V shows the pinned items only."
 
 [settings.app_desktops_page]
 a_short_fade_while_reduced_motion = "A short fade while Reduced motion is on."
@@ -532,6 +570,7 @@ left_where_you_let_it_go = "Left where you let it go."
 as_if_you_held_drag_notes = "As if you held {key}: drag “Notes” by its content."
 held = "{key} held"
 hold = "Hold {key}"
+notes = "Notes"
 
 [settings.app_keyboard_page]
 one_layout_only_nothing_to_switch = "One layout only: nothing to switch."
@@ -585,6 +624,9 @@ shift = "Shift"
 default = "Default: {said}"
 is_already_used_by_replacing_it = "{shown} is already used by “{other}”. Replacing it takes it away."
 of_9_changed = "{changed} of 9 changed"
+changed_count = { other = "{n} changed" }
+all_shortcuts = "64 shortcuts"
+all_shortcuts_changed = { other = "64 shortcuts · {n} changed" }
 
 [settings.app_mouse]
 not_on_this_touchpad_it_senses = "Not on this touchpad: it senses only two fingers."
@@ -684,6 +726,7 @@ wpa3_personal = "WPA3 personal"
 wpa_wpa2_enterprise = "WPA/WPA2 enterprise"
 wep = "WEP"
 connect_to = "Connect to “{sheet_name}”"
+vpn = "VPN “{sheet_name}”"
 
 [settings.app_network_view]
 later = "Later"
@@ -804,6 +847,7 @@ windows = "{opened} windows"
 compositor_mb = "compositor · {c1_round} MB"
 shell_mb = "shell · {s0_round} → {s1_round} MB"
 only_grows = "{whose}: only grows ⚠"
+signals_count = { one = "⚠ {n} signal", other = "⚠ {n} signals" }
 
 [settings.app_power_page]
 after_the_dimming_if_nothing_happens = "After the dimming, if nothing happens still."
@@ -911,6 +955,12 @@ is_not_there_the_bar_is = "{named} is not there: the bar is on the {there} meanw
 en = "en"
 keep_this_refresh_rate = "Keep this refresh rate?"
 keep_this_resolution = "Keep this resolution?"
+unplugged_at = "{title} unplugged at {at}"
+its_place_and_settings_are_kept = "Its place ({place_unwrap_or_default}) and settings are kept: it takes them back as soon as it returns. Its windows went to the {other}."
+the_laptop_screen_is_off_the = "The laptop screen is off; the session goes on on the {other}, and the bar moved there. Its settings come back when you open the lid."
+off_2 = "{title} off"
+it_stays_plugged_in_and_keeps = "It stays plugged in and keeps its place; its windows went to the {other}."
+now_shows = "The {title} now shows {now}. Without an answer it goes back to {then} in {left} s."
 
 [settings.app_sound]
 headset_microphone = "Headset microphone"
@@ -966,6 +1016,8 @@ playing_on = "Playing on {s_description}"
 playing = "Playing"
 recording = " · recording {s_description}"
 recording_2 = "Recording {s_description}"
+l = "L"
+r = "R"
 
 [settings.app_time]
 the_system_refused = "The system refused."
@@ -999,6 +1051,11 @@ later_2 = "Later"
 once_for_the_whole_desktop_the = "{hours} · “{today}”. Once for the whole desktop: the bar, the calendar, the lock screen."
 no_time_zone_matches = "No time zone matches “{picker_query_trim}”."
 choose_2 = "Choose {f_city_name_lang}"
+the_system_s_time_service_timedated = "The system’s time service (timedated) does not answer."
+no_time_service_on_this_computer = "No time service on this computer."
+off_the_time_no_longer_corrects = "Off: the time no longer corrects itself."
+over_the_internet_ntp_on_time = "Over the Internet (NTP) · on time"
+over_the_internet_ntp_not_on = "Over the Internet (NTP) · not on time yet"
 
 [settings.app_view]
 search_settings = "Search settings"
@@ -1040,6 +1097,9 @@ just_now = "just now"
 min_ago = "{m} min ago"
 at = "at {time}"
 yesterday = "yesterday"
+never_sleeps = "never sleeps"
+sleeps_after = "sleeps after {suspend}"
+never_value = "Never"
 
 [settings.app_wallpaper_page]
 screen = "Screen"
@@ -1124,6 +1184,19 @@ time = "Time"
 over_24_hours_or_12_with = "Over 24 hours, or 12 with AM and PM."
 the_bar_s_clock = "The bar’s clock"
 its_font_colour_and_seconds = "Its font, colour and seconds."
+dark = "Dark"
+light = "Light"
+frost = "Frost"
+matrix = "Matrix"
+the_system_s_2 = "The system’s"
+fran_ais = "Français"
+english = "English"
+in_words = "In words"
+short = "Short"
+in_numbers = "In numbers"
+year_first = "Year first"
+n_14_05 = "14:05"
+n_2_05_pm = "2:05 PM"
 
 [settings.applications]
 default_applications = "DEFAULT APPLICATIONS"
@@ -1152,6 +1225,25 @@ at_session_start_2 = "At session start"
 the_type = "The type {other}"
 open_with = "{what} open with {app}"
 opens_with = "{what} opens with {app}"
+http_links = "http: links"
+https_links = "https: links"
+html_pages = "HTML pages"
+xhtml_pages = "XHTML pages"
+mp4_videos = "MP4 videos"
+webm_videos = "WebM videos"
+mkv_videos = "MKV videos"
+quicktime_videos = "QuickTime videos"
+avi_videos = "AVI videos"
+mpeg_videos = "MPEG videos"
+ogg_videos = "Ogg videos"
+png_images = "PNG images"
+jpeg_images = "JPEG images"
+webp_images = "WebP images"
+gif_images = "GIF images"
+svg_images = "SVG images"
+avif_images = "AVIF images"
+bmp_images = "BMP images"
+tiff_images = "TIFF images"
 
 [settings.bar]
 place = "PLACE"
@@ -1186,6 +1278,15 @@ clock_colour = "Clock colour"
 the_bar_s_form = "The bar’s form"
 change_form_by_hand = "Change form by hand"
 order_of_the_groups = "Order of the groups"
+right = "Right"
+left = "Left"
+the_primary_screen = "The primary screen"
+every_screen = "Every screen"
+odometer = "Odometer"
+roll = "Roll"
+flip = "Flip"
+neon = "Neon"
+no_motion = "No motion"
 
 [settings.bluetooth]
 bluetooth = "BLUETOOTH"
@@ -1215,6 +1316,13 @@ battery = " · battery {percent} %"
 no_device_connected = "No device connected"
 n_1_device_connected = "1 device connected"
 devices_connected = "{x_n} devices connected"
+connected_m = "Connected"
+connected_f = "Connected"
+not_connected_m = "Not connected"
+not_connected_f = "Not connected"
+reconnects_m = " · connects by itself when switched on"
+reconnects_f = " · connects by itself when switched on"
+paired_count = { other = "{n} paired" }
 
 [settings.captures]
 screenshots = "SCREENSHOTS"
@@ -1248,6 +1356,16 @@ n_1_pinned = "{items_word} · 1 pinned"
 pinned = "{items_word} · {x_n} pinned"
 n_1_item = "1 item"
 items = "{x_n} items"
+empty = "Empty"
+item_count = { one = "{n} item", other = "{n} items" }
+png = "PNG"
+jpeg = "JPEG"
+mp4 = "MP4"
+webm = "WebM"
+until_the_session_ends = "Until the session ends"
+n_1_day = "1 day"
+n_7_days = "7 days"
+n_30_days = "30 days"
 
 [settings.desktops]
 desktops = "DESKTOPS"
@@ -1295,6 +1413,16 @@ removed_its_window_goes_to = "“{name}” removed: its window goes to “{to}�
 removed_its_windows_go_to = "“{name}” removed: its {x_n} windows go to “{to}”"
 always_on = "Always on “{name}”"
 opens = "opens {said_to_lowercase}"
+alt_drag = "Alt + drag"
+super_drag = "Super + drag"
+no_key = "No key"
+super_right_drag = "Super + right-drag"
+alt_right_drag = "Alt + right-drag"
+standard = "Standard"
+rain = "Rain"
+frost = "Frost"
+all_desktops = "All desktops"
+this_desktop_only = "This desktop only"
 
 [settings.keyboard]
 layouts = "LAYOUTS"
@@ -1369,6 +1497,21 @@ compose_key = "Compose key"
 then_two_keys_and_e_make = "Then two keys: ' and e make é, o and e make œ."
 num_lock_on_at_login = "Num Lock on at login"
 the_keypad_types_digits_as_soon = "The keypad types digits as soon as the session opens."
+no_shortcut = "No shortcut"
+alt_shift = "Alt + Shift"
+ctrl_shift = "Ctrl + Shift"
+both_shift_keys = "Both Shift keys"
+super_space = "Super + Space"
+as_usual = "As usual"
+as_ctrl = "As Ctrl"
+as_escape = "As Escape"
+none = "None"
+right_alt = "Right Alt"
+menu = "Menu"
+right_ctrl = "Right Ctrl"
+go_to_desktop_n = "Go to desktop"
+send_to_desktop_n = "Send to desktop"
+take_to_desktop_n = "Take to desktop"
 
 [settings.model]
 personalisation = "PERSONALISATION"
@@ -1468,6 +1611,11 @@ bluetooth_mouse = "Bluetooth mouse"
 usb_mouse = "USB mouse"
 built_in_2 = "Built in"
 mice = "{many_len} mice"
+with_two_fingers = "With two fingers"
+bottom_right_corner = "Bottom-right corner"
+on_the_right_edge = "On the right edge"
+adaptive = "Adaptive"
+none = "None"
 
 [settings.network]
 airplane_mode = "AIRPLANE MODE"
@@ -1577,6 +1725,26 @@ screen_off = "screen off"
 asleep = "asleep"
 no_sleep = "no sleep"
 never = "never"
+never_2 = "Never"
+n_1_min = "1 min"
+n_2_min = "2 min"
+n_3_min = "3 min"
+n_5_min = "5 min"
+n_10_min = "10 min"
+n_15_min = "15 min"
+n_30_min = "30 min"
+at_once = "At once"
+n_10_s_after = "10 s after"
+n_30_s_after = "30 s after"
+n_1_min_after = "1 min after"
+n_5_min_after = "5 min after"
+n_1_h = "1 h"
+n_2_h = "2 h"
+suspend = "Suspend"
+lock = "Lock"
+do_nothing = "Do nothing"
+ask_what_to_do = "Ask what to do"
+power_off = "Power off"
 
 [settings.screens]
 arrangement = "ARRANGEMENT"
@@ -1614,6 +1782,20 @@ external_screen = "external screen"
 alone = "{one} alone"
 now = "Now"
 new_its_arrangement_will_be_kept = "new, its arrangement will be kept"
+left_of = "to the left of the {other}"
+right_of = "to the right of the {other}"
+above = "above the {other}"
+below = "below the {other}"
+tops_aligned = "tops aligned"
+bottoms_aligned = "bottoms aligned"
+lefts_aligned = "lefts aligned"
+rights_aligned = "rights aligned"
+centred = "centred"
+n_1_window_waits_for_it = "1 window waits for it"
+windows_wait_for_it = "{x_n} windows wait for it"
+today_at = "Today, {time}"
+yesterday_at = "Yesterday, {time}"
+numeric_date = "%Y-%m-%d"
 
 [settings.sound]
 output = "OUTPUT"
@@ -1654,6 +1836,8 @@ time_format = "Time format"
 no_clock_change = "no clock change"
 standard_time_until = "standard time until {said}"
 summer_time_until = "summer time until {said}"
+first_of_month = "1 {month}"
+day_of_month = "{day} {month}"
 
 [settings.wallpaper]
 preview = "PREVIEW"
@@ -1715,6 +1899,46 @@ mute_the_microphone = "Mute the microphone"
 microphone = "Microphone"
 connected_to = "connected to {name}, {signal}"
 mute_2 = "Mute {app}"
+waiting_for = "waiting for {since}"
+stuck_for = "stuck for {since}"
+done_to_see = "done, to see"
+working_for = "working for {since}"
+resting = "resting"
+n_1_more_agent_resting = "1 more agent resting"
+n_1_more_agent = "1 more agent"
+more_agents_resting = "{x_n} more agents resting"
+more_agents = "{x_n} more agents"
+is_waiting = "{waiting_0} is waiting."
+are_waiting = "{self_and_waiting} are waiting."
+is_stuck = "{stuck_0} is stuck."
+are_stuck = "{self_and_stuck} are stuck."
+today_no_events = "Today, no events"
+today_1_event = "Today, 1 event"
+today_events = "Today, {x_n} events"
+to_do_no_tasks = "To do, no tasks"
+to_do_1_task = "To do, 1 task"
+to_do_tasks = "To do, {x_n} tasks"
+no_windows = "no windows"
+n_1_window = "1 window"
+windows_2 = "{x_n} windows"
+weak_signal = "weak signal"
+fair_signal = "fair signal"
+good_signal = "good signal"
+strong_signal = "strong signal"
+off = "off"
+no_device_connected = "no device connected"
+connecting = "connecting…"
+microphone_muted_used_by = "Microphone muted, used by {apps}"
+microphone_used_by = "Microphone used by {apps}"
+camera_used_by = "Camera used by {apps}"
+screen_shared_with = "Screen shared with {apps}"
+recording_the_screen = "Recording the screen"
+n_1_more_task = "1 more task"
+more_tasks = "{x_n} more tasks"
+n_1_more_event_today = "1 more event today"
+more_events_today = "{x_n} more events today"
+n_1_more_window = "1 more window"
+more_windows = "{x_n} more windows"
 
 [shell.actions]
 an_action_window_desktop_setting_session = "An action: window, desktop, setting, session…"
@@ -1730,6 +1954,9 @@ a_digit_picks_at_once_backspace = "A digit picks at once · Backspace goes back 
 choose_enter_runs_tab_completes = "↑↓ choose · Enter runs · Tab completes"
 the_recent_first_on_a_tie = "the recent first on a tie"
 keyword = "keyword: {word}"
+goes_to = "{title} goes to…"
+search_the_launcher_for = "Search the launcher for “{query}”"
+search_the_settings_for = "Search the Settings for “{query}”"
 
 [shell.agents]
 briefing = "Briefing"
@@ -1776,6 +2003,9 @@ working = "{x_n} working"
 resting_4 = "{resting} resting"
 following = "Following: {list}."
 plug_in_2 = "Plug in {tool_title}"
+ago = "· {time} ago"
+allow = "Allow {tool}?"
+allow_2 = "Allow {tool}: {what}?"
 
 [shell.auth]
 authorization_required = "Authorization required"
@@ -1794,6 +2024,9 @@ none = "none"
 cancel = "Cancel"
 authorize = "Authorize"
 authorization_required_2 = "Authorization required: {app}"
+started_by = "{pid}, started by {by}"
+n_1_more_request_waiting = "1 more request waiting"
+more_requests_waiting = "{x_n} more requests waiting"
 
 [shell.capture]
 area = "Area"
@@ -1849,6 +2082,17 @@ recording = "recording"
 unmute = "Unmute"
 mute_the_microphone = "Mute the microphone"
 stop_recording = "Stop recording"
+for_s = "for {s} s"
+for_min = "for {m} min"
+for_h_min = "for {h} h {m_60} min"
+sharing_the_window = "sharing the window “{title}”"
+sharing_the_laptop_screen = "sharing the laptop screen"
+sharing_the_screen = "sharing the screen “{name}”"
+notifications_wait_until_the_end = "Notifications wait until the end"
+n_1_notification_held = "1 notification held"
+notifications_held = "{x_n} notifications held"
+stop_sharing = "Stop sharing"
+stop_sharing_with = "Stop sharing with {app}"
 
 [shell.launcher]
 search_for_an_application_calculate = "Search for an application, calculate…"
@@ -1873,6 +2117,8 @@ wrong_password = "Wrong password."
 caps_lock_is_on_2 = "Caps Lock is on."
 too_many_attempts_try_again_in = "Too many attempts. Try again in {seconds} s."
 keyboard_layout_change = "Keyboard layout: {name}. Change"
+n_1_agent_is_waiting_for_you = "1 agent is waiting for you"
+agents_are_waiting_for_you = "{x_n} agents are waiting for you"
 
 [shell.meeting]
 join_the_video_call = "Join the video call"
@@ -1886,6 +2132,12 @@ next_meeting_2 = "Next meeting"
 meeting_now = "Meeting now"
 video_call = ", video call"
 text = ":"
+in_text = "in {self_minutes_minutes}"
+ends_in = "ends in {self_minutes_left}"
+h = "{h} h"
+h_2 = "{h} h {m:02}"
+in_text_2 = "in {long_minutes}"
+ends_in_2 = "ends in {long_left}"
 
 [shell.music]
 music = "Music"
@@ -1934,6 +2186,11 @@ remove = "Remove"
 unpin = "Unpin"
 pin = "Pin"
 nothing_for = "Nothing for “{query}”"
+now = "now"
+min_ago = "{x_n} min ago"
+h_ago = "{x_n} h ago"
+yesterday = "yesterday"
+days_ago = "{x_n} days ago"
 
 [shell.popover_history]
 clear_all = "Clear all"
@@ -1950,6 +2207,13 @@ yesterday = "YESTERDAY"
 older = "OLDER"
 nothing_new = "Nothing new"
 all_read = "All read."
+until_tomorrow = "Until tomorrow, {self_time_at}"
+until = "Until {self_time_at}"
+now = "now"
+min_ago = "{x_n} min ago"
+h_ago = "{x_n} h ago"
+yesterday_2 = "yesterday"
+days_ago = "{x_n} days ago"
 
 [shell.popover_session_words]
 settings = "Settings"
@@ -1980,6 +2244,13 @@ restarting_2 = "Restarting…"
 shutting_down_2 = "Shutting down…"
 an_application = "An application"
 go_back_to = "Go back to {app}"
+the_session_ends_in_s = "The session ends in {seconds} s."
+the_computer_restarts_in_s = "The computer restarts in {seconds} s."
+the_computer_shuts_down_in_s = "The computer shuts down in {seconds} s."
+is_holding_back = "{app} is holding back {what}"
+applications_are_holding_back = "{x_n} applications are holding back {what}"
+its_window_did_not_close = "Its window did not close."
+did_not_close = "“{title}” did not close."
 
 [shell.popover_window_menu]
 restore = "Restore"
@@ -2003,6 +2274,10 @@ dismiss_this_reminder = "Dismiss this reminder"
 video_call = ", video call"
 calendar = "Calendar"
 started_at = "{m_title} · started at {m_hhmm}"
+in_text = "in {minutes_left}"
+started_ago = "started {minutes_left} ago"
+in_text_2 = "in {long_tab_left}"
+started_ago_2 = "started {long_tab_left} ago"
 
 [shell.setup]
 your_day_here = "Your day here"
@@ -2051,6 +2326,10 @@ external_screen = "External screen"
 show_the_pointer = "Show the pointer"
 cancel = "Cancel"
 share = "Share"
+wants_to_see_your_screen = "{app} wants to see your screen"
+an_application_wants_to_see_your = "An application wants to see your screen"
+this_desktop = "this desktop"
+desktop = "desktop {desktop}"
 
 [shell.launcher_answers]
 length = "Length"
@@ -2075,12 +2354,36 @@ tib = "TiB"
 [settings.app_account]
 the_system_refused = "The system refused."
 the_password_has_not_changed = "The password has not changed: {why}."
+choose_an_avatar = "Choose an avatar"
+pictures_jpeg_png_webp = "Pictures (JPEG, PNG, WebP)"
+display_name = "Display name: {after}"
+undone_the_display_name_is_back = "Undone: the display name is back to {after}."
+redone_display_name = "Redone: display name: {after}."
+avatar_removed = "Avatar removed."
+avatar_changed = "Avatar changed."
+undone_the_avatar_is_back = "Undone: the avatar is back."
+redone_avatar_changed = "Redone: avatar changed."
+password_changed = "Password changed."
+the_system_does_not_answer = "The system does not answer."
 
 [settings.app_applications]
 undone = "Undone: {row}: {before}"
 redone = "Redone: {row}: {name}"
 not_written = "Not written: {why}"
 text = ": "
+at_start_up = "{name} at start-up: {yes_on}"
+undone_at_start_up = "Undone: {name} at start-up: {yes_on}"
+redone_at_start_up = "Redone: {name} at start-up: {yes_on}"
+removed_from_start_up = "{name} removed from start-up"
+undone_is_back_at_start_up = "Undone: {name} is back at start-up"
+redone_removed_from_start_up = "Redone: {name} removed from start-up"
+added_to_start_up = "{name} added to start-up"
+undone_is_no_longer_at_start = "Undone: {name} is no longer at start-up"
+redone_added_to_start_up = "Redone: {name} added to start-up"
+none = "none"
+automatic = "Automatic"
+on = "on"
+off = "off"
 
 [settings.keys]
 shift = "Shift"
@@ -2130,6 +2433,7 @@ enter_inserts = "Enter inserts"
 no_emoji_for = "No emoji for “{query}”"
 skin_tone = "Skin tone"
 emoji_enter_inserts_the_first_the = "Emoji · Enter inserts the first, the arrows choose"
+tones = ["Yellow", "Light", "Medium-light", "Medium", "Medium-dark", "Dark"]
 
 [shell.levels_model]
 muted = "muted"
@@ -2160,6 +2464,32 @@ charging_2 = "charging"
 plugged_in_full_2 = "plugged in, full"
 plugged_in = "plugged in"
 plug_in_the_charger_2 = "plug in the charger"
+n_1_more_application = "+1 more application"
+more_applications = "+{x_n} more applications"
+power_saver = "power saver"
+balanced = "balanced"
+battery = "Battery"
+power = "Power"
+plugged_in_2 = "Plugged in"
+power_saver_2 = "Power saver"
+balanced_2 = "Balanced"
+performance_reduced_the_computer_is_on = "Performance reduced: the computer is on a lap."
+performance_reduced_the_computer_is_too = "Performance reduced: the computer is too hot."
+performance_reduced_by_the_system = "Performance reduced by the system."
+no_windows = "{title}, no windows"
+n_1_window = "{title}, 1 window"
+windows = "{title}, {x_n} windows"
+laptop_screen = "Laptop screen"
+screen = "Screen {number}"
+inch_external_screen = "{i}-inch external screen"
+n_1_window_2 = "1 window"
+windows_2 = "{x_n} windows"
+keyboard_levels_2 = ["Off", "On"]
+keyboard_levels_3 = ["Off", "Low", "High"]
+keyboard_levels_4 = ["Off", "Low", "Medium", "High"]
+on_the_screen = "on the {screen}"
+on_screen = "on {screen}"
+desktop_n = "Desktop {number}"
 
 [shell.network_model]
 connecting = "Connecting…"
@@ -2216,6 +2546,10 @@ add_a_task = "Add a task"
 new_task = "New task…"
 nothing_to_do = "Nothing to do."
 not_saved = "Not saved"
+tick = "Tick \"{title}\""
+untick = "Untick \"{title}\""
+to_do_1_task = "To do: 1 task"
+to_do_tasks = "To do: {x_n} tasks"
 
 [shell.today]
 today = "TODAY"
@@ -2224,3 +2558,89 @@ video_call = ", video call"
 [shell.windows]
 close = "Close {title}"
 this_desktop_s_windows = "This desktop's windows: {count}"
+minimised = ", minimised"
+
+
+[shell.notifications]
+dev_shell_stopped = "The development shell stopped"
+dev_shell_stopped_body = "{program} did not start or kept ending. The installed shell runs again."
+
+
+[link.wallpaper]
+swatches = ["Night", "Slate", "Deep blue", "Fir", "Earth", "Graphite"]
+
+[link.backdrop]
+night = "Night"
+mist = "Mist"
+dawn = "Dawn"
+forest = "Forest"
+
+[link.moving]
+rain = "Rain"
+stars = "Stars"
+aurora = "Aurora"
+
+[link.theme]
+green = "Panda green"
+blue = "Blue"
+violet = "Violet"
+rose = "Pink"
+teal = "Teal"
+wallpaper = "From the wallpaper"
+ice = "Ice blue"
+phosphor = "Phosphor green"
+
+
+[compositor.away_power]
+power_saver_on_battery_at = "Power saver on: battery at {percent} %."
+
+[compositor.capture_save]
+screenshots = "Screenshots"
+screenshot_from = "Screenshot from {day} {time}.{extension}"
+
+[compositor.magnifier_draw]
+magnifier = "Magnifier"
+super_esc_to_exit = "Super+Esc to exit"
+
+[compositor.opacity]
+text = "{percent}%"
+
+[compositor.radial_draw]
+desktop = "Desktop {n_1}"
+click = "click"
+restore = ["Restore"]
+maximise = ["Maximise"]
+on_top = ["Always", "on top"]
+next_desktop = ["Next", "desktop"]
+other_screen = ["Other", "screen"]
+minimise = ["Minimise"]
+close = ["Close"]
+previous_desktop = ["Previous", "desktop"]
+all_desktops = ["All", "desktops"]
+
+[compositor.record_save]
+screen_recordings = "Screen recordings"
+screen_recording_from = "Screen recording from {day} {time}.{ext}"
+
+[compositor.session_restore]
+and = " and "
+not_reopened = { other = "{listed} could not be reopened." }
+
+
+[compositor.overview]
+badge_waiting = { other = "{n} waiting" }
+badge_stuck = { other = "{n} stuck" }
+badge_done = "{n} to see"
+badge_working = "{n} working"
+badge_resting = "{n} resting"
+
+
+[compositor.overview_draw]
+drop_on_desktop = "Drop: desktop {desktop}"
+
+
+[shell.footer]
+clipboard = "Clipboard"
+notifications_unseen = "Notifications, {unseen} unseen"
+menu_all_applications = "Menu: all applications"
+session_menu = "{user}, session menu"

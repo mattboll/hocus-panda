@@ -9,6 +9,7 @@
 //! Screenshots, recordings and shared screens draw the screen themselves
 //! (`render::Purpose::Capture`): they stay at 1×.
 
+use hocus_words::compositor::magnifier_draw as txt;
 use std::cell::{OnceCell, RefCell};
 
 use anyhow::Context;
@@ -464,15 +465,11 @@ pub struct Words {
 }
 
 impl Words {
-    pub fn of(zoom: f64, french: bool) -> Self {
+    pub fn of(zoom: f64, lang: hocus_words::Lang) -> Self {
         Self {
-            label: if french { "Loupe" } else { "Magnifier" },
-            zoom: super::zoom_words(zoom, french),
-            hint: if french {
-                "Super+Échap quitte"
-            } else {
-                "Super+Esc to exit"
-            },
+            label: txt::MAGNIFIER.get(lang),
+            zoom: super::zoom_words(zoom, lang),
+            hint: txt::SUPER_ESC_TO_EXIT.get(lang),
         }
     }
 }
@@ -735,7 +732,7 @@ impl State {
         if pill_alpha > 0.0
             && let Some(fonts) = paint.fonts()
         {
-            let words = Words::of(zoom_to, self.radial_french());
+            let words = Words::of(zoom_to, self.radial_lang());
             let key = (words.clone(), milli);
             let mut cache = paint.pill.borrow_mut();
             if cache.as_ref().is_none_or(|(k, ..)| *k != key)
@@ -807,8 +804,8 @@ mod tests {
     #[test]
     fn the_pill_draws_in_both_languages_and_its_buttons_are_inside() {
         let fonts = crate::radial_draw::fonts().expect("the shell's fonts");
-        for french in [true, false] {
-            let words = Words::of(8.0, french);
+        for lang in hocus_words::Lang::ALL {
+            let words = Words::of(8.0, lang);
             let parts = layout(&fonts, &words);
             assert!(
                 parts.width > 200.0 && parts.width < 400.0,
@@ -823,7 +820,10 @@ mod tests {
         }
         let paint = Paint::default();
         let pill = paint
-            .layout(&Words::of(2.0, true), Size::from((1920.0, 1080.0)))
+            .layout(
+                &Words::of(2.0, hocus_words::Lang::French),
+                Size::from((1920.0, 1080.0)),
+            )
             .expect("laid out");
         assert!(pill.rect.contains(pill.minus.loc) && pill.rect.contains(pill.plus.loc));
         assert!((pill.rect.loc.x + pill.rect.size.w / 2.0 - 960.0).abs() <= 1.0);

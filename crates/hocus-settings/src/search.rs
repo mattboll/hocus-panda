@@ -131,9 +131,11 @@ struct Entry {
 }
 
 fn entries(lang: Lang) -> Vec<Entry> {
-    let other = match lang {
-        Lang::French => Lang::English,
-        Lang::English => Lang::French,
+    // Names are found in English too, and in French when it is English.
+    let other = if lang == Lang::English {
+        Lang::French
+    } else {
+        Lang::English
     };
     let chars = |s: &str| fold(s).chars().collect::<Vec<_>>();
     let section_names = |id: SectionId| vec![chars(id.name(lang)), chars(id.name(other))];

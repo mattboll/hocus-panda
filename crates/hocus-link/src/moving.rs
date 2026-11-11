@@ -12,6 +12,7 @@
 //! The rain's colours are tokens ([`RainColours`]) that a theme can set;
 //! every theme has the phosphor green for now.
 
+use hocus_words::link::moving as txt;
 use serde::{Deserialize, Serialize};
 
 use crate::theme::AccentColours;
@@ -48,12 +49,13 @@ impl Moving {
     }
 
     /// Its name, in French then English.
-    pub const fn names(self) -> (&'static str, &'static str) {
+    pub fn name(self, lang: hocus_words::Lang) -> &'static str {
         match self {
-            Self::Rain => ("Pluie", "Rain"),
-            Self::Stars => ("Étoiles", "Stars"),
-            Self::Aurora => ("Aurore", "Aurora"),
+            Self::Rain => txt::RAIN,
+            Self::Stars => txt::STARS,
+            Self::Aurora => txt::AURORA,
         }
+        .get(lang)
     }
 
     /// Frames a second while it runs on mains power; half on battery.

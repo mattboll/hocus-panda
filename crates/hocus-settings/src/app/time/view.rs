@@ -18,7 +18,7 @@ use crate::{
         style::*,
         view::{El, card_box, divided, icon, label, t},
     },
-    lang::{Lang, pair, w},
+    lang::Lang,
     model::{Icon, SectionId},
     theme::Ink,
     time as model,
@@ -33,25 +33,25 @@ impl App {
         let lang = self.lang;
         page = page.push(self.time_clock());
         page = page.push(group(
-            w(words::TIME).get(lang),
+            words::TIME.get(lang),
             column![self.time_auto_row(), divided(true, self.time_set_row()),].into(),
         ));
-        page = page.push(group(w(words::TIME_ZONE).get(lang), self.time_zone_row()));
-        page = page.push(group(w(words::FORMAT).get(lang), self.time_format_row()));
+        page = page.push(group(words::TIME_ZONE.get(lang), self.time_zone_row()));
+        page = page.push(group(words::FORMAT.get(lang), self.time_format_row()));
         page = page.push(group(
-            w(words::LATER).get(lang),
+            words::LATER.get(lang),
             column![
                 later_row(
-                    w(words::AUTOMATIC_TIME_ZONE),
-                    w(words::FOLLOW_WHERE_THE_COMPUTER_IS_WHEN),
+                    words::AUTOMATIC_TIME_ZONE,
+                    words::FOLLOW_WHERE_THE_COMPUTER_IS_WHEN,
                     true,
                     lang,
                 ),
                 divided(
                     true,
                     later_row(
-                        w(words::REGIONAL_FORMATS),
-                        w(words::NUMBERS_CURRENCY_AND_THE_FIRST_DAY),
+                        words::REGIONAL_FORMATS,
+                        words::NUMBERS_CURRENCY_AND_THE_FIRST_DAY,
                         false,
                         lang,
                     ),
@@ -71,7 +71,7 @@ impl App {
         let now = self.time_now();
         let clock = model::say_time(now.time(), self.time_twelve());
         let line = self.time_zone().map_or_else(
-            || w(words::TIME_ZONE_NOT_KNOWN).get(lang).to_owned(),
+            || words::TIME_ZONE_NOT_KNOWN.get(lang).to_owned(),
             |zone| model::clock_line(zone, now.timestamp(), lang),
         );
         card_box(
@@ -118,7 +118,7 @@ impl App {
         .id(format!("control:{}", model::AUTO));
         self.time_row(
             model::AUTO,
-            w(words::SET_THE_TIME_AUTOMATICALLY).get(lang),
+            words::SET_THE_TIME_AUTOMATICALLY.get(lang),
             t(line, 12.5, ink).into(),
             switch.into(),
         )
@@ -127,44 +127,21 @@ impl App {
     /// The automatic time's line, and its colour.
     pub(super) fn time_auto_line(&self) -> (String, Color) {
         let lang = self.lang;
-        let said = |fr: &'static str, en: &'static str| pair(fr, en).get(lang).to_owned();
+        let said = |text: hocus_words::Text| text.get(lang).to_owned();
         match self.time.heard.as_ref() {
             None => (String::new(), DIM.get()),
             Some(None) => (
-                said(
-                    "Le service de l’heure du système (timedated) ne répond pas.",
-                    "The system’s time service (timedated) does not answer.",
-                ),
+                said(words::THE_SYSTEM_S_TIME_SERVICE_TIMEDATED),
                 FAINT.get(),
             ),
-            Some(Some(td)) if !td.can_ntp => (
-                said(
-                    "Aucun service de mise à l’heure sur cet ordinateur.",
-                    "No time service on this computer.",
-                ),
-                FAINT.get(),
-            ),
-            Some(Some(_)) if !self.time_ntp() => (
-                said(
-                    "Coupé : l’heure ne se corrige plus seule.",
-                    "Off: the time no longer corrects itself.",
-                ),
-                DIM.get(),
-            ),
-            Some(Some(td)) if td.synced => (
-                said(
-                    "Par Internet (NTP) · à l’heure",
-                    "Over the Internet (NTP) · on time",
-                ),
-                MINT.get(),
-            ),
-            Some(Some(_)) => (
-                said(
-                    "Par Internet (NTP) · pas encore à l’heure",
-                    "Over the Internet (NTP) · not on time yet",
-                ),
-                AMBER.get(),
-            ),
+            Some(Some(td)) if !td.can_ntp => {
+                (said(words::NO_TIME_SERVICE_ON_THIS_COMPUTER), FAINT.get())
+            }
+            Some(Some(_)) if !self.time_ntp() => {
+                (said(words::OFF_THE_TIME_NO_LONGER_CORRECTS), DIM.get())
+            }
+            Some(Some(td)) if td.synced => (said(words::OVER_THE_INTERNET_NTP_ON_TIME), MINT.get()),
+            Some(Some(_)) => (said(words::OVER_THE_INTERNET_NTP_NOT_ON), AMBER.get()),
         }
     }
 
@@ -175,9 +152,9 @@ impl App {
         let manual = self.time_manual();
         let (date, time) = self.time_fields();
         let line = if manual {
-            w(words::TYPE_THE_DATE_AND_THE_TIME)
+            words::TYPE_THE_DATE_AND_THE_TIME
         } else {
-            w(words::SET_BY_HAND_WHEN_AUTOMATIC_TIME)
+            words::SET_BY_HAND_WHEN_AUTOMATIC_TIME
         };
         let busy = self.time.time_asked.is_some();
         let typed = self.time_typed();
@@ -197,7 +174,7 @@ impl App {
             let can = typed.is_some() && !busy;
             let focused = self.time_focused(Stop::Set);
             let mut set = button(
-                text(w(words::SET).get(lang))
+                text(words::SET.get(lang))
                     .size(12.5)
                     .font(BOLD)
                     .color(fade(DEEP.get(), if can { 1.0 } else { INERT })),
@@ -231,7 +208,7 @@ impl App {
         }
         self.time_row(
             model::SET,
-            w(words::DATE_AND_TIME).get(lang),
+            words::DATE_AND_TIME.get(lang),
             t(line.get(lang), 12.5, DIM.get()).into(),
             controls.into(),
         )
@@ -289,7 +266,7 @@ impl App {
         }
         self.time_row(
             model::ZONE,
-            w(words::TIME_ZONE_2).get(lang),
+            words::TIME_ZONE_2.get(lang),
             t(line, 12.5, DIM.get()).into(),
             container(open)
                 .id(format!("control:{}", model::ZONE))
@@ -313,7 +290,7 @@ impl App {
             ));
         self.time_row(
             model::FORMAT,
-            w(words::TIME_AND_DATE_FORMAT).get(lang),
+            words::TIME_AND_DATE_FORMAT.get(lang),
             t(self.time_format_line(), 12.5, DIM.get()).into(),
             container(link).id(format!("link:{}", model::FORMAT)).into(),
         )
@@ -324,7 +301,13 @@ impl App {
         let hours = if self.time_twelve() { "12 h" } else { "24 h" };
         let today =
             crate::appearance::today_as(self.time_date_format(), self.time_now().date(), self.lang);
-        words::once_for_the_whole_desktop_the(self.lang, hours, &today)
+        words::once_for_the_whole_desktop_the(
+            self.lang,
+            words::OnceForTheWholeDesktopThe {
+                hours,
+                today: &today,
+            },
+        )
     }
 
     /// A row of the page: its name, its line, its control, lit when found.
@@ -370,7 +353,7 @@ impl App {
         let found = self.time_found();
         let now = jiff::Timestamp::now();
         let twelve = self.time_twelve();
-        let field = text_input(w(words::A_CITY_A_COUNTRY_A_ZONE).get(lang), &picker.query)
+        let field = text_input(words::A_CITY_A_COUNTRY_A_ZONE.get(lang), &picker.query)
             .id(ZONE_SEARCH)
             .on_input(|s| Message::Time(Msg::Query(s)))
             .on_submit(Message::Time(Msg::Choose))
@@ -462,7 +445,7 @@ impl App {
         }
         let chosen = found.get(picker.selected);
         let choose_said = chosen.map_or_else(
-            || w(words::CHOOSE).get(lang).to_owned(),
+            || words::CHOOSE.get(lang).to_owned(),
             |f| words::choose_2(lang, f.city.name(lang)),
         );
         let mut choose = button(text(choose_said).size(13).font(BOLD).color(DEEP))
@@ -475,7 +458,7 @@ impl App {
         let buttons = row![
             Space::new().width(Length::Fill),
             container(
-                button(t(w(words::CANCEL).get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
+                button(t(words::CANCEL.get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
                     .height(32)
                     .padding([7, 14])
                     .on_press(Message::Time(Msg::Picker(false)))
@@ -495,7 +478,7 @@ impl App {
             column![
                 row![
                     icon(Icon::Appearance, 18.0, TEXT.get()),
-                    text(w(words::TIME_ZONE_2).get(lang))
+                    text(words::TIME_ZONE_2.get(lang))
                         .size(17)
                         .font(BOLD)
                         .color(TEXT),
@@ -504,7 +487,7 @@ impl App {
                 .align_y(Alignment::Center),
                 search,
                 rows,
-                t(w(words::A_CITY_A_COUNTRY_OR_A).get(lang), 12.0, FAINT.get(),),
+                t(words::A_CITY_A_COUNTRY_OR_A.get(lang), 12.0, FAINT.get(),),
                 buttons,
             ]
             .spacing(12),
@@ -686,7 +669,7 @@ fn later_row<'a>(
     lang: Lang,
 ) -> El<'a> {
     let chip = container(
-        text(w(words::LATER_2).get(lang))
+        text(words::LATER_2.get(lang))
             .size(10.5)
             .font(BOLD)
             .color(rgb(0xF5B44A)),

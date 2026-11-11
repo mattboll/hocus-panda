@@ -100,7 +100,7 @@ fn start(text: &str, theme: &str) -> anyhow::Result<Option<Bed>> {
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
     let mut config = Config::load(&file);
     config.file = Some(file);
-    config.french = true;
+    config.lang = hocus_words::Lang::French;
     config.lock_auth = Authenticator::test("not a password");
     let mut headless = common::gles();
     headless.outputs = vec![format!("{}x{}", SCREEN.0, SCREEN.1).parse()?];

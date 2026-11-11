@@ -101,32 +101,23 @@ impl Words {
     pub fn agent(self, name: &str, look: crate::agents::Look, minutes: u64) -> String {
         use crate::agents::Look;
         let since = self.minutes(minutes);
-        let state = match (look, (self.lang == Lang::French)) {
-            (Look::Waiting, true) => format!("t'attend depuis {since}"),
-            (Look::Waiting, false) => format!("waiting for {since}"),
-            (Look::Stuck, true) => format!("bloqué depuis {since}"),
-            (Look::Stuck, false) => format!("stuck for {since}"),
-            (Look::ToSee, true) => "a fini, à voir".to_owned(),
-            (Look::ToSee, false) => "done, to see".to_owned(),
-            (Look::Working, true) => format!("au travail depuis {since}"),
-            (Look::Working, false) => format!("working for {since}"),
-            (Look::Resting, true) => "au repos".to_owned(),
-            (Look::Resting, false) => "resting".to_owned(),
+        let state = match look {
+            Look::Waiting => txt::waiting_for(self.lang, &since),
+            Look::Stuck => txt::stuck_for(self.lang, &since),
+            Look::ToSee => txt::DONE_TO_SEE.get(self.lang).to_owned(),
+            Look::Working => txt::working_for(self.lang, &since),
+            Look::Resting => txt::RESTING.get(self.lang).to_owned(),
         };
         format!("{name}, {state}")
     }
 
     /// "+ N autres": "5 autres agents au repos", "5 autres agents".
     pub fn other_agents(self, n: usize, resting: bool) -> String {
-        match ((self.lang == Lang::French), n, resting) {
-            (true, 1, true) => "1 autre agent au repos".to_owned(),
-            (true, 1, false) => "1 autre agent".to_owned(),
-            (true, n, true) => format!("{n} autres agents au repos"),
-            (true, n, false) => format!("{n} autres agents"),
-            (false, 1, true) => "1 more agent resting".to_owned(),
-            (false, 1, false) => "1 more agent".to_owned(),
-            (false, n, true) => format!("{n} more agents resting"),
-            (false, n, false) => format!("{n} more agents"),
+        match (n, resting) {
+            (1, true) => txt::N_1_MORE_AGENT_RESTING.get(self.lang).to_owned(),
+            (1, false) => txt::N_1_MORE_AGENT.get(self.lang).to_owned(),
+            (n, true) => txt::more_agents_resting(self.lang, n),
+            (n, false) => txt::more_agents(self.lang, n),
         }
     }
 
@@ -146,44 +137,34 @@ impl Words {
     /// bloqué.".
     pub fn announce(self, waiting: &[&str], stuck: &[&str]) -> String {
         let mut said = Vec::new();
-        match (waiting.len(), (self.lang == Lang::French)) {
-            (0, _) => {}
-            (1, true) => said.push(format!("{} t'attend.", waiting[0])),
-            (_, true) => said.push(format!("{} t'attendent.", self.and(waiting))),
-            (1, false) => said.push(format!("{} is waiting.", waiting[0])),
-            (_, false) => said.push(format!("{} are waiting.", self.and(waiting))),
+        match waiting.len() {
+            0 => {}
+            1 => said.push(txt::is_waiting(self.lang, waiting[0])),
+            _ => said.push(txt::are_waiting(self.lang, self.and(waiting))),
         }
-        match (stuck.len(), (self.lang == Lang::French)) {
-            (0, _) => {}
-            (1, true) => said.push(format!("{} est bloqué.", stuck[0])),
-            (_, true) => said.push(format!("{} sont bloqués.", self.and(stuck))),
-            (1, false) => said.push(format!("{} is stuck.", stuck[0])),
-            (_, false) => said.push(format!("{} are stuck.", self.and(stuck))),
+        match stuck.len() {
+            0 => {}
+            1 => said.push(txt::is_stuck(self.lang, stuck[0])),
+            _ => said.push(txt::are_stuck(self.lang, self.and(stuck))),
         }
         said.join(" ")
     }
 
     /// Today's list: "Aujourd'hui, 3 évènements".
     pub fn today(self, events: usize) -> String {
-        match ((self.lang == Lang::French), events) {
-            (true, 0) => "Aujourd'hui, aucun évènement".to_owned(),
-            (true, 1) => "Aujourd'hui, 1 évènement".to_owned(),
-            (true, n) => format!("Aujourd'hui, {n} évènements"),
-            (false, 0) => "Today, no events".to_owned(),
-            (false, 1) => "Today, 1 event".to_owned(),
-            (false, n) => format!("Today, {n} events"),
+        match events {
+            0 => txt::TODAY_NO_EVENTS.get(self.lang).to_owned(),
+            1 => txt::TODAY_1_EVENT.get(self.lang).to_owned(),
+            n => txt::today_events(self.lang, n),
         }
     }
 
     /// The to-do list: "À faire, 5 tâches".
     pub fn tasks(self, open: usize) -> String {
-        match ((self.lang == Lang::French), open) {
-            (true, 0) => "À faire, aucune tâche".to_owned(),
-            (true, 1) => "À faire, 1 tâche".to_owned(),
-            (true, n) => format!("À faire, {n} tâches"),
-            (false, 0) => "To do, no tasks".to_owned(),
-            (false, 1) => "To do, 1 task".to_owned(),
-            (false, n) => format!("To do, {n} tasks"),
+        match open {
+            0 => txt::TO_DO_NO_TASKS.get(self.lang).to_owned(),
+            1 => txt::TO_DO_1_TASK.get(self.lang).to_owned(),
+            n => txt::to_do_tasks(self.lang, n),
         }
     }
 
@@ -203,13 +184,10 @@ impl Words {
         if current {
             name.push_str(self.pick(txt::CURRENT));
         }
-        let count = match ((self.lang == Lang::French), windows.len()) {
-            (true, 0) => "aucune fenêtre".to_owned(),
-            (true, 1) => "1 fenêtre".to_owned(),
-            (true, n) => format!("{n} fenêtres"),
-            (false, 0) => "no windows".to_owned(),
-            (false, 1) => "1 window".to_owned(),
-            (false, n) => format!("{n} windows"),
+        let count = match windows.len() {
+            0 => txt::NO_WINDOWS.get(self.lang).to_owned(),
+            1 => txt::N_1_WINDOW.get(self.lang).to_owned(),
+            n => txt::windows_2(self.lang, n),
         };
         name.push_str(", ");
         name.push_str(&count);
@@ -235,17 +213,13 @@ impl Words {
             (Link::Connecting, true) => "connexion…".to_owned(),
             (Link::Connecting, false) => "connecting…".to_owned(),
             (Link::Connected { name, bars }, _) => {
-                let signal = match (bars, (self.lang == Lang::French)) {
-                    (0 | 1, true) => "signal faible",
-                    (2, true) => "signal moyen",
-                    (3, true) => "bon signal",
-                    (_, true) => "signal fort",
-                    (0 | 1, false) => "weak signal",
-                    (2, false) => "fair signal",
-                    (3, false) => "good signal",
-                    (_, false) => "strong signal",
+                let signal = match bars {
+                    0 | 1 => txt::WEAK_SIGNAL.get(self.lang),
+                    2 => txt::FAIR_SIGNAL.get(self.lang),
+                    3 => txt::GOOD_SIGNAL.get(self.lang),
+                    _ => txt::STRONG_SIGNAL.get(self.lang),
                 };
-                txt::connected_to(self.lang, name, signal)
+                txt::connected_to(self.lang, txt::ConnectedTo { name, signal })
             }
         };
         format!("Wi-Fi, {state}")
@@ -253,23 +227,17 @@ impl Words {
 
     /// Bluetooth's row: "Bluetooth, Casque, batterie 80 %".
     pub fn bluetooth(self, row: &BluetoothRow) -> String {
-        let state = match (row, (self.lang == Lang::French)) {
-            (BluetoothRow::Hidden, _) => return String::new(),
-            (BluetoothRow::Off, true) => "désactivé".to_owned(),
-            (BluetoothRow::Off, false) => "off".to_owned(),
-            (BluetoothRow::Nothing, true) => "aucun appareil connecté".to_owned(),
-            (BluetoothRow::Nothing, false) => "no device connected".to_owned(),
-            (BluetoothRow::Connecting, true) => "connexion…".to_owned(),
-            (BluetoothRow::Connecting, false) => "connecting…".to_owned(),
-            (
-                BluetoothRow::Connected {
-                    name,
-                    battery,
-                    more,
-                    ..
-                },
-                _,
-            ) => {
+        let state = match row {
+            BluetoothRow::Hidden => return String::new(),
+            BluetoothRow::Off => txt::OFF.get(self.lang).to_owned(),
+            BluetoothRow::Nothing => txt::NO_DEVICE_CONNECTED.get(self.lang).to_owned(),
+            BluetoothRow::Connecting => txt::CONNECTING.get(self.lang).to_owned(),
+            BluetoothRow::Connected {
+                name,
+                battery,
+                more,
+                ..
+            } => {
                 let mut said = name.clone();
                 if let Some(battery) = battery {
                     said.push_str(&format!(", {} {battery}\u{a0}%", self.pick(txt::BATTERY)));
@@ -345,19 +313,12 @@ impl Words {
             .iter()
             .map(|(kind, apps)| {
                 let apps = self.and(&apps.iter().map(String::as_str).collect::<Vec<_>>());
-                match (kind, (self.lang == Lang::French)) {
-                    (Kind::Microphone, true) if muted => format!("Micro coupé, utilisé par {apps}"),
-                    (Kind::Microphone, true) => format!("Micro utilisé par {apps}"),
-                    (Kind::Microphone, false) if muted => {
-                        format!("Microphone muted, used by {apps}")
-                    }
-                    (Kind::Microphone, false) => format!("Microphone used by {apps}"),
-                    (Kind::Camera, true) => format!("Caméra utilisée par {apps}"),
-                    (Kind::Camera, false) => format!("Camera used by {apps}"),
-                    (Kind::Screen, true) => format!("Écran partagé avec {apps}"),
-                    (Kind::Screen, false) => format!("Screen shared with {apps}"),
-                    (Kind::Recording, true) => "Enregistrement de l'écran".to_owned(),
-                    (Kind::Recording, false) => "Recording the screen".to_owned(),
+                match kind {
+                    Kind::Microphone if muted => txt::microphone_muted_used_by(self.lang, &apps),
+                    Kind::Microphone => txt::microphone_used_by(self.lang, &apps),
+                    Kind::Camera => txt::camera_used_by(self.lang, &apps),
+                    Kind::Screen => txt::screen_shared_with(self.lang, &apps),
+                    Kind::Recording => txt::RECORDING_THE_SCREEN.get(self.lang).to_owned(),
                 }
             })
             .collect();
@@ -370,29 +331,23 @@ impl Words {
 
     /// "+ 4 autres": "4 autres tâches".
     pub fn more_tasks(self, n: usize) -> String {
-        match ((self.lang == Lang::French), n) {
-            (true, 1) => "1 autre tâche".to_owned(),
-            (true, n) => format!("{n} autres tâches"),
-            (false, 1) => "1 more task".to_owned(),
-            (false, n) => format!("{n} more tasks"),
+        match n {
+            1 => txt::N_1_MORE_TASK.get(self.lang).to_owned(),
+            n => txt::more_tasks(self.lang, n),
         }
     }
 
     pub fn more_today(self, n: usize) -> String {
-        match ((self.lang == Lang::French), n) {
-            (true, 1) => "1 autre évènement aujourd'hui".to_owned(),
-            (true, n) => format!("{n} autres évènements aujourd'hui"),
-            (false, 1) => "1 more event today".to_owned(),
-            (false, n) => format!("{n} more events today"),
+        match n {
+            1 => txt::N_1_MORE_EVENT_TODAY.get(self.lang).to_owned(),
+            n => txt::more_events_today(self.lang, n),
         }
     }
 
     pub fn more_windows(self, n: usize) -> String {
-        match ((self.lang == Lang::French), n) {
-            (true, 1) => "1 autre fenêtre".to_owned(),
-            (true, n) => format!("{n} autres fenêtres"),
-            (false, 1) => "1 more window".to_owned(),
-            (false, n) => format!("{n} more windows"),
+        match n {
+            1 => txt::N_1_MORE_WINDOW.get(self.lang).to_owned(),
+            n => txt::more_windows(self.lang, n),
         }
     }
 

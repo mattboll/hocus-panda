@@ -18,20 +18,20 @@ use std::{
 };
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words},
     model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const CAPTURES: RowGroup = RowGroup {
-    label: w(words::SCREENSHOTS),
+    label: words::SCREENSHOTS,
     per_source: false,
 };
 pub const RECORDING: RowGroup = RowGroup {
-    label: w(words::SCREEN_RECORDING),
+    label: words::SCREEN_RECORDING,
     per_source: false,
 };
 pub const CLIPBOARD: RowGroup = RowGroup {
-    label: w(words::CLIPBOARD_HISTORY),
+    label: words::CLIPBOARD_HISTORY,
     per_source: false,
 };
 
@@ -102,8 +102,22 @@ impl Folder {
     /// `extension` its.
     pub fn sample(self, (day, time): (&str, &str), extension: &str, lang: Lang) -> String {
         match self {
-            Self::Captures => words::screenshot_from(lang, day, extension, time),
-            Self::Recordings => words::screen_recording_from(lang, day, extension, time),
+            Self::Captures => words::screenshot_from(
+                lang,
+                words::ScreenshotFrom {
+                    day,
+                    extension,
+                    time,
+                },
+            ),
+            Self::Recordings => words::screen_recording_from(
+                lang,
+                words::ScreenRecordingFrom {
+                    day,
+                    extension,
+                    time,
+                },
+            ),
         }
     }
 
@@ -131,8 +145,14 @@ impl Folder {
             Self::Recordings => words::RECORDINGS.get(lang),
         };
         match gone {
-            true => words::this_folder_no_longer_exists_usb(lang, default, what),
-            false => words::this_folder_cannot_be_written_go(lang, default, what),
+            true => words::this_folder_no_longer_exists_usb(
+                lang,
+                words::ThisFolderNoLongerExistsUsb { default, what },
+            ),
+            false => words::this_folder_cannot_be_written_go(
+                lang,
+                words::ThisFolderCannotBeWrittenGo { default, what },
+            ),
         }
     }
 }
@@ -234,18 +254,20 @@ pub fn writable(dir: &Path) -> Writable {
 
 /// The history's count, as the group's label says it.
 pub fn count_said(items: u32, pinned: u32, lang: Lang) -> String {
-    let items_word = match (items, lang) {
-        (0, Lang::French) => return "Vide".to_owned(),
-        (0, Lang::English) => return "Empty".to_owned(),
-        (1, Lang::French) => "1 élément".to_owned(),
-        (1, Lang::English) => "1 item".to_owned(),
-        (n, Lang::French) => format!("{n} éléments"),
-        (n, Lang::English) => format!("{n} items"),
+    let items_word = match items {
+        0 => return words::EMPTY.get(lang).to_owned(),
+        n => words::item_count(lang, n),
     };
     match pinned {
         0 => items_word,
         1 => words::n_1_pinned(lang, &items_word),
-        n => words::pinned(lang, &items_word, n),
+        n => words::pinned(
+            lang,
+            words::Pinned {
+                items_word: &items_word,
+                x_n: n,
+            },
+        ),
     }
 }
 
@@ -257,9 +279,9 @@ pub fn items_said(n: u32, lang: Lang) -> String {
     }
 }
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -292,8 +314,8 @@ fn setting(
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
-        let folder = w(words::FOLDER);
-        let format = w(words::FORMAT);
+        let folder = words::FOLDER;
+        let format = words::FORMAT;
         vec![
             setting(
                 CAPTURE_FOLDER,
@@ -317,18 +339,15 @@ pub fn settings() -> &'static [Setting] {
                     &["capture", "png", "jpeg", "jpg", "image"],
                     &["screenshot", "png", "jpeg", "jpg", "image"],
                 ),
-                Kind::Segmented(vec![
-                    word("PNG", "PNG", "png"),
-                    word("JPEG", "JPEG", "jpeg"),
-                ]),
+                Kind::Segmented(vec![word(words::PNG, "png"), word(words::JPEG, "jpeg")]),
                 one(&["capture", "format"], Codec::Word(&["png", "jpeg"])),
                 None,
             ),
             setting(
                 SOUND,
                 CAPTURES,
-                w(words::SHUTTER_SOUND),
-                Some(w(words::A_DISCREET_CLICK_WHEN_THE_PICTURE)),
+                words::SHUTTER_SOUND,
+                Some(words::A_DISCREET_CLICK_WHEN_THE_PICTURE),
                 (
                     &["son", "obturateur", "déclic", "capture"],
                     &["sound", "shutter", "click", "screenshot"],
@@ -359,18 +378,15 @@ pub fn settings() -> &'static [Setting] {
                     &["enregistrement", "vidéo", "mp4", "webm"],
                     &["recording", "video", "mp4", "webm"],
                 ),
-                Kind::Segmented(vec![
-                    word("MP4", "MP4", "mp4"),
-                    word("WebM", "WebM", "webm"),
-                ]),
+                Kind::Segmented(vec![word(words::MP4, "mp4"), word(words::WEBM, "webm")]),
                 one(&["recording", "format"], Codec::Word(&["mp4", "webm"])),
                 None,
             ),
             setting(
                 HISTORY,
                 CLIPBOARD,
-                w(words::KEEP_WHAT_I_COPY),
-                Some(w(words::SUPER_V_SHOWS_IT_TO_PASTE)),
+                words::KEEP_WHAT_I_COPY,
+                Some(words::SUPER_V_SHOWS_IT_TO_PASTE),
                 (
                     &["presse-papiers", "historique", "super+v", "copier"],
                     &["clipboard", "history", "super+v", "copy"],
@@ -382,21 +398,17 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 KEEP,
                 CLIPBOARD,
-                w(words::KEEP_FOR),
-                Some(w(words::PINNED_ITEMS_ALWAYS_STAY_200_ITEMS)),
+                words::KEEP_FOR,
+                Some(words::PINNED_ITEMS_ALWAYS_STAY_200_ITEMS),
                 (
                     &["durée", "garder", "presse-papiers", "historique"],
                     &["duration", "keep", "clipboard", "history"],
                 ),
                 Kind::Menu(vec![
-                    word(
-                        "Jusqu’à la fin de la session",
-                        "Until the session ends",
-                        "session",
-                    ),
-                    word("1 jour", "1 day", "1d"),
-                    word("7 jours", "7 days", "7d"),
-                    word("30 jours", "30 days", "30d"),
+                    word(words::UNTIL_THE_SESSION_ENDS, "session"),
+                    word(words::N_1_DAY, "1d"),
+                    word(words::N_7_DAYS, "7d"),
+                    word(words::N_30_DAYS, "30d"),
                 ]),
                 one(
                     &["clipboard", "keep"],
@@ -407,8 +419,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SECRETS,
                 CLIPBOARD,
-                w(words::LEAVE_PASSWORDS_OUT),
-                Some(w(words::WHAT_A_PASSWORD_MANAGER_MARKS_SECRET)),
+                words::LEAVE_PASSWORDS_OUT,
+                Some(words::WHAT_A_PASSWORD_MANAGER_MARKS_SECRET),
                 (
                     &[
                         "mots de passe",
@@ -426,7 +438,7 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 IGNORE,
                 CLIPBOARD,
-                w(words::APPLICATIONS_LEFT_OUT),
+                words::APPLICATIONS_LEFT_OUT,
                 None,
                 (
                     &["ignorer", "mots de passe", "application"],
@@ -446,7 +458,7 @@ pub fn outside() -> &'static [Outside] {
         id: CLEAR,
         section: SectionId::Captures,
         group: CLIPBOARD.label,
-        name: w(words::CLEAR_THE_HISTORY),
+        name: words::CLEAR_THE_HISTORY,
         keywords: (
             &["effacer", "vider", "presse-papiers", "historique"],
             &["clear", "empty", "clipboard", "history"],

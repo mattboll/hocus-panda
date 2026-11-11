@@ -141,7 +141,7 @@ impl Bed {
         config.plain_background = true;
         config.pictures = Some(root.join("Images"));
         config.state_dir = Some(root.join("state/hocuspanda"));
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         let mut hp = Headless::start_on_bus(
             HeadlessConfig {
                 outputs: vec!["1920x1080".parse()?],
@@ -243,6 +243,16 @@ impl Bed {
         }
         self.hp.button(BTN_LEFT, false);
         self.idle(Duration::from_millis(80))
+    }
+
+    /// A mark drawn by a drag on the image, once the editor has it: the
+    /// next tool or colour chosen cannot reach it before its release does,
+    /// however late the shell is.
+    fn draw(&mut self, from: (f64, f64), to: (f64, f64)) -> anyhow::Result<()> {
+        let mark = self.mark();
+        self.drag(from, to)?;
+        self.logged_since(mark, "a mark on the capture")?;
+        Ok(())
     }
 
     fn key(&mut self, keys: &[u32]) -> anyhow::Result<()> {
@@ -564,21 +574,23 @@ fn the_marks_are_in_the_saved_image_where_they_were_drawn() -> anyhow::Result<()
     let (file, before, thumb) = bed.capture()?;
     let places = bed.edit(thumb)?;
     // An arrow in red, the colour it starts with.
-    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    bed.draw(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
     // A box in green.
     bed.click(places.at("box"))?;
     bed.click(places.at("colour2"))?;
-    bed.drag(places.image(320.0, 30.0), places.image(560.0, 150.0))?;
+    bed.draw(places.image(320.0, 30.0), places.image(560.0, 150.0))?;
     // A text in white.
     bed.click(places.at("text"))?;
     bed.click(places.at("colour4"))?;
     bed.click(places.image(40.0, 300.0))?;
     bed.key(&[KEY_O])?;
     bed.key(&[KEY_K])?;
+    let typed = bed.mark();
     bed.key(&[KEY_ENTER])?;
+    bed.logged_since(typed, "a mark on the capture")?;
     // A blur.
     bed.click(places.at("blur"))?;
-    bed.drag(places.image(320.0, 200.0), places.image(560.0, 340.0))?;
+    bed.draw(places.image(320.0, 200.0), places.image(560.0, 340.0))?;
     let mark = bed.mark();
     bed.click(places.at("copy"))?;
     bed.logged_since(mark, "the annotated capture is written")?;

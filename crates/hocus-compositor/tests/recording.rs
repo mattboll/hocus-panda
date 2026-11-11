@@ -834,7 +834,7 @@ impl ShellBed {
         let mut config = Config::default();
         config.keyboard.layouts = vec!["us".to_owned()];
         config.plain_background = true;
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         config.videos = Some(dir.join("Vidéos"));
         config.pipewire_remote = Some(dir.join("no-pipewire"));
         config.panel.form = form;

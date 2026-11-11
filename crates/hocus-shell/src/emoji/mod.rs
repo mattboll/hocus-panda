@@ -61,10 +61,6 @@ impl Words {
         Self { lang }
     }
 
-    fn fr(self) -> bool {
-        self.lang == Lang::French
-    }
-
     pub fn placeholder(self) -> &'static str {
         txt::SEARCH_EMOJI.get(self.lang)
     }
@@ -95,23 +91,7 @@ impl Words {
 
     /// Tone `i`'s name: yellow, then light to dark.
     pub fn tone(self, i: usize) -> &'static str {
-        const FR: [&str; 6] = [
-            "Jaune",
-            "Claire",
-            "Moyennement claire",
-            "Moyenne",
-            "Moyennement foncée",
-            "Foncée",
-        ];
-        const EN: [&str; 6] = [
-            "Yellow",
-            "Light",
-            "Medium-light",
-            "Medium",
-            "Medium-dark",
-            "Dark",
-        ];
-        let names = if self.fr() { FR } else { EN };
+        let names = txt::TONES.get(self.lang);
         names.get(i).copied().unwrap_or_default()
     }
 

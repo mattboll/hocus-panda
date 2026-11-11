@@ -42,7 +42,6 @@ use super::{
 };
 use crate::{
     agents::{self as model, Played, Row, Tool, Tools},
-    lang::{pair, w},
     model::{SectionId, Setting, Value},
     screens::Said,
     store::Slot,
@@ -53,12 +52,12 @@ const WAVE: Duration = Duration::from_millis(600);
 /// Each next panda plays its mood this much later than the one before.
 const STAGGER: Duration = Duration::from_millis(300);
 /// The family, in its order: its moods and their words.
-const FAMILY: [(hocus_pandas::Mood, (&str, &str)); 5] = [
-    (hocus_pandas::Mood::Working, ("au travail", "at work")),
-    (hocus_pandas::Mood::Waiting, ("t’attend", "waiting")),
-    (hocus_pandas::Mood::Done, ("a fini", "done")),
-    (hocus_pandas::Mood::Stuck, ("bloqué", "stuck")),
-    (hocus_pandas::Mood::Resting, ("au repos", "resting")),
+const FAMILY: [(hocus_pandas::Mood, hocus_words::Text); 5] = [
+    (hocus_pandas::Mood::Working, words::FAMILY_WORKING),
+    (hocus_pandas::Mood::Waiting, words::FAMILY_WAITING),
+    (hocus_pandas::Mood::Done, words::FAMILY_DONE),
+    (hocus_pandas::Mood::Stuck, words::FAMILY_STUCK),
+    (hocus_pandas::Mood::Resting, words::FAMILY_RESTING),
 ];
 /// The dots in their place, with the pandas off: the rows' colours.
 const DOTS: [u32; 5] = [0x6CC287, 0xF5B44A, 0x7EE0A0, 0xF2945B, 0xA9B2C2];
@@ -585,7 +584,7 @@ impl App {
     fn agents_link<'a>(&self) -> El<'a> {
         let focused = self.agents_focused(Stop::Link);
         container(
-            button(t(self.say(w(words::THE_BAR)), 13.0, MINT.get()).font(BOLD))
+            button(t(self.say(words::THE_BAR), 13.0, MINT.get()).font(BOLD))
                 .padding([1, 2])
                 .on_press(Message::Agents(Msg::Link))
                 .style(move |_, status| button::Style {
@@ -626,7 +625,7 @@ impl App {
             row![
                 super::view::icon(crate::model::Icon::Bar, 14.0, DIM.get()),
                 t(
-                    self.say(w(words::THE_AGENTS_GROUP_IN_THE_BAR)),
+                    self.say(words::THE_AGENTS_GROUP_IN_THE_BAR),
                     13.0,
                     DIM.get()
                 ),
@@ -659,7 +658,7 @@ impl App {
             }
             None => column![
                 container(t(
-                    self.say(w(words::THE_TOOLS_ARE_NOT_KNOWN_THE)),
+                    self.say(words::THE_TOOLS_ARE_NOT_KNOWN_THE),
                     13.0,
                     DIM.get()
                 ))
@@ -676,7 +675,7 @@ impl App {
         page = page.push(
             self.agents_group(
                 model::HALO_GROUP.label.get(lang),
-                self.say(w(words::MEETINGS_KEEP_THEIRS)).to_owned(),
+                self.say(words::MEETINGS_KEEP_THEIRS).to_owned(),
                 column![
                     model_row(model::HALO),
                     divided(true, model_row(model::REMIND)),
@@ -689,7 +688,7 @@ impl App {
         page = page.push(
             self.agents_group(
                 model::PANDAS_GROUP.label.get(lang),
-                self.say(w(words::THEY_MOVE_ONLY_ON_A_CHANGE)).to_owned(),
+                self.say(words::THEY_MOVE_ONLY_ON_A_CHANGE).to_owned(),
                 column![
                     self.agents_peek_row(model_row(model::PEEK)),
                     divided(true, model_row(model::PANDAS)),
@@ -734,7 +733,7 @@ impl App {
         let mut rest = model::line(row_state, tool, &file, declined.as_deref(), lang);
         if tool == Tool::Herdr && row_state == Row::Stopped && tools.herdr_declined {
             rest = self
-                .say(w(words::NOT_FOLLOWED_FOLLOW_HERDR_BRINGS_IT))
+                .say(words::NOT_FOLLOWED_FOLLOW_HERDR_BRINGS_IT)
                 .to_owned();
         }
         let broken = !facts.reads && tool != Tool::Herdr && !absent;
@@ -772,25 +771,23 @@ impl App {
         let action: El<'_> = match (tool, self.agents_action(tools, tool)) {
             (Tool::Herdr, Some(on)) => self.agents_switch(on, focused),
             (_, Some(true)) => self.agents_button(
-                self.say(w(words::PLUG_IN)),
+                self.say(words::PLUG_IN),
                 true,
                 focused,
                 Some(Message::Agents(Msg::Plug(tool))),
             ),
             (_, Some(false)) => self.agents_button(
-                self.say(w(words::UNPLUG)),
+                self.say(words::UNPLUG),
                 false,
                 focused,
                 Some(Message::Agents(Msg::Unplug(tool))),
             ),
-            (_, None) if broken => {
-                self.agents_button(self.say(w(words::PLUG_IN)), true, false, None)
-            }
+            (_, None) if broken => self.agents_button(self.say(words::PLUG_IN), true, false, None),
             (_, None) => Space::new().into(),
         };
         let action: El<'_> = container(action).id(format!("tool:{}", tool.word())).into();
         let action: El<'_> = if tool == Tool::Herdr && !absent {
-            row![t(self.say(w(words::FOLLOW_HERDR)), 12.5, DIM.get()), action]
+            row![t(self.say(words::FOLLOW_HERDR), 12.5, DIM.get()), action]
                 .spacing(10)
                 .align_y(Alignment::Center)
                 .into()
@@ -897,9 +894,9 @@ impl App {
             button(
                 t(
                     if copied {
-                        self.say(w(words::COPIED))
+                        self.say(words::COPIED)
                     } else {
-                        self.say(w(words::COPY))
+                        self.say(words::COPY)
                     },
                     12.5,
                     if copied { MINT.get() } else { TEXT.get() },
@@ -933,9 +930,9 @@ impl App {
         .style(boxed(crate::theme::ink(rgba(0, 0, 0, 0.25)), 9.0, None));
         container(
             column![
-                t(self.say(w(words::ANOTHER_TOOL)), 14.0, TEXT.get()).font(SEMIBOLD),
+                t(self.say(words::ANOTHER_TOOL), 14.0, TEXT.get()).font(SEMIBOLD),
                 t(
-                    w(words::ANY_PROGRAM_CAN_SAY_WHERE_ITS).get(lang),
+                    words::ANY_PROGRAM_CAN_SAY_WHERE_ITS.get(lang),
                     12.5,
                     DIM.get()
                 ),
@@ -954,13 +951,13 @@ impl App {
         let words = container(
             column![
                 t(
-                    self.say(w(words::NO_AGENT_TOOL_ON_THIS_COMPUTER)),
+                    self.say(words::NO_AGENT_TOOL_ON_THIS_COMPUTER),
                     14.0,
                     TEXT.get()
                 )
                 .font(SEMIBOLD),
                 t(
-                    w(words::CLAUDE_CODE_CODEX_AND_HERDR_ARE).get(lang),
+                    words::CLAUDE_CODE_CODEX_AND_HERDR_ARE.get(lang),
                     12.5,
                     DIM.get()
                 ),
@@ -992,9 +989,9 @@ impl App {
         let played = self.agents.played;
         let shown = played.filter(|p| p.shown_by(halo));
         let line = match (played, shown) {
-            (Some(_), None) => self.say(w(words::NO_HALO_FOR_THAT)),
+            (Some(_), None) => self.say(words::NO_HALO_FOR_THAT),
             (Some(p), Some(_)) => p.said().get(lang),
-            (None, _) => self.say(w(words::CHOOSE_A_STATE_IT_PLAYS_ON)),
+            (None, _) => self.say(words::CHOOSE_A_STATE_IT_PLAYS_ON),
         };
         let focused = self.agents_focused(Stop::Preview);
         let option = |p: Played| -> El<'_> {
@@ -1053,7 +1050,7 @@ impl App {
             row![
                 container(bar).id("agents:preview-bar".to_owned()),
                 column![
-                    t(self.say(w(words::PREVIEW)), 14.0, TEXT.get()).font(SEMIBOLD),
+                    t(self.say(words::PREVIEW), 14.0, TEXT.get()).font(SEMIBOLD),
                     container(t(
                         line,
                         12.5,
@@ -1159,7 +1156,7 @@ impl App {
             cells = cells.push(
                 mouse_area(
                     container(
-                        column![face, t(pair(word.0, word.1).get(lang), 12.0, rgb(0xA9B2C2)),]
+                        column![face, t(word.get(lang), 12.0, rgb(0xA9B2C2)),]
                             .spacing(4)
                             .align_x(Alignment::Center),
                     )
@@ -1193,16 +1190,16 @@ impl App {
         container(
             row![
                 column![
-                    t(self.say(w(words::NEVER_AT_REST)), 14.0, TEXT.get()).font(SEMIBOLD),
+                    t(self.say(words::NEVER_AT_REST), 14.0, TEXT.get()).font(SEMIBOLD),
                     t(
-                        w(words::THEY_STAY_STILL_ON_POWER_SAVING).get(lang),
+                        words::THEY_STAY_STILL_ON_POWER_SAVING.get(lang),
                         12.5,
                         DIM.get()
                     ),
                 ]
                 .spacing(2)
                 .width(Length::Fill),
-                t(self.say(w(words::ALWAYS)), 13.0, DIM.get()).font(SEMIBOLD),
+                t(self.say(words::ALWAYS), 13.0, DIM.get()).font(SEMIBOLD),
             ]
             .spacing(16)
             .align_y(Alignment::Center),
@@ -1238,8 +1235,8 @@ impl App {
             .unwrap_or_default();
         let title = words::plug_in_2(lang, tool.title());
         let what = match tool {
-            Tool::Codex => w(words::HOCUSPANDA_ADDS_ITS_HOOKS_AND_ITS),
-            _ => w(words::HOCUSPANDA_ADDS_ITS_HOOKS_TO_CLAUDE),
+            Tool::Codex => words::HOCUSPANDA_ADDS_ITS_HOOKS_AND_ITS,
+            _ => words::HOCUSPANDA_ADDS_ITS_HOOKS_TO_CLAUDE,
         };
         let mut body = column![
             row![
@@ -1250,22 +1247,18 @@ impl App {
             .align_y(Alignment::Center),
             t(what.get(lang), 13.0, SOFT.get()).line_height(1.5),
             column![
-                t(self.say(w(words::FILE_CHANGED)), 11.0, FAINT.get()).font(BOLD),
+                t(self.say(words::FILE_CHANGED), 11.0, FAINT.get()).font(BOLD),
                 container(t(file, 12.0, TEXT.get()).font(MONO))
                     .padding([6, 10])
                     .style(boxed(crate::theme::ink(rgba(0, 0, 0, 0.25)), 8.0, None)),
             ]
             .spacing(6),
-            t(
-                self.say(w(words::A_COPY_OF_THE_ORIGINAL_IS)),
-                12.0,
-                DIM.get()
-            ),
+            t(self.say(words::A_COPY_OF_THE_ORIGINAL_IS), 12.0, DIM.get()),
         ]
         .spacing(14);
         if tool == Tool::Codex {
             body = body.push(t(
-                self.say(w(words::CODEX_WILL_THEN_ASK_YOU_TO)),
+                self.say(words::CODEX_WILL_THEN_ASK_YOU_TO),
                 12.0,
                 rgb(0xF5C46E),
             ));
@@ -1273,14 +1266,14 @@ impl App {
         let buttons = row![
             Space::new().width(Length::Fill),
             container(self.agents_button(
-                self.say(w(words::CANCEL)),
+                self.say(words::CANCEL),
                 false,
                 !consent.on_plug,
                 Some(Message::Agents(Msg::Consent(false))),
             ))
             .id("sheet:cancel".to_owned()),
             container(self.agents_button(
-                self.say(w(words::PLUG_IN)),
+                self.say(words::PLUG_IN),
                 true,
                 consent.on_plug,
                 Some(Message::Agents(Msg::Consent(true))),

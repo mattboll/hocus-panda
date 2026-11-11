@@ -128,7 +128,7 @@ pub struct Config {
     /// `LC_MESSAGES`, `LANG`): the captures' folder and files are named in
     /// it. Not part of the file.
     #[serde(skip)]
-    pub french: bool,
+    pub lang: hocus_words::Lang,
     /// The PipeWire socket screen sharing streams to (5.11), when not
     /// PipeWire's default (`PIPEWIRE_REMOTE`, else `pipewire-0` in the
     /// runtime directory): tests give one of their own. Not part of the

@@ -26,7 +26,7 @@ use crate::{
         style::{self, *},
         view::{El, card_box, divided, ease_out, label, t},
     },
-    lang::{Lang, w},
+    lang::Lang,
     network as model,
     theme::Ink,
 };
@@ -285,7 +285,7 @@ fn ghost<'a>(said: String, press: Message, focused: bool) -> El<'a> {
 /// The amber "Plus tard".
 fn later<'a>(lang: Lang) -> El<'a> {
     container(
-        text(w(words::LATER).get(lang))
+        text(words::LATER.get(lang))
             .size(11.5)
             .font(BOLD)
             .color(LATER),
@@ -431,12 +431,12 @@ impl App {
         let hotspot = page_row(
             tile(|c| wifi_glyph(4, 18.0, c), Tone::Plain, INERT),
             name(
-                w(words::WI_FI_HOTSPOT).get(lang).to_owned(),
+                words::WI_FI_HOTSPOT.get(lang).to_owned(),
                 INERT,
                 Some(later(lang)),
             ),
             vec![line(
-                w(words::MAKE_THE_COMPUTER_AN_ACCESS_POINT).get(lang),
+                words::MAKE_THE_COMPUTER_AN_ACCESS_POINT.get(lang),
                 fade(DIM.get(), INERT),
             )],
             self.network_switch("network.hotspot", false, None, false),
@@ -447,7 +447,7 @@ impl App {
         );
         page = page.push(
             column![
-                group_head(w(words::LATER_2).get(lang), None),
+                group_head(words::LATER_2.get(lang), None),
                 card_box(hotspot)
             ]
             .spacing(8),
@@ -463,13 +463,13 @@ impl App {
                 container(draw(WARNING, 18.0, PEACH.get())).padding(Padding::default().top(1)),
                 column![
                     t(
-                        w(words::NETWORKMANAGER_DOES_NOT_ANSWER).get(lang),
+                        words::NETWORKMANAGER_DOES_NOT_ANSWER.get(lang),
                         13.5,
                         PEACH.get()
                     )
                     .font(BOLD),
                     t(
-                        w(words::THIS_COMPUTER_S_NETWORK_IS_MANAGED).get(lang),
+                        words::THIS_COMPUTER_S_NETWORK_IS_MANAGED.get(lang),
                         12.5,
                         SOFT.get(),
                     )
@@ -498,12 +498,12 @@ impl App {
         let alive = manager && readable;
         let alpha = if alive { 1.0 } else { INERT };
         let said = if !readable && manager {
-            line(w(words::THE_RADIOS_DO_NOT_READ_DEV).get(lang), FAINT.get())
+            line(words::THE_RADIOS_DO_NOT_READ_DEV.get(lang), FAINT.get())
         } else if on && manager {
-            line(w(words::ON_WI_FI_AND_BLUETOOTH_ARE).get(lang), AMBER.get())
+            line(words::ON_WI_FI_AND_BLUETOOTH_ARE.get(lang), AMBER.get())
         } else {
             line(
-                w(words::TURNS_WI_FI_AND_BLUETOOTH_OFF).get(lang),
+                words::TURNS_WI_FI_AND_BLUETOOTH_OFF.get(lang),
                 fade(DIM.get(), alpha),
             )
         };
@@ -517,7 +517,7 @@ impl App {
                 },
                 alpha,
             ),
-            name(w(words::AIRPLANE_MODE).get(lang).to_owned(), alpha, None),
+            name(words::AIRPLANE_MODE.get(lang).to_owned(), alpha, None),
             vec![said],
             self.network_switch(
                 "network.airplane",
@@ -540,15 +540,15 @@ impl App {
         let block = self.network.wifi_block();
         let on = self.network.wifi_on();
         let (said, color) = if !manager {
-            (w(words::UNKNOWN), fade(DIM.get(), INERT))
+            (words::UNKNOWN, fade(DIM.get(), INERT))
         } else if !hardware {
-            (w(words::NO_WI_FI_ADAPTER), DIM.get())
+            (words::NO_WI_FI_ADAPTER, DIM.get())
         } else if block == Block::Hard {
-            (w(words::BLOCKED_BY_THE_WIRELESS_SWITCH), PEACH.get())
+            (words::BLOCKED_BY_THE_WIRELESS_SWITCH, PEACH.get())
         } else if self.network.airplane() {
-            (w(words::OFF_BY_AIRPLANE_MODE_TURNING_IT), DIM.get())
+            (words::OFF_BY_AIRPLANE_MODE_TURNING_IT, DIM.get())
         } else {
-            (w(words::BUILT_IN_WI_FI_ADAPTER_FINDS), DIM.get())
+            (words::BUILT_IN_WI_FI_ADAPTER_FINDS, DIM.get())
         };
         let alpha = if manager { 1.0 } else { INERT };
         let switchable = manager && hardware && block != Block::Hard;
@@ -594,18 +594,18 @@ impl App {
             lines.push(line(address, DIM.get()));
         }
         if details.network.portal {
-            lines.push(line(w(words::SIGN_IN_PAGE_TO_OPEN).get(lang), AMBER.get()));
+            lines.push(line(words::SIGN_IN_PAGE_TO_OPEN.get(lang), AMBER.get()));
         }
         let controls = row![
             container(secondary(
-                w(words::DISCONNECT).get(lang).to_owned(),
+                words::DISCONNECT.get(lang).to_owned(),
                 Some(Message::Network(Msg::Disconnect)),
                 self.network_focused(Stop::Disconnect),
                 true,
             ))
             .id("network:disconnect".to_owned()),
             container(ghost(
-                w(words::DETAILS).get(lang).to_owned(),
+                words::DETAILS.get(lang).to_owned(),
                 Message::Network(Msg::Details),
                 self.network_focused(Stop::Details),
             ))
@@ -630,13 +630,13 @@ impl App {
         let lang = self.lang;
         page_row(
             tile(|c| draw(PLUS, 18.0, c), Tone::Plain, 1.0),
-            name(w(words::HIDDEN_NETWORK).get(lang).to_owned(), 1.0, None),
+            name(words::HIDDEN_NETWORK.get(lang).to_owned(), 1.0, None),
             vec![line(
-                w(words::A_NETWORK_THAT_DOES_NOT_SAY).get(lang),
+                words::A_NETWORK_THAT_DOES_NOT_SAY.get(lang),
                 DIM.get(),
             )],
             container(secondary(
-                w(words::JOIN).get(lang).to_owned(),
+                words::JOIN.get(lang).to_owned(),
                 Some(Message::Network(Msg::Hidden)),
                 self.network_focused(Stop::Hidden),
                 true,
@@ -674,7 +674,7 @@ impl App {
                 },
                 1.0,
             ),
-            name(w(words::CABLE).get(lang).to_owned(), 1.0, None),
+            name(words::CABLE.get(lang).to_owned(), 1.0, None),
             vec![line(model::wired_line(wired, lang), DIM.get())],
             value,
             Some("row:network.cable".to_owned()),
@@ -684,7 +684,7 @@ impl App {
         );
         Some(
             container(
-                column![group_head(w(words::CABLE_2).get(lang), None), card_box(row)].spacing(8),
+                column![group_head(words::CABLE_2.get(lang), None), card_box(row)].spacing(8),
             )
             .id("group:network.cable".to_owned())
             .into(),
@@ -695,9 +695,9 @@ impl App {
         let lang = self.lang;
         let count = self.network.details.as_deref().map_or(0, |d| d.saved.len());
         let said = if self.network.airplane() {
-            w(words::THEY_STAY_SAVED)
+            words::THEY_STAY_SAVED
         } else {
-            w(words::THOSE_THE_COMPUTER_JOINS_BY_ITSELF)
+            words::THOSE_THE_COMPUTER_JOINS_BY_ITSELF
         };
         let focused = self.network_focused(Stop::Saved);
         let chip = container(t(count.to_string(), 12.0, DIM.get()).font(SEMIBOLD))
@@ -709,7 +709,7 @@ impl App {
             ));
         let inner = page_row(
             tile(|c| draw(KEY, 18.0, c), Tone::Plain, 1.0),
-            name(w(words::SAVED_NETWORKS).get(lang).to_owned(), 1.0, None),
+            name(words::SAVED_NETWORKS.get(lang).to_owned(), 1.0, None),
             vec![line(said.get(lang), DIM.get())],
             row![chip, draw(CHEVRON_RIGHT, 16.0, DIM.get())]
                 .spacing(10)
@@ -749,7 +749,7 @@ impl App {
         let right: Option<El<'_>> = scanning.then(|| {
             row![
                 spinner(12.0, FAINT.get(), !self.reduced_motion),
-                t(w(words::SEARCHING).get(lang), 12.0, FAINT.get())
+                t(words::SEARCHING.get(lang), 12.0, FAINT.get())
             ]
             .spacing(7)
             .align_y(Alignment::Center)
@@ -761,8 +761,7 @@ impl App {
         let mut rows = column![];
         if around.is_empty() {
             rows = rows.push(
-                container(t(w(words::NO_NETWORK_FOUND).get(lang), 13.5, DIM.get()))
-                    .padding([16, 16]),
+                container(t(words::NO_NETWORK_FOUND.get(lang), 13.5, DIM.get())).padding([16, 16]),
             );
         }
         for (i, wifi) in around.iter().enumerate() {
@@ -776,9 +775,9 @@ impl App {
             .on_exit(Message::Network(Msg::Hover(false)));
         container(
             column![
-                group_head(w(words::AVAILABLE_NETWORKS).get(lang), right),
+                group_head(words::AVAILABLE_NETWORKS.get(lang), right),
                 list,
-                note(w(words::STRONGEST_FIRST_THE_LIST_STAYS_IN).get(lang)),
+                note(words::STRONGEST_FIRST_THE_LIST_STAYS_IN.get(lang)),
             ]
             .spacing(8),
         )
@@ -800,16 +799,16 @@ impl App {
         let control: El<'_> = if this {
             row![
                 spinner(14.0, DIM.get(), !self.reduced_motion),
-                t(w(words::CONNECTING).get(lang), 12.5, DIM.get())
+                t(words::CONNECTING.get(lang), 12.5, DIM.get())
             ]
             .spacing(7)
             .align_y(Alignment::Center)
             .into()
         } else {
             let label = if at_once {
-                w(words::CONNECT)
+                words::CONNECT
             } else {
-                w(words::CONNECT_2)
+                words::CONNECT_2
             };
             let can = !busy;
             secondary(
@@ -842,7 +841,7 @@ impl App {
             button(
                 row![
                     draw(CHEVRON_LEFT, 14.0, MINT.get()),
-                    t(w(words::NETWORK).get(lang), 13.0, MINT.get()).font(SEMIBOLD)
+                    t(words::NETWORK.get(lang), 13.0, MINT.get()).font(SEMIBOLD)
                 ]
                 .spacing(4)
                 .align_y(Alignment::Center),
@@ -859,12 +858,12 @@ impl App {
         .id("network:back".to_owned());
         let title = column![
             back,
-            text(w(words::SAVED_NETWORKS).get(lang))
+            text(words::SAVED_NETWORKS.get(lang))
                 .size(22)
                 .font(BOLD)
                 .color(TEXT),
             t(
-                w(words::MOST_RECENT_FIRST_A_FORGOTTEN_NETWORK).get(lang),
+                words::MOST_RECENT_FIRST_A_FORGOTTEN_NETWORK.get(lang),
                 13.5,
                 DIM.get()
             )
@@ -875,8 +874,7 @@ impl App {
         let mut rows = column![];
         if saved.is_empty() {
             rows = rows.push(
-                container(t(w(words::NO_SAVED_NETWORK).get(lang), 13.5, DIM.get()))
-                    .padding([16, 16]),
+                container(t(words::NO_SAVED_NETWORK.get(lang), 13.5, DIM.get())).padding([16, 16]),
             );
         }
         let focused = self.network_focused(Stop::SavedList);
@@ -959,7 +957,7 @@ impl App {
         // Se connecter seul.
         inner = inner.push(
             row![
-                t(w(words::CONNECT_AUTOMATICALLY).get(lang), 13.5, TEXT.get()).width(Length::Fill),
+                t(words::CONNECT_AUTOMATICALLY.get(lang), 13.5, TEXT.get()).width(Length::Fill),
                 self.network_switch(
                     "network.autoconnect",
                     saved.autoconnect,
@@ -975,10 +973,10 @@ impl App {
             Security::Psk { .. } | Security::Wep => {
                 inner = inner.push(
                     row![
-                        t(w(words::PASSWORD).get(lang), 13.5, TEXT.get()).width(Length::Fill),
+                        t(words::PASSWORD.get(lang), 13.5, TEXT.get()).width(Length::Fill),
                         self.network_password_field(&saved.uuid),
                         container(secondary(
-                            w(words::CHANGE).get(lang).to_owned(),
+                            words::CHANGE.get(lang).to_owned(),
                             Some(Message::Network(Msg::Change(saved.uuid.clone()))),
                             self.network_focused(Stop::Change),
                             false,
@@ -992,7 +990,7 @@ impl App {
             Security::Enterprise => {
                 inner = inner.push(
                     row![
-                        t(w(words::IDENTITY).get(lang), 13.5, TEXT.get()).width(Length::Fill),
+                        t(words::IDENTITY.get(lang), 13.5, TEXT.get()).width(Length::Fill),
                         t(saved.identity.clone().unwrap_or_default(), 13.5, DIM.get()),
                     ]
                     .align_y(Alignment::Center)
@@ -1051,7 +1049,7 @@ impl App {
             container(
                 button(
                     container(
-                        t(w(words::FORGET_THIS_NETWORK).get(lang), 12.5, PEACH.get()).font(BOLD)
+                        t(words::FORGET_THIS_NETWORK.get(lang), 12.5, PEACH.get()).font(BOLD)
                     )
                     .height(Length::Fill)
                     .center_y(Length::Fill)
@@ -1268,4 +1266,4 @@ impl App {
     }
 }
 
-const WIFI_LABEL: crate::lang::Words = w(words::WI_FI);
+const WIFI_LABEL: crate::lang::Words = words::WI_FI;

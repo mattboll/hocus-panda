@@ -104,22 +104,27 @@ language type.
 **To add a string**: add its key to `en.toml` and to every other file,
 in the section of the code that says it (`[settings.appearance]`,
 `[shell.lock]`, `[perf.signal]`). A plain text becomes a constant
-(`hocus_words::shell::lock::PASSWORD.get(lang)`; the Settings' tables wrap
-it in `w(…)`). Arguments are `{name}`, a function's parameters in the
-order of their names (`{{` and `}}` for braces). A count is `{ one = "…",
-other = "…" }` and its function takes `n` first: `one` is 1 in English,
-0 and 1 in French. A list (`["lundi", …]`) is the same length in every
-file. The build stops on a key a file lacks or has too many of, and on a
-placeholder English does not have.
+(`hocus_words::shell::lock::PASSWORD.get(lang)`, a `Text`; the Settings'
+tables hold them as they are). One placeholder, `{name}`, is a parameter
+(`words::found_in(lang, dir)`); several are the fields of a struct named
+after the key, so none can be swapped
+(`words::now_shows(lang, words::NowShows { left, now, then, title })`);
+`{{` and `}}` are braces. A count is `{ one = "…", other = "…" }` and its
+function takes `n`: `one` is 1 in English, 0 and 1 in French. A list
+(`["lundi", …]`) is the same length in every file. A text made in code
+from the catalogue's is `Text::per_lang(|lang| …)`; a name the same in
+every language, `Text::same(…)`. The build stops on a key a file lacks or
+has too many of, and on a placeholder English does not have.
 
 **To add a language**: copy `en.toml` to `words/<code>.toml` (`de`), set
 its `[language]` table (`code`, `variant = "German"`, `name =
 "Deutsch"`, `plural`: `n=1`, `n<2` or `none`), translate every value.
 `Lang::German` exists from then on, chosen by a locale starting with its
-code or by `[locale] language = "de"`. What still chooses between French
-and English in code is left: a `match lang` (and the Settings' `Words`)
-stops the build until it moves to the catalogue, while an `if … French
-… else` and the shell's surfaces that keep a `fr` flag say English.
+code or by `[locale] language = "de"`; nothing else changes. CI proves
+it: `HOCUS_WORDS_TEST_LANGUAGE=1 cargo check --workspace --all-targets`
+builds everything with a third language, `xx`, English's words in a file
+of its own. City and country names, and XKB's layouts' names, come from
+their own tables: a language they lack says them in English.
 
 ## Énergie (6.10)
 

@@ -27,7 +27,7 @@ use iced::{
 use super::{App, Doing, Focus, Message, ToastAction, style::*};
 use crate::theme::Ink;
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::Icon,
     screens::{
         self, ARRANGE, Align, IDENTIFY, MIRROR, Mode3, PRIMARY, RATE, RESOLUTION, ROTATION, Rect,
@@ -429,7 +429,7 @@ impl App {
             }
             Said::Refused(why) => {
                 self.screens.asked = None;
-                let text = format!("{} {why}", self.say(w(words::REFUSED)));
+                let text = format!("{} {why}", self.say(words::REFUSED));
                 self.toast(text, ToastAction::None, super::TOAST)
             }
             Said::Gone => {
@@ -470,9 +470,27 @@ impl App {
         let then = say_mode_text(&trial.before, lang);
         let title = screens::lower_first(&screen.title(lang));
         let said = super::KeysSaid {
-            done: words::kept_on_the(lang, &now, &title),
-            undone: words::undone_the_is_back_to(lang, &then, &title),
-            redone: words::redone_on_the(lang, &now, &title),
+            done: words::kept_on_the(
+                lang,
+                words::KeptOnThe {
+                    now: &now,
+                    title: &title,
+                },
+            ),
+            undone: words::undone_the_is_back_to(
+                lang,
+                words::UndoneTheIsBackTo {
+                    then: &then,
+                    title: &title,
+                },
+            ),
+            redone: words::redone_on_the(
+                lang,
+                words::RedoneOnThe {
+                    now: &now,
+                    title: &title,
+                },
+            ),
             row: if trial.what == RATE { RATE } else { RESOLUTION },
         };
         self.ask_keys(edits, said, Doing::New, None);
@@ -554,8 +572,20 @@ impl App {
                     true => words::ON.get(lang),
                     false => words::OFF.get(lang),
                 };
-                let done = words::variable_refresh_rate_of_the(lang, &lower, yes(on));
-                let undone = words::undone_variable_refresh_rate_of_the(lang, &lower, yes(!on));
+                let done = words::variable_refresh_rate_of_the(
+                    lang,
+                    words::VariableRefreshRateOfThe {
+                        lower: &lower,
+                        yes_on: yes(on),
+                    },
+                );
+                let undone = words::undone_variable_refresh_rate_of_the(
+                    lang,
+                    words::UndoneVariableRefreshRateOfThe {
+                        lower: &lower,
+                        yes_on: yes(!on),
+                    },
+                );
                 (vec![edit], done, undone)
             }
             _ => return iced::Task::none(),
@@ -612,10 +642,22 @@ impl App {
                 let said_now = self.say_scale_choice(scale, &screen);
                 let said_then =
                     self.say_scale_choice((!screen.scale_auto).then_some(screen.scale), &screen);
-                let done = words::scale_of_the(lang, &lower, &said_now);
+                let done = words::scale_of_the(
+                    lang,
+                    words::ScaleOfThe {
+                        lower: &lower,
+                        said_now: &said_now,
+                    },
+                );
                 let said = super::KeysSaid {
                     redone: redone_of(&done, lang),
-                    undone: words::undone_the_s_scale_is_back(lang, &lower, &said_then),
+                    undone: words::undone_the_s_scale_is_back(
+                        lang,
+                        words::UndoneTheSScaleIsBack {
+                            lower: &lower,
+                            said_then: &said_then,
+                        },
+                    ),
                     done,
                     row: SCALE,
                 };
@@ -817,7 +859,7 @@ impl App {
         }
         if landing == moving.position {
             let text = self
-                .say(w(words::DROPPED_WHERE_IT_WAS_NOTHING_CHANGES))
+                .say(words::DROPPED_WHERE_IT_WAS_NOTHING_CHANGES)
                 .to_owned();
             return self.toast(text, ToastAction::None, super::UNDONE);
         }
@@ -849,9 +891,7 @@ impl App {
         let done = format!("{} {place}", moving.title(lang));
         let said = super::KeysSaid {
             redone: redone_of(&done, lang),
-            undone: self
-                .say(w(words::UNDONE_THE_SCREENS_ARE_BACK_IN))
-                .to_owned(),
+            undone: self.say(words::UNDONE_THE_SCREENS_ARE_BACK_IN).to_owned(),
             done,
             row: ARRANGE,
         };
@@ -920,9 +960,7 @@ impl App {
         let done = format!("{} {place}", moving.title(lang));
         let said = super::KeysSaid {
             redone: redone_of(&done, lang),
-            undone: self
-                .say(w(words::UNDONE_THE_SCREENS_ARE_BACK_IN))
-                .to_owned(),
+            undone: self.say(words::UNDONE_THE_SCREENS_ARE_BACK_IN).to_owned(),
             done,
             row: ARRANGE,
         };
@@ -948,7 +986,7 @@ impl App {
                 .map(|name| {
                     vec![(
                         Choice::Forget(name),
-                        self.say(w(words::FORGET_THIS_SET)).to_owned(),
+                        self.say(words::FORGET_THIS_SET).to_owned(),
                     )]
                 })
                 .unwrap_or_default();
@@ -991,7 +1029,7 @@ impl App {
                     for s in &known.list {
                         let mut label = s.title(lang);
                         if !s.connected {
-                            label.push_str(self.say(w(words::UNPLUGGED)));
+                            label.push_str(self.say(words::UNPLUGGED));
                         }
                         list.push((Choice::Primary(Some(s.name.clone())), label));
                     }
@@ -1023,7 +1061,7 @@ impl App {
 
     fn say_primary(&self, name: Option<&str>) -> String {
         match name {
-            None => self.say(w(words::AUTOMATIC)).to_owned(),
+            None => self.say(words::AUTOMATIC).to_owned(),
             Some(name) => self
                 .screens_list()
                 .and_then(|k| k.get(name))
@@ -1308,7 +1346,7 @@ fn divided(divider: bool, row: El<'_>) -> El<'_> {
 /// "Plus tard", amber.
 fn later<'a>(lang: Lang) -> El<'a> {
     container(
-        text(w(words::LATER).get(lang))
+        text(words::LATER.get(lang))
             .size(10.5)
             .font(BOLD)
             .color(AMBER),

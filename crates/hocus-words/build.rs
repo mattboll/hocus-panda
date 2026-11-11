@@ -38,6 +38,26 @@ fn main() {
         println!("cargo::rerun-if-changed={}", path.display());
         langs.push(read(path));
     }
+    // `HOCUS_WORDS_TEST_LANGUAGE=1`: one more language, `xx` (`Lang::Test`),
+    // English's words in a file of its own, read like any other: what CI
+    // builds the workspace with to show that a language is a file and
+    // nothing else (docs/decisions/0006-words.md).
+    println!("cargo::rerun-if-env-changed=HOCUS_WORDS_TEST_LANGUAGE");
+    println!("cargo::rustc-check-cfg=cfg(test_language)");
+    if std::env::var_os("HOCUS_WORDS_TEST_LANGUAGE").is_some_and(|v| v == "1") {
+        let english = fs::read_to_string(dir.join(format!("{REFERENCE}.toml")))
+            .unwrap_or_else(|e| fail(&format!("words/{REFERENCE}.toml: {e}")));
+        let Some((_, words)) = english.split_once("plural = \"n=1\"\n") else {
+            fail("words/en.toml: no plural = \"n=1\" line");
+        };
+        let file = PathBuf::from(env("OUT_DIR")).join("xx.toml");
+        let text = format!(
+            "[language]\ncode = \"xx\"\nvariant = \"Test\"\nname = \"Test\"\nplural = \"n=1\"\n{words}"
+        );
+        fs::write(&file, text).unwrap_or_else(|e| fail(&format!("{}: {e}", file.display())));
+        langs.push(read(&file));
+        println!("cargo::rustc-cfg=test_language");
+    }
     // The reference first: it is the default, and its order is `ALL`'s.
     langs.sort_by_key(|l| (l.code != REFERENCE, l.code.clone()));
     if langs.first().is_none_or(|l| l.code != REFERENCE) {
@@ -175,6 +195,14 @@ fn head(out: &mut String, langs: &[Language]) {
         .map(|l| format!("{}: &'static [&'static str],", field_name(&l.code)))
         .collect();
     let gets = arms(&|l| format!("self.{}", field_name(&l.code)));
+    let same: String = langs
+        .iter()
+        .map(|l| format!("{}: text,", field_name(&l.code)))
+        .collect();
+    let per_lang: String = langs
+        .iter()
+        .map(|l| format!("{}: said(Lang::{}),", field_name(&l.code), l.variant))
+        .collect();
     let count = langs.len();
     let _ = write!(
         out,
@@ -211,6 +239,18 @@ pub struct Text {{ {fields} }}
 impl Text {{
     pub const fn get(self, lang: Lang) -> &'static str {{
         match lang {{ {gets} }}
+    }}
+
+    /// One text in every language: a name, not a word (a font's, a
+    /// screen's mode).
+    pub const fn same(text: &'static str) -> Self {{
+        Self {{ {same} }}
+    }}
+
+    /// A text made in code for each language from the catalogue's
+    /// (`"{{}} 3"` of each language's word).
+    pub fn per_lang(mut said: impl FnMut(Lang) -> &'static str) -> Self {{
+        Self {{ {per_lang} }}
     }}
 }}
 
@@ -386,6 +426,18 @@ fn placeholders(template: &str, at: &str, file: &str) -> BTreeSet<String> {
     names
 }
 
+/// `memory_line` → `MemoryLine`: a key's arguments' struct.
+fn camel(key: &str) -> String {
+    key.split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 fn unescape(template: &str) -> String {
     template.replace("{{", "{").replace("}}", "}")
 }
@@ -514,18 +566,65 @@ fn entry(
         ordered.push("n".to_owned());
     }
     ordered.extend(params.iter().filter(|p| !plural || *p != "n").cloned());
-    let args: String = ordered
-        .iter()
-        .map(|p| {
-            if plural && p == "n" {
-                ", n: impl Count".to_owned()
-            } else {
-                format!(", {}: impl ::std::fmt::Display", raw(p))
-            }
-        })
-        .collect();
+    // One argument: a parameter. More: a struct of named fields, so that
+    // two of one type cannot be swapped at the call.
+    let named = ordered.len() > 1;
+    let bound = |p: &str| {
+        if plural && p == "n" {
+            "Count"
+        } else {
+            "::std::fmt::Display"
+        }
+    };
+    let types: Vec<String> = (0..ordered.len()).map(|i| format!("T{i}")).collect();
+    let mut camel = camel(key);
+    if ["Lang", "Plural", "Text", "List", "Count"].contains(&camel.as_str()) {
+        camel.push_str("Args");
+    }
     doc(out, &english);
-    let _ = writeln!(out, "pub fn {}(lang: Lang{args}) -> String {{", raw(key));
+    if named {
+        let fields: String = ordered
+            .iter()
+            .zip(&types)
+            .map(|(p, t)| format!("pub {}: {t},", raw(p)))
+            .collect();
+        let _ = writeln!(
+            out,
+            "#[derive(Debug, Clone, Copy)]\npub struct {camel}<{}> {{ {fields} }}",
+            types.join(", ")
+        );
+        let generics: String = ordered
+            .iter()
+            .zip(&types)
+            .map(|(p, t)| format!("{t}: {}", bound(p)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let names: String = ordered
+            .iter()
+            .map(|p| raw(p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        doc(out, &english);
+        let _ = writeln!(
+            out,
+            "pub fn {}<{generics}>(lang: Lang, args: {camel}<{}>) -> String {{\nlet {camel} {{ {names} }} = args;",
+            raw(key),
+            types.join(", ")
+        );
+    } else {
+        let p = ordered.first().map_or("", String::as_str);
+        let kind = if bound(p) == "Count" {
+            "impl Count"
+        } else {
+            "impl ::std::fmt::Display"
+        };
+        let _ = writeln!(
+            out,
+            "pub fn {}(lang: Lang, {}: {kind}) -> String {{",
+            raw(key),
+            raw(p)
+        );
+    }
     let _ = writeln!(out, "match lang {{");
     for (said, (f, lang)) in all.iter().zip(forms.iter().zip(langs)) {
         let one = f.get("one").map_or("", String::as_str);
@@ -541,22 +640,42 @@ fn entry(
         }
     }
     out.push_str("}\n}\n");
-    let symbolic: String = ordered
-        .iter()
-        .filter(|p| !plural || *p != "n")
-        .map(|p| format!(", \"{{{p}}}\""))
-        .collect();
+    let value = |p: &String| {
+        if plural && p == "n" {
+            "n".to_owned()
+        } else {
+            format!("\"{{{p}}}\"")
+        }
+    };
+    let call = if named {
+        let fields: String = ordered
+            .iter()
+            .map(|p| {
+                let v = value(p);
+                if v == *p {
+                    format!("{v}, ")
+                } else {
+                    format!("{}: {v}, ", raw(p))
+                }
+            })
+            .collect();
+        format!(
+            "{module}::{}(lang, {module}::{camel} {{ {fields} }})",
+            raw(key)
+        )
+    } else {
+        format!(
+            "{module}::{}(lang, {})",
+            raw(key),
+            ordered.first().map(value).unwrap_or_default()
+        )
+    };
     if plural {
         let _ = writeln!(
             every,
-            "for n in [0u64, 1, 2] {{ all.push((format!(\"{at}[{{n}}]\"), {module}::{}(lang, n{symbolic}))); }}",
-            raw(key)
+            "for n in [0u64, 1, 2] {{ all.push((format!(\"{at}[{{n}}]\"), {call})); }}"
         );
     } else {
-        let _ = writeln!(
-            every,
-            "all.push((\"{at}\".to_owned(), {module}::{}(lang{symbolic})));",
-            raw(key)
-        );
+        let _ = writeln!(every, "all.push((\"{at}\".to_owned(), {call}));");
     }
 }

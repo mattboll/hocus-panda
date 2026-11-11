@@ -633,10 +633,9 @@ impl Words {
     /// A line's name for screen readers: its title, and whether it is
     /// the focused window or minimised.
     pub fn name(self, line: &Line) -> String {
-        let state = match (line.focused, line.minimized, (self.lang == Lang::French)) {
-            (true, _, _) => ", active",
-            (_, true, true) => ", réduite",
-            (_, true, false) => ", minimised",
+        let state = match (line.focused, line.minimized) {
+            (true, _) => ", active",
+            (_, true) => txt::MINIMISED.get(self.lang),
             _ => "",
         };
         format!("{}{state}", line.title)

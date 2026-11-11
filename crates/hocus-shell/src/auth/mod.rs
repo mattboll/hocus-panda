@@ -388,10 +388,9 @@ impl Words {
     /// The process's line: its id, and who started it.
     pub fn started(self, pid: Option<u32>, by: Option<&str>) -> String {
         let pid = pid.map_or_else(|| "?".to_owned(), |p| p.to_string());
-        match (by, (self.lang == Lang::French)) {
-            (Some(by), true) => format!("{pid}, lancé par {by}"),
-            (Some(by), false) => format!("{pid}, started by {by}"),
-            (None, _) => pid,
+        match by {
+            Some(by) => txt::started_by(self.lang, txt::StartedBy { by: &by, pid: &pid }),
+            None => pid,
         }
     }
 
@@ -401,12 +400,10 @@ impl Words {
 
     /// The requests waiting behind it.
     pub fn waiting(self, n: usize) -> String {
-        match (n, (self.lang == Lang::French)) {
-            (0, _) => String::new(),
-            (1, true) => "1 autre demande en attente".to_owned(),
-            (n, true) => format!("{n} autres demandes en attente"),
-            (1, false) => "1 more request waiting".to_owned(),
-            (n, false) => format!("{n} more requests waiting"),
+        match n {
+            0 => String::new(),
+            1 => txt::N_1_MORE_REQUEST_WAITING.get(self.lang).to_owned(),
+            n => txt::more_requests_waiting(self.lang, n),
         }
     }
 

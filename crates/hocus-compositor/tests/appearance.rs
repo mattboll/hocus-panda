@@ -139,7 +139,7 @@ impl Bed {
         config.keyboard.layouts = vec!["us".to_owned()];
         config.file = Some(file.clone());
         config.plain_background = true;
-        config.french = true;
+        config.lang = hocus_words::Lang::French;
         let mut hp = Headless::start_with_shell(
             HeadlessConfig {
                 outputs: outputs

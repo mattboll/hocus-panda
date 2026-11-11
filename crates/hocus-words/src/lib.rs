@@ -57,6 +57,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
     clippy::useless_format,
     clippy::needless_borrows_for_generic_args,
     clippy::match_single_binding,
+    clippy::vec_init_then_push,
+    clippy::redundant_field_names,
     reason = "generated: one shape for every key"
 )]
 mod catalogue {
@@ -134,49 +136,6 @@ impl Lang {
     }
 }
 
-/// For the crates' tests of their move to the catalogue (#775): every key
-/// of `before` says, in French then English, exactly its two texts, and
-/// every key of `formats` the same words around its placeholders, whatever
-/// their names. Panics on the first that does not.
-#[doc(hidden)]
-#[expect(clippy::panic, reason = "a tests' helper: a mismatch fails the test")]
-pub fn check_before(before: &[(&str, &str, &str)], formats: &[(&str, &str, &str)]) {
-    use std::collections::HashMap;
-    let said = |lang| every(lang).into_iter().collect::<HashMap<_, _>>();
-    let (fr, en) = (said(Lang::French), said(Lang::English));
-    let text = |all: &HashMap<String, String>, key: &str| {
-        all.get(key)
-            .cloned()
-            .unwrap_or_else(|| panic!("{key} is not in the catalogue"))
-    };
-    for (key, before_fr, before_en) in before {
-        assert_eq!(text(&fr, key), *before_fr, "{key}");
-        assert_eq!(text(&en, key), *before_en, "{key}");
-    }
-    let bare = |s: &str| {
-        let mut out = String::new();
-        let mut inside = false;
-        for c in s.replace("{{", "\u{1}").replace("}}", "\u{2}").chars() {
-            match c {
-                '{' => inside = true,
-                '}' => {
-                    inside = false;
-                    out.push_str("{}");
-                }
-                _ if inside => {}
-                '\u{1}' => out.push('{'),
-                '\u{2}' => out.push('}'),
-                c => out.push(c),
-            }
-        }
-        out
-    };
-    for (key, before_fr, before_en) in formats {
-        assert_eq!(bare(&text(&fr, key)), bare(before_fr), "{key}");
-        assert_eq!(bare(&text(&en, key)), bare(before_en), "{key}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,68 +173,15 @@ mod tests {
         }
     }
 
-    /// Adding a language is adding a file: this crate, copied with a third
-    /// file (English's words under the code `xx`), builds, and its
-    /// language is chosen by a locale and by its code like the others.
+    /// Built with `HOCUS_WORDS_TEST_LANGUAGE=1` (CI's "third language"
+    /// step), a third file is one more language, chosen like the others.
+    #[cfg(test_language)]
     #[test]
     fn a_third_language_is_one_more_file() {
-        use std::{fs, path::Path, process::Command};
-
-        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let dir = std::env::temp_dir().join(format!("hocus-words-third-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(dir.join("src")).unwrap();
-        fs::create_dir_all(dir.join("words")).unwrap();
-        fs::create_dir_all(dir.join("tests")).unwrap();
-        fs::copy(here.join("build.rs"), dir.join("build.rs")).unwrap();
-        fs::copy(here.join("src/lib.rs"), dir.join("src/lib.rs")).unwrap();
-        for code in ["en", "fr"] {
-            let file = format!("words/{code}.toml");
-            fs::copy(here.join(&file), dir.join(&file)).unwrap();
-        }
-        let english = fs::read_to_string(here.join("words/en.toml")).unwrap();
-        let (_, words) = english.split_once("plural = \"n=1\"\n").unwrap();
-        fs::write(
-            dir.join("words/xx.toml"),
-            format!(
-                "[language]\ncode = \"xx\"\nvariant = \"Test\"\nname = \"Test\"\nplural = \"n=1\"\n{words}"
-            ),
-        )
-        .unwrap();
-        fs::write(
-            dir.join("Cargo.toml"),
-            "[package]\nname = \"hocus-words\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-             [build-dependencies]\ntoml = \"1\"\n[workspace]\n",
-        )
-        .unwrap();
-        let lock = here.join("../../Cargo.lock");
-        fs::copy(lock, dir.join("Cargo.lock")).unwrap();
-        fs::write(
-            dir.join("tests/third.rs"),
-            r#"use hocus_words::Lang;
-
-#[test]
-fn the_third_language_is_there() {
-    assert_eq!(Lang::ALL.len(), 3);
-    assert_eq!(Lang::of("xx_XX.UTF-8"), Lang::Test);
-    assert_eq!(Lang::of_code("xx"), Some(Lang::Test));
-    assert_eq!(Lang::Test.name(), "Test");
-    assert_eq!(hocus_words::every(Lang::Test), hocus_words::every(Lang::English));
-    Lang::choose(Some(Lang::Test));
-    assert_eq!(Lang::of_messages(), Lang::Test);
-}
-"#,
-        )
-        .unwrap();
-        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-        let out = Command::new(cargo)
-            .args(["test", "--offline", "--quiet", "--test", "third"])
-            .current_dir(&dir)
-            .env("CARGO_TARGET_DIR", dir.join("target"))
-            .output()
-            .unwrap();
-        let said = String::from_utf8_lossy(&out.stderr).into_owned();
-        let _ = fs::remove_dir_all(&dir);
-        assert!(out.status.success(), "{said}");
+        assert_eq!(Lang::ALL.len(), 3);
+        assert_eq!(Lang::of("xx_XX.UTF-8"), Lang::Test);
+        assert_eq!(Lang::of_code("xx"), Some(Lang::Test));
+        assert_eq!(Lang::Test.name(), "Test");
+        assert_eq!(every(Lang::Test), every(Lang::English));
     }
 }

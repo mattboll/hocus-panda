@@ -862,18 +862,12 @@ pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
     use crate::clock::time::Lang;
     use hocus_link::Supervised;
     let program = program.display();
-    let (number, summary, body) = match (which, Lang::of_messages()) {
-        (Supervised::Shell, Lang::French) => (
+    let lang = Lang::of_messages();
+    let (number, summary, body) = match which {
+        Supervised::Shell => (
             0,
-            "Le shell de développement s’est arrêté",
-            format!(
-                "{program} n’a pas démarré ou s’arrêtait sans cesse. Le shell installé a repris."
-            ),
-        ),
-        (Supervised::Shell, Lang::English) => (
-            0,
-            "The development shell stopped",
-            format!("{program} did not start or kept ending. The installed shell runs again."),
+            hocus_words::shell::notifications::DEV_SHELL_STOPPED.get(lang),
+            hocus_words::shell::notifications::dev_shell_stopped_body(lang, &program),
         ),
     };
     tracing::info!(which = which.word(), %program, "a given program was let go of: said");

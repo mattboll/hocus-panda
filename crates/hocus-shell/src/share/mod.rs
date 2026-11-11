@@ -49,11 +49,11 @@ impl Words {
 
     /// "Firefox veut voir ton écran", the application's name known or not.
     pub fn asks(self, app: Option<&str>) -> String {
-        match (app, (self.lang == Lang::French)) {
-            (Some(app), true) => format!("{app} veut voir ton écran"),
-            (Some(app), false) => format!("{app} wants to see your screen"),
-            (None, true) => "Une application veut voir ton écran".to_owned(),
-            (None, false) => "An application wants to see your screen".to_owned(),
+        match app {
+            Some(app) => txt::wants_to_see_your_screen(self.lang, app),
+            None => txt::AN_APPLICATION_WANTS_TO_SEE_YOUR
+                .get(self.lang)
+                .to_owned(),
         }
     }
 
@@ -91,11 +91,9 @@ impl Words {
 
     /// A window's desktop: this one, or its number.
     pub fn desktop(self, here: bool, desktop: u8) -> String {
-        match (here, (self.lang == Lang::French)) {
-            (true, true) => "ce bureau".to_owned(),
-            (true, false) => "this desktop".to_owned(),
-            (false, true) => format!("bureau {desktop}"),
-            (false, false) => format!("desktop {desktop}"),
+        match here {
+            true => txt::THIS_DESKTOP.get(self.lang).to_owned(),
+            false => txt::desktop(self.lang, desktop),
         }
     }
 

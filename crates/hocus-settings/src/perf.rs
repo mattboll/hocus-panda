@@ -17,7 +17,7 @@ use hocus_perf::{Day, Report, files, format::Who, report::report, text};
 use jiff::{civil::Date, tz::TimeZone};
 
 use crate::{
-    lang::{Lang, w},
+    lang::Lang,
     model::{Codec, Kind, RowGroup, SectionId, Setting, one},
 };
 
@@ -25,7 +25,7 @@ use crate::{
 pub const RECORD: &str = "perf.record";
 
 const RECORDING: RowGroup = RowGroup {
-    label: w(words::RECORDING),
+    label: words::RECORDING,
     per_source: false,
 };
 
@@ -37,8 +37,8 @@ pub fn settings() -> &'static [Setting] {
             id: RECORD,
             section: SectionId::Performance,
             group: RECORDING,
-            name: w(words::RECORD_THE_DAY),
-            line: Some(w(words::EVERY_10_S_THE_COMPOSITOR_S)),
+            name: words::RECORD_THE_DAY,
+            line: Some(words::EVERY_10_S_THE_COMPOSITOR_S),
             keywords: (
                 &[
                     "performances",
@@ -216,40 +216,44 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         value: text::percent(r.cpu.average_percent, l),
         line: format!(
             "{} · {}",
-            w(words::OF_A_CORE_ON_AVERAGE).get(lang),
+            words::OF_A_CORE_ON_AVERAGE.get(lang),
             text::cpu_time(cpu_ms)
         ),
         sub: format!(
             "{} {} · shell {}",
-            w(words::COMPOSITOR).get(lang),
+            words::COMPOSITOR.get(lang),
             text::cpu_time(r.cpu.compositor_ms),
             text::cpu_time(r.cpu.shell_ms)
         ),
     };
     let memory = Tile {
-        label: w(words::MEMORY).get(lang).to_owned(),
+        label: words::MEMORY.get(lang).to_owned(),
         value: text::megabytes(kb(r.memory.end_kb), l),
         line: words::at_the_start_peak_at(
             lang,
-            mb(kb(r.memory.start_kb)),
-            mb(r.memory.peak_kb),
-            text::clock(r.memory.peak_at, tz),
+            words::AtTheStartPeakAt {
+                mb_kb_r_memory_start_kb: mb(kb(r.memory.start_kb)),
+                mb_r_memory_peak_kb: mb(r.memory.peak_kb),
+                text_clock_r_memory_peak: text::clock(r.memory.peak_at, tz),
+            },
         ),
         sub: format!(
             "{} {} · shell {}",
-            w(words::COMPOSITOR).get(lang),
+            words::COMPOSITOR.get(lang),
             mb(r.memory.end_kb[0]),
             mb(r.memory.end_kb[1])
         ),
     };
     let frames = Tile {
-        label: w(words::FRAMES).get(lang).to_owned(),
+        label: words::FRAMES.get(lang).to_owned(),
         value: text::count(r.drawing.frames, l),
         line: if r.locked_s > 0 {
             words::in_locked(
                 lang,
-                r.drawing.locked_frames,
-                text::duration(r.locked_s as i64),
+                words::InLocked {
+                    r_drawing_locked_frames: r.drawing.locked_frames,
+                    text_duration_r_locked_s: text::duration(r.locked_s as i64),
+                },
             )
         } else {
             words::scenes(lang, text::count(r.drawing.scenes, l))
@@ -260,7 +264,7 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
         ),
     };
     let motion = Tile {
-        label: w(words::MOTION).get(lang).to_owned(),
+        label: words::MOTION.get(lang).to_owned(),
         value: if r.moving_wallpaper_s > 0 {
             text::duration(r.moving_wallpaper_s as i64)
         } else {
@@ -272,16 +276,14 @@ pub fn tiles(r: &Report, lang: Lang, tz: &TimeZone) -> [Tile; 4] {
                 text::count(r.drawing.motion_frames, l),
             )
         } else {
-            w(words::FRAMES_OF_THE_DESKTOP_S_MOTIONS)
-                .get(lang)
-                .to_owned()
+            words::FRAMES_OF_THE_DESKTOP_S_MOTIONS.get(lang).to_owned()
         },
         sub: match &r.power {
             Some(p) => words::on_battery_w_on_average(
                 lang,
                 text::number(f64::from(p.average_mw) / 1000.0, 1, l),
             ),
-            None => w(words::ON_AC_POWER_NOT_MEASURED).get(lang).to_owned(),
+            None => words::ON_AC_POWER_NOT_MEASURED.get(lang).to_owned(),
         },
     };
     [cpu, memory, frames, motion]
@@ -295,7 +297,7 @@ pub fn session(r: &Report, lang: Lang, tz: &TimeZone) -> String {
             text::clock(from, tz),
             text::clock(to, tz)
         ),
-        _ => w(words::NOTHING_RECORDED).get(lang).to_owned(),
+        _ => words::NOTHING_RECORDED.get(lang).to_owned(),
     }
 }
 

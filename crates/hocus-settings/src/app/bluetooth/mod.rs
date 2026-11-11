@@ -33,7 +33,7 @@ use iced::{
 };
 
 use super::{App, MENU_IN, Message, Page, TOAST, ToastAction, UNDONE};
-use crate::{bluetooth as model, lang::w, model::SectionId};
+use crate::{bluetooth as model, model::SectionId};
 
 /// The spinner's turn.
 const TURN: Duration = Duration::from_millis(900);
@@ -316,7 +316,7 @@ impl App {
                 // Turned off: said, and taken back with "Annuler".
                 self.undo.push(super::Undo::Bluetooth(Choice::Power { on }));
                 self.redo.clear();
-                let text = w(words::BLUETOOTH_OFF).get(self.lang).to_owned();
+                let text = words::BLUETOOTH_OFF.get(self.lang).to_owned();
                 self.toast(text, ToastAction::Undo, TOAST)
             }
             Msg::Menu(path) => {
@@ -526,7 +526,7 @@ impl App {
                 self.bluetooth.ask(Ask::Rename(path.clone(), name.clone()));
                 // Empty: its own name again, which BlueZ says next.
                 let said = if name.is_empty() {
-                    w(words::ITS_OWN_NAME).get(lang).to_owned()
+                    words::ITS_OWN_NAME.get(lang).to_owned()
                 } else {
                     words::text(lang, name)
                 };

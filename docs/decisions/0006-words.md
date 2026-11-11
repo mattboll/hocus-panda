@@ -35,9 +35,11 @@ A generated table, in the crate `hocus-words`:
   from the files: adding a language is adding a file.
 - A plain text is a constant (`hocus_words::perf::MEMORY.get(lang)`); a
   text with `{placeholders}` or plural forms (`{ one = …, other = … }`) a
-  function taking the language and its arguments, `n` (the count) first,
-  the others by name (`hocus_words::perf::windows_opened(lang, 3)`); a list
-  (the months) a constant of one length in every language.
+  function taking the language and its argument
+  (`hocus_words::perf::windows_opened(lang, 3)`), or, with several, a
+  struct of named fields, so that two of one type cannot be swapped
+  (`perf::signal::MemoryLine { end, rate, since, start }`); a list (the
+  months) a constant of one length in every language.
 - What the files disagree on stops the build, and says which key in which
   file; a key the code asks for and no file has does not compile; a
   placeholder English gains changes the function, so every caller is
@@ -58,6 +60,6 @@ code, keyed on `Lang` where it differs.
   a test that renders what it says, in both languages, against what it
   said before the move (`tests/fixtures/words-*.txt`), so the text stays
   byte for byte the same.
-- Until a crate has moved, its `match lang` arms still compile against
-  the two languages; a third language's file then stops the build at
-  every such site still left, which is the list of what to migrate.
+- No code chooses between French and English any more: CI builds the
+  workspace with a third language file (`HOCUS_WORDS_TEST_LANGUAGE=1`),
+  and a `match lang` that forgets one stops that build.

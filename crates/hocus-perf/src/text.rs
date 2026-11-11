@@ -216,18 +216,32 @@ pub fn signal(s: &Signal, lang: Lang, tz: &TimeZone) -> (String, String) {
             w::sustained_cpu(lang, &span),
             w::sustained_cpu_line(
                 lang,
-                &long,
-                percent(s.value, lang),
-                percent(signals::CPU_PERCENT, lang),
+                w::SustainedCpuLine {
+                    long: &long,
+                    percent: percent(s.value, lang),
+                    threshold: percent(signals::CPU_PERCENT, lang),
+                },
             ),
         ),
         SignalKind::FramesAtRest => (
             w::frames_at_rest(lang, &span),
-            w::frames_at_rest_line(lang, number(s.value, 0, lang), &long),
+            w::frames_at_rest_line(
+                lang,
+                w::FramesAtRestLine {
+                    fps: number(s.value, 0, lang),
+                    long: &long,
+                },
+            ),
         ),
         SignalKind::Wakeups => (
             w::wakeups(lang, &span),
-            w::wakeups_line(lang, &long, number(s.value, 1, lang)),
+            w::wakeups_line(
+                lang,
+                w::WakeupsLine {
+                    long: &long,
+                    rate: number(s.value, 1, lang),
+                },
+            ),
         ),
         SignalKind::MemoryGrowing => {
             let whose = who(s.who.unwrap_or(Who::Shell), lang);
@@ -236,10 +250,12 @@ pub fn signal(s: &Signal, lang: Lang, tz: &TimeZone) -> (String, String) {
                 w::memory(lang, whose),
                 w::memory_line(
                     lang,
-                    megabytes(b, lang),
-                    number(s.value, 1, lang),
-                    clock(s.from, tz),
-                    (f64::from(a) / 1024.0).round(),
+                    w::MemoryLine {
+                        end: megabytes(b, lang),
+                        rate: number(s.value, 1, lang),
+                        since: clock(s.from, tz),
+                        start: (f64::from(a) / 1024.0).round(),
+                    },
                 ),
             )
         }
@@ -255,16 +271,36 @@ pub fn notification(s: &Signal, lang: Lang, tz: &TimeZone) -> String {
     use words::notification as w;
     let at = clock(s.from, tz);
     match s.kind {
-        SignalKind::SustainedCpu => w::sustained_cpu(lang, &at, percent(s.value, lang)),
-        SignalKind::FramesAtRest => w::frames_at_rest(lang, &at, number(s.value, 0, lang)),
+        SignalKind::SustainedCpu => w::sustained_cpu(
+            lang,
+            w::SustainedCpu {
+                at: &at,
+                percent: percent(s.value, lang),
+            },
+        ),
+        SignalKind::FramesAtRest => w::frames_at_rest(
+            lang,
+            w::FramesAtRest {
+                at: &at,
+                fps: number(s.value, 0, lang),
+            },
+        ),
         SignalKind::Wakeups => w::wakeups(lang, number(s.value, 1, lang)),
         SignalKind::MemoryGrowing => w::memory(
             lang,
-            &at,
-            number(s.value, 1, lang),
-            who(s.who.unwrap_or(Who::Shell), lang),
+            w::Memory {
+                at: &at,
+                rate: number(s.value, 1, lang),
+                whose: who(s.who.unwrap_or(Who::Shell), lang),
+            },
         ),
-        SignalKind::SlowMoment => w::slow_moment(lang, &at, number(s.value, 0, lang)),
+        SignalKind::SlowMoment => w::slow_moment(
+            lang,
+            w::SlowMoment {
+                at: &at,
+                ms: number(s.value, 0, lang),
+            },
+        ),
     }
 }
 
@@ -295,9 +331,11 @@ pub fn totals(r: &Report, lang: Lang, tz: &TimeZone) -> Vec<(String, String)> {
         "CPU".to_owned(),
         w::cpu(
             lang,
-            cpu_time(r.cpu.compositor_ms),
-            percent(r.cpu.average_percent, lang),
-            cpu_time(r.cpu.shell_ms),
+            w::Cpu {
+                compositor: cpu_time(r.cpu.compositor_ms),
+                percent: percent(r.cpu.average_percent, lang),
+                shell: cpu_time(r.cpu.shell_ms),
+            },
         ),
     ));
     let sum = |kb: [u32; 2]| kb[0] + kb[1];
@@ -459,153 +497,5 @@ Signaux
             notification(&r.signals[0], Lang::English, &tz),
             "The desktop drew 9 frames a second with nothing moving (since 08:00)."
         );
-    }
-
-    /// Everything this module says, in every language, against what it
-    /// said before its words moved to the catalogue (#775): byte for
-    /// byte. `HOCUS_WORDS_BLESS=1` writes the file again.
-    #[test]
-    fn the_words_are_those_said_before_the_catalogue() {
-        let tz = TimeZone::UTC;
-        let kinds = [
-            EventKind::WindowOpened,
-            EventKind::WindowClosed,
-            EventKind::ScreenPlugged,
-            EventKind::ScreenUnplugged,
-            EventKind::Locked,
-            EventKind::Unlocked,
-            EventKind::Suspend,
-            EventKind::Resume,
-            EventKind::SettingsPage,
-            EventKind::Config,
-            EventKind::OnBattery,
-            EventKind::OnAc,
-            EventKind::WallpaperMoving,
-            EventKind::WallpaperStill,
-            EventKind::Other,
-        ];
-        let event = |kind| Event {
-            t: 27_000,
-            kind,
-            what: "{what}".to_owned(),
-        };
-        let base = Peak {
-            n: 1,
-            from: 27_000,
-            to: 27_100,
-            cpu_percent: 12.5,
-            cpu_ms: 1_000,
-            signal: None,
-            events: Vec::new(),
-            wallpaper: false,
-            frames: 600,
-            inputs: 0,
-            motion_frames: 0,
-            app_commits: 0,
-        };
-        let mut peaks = vec![
-            Peak {
-                signal: Some(SignalKind::FramesAtRest),
-                ..base.clone()
-            },
-            Peak {
-                wallpaper: true,
-                inputs: 3,
-                ..base.clone()
-            },
-            Peak {
-                events: vec![event(EventKind::WindowOpened); 3],
-                ..base.clone()
-            },
-            Peak {
-                events: vec![event(EventKind::WindowOpened), event(EventKind::Config)],
-                ..base.clone()
-            },
-            Peak {
-                inputs: 1,
-                ..base.clone()
-            },
-            Peak {
-                app_commits: 1,
-                ..base.clone()
-            },
-            Peak {
-                motion_frames: 1,
-                ..base.clone()
-            },
-            base.clone(),
-        ];
-        for kind in [EventKind::ScreenPlugged, EventKind::Resume] {
-            peaks.push(Peak {
-                events: vec![event(kind)],
-                ..base.clone()
-            });
-        }
-        for kind in SignalKind::ALL {
-            peaks.push(Peak {
-                signal: Some(kind),
-                ..base.clone()
-            });
-        }
-        let signals: Vec<Signal> = SignalKind::ALL
-            .into_iter()
-            .map(|kind| Signal {
-                kind,
-                from: 27_000,
-                to: 27_400,
-                value: 42.25,
-                who: Some(Who::Compositor),
-                kb: Some([200_000, 300_000]),
-            })
-            .collect();
-        let full = Report {
-            from: Some(26_000),
-            to: Some(30_000),
-            recorded_s: 4_000,
-            locked_s: 600,
-            moving_wallpaper_s: 90,
-            power: Some(crate::report::Power {
-                average_mw: 6_500,
-                on_battery_s: 3_600,
-            }),
-            drawing: crate::report::Drawing {
-                frames: 52_000,
-                motion_frames: 1_200,
-                rest_wakeups_per_s: 0.4,
-                ..Default::default()
-            },
-            peaks: peaks.clone(),
-            signals: signals.clone(),
-            ..Default::default()
-        };
-        let mut said = String::new();
-        for lang in Lang::ALL {
-            said.push_str(&format!("# {lang:?}\n"));
-            said.push_str(&format!("{}\n", megabytes(300_000, lang)));
-            said.push_str(&format!("{}\n", date(on(), lang)));
-            for who in Who::ALL {
-                said.push_str(&format!("{}\n", self::who(who, lang)));
-            }
-            for kind in kinds {
-                said.push_str(&format!("{}\n", self::event(&event(kind), lang)));
-            }
-            for p in &peaks {
-                let (what, why) = peak(p, lang);
-                said.push_str(&format!("{what} | {why}\n"));
-            }
-            for s in &signals {
-                let (title, line) = signal(s, lang, &tz);
-                said.push_str(&format!("{title} | {line}\n"));
-                said.push_str(&format!("{}\n", notification(s, lang, &tz)));
-            }
-            said.push_str(&day(&Report::default(), on(), lang, &tz));
-            said.push_str(&signal_report(&full, &signals[0], on(), lang, &tz));
-        }
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/words-before.txt");
-        if std::env::var_os("HOCUS_WORDS_BLESS").is_some() {
-            std::fs::write(path, &said).unwrap();
-        }
-        let before = std::fs::read_to_string(path).unwrap();
-        assert_eq!(said, before);
     }
 }

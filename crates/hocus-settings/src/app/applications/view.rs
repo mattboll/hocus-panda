@@ -19,7 +19,6 @@ use crate::{
         view::{El, card_box, divided, icon, label, t},
     },
     applications::{self as model, ADDED, DEFAULTS_GROUP, Opens, STARTUP, STARTUP_GROUP, TERMINAL},
-    lang::w,
     model::{Icon as Glyph, SectionId},
 };
 
@@ -51,7 +50,7 @@ impl App {
             label(DEFAULTS_GROUP.label.get(lang)),
             Space::new().width(Length::Fill),
             t(
-                w(words::OTHER_APPLICATIONS_USE_THEM_TOO).get(lang),
+                words::OTHER_APPLICATIONS_USE_THEM_TOO.get(lang),
                 12.0,
                 FAINT.get(),
             ),
@@ -280,13 +279,13 @@ impl App {
             None if none => self.app_button(
                 Menu::Default(opens),
                 None,
-                w(words::NONE).get(lang).to_owned(),
+                words::NONE.get(lang).to_owned(),
                 true,
             ),
             None => self.app_button(
                 Menu::Default(opens),
                 None,
-                w(words::CHOOSE).get(lang).to_owned(),
+                words::CHOOSE.get(lang).to_owned(),
                 known.is_none(),
             ),
         };
@@ -309,12 +308,9 @@ impl App {
         let other = self.apps.typing.is_some() || (self.apps.known.is_some() && chosen.is_none());
         let line = match &self.apps.missing {
             Some(program) => (words::not_found_in_path(lang, program), AMBER.get()),
-            None if other => (
-                w(words::RUN_AS_IT_IS_BY_SUPER).get(lang).to_owned(),
-                DIM.get(),
-            ),
+            None if other => (words::RUN_AS_IT_IS_BY_SUPER.get(lang).to_owned(), DIM.get()),
             None => (
-                w(words::SUPER_RETURN_AND_APPLICATIONS_THAT_OPEN)
+                words::SUPER_RETURN_AND_APPLICATIONS_THAT_OPEN
                     .get(lang)
                     .to_owned(),
                 DIM.get(),
@@ -378,7 +374,7 @@ impl App {
                         (None, None) => self.app_button(
                             Menu::Terminal,
                             None,
-                            w(words::AUTOMATIC).get(lang).to_owned(),
+                            words::AUTOMATIC.get(lang).to_owned(),
                             !self.writable(),
                         ),
                     }
@@ -399,7 +395,7 @@ impl App {
             TERMINAL,
             self.lit(TERMINAL),
             row![
-                Self::app_words(w(words::TERMINAL).get(lang).to_owned(), line, None),
+                Self::app_words(words::TERMINAL.get(lang).to_owned(), line, None),
                 control,
             ]
             .spacing(16)
@@ -414,7 +410,7 @@ impl App {
         let lang = self.lang;
         let focused = self.apps_focused(&Stop::Add);
         let add = button(
-            text(w(words::ADD_AN_APPLICATION).get(lang))
+            text(words::ADD_AN_APPLICATION.get(lang))
                 .size(13)
                 .font(SEMIBOLD)
                 .color(GREEN.get()),
@@ -441,9 +437,9 @@ impl App {
                 true,
                 container(t(
                     if self.apps.known.is_some() {
-                        w(words::NO_APPLICATION_STARTS_WITH_THE_SESSION)
+                        words::NO_APPLICATION_STARTS_WITH_THE_SESSION
                     } else {
-                        w(words::ONE_MOMENT)
+                        words::ONE_MOMENT
                     }
                     .get(lang),
                     13.0,
@@ -458,7 +454,7 @@ impl App {
         }
         let mut foot: Vec<El<'_>> = vec![
             t(
-                w(words::THEY_START_ONCE_THE_BAR_SHOWS).get(lang),
+                words::THEY_START_ONCE_THE_BAR_SHOWS.get(lang),
                 12.0,
                 FAINT.get(),
             )
@@ -480,9 +476,9 @@ impl App {
             let focused = self.apps_focused(&Stop::Others);
             let link = button(
                 text(if self.apps.others {
-                    w(words::HIDE_THEM).get(lang)
+                    words::HIDE_THEM.get(lang)
                 } else {
-                    w(words::SHOW_THEM).get(lang)
+                    words::SHOW_THEM.get(lang)
                 })
                 .size(12)
                 .font(SEMIBOLD)
@@ -512,7 +508,7 @@ impl App {
             let mut list = column![];
             for (i, entry) in others.iter().enumerate() {
                 let line = if entry.only_in.is_empty() {
-                    w(words::NOT_FOR_THIS_DESKTOP).get(lang).to_owned()
+                    words::NOT_FOR_THIS_DESKTOP.get(lang).to_owned()
                 } else {
                     let names = entry.only_in.join(", ");
                     words::r#for(lang, &names)
@@ -560,7 +556,7 @@ impl App {
         });
         let mut line = row![].spacing(0).align_y(Alignment::Center);
         if own {
-            line = line.push(t(w(words::ADDED_BY_YOU).get(lang), 12.5, DIM.get()));
+            line = line.push(t(words::ADDED_BY_YOU.get(lang), 12.5, DIM.get()));
             if app.is_none() && !entry.exec.is_empty() {
                 line = line.push(t(" · ", 12.5, DIM.get()));
                 line = line.push(
@@ -571,9 +567,7 @@ impl App {
                 );
             }
         } else {
-            let mut said = w(words::INSTALLED_WITH_THE_APPLICATION)
-                .get(lang)
-                .to_owned();
+            let mut said = words::INSTALLED_WITH_THE_APPLICATION.get(lang).to_owned();
             if let Some(comment) = entry.comment.as_deref().filter(|c| c.chars().count() <= 40) {
                 said = format!("{} · {}", said.trim_end_matches('.'), lower_first(comment));
             }
@@ -671,8 +665,8 @@ impl App {
             {
                 Some("") => (
                     None,
-                    w(words::AUTOMATIC).get(lang).to_owned(),
-                    Some(w(words::THE_FIRST_FOUND).get(lang).to_owned()),
+                    words::AUTOMATIC.get(lang).to_owned(),
+                    Some(words::THE_FIRST_FOUND.get(lang).to_owned()),
                 ),
                 Some(id) => {
                     let app = known.app(id);
@@ -683,7 +677,7 @@ impl App {
                         None,
                     )
                 }
-                None => (None, w(words::OTHER_COMMAND).get(lang).to_owned(), None),
+                None => (None, words::OTHER_COMMAND.get(lang).to_owned(), None),
             };
             if id.is_none() {
                 list = list.push(
@@ -792,7 +786,7 @@ impl App {
     pub(in crate::app) fn apps_sheet(&self) -> Option<El<'_>> {
         let sheet = self.apps.sheet.as_ref()?;
         let lang = self.lang;
-        let field = text_input(w(words::SEARCH_AN_APPLICATION).get(lang), &sheet.query)
+        let field = text_input(words::SEARCH_AN_APPLICATION.get(lang), &sheet.query)
             .id(SEARCH)
             .size(13.5)
             .padding(Padding {
@@ -853,18 +847,14 @@ impl App {
         }
         if apps.is_empty() {
             list = list.push(
-                container(t(
-                    w(words::NO_APPLICATION_TO_ADD).get(lang),
-                    13.0,
-                    FAINT.get(),
-                ))
-                .padding([10, 10]),
+                container(t(words::NO_APPLICATION_TO_ADD.get(lang), 13.0, FAINT.get()))
+                    .padding([10, 10]),
             );
         }
         let shown = (apps.len().clamp(1, 7) as f32) * 40.0;
         let ready = !apps.is_empty();
         let mut add = button(
-            text(w(words::ADD).get(lang))
+            text(words::ADD.get(lang))
                 .size(13)
                 .font(BOLD)
                 .color(if ready { DEEP.get() } else { DIM.get() }),
@@ -895,13 +885,13 @@ impl App {
         if ready {
             add = add.on_press(Message::Apps(Msg::Add));
         }
-        let cancel = button(t(w(words::CANCEL).get(lang), 13.0, DIM.get()).font(SEMIBOLD))
+        let cancel = button(t(words::CANCEL.get(lang), 13.0, DIM.get()).font(SEMIBOLD))
             .height(30)
             .padding([6, 13])
             .style(flat(None, HOVER.get(), 8.0, false))
             .on_press(Message::Apps(Msg::Sheet(false)));
         let body = column![
-            text(w(words::ADD_TO_START_UP).get(lang))
+            text(words::ADD_TO_START_UP.get(lang))
                 .size(16)
                 .font(BOLD)
                 .color(TEXT.get()),

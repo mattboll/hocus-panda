@@ -180,7 +180,7 @@ fn start(machine: &Machine) -> anyhow::Result<Option<Bed>> {
     let mut config = Config {
         file: Some(settings),
         plain_background: true,
-        french: true,
+        lang: hocus_words::Lang::French,
         ..Config::default()
     };
     config.keyboard.layouts = vec!["us".to_owned()];

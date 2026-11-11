@@ -9,13 +9,13 @@ use hocus_sound::{Card, Kind, Mixer, Sink};
 use hocus_words::settings::sound as words;
 
 use crate::{
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::{Outside, SectionId},
 };
 
-const OUTPUT: Words = w(words::OUTPUT);
-const INPUT: Words = w(words::INPUT);
-const APPS: Words = w(words::APPLICATIONS);
+const OUTPUT: Words = words::OUTPUT;
+const INPUT: Words = words::INPUT;
+const APPS: Words = words::APPLICATIONS;
 
 /// The page's settings, for the search: each lights its row.
 pub fn outside() -> &'static [Outside] {
@@ -38,63 +38,63 @@ pub fn outside() -> &'static [Outside] {
         o(
             "sound.output",
             OUTPUT,
-            w(words::OUTPUT_2),
+            words::OUTPUT_2,
             &["haut-parleurs", "casque", "enceinte", "hdmi", "displayport"],
             &["output", "speaker", "headphones"],
         ),
         o(
             "sound.output-volume",
             OUTPUT,
-            w(words::OUTPUT_VOLUME),
+            words::OUTPUT_VOLUME,
             &["fort", "muet"],
             &["volume", "mute", "loud"],
         ),
         o(
             "sound.profile",
             OUTPUT,
-            w(words::PROFILE),
+            words::PROFILE,
             &["a2dp", "hfp", "qualité", "mode appel"],
             &["profile", "codec"],
         ),
         o(
             "sound.balance",
             OUTPUT,
-            w(words::BALANCE),
+            words::BALANCE,
             &["gauche", "droite"],
             &["left", "right", "stereo"],
         ),
         o(
             "sound.test",
             OUTPUT,
-            w(words::TEST_THE_SPEAKERS),
+            words::TEST_THE_SPEAKERS,
             &["essai"],
             &["test"],
         ),
         o(
             "sound.input",
             INPUT,
-            w(words::INPUT_2),
+            words::INPUT_2,
             &["micro", "microphone", "casque"],
             &["input", "mic"],
         ),
         o(
             "sound.input-volume",
             INPUT,
-            w(words::MICROPHONE_VOLUME),
+            words::MICROPHONE_VOLUME,
             &["gain", "sensibilité"],
             &["gain"],
         ),
         o(
             "sound.meter",
             INPUT,
-            w(words::MICROPHONE_LEVEL),
+            words::MICROPHONE_LEVEL,
             &["vumètre"],
             &["level", "meter"],
         ),
         o(
             "sound.apps",
             APPS,
-            w(words::APPLICATIONS_VOLUME),
+            words::APPLICATIONS_VOLUME,
             &["mélangeur"],
             &["mixer", "per application"],
         ),
@@ -180,7 +180,7 @@ pub fn balanced(sink: &Sink, balance: i32) -> Vec<f32> {
 /// "centre", "G 30", "D 30".
 pub fn say_balance(balance: i32, lang: Lang) -> String {
     match balance.signum() {
-        0 => w(words::CENTRE).get(lang).to_owned(),
+        0 => words::CENTRE.get(lang).to_owned(),
         -1 => words::l(lang, -balance),
         _ => words::r(lang, balance),
     }
@@ -212,24 +212,20 @@ pub fn line(sink: &Sink, graph: &Graph, input: bool, lang: Lang) -> String {
     if bluetooth(sink, card) {
         let mut said = "Bluetooth".to_owned();
         if !input && in_call_mode(card) {
-            said.push_str(w(words::CALL_MODE).get(lang));
+            said.push_str(words::CALL_MODE.get(lang));
         }
         return said;
     }
     if sink.kind == Kind::Screen {
-        return w(words::EXTERNAL_SCREEN).get(lang).to_owned();
+        return words::EXTERNAL_SCREEN.get(lang).to_owned();
     }
     match (sink.form_factor.as_deref(), sink.bus.as_deref(), input) {
-        (Some("internal"), _, false) | (None, Some("pci"), false) => {
-            w(words::BUILT_INTO_THE_LAPTOP)
-        }
-        (Some("internal"), _, true) | (None, Some("pci"), true) => {
-            w(words::BUILT_INTO_THE_LAPTOP_2)
-        }
-        (_, Some("usb"), _) => w(words::USB),
+        (Some("internal"), _, false) | (None, Some("pci"), false) => words::BUILT_INTO_THE_LAPTOP,
+        (Some("internal"), _, true) | (None, Some("pci"), true) => words::BUILT_INTO_THE_LAPTOP_2,
+        (_, Some("usb"), _) => words::USB,
         _ => match card {
             Some(card) if !card.description.is_empty() => return card.description.clone(),
-            _ => w(words::ON_THIS_PIPEWIRE),
+            _ => words::ON_THIS_PIPEWIRE,
         },
     }
     .get(lang)
@@ -301,13 +297,9 @@ fn ellipsized(name: &str, most: usize) -> String {
 /// input).
 pub fn say_volume(sink: &Sink, input: bool, lang: Lang) -> String {
     match sink.sound {
-        Some(s) if s.muted => if input {
-            w(words::OFF)
-        } else {
-            w(words::MUTED)
-        }
-        .get(lang)
-        .to_owned(),
+        Some(s) if s.muted => if input { words::OFF } else { words::MUTED }
+            .get(lang)
+            .to_owned(),
         Some(s) => format!("{} %", s.volume.round() as i32),
         None => String::new(),
     }
@@ -316,12 +308,12 @@ pub fn say_volume(sink: &Sink, input: bool, lang: Lang) -> String {
 /// The line under a profile: what it is for, for a headset's.
 pub fn profile_line(name: &str, only: bool) -> Option<Words> {
     if only {
-        return Some(w(words::THE_ONLY_ONE_THIS_DEVICE_OFFERS));
+        return Some(words::THE_ONLY_ONE_THIS_DEVICE_OFFERS);
     }
     if name.starts_with("a2dp") {
-        Some(w(words::THE_BEST_SOUND_THE_HEADSET_S))
+        Some(words::THE_BEST_SOUND_THE_HEADSET_S)
     } else if call_mode(name) {
-        Some(w(words::PHONE_QUALITY_TO_TALK_INTO_THE))
+        Some(words::PHONE_QUALITY_TO_TALK_INTO_THE)
     } else {
         None
     }
@@ -446,7 +438,7 @@ mod tests {
         assert!(headsets_asleep(&graph).is_empty());
         assert!(profile_line("a2dp-sink", false).is_some());
         assert_eq!(
-            profile_line("headset-head-unit", false).map(|w| w.en),
+            profile_line("headset-head-unit", false).map(|w| w.get(hocus_words::Lang::English)),
             Some("Phone quality, to talk into the headset's microphone.")
         );
     }

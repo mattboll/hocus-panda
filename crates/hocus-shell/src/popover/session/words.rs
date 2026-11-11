@@ -62,15 +62,10 @@ impl Words {
 
     /// The countdown's sentence, `seconds` left.
     pub fn counting(self, action: LeaveAction, seconds: u32) -> String {
-        match (action, (self.lang == Lang::French)) {
-            (LeaveAction::LogOut, true) => format!("La session se ferme dans {seconds} s."),
-            (LeaveAction::LogOut, false) => format!("The session ends in {seconds} s."),
-            (LeaveAction::Restart, true) => format!("L’ordinateur redémarre dans {seconds} s."),
-            (LeaveAction::Restart, false) => format!("The computer restarts in {seconds} s."),
-            (LeaveAction::ShutDown, true) => format!("L’ordinateur s’éteint dans {seconds} s."),
-            (LeaveAction::ShutDown, false) => {
-                format!("The computer shuts down in {seconds} s.")
-            }
+        match action {
+            LeaveAction::LogOut => txt::the_session_ends_in_s(self.lang, seconds),
+            LeaveAction::Restart => txt::the_computer_restarts_in_s(self.lang, seconds),
+            LeaveAction::ShutDown => txt::the_computer_shuts_down_in_s(self.lang, seconds),
         }
     }
 
@@ -106,11 +101,21 @@ impl Words {
     /// The list's title: `app` alone, or `count` applications.
     pub fn held(self, action: LeaveAction, app: &str, count: usize) -> String {
         let what = self.held_what(action);
-        match (count, (self.lang == Lang::French)) {
-            (1, true) => format!("{app} retient {what}"),
-            (1, false) => format!("{app} is holding back {what}"),
-            (n, true) => format!("{n} applications retiennent {what}"),
-            (n, false) => format!("{n} applications are holding back {what}"),
+        match count {
+            1 => txt::is_holding_back(
+                self.lang,
+                txt::IsHoldingBack {
+                    app: &app,
+                    what: &what,
+                },
+            ),
+            n => txt::applications_are_holding_back(
+                self.lang,
+                txt::ApplicationsAreHoldingBack {
+                    what: &what,
+                    x_n: &n,
+                },
+            ),
         }
     }
 
@@ -129,11 +134,9 @@ impl Words {
 
     /// What a window that did not close says, its title `title`.
     pub fn window_open(self, title: &str) -> String {
-        match (title.trim().is_empty(), (self.lang == Lang::French)) {
-            (true, true) => "Sa fenêtre ne s’est pas fermée.".to_owned(),
-            (true, false) => "Its window did not close.".to_owned(),
-            (false, true) => format!("« {title} » ne s’est pas fermée."),
-            (false, false) => format!("“{title}” did not close."),
+        match title.trim().is_empty() {
+            true => txt::ITS_WINDOW_DID_NOT_CLOSE.get(self.lang).to_owned(),
+            false => txt::did_not_close(self.lang, title),
         }
     }
 

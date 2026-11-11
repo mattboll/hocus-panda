@@ -15,16 +15,16 @@ use std::sync::OnceLock;
 use hocus_link::input::{Bus, DeviceKind, InputDevice, RightClick};
 
 use crate::{
-    lang::{Lang, Words, pair, w},
+    lang::{Lang, Words},
     model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const TOUCHPAD: RowGroup = RowGroup {
-    label: w(words::TOUCHPAD),
+    label: words::TOUCHPAD,
     per_source: false,
 };
 pub const MOUSE: RowGroup = RowGroup {
-    label: w(words::MOUSE),
+    label: words::MOUSE,
     per_source: false,
 };
 /// The gestures' rows (6.13).
@@ -33,7 +33,7 @@ pub const SWIPE_LAUNCHER: &str = "touchpad.swipe-launcher";
 pub const LEFT_TO_APPS: &str = "touchpad.left-to-applications";
 
 pub const GESTURES: RowGroup = RowGroup {
-    label: w(words::TOUCHPAD_GESTURES),
+    label: words::TOUCHPAD_GESTURES,
     per_source: false,
 };
 
@@ -45,9 +45,9 @@ const PROFILES: &[&str] = &["adaptive", "flat"];
 const SPEED: Kind = Kind::Speed { min: -10, max: 10 };
 const TENTHS: Codec = Codec::Tenths { min: -10, max: 10 };
 
-fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
+fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
-        label: pair(fr, en),
+        label: text,
         value: Value::Word(word),
     }
 }
@@ -89,7 +89,7 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.speed",
                 TOUCHPAD,
-                w(words::POINTER_SPEED),
+                words::POINTER_SPEED,
                 None,
                 (
                     &["vitesse", "sensibilité", "pavé", "touchpad"],
@@ -102,8 +102,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.tap-to-click",
                 TOUCHPAD,
-                w(words::TAP_TO_CLICK),
-                Some(w(words::ONE_FINGER_CLICKS_TWO_RIGHT_CLICK)),
+                words::TAP_TO_CLICK,
+                Some(words::ONE_FINGER_CLICKS_TWO_RIGHT_CLICK),
                 (
                     &["tap", "taper", "toucher", "pavé", "clic"],
                     &["tap", "touchpad", "click"],
@@ -115,8 +115,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.tap-and-drag",
                 TOUCHPAD,
-                w(words::TAP_AND_DRAG),
-                Some(w(words::TAP_TWICE_AND_HOLD_THE_SECOND)),
+                words::TAP_AND_DRAG,
+                Some(words::TAP_TWICE_AND_HOLD_THE_SECOND),
                 (
                     &["glisser", "déplacer", "tap", "pavé"],
                     &["drag", "tap", "touchpad"],
@@ -128,8 +128,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.right-click",
                 TOUCHPAD,
-                w(words::RIGHT_CLICK_BY_PRESSING),
-                Some(w(words::WITH_TWO_FINGERS_ANYWHERE_OR_ONE)),
+                words::RIGHT_CLICK_BY_PRESSING,
+                Some(words::WITH_TWO_FINGERS_ANYWHERE_OR_ONE),
                 (
                     &["clic droit", "deux doigts", "coin", "clickfinger", "pavé"],
                     &[
@@ -141,8 +141,8 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 Kind::Menu(vec![
-                    word("À deux doigts", "With two fingers", "two-fingers"),
-                    word("Coin inférieur droit", "Bottom-right corner", "corner"),
+                    word(words::WITH_TWO_FINGERS, "two-fingers"),
+                    word(words::BOTTOM_RIGHT_CORNER, "corner"),
                 ]),
                 // Without the key, the touchpad's own (libinput's default
                 // for it): the window shows the device's.
@@ -156,8 +156,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.disable-while-typing",
                 TOUCHPAD,
-                w(words::OFF_WHILE_TYPING),
-                Some(w(words::YOUR_PALM_DOES_NOT_MOVE_THE)),
+                words::OFF_WHILE_TYPING,
+                Some(words::YOUR_PALM_DOES_NOT_MOVE_THE),
                 (
                     &["paume", "frappe", "taper", "clavier", "pavé"],
                     &["palm", "typing", "keyboard", "touchpad"],
@@ -169,8 +169,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.natural-scroll",
                 TOUCHPAD,
-                w(words::NATURAL_SCROLLING),
-                Some(w(words::CONTENT_FOLLOWS_YOUR_FINGERS)),
+                words::NATURAL_SCROLLING,
+                Some(words::CONTENT_FOLLOWS_YOUR_FINGERS),
                 (
                     &["défilement", "inversé", "sens", "pavé"],
                     &["natural", "scroll", "reverse", "touchpad"],
@@ -182,15 +182,15 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.scroll",
                 TOUCHPAD,
-                w(words::SCROLL),
+                words::SCROLL,
                 None,
                 (
                     &["défilement", "deux doigts", "bord", "pavé"],
                     &["scroll", "two fingers", "edge", "touchpad"],
                 ),
                 Kind::Menu(vec![
-                    word("À deux doigts", "With two fingers", "two-fingers"),
-                    word("Sur le bord droit", "On the right edge", "edge"),
+                    word(words::WITH_TWO_FINGERS, "two-fingers"),
+                    word(words::ON_THE_RIGHT_EDGE, "edge"),
                 ]),
                 one(&["touchpad", "scroll"], Codec::Word(SCROLLS)),
                 None,
@@ -198,8 +198,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "touchpad.off-with-mouse",
                 TOUCHPAD,
-                w(words::OFF_WHILE_A_MOUSE_IS_PLUGGED),
-                Some(w(words::IT_COMES_BACK_AS_SOON_AS)),
+                words::OFF_WHILE_A_MOUSE_IS_PLUGGED,
+                Some(words::IT_COMES_BACK_AS_SOON_AS),
                 (
                     &["souris", "couper", "désactiver", "pavé"],
                     &["mouse", "disable", "touchpad"],
@@ -211,7 +211,7 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.speed",
                 MOUSE,
-                w(words::POINTER_SPEED),
+                words::POINTER_SPEED,
                 None,
                 speed_words,
                 SPEED,
@@ -221,15 +221,15 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.acceleration",
                 MOUSE,
-                w(words::ACCELERATION),
-                Some(w(words::ADAPTIVE_A_QUICK_MOVE_GOES_FURTHER)),
+                words::ACCELERATION,
+                Some(words::ADAPTIVE_A_QUICK_MOVE_GOES_FURTHER),
                 (
                     &["accélération", "précision", "souris"],
                     &["acceleration", "flat", "precision", "mouse"],
                 ),
                 Kind::Menu(vec![
-                    word("Adaptative", "Adaptive", "adaptive"),
-                    word("Aucune", "None", "flat"),
+                    word(words::ADAPTIVE, "adaptive"),
+                    word(words::NONE, "flat"),
                 ]),
                 one(&["pointer", "acceleration"], Codec::Word(PROFILES)),
                 None,
@@ -237,8 +237,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.natural-scroll",
                 MOUSE,
-                w(words::NATURAL_SCROLLING),
-                Some(w(words::CONTENT_FOLLOWS_THE_WHEEL_AS_UNDER)),
+                words::NATURAL_SCROLLING,
+                Some(words::CONTENT_FOLLOWS_THE_WHEEL_AS_UNDER),
                 (
                     &["défilement", "inversé", "molette", "souris"],
                     &["natural", "scroll", "wheel", "reverse", "mouse"],
@@ -250,8 +250,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 "pointer.left-handed",
                 MOUSE,
-                w(words::LEFT_HANDED),
-                Some(w(words::THE_RIGHT_BUTTON_BECOMES_THE_MAIN)),
+                words::LEFT_HANDED,
+                Some(words::THE_RIGHT_BUTTON_BECOMES_THE_MAIN),
                 (
                     &["gaucher", "boutons", "inverser", "souris"],
                     &["left-handed", "buttons", "swap", "mouse"],
@@ -263,8 +263,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SWIPE_DESKTOPS,
                 GESTURES,
-                w(words::THREE_FINGERS_SIDEWAYS),
-                Some(w(words::SWITCH_DESKTOP_ON_THE_SCREEN_UNDER)),
+                words::THREE_FINGERS_SIDEWAYS,
+                Some(words::SWITCH_DESKTOP_ON_THE_SCREEN_UNDER),
                 (
                     &[
                         "geste",
@@ -290,8 +290,8 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 SWIPE_LAUNCHER,
                 GESTURES,
-                w(words::FOUR_FINGERS_UP_OR_DOWN),
-                Some(w(words::UP_OPENS_THE_LAUNCHER_WHICH_GROWS)),
+                words::FOUR_FINGERS_UP_OR_DOWN,
+                Some(words::UP_OPENS_THE_LAUNCHER_WHICH_GROWS),
                 (
                     &[
                         "geste",
@@ -322,13 +322,13 @@ pub fn settings() -> &'static [Setting] {
             setting(
                 LEFT_TO_APPS,
                 GESTURES,
-                w(words::WHAT_IS_LEFT_TO_APPLICATIONS),
-                Some(w(words::TWO_FINGERS_TO_SCROLL_AND_PINCH)),
+                words::WHAT_IS_LEFT_TO_APPLICATIONS,
+                Some(words::TWO_FINGERS_TO_SCROLL_AND_PINCH),
                 (
                     &["geste", "doigts", "pincer", "applications", "pavé"],
                     &["gesture", "fingers", "pinch", "applications", "touchpad"],
                 ),
-                Kind::Note(w(words::ALWAYS)),
+                Kind::Note(words::ALWAYS),
                 Places::Page(Place {
                     key: &["touchpad", "swipe-desktops"],
                     codec: Codec::Bool,
@@ -355,8 +355,8 @@ pub fn kind_of(setting: &str) -> Option<DeviceKind> {
 pub fn aside(setting: &str) -> Option<Words> {
     match kind_of(setting)? {
         DeviceKind::Touchpad if setting.starts_with("touchpad.swipe") => None,
-        DeviceKind::Touchpad => Some(w(words::TOUCHPAD_2)),
-        DeviceKind::Pointer => Some(w(words::MOUSE_2)),
+        DeviceKind::Touchpad => Some(words::TOUCHPAD_2),
+        DeviceKind::Pointer => Some(words::MOUSE_2),
     }
 }
 
@@ -408,20 +408,20 @@ pub fn named(kind: DeviceKind, devices: &[InputDevice], lang: Lang) -> Option<St
         (_, []) => None,
         (DeviceKind::Touchpad, [one, ..]) => Some(
             if one.built_in {
-                w(words::BUILT_IN)
+                words::BUILT_IN
             } else if one.bus == Bus::Bluetooth {
-                w(words::BLUETOOTH_TOUCHPAD)
+                words::BLUETOOTH_TOUCHPAD
             } else {
-                w(words::USB_TOUCHPAD)
+                words::USB_TOUCHPAD
             }
             .get(lang)
             .to_owned(),
         ),
         (DeviceKind::Pointer, [one]) => Some(
             match (one.bus, one.built_in) {
-                (Bus::Bluetooth, _) => w(words::BLUETOOTH_MOUSE),
-                (Bus::Usb, _) => w(words::USB_MOUSE),
-                (Bus::Internal, _) => w(words::BUILT_IN_2),
+                (Bus::Bluetooth, _) => words::BLUETOOTH_MOUSE,
+                (Bus::Usb, _) => words::USB_MOUSE,
+                (Bus::Internal, _) => words::BUILT_IN_2,
             }
             .get(lang)
             .to_owned(),
@@ -520,9 +520,12 @@ mod tests {
         assert!(!takes("touchpad.right-click", Some(&devices)));
         assert!(takes("touchpad.scroll", None), "devices not known yet");
         assert_eq!(
-            aside("touchpad.natural-scroll").map(|w| w.fr),
+            aside("touchpad.natural-scroll").map(|w| w.get(hocus_words::Lang::French)),
             Some(", pavé tactile")
         );
-        assert_eq!(aside("pointer.speed").map(|w| w.en), Some(", mouse"));
+        assert_eq!(
+            aside("pointer.speed").map(|w| w.get(hocus_words::Lang::English)),
+            Some(", mouse")
+        );
     }
 }

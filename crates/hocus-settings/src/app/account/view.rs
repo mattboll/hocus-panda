@@ -25,7 +25,7 @@ use crate::{
         style::*,
         view::{El, card_box, divided, label, t},
     },
-    lang::{Lang, Words, w},
+    lang::{Lang, Words},
     model::SectionId,
     theme::Ink,
 };
@@ -51,7 +51,7 @@ impl App {
     pub(in crate::app) fn account_page<'a>(&'a self, mut page: Column<'a, Message>) -> El<'a> {
         let lang = self.lang;
         page = page.push(group(
-            w(words::PROFILE).get(lang),
+            words::PROFILE.get(lang),
             column![
                 self.account_avatar_row(),
                 divided(true, self.account_name_row()),
@@ -61,14 +61,14 @@ impl App {
             .into(),
         ));
         page = page.push(group(
-            w(words::SECURITY).get(lang),
+            words::SECURITY.get(lang),
             column![
                 self.account_password_row(),
                 divided(true, self.account_lock_row()),
             ]
             .into(),
         ));
-        page = page.push(group(w(words::LATER).get(lang), later_row(lang)));
+        page = page.push(group(words::LATER.get(lang), later_row(lang)));
         container(page)
             .id(format!("page:{}", SectionId::Account.section().slug))
             .into()
@@ -110,7 +110,7 @@ impl App {
         let mut change = button(
             row![
                 stroke(IMAGE, DIM.get(), 14.0),
-                t(w(words::CHANGE_AVATAR).get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
+                t(words::CHANGE_AVATAR.get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
             ]
             .spacing(7)
             .height(Length::Fill)
@@ -132,7 +132,7 @@ impl App {
                         .font(BOLD)
                         .color(TEXT),
                     t(
-                        w(words::ON_THE_LOCK_SCREEN_AT_LOGIN).get(lang),
+                        words::ON_THE_LOCK_SCREEN_AT_LOGIN.get(lang),
                         12.5,
                         DIM.get(),
                     ),
@@ -190,8 +190,8 @@ impl App {
         ];
         self.simple_row(
             model::NAME,
-            w(words::DISPLAY_NAME),
-            w(words::YOUR_FULL_NAME_AS_THE_DESKTOP).get(lang).to_owned(),
+            words::DISPLAY_NAME,
+            words::YOUR_FULL_NAME_AS_THE_DESKTOP.get(lang).to_owned(),
             DIM.get(),
             container(field).id(format!("box:{NAME_FIELD}")).into(),
         )
@@ -205,8 +205,8 @@ impl App {
             .unwrap_or_default();
         self.simple_row(
             model::LOGIN,
-            w(words::LOGIN_NAME),
-            w(words::THE_LOGIN_NAME_IT_IS_NOT).get(self.lang).to_owned(),
+            words::LOGIN_NAME,
+            words::THE_LOGIN_NAME_IT_IS_NOT.get(self.lang).to_owned(),
             DIM.get(),
             text(login).size(12.5).font(MONO).color(SOFT).into(),
         )
@@ -217,13 +217,13 @@ impl App {
         let admin = self.account.account().is_some_and(|a| a.admin);
         let (value, line) = if admin {
             (
-                w(words::ADMINISTRATOR),
-                w(words::CAN_INSTALL_SOFTWARE_AND_CHANGE_SYSTEM),
+                words::ADMINISTRATOR,
+                words::CAN_INSTALL_SOFTWARE_AND_CHANGE_SYSTEM,
             )
         } else {
             (
-                w(words::STANDARD),
-                w(words::SYSTEM_SETTINGS_ASK_FOR_AN_ADMINISTRATOR),
+                words::STANDARD,
+                words::SYSTEM_SETTINGS_ASK_FOR_AN_ADMINISTRATOR,
             )
         };
         let value = if self.account.account().is_some() {
@@ -233,7 +233,7 @@ impl App {
         };
         self.simple_row(
             model::KIND,
-            w(words::ACCOUNT_TYPE),
+            words::ACCOUNT_TYPE,
             line.get(lang).to_owned(),
             DIM.get(),
             t(value, 13.5, SOFT.get()).into(),
@@ -247,7 +247,7 @@ impl App {
         let mut change = button(
             row![
                 stroke(KEY, DIM.get(), 14.0),
-                t(w(words::CHANGE).get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
+                t(words::CHANGE.get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
             ]
             .spacing(7)
             .height(Length::Fill)
@@ -260,13 +260,13 @@ impl App {
             change = change.on_press(Message::Account(Msg::Sheet(true)));
         }
         let line = if can {
-            w(words::IT_OPENS_THE_SESSION_UNLOCKS_IT)
+            words::IT_OPENS_THE_SESSION_UNLOCKS_IT
         } else {
-            w(words::THE_PASSWORD_IS_CHANGED_WITH_THE)
+            words::THE_PASSWORD_IS_CHANGED_WITH_THE
         };
         self.simple_row(
             model::PASSWORD,
-            w(words::PASSWORD),
+            words::PASSWORD,
             line.get(lang).to_owned(),
             DIM.get(),
             container(change)
@@ -290,10 +290,8 @@ impl App {
             ));
         self.simple_row(
             model::LOCK,
-            w(words::AUTOMATIC_LOCKING),
-            w(words::WHEN_THE_SESSION_LOCKS_BY_ITSELF)
-                .get(lang)
-                .to_owned(),
+            words::AUTOMATIC_LOCKING,
+            words::WHEN_THE_SESSION_LOCKS_BY_ITSELF.get(lang).to_owned(),
             DIM.get(),
             container(link).id(format!("link:{}", model::LOCK)).into(),
         )
@@ -407,7 +405,7 @@ impl App {
         let mut remove = button(
             container(
                 t(
-                    w(words::REMOVE).get(lang),
+                    words::REMOVE.get(lang),
                     13.0,
                     fade(TEXT.get(), if removable { 1.0 } else { INERT }),
                 )
@@ -425,7 +423,7 @@ impl App {
         let choose = button(
             row![
                 stroke(IMAGE, DIM.get(), 14.0),
-                t(w(words::CHOOSE_A_PICTURE).get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
+                t(words::CHOOSE_A_PICTURE.get(lang), 13.0, TEXT.get()).font(SEMIBOLD),
             ]
             .spacing(7)
             .height(Length::Fill)
@@ -437,7 +435,7 @@ impl App {
         .style(|_: &Theme, status| secondary(status, false, false, false));
         let panel = container(
             column![
-                label(w(words::THE_PANDAS).get(lang)),
+                label(words::THE_PANDAS.get(lang)),
                 grid,
                 container(Space::new().width(Length::Fill).height(1)).style(boxed(
                     LINE.get(),
@@ -450,7 +448,7 @@ impl App {
                 ]
                 .spacing(8),
                 t(
-                    w(words::A_PICTURE_IS_CROPPED_TO_A).get(lang),
+                    words::A_PICTURE_IS_CROPPED_TO_A.get(lang),
                     12.0,
                     FAINT.get(),
                 )
@@ -484,9 +482,9 @@ impl App {
         let sheet = self.account.sheet.as_ref()?;
         let lang = self.lang;
         let names = [
-            w(words::CURRENT_PASSWORD),
-            w(words::NEW_PASSWORD),
-            w(words::ONCE_MORE),
+            words::CURRENT_PASSWORD,
+            words::NEW_PASSWORD,
+            words::ONCE_MORE,
         ];
         let mut fields = column![].spacing(12);
         for (i, name) in names.iter().enumerate() {
@@ -498,20 +496,15 @@ impl App {
             .spacing(6);
             let under: Option<(String, Color)> = match i {
                 0 if sheet.wrong_current => Some((
-                    w(words::THAT_IS_NOT_THE_CURRENT_PASSWORD)
-                        .get(lang)
-                        .to_owned(),
+                    words::THAT_IS_NOT_THE_CURRENT_PASSWORD.get(lang).to_owned(),
                     REFUSED.get(),
                 )),
                 1 => sheet.refused.clone().map(|why| (why, REFUSED.get())),
                 2 => sheet.matching().map(|same| {
                     if same {
-                        (w(words::BOTH_MATCH).get(lang).to_owned(), MINT.get())
+                        (words::BOTH_MATCH.get(lang).to_owned(), MINT.get())
                     } else {
-                        (
-                            w(words::THEY_DO_NOT_MATCH).get(lang).to_owned(),
-                            PEACH.get(),
-                        )
+                        (words::THEY_DO_NOT_MATCH.get(lang).to_owned(), PEACH.get())
                     }
                 }),
                 _ => None,
@@ -525,9 +518,9 @@ impl App {
         let ready = sheet.ready();
         let mut change = button(
             text(if sheet.running {
-                w(words::CHANGING).get(lang)
+                words::CHANGING.get(lang)
             } else {
-                w(words::CHANGE_2).get(lang)
+                words::CHANGE_2.get(lang)
             })
             .size(13)
             .font(BOLD)
@@ -552,7 +545,7 @@ impl App {
         if ready {
             change = change.on_press(Message::Account(Msg::Change));
         }
-        let mut cancel = button(t(w(words::CANCEL).get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
+        let mut cancel = button(t(words::CANCEL.get(lang), 13.0, TEXT.get()).font(SEMIBOLD))
             .height(32)
             .padding([7, 14])
             .style(|_: &Theme, status| {
@@ -568,7 +561,7 @@ impl App {
         let mut body = column![
             row![
                 stroke(KEY, TEXT.get(), 18.0),
-                text(w(words::CHANGE_THE_PASSWORD).get(lang))
+                text(words::CHANGE_THE_PASSWORD.get(lang))
                     .size(17)
                     .font(BOLD)
                     .color(TEXT),
@@ -576,14 +569,14 @@ impl App {
             .spacing(10)
             .align_y(Alignment::Center),
             t(
-                w(words::THE_ONE_THAT_OPENS_YOUR_SESSION).get(lang),
+                words::THE_ONE_THAT_OPENS_YOUR_SESSION.get(lang),
                 13.0,
                 SOFT.get(),
             )
             .line_height(1.45),
             fields,
             t(
-                w(words::THE_SYSTEM_MAY_REFUSE_A_PASSWORD).get(lang),
+                words::THE_SYSTEM_MAY_REFUSE_A_PASSWORD.get(lang),
                 12.0,
                 FAINT.get(),
             )
@@ -789,7 +782,7 @@ fn group<'a>(name: &'static str, body: El<'a>) -> El<'a> {
 /// "Comptes en ligne": later, inert.
 fn later_row<'a>(lang: Lang) -> El<'a> {
     let chip = container(
-        text(w(words::LATER_2).get(lang))
+        text(words::LATER_2.get(lang))
             .size(10.5)
             .font(BOLD)
             .color(rgb(0xF5B44A)),
@@ -813,7 +806,7 @@ fn later_row<'a>(lang: Lang) -> El<'a> {
                 )),
             column![
                 row![
-                    text(w(words::ONLINE_ACCOUNTS).get(lang))
+                    text(words::ONLINE_ACCOUNTS.get(lang))
                         .size(14)
                         .font(SEMIBOLD)
                         .color(fade(TEXT.get(), INERT)),
@@ -822,7 +815,7 @@ fn later_row<'a>(lang: Lang) -> El<'a> {
                 .spacing(8)
                 .align_y(Alignment::Center),
                 t(
-                    w(words::GOOGLE_NEXTCLOUD_SHARED_BY_THE_CALENDAR).get(lang),
+                    words::GOOGLE_NEXTCLOUD_SHARED_BY_THE_CALENDAR.get(lang),
                     12.5,
                     fade(DIM.get(), INERT),
                 ),

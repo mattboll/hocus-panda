@@ -21,12 +21,12 @@ impl App {
         let lang = self.lang;
         let mut page = column![
             column![
-                text(self.say(w(words::SCREENS)))
+                text(self.say(words::SCREENS))
                     .size(22)
                     .font(BOLD)
                     .color(TEXT),
                 t(
-                    self.say(w(words::WHERE_EACH_SCREEN_SITS_ITS_RESOLUTION)),
+                    self.say(words::WHERE_EACH_SCREEN_SITS_ITS_RESOLUTION),
                     13.5,
                     DIM.get(),
                 )
@@ -42,7 +42,7 @@ impl App {
             button(
                 row![
                     icon(Icon::Screens, 13.0, DIM.get()),
-                    t(self.say(w(words::IDENTIFY)), 12.0, TEXT.get()).font(SEMIBOLD),
+                    t(self.say(words::IDENTIFY), 12.0, TEXT.get()).font(SEMIBOLD),
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),
@@ -71,7 +71,7 @@ impl App {
         )
         .id(format!("control:{IDENTIFY}"));
         let head = row![
-            label(self.say(w(words::ARRANGEMENT))),
+            label(self.say(words::ARRANGEMENT)),
             Space::new().width(Length::Fill),
             identify
         ]
@@ -102,7 +102,7 @@ impl App {
         let arrangement = column![
             container(drawing).style(boxed(crate::theme::ink(rgba(0, 0, 0, 0.20)), 8.0, None)),
             container(t(
-                self.say(w(words::DRAG_A_SCREEN_AGAINST_THE_OTHER)),
+                self.say(words::DRAG_A_SCREEN_AGAINST_THE_OTHER),
                 12.0,
                 FAINT.get(),
             ),)
@@ -130,7 +130,7 @@ impl App {
         let mut all = column![];
         all = all.push(self.screen_row(
             PRIMARY,
-            self.say(w(words::PRIMARY_SCREEN)),
+            self.say(words::PRIMARY_SCREEN),
             Some(primary_line.0),
             primary_line.1,
             None,
@@ -140,8 +140,8 @@ impl App {
             true,
             self.screen_row(
                 MIRROR,
-                self.say(w(words::MIRRORING)),
-                Some(self.say(w(words::SHOW_THE_SAME_PICTURE_ON_BOTH)).to_owned()),
+                self.say(words::MIRRORING),
+                Some(self.say(words::SHOW_THE_SAME_PICTURE_ON_BOTH).to_owned()),
                 None,
                 Some(later(lang)),
                 switch(false, true, false, 1.0, None),
@@ -149,7 +149,7 @@ impl App {
         ));
         page = page.push(
             column![
-                row![label(self.say(w(words::ALL_SCREENS)))]
+                row![label(self.say(words::ALL_SCREENS))]
                     .height(28)
                     .align_y(Alignment::Center),
                 card_box(all.into()),
@@ -167,7 +167,7 @@ impl App {
         }
         page = page.push(
             column![
-                row![label(self.say(w(words::NIGHT_LIGHT)))]
+                row![label(self.say(words::NIGHT_LIGHT))]
                     .height(28)
                     .align_y(Alignment::Center),
                 card_box(night.into()),
@@ -292,14 +292,14 @@ impl App {
             );
         }
         let note = t(
-            self.say(w(words::EACH_SET_KEEPS_ITS_SCREENS_PLACES)),
+            self.say(words::EACH_SET_KEEPS_ITS_SCREENS_PLACES),
             12.0,
             FAINT.get(),
         );
         Some(
             container(
                 column![
-                    row![label(self.say(w(words::SCREEN_SETS)))]
+                    row![label(self.say(words::SCREEN_SETS))]
                         .height(28)
                         .align_y(Alignment::Center),
                     card_box(
@@ -318,12 +318,12 @@ impl App {
     /// Nothing to draw yet, or nothing will come: the drawing says so.
     pub(super) fn screens_empty(&self) -> Option<String> {
         if self.screens.unavailable {
-            return Some(self.say(w(words::THE_DESKTOP_DOES_NOT_TELL_ITS)).to_owned());
+            return Some(self.say(words::THE_DESKTOP_DOES_NOT_TELL_ITS).to_owned());
         }
         self.screens
             .known
             .is_none()
-            .then(|| self.say(w(words::THE_SCREENS)).to_owned())
+            .then(|| self.say(words::THE_SCREENS).to_owned())
     }
 
     /// The screens as drawn.
@@ -356,11 +356,11 @@ impl App {
                 rect.y = sliding.from.y + (rect.y - sliding.from.y) * k;
             }
             let dashed = if !s.connected {
-                Some(self.say(w(words::UNPLUGGED_ITS_PLACE_IS_KEPT)).to_owned())
+                Some(self.say(words::UNPLUGGED_ITS_PLACE_IS_KEPT).to_owned())
             } else if s.lid_closed && on > 0 {
-                Some(self.say(w(words::LID_CLOSED)).to_owned())
+                Some(self.say(words::LID_CLOSED).to_owned())
             } else if !s.enabled {
-                Some(self.say(w(words::OFF)).to_owned())
+                Some(self.say(words::OFF).to_owned())
             } else {
                 None
             };
@@ -437,54 +437,34 @@ impl App {
                 let other = laptop
                     .map(|l| screens::lower_first(&l.title(lang)))
                     .unwrap_or_default();
-                match lang {
-                    Lang::French => (
-                        format!("{title} débranché à {at}"),
-                        format!(
-                            "Sa place ({}) et ses réglages sont gardés : il les reprend dès qu’il revient. Ses fenêtres sont passées sur l’{other}.",
-                            place.unwrap_or_default()
-                        ),
+                (
+                    words::unplugged_at(
+                        lang,
+                        words::UnpluggedAt {
+                            at: &at,
+                            title: &title,
+                        },
                     ),
-                    Lang::English => (
-                        format!("{title} unplugged at {at}"),
-                        format!(
-                            "Its place ({}) and settings are kept: it takes them back as soon as it returns. Its windows went to the {other}.",
-                            place.unwrap_or_default()
-                        ),
+                    words::its_place_and_settings_are_kept(
+                        lang,
+                        words::ItsPlaceAndSettingsAreKept {
+                            other: &other,
+                            place_unwrap_or_default: place.unwrap_or_default(),
+                        },
                     ),
-                }
+                )
             } else if s.lid_closed && known.on().count() > 0 {
                 let other = other_name(s);
-                match lang {
-                    Lang::French => (
-                        "Couvercle fermé".to_owned(),
-                        format!(
-                            "L’écran du portable est éteint ; la session continue sur l’{other}, et la barre y est passée. Ses réglages reviennent quand tu rouvres le couvercle."
-                        ),
-                    ),
-                    Lang::English => (
-                        "Lid closed".to_owned(),
-                        format!(
-                            "The laptop screen is off; the session goes on on the {other}, and the bar moved there. Its settings come back when you open the lid."
-                        ),
-                    ),
-                }
+                (
+                    words::LID_CLOSED.get(lang).to_owned(),
+                    words::the_laptop_screen_is_off_the(lang, &other),
+                )
             } else if !s.enabled {
                 let other = other_name(s);
-                match lang {
-                    Lang::French => (
-                        format!("{title} éteint"),
-                        format!(
-                            "Il reste branché et garde sa place ; ses fenêtres sont passées sur l’{other}."
-                        ),
-                    ),
-                    Lang::English => (
-                        format!("{title} off"),
-                        format!(
-                            "It stays plugged in and keeps its place; its windows went to the {other}."
-                        ),
-                    ),
-                }
+                (
+                    words::off_2(lang, &title),
+                    words::it_stays_plugged_in_and_keeps(lang, &other),
+                )
             } else {
                 continue;
             };
@@ -492,8 +472,8 @@ impl App {
         }
         if known.places_refused {
             notes.push(note(
-                self.say(w(words::THE_FILE_S_PLACES_REFUSED)).to_owned(),
-                self.say(w(words::IN_CONFIG_TOML_THE_SCREENS_OVERLAP))
+                self.say(words::THE_FILE_S_PLACES_REFUSED).to_owned(),
+                self.say(words::IN_CONFIG_TOML_THE_SCREENS_OVERLAP)
                     .to_owned(),
                 "note:places".to_owned(),
             ));
@@ -522,7 +502,7 @@ impl App {
         .height(28);
         if screen.primary {
             head = head.push(
-                container(t(self.say(w(words::PRIMARY)), 11.0, BLUE.get()).font(BOLD))
+                container(t(self.say(words::PRIMARY), 11.0, BLUE.get()).font(BOLD))
                     .padding([2, 8])
                     .style(boxed(
                         crate::theme::ink(rgba(143, 179, 255, 0.12)),
@@ -543,16 +523,16 @@ impl App {
         let only = self.screens_list().is_some_and(|k| k.on().count() <= 1) && screen.enabled;
         let lid = screen.lid_closed && self.screens_list().is_some_and(|k| k.on().count() > 0);
         let use_line = if lid {
-            self.say(w(words::THE_LID_IS_CLOSED))
+            self.say(words::THE_LID_IS_CLOSED)
         } else if only {
-            self.say(w(words::IT_IS_THE_ONLY_SCREEN_ON))
+            self.say(words::IT_IS_THE_ONLY_SCREEN_ON)
         } else {
-            self.say(w(words::OFF_IT_KEEPS_ITS_PLACE_AND))
+            self.say(words::OFF_IT_KEEPS_ITS_PLACE_AND)
         };
         let native = screen.native();
         let size = screen.mode.map(|m| (m.0, m.1));
         let resolution_line = match (native, size) {
-            (Some(n), Some(s)) if n == s => self.say(w(words::ITS_NATIVE_RESOLUTION)).to_owned(),
+            (Some(n), Some(s)) if n == s => self.say(words::ITS_NATIVE_RESOLUTION).to_owned(),
             (Some(n), _) => {
                 words::not_its_native_resolution_the_picture(lang, screens::say_size(n))
             }
@@ -564,11 +544,17 @@ impl App {
             .filter(|_| !screen.mode_offered)
             .map(|m| {
                 let applies = screen.mode.map(|m| say_mode3(m, lang)).unwrap_or_default();
-                words::in_the_file_which_the_screen(lang, &applies, m)
+                words::in_the_file_which_the_screen(
+                    lang,
+                    words::InTheFileWhichTheScreen {
+                        applies: &applies,
+                        m,
+                    },
+                )
             });
         let rates = size.map(|s| screen.rates(s)).unwrap_or_default();
         let rate_line =
-            (rates.len() <= 1).then(|| self.say(w(words::ONLY_ONE_AT_THIS_RESOLUTION)).to_owned());
+            (rates.len() <= 1).then(|| self.say(words::ONLY_ONE_AT_THIS_RESOLUTION).to_owned());
         let logical_size = screen.size;
         let mut scale_line = words::like(lang, screens::say_size(logical_size));
         if screen.scale_auto
@@ -577,17 +563,17 @@ impl App {
             scale_line.push_str(&words::chosen_by_its_density_ppi(lang, d));
         }
         if logical_size.0 < FULL_FROM {
-            scale_line.push_str(self.say(w(words::THE_BAR_TAKES_ITS_MINI_FORM)));
+            scale_line.push_str(self.say(words::THE_BAR_TAKES_ITS_MINI_FORM));
         }
         let vrr_line = if screen.vrr_capable {
-            self.say(w(words::THE_PICTURE_FOLLOWS_GAMES_AND_VIDEOS))
+            self.say(words::THE_PICTURE_FOLLOWS_GAMES_AND_VIDEOS)
         } else {
-            self.say(w(words::THIS_SCREEN_DOES_NOT_OFFER_IT))
+            self.say(words::THIS_SCREEN_DOES_NOT_OFFER_IT)
         };
         let mut rows = column![];
         rows = rows.push(self.screen_row(
             USE,
-            self.say(w(words::USE_THIS_SCREEN)),
+            self.say(words::USE_THIS_SCREEN),
             Some(use_line.to_owned()),
             None,
             None,
@@ -597,7 +583,7 @@ impl App {
         let rows = rows
             .push(self.screen_row(
                 RESOLUTION,
-                self.say(w(words::RESOLUTION)),
+                self.say(words::RESOLUTION),
                 Some(resolution_line),
                 resolution_warn,
                 None,
@@ -606,7 +592,7 @@ impl App {
             .push(rule())
             .push(self.screen_row(
                 RATE,
-                self.say(w(words::REFRESH_RATE)),
+                self.say(words::REFRESH_RATE),
                 rate_line,
                 None,
                 None,
@@ -615,7 +601,7 @@ impl App {
             .push(rule())
             .push(self.screen_row(
                 SCALE,
-                self.say(w(words::SCALE)),
+                self.say(words::SCALE),
                 Some(scale_line),
                 None,
                 None,
@@ -624,7 +610,7 @@ impl App {
             .push(rule())
             .push(self.screen_row(
                 VRR,
-                self.say(w(words::VARIABLE_REFRESH_RATE_VRR)),
+                self.say(words::VARIABLE_REFRESH_RATE_VRR),
                 Some(vrr_line.to_owned()),
                 None,
                 None,
@@ -633,24 +619,18 @@ impl App {
             .push(rule())
             .push(self.screen_row(
                 ROTATION,
-                self.say(w(words::ROTATION)),
-                Some(self.say(w(words::PLANNED_AFTER_V1_CHOICE_OF_29)).to_owned()),
+                self.say(words::ROTATION),
+                Some(self.say(words::PLANNED_AFTER_V1_CHOICE_OF_29).to_owned()),
                 None,
                 Some(later(lang)),
-                menu_button(
-                    self.say(w(words::NORMAL)).to_owned(),
-                    true,
-                    false,
-                    false,
-                    None,
-                ),
+                menu_button(self.say(words::NORMAL).to_owned(), true, false, false, None),
             ));
         column![head, card_box(rows.into())].spacing(8).into()
     }
 
     /// The line under "Écran principal", and its warning.
     pub(super) fn primary_line(&self) -> (String, Option<String>) {
-        let line = self.say(w(words::THE_BAR_AND_NEW_WINDOWS_GO)).to_owned();
+        let line = self.say(words::THE_BAR_AND_NEW_WINDOWS_GO).to_owned();
         let warn = self.primary_named().and_then(|name| {
             let known = self.screens_list()?;
             if known.get(&name).is_some_and(|s| s.connected) {
@@ -659,7 +639,13 @@ impl App {
             let there = known.plugged().find(|s| s.primary)?;
             let named = self.say_primary(Some(&name));
             let there = screens::lower_first(&there.title(self.lang));
-            Some(words::is_not_there_the_bar_is(self.lang, &named, &there))
+            Some(words::is_not_there_the_bar_is(
+                self.lang,
+                words::IsNotThereTheBarIs {
+                    named: &named,
+                    there: &there,
+                },
+            ))
         });
         (line, warn)
     }
@@ -879,19 +865,21 @@ impl App {
             RATE => words::KEEP_THIS_REFRESH_RATE.get(lang),
             _ => words::KEEP_THIS_RESOLUTION.get(lang),
         };
-        let body = match lang {
-            Lang::French => {
-                let mut s = format!(
-                    "L’{title} affiche maintenant {now}. Sans réponse, il revient à {then} dans {left} s."
-                );
-                if let Some(first) = s.get(..1) {
-                    s = first.to_uppercase() + &s[1..];
-                }
-                s
+        // French starts with "l’écran": the line takes a capital.
+        let body = {
+            let mut s = words::now_shows(
+                lang,
+                words::NowShows {
+                    left,
+                    now: &now,
+                    then: &then,
+                    title: &title,
+                },
+            );
+            if let Some(first) = s.get(..1) {
+                s = first.to_uppercase() + &s[1..];
             }
-            Lang::English => format!(
-                "The {title} now shows {now}. Without an answer it goes back to {then} in {left} s."
-            ),
+            s
         };
         // Sizes and rates kept on one line.
         let body = body
@@ -908,7 +896,7 @@ impl App {
         let buttons = row![
             Space::new().width(Length::Fill),
             container(
-                button(t(self.say(w(words::REVERT)), 13.0, TEXT.get()).font(SEMIBOLD))
+                button(t(self.say(words::REVERT), 13.0, TEXT.get()).font(SEMIBOLD))
                     .height(32)
                     .padding([7, 14])
                     .on_press(Message::Screens(Msg::Revert))
@@ -926,7 +914,7 @@ impl App {
             )
             .id("dialog:revert".to_owned()),
             container(
-                button(t(self.say(w(words::KEEP)), 13.0, DEEP.get()).font(BOLD))
+                button(t(self.say(words::KEEP), 13.0, DEEP.get()).font(BOLD))
                     .height(32)
                     .padding([7, 16])
                     .on_press(Message::Screens(Msg::Keep))
@@ -949,11 +937,7 @@ impl App {
                     column![
                         text(question).size(17).font(BOLD).color(TEXT),
                         t(body, 13.0, SOFT.get()).line_height(1.5),
-                        t(
-                            self.say(w(words::ESC_GOES_BACK_AT_ONCE_IF)),
-                            12.0,
-                            FAINT.get(),
-                        ),
+                        t(self.say(words::ESC_GOES_BACK_AT_ONCE_IF), 12.0, FAINT.get(),),
                     ]
                     .spacing(6)
                     .width(Length::Fill),

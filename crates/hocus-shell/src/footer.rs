@@ -21,6 +21,7 @@
 //! While the bar switches its form, it is the full form's width and both
 //! forms' height, and the two cross-fade as the other groups do.
 
+use hocus_words::shell::footer as txt;
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock, PoisonError},
@@ -286,17 +287,13 @@ impl Words {
 
     /// `item`'s name, `unseen` notifications not seen, the user `user`.
     pub fn name(self, item: Item, unseen: usize, user: &str) -> String {
-        match (item, (self.lang == Lang::French)) {
-            (Item::Clipboard, true) => "Presse-papiers".to_owned(),
-            (Item::Clipboard, false) => "Clipboard".to_owned(),
-            (Item::Notifications, _) if unseen == 0 => "Notifications".to_owned(),
-            (Item::Notifications, true) => format!("Notifications, {unseen} non vues"),
-            (Item::Notifications, false) => format!("Notifications, {unseen} unseen"),
-            (Item::Menu, true) => "Menu : toutes les applications".to_owned(),
-            (Item::Menu, false) => "Menu: all applications".to_owned(),
-            (Item::User, true) => format!("{user}, menu de session"),
-            (Item::User, false) => format!("{user}, session menu"),
-            (_, _) => String::new(),
+        match item {
+            Item::Clipboard => txt::CLIPBOARD.get(self.lang).to_owned(),
+            Item::Notifications if unseen == 0 => "Notifications".to_owned(),
+            Item::Notifications => txt::notifications_unseen(self.lang, unseen),
+            Item::Menu => txt::MENU_ALL_APPLICATIONS.get(self.lang).to_owned(),
+            Item::User => txt::session_menu(self.lang, user),
+            _ => String::new(),
         }
     }
 }

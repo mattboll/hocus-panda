@@ -295,7 +295,7 @@ fn windows_named(lang: Lang, names: &[String]) -> (String, bool) {
         (0, _) => (unknown.to_owned(), true),
         (1, _) => (capital(named[0]), true),
         (n, [one]) if *one == unknown => (txt::windows(lang, n), false),
-        (n, [one]) => (txt::windows_2(lang, one, n), false),
+        (n, [one]) => (txt::windows_2(lang, txt::Windows2 { one, x_n: n }), false),
         (2, [a, b]) => (format!("{} {and} {b}", capital(a)), false),
         (n, [a, b, ..]) => {
             let others = n - named.iter().filter(|x| *x == a || *x == b).count();
