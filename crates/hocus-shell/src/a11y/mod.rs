@@ -27,7 +27,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_a11y::{Act, Asked, Bridge, Event, Rect, Window};
+use hocus_a11y::{Act, Asked, Bridge, Event, Node, Rect, Role, Window};
 use hocus_link::LevelKey;
 use iced::{Rectangle, window};
 
@@ -175,10 +175,8 @@ enum Target {
     /// A bubble's control by its key, or the bubble itself (`note`: its
     /// default).
     Bubble { serial: u64, key: String },
-    Lock {
-        surface: window::Id,
-        target: crate::lock::Target,
-    },
+    /// A control of a lock, by its key.
+    Lock(String),
     /// A control of the authentication dialog, by its key.
     Auth(String),
     /// A row of the actions palette, by its key (#736).
@@ -403,33 +401,20 @@ impl Said {
             &crate::notifications::wall(),
             lang,
         ));
-        let layout = crate::layouts::snapshot().shown().map(|l| l.name.clone());
         let mut screens: Vec<(&String, &window::Id)> = lock.surfaces.iter().collect();
         screens.sort();
         screens
             .into_iter()
             .map(|(output, surface)| {
-                let window = surfaces::lock(
-                    &surfaces::Lock {
-                        output: output.clone(),
-                        shown: lock.shown.clone(),
-                        clock: Some(clock.clone()),
-                        layout: layout.clone(),
-                    },
-                    words,
-                );
-                for (key, target) in [
-                    ("field", crate::lock::Target::Field),
-                    ("unlock", crate::lock::Target::Button),
-                    ("layout", crate::lock::Target::Layout),
-                ] {
-                    self.targets.insert(
-                        (window.key.clone(), key.to_owned()),
-                        Target::Lock {
-                            surface: *surface,
-                            target,
-                        },
-                    );
+                let clock = Node::new("clock", Role::Label, clock.clone());
+                let window = crate::lock::view::a11y(*surface, output, words, vec![clock]);
+                for node in window.all() {
+                    if node.key.starts_with("lock:") {
+                        self.targets.insert(
+                            (window.key.clone(), node.key.clone()),
+                            Target::Lock(node.key.clone()),
+                        );
+                    }
                 }
                 window
             })
@@ -488,10 +473,7 @@ impl Said {
             (Target::Bubble { serial, key }, Act::Click) => {
                 crate::notifications::bubble::a11y_click(*serial, key);
             }
-            (Target::Lock { surface, target }, Act::Click | Act::Focus) => {
-                crate::lock::pointer(*surface, crate::lock::Pointing::Press(Some(*target)));
-                crate::lock::pointer(*surface, crate::lock::Pointing::Release(Some(*target)));
-            }
+            (Target::Lock(key), Act::Click | Act::Focus) => crate::lock::view::a11y_click(key),
             (Target::Auth(key), Act::Click | Act::Focus) => crate::auth::a11y_click(key),
             (_, act) => tracing::debug!(?act, "not done from a screen reader"),
         }

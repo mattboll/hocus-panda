@@ -2,7 +2,6 @@
 //! notifications' bubbles, the lock screen and the authentication dialog.
 
 use hocus_a11y::{Act, Node, Role, Window};
-use hocus_link::{LockFocus, LockPhase, LockShown};
 
 use super::words::Words;
 use crate::popover::Item;
@@ -110,74 +109,6 @@ pub fn bubble(b: &Bubble, words: Words) -> Window {
     window
 }
 
-/// The lock on one screen: the screen with the form shows the clock, the
-/// password's field, its button, the layout's and how many agents wait;
-/// the others the clock alone.
-#[derive(Debug, Clone)]
-pub struct Lock {
-    pub output: String,
-    pub shown: LockShown,
-    /// "14 h 32, jeudi 6 novembre".
-    pub clock: Option<String>,
-    /// The keyboard's layout, when there is a choice.
-    pub layout: Option<String>,
-}
-
-pub fn lock(l: &Lock, words: Words) -> Window {
-    let lock_words = crate::lock::Words::new(words.lang());
-    let mut window = Window::new(format!("lock:{}", l.output), words.lock());
-    if let Some(clock) = &l.clock {
-        window
-            .nodes
-            .push(Node::new("clock", Role::Label, clock.clone()));
-    }
-    if l.output != l.shown.output {
-        return window;
-    }
-    let said = match l.shown.phase {
-        LockPhase::Checking | LockPhase::Opening => lock_words.checking().to_owned(),
-        LockPhase::Wrong => lock_words.wrong(l.shown.caps),
-        LockPhase::Waiting(seconds) => lock_words.wait(seconds),
-        LockPhase::Idle | LockPhase::Typing if l.shown.caps => lock_words.caps().to_owned(),
-        LockPhase::Idle | LockPhase::Typing => String::new(),
-    };
-    window.nodes.push(
-        Node::new("field", Role::PasswordField, lock_words.password())
-            .describe(said)
-            .disabled(matches!(
-                l.shown.phase,
-                LockPhase::Checking | LockPhase::Opening | LockPhase::Waiting(_)
-            ))
-            .act(Act::Focus),
-    );
-    window
-        .nodes
-        .push(Node::new("unlock", Role::Button, lock_words.unlock()).act(Act::Click));
-    if let Some(layout) = &l.layout {
-        window
-            .nodes
-            .push(Node::new("layout", Role::Button, lock_words.layout(layout)).act(Act::Click));
-    }
-    if l.shown.agents > 0 {
-        window.nodes.push(Node::new(
-            "agents",
-            Role::Label,
-            lock_words.agents(l.shown.agents),
-        ));
-    }
-    window.focus = Some(
-        match l.shown.focus {
-            LockFocus::Field => "field",
-            LockFocus::Button => "unlock",
-            LockFocus::Layout if l.layout.is_some() => "layout",
-            LockFocus::Layout => "field",
-        }
-        .to_owned(),
-    );
-    window.active = true;
-    window
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,68 +184,5 @@ mod tests {
         assert_eq!(reply.acts, vec![Act::Click]);
         let urgent = bubble(&Bubble { urgent: true, ..b }, FR);
         assert_eq!(urgent.name, "Slack : Léa Martin, urgent");
-    }
-
-    fn shown(phase: LockPhase, focus: LockFocus) -> LockShown {
-        LockShown {
-            phase,
-            chars: 3,
-            caps: false,
-            shake: 0,
-            focus,
-            agents: 2,
-            wallpaper: true,
-            motion: true,
-            output: "eDP-1".to_owned(),
-        }
-    }
-
-    #[test]
-    fn the_lock_has_a_password_field_and_its_button() {
-        let l = Lock {
-            output: "eDP-1".to_owned(),
-            shown: shown(LockPhase::Typing, LockFocus::Field),
-            clock: Some("14 h 32, jeudi 6 novembre".to_owned()),
-            layout: Some("Français".to_owned()),
-        };
-        let window = lock(&l, FR);
-        let dump = window.dump();
-        assert!(
-            dump.contains("label \"14 h 32, jeudi 6 novembre\""),
-            "{dump}"
-        );
-        let field = window.find("field").expect("the field");
-        assert_eq!(field.role, Role::PasswordField);
-        assert_eq!(field.name, "Mot de passe");
-        // Never what is typed.
-        assert_eq!(field.value, None);
-        let unlock = window.find("unlock").expect("the button");
-        assert_eq!(unlock.name, "Déverrouiller");
-        assert_eq!(unlock.acts, vec![Act::Click]);
-        assert!(dump.contains("label \"2 agents t’attendent\""), "{dump}");
-        assert_eq!(window.focus.as_deref(), Some("field"));
-        assert!(window.active);
-        let wrong = lock(
-            &Lock {
-                shown: shown(LockPhase::Wrong, LockFocus::Button),
-                ..l.clone()
-            },
-            FR,
-        );
-        assert_eq!(
-            wrong.find("field").and_then(|f| f.description.as_deref()),
-            Some("Mot de passe incorrect.")
-        );
-        assert_eq!(wrong.focus.as_deref(), Some("unlock"));
-        // Another screen: the clock alone.
-        let other = lock(
-            &Lock {
-                output: "HDMI-1".to_owned(),
-                ..l
-            },
-            FR,
-        );
-        assert_eq!(other.nodes.len(), 1);
-        assert!(!other.active);
     }
 }

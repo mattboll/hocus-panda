@@ -1709,20 +1709,13 @@ impl Shell {
     /// The lock (7.1), if its surface is `id`.
     fn lock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let output = lock::output_of(id)?;
-        let layer = |layer| {
-            canvas(lock::draw::View {
-                layer,
-                id,
-                output: output.clone(),
-                wall: self.wall.clone(),
-                lang: self.lang,
-                words: lock::words(),
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-        };
-        use lock::draw::Layer;
-        Some(stack![layer(Layer::Back), layer(Layer::Front)].into())
+        Some(lock::view::view(
+            id,
+            output,
+            self.wall.clone(),
+            self.lang,
+            lock::words(),
+        ))
     }
 
     /// The curtain's pill (7.2), if its surface is `id`.
