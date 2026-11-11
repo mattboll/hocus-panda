@@ -35,27 +35,21 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// The chooser's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     /// "Firefox veut voir ton écran", the application's name known or not.
     pub fn asks(self, app: Option<&str>) -> String {
-        match (app, self.fr) {
+        match (app, (self.lang == Lang::French)) {
             (Some(app), true) => format!("{app} veut voir ton écran"),
             (Some(app), false) => format!("{app} wants to see your screen"),
             (None, true) => "Une application veut voir ton écran".to_owned(),
@@ -97,7 +91,7 @@ impl Words {
 
     /// A window's desktop: this one, or its number.
     pub fn desktop(self, here: bool, desktop: u8) -> String {
-        match (here, self.fr) {
+        match (here, (self.lang == Lang::French)) {
             (true, true) => "ce bureau".to_owned(),
             (true, false) => "this desktop".to_owned(),
             (false, true) => format!("bureau {desktop}"),

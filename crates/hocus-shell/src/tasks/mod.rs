@@ -20,6 +20,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::tasks as txt;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -984,54 +985,40 @@ pub fn tick(now: Instant) -> Vec<Effect> {
 /// The list's words, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     /// The group's header.
     pub fn header(self) -> &'static str {
-        if self.fr { "À FAIRE" } else { "TO DO" }
+        txt::TO_DO.get(self.lang)
     }
 
     /// The popover's title.
     pub fn title(self) -> &'static str {
-        if self.fr { "À faire" } else { "To do" }
+        txt::TO_DO_2.get(self.lang)
     }
 
     /// The `+`'s name.
     pub fn add(self) -> &'static str {
-        if self.fr {
-            "Ajouter une tâche"
-        } else {
-            "Add a task"
-        }
+        txt::ADD_A_TASK.get(self.lang)
     }
 
     pub fn placeholder(self) -> &'static str {
-        if self.fr {
-            "Nouvelle tâche…"
-        } else {
-            "New task…"
-        }
+        txt::NEW_TASK.get(self.lang)
     }
 
     pub fn nothing(self) -> &'static str {
-        if self.fr {
-            "Rien à faire."
-        } else {
-            "Nothing to do."
-        }
+        txt::NOTHING_TO_DO.get(self.lang)
     }
 
     /// "+ 4 autres", "+ 1 autre".
     pub fn more(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "+ 1 autre".to_owned(),
             (true, n) => format!("+ {n} autres"),
             (false, n) => format!("+ {n} more"),
@@ -1040,7 +1027,7 @@ impl Words {
 
     /// A box's name: what a click does.
     pub fn tick(self, title: &str, ticked: bool) -> String {
-        match (self.fr, ticked) {
+        match ((self.lang == Lang::French), ticked) {
             (true, false) => format!("Cocher « {title} »"),
             (true, true) => format!("Décocher « {title} »"),
             (false, false) => format!("Tick \"{title}\""),
@@ -1049,16 +1036,12 @@ impl Words {
     }
 
     pub fn unsaved(self) -> &'static str {
-        if self.fr {
-            "Pas enregistré"
-        } else {
-            "Not saved"
-        }
+        txt::NOT_SAVED.get(self.lang)
     }
 
     /// The mini item's name: how many tasks are open.
     pub fn count(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "À faire : 1 tâche".to_owned(),
             (true, n) => format!("À faire : {n} tâches"),
             (false, 1) => "To do: 1 task".to_owned(),
@@ -1073,8 +1056,12 @@ mod tests {
 
     #[test]
     fn its_words_in_french_and_english() {
-        let fr = Words { fr: true };
-        let en = Words { fr: false };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(fr.header(), "À FAIRE");
         assert_eq!(en.header(), "TO DO");
         assert_eq!(fr.more(4), "+ 4 autres");

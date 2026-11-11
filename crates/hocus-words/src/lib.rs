@@ -134,6 +134,49 @@ impl Lang {
     }
 }
 
+/// For the crates' tests of their move to the catalogue (#775): every key
+/// of `before` says, in French then English, exactly its two texts, and
+/// every key of `formats` the same words around its placeholders, whatever
+/// their names. Panics on the first that does not.
+#[doc(hidden)]
+#[expect(clippy::panic, reason = "a tests' helper: a mismatch fails the test")]
+pub fn check_before(before: &[(&str, &str, &str)], formats: &[(&str, &str, &str)]) {
+    use std::collections::HashMap;
+    let said = |lang| every(lang).into_iter().collect::<HashMap<_, _>>();
+    let (fr, en) = (said(Lang::French), said(Lang::English));
+    let text = |all: &HashMap<String, String>, key: &str| {
+        all.get(key)
+            .cloned()
+            .unwrap_or_else(|| panic!("{key} is not in the catalogue"))
+    };
+    for (key, before_fr, before_en) in before {
+        assert_eq!(text(&fr, key), *before_fr, "{key}");
+        assert_eq!(text(&en, key), *before_en, "{key}");
+    }
+    let bare = |s: &str| {
+        let mut out = String::new();
+        let mut inside = false;
+        for c in s.replace("{{", "\u{1}").replace("}}", "\u{2}").chars() {
+            match c {
+                '{' => inside = true,
+                '}' => {
+                    inside = false;
+                    out.push_str("{}");
+                }
+                _ if inside => {}
+                '\u{1}' => out.push('{'),
+                '\u{2}' => out.push('}'),
+                c => out.push(c),
+            }
+        }
+        out
+    };
+    for (key, before_fr, before_en) in formats {
+        assert_eq!(bare(&text(&fr, key)), bare(before_fr), "{key}");
+        assert_eq!(bare(&text(&en, key)), bare(before_en), "{key}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

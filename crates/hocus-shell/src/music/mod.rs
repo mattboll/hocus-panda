@@ -470,22 +470,16 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The music player's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn music(self) -> &'static str {

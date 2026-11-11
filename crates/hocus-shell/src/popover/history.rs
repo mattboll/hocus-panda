@@ -202,22 +202,16 @@ const EASE_OUT: (f32, f32, f32, f32) = (0.0, 0.0, 0.58, 1.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     fn title(self) -> &'static str {
@@ -244,7 +238,7 @@ impl Words {
     /// "8 AM".
     fn time(self, at: &Zoned) -> String {
         let (h, m) = (at.hour(), at.minute());
-        if self.fr {
+        if self.lang == Lang::French {
             if m == 0 {
                 format!("{h}\u{a0}h")
             } else {
@@ -274,7 +268,7 @@ impl Words {
             (Choice::Always, _) | (_, None) => self.pick(txt::UNTIL_YOU_TURN_IT_OFF).to_owned(),
             (_, Some(at)) => {
                 let tomorrow = now.date().tomorrow().ok() == Some(at.date());
-                match (self.fr, tomorrow) {
+                match ((self.lang == Lang::French), tomorrow) {
                     (true, true) => format!("Jusqu’à demain, {}", self.time(&at)),
                     (true, false) => format!("Jusqu’à {}", self.time(&at)),
                     (false, true) => format!("Until tomorrow, {}", self.time(&at)),
@@ -295,7 +289,7 @@ impl Words {
     }
 
     fn ago(self, ago: Ago) -> String {
-        match (ago, self.fr) {
+        match (ago, (self.lang == Lang::French)) {
             (Ago::Now, true) => "maintenant".to_owned(),
             (Ago::Now, false) => "now".to_owned(),
             (Ago::Minutes(n), true) => format!("il y a {n}\u{a0}min"),
@@ -1240,7 +1234,7 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
     let over = ui.over == Some(key) && ui.leaving.is_none();
     let lit = over || ui.focus == Some(Target::Item(key));
     let size = shown.rect.size();
-    let fr = words.fr;
+    let fr = words.lang == hocus_words::Lang::French;
     // The icon, else the application's first letter on a square.
     let icon: El<'a> = match &shown.icon {
         Some(Icon::Raster(handle)) => image(handle.clone())

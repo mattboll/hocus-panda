@@ -23,22 +23,16 @@ pub fn plain(name: &str) -> String {
 /// The words, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    pub fr: bool,
+    pub lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     /// `a`, `a et b`, `a, b et c`.
@@ -58,7 +52,7 @@ impl Words {
     /// The time as said: "14 h 32" in French, "2:32 PM" or "14:32" else.
     pub fn time(self, shown: &Shown) -> String {
         let written = shown.time();
-        if !self.fr || shown.half.is_some() {
+        if !(self.lang == Lang::French) || shown.half.is_some() {
             return written;
         }
         match written.split_once(':') {
@@ -83,13 +77,13 @@ impl Words {
     /// The agents' header: "Agents : 3 t'attendent, 10 au travail".
     pub fn agents(self, waiting: usize, stuck: usize, working: usize, to_see: usize) -> String {
         let mut parts = Vec::new();
-        match (waiting, self.fr) {
+        match (waiting, (self.lang == Lang::French)) {
             (0, _) => {}
             (1, true) => parts.push("1 t'attend".to_owned()),
             (n, true) => parts.push(format!("{n} t'attendent")),
             (n, false) => parts.push(format!("{n} waiting")),
         }
-        match (stuck, self.fr) {
+        match (stuck, (self.lang == Lang::French)) {
             (0, _) => {}
             (1, true) => parts.push("1 bloqué".to_owned()),
             (n, true) => parts.push(format!("{n} bloqués")),
@@ -107,7 +101,7 @@ impl Words {
     pub fn agent(self, name: &str, look: crate::agents::Look, minutes: u64) -> String {
         use crate::agents::Look;
         let since = self.minutes(minutes);
-        let state = match (look, self.fr) {
+        let state = match (look, (self.lang == Lang::French)) {
             (Look::Waiting, true) => format!("t'attend depuis {since}"),
             (Look::Waiting, false) => format!("waiting for {since}"),
             (Look::Stuck, true) => format!("bloqué depuis {since}"),
@@ -124,7 +118,7 @@ impl Words {
 
     /// "+ N autres": "5 autres agents au repos", "5 autres agents".
     pub fn other_agents(self, n: usize, resting: bool) -> String {
-        match (self.fr, n, resting) {
+        match ((self.lang == Lang::French), n, resting) {
             (true, 1, true) => "1 autre agent au repos".to_owned(),
             (true, 1, false) => "1 autre agent".to_owned(),
             (true, n, true) => format!("{n} autres agents au repos"),
@@ -152,14 +146,14 @@ impl Words {
     /// bloqué.".
     pub fn announce(self, waiting: &[&str], stuck: &[&str]) -> String {
         let mut said = Vec::new();
-        match (waiting.len(), self.fr) {
+        match (waiting.len(), (self.lang == Lang::French)) {
             (0, _) => {}
             (1, true) => said.push(format!("{} t'attend.", waiting[0])),
             (_, true) => said.push(format!("{} t'attendent.", self.and(waiting))),
             (1, false) => said.push(format!("{} is waiting.", waiting[0])),
             (_, false) => said.push(format!("{} are waiting.", self.and(waiting))),
         }
-        match (stuck.len(), self.fr) {
+        match (stuck.len(), (self.lang == Lang::French)) {
             (0, _) => {}
             (1, true) => said.push(format!("{} est bloqué.", stuck[0])),
             (_, true) => said.push(format!("{} sont bloqués.", self.and(stuck))),
@@ -171,7 +165,7 @@ impl Words {
 
     /// Today's list: "Aujourd'hui, 3 évènements".
     pub fn today(self, events: usize) -> String {
-        match (self.fr, events) {
+        match ((self.lang == Lang::French), events) {
             (true, 0) => "Aujourd'hui, aucun évènement".to_owned(),
             (true, 1) => "Aujourd'hui, 1 évènement".to_owned(),
             (true, n) => format!("Aujourd'hui, {n} évènements"),
@@ -183,7 +177,7 @@ impl Words {
 
     /// The to-do list: "À faire, 5 tâches".
     pub fn tasks(self, open: usize) -> String {
-        match (self.fr, open) {
+        match ((self.lang == Lang::French), open) {
             (true, 0) => "À faire, aucune tâche".to_owned(),
             (true, 1) => "À faire, 1 tâche".to_owned(),
             (true, n) => format!("À faire, {n} tâches"),
@@ -209,7 +203,7 @@ impl Words {
         if current {
             name.push_str(self.pick(txt::CURRENT));
         }
-        let count = match (self.fr, windows.len()) {
+        let count = match ((self.lang == Lang::French), windows.len()) {
             (true, 0) => "aucune fenêtre".to_owned(),
             (true, 1) => "1 fenêtre".to_owned(),
             (true, n) => format!("{n} fenêtres"),
@@ -228,7 +222,7 @@ impl Words {
 
     /// The Wi-Fi's row: "Wi-Fi, connecté à Livebox-A3F2, signal fort".
     pub fn wifi(self, link: &Link) -> String {
-        let state = match (link, self.fr) {
+        let state = match (link, (self.lang == Lang::French)) {
             (Link::Hidden, _) => return String::new(),
             (Link::Wired, true) => return "Réseau, filaire".to_owned(),
             (Link::Wired, false) => return "Network, wired".to_owned(),
@@ -241,7 +235,7 @@ impl Words {
             (Link::Connecting, true) => "connexion…".to_owned(),
             (Link::Connecting, false) => "connecting…".to_owned(),
             (Link::Connected { name, bars }, _) => {
-                let signal = match (bars, self.fr) {
+                let signal = match (bars, (self.lang == Lang::French)) {
                     (0 | 1, true) => "signal faible",
                     (2, true) => "signal moyen",
                     (3, true) => "bon signal",
@@ -251,11 +245,7 @@ impl Words {
                     (3, false) => "good signal",
                     (_, false) => "strong signal",
                 };
-                if self.fr {
-                    format!("connecté à {name}, {signal}")
-                } else {
-                    format!("connected to {name}, {signal}")
-                }
+                txt::connected_to(self.lang, name, signal)
             }
         };
         format!("Wi-Fi, {state}")
@@ -263,7 +253,7 @@ impl Words {
 
     /// Bluetooth's row: "Bluetooth, Casque, batterie 80 %".
     pub fn bluetooth(self, row: &BluetoothRow) -> String {
-        let state = match (row, self.fr) {
+        let state = match (row, (self.lang == Lang::French)) {
             (BluetoothRow::Hidden, _) => return String::new(),
             (BluetoothRow::Off, true) => "désactivé".to_owned(),
             (BluetoothRow::Off, false) => "off".to_owned(),
@@ -284,7 +274,7 @@ impl Words {
                 if let Some(battery) = battery {
                     said.push_str(&format!(", {} {battery}\u{a0}%", self.pick(txt::BATTERY)));
                 }
-                match (more, self.fr) {
+                match (more, (self.lang == Lang::French)) {
                     (0, _) => {}
                     (n, true) => said.push_str(&format!(", et {n} autres")),
                     (n, false) => said.push_str(&format!(", and {n} more")),
@@ -340,7 +330,11 @@ impl Words {
     }
 
     pub fn lang(self) -> Lang {
-        if self.fr { Lang::French } else { Lang::English }
+        if self.lang == Lang::French {
+            Lang::French
+        } else {
+            Lang::English
+        }
     }
 
     /// The in-use sign: "Micro utilisé par Firefox, caméra utilisée par
@@ -351,7 +345,7 @@ impl Words {
             .iter()
             .map(|(kind, apps)| {
                 let apps = self.and(&apps.iter().map(String::as_str).collect::<Vec<_>>());
-                match (kind, self.fr) {
+                match (kind, (self.lang == Lang::French)) {
                     (Kind::Microphone, true) if muted => format!("Micro coupé, utilisé par {apps}"),
                     (Kind::Microphone, true) => format!("Micro utilisé par {apps}"),
                     (Kind::Microphone, false) if muted => {
@@ -376,7 +370,7 @@ impl Words {
 
     /// "+ 4 autres": "4 autres tâches".
     pub fn more_tasks(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "1 autre tâche".to_owned(),
             (true, n) => format!("{n} autres tâches"),
             (false, 1) => "1 more task".to_owned(),
@@ -385,7 +379,7 @@ impl Words {
     }
 
     pub fn more_today(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "1 autre évènement aujourd'hui".to_owned(),
             (true, n) => format!("{n} autres évènements aujourd'hui"),
             (false, 1) => "1 more event today".to_owned(),
@@ -394,7 +388,7 @@ impl Words {
     }
 
     pub fn more_windows(self, n: usize) -> String {
-        match (self.fr, n) {
+        match ((self.lang == Lang::French), n) {
             (true, 1) => "1 autre fenêtre".to_owned(),
             (true, n) => format!("{n} autres fenêtres"),
             (false, 1) => "1 more window".to_owned(),
@@ -445,11 +439,7 @@ impl Words {
 
     /// An application's tile: "Couper le son de Firefox".
     pub fn mute_app(self, app: &str) -> String {
-        if self.fr {
-            format!("Couper le son de {app}")
-        } else {
-            format!("Mute {app}")
-        }
+        txt::mute_2(self.lang, app)
     }
 
     pub fn mute_microphone(self) -> &'static str {
@@ -477,14 +467,18 @@ mod tests {
 
     #[test]
     fn the_clock_says_a_sentence() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             fr.clock(&shown("14:32", "jeudi 6 novembre")),
             "14 h 32, jeudi 6 novembre"
         );
         assert_eq!(fr.time(&shown("09:05", "")), "9 h 05");
         assert_eq!(fr.time(&shown("00:00", "")), "0 h");
-        let en = Words { fr: false };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(
             en.clock(&shown("14:32", "Thursday 6 November")),
             "14:32, Thursday 6 November"
@@ -493,7 +487,9 @@ mod tests {
 
     #[test]
     fn announcements_group_names() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(fr.announce(&["site-web"], &[]), "site-web t'attend.");
         assert_eq!(
             fr.announce(&["site-web", "docs"], &[]),
@@ -504,7 +500,9 @@ mod tests {
             fr.announce(&["a"], &["b", "c", "d"]),
             "a t'attend. b, c et d sont bloqués."
         );
-        let en = Words { fr: false };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(
             en.announce(&["site-web", "docs"], &["infra"]),
             "site-web and docs are waiting. infra is stuck."
@@ -513,7 +511,9 @@ mod tests {
 
     #[test]
     fn the_agents_header_counts_who_waits_and_who_works() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             fr.agents(3, 0, 10, 0),
             "Agents : 3 t'attendent, 10 au travail"
@@ -522,13 +522,17 @@ mod tests {
             fr.agents(1, 1, 0, 2),
             "Agents : 1 t'attend, 1 bloqué, 2 à voir, 0 au travail"
         );
-        let en = Words { fr: false };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(en.agents(3, 0, 10, 0), "Agents: 3 waiting, 10 working");
     }
 
     #[test]
     fn rows_say_their_state_in_words() {
-        let fr = Words { fr: true };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             fr.wifi(&Link::Connected {
                 name: "Livebox-A3F2".into(),
@@ -557,7 +561,10 @@ mod tests {
             "Slack : Léa Martin"
         );
         assert_eq!(
-            Words { fr: false }.notification("Slack", "Léa Martin", true),
+            Words {
+                lang: hocus_words::Lang::English
+            }
+            .notification("Slack", "Léa Martin", true),
             "Slack: Léa Martin, urgent"
         );
     }

@@ -27,6 +27,7 @@
 //! its buffer has no alpha: the bubble's card holds the panda too, and the
 //! compositor cuts it to its rounded corners.
 
+use hocus_words::shell::agents_peek as txt;
 use std::{
     collections::HashMap,
     sync::{
@@ -242,21 +243,16 @@ pub fn said(
 /// applications' names `names` (one per window, empty when unknown).
 pub fn screens_lines(lang: Lang, moved: &ScreensMoved, names: &[String]) -> (String, String) {
     let fr = lang == Lang::French;
-    let screen = match (moved.built_in, moved.inches, fr) {
-        (true, _, true) => "écran du portable".to_owned(),
-        (true, _, false) => "laptop screen".to_owned(),
-        (false, 0, true) => "écran externe".to_owned(),
-        (false, 0, false) => "external screen".to_owned(),
-        (false, i, true) => format!("écran externe {i} pouces"),
-        (false, i, false) => format!("{i}-inch screen"),
+    let screen = match (moved.built_in, moved.inches) {
+        (true, _) => txt::LAPTOP_SCREEN.get(lang).to_owned(),
+        (false, 0) => txt::EXTERNAL_SCREEN.get(lang).to_owned(),
+        (false, i) => txt::inch_screen(lang, i),
     };
-    let first = match (moved.gone, fr) {
-        (true, true) => format!("L’{screen} est parti."),
-        (true, false) => format!("The {screen} left."),
-        (false, true) => format!("Re-bonjour, {screen}\u{a0}!"),
-        (false, false) => format!("Welcome back, {screen}!"),
+    let first = match moved.gone {
+        true => txt::the_left(lang, &screen),
+        false => txt::welcome_back(lang, &screen),
     };
-    let (who, one) = windows_named(fr, names);
+    let (who, one) = windows_named(lang, names);
     let second = match (moved.gone, fr, one) {
         (true, true, _) => {
             let verb = if one { "est" } else { "sont" };
@@ -282,8 +278,8 @@ pub fn screens_lines(lang: Lang, moved: &ScreensMoved, names: &[String]) -> (Str
 
 /// The windows named: "Firefox", "Firefox et foot", "Firefox, foot et 3
 /// autres", "3 fenêtres foot"; and whether that is one window.
-fn windows_named(fr: bool, names: &[String]) -> (String, bool) {
-    let unknown = if fr { "une fenêtre" } else { "a window" };
+fn windows_named(lang: Lang, names: &[String]) -> (String, bool) {
+    let unknown = txt::A_WINDOW.get(lang);
     let named: Vec<&str> = names
         .iter()
         .map(|n| if n.is_empty() { unknown } else { n.as_str() })
@@ -294,34 +290,18 @@ fn windows_named(fr: bool, names: &[String]) -> (String, bool) {
             distinct.push(n);
         }
     }
-    let and = if fr { "et" } else { "and" };
+    let and = txt::AND.get(lang);
     match (named.len(), distinct.as_slice()) {
         (0, _) => (unknown.to_owned(), true),
         (1, _) => (capital(named[0]), true),
-        (n, [one]) if *one == unknown => (
-            if fr {
-                format!("{n} fenêtres")
-            } else {
-                format!("{n} windows")
-            },
-            false,
-        ),
-        (n, [one]) => (
-            if fr {
-                format!("{n} fenêtres {one}")
-            } else {
-                format!("{n} {one} windows")
-            },
-            false,
-        ),
+        (n, [one]) if *one == unknown => (txt::windows(lang, n), false),
+        (n, [one]) => (txt::windows_2(lang, one, n), false),
         (2, [a, b]) => (format!("{} {and} {b}", capital(a)), false),
         (n, [a, b, ..]) => {
             let others = n - named.iter().filter(|x| *x == a || *x == b).count();
-            let rest = match (others, fr) {
-                (1, true) => "1 autre".to_owned(),
-                (1, false) => "1 other".to_owned(),
-                (k, true) => format!("{k} autres"),
-                (k, false) => format!("{k} others"),
+            let rest = match others {
+                1 => txt::N_1_OTHER.get(lang).to_owned(),
+                k => txt::others(lang, k),
             };
             if others == 0 {
                 (format!("{} {and} {b}", capital(a)), false)

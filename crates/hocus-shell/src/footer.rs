@@ -276,19 +276,17 @@ fn region(id: window::Id, form: Form, switching: bool) -> Message {
 /// The buttons' names, for screen readers, in the bar's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     /// `item`'s name, `unseen` notifications not seen, the user `user`.
     pub fn name(self, item: Item, unseen: usize, user: &str) -> String {
-        match (item, self.fr) {
+        match (item, (self.lang == Lang::French)) {
             (Item::Clipboard, true) => "Presse-papiers".to_owned(),
             (Item::Clipboard, false) => "Clipboard".to_owned(),
             (Item::Notifications, _) if unseen == 0 => "Notifications".to_owned(),
@@ -684,8 +682,12 @@ mod tests {
 
     #[test]
     fn each_button_has_its_name() {
-        let fr = Words { fr: true };
-        let en = Words { fr: false };
+        let fr = Words {
+            lang: hocus_words::Lang::French,
+        };
+        let en = Words {
+            lang: hocus_words::Lang::English,
+        };
         assert_eq!(fr.name(Item::Clipboard, 0, "Alex"), "Presse-papiers");
         assert_eq!(
             fr.name(Item::Notifications, 3, "Alex"),

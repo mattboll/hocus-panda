@@ -525,26 +525,23 @@ pub fn bar_of(id: window::Id) -> Option<String> {
 /// The card's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
+}
+
+impl Words {
+    /// The language its words are said in.
+    pub(crate) fn lang(self) -> Lang {
+        self.lang
+    }
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
-    }
-
-    pub(crate) fn fr(self) -> bool {
-        self.fr
+        text.get(self.lang)
     }
 
     /// "25 min", "1 h 05".
@@ -558,7 +555,7 @@ impl Words {
 
     /// "dans 25 min", "fin dans 18 min": the time line's after the start.
     pub fn relative(self, phase: Phase) -> String {
-        match (phase, self.fr) {
+        match (phase, (self.lang == Lang::French)) {
             (Phase::Ahead { minutes }, true) => format!("dans {}", Self::minutes(minutes)),
             (Phase::Ahead { minutes }, false) => format!("in {}", Self::minutes(minutes)),
             (Phase::Under { left, .. }, true) => format!("fin dans {}", Self::minutes(left)),
@@ -597,7 +594,7 @@ impl Words {
         let long = |minutes: i64| {
             if minutes >= 60 {
                 let (h, m) = (minutes / 60, minutes % 60);
-                match (self.fr, m) {
+                match ((self.lang == Lang::French), m) {
                     (true, 0) => format!("{h} h"),
                     (false, 0) => format!("{h} h"),
                     (true, m) => format!("{h} h {m:02}"),
@@ -609,7 +606,7 @@ impl Words {
                 format!("{minutes} minutes")
             }
         };
-        let when = match (card.phase, self.fr) {
+        let when = match (card.phase, (self.lang == Lang::French)) {
             (Phase::Ahead { minutes }, true) => format!("dans {}", long(minutes)),
             (Phase::Ahead { minutes }, false) => format!("in {}", long(minutes)),
             (Phase::Under { left, .. }, true) => format!("fin dans {}", long(left)),
@@ -619,7 +616,7 @@ impl Words {
             Phase::Ahead { .. } => self.pick(txt::NEXT_MEETING_2),
             Phase::Under { .. } => self.pick(txt::MEETING_NOW),
         };
-        let colon = if self.fr { " :" } else { ":" };
+        let colon = txt::TEXT.get(self.lang);
         let mut name = format!("{heading}{colon} {}, {}, {when}", card.title, card.start);
         if card.video.is_some() {
             name.push_str(self.pick(txt::VIDEO_CALL));

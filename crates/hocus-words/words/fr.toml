@@ -1704,6 +1704,8 @@ session_locked = "Session verrouillée"
 mute = "Couper le son"
 mute_the_microphone = "Couper le micro"
 microphone = "Micro"
+connected_to = "connecté à {name}, {signal}"
+mute_2 = "Couper le son de {app}"
 
 [shell.actions]
 an_action_window_desktop_setting_session = "Une action : fenêtre, bureau, réglage, session…"
@@ -1718,6 +1720,7 @@ settings = "Réglages"
 a_digit_picks_at_once_backspace = "Un chiffre choisit tout de suite · Retour arrière revient aux actions"
 choose_enter_runs_tab_completes = "↑↓ choisir · Entrée lancer · Tab compléter"
 the_recent_first_on_a_tie = "les récentes d’abord à score égal"
+keyword = "mot-clé : {word}"
 
 [shell.agents]
 briefing = "Le point"
@@ -1760,6 +1763,10 @@ any_tool_can_say_how_its = "N'importe quel outil peut dire où en est son agent 
 copy = "Copier"
 copied = "Copié"
 states_working_waiting_done_failed_idle = "États : working, waiting, done, failed, idle. La fenêtre de l'agent est trouvée d'elle-même."
+working = "{x_n} au travail"
+resting_4 = "{resting} au repos"
+following = "Suivis : {list}."
+plug_in_2 = "Brancher {tool_title}"
 
 [shell.auth]
 authorization_required = "Autorisation nécessaire"
@@ -1777,6 +1784,7 @@ window = "Fenêtre"
 none = "aucune"
 cancel = "Annuler"
 authorize = "Autoriser"
+authorization_required_2 = "Autorisation nécessaire : {app}"
 
 [shell.capture]
 area = "Zone"
@@ -1813,6 +1821,8 @@ saved = "Enregistrée"
 open = "Ouvrir"
 screen_recording = "Enregistrement d'écran"
 the_recording_could_not_be_saved = "L'enregistrement n'a pas pu être enregistré"
+saved_2 = "Enregistrée : {name}"
+annotated = "{stem} (annotée).{extension}"
 
 [shell.in_use]
 resume_the_recording = "Reprendre l'enregistrement"
@@ -1840,6 +1850,10 @@ enter_copies = "Entrée copie"
 enter_opens = "Entrée ouvre"
 enter_searches = "Entrée cherche"
 duckduckgo_ctrl_enter_from_anywhere = "DuckDuckGo · Ctrl+Entrée depuis n’importe où"
+open = "Ouvrir {typed}"
+in_the_browser = "{url} · dans le navigateur"
+search_the_web_for = "Chercher « {query} » sur le web"
+copied = "Copié : {value}"
 
 [shell.lock]
 password = "Mot de passe"
@@ -1848,6 +1862,8 @@ caps_lock_is_on = "Majuscules verrouillées"
 checking = "Vérification…"
 wrong_password = "Mot de passe incorrect."
 caps_lock_is_on_2 = "Les majuscules sont verrouillées."
+too_many_attempts_try_again_in = "Trop d’essais. Réessaie dans {seconds} s."
+keyboard_layout_change = "Disposition du clavier : {name}. Changer"
 
 [shell.meeting]
 join_the_video_call = "Rejoindre la visio"
@@ -1860,6 +1876,7 @@ n_1_minute = "1 minute"
 next_meeting_2 = "Prochaine réunion"
 meeting_now = "Réunion en cours"
 video_call = ", visio"
+text = " :"
 
 [shell.music]
 music = "Musique"
@@ -1907,6 +1924,7 @@ screenshot = "Capture d'écran"
 remove = "Retirer"
 unpin = "Désépingler"
 pin = "Épingler"
+nothing_for = "Rien pour « {query} »"
 
 [shell.popover_history]
 clear_all = "Tout effacer"
@@ -1952,6 +1970,7 @@ logging_out_2 = "Fermeture de la session…"
 restarting_2 = "Redémarrage…"
 shutting_down_2 = "Extinction…"
 an_application = "Une application"
+go_back_to = "Revenir à {app}"
 
 [shell.popover_window_menu]
 restore = "Restaurer"
@@ -1974,6 +1993,7 @@ remind_me_when_it_starts = "Me le redire à l'heure"
 dismiss_this_reminder = "Ignorer ce rappel"
 video_call = ", visio"
 calendar = "Agenda"
+started_at = "{m_title} · a commencé à {m_hhmm}"
 
 [shell.setup]
 your_day_here = "Ta journée ici"
@@ -2064,3 +2084,134 @@ delete = "Suppr"
 mute = "Muet"
 brightness = "Luminosité +"
 brightness_2 = "Luminosité −"
+
+
+[shell.agents_peek]
+a_window = "une fenêtre"
+and = "et"
+windows = "{x_n} fenêtres"
+windows_2 = "{x_n} fenêtres {one}"
+laptop_screen = "écran du portable"
+external_screen = "écran externe"
+inch_screen = "écran externe {i} pouces"
+the_left = "L’{screen} est parti."
+welcome_back = "Re-bonjour, {screen} !"
+n_1_other = "1 autre"
+others = "{k} autres"
+
+[shell.bluetooth_model]
+no_device = "Aucun appareil"
+bluetooth_off = "Bluetooth coupé"
+bluetooth_is_off = "Le Bluetooth est coupé."
+battery = "batterie {percent} %"
+my_devices = "MES APPAREILS"
+all_your_devices_are_connected = "Tous tes appareils sont connectés."
+it_does_not_answer_check_that = "Il ne répond pas. Vérifie qu'il est allumé et à portée."
+nearby = "AUTOUR"
+pairing = "Association…"
+pairing_failed_put_the_device_in = "L'association a échoué. Mets l'appareil en mode association et réessaie."
+searching_for_devices = "Recherche des appareils…"
+bluetooth_settings = "Réglages du Bluetooth…"
+no_new_device_found = "Aucun nouvel appareil trouvé."
+
+[shell.emoji]
+search_emoji = "Chercher un emoji"
+recent = "Récents"
+enter_inserts = "Entrée insère"
+no_emoji_for = "Aucun emoji pour « {query} »"
+skin_tone = "Teinte de peau"
+emoji_enter_inserts_the_first_the = "Emoji · Entrée insère le premier, les flèches choisissent"
+
+[shell.levels_model]
+muted = "muet"
+sound = "Son"
+output = "SORTIE"
+microphone = "MICRO"
+off = "coupé"
+sound_settings = "Réglages du son…"
+no_application_is_playing_sound = "Aucune application ne joue de son."
+brightness = "Luminosité"
+built_in_screen = "Écran du portable"
+the_screen_is_set_with_its = "L'écran {screen} se règle avec ses propres boutons."
+power_mode = "Mode d'énergie"
+power_mode_2 = "MODE D'ÉNERGIE"
+this_computer_has_no_performance_mode = "Le mode performance n'existe pas sur cet ordinateur."
+battery_health_of_its_original_capacity = "État de la batterie : {percent} % de sa capacité d'origine"
+no_window = "Aucune fenêtre."
+left = "{t} restantes"
+on_battery = "Sur batterie"
+charging_full_in = "En charge · plein dans {t}"
+charging = "En charge"
+plugged_in_full = "Branché, plein"
+plugged_in_not_charging = "Branché, ne charge pas"
+plug_in_the_charger = " · branche le chargeur"
+on_battery_2 = "sur batterie"
+full_in = "plein dans {t}"
+charging_2 = "en charge"
+plugged_in_full_2 = "branché, plein"
+plugged_in = "branché"
+plug_in_the_charger_2 = "branche le chargeur"
+
+[shell.network_model]
+connecting = "Connexion…"
+offline = "Hors ligne"
+wi_fi_off = "Wi-Fi coupé"
+wired = "Câble"
+connected_by_cable = "Connecté par câble"
+airplane_mode = "Mode avion"
+airplane_mode_is_on = "Le mode avion est activé."
+wi_fi_settings = "Réglages du Wi-Fi…"
+wi_fi_is_off = "Le Wi-Fi est coupé."
+no_wi_fi_adapter = "Aucune carte Wi-Fi."
+connected = "Connecté"
+sign_in_page_to_open = "Page de connexion à ouvrir"
+disconnect = "Déconnecter"
+open_the_sign_in_page = "Ouvrir la page de connexion"
+networks = "RÉSEAUX"
+searching = "Recherche…"
+searching_for_networks = "Recherche des réseaux…"
+no_network_found = "Aucun réseau trouvé."
+saved = "enregistré"
+in_settings = "dans les Réglages"
+failed = "échec"
+password = "Mot de passe"
+cancel = "Annuler"
+connect = "Se connecter"
+wrong_password_check_it_and_try = "Mot de passe incorrect. Vérifie-le et réessaie."
+could_not_connect_try_again = "La connexion a échoué. Réessaie."
+
+[shell.popover_brightness]
+keyboard_backlight = "Rétroéclairage du clavier"
+
+[shell.popover_desktop]
+minimised = ", réduite"
+
+[shell.popover_meeting]
+next = "Ensuite"
+
+
+[shell.curtain]
+locking_in_s = "Verrouillage dans {seconds} s"
+move_the_mouse_to_stay = "Bouge la souris pour rester"
+locking_in_seconds_move_the_mouse = "Verrouillage dans {seconds} secondes. Bouge la souris pour rester."
+
+[shell.notifications_draw]
+now = "· maintenant"
+close = "Fermer"
+waiting = "+{x_n} en attente"
+
+[shell.tasks]
+to_do = "À FAIRE"
+to_do_2 = "À faire"
+add_a_task = "Ajouter une tâche"
+new_task = "Nouvelle tâche…"
+nothing_to_do = "Rien à faire."
+not_saved = "Pas enregistré"
+
+[shell.today]
+today = "AUJOURD'HUI"
+video_call = ", visio"
+
+[shell.windows]
+close = "Fermer {title}"
+this_desktop_s_windows = "Fenêtres du bureau : {count}"

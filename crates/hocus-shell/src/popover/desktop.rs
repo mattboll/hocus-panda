@@ -19,6 +19,7 @@
 //!
 //! Built with the shell's widget kit ([`crate::ui`]), as the Wi-Fi's.
 
+use hocus_words::shell::popover_desktop as txt;
 use std::sync::{Mutex, PoisonError};
 
 use hocus_a11y::Role;
@@ -434,11 +435,7 @@ fn rows<'a>(
             .on_press(Msg::Act(target));
         let mut said_as = row.title.clone();
         if row.minimized {
-            said_as.push_str(if words.fr() {
-                ", réduite"
-            } else {
-                ", minimised"
-            });
+            said_as.push_str(txt::MINIMISED.get(words.lang()));
         }
         let declared = control(
             mouse_area(pressed).on_right_press(Msg::Menu(target)),

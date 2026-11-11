@@ -9,6 +9,7 @@
 
 pub mod draw;
 
+use hocus_words::shell::curtain as txt;
 use std::time::{Duration, Instant};
 
 use hocus_link::{CURTAIN_NAMESPACE, CurtainShown};
@@ -146,42 +147,28 @@ impl Surface for Curtain {
 /// The pill's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     /// "Verrouillage dans 7 s".
     pub fn locking_in(self, seconds: u32) -> String {
-        if self.fr {
-            format!("Verrouillage dans {seconds} s")
-        } else {
-            format!("Locking in {seconds} s")
-        }
+        txt::locking_in_s(self.lang, seconds)
     }
 
     pub fn stay(self) -> &'static str {
-        if self.fr {
-            "Bouge la souris pour rester"
-        } else {
-            "Move the mouse to stay"
-        }
+        txt::MOVE_THE_MOUSE_TO_STAY.get(self.lang)
     }
 
     /// Its name for a screen reader, said once as it shows (11,
     /// accessibility).
     #[allow(dead_code)]
     pub fn name(self, seconds: u32) -> String {
-        if self.fr {
-            format!("Verrouillage dans {seconds} secondes. Bouge la souris pour rester.")
-        } else {
-            format!("Locking in {seconds} seconds. Move the mouse to stay.")
-        }
+        txt::locking_in_seconds_move_the_mouse(self.lang, seconds)
     }
 }
 

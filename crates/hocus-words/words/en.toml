@@ -1713,6 +1713,8 @@ session_locked = "Session locked"
 mute = "Mute"
 mute_the_microphone = "Mute the microphone"
 microphone = "Microphone"
+connected_to = "connected to {name}, {signal}"
+mute_2 = "Mute {app}"
 
 [shell.actions]
 an_action_window_desktop_setting_session = "An action: window, desktop, setting, session…"
@@ -1727,6 +1729,7 @@ settings = "Settings"
 a_digit_picks_at_once_backspace = "A digit picks at once · Backspace goes back to the actions"
 choose_enter_runs_tab_completes = "↑↓ choose · Enter runs · Tab completes"
 the_recent_first_on_a_tie = "the recent first on a tie"
+keyword = "keyword: {word}"
 
 [shell.agents]
 briefing = "Briefing"
@@ -1769,6 +1772,10 @@ any_tool_can_say_how_its = "Any tool can say how its agent is doing with a comma
 copy = "Copy"
 copied = "Copied"
 states_working_waiting_done_failed_idle = "States: working, waiting, done, failed, idle. The agent's window is found by itself."
+working = "{x_n} working"
+resting_4 = "{resting} resting"
+following = "Following: {list}."
+plug_in_2 = "Plug in {tool_title}"
 
 [shell.auth]
 authorization_required = "Authorization required"
@@ -1786,6 +1793,7 @@ window = "Window"
 none = "none"
 cancel = "Cancel"
 authorize = "Authorize"
+authorization_required_2 = "Authorization required: {app}"
 
 [shell.capture]
 area = "Area"
@@ -1822,6 +1830,8 @@ saved = "Saved"
 open = "Open"
 screen_recording = "Screen recording"
 the_recording_could_not_be_saved = "The recording could not be saved"
+saved_2 = "Saved: {name}"
+annotated = "{stem} (annotated).{extension}"
 
 [shell.in_use]
 resume_the_recording = "Resume the recording"
@@ -1849,6 +1859,10 @@ enter_copies = "Enter copies"
 enter_opens = "Enter opens"
 enter_searches = "Enter searches"
 duckduckgo_ctrl_enter_from_anywhere = "DuckDuckGo · Ctrl+Enter from anywhere"
+open = "Open {typed}"
+in_the_browser = "{url} · in the browser"
+search_the_web_for = "Search the web for “{query}”"
+copied = "Copied: {value}"
 
 [shell.lock]
 password = "Password"
@@ -1857,6 +1871,8 @@ caps_lock_is_on = "Caps Lock is on"
 checking = "Checking…"
 wrong_password = "Wrong password."
 caps_lock_is_on_2 = "Caps Lock is on."
+too_many_attempts_try_again_in = "Too many attempts. Try again in {seconds} s."
+keyboard_layout_change = "Keyboard layout: {name}. Change"
 
 [shell.meeting]
 join_the_video_call = "Join the video call"
@@ -1869,6 +1885,7 @@ n_1_minute = "1 minute"
 next_meeting_2 = "Next meeting"
 meeting_now = "Meeting now"
 video_call = ", video call"
+text = ":"
 
 [shell.music]
 music = "Music"
@@ -1916,6 +1933,7 @@ screenshot = "Screenshot"
 remove = "Remove"
 unpin = "Unpin"
 pin = "Pin"
+nothing_for = "Nothing for “{query}”"
 
 [shell.popover_history]
 clear_all = "Clear all"
@@ -1961,6 +1979,7 @@ logging_out_2 = "Logging out…"
 restarting_2 = "Restarting…"
 shutting_down_2 = "Shutting down…"
 an_application = "An application"
+go_back_to = "Go back to {app}"
 
 [shell.popover_window_menu]
 restore = "Restore"
@@ -1983,6 +2002,7 @@ remind_me_when_it_starts = "Remind me when it starts"
 dismiss_this_reminder = "Dismiss this reminder"
 video_call = ", video call"
 calendar = "Calendar"
+started_at = "{m_title} · started at {m_hhmm}"
 
 [shell.setup]
 your_day_here = "Your day here"
@@ -2073,3 +2093,134 @@ delete = "Delete"
 mute = "Mute"
 brightness = "Brightness +"
 brightness_2 = "Brightness −"
+
+
+[shell.agents_peek]
+a_window = "a window"
+and = "and"
+windows = "{x_n} windows"
+windows_2 = "{x_n} {one} windows"
+laptop_screen = "laptop screen"
+external_screen = "external screen"
+inch_screen = "{i}-inch screen"
+the_left = "The {screen} left."
+welcome_back = "Welcome back, {screen}!"
+n_1_other = "1 other"
+others = "{k} others"
+
+[shell.bluetooth_model]
+no_device = "No device"
+bluetooth_off = "Bluetooth off"
+bluetooth_is_off = "Bluetooth is off."
+battery = "battery {percent} %"
+my_devices = "MY DEVICES"
+all_your_devices_are_connected = "All your devices are connected."
+it_does_not_answer_check_that = "It does not answer. Check that it is on and in range."
+nearby = "NEARBY"
+pairing = "Pairing…"
+pairing_failed_put_the_device_in = "Pairing failed. Put the device in pairing mode and try again."
+searching_for_devices = "Searching for devices…"
+bluetooth_settings = "Bluetooth settings…"
+no_new_device_found = "No new device found."
+
+[shell.emoji]
+search_emoji = "Search emoji"
+recent = "Recent"
+enter_inserts = "Enter inserts"
+no_emoji_for = "No emoji for “{query}”"
+skin_tone = "Skin tone"
+emoji_enter_inserts_the_first_the = "Emoji · Enter inserts the first, the arrows choose"
+
+[shell.levels_model]
+muted = "muted"
+sound = "Sound"
+output = "OUTPUT"
+microphone = "MICROPHONE"
+off = "off"
+sound_settings = "Sound settings…"
+no_application_is_playing_sound = "No application is playing sound."
+brightness = "Brightness"
+built_in_screen = "Built-in screen"
+the_screen_is_set_with_its = "The {screen} screen is set with its own buttons."
+power_mode = "Power mode"
+power_mode_2 = "POWER MODE"
+this_computer_has_no_performance_mode = "This computer has no performance mode."
+battery_health_of_its_original_capacity = "Battery health: {percent} % of its original capacity"
+no_window = "No window."
+left = "{t} left"
+on_battery = "On battery"
+charging_full_in = "Charging · full in {t}"
+charging = "Charging"
+plugged_in_full = "Plugged in, full"
+plugged_in_not_charging = "Plugged in, not charging"
+plug_in_the_charger = " · plug in the charger"
+on_battery_2 = "on battery"
+full_in = "full in {t}"
+charging_2 = "charging"
+plugged_in_full_2 = "plugged in, full"
+plugged_in = "plugged in"
+plug_in_the_charger_2 = "plug in the charger"
+
+[shell.network_model]
+connecting = "Connecting…"
+offline = "Offline"
+wi_fi_off = "Wi-Fi off"
+wired = "Wired"
+connected_by_cable = "Connected by cable"
+airplane_mode = "Airplane mode"
+airplane_mode_is_on = "Airplane mode is on."
+wi_fi_settings = "Wi-Fi settings…"
+wi_fi_is_off = "Wi-Fi is off."
+no_wi_fi_adapter = "No Wi-Fi adapter."
+connected = "Connected"
+sign_in_page_to_open = "Sign-in page to open"
+disconnect = "Disconnect"
+open_the_sign_in_page = "Open the sign-in page"
+networks = "NETWORKS"
+searching = "Searching…"
+searching_for_networks = "Searching for networks…"
+no_network_found = "No network found."
+saved = "saved"
+in_settings = "in Settings"
+failed = "failed"
+password = "Password"
+cancel = "Cancel"
+connect = "Connect"
+wrong_password_check_it_and_try = "Wrong password. Check it and try again."
+could_not_connect_try_again = "Could not connect. Try again."
+
+[shell.popover_brightness]
+keyboard_backlight = "Keyboard backlight"
+
+[shell.popover_desktop]
+minimised = ", minimised"
+
+[shell.popover_meeting]
+next = "Next"
+
+
+[shell.curtain]
+locking_in_s = "Locking in {seconds} s"
+move_the_mouse_to_stay = "Move the mouse to stay"
+locking_in_seconds_move_the_mouse = "Locking in {seconds} seconds. Move the mouse to stay."
+
+[shell.notifications_draw]
+now = "· now"
+close = "Close"
+waiting = "+{x_n} waiting"
+
+[shell.tasks]
+to_do = "TO DO"
+to_do_2 = "To do"
+add_a_task = "Add a task"
+new_task = "New task…"
+nothing_to_do = "Nothing to do."
+not_saved = "Not saved"
+
+[shell.today]
+today = "TODAY"
+video_call = ", video call"
+
+[shell.windows]
+close = "Close {title}"
+this_desktop_s_windows = "This desktop's windows: {count}"

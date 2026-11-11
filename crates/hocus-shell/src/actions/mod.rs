@@ -48,22 +48,16 @@ const QUERY_MOST: usize = 120;
 /// The palette's words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    pub fr: bool,
+    pub lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn title(self) -> &'static str {
@@ -90,11 +84,7 @@ impl Words {
     }
 
     pub fn keyword(self, word: &str) -> String {
-        if self.fr {
-            format!("mot-clé\u{a0}: {word}")
-        } else {
-            format!("keyword: {word}")
-        }
+        txt::keyword(self.lang, word)
     }
 
     pub fn state(self, on: bool) -> &'static str {
@@ -106,19 +96,19 @@ impl Words {
 
     /// A step's heading: what goes where.
     pub fn step_head(self, def: &Def, title: &str) -> String {
-        match (def.id, self.fr) {
+        match (def.id, (self.lang == Lang::French)) {
             ("send-to-desktop" | "take-to-desktop", true) if !title.is_empty() => {
                 format!("{title} part sur…")
             }
             ("send-to-desktop" | "take-to-desktop", false) if !title.is_empty() => {
                 format!("{title} goes to…")
             }
-            _ => def.name(self.fr).to_owned(),
+            _ => def.name(self.lang == Lang::French).to_owned(),
         }
     }
 
     pub fn elsewhere(self, to: Elsewhere, query: &str) -> String {
-        match (to, self.fr) {
+        match (to, (self.lang == Lang::French)) {
             (Elsewhere::Launcher, true) => {
                 format!("Chercher «\u{a0}{query}\u{a0}» dans le lanceur")
             }
@@ -195,7 +185,7 @@ impl Open {
         let agents = agents();
         let desks = desks(&self.shown);
         let seen = list::Seen {
-            fr: words.fr,
+            fr: (words.lang == hocus_words::Lang::French),
             shown: &self.shown,
             recent: &recent,
             dnd: dnd(),

@@ -514,22 +514,16 @@ pub fn set_agents(agents: Vec<AgentShown>) {
 /// The group's and its popovers' words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn header(self) -> &'static str {
@@ -558,7 +552,7 @@ impl Words {
                 let working = self.working(brief.working.len());
                 match brief.to_see.len() {
                     0 => working,
-                    n if self.fr => format!("{working} · {n} à voir"),
+                    n if (self.lang == Lang::French) => format!("{working} · {n} à voir"),
                     n => format!("{working} · {n} to see"),
                 }
             }
@@ -567,21 +561,13 @@ impl Words {
 
     /// "3 au travail".
     pub fn working(self, n: usize) -> String {
-        if self.fr {
-            format!("{n} au travail")
-        } else {
-            format!("{n} working")
-        }
+        txt::working(self.lang, n)
     }
 
     /// The briefing's footer: "3 au travail · 1 au repos".
     pub fn footer(self, brief: &Brief) -> String {
         let resting = brief.resting.len();
-        let resting = if self.fr {
-            format!("{resting} au repos")
-        } else {
-            format!("{resting} resting")
-        };
+        let resting = txt::resting_4(self.lang, resting);
         format!("{} · {resting}", self.working(brief.working.len()))
     }
 
@@ -618,7 +604,7 @@ impl Words {
         } else {
             format!("{minutes}\u{a0}min")
         };
-        match (ago, self.fr) {
+        match (ago, (self.lang == Lang::French)) {
             (false, _) => format!("· {time}"),
             (true, true) => format!("· il y a {time}"),
             (true, false) => format!("· {time} ago"),
@@ -636,7 +622,7 @@ impl Words {
     /// What a waiting or stuck agent's tool said, as the briefing words
     /// it: a request "Autoriser Bash : npm install ?", a text as it is.
     pub fn note(self, note: &Note) -> String {
-        match (note, self.fr) {
+        match (note, (self.lang == Lang::French)) {
             (Note::Says(text), _) => text.clone(),
             (Note::Allow { tool, what }, true) if what.is_empty() => {
                 format!("Autoriser {tool}\u{a0}?")
@@ -671,11 +657,7 @@ impl Words {
 
     pub fn followed(self, names: &[&str]) -> String {
         let list = names.join(", ");
-        if self.fr {
-            format!("Suivis\u{a0}: {list}.")
-        } else {
-            format!("Following: {list}.")
-        }
+        txt::following(self.lang, &list)
     }
 
     /// What the mini form's item says (4.7), for the log: its badge and
@@ -746,11 +728,7 @@ impl Words {
     }
 
     pub fn plug_title(self, tool: Tool) -> String {
-        if self.fr {
-            format!("Brancher {}", tool.title())
-        } else {
-            format!("Plug in {}", tool.title())
-        }
+        txt::plug_in_2(self.lang, tool.title())
     }
 
     pub fn what(self, tool: Tool) -> &'static str {

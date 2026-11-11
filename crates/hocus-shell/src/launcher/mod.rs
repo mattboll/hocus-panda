@@ -72,26 +72,24 @@ pub const EMOJI_MOST: usize = 8;
 /// The launcher's words, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
-    fr: bool,
+    lang: Lang,
 }
 
 impl Words {
     pub fn new(lang: Lang) -> Self {
-        Self {
-            fr: lang == Lang::French,
-        }
+        Self { lang }
     }
 
     fn pick(self, text: hocus_words::Text) -> &'static str {
-        text.get(if self.fr {
-            hocus_words::Lang::French
-        } else {
-            hocus_words::Lang::English
-        })
+        text.get(self.lang)
     }
 
     pub fn lang(self) -> Lang {
-        if self.fr { Lang::French } else { Lang::English }
+        if self.lang == Lang::French {
+            Lang::French
+        } else {
+            Lang::English
+        }
     }
 
     pub fn placeholder(self) -> &'static str {
@@ -121,27 +119,15 @@ impl Words {
     }
 
     pub fn open(self, typed: &str) -> String {
-        if self.fr {
-            format!("Ouvrir {typed}")
-        } else {
-            format!("Open {typed}")
-        }
+        txt::open(self.lang, typed)
     }
 
     pub fn in_browser(self, url: &str) -> String {
-        if self.fr {
-            format!("{url} · dans le navigateur")
-        } else {
-            format!("{url} · in the browser")
-        }
+        txt::in_the_browser(self.lang, url)
     }
 
     pub fn search_web(self, query: &str) -> String {
-        if self.fr {
-            format!("Chercher «\u{a0}{query}\u{a0}» sur le web")
-        } else {
-            format!("Search the web for \u{201c}{query}\u{201d}")
-        }
+        txt::search_the_web_for(self.lang, query)
     }
 
     pub fn web_engine(self) -> &'static str {
@@ -150,11 +136,7 @@ impl Words {
 
     /// The toast once a result is copied.
     pub fn copied(self, value: &str) -> String {
-        if self.fr {
-            format!("Copié\u{a0}: {value}")
-        } else {
-            format!("Copied: {value}")
-        }
+        txt::copied(self.lang, value)
     }
 }
 
@@ -983,7 +965,13 @@ mod tests {
 
     fn reading(fr: bool) -> Reading {
         Reading {
-            words: Words { fr },
+            words: Words {
+                lang: if fr {
+                    hocus_words::Lang::French
+                } else {
+                    hocus_words::Lang::English
+                },
+            },
             numbers: answers::Numbers::new(if fr { Lang::French } else { Lang::English }),
         }
     }
@@ -1106,7 +1094,9 @@ mod tests {
             grid.address.as_ref().map(|a| a.url.as_str()),
             Some("https://github.com")
         );
-        let words = Words { fr: true };
+        let words = Words {
+            lang: hocus_words::Lang::French,
+        };
         assert_eq!(
             words.search_web("crêpes"),
             "Chercher «\u{a0}crêpes\u{a0}» sur le web"
