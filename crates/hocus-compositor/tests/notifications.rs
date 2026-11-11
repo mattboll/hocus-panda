@@ -1333,3 +1333,27 @@ fn a_bubble_never_drawn_is_said_as_it_goes() -> anyhow::Result<()> {
 fn journal_has(journal: &Journal, what: &str) -> bool {
     journal.text().contains(what)
 }
+
+/// The history in its main state (four, by sections), shot under
+/// `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let history = kept("Logiciels", "12 mises à jour disponibles", 26 * 60, false)
+        + &kept("Firefox", "Téléchargement terminé", 70, false)
+        + &kept("Calendrier", "Point produit", 40, false);
+    let mut bed = start_with(&shell, |_, _| {}, &history)?;
+    bed.logged("the history read back kept=3")?;
+    bed.notify(Notice {
+        summary: "Camille dans #design",
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    bed.logged("a notification to the history")?;
+    bed.open_history()?;
+    bed.hp.pointer_move(400.0, 300.0);
+    common::popover_shot(&mut bed.hp, "history")
+}

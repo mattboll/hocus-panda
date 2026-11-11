@@ -1286,3 +1286,17 @@ fn screenshot_of_a_month_outside_the_window() -> anyhow::Result<()> {
     eprintln!("{}", file.display());
     Ok(())
 }
+
+/// The calendar in its main state (today, its six events), shot under
+/// `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, WITH_FIXTURE, FIXTURE, FormChoice::Full)?;
+    bed.open()?;
+    bed.hp.pointer_move(400.0, 600.0);
+    common::popover_shot(&mut bed.hp, "calendar")
+}

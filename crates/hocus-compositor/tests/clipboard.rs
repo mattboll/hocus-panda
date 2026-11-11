@@ -1143,3 +1143,21 @@ fn the_settings_line_hears_the_count_and_clears_all_but_the_pinned() -> anyhow::
     assert!(!shown.contains("RÉCENTS"), "{shown}");
     Ok(())
 }
+
+/// The history in its main state (two copies, the first selected), shot
+/// under `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let Some(mut bed) = Bed::start(dir.path())? else {
+        return Ok(());
+    };
+    let terminal = bed.window("test.terminal", (640, 420))?;
+    bed.copy(&terminal, "cargo build --release")?;
+    let editor = bed.window("test.editor", (320, 200))?;
+    bed.copy(&editor, "Réunion à la Pépinière")?;
+    bed.super_v()?;
+    bed.hp.pointer_move(100.0, 100.0);
+    common::popover_shot(&mut bed.hp, "clipboard")
+}

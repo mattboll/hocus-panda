@@ -4229,3 +4229,53 @@ fn screenshots_of_the_pandas() -> anyhow::Result<()> {
     pandas_shot(&mut bed, &folder, "mini", 260)?;
     Ok(())
 }
+
+/// The briefing in its main state (one waits, one is stuck, one to see),
+/// and Sources (Claude Code found, not plugged in), shot under
+/// `HOCUS_KIT_SHOTS` (#772's side-by-sides; see `wifi::kit_shot`).
+#[test]
+#[ignore = "writes screenshots under HOCUS_KIT_SHOTS"]
+fn kit_shot() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(
+        &shell,
+        &hocus,
+        &Machine {
+            claude: true,
+            ..Machine::default()
+        },
+    )?;
+    bed.claude(
+        "s1",
+        "site-web",
+        "PermissionRequest",
+        ",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm install\",\
+         \"description\":\"Install the dependencies\"}",
+    )?;
+    bed.agent_becomes("site-web", Some("waiting"))?;
+    bed.claude(
+        "s2",
+        "migration",
+        "StopFailure",
+        ",\"error\":\"rate_limit\",\"error_details\":\"429 Too Many Requests\",\
+         \"last_assistant_message\":\"API Error: Rate limit reached\"",
+    )?;
+    bed.agent_becomes("migration", Some("failed"))?;
+    bed.claude("s3", "api", "Stop", ",\"stop_hook_active\":false")?;
+    bed.agent_becomes("api", Some("done"))?;
+    bed.settle()?;
+    let briefing = bed.open_briefing()?;
+    bed.hp.pointer_move(400.0, 600.0);
+    common::popover_shot(&mut bed.hp, "briefing")?;
+    let sources = bed.briefing_item(briefing, "Sources")?;
+    bed.click(sources)?;
+    let shown = bed.hp.dispatch_until(WAIT, |hp| {
+        let popovers = hp.popover_surfaces();
+        popovers.len() == 1 && popovers[0].1.width == 300 && popovers[0].1.height > 0
+    })?;
+    anyhow::ensure!(shown, "no Sources: {:?}", bed.hp.popover_surfaces());
+    bed.hp.pointer_move(400.0, 600.0);
+    common::popover_shot(&mut bed.hp, "agents")
+}
