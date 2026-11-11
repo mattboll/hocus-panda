@@ -360,6 +360,21 @@ fn account(
 mod tests {
     use super::*;
 
+    /// `[day]` and `[calendar]` have the defaults the shipped file lists
+    /// (`hocus_config::defaults`), as the compositor's sections do.
+    #[test]
+    fn the_shipped_example_is_the_defaults() -> anyhow::Result<()> {
+        use hocus_config::defaults;
+        let uncommented = defaults::uncomment(defaults::SHIPPED);
+        assert!(uncommented.contains("[calendar]"), "{uncommented}");
+        assert_eq!(from_toml(&uncommented)?, Config::default());
+        assert_eq!(
+            crate::reminders::from_toml(&uncommented)?,
+            crate::reminders::Settings::default()
+        );
+        Ok(())
+    }
+
     #[test]
     fn day_reads_its_accounts_and_lets_the_rest_through() -> anyhow::Result<()> {
         let config = from_toml(

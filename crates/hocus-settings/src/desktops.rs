@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 
 use crate::{
     lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const DESKTOPS: RowGroup = RowGroup {
@@ -330,14 +330,6 @@ pub fn outside() -> &'static [crate::model::Outside] {
     &ALL
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
         label: w(fr, en),
@@ -372,7 +364,7 @@ fn setting(
 pub fn settings() -> &'static [Setting] {
     static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
     SETTINGS.get_or_init(|| {
-        let switch = |key| one(key, Codec::Bool, Value::Bool(true));
+        let switch = |key| one(key, Codec::Bool);
         vec![
             setting(
                 COUNT,
@@ -392,14 +384,10 @@ pub fn settings() -> &'static [Setting] {
                     step: 1,
                     unit: "",
                 },
-                one(
-                    &["desktops", "count"],
-                    Codec::Int {
+                one(&["desktops", "count"], Codec::Int {
                         min: 1,
                         max: MOST as i64,
-                    },
-                    Value::Int(DEFAULT as i64),
-                ),
+                    }),
             ),
             setting(
                 NAMES,
@@ -414,7 +402,7 @@ pub fn settings() -> &'static [Setting] {
                     &["name", "rename", "label", "workspaces"],
                 ),
                 Kind::Text,
-                one(&["desktops", "names"], Codec::Texts, Value::List(Vec::new())),
+                one(&["desktops", "names"], Codec::Texts),
             ),
             setting(
                 MOVE_KEY,
@@ -433,11 +421,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Super + glisser", "Super + drag", "super"),
                     word("Aucune touche", "No key", "none"),
                 ]),
-                one(
-                    &["windows", "move-modifier"],
-                    Codec::Word(DRAG_KEYS),
-                    Value::Word("alt"),
-                ),
+                one(&["windows", "move-modifier"], Codec::Word(DRAG_KEYS)),
             ),
             setting(
                 RESIZE_KEY,
@@ -460,11 +444,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Alt + clic droit glissé", "Alt + right-drag", "alt"),
                     word("Aucune touche", "No key", "none"),
                 ]),
-                one(
-                    &["windows", "resize-modifier"],
-                    Codec::Word(DRAG_KEYS),
-                    Value::Word("super"),
-                ),
+                one(&["windows", "resize-modifier"], Codec::Word(DRAG_KEYS)),
             ),
             setting(
                 MAGNET,
@@ -528,11 +508,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Pluie", "Rain", "rain"),
                     word("Givre", "Frost", "frost"),
                 ]),
-                one(
-                    &["windows", "animation"],
-                    Codec::Word(ANIMATIONS),
-                    Value::Word("standard"),
-                ),
+                one(&["windows", "animation"], Codec::Word(ANIMATIONS)),
             ),
             setting(
                 ALT_TAB_ROW,
@@ -550,11 +526,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Tous les bureaux", "All desktops", "all"),
                     word("Ce bureau seulement", "This desktop only", "desktop"),
                 ]),
-                one(
-                    &["windows", "alt-tab"],
-                    Codec::Word(ALT_TAB_WORDS),
-                    Value::Word("all"),
-                ),
+                one(&["windows", "alt-tab"], Codec::Word(ALT_TAB_WORDS)),
             ),
             setting(
                 HOT_CORNER,

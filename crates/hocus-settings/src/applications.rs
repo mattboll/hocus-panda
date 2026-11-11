@@ -37,7 +37,7 @@ use hocus_xdg::{
 
 use crate::{
     lang::{Lang, Words, w},
-    model::{Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Codec, Kind, Outside, RowGroup, SectionId, Setting, one},
 };
 
 /// The rows' ids: the terminal is the file's key, the others live outside
@@ -268,11 +268,7 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 kind: Kind::Text,
-                places: Places::One(Place {
-                    key: &["programs", "terminal"],
-                    codec: Codec::Text,
-                    default: Value::Text(String::new()),
-                }),
+                places: one(&["programs", "terminal"], Codec::Text),
                 needs: None,
             },
             Setting {
@@ -306,11 +302,7 @@ pub fn settings() -> &'static [Setting] {
                     ],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(Place {
-                    key: &["session", "restore"],
-                    codec: Codec::Bool,
-                    default: Value::Bool(true),
-                }),
+                places: one(&["session", "restore"], Codec::Bool),
                 needs: None,
             },
         ]
@@ -1172,6 +1164,7 @@ fn watch(dirs: &Dirs, asks: mpsc::Sender<Ask>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Places, Value};
 
     /// "Rouvrir les applications de la dernière session": a switch of the
     /// start-up group, `[session] restore`, on when the file says nothing;

@@ -31,7 +31,7 @@ use toml_edit::{DocumentMut, Item};
 
 use crate::{
     lang::{Lang, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const PREVIEW: RowGroup = RowGroup {
@@ -190,11 +190,7 @@ pub fn settings() -> &'static [Setting] {
                         value: Value::Word("center"),
                     },
                 ]),
-                places: Places::One(Place {
-                    key: &["wallpaper", "fit"],
-                    codec: Codec::Word(FITS),
-                    default: Value::Word("cover"),
-                }),
+                places: one(&["wallpaper", "fit"], Codec::Word(FITS)),
                 needs: None,
             },
             Setting {
@@ -213,13 +209,7 @@ pub fn settings() -> &'static [Setting] {
                         })
                         .collect(),
                 ),
-                places: Places::One(Place {
-                    key: &["wallpaper", "color"],
-                    codec: Codec::Colour,
-                    default: Value::Text(hocus_link::wallpaper::colour_word(
-                        hocus_link::wallpaper::DEFAULT_COLOR,
-                    )),
-                }),
+                places: one(&["wallpaper", "color"], Codec::Colour),
                 needs: None,
             },
             Setting {
@@ -236,11 +226,7 @@ pub fn settings() -> &'static [Setting] {
                     &["animated", "animation", "rain", "stars", "moving"],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(Place {
-                    key: &["wallpaper", "animate"],
-                    codec: Codec::Bool,
-                    default: Value::Bool(true),
-                }),
+                places: one(&["wallpaper", "animate"], Codec::Bool),
                 needs: None,
             },
             Setting {
@@ -267,11 +253,7 @@ pub fn settings() -> &'static [Setting] {
                         value: Value::Word("full"),
                     },
                 ]),
-                places: Places::One(Place {
-                    key: &["wallpaper", "on-battery"],
-                    codec: Codec::Word(ON_BATTERY_WORDS),
-                    default: Value::Word("half"),
-                }),
+                places: one(&["wallpaper", "on-battery"], Codec::Word(ON_BATTERY_WORDS)),
                 needs: None,
             },
             Setting {
@@ -304,11 +286,7 @@ pub fn settings() -> &'static [Setting] {
                         value: Value::Word("picture"),
                     },
                 ]),
-                places: Places::One(Place {
-                    key: &["wallpaper", "lock"],
-                    codec: Codec::Word(LOCKS),
-                    default: Value::Word("dimmed"),
-                }),
+                places: one(&["wallpaper", "lock"], Codec::Word(LOCKS)),
                 needs: None,
             },
             own(

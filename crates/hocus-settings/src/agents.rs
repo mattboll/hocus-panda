@@ -15,7 +15,7 @@ use hocus_link::ToolState;
 
 use crate::{
     lang::{Lang, Words, w},
-    model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Outside, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const TOOLS: RowGroup = RowGroup {
@@ -507,14 +507,6 @@ pub fn outside() -> &'static [Outside] {
     &ALL
 }
 
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
-}
-
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     Choice {
         label: w(fr, en),
@@ -593,11 +585,7 @@ pub fn settings() -> &'static [Setting] {
                     ),
                     word("Jamais", "Never", "off"),
                 ]),
-                one(
-                    &["agents", "halo"],
-                    Codec::Word(HALO_WORDS),
-                    Value::Word("all"),
-                ),
+                one(&["agents", "halo"], Codec::Word(HALO_WORDS)),
             ),
             setting(
                 REMIND,
@@ -620,11 +608,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Après 10 min", "After 10 min", "10m"),
                     word("Jamais", "Never", "never"),
                 ]),
-                one(
-                    &["agents", "remind"],
-                    Codec::Word(REMIND_WORDS),
-                    Value::Word("5m"),
-                ),
+                one(&["agents", "remind"], Codec::Word(REMIND_WORDS)),
             ),
             setting(
                 PEEK,
@@ -654,11 +638,7 @@ pub fn settings() -> &'static [Setting] {
                     ),
                     word("Jamais", "Never", "off"),
                 ]),
-                one(
-                    &["agents", "peek"],
-                    Codec::Word(PEEK_WORDS),
-                    Value::Word("waiting-and-done"),
-                ),
+                one(&["agents", "peek"], Codec::Word(PEEK_WORDS)),
             ),
             setting(
                 PANDAS,
@@ -676,7 +656,7 @@ pub fn settings() -> &'static [Setting] {
                     &["panda", "pandas", "dot", "colour", "rows"],
                 ),
                 Kind::Switch,
-                one(&["agents", "pandas"], Codec::Bool, Value::Bool(true)),
+                one(&["agents", "pandas"], Codec::Bool),
             ),
         ]
     })

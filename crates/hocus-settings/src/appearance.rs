@@ -15,7 +15,7 @@ use hocus_link::theme::{Accent, Scheme};
 
 use crate::{
     lang::{Lang, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value, one},
 };
 
 const THEME: RowGroup = RowGroup {
@@ -61,14 +61,6 @@ fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
         label: w(fr, en),
         value: Value::Word(word),
     }
-}
-
-fn one(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
 }
 
 /// The theme's setting, and the accent's.
@@ -389,11 +381,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Givre", "Frost", "frost"),
                     word("Matrix", "Matrix", "matrix"),
                 ]),
-                places: one(
-                    &["appearance", "theme"],
-                    Codec::Word(SCHEMES),
-                    Value::Word("dark"),
-                ),
+                places: one(&["appearance", "theme"], Codec::Word(SCHEMES)),
                 needs: None,
             },
             Setting {
@@ -410,11 +398,7 @@ pub fn settings() -> &'static [Setting] {
                     &["colour", "color", "hue", "highlight", "green", "blue", "accent"],
                 ),
                 kind: Kind::Swatches,
-                places: one(
-                    &["appearance", "accent"],
-                    Codec::Word(ACCENTS),
-                    Value::Word("green"),
-                ),
+                places: one(&["appearance", "accent"], Codec::Word(ACCENTS)),
                 needs: None,
             },
             Setting {
@@ -436,11 +420,7 @@ pub fn settings() -> &'static [Setting] {
                     step: 10,
                     unit: " %",
                 },
-                places: one(
-                    &["appearance", "text-scale"],
-                    Codec::Hundredths { min: 80, max: 150 },
-                    Value::Int(100),
-                ),
+                places: one(&["appearance", "text-scale"], Codec::Hundredths { min: 80, max: 150 }),
                 needs: None,
             },
             Setting {
@@ -457,11 +437,7 @@ pub fn settings() -> &'static [Setting] {
                     &["pointer", "mouse", "arrow", "cursor"],
                 ),
                 kind: Kind::Menu(cursor_themes),
-                places: one(
-                    &["appearance", "cursor-theme"],
-                    Codec::Text,
-                    Value::Text(String::new()),
-                ),
+                places: Places::One(Place::unset(&["appearance", "cursor-theme"], Codec::Text, Value::Text(String::new()))),
                 needs: None,
             },
             Setting {
@@ -478,11 +454,7 @@ pub fn settings() -> &'static [Setting] {
                     &["pointer", "mouse", "arrow", "big cursor"],
                 ),
                 kind: Kind::Segmented(CURSOR_SIZES.map(size).to_vec()),
-                places: one(
-                    &["appearance", "cursor-size"],
-                    Codec::Int { min: 8, max: 256 },
-                    Value::Int(24),
-                ),
+                places: Places::One(Place::unset(&["appearance", "cursor-size"], Codec::Int { min: 8, max: 256 }, Value::Int(24))),
                 needs: None,
             },
             Setting {
@@ -524,11 +496,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Français", "Français", "fr"),
                     word("English", "English", "en"),
                 ]),
-                places: one(
-                    &["locale", "language"],
-                    Codec::Word(LANGUAGES),
-                    Value::Word("system"),
-                ),
+                places: one(&["locale", "language"], Codec::Word(LANGUAGES)),
                 needs: None,
             },
             Setting {
@@ -550,11 +518,7 @@ pub fn settings() -> &'static [Setting] {
                     word("En chiffres", "In numbers", "numeric"),
                     word("Année d’abord", "Year first", "iso"),
                 ]),
-                places: one(
-                    &["locale", "date"],
-                    Codec::Word(DATES),
-                    Value::Word("long"),
-                ),
+                places: one(&["locale", "date"], Codec::Word(DATES)),
                 needs: None,
             },
             Setting {
@@ -574,11 +538,7 @@ pub fn settings() -> &'static [Setting] {
                     word("14:05", "14:05", "24h"),
                     word("2:05 PM", "2:05 PM", "12h"),
                 ]),
-                places: one(
-                    &["locale", "time"],
-                    Codec::Word(TIMES),
-                    Value::Word(locale_hours()),
-                ),
+                places: Places::One(Place::unset(&["locale", "time"], Codec::Word(TIMES), Value::Word(locale_hours()))),
                 needs: None,
             },
             Setting {

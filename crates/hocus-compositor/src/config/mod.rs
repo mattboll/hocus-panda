@@ -945,16 +945,12 @@ mod tests {
     }
 
     /// The commented file the package ships lists every setting with its
-    /// default: uncommented, it reads as no file at all.
+    /// default (`hocus_config::defaults`, which the Settings read theirs
+    /// from): uncommented, it reads as no file at all.
     #[test]
     fn the_shipped_example_is_the_defaults() -> anyhow::Result<()> {
-        let example = include_str!("../../../../packaging/config.toml");
-        let uncommented: String = example
-            .lines()
-            .filter_map(|l| l.strip_prefix("# ").filter(|l| !l.starts_with(' ')))
-            .filter(|l| l.starts_with('[') || l.contains(" = "))
-            .map(|l| format!("{l}\n"))
-            .collect();
+        use hocus_config::defaults;
+        let uncommented = defaults::uncomment(defaults::SHIPPED);
         assert!(uncommented.contains("[shortcuts]"), "{uncommented}");
         assert_eq!(toml::from_str::<Config>(&uncommented)?, Config::default());
         Ok(())

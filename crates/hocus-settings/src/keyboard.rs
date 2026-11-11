@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use crate::{
     lang::{Words, w},
-    model::{Choice, Codec, Kind, Place, Places, RowGroup, SectionId, Setting, Value},
+    model::{Choice, Codec, Kind, RowGroup, SectionId, Setting, Value, one},
 };
 
 pub const LAYOUTS: RowGroup = RowGroup {
@@ -125,13 +125,12 @@ pub fn family_of(setting: &str) -> Option<&'static Family> {
     })
 }
 
-/// One action of `[shortcuts]`: its key, its group, its names, its
-/// defaults, a few nearby words.
+/// One action of `[shortcuts]`: its key, its group, its names, a few
+/// nearby words (its defaults are the configuration's).
 struct Action {
     key: &'static str,
     group: RowGroup,
     name: Words,
-    defaults: &'static [&'static str],
     near: (&'static [&'static str], &'static [&'static str]),
 }
 
@@ -139,14 +138,12 @@ const fn a(
     key: &'static str,
     group: RowGroup,
     name: Words,
-    defaults: &'static [&'static str],
     near: (&'static [&'static str], &'static [&'static str]),
 ) -> Action {
     Action {
         key,
         group,
         name,
-        defaults,
         near,
     }
 }
@@ -158,105 +155,90 @@ fn actions() -> Vec<Action> {
             "close",
             WINDOWS,
             w("Fermer la fenêtre", "Close the window"),
-            &["Super+Q", "Alt+F4"],
             (&["quitter"], &["quit"]),
         ),
         a(
             "minimize",
             WINDOWS,
             w("Réduire la fenêtre", "Minimise the window"),
-            &["Super+H"],
             (&["cacher", "minimiser"], &["hide", "minimize"]),
         ),
         a(
             "snap-left",
             WINDOWS,
             w("Moitié gauche", "Left half"),
-            &["Super+Left"],
             (&["ancrer", "côte à côte"], &["snap", "tile"]),
         ),
         a(
             "snap-right",
             WINDOWS,
             w("Moitié droite", "Right half"),
-            &["Super+Right"],
             (&["ancrer", "côte à côte"], &["snap", "tile"]),
         ),
         a(
             "maximize",
             WINDOWS,
             w("Agrandir", "Maximise"),
-            &["Super+Up"],
             (&["plein écran", "maximiser"], &["maximize", "full"]),
         ),
         a(
             "restore",
             WINDOWS,
             w("Restaurer", "Restore"),
-            &["Super+Down"],
             (&["réduire"], &["unmaximize"]),
         ),
         a(
             "quarter-up",
             WINDOWS,
             w("Quart du haut", "Top quarter"),
-            &["Super+Shift+Up"],
             (&["ancrer", "coin"], &["snap", "corner"]),
         ),
         a(
             "quarter-down",
             WINDOWS,
             w("Quart du bas", "Bottom quarter"),
-            &["Super+Shift+Down"],
             (&["ancrer", "coin"], &["snap", "corner"]),
         ),
         a(
             "quarter-left",
             WINDOWS,
             w("Quart de gauche", "Left quarter"),
-            &["Super+Shift+Left"],
             (&["ancrer", "coin"], &["snap", "corner"]),
         ),
         a(
             "quarter-right",
             WINDOWS,
             w("Quart de droite", "Right quarter"),
-            &["Super+Shift+Right"],
             (&["ancrer", "coin"], &["snap", "corner"]),
         ),
         a(
             "focus-left",
             WINDOWS,
             w("Fenêtre de gauche", "Window on the left"),
-            &[],
             (&["focus", "aller"], &["focus"]),
         ),
         a(
             "focus-right",
             WINDOWS,
             w("Fenêtre de droite", "Window on the right"),
-            &[],
             (&["focus", "aller"], &["focus"]),
         ),
         a(
             "focus-up",
             WINDOWS,
             w("Fenêtre du haut", "Window above"),
-            &[],
             (&["focus", "aller"], &["focus"]),
         ),
         a(
             "focus-down",
             WINDOWS,
             w("Fenêtre du bas", "Window below"),
-            &[],
             (&["focus", "aller"], &["focus"]),
         ),
         a(
             "switch-windows",
             WINDOWS,
             w("Passer d’une fenêtre à l’autre", "Switch windows"),
-            &["Alt+Tab"],
             (&["alt tab", "basculer"], &["alt tab", "switcher"]),
         ),
         a(
@@ -266,7 +248,6 @@ fn actions() -> Vec<Action> {
                 "Passer d’une fenêtre à l’autre, à rebours",
                 "Switch windows backward",
             ),
-            &["Alt+Shift+Tab"],
             (&["alt tab", "basculer"], &["alt tab", "switcher"]),
         ),
         // « geste »: what three fingers sideways do, so the search for
@@ -275,49 +256,14 @@ fn actions() -> Vec<Action> {
             "desktop-left",
             DESKTOPS,
             w("Bureau de gauche", "Desktop on the left"),
-            &["Super+Ctrl+Left"],
             (&["espace de travail", "geste"], &["workspace", "gesture"]),
         ),
         a(
             "desktop-right",
             DESKTOPS,
             w("Bureau de droite", "Desktop on the right"),
-            &["Super+Ctrl+Right"],
             (&["espace de travail", "geste"], &["workspace", "gesture"]),
         ),
-    ];
-    const DESKTOP: [&[&str]; 9] = [
-        &["Super+1"],
-        &["Super+2"],
-        &["Super+3"],
-        &["Super+4"],
-        &["Super+5"],
-        &["Super+6"],
-        &["Super+7"],
-        &["Super+8"],
-        &["Super+9"],
-    ];
-    const SEND: [&[&str]; 9] = [
-        &["Super+Shift+1"],
-        &["Super+Shift+2"],
-        &["Super+Shift+3"],
-        &["Super+Shift+4"],
-        &["Super+Shift+5"],
-        &["Super+Shift+6"],
-        &["Super+Shift+7"],
-        &["Super+Shift+8"],
-        &["Super+Shift+9"],
-    ];
-    const TAKE: [&[&str]; 9] = [
-        &["Super+Ctrl+Shift+1"],
-        &["Super+Ctrl+Shift+2"],
-        &["Super+Ctrl+Shift+3"],
-        &["Super+Ctrl+Shift+4"],
-        &["Super+Ctrl+Shift+5"],
-        &["Super+Ctrl+Shift+6"],
-        &["Super+Ctrl+Shift+7"],
-        &["Super+Ctrl+Shift+8"],
-        &["Super+Ctrl+Shift+9"],
     ];
     const NUMBERED: [(&str, &str, &str, &str); 9] = [
         ("desktop-1", "send-to-desktop-1", "take-to-desktop-1", "1"),
@@ -331,12 +277,12 @@ fn actions() -> Vec<Action> {
         ("desktop-9", "send-to-desktop-9", "take-to-desktop-9", "9"),
     ];
     let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-    for (keys, words, defaults) in [
-        (0, ("Aller au bureau", "Go to desktop"), DESKTOP),
-        (1, ("Envoyer au bureau", "Send to desktop"), SEND),
-        (2, ("Emmener au bureau", "Take to desktop"), TAKE),
+    for (keys, words) in [
+        (0, ("Aller au bureau", "Go to desktop")),
+        (1, ("Envoyer au bureau", "Send to desktop")),
+        (2, ("Emmener au bureau", "Take to desktop")),
     ] {
-        for (i, numbered) in NUMBERED.iter().enumerate() {
+        for numbered in NUMBERED {
             let key = [numbered.0, numbered.1, numbered.2][keys];
             let n = numbered.3;
             list.push(a(
@@ -346,7 +292,6 @@ fn actions() -> Vec<Action> {
                     leak(format!("{} {n}", words.0)),
                     leak(format!("{} {n}", words.1)),
                 ),
-                defaults[i],
                 (&["espace de travail"], &["workspace"]),
             ));
         }
@@ -359,7 +304,6 @@ fn actions() -> Vec<Action> {
                 "Emmener au bureau de gauche",
                 "Take to the desktop on the left",
             ),
-            &["Super+Ctrl+Shift+Left"],
             (&["déplacer"], &["move"]),
         ),
         a(
@@ -369,7 +313,6 @@ fn actions() -> Vec<Action> {
                 "Emmener au bureau de droite",
                 "Take to the desktop on the right",
             ),
-            &["Super+Ctrl+Shift+Right"],
             (&["déplacer"], &["move"]),
         ),
         // Nested, the compositor gives these no default: `Super+Alt` is
@@ -381,7 +324,6 @@ fn actions() -> Vec<Action> {
                 "Envoyer sur l’écran de gauche",
                 "Move to the screen on the left",
             ),
-            &["Super+Alt+Left"],
             (&["déplacer", "moniteur"], &["move", "monitor", "display"]),
         ),
         a(
@@ -391,14 +333,12 @@ fn actions() -> Vec<Action> {
                 "Envoyer sur l’écran de droite",
                 "Move to the screen on the right",
             ),
-            &["Super+Alt+Right"],
             (&["déplacer", "moniteur"], &["move", "monitor", "display"]),
         ),
         a(
             "overview",
             DESKTOPS,
             w("Vue d’ensemble", "Overview"),
-            &["Super+W"],
             (
                 &["exposé", "bureaux", "fenêtres", "tout voir"],
                 &["expose", "desktops", "windows", "workspaces"],
@@ -408,21 +348,18 @@ fn actions() -> Vec<Action> {
             "terminal",
             BAR,
             w("Ouvrir un terminal", "Open a terminal"),
-            &["Super+Return"],
             (&["console", "shell"], &["console", "shell"]),
         ),
         a(
             "launcher",
             BAR,
             w("Ouvrir le lanceur", "Open the launcher"),
-            &["Super+Space"],
             (&["applications", "chercher"], &["apps", "search"]),
         ),
         a(
             "actions",
             BAR,
             w("Actions", "Actions"),
-            &["Super+P"],
             (
                 &["palette", "commandes", "tout faire", "chercher une action"],
                 &["palette", "commands", "command palette", "search actions"],
@@ -432,7 +369,6 @@ fn actions() -> Vec<Action> {
             "focus-bar",
             BAR,
             w("Aller dans la barre", "Go to the bar"),
-            &["Super+B"],
             (
                 &["clavier", "barre", "accessibilité", "focus"],
                 &["keyboard", "panel", "accessibility", "focus"],
@@ -442,56 +378,48 @@ fn actions() -> Vec<Action> {
             "toggle-bar",
             BAR,
             w("Changer la forme de la barre", "Change the bar's form"),
-            &["Super+Shift+B"],
             (&["mini", "barre"], &["panel", "bar"]),
         ),
         a(
             "clipboard",
             BAR,
             w("Historique du presse-papiers", "Clipboard history"),
-            &["Super+V"],
             (&["copier", "coller"], &["copy", "paste"]),
         ),
         a(
             "emoji",
             BAR,
             w("Émojis", "Emoji"),
-            &["Super+period"],
             (&["émoticône", "smiley"], &["emoji", "smiley"]),
         ),
         a(
             "join",
             BAR,
             w("Rejoindre la réunion", "Join the meeting"),
-            &["Super+J"],
             (&["visio", "appel"], &["call", "video"]),
         ),
         a(
             "capture",
             CAPTURES,
             w("Capture d’écran", "Screenshot"),
-            &["Print"],
             (&["capture", "copie d’écran"], &["screenshot", "capture"]),
         ),
         a(
             "capture-screen",
             CAPTURES,
             w("Capturer l’écran", "Capture the screen"),
-            &["Shift+Print"],
             (&["capture", "écran entier"], &["screenshot", "full screen"]),
         ),
         a(
             "capture-window",
             CAPTURES,
             w("Capturer la fenêtre", "Capture the window"),
-            &["Alt+Print"],
             (&["capture"], &["screenshot"]),
         ),
         a(
             "record",
             CAPTURES,
             w("Enregistrer l’écran", "Record the screen"),
-            &["Super+Shift+R"],
             (
                 &["capture vidéo", "vidéo", "enregistrement"],
                 &["screen recording", "video"],
@@ -501,49 +429,42 @@ fn actions() -> Vec<Action> {
             "lock",
             SESSION,
             w("Verrouiller la session", "Lock the session"),
-            &["Super+L"],
             (&["verrou", "mot de passe"], &["lock"]),
         ),
         a(
             "log-out",
             SESSION,
             w("Se déconnecter", "Log out"),
-            &["Super+Shift+E"],
             (&["quitter la session"], &["log off", "sign out"]),
         ),
         a(
             "volume-up",
             MEDIA,
             w("Monter le son", "Volume up"),
-            &["XF86AudioRaiseVolume"],
             (&["volume", "son"], &["volume", "sound"]),
         ),
         a(
             "volume-down",
             MEDIA,
             w("Baisser le son", "Volume down"),
-            &["XF86AudioLowerVolume"],
             (&["volume", "son"], &["volume", "sound"]),
         ),
         a(
             "mute",
             MEDIA,
             w("Couper le son", "Mute"),
-            &["XF86AudioMute"],
             (&["muet", "silence"], &["mute", "silence"]),
         ),
         a(
             "brightness-up",
             MEDIA,
             w("Plus de luminosité", "Brightness up"),
-            &["XF86MonBrightnessUp"],
             (&["luminosité", "écran"], &["brightness"]),
         ),
         a(
             "brightness-down",
             MEDIA,
             w("Moins de luminosité", "Brightness down"),
-            &["XF86MonBrightnessDown"],
             (&["luminosité", "écran"], &["brightness"]),
         ),
         // The magnifier (#424).
@@ -551,7 +472,6 @@ fn actions() -> Vec<Action> {
             "magnifier-in",
             MAGNIFIER,
             w("Zoomer", "Zoom in"),
-            &["Super+equal", "Super+plus", "Super+KP_Add"],
             (
                 &["loupe", "grossir", "agrandir", "malvoyant"],
                 &["magnifier", "magnify", "zoom", "low vision"],
@@ -561,14 +481,12 @@ fn actions() -> Vec<Action> {
             "magnifier-out",
             MAGNIFIER,
             w("Dézoomer", "Zoom out"),
-            &["Super+minus", "Super+KP_Subtract"],
             (&["loupe", "réduire"], &["magnifier", "zoom"]),
         ),
         a(
             "magnifier-off",
             MAGNIFIER,
             w("Éteindre la loupe", "Turn the magnifier off"),
-            &["Super+Escape"],
             (&["loupe", "zoom"], &["magnifier", "zoom"]),
         ),
         // The screen reader (#734).
@@ -579,7 +497,6 @@ fn actions() -> Vec<Action> {
                 "Lancer ou arrêter le lecteur d'écran",
                 "Start or stop the screen reader",
             ),
-            &["Super+Alt+S"],
             (
                 &["lecteur d'écran", "orca", "aveugle", "voix"],
                 &["screen reader", "orca", "blind", "speech"],
@@ -587,14 +504,6 @@ fn actions() -> Vec<Action> {
         ),
     ]);
     list
-}
-
-fn place(key: &'static [&'static str], codec: Codec, default: Value) -> Places {
-    Places::One(Place {
-        key,
-        codec,
-        default,
-    })
 }
 
 fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
@@ -653,11 +562,7 @@ pub fn settings() -> &'static [Setting] {
                     &["layout", "azerty", "qwerty", "dvorak", "keyboard"],
                 ),
                 Kind::Layouts,
-                place(
-                    &["keyboard", "layouts"],
-                    Codec::Texts,
-                    Value::List(Vec::new()),
-                ),
+                one(&["keyboard", "layouts"], Codec::Texts),
             ),
             setting(
                 "keyboard.switch",
@@ -678,11 +583,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Les deux Maj", "Both Shift keys", "grp:shifts_toggle"),
                     word("Super + Espace", "Super + Space", "grp:win_space_toggle"),
                 ]),
-                place(
-                    &["keyboard", "options"],
-                    Codec::XkbOption(SWITCHES),
-                    Value::Word(""),
-                ),
+                one(&["keyboard", "options"], Codec::XkbOption(SWITCHES)),
             ),
             setting(
                 "keyboard.repeat-delay",
@@ -699,13 +600,12 @@ pub fn settings() -> &'static [Setting] {
                     step: 50,
                     unit: " ms",
                 },
-                place(
+                one(
                     &["keyboard", "repeat_delay"],
                     Codec::Int {
                         min: 100,
                         max: 1000,
                     },
-                    Value::Int(200),
                 ),
             ),
             setting(
@@ -720,11 +620,7 @@ pub fn settings() -> &'static [Setting] {
                     step: 1,
                     unit: " /s",
                 },
-                place(
-                    &["keyboard", "repeat_rate"],
-                    Codec::Int { min: 5, max: 60 },
-                    Value::Int(25),
-                ),
+                one(&["keyboard", "repeat_rate"], Codec::Int { min: 5, max: 60 }),
             ),
             setting(
                 "keyboard.caps",
@@ -740,11 +636,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Comme Ctrl", "As Ctrl", "caps:ctrl_modifier"),
                     word("Comme Échap", "As Escape", "caps:escape"),
                 ]),
-                place(
-                    &["keyboard", "options"],
-                    Codec::XkbOption(CAPS),
-                    Value::Word(""),
-                ),
+                one(&["keyboard", "options"], Codec::XkbOption(CAPS)),
             ),
             setting(
                 "keyboard.compose",
@@ -765,11 +657,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Ctrl droite", "Right Ctrl", "compose:rctrl"),
                     word("Verr. Maj.", "Caps Lock", "compose:caps"),
                 ]),
-                place(
-                    &["keyboard", "options"],
-                    Codec::XkbOption(COMPOSE),
-                    Value::Word(""),
-                ),
+                one(&["keyboard", "options"], Codec::XkbOption(COMPOSE)),
             ),
             setting(
                 "keyboard.numlock",
@@ -784,7 +672,7 @@ pub fn settings() -> &'static [Setting] {
                     &["num lock", "keypad", "digits"],
                 ),
                 Kind::Switch,
-                place(&["keyboard", "numlock"], Codec::Bool, Value::Bool(false)),
+                one(&["keyboard", "numlock"], Codec::Bool),
             ),
         ];
         for action in actions() {
@@ -801,11 +689,7 @@ pub fn settings() -> &'static [Setting] {
                     leak_list(action.near.1, &["shortcut", "keys"]),
                 ),
                 kind: Kind::Shortcut,
-                places: place(
-                    key,
-                    Codec::Chords,
-                    Value::List(action.defaults.iter().map(|s| (*s).to_owned()).collect()),
-                ),
+                places: one(key, Codec::Chords),
                 needs: None,
             });
         }

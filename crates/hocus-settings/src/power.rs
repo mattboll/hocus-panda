@@ -73,14 +73,6 @@ fn word(fr: &'static str, en: &'static str, word: &'static str) -> Choice {
     }
 }
 
-fn place(key: &'static [&'static str], codec: Codec, default: Value) -> Place {
-    Place {
-        key,
-        codec,
-        default,
-    }
-}
-
 /// The page's settings, in its order.
 // Over 200 lines: a table, one entry per setting of the page.
 pub fn settings() -> &'static [Setting] {
@@ -122,16 +114,8 @@ pub fn settings() -> &'static [Setting] {
                 places: Places::PerSource {
                     // The compositor's defaults (7.2): 3 min on battery,
                     // 5 on AC.
-                    battery: place(
-                        &["power", "battery", "idle"],
-                        Codec::Delay,
-                        Value::Seconds(Some(180)),
-                    ),
-                    ac: place(
-                        &["idle", "delay"],
-                        Codec::IdleSeconds,
-                        Value::Seconds(Some(300)),
-                    ),
+                    battery: Place::new(&["power", "battery", "idle"], Codec::Delay),
+                    ac: Place::new(&["idle", "delay"], Codec::IdleSeconds),
                 },
                 needs: None,
             },
@@ -156,16 +140,8 @@ pub fn settings() -> &'static [Setting] {
                     minutes("5 min après", "5 min after", Some(300)),
                 ]),
                 places: Places::PerSource {
-                    battery: place(
-                        &["power", "battery", "screen-off-after"],
-                        Codec::Delay,
-                        Value::Seconds(Some(10)),
-                    ),
-                    ac: place(
-                        &["power", "ac", "screen-off-after"],
-                        Codec::Delay,
-                        Value::Seconds(Some(30)),
-                    ),
+                    battery: Place::new(&["power", "battery", "screen-off-after"], Codec::Delay),
+                    ac: Place::new(&["power", "ac", "screen-off-after"], Codec::Delay),
                 },
                 needs: None,
             },
@@ -191,16 +167,8 @@ pub fn settings() -> &'static [Setting] {
                     never,
                 ]),
                 places: Places::PerSource {
-                    battery: place(
-                        &["power", "battery", "suspend-after"],
-                        Codec::Delay,
-                        Value::Seconds(Some(900)),
-                    ),
-                    ac: place(
-                        &["power", "ac", "suspend-after"],
-                        Codec::Delay,
-                        Value::Seconds(None),
-                    ),
+                    battery: Place::new(&["power", "battery", "suspend-after"], Codec::Delay),
+                    ac: Place::new(&["power", "ac", "suspend-after"], Codec::Delay),
                 },
                 needs: None,
             },
@@ -221,11 +189,7 @@ pub fn settings() -> &'static [Setting] {
                     &["lock", "auto-lock", "password", "security"],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(place(
-                    &["power", "lock-on-idle"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                )),
+                places: Places::One(Place::new(&["power", "lock-on-idle"], Codec::Bool)),
                 needs: None,
             },
             Setting {
@@ -245,11 +209,7 @@ pub fn settings() -> &'static [Setting] {
                     &["lock on suspend", "resume", "wake"],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(place(
-                    &["power", "lock-before-sleep"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                )),
+                places: Places::One(Place::new(&["power", "lock-before-sleep"], Codec::Bool)),
                 needs: None,
             },
             Setting {
@@ -268,11 +228,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Éteindre l’écran", "Turn the screen off", "screen-off"),
                     word("Ne rien faire", "Do nothing", "nothing"),
                 ]),
-                places: Places::One(place(
-                    &["power", "lid"],
-                    Codec::Word(LIDS),
-                    Value::Word("suspend"),
-                )),
+                places: Places::One(Place::new(&["power", "lid"], Codec::Word(LIDS))),
                 needs: None,
             },
             Setting {
@@ -292,11 +248,7 @@ pub fn settings() -> &'static [Setting] {
                     &["external screen", "dock", "monitor", "docked", "lid"],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(place(
-                    &["power", "lid-ignored-when-docked"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                )),
+                places: Places::One(Place::new(&["power", "lid-ignored-when-docked"], Codec::Bool)),
                 needs: None,
             },
             Setting {
@@ -318,11 +270,7 @@ pub fn settings() -> &'static [Setting] {
                     word("Éteindre", "Power off", "power-off"),
                     word("Ne rien faire", "Do nothing", "nothing"),
                 ]),
-                places: Places::One(place(
-                    &["power", "power-button"],
-                    Codec::Word(BUTTONS),
-                    Value::Word("ask"),
-                )),
+                places: Places::One(Place::new(&["power", "power-button"], Codec::Word(BUTTONS))),
                 needs: None,
             },
             Setting {
@@ -339,11 +287,7 @@ pub fn settings() -> &'static [Setting] {
                     &["battery", "battery life", "power saving", "saver"],
                 ),
                 kind: Kind::Switch,
-                places: Places::One(place(
-                    &["power", "auto-saver"],
-                    Codec::Bool,
-                    Value::Bool(true),
-                )),
+                places: Places::One(Place::new(&["power", "auto-saver"], Codec::Bool)),
                 needs: None,
             },
             Setting {
@@ -362,11 +306,7 @@ pub fn settings() -> &'static [Setting] {
                     step: 5,
                     unit: " %",
                 },
-                places: Places::One(place(
-                    &["power", "auto-saver-below"],
-                    Codec::Int { min: 5, max: 50 },
-                    Value::Int(20),
-                )),
+                places: Places::One(Place::new(&["power", "auto-saver-below"], Codec::Int { min: 5, max: 50 })),
                 needs: Some(AUTO_SAVER),
             },
         ]
