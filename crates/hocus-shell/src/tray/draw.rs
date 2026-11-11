@@ -250,7 +250,7 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
             (Some(id), 0) => {
                 place.id = None;
                 messages.push(Message::RemoveWindow(id));
-                crate::popover::with(|c| c.set_items(bar, TRAY_NAMESPACE, Vec::new()));
+                crate::popover::with(|c| c.ring.forget(bar, TRAY_NAMESPACE, false));
             }
             (None, 0) => {}
             (None, _) => {

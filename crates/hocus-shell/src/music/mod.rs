@@ -363,9 +363,25 @@ fn fit_all() -> bool {
         }
     });
     // The bar's items for the keyboard and the popover's place.
+    let name = Words::new(crate::clock::time::Lang::of_messages()).music();
     popover::with(|c| {
         for (bar, items) in items {
-            c.set_items(&bar, MUSIC_NAMESPACE, items);
+            let spots = items
+                .into_iter()
+                .map(|(item, rect)| crate::ui::ring::Spot {
+                    node: Some(
+                        hocus_a11y::Node::new(
+                            crate::ui::items::key(item),
+                            hocus_a11y::Role::Button,
+                            name,
+                        )
+                        .act(hocus_a11y::Act::Click),
+                    ),
+                    ..crate::ui::ring::Spot::at(item, rect)
+                })
+                .collect();
+            let declared = crate::ui::ring::Declared { spots, group: None };
+            c.declare(&bar, MUSIC_NAMESPACE, declared);
         }
     });
     if !effects.is_empty() {

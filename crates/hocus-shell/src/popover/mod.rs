@@ -83,7 +83,7 @@ use iced::{Point, Rectangle, Size, window};
 
 use crate::ui::{
     cone::Cone,
-    ring::{Declared, Ring, Spot},
+    ring::{Declared, Ring},
 };
 use iced_layershell::reexport::KeyboardInteractivity;
 
@@ -338,9 +338,13 @@ impl Controller {
     }
 
     /// Bar `bar`'s surface of `namespace` shows `items` (in the bar's
-    /// frame), named by `a11y::bar`.
+    /// frame), without their nodes: the tests' surfaces.
+    #[cfg(test)]
     pub fn set_items(&mut self, bar: &str, namespace: &'static str, items: Vec<(Item, Rectangle)>) {
-        let spots = items.into_iter().map(|(i, r)| Spot::at(i, r)).collect();
+        let spots = items
+            .into_iter()
+            .map(|(i, r)| crate::ui::ring::Spot::at(i, r))
+            .collect();
         self.declare(bar, namespace, Declared { spots, group: None });
     }
 

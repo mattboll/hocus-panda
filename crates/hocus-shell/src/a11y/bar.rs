@@ -1,22 +1,14 @@
 //! A bar as screen readers see it: its items, in the order and at the
-//! places its surfaces show them (the kit's ring's declarations, which the
-//! keyboard steps through), gathered in the groups they make (Today, To
-//! do, the agents, the windows, the desktops, the footer). The surfaces on
-//! the kit ([`crate::ui::items`]) declare their nodes and groups
-//! themselves; the others' are named here with what they draw.
+//! places its surfaces show them, gathered in the groups they make (Today,
+//! To do, the agents, the windows, the desktops, the footer). Each surface
+//! declares its items' nodes and its group to the kit's ring as it draws
+//! ([`crate::ui::ring`], [`crate::ui::items`]): here they are only put
+//! together, at their places, the one holding the ring the focus.
 
-use hocus_a11y::{Act, Node, Rect, Role, Window};
-use hocus_bluetooth::model::Row as BluetoothRow;
-use hocus_link::{AGENTS_NAMESPACE, AgentShown};
-use hocus_network::model::Link;
+use hocus_a11y::{Node, Rect, Role, Window};
 
-use super::words::{Words, plain};
-use crate::{
-    agents::{Brief, Lines, Look},
-    clock::time::Shown,
-    levels::model::Snapshot,
-    popover::Item,
-};
+use super::words::Words;
+use crate::{popover::Item, ui::items::key};
 
 /// What a bar shows, gathered from the shell's model (or made by a test).
 #[derive(Debug, Clone, Default)]
@@ -40,23 +32,9 @@ pub struct Facts {
     pub focused: Option<Item>,
     /// The item whose popover is open.
     pub open: Option<Item>,
-    pub clock: Option<Shown>,
-    pub agents: Vec<AgentShown>,
-    /// Now, on the agents' `since`'s clock (microseconds).
-    pub now_us: u64,
-    pub rows_shown: usize,
-    pub link: Option<Link>,
-    pub bluetooth: Option<BluetoothRow>,
-    pub layout: Option<String>,
-    pub levels: Snapshot,
     /// What is said on its own now, and its number: a new number is a new
     /// announcement.
     pub announce: Option<(u64, String)>,
-}
-
-/// An item's key in its window: its debug form, unique and stable.
-pub fn key(item: Item) -> String {
-    format!("{item:?}")
 }
 
 /// The bar's window.
@@ -64,21 +42,16 @@ pub fn window(facts: &Facts, words: Words) -> Window {
     let mut window = Window::new(format!("bar:{}", facts.bar), words.bar(&facts.screen));
     let mut groups: Vec<(&'static str, Vec<Node>)> = Vec::new();
     for (namespace, item, rect) in &facts.items {
-        let (node, part) = match facts.nodes.iter().find(|(i, _, _)| i == item) {
-            Some((_, node, part)) => {
-                let node = node.clone().bounds(Some(*rect));
-                let node = if facts.open == Some(*item) {
-                    node.expanded(true)
-                } else {
-                    node
-                };
-                (node, *part)
-            }
-            None => match item_node(*item, *rect, facts, words) {
-                Some(node) => (node, false),
-                None => continue,
-            },
+        let Some((_, node, part)) = facts.nodes.iter().find(|(i, _, _)| i == item) else {
+            continue;
         };
+        let node = node.clone().bounds(Some(*rect));
+        let node = if facts.open == Some(*item) {
+            node.expanded(true)
+        } else {
+            node
+        };
+        let part = *part;
         match groups.last_mut() {
             // A line's ✕ is its child.
             Some((last, nodes)) if last == namespace && part => match nodes.last_mut() {
@@ -90,7 +63,7 @@ pub fn window(facts: &Facts, words: Words) -> Window {
         }
     }
     for (namespace, nodes) in groups {
-        window.nodes.extend(group(namespace, nodes, facts, words));
+        window.nodes.extend(group(namespace, nodes, facts));
     }
     if let Some((n, said)) = &facts.announce {
         window
@@ -103,149 +76,33 @@ pub fn window(facts: &Facts, words: Words) -> Window {
     window
 }
 
-/// A surface's items in the group they make, if they make one: the one
-/// a surface of the kit declares, else as said here.
-fn group(namespace: &str, mut nodes: Vec<Node>, facts: &Facts, words: Words) -> Vec<Node> {
-    if let Some((_, group)) = facts.groups.iter().find(|(n, _)| *n == namespace) {
-        return vec![group.clone().children(nodes)];
-    }
-    let full = nodes.len() > 1;
-    let container = match namespace {
-        AGENTS_NAMESPACE if full || facts.agents.len() > facts.rows_shown => {
-            let lines = Lines::of_at_most(&facts.agents, facts.now_us, facts.rows_shown);
-            if lines.hidden > 0 {
-                nodes.push(Node::new(
-                    "agents-more",
-                    Role::Label,
-                    words.other_agents(lines.hidden, lines.hidden_rest),
-                ));
-            }
-            Some(Node::new("agents", Role::List, "Agents"))
+/// A surface's items in the group it declares, if it declares one: its
+/// own lines (what nothing holds, "11 autres agents") after them.
+fn group(namespace: &str, nodes: Vec<Node>, facts: &Facts) -> Vec<Node> {
+    match facts.groups.iter().find(|(n, _)| *n == namespace) {
+        Some((_, group)) => {
+            let mut group = group.clone();
+            let lines = std::mem::take(&mut group.children);
+            vec![group.children(nodes).children(lines)]
         }
-        _ => None,
-    };
-    match container {
-        Some(container) => vec![container.children(nodes)],
         None => nodes,
     }
-}
-
-/// One item's node, named with what it draws.
-fn item_node(item: Item, rect: Rect, facts: &Facts, words: Words) -> Option<Node> {
-    let lang = words.lang();
-    let button = |name: String| {
-        Node::new(key(item), Role::Button, name)
-            .bounds(Some(rect))
-            .act(Act::Click)
-    };
-    let node = match item {
-        Item::Calendar => button(facts.clock.as_ref().map(|c| words.clock(c))?),
-        Item::Music => button(crate::music::Words::new(lang).music().to_owned()),
-        Item::Secretary => {
-            let brief = Brief::of(&facts.agents);
-            button(words.agents(
-                brief.waiting.len(),
-                brief.stuck.len(),
-                brief.working.len(),
-                brief.to_see.len(),
-            ))
-        }
-        Item::Agent(id) => {
-            let agent = facts.agents.iter().find(|a| a.id == id)?;
-            let look = Look::of(&agent.state);
-            let minutes = facts.now_us.saturating_sub(agent.since) / 60_000_000;
-            button(words.agent(&plain(&agent.name), look, minutes))
-        }
-        Item::Sources => button("Sources".to_owned()),
-        Item::AnotherTool => button(crate::agents::Words::new(lang).another().to_owned()),
-        Item::Plug(tool) => button(format!(
-            "{} {}",
-            crate::agents::Words::new(lang).plug(),
-            tool.title()
-        )),
-        Item::Decline => button(crate::agents::Words::new(lang).decline().to_owned()),
-        Item::Wifi => button(words.wifi(facts.link.as_ref()?)),
-        Item::Bluetooth => button(words.bluetooth(facts.bluetooth.as_ref()?)),
-        Item::Keyboard => button(words.layout(facts.layout.as_deref()?)),
-        Item::Sound => {
-            let sound = facts.levels.sound?;
-            let value = if sound.muted {
-                words.muted().to_owned()
-            } else {
-                words.percent(sound.volume)
-            };
-            Node::new(key(item), Role::Slider, words.volume())
-                .value(value)
-                .range(f64::from(sound.volume), 0.0, 100.0, Some(5.0))
-                .bounds(Some(rect))
-                .act(Act::Click)
-                .act(Act::Increment)
-                .act(Act::Decrement)
-        }
-        Item::Brightness => {
-            let brightness = facts.levels.brightness?;
-            Node::new(
-                key(item),
-                Role::Slider,
-                crate::levels::model::Words::new(lang).brightness(),
-            )
-            .value(words.percent(brightness))
-            .range(f64::from(brightness), 0.0, 100.0, Some(5.0))
-            .bounds(Some(rect))
-            .act(Act::Click)
-            .act(Act::Increment)
-            .act(Act::Decrement)
-        }
-        Item::Battery => match facts.levels.battery {
-            Some(battery) => Node::new(key(item), Role::ProgressBar, words.battery())
-                .value(words.battery_value(&battery, &facts.levels))
-                .range(f64::from(battery.shown()), 0.0, 100.0, None)
-                .bounds(Some(rect))
-                .act(Act::Click),
-            None => button(words.power(&facts.levels)),
-        },
-        // Declared by their surfaces on the kit.
-        Item::Notifications
-        | Item::Clipboard
-        | Item::Menu
-        | Item::User
-        | Item::InUse
-        | Item::Meeting
-        | Item::MeetingMark
-        | Item::Join
-        | Item::TodayLine(_)
-        | Item::TodayMore
-        | Item::Tray(_)
-        | Item::Window(_)
-        | Item::WindowClose(_)
-        | Item::WindowsMore
-        | Item::Windows
-        | Item::Desktop { .. }
-        | Item::Tasks
-        | Item::TasksMore
-        | Item::TaskAdd
-        | Item::Task(_)
-        | Item::DayChoose
-        | Item::DayLater => return None,
-        // Not the bar's own: shown in a popover.
-        Item::WindowMenu(_) => return None,
-    };
-    Some(if facts.open == Some(item) {
-        node.expanded(true)
-    } else {
-        node
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hocus_a11y::Act;
     use hocus_link::{
-        CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE, FOOTER_NAMESPACE,
-        LEVELS_NAMESPACE, WINDOWS_NAMESPACE,
+        AGENTS_NAMESPACE, AgentShown, CLOCK_NAMESPACE, CONNECTIONS_NAMESPACE, DESKTOPS_NAMESPACE,
+        FOOTER_NAMESPACE, LEVELS_NAMESPACE, WINDOWS_NAMESPACE,
     };
+    use hocus_network::model::Link;
 
-    use crate::levels::model::{Battery, Charge, Profile, Sound};
+    use crate::{
+        clock::time::Shown,
+        levels::model::{Battery, Charge, Profile, Snapshot, Sound},
+    };
 
     const FR: Words = Words {
         lang: hocus_words::Lang::French,
@@ -253,6 +110,7 @@ mod tests {
     const EN: Words = Words {
         lang: hocus_words::Lang::English,
     };
+    const MINUTE: u64 = 60_000_000;
 
     fn agent(id: u64, name: &str, state: &str, since: u64) -> AgentShown {
         AgentShown {
@@ -266,27 +124,32 @@ mod tests {
         }
     }
 
-    fn at(y: f32) -> Rect {
-        Rect::new(8.0, y, 240.0, 24.0)
-    }
-
-    /// The mockup's bar: 14:32 on Thursday 6 November, three agents
-    /// waiting and ten at work, four desktops, the Wi-Fi, the volume at
-    /// 62 %, the battery at 82 %.
-    fn facts(date: &str) -> Facts {
-        let fr = !date.starts_with("Thursday");
-        let desktop = if fr { "Bureau" } else { "Desktop" };
-        let minute = 60_000_000;
+    /// Three agents waiting and ten at work.
+    fn agents() -> Vec<AgentShown> {
         let mut agents = vec![
-            agent(1, "site-web", "waiting", 8 * minute),
-            agent(2, "docs", "waiting", 9 * minute),
-            agent(3, "api", "waiting", 9 * minute),
+            agent(1, "site-web", "waiting", 8 * MINUTE),
+            agent(2, "docs", "waiting", 9 * MINUTE),
+            agent(3, "api", "waiting", 9 * MINUTE),
         ];
         for i in 0..10 {
             agents.push(agent(10 + i, &format!("w{i}"), "working", 0));
         }
+        agents
+    }
+
+    fn at(y: f32) -> Rect {
+        Rect::new(8.0, y, 240.0, 24.0)
+    }
+
+    /// The mockup's bar as its surfaces declare it: 14:32 on Thursday 6
+    /// November, three agents waiting and ten at work, four desktops, the
+    /// Wi-Fi, the volume at 62 %, the battery at 82 %.
+    fn facts(date: &str) -> Facts {
+        let fr = !date.starts_with("Thursday");
         let words = if fr { FR } else { EN };
-        // The desktops' tiles as their surface declares them.
+        let desktop = if fr { "Bureau" } else { "Desktop" };
+        let agents = agents();
+        let now = 10 * MINUTE;
         let desk = |index: u8, current: bool, windows: &[&str]| {
             let item = Item::Desktop { row: 0, index };
             let windows: Vec<String> = windows.iter().map(|w| (*w).to_owned()).collect();
@@ -301,6 +164,39 @@ mod tests {
             .act(Act::Click);
             (item, node, false)
         };
+        let clock = Shown {
+            hm: ['1', '4', ':', '3', '2'],
+            ss: ['0', '7'],
+            half: None,
+            date: date.to_owned(),
+        };
+        let levels = Snapshot {
+            sound: Some(Sound {
+                volume: 62.0,
+                muted: false,
+            }),
+            battery: Some(Battery {
+                percent: 82.0,
+                charge: Charge::Discharging,
+                left: Some(std::time::Duration::from_secs(3 * 3600 + 600)),
+                health: None,
+            }),
+            profile: Some(Profile::Balanced),
+            ..Snapshot::default()
+        };
+        let link = Link::Connected {
+            name: "Livebox-A3F2".to_owned(),
+            bars: 4,
+        };
+        let declared = |item: Item, node: Option<Node>| (item, node.expect("a node"), false);
+        let agent = |item| declared(item, crate::agents::draw::node(words, item, &agents, now));
+        let connection = |item| {
+            declared(
+                item,
+                crate::network::draw::node(words, item, Some(&link), None, Some("Français")),
+            )
+        };
+        let level = |item| declared(item, crate::levels::draw::node(words, item, &levels));
         Facts {
             bar: "eDP-1".to_owned(),
             screen: if fr {
@@ -330,37 +226,21 @@ mod tests {
                 (LEVELS_NAMESPACE, Item::Battery, at(560.0)),
                 (FOOTER_NAMESPACE, Item::Notifications, at(700.0)),
             ],
-            clock: Some(Shown {
-                hm: ['1', '4', ':', '3', '2'],
-                ss: ['0', '7'],
-                half: None,
-                date: date.to_owned(),
-            }),
-            agents,
-            now_us: 10 * minute,
-            rows_shown: 2,
-            link: Some(Link::Connected {
-                name: "Livebox-A3F2".to_owned(),
-                bars: 4,
-            }),
-            layout: Some("Français".to_owned()),
-            levels: Snapshot {
-                sound: Some(Sound {
-                    volume: 62.0,
-                    muted: false,
-                }),
-                battery: Some(Battery {
-                    percent: 82.0,
-                    charge: Charge::Discharging,
-                    left: Some(std::time::Duration::from_secs(3 * 3600 + 600)),
-                    health: None,
-                }),
-                profile: Some(Profile::Balanced),
-                ..Snapshot::default()
-            },
             nodes: vec![
+                (
+                    Item::Calendar,
+                    crate::clock::item::node(words.lang(), &clock),
+                    false,
+                ),
+                agent(Item::Secretary),
+                agent(Item::Agent(1)),
+                agent(Item::Agent(2)),
                 desk(0, true, &["Terminal", "Firefox"]),
                 desk(1, false, &["Firefox"]),
+                connection(Item::Wifi),
+                connection(Item::Keyboard),
+                level(Item::Sound),
+                level(Item::Battery),
                 (
                     Item::Notifications,
                     Node::new("Notifications", Role::Button, "Notifications, 2 non vues"),
@@ -368,6 +248,11 @@ mod tests {
                 ),
             ],
             groups: vec![
+                (
+                    AGENTS_NAMESPACE,
+                    crate::agents::draw::group(words, 3, &agents, now, 2)
+                        .expect("the agents' list"),
+                ),
                 (
                     DESKTOPS_NAMESPACE,
                     Node::new("desktops", Role::RadioGroup, words.desktops()),
@@ -404,6 +289,12 @@ mod tests {
         ] {
             assert!(dump.contains(line), "no {line:?} in\n{dump}");
         }
+        // The line nothing holds after the rows it counts.
+        let list = window.find("agents").expect("the agents' list");
+        assert_eq!(
+            list.children.last().map(|n| n.key.as_str()),
+            Some("agents-more")
+        );
         // The volume can be moved from the bar.
         let volume = window.find("Sound").expect("the volume");
         assert!(volume.acts.contains(&Act::Increment));
@@ -501,10 +392,10 @@ mod tests {
 
     #[test]
     fn a_name_with_control_characters_is_said_as_drawn() {
-        let mut facts = facts("jeudi 6 novembre");
-        facts.agents[0].name = "site\u{1b}-web\n".to_owned();
-        let window = super::window(&facts, FR);
-        let row = window.find("Agent(1)").expect("the row");
+        let mut agents = agents();
+        agents[0].name = "site\u{1b}-web\n".to_owned();
+        let row =
+            crate::agents::draw::node(FR, Item::Agent(1), &agents, 10 * MINUTE).expect("the row");
         assert_eq!(row.name, "site-web, t'attend depuis 2 minutes");
     }
 }

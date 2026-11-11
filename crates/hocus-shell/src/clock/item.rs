@@ -122,18 +122,36 @@ impl Clock {
     }
 }
 
+/// The clock's group as screen readers read it: the time and the date
+/// `shown`, in `lang`; a click opens the calendar.
+pub fn node(lang: crate::clock::time::Lang, shown: &crate::clock::time::Shown) -> hocus_a11y::Node {
+    hocus_a11y::Node::new(
+        crate::ui::items::key(Item::Calendar),
+        hocus_a11y::Role::Button,
+        crate::a11y::Words::new(lang).clock(shown),
+    )
+    .act(hocus_a11y::Act::Click)
+}
+
 /// As the clock is about to draw: its look read, and its place told to
 /// the popovers (for the pointer on the bar, `Tab`, and where the
 /// calendar opens). While the form switches, it has none.
 pub fn refresh(clock: &Clock, state: &mut State, size: Size) {
     let place = clock.item_rect(size);
     let in_bar = place.map(|(_, rect)| clock.in_bar(rect));
+    let spots = in_bar
+        .map(|r| crate::ui::ring::Spot {
+            node: Some(node(
+                clock.lang,
+                &crate::clock::time::Shown::at(&crate::notifications::wall(), clock.lang),
+            )),
+            ..crate::ui::ring::Spot::at(Item::Calendar, r)
+        })
+        .into_iter()
+        .collect();
+    let declared = crate::ui::ring::Declared { spots, group: None };
     let (open, focused) = popover::with(|c| {
-        c.set_items(
-            &clock.bar,
-            CLOCK_NAMESPACE,
-            in_bar.map(|r| (Item::Calendar, r)).into_iter().collect(),
-        );
+        c.declare(&clock.bar, CLOCK_NAMESPACE, declared);
         (
             c.shows(&clock.bar, Item::Calendar),
             c.focused(&clock.bar, Item::Calendar),

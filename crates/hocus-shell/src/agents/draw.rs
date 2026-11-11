@@ -905,7 +905,20 @@ impl<Message> canvas::Program<Message> for Group {
             })
             .collect();
         log_items(&in_bar);
-        popover::with(|c| c.set_items(&self.bar, AGENTS_NAMESPACE, in_bar));
+        let said = crate::a11y::Words::new(self.words.lang);
+        let (agents, now_us) = (super::said().agents, super::now_us());
+        let spots: Vec<crate::ui::ring::Spot> = in_bar
+            .into_iter()
+            .map(|(item, rect)| crate::ui::ring::Spot {
+                node: node(said, item, &agents, now_us),
+                ..crate::ui::ring::Spot::at(item, rect)
+            })
+            .collect();
+        let declared = crate::ui::ring::Declared {
+            group: group(said, spots.len(), &agents, now_us, super::rows_shown()),
+            spots,
+        };
+        popover::with(|c| c.declare(&self.bar, AGENTS_NAMESPACE, declared));
         let Some(layout) = layout().filter(|l| l.height > 0.0) else {
             return crate::backdrop::over(under, frame);
         };
@@ -1660,6 +1673,69 @@ pub fn mark(
             Alignment::Center,
         ),
     ));
+}
+
+/// An item of the agents' group as screen readers read it: her row with
+/// who waits and who works, an agent's row with its state and since when
+/// (`now_us` on the agents' clock), the card's buttons.
+pub fn node(
+    words: crate::a11y::Words,
+    item: Item,
+    agents: &[hocus_link::AgentShown],
+    now_us: u64,
+) -> Option<hocus_a11y::Node> {
+    use hocus_a11y::{Act, Node, Role};
+    let lang = words.lang();
+    let name = match item {
+        Item::Secretary => {
+            let brief = super::Brief::of(agents);
+            words.agents(
+                brief.waiting.len(),
+                brief.stuck.len(),
+                brief.working.len(),
+                brief.to_see.len(),
+            )
+        }
+        Item::Agent(id) => {
+            let agent = agents.iter().find(|a| a.id == id)?;
+            let look = super::Look::of(&agent.state);
+            let minutes = now_us.saturating_sub(agent.since) / 60_000_000;
+            words.agent(&crate::a11y::plain(&agent.name), look, minutes)
+        }
+        Item::Sources => "Sources".to_owned(),
+        Item::AnotherTool => super::Words::new(lang).another().to_owned(),
+        Item::Plug(tool) => format!("{} {}", super::Words::new(lang).plug(), tool.title()),
+        Item::Decline => super::Words::new(lang).decline().to_owned(),
+        _ => return None,
+    };
+    Some(Node::new(crate::ui::items::key(item), Role::Button, name).act(Act::Click))
+}
+
+/// The list the agents' `controls` rows make for screen readers, with
+/// the line saying how many more there are than `rows` shows; none for a
+/// row alone that hides none.
+pub fn group(
+    words: crate::a11y::Words,
+    controls: usize,
+    agents: &[hocus_link::AgentShown],
+    now_us: u64,
+    rows: usize,
+) -> Option<hocus_a11y::Node> {
+    use hocus_a11y::{Node, Role};
+    if controls <= 1 && agents.len() <= rows {
+        return None;
+    }
+    let lines = super::Lines::of_at_most(agents, now_us, rows);
+    let list = Node::new("agents", Role::List, "Agents");
+    Some(if lines.hidden > 0 {
+        list.child(Node::new(
+            "agents-more",
+            Role::Label,
+            words.other_agents(lines.hidden, lines.hidden_rest),
+        ))
+    } else {
+        list
+    })
 }
 
 #[cfg(test)]

@@ -346,11 +346,20 @@ impl<Message> canvas::Program<Message> for Levels {
         };
         let size = bounds.size();
         let items = self.items(state, size);
-        let in_bar = items
+        let in_bar: Vec<(Item, Rectangle)> = items
             .iter()
             .map(|(item, rect)| (*item, self.in_bar_rect(*rect, size)))
             .collect();
-        popover::with(|c| c.set_items(&self.bar, hocus_link::LEVELS_NAMESPACE, in_bar));
+        let said = crate::a11y::Words::new(self.words.lang);
+        let spots = in_bar
+            .into_iter()
+            .map(|(item, rect)| crate::ui::ring::Spot {
+                node: node(said, item, &state.levels),
+                ..crate::ui::ring::Spot::at(item, rect)
+            })
+            .collect();
+        let declared = crate::ui::ring::Declared { spots, group: None };
+        popover::with(|c| c.declare(&self.bar, hocus_link::LEVELS_NAMESPACE, declared));
         // Under the signs and gauges, which are drawn in the column's clip.
         crate::backdrop::layer(&mut frame, Rectangle::with_size(size), |f| {
             for (item, rect) in items {
@@ -714,6 +723,51 @@ fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
         None if keys => bottom - KEY_BOTTOM - MINI_KEY.height - MINI_GAP - lit,
         None => bottom - KEY_BOTTOM - lit,
     }
+}
+
+/// A level's item as screen readers read it, `levels` as it shows them:
+/// the volume and the brightness sliders, the battery's charge (the power
+/// modes alone without one).
+pub fn node(words: crate::a11y::Words, item: Item, levels: &Snapshot) -> Option<hocus_a11y::Node> {
+    use hocus_a11y::{Act, Node, Role};
+    let key = crate::ui::items::key(item);
+    Some(match item {
+        Item::Sound => {
+            let sound = levels.sound?;
+            let value = if sound.muted {
+                words.muted().to_owned()
+            } else {
+                words.percent(sound.volume)
+            };
+            Node::new(key, Role::Slider, words.volume())
+                .value(value)
+                .range(f64::from(sound.volume), 0.0, 100.0, Some(5.0))
+                .act(Act::Click)
+                .act(Act::Increment)
+                .act(Act::Decrement)
+        }
+        Item::Brightness => {
+            let brightness = levels.brightness?;
+            Node::new(key, Role::Slider, Words::new(words.lang()).brightness())
+                .value(words.percent(brightness))
+                .range(f64::from(brightness), 0.0, 100.0, Some(5.0))
+                .act(Act::Click)
+                .act(Act::Increment)
+                .act(Act::Decrement)
+        }
+        Item::Battery => match levels.battery {
+            Some(battery) => Node::new(key, Role::ProgressBar, words.battery())
+                .value(words.battery_value(&battery, levels))
+                .range(f64::from(battery.shown()), 0.0, 100.0, None)
+                .act(Act::Click),
+            None => Node::new(key, Role::Button, words.power(levels)).act(Act::Click),
+        },
+        Item::Keyboard => {
+            let layout = crate::layouts::snapshot().shown().map(|l| l.name.clone())?;
+            crate::network::draw::node(words, item, None, None, Some(&layout))?
+        }
+        _ => return None,
+    })
 }
 
 /// The keyboard's ring around `rect` (bar.md §11): the kit's.

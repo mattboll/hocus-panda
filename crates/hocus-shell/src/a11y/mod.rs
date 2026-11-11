@@ -284,7 +284,7 @@ impl Said {
         let mut bars = crate::popover::with(|c| c.bar_forms());
         bars.sort_by(|a, b| a.0.cmp(&b.0));
         for (i, (bar, form)) in bars.iter().enumerate() {
-            let mut facts = gather(bar, *form, lang, &agents);
+            let mut facts = gather(bar, *form, lang);
             // Said once, from the first bar.
             if i == 0 {
                 facts.announce = self
@@ -295,7 +295,7 @@ impl Said {
             let window = bar::window(&facts, words);
             for (item, rect) in &facts.frame {
                 self.targets.insert(
-                    (window.key.clone(), bar::key(*item)),
+                    (window.key.clone(), crate::ui::items::key(*item)),
                     Target::Item {
                         bar: bar.clone(),
                         item: *item,
@@ -613,13 +613,8 @@ fn press_row(row: &str, act: Act) {
     }
 }
 
-/// What bar `bar` shows now, from the shell's model.
-fn gather(
-    bar: &str,
-    form: hocus_link::Form,
-    lang: Lang,
-    agents: &[hocus_link::AgentShown],
-) -> bar::Facts {
+/// What bar `bar` shows now, as its surfaces declared it.
+fn gather(bar: &str, form: hocus_link::Form, lang: Lang) -> bar::Facts {
     let (shown, declared, groups, focused, open, height) = crate::popover::with(|c| {
         let spots = c.ring.spots(bar);
         let declared: Vec<(Item, Node, bool)> = spots
@@ -662,8 +657,6 @@ fn gather(
         || bar.to_owned(),
         |s| levels_words.screen(s.built_in, s.inches, s.number),
     );
-    let link = crate::network::snapshot().link();
-    let bluetooth = crate::bluetooth::snapshot().row();
     bar::Facts {
         bar: bar.to_owned(),
         screen,
@@ -674,17 +667,6 @@ fn gather(
         groups,
         focused,
         open,
-        clock: Some(crate::clock::time::Shown::at(
-            &crate::notifications::wall(),
-            lang,
-        )),
-        agents: agents.to_vec(),
-        now_us: crate::agents::now_us(),
-        rows_shown: crate::agents::rows_shown(),
-        link: (link != hocus_network::model::Link::Hidden).then_some(link),
-        bluetooth: (bluetooth != hocus_bluetooth::model::Row::Hidden).then_some(bluetooth),
-        layout: crate::layouts::snapshot().shown().map(|l| l.name.clone()),
-        levels: crate::levels::snapshot(),
         announce: None,
     }
 }
