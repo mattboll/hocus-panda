@@ -78,6 +78,7 @@ only when the maintainer asks to see a change (CLAUDE.md, "Hard rules").
 | `fmt`, `clippy`, `licenses` (cargo-deny) | yes | yes | |
 | `unused-dependencies` (cargo-machete) | yes | yes | |
 | `vendor` (`scripts/vendor.sh --check`) | yes | yes | |
+| `docs` (`scripts/ci/docs-names.sh`): no crate nor `hocus msg` subcommand the docs name is gone | yes | yes | |
 | `pr-tests`: the tests of what changed | yes | | |
 | `build` and `linux (N/4)`: the whole suite | when asked (below) | yes | |
 | `package`: the release build, the .deb and what it holds | | yes | |
@@ -178,7 +179,7 @@ are left out of CI's profile by name.
 ### The package
 
 `package` builds what the maintainer installs: the release build of the
-five programs with `--locked`, the .deb (`packaging/deb/build.sh`), and
+four programs with `--locked`, the .deb (`packaging/deb/build.sh`), and
 `packaging/deb/check.sh`, which fails when the package holds other files
 than [packaging/README.md](../packaging/README.md) lists. The .deb is kept
 as the run's artifact for a week.
