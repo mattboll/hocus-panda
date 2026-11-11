@@ -1949,6 +1949,7 @@ impl Shell {
     /// compositor gives their surface ([`keys`]), and an input method while
     /// a field of theirs has the keyboard ([`field::ime`]).
     fn view(&self, id: window::Id) -> Element<'_, Message> {
+        ui::surface::viewing();
         keys::Held::new(
             id,
             field::ime::Asking::new(pointer::Entered::new(self.surface_view(id))),
