@@ -19,6 +19,8 @@
 
 use std::{fmt, str::FromStr};
 
+use crate::BadLine;
+
 /// What a device is, for its settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceKind {
@@ -299,9 +301,15 @@ impl fmt::Display for InputDevice {
 }
 
 impl FromStr for InputDevice {
-    type Err = String;
+    type Err = BadLine;
 
-    fn from_str(line: &str) -> Result<Self, String> {
+    fn from_str(line: &str) -> Result<Self, BadLine> {
+        Self::read(line).map_err(BadLine)
+    }
+}
+
+impl InputDevice {
+    fn read(line: &str) -> Result<Self, String> {
         let mut words = line.split_whitespace();
         if words.next() != Some("device") {
             return Err(format!("not a device: {line}"));
@@ -378,9 +386,9 @@ impl fmt::Display for DeviceEvent {
 }
 
 impl FromStr for DeviceEvent {
-    type Err = String;
+    type Err = BadLine;
 
-    fn from_str(line: &str) -> Result<Self, String> {
+    fn from_str(line: &str) -> Result<Self, BadLine> {
         let line = line.trim_end_matches(['\n', '\r']);
         if line == "listed" {
             return Ok(Self::Listed);
@@ -395,9 +403,9 @@ impl FromStr for DeviceEvent {
             return id
                 .parse()
                 .map(Self::Removed)
-                .map_err(|_| format!("not a device's number: {id}"));
+                .map_err(|_| BadLine(format!("not a device's number: {id}")));
         }
-        Err(format!("not a device's event: {line}"))
+        Err(BadLine(format!("not a device's event: {line}")))
     }
 }
 

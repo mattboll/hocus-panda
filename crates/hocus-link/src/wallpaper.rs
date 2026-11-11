@@ -46,7 +46,7 @@ impl Default for Picture {
 
 impl Picture {
     /// What the file's text says; an unknown word is refused.
-    pub fn of(text: &str) -> Result<Self, String> {
+    pub fn of(text: &str) -> Result<Self, BadLine> {
         if text == "plain" {
             return Ok(Self::Plain);
         }
@@ -59,9 +59,9 @@ impl Picture {
         if text.contains('/') && !text.contains(['\t', '\n', '\r']) {
             return Ok(Self::File(text.to_owned()));
         }
-        Err(format!(
+        Err(BadLine(format!(
             "no wallpaper {text:?}: night, mist, dawn, forest, rain, stars, aurora, plain or a picture's path"
-        ))
+        )))
     }
 
     /// As the file writes it.
@@ -273,8 +273,8 @@ impl FromStr for Wallpapers {
         };
         let lock = next("lock")?;
         let lock = LockLook::of(lock).ok_or_else(|| BadLine(format!("no lock look {lock:?}")))?;
-        let lock_picture = Picture::of(next("lock's picture")?).map_err(BadLine)?;
-        let picture = Picture::of(next("picture")?).map_err(BadLine)?;
+        let lock_picture = Picture::of(next("lock's picture")?)?;
+        let picture = Picture::of(next("picture")?)?;
         let fit = next("fit")?;
         let fit = Fit::of(fit).ok_or_else(|| BadLine(format!("no fit {fit:?}")))?;
         let color = next("colour")?;
@@ -287,7 +287,7 @@ impl FromStr for Wallpapers {
         }
         let outputs = pairs
             .iter()
-            .map(|[name, picture]| Ok(((*name).to_owned(), Picture::of(picture).map_err(BadLine)?)))
+            .map(|[name, picture]| Ok(((*name).to_owned(), Picture::of(picture)?)))
             .collect::<Result<_, BadLine>>()?;
         Ok(Self {
             lock,
@@ -361,7 +361,7 @@ pub fn render_at(look: &Look, size: (i32, i32), scale: f64) -> Rendered {
         }
         Picture::File(text) => match picture(&expand(text), look.fit, look.color, size) {
             Ok(rendered) => rendered,
-            Err(why) => builtin_rendered(Backdrop::Night, size, Some(why)),
+            Err(why) => builtin_rendered(Backdrop::Night, size, Some(why.to_string())),
         },
     }
 }
@@ -377,45 +377,81 @@ fn builtin_rendered(builtin: Backdrop, size: (i32, i32), failed: Option<String>)
     }
 }
 
-/// A picture's file read and decoded, its EXIF orientation applied.
-pub fn decode(path: &Path) -> Result<image::DynamicImage, String> {
-    use image::ImageDecoder;
+/// Why a picture's file did not open; `name` is the file's, without its
+/// folders (it is shown).
+#[derive(Debug, thiserror::Error)]
+pub enum PictureError {
+    /// The file could not be read.
+    #[error("{name}: {source}")]
+    Read {
+        name: String,
+        source: std::io::Error,
+    },
+    /// It was read, and is not a picture the desktop decodes.
+    #[error("{name} does not open as a picture: {source}")]
+    Decode {
+        name: String,
+        source: image::ImageError,
+    },
+}
+
+/// The picture's file opened, its format found from what it holds.
+fn opened(
+    path: &Path,
+) -> Result<
+    (
+        image::ImageReader<std::io::BufReader<std::fs::File>>,
+        String,
+    ),
+    PictureError,
+> {
     let name = path.file_name().map_or_else(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
+    let read = |source| PictureError::Read {
+        name: name.clone(),
+        source,
+    };
     let reader = image::ImageReader::open(path)
-        .map_err(|err| format!("{name}: {err}"))?
+        .map_err(read)?
         .with_guessed_format()
-        .map_err(|err| format!("{name}: {err}"))?;
-    let mut decoder = reader
-        .into_decoder()
-        .map_err(|err| format!("{name} does not open as a picture: {err}"))?;
+        .map_err(read)?;
+    Ok((reader, name))
+}
+
+/// A picture's file read and decoded, its EXIF orientation applied.
+pub fn decode(path: &Path) -> Result<image::DynamicImage, PictureError> {
+    use image::ImageDecoder;
+    let (reader, name) = opened(path)?;
+    let not_one = |source| PictureError::Decode {
+        name: name.clone(),
+        source,
+    };
+    let mut decoder = reader.into_decoder().map_err(not_one)?;
     let orientation = decoder
         .orientation()
         .unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut decoded = image::DynamicImage::from_decoder(decoder)
-        .map_err(|err| format!("{name} does not open as a picture: {err}"))?;
+    let mut decoded = image::DynamicImage::from_decoder(decoder).map_err(not_one)?;
     decoded.apply_orientation(orientation);
     Ok(decoded)
 }
 
 /// A picture's size in pixels as its header says it, without decoding it:
 /// whether it opens as a picture (the Settings check before copying).
-pub fn dimensions(path: &Path) -> Result<(u32, u32), String> {
-    let name = path.file_name().map_or_else(
-        || path.display().to_string(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    image::ImageReader::open(path)
-        .map_err(|err| format!("{name}: {err}"))?
-        .with_guessed_format()
-        .map_err(|err| format!("{name}: {err}"))?
+pub fn dimensions(path: &Path) -> Result<(u32, u32), PictureError> {
+    let (reader, name) = opened(path)?;
+    reader
         .into_dimensions()
-        .map_err(|err| format!("{name} does not open as a picture: {err}"))
+        .map_err(|source| PictureError::Decode { name, source })
 }
 
-fn picture(path: &Path, fit: Fit, color: [u8; 3], size: (i32, i32)) -> Result<Rendered, String> {
+fn picture(
+    path: &Path,
+    fit: Fit,
+    color: [u8; 3],
+    size: (i32, i32),
+) -> Result<Rendered, PictureError> {
     use image::{GenericImageView, imageops::FilterType};
     let decoded = decode(path)?;
     let accent = dominant(&decoded);
@@ -630,7 +666,7 @@ mod tests {
         assert!(failed.failed.is_some());
         assert_eq!(failed.accent, Backdrop::Night.accent());
         assert!(dimensions(&bad).is_err());
-        assert_eq!(dimensions(&path), Ok((40, 20)));
+        assert_eq!(dimensions(&path).ok(), Some((40, 20)));
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&bad);
         let _ = std::fs::remove_dir(&dir);

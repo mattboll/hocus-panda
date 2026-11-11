@@ -38,25 +38,19 @@ impl Default for Settings {
 }
 
 /// `[calendar]` from the configuration file's text.
-pub fn from_toml(text: &str) -> Result<Settings, String> {
+pub fn from_toml(text: &str) -> Result<Settings, toml::de::Error> {
     #[derive(Deserialize)]
     struct File {
         #[serde(default)]
         calendar: Settings,
     }
-    toml::from_str::<File>(text)
-        .map(|f| f.calendar)
-        .map_err(|err| err.to_string())
+    toml::from_str::<File>(text).map(|f| f.calendar)
 }
 
 /// `[calendar]` of the configuration file at `path`: the default when
 /// there is no file; an error (to log) when it does not read.
-pub fn read(path: &Path) -> Result<Settings, String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => from_toml(&text).map_err(|err| format!("{}: {err}", path.display())),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
-        Err(err) => Err(format!("{}: {err}", path.display())),
-    }
+pub fn read(path: &Path) -> Result<Settings, crate::config::ReadError> {
+    crate::config::ReadError::text_or(path, Settings::default, from_toml)
 }
 
 /// How many minutes before its start `event`'s reminder comes, if it has

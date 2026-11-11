@@ -66,7 +66,7 @@ pub fn follow(socket: PathBuf, mut heard: impl FnMut(Vec<InputDevice>) -> bool +
                     Ok(DeviceEvent::Removed(id)) => devices.retain(|d| d.id != id),
                     Ok(DeviceEvent::Listed) => listed = true,
                     Err(err) => {
-                        tracing::debug!(err, "a device's line that does not read");
+                        tracing::debug!(%err, "a device's line that does not read");
                         continue;
                     }
                 }

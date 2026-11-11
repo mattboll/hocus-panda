@@ -357,7 +357,8 @@ async fn call(connection: &Connection, user: &OwnedObjectPath, ask: &Ask) -> Res
         Ask::Chosen(path) => {
             let path = path.clone();
             let made = tokio::task::spawn_blocking(move || {
-                let picture = hocus_link::wallpaper::decode(&path)?;
+                let picture =
+                    hocus_link::wallpaper::decode(&path).map_err(|err| err.to_string())?;
                 account::png(&account::square(&picture))
             })
             .await

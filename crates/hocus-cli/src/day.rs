@@ -33,7 +33,7 @@ pub struct PlankaToken {
 pub fn planka_token(args: PlankaToken) -> Result<String, String> {
     let file = args.config.or_else(config_file);
     let config = match &file {
-        Some(file) => config::read(file)?,
+        Some(file) => config::read(file).map_err(|err| err.to_string())?,
         None => config::Config::default(),
     };
     let base = file.as_deref().and_then(Path::parent);
