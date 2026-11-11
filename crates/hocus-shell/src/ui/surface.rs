@@ -273,6 +273,28 @@ struct Kept {
     queued: Vec<Pressed>,
     /// What the tree showed when last said in the log.
     said: String,
+    /// Where the pointer is, as the events themselves say it.
+    pointer: Option<iced::Point>,
+}
+
+/// The pointer as of `event`, kept in `kept`: iced hands every event of a
+/// batch the cursor as it is after the batch, so that a press and a
+/// release read together with a move away (a slow frame) found the
+/// pointer gone from the button pressed, and the click was lost. The
+/// widgets get, with each event, the pointer where that event has it.
+fn pointer_of(kept: &mut Kept, event: &Event, cursor: mouse::Cursor) -> mouse::Cursor {
+    match event {
+        Event::Mouse(mouse::Event::CursorMoved { position }) => kept.pointer = Some(*position),
+        Event::Mouse(mouse::Event::CursorEntered) => kept.pointer = cursor.land().position(),
+        Event::Mouse(mouse::Event::CursorLeft) => kept.pointer = None,
+        _ => {}
+    }
+    match (event, kept.pointer, cursor) {
+        (Event::Mouse(_), Some(at), mouse::Cursor::Levitating(_)) => mouse::Cursor::Levitating(at),
+        (Event::Mouse(_), Some(at), _) => mouse::Cursor::Available(at),
+        (Event::Mouse(mouse::Event::CursorLeft), None, _) => mouse::Cursor::Unavailable,
+        _ => cursor,
+    }
 }
 
 fn child(layout: Layout<'_>) -> Layout<'_> {
@@ -592,6 +614,7 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
         }
         // The tree built after what was handled: what waited for it.
         let kept = tree.state.downcast_mut::<Kept>();
+        let cursor = pointer_of(kept, event, cursor);
         if kept.outdated.is_some_and(|build| build != self.build) {
             kept.outdated = None;
             let held = std::mem::take(&mut kept.held);
