@@ -203,6 +203,8 @@ fn follow() {
             let again = last.is_some();
             *CATALOG.lock().unwrap_or_else(PoisonError::into_inner) =
                 Some(Arc::new(Catalog::of(found.clone())));
+            // The notifications' history waits for them (its icons).
+            crate::notifications::came();
             last = Some(found);
             if again {
                 super::icons::again();
