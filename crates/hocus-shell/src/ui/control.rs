@@ -67,7 +67,7 @@ pub fn control<'a, M>(
     node = match role {
         Role::Slider => node.act(Act::Increment).act(Act::Decrement),
         Role::PasswordField | Role::TextField => node.act(Act::Focus),
-        Role::Label | Role::Status | Role::Group | Role::List => node,
+        Role::Label | Role::Status | Role::Group | Role::List | Role::ProgressBar => node,
         _ => node.act(Act::Click),
     };
     Control {

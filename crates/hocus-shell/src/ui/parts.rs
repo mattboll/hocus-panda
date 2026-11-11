@@ -100,14 +100,19 @@ pub fn gap<'a, M: 'a>(width: f32) -> El<'a, M> {
 
 /// A divider: 1 px across the content, `RULE` px above and below.
 pub fn rule<'a, M: 'a>() -> El<'a, M> {
+    rule_of(RULE)
+}
+
+/// A divider: 1 px across the content, `around` px above and below.
+pub fn rule_of<'a, M: 'a>(around: f32) -> El<'a, M> {
     container(
         container(Space::new().width(Length::Fill).height(1.0))
             .style(|_| boxed(RULE_FILL.get(), 0.0)),
     )
     .padding(Padding {
-        top: RULE,
+        top: around,
         right: ROW_OUT,
-        bottom: RULE,
+        bottom: around,
         left: ROW_OUT,
     })
     .into()
@@ -134,6 +139,16 @@ pub fn note<'a, M: 'static>(note: &str) -> El<'a, M> {
 /// 0.08em`, which iced's text has not: a letter a widget), `height` tall,
 /// `aside` on its right; a line for screen readers.
 pub fn label<'a, M: 'static>(word: &str, height: f32, aside: Option<El<'a, M>>) -> El<'a, M> {
+    label_as(word, word, height, aside)
+}
+
+/// A section's label drawn as `word`, read as `said` (not in capitals).
+pub fn label_as<'a, M: 'static>(
+    word: &str,
+    said_as: &str,
+    height: f32,
+    aside: Option<El<'a, M>>,
+) -> El<'a, M> {
     let mut letters = row![].spacing(LABEL_SPACING);
     for ch in word.chars() {
         letters = letters.push(said(ch.to_string(), LABEL, MANROPE_BOLD, DIM.get()));
@@ -144,7 +159,7 @@ pub fn label<'a, M: 'static>(word: &str, height: f32, aside: Option<El<'a, M>>) 
     }
     super::line(
         inset(container(line).height(height).align_y(Vertical::Center)),
-        word,
+        said_as,
     )
     .into()
 }

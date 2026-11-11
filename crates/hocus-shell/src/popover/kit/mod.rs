@@ -56,7 +56,7 @@ pub(crate) const HEADER_TOP: f32 = BORDER + PAD_TOP;
 pub(crate) const HEADER: f32 = 32.0;
 pub(crate) const HEADER_MIDDLE: f32 = HEADER_TOP + HEADER / 2.0;
 pub(crate) const TITLE: f32 = 16.0;
-const ASIDE: f32 = 13.0;
+pub(crate) const ASIDE: f32 = 13.0;
 /// Icons in rows, and the gap after them.
 pub(crate) const ICON: f32 = 18.0;
 pub(crate) const ICON_GAP: f32 = 10.0;
@@ -99,7 +99,6 @@ const RIM: Ink = Ink::Token(|t| t.bar_border);
 /// Buttons, and under the pointer.
 pub(crate) const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 pub(crate) const FILL_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 const SWITCH_OFF: Ink = Ink::Token(|t| t.switch_off);
 const KNOB_SHADOW: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.4));
 /// `gauge.critical`'s light end: failures, a low battery, a sign-in page.
@@ -208,15 +207,6 @@ pub(crate) fn title_aside(f: &mut Frame, word: String) {
     ));
 }
 
-/// A section's divider: 1 px across the content at `y`.
-pub(crate) fn rule(f: &mut Frame, y: f32) {
-    f.fill_rectangle(
-        Point::new(LEFT, y),
-        Size::new(RIGHT - LEFT, 1.0),
-        RULE.get(),
-    );
-}
-
 /// `word`'s letters and their places from the content's left, spaced as a
 /// label's, `width` measuring each in the label's font.
 pub(crate) fn spaced(word: &str, mut width: impl FnMut(&str) -> f32) -> Vec<(char, f32)> {
@@ -249,11 +239,6 @@ pub(crate) fn label(f: &mut Frame, letters: &[(char, f32)], middle: f32) {
             ),
         ));
     }
-}
-
-/// The middle of a label's line from `top`, padded.
-pub(crate) fn label_middle(top: f32) -> f32 {
-    top + LABEL_PAD + LABEL * LINE / 2.0
 }
 
 /// `lines` from `top` at `x`, `size` px on lines `height` em apart, in

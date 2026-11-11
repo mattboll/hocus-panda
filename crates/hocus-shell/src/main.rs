@@ -1920,14 +1920,7 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::Battery => canvas(popover::battery::Panel {
-                id,
-                words: self.words,
-                glass: self.look.glass,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            popover::Item::Battery => popover::battery::view(id, self.words, self.look.glass),
             popover::Item::Windows => canvas(popover::windows::Panel {
                 id,
                 words: windows::Words::new(clock::time::Lang::of_messages()),
