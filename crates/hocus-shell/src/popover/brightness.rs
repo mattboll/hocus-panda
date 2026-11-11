@@ -275,11 +275,15 @@ pub enum Msg {
 pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate::Message> {
     let levels = levels::snapshot();
     let screens = levels::screens();
-    let (content, until) = ui(|ui| (content(words, &levels, screens, ui), ui.until()));
+    let built = ui(|ui| content(words, &levels, screens, ui));
     // Asked and not said: the surface wakes when it stops showing.
-    Around::new(id, content, handle, Msg::Stale)
+    Around::new(id, built, handle, Msg::Stale)
+        .rebuild(move || {
+            let (levels, screens) = (levels::snapshot(), levels::screens());
+            ui(|ui| content(words, &levels, screens, ui))
+        })
         .stale_when(|| ui(|ui| ui.until().is_some_and(|until| Instant::now() >= until)))
-        .wake_at(until)
+        .wake_at(|| ui(|ui| ui.until()))
         .keys(arrows)
         .press(Msg::Pressed)
         .subtitle(Some(words.built_in().to_owned()))

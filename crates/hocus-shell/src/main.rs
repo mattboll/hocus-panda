@@ -1932,15 +1932,11 @@ impl Shell {
             .height(Length::Fill)
             .into(),
             popover::Item::Desktop { .. } | popover::Item::WindowsMore => {
-                canvas(popover::desktop::Panel {
+                popover::desktop::view(&popover::desktop::Panel {
                     id,
                     words: self.words,
                     glass: self.look.glass,
-                    software: self.software,
                 })
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
             }
             popover::Item::Sources | popover::Item::AnotherTool | popover::Item::Plug(_) => {
                 canvas(popover::agents::Panel {

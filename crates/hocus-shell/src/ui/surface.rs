@@ -105,7 +105,9 @@ pub struct Around<'a, L> {
     /// The line under its title, for screen readers.
     subtitle: Option<String>,
     /// When what it shows ends by itself (a value asked and not said).
-    wake: Option<std::time::Instant>,
+    wake: Box<dyn Fn() -> Option<std::time::Instant> + 'a>,
+    /// Its content built again, from the model as it is now.
+    rebuild: Option<Box<dyn Fn() -> El<'a, L> + 'a>>,
 }
 
 impl<L> std::fmt::Debug for Around<'_, L> {
@@ -140,7 +142,8 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
             later: None,
             natural: Box::new(|_| {}),
             subtitle: None,
-            wake: None,
+            wake: Box::new(|| None),
+            rebuild: None,
         }
     }
 
@@ -183,10 +186,18 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
         self
     }
 
-    /// Drawn again at `at`, if any: what it shows ends then by itself,
-    /// which `stale_when` then says.
-    pub fn wake_at(mut self, at: Option<std::time::Instant>) -> Self {
-        self.wake = at;
+    /// How its content is built (as `content` was): what changes outside
+    /// it as it draws (`stale_when`, [`touch`]) builds it again in place,
+    /// this surface alone drawn again.
+    pub fn rebuild(mut self, rebuild: impl Fn() -> El<'a, L> + 'a) -> Self {
+        self.rebuild = Some(Box::new(rebuild));
+        self
+    }
+
+    /// Drawn again when `at` says, if it does: what it shows ends then by
+    /// itself, which `stale_when` then says.
+    pub fn wake_at(mut self, at: impl Fn() -> Option<std::time::Instant> + 'a) -> Self {
+        self.wake = Box::new(at);
         self
     }
 
@@ -507,10 +518,7 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
         let drawing = matches!(event, Event::Window(window::Event::RedrawRequested(_)));
         // Asked on every event: a tree built again from one is drawn
         // without a request of its own.
-        if let Some(at) = self
-            .wake
-            .filter(|at| open && *at > std::time::Instant::now())
-        {
+        if let Some(at) = (self.wake)().filter(|at| open && *at > std::time::Instant::now()) {
             shell.request_redraw_at(window::RedrawRequest::At(at));
         }
         let mut handled = false;
@@ -587,9 +595,22 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
         }
         tree.state.downcast_mut::<Kept>().outdated = Some(self.build);
         if drawing {
-            // From a redraw, iced_layershell builds no view again unless
-            // a message asks: every surface's then.
-            shell.publish(Message::Keys);
+            if let Some(rebuild) = &self.rebuild {
+                // Built again here, laid out again before it draws: no
+                // message, which would draw every surface of the shell
+                // again. What waits for the new tree runs as it next
+                // draws, a frame later.
+                self.content = rebuild();
+                tree.children[0].diff(self.content.as_widget());
+                self.build = BUILDS.fetch_add(1, Ordering::Relaxed);
+                self.stamp = STAMP.load(Ordering::Relaxed);
+                shell.invalidate_layout();
+                shell.request_redraw();
+            } else {
+                // From a redraw, iced_layershell builds no view again
+                // unless a message asks: every surface's then.
+                shell.publish(Message::Keys);
+            }
         } else {
             shell.invalidate_widgets();
             crate::popover::send(vec![Effect::Wake(hocus_link::POPOVER_NAMESPACE)]);

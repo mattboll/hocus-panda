@@ -407,11 +407,11 @@ pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate:
         .iter()
         .find(|s| s.default)
         .map(|s| s.description.clone());
-    let (content, until) = ui(|ui| (content(words, &shown, ui), until(ui)));
+    let content = ui(|ui| content(words, &shown, ui));
     // Asked and not said: the surface wakes when it stops showing.
     Around::new(id, content, handle, Msg::Stale)
         .stale_when(|| ui(|ui| expired(ui, Instant::now())))
-        .wake_at(until)
+        .wake_at(|| ui(|ui| until(ui)))
         .keys(arrows)
         .press(Msg::Pressed)
         .first(Msg::Focus(Target::Slider))

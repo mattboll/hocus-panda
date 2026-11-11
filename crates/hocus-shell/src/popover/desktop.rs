@@ -16,29 +16,39 @@
 //! once it holds the keyboard (clicked); `Esc` closes it. It follows
 //! windows opening, closing and retitling while it shows: the
 //! compositor's lines draw this surface alone ([`crate::desktops`]).
+//!
+//! Built with the shell's widget kit ([`crate::ui`]), as the Wi-Fi's.
 
-use std::time::Instant;
+use std::sync::{Mutex, PoisonError};
 
+use hocus_a11y::Role;
 use iced::{
-    Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
-    widget::{
-        canvas::{self, Frame, Geometry},
-        text::Alignment,
-    },
+    Element, Length, Padding, Point, Rectangle, Size,
+    advanced::widget::Id,
+    alignment::Vertical,
+    keyboard,
+    widget::{Space, column, container, keyed_column, mouse_area, row, space},
     window,
 };
 
 use super::{
     Effect, Event as Seen, Item, Pressed, event,
-    kit::{self, Clip, FILL, Input, List, Pointer, SMALL_RADIUS, Wheel, text, text_in},
+    kit::{self, FILL, List, SMALL_RADIUS},
 };
 use crate::{
     desktops::{self, Row},
     levels::{
-        draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, ring},
+        draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT},
         model::Words,
     },
+    ui::{
+        self, Around, Later, control,
+        parts::{self, drawn, gap},
+        style::{self, said},
+    },
 };
+
+type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
@@ -54,7 +64,6 @@ const RIGHT: f32 = WIDTH as f32 - BORDER - PAD_SIDE;
 /// above what follows.
 const HEADER_TOP: f32 = BORDER + PAD_TOP;
 const HEADER: f32 = 26.0;
-const HEADER_MIDDLE: f32 = HEADER_TOP + HEADER / 2.0;
 const TITLE: f32 = 14.0;
 const COUNT: f32 = 12.0;
 const GAP: f32 = 4.0;
@@ -143,26 +152,6 @@ pub fn height(bar: &str, row: u8, index: u8) -> u32 {
     )
 }
 
-/// Row `i`'s top in the list's content.
-fn row_top(i: usize) -> f32 {
-    i as f32 * (ROW + ROW_GAP)
-}
-
-/// Row `i`'s place in `list`, scrolled by `scroll`: short of the
-/// scrollbar when the list scrolls.
-fn row_rect(list: List, i: usize, scroll: f32) -> Rectangle {
-    let right = if list.scrolls() {
-        RIGHT - SCROLLED_END
-    } else {
-        RIGHT + ROW_OUT
-    };
-    let view = list.view;
-    Rectangle::new(
-        Point::new(view.x, view.y + row_top(i) - scroll),
-        Size::new(right - view.x, ROW),
-    )
-}
-
 /// A desktop's list on its surface.
 #[derive(Debug, Clone)]
 pub struct Panel {
@@ -171,220 +160,324 @@ pub struct Panel {
     pub words: Words,
     /// On the compositor's glass (else opaque).
     pub glass: bool,
-    /// The shell draws on the CPU.
-    pub software: bool,
 }
 
-/// What it shows: whose, its rows and their titles as cut.
+/// What it shows: whose, its rows, its title.
 #[derive(Debug, Clone, PartialEq)]
-struct Shown {
+struct Source {
     bar: String,
+    item: Item,
     /// The bar's row (its screen, 8.4) and the desktop.
     row: u8,
     index: u8,
     /// Another screen's: the line saying which.
     screen: Option<String>,
     rows: Vec<Row>,
-    titles: Vec<String>,
-    /// Its title: its name (6.14) or "Bureau N", elided to the room the
-    /// count leaves it; and whole.
+    /// Its name (6.14) or "Bureau N", whole.
     title: String,
-    title_of: String,
 }
 
-/// What the surface keeps between draws.
+/// What it shows now, as the controller and the compositor say (none
+/// once closing).
+fn source(id: window::Id, words: Words) -> Option<Source> {
+    let (bar, item) = super::with(|c| match c.open_on() {
+        Some((bar, item @ (Item::Desktop { .. } | Item::WindowsMore))) if c.is_open(id) => {
+            Some((bar.to_owned(), item))
+        }
+        _ => None,
+    })?;
+    // The windows' "+ N" (#604): the current desktop's.
+    let (row, index) = match item {
+        Item::Desktop { row, index } => (row, index),
+        _ => (0, u8::try_from(desktops::current(&bar)).unwrap_or(u8::MAX)),
+    };
+    let shown_screen = desktops::screen_of(&bar, row);
+    let output = shown_screen
+        .as_ref()
+        .map_or_else(|| bar.clone(), |s| s.output.clone());
+    let screen = shown_screen
+        .filter(|_| row > 0)
+        .map(|s| words.on_screen(s.built_in, s.inches, s.number));
+    let rows = desktops::rows(&output, usize::from(index));
+    let title = words.desktop_title(
+        usize::from(index) + 1,
+        desktops::name(usize::from(index)).as_deref(),
+    );
+    Some(Source {
+        bar,
+        item,
+        row,
+        index,
+        screen,
+        rows,
+        title,
+    })
+}
+
+/// A row, by its window's id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Window(u64),
+}
+
+impl Target {
+    /// Its control's id: what tests, and screen readers, know it by.
+    fn id(self) -> String {
+        format!("desktop:{self:?}")
+    }
+}
+
+const LIST_ID: &str = "desktop:list";
+
 #[derive(Debug, Default)]
-pub struct State {
-    shown: Option<Shown>,
-    /// The windows' ids under the pointer and pressed.
-    pointer: Pointer<u64>,
-    focus: Option<u64>,
-    /// How far the list is scrolled.
-    scroll: f32,
-    wheel: Wheel,
+struct Ui {
+    focus: Option<Target>,
+    /// What it showed last: closing, it shows it still.
+    shown: Option<Source>,
+    /// What was last said in the log.
+    said: Option<Source>,
 }
 
-impl State {
-    fn ids(&self) -> Vec<u64> {
-        self.shown
-            .as_ref()
-            .map_or_else(Vec::new, |s| s.rows.iter().map(|r| r.id).collect())
-    }
+static UI: Mutex<Option<Ui>> = Mutex::new(None);
 
-    fn list(&self) -> List {
-        let screen = self.shown.as_ref().is_some_and(|s| s.screen.is_some());
-        list_of(self.ids().len(), content_top(screen))
-    }
-
-    fn rect_of(&self, id: u64) -> Option<Rectangle> {
-        let i = self.ids().iter().position(|i| *i == id)?;
-        Some(row_rect(self.list(), i, self.scroll))
-    }
-
-    /// The row under `at`, inside the list's viewport.
-    fn row_at(&self, at: Point) -> Option<u64> {
-        let list = self.list();
-        if !list.view.contains(at) {
-            return None;
-        }
-        self.ids()
-            .into_iter()
-            .enumerate()
-            .find(|(i, _)| row_rect(list, *i, self.scroll).contains(at))
-            .map(|(_, id)| id)
-    }
-
-    /// The list scrolled so that the row holding the keyboard shows.
-    fn reveal(&mut self) {
-        let Some(i) = self
-            .focus
-            .and_then(|f| self.ids().iter().position(|id| *id == f))
-        else {
-            return;
-        };
-        let list = self.list();
-        self.scroll = kit::reveal(
-            (row_top(i), ROW),
-            list.view.height,
-            self.scroll,
-            list.most_scroll(),
-        );
-    }
+fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
+    let mut ui = UI.lock().unwrap_or_else(PoisonError::into_inner);
+    with(ui.get_or_insert_with(Ui::default))
 }
 
-impl<Message> canvas::Program<Message> for Panel {
-    type State = State;
+/// The list opens: no row holds the ring.
+pub fn opening() {
+    ui(|ui| ui.focus = None);
+}
 
-    fn update(
-        &self,
-        state: &mut State,
-        event: &iced::Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) -> Option<canvas::Action<Message>> {
-        match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
-            Input::Redraw(now) => self.refresh(state, now),
-            Input::Mouse(seen, at) => self.mouse(state, seen, at),
-            Input::Key(pressed) => self.key(state, &pressed),
-            Input::Nothing => None,
+/// What a widget asks.
+#[derive(Debug, Clone)]
+pub enum Msg {
+    /// A row pressed, or `Enter` on it: its window.
+    Act(Target),
+    /// A right click on a row: its window's menu, in the list's place
+    /// (#723).
+    Menu(Target),
+    /// The ring comes to it.
+    Focus(Target),
+    /// A press anywhere on the popover.
+    Pressed,
+    /// What it shows changed under the view.
+    Stale,
+}
+
+/// What waits for the tree built after a message: the list scrolled.
+static LATER: Later = Later::new();
+
+/// The list on its surface.
+pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
+    let (id, words) = (panel.id, panel.words);
+    let content = build(id, words);
+    let (ids, subtitle) = ui(|ui| {
+        let rows = ui.shown.as_ref().map_or(&[][..], |s| &s.rows[..]);
+        let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
+        (
+            ids,
+            ui.shown.as_ref().and_then(|s| words.windows(s.rows.len())),
+        )
+    });
+    Around::new(id, content, handle, Msg::Stale)
+        .rebuild(move || build(id, words))
+        .stale_when(move || {
+            source(id, words).is_some_and(|now| ui(|ui| ui.shown.as_ref() != Some(&now)))
+        })
+        .keys(move |pressed| arrows(pressed, &ids))
+        .press(Msg::Pressed)
+        .later(&LATER)
+        .subtitle(subtitle)
+        .on_glass(panel.glass)
+}
+
+/// Its content, from what it shows now (closing, what it showed).
+fn build<'a>(id: window::Id, words: Words) -> El<'a> {
+    let now = source(id, words);
+    ui(|ui| {
+        if now.is_some() {
+            ui.shown = now;
         }
-    }
+        let shown = ui.shown.clone();
+        content(words, shown.as_ref(), ui)
+    })
+}
 
-    fn draw(
-        &self,
-        state: &State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        kit::background(&mut frame, bounds.size(), self.glass);
-        let Some(shown) = &state.shown else {
-            return vec![frame.into_geometry()];
-        };
-        let f = &mut frame;
-        f.fill_text(text_in(
-            MANROPE_BOLD,
-            text(
-                shown.title.clone(),
-                Point::new(LEFT, HEADER_MIDDLE),
-                TITLE,
-                TEXT.get(),
-                Alignment::Left,
-            ),
+/// The arrows with no row holding the ring: the first (down), or the
+/// last (up); the kit takes them round the rows after.
+fn arrows(pressed: &Pressed, ids: &[u64]) -> Option<Msg> {
+    use keyboard::{Key, key::Named};
+    let down = match &pressed.key {
+        Key::Named(Named::ArrowDown) => true,
+        Key::Named(Named::ArrowUp) => false,
+        _ => return None,
+    };
+    if ui(|ui| ui.focus.is_some()) {
+        return None;
+    }
+    let id = if down { ids.first() } else { ids.last() };
+    id.map(|id| Msg::Focus(Target::Window(*id)))
+}
+
+fn content<'a>(words: Words, shown: Option<&Source>, ui: &mut Ui) -> El<'a> {
+    let mut all: Vec<El<'a>> = Vec::new();
+    if let Some(shown) = shown {
+        let count = words.windows(shown.rows.len()).unwrap_or_default();
+        let list = list_of(shown.rows.len(), content_top(shown.screen.is_some()));
+        let room = title_room(list.scrolls());
+        let titles: Vec<String> = shown
+            .rows
+            .iter()
+            .map(|r| kit::elide(&r.title, room, |t| kit::measure(t, NAME, MANROPE)))
+            .collect();
+        say(words, shown, &count, &titles, ui);
+        // A long name keeps 8 px before the count.
+        let counted = kit::measure(&count, COUNT, MANROPE);
+        let header_room = RIGHT - LEFT - if count.is_empty() { 0.0 } else { counted + 8.0 };
+        let title = kit::elide(&shown.title, header_room, |t| {
+            kit::measure(t, TITLE, MANROPE_BOLD)
+        });
+        let line = row![
+            said(title, TITLE, MANROPE_BOLD, TEXT.get()),
+            space::horizontal(),
+            said(count, COUNT, MANROPE, FAINT.get()),
+        ]
+        .align_y(Vertical::Center);
+        all.push(parts::inset(
+            container(line).height(HEADER).align_y(Vertical::Center),
         ));
-        if let Some(count) = self.words.windows(shown.rows.len()) {
-            f.fill_text(text(
-                count,
-                Point::new(RIGHT, HEADER_MIDDLE),
-                COUNT,
-                FAINT.get(),
-                Alignment::Right,
-            ));
-        }
         if let Some(screen) = &shown.screen {
-            f.fill_text(text(
-                screen.clone(),
-                Point::new(LEFT, CONTENT_TOP - GAP + SCREEN_LINE / 2.0),
-                SCREEN,
-                FAINT.get(),
-                Alignment::Left,
-            ));
+            let line = container(said(screen.clone(), SCREEN, MANROPE, FAINT.get()))
+                .height(SCREEN_LINE)
+                .align_y(Vertical::Center);
+            all.push(ui::line(parts::inset(line), screen.clone()).into());
         }
+        all.push(Space::new().height(GAP).into());
         if shown.rows.is_empty() {
-            let top = content_top(shown.screen.is_some());
-            f.fill_text(text(
-                self.words.no_window().to_owned(),
-                Point::new(LEFT, top + EMPTY_PAD + EMPTY * LINE / 2.0),
-                EMPTY,
-                FAINT.get(),
-                Alignment::Left,
-            ));
+            let empty = container(said(words.no_window(), EMPTY, MANROPE, FAINT.get()))
+                .padding(Padding {
+                    top: EMPTY_PAD,
+                    ..Padding::ZERO
+                })
+                .height(EMPTY_PAD + EMPTY * LINE + EMPTY_PAD + GAP);
+            all.push(ui::line(parts::inset(empty), words.no_window()).into());
+        } else {
+            all.push(rows(words, shown, &titles, list, ui.focus));
         }
-        // The rows in their viewport, cut to it (on the CPU, text shows
-        // only whole).
-        let shown_list = state.list();
-        let mut rows = Frame::with_bounds(renderer, shown_list.view);
-        let clip = Clip::new(self.software, Some(shown_list.view));
-        for (i, (row, title)) in shown.rows.iter().zip(&shown.titles).enumerate() {
-            let rect = row_rect(shown_list, i, state.scroll);
-            if !rect.intersects(&shown_list.view) {
-                continue;
-            }
-            if state.pointer.hover == Some(row.id) {
-                rows.fill(&kit::rounded(rect, SMALL_RADIUS), FILL.get());
-            }
-            let icon = Rectangle::new(
-                Point::new(rect.x + ROW_PAD, rect.center_y() - ICON / 2.0),
-                Size::new(ICON, ICON),
-            );
-            let found = desktops::icons::of(&row.app);
-            let name = if row.app.is_empty() {
-                row.title.as_str()
-            } else {
-                letter_of(&row.app)
-            };
-            // Minimised: greyed, its icon at half.
-            let (opacity, colour) = if row.minimized {
-                (MINIMIZED_ICON, FAINT)
-            } else {
-                (1.0, TEXT)
-            };
+    }
+    container(iced::widget::Column::with_children(all))
+        .padding(Padding {
+            top: HEADER_TOP,
+            right: LEFT - ROW_OUT,
+            bottom: PAD_BOTTOM + BORDER,
+            left: LEFT - ROW_OUT,
+        })
+        .into()
+}
+
+/// The rows, in a list that scrolls past 8; another desktop's list from
+/// its top.
+fn rows<'a>(
+    words: Words,
+    shown: &Source,
+    titles: &[String],
+    list: List,
+    focus: Option<Target>,
+) -> El<'a> {
+    let scrolls = list.scrolls();
+    let mut column = column![].spacing(ROW_GAP);
+    for (row, title) in shown.rows.iter().zip(titles) {
+        let target = Target::Window(row.id);
+        let found = desktops::icons::of(&row.app);
+        let name = if row.app.is_empty() {
+            row.title.clone()
+        } else {
+            letter_of(&row.app).to_owned()
+        };
+        // Minimised: greyed, its icon at half.
+        let (opacity, colour) = if row.minimized {
+            (MINIMIZED_ICON, FAINT)
+        } else {
+            (1.0, TEXT)
+        };
+        let icon = drawn(ICON, ICON, move |f, s| {
             kit::app_tile(
-                &mut rows,
-                icon,
-                (found.as_ref(), name),
+                f,
+                Rectangle::new(Point::ORIGIN, s),
+                (found.as_ref(), &name),
                 (ICON_RADIUS, LETTER),
                 opacity,
             );
-            clip.fill(
-                &mut rows,
-                text(
-                    title.clone(),
-                    Point::new(icon.x + ICON + ICON_GAP, rect.center_y()),
-                    NAME,
-                    colour.get(),
-                    Alignment::Left,
-                ),
-            );
+        });
+        let line = row![
+            icon,
+            gap(ICON_GAP),
+            said(title.clone(), NAME, MANROPE, colour.get())
+        ]
+        .align_y(Vertical::Center);
+        let pressed = iced::widget::button(container(line).center_y(Length::Fill))
+            .padding(Padding {
+                left: ROW_PAD,
+                ..Padding::ZERO
+            })
+            .width(Length::Fill)
+            .height(ROW)
+            .style(|_, status| {
+                if style::lit(status) {
+                    style::hovered(FILL.get(), SMALL_RADIUS)
+                } else {
+                    style::clear()
+                }
+            })
+            .on_press(Msg::Act(target));
+        let mut said_as = row.title.clone();
+        if row.minimized {
+            said_as.push_str(if words.fr() {
+                ", réduite"
+            } else {
+                ", minimised"
+            });
         }
-        shown_list.scrollbar_at(f, state.scroll, RIGHT);
-        if let Some(rect) = state.focus.and_then(|id| state.rect_of(id)) {
-            ring(f, rect, SMALL_RADIUS);
-        }
-        self.say(state, shown);
-        vec![frame.into_geometry(), rows.into_geometry()]
+        let declared = control(
+            mouse_area(pressed).on_right_press(Msg::Menu(target)),
+            target.id(),
+            Role::ListItem,
+            said_as,
+        )
+        .focus(focus == Some(target), Msg::Focus(target), SMALL_RADIUS)
+        .activate(Msg::Act(target))
+        .rows(0);
+        column = column.push(container(declared).id(Id::from(target.id() + ":row")));
     }
+    // The rows reach the scrollbar's 2 px short, as the canvas's.
+    let rows = container(column).padding(Padding {
+        right: if scrolls { SCROLLED_END } else { 0.0 },
+        ..Padding::ZERO
+    });
+    let list = parts::list_by(rows.into(), LIST_ID, list.view.height, None, Some(NOTCH));
+    // Keyed by whose it is: another desktop's starts at its top.
+    let key = (u64::from(shown.row) << 8) | u64::from(shown.index);
+    keyed_column([(key, list)]).into()
+}
 
-    fn mouse_interaction(
-        &self,
-        state: &State,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> mouse::Interaction {
-        state.pointer.interaction(false)
+/// What it shows, said in the log as it changes.
+fn say(words: Words, shown: &Source, count: &str, titles: &[String], ui: &mut Ui) {
+    if ui.said.as_ref() == Some(shown) {
+        return;
     }
+    tracing::debug!(
+        bar = %shown.bar,
+        title = %shown.title,
+        count = %count,
+        empty = ?shown.rows.is_empty().then(|| words.no_window()),
+        rows = ?titles,
+        minimized = shown.rows.iter().filter(|r| r.minimized).count(),
+        screen = ?shown.screen,
+        "the desktop's list shows it"
+    );
+    ui.said = Some(shown.clone());
 }
 
 /// What an application's letter tile is named by: its id's last part
@@ -396,245 +489,43 @@ fn letter_of(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-impl Panel {
-    /// What it shows, for screen readers (crate::a11y::rows): its windows,
-    /// each a line that goes to it.
-    fn say(&self, state: &State, shown: &Shown) {
-        use crate::a11y::rows::{self, Rows};
-        use hocus_a11y::Role;
-        let mut nodes = Vec::new();
-        if let Some(screen) = &shown.screen {
-            nodes.push(rows::line(screen.clone()));
-        }
-        if shown.rows.is_empty() {
-            nodes.push(rows::line(self.words.no_window()));
-        }
-        for row in &shown.rows {
-            let Some(rect) = state.rect_of(row.id) else {
-                continue;
-            };
-            let mut name = row.title.clone();
-            if row.minimized {
-                name.push_str(if self.words.fr() {
-                    ", réduite"
-                } else {
-                    ", minimised"
-                });
-            }
-            nodes.push(rows::act(row.id, Role::ListItem, name, rect));
-        }
-        rows::publish(
-            self.id,
-            Rows {
-                subtitle: self.words.windows(shown.rows.len()),
-                nodes,
-                order: rows::order(state.ids()),
-                focus: state.focus.map(rows::key),
-                arrows: false,
-            },
-        );
-    }
+// --- What a message does -------------------------------------------------------
 
-    /// What it shows, read afresh: whose list (the controller says), its
-    /// rows and their titles, cut to their room once.
-    fn refresh<Message>(
-        &self,
-        state: &mut State,
-        _now: Instant,
-    ) -> Option<canvas::Action<Message>> {
-        for pressed in kit::keys(self.id) {
-            let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
+fn handle(message: Msg) {
+    let before = ui(|ui| ui.focus);
+    match message {
+        Msg::Stale => {}
+        Msg::Pressed => ui(|ui| ui.focus = None),
+        Msg::Focus(target) => ui(|ui| ui.focus = Some(target)),
+        Msg::Act(Target::Window(id)) => {
+            tracing::debug!(window = id, "a desktop's list brings a window");
+            super::send(vec![Effect::Bring(id)]);
+            event(Seen::Chosen);
         }
-        // Closing, it shows what it showed.
-        let (bar, item) = super::with(|c| match c.open_on() {
-            Some((bar, item @ (Item::Desktop { .. } | Item::WindowsMore)))
-                if c.is_open(self.id) =>
+        Msg::Menu(Target::Window(id)) => {
+            let shown = ui(|ui| ui.shown.clone());
+            if let Some(shown) = shown
+                && let Some(row) = shown.rows.iter().find(|r| r.id == id)
             {
-                Some((bar.to_owned(), item))
-            }
-            _ => None,
-        })?;
-        // The windows' "+ N" (#604): the current desktop's.
-        let (row, index) = match item {
-            Item::Desktop { row, index } => (row, index),
-            _ => (0, u8::try_from(desktops::current(&bar)).unwrap_or(u8::MAX)),
-        };
-        let shown_screen = desktops::screen_of(&bar, row);
-        let output = shown_screen
-            .as_ref()
-            .map_or_else(|| bar.clone(), |s| s.output.clone());
-        let screen = shown_screen
-            .filter(|_| row > 0)
-            .map(|s| self.words.on_screen(s.built_in, s.inches, s.number));
-        let rows = desktops::rows(&output, usize::from(index));
-        let full_title = self.words.desktop_title(
-            usize::from(index) + 1,
-            desktops::name(usize::from(index)).as_deref(),
-        );
-        let count = self.words.windows(rows.len()).unwrap_or_default();
-        let same = state.shown.as_ref().is_some_and(|s| {
-            s.bar == bar
-                && s.row == row
-                && s.index == index
-                && s.rows == rows
-                && s.title_of == full_title
-                && s.screen == screen
-        });
-        if same {
-            return None;
-        }
-        let room = title_room(list_of(rows.len(), content_top(screen.is_some())).scrolls());
-        let (titles, title) = match iced::advanced::graphics::text::font_system().write() {
-            Ok(mut system) => {
-                let titles = rows
-                    .iter()
-                    .map(|r| {
-                        kit::elide(&r.title, room, |t| {
-                            kit::measure_in(system.raw(), t, NAME, MANROPE)
-                        })
-                    })
-                    .collect();
-                // A long name keeps 8 px before the count.
-                let counted = kit::measure_in(system.raw(), &count, COUNT, MANROPE);
-                let header = RIGHT - LEFT - if count.is_empty() { 0.0 } else { counted + 8.0 };
-                let title = kit::elide(&full_title, header, |t| {
-                    kit::measure_in(system.raw(), t, TITLE, MANROPE_BOLD)
-                });
-                (titles, title)
-            }
-            Err(_) => (
-                rows.iter().map(|r| r.title.clone()).collect(),
-                full_title.clone(),
-            ),
-        };
-        tracing::debug!(
-            bar = %bar,
-            title = %full_title,
-            count = %count,
-            empty = ?rows.is_empty().then(|| self.words.no_window()),
-            rows = ?titles,
-            minimized = rows.iter().filter(|r| r.minimized).count(),
-            screen = ?screen,
-            "the desktop's list shows it"
-        );
-        // Another desktop's list starts at its top.
-        let another = state
-            .shown
-            .as_ref()
-            .is_none_or(|s| s.bar != bar || s.row != row || s.index != index);
-        state.shown = Some(Shown {
-            bar,
-            row,
-            index,
-            screen,
-            rows,
-            titles,
-            title,
-            title_of: full_title,
-        });
-        state.pointer.hover = None;
-        if state.focus.is_some_and(|f| !state.ids().contains(&f)) {
-            state.focus = None;
-        }
-        let most = state.list().most_scroll();
-        state.scroll = if another { 0.0 } else { state.scroll.min(most) };
-        // A change of size reaches the controller, which resizes the
-        // surface (without waking it again).
-        super::refit(item);
-        None
-    }
-
-    /// Window `id`: its desktop, and the focus; the list closes.
-    fn bring(id: u64) {
-        tracing::debug!(window = id, "a desktop's list brings a window");
-        super::send(vec![Effect::Bring(id)]);
-        event(Seen::Chosen);
-    }
-
-    fn mouse<Message>(
-        &self,
-        state: &mut State,
-        seen: &mouse::Event,
-        at: Option<Point>,
-    ) -> Option<canvas::Action<Message>> {
-        let target = at.and_then(|at| state.row_at(at));
-        let redraw = Some(canvas::Action::request_redraw().and_capture());
-        match seen {
-            mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                state.pointer.moved();
-                state.pointer.over(target).then_some(redraw).flatten()
-            }
-            mouse::Event::CursorLeft => {
-                state.pointer.left();
-                redraw
-            }
-            mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                state.focus = None;
-                state.pointer.pressed = target;
-                redraw
-            }
-            mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                if let Some(id) = state.pointer.release(target) {
-                    Self::bring(id);
-                }
-                redraw
-            }
-            // A right click on a row: its window's menu, in the list's
-            // place (#723).
-            mouse::Event::ButtonPressed(mouse::Button::Right) => {
-                let id = target?;
-                let shown = state.shown.as_ref()?;
-                let row = shown.rows.iter().find(|r| r.id == id)?;
                 super::window_menu::ask(&shown.bar, id, None, &row.title, &row.app);
-                redraw
             }
-            // The wheel or a touchpad over a list that scrolls.
-            mouse::Event::WheelScrolled { delta } => {
-                let list = state.list();
-                if !list.scrolls() || !at.is_some_and(|at| list.view.contains(at)) {
-                    return None;
-                }
-                let by = state.wheel.down(delta, NOTCH, kit::popover_scale());
-                state.scroll = (state.scroll + by).clamp(0.0, list.most_scroll());
-                // What is under the pointer now.
-                state.pointer.hover = at.and_then(|at| state.row_at(at));
-                redraw
-            }
-            _ => None,
         }
     }
-
-    fn key<Message>(
-        &self,
-        state: &mut State,
-        pressed: &Pressed,
-    ) -> Option<canvas::Action<Message>> {
-        use keyboard::{Key, key::Named};
-        let order = state.ids();
-        match &pressed.key {
-            Key::Named(Named::Escape) => {
-                event(Seen::Escape);
-                return Some(canvas::Action::capture());
-            }
-            Key::Named(Named::Tab) => {
-                state.focus = kit::step(&order, state.focus, pressed.modifiers.shift());
-            }
-            Key::Named(arrow @ (Named::ArrowDown | Named::ArrowUp)) => {
-                let down = *arrow == Named::ArrowDown;
-                state.focus = match state.focus {
-                    Some(focus) => kit::cycle(&order, focus, down),
-                    None => kit::step(&order, None, !down),
-                };
-            }
-            Key::Named(Named::Enter | Named::Space) => {
-                if let Some(id) = state.focus {
-                    Self::bring(id);
-                }
-            }
-            _ => return None,
+    let (focus, item) = ui(|ui| {
+        let shown = ui.shown.as_ref();
+        // A row gone takes the ring with it.
+        if let Some(Target::Window(id)) = ui.focus
+            && !shown.is_some_and(|s| s.rows.iter().any(|r| r.id == id))
+        {
+            ui.focus = None;
         }
-        state.reveal();
-        Some(canvas::Action::request_redraw().and_capture())
+        (ui.focus, shown.map(|s| s.item))
+    });
+    if let Some(target) = focus.filter(|f| Some(*f) != before) {
+        LATER.push(ui::reveal(Id::new(LIST_ID), Id::from(target.id() + ":row")));
+    }
+    if let Some(item) = item {
+        super::refit(item);
     }
 }
 

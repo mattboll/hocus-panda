@@ -265,14 +265,15 @@ pub fn view<'a>(id: window::Id, words: Words, glass: bool) -> Element<'a, crate:
     let subtitle = levels
         .battery
         .map(|b| words.plugged(b.charge.plugged()).to_owned());
-    let (content, until) = ui(|ui| {
-        let until = ui.asked.map(|(_, since)| since + ASKED_FOR);
-        (content(words, &levels, ui), until)
-    });
+    let built = ui(|ui| content(words, &levels, ui));
     // Asked and not said: the surface wakes when it stops showing.
-    Around::new(id, content, handle, Msg::Stale)
+    Around::new(id, built, handle, Msg::Stale)
+        .rebuild(move || {
+            let levels = levels::snapshot();
+            ui(|ui| content(words, &levels, ui))
+        })
         .stale_when(|| ui(|ui| expired(ui, Instant::now())))
-        .wake_at(until)
+        .wake_at(|| ui(|ui| ui.asked.map(|(_, since)| since + ASKED_FOR)))
         .keys(arrows)
         .press(Msg::Pressed)
         .subtitle(subtitle)

@@ -248,6 +248,19 @@ pub fn list<'a, M: Clone + 'a>(
     most: f32,
     over: fn(bool) -> M,
 ) -> El<'a, M> {
+    list_by(rows, id, most, Some(over), None)
+}
+
+/// A list as [`list`], the pointer over it told if asked, a notch of the
+/// wheel scrolling `notch` px when given ([`super::notched`]), else
+/// iced's 60.
+pub fn list_by<'a, M: Clone + 'a>(
+    rows: El<'a, M>,
+    id: &'static str,
+    most: f32,
+    over: Option<fn(bool) -> M>,
+    notch: Option<f32>,
+) -> El<'a, M> {
     let scrolled = scrollable(rows)
         .id(id)
         .direction(scrollable::Direction::Vertical(
@@ -258,13 +271,18 @@ pub fn list<'a, M: Clone + 'a>(
                 .spacing(0),
         ))
         .style(|_, _| style::scrollbar(SCROLLBAR));
-    container(
-        mouse_area(scrolled)
+    let scrolled: El<'a, M> = match notch {
+        Some(notch) => super::notched::Notched::new(scrolled, notch).into(),
+        None => scrolled.into(),
+    };
+    let told: El<'a, M> = match over {
+        Some(over) => mouse_area(scrolled)
             .on_enter(over(true))
-            .on_exit(over(false)),
-    )
-    .max_height(most)
-    .into()
+            .on_exit(over(false))
+            .into(),
+        None => scrolled,
+    };
+    container(told).max_height(most).into()
 }
 
 /// "Réglages du …": the sliders in their tile, the words, a chevron; the
