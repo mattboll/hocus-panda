@@ -507,6 +507,27 @@ impl Words {
         }
     }
 
+    pub fn shuffle(self) -> &'static str {
+        self.pick("Lecture aléatoire", "Shuffle")
+    }
+
+    pub fn previous(self) -> &'static str {
+        self.pick("Piste précédente", "Previous track")
+    }
+
+    pub fn next(self) -> &'static str {
+        self.pick("Piste suivante", "Next track")
+    }
+
+    /// The play button's name: what it does.
+    pub fn play_pause(self, playing: bool) -> &'static str {
+        if playing {
+            self.pick("Pause", "Pause")
+        } else {
+            self.pick("Lecture", "Play")
+        }
+    }
+
     pub fn open(self, app: &str) -> String {
         format!("{} {app}", self.pick("Afficher", "Show"))
     }

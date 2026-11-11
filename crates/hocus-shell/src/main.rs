@@ -77,6 +77,7 @@ mod tasks;
 mod theme;
 mod today;
 mod tray;
+mod ui;
 mod user;
 mod wayland;
 mod windows;
@@ -1905,26 +1906,13 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::Wifi if popover::wifi::widgets::on() => {
-                popover::wifi::widgets::view(&popover::wifi::Panel {
-                    id,
-                    words: self.words,
-                    glass: self.look.glass,
-                    motion: self.look.motion,
-                    software: self.software,
-                })
-            }
-            popover::Item::Music => popover::music::view(id, self.look.glass),
-            popover::Item::Wifi => canvas(popover::wifi::Panel {
+            popover::Item::Wifi => popover::wifi::view(&popover::wifi::Panel {
                 id,
                 words: self.words,
                 glass: self.look.glass,
                 motion: self.look.motion,
-                software: self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
+            popover::Item::Music => popover::music::view(id, self.look.glass),
             popover::Item::Bluetooth => canvas(popover::bluetooth::Panel {
                 id,
                 words: self.words,

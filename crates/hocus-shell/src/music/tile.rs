@@ -20,12 +20,12 @@ use crate::{
     popover::{
         self, Item, kit,
         music::{Glyph, cover},
-        wifi::{
-            custom::ring,
-            widgets::{filled, lit, said},
-        },
     },
     theme::Ink,
+    ui::{
+        ring,
+        style::{filled, lit, said},
+    },
 };
 
 const COVER: f32 = 34.0;
