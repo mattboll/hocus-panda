@@ -108,6 +108,8 @@ pub struct Around<'a, L> {
     wake: Box<dyn Fn() -> Option<std::time::Instant> + 'a>,
     /// Its content built again, from the model as it is now.
     rebuild: Option<Box<dyn Fn() -> El<'a, L> + 'a>>,
+    /// Built again, to be laid out.
+    pending: Option<El<'a, L>>,
 }
 
 impl<L> std::fmt::Debug for Around<'_, L> {
@@ -144,6 +146,7 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
             subtitle: None,
             wake: Box::new(|| None),
             rebuild: None,
+            pending: None,
         }
     }
 
@@ -448,6 +451,10 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
         renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
+        if let Some(content) = self.pending.take() {
+            self.content = content;
+            tree.children[0].diff(self.content.as_widget());
+        }
         let max = limits.max();
         // All the height it wants: what the surface should be.
         let free = layout::Limits::new(Size::ZERO, Size::new(max.width, f32::INFINITY));
@@ -600,8 +607,10 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
                 // message, which would draw every surface of the shell
                 // again. What waits for the new tree runs as it next
                 // draws, a frame later.
-                self.content = rebuild();
-                tree.children[0].diff(self.content.as_widget());
+                // Swapped in as it is laid out again: until then the
+                // tree and its layout are the old content's (a stack
+                // around asks the pointer's look of them).
+                self.pending = Some(rebuild());
                 self.build = BUILDS.fetch_add(1, Ordering::Relaxed);
                 self.stamp = STAMP.load(Ordering::Relaxed);
                 shell.invalidate_layout();

@@ -2000,15 +2000,12 @@ impl Shell {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
-            popover::Item::User => canvas(popover::session::Panel {
+            popover::Item::User => popover::session::view(&popover::session::Panel {
                 id,
                 words: popover::session::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
                 motion: self.look.motion && !self.software,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+            }),
             popover::Item::Calendar => canvas(popover::calendar::Panel {
                 id,
                 glass: self.look.glass,
