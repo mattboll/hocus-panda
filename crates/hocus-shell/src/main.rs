@@ -409,6 +409,8 @@ struct Shell {
     words: levels::model::Words,
     /// The curtain's pill before the lock (7.2).
     curtain: curtain::Curtain,
+    /// The share's chooser (5.11).
+    share: surfaces::Lent<share::Share>,
 }
 
 #[to_layer_message(multi)]
@@ -439,6 +441,8 @@ enum Message {
     Music,
     /// The music tile was pressed.
     MusicTile(music::tile::Press),
+    /// Asked of a surface from another thread (a screen reader's click).
+    Surface(surfaces::Asked),
 }
 
 impl Shell {
@@ -470,6 +474,7 @@ impl Shell {
             lang: clock::time::Lang::from_env(),
             words: levels::model::Words::new(clock::time::Lang::of_messages()),
             curtain: curtain::Curtain::default(),
+            share: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -568,6 +573,14 @@ impl Shell {
             Message::MusicTile(press) => {
                 music::tile::pressed(press);
                 Task::none()
+            }
+            Message::Surface(asked) => {
+                let effects = match asked {
+                    surfaces::Asked::Share(act) => self
+                        .share
+                        .update(share::Said::Act { on: None, act }, self.now),
+                };
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
@@ -852,13 +865,15 @@ impl Shell {
                 capture::captured(captured);
                 Task::none()
             }
+            // A message (every surface's view built again): the chooser
+            // opens a surface, which is one.
             ToShell::ShareChoose(choose) => {
-                share::set(choose);
-                Task::none()
+                let effects = self.share.update(share::Said::Choose(choose), self.now);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::ShareChooseEnd(request) => {
-                share::end(request);
-                Task::none()
+                let effects = self.share.update(share::Said::End(request), self.now);
+                Task::batch(popover::messages(effects).into_iter().map(Task::done))
             }
             ToShell::AuthAt(at) => {
                 auth::placed(at);
@@ -1730,14 +1745,6 @@ impl Shell {
         ))
     }
 
-    /// The share's chooser (5.11), if its surface is `id`.
-    fn share_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        if !share::is_surface(id) {
-            return None;
-        }
-        Some(share::view::view(id, share::words(), self.look.glass))
-    }
-
     /// The panda peeking out (4.5), if its surface is `id`.
     fn peek_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
         let bar = agents::peek::bar_of(id)?;
@@ -1958,7 +1965,7 @@ impl Shell {
                 .or_else(|| self.actions_view(id))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth_view(id))
-                .or_else(|| self.share_view(id))
+                .or_else(|| self.share.view(id, self.look))
                 .or_else(|| self.lock_view(id))
                 .or_else(|| self.curtain.view(id, self.look))
                 .or_else(|| self.in_use_view(id))
@@ -2484,15 +2491,6 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::Captured(captured) => {
                             capture::captured(captured);
-                            continue;
-                        }
-                        // Sharing (5.11): the chooser's surface, the sign's.
-                        ToShell::ShareChoose(choose) => {
-                            share::set(choose);
-                            continue;
-                        }
-                        ToShell::ShareChooseEnd(request) => {
-                            share::end(request);
                             continue;
                         }
                         // The authentication dialog (7.5): its place, and

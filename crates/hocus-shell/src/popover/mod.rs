@@ -622,6 +622,8 @@ pub enum Event {
 /// What the controller asks for.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
+    /// Asked of a surface the loop owns, from another thread: a message.
+    Surface(crate::surfaces::Asked),
     /// A popover's surface for `item`, on `bar`'s output: `size`, and its
     /// layer-shell margins (top, right, bottom, left).
     Open {
@@ -2548,6 +2550,7 @@ fn carry_out(effect: Effect) -> Vec<crate::Message> {
     use crate::Message;
     use iced_layershell::reexport::{Anchor, Layer, NewLayerShellSettings, OutputOption};
     match effect {
+        Effect::Surface(asked) => vec![Message::Surface(asked)],
         Effect::Open {
             id,
             bar,

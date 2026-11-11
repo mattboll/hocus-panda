@@ -51,6 +51,27 @@ enum Heard {
     Bridge(Event),
     /// The compositor asks what the shell shows (`hocus msg a11y`).
     Dump,
+    /// What a surface the loop owns shows now.
+    Shown(Shown),
+}
+
+/// What a surface the loop owns tells screen readers as it changes (#773):
+/// this thread reads no state of theirs.
+#[derive(Debug, Clone)]
+pub enum Shown {
+    /// The share's chooser, while it shows.
+    Share(Option<crate::share::Seen>),
+}
+
+/// What a surface the loop owns shows now, for this thread.
+pub fn shown(shown: Shown) {
+    if let Some(tell) = HEARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        let _ = tell.send(Heard::Shown(shown));
+    }
 }
 
 /// The thread's channel, once it runs.
@@ -142,6 +163,7 @@ fn run(mut bridge: Option<Bridge>, heard: &mpsc::Receiver<Heard>) {
                 continue;
             }
             Some(Heard::Bridge(Event::Asked(asked))) => said.carry_out(&asked),
+            Some(Heard::Shown(Shown::Share(seen))) => said.share = seen,
             Some(Heard::Dump) => {
                 for window in said.describe(Instant::now()) {
                     for line in window.dump().lines() {
@@ -200,6 +222,8 @@ struct Said {
     announced: u64,
     announce: Option<(u64, String, Instant)>,
     targets: HashMap<(String, String), Target>,
+    /// The share's chooser, as the loop last told it.
+    share: Option<crate::share::Seen>,
 }
 
 impl Said {
@@ -326,7 +350,7 @@ impl Said {
             }
             windows.push(toolbar);
         }
-        if let Some(chooser) = crate::share::a11y() {
+        if let Some(chooser) = self.share.as_ref().and_then(crate::share::a11y) {
             for node in chooser.all() {
                 if node.key.starts_with("share:") {
                     self.targets.insert(

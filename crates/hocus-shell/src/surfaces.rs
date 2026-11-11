@@ -6,8 +6,14 @@
 //! or its workers (owned results through a channel), and its view is a
 //! function of it ([`Surface::view`]). So a surface is tried alone: made,
 //! told, and its view read, without a compositor.
+//!
+//! The widget kit's surfaces ([`crate::ui::Around`]) handle what their
+//! widgets ask at once, while the view lives, without a message (which
+//! would build every surface's view again): their state is [`Lent`] to the
+//! view. Another thread (the screen readers') asks through [`Asked`], a
+//! message for the loop.
 
-use std::time::Instant;
+use std::{cell::RefCell, time::Instant};
 
 use iced::{Element, window};
 
@@ -34,4 +40,45 @@ pub trait Surface {
 
     /// What it shows on surface `id`, if `id` is one of its own.
     fn view(&self, id: window::Id, look: Look) -> Option<Element<'_, crate::Message>>;
+}
+
+/// A surface's state, lent to its view's widgets, which change it as they
+/// handle what they ask: on the loop's thread alone, no lock. Taken twice
+/// at once (a bug), it is said in the log and nothing is done.
+#[derive(Debug, Default)]
+pub struct Lent<T>(RefCell<T>);
+
+impl<T> Lent<T> {
+    pub fn get_mut(&mut self) -> &mut T {
+        self.0.get_mut()
+    }
+
+    /// `read` on the state, unless it is being changed.
+    pub fn read<R>(&self, read: impl FnOnce(&T) -> R) -> Option<R> {
+        match self.0.try_borrow() {
+            Ok(state) => Some(read(&state)),
+            Err(err) => {
+                tracing::error!(%err, "a surface's state read while it changes");
+                None
+            }
+        }
+    }
+
+    /// `change` on the state, unless it is being read or changed.
+    pub fn change<R>(&self, change: impl FnOnce(&mut T) -> R) -> Option<R> {
+        match self.0.try_borrow_mut() {
+            Ok(mut state) => Some(change(&mut state)),
+            Err(err) => {
+                tracing::error!(%err, "a surface's state changed while in use");
+                None
+            }
+        }
+    }
+}
+
+/// What another thread asks of a surface, as a message for the loop (a
+/// screen reader's click).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Asked {
+    Share(crate::share::Act),
 }
