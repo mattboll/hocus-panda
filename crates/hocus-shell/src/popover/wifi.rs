@@ -59,6 +59,10 @@ use super::{
 };
 use crate::theme::Ink;
 use crate::{
+    field::{
+        self, Entry, Place, Took,
+        view::{Look, Style},
+    },
     levels::{
         draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, ring, stroke},
         model::Words,
@@ -67,7 +71,7 @@ use crate::{
         self, Ask,
         draw::{ethernet, wifi},
         model::{Failure, Network, Progress, Security, Wifi},
-        secret::Secret,
+        secret::{self, Secret},
     },
 };
 
@@ -101,9 +105,6 @@ const ERROR: f32 = 12.5;
 const BUTTON: f32 = 30.0;
 const BUTTON_PAD: f32 = 12.0;
 const BUTTON_TEXT: f32 = 13.0;
-/// A password's dots.
-const DOT: f32 = 2.6;
-const DOT_ADVANCE: f32 = 8.0;
 /// The Settings' link at the bottom, as the sound popover's (6.5).
 const LINK: f32 = 36.0;
 const LINK_TILE: f32 = 24.0;
@@ -139,6 +140,45 @@ pub(crate) enum Target {
     Settings,
 }
 
+/// The password's field: the shell's text field (#771) as a secret,
+/// masked unless the eye shows it, never copied out.
+#[derive(Debug)]
+struct Password(Entry);
+
+impl Default for Password {
+    fn default() -> Self {
+        Self(Entry::new(field::Kind::Secret, secret::LONGEST))
+    }
+}
+
+impl std::ops::Deref for Password {
+    type Target = Entry;
+
+    fn deref(&self) -> &Entry {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Password {
+    fn deref_mut(&mut self) -> &mut Entry {
+        &mut self.0
+    }
+}
+
+impl Password {
+    /// Long enough to try.
+    fn complete(&self) -> bool {
+        self.0.chars() >= secret::SHORTEST
+    }
+
+    /// A copy for NetworkManager, made on purpose.
+    fn secret(&self) -> Secret {
+        let mut secret = Secret::new();
+        secret.push(self.0.text());
+        secret
+    }
+}
+
 /// What it keeps between draws and between opening and closing: the
 /// controller asks its height from it, and its rows' order holds.
 #[derive(Debug, Default)]
@@ -147,7 +187,7 @@ struct Ui {
     order: Vec<Vec<u8>>,
     /// The row whose password field is unfolded.
     unfolded: Option<Vec<u8>>,
-    password: Secret,
+    password: Password,
     /// The password shown, not dots.
     shown: bool,
     /// Why the last try with the field failed.
@@ -321,7 +361,7 @@ pub fn closing() {
 }
 
 /// Asks for the clipboard's text, for the field holding the keyboard: it
-/// lands at the field's end as if typed (whole if it fits, or not at all),
+/// lands at the field's caret as if typed (whole if it fits, or not at all),
 /// and clears the error; the popover then draws again. One at a time.
 fn paste() {
     let n = ui(|ui| {
@@ -347,7 +387,7 @@ fn paste() {
             if ui.unfolded.is_none() || ui.focus != Some(Target::Field) {
                 return false;
             }
-            let fits = ui.password.push(text);
+            let fits = ui.password.paste(text);
             if fits {
                 ui.error = None;
                 tracing::debug!("the clipboard's text pasted into the field");
@@ -620,8 +660,6 @@ pub struct State {
     /// The rows' names as shown, and the current network's.
     row_names: Vec<String>,
     current_name: String,
-    /// The password's width when shown (it is never kept as a key).
-    shown_width: f32,
     /// The label's letters and their places.
     label: Vec<(char, f32)>,
     pointer: Pointer<Target>,
@@ -640,6 +678,13 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
+        if let iced::Event::InputMethod(event) = event {
+            let took = ui(|ui| match ui.focus {
+                Some(Target::Field) => ui.password.input_method(event),
+                _ => Took::No,
+            });
+            return self.took(state, took);
+        }
         match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
             Input::Redraw(now) => self.refresh(state, now),
             Input::Mouse(event, at) => self.mouse(state, event, at),
@@ -773,6 +818,14 @@ impl Panel {
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
+                // A press held in the field selects as it drags.
+                if let Some(dragged) = ui(|ui| {
+                    ui.password
+                        .pressed()
+                        .then(|| at.is_some_and(|at| ui.password.drag(at)))
+                }) {
+                    return dragged.then_some(redraw).flatten();
+                }
                 state.pointer.moved();
                 let held = ui(|ui| std::mem::replace(&mut ui.over_list, in_list));
                 if state.pointer.over(target) || held != in_list {
@@ -787,8 +840,12 @@ impl Panel {
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
                 state.pointer.pressed = target;
-                // The field takes the keyboard on the press, as a browser's.
+                // The field takes the keyboard on the press, as a browser's,
+                // its caret where the press is.
                 ui(|ui| {
+                    if let Some(at) = at.filter(|_| target == Some(Target::Field)) {
+                        ui.password.press(at);
+                    }
                     ui.focus = match target {
                         Some(Target::Field) => Some(Target::Field),
                         _ if ui.focus == Some(Target::Field) && ui.unfolded.is_some() => {
@@ -800,6 +857,7 @@ impl Panel {
                 redraw
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                ui(|ui| ui.password.release());
                 if let Some(clicked) = state.pointer.release(target) {
                     self.act(state, Some(clicked));
                 }
@@ -975,7 +1033,7 @@ impl Panel {
             ui.error = None;
             network::ask(Ask::ConnectWith {
                 ssid,
-                secret: ui.password.duplicate(),
+                secret: ui.password.secret(),
             });
         });
     }
@@ -1038,32 +1096,32 @@ impl Panel {
                 Some(Target::Field | Target::Join) => self.submit(&network),
                 other => self.act(state, other),
             },
-            Key::Named(Named::Backspace) if typing => ui(|ui| {
-                if modifiers.control() {
-                    ui.password.clear();
-                } else {
-                    ui.password.pop();
-                }
-                ui.error = None;
-            }),
             Key::Named(Named::Space) if !typing => self.act(state, focus),
-            // Nothing shows until the text comes.
-            _ if typing && crate::paste::asks(&pressed.key, modifiers) => {
+            _ if typing => {
+                let took = ui(|ui| {
+                    ui.password
+                        .key(&pressed.key, modifiers, pressed.text.as_deref())
+                });
+                return self.took(state, took);
+            }
+            _ => return None,
+        }
+        self.reveal(state);
+        Some(canvas::Action::request_redraw().and_capture())
+    }
+
+    /// What the field did with a key: what went wrong goes as it is
+    /// edited, a paste is asked for (nothing shows until the text comes).
+    fn took<Message>(&self, state: &mut State, took: Took) -> Option<canvas::Action<Message>> {
+        match took {
+            Took::No => return None,
+            Took::Same => return Some(canvas::Action::capture()),
+            Took::Moved => {}
+            Took::Edited => ui(|ui| ui.error = None),
+            Took::Paste => {
                 paste();
                 return Some(canvas::Action::capture());
             }
-            _ if typing && !(modifiers.control() || modifiers.logo() || modifiers.alt()) => {
-                let text = pressed
-                    .text
-                    .as_deref()
-                    .filter(|t| !t.is_empty() && t.chars().all(|c| !c.is_control()))?;
-                ui(|ui| {
-                    if ui.password.push(text) {
-                        ui.error = None;
-                    }
-                });
-            }
-            _ => return None,
         }
         self.reveal(state);
         Some(canvas::Action::request_redraw().and_capture())
@@ -1619,65 +1677,24 @@ impl Drawn<'_> {
     }
 
     /// The field's text, in its own frame: dots, or the password when the
-    /// eye shows it, else the placeholder; the caret when it has the
-    /// keyboard.
+    /// eye shows it, else the placeholder; its selection, and the caret
+    /// when it has the keyboard.
     fn field_text(&self, f: &mut Frame, field: Rectangle) {
-        let left = field.x + FIELD_PAD;
-        let room = field.width - FIELD_PAD - FIELD_RIGHT;
-        let middle = field.center_y();
-        let password = &self.ui.password;
-        let caret = self.ui.focus == Some(Target::Field);
-        if password.is_empty() {
-            self.clip().fill(
-                f,
-                text(
-                    self.words().password().to_owned(),
-                    Point::new(left, middle),
-                    FIELD_TEXT,
-                    FAINT.get(),
-                    Alignment::Left,
-                ),
-            );
-            if caret {
-                f.fill_rectangle(
-                    Point::new(left, middle - 8.0),
-                    Size::new(1.0, 16.0),
-                    TEXT.get(),
-                );
-            }
-            return;
-        }
-        let width = if self.ui.shown {
-            self.state.shown_width
-        } else {
-            password.chars() as f32 * DOT_ADVANCE
-        };
-        // The end in view, as a field scrolls to its caret.
-        let x = left - (width + 2.0 - room).max(0.0);
-        if self.ui.shown {
-            self.clip().fill(
-                f,
-                text(
-                    password.as_str().to_owned(),
-                    Point::new(x, middle),
-                    FIELD_TEXT,
-                    TEXT.get(),
-                    Alignment::Left,
-                ),
-            );
-        } else {
-            for i in 0..password.chars() {
-                let centre = Point::new(x + DOT_ADVANCE * (i as f32 + 0.5), middle);
-                f.fill(&Path::circle(centre, DOT), TEXT.get());
-            }
-        }
-        if caret {
-            f.fill_rectangle(
-                Point::new(x + width + 1.0, middle - 8.0),
-                Size::new(1.0, 16.0),
-                TEXT.get(),
-            );
-        }
+        self.ui.password.draw(
+            f,
+            Place {
+                left: field.x + FIELD_PAD,
+                middle: field.center_y(),
+                width: field.width - FIELD_PAD - FIELD_RIGHT,
+                style: Style {
+                    reveal: self.ui.shown,
+                    ..Style::one(FIELD_TEXT, MANROPE)
+                },
+            },
+            self.words().password(),
+            &Look::of(TEXT.get(), FAINT.get()),
+            self.ui.focus == Some(Target::Field),
+        );
     }
 
     /// The keyboard's ring, around what holds it (not the field, whose
@@ -1838,13 +1855,6 @@ impl Panel {
             let room = kit::block_room(disconnect);
             state.current_name = state.widths.fit(&current.name, room, true);
         }
-        state.shown_width = ui(|ui| {
-            if ui.shown && !ui.password.is_empty() {
-                kit::measure(ui.password.as_str(), FIELD_TEXT, MANROPE)
-            } else {
-                0.0
-            }
-        });
     }
 }
 
@@ -1948,7 +1958,7 @@ mod tests {
         assert_eq!(unfolded.height(), small + form_height(0).round() as u32);
         assert!(!unfolded.scrolls());
         // Folding clears what was typed.
-        ui.password.push("azerty&1@ê");
+        assert!(ui.password.paste("azerty&1@ê"));
         ui.fold();
         assert!(ui.password.is_empty() && ui.unfolded.is_none());
     }

@@ -33,7 +33,11 @@ use iced::{keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
 
 use self::data::Group;
-use crate::{clock::time::Lang, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    field::{self, Entry, Took},
+    popover::Effect,
+};
 
 /// The grid's columns.
 pub const COLUMNS: usize = 8;
@@ -247,7 +251,8 @@ pub struct Open {
     pub screen: (f32, f32),
     /// Its margins from the screen's top left corner, as last asked.
     pub place: (i32, i32),
-    pub query: String,
+    /// The search field (#771).
+    pub query: Entry,
     pub grid: Grid,
     /// The place selected, in [`Grid::flat`], and the first row shown.
     pub selected: usize,
@@ -266,7 +271,7 @@ impl Open {
     fn regrid(&mut self) {
         let table = data::table();
         let recent = recent_of(table);
-        self.grid = Grid::of(table, &self.query, &recent);
+        self.grid = Grid::of(table, self.query.text(), &recent);
         self.selected = 0;
         self.offset = 0;
     }
@@ -409,7 +414,7 @@ pub fn toggle(output: String, scale: u32, screen: (i32, i32), at: EmojiAt) {
             at,
             screen,
             place: (0, 0),
-            query: String::new(),
+            query: Entry::new(field::Kind::Line, QUERY_MOST),
             grid: Grid::default(),
             selected: 0,
             offset: 0,
@@ -594,9 +599,11 @@ pub fn key_on(
         Close,
         Act(usize, bool),
         Draw,
+        Paste,
     }
     let then = with(|p| {
         let open = p.open_mut(id)?;
+        let held = modifiers.shift() || modifiers.control();
         let arrow = |arrow: Arrow, open: &mut Open| {
             open.selected = open.grid.step(open.selected, arrow);
             open.offset =
@@ -612,41 +619,20 @@ pub fn key_on(
                     Then::Act(open.selected, modifiers.shift())
                 }
             }
-            Key::Named(Named::ArrowLeft) => arrow(Arrow::Left, open),
-            Key::Named(Named::ArrowRight) => arrow(Arrow::Right, open),
+            // Across the grid; with Shift or Ctrl, in the field.
+            Key::Named(Named::ArrowLeft) if !held => arrow(Arrow::Left, open),
+            Key::Named(Named::ArrowRight) if !held => arrow(Arrow::Right, open),
             Key::Named(Named::ArrowUp) => arrow(Arrow::Up, open),
             Key::Named(Named::ArrowDown) => arrow(Arrow::Down, open),
-            Key::Named(Named::Backspace) => {
-                if open.query.is_empty() {
-                    Then::Nothing
-                } else {
-                    if modifiers.control() {
-                        let kept = open.query.trim_end().rfind(' ').map_or(0, |at| at + 1);
-                        open.query.truncate(kept);
-                    } else {
-                        open.query.pop();
-                    }
-                    open.regrid();
-                    Then::Draw
-                }
-            }
             Key::Named(Named::Tab) => Then::Nothing,
-            _ => match text {
-                Some(typed)
-                    if !modifiers.control()
-                        && !modifiers.alt()
-                        && !modifiers.logo()
-                        && !typed.is_empty()
-                        && !typed.chars().any(char::is_control) =>
-                {
-                    if open.query.chars().count() + typed.chars().count() > QUERY_MOST {
-                        return Some(Then::Nothing);
-                    }
-                    open.query.push_str(typed);
+            _ => match open.query.key(key, modifiers, text) {
+                Took::No | Took::Same => Then::Nothing,
+                Took::Moved => Then::Draw,
+                Took::Edited => {
                     open.regrid();
                     Then::Draw
                 }
-                _ => Then::Nothing,
+                Took::Paste => Then::Paste,
             },
         })
     });
@@ -661,7 +647,48 @@ pub fn key_on(
             act(id, at, keep);
             true
         }
+        Some(Then::Paste) => {
+            paste(id);
+            true
+        }
     }
+}
+
+/// The field of the picker on `id` edited: its grid follows. Whether it
+/// draws again.
+fn edited(id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
+    with(|p| {
+        p.open_mut(id).is_some_and(|open| {
+            let took = edit(&mut open.query);
+            if took == Took::Edited {
+                open.regrid();
+            }
+            took.draws()
+        })
+    })
+}
+
+/// The clipboard's text, on one line, into the field of the picker on
+/// `id` at its caret, read off the loop.
+fn paste(id: window::Id) {
+    crate::paste::request(crate::paste::Clean::Spaced, move |pasted| {
+        let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+            return;
+        };
+        let pasted = |entry: &mut Entry| match entry.paste(pasted) {
+            true => Took::Edited,
+            false => Took::Same,
+        };
+        if edited(id, pasted) {
+            wake();
+        }
+    });
+}
+
+/// An input method's preedit or commit in the field of the picker on
+/// `id`: whether it draws again.
+pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
+    edited(id, |entry| entry.input_method(event))
 }
 
 /// A key that reached another of the shell's surfaces while the picker is

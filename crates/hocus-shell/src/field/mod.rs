@@ -29,20 +29,30 @@
 //! never copied nor cut out, keeps no undo history, moves by word as by
 //! its whole, and is overwritten with zeros when it empties or goes.
 //!
-//! No surface uses it yet: its first user, the secretary's drawer, was
-//! removed with her; the shell's other fields still edit by hand until
-//! they move here (#771).
+//! A surface holds an [`Entry`] ([`entry`]): the field with its keys, its
+//! pointer and where it was last drawn, which is all a surface asks of it
+//! (#771). The launcher's, the actions', the emoji picker's and the
+//! clipboard's searches, the task to add, the day's sources' address and
+//! token, the Wi-Fi's and the authentication's passwords, and the text
+//! typed into a capture are each one.
 
+pub mod entry;
 pub mod ime;
 pub mod keys;
 pub mod view;
 
-use std::ops::Range;
+pub use entry::{Entry, Place, Took};
+
+use std::{cell::Cell, ops::Range};
 
 /// What a field holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// Text on lines of its own (a line break goes in).
+    /// Text on one line: a line break pasted is a space.
+    Line,
+    /// Text on lines of its own (a line break goes in). No surface has one
+    /// since the secretary's drawer went.
+    #[allow(dead_code)]
     Lines,
     /// A secret on one line: masked, never copied, nothing kept to undo.
     Secret,
@@ -119,11 +129,14 @@ pub trait Lines {
 }
 
 /// A text's lines between its line breaks, each character one unit wide:
-/// for a field not laid out yet.
+/// for a field on lines not laid out yet. No surface has one since the
+/// secretary's drawer went.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct Paragraphs<'a>(pub &'a str);
 
 impl Paragraphs<'_> {
+    #[allow(dead_code)]
     fn ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
         let mut start = 0;
         self.0.split('\n').map(move |p| {
@@ -225,7 +238,7 @@ pub struct Scroll {
 }
 
 /// A text field. See the module.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Field {
     kind: Kind,
     text: String,
@@ -238,8 +251,24 @@ pub struct Field {
     history: History,
     preedit: Option<Preedit>,
     pub gesture: Gesture,
-    /// Kept by its layout from one to the next.
-    pub scroll: Scroll,
+    /// Kept by its layout from one to the next: where it draws.
+    pub scroll: Cell<Scroll>,
+}
+
+/// A secret never says itself, nor what was typed before it: its length
+/// only.
+impl std::fmt::Debug for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut says = f.debug_struct("Field");
+        says.field("kind", &self.kind);
+        match self.kind {
+            Kind::Secret => says.field("chars", &self.text.chars().count()),
+            Kind::Line | Kind::Lines => says.field("text", &self.text),
+        };
+        says.field("caret", &self.caret)
+            .field("anchor", &self.anchor)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Drop for Field {
@@ -257,7 +286,7 @@ impl Field {
         // copy behind.
         let text = match kind {
             Kind::Secret => String::with_capacity(most * 4),
-            Kind::Lines => String::new(),
+            Kind::Line | Kind::Lines => String::new(),
         };
         Self {
             kind,
@@ -273,7 +302,7 @@ impl Field {
             },
             preedit: None,
             gesture: Gesture::Idle,
-            scroll: Scroll::default(),
+            scroll: Cell::default(),
         }
     }
 
@@ -291,10 +320,6 @@ impl Field {
 
     pub fn caret(&self) -> usize {
         self.caret
-    }
-
-    pub fn anchor(&self) -> usize {
-        self.anchor
     }
 
     /// What is selected, in order; empty if nothing.
@@ -344,7 +369,7 @@ impl Field {
         self.goal = None;
         self.preedit = None;
         self.gesture = Gesture::Idle;
-        self.scroll = Scroll::default();
+        self.scroll.set(Scroll::default());
         for snapshot in self
             .history
             .undo
@@ -715,14 +740,16 @@ pub fn line_around(text: &str, at: usize) -> Range<usize> {
     from..to
 }
 
-/// `text` as `kind` takes it: line breaks kept on lines (`\r\n` one), tabs
-/// a space, other control characters dropped; on one line, none of them.
+/// `text` as `kind` takes it: line breaks kept on lines (`\r\n` one) and a
+/// space on one line, tabs a space, other control characters dropped; in
+/// a secret, none of them.
 fn clean(text: &str, kind: Kind) -> String {
     let text = text.replace("\r\n", "\n");
     text.chars()
         .filter_map(|c| match (c, kind) {
             ('\n' | '\r', Kind::Lines) => Some('\n'),
-            ('\t', Kind::Lines) => Some(' '),
+            ('\n' | '\r', Kind::Line) => Some(' '),
+            ('\t', Kind::Line | Kind::Lines) => Some(' '),
             (c, _) if c.is_control() => None,
             (c, _) => Some(c),
         })

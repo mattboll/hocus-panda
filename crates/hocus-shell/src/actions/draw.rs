@@ -33,6 +33,10 @@ use super::{
 };
 use crate::theme::Ink;
 use crate::{
+    field::{
+        Place,
+        view::{Look, Style},
+    },
     levels::draw::{LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD, Wheel},
 };
@@ -339,6 +343,8 @@ impl<Message> canvas::Program<Message> for View {
                 ..
             }) => super::key_on(self.id, key, *modifiers, text.as_deref())
                 .then(|| canvas::Action::request_redraw().and_capture()),
+            iced::Event::InputMethod(event) => super::input_method(self.id, event)
+                .then(|| canvas::Action::request_redraw().and_capture()),
             _ => None,
         }
     }
@@ -429,6 +435,13 @@ impl View {
             let target = at.and_then(|at| layout.row_at(open, at));
             Some(match seen {
                 mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
+                    // A press held in the field selects as it drags.
+                    if open.query.pressed() {
+                        return Some(match at {
+                            Some(at) if open.query.drag(at) => Then::Draw,
+                            _ => Then::Nothing,
+                        });
+                    }
                     hovered(open, target)
                 }
                 mouse::Event::CursorLeft => {
@@ -437,9 +450,16 @@ impl View {
                 }
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     open.pressed = target;
-                    Then::Nothing
+                    match at.filter(|at| layout.field.contains(*at)) {
+                        Some(at) => {
+                            open.query.press(at);
+                            Then::Draw
+                        }
+                        None => Then::Nothing,
+                    }
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    open.query.release();
                     match open.pressed.take().filter(|p| Some(*p) == target) {
                         Some(row) => Then::Act(row),
                         None => Then::Nothing,
@@ -519,14 +539,16 @@ impl View {
             Size::new(layout.width - 2.0 * IN, 1.0),
             RULE.get(),
         );
-        let matched = if open.query.trim().is_empty() && open.step.is_none() {
+        let matched = if open.query.text().trim().is_empty() && open.step.is_none() {
             super::all()
         } else {
             open.matched()
         };
-        let text = self
-            .words
-            .footer(matched, open.step.is_some(), open.query.trim().is_empty());
+        let text = self.words.footer(
+            matched,
+            open.step.is_some(),
+            open.query.text().trim().is_empty(),
+        );
         f.fill_text(kit::text(
             kit::elide(&text, layout.width - 2.0 * IN - 2.0 * FOOT_LEFT, |t| {
                 kit::measure(t, FOOT, MANROPE)
@@ -641,42 +663,35 @@ impl View {
             x = chip.x + w + 8.0;
         }
         let room = (right - x).max(0.0);
-        let caret = |f: &mut Frame, at: f32| {
-            f.fill_rectangle(
-                Point::new(at, middle - 12.0),
-                Size::new(2.0, 24.0),
-                GREEN.get(),
-            );
+        // What is typed, its selection and its green caret; the
+        // placeholder smaller while it is empty.
+        let placeholder = match &open.step {
+            Some(step) => self
+                .words
+                .step_placeholder(step.def.step.unwrap_or(Step::Desktop)),
+            None => self.words.placeholder(),
         };
-        if open.query.is_empty() {
-            caret(f, x);
-            let placeholder = match &open.step {
-                Some(step) => self
-                    .words
-                    .step_placeholder(step.def.step.unwrap_or(Step::Desktop)),
-                None => self.words.placeholder(),
-            };
-            f.fill_text(kit::text(
-                kit::elide(placeholder, room - 8.0, |t| {
-                    kit::measure(t, PLACEHOLDER, MANROPE)
-                }),
-                Point::new(x + 8.0, middle),
-                PLACEHOLDER,
-                QUIET.get(),
-                Alignment::Left,
-            ));
-        } else {
-            let shown = tail(&open.query, room - 6.0, |t| kit::measure(t, QUERY, MANROPE));
-            let w = kit::measure(&shown, QUERY, MANROPE);
-            f.fill_text(kit::text(
-                shown,
-                Point::new(x, middle),
-                QUERY,
-                TEXT.get(),
-                Alignment::Left,
-            ));
-            caret(f, x + w + 2.0);
-        }
+        let placeholder = kit::elide(placeholder, room - 8.0, |t| {
+            kit::measure(t, PLACEHOLDER, MANROPE)
+        });
+        open.query.draw(
+            f,
+            Place {
+                left: x + 2.0,
+                middle,
+                width: room - 6.0,
+                style: Style {
+                    hint: (PLACEHOLDER, MANROPE),
+                    ..Style::one(QUERY, MANROPE)
+                },
+            },
+            &placeholder,
+            &Look {
+                caret: GREEN.get(),
+                ..Look::of(TEXT.get(), QUIET.get())
+            },
+            true,
+        );
     }
 
     fn row(&self, f: &mut Frame, open: &Open, row: &Row, rect: Rectangle, selected: bool) {
@@ -863,7 +878,7 @@ impl View {
             ),
             Row::Target(t) => (t.label.clone(), Vec::new(), false, None, t.sub.clone()),
             Row::Elsewhere(to) => (
-                words.elsewhere(*to, open.query.trim()),
+                words.elsewhere(*to, open.query.text().trim()),
                 Vec::new(),
                 false,
                 None,
@@ -1002,7 +1017,7 @@ pub fn spoken(open: &Open, row: &Row, words: Words) -> (String, String) {
             (t.label.clone(), aside.join(", "))
         }
         Row::Elsewhere(to) => (
-            words.elsewhere(*to, open.query.trim()),
+            words.elsewhere(*to, open.query.text().trim()),
             words.elsewhere_line(*to).to_owned(),
         ),
         Row::Head(h) => (h.clone(), String::new()),
@@ -1064,14 +1079,17 @@ pub fn said(open: &Open, words: Words) -> String {
                 }
                 Row::Nothing(n) => n.clone(),
                 Row::Elsewhere(to) => {
-                    format!("{selected}{}", words.elsewhere(*to, open.query.trim()))
+                    format!(
+                        "{selected}{}",
+                        words.elsewhere(*to, open.query.text().trim())
+                    )
                 }
             }
         })
         .collect();
     format!(
         "query={:?} step={:?} target={:?} place={},{} size={}x{} rows={rows:?}",
-        open.query,
+        open.query.text(),
         open.step.as_ref().map(|s| s.def.id),
         open.shown.title,
         open.place.0,
@@ -1301,23 +1319,6 @@ fn glyph_svg(d: &str, width: f32) -> svg::Handle {
 /// An agent's panda for its state, in the theme's dress.
 fn panda(state: &str) -> svg::Handle {
     crate::pandas::still(crate::pandas::mood(crate::agents::Look::of(state)))
-}
-
-/// `query`'s end that fits `room`: what was typed last shows.
-fn tail(query: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
-    if width(query) <= room {
-        return query.to_owned();
-    }
-    let chars: Vec<char> = query.chars().collect();
-    for skip in 1..chars.len() {
-        let cut: String = std::iter::once('…')
-            .chain(chars[skip..].iter().copied())
-            .collect();
-        if width(&cut) <= room {
-            return cut;
-        }
-    }
-    "…".to_owned()
 }
 
 fn inset(rect: Rectangle, by: f32) -> Rectangle {

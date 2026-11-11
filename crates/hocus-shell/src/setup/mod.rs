@@ -41,7 +41,7 @@ use hocus_link::{Launch, TASKS_NAMESPACE, ToCompositor};
 
 use crate::{
     clock::time::Lang,
-    network::secret::Secret,
+    field::{self, Entry, Took},
     popover::{self, Effect, Item},
 };
 
@@ -228,8 +228,10 @@ pub struct Flow {
     pub online: Online,
     /// `gnome-control-center`'s path, once looked for and found.
     pub panel: Option<String>,
-    pub address: String,
-    pub token: Secret,
+    /// The board's address and its token (a secret: masked, never copied
+    /// out): the shell's text fields (#771).
+    pub address: Entry,
+    pub token: Entry,
     /// A check under way: its number.
     pub checking: Option<u64>,
     pub refused: Option<Refusal>,
@@ -245,8 +247,8 @@ impl Flow {
             step: Step::Accounts,
             online: Online::Unknown,
             panel: None,
-            address: String::new(),
-            token: Secret::longest(LONGEST_TOKEN),
+            address: Entry::new(field::Kind::Line, LONGEST_ADDRESS),
+            token: Entry::new(field::Kind::Secret, LONGEST_TOKEN),
             checking: None,
             refused: None,
             show: None,
@@ -380,51 +382,39 @@ pub fn back() -> bool {
     went
 }
 
-/// `text` typed (or pasted) at the end of `field`: whether it took it.
-pub fn type_in(field: Field, text: &str) -> bool {
+impl Flow {
+    /// Field `field`.
+    pub fn entry(&mut self, field: Field) -> &mut Entry {
+        match field {
+            Field::Address => &mut self.address,
+            Field::Token => &mut self.token,
+        }
+    }
+}
+
+/// `field` edited by `edit` (a key, an input method, the pointer): what
+/// was refused goes with what changes, a paste is asked for. What it took.
+pub fn edit(field: Field, edit: impl FnOnce(&mut Entry) -> Took) -> Took {
     let took = with(|flow| {
-        let took = match field {
-            Field::Address => {
-                let fits = flow.address.chars().count() + text.chars().count() <= LONGEST_ADDRESS;
-                if fits {
-                    flow.address.push_str(text);
-                }
-                fits
-            }
-            Field::Token => flow.token.push(text),
-        };
-        if took {
+        let took = edit(flow.entry(field));
+        if took == Took::Edited {
             flow.refused = None;
         }
         took
     })
-    .unwrap_or(false);
-    if took {
-        changed();
+    .unwrap_or(Took::No);
+    match took {
+        Took::Edited => changed(),
+        Took::Paste => paste(field),
+        Took::No | Took::Same | Took::Moved => {}
     }
     took
 }
 
-/// `Backspace` in `field` (`all`: with `Ctrl`, the field cleared).
-pub fn erase(field: Field, all: bool) {
-    with(|flow| {
-        match (field, all) {
-            (Field::Address, true) => flow.address.clear(),
-            (Field::Address, false) => {
-                flow.address.pop();
-            }
-            (Field::Token, true) => flow.token.clear(),
-            (Field::Token, false) => flow.token.pop(),
-        }
-        flow.refused = None;
-    });
-    changed();
-}
-
-/// The clipboard's text at the end of `field` (`Ctrl+V`, 3.5b), off the
+/// The clipboard's text at the caret of `field` (`Ctrl+V`, 3.5b), off the
 /// loop: on one line for the address; for the token, its line breaks
 /// dropped, never in a `String` of ours but the field's.
-pub fn paste(field: Field) {
+fn paste(field: Field) {
     let clean = match field {
         Field::Address => crate::paste::Clean::Spaced,
         Field::Token => crate::paste::Clean::Dropped,
@@ -434,7 +424,11 @@ pub fn paste(field: Field) {
             return;
         };
         let open = with(|flow| flow.step == Step::Planka).unwrap_or(false);
-        if open && type_in(field, text) {
+        let pasted = |entry: &mut Entry| match entry.paste(text) {
+            true => Took::Edited,
+            false => Took::Same,
+        };
+        if open && edit(field, pasted) == Took::Edited {
             tracing::debug!(?field, "the clipboard's text pasted into the Planka step");
         } else {
             tracing::debug!(
@@ -451,7 +445,8 @@ pub fn paste(field: Field) {
 /// "Se connecter": the address and the token checked off the loop.
 pub fn sign_in() {
     let asked = with(|flow| {
-        if flow.checking.is_some() || flow.address.trim().is_empty() || flow.token.is_empty() {
+        if flow.checking.is_some() || flow.address.text().trim().is_empty() || flow.token.is_empty()
+        {
             return None;
         }
         let n = flow.next();
@@ -459,8 +454,8 @@ pub fn sign_in() {
         flow.refused = None;
         Some(Job::Check {
             n,
-            address: flow.address.trim().to_owned(),
-            token: Token::new(flow.token.as_str()),
+            address: flow.address.text().trim().to_owned(),
+            token: Token::new(flow.token.text()),
         })
     })
     .flatten();
@@ -549,7 +544,7 @@ pub fn column(which: usize, column: usize) {
 /// One of a server's boards chosen: read off the loop.
 pub fn board(index: usize) {
     let asked = with(|flow| {
-        let token = Token::new(flow.token.as_str());
+        let token = Token::new(flow.token.text());
         let n = flow.next();
         flow.unfolded = None;
         let Some(Show::Planka { found, reading, .. }) = &mut flow.show else {
@@ -616,7 +611,7 @@ pub fn done() {
             }
             Show::Google { .. } => return None,
         };
-        let token = matches!(choice, Choice::Planka(_)).then(|| Token::new(flow.token.as_str()));
+        let token = matches!(choice, Choice::Planka(_)).then(|| Token::new(flow.token.text()));
         Some(Job::Finish { choice, token })
     })
     .flatten();

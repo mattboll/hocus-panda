@@ -20,6 +20,10 @@ use iced::{
 use super::{Dialog, Phase, Pointing, Target, Words};
 use crate::theme::Ink;
 use crate::{
+    field::{
+        Place,
+        view::{Look, Style},
+    },
     levels::draw::{ACCENT, DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb, stroke},
     popover::kit::{self, MANROPE_SEMIBOLD},
 };
@@ -82,8 +86,6 @@ const FIELD_RADIUS: f32 = 12.0;
 const FIELD_LEFT: f32 = 14.0;
 const FIELD_RIGHT: f32 = 10.0;
 const FIELD_TEXT: f32 = 16.0;
-const DOT: f32 = 2.8;
-const DOT_ADVANCE: f32 = 10.6;
 const CAPS: f32 = 22.0;
 const CAPS_RADIUS: f32 = 6.0;
 /// The line under it, 6 px under: 13 px on 1.45 lines, 19 px kept.
@@ -512,10 +514,10 @@ impl<Message> canvas::Program<Message> for View {
                 .flatten();
                 let pointing = match seen {
                     mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
-                        Pointing::Over(target)
+                        Pointing::Over(target, at)
                     }
-                    mouse::Event::CursorLeft => Pointing::Over(None),
-                    mouse::Event::ButtonPressed(mouse::Button::Left) => Pointing::Press(target),
+                    mouse::Event::CursorLeft => Pointing::Over(None, None),
+                    mouse::Event::ButtonPressed(mouse::Button::Left) => Pointing::Press(target, at),
                     mouse::Event::ButtonReleased(mouse::Button::Left) => Pointing::Release(target),
                     _ => return None,
                 };
@@ -533,6 +535,7 @@ impl<Message> canvas::Program<Message> for View {
                 text.as_deref(),
                 now,
             )),
+            iced::Event::InputMethod(event) => redraw(super::input_method(self.id, event)),
             _ => None,
         }
     }
@@ -1030,35 +1033,24 @@ impl View {
         let caps_shown = caps && dialog.phase == Phase::Typing;
         let room =
             field.width - FIELD_LEFT - FIELD_RIGHT - if caps_shown { CAPS + 6.0 } else { 0.0 };
+        // What is typed, as dots, its selection, and its caret while it
+        // has the keyboard.
         let typed = dialog.field.chars();
-        if typed == 0 {
-            // After the caret, never under it.
-            text(
-                f,
-                w.password(),
-                Point::new(left + 3.0, middle),
-                FIELD_TEXT,
-                FAINT.get(),
-                MANROPE,
-            );
-        } else {
-            let width = typed as f32 * DOT_ADVANCE;
-            let x = left - (width + 2.0 - room).max(0.0);
-            for i in 0..typed {
-                let centre = Point::new(x + DOT_ADVANCE * (i as f32 + 0.5), middle);
-                if centre.x > left - DOT {
-                    f.fill(&Path::circle(centre, DOT), TEXT.get());
-                }
-            }
-        }
-        if dialog.focus == Target::Field && !checking {
-            let x = left + (typed as f32 * DOT_ADVANCE).min(room - 2.0);
-            f.fill_rectangle(
-                Point::new(x, middle - 9.0),
-                Size::new(1.0, 18.0),
-                TEXT.get(),
-            );
-        }
+        dialog.field.draw(
+            f,
+            Place {
+                left: left + 2.0,
+                middle,
+                width: room - 2.0,
+                style: Style {
+                    hint: (FIELD_TEXT, MANROPE),
+                    ..Style::one(FIELD_TEXT, MANROPE_BOLD)
+                },
+            },
+            w.password(),
+            &Look::of(TEXT.get(), FAINT.get()),
+            dialog.focus == Target::Field && !checking,
+        );
         if caps_shown {
             let sign = Rectangle::new(
                 Point::new(

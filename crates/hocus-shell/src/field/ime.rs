@@ -1,11 +1,17 @@
 //! An input method for a surface's field (#763): the shell draws its
-//! fields on canvases, which cannot ask for one, so their surface's
+//! fields on canvases, which cannot ask for one, so every surface's
 //! widgets are wrapped in [`Asking`], which asks iced for it at each
 //! redraw while a field there has the keyboard: text-input-v3 is enabled
 //! on the surface, with the caret's place (where an input method opens
 //! its window) and what the field takes (a secret: no suggestions). Its
 //! preedit and its commits come back to the canvas as iced's
 //! `InputMethod` events.
+//!
+//! Which field has the keyboard, a surface says by drawing it so
+//! ([`drawn`], from [`super::Entry::draw`]): the wrapper hears it as its
+//! widgets draw, and asks from the next redraw on.
+
+use std::cell::Cell;
 
 use iced::{
     Element, Event, Length, Rectangle, Size, Vector,
@@ -13,27 +19,43 @@ use iced::{
         Clipboard, Layout, Shell, Widget,
         input_method::{InputMethod, Purpose},
         layout, mouse, overlay, renderer,
-        widget::{Operation, Tree},
+        widget::{Operation, Tree, tree},
     },
     window,
 };
 
-/// What a surface's field asks of an input method: where its caret is
-/// (surface-local) and what it takes; `None` while no field there has the
-/// keyboard.
-pub type Ask<'a> = Box<dyn Fn() -> Option<(Rectangle, Purpose)> + 'a>;
+/// What a field asks of an input method: where its caret is (on its
+/// canvas) and what it takes.
+type Ask = (Rectangle, Purpose);
+
+thread_local! {
+    /// The field drawn with the keyboard, among the widgets being drawn.
+    static DRAWN: Cell<Option<Ask>> = const { Cell::new(None) };
+}
+
+/// A field was drawn with the keyboard, its caret at `caret`.
+pub fn drawn(caret: Rectangle, purpose: Purpose) {
+    DRAWN.set(Some((caret, purpose)));
+}
+
+/// What the wrapper keeps from a draw to the next redraw.
+#[derive(Debug, Default)]
+struct State {
+    /// The field last drawn with the keyboard.
+    typing: Cell<Option<Ask>>,
+    /// Whether it was asked for since.
+    asked: Cell<bool>,
+}
 
 /// A surface's widgets, which ask for an input method for its field.
 pub struct Asking<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
-    ask: Ask<'a>,
 }
 
 impl<'a, Message, Theme, Renderer> Asking<'a, Message, Theme, Renderer> {
-    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>, ask: Ask<'a>) -> Self {
+    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
         Self {
             content: content.into(),
-            ask,
         }
     }
 }
@@ -78,6 +100,7 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
+        DRAWN.set(None);
         self.content.as_widget().draw(
             &tree.children[0],
             renderer,
@@ -87,6 +110,20 @@ where
             cursor,
             viewport,
         );
+        let typing = DRAWN.take();
+        let state = tree.state.downcast_ref::<State>();
+        if state.typing.get() != typing {
+            state.typing.set(typing);
+            state.asked.set(false);
+        }
+    }
+
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<State>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(State::default())
     }
 
     fn children(&self) -> Vec<Tree> {
@@ -130,11 +167,13 @@ where
             shell,
             viewport,
         );
+        let state = tree.state.downcast_ref::<State>();
+        let Some((caret, purpose)) = state.typing.get() else {
+            return;
+        };
         // Asked at each redraw, as iced's own fields do: what is asked
         // then is what the surface's text input says.
-        if let Event::Window(window::Event::RedrawRequested(_)) = event
-            && let Some((caret, purpose)) = (self.ask)()
-        {
+        if let Event::Window(window::Event::RedrawRequested(_)) = event {
             let at = layout.bounds().position();
             shell.request_input_method(&InputMethod::<&str>::Enabled {
                 cursor: caret + Vector::new(at.x, at.y),
@@ -142,6 +181,10 @@ where
                 // Shown in the field itself.
                 preedit: None,
             });
+            state.asked.set(true);
+        } else if !state.asked.get() {
+            // A field took the keyboard as it last drew: asked at once.
+            shell.request_redraw();
         }
     }
 

@@ -45,7 +45,7 @@ use crate::{
         self, Ask,
         draw::{ethernet, wifi as arcs},
         model::{Failure, Network, Security, Wifi},
-        secret::Secret,
+        secret,
     },
     popover::{
         Effect, Event as Seen, Item, Pressed, event,
@@ -613,7 +613,7 @@ fn form<'a>(panel: &Panel, busy: bool, ui: &Ui) -> El<'a> {
     let error = ui.error;
     let focus = ui.focus;
     let pad = (super::FIELD - super::FIELD_TEXT * LINE) / 2.0;
-    let field = text_input(words.password(), ui.password.as_str())
+    let field = text_input(words.password(), ui.password.text())
         .id(FIELD_ID)
         .secure(!ui.shown)
         .on_input(Msg::Typed)
@@ -1096,9 +1096,9 @@ fn handle(message: Msg, motion: bool) {
         Msg::Stale => {}
         Msg::Act(target) => act(target, &network, motion),
         Msg::Typed(typed) => ui(|ui| {
-            let mut password = Secret::new();
-            if password.push(&typed) || typed.is_empty() {
-                ui.password = password;
+            if typed.chars().count() <= secret::LONGEST {
+                ui.password.clear();
+                ui.password.set(&typed);
                 ui.error = None;
             }
         }),
@@ -1258,7 +1258,7 @@ fn submit(network: &Network) {
         ui.error = None;
         network::ask(Ask::ConnectWith {
             ssid,
-            secret: ui.password.duplicate(),
+            secret: ui.password.secret(),
         });
     });
 }

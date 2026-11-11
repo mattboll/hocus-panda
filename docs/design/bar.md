@@ -1531,7 +1531,8 @@ slots are not part of the product.
   closes and when dropped; its `Debug` says its length; it leaves the shell
   only in NetworkManager's D-Bus call. It is shown as dots unless the eye
   is pressed. The compositor logs no key, not even at trace.
-  Ctrl+Backspace clears the field. Paste came after (3.5b).
+  Ctrl+Backspace clears the field (a secret is one word). Paste came
+  after (3.5b).
 - **Popover**: its bottom on the bar's whatever its height (the mockup's),
   where the sound's top is on its item; it grows and shrinks as rows come,
   unfold and go. A hovered popover in the mini form whose row unfolds
@@ -1886,8 +1887,24 @@ What issue #465 changes under the five popovers, nothing on screen.
 The shell draws its own widgets on canvases, and each field was written
 by hand (typing and Backspace). One field, edited as everywhere, is now
 shared (`hocus-shell/src/field/`). Its first user, the secretary's
-drawer, was removed with her (2026-11-10): no surface uses it until the
-shell's other fields move to it (#771).
+drawer, was removed with her (2026-11-10). Every field of the shell is
+one since #771 (2026-11-11): the launcher's, the actions', the emoji
+picker's and the clipboard's searches, the task to add, the day's
+sources' address and token, the Wi-Fi's and the authentication's
+passwords (secrets), and the text typed into a capture. A surface takes
+its own keys first (Enter, Escape, Tab, the arrows of its list; in the
+launcher's and the emoji picker's grids the plain left and right arrows
+too, and Right into an action's step once the caret is at its field's
+end); the field takes the rest. So `Ctrl+Backspace` takes a word, not the
+field (a secret is one word).
+
+- **On a surface** (`field::Entry`): the model with what every surface
+  would do again around it: its keys, its copies and cuts sent to the
+  clipboard, the pointer's presses counted (a word, then it all; Shift
+  extends, with the modifiers the shell last heard), an input method's
+  events, and where it was last drawn, from which a press finds its
+  place. A paste is the surface's to ask (`paste::request`: on one line,
+  a secret's line breaks dropped) and comes in at the caret.
 
 - **The model** (`Field`): its text, its caret and the selection's anchor
   (byte offsets on character boundaries), what the pointer does (an enum:
@@ -1898,10 +1915,11 @@ shell's other fields move to it (#771).
   `release`), it says what came of it (`Outcome`: the same, moved,
   edited, to copy, cut, to paste); the surface reads and writes the
   clipboard.
-  Its kinds: `Lines` (a line break goes in) and `Secret` (one line,
-  masked, never copied nor cut out, no history, a word is its whole, its
-  room taken once and its text overwritten with zeros as it empties or
-  goes).
+  Its kinds: `Line` (one line: a line break pasted is a space), `Lines`
+  (a line break goes in; no surface has one now) and `Secret` (one line,
+  masked unless shown on purpose, never copied nor cut out, no history,
+  a word is its whole, its room taken once and its text overwritten with
+  zeros as it empties or goes; its `Debug` says its length only).
 - **Its keys** (`field::keys::act`): the arrows (Ctrl: by word), Home and
   End (Ctrl: the text's ends), Shift with them, Backspace and Delete
   (Ctrl: a word), `Ctrl+A`, `Ctrl+C`/`X`/`V`, `Ctrl+Insert`,
@@ -1916,10 +1934,11 @@ shell's other fields move to it (#771).
   selection colour (`theme::SELECTION`), the preedit underlined, the
   caret while it has the keyboard (still: nothing blinks at rest).
 - **An input method** (`field::ime::Asking`): a canvas cannot ask iced for
-  one, so a surface with a field wraps its widgets in `Asking`, which asks
-  at each redraw while a field there has the keyboard (text-input-v3
-  enabled, the caret's place, `Secure` for a secret). Its preedit and
-  commits come back to the canvas as iced's `InputMethod` events.
+  one, so every surface's widgets are wrapped in `Asking`, which hears a
+  field drawn with the keyboard and asks at each redraw from then on
+  (text-input-v3 enabled, the caret's place, `Secure` for a secret). Its
+  preedit and commits come back to the canvas as iced's `InputMethod`
+  events.
 - **Double and triple clicks** take the word and the line
   (`field::word_around`, `field::line_around`).
 

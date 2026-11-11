@@ -49,9 +49,6 @@ mod day;
 mod desktops;
 mod emoji;
 mod ending;
-// Its first user, the secretary's drawer, is gone: the shell's other
-// fields move onto it with #771.
-#[allow(dead_code)]
 mod field;
 mod footer;
 mod foreign;
@@ -2102,12 +2099,13 @@ impl Shell {
     }
 
     /// A surface's widgets, whose pointer's shape is set again each time
-    /// the pointer enters it ([`pointer`]), and which get the keys the
-    /// compositor gives their surface ([`keys`]).
+    /// the pointer enters it ([`pointer`]), which get the keys the
+    /// compositor gives their surface ([`keys`]), and an input method while
+    /// a field of theirs has the keyboard ([`field::ime`]).
     fn view(&self, id: window::Id) -> Element<'_, Message> {
         keys::Held::new(
             id,
-            pointer::Entered::new(self.surface_view(id)),
+            field::ime::Asking::new(pointer::Entered::new(self.surface_view(id))),
             Message::Keys,
         )
         .into()

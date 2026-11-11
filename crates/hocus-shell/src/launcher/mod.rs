@@ -53,7 +53,11 @@ use hocus_link::{LAUNCHER_CLOSE, LAUNCHER_NAMESPACE, Launch, ToCompositor};
 use iced::{keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
 
-use crate::{clock::time::Lang, popover::Effect};
+use crate::{
+    clock::time::Lang,
+    field::{self, Entry, Took},
+    popover::Effect,
+};
 
 /// The grid's columns at most, and the frequent applications shown at
 /// most.
@@ -375,7 +379,8 @@ pub struct Open {
     /// Its screen, where a toast shows once it closes.
     pub output: String,
     pub scale: f32,
-    pub query: String,
+    /// The search field (#771).
+    pub query: Entry,
     pub grid: Grid,
     pub catalog: Arc<apps::Catalog>,
     counts: HashMap<String, u32>,
@@ -408,7 +413,13 @@ impl Open {
             words,
             numbers: answers::Numbers::new(Lang::of_numbers()),
         };
-        Grid::of(&self.catalog, &self.counts, &self.query, reading, columns)
+        Grid::of(
+            &self.catalog,
+            &self.counts,
+            self.query.text(),
+            reading,
+            columns,
+        )
     }
 
     /// Its grid in rows of `columns` tiles, as its screen has room for:
@@ -510,7 +521,7 @@ pub fn toggle(output: String, scale: u32) {
             surface,
             output: output.clone(),
             scale,
-            query: String::new(),
+            query: Entry::new(field::Kind::Line, QUERY_MOST),
             grid: Grid::default(),
             catalog,
             counts,
@@ -549,9 +560,10 @@ pub fn open_with(output: String, scale: u32, query: &str) {
     }
     let wanted = with(|l| match &mut l.phase {
         Phase::Open(open) => {
-            open.query = query.chars().take(QUERY_MOST).collect();
+            let query: String = query.chars().take(QUERY_MOST).collect();
+            open.query.set(&query);
             open.regrid(words());
-            tracing::debug!(query = open.query, "the launcher opens searching");
+            tracing::debug!(query, "the launcher opens searching");
             Some((icon_names(open), open.scale))
         }
         Phase::Closed => None,
@@ -698,7 +710,7 @@ pub fn act(id: window::Id, at: usize) {
                     effects.extend(browse(&address.url));
                 }
             }
-            Some(Item::Card(Card::Web)) => effects.extend(browse(&answers::web(&open.query))),
+            Some(Item::Card(Card::Web)) => effects.extend(browse(&answers::web(open.query.text()))),
             Some(Item::Emoji(e)) => {
                 let Some(emoji) = crate::emoji::data::table().emoji.get(*e) else {
                     return effects;
@@ -780,6 +792,7 @@ pub fn key_on(
         Act(usize),
         Web,
         Draw,
+        Paste,
     }
     let words = words();
     let then = with(|l| {
@@ -789,10 +802,11 @@ pub fn key_on(
             open.offset = draw::keep_in_view(&open.grid, open.selected, open.offset, open.size);
             Then::Draw
         };
+        let held = modifiers.shift() || modifiers.control();
         Some(match key {
             Key::Named(Named::Escape) => Then::Close,
             Key::Named(Named::Enter) => {
-                if modifiers.control() && !open.query.trim().is_empty() {
+                if modifiers.control() && !open.query.text().trim().is_empty() {
                     Then::Web
                 } else if open.grid.flat.is_empty() {
                     Then::Nothing
@@ -800,41 +814,19 @@ pub fn key_on(
                     Then::Act(open.selected)
                 }
             }
-            Key::Named(Named::ArrowLeft) => arrow(Arrow::Left, open),
-            Key::Named(Named::ArrowRight) => arrow(Arrow::Right, open),
+            // Across the grid; with Shift or Ctrl, in the field.
+            Key::Named(Named::ArrowLeft) if !held => arrow(Arrow::Left, open),
+            Key::Named(Named::ArrowRight) if !held => arrow(Arrow::Right, open),
             Key::Named(Named::ArrowUp) => arrow(Arrow::Up, open),
             Key::Named(Named::ArrowDown) => arrow(Arrow::Down, open),
-            Key::Named(Named::Backspace) => {
-                if open.query.is_empty() {
-                    Then::Nothing
-                } else {
-                    if modifiers.control() {
-                        // The last word, and the spaces after it.
-                        let kept = open.query.trim_end().rfind(' ').map_or(0, |at| at + 1);
-                        open.query.truncate(kept);
-                    } else {
-                        open.query.pop();
-                    }
+            _ => match open.query.key(key, modifiers, text) {
+                Took::No | Took::Same => Then::Nothing,
+                Took::Moved => Then::Draw,
+                Took::Edited => {
                     open.regrid(words);
                     Then::Draw
                 }
-            }
-            _ => match text {
-                Some(typed)
-                    if !modifiers.control()
-                        && !modifiers.alt()
-                        && !modifiers.logo()
-                        && !typed.is_empty()
-                        && !typed.chars().any(char::is_control) =>
-                {
-                    if open.query.chars().count() + typed.chars().count() > QUERY_MOST {
-                        return Some(Then::Nothing);
-                    }
-                    open.query.push_str(typed);
-                    open.regrid(words);
-                    Then::Draw
-                }
-                _ => Then::Nothing,
+                Took::Paste => Then::Paste,
             },
         })
     });
@@ -854,7 +846,49 @@ pub fn key_on(
             true
         }
         Some(Then::Draw) => true,
+        Some(Then::Paste) => {
+            paste(id);
+            true
+        }
     }
+}
+
+/// The clipboard's text, on one line, into the field of the launcher on
+/// `id` at its caret, read off the loop.
+fn paste(id: window::Id) {
+    crate::paste::request(crate::paste::Clean::Spaced, move |pasted| {
+        let Some(pasted) = pasted.filter(|t| !t.is_empty()) else {
+            return;
+        };
+        let words = words();
+        let took = with(|l| {
+            l.open_mut(id).is_some_and(|open| {
+                let took = open.query.paste(pasted);
+                if took {
+                    open.regrid(words);
+                }
+                took
+            })
+        });
+        if took {
+            wake();
+        }
+    });
+}
+
+/// An input method's preedit or commit in the field of the launcher on
+/// `id`: whether it draws again.
+pub fn input_method(id: window::Id, event: &iced::advanced::input_method::Event) -> bool {
+    let words = words();
+    with(|l| {
+        l.open_mut(id).is_some_and(|open| {
+            let took = open.query.input_method(event);
+            if took == Took::Edited {
+                open.regrid(words);
+            }
+            took.draws()
+        })
+    })
 }
 
 /// A key that reached another of the shell's surfaces while the launcher

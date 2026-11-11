@@ -59,6 +59,8 @@ const KEY_1: u32 = 2;
 const KEY_0: u32 = 11;
 const KEY_LEFTBRACE: u32 = 26;
 const KEY_V: u32 = 47;
+const KEY_C: u32 = 46;
+const KEY_X: u32 = 45;
 const KEY_INSERT: u32 = 110;
 const KEY_SPACE: u32 = 57;
 
@@ -753,6 +755,47 @@ fn a_password_typed_on_a_french_keyboard_reaches_networkmanager_exactly() -> any
     for part in [PASSWORD, "azerty&", "rty&1@"] {
         assert!(!log.contains(part), "the log says {part:?}");
     }
+    Ok(())
+}
+
+/// The password's field is the shell's text field as a secret (#771):
+/// selected, it is neither copied nor cut out, and stays as typed.
+#[test]
+fn a_password_selected_is_neither_copied_nor_cut_out() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let setup = Setup {
+        aps: around(),
+        ..Setup::default()
+    };
+    let mut bed = start(&shell, setup, true)?;
+    let item = bed.item();
+    bed.click(item)?;
+    let rect = popover(height(&[], 8, 0.0));
+    bed.popover_is(Some(rect))?;
+    bed.click(row(rect, &[], 2))?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    for key in [KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_1] {
+        bed.press(key);
+    }
+    chord(&mut bed.hp, &[KEY_LEFTSHIFT, KEY_1]);
+    chord(&mut bed.hp, &[KEY_RIGHTALT, KEY_0]);
+    bed.press(KEY_LEFTBRACE);
+    bed.press(KEY_E);
+    // On a French keyboard: Ctrl+A is on Q's key. It all selected, Ctrl+C
+    // then Ctrl+X: the clipboard takes nothing.
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_Q]);
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_C]);
+    chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_X]);
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    assert_eq!(bed.hp.clipboard(), None, "the password was copied");
+    // Nothing was cut out: NetworkManager gets it whole.
+    bed.press(KEY_ENTER);
+    bed.asked(&Call::AddAndActivate {
+        ssid: FREEBOX.to_owned(),
+        psk: Some(PASSWORD.to_owned()),
+    })?;
     Ok(())
 }
 

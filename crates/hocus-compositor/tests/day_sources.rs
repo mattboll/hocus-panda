@@ -33,6 +33,8 @@ use hocus_link::{POPOVER_NAMESPACE, TASKS_NAMESPACE};
 
 const KEY_ENTER: u32 = 28;
 const KEY_V: u32 = 47;
+const KEY_A: u32 = 30;
+const KEY_BACKSPACE: u32 = 14;
 const GOOD: &str = "tok-good";
 /// The good token as the browser's tools copy it, with another cookie.
 const PASTED: &str = "accessToken=tok-good; lang=fr\n";
@@ -336,14 +338,16 @@ impl Bed {
     fn sign_in(&mut self, address: &str, token: &str) -> anyhow::Result<String> {
         self.click_target("Field(Address)")?;
         self.shows(&["focus=Field(Address)"])?;
-        // Ctrl+Backspace clears what was there.
-        common::chord(&mut self.hp, &[KEY_LEFTCTRL, 14]);
+        // It all selected, Backspace clears what was there.
+        common::chord(&mut self.hp, &[KEY_LEFTCTRL, KEY_A]);
+        self.press(KEY_BACKSPACE);
         self.shows(&["address=«»"])?;
         self.type_text(address);
         self.shows(&[&format!("address=«{address}»")])?;
         self.press(KEY_TAB);
         self.shows(&["focus=Field(Token)"])?;
-        common::chord(&mut self.hp, &[KEY_LEFTCTRL, 14]);
+        // A secret is one word: Ctrl+Backspace takes it all.
+        common::chord(&mut self.hp, &[KEY_LEFTCTRL, KEY_BACKSPACE]);
         self.shows(&["token=none"])?;
         self.type_text(token);
         self.shows(&["token=typed"])?;
@@ -918,7 +922,8 @@ fn the_planka_step_takes_a_pasted_token_and_says_a_refused_one_no_server_or_a_bo
     // cards counted.
     let from = bed.mark();
     bed.click_target("Field(Address)")?;
-    common::chord(&mut bed.hp, &[KEY_LEFTCTRL, 14]);
+    common::chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_A]);
+    bed.press(KEY_BACKSPACE);
     bed.type_text(&board);
     bed.press(KEY_TAB);
     bed.shows(&["focus=Field(Token)"])?;

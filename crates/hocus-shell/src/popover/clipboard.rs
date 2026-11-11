@@ -48,6 +48,11 @@ use crate::theme::Ink;
 use crate::{
     clipboard::{self, Item, Kind},
     clock::time::Lang,
+    field::{
+        self, Entry, Place, Took,
+        entry::Pasted,
+        view::{Look, Style},
+    },
     levels::draw::{DIM, FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
     notifications::history::{Ago, ago},
     popover::kit::MANROPE_SEMIBOLD,
@@ -582,21 +587,38 @@ pub struct Panel {
 
 /// What its surface keeps between draws: a surface each time it opens,
 /// so that it opens on an empty search.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct State {
     laid: Option<Laid>,
     /// What it was laid out from: the history's version, the query, the
     /// minute.
     from: Option<(u64, String, i64)>,
-    query: String,
-    /// The query as it shows, and the caret after it.
-    field: (String, f32),
+    /// The search field (#771).
+    query: Entry,
     pointer: Pointer<Target>,
     selected: Option<u64>,
     scroll: f32,
     wheel: Wheel,
     logged: String,
 }
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            laid: None,
+            from: None,
+            query: Entry::new(field::Kind::Line, QUERY_MOST),
+            pointer: Pointer::default(),
+            selected: None,
+            scroll: 0.0,
+            wheel: Wheel::default(),
+            logged: String::new(),
+        }
+    }
+}
+
+/// What a paste read for the search field.
+static PASTED: Pasted = Pasted::new();
 
 impl State {
     fn keys(&self) -> Vec<u64> {
@@ -616,10 +638,19 @@ impl<Message> canvas::Program<Message> for Panel {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
+        if let iced::Event::InputMethod(event) = event {
+            let took = state.query.input_method(event);
+            return self.took(state, took);
+        }
         match kit::input(self.id, event, bounds, cursor, &mut state.pointer) {
             Input::Redraw(_) => {
                 for pressed in kit::keys(self.id) {
                     let _: Option<canvas::Action<Message>> = self.key(state, &pressed);
+                }
+                if let Some(pasted) = PASTED.take(self.id)
+                    && state.query.paste(&pasted)
+                {
+                    self.typed(state);
                 }
                 self.refresh(state);
                 None
@@ -725,7 +756,7 @@ impl Panel {
                 Role::TextField,
                 words.placeholder(),
             )
-            .value(state.query.clone())
+            .value(state.query.text().to_owned())
             .bounds(rows::at(Laid::field())),
             Node::new(rows::key(Target::Clear), Role::Button, words.clear())
                 .bounds(rows::at(laid.clear)),
@@ -872,33 +903,20 @@ impl Panel {
                 field.center_y() - MAGNIFIER / 2.0,
             ),
         );
-        let x = field.x + BORDER + FIELD_PAD + MAGNIFIER + FIELD_GAP;
-        let (shown, caret) = &state.field;
-        let (content, colour) = if state.query.is_empty() {
-            (self.words.placeholder().to_owned(), QUIET)
-        } else {
-            (shown.clone(), TEXT)
-        };
-        f.fill_text(text(
-            content,
-            Point::new(x, field.center_y()),
-            QUERY,
-            colour.get(),
-            Alignment::Left,
-        ));
-        // The caret after what is typed, while the field has the keyboard.
-        if keyboard {
-            let caret_x = if state.query.is_empty() {
-                x - 2.0
-            } else {
-                x + caret + 1.0
-            };
-            f.fill_rectangle(
-                Point::new(caret_x, field.center_y() - QUERY * 0.6),
-                Size::new(1.0, QUERY * 1.2),
-                TEXT.get(),
-            );
-        }
+        // What is typed, its selection, and its caret while the field
+        // has the keyboard.
+        state.query.draw(
+            f,
+            Place {
+                left: field.x + BORDER + FIELD_PAD + MAGNIFIER + FIELD_GAP,
+                middle: field.center_y(),
+                width: field.width - 2.0 * (BORDER + FIELD_PAD) - MAGNIFIER - FIELD_GAP,
+                style: Style::one(QUERY, MANROPE),
+            },
+            self.words.placeholder(),
+            &Look::of(TEXT.get(), QUIET.get()),
+            keyboard,
+        );
     }
 
     /// A section's label, spaced, its line centred on `middle`; the
@@ -1056,11 +1074,10 @@ impl Panel {
             )
         });
         let minute = now.timestamp().as_second() / 60;
-        let from = (version, state.query.clone(), minute);
+        let from = (version, state.query.text().to_owned(), minute);
         if state.from.as_ref() == Some(&from) && state.laid.is_some() {
             return;
         }
-        let typed = state.from.as_ref().map(|f| &f.1) != Some(&state.query);
         let laid = {
             let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
             let cache = cache.get_or_insert_with(Cache::default);
@@ -1071,24 +1088,13 @@ impl Panel {
             lay_out(
                 &items,
                 off,
-                &state.query,
+                state.query.text(),
                 self.words,
                 &now,
                 cache,
                 &mut kit::measure,
             )
         };
-        if typed {
-            let room = Laid::field().width - 2.0 * (BORDER + FIELD_PAD) - MAGNIFIER - FIELD_GAP;
-            let width = |t: &str| kit::measure(t, QUERY, MANROPE);
-            let shown = tail(&state.query, room, width);
-            let caret = if state.query.is_empty() {
-                0.0
-            } else {
-                width(&shown)
-            };
-            state.field = (shown, caret);
-        }
         let keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
         if state.selected.is_none_or(|s| !keys.contains(&s)) {
             state.selected = keys.first().copied();
@@ -1128,7 +1134,7 @@ impl Panel {
             .collect();
         tracing::debug!(
             title = self.words.title(),
-            typed = state.query.chars().count(),
+            typed = state.query.chars(),
             history = %said,
             items = %targets.join(" "),
             "the clipboard's history shows it"
@@ -1190,6 +1196,13 @@ impl Panel {
         let redraw = Some(canvas::Action::request_redraw().and_capture());
         match seen {
             mouse::Event::CursorEntered | mouse::Event::CursorMoved { .. } => {
+                // A press held in the field selects as it drags.
+                if state.query.pressed() {
+                    return at
+                        .is_some_and(|at| state.query.drag(at))
+                        .then_some(redraw)
+                        .flatten();
+                }
                 state.pointer.moved();
                 let changed = state.pointer.over(target);
                 // Hovering a row selects it.
@@ -1210,9 +1223,13 @@ impl Panel {
                 // Clicked in, a hovered history takes the keyboard.
                 event(Seen::Hold);
                 state.pointer.pressed = target;
+                if let Some(at) = at.filter(|_| target == Some(Target::Field)) {
+                    state.query.press(at);
+                }
                 redraw
             }
             mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                state.query.release();
                 if let Some(target) = state.pointer.release(target) {
                     self.act(state, target);
                 }
@@ -1272,32 +1289,32 @@ impl Panel {
                 self.reveal(state);
                 self.log(state);
             }
-            Key::Named(Named::Backspace) => {
-                if modifiers.control() {
-                    let kept = state.query.trim_end().rfind(' ').map_or(0, |at| at + 1);
-                    state.query.truncate(kept);
-                } else {
-                    state.query.pop();
-                }
-                self.typed(state);
-            }
             // Nothing else to go to: the field keeps the keyboard.
             Key::Named(Named::Tab) => return Some(canvas::Action::capture()),
-            _ => match pressed.text.as_deref() {
-                Some(typed)
-                    if !modifiers.control()
-                        && !modifiers.alt()
-                        && !modifiers.logo()
-                        && !typed.is_empty()
-                        && !typed.chars().any(char::is_control) =>
-                {
-                    if state.query.chars().count() + typed.chars().count() <= QUERY_MOST {
-                        state.query.push_str(typed);
-                        self.typed(state);
-                    }
-                }
-                _ => return None,
-            },
+            _ => {
+                let took = state
+                    .query
+                    .key(&pressed.key, modifiers, pressed.text.as_deref());
+                return self.took(state, took);
+            }
+        }
+        Some(canvas::Action::request_redraw().and_capture())
+    }
+
+    /// What the field did with a key: the list follows what is typed, a
+    /// paste is asked for.
+    fn took<Message>(&self, state: &mut State, took: Took) -> Option<canvas::Action<Message>> {
+        match took {
+            Took::No => return None,
+            Took::Same => return Some(canvas::Action::capture()),
+            Took::Moved => {}
+            Took::Edited => self.typed(state),
+            Took::Paste => {
+                PASTED.ask(self.id, crate::paste::Clean::Spaced, || {
+                    super::changed(super::Item::Clipboard);
+                });
+                return Some(canvas::Action::capture());
+            }
         }
         Some(canvas::Action::request_redraw().and_capture())
     }
@@ -1334,23 +1351,6 @@ impl Panel {
             laid.most_scroll(),
         );
     }
-}
-
-/// `query`'s end that fits `room`: what was typed last shows.
-fn tail(query: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
-    if width(query) <= room {
-        return query.to_owned();
-    }
-    let chars: Vec<char> = query.chars().collect();
-    for skip in 1..chars.len() {
-        let cut: String = std::iter::once('…')
-            .chain(chars[skip..].iter().copied())
-            .collect();
-        if width(&cut) <= room {
-            return cut;
-        }
-    }
-    "…".to_owned()
 }
 
 fn inset(rect: Rectangle, by: f32) -> Rectangle {
@@ -1580,10 +1580,7 @@ mod tests {
     }
 
     #[test]
-    fn a_long_query_shows_its_end() {
-        let width = |t: &str| t.chars().count() as f32 * 7.0;
-        assert_eq!(tail("cargo", 100.0, width), "cargo");
-        assert_eq!(tail("cargo nextest run", 70.0, width), "…xtest run");
+    fn an_item_shows_on_one_line() {
         assert_eq!(one_line("  git log\n\t--oneline  \n"), "git log --oneline");
     }
 }

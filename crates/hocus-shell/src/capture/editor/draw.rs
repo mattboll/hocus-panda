@@ -18,6 +18,10 @@ use super::{COLOURS, Drag, Editor, Phase, TEXT, TEXT_IN, Target, Tool, Typing, m
 use crate::theme::Ink;
 use crate::{
     capture::{Words, marks},
+    field::{
+        Place,
+        view::{Look, Style},
+    },
     levels::draw::{MANROPE_BOLD, TEXT as TEXT_COLOUR, rgb},
     popover::kit::{self, MANROPE_SEMIBOLD},
 };
@@ -337,6 +341,8 @@ impl<Message> canvas::Program<Message> for View {
                 layout.z,
             )
             .then(|| canvas::Action::request_redraw().and_capture()),
+            iced::Event::InputMethod(event) => super::input_method(self.id, event)
+                .then(|| canvas::Action::request_redraw().and_capture()),
             _ => None,
         }
     }
@@ -417,6 +423,14 @@ pub fn hold(e: &mut Editor, renderer: &Renderer) {
     }
 }
 
+/// The frame of the text being typed: from where it was clicked.
+fn field_of(typing: &Typing, z: f32) -> Rectangle {
+    Rectangle::new(
+        Point::new(typing.at.x, typing.at.y - FIELD.1 * z / 2.0),
+        Size::new(FIELD.0 * z, FIELD.1 * z),
+    )
+}
+
 /// What a click asks that the editor does outside its lock.
 enum Then {
     Nothing,
@@ -439,6 +453,13 @@ impl View {
             };
             match seen {
                 mouse::Event::CursorMoved { .. } | mouse::Event::CursorEntered => {
+                    // A press held in the text selects as it drags.
+                    if let Some(typing) = e.typing.as_mut().filter(|t| t.text.pressed()) {
+                        return match at {
+                            Some(p) if typing.text.drag(p) => Then::Draw,
+                            _ => Then::Nothing,
+                        };
+                    }
                     let mut drawn = e.hover != target;
                     e.hover = target;
                     if let (Some(drag), Some(p)) = (e.drag.as_mut(), at) {
@@ -458,11 +479,16 @@ impl View {
                     if target == Some(Target::Image) {
                         e.pressed = None;
                         if e.tool == Tool::Text {
-                            e.commit_text(image, z);
-                            e.typing = Some(Typing {
-                                at: p,
-                                text: String::new(),
-                            });
+                            // In the text being typed: its caret where the
+                            // press is. Elsewhere: it becomes a mark, and
+                            // another starts there.
+                            match e.typing.as_mut().filter(|t| field_of(t, z).contains(p)) {
+                                Some(typing) => typing.text.press(p),
+                                None => {
+                                    e.commit_text(image, z);
+                                    e.typing = Some(Typing::at(p));
+                                }
+                            }
                         } else {
                             e.drag = Some(Drag { from: p, to: p });
                         }
@@ -472,6 +498,11 @@ impl View {
                     Then::Draw
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    if let Some(typing) = e.typing.as_mut()
+                        && typing.text.release()
+                    {
+                        return Then::Draw;
+                    }
                     if let Some(drag) = e.drag.take() {
                         if let Some(mark) = e.mark_of(image, drag, z) {
                             e.add(mark);
@@ -640,10 +671,7 @@ impl View {
     fn draw_field(&self, f: &mut Frame, e: &Editor, typing: &Typing, z: f32) {
         let [r, g, b] = COLOURS[e.colour];
         let colour = Color::from_rgb8(r, g, b);
-        let field = Rectangle::new(
-            Point::new(typing.at.x, typing.at.y - FIELD.1 * z / 2.0),
-            Size::new(FIELD.0 * z, FIELD.1 * z),
-        );
+        let field = field_of(typing, z);
         let shape = kit::rounded(field, FIELD_RADIUS * z);
         f.fill(&shape, FIELD_BACK.get());
         f.stroke(
@@ -656,22 +684,19 @@ impl View {
                 ..Stroke::default().with_color(colour).with_width(1.0)
             },
         );
-        let at = Point::new(typing.at.x + TEXT_IN * z, typing.at.y);
-        let size = TEXT.0 * z;
-        let (said, shade) = if typing.text.is_empty() {
-            (self.words.text_hint().to_owned(), HINT.get())
-        } else {
-            (typing.text.clone(), colour)
-        };
-        f.fill_text(kit::text_in(
-            MANROPE_BOLD,
-            kit::text(said, at, size, shade, Alignment::Left),
-        ));
-        let caret = at.x + kit::measure(&typing.text, size, MANROPE_BOLD) + 1.0;
-        f.fill_rectangle(
-            Point::new(caret, at.y - size * 0.6),
-            Size::new(1.5, size * 1.2),
-            colour,
+        // What is typed, in the mark's colour and where the mark will be,
+        // past its frame when it is long; its selection and its caret.
+        typing.text.draw(
+            f,
+            Place {
+                left: typing.at.x + TEXT_IN * z,
+                middle: typing.at.y,
+                width: (f.width() - typing.at.x - TEXT_IN * z).max(0.0),
+                style: Style::one(TEXT.0 * z, MANROPE_BOLD),
+            },
+            self.words.text_hint(),
+            &Look::of(colour, HINT.get()),
+            true,
         );
     }
 
