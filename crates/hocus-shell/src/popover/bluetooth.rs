@@ -824,6 +824,79 @@ mod tests {
     }
 
     #[test]
+    fn nothing_can_be_asked_while_something_runs_but_the_settings_link() {
+        use hocus_bluetooth::Attempt;
+        let panel = Panel {
+            id: window::Id::unique(),
+            words: Words::new(crate::clock::time::Lang::French),
+            glass: false,
+            motion: false,
+        };
+        let mut bt = bt();
+        bt.nearby[1].code = true;
+        let mut ui = Ui::default();
+        ui.relist(&bt);
+        // What the ring goes to, and what `Enter` acts on, in order.
+        let held = |bt: &Bluetooth, ui: &Ui| -> Vec<(String, bool)> {
+            let content = content(&panel, bt, ui, Instant::now());
+            ui::walk::declared(content, hocus_link::POPOVER_WIDTH as f32)
+                .into_iter()
+                .filter(|(_, d)| d.node.key.starts_with("bluetooth:"))
+                .map(|(_, d)| {
+                    (
+                        d.node.key.clone(),
+                        d.on_focus.is_some() && d.on_activate.is_some(),
+                    )
+                })
+                .collect()
+        };
+        let idle = held(&bt, &ui);
+        let ring: Vec<&str> = idle
+            .iter()
+            .filter(|(_, held)| *held)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            ring[..5],
+            [
+                "bluetooth:Switch",
+                "bluetooth:Disconnect(0)",
+                "bluetooth:Mine(0)",
+                "bluetooth:Mine(1)",
+                "bluetooth:Near(0)"
+            ]
+        );
+        // A device asking a code goes to the Settings: it can be chosen.
+        assert!(ring.contains(&"bluetooth:Near(1)"));
+        assert_eq!(ring.last(), Some(&"bluetooth:Settings"));
+        // A connection under way: the rows are inert, still declared.
+        bt.attempt = Some(Attempt {
+            id: 1,
+            path: bt.paired[0].path.clone(),
+            step: Step::Running(Action::Connect),
+        });
+        let running = held(&bt, &ui);
+        let ring: Vec<&str> = running
+            .iter()
+            .filter(|(_, held)| *held)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(
+            ring,
+            [
+                "bluetooth:Switch",
+                "bluetooth:Disconnect(0)",
+                "bluetooth:Settings"
+            ]
+        );
+        assert!(
+            running
+                .iter()
+                .any(|(id, held)| id == "bluetooth:Mine(0)" && !held)
+        );
+    }
+
+    #[test]
     fn the_nearby_rows_hold_their_order_while_worked_in() {
         let mut ui = Ui::default();
         let mut bt = bt();
