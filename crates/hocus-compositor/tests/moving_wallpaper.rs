@@ -1,6 +1,6 @@
 //! The wallpapers that move (#433, docs/design/settings.md 6.3), on the
 //! held clock, on GLES (the GPU `HOCUS_TEST_GPU` names, else Mesa's
-//! software device; skipped without either) and on pixman: their pace,
+//! software device; they fail without either) and on pixman: their pace,
 //! when they stop, the glass over them, and what they cost.
 
 use crate::common;
@@ -39,8 +39,7 @@ fn sized(renderer: HeadlessConfig, sizes: &[(i32, i32)]) -> HeadlessConfig {
 fn gles(config: Config, sizes: &[(i32, i32)]) -> anyhow::Result<Option<Headless>> {
     let hp = Headless::start_with(sized(common::gles(), sizes), config)?;
     if hp.renderer() != "gles" {
-        eprintln!("no GLES here: the wallpapers do not move");
-        return Ok(None);
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     Ok(Some(hp))
 }

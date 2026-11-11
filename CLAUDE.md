@@ -255,7 +255,7 @@ live session, give the nested compositor a PipeWire of its own, or its
 streams appear on your real PipeWire. Its tests
 (`crates/hocus-compositor/tests/sharing.rs`) start a dbus-daemon and a
 PipeWire of their own (`Config::pipewire_remote`), link their consumer
-themselves (no WirePlumber), and skip without them.
+themselves (no WirePlumber), and fail without them.
 
 The system's authentication dialog (docs/design/polkit.md): the shell is
 the session's polkit agent on the system bus only with `HOCUS_AUTH_AGENT`
@@ -275,7 +275,7 @@ installed) and saved in `$XDG_VIDEOS_DIR` (else `user-dirs.dirs`', else
 `~/Videos`), their sound from PipeWire's default socket: next to a live
 session, give the nested compositor a fresh `HOME` (or `XDG_VIDEOS_DIR`)
 and a PipeWire of its own. Its tests save in folders of their own
-(`Config::videos`), decode the files with ffmpeg and ffprobe, and skip
+(`Config::videos`), decode the files with ffmpeg and ffprobe, and fail
 without them. The capture's editor (5.9) asks the desktop
 portal's file chooser only on the bus given with `--session-bus` (or the
 session's own on a virtual terminal), else saves beside the capture.

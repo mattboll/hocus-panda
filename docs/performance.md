@@ -16,8 +16,8 @@ So, unless `HOCUS_TEST_GPU` names a render node:
   The tests of its shaders (the streak, the halo, the glass, the rim's
   ring) draw with GLES on Mesa's software device (llvmpipe,
   `RendererChoice::GlesSoftware`, through
-  `hocus_compositor::test_gpu::gles()`). Without that device, as on CI,
-  they draw with pixman and skip what only GLES draws. llvmpipe draws on
+  `hocus_compositor::test_gpu::gles()`), on CI too. Without that device
+  they fail, saying so (`common::missing`). llvmpipe draws on
   one thread (`LP_NUM_THREADS=1`, in `.cargo/config.toml`). With a thread
   per core, each of those tests took every core, and the tests running
   beside them missed their frames. The tests that measure a motion
@@ -235,8 +235,8 @@ screenshots.
 
 Counts gate, times are reported. Each motion is counted on the held
 clock, on GLES (Mesa's software device, or the GPU `HOCUS_TEST_GPU`
-names: without either, the tests that only GLES draws are skipped, as
-the glass's) and, where it draws there, on pixman.
+names: without either, the tests that only GLES draws fail, as the
+glass's) and, where it draws there, on pixman.
 
 **A window's rain** (`tests/rain.rs`, 60 Hz):
 

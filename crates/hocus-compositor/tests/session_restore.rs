@@ -498,8 +498,7 @@ impl Notifications {
             .output()
             .is_err()
         {
-            eprintln!("no dbus-daemon: the notification is not looked at");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir: &Path = &tree.path("bus");
         std::fs::create_dir_all(dir)?;

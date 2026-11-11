@@ -28,8 +28,8 @@
 //! Pixman here, so the shell draws on the CPU, opaque and without motion:
 //! as in CI. The tests of the compositor's shaders (the streak, the halo)
 //! run on GLES: on the GPU `HOCUS_TEST_GPU` names, else on Mesa's software
-//! device, and are skipped without it. The tests of the shell's motion run
-//! on that GPU alone, and are skipped without it. The shell runs away from
+//! device, and fail without it. The tests of the shell's motion run on
+//! that GPU alone, and are run on purpose (`#[ignore]`). The shell runs away from
 //! the machine's services (no session bus, no system bus, no PipeWire).
 
 use crate::common;
@@ -1530,8 +1530,7 @@ fn going_to_an_agent_runs_the_streak_then_pulses_its_rim_then_rests() -> anyhow:
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
     bed.hocus(&["agent", "build", "working"], None)?;
@@ -1612,8 +1611,7 @@ fn going_to_an_agent_on_another_desktop_slides_there_first() -> anyhow::Result<(
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
     common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
@@ -1703,8 +1701,7 @@ fn the_streak_takes_the_rows_colour() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "infra", "waiting"], None)?;
@@ -1769,8 +1766,7 @@ fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "build", "working"], None)?;
@@ -1840,8 +1836,7 @@ fn a_second_click_replaces_the_first_streak_at_once() -> anyhow::Result<()> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no streak");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (500, 300), false)?;
     bed.hocus(&["agent", "infra", "waiting"], None)?;
@@ -2443,7 +2438,7 @@ impl Bed {
 }
 
 /// A bed on GLES, the GPU's or Mesa's software device (the halo is its
-/// shaders'); `None`, and the test is skipped, without it. Its clock far
+/// shaders'); the test fails without it. Its clock far
 /// from a minute's change: the clock's odometer would draw while nothing
 /// else should.
 fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
@@ -2461,8 +2456,7 @@ fn halo_bed(reduced_motion: bool) -> anyhow::Result<Option<Bed>> {
         },
     )?;
     if bed.hp.renderer() != "gles" {
-        eprintln!("the compositor draws on the CPU here: no halo");
-        return Ok(None);
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     Ok(Some(bed))
 }

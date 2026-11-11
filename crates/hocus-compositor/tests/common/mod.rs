@@ -307,16 +307,26 @@ pub fn render_node() -> Option<std::path::PathBuf> {
 
 /// A compositor drawing with GLES, for the tests of its shaders (the
 /// streak, the halo, the glass, the rim's ring): on the GPU
-/// `HOCUS_TEST_GPU` names, else on Mesa's software device; with pixman
-/// without that, which those tests see in `renderer()` and skip.
+/// `HOCUS_TEST_GPU` names, else on Mesa's software device. Without that
+/// either, the test fails: on pixman none of them would draw.
 pub fn gles() -> HeadlessConfig {
     let config = hocus_compositor::test_gpu::gles();
     match (config.renderer, &config.render_node) {
         (_, Some(node)) => eprintln!("GLES on the GPU {}", node.display()),
         (RendererChoice::GlesSoftware, _) => eprintln!("GLES on Mesa's software device"),
-        _ => eprintln!("no GLES here, not even Mesa's software device: pixman"),
+        _ => missing("GLES on Mesa's software device (libegl-mesa0, libgles2)"),
     }
     config
+}
+
+/// Fails the test: it needs `what` (system programs, a driver), which this
+/// machine lacks. A test never passes without what it tests with: it said
+/// "skipped" where nobody reads, and passed (#765, #769). CI installs them
+/// (`.github/workflows/ci.yml`); the tests of what it does not install are
+/// left out there by name (`[profile.ci]` in `.config/nextest.toml`).
+#[track_caller]
+pub fn missing(what: &str) -> ! {
+    panic!("this test needs {what}, which this machine lacks: install it")
 }
 
 pub fn compositor() -> anyhow::Result<Headless> {

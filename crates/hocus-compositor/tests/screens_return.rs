@@ -11,6 +11,7 @@ use crate::common;
 
 use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
 
+use anyhow::Context;
 use common::{KEY_LEFT, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, open, two_screens, wait};
 use hocus_compositor::{
     Config, Headless, HeadlessConfig, OutputSpec, Placed, RendererChoice, ScreenIdentity,
@@ -385,10 +386,7 @@ fn shell_script(dir: &std::path::Path, log: &std::path::Path) -> Option<PathBuf>
 fn the_winking_panda_says_what_moved_for_4_s() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let log = dir.path().join("shell.log");
-    let Some(script) = shell_script(dir.path(), &log) else {
-        eprintln!("hocuspanda-shell is not built: build the workspace to run this test");
-        return Ok(());
-    };
+    let script = shell_script(dir.path(), &log).context("the shell's script is not written")?;
     let mut hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: vec![OutputSpec::new(1920, 1080), OutputSpec::new(2560, 1440)],

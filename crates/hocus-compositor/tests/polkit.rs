@@ -17,7 +17,7 @@
 //! then the cookie.
 //!
 //! Pixman here, the shell on the CPU, without motion: as in CI. Without
-//! the shell built or dbus-daemon, the tests skip.
+//! the shell built or dbus-daemon, the tests fail.
 
 use crate::common;
 
@@ -57,8 +57,7 @@ fn has(program: &str) -> bool {
 fn ready() -> Option<PathBuf> {
     let shell = common::shell_program();
     if !has("dbus-daemon") {
-        eprintln!("dbus-daemon missing: skipped");
-        return None;
+        common::missing("dbus-daemon");
     }
     Some(shell)
 }

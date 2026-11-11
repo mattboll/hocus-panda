@@ -485,8 +485,7 @@ fn brighter_than_window_and_ice(shot: &(i32, i32, Vec<u8>), rect: Rect) -> usize
 fn the_pane_thaws_its_text_steady_from_200_ms_its_edges_never_wavering() -> anyhow::Result<()> {
     let mut hp = Headless::start_with(on(common::gles(), 1), frosting())?;
     if hp.renderer() != "gles" {
-        eprintln!("no GLES here: the pane does not thaw");
-        return Ok(());
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     common::at_rest(&mut hp)?;
     hp.hold_clock();

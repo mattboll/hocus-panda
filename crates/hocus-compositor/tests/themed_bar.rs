@@ -1,6 +1,6 @@
 //! The bar over a wallpaper that moves, in Givre and Matrix (bar.md §13,
 //! #433): the real shell drawing on wgpu, as on a GPU (over Mesa's
-//! software Vulkan driver, lavapipe; skipped without it or without the
+//! software Vulkan driver, lavapipe; failing without it or without the
 //! shell built), the compositor on GLES (Mesa's software device), the
 //! screen as the maintainer's laptop's, 2560×1600 at 1.25. Frame after
 //! frame on the held clock, the bar's empty middle (its glass and tint,
@@ -79,8 +79,7 @@ impl Bed {
     fn start(theme: &str) -> anyhow::Result<Option<Self>> {
         let shell = common::shell_program();
         let Some(manifest) = lavapipe() else {
-            eprintln!("no software Vulkan driver (Mesa's lavapipe): skipped");
-            return Ok(None);
+            common::missing("Mesa's software Vulkan driver, lavapipe (mesa-vulkan-drivers)");
         };
         let dir = tempfile::tempdir()?;
         let root = dir.path();
@@ -117,8 +116,7 @@ impl Bed {
             Some(script),
         )?;
         if hp.renderer() != "gles" {
-            eprintln!("no GLES here: the wallpapers do not move");
-            return Ok(None);
+            common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
         }
         let up = hp.dispatch_until(Duration::from_secs(60), |hp| hp.bar_commits() > 0)?;
         anyhow::ensure!(up, "no bar");

@@ -77,8 +77,7 @@ impl Bed {
     fn start_with_bus(text: &str, with_bus: bool) -> anyhow::Result<Option<Self>> {
         let (shell, settings) = (common::shell_program(), common::settings_program());
         if with_bus && !has("dbus-daemon") {
-            eprintln!("no dbus-daemon: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let dir = tempfile::tempdir()?;
         let root = dir.path();

@@ -79,8 +79,7 @@ impl Bed {
             .status()
             .is_ok_and(|s| s.success());
         if !bus {
-            eprintln!("dbus-daemon missing: skipped");
-            return Ok(None);
+            common::missing("dbus-daemon");
         }
         let mut fakes = Fakes::empty()?;
         fakes.start_bus()?;

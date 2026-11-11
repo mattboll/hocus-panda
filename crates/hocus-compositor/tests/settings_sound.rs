@@ -72,8 +72,7 @@ fn ready(shell: bool) -> bool {
                 .is_ok_and(|s| s.success())
         });
     if !fakes::available() || !tools {
-        eprintln!("pipewire or its tools missing: skipped");
-        return false;
+        common::missing("pipewire, pw-dump, wpctl and pw-metadata");
     }
     true
 }
