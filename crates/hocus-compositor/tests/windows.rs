@@ -150,7 +150,7 @@ fn the_shared_edge_resizes_only_the_window_grabbed_which_floats() -> anyhow::Res
     let (cx, _) = seam_centre();
     let (x, y) = (cx - 3.0, 300.0);
     hp.pointer_move(x, y);
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x + 100.0, y);
     hp.button(BTN_LEFT, false);
@@ -201,7 +201,7 @@ fn a_snapped_window_resized_by_an_outer_edge_floats_and_its_pair_stays() -> anyh
     let left = Zone::Left.rect(AREA);
     let (x, y) = (300.0, f64::from(left.bottom() + 3));
     hp.pointer_move(x, y);
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::NsResize));
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::NsResize));
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x, y - 100.0);
     hp.button(BTN_LEFT, false);
@@ -248,7 +248,7 @@ fn the_seams_handle_resizes_both_windows() -> anyhow::Result<()> {
     let (x, y) = seam_centre();
     let (x, y) = (x + 5.0, y + 20.0);
     hp.pointer_move(x, y);
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x + 100.0, y);
     hp.button(BTN_LEFT, false);
@@ -289,7 +289,7 @@ fn the_handle_shows_near_a_snapped_pairs_seam_only_and_then_rests() -> anyhow::R
     let (seam, _) = hp.state().snap.seam_handle.expect("the handle shows");
     assert!(seam.vertical);
     assert_eq!(
-        hp.state().frame_cursor,
+        hp.state().pointer.frame_cursor,
         None,
         "over the window: the client's"
     );

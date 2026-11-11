@@ -745,7 +745,7 @@ impl State {
             Phase::Choosing(_) => self.tell_shell(ToShell::CaptureEnd),
         }
         self.keep_area();
-        self.frame_cursor = None;
+        self.pointer.frame_cursor = None;
         self.redraw = true;
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
@@ -835,7 +835,7 @@ impl State {
             Some(_) => None,
             None => Some(self.capture_follow(at)),
         };
-        self.frame_cursor = cursor;
+        self.pointer.frame_cursor = cursor;
         pointer.motion(
             self,
             toolbar,
@@ -1028,7 +1028,7 @@ impl State {
             None => {}
         }
         let cursor = Some(self.capture_follow(at));
-        self.frame_cursor = cursor;
+        self.pointer.frame_cursor = cursor;
         self.redraw = true;
     }
 

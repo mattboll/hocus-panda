@@ -530,7 +530,7 @@ impl State {
         };
         let at = pointer.current_location();
         let off = !self.on_a_screen(Rect::new(at.x.floor() as i32, at.y.floor() as i32, 0, 0));
-        if self.pointer_placed && !off {
+        if self.pointer.placed && !off {
             return;
         }
         let names: Vec<String> = self.space.outputs().map(Output::name).collect();
@@ -588,8 +588,8 @@ impl State {
         {
             self.switcher_out = None;
         }
-        if self.swiping.as_ref() == Some(output) {
-            self.swiping = None;
+        if self.gestures.swiping.as_ref() == Some(output) {
+            self.gestures.swiping = None;
         }
         if self.radial.as_ref().is_some_and(|r| r.output == *output) {
             self.close_radial(None);

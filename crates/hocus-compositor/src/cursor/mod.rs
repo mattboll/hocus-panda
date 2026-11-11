@@ -377,7 +377,7 @@ impl State {
     /// `choice`'s theme and size, the old theme's thread let go (it ends
     /// as its asks' channel closes).
     pub fn restart_cursor(&mut self, choice: Choice) {
-        if let Some(source) = self.cursor_images.source.take() {
+        if let Some(source) = self.pointer.cursor_images.source.take() {
             self.loop_handle.remove(source);
         }
         let search = self.config.cursor_env.search.clone();
@@ -386,7 +386,7 @@ impl State {
             size = choice.size,
             "the cursor changed"
         );
-        self.cursor_images = CursorImages::start(&self.loop_handle, choice, search);
+        self.pointer.cursor_images = CursorImages::start(&self.loop_handle, choice, search);
         if !self.nested {
             self.redraw = true;
         }
@@ -394,10 +394,10 @@ impl State {
 
     /// What the pointer shows: what the client under it set.
     pub fn shown_cursor(&self) -> Shown<'_> {
-        if let Some(icon) = self.frame_cursor {
+        if let Some(icon) = self.pointer.frame_cursor {
             return Shown::Named(icon);
         }
-        match &self.cursor {
+        match &self.pointer.cursor {
             CursorImageStatus::Hidden => Shown::Hidden,
             CursorImageStatus::Surface(surface) => Shown::Surface(surface),
             CursorImageStatus::Named(icon) => Shown::Named(*icon),
@@ -411,7 +411,7 @@ impl State {
             Shown::Named(icon) => Some(icon),
             _ => None,
         };
-        if self.cursor_images.loaded(loaded, shown) && !self.nested {
+        if self.pointer.cursor_images.loaded(loaded, shown) && !self.nested {
             self.redraw = true;
         }
     }
@@ -420,7 +420,7 @@ impl State {
     /// compositor draws it.
     pub fn cursor_next_frame(&self, now: Duration) -> Option<Duration> {
         match self.shown_cursor() {
-            Shown::Named(icon) if !self.nested => self.cursor_images.next_frame(icon, now),
+            Shown::Named(icon) if !self.nested => self.pointer.cursor_images.next_frame(icon, now),
             _ => None,
         }
     }
@@ -456,7 +456,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer().map(|p| p.current_location()) else {
             return Vec::new();
         };
-        let size = f64::from(self.cursor_images.choice.size);
+        let size = f64::from(self.pointer.cursor_images.choice.size);
         // A theme's image may be larger than its size says.
         let reach = size * 2.0;
         let near = Rectangle::<f64, Logical>::new(
@@ -491,7 +491,11 @@ impl State {
             }
             Shown::Named(icon) => {
                 let pixels = (size * scale).round().max(1.0) as u32;
-                match self.cursor_images.themed(icon, pixels, scale, self.now()) {
+                match self
+                    .pointer
+                    .cursor_images
+                    .themed(icon, pixels, scale, self.now())
+                {
                     Some(placed) => {
                         let hotspot =
                             Point::from((f64::from(placed.hotspot.0), f64::from(placed.hotspot.1)));
@@ -516,11 +520,15 @@ impl State {
                         // The drawn shapes are in units of 24: at the
                         // cursor's size.
                         let unit = size / f64::from(drawn::SIZE);
-                        let (buffer, px) = self.cursor_images.drawn.at_scale(shape, scale * unit);
+                        let (buffer, px) = self
+                            .pointer
+                            .cursor_images
+                            .drawn
+                            .at_scale(shape, scale * unit);
                         let (x, y) = shape.hotspot();
                         let at = (on_output - Point::from((x * unit, y * unit))).to_physical(scale);
                         let all = Rectangle::from_size(Size::from((f64::from(px), f64::from(px))));
-                        let logical = self.cursor_images.choice.size as i32;
+                        let logical = self.pointer.cursor_images.choice.size as i32;
                         MemoryRenderBufferRenderElement::from_buffer(
                             renderer,
                             at,
@@ -565,7 +573,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer().map(|p| p.current_location()) else {
             return Vec::new();
         };
-        let size = f64::from(self.cursor_images.choice.size);
+        let size = f64::from(self.pointer.cursor_images.choice.size);
         // Where the hotspot shows, in the screen's pixels.
         let at = (pointer - view.loc).to_physical(scale * zoom);
         let step = crate::magnifier::STEPS
@@ -600,6 +608,7 @@ impl State {
             Shown::Named(icon) => {
                 let pixels = (size * scale * step).round().max(1.0) as u32;
                 match self
+                    .pointer
                     .cursor_images
                     .themed(icon, pixels, scale * step, self.now())
                 {
@@ -630,6 +639,7 @@ impl State {
                         let shape = Shape::of(icon);
                         let unit = size / f64::from(drawn::SIZE);
                         let (buffer, px) = self
+                            .pointer
                             .cursor_images
                             .drawn
                             .at_scale(shape, scale * step * unit);

@@ -3,7 +3,7 @@
 //! them.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     path::PathBuf,
     time::Duration,
 };
@@ -15,7 +15,6 @@ use smithay::{
     input::{
         Seat, SeatState,
         keyboard::{Keycode, XkbConfig},
-        pointer::{CursorIcon, CursorImageStatus},
     },
     output::Output,
     reexports::{
@@ -34,9 +33,11 @@ use smithay::{
     xwayland::X11Wm,
 };
 
+mod input;
 mod protocols;
 mod windows;
 
+pub use input::{Gestures, Keyboard, Pointer};
 pub use protocols::Protocols;
 pub use windows::{Arrivals, Departures, Snap};
 
@@ -48,7 +49,6 @@ use crate::{
     model::{self, Model, Rect, WindowId},
     motion::Tween,
     overlay::Overlay,
-    popups::PopupGrab,
     programs::Programs,
     shortcuts::Ending,
     switcher::Switcher,
@@ -100,29 +100,12 @@ pub struct State {
     pub textures: Textures,
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
-    /// The pointer and the overview's hot corners (#727).
-    pub hot_corner: crate::hot_corner::HotCorner,
-    /// The user has moved the pointer (a device's motion; in a headless
-    /// compositor, from its start: tests put it where they want): screens
-    /// lit after no longer bring it to the primary screen's middle.
-    pub pointer_placed: bool,
     pub wobble: Option<(WindowId, Jelly)>,
-    /// The cursor over a window's frame or grip, or during a grab: it
-    /// wins over the client's.
-    pub frame_cursor: Option<CursorIcon>,
-    /// The last press on a grip, for a double click.
-    pub last_grip_press: Option<(WindowId, Duration)>,
-    /// Buttons whose press the desktop kept: their release too.
-    pub kept_buttons: HashSet<u32>,
-    pub popup_grab: Option<PopupGrab>,
     /// A frame is asked for at this time, after a pause.
     pub wake: Option<Duration>,
     /// When the last frame was drawn: motions are judged as of then (see
     /// `tick`). Set while drawing, which borrows the state shared.
     pub drawn_at: std::cell::Cell<Option<Duration>>,
-    /// What the pointer shows, as the client under it sets it.
-    pub cursor: CursorImageStatus,
-    pub cursor_images: CursorImages,
     /// Something changed on screen since the last frame.
     pub redraw: bool,
     /// Nothing moved as of the last frame drawn, as `tick` judged it then:
@@ -157,12 +140,6 @@ pub struct State {
     /// The strokes, the arrows and the laser drawn on the screens
     /// (docs/design/ink.md).
     pub ink: crate::ink::Ink,
-    /// The screen whose strip follows three fingers on the touchpad.
-    pub swiping: Option<Output>,
-    /// The touchpad's swipe, and whether the desktop takes it (6.13).
-    pub hold: crate::gestures::Hold,
-    /// Swipes given to clients so far, and their moves, for tests.
-    pub swipes_given: (u64, u64),
     /// Alt+Tab, while it is held, and its panel vanishing (§11).
     pub switcher: Option<Switcher>,
     pub switcher_out: Option<(Switcher, Tween)>,
@@ -231,12 +208,6 @@ pub struct State {
     pub walls: std::cell::RefCell<crate::moving::Walls>,
     /// The seat's session on a virtual terminal, which switches terminals.
     pub session: Option<LibSeatSession>,
-    /// Keys whose press was a shortcut: their release is kept from the
-    /// clients too.
-    pub kept_keys: HashSet<Keycode>,
-    /// The keymap's layouts' XKB codes (`fr`, `fr(bepo)`), by group, for
-    /// the bar's row; empty when XKB refused them and took its defaults.
-    pub layout_codes: Vec<String>,
     /// The lock screen (7.1, docs/design/lock.md).
     pub lock: crate::lock::Lock,
     /// Locking on idle and before sleep, the curtain and the screens off
@@ -253,6 +224,12 @@ pub struct State {
     pub departures: Departures,
     /// Where a dragged window would snap, and the seam's handle.
     pub snap: Snap,
+    /// The pointer: what it shows, its grabs, the buttons kept.
+    pub pointer: Pointer,
+    /// The keyboard: the keys kept from clients, the layouts' codes.
+    pub keyboard: Keyboard,
+    /// The touchpad's swipes.
+    pub gestures: Gestures,
 }
 
 impl State {
@@ -356,18 +333,10 @@ impl State {
             switcher_repeat: None,
             levels: crate::levels::Levels::default(),
             moving: None,
-            hot_corner: crate::hot_corner::HotCorner::default(),
-            pointer_placed: false,
             wobble: None,
-            frame_cursor: None,
-            last_grip_press: None,
-            kept_buttons: HashSet::new(),
-            popup_grab: None,
             wake: None,
             drawn_at: std::cell::Cell::new(None),
             still: false,
-            cursor: CursorImageStatus::default_named(),
-            cursor_images,
             redraw: true,
             strips: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),
@@ -383,9 +352,6 @@ impl State {
             auth: crate::auth::Auth::default(),
             record: crate::record::Recording::default(),
             ink: crate::ink::Ink::default(),
-            swiping: None,
-            hold: crate::gestures::Hold::default(),
-            swipes_given: (0, 0),
             switcher: None,
             switcher_out: None,
             radial: None,
@@ -419,12 +385,13 @@ impl State {
             backgrounds: std::cell::RefCell::default(),
             walls: std::cell::RefCell::default(),
             session: None,
-            kept_keys: HashSet::new(),
-            layout_codes,
             lock: crate::lock::Lock::new(dh),
             away: crate::away::Away::default(),
             leave: crate::leave::Leave::default(),
             ending: None,
+            gestures: Gestures::default(),
+            keyboard: Keyboard::new(layout_codes),
+            pointer: Pointer::new(cursor_images),
             snap: Snap::default(),
             departures: Departures::default(),
             arrivals: Arrivals::default(),

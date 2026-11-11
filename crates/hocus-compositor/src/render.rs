@@ -1879,7 +1879,7 @@ impl State {
             );
             send_frames_surface_tree(&surface, output, now, throttle, |_, _| Some(output.clone()));
         }
-        if let CursorImageStatus::Surface(cursor) = &self.cursor {
+        if let CursorImageStatus::Surface(cursor) = &self.pointer.cursor {
             // A client's cursor draws at the scale of the screen under the
             // pointer.
             if self.output_under_pointer().as_ref() == Some(output) {

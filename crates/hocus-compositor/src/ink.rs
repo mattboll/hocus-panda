@@ -947,7 +947,7 @@ impl State {
             button,
             location: at,
         });
-        self.frame_cursor = Some(smithay::input::pointer::CursorIcon::Crosshair);
+        self.pointer.frame_cursor = Some(smithay::input::pointer::CursorIcon::Crosshair);
         pointer.set_grab(self, grab, serial, smithay::input::pointer::Focus::Clear);
         self.redraw = true;
     }
@@ -972,7 +972,7 @@ impl State {
     pub(crate) fn ink_end(&mut self) {
         let now = self.now();
         self.ink.end(now);
-        self.frame_cursor = None;
+        self.pointer.frame_cursor = None;
         self.redraw = true;
     }
 

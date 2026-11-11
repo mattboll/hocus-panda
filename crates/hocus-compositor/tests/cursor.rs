@@ -79,7 +79,7 @@ fn at_an_edge(hp: &mut Headless, scale: i32, offset: i32, wanted: u32) -> anyhow
         f64::from(rect.y) + 100.0,
     );
     hp.pointer_move(x, y);
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     let (px, py) = (x as i32 * scale + offset, y as i32 * scale + offset);
     let until = Instant::now() + WAIT;
     loop {

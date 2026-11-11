@@ -965,7 +965,11 @@ impl Headless {
     /// The cursor the compositor shows over a frame, a grip or the
     /// capture, by its name (`crosshair`, `move`, `nwse-resize`…).
     pub fn frame_cursor(&self) -> Option<String> {
-        self.app.state.frame_cursor.map(|c| c.name().to_owned())
+        self.app
+            .state
+            .pointer
+            .frame_cursor
+            .map(|c| c.name().to_owned())
     }
 
     /// The keyboard's active layout (XKB's group).
@@ -1535,7 +1539,7 @@ impl Headless {
     }
 
     pub fn pointer_move(&mut self, x: f64, y: f64) {
-        self.app.state.pointer_placed = true;
+        self.app.state.pointer.placed = true;
         let from = self
             .app
             .state
@@ -2000,7 +2004,7 @@ impl Headless {
     /// Swipes given to clients so far (the desktop took none of them), and
     /// their moves (6.13).
     pub fn swipes_given(&self) -> (u64, u64) {
-        self.app.state.swipes_given
+        self.app.state.gestures.swipes_given
     }
 
     /// How the launcher shows now, if it shows: its opacity and its
@@ -2160,7 +2164,7 @@ impl Headless {
     /// The pointer as a session finds it at its start, never moved by the
     /// user: screens lit from now on bring it to the primary's middle.
     pub fn pointer_unplaced(&mut self) {
-        self.app.state.pointer_placed = false;
+        self.app.state.pointer.placed = false;
     }
 
     /// The window a pointer's move is moving, if any.

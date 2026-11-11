@@ -77,7 +77,7 @@ fn two_floating_windows_stuck_at_the_gap_form_a_pair_whose_handle_resizes_both()
     let (seam, _) = hp.state().snap.seam_handle.expect("the handle shows");
     assert!(seam.vertical);
     assert_eq!(seam.centre(), (x, y));
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     // It resizes both, and both still float.
     drag_by(&mut hp, (x, y), 60.0);
     let wider = Rect::new(a.x, a.y, a.width + 60, a.height);
@@ -197,7 +197,7 @@ fn a_floating_window_over_the_seam_hides_its_handle_and_takes_the_press() -> any
     );
     // A press there is the window's.
     hp.pointer_move(x, y);
-    assert_eq!(hp.state().frame_cursor, None, "the client's cursor");
+    assert_eq!(hp.state().pointer.frame_cursor, None, "the client's cursor");
     drag_by(&mut hp, (x, y), 60.0);
     wait(&mut hp, Duration::from_millis(100))?;
     assert_eq!(rect_of(&hp, "test.left"), Some(Zone::Left.rect(AREA)));
@@ -216,7 +216,7 @@ fn a_window_behind_the_pair_leaves_its_handle() -> anyhow::Result<()> {
     assert!(behind.contains(x, y));
     hp.pointer_move(x, y);
     assert!(hp.state().snap.seam_handle.is_some(), "the handle shows");
-    assert_eq!(hp.state().frame_cursor, Some(CursorIcon::EwResize));
+    assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     drag_by(&mut hp, (x, y), 100.0);
     let left = Zone::Left.rect(AREA);
     wait_for_rect(

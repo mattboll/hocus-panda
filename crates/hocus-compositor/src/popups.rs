@@ -22,11 +22,11 @@ pub struct PopupGrab {
 impl State {
     /// A menu of window `window` asks for the keyboard.
     pub fn grab_popup(&mut self, window: WindowId, popup: PopupSurface) {
-        match &mut self.popup_grab {
+        match &mut self.pointer.popup_grab {
             Some(grab) if grab.window == window => grab.chain.push(popup),
             _ => {
                 self.end_popup_grab();
-                self.popup_grab = Some(PopupGrab {
+                self.pointer.popup_grab = Some(PopupGrab {
                     window,
                     chain: vec![popup],
                 });
@@ -37,7 +37,7 @@ impl State {
 
     /// The keyboard goes to the innermost menu.
     pub fn popup_focus(&self) -> Option<KeyboardFocus> {
-        let grab = self.popup_grab.as_ref()?;
+        let grab = self.pointer.popup_grab.as_ref()?;
         let popup = grab.chain.iter().rev().find(|p| p.alive())?;
         Some(KeyboardFocus::Wayland(popup.wl_surface().clone()))
     }
@@ -62,7 +62,7 @@ impl State {
 
     /// A menu went: the keyboard goes back to the one under it.
     pub fn popup_gone(&mut self, popup: &PopupSurface) {
-        let Some(grab) = &mut self.popup_grab else {
+        let Some(grab) = &mut self.pointer.popup_grab else {
             return;
         };
         let before = grab.chain.len();
@@ -71,14 +71,14 @@ impl State {
             return;
         }
         if grab.chain.is_empty() {
-            self.popup_grab = None;
+            self.pointer.popup_grab = None;
         }
         self.give_keyboard();
     }
 
     /// Every menu of the grab closes.
     pub fn end_popup_grab(&mut self) {
-        let Some(grab) = self.popup_grab.take() else {
+        let Some(grab) = self.pointer.popup_grab.take() else {
             return;
         };
         for popup in grab.chain.iter().rev() {
@@ -88,7 +88,12 @@ impl State {
 
     /// A window went or hid: its menus go with it.
     pub fn end_popup_grab_of(&mut self, id: WindowId) {
-        if self.popup_grab.as_ref().is_some_and(|g| g.window == id) {
+        if self
+            .pointer
+            .popup_grab
+            .as_ref()
+            .is_some_and(|g| g.window == id)
+        {
             self.end_popup_grab();
         }
     }
@@ -96,11 +101,11 @@ impl State {
     /// A press at `at` while menus hold the keyboard: away from their
     /// application, they close and the press goes nowhere. Whether it did.
     pub fn dismiss_popups_at(&mut self, at: Point<f64, Logical>) -> bool {
-        let Some(grab) = &self.popup_grab else {
+        let Some(grab) = &self.pointer.popup_grab else {
             return false;
         };
         let Some(root) = grab.chain.first().map(|p| p.wl_surface().clone()) else {
-            self.popup_grab = None;
+            self.pointer.popup_grab = None;
             return false;
         };
         let own = self

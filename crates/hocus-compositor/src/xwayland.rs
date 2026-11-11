@@ -14,7 +14,7 @@ use crate::{App, State};
 /// Spawns XWayland on the next free display. Without the `Xwayland`
 /// program, X11 applications just do not start.
 pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
-    let choice = state.cursor_images.choice().clone();
+    let choice = state.pointer.cursor_images.choice().clone();
     let spawned = XWayland::spawn(
         &state.display_handle,
         None,

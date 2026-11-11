@@ -42,7 +42,7 @@ impl SeatHandler for State {
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
-        self.cursor = image;
+        self.pointer.cursor = image;
         self.redraw = true;
     }
 

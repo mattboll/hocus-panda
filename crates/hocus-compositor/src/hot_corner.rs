@@ -98,7 +98,7 @@ impl State {
     /// leaves it.
     pub fn hot_corner_motion(&mut self, at: Point<f64, Logical>) {
         let here = self.hot_corner_at(at);
-        match &self.hot_corner {
+        match &self.pointer.hot_corner {
             HotCorner::Dwelling { output, .. }
                 if here.as_ref().is_some_and(|o| o.name() == *output) => {}
             HotCorner::Spent { output } => {
@@ -112,7 +112,7 @@ impl State {
                         at.x - corner.x > REARM || at.y - corner.y > REARM
                     });
                 if away {
-                    self.hot_corner = HotCorner::Armed;
+                    self.pointer.hot_corner = HotCorner::Armed;
                 }
             }
             HotCorner::Dwelling { .. } => {
@@ -132,7 +132,7 @@ impl State {
                         at.x - corner.x > REARM || at.y - corner.y > REARM
                     });
                 if away {
-                    self.hot_corner = HotCorner::Armed;
+                    self.pointer.hot_corner = HotCorner::Armed;
                 }
             }
         }
@@ -146,7 +146,7 @@ impl State {
         };
         let name = output.name();
         if !self.hot_corner_acts(&output) {
-            self.hot_corner = HotCorner::Spent { output: name };
+            self.pointer.hot_corner = HotCorner::Spent { output: name };
             return;
         }
         let inserted = self
@@ -157,14 +157,14 @@ impl State {
             });
         match inserted {
             Ok(timer) => {
-                self.hot_corner = HotCorner::Dwelling {
+                self.pointer.hot_corner = HotCorner::Dwelling {
                     output: name,
                     timer,
                 }
             }
             Err(err) => {
                 tracing::warn!(%err.error, "no timer for the hot corner");
-                self.hot_corner = HotCorner::Spent { output: name };
+                self.pointer.hot_corner = HotCorner::Spent { output: name };
             }
         }
     }
@@ -172,7 +172,8 @@ impl State {
     /// The pointer stayed in the corner: the overview opens (or closes),
     /// if the corner may still act.
     fn hot_corner_dwelt(&mut self) {
-        let HotCorner::Dwelling { output, .. } = std::mem::take(&mut self.hot_corner) else {
+        let HotCorner::Dwelling { output, .. } = std::mem::take(&mut self.pointer.hot_corner)
+        else {
             return;
         };
         let acts = self
@@ -185,12 +186,12 @@ impl State {
             tracing::debug!(output, "the hot corner toggles the overview");
             self.toggle_overview();
         }
-        self.hot_corner = HotCorner::Spent { output };
+        self.pointer.hot_corner = HotCorner::Spent { output };
     }
 
     /// The dwell under way, if any, ends without acting.
     fn hot_corner_cancel(&mut self) {
-        if let HotCorner::Dwelling { timer, .. } = std::mem::take(&mut self.hot_corner) {
+        if let HotCorner::Dwelling { timer, .. } = std::mem::take(&mut self.pointer.hot_corner) {
             self.loop_handle.remove(timer);
         }
     }

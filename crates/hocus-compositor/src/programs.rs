@@ -85,7 +85,7 @@ impl Env {
             socket: state.socket_path.clone(),
             xdisplay: state.xdisplay,
             activation: None,
-            cursor: state.cursor_images.choice().clone(),
+            cursor: state.pointer.cursor_images.choice().clone(),
             session_bus: match &state.shell.bus {
                 Some(crate::shell::Bus::Given(address)) => Some(address.clone()),
                 _ => None,

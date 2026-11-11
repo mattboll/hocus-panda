@@ -257,7 +257,7 @@ impl State {
                     && !this.shortcuts_inhibited()
                     && let Some((action, chord)) = this.magnifier_chord(mods, &keysym)
                 {
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Shortcut(action, chord));
                 }
                 // The authentication dialog holds the keyboard (7.5): of
@@ -273,13 +273,13 @@ impl State {
                         return FilterResult::Forward;
                     }
                     if state != KeyState::Pressed {
-                        return if this.kept_keys.remove(&code) {
+                        return if this.keyboard.kept_keys.remove(&code) {
                             FilterResult::Intercept(Kept::Release)
                         } else {
                             FilterResult::Forward
                         };
                     }
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Radial(crate::radial::Key::of(
                         sym, mods.shift,
                     )));
@@ -292,13 +292,13 @@ impl State {
                         return FilterResult::Forward;
                     }
                     if state != KeyState::Pressed {
-                        return if this.kept_keys.remove(&code) {
+                        return if this.keyboard.kept_keys.remove(&code) {
                             FilterResult::Intercept(Kept::Release)
                         } else {
                             FilterResult::Forward
                         };
                     }
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     let shortcuts = &this.config.shortcuts;
                     let action = keysym
                         .raw_latin_sym_or_raw_current_sym()
@@ -320,14 +320,14 @@ impl State {
                         return FilterResult::Forward;
                     }
                     if state != KeyState::Pressed {
-                        return if this.kept_keys.remove(&code) {
+                        return if this.keyboard.kept_keys.remove(&code) {
                             FilterResult::Intercept(Kept::Release)
                         } else {
                             FilterResult::Forward
                         };
                     }
                     let key = keysym.raw_latin_sym_or_raw_current_sym().unwrap_or(sym);
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Switch(switch_key(
                         switcher_key,
                         key,
@@ -336,7 +336,7 @@ impl State {
                     )));
                 }
                 if state != KeyState::Pressed {
-                    return if this.kept_keys.remove(&code) {
+                    return if this.keyboard.kept_keys.remove(&code) {
                         FilterResult::Intercept(Kept::Release)
                     } else {
                         FilterResult::Forward
@@ -349,7 +349,7 @@ impl State {
                     if is_modifier(sym) {
                         return FilterResult::Forward;
                     }
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Capture(crate::capture::Key::of(
                         sym, mods.shift,
                     )));
@@ -367,11 +367,11 @@ impl State {
                 // to the window.
                 // `Esc` while a window is moved puts it back (8.5 B).
                 if sym == Keysym::Escape.raw() && this.moving.is_some() && !auth {
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::CancelMove);
                 }
                 if sym == Keysym::Escape.raw() && this.ink.shows() && !auth {
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::InkClear);
                 }
                 // A client that takes every key (the Settings recording a
@@ -405,7 +405,7 @@ impl State {
                     !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
                 });
                 if let Some((action, chord)) = action {
-                    this.kept_keys.insert(code);
+                    this.keyboard.kept_keys.insert(code);
                     return FilterResult::Intercept(Kept::Shortcut(action, chord));
                 }
                 FilterResult::Forward
@@ -501,7 +501,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        self.pointer_placed = true;
+        self.pointer.placed = true;
         let from = pointer.current_location();
         let to = self.onto_outputs(from, from + event.delta());
         // Games and 3D tools read the motion itself (relative-pointer).
@@ -527,7 +527,7 @@ impl State {
         let Some(location) = self.absolute_location::<I>(event) else {
             return;
         };
-        self.pointer_placed = true;
+        self.pointer.placed = true;
         // Such a device cannot push the magnifier's edge (#424).
         self.magnifier_absolute(true);
         self.pointer_motion(location, event.time_msec());
@@ -590,7 +590,7 @@ impl State {
             if press.resizes
                 && let Some(rect) = self.rect_of(press.window)
             {
-                self.kept_buttons.remove(&press.button);
+                self.pointer.kept_buttons.remove(&press.button);
                 let edges = Edges::nearest_corner(rect, press.at.x, press.at.y);
                 let start = GrabStartData {
                     focus: None,
@@ -634,7 +634,7 @@ impl State {
                 },
             );
             pointer.frame(self);
-            self.frame_cursor = None;
+            self.pointer.frame_cursor = None;
             self.overview_motion(location);
             if !self.nested {
                 self.redraw = true;
@@ -658,7 +658,7 @@ impl State {
                 },
             );
             pointer.frame(self);
-            self.frame_cursor = None;
+            self.pointer.frame_cursor = None;
             self.redraw = true;
             return;
         }
@@ -685,8 +685,8 @@ impl State {
             if cursor.is_some() {
                 under = None;
             }
-            if cursor != self.frame_cursor {
-                self.frame_cursor = cursor;
+            if cursor != self.pointer.frame_cursor {
+                self.pointer.frame_cursor = cursor;
                 self.redraw = true;
             }
         }
@@ -834,7 +834,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        if pointer.is_grabbed() || self.frame_cursor.is_some() {
+        if pointer.is_grabbed() || self.pointer.frame_cursor.is_some() {
             return;
         }
         let at = pointer.current_location();
@@ -861,7 +861,7 @@ impl State {
         // Locked (7.1): to the lock's surface under the pointer alone (its
         // focus), the desktop doing nothing with it.
         if self.locked() {
-            if state == ButtonState::Released && self.kept_buttons.remove(&button) {
+            if state == ButtonState::Released && self.pointer.kept_buttons.remove(&button) {
                 return;
             }
             pointer.button(
@@ -883,18 +883,18 @@ impl State {
             && let Some(press) = self.radial_press.filter(|p| p.button == button)
         {
             self.radial_press = None;
-            self.kept_buttons.remove(&button);
+            self.pointer.kept_buttons.remove(&button);
             self.open_radial(press.window, pointer.current_location());
             return;
         }
         if self.radial.is_some() && !self.auth_holds() {
             if state == ButtonState::Pressed {
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 if matches!(button, BTN_LEFT | BTN_RIGHT) {
                     self.radial_press(pointer.current_location());
                 }
             } else {
-                self.kept_buttons.remove(&button);
+                self.pointer.kept_buttons.remove(&button);
             }
             return;
         }
@@ -902,11 +902,11 @@ impl State {
         if !self.auth_holds() && self.overview.is_some() {
             let at = pointer.current_location();
             if state == ButtonState::Released && self.overview_release(button, at) {
-                self.kept_buttons.remove(&button);
+                self.pointer.kept_buttons.remove(&button);
                 return;
             }
             if state == ButtonState::Pressed && self.overview_takes(at) {
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 self.overview_press(button, at);
                 return;
             }
@@ -916,7 +916,7 @@ impl State {
         }
         // A press away from the authentication dialog does nothing (7.5).
         if state == ButtonState::Pressed && self.auth_keeps_pointer(pointer.current_location()) {
-            self.kept_buttons.insert(button);
+            self.pointer.kept_buttons.insert(button);
             return;
         }
         // The capture open takes it, but over its toolbar (5.8).
@@ -925,17 +925,17 @@ impl State {
         }
         let serial = SERIAL_COUNTER.next_serial();
         let at = pointer.current_location();
-        if state == ButtonState::Released && self.kept_buttons.remove(&button) {
+        if state == ButtonState::Released && self.pointer.kept_buttons.remove(&button) {
             return;
         }
         // The share's chooser keeps the presses off what it darkens.
         if state == ButtonState::Pressed && self.share_keeps_pointer(at) {
-            self.kept_buttons.insert(button);
+            self.pointer.kept_buttons.insert(button);
             return;
         }
         // Alt+Tab's panel takes the click.
         if state == ButtonState::Pressed && self.switcher_click(at.x, at.y) {
-            self.kept_buttons.insert(button);
+            self.pointer.kept_buttons.insert(button);
             return;
         }
         // `Super`+drag draws, wherever it starts: over a window, the bar
@@ -954,7 +954,7 @@ impl State {
         }
         if state == ButtonState::Pressed && !pointer.is_grabbed() {
             if self.dismiss_popups_at(at) || self.press_outside_shell(at) {
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 return;
             }
             if button == BTN_LEFT
@@ -962,7 +962,7 @@ impl State {
             {
                 // The bar's edge switches its form; no client sees the press.
                 self.toggle_bar(&output);
-                self.kept_buttons.insert(button);
+                self.pointer.kept_buttons.insert(button);
                 return;
             }
             let seam = self.seam_near(at);
@@ -973,7 +973,7 @@ impl State {
                 if button == BTN_LEFT {
                     self.start_pair_resize(seam.grab, seam.edges, button, serial);
                 } else {
-                    self.kept_buttons.insert(button);
+                    self.pointer.kept_buttons.insert(button);
                 }
                 return;
             } else if let Some((id, edges)) = seam
@@ -984,7 +984,7 @@ impl State {
                 if button == BTN_LEFT {
                     self.start_resize(id, edges, button, None, serial);
                 } else {
-                    self.kept_buttons.insert(button);
+                    self.pointer.kept_buttons.insert(button);
                 }
                 return;
             } else if let Some(id) = self.grip_hit(at) {
@@ -992,14 +992,15 @@ impl State {
                 if button == BTN_LEFT {
                     let now = self.now();
                     let double = self
+                        .pointer
                         .last_grip_press
                         .take()
                         .is_some_and(|(w, t)| w == id && now.saturating_sub(t) < DOUBLE_CLICK);
                     if double {
                         self.toggle_maximized(id);
-                        self.kept_buttons.insert(button);
+                        self.pointer.kept_buttons.insert(button);
                     } else {
-                        self.last_grip_press = Some((id, now));
+                        self.pointer.last_grip_press = Some((id, now));
                         self.start_move(id, button, None, serial);
                     }
                 } else {
@@ -1014,7 +1015,7 @@ impl State {
                             resizes: false,
                         });
                     }
-                    self.kept_buttons.insert(button);
+                    self.pointer.kept_buttons.insert(button);
                 }
                 return;
             } else if let Some(id) = self.window_under(at) {
@@ -1034,7 +1035,7 @@ impl State {
                         serial,
                         resizes: true,
                     });
-                    self.kept_buttons.insert(button);
+                    self.pointer.kept_buttons.insert(button);
                     return;
                 }
             }
@@ -1123,8 +1124,8 @@ impl State {
             return;
         };
         match gesture {
-            Gesture::SwipeBegin { .. } => self.swipes_given.0 += 1,
-            Gesture::SwipeUpdate { .. } => self.swipes_given.1 += 1,
+            Gesture::SwipeBegin { .. } => self.gestures.swipes_given.0 += 1,
+            Gesture::SwipeUpdate { .. } => self.gestures.swipes_given.1 += 1,
             _ => {}
         }
         let serial = SERIAL_COUNTER.next_serial();
