@@ -557,6 +557,9 @@ pub struct Tokens {
     pub toast: Rgba,
     /// Text and marks on an accent's fill.
     pub on_accent: Rgba,
+    /// Every agent acting on the desktop (docs/design/mcp.md): its ring,
+    /// its mark, its tag, its name.
+    pub agent: Rgba,
 }
 
 pub const DARK: Tokens = Tokens {
@@ -590,6 +593,7 @@ pub const DARK: Tokens = Tokens {
     shadow: hex(0x000000),
     toast: hex(0x262C3C),
     on_accent: hex(0x0B1020),
+    agent: hex(0xB69CFF),
 };
 
 pub const LIGHT: Tokens = Tokens {
@@ -623,6 +627,7 @@ pub const LIGHT: Tokens = Tokens {
     shadow: hex(0x0B1020),
     toast: hex(0x262C3C),
     on_accent: hex(0x0B1020),
+    agent: hex(0x6B4FD6),
 };
 
 /// Givre (#740, bar.md §13): night-blue glass, icy text and hairlines.
@@ -660,6 +665,7 @@ pub const FROST: Tokens = Tokens {
     shadow: hex(0x000000),
     toast: hex(0x262C3C),
     on_accent: hex(0x04111D),
+    agent: hex(0xB69CFF),
 };
 
 /// Givre's viewfinder corner marks: 10 px, 1.5 px thick, `#BFEFFF` at
@@ -708,6 +714,7 @@ pub const MATRIX: Tokens = Tokens {
     shadow: hex(0x000000),
     toast: hex(0x262C3C),
     on_accent: hex(0x001A0A),
+    agent: hex(0xB69CFF),
 };
 
 /// Matrix's green: its hairlines, the clock's colon, the code edge.
@@ -748,6 +755,7 @@ pub const DARK_CONTRAST: Tokens = Tokens {
     shadow: hex(0x000000),
     toast: hex(0x262C3C),
     on_accent: hex(0x0B1020),
+    agent: hex(0xCDBBFF),
 };
 
 /// The light theme under high contrast.
@@ -782,6 +790,7 @@ pub const LIGHT_CONTRAST: Tokens = Tokens {
     shadow: hex(0x0B1020),
     toast: hex(0x262C3C),
     on_accent: hex(0x0B1020),
+    agent: hex(0x4A2DB5),
 };
 
 /// How a colour drawn for the dark theme reads under high contrast in

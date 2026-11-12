@@ -500,6 +500,10 @@ impl Shell {
                 motion: self.look.motion,
             }),
             popover::Item::Music => popover::music::view(id, self.look.glass),
+            popover::Item::Journal => popover::journal::view(&popover::journal::Panel {
+                id,
+                glass: self.look.glass,
+            }),
             popover::Item::Bluetooth => popover::bluetooth::view(&popover::bluetooth::Panel {
                 id,
                 words: self.words,
@@ -659,6 +663,7 @@ impl Shell {
                 .or_else(|| self.windows_view(id))
                 .or_else(|| self.music_view(id))
                 .or_else(|| self.popover_view(id))
+                .or_else(|| crate::mcp::view(id, self.look.glass))
                 .or_else(|| notifications::view(id, self.look.glass))
                 .or_else(|| reminder::view(id, self.look.glass))
                 .unwrap_or_else(|| Space::new().into());

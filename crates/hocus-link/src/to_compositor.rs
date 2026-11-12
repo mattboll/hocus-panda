@@ -190,6 +190,12 @@ pub enum ToCompositor {
     WindowMenu(u64),
     /// The palette (#736) runs an action ([`RunAction`]).
     Action(RunAction),
+    /// The toast's or the journal's "Annuler": request `0` of an MCP agent
+    /// undone (docs/design/mcp.md).
+    McpUndo(u64),
+    /// "Tout arrêter" (`true`), or "Reprendre" (`false`): every MCP agent
+    /// stopped, or let go on.
+    McpStop(bool),
 }
 
 impl ToCompositor {

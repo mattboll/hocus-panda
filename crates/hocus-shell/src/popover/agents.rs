@@ -814,6 +814,7 @@ mod tests {
         let said = agents::Said {
             tools: vec![tool("claude-code", ToolState::Found)],
             agents: Vec::new(),
+            mcp: Vec::new(),
         };
         // Only in the mini form, and only while the card would show.
         assert!(declines(&said, Some(Form::Mini)));
@@ -821,6 +822,7 @@ mod tests {
         let plugged = agents::Said {
             tools: vec![tool("claude-code", ToolState::Plugged)],
             agents: Vec::new(),
+            mcp: Vec::new(),
         };
         assert!(!declines(&plugged, Some(Form::Mini)));
         let words = Words::new(crate::clock::time::Lang::French);

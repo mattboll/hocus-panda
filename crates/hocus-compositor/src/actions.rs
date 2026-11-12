@@ -112,6 +112,7 @@ fn shortcut_action(id: &str) -> Option<Action> {
         "magnifier-out" => Action::MagnifierOut,
         "magnifier-off" => Action::MagnifierOff,
         "screen-reader" => Action::ScreenReader,
+        "stop-agents" => Action::StopAgents,
         _ => return None,
     })
 }

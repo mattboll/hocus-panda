@@ -549,6 +549,11 @@ impl Headless {
     }
 
     /// The agents as the shell was last told them.
+    /// What the MCP agents show now (docs/design/mcp.md).
+    pub fn mcp_shown(&self) -> hocus_link::McpShown {
+        self.app.state.mcp_shown()
+    }
+
     pub fn agents_peek(&self) -> Vec<hocus_link::AgentShown> {
         self.app.state.agents.told.clone().unwrap_or_default()
     }

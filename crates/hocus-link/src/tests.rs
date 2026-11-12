@@ -654,6 +654,51 @@ fn to_shell() -> Vec<ToShell> {
             ..ActionsShown::default()
         }),
         ToShell::ActionsEnd,
+        ToShell::Mcp(McpShown::default()),
+        ToShell::Mcp(McpShown {
+            stopped: true,
+            agents: vec![McpRow {
+                id: 1,
+                name: "Claude".into(),
+                doing: McpDoing::Did {
+                    summary: McpSummary {
+                        moved: 3,
+                        settings: vec!["appearance.theme".into()],
+                        ..McpSummary::default()
+                    },
+                    at: "10:43".into(),
+                },
+            }],
+            show: Some(McpShow {
+                agent: "Claude".into(),
+                intent: "Range les terminaux".into(),
+                output: "HEADLESS-1".into(),
+                at: McpAt::Desktop {
+                    index: 1,
+                    x: 900,
+                    y: 16,
+                },
+            }),
+            toast: Some(McpToast {
+                request: 2,
+                agent: "Claude".into(),
+                summary: McpSummary::default(),
+                intent: "range".into(),
+                undo: true,
+                output: "HEADLESS-1".into(),
+                left: 16,
+                bottom: 1064,
+                since: 5,
+            }),
+            journal: vec![McpLine {
+                agent: "Claude".into(),
+                at: "10:38".into(),
+                said: McpSaid::Refused {
+                    tool: "launch".into(),
+                    why: McpRefusal::ReadOnly,
+                },
+            }],
+        }),
     ];
     all.extend(LevelKey::ALL.map(ToShell::Level));
     all
@@ -802,6 +847,8 @@ fn to_compositor() -> Vec<ToCompositor> {
             arg: None,
             window: None,
         }),
+        ToCompositor::McpUndo(4),
+        ToCompositor::McpStop(true),
     ];
     all.extend(CaptureMode::ALL.map(|mode| ToCompositor::Capture(CaptureAsk::Mode(mode))));
     all.extend(

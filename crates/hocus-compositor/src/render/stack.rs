@@ -124,6 +124,8 @@ impl State {
             if purpose.screen() {
                 let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
                 windows.extend(self.window_ring(renderer, *id, &output.name(), visual, scale, now));
+                // An MCP agent's action, shown before it is done.
+                windows.extend(self.mcp_ring(renderer, *id, visual, scale));
             }
             // The palette's target over its dim, ringed.
             let out = if palette_target == Some(*id) {

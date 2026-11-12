@@ -83,9 +83,17 @@ pub const MARK_INK: Ink = Ink::Dark(rgb(0x0B1020));
 pub struct Said {
     pub tools: Vec<AgentTool>,
     pub agents: Vec<AgentShown>,
+    /// The agents acting on the desktop through `hocus mcp`
+    /// (docs/design/mcp.md), as rows of their own ([`crate::mcp`]).
+    pub mcp: Vec<AgentShown>,
 }
 
 impl Said {
+    /// Every agent with a row: the tools' and herdr's, then the MCP ones.
+    pub fn all(&self) -> Vec<AgentShown> {
+        self.agents.iter().chain(&self.mcp).cloned().collect()
+    }
+
     /// `tool`'s state, absent when not said.
     pub fn state(&self, tool: &str) -> ToolState {
         self.tools
@@ -118,18 +126,20 @@ impl Said {
         if self.state("herdr").followed() {
             followed.push("herdr");
         }
+        let all = self.all();
         match (
-            to_plug.is_empty(),
+            // An MCP agent's row shows over the card.
+            to_plug.is_empty() || !self.mcp.is_empty(),
             followed.is_empty(),
-            self.agents.is_empty(),
+            all.is_empty(),
         ) {
             (false, _, _) => Shows::Card(to_plug),
             (true, true, true) => Shows::Hidden,
             (true, false, true) => Shows::Idle(followed),
             (true, _, false) => Shows::Lines(Lines::of_at_most(
-                &self.agents,
+                &all,
                 now,
-                rows_that_fit(&looks(&self.agents), rows_room()),
+                rows_that_fit(&looks(&all), rows_room()),
             )),
         }
     }
@@ -224,13 +234,13 @@ pub fn rows_room() -> f32 {
 /// agents running now show.
 pub fn set_rows_room(room: f32) -> bool {
     let before = f32::from_bits(ROWS_ROOM.swap(room.to_bits(), Ordering::Relaxed));
-    let looks = looks(&said().agents);
+    let looks = looks(&said().all());
     rows_that_fit(&looks, before) != rows_that_fit(&looks, room)
 }
 
 /// How many rows the agents running now show at most.
 pub fn rows_shown() -> usize {
-    rows_that_fit(&looks(&said().agents), rows_room())
+    rows_that_fit(&looks(&said().all()), rows_room())
 }
 
 /// The agents' rows, as the group shows them.
@@ -507,6 +517,24 @@ pub fn set_tools(tools: Vec<AgentTool>) {
 /// The compositor says the agents.
 pub fn set_agents(agents: Vec<AgentShown>) {
     change(|said| said.agents = agents);
+}
+
+/// The MCP agents' rows ([`crate::mcp`]): drawn again when their words
+/// change too.
+pub fn set_mcp(rows: Vec<AgentShown>) {
+    let words: Vec<String> = rows.iter().map(|r| crate::mcp::row_word(r.id)).collect();
+    static WORDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let changed = {
+        let mut kept = WORDS.lock().unwrap_or_else(PoisonError::into_inner);
+        let changed = *kept != words;
+        *kept = words;
+        changed
+    };
+    change(|said| said.mcp = rows);
+    if changed {
+        draw::stale();
+        popover::send(vec![popover::Effect::Wake(AGENTS_NAMESPACE)]);
+    }
 }
 
 // --- Words ----------------------------------------------------------------------
@@ -1094,7 +1122,11 @@ fn row(
     measure: &mut impl FnMut(&str, f32, Font) -> f32,
 ) -> Row {
     let width = WIDTH + 2.0 * ROW_OUT;
-    let word = words.word(line);
+    let word = if crate::mcp::is_row(line.id) {
+        crate::mcp::row_word(line.id)
+    } else {
+        words.word(line)
+    };
     let height = row_height(line.look);
     let rect = Rectangle::new(Point::new(-ROW_OUT, y), Size::new(width, height));
     if !line.look.carded() {
@@ -1301,7 +1333,14 @@ mod tests {
 
     #[test]
     fn the_group_proposes_follows_or_hides() {
-        let said = |tools: Vec<AgentTool>, agents: Vec<AgentShown>| Said { tools, agents }.shows(0);
+        let said = |tools: Vec<AgentTool>, agents: Vec<AgentShown>| {
+            Said {
+                tools,
+                agents,
+                mcp: Vec::new(),
+            }
+            .shows(0)
+        };
         // Both found: the card for both.
         assert_eq!(
             said(

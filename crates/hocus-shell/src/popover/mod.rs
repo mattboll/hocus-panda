@@ -47,6 +47,7 @@ pub mod clipboard;
 pub mod desktop;
 pub mod history;
 pub mod in_use;
+pub mod journal;
 pub mod kit;
 pub mod meeting;
 pub mod music;
@@ -1210,7 +1211,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::DayChoose
         | Item::Windows
         | Item::WindowMenu(_)
-        | Item::Music => None,
+        | Item::Music
+        | Item::Journal => None,
     }
 }
 

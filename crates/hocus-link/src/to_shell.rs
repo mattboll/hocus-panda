@@ -286,6 +286,9 @@ pub enum ToShell {
     Actions(ActionsShown),
     /// The palette's target window went, or the session locks: it closes.
     ActionsEnd,
+    /// What the agents acting through `hocus mcp` show (docs/design/mcp.md):
+    /// sent as the shell connects and whenever it changes.
+    Mcp(crate::McpShown),
 }
 
 impl ToShell {

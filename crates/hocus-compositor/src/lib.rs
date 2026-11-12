@@ -54,6 +54,7 @@ pub mod lock;
 mod magnet;
 mod magnifier;
 mod matrix;
+mod mcp;
 pub mod model;
 pub mod motion;
 mod moving;
@@ -409,6 +410,8 @@ impl App {
         state.tick();
         // The agents' changes of this turn, in one line.
         state.flush_agents();
+        // What the MCP agents show (docs/design/mcp.md), when it changed.
+        state.flush_mcp();
         // The screen the notifications' bubbles show on, when it changed.
         state.flush_bubbles_screen();
         // The screens a fullscreen window covers, when they changed.

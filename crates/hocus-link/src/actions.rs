@@ -343,7 +343,7 @@ const WORKSPACE: &[&str] = &["espace de travail", "workspace"];
 const MOVE_SCREEN: &[&str] = &["déplacer", "moniteur", "move", "monitor", "display"];
 
 /// The actions, in each category's order.
-const ACTIONS: [Def; 65] = [
+const ACTIONS: [Def; 66] = [
     // The window.
     d(
         "close",
@@ -694,6 +694,15 @@ const ACTIONS: [Def; 65] = [
     )
     .step(Step::Agent)
     .shell(),
+    d(
+        "stop-agents",
+        "Arrêter tous les agents",
+        "Stop every agent",
+        &["agent", "arrêter", "stop", "mcp", "claude"],
+        C::Agents,
+        G::Agent,
+    )
+    .key("stop-agents"),
     // The bar.
     d(
         "terminal",

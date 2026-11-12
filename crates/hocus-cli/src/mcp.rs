@@ -190,7 +190,7 @@ impl Bridge {
         let version = LEGACY
             .iter()
             .find(|v| Some(**v) == asked)
-            .unwrap_or(&LEGACY[0]);
+            .unwrap_or(&"2025-11-25");
         self.protocol = Some(version);
         json!({
             "protocolVersion": version,
@@ -201,6 +201,7 @@ impl Bridge {
     }
 
     /// The revision agreed at `initialize`, if a client opened with it.
+    #[cfg(test)]
     pub fn protocol(&self) -> Option<&'static str> {
         self.protocol
     }
@@ -226,8 +227,8 @@ impl Bridge {
             "content": [{ "type": "text", "text": done.text }],
             "isError": done.error,
         });
-        if let Some(data) = done.data {
-            result["structuredContent"] = data;
+        if let (Some(data), Some(fields)) = (done.data, result.as_object_mut()) {
+            fields.insert("structuredContent".into(), data);
         }
         Ok(result)
     }
@@ -336,7 +337,17 @@ impl Bridge {
         stream
             .write_all(format!("{}\n", hocus_agents::mcp::opening(&self.agent)).as_bytes())
             .map_err(at)?;
-        let reader = BufReader::new(stream.try_clone().map_err(at)?);
+        let mut reader = BufReader::new(stream.try_clone().map_err(at)?);
+        // The compositor's hello first: what was written before it could
+        // be read by another of its threads.
+        let mut hello = String::new();
+        reader.read_line(&mut hello).map_err(at)?;
+        match serde_json::from_str::<Answer>(&hello) {
+            Ok(Answer {
+                id: 0, ok: Some(_), ..
+            }) => {}
+            _ => return Err(format!("{} does not serve agents", path.display())),
+        }
         Ok(Line {
             stream,
             reader,
@@ -583,7 +594,7 @@ mod tests {
             &mut b,
             r#"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
         );
-        assert_eq!(a["result"]["protocolVersion"], LEGACY[0]);
+        assert_eq!(a["result"]["protocolVersion"], "2025-11-25");
     }
 
     #[test]

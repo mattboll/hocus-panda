@@ -847,6 +847,7 @@ impl State {
         self.tell_desktops();
         self.tell_window_states(true);
         self.tell_agents();
+        self.tell_mcp();
         self.tell_bubbles_screen();
         self.tell_fullscreen_again();
         self.hand_kept_levels();
@@ -937,6 +938,8 @@ impl State {
             } => self.send_to_asked(id, &output, desktop),
             ToCompositor::WindowMenu(id) => self.window_menu_asked(id),
             ToCompositor::Action(run) => self.action_asked(run),
+            ToCompositor::McpUndo(request) => self.mcp_undo(request),
+            ToCompositor::McpStop(stop) => self.mcp_stop(stop),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
             ToCompositor::Ring(row) => self.ring_moved(&row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
