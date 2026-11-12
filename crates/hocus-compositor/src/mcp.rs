@@ -258,8 +258,9 @@ pub struct Mcp {
     done: VecDeque<Request>,
     next_request: u64,
     toast: Option<(McpToast, RegistrationToken)>,
-    /// What the shell was told last.
+    /// What the shell was told last, and whether something changed since.
     pub told: Option<McpShown>,
+    dirty: bool,
     ring_ids: RingIds,
 }
 
@@ -320,6 +321,7 @@ fn rect_json(r: Rect) -> Value {
 
 impl State {
     pub(crate) fn mcp_heard(&mut self, from: FromAgent) {
+        self.mcp.dirty = true;
         match from {
             FromAgent::Opened { session, agent, to } => {
                 tracing::info!(agent, session, "an MCP agent connects");
@@ -362,7 +364,11 @@ impl State {
 
     /// An agent's row, made the first time it is seen.
     fn mcp_seen(&mut self, agent: &str) {
-        if self.mcp.seen.iter().any(|s| s.name == agent) {
+        // An agent the configuration does not name has no row: only its
+        // refusals are kept.
+        if self.mcp.seen.iter().any(|s| s.name == agent)
+            || !self.config.agents.mcp.iter().any(|a| a.name == agent)
+        {
             return;
         }
         let id = self.mcp.seen.len() as u64 + 1;
@@ -485,6 +491,7 @@ impl State {
         if let Some(why) = self.mcp_refusal(&agent, &call) {
             return self.mcp_refuse(session, asked.id, &agent, &call, why);
         }
+        self.mcp_seen(&agent);
         if !call.acts() {
             let result = self.mcp_read(session, asked.id, &agent, &call);
             if let Some(result) = result {
@@ -780,6 +787,7 @@ impl State {
 
     /// The action shown has shown long enough: done, if it still may be.
     fn mcp_shown_long_enough(&mut self) {
+        self.mcp.dirty = true;
         let Some(showing) = self.mcp.showing.take() else {
             return;
         };
@@ -793,6 +801,12 @@ impl State {
                 &waiting.call,
                 why,
             );
+            self.mcp_after(&waiting.agent);
+            return self.mcp_next();
+        }
+        // What it touches may have gone meanwhile (a window closed).
+        if let Err(why) = self.mcp_check(&waiting.call) {
+            self.mcp_answer(waiting.session, waiting.id, Err(why));
             self.mcp_after(&waiting.agent);
             return self.mcp_next();
         }
@@ -1190,6 +1204,7 @@ impl State {
 
     /// `agent`'s request settles: its toast, its journal's line.
     fn mcp_settle(&mut self, agent: &str) {
+        self.mcp.dirty = true;
         // An action still shown or written for it: later.
         let pending = self
             .mcp
@@ -1291,6 +1306,7 @@ impl State {
 
     /// "Annuler": request `id` put back as it was.
     pub(crate) fn mcp_undo(&mut self, id: u64) {
+        self.mcp.dirty = true;
         let Some(index) = self.mcp.done.iter().position(|r| r.id == id && !r.undone) else {
             tracing::debug!(request = id, "nothing to undo");
             return;
@@ -1398,6 +1414,7 @@ impl State {
             return;
         }
         self.mcp.stopped = stop;
+        self.mcp.dirty = true;
         tracing::info!(stopped = stop, "the MCP agents");
         if !stop {
             return;
@@ -1445,6 +1462,9 @@ impl State {
 
     /// Tells the shell what the agents show, when it changed this turn.
     pub fn flush_mcp(&mut self) {
+        if !std::mem::take(&mut self.mcp.dirty) {
+            return;
+        }
         let shown = self.mcp_shown();
         if self.mcp.told.as_ref() == Some(&shown) {
             return;

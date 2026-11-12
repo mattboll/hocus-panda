@@ -124,7 +124,9 @@ shortcuts, so it cannot press it.
 ## Limits
 
 One action at a time per agent, the next waiting for the one shown; an
-agent whose connection ends is forgotten, its journal kept. Undo applies
+agent whose connection ends has what it waited for dropped; its row
+and its journal stay for the session. An agent the configuration does
+not name has no row. Undo applies
 to a request's actions as they were left: a window moved since by the
 user goes back too, a window closed since is skipped. Settings' undo
 writes the file as the Settings would; the Settings' recent changes do
