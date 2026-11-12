@@ -9,7 +9,7 @@ langue").
 
 | Group | Effect | Key | Ticket |
 |---|---|---|---|
-| The wallpaper | Neige qui tient | `snow` | #795 |
+| The wallpaper | Neige qui tient | `snow` | #795 (built) |
 | | Aurore en musique | `aurora` | #801 |
 | | Pluie sur la vitre | `rain-on-glass` | #802 |
 | | Bassin de koïs | `koi` | #803 |
@@ -38,6 +38,8 @@ Every effect follows the same rules (`State::effects_still`, in
 - none on the CPU: pixman draws no shader, and what would have played
   plays as it does without the effect (a closing window closes as
   standard);
+- none on a screen showing a fullscreen window, nor on a screen off:
+  what plays there waits;
 - never over what the user reads: around a window effect, nothing is
   drawn over the other windows nor the bar (each effect's shader is told
   their rectangles, the nearest eight, and draws nothing there), and a
@@ -47,7 +49,11 @@ Every effect follows the same rules (`State::effects_still`, in
   asked for.
 
 An effect is decided as it starts: a switch turned off, or a rule that
-starts holding, leaves one under way to end.
+starts holding, leaves one under way to end. An effect that lasts (the
+snow) follows its switch at once, and the rules as they change: with
+reduced motion it is drawn still (what lies stays, nothing falls), and
+in the power saver or while a screen is shared or recorded it is not
+drawn, and waits.
 
 ## How a window effect is drawn
 
@@ -71,6 +77,31 @@ starts holding, leaves one under way to end.
   windows: on the wallpaper only.
 - **Where they may draw** (`draw.rs`, `Clip`): a rectangle to stay
   within, and the other windows' and the bar's to stay out of.
+- **Shapes drawn in one call** (`mesh.rs`, the `SHAPES` program): indexed
+  triangles whose vertices say what each pixel is: a fill of their own
+  colours (smoothed by a fringe of transparent vertices), a soft disc, a
+  clump lit from its upper left, a box blurred by a Gaussian. Drawn over
+  what is under them, then added to it; cut to the frame's damage (a
+  scissor each rectangle), never blended twice over what the frame kept.
+- **The layer under the windows** (`render/snow.rs`): drawn over the
+  wallpaper and the layers under the windows, under the windows and the
+  bar, on each screen where an effect on it shows (not one showing a
+  fullscreen window); in the frames of the screen alone. The glass of the
+  bar and of the popovers is blurred from what is behind it with a blank
+  in the layer's place, put back once the glass is done: the glass is not
+  blurred again at each of the layer's frames. Nothing is drawn while
+  nothing on it moves (its picture changes only as its effect steps).
+- **Decorations on a window's edge** (`render/snow.rs`): each drawn right
+  in front of what holds it (its window among the windows, the bar right
+  in front of the bar), where it is drawn this frame (sliding with its
+  desktop, fading with it): a window in front covers it, and it never
+  covers another. It shows above the edge, and of the window itself on
+  its top 8 px alone (`REACH_BELOW`, below which the shader draws
+  nothing): never on a title's text, nor on what the window shows.
+- **The windows' motion** (`motion.rs`): each window's velocity and
+  acceleration from where it is drawn frame to frame (a frame counting
+  for 1/30 s at most; its velocity smoothed over 25 ms: a window dragged
+  slowly moves by whole pixels, one frame in three, which is no jolt).
 
 The fragment shaders compute in high precision: Mesa's software device
 takes `mediump` as 16 bits, whose squared distances overflow past 256 px.
@@ -114,9 +145,53 @@ untouched, gone within 5 s and nothing drawn after; on pixman, with reduced moti
 close); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only effects::shots`.
 
+## Snow that settles (#795)
+
+With `snow = true`, snow falls behind the windows and settles on them,
+as the board "Neige qui tient" does: its JS ported, its lengths in
+logical pixels (`effects/snow.rs` the simulation, `snow_look.rs` its
+drawing, `snowing.rs` where it falls).
+
+- **Falling**: as many flakes as the board's 520 over 1200 × 720, each at
+  a depth from far to near (its size, its speed and its alpha: 16 to
+  86 px/s, 25 to 90 %), drifting with the wind's gusts and its own sway;
+  far and middle ones small soft discs, near ones larger and softer.
+  Drawn on the layer under the windows.
+- **Settling**: the flakes of the middle plane land on the top edges of
+  the windows (front first) and of the bar (inset 6 px), else on the
+  ground at the bottom of the screen. Each is a heightfield: a column
+  every 4 px on an edge (24 px at most), every 6 px on the ground (46 px
+  at most, rolling as it starts); its slopes slide to their angle of
+  repose a step at a time, an edge's two ends thinned.
+- **Its caps**: smoothed by a 9-tap blur, along quadratic curves, white
+  at their peak to blue at their base (2 px below the edge), a white
+  highlight along their top, a soft shadow on the edge (5 px, blurred
+  3 px), and a glint now and then where the snow lies 3 px deep or more.
+  The ground: white 50 px up to blue at the bottom.
+- **Shedding**: a window whose acceleration passes 2600 px/s² sheds its
+  snow, all of it beyond 11 600: in clumps thrown up and along with its
+  speed, which fall with gravity (behind the windows), break in four on
+  the ground when big and grow it.
+- **Starting**: as it is turned on (and on a screen that comes), its piles
+  are grown as if it had snowed 50 s: the board's warm-up, each landing
+  on the highest edge under it.
+- **Stepped** at 60 steps a second from its start with a seeded generator
+  (on the tests' held clock too), on the screens that are on and show no
+  fullscreen window; a frame is drawn as it steps.
+- A cap follows its window as it moves and slides with its desktop; a
+  window sent to another desktop takes its cap along, kept while out of
+  sight; a minimised or closed window's goes. A window opening starts
+  bare. With reduced motion the piles are drawn still: no flakes, no
+  clumps, no glints, nothing drawn frame after frame.
+
+Tests: `tests/snow.rs` (on GLES on Mesa's software device: a cap grows
+and the window's pixels below its top 8 px stay as they were; a window
+shaken sheds its snow in clumps, and moved slowly does not; off, on
+pixman or still, nothing drawn frame after frame); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
+snow::shots`.
+
 ## Not built yet
 
-The animated layer under the windows (over the wallpaper, on the
-screens where it shows) comes with the snow (#795); the decorations
-around a window's edges with the garland (#799); the others with their
-tickets.
+The garland (#799) hangs under the active window as an edge's
+decoration; the other effects come with their tickets.

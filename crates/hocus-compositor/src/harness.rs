@@ -263,6 +263,31 @@ impl Headless {
             .count()
     }
 
+    /// Whether it snows (#795): the snow kept, falling or still.
+    pub fn snowing(&self) -> bool {
+        self.app.state.fx.snow.is_some()
+    }
+
+    /// How much snow window `id`'s cap holds, square logical pixels.
+    pub fn snow_cap(&self, id: WindowId) -> Option<f32> {
+        let snow = self.app.state.fx.snow.as_ref()?;
+        Some(
+            snow.caps
+                .get(&crate::effects::snow::Holder::Window(id))?
+                .volume(),
+        )
+    }
+
+    /// The clumps of snow falling now, on every screen.
+    pub fn snow_clumps(&self) -> usize {
+        self.app
+            .state
+            .fx
+            .snow
+            .as_ref()
+            .map_or(0, |s| s.fields.values().map(|f| f.clumps.len()).sum())
+    }
+
     /// Whether window `app_id` opens in a rain now.
     pub fn raining(&self, app_id: &str) -> bool {
         self.app.state.windows.values().any(|m| {

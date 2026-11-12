@@ -4,8 +4,11 @@
 //!
 //! What they share: when they may play ([`State::effects_still`]), the
 //! window pass that draws a window's picture through a shader of its own
-//! ([`draw::Fire`]), and the particles ([`particles`]). Built with its
-//! first effect, closing a window in flames ([`flames`], #794).
+//! ([`draw::Fire`]), the particles ([`particles`]) and the shapes drawn in
+//! one call ([`mesh`]), the layer under the windows and the decorations on
+//! their edges (`crate::render::snow`), and the windows' motion
+//! ([`motion`]). Built with its first effects: closing a window in flames
+//! ([`flames`], #794), snow that settles ([`snow`], #795).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -16,9 +19,25 @@
 
 pub mod draw;
 pub mod flames;
+pub mod mesh;
+pub mod motion;
 pub mod particles;
+pub mod snow;
+pub mod snow_look;
+pub mod snowing;
 
 pub use draw::{Fire, FireElement};
+
+/// What the effects playing now keep from frame to frame.
+#[derive(Debug, Default)]
+pub struct Live {
+    /// The windows' motions, followed while an effect reacts to them.
+    pub motions: motion::Motions,
+    /// The snow, while it is on (#795).
+    pub snow: Option<snow::Snow>,
+    /// The snows started so far, for their seeds.
+    snows: u64,
+}
 
 use crate::{State, model::Mode, model::WindowId};
 

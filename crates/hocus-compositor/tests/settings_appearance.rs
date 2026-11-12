@@ -404,26 +404,31 @@ fn the_page_shows_its_groups_and_choosing_light_turns_the_desktop_light() -> any
     Ok(())
 }
 
-/// The effects (#793): off by default; the flames' switch writes
-/// `[effects] flames`, the effects not built yet are inert.
+/// The effects (#793): off by default; the snow's and the flames'
+/// switches write `[effects] snow` and `flames`, the effects not built yet
+/// are inert.
 #[test]
-fn the_flames_switch_writes_its_key_and_the_effects_to_come_are_inert() -> anyhow::Result<()> {
+fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
     let shown = bed.open()?;
-    assert_eq!(row(&shown, "effects.flames")["value"], "non");
-    assert_eq!(row(&shown, "effects.flames")["inert"], false);
-    assert_eq!(row(&shown, "effects.snow")["inert"], true);
+    for live in ["effects.snow", "effects.flames"] {
+        assert_eq!(row(&shown, live)["value"], "non", "{live}");
+        assert_eq!(row(&shown, live)["inert"], false, "{live}");
+    }
+    assert_eq!(row(&shown, "effects.aurora")["inert"], true);
     assert_eq!(row(&shown, "effects.creatures")["inert"], true);
     bed.click("control:effects.flames")?;
     let text = bed.written(|t| t.contains("[effects]\nflames = true"))?;
     assert!(text.starts_with("# My desktop, by hand."), "{text}");
-    // A switch to come takes no click.
     bed.click("control:effects.snow")?;
+    bed.written(|t| t.contains("snow = true") && t.contains("flames = true"))?;
+    // A switch to come takes no click.
+    bed.click("control:effects.aurora")?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     let text = std::fs::read_to_string(bed.file())?;
-    assert!(!text.contains("snow"), "{text}");
+    assert!(!text.contains("aurora"), "{text}");
     Ok(())
 }
 
@@ -785,8 +790,8 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The effects' rows for the maintainer (#793), into `HOCUS_SHOTS`: the
-/// flames on, the others to come.
+/// The effects' rows for the maintainer (#793, #795), into `HOCUS_SHOTS`:
+/// the snow and the flames on, the others to come.
 #[test]
 #[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
 fn screenshots_of_the_effects() -> anyhow::Result<()> {
@@ -794,35 +799,42 @@ fn screenshots_of_the_effects() -> anyhow::Result<()> {
         return Ok(());
     };
     std::fs::create_dir_all(&out)?;
-    let Some(mut bed) = Bed::start(&format!("{FILE}\n[effects]\nflames = true\n"))? else {
+    let Some(mut bed) = Bed::start(&format!("{FILE}\n[effects]\nsnow = true\nflames = true\n"))?
+    else {
         return Ok(());
     };
     bed.open()?;
-    bed.reveal("row:effects.creatures")?;
-    bed.hp.pointer_move(400.0, 1060.0);
-    common::at_rest(&mut bed.hp)?;
-    wait(&mut bed.hp, Duration::from_millis(500))?;
-    let window = bed.window()?;
-    let (w, h, bytes) = bed.hp.screenshot(0)?;
-    let rgba: Vec<u8> = bytes
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| [p[2], p[1], p[0], 255])
-        .collect();
-    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
-        .ok_or_else(|| anyhow::anyhow!("no image"))?;
-    let image = image::imageops::crop_imm(
-        &image,
-        window.x.max(0) as u32,
-        window.y.max(0) as u32,
-        window.width as u32,
-        window.height as u32,
-    )
-    .to_image();
-    let path = out.join("settings-effects.png");
-    image.save(&path)?;
-    eprintln!("{}", path.display());
+    // The wallpaper's group, the snow on; then the rest down to the agents.
+    for (row, name) in [
+        ("row:effects.depth", "settings-effects-snow"),
+        ("row:effects.creatures", "settings-effects"),
+    ] {
+        bed.reveal(row)?;
+        bed.hp.pointer_move(400.0, 1060.0);
+        common::at_rest(&mut bed.hp)?;
+        wait(&mut bed.hp, Duration::from_millis(500))?;
+        let window = bed.window()?;
+        let (w, h, bytes) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+            .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        let image = image::imageops::crop_imm(
+            &image,
+            window.x.max(0) as u32,
+            window.y.max(0) as u32,
+            window.width as u32,
+            window.height as u32,
+        )
+        .to_image();
+        let path = out.join(format!("{name}.png"));
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+    }
     Ok(())
 }
 

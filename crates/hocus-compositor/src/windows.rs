@@ -1476,6 +1476,8 @@ impl State {
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
+        // The snow (#795).
+        moving |= self.tick_snow(now);
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         self.departures.leaving.retain(|l| match &l.burn {
