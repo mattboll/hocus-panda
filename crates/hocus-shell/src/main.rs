@@ -809,7 +809,7 @@ impl Shell {
                 Task::none()
             }
             ToShell::Mcp(shown) => Task::batch(
-                popover::messages(mcp::set(shown))
+                popover::messages(mcp::set(*shown))
                     .into_iter()
                     .map(Task::done),
             ),

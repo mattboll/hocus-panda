@@ -47,6 +47,8 @@ resvg.workspace = true
 # The screen capture (5.8): its PNG, cut and put together off the loop;
 # PNG alone of the codecs, as the shell's (MIT or Apache-2.0).
 image = { workspace = true, features = ["png", "jpeg"] }
+# An MCP agent's capture of a window, as base64 in its answer.
+base64.workspace = true
 # The capture's file names say when, in local time (MIT or Unlicense), as
 # the shell's clock reads it.
 jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }

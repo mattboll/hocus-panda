@@ -148,6 +148,7 @@ impl State {
                 hocus_link::TIP_NAMESPACE => Some((own, hocus_link::TIP_RADIUS)),
                 hocus_link::MCP_TAG_NAMESPACE => Some((own, hocus_link::MCP_TAG_RADIUS)),
                 hocus_link::MCP_TOAST_NAMESPACE => Some((own, hocus_link::MCP_TOAST_RADIUS)),
+                hocus_link::MCP_CARD_NAMESPACE => Some((own, hocus_link::MCP_CARD_RADIUS)),
                 hocus_link::CLOCK_NAMESPACE
                 | hocus_link::LEVELS_NAMESPACE
                 | hocus_link::CONNECTIONS_NAMESPACE

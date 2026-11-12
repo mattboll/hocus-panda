@@ -314,7 +314,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             output,
             size,
             at: (x, y),
-            toast,
+            kind,
         } => vec![Message::NewLayerShell {
             settings: NewLayerShellSettings {
                 size: Some(size),
@@ -323,21 +323,19 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 // From the screen's corner, whatever the bar keeps.
                 exclusive_zone: Some(-1),
                 margin: Some((y.max(0), 0, 0, x.max(0))),
-                keyboard_interactivity: KeyboardInteractivity::None,
+                // The card takes the keyboard once clicked, never before.
+                keyboard_interactivity: if kind == crate::mcp::Surface::Card {
+                    KeyboardInteractivity::OnDemand
+                } else {
+                    KeyboardInteractivity::None
+                },
                 output_option: if output == crate::ALONE {
                     OutputOption::Active
                 } else {
                     OutputOption::OutputName(output)
                 },
-                events_transparent: !toast,
-                namespace: Some(
-                    if toast {
-                        hocus_link::MCP_TOAST_NAMESPACE
-                    } else {
-                        hocus_link::MCP_TAG_NAMESPACE
-                    }
-                    .to_owned(),
-                ),
+                events_transparent: kind == crate::mcp::Surface::Tag,
+                namespace: Some(kind.namespace().to_owned()),
             },
             id,
         }],

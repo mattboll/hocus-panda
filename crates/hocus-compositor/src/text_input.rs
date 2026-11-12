@@ -10,19 +10,25 @@
 //! state itself. A real input method (fcitx5, IBus) has no place yet: that
 //! would be smithay's relay, with the picker beside it.
 //!
+//! Each text input is its seat's: the user's, or an MCP agent's own
+//! (docs/design/mcp.md), whose inputs follow the agent's keyboard alone and
+//! say, through their content's purpose, whether a field is for a
+//! password, which an agent's typing then asks the user about.
+//!
 //! The protocol's rules kept: a text input enters the surface holding the
 //! keyboard when it is its client's, and leaves it when the keyboard goes;
 //! what a client asks takes effect on its `commit`, `enable` resetting
 //! what it said before; `done` carries the number of commits received.
 
 use smithay::{
+    input::Seat,
     reexports::{
         wayland_protocols::wp::text_input::zv3::server::{
             zwp_text_input_manager_v3::{self, ZwpTextInputManagerV3},
             zwp_text_input_v3::{self, ZwpTextInputV3},
         },
         wayland_server::{
-            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, WEnum,
             backend::ClientId, protocol::wl_surface::WlSurface,
         },
     },
@@ -41,6 +47,11 @@ pub struct TextInputs {
 #[derive(Debug)]
 struct Input {
     resource: ZwpTextInputV3,
+    /// An agent's seat's, not the user's.
+    agent: Option<Seat<State>>,
+    /// As of its last commit: its field is for a password or a PIN.
+    secret: bool,
+    pending_secret: Option<bool>,
     /// The surface it entered, if it is in one.
     entered: Option<WlSurface>,
     /// As of its last commit: enabled, and its caret (surface-local).
@@ -61,7 +72,18 @@ impl TextInputs {
     fn active(&self, surface: &WlSurface) -> Option<&Input> {
         self.inputs
             .iter()
-            .find(|i| i.enabled && i.entered.as_ref() == Some(surface))
+            .find(|i| i.agent.is_none() && i.enabled && i.entered.as_ref() == Some(surface))
+    }
+
+    /// Whether agent seat `seat`'s text input in `surface` is enabled for
+    /// a password or a PIN, as its client last committed.
+    pub fn secret_for(&self, seat: &Seat<State>, surface: &WlSurface) -> bool {
+        self.inputs.iter().any(|i| {
+            i.agent.as_ref() == Some(seat)
+                && i.enabled
+                && i.secret
+                && i.entered.as_ref() == Some(surface)
+        })
     }
 
     /// Where the caret of `surface`'s enabled text input is, surface-local.
@@ -113,7 +135,12 @@ impl TextInputs {
     /// The keyboard went to `focus`: the text inputs in the surface it left
     /// leave it, those of its client enter it.
     pub fn focus_changed(&mut self, focus: Option<&WlSurface>) {
-        for input in &mut self.inputs {
+        self.focus_changed_on(None, focus);
+    }
+
+    /// The keyboard of `agent`'s seat (the user's: `None`) went to `focus`.
+    pub fn focus_changed_on(&mut self, agent: Option<&Seat<State>>, focus: Option<&WlSurface>) {
+        for input in self.inputs.iter_mut().filter(|i| i.agent.as_ref() == agent) {
             if let Some(old) = &input.entered
                 && Some(old) != focus
             {
@@ -169,10 +196,21 @@ impl Dispatch<ZwpTextInputManagerV3, ()> for State {
         _: &DisplayHandle,
         data_init: &mut DataInit<'_, Self>,
     ) {
-        if let zwp_text_input_manager_v3::Request::GetTextInput { id, .. } = request {
+        if let zwp_text_input_manager_v3::Request::GetTextInput { id, seat } = request {
             let resource = data_init.init(id, ());
+            let agent = Seat::<State>::from_resource(&seat).filter(|s| *s != state.seat);
+            let focus = match &agent {
+                Some(agent) => agent
+                    .get_keyboard()
+                    .and_then(|k| k.current_focus())
+                    .and_then(|f| f.wl_surface().map(|s| s.into_owned())),
+                None => state.keyboard_surface(),
+            };
             let mut input = Input {
                 resource,
+                agent,
+                secret: false,
+                pending_secret: None,
                 entered: None,
                 enabled: false,
                 cursor: None,
@@ -182,7 +220,7 @@ impl Dispatch<ZwpTextInputManagerV3, ()> for State {
                 left_enabled: None,
             };
             // Its client may hold the keyboard already.
-            if let Some(surface) = state.keyboard_surface()
+            if let Some(surface) = focus
                 && surface.id().same_client_as(&input.resource.id())
             {
                 input.resource.enter(&surface);
@@ -216,6 +254,8 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
             zwp_text_input_v3::Request::Enable => {
                 input.pending_enable = Some(true);
                 input.pending_cursor = None;
+                // What it said of its content before is reset.
+                input.pending_secret = Some(false);
             }
             zwp_text_input_v3::Request::Disable => input.pending_enable = Some(false),
             zwp_text_input_v3::Request::SetCursorRectangle {
@@ -226,8 +266,18 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
             } => {
                 input.pending_cursor = Some(Rectangle::new((x, y).into(), (width, height).into()));
             }
+            zwp_text_input_v3::Request::SetContentType { purpose, .. } => {
+                use zwp_text_input_v3::ContentPurpose;
+                input.pending_secret = Some(matches!(
+                    purpose,
+                    WEnum::Value(ContentPurpose::Password | ContentPurpose::Pin)
+                ));
+            }
             zwp_text_input_v3::Request::Commit => {
                 input.commits = input.commits.wrapping_add(1);
+                if let Some(secret) = input.pending_secret.take() {
+                    input.secret = secret;
+                }
                 match input.pending_enable.take() {
                     Some(true) => {
                         input.enabled = input.entered.is_some();
@@ -237,6 +287,7 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
                     Some(false) => {
                         input.enabled = false;
                         input.cursor = None;
+                        input.secret = false;
                     }
                     None => {}
                 }
@@ -249,6 +300,9 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
                 }
                 let enabled = input.enabled;
                 let entered = input.entered.clone();
+                if input.agent.is_some() {
+                    return;
+                }
                 if enabled {
                     // An emoji may be waiting for it.
                     state.emoji_text_input_ready();
@@ -258,8 +312,8 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
                     state.magnifier_caret(&surface);
                 }
             }
-            // Surrounding text, its change's cause and the content's type
-            // are an input method's business: nothing here uses them.
+            // Surrounding text and its change's cause are an input
+            // method's business: nothing here uses them.
             _ => {}
         }
     }

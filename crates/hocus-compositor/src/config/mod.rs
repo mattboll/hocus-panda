@@ -135,6 +135,11 @@ pub struct Config {
     /// file.
     #[serde(skip)]
     pub pipewire_remote: Option<PathBuf>,
+    /// The accessibility bus MCP agents read applications' trees on, when
+    /// not the one the session's bus names (`org.a11y.Bus`): tests give
+    /// one of their own. Not part of the file.
+    #[serde(skip)]
+    pub a11y_bus: Option<String>,
     /// The videos' folder, where recordings are saved in a folder of their
     /// own (5.10): `$XDG_VIDEOS_DIR`, else xdg-user-dirs', else `~/Videos`.
     /// Not part of the file; `None` records nothing (tests, unless they
@@ -330,6 +335,48 @@ pub struct Agents {
     pub show_before_ms: u32,
     /// `[[agents.mcp]]`: the agents `hocus mcp --agent NAME` may serve.
     pub mcp: Vec<McpAgent>,
+    /// The applications (app ids, globs) where each click, typing, keys or
+    /// closing of an agent waits for the user's card: the settings and the
+    /// usual password managers by default.
+    #[serde(rename = "confirm-apps")]
+    pub confirm_apps: Vec<String>,
+}
+
+/// `[agents] confirm-apps`' default.
+pub const CONFIRM_APPS: [&str; 7] = [
+    "hocus-settings",
+    "org.keepassxc.KeePassXC",
+    "com.bitwarden.desktop",
+    "1password",
+    "org.gnome.seahorse.Application",
+    "org.gnome.World.Secrets",
+    "org.kde.kwalletmanager5",
+];
+
+impl Agents {
+    /// Whether an agent's input into `app_id` waits for the user.
+    pub fn confirms(&self, app_id: &str) -> bool {
+        self.confirm_apps.iter().any(|glob| app_glob(glob, app_id))
+    }
+}
+
+/// Whether `app_id` is one `glob` names: `*` for any run of characters,
+/// ignoring case (`org.mozilla.*`).
+pub fn app_glob(glob: &str, app_id: &str) -> bool {
+    fn from(glob: &[char], text: &[char]) -> bool {
+        match glob.split_first() {
+            None => text.is_empty(),
+            Some(('*', rest)) => {
+                (0..=text.len()).any(|i| from(rest, text.get(i..).unwrap_or_default()))
+            }
+            Some((c, rest)) => text
+                .split_first()
+                .is_some_and(|(t, more)| t.to_lowercase().eq(c.to_lowercase()) && from(rest, more)),
+        }
+    }
+    let glob: Vec<char> = glob.trim().chars().collect();
+    let text: Vec<char> = app_id.chars().collect();
+    !app_id.is_empty() && from(&glob, &text)
 }
 
 impl Default for Agents {
@@ -341,6 +388,7 @@ impl Default for Agents {
             pandas: true,
             show_before_ms: 600,
             mcp: Vec::new(),
+            confirm_apps: CONFIRM_APPS.iter().map(|a| (*a).to_owned()).collect(),
         }
     }
 }
@@ -356,6 +404,17 @@ pub struct McpAgent {
     /// Whether it may change settings.
     #[serde(default)]
     pub settings: bool,
+    /// The applications (app ids, globs) whose windows it may click and
+    /// type in and whose trees it reads; none by default.
+    #[serde(default)]
+    pub apps: Vec<String>,
+}
+
+impl McpAgent {
+    /// Whether its input may go into a window of `app_id`.
+    pub fn may_use(&self, app_id: &str) -> bool {
+        self.apps.iter().any(|glob| app_glob(glob, app_id))
+    }
 }
 
 /// What an MCP agent may do.
@@ -1042,14 +1101,22 @@ mod tests {
                     name: "Claude".into(),
                     access: super::McpAccess::Act,
                     settings: true,
+                    apps: Vec::new(),
                 },
                 super::McpAgent {
                     name: "look".into(),
                     access: super::McpAccess::Read,
                     settings: false,
+                    apps: Vec::new(),
                 },
             ]
         );
+        assert!(super::app_glob("org.mozilla.*", "org.mozilla.firefox"));
+        assert!(super::app_glob("KITTY", "kitty"));
+        assert!(!super::app_glob("kitty", "kitty-2"));
+        assert!(!super::app_glob("*", ""));
+        assert!(Agents::default().confirms("org.keepassxc.KeePassXC"));
+        assert!(!Agents::default().confirms("kitty"));
         assert_eq!(
             Remind::Two.after(),
             Some(std::time::Duration::from_secs(120))

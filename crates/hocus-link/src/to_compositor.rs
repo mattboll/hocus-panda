@@ -196,6 +196,10 @@ pub enum ToCompositor {
     /// "Tout arrêter" (`true`), or "Reprendre" (`false`): every MCP agent
     /// stopped, or let go on.
     McpStop(bool),
+    /// The user answered card `card` (docs/design/mcp.md, scene 3).
+    McpReply { card: u64, reply: crate::McpReply },
+    /// "Rendre la main": agent `0`'s actions go on.
+    McpHandBack(String),
 }
 
 impl ToCompositor {

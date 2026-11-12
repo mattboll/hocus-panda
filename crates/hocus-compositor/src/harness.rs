@@ -554,6 +554,16 @@ impl Headless {
         self.app.state.mcp_shown()
     }
 
+    /// The user answers an MCP agent's card, as its buttons do.
+    pub fn mcp_reply(&mut self, card: u64, reply: hocus_link::McpReply) {
+        self.app.state.mcp_reply(card, reply);
+    }
+
+    /// « Rendre la main » to MCP agent `agent`.
+    pub fn mcp_hand_back(&mut self, agent: &str) {
+        self.app.state.mcp_hand_back(agent);
+    }
+
     pub fn agents_peek(&self) -> Vec<hocus_link::AgentShown> {
         self.app.state.agents.told.clone().unwrap_or_default()
     }

@@ -5,7 +5,9 @@
 //! the last requests and refusals, newest first: a dot in the agent's
 //! violet (red when refused), "Claude · rangé 3 fenêtres", where or why
 //! under it, "Annuler" while the request can be undone, its time on the
-//! right. 300 px wide, 12 px in, its lines 6 × 4 px in.
+//! right. 300 px wide, 12 px in, its lines 6 × 4 px in. While the user
+//! has taken over from an agent, a line under the head says so, with
+//! « Rendre la main ».
 //!
 //! Built with the shell's widget kit ([`crate::ui`]).
 
@@ -65,19 +67,24 @@ fn entry_height() -> f32 {
 
 /// Its height for what it lists now.
 pub fn height() -> u32 {
-    let lines = crate::mcp::shown().journal.len().min(MOST);
+    let shown = crate::mcp::shown();
+    let taken = shown.taken.len() as f32 * (SUB * LINE + GAP);
+    let lines = shown.journal.len().min(MOST);
     let list = if lines == 0 {
         SAID * LINE + GAP
     } else {
         lines as f32 * entry_height()
     };
-    (BORDER + PAD + head_height() + 4.0 + SUB * LINE + GAP + list + PAD + BORDER).ceil() as u32
+    (BORDER + PAD + head_height() + 4.0 + SUB * LINE + GAP + taken + list + PAD + BORDER).ceil()
+        as u32
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Stop,
     Undo(u64),
+    /// « Rendre la main » to the agent of `taken`'s place.
+    HandBack(usize),
 }
 
 impl Target {
@@ -184,6 +191,31 @@ fn build<'a>(words: Words) -> El<'a> {
         Role::Label,
         words.today(shown.stopped),
     );
+    let mut taken = column![];
+    for (i, agent) in shown.taken.iter().enumerate() {
+        let target = Target::HandBack(i);
+        let back = button(style::said(
+            words.hand_back().to_owned(),
+            SUB,
+            MANROPE_BOLD,
+            AGENT.get(),
+        ))
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(target));
+        let back = control(back, target.id(), Role::Button, words.hand_back())
+            .focus(focus == Some(target), Msg::Focus(target), 4.0)
+            .activate(Msg::Act(target));
+        taken = taken.push(
+            row![
+                style::said(words.taken_note(agent), SUB, MANROPE, TEXT.get()),
+                space::horizontal(),
+                back,
+            ]
+            .align_y(Vertical::Center)
+            .height(SUB * LINE + GAP),
+        );
+    }
     let mut list = column![];
     if shown.journal.is_empty() {
         list = list.push(
@@ -207,6 +239,7 @@ fn build<'a>(words: Words) -> El<'a> {
         Space::new().height(4.0),
         sub,
         Space::new().height(GAP),
+        taken,
         list
     ])
     .padding(BORDER + PAD)
@@ -316,6 +349,12 @@ fn handle(message: Msg) {
             let stop = !crate::mcp::shown().stopped;
             tracing::info!(stop, "the agents' journal stops them, or lets them go on");
             super::send(vec![Effect::Tell(ToCompositor::McpStop(stop))]);
+        }
+        Msg::Act(Target::HandBack(i)) => {
+            if let Some(agent) = crate::mcp::shown().taken.get(i).cloned() {
+                tracing::info!(agent, "the agents' journal hands back");
+                super::send(vec![Effect::Tell(ToCompositor::McpHandBack(agent))]);
+            }
         }
         Msg::Act(Target::Undo(request)) => {
             tracing::info!(request, "the agents' journal undoes a request");

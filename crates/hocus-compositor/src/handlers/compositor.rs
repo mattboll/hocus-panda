@@ -63,6 +63,8 @@ impl CompositorHandler for State {
             if let Some(window) = self.window_for(&root) {
                 window.on_commit();
                 self.window_commits += 1;
+                // An MCP agent's capture may wait for it to draw.
+                self.mcp_committed(&root);
                 self.perf.counters.app_commit();
                 // Raining (#432): its picture is drawn again.
                 if let Some(rain) = self

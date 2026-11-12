@@ -1050,6 +1050,18 @@ impl TtyBackend {
                 state.capture.take_pending();
             }
         }
+        // An MCP agent's capture of a window, the same way.
+        if state.mcp_shots_pending() {
+            if !self.active {
+                state.mcp_shots_refused("the session is in the background: nothing captured");
+            } else if with_renderer!(&mut self.drawing, |r, share, Target| {
+                crate::mcp::capture::take::<_, Target>(r, state)
+            })
+            .is_none()
+            {
+                state.mcp_shots_refused("no renderer: nothing captured");
+            }
+        }
         // Screen sharing's thumbnails and frames (5.11): none while another
         // terminal shows.
         if self.active {
