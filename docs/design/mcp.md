@@ -37,6 +37,16 @@ Claude Code in, with the user's click:
 claude mcp add --scope user hocuspanda -- hocus mcp --agent Claude
 ```
 
+## Out of sight (#790)
+
+An agent works without moving what the user sees. `launch` with a
+`desktop` opens the application's first window on that desktop (its id,
+the id's last part or its entry's `StartupWMClass`, within 30 s), without
+the keyboard; the desktop the user sees stays. `switch_desktop`, and
+`focus_window` on a window of another desktop, change what the user sees:
+their descriptions tell the client to call them only when the user asked
+(the desktop cannot check).
+
 ## Rights
 
 ```toml
@@ -80,7 +90,7 @@ is the tool's result, `isError: true`, its text saying why.
 | `focus_window` | `window`, `intent` | brought forward with the keyboard; a minimised one comes back |
 | `move_window` | `window`, `x`, `y`, `width`, `height` (any of them), `desktop`, `intent` | moved and sized (a snapped or maximised window floats first), and/or sent to that desktop of its screen; its new `geometry` and `desktop` |
 | `switch_desktop` | `desktop`, `output` (default the focused window's screen), `intent` | that screen shows it |
-| `launch` | `app` (a desktop entry's id, else its name, ignoring case), `intent` | started, as the launcher starts it |
+| `launch` | `app` (a desktop entry's id, else its name, ignoring case), `desktop`, `output` (default the pointer's screen), `intent` | started, as the launcher starts it; with `desktop`, its first window opens there |
 | `set_setting` | `key` (`appearance.theme`), `value`, `intent` | written into the configuration file in place (hocus-config), `before` and `after`. Only keys `packaging/config.toml` lists, with a value of their default's type |
 
 There is no `arrange`: an agent composes moves. Lot B's tools are under
