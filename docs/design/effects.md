@@ -153,15 +153,18 @@ board "Fenêtres en gelée" does: its spring mesh ported
 (`effects/jelly.rs`), drawn by the wobble's bent mesh (`wobble.rs`), its
 lengths in logical pixels.
 
-- 22 × 16 points over the window, each pulled to its place on the rigid
-  window by a damped spring: held, stiffest near the hand (`22 + 1100
-  e^(-d/55)`, damped `3.2 + 12 e^(-d/90)`), the points within 6 px of it
-  pinned; let go, all at 120 damped 5.5, a few swings before it lies
-  still. Neighbours along a row are kept near their spacing (8 % of the
-  gap a step). Stepped 180 times a second (the board's three a frame).
-- The grid's columns and rows are cut so that one of each passes under
-  the hand: the point held is pinned, and follows the pointer exactly
-  (the board's grid seldom has a point within 6 px of the hand).
+- 22 × 16 points even over the window, each pulled to its place on the
+  rigid window by a damped spring: held, stiffest near the hand (`22 +
+  1100 e^(-d/55)`, damped `3.2 + 12 e^(-d/90)`), the points within 6 px
+  of it pinned; let go, all at 120 damped 5.5, a few swings before it
+  lies still. Stepped 180 times a second (the board's three a frame).
+- The hand holds the window as the board's does, by that stiffness
+  falling off smoothly: the window under it follows the pointer closely
+  (some 10 px behind in a hard shake), with no crease.
+- Each point is pulled toward its four neighbours' displacements (300
+  /s²) where the board kept neighbours along a row near their spacing:
+  the board's pull, with a point lagging up or down, folded the sheet
+  into a zig-zag near the hand; this bends it smoothly.
 - Once every point is back at its place and still (0.5 px, 6 px/s),
   held or let go, the window is drawn as it is, not through the mesh: its
   text straight, pixel for pixel; and no frame is asked for while it is

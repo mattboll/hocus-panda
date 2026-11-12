@@ -5,15 +5,21 @@
 //! with a lag that grows away from it, then it settles in a few
 //! oscillations once let go.
 //!
-//! The board's model, its lengths in logical pixels: 22 × 16 points over
-//! the window, each pulled toward its place on the rigid window by a
+//! The board's model, its lengths in logical pixels: 22 × 16 points even
+//! over the window, each pulled toward its place on the rigid window by a
 //! damped spring, stiffest near the hand (`22 + 1100 e^(-d/55)`, damped
 //! `3.2 + 12 e^(-d/90)`), the points within 6 px of it pinned; let go, all
-//! at 120 damped 5.5; neighbours along a row kept near their spacing
-//! (8 % of the gap each step). Stepped at the board's pace, 180 steps a
-//! second (three a frame at 60 Hz), so that a moment is the same whatever
-//! the frames' pace. The grid's columns and rows are cut so that one of
-//! each passes under the hand: the point held is a point of the grid.
+//! at 120 damped 5.5. The hand holds the window as the board's does, by
+//! that stiffness falling off smoothly away from it: the window under it
+//! follows the pointer closely, and nothing creases there. Stepped at the
+//! board's pace, 180 steps a second (three a frame at 60 Hz), so that a
+//! moment is the same whatever the frames' pace.
+//!
+//! Where the board keeps neighbours along a row near their spacing (8 %
+//! of the gap a step, on their places), each point here is pulled toward
+//! its four neighbours' displacements instead: the board's pull, with a
+//! point lagging up or down, shortened the row and folded the sheet over
+//! itself into a zig-zag; this one bends it smoothly.
 
 use std::time::Duration;
 
@@ -28,8 +34,9 @@ const HELD_STIFF: (f64, f64, f64) = (22.0, 1100.0, 55.0);
 const HELD_DAMP: (f64, f64, f64) = (3.2, 12.0, 90.0);
 /// Points this near the hand go with it, logical pixels.
 const PINNED: f64 = 6.0;
-/// How much of a row's stretch is undone each step.
-const ROW: f64 = 0.08;
+/// How hard each point is pulled toward its neighbours' displacements,
+/// per second squared.
+const SHEET: f64 = 300.0;
 /// The step, the board's third of a 60 Hz frame; the longest time caught
 /// up in one frame.
 const STEP: Duration = Duration::from_nanos(5_555_556);
@@ -55,33 +62,17 @@ pub struct Gel {
     last: Duration,
 }
 
-/// `n` places from 0 to `len`, one of them at `at` (between, cut evenly
-/// on each side of it).
-fn cuts<const N: usize>(len: f64, at: f64) -> [f64; N] {
-    let cells = N - 1;
-    let at = at.clamp(0.0, len);
-    let lo = if at > 0.5 { 1 } else { 0 };
-    let hi = if at < len - 0.5 { cells - 1 } else { cells };
-    let before = ((at / len * cells as f64).round() as usize).clamp(lo, hi.max(lo));
-    std::array::from_fn(|i| {
-        if i <= before {
-            if before == 0 {
-                0.0
-            } else {
-                at * i as f64 / before as f64
-            }
-        } else {
-            at + (len - at) * (i - before) as f64 / (cells - before) as f64
-        }
-    })
+/// `N` places evenly from 0 to `len`.
+fn even<const N: usize>(len: f64) -> [f64; N] {
+    std::array::from_fn(|i| len * i as f64 / (N - 1) as f64)
 }
 
 impl Gel {
     /// A window `size` large held at `held` (from its corner, logical).
     pub fn new(size: (f64, f64), held: (f64, f64), now: Duration) -> Self {
         let (w, h) = (size.0.max(1.0), size.1.max(1.0));
-        let xs = cuts::<ACROSS>(w, held.0);
-        let ys = cuts::<DOWN>(h, held.1);
+        let xs = even::<ACROSS>(w);
+        let ys = even::<DOWN>(h);
         let mut springs = Vec::with_capacity(ACROSS * DOWN);
         for y in ys {
             for x in xs {
@@ -139,9 +130,11 @@ impl Gel {
 
     #[expect(
         clippy::indexing_slicing,
-        reason = "the points' vectors hold ACROSS × DOWN entries, k and k + 1 points of a row"
+        reason = "the points' vectors hold ACROSS × DOWN entries; k and its neighbours are \
+                  points of the grid"
     )]
     fn step(&mut self, h: f64) {
+        let last = self.d.clone();
         for k in 0..self.d.len() {
             let (stiff, damp, pinned) = if self.holding {
                 self.held[k]
@@ -153,40 +146,27 @@ impl Gel {
                 self.v[k] = (0.0, 0.0);
                 continue;
             }
-            let (dx, dy) = self.d[k];
+            let (i, j) = (k % ACROSS, k / ACROSS);
+            let (dx, dy) = last[k];
+            // Each point pulled toward its neighbours' displacements: the
+            // sheet bends smoothly, never folds.
+            let mut pull = (0.0, 0.0);
+            let neighbours = [
+                (i > 0).then(|| k - 1),
+                (i + 1 < ACROSS).then(|| k + 1),
+                (j > 0).then(|| k - ACROSS),
+                (j + 1 < DOWN).then(|| k + ACROSS),
+            ];
+            for n in neighbours.into_iter().flatten() {
+                pull.0 += last[n].0 - dx;
+                pull.1 += last[n].1 - dy;
+            }
             let (vx, vy) = self.v[k];
-            let vx = vx + (-dx * stiff - vx * damp) * h;
-            let vy = vy + (-dy * stiff - vy * damp) * h;
+            let vx = vx + (-dx * stiff + pull.0 * SHEET - vx * damp) * h;
+            let vy = vy + (-dy * stiff + pull.1 * SHEET - vy * damp) * h;
             let r = self.reach;
             self.v[k] = (vx, vy);
             self.d[k] = ((dx + vx * h).clamp(-r, r), (dy + vy * h).clamp(-r, r));
-        }
-        // Along each row, neighbours kept near their spacing: on the
-        // points' places, their speeds left as they are (the board's).
-        for j in 0..DOWN {
-            for i in 0..ACROSS - 1 {
-                let (a, b) = (j * ACROSS + i, j * ACROSS + i + 1);
-                let gap = self.xs[i + 1] - self.xs[i];
-                let dx = gap + self.d[b].0 - self.d[a].0;
-                let dy = self.d[b].1 - self.d[a].1;
-                let len = dx.hypot(dy);
-                if len <= f64::EPSILON {
-                    continue;
-                }
-                let e = (len - gap) / len * ROW;
-                self.d[a].0 += dx * e;
-                self.d[a].1 += dy * e;
-                self.d[b].0 -= dx * e;
-                self.d[b].1 -= dy * e;
-            }
-        }
-        // The point held stays under the hand.
-        if self.holding {
-            for (d, (_, _, pinned)) in self.d.iter_mut().zip(&self.held) {
-                if *pinned {
-                    *d = (0.0, 0.0);
-                }
-            }
         }
     }
 
@@ -248,19 +228,6 @@ mod tests {
         Duration::from_millis(n)
     }
 
-    #[test]
-    fn the_grid_passes_under_the_hand() {
-        let xs = cuts::<ACROSS>(480.0, 120.0);
-        assert_eq!((xs[0], xs[ACROSS - 1]), (0.0, 480.0));
-        assert!(xs.contains(&120.0));
-        assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
-        // At an edge, and a hair from it.
-        assert_eq!(cuts::<DOWN>(340.0, 0.0)[0], 0.0);
-        let near = cuts::<DOWN>(340.0, 2.0);
-        assert_eq!((near[0], near[1]), (0.0, 2.0));
-        assert!(cuts::<DOWN>(340.0, 340.0).windows(2).all(|w| w[0] < w[1]));
-    }
-
     /// The board's demo: held 120 px in on the title, shaken sideways; the
     /// point held follows, the far corner lags; let go, it swings past
     /// its place, and lies still within 2.5 s.
@@ -273,10 +240,25 @@ mod tests {
             gel.moved(to - x, 0.0, ms(t * 17));
             x = to;
         }
+        // Under the hand it follows closely (the board's weighting, no
+        // point pinned there), the far corner far behind.
         let (held, _) = gel.at(120.0, 14.0);
-        assert!(held.abs() < 1e-9, "{held}");
         let (far, _) = gel.at(480.0, 340.0);
         assert!(far.abs() > 30.0, "the far corner lags: {far}");
+        assert!(
+            held.abs() < far.abs() / 4.0,
+            "under the hand {held}, far {far}"
+        );
+        // Smooth along the top edge round the hand: no crease between
+        // neighbours.
+        let top: Vec<f64> = (0..=48)
+            .map(|i| gel.at(f64::from(i) * 10.0, 0.0).1)
+            .collect();
+        let bend = top
+            .windows(3)
+            .map(|w| (w[0] - 2.0 * w[1] + w[2]).abs())
+            .fold(0.0, f64::max);
+        assert!(bend < 3.0, "a crease on the top edge: {bend}");
         gel.release();
         let mut sign = far.signum();
         let mut swings = 0;
