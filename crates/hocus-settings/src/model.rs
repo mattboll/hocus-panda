@@ -1174,6 +1174,172 @@ mod tests {
         assert!(rows > 100, "{rows} rows");
     }
 
+    /// `hocus_config::labels`, the table the shell names settings with,
+    /// is these rows' keys, names and choices: written again with
+    /// `HOCUS_LABELS_WRITE=1`.
+    #[test]
+    fn the_labels_are_the_rows() {
+        let table = labels_table();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../hocus-config/src/labels_table.rs"
+        );
+        if std::env::var_os("HOCUS_LABELS_WRITE").is_some() {
+            std::fs::write(path, &table).expect("the table written");
+        }
+        let now = std::fs::read_to_string(path).unwrap_or_default();
+        assert!(
+            now == table,
+            "hocus-config's labels are not the rows: HOCUS_LABELS_WRITE=1 cargo test -p \
+             hocus-settings the_labels_are_the_rows"
+        );
+        // And what the lookup says is what the rows say, of each key one
+        // row writes alone.
+        let shared = shared_keys();
+        for setting in all_settings() {
+            for place in setting.places.all() {
+                if matches!(setting.places, Places::Page(_)) || shared.contains(&place.dotted()) {
+                    continue;
+                }
+                let label = hocus_config::labels::of(&place.dotted());
+                // A name made per desktop ("Bureau 3") is no constant of
+                // the catalogue: only the shortcuts', which no agent changes.
+                let Some(label) = label else {
+                    assert_eq!(
+                        place.key.first(),
+                        Some(&"shortcuts"),
+                        "{} has no label",
+                        setting.id
+                    );
+                    continue;
+                };
+                assert!(
+                    Lang::ALL
+                        .iter()
+                        .any(|l| label.name.get(*l) == setting.name.get(*l)),
+                    "{}",
+                    setting.id
+                );
+            }
+        }
+    }
+
+    /// The keys several rows write (`[keyboard] options`' families): the
+    /// table names none of them, a row's name saying only its part.
+    fn shared_keys() -> Vec<String> {
+        let mut seen: Vec<String> = Vec::new();
+        let mut shared = Vec::new();
+        for setting in all_settings() {
+            for place in setting.places.all() {
+                let key = place.dotted();
+                if seen.contains(&key) {
+                    shared.push(key);
+                } else {
+                    seen.push(key);
+                }
+            }
+        }
+        shared
+    }
+
+    /// The labels' table as Rust: each catalogue text by its constant.
+    fn labels_table() -> String {
+        use std::collections::BTreeMap;
+        // Each plain text of the catalogue, by what it says in every
+        // language: its constants' paths.
+        let mut by_said: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
+        let all: Vec<Vec<(String, String)>> =
+            Lang::ALL.iter().map(|l| hocus_words::every(*l)).collect();
+        for (i, (key, _)) in all[0].iter().enumerate() {
+            if key.contains('[') {
+                continue;
+            }
+            let said: Vec<String> = all.iter().map(|texts| texts[i].1.clone()).collect();
+            if said.iter().any(|t| t.contains('{')) {
+                continue;
+            }
+            by_said.entry(said).or_default().push(key.clone());
+        }
+        const KEYWORDS: [&str; 38] = [
+            "as", "async", "await", "break", "const", "continue", "dyn", "else", "enum", "extern",
+            "false", "fn", "for", "gen", "if", "impl", "in", "let", "loop", "match", "mod", "move",
+            "mut", "pub", "ref", "return", "static", "struct", "trait", "true", "type", "unsafe",
+            "use", "where", "while", "abstract", "final", "try",
+        ];
+        let text = |t: &Words| -> Option<String> {
+            let said: Vec<String> = Lang::ALL.iter().map(|l| t.get(*l).to_owned()).collect();
+            if let Some(key) = by_said.get(&said).and_then(|keys| keys.iter().min()) {
+                let mut parts: Vec<String> = key
+                    .split('.')
+                    .map(|p| {
+                        if KEYWORDS.contains(&p) {
+                            format!("r#{p}")
+                        } else {
+                            p.to_owned()
+                        }
+                    })
+                    .collect();
+                if let Some(last) = parts.last_mut() {
+                    *last = last.trim_start_matches("r#").to_ascii_uppercase();
+                }
+                return Some(format!("hocus_words::{}", parts.join("::")));
+            }
+            said.windows(2)
+                .all(|w| w[0] == w[1])
+                .then(|| format!("Text::same({:?})", said[0]))
+        };
+        let shared = shared_keys();
+        let mut rows: BTreeMap<String, String> = BTreeMap::new();
+        for setting in all_settings() {
+            if matches!(setting.places, Places::Page(_)) {
+                continue;
+            }
+            let Some(name) = text(&setting.name) else {
+                continue;
+            };
+            for place in setting.places.all() {
+                if shared.contains(&place.dotted()) {
+                    continue;
+                }
+                let said = match &setting.kind {
+                    Kind::Switch => "Said::Switch".to_owned(),
+                    Kind::Menu(choices) | Kind::Segmented(choices) => {
+                        let items: Vec<String> = choices
+                            .iter()
+                            .filter_map(|c| {
+                                let value = place.codec.write(&c.value)?;
+                                let value = match value.as_str() {
+                                    Some(word) => word.to_owned(),
+                                    None => value.decorated("", "").to_string(),
+                                };
+                                Some(format!("({value:?}, {})", text(&c.label)?))
+                            })
+                            .collect();
+                        format!("Said::Choices(&[{}])", items.join(", "))
+                    }
+                    Kind::Slider { unit, .. } => format!("Said::Number({unit:?})"),
+                    _ => "Said::Other".to_owned(),
+                };
+                rows.entry(place.dotted()).or_insert_with(|| {
+                    format!(
+                        "    Label {{\n        key: {:?},\n        name: {name},\n        said: {said},\n    }},\n",
+                        place.dotted()
+                    )
+                });
+            }
+        }
+        let mut out = String::from(
+            "// Generated from the Settings' rows: see `labels.rs`. Do not edit.\n\n\
+             /// Every key a row writes, in the dotted keys' order.\n\
+             pub const ALL: &[Label] = &[\n",
+        );
+        for row in rows.values() {
+            out.push_str(row);
+        }
+        out.push_str("];\n");
+        out
+    }
+
     #[test]
     fn values_are_said_in_both_languages() {
         assert_eq!(say_seconds(420, Lang::French), "7 min");

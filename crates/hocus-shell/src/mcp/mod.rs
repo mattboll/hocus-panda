@@ -326,43 +326,6 @@ pub fn toast_shows(request: u64) -> bool {
 
 // --- Words ---------------------------------------------------------------------
 
-/// How a setting's row says its value.
-enum Row {
-    Switch,
-    /// Its choices: the value as the file writes it, its label.
-    Choices(&'static [(&'static str, hocus_words::Text)]),
-    /// A count, said as it is.
-    Number,
-    /// Said by its name alone (a delay, a colour, a path).
-    Other,
-}
-
-/// The Settings' row of the settings agents most often change: its name
-/// and how it says its value, from the words catalogue the Settings show
-/// them with (crate `hocus-settings`' model, which the shell does not
-/// link).
-fn setting_row(key: &str) -> Option<(hocus_words::Text, Row)> {
-    use hocus_words::settings::{accessibility, appearance, desktops, power, screens};
-    const THEMES: &[(&str, hocus_words::Text)] = &[
-        ("dark", appearance::DARK),
-        ("light", appearance::LIGHT),
-        ("frost", appearance::FROST),
-        ("matrix", appearance::MATRIX),
-    ];
-    Some(match key {
-        "appearance.theme" => (appearance::THEME, Row::Choices(THEMES)),
-        "appearance.accent" => (appearance::ACCENT_COLOUR, Row::Other),
-        "appearance.high-contrast" => (accessibility::HIGH_CONTRAST, Row::Switch),
-        "appearance.reduced-motion" => (accessibility::REDUCED_MOTION, Row::Switch),
-        "appearance.reduce-transparency" => (accessibility::REDUCED_TRANSPARENCY, Row::Switch),
-        "night-light.enabled" => (screens::NIGHT_LIGHT_2, Row::Switch),
-        "windows.wobble" => (desktops::WOBBLY_WINDOWS, Row::Switch),
-        "desktops.count" => (desktops::NUMBER_OF_DESKTOPS, Row::Number),
-        "idle.delay" => (power::DIM_THE_SCREEN_AFTER, Row::Other),
-        _ => return None,
-    })
-}
-
 /// What the agents' surfaces say, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
@@ -420,42 +383,29 @@ impl Words {
 
     /// A setting changed, in the Settings' own words: its row's name, and
     /// its choice's label ("mis « Thème » sur « Sombre »"), on or off for
-    /// a switch; one the table does not know, "changé un réglage".
+    /// a switch (`hocus_config::labels`, the Settings' rows); a key no row
+    /// writes, "changé un réglage".
     pub fn setting(self, set: &hocus_link::McpSet) -> String {
+        use hocus_config::labels::Said;
         let lang = self.lang;
-        let Some((name, kind)) = setting_row(&set.key) else {
+        let Some(label) = hocus_config::labels::of(&set.key) else {
             return txt::CHANGED_A_SETTING.get(lang).to_owned();
         };
-        let name = name.get(lang);
-        match kind {
-            Row::Switch => match set.value.as_str() {
+        let name = label.name.get(lang);
+        match (label.said, label.value(&set.value, lang)) {
+            (Said::Switch, _) => match set.value.as_str() {
                 "true" => txt::turned_on(lang, name),
                 "false" => txt::turned_off(lang, name),
                 _ => txt::changed(lang, name),
             },
-            Row::Choices(choices) => choices
-                .iter()
-                .find(|(value, _)| *value == set.value)
-                .map_or_else(
-                    || txt::changed(lang, name),
-                    |(_, label)| {
-                        txt::set_to(
-                            lang,
-                            txt::SetTo {
-                                name,
-                                value: label.get(lang),
-                            },
-                        )
-                    },
-                ),
-            Row::Number => txt::set_to(
+            (_, Some(value)) => txt::set_to(
                 lang,
                 txt::SetTo {
                     name,
-                    value: &set.value,
+                    value: &value,
                 },
             ),
-            Row::Other => txt::changed(lang, name),
+            (_, None) => txt::changed(lang, name),
         }
     }
 
@@ -570,6 +520,9 @@ impl Words {
             McpRefusal::Unknown => txt::WHY_UNKNOWN,
             McpRefusal::ReadOnly => txt::WHY_READ_ONLY,
             McpRefusal::NoSettings => txt::WHY_NO_SETTINGS,
+            McpRefusal::NoWindows => txt::WHY_NO_WINDOWS,
+            McpRefusal::NoDesktops => txt::WHY_NO_DESKTOPS,
+            McpRefusal::NoInput => txt::WHY_NO_INPUT,
             McpRefusal::Locked => txt::WHY_LOCKED,
             McpRefusal::Asking => txt::WHY_ASKING,
             McpRefusal::Stopped => txt::WHY_STOPPED,
@@ -706,10 +659,15 @@ mod tests {
         );
         assert_eq!(
             fr.setting(&set("idle.delay", "600")),
-            "changé « Assombrir l’écran après »"
+            "mis « Assombrir l’écran après » sur « 10 min »"
+        );
+        // Any row's key, by its row's words (lot A's table had nine).
+        assert_eq!(
+            fr.setting(&set("pointer.acceleration", "flat")),
+            "mis « Accélération » sur « Aucune »"
         );
         assert_eq!(
-            fr.setting(&set("perf.record", "false")),
+            fr.setting(&set("no.such-key", "false")),
             "changé un réglage"
         );
         let more = McpSummary {
