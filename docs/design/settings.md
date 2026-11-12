@@ -69,7 +69,7 @@ and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
 it, 720 wide at most, padded 6 40 72 32. All 20 sections fit 760 px
 without scrolling (the sidebar's rows 28 px tall since Accessibilité
-came, 27 px since Performances came).
+came, 27 px since Performances came, 26 px since Agir sur le bureau came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,

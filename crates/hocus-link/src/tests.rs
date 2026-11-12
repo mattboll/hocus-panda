@@ -87,6 +87,9 @@ fn to_shell() -> Vec<ToShell> {
         ToShell::SessionMenu {
             output: "eDP-1".into(),
         },
+        ToShell::Journal {
+            output: "eDP-1".into(),
+        },
         ToShell::DropOver {
             bar: "eDP-1".into(),
             over: Some(("DP-1".into(), 3)),
