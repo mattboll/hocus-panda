@@ -84,6 +84,7 @@ mod lock_external;
 mod lock_shots;
 mod magnet;
 mod magnifier;
+mod mcp;
 mod meeting;
 mod moving_wallpaper;
 mod music;
