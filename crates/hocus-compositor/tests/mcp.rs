@@ -673,6 +673,44 @@ fn a_click_lands_through_the_agents_seat_and_the_users_focus_stays() -> anyhow::
     Ok(())
 }
 
+/// The session ended each time an agent went: an application asking its
+/// seat's pointer's cursor shape after that panicked the compositor. The
+/// seat stays; the agent's next connection takes it again.
+#[test]
+fn an_agent_going_leaves_its_seat_for_the_next_time() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, IN_APPS)?;
+    let (id, handle) = acted(&mut bed.hp, "acted", false)?;
+    let click = json!({ "window": id, "x": 40, "y": 30, "intent": "Clique dans la fenêtre" });
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let result = agent.tool(&mut bed.hp, "click", click.clone())?;
+    assert_eq!(result["isError"], false, "{result}");
+    let mut got = Vec::new();
+    let pressed = bed.hp.dispatch_until(WAIT, |_| {
+        seated(&handle, AGENT_SEAT, &mut got);
+        got.contains(&common::Seated::Press(0x110))
+    })?;
+    anyhow::ensure!(pressed, "no press on the agent's seat: {got:?}");
+    drop(agent);
+    let went = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().pointers.is_empty())?;
+    anyhow::ensure!(went, "the agent's pointer still shows");
+    handle.commands.send(common::Command::CursorShapes)?;
+    bed.hp
+        .dispatch_until(std::time::Duration::from_millis(300), |_| false)?;
+    // Again, on the same seat.
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let result = agent.tool(&mut bed.hp, "click", click)?;
+    assert_eq!(result["isError"], false, "{result}");
+    got.clear();
+    let pressed = bed.hp.dispatch_until(WAIT, |_| {
+        seated(&handle, AGENT_SEAT, &mut got);
+        got.contains(&common::Seated::Press(0x110))
+    })?;
+    anyhow::ensure!(pressed, "no press on the seat taken again: {got:?}");
+    Ok(())
+}
+
 #[test]
 fn typing_reaches_the_window_alone_and_never_the_shortcuts() -> anyhow::Result<()> {
     let mut bed = bed_with(false, IN_APPS)?;

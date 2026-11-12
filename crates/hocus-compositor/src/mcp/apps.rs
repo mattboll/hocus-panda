@@ -232,7 +232,7 @@ impl State {
             .seats
             .list
             .iter_mut()
-            .find(|s| s.session == waiting.session)
+            .find(|s| s.session == Some(waiting.session))
         {
             seat.at = Some((point, id));
         }
@@ -241,7 +241,7 @@ impl State {
             .seats
             .list
             .iter_mut()
-            .find(|s| s.session == waiting.session)
+            .find(|s| s.session == Some(waiting.session))
         {
             seat.last = Some(Instant::now());
         }
@@ -280,10 +280,11 @@ impl State {
             .iter()
             .filter_map(|s| {
                 let (at, on) = s.at?;
+                let session = s.session?;
                 let recent = s.last.is_some_and(|l| l.elapsed() < DRIVEN_FOR);
-                let now = showing == Some(s.session) || asking == Some(s.session);
+                let now = showing == Some(session) || asking == Some(session);
                 (self.model.is_shown(on) && self.windows.contains_key(&on) && (recent || now))
-                    .then(|| (s.agent.clone(), s.session, at, now))
+                    .then(|| (s.agent.clone(), session, at, now))
             })
             .collect()
     }

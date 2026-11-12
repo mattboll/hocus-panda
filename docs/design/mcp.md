@@ -158,8 +158,11 @@ follows its clicks. The keys it types go to that window alone, never to
 the desktop's shortcuts (the stop key among them). It works on a desktop
 no screen shows too: while it acted on a window there in the last 10 s
 the window gets a frame callback 10 times a second, and a capture of it
-wakes it first and waits for it to draw (200 ms at most). The seat goes
-with the connection. Limits: an application must take every seat (GTK
+wakes it first and waits for it to draw (200 ms at most). The seat rests
+when the connection ends (no focus, no pointer drawn) and the agent's next
+connection takes it again; it is never taken away, since applications
+still ask its pointer's cursor shape after, which ended the session.
+Limits: an application must take every seat (GTK
 and Qt do): one that has not taken the agent's 2 s after it came is
 refused, saying so; X11 windows are refused, saying so; an agent's click
 never starts a move or a resize, nor grabs a menu; its seat's selection

@@ -55,6 +55,10 @@ use wayland_protocols::{
         ext_idle_notifier_v1::ExtIdleNotifierV1,
     },
     wp::{
+        cursor_shape::v1::client::{
+            wp_cursor_shape_device_v1::WpCursorShapeDeviceV1,
+            wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+        },
         idle_inhibit::zv1::client::{
             zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1,
             zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
@@ -490,6 +494,9 @@ pub enum Shows {
 /// What the test asks of a client.
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// An acted client asks a cursor shape device for each pointer its
+    /// seats gave it, as toolkits do when the pointer comes in.
+    CursorShapes,
     Fullscreen(bool),
     /// Takes the clipboard (it must hold the keyboard), then says
     /// [`Event::Copied`] once the compositor has it.
@@ -709,6 +716,8 @@ fn run_client(
         caret: None,
         text_inputs: None,
         text_input: None,
+        cursor_shapes: None,
+        pointers: Vec::new(),
         committing: None,
         ctrl: false,
         writing: false,
@@ -773,6 +782,9 @@ fn run_client(
             client.acted = Some(secret);
             client.text_inputs = globals
                 .bind::<ZwpTextInputManagerV3, _, _>(&qh, 1..=1, ())
+                .ok();
+            client.cursor_shapes = globals
+                .bind::<WpCursorShapeManagerV1, _, _>(&qh, 1..=1, ())
                 .ok();
         }
         Some(Shows::Pointing { app_id, size }) => {
@@ -988,6 +1000,13 @@ fn run_client(
                     };
                     client.copy(conn, &qh, clip);
                 }
+                (Command::CursorShapes, _) => {
+                    if let Some(manager) = &client.cursor_shapes {
+                        for pointer in &client.pointers {
+                            manager.get_pointer(pointer, &qh, ());
+                        }
+                    }
+                }
                 (Command::Close, _) => client.window = None,
                 (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
@@ -1158,6 +1177,10 @@ struct Client {
     caret: Option<(i32, i32, i32, i32)>,
     text_inputs: Option<ZwpTextInputManagerV3>,
     text_input: Option<ZwpTextInputV3>,
+    /// An acted client's cursor shape manager, and the pointers its seats
+    /// gave it.
+    cursor_shapes: Option<WpCursorShapeManagerV1>,
+    pointers: Vec<wl_pointer::WlPointer>,
     committing: Option<String>,
     ctrl: bool,
     writing: bool,
@@ -1390,7 +1413,7 @@ impl SeatHandler for Client {
             let of = OfSeat { name, secret };
             match capability {
                 Capability::Pointer => {
-                    seat.get_pointer(qh, of);
+                    self.pointers.push(seat.get_pointer(qh, of));
                 }
                 Capability::Keyboard => {
                     seat.get_keyboard(qh, of.clone());
@@ -2098,6 +2121,30 @@ pub fn last_json(path: &Path, marker: &str) -> Option<serde_json::Value> {
     let line = text.lines().rev().find(|l| l.contains(marker))?;
     let at = line.find(marker)? + marker.len() - 1;
     serde_json::from_str(&line[at..]).ok()
+}
+
+impl Dispatch<WpCursorShapeManagerV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &WpCursorShapeManagerV1,
+        _: <WpCursorShapeManagerV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WpCursorShapeDeviceV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &WpCursorShapeDeviceV1,
+        _: <WpCursorShapeDeviceV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 impl Dispatch<ZwpTextInputManagerV3, ()> for Client {
