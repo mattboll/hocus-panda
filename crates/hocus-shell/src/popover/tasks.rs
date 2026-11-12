@@ -5,11 +5,14 @@
 //!
 //! Its header: "À faire" (14 px, bold), the count of open tasks (12 px,
 //! `text.dim`) and a `+` as the group's. Then the field to add a task when
-//! open (30 px, radius 8, 4 px above and under, 13.5 px), and up to 6
-//! tasks on 30 px lines, each box in a 26 × 26 button 5 px past the
-//! content's left, the title 5 px after it (13.5 px): they tick as the
-//! group's do ([`crate::tasks`]). Past 6 the list scrolls (the wheel), and
-//! "+ N autres" under it says how many are past the six. No task: "Rien à
+//! open (30 px, radius 8, 4 px above and under, 13.5 px; its text wraps
+//! as it is typed, the field growing 20 px a row up to 5, then
+//! scrolling), and up to 6 tasks, each box in a 26 × 26 button 5 px past
+//! the content's left, the title 5 px after it (13.5 px) whole, wrapped
+//! onto as many rows as it takes, 18 px apart: a line is 30 px, 18 more a
+//! row past the first, the box beside the first. They tick as the group's
+//! do ([`crate::tasks`]). Past 6 the list scrolls (the wheel), and "+ N
+//! autres" under it says how many are past the six. No task: "Rien à
 //! faire." (13.5 px, `text.faint`).
 //!
 //! The keyboard: `Tab` goes through the `+` and each box, `Space` or
@@ -35,8 +38,8 @@ use crate::{
     field::view::{Look as FieldLook, Style},
     levels::draw::{DIM, FAINT, HOVER, MANROPE, MANROPE_BOLD, TEXT},
     tasks::{
-        self, At, Key, Lines, Look, POPOVER_LINES, Words,
-        draw::{FIELD_BORDER, FIELD_FILL, plus, tick_box, title, unsaved},
+        self, At, FIELD_ROWS, Key, Lines, Look, POPOVER_LINES, Words,
+        draw::{FIELD_BORDER, FIELD_FILL, TITLE_ROW, plus, tick_box, title, title_rows, unsaved},
     },
     ui::{
         self, Around, Later, control,
@@ -111,14 +114,48 @@ struct Laid {
     end: f32,
 }
 
-fn lay_out(lines: &Lines, field: bool, words: Words) -> Laid {
+/// The room across for a title.
+fn title_room() -> f32 {
+    RIGHT - (LEFT - BUTTON_OUT + BUTTON + TITLE_GAP)
+}
+
+/// A title's rows: whole, wrapped.
+fn rows_of(title: &str) -> Vec<String> {
+    title_rows(title, title_room(), None, |t| {
+        kit::measure(t, LINE_TEXT, MANROPE)
+    })
+    .0
+}
+
+/// A line's height for its title's `rows`: 30 px, 18 more a row past the
+/// first.
+fn line_height(rows: usize) -> f32 {
+    LINE + rows.saturating_sub(1) as f32 * TITLE_ROW
+}
+
+/// The field's text: 13.5 px, wrapped onto 5 rows at most.
+fn field_style() -> Style {
+    Style::wrapped(LINE_TEXT, MANROPE, FIELD_ROWS)
+}
+
+/// The field's height if it is open here: 30 px for its first row, a row
+/// more for each other in view.
+fn field_height() -> Option<f32> {
+    let style = field_style();
+    tasks::field_height(&At::Popover, RIGHT - LEFT - 2.0 * FIELD_PAD, style)
+        .map(|text| FIELD + (text - style.line).max(0.0))
+}
+
+/// `lines` laid out, `heights` tall, under the field if open (`field` px
+/// tall).
+fn lay_out(lines: &Lines, heights: &[f32], field: Option<f32>, words: Words) -> Laid {
     let mut y = HEADER_TOP + HEADER;
-    let field = field.then(|| {
+    let field = field.map(|height| {
         let rect = Rectangle::new(
             Point::new(LEFT, y + FIELD_MARGIN),
-            Size::new(RIGHT - LEFT, FIELD),
+            Size::new(RIGHT - LEFT, height),
         );
-        y += FIELD + 2.0 * FIELD_MARGIN;
+        y += height + 2.0 * FIELD_MARGIN;
         rect
     });
     let n = lines.lines.len();
@@ -132,12 +169,13 @@ fn lay_out(lines: &Lines, field: bool, words: Words) -> Laid {
             y += LINE;
         }
     } else {
-        let view = n.min(POPOVER_LINES) as f32 * LINE;
+        // The first six in view, whatever their heights.
+        let view: f32 = heights.iter().take(POPOVER_LINES).sum();
         let list = Rectangle::new(
             Point::new(LEFT - BUTTON_OUT, y),
             Size::new(RIGHT - LEFT + BUTTON_OUT, view),
         );
-        out.list = Some((list, n as f32 * LINE));
+        out.list = Some((list, heights.iter().sum()));
         y += view;
         if n > POPOVER_LINES {
             out.more = Some((words.more(n - POPOVER_LINES), y + MORE / 2.0));
@@ -148,14 +186,23 @@ fn lay_out(lines: &Lines, field: bool, words: Words) -> Laid {
     out
 }
 
+/// The lines' heights, their titles wrapped.
+fn heights(lines: &Lines) -> Vec<f32> {
+    lines
+        .lines
+        .iter()
+        .map(|l| line_height(rows_of(&l.title).len()))
+        .collect()
+}
+
 /// Its height for what it shows now.
 pub fn height() -> u32 {
     let lines = tasks::peek();
-    let field = tasks::field().is_some_and(|f| f.at == At::Popover);
     kit::height(
         lay_out(
             &lines,
-            field,
+            &heights(&lines),
+            field_height(),
             Words::new(crate::clock::time::Lang::of_messages()),
         )
         .end,
@@ -230,7 +277,7 @@ pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
 fn build<'a>(words: Words) -> El<'a> {
     let lines = tasks::lines();
     let field = tasks::field().filter(|f| f.at == At::Popover);
-    let laid = lay_out(&lines, field.is_some(), words);
+    let laid = lay_out(&lines, &heights(&lines), field_height(), words);
     ui(|ui| {
         say(words, &lines, &laid, field.as_ref(), ui);
         content(words, &lines, &laid, field.as_ref(), ui.focus.as_ref())
@@ -290,7 +337,7 @@ fn content<'a>(
     if let Some(field) = field {
         let typed = Field {
             with: Box::new(entry),
-            style: Style::one(LINE_TEXT, MANROPE),
+            style: field_style(),
             placeholder: words.placeholder().into(),
             look: FieldLook::of(TEXT.get(), FAINT.get()),
             focused: field.focused,
@@ -299,7 +346,7 @@ fn content<'a>(
             on_focus: Msg::InField,
             on_took: |_| Msg::Took,
         }
-        .view(FIELD);
+        .view(laid.field.map_or(FIELD, |f| f.height));
         let boxed = container(typed).style(|_| iced::widget::container::Style {
             background: Some(FIELD_FILL.get().into()),
             border: iced::Border {
@@ -333,18 +380,12 @@ fn content<'a>(
             words.nothing(),
         ));
     }
-    if laid.list.is_some() {
+    if let Some((view, _)) = laid.list {
         let mut rows = column![].width(Length::Fill);
         for line in &lines.lines {
             rows = rows.push(line_of(words, line, focus));
         }
-        all = all.push(list_by(
-            rows.into(),
-            LIST_ID,
-            POPOVER_LINES as f32 * LINE,
-            None,
-            Some(LINE),
-        ));
+        all = all.push(list_by(rows.into(), LIST_ID, view.height, None, Some(LINE)));
     }
     if let Some((more, _)) = &laid.more {
         all = all.push(ui::line(
@@ -405,19 +446,26 @@ fn line_of<'a>(words: Words, line: &tasks::Line, focus: Option<&Target>) -> El<'
     } else {
         declared = declared.node(|n| n.disabled(true));
     }
-    let room = RIGHT - (LEFT - BUTTON_OUT + BUTTON + TITLE_GAP);
     let look = line.look;
-    let said = kit::elide(&line.title, room, |t| kit::measure(t, LINE_TEXT, MANROPE));
-    let shown = drawn(room, LINE, move |f, s| {
-        let at = Point::new(0.0, s.height / 2.0);
+    let said = rows_of(&line.title);
+    let height = line_height(said.len());
+    // The first row beside the box, the others under it.
+    let shown = drawn(title_room(), height, move |f, _| {
+        let at = Point::new(0.0, LINE / 2.0);
         match look {
             Look::Unsaved { .. } => unsaved(f, words, at, alpha),
-            look => title(f, &said, at, LINE_TEXT, look.ticked(), alpha),
+            look => {
+                for (i, said) in said.iter().enumerate() {
+                    let at = at + iced::Vector::new(0.0, i as f32 * TITLE_ROW);
+                    title(f, said, at, LINE_TEXT, look.ticked(), alpha);
+                }
+            }
         }
     });
-    row![declared, gap(TITLE_GAP), shown]
-        .height(LINE)
-        .align_y(Vertical::Center)
+    let tick = container(declared).height(LINE).align_y(Vertical::Center);
+    row![tick, gap(TITLE_GAP), shown]
+        .height(height)
+        .align_y(Vertical::Top)
         .into()
 }
 
@@ -435,13 +483,22 @@ fn say(words: Words, lines: &Lines, laid: &Laid, field: Option<&tasks::Field>, u
             }
         })
         .collect();
+    // How many rows each title takes.
+    let titles: Vec<String> = lines
+        .lines
+        .iter()
+        .take(POPOVER_LINES)
+        .map(|l| rows_of(&l.title).len().to_string())
+        .collect();
     let said = format!(
-        "count={} rows=[{}] more={} empty={} field={}",
+        "count={} rows=[{}] more={} empty={} field={} titles=[{}] field_height={}",
         lines.open(),
         rows.join("; "),
         laid.more.as_ref().map_or("none", |(m, _)| m.as_str()),
         laid.empty.is_some(),
         field.map_or_else(|| "none".to_owned(), |f| format!("«{}»", f.text)),
+        titles.join(","),
+        laid.field.map_or(0.0, |f| f.height),
     );
     if ui.said.as_ref() != Some(&said) {
         tracing::debug!("the tasks' popover shows it: {said}");
@@ -508,6 +565,10 @@ mod tests {
     #[test]
     fn up_to_six_lines_of_30_px_then_the_rest_and_the_list_scrolls() {
         let words = Words::new(crate::clock::time::Lang::French);
+        let lay_out = |lines: &Lines, field: bool, words| {
+            let heights = vec![LINE; lines.lines.len()];
+            lay_out(lines, &heights, field.then_some(FIELD), words)
+        };
         let three = lay_out(&lines(3), false, words);
         let (view, content) = three.list.expect("a list");
         assert_eq!((view.height, content), (90.0, 90.0));
@@ -522,5 +583,18 @@ mod tests {
         assert_eq!(field.list.map(|l| l.0.y), Some(HEADER_TOP + HEADER + 38.0));
         let none = lay_out(&lines(0), false, words);
         assert!(none.empty.is_some() && none.list.is_none());
+    }
+
+    #[test]
+    fn taller_lines_the_six_first_in_view_and_a_grown_field() {
+        let words = Words::new(crate::clock::time::Lang::French);
+        // A title on 3 rows: 30 + 2 × 18 px.
+        assert_eq!(line_height(3), 66.0);
+        let heights = [30.0, 66.0, 30.0, 48.0, 30.0, 30.0, 66.0];
+        let laid = lay_out(&lines(7), &heights, Some(70.0), words);
+        let (view, content) = laid.list.expect("a list");
+        assert_eq!((view.height, content), (234.0, 300.0));
+        assert_eq!(laid.field.map(|f| f.height), Some(70.0));
+        assert_eq!(view.y, HEADER_TOP + HEADER + 70.0 + 8.0);
     }
 }

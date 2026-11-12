@@ -8,7 +8,9 @@
 //! the tasks' popover; a tick reaching the source at once, the line going
 //! 1.5 s after, a second click within them unticking; a refused change
 //! unticking and saying "Pas enregistré" for 3 s; adding through the
-//! field, `Enter` and `Esc`, a click elsewhere; the mini form's item, its
+//! field, `Enter` and `Esc`, a click elsewhere; a long title wrapping
+//! onto 3 rows, its line taller, cut past them; the field growing as a
+//! long task is typed (#792); the mini form's item, its
 //! count, its popover after a 150 ms hover; the keyboard (`Tab`, `Space`,
 //! `Enter`); no board, no group, an empty board "Rien à faire."; at rest,
 //! nothing drawn.
@@ -67,6 +69,28 @@ title = "Envoyer le compte rendu"
 
 [[tasks.cards]]
 id = "t7"
+title = "Appeler le client"
+"#;
+
+/// A title that wraps past 3 rows, one on 2, one short.
+const LONG: &str = r#"
+[tasks]
+board = "Sprint"
+
+[[tasks.cards]]
+id = "t1"
+title = "Relire la spec"
+
+[[tasks.cards]]
+id = "t2"
+title = "Préparer la démo du paiement pour le client : les captures des réglages, le changelog, la documentation et le compte rendu de lundi"
+
+[[tasks.cards]]
+id = "t3"
+title = "Mettre à jour le changelog du paiement"
+
+[[tasks.cards]]
+id = "t4"
 title = "Appeler le client"
 "#;
 
@@ -324,6 +348,24 @@ impl Bed {
         Ok(self.hp.popover_surfaces()[0].1)
     }
 
+    /// Waits for the group's surface to draw no more: what it shows
+    /// now is on the screen.
+    fn settled(&mut self) -> anyhow::Result<()> {
+        let mut last = self.hp.tasks_commits();
+        let mut still = 0;
+        let quiet = self.hp.dispatch_until(WAIT, |hp| {
+            let now = hp.tasks_commits();
+            if now == last {
+                still += 1;
+            } else {
+                (last, still) = (now, 0);
+            }
+            still >= 10 && hp.at_rest()
+        })?;
+        anyhow::ensure!(quiet, "the group kept drawing");
+        wait(&mut self.hp, Duration::from_millis(150))
+    }
+
     fn closed(&mut self) -> anyhow::Result<()> {
         let closed = self
             .hp
@@ -335,12 +377,17 @@ impl Bed {
     /// With `HOCUS_SHOTS` naming a folder: the bar's top right as it is
     /// now, the popover's room beside it, saved there as `NAME-what.png`.
     fn shot(&mut self, what: &str) -> anyhow::Result<()> {
+        self.shot_in(what, (560, 560))
+    }
+
+    /// The same, `size` of the screen's top right.
+    fn shot_in(&mut self, what: &str, size: (i32, i32)) -> anyhow::Result<()> {
         let Some(folder) = std::env::var_os("HOCUS_SHOTS") else {
             return Ok(());
         };
         common::at_rest(&mut self.hp)?;
         let (width, height, bytes) = self.hp.screenshot(0)?;
-        let (w, h) = (560.min(width), 560.min(height));
+        let (w, h) = (size.0.min(width), size.1.min(height));
         let x0 = width - w;
         let mut image = image::RgbaImage::new(w as u32, h as u32);
         for y in 0..h {
@@ -398,6 +445,33 @@ fn number(line: &str, name: &str) -> Option<u64> {
         .ok()
 }
 
+/// The rows each title takes in a "shows it" line, and whether it was
+/// cut past them.
+fn titles(line: &str) -> Vec<(i32, bool)> {
+    let Some(start) = line.find("titles=[") else {
+        return Vec::new();
+    };
+    let rest = &line[start + 8..];
+    let end = rest.find(']').unwrap_or(rest.len());
+    rest[..end]
+        .split(',')
+        .filter(|t| !t.is_empty())
+        .map(|t| {
+            let cut = t.ends_with('…');
+            (t.trim_end_matches('…').parse().unwrap_or(0), cut)
+        })
+        .collect()
+}
+
+/// The group's lines' heights for what a "shows it" line says: 22 px,
+/// 18 more a title's row past the first.
+fn lines_height(line: &str) -> i32 {
+    titles(line)
+        .iter()
+        .map(|(rows, _)| 22 + 18 * (rows - 1))
+        .sum()
+}
+
 /// The rows a "shows it" line gives.
 fn rows(line: &str) -> Vec<String> {
     let Some(start) = line.find("rows=[") else {
@@ -429,27 +503,15 @@ fn the_group_shows_three_tasks_in_the_columns_order_and_the_rest_in_its_popover(
         "{line}"
     );
     assert!(line.contains("add=«Ajouter une tâche»"), "{line}");
-    // 18 px of header, three 22 px lines and the 20 px "+ N" line, with
-    // 5 px around; 14 px under where the agents' group would be (hidden:
-    // nothing followed), the bar inside its rim.
-    let rect = bed.group_height(18 + 3 * 22 + 20 + 10)?;
+    // 18 px of header, the lines (22 px, the third's title wrapped, taller)
+    // and the 20 px "+ N" line, with 5 px around; 14 px under where the
+    // agents' group would be (hidden: nothing followed), the bar inside
+    // its rim.
+    let rect = bed.group_height(18 + lines_height(&line) + 20 + 10)?;
     assert_eq!(rect.width, 194);
     assert_eq!(rect.x, 1920 - 8 - 1 - 194);
     assert_eq!(rect.y, 8 + 100 - 5);
     bed.shot("full")?;
-    // The third title is cut: resting on it shows it whole.
-    let from = bed.mark();
-    let third = bed.item("Task(2)")?;
-    common::point(&mut bed.hp, (third.0 + 40.0, third.1))?;
-    bed.logged_after(
-        from,
-        &[
-            "a tooltip shows",
-            "name=\"Mettre à jour le changelog et la documentation du paiement\"",
-        ],
-    )?;
-    bed.shot("tooltip")?;
-    bed.hp.pointer_move(400.0, 300.0);
     // "+ 4 autres" opens the popover beside it, every task, six at once.
     let from = bed.mark();
     let more = bed.item("TasksMore")?;
@@ -599,7 +661,8 @@ fn enter_adds_the_task_at_the_top_and_esc_or_a_click_elsewhere_closes_the_empty_
     let from = bed.mark();
     bed.click_item("TaskAdd")?;
     bed.field_opens(from)?;
-    bed.group_height(18 + 30 + 3 * 22 + 20 + 10)?;
+    let line = bed.group_after(from, &["field_rows=1"])?;
+    bed.group_height(18 + 30 + lines_height(&line) + 20 + 10)?;
     bed.shot("field-empty")?;
     // Counted before the keys: the commit that shows them may come before
     // the shell's line is read, and waiting for one more after it took the
@@ -712,6 +775,186 @@ fn ctrl_v_pastes_the_clipboards_text_into_the_field_on_one_line() -> anyhow::Res
     bed.press(KEY_ENTER);
     bed.logged_after(from, &["the day holds", "«a Appeler Inès»; t1"])?;
     Ok(())
+}
+
+#[test]
+fn a_long_title_wraps_onto_3_rows_its_line_taller_then_ends_cut_shown_whole_on_a_rest()
+-> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("long", "1920x1080", WITH_TASKS, LONG)? else {
+        return Ok(());
+    };
+    let line = bed.group_after(0, &["form=full", "more=+ 1 autre "])?;
+    // The short title on one row, the long one on 3 and cut past them,
+    // the third on 2: not cut to one line.
+    let titles = titles(&line);
+    assert_eq!(titles.len(), 3, "{line}");
+    assert_eq!(titles[0], (1, false), "{line}");
+    assert_eq!(titles[1], (3, true), "{line}");
+    assert!(titles[2].0 > 1 && !titles[2].1, "{line}");
+    // The lines grow with their titles: 22 px, 18 more a row.
+    let height = 22 + 58 + (22 + 18 * (titles[2].0 - 1));
+    assert_eq!(lines_height(&line), height);
+    bed.group_height(18 + height + 20 + 10)?;
+    // Still cut past its 3 rows: resting on it shows it whole.
+    let from = bed.mark();
+    let long = bed.item("Task(1)")?;
+    common::point(&mut bed.hp, (long.0 + 40.0, long.1 + 18.0))?;
+    bed.logged_after(
+        from,
+        &[
+            "a tooltip shows",
+            "name=\"Préparer la démo du paiement pour le client : les captures des réglages, \
+             le changelog, la documentation et le compte rendu de lundi\"",
+        ],
+    )?;
+    // A title whole in its rows has none.
+    let from = bed.mark();
+    let third = bed.item("Task(2)")?;
+    common::point(&mut bed.hp, (third.0 + 40.0, third.1))?;
+    wait(&mut bed.hp, Duration::from_millis(900))?;
+    assert!(
+        bed.lines_since(from, "a tooltip shows").is_empty(),
+        "{}",
+        bed.plain()
+    );
+    Ok(())
+}
+
+#[test]
+fn the_field_wraps_and_grows_to_5_rows_as_one_types_and_enter_adds_it_on_one_line()
+-> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("grows", "1920x1080", WITH_TASKS, SEVEN)? else {
+        return Ok(());
+    };
+    let line = bed.group_after(0, &["more=+ 4 autres"])?;
+    let lines = lines_height(&line);
+    let from = bed.mark();
+    bed.click_item("TaskAdd")?;
+    bed.field_opens(from)?;
+    bed.group_height(18 + 30 + lines + 20 + 10)?;
+    // Typed on, it wraps: the field grows a row (19 px) at a time.
+    let short = "preparer la demo du paiement pour";
+    bed.type_text(short);
+    bed.logged_after(
+        from,
+        &["the tasks show", &format!("«{short}» focused=true")],
+    )?;
+    bed.group_after(from, &["field_rows=2"])?;
+    bed.group_height(18 + 30 + 19 + lines + 20 + 10)?;
+    // Up to 5 rows, then it scrolls: no taller.
+    let long = " le client avec les captures des reglages le changelog \
+                la documentation et le compte rendu de la reunion de lundi \
+                et les notes de version";
+    bed.type_text(long);
+    let title = format!("{short}{long}");
+    bed.logged_after(
+        from,
+        &["the tasks show", &format!("«{title}» focused=true")],
+    )?;
+    bed.group_after(from, &["field_rows=5"])?;
+    bed.group_height(18 + 30 + 4 * 19 + lines + 20 + 10)?;
+    // `Enter` adds it, whole and on one line, and closes the field.
+    let from = bed.mark();
+    bed.press(KEY_ENTER);
+    bed.logged_after(from, &["a task added", &title])?;
+    bed.logged_after(from, &["the field to add a task closes", "Enter"])?;
+    bed.logged_after(from, &["the day holds", &format!("«{title}»; t1")])?;
+    bed.group_after(from, &["field_rows=0", "more=+ 5 autres"])?;
+    Ok(())
+}
+
+/// The screenshots of #792 under `HOCUS_SHOTS` (`long-…`): long tasks in
+/// the bar, the popover with them whole, the field growing while a long
+/// task is typed (the group's, then the popover's).
+#[test]
+#[ignore = "writes the screenshots under HOCUS_SHOTS"]
+fn long_titles_shots() -> anyhow::Result<()> {
+    let long = LONG.to_owned()
+        + r#"
+[[tasks.cards]]
+id = "t5"
+title = "Réserver la salle du conseil pour la rétrospective du trimestre avec toute l'équipe"
+
+[[tasks.cards]]
+id = "t6"
+title = "Envoyer le compte rendu"
+"#;
+    let Some(mut bed) = Bed::start("long", "1920x1080", WITH_TASKS, &long)? else {
+        return Ok(());
+    };
+    let line = bed.group_after(0, &["form=full", "more=+ 3 autres"])?;
+    bed.group_height(18 + lines_height(&line) + 20 + 10)?;
+    bed.settled()?;
+    bed.shot_in("bar", (560, 560))?;
+    // The popover, every title whole.
+    let from = bed.mark();
+    bed.click_item("TasksMore")?;
+    bed.popover()?;
+    bed.logged_after(from, &["the tasks' popover shows it", "count=6"])?;
+    bed.hp.pointer_move(400.0, 300.0);
+    bed.settled()?;
+    bed.shot_in("popover", (560, 900))?;
+    bed.click((400.0, 300.0))?;
+    bed.closed()?;
+    // The group's field, a long task typed in it.
+    let from = bed.mark();
+    bed.click_item("TaskAdd")?;
+    bed.field_opens(from)?;
+    bed.hp.pointer_move(400.0, 300.0);
+    let typed = "preparer la demo du paiement pour le client avec les captures des \
+                 reglages et le changelog";
+    bed.type_text(typed);
+    bed.logged_after(
+        from,
+        &["the tasks show", &format!("«{typed}» focused=true")],
+    )?;
+    let shows = bed.group_after(from, &[])?;
+    bed.group_height(18 + 30 + 19 * field_rows(&shows) + lines_height(&shows) + 20 + 10)?;
+    bed.settled()?;
+    bed.shot_in("field", (560, 560))?;
+    let more = " puis la documentation et le compte rendu de la reunion de lundi \
+                et les notes de version";
+    bed.type_text(more);
+    bed.logged_after(
+        from,
+        &["the tasks show", &format!("«{typed}{more}» focused=true")],
+    )?;
+    let shows = bed.group_after(from, &["field_rows=5"])?;
+    bed.group_height(18 + 30 + 19 * 4 + lines_height(&shows) + 20 + 10)?;
+    bed.settled()?;
+    bed.shot_in("field-full", (560, 560))?;
+    bed.press(KEY_ESC);
+    bed.logged_after(from, &["the field to add a task closes", "Escape"])?;
+    // The popover's field.
+    let from = bed.mark();
+    bed.click_item("TasksMore")?;
+    bed.popover()?;
+    bed.logged_after(from, &["the tasks' popover shows it", "count=6"])?;
+    let pop = bed.hp.popover_surfaces()[0].1;
+    // Its `+`, on the header's right: 22 px wide, 4 px past the content's
+    // right (14 px in), in the 30 px header 13 px down.
+    let add = (
+        f64::from(pop.x + pop.width) - 22.0,
+        f64::from(pop.y) + 13.0 + 15.0,
+    );
+    bed.click(add)?;
+    bed.logged_after(from, &["the field to add a task opens", "Popover"])?;
+    bed.hp.pointer_move(400.0, 300.0);
+    bed.type_text(typed);
+    bed.logged_after(
+        from,
+        &["the tasks' popover shows it", &format!("field=«{typed}»")],
+    )?;
+    bed.settled()?;
+    bed.shot_in("popover-field", (560, 900))?;
+    Ok(())
+}
+
+/// The field's rows a group's "shows it" line says.
+fn field_rows(line: &str) -> i32 {
+    number(line, "field_rows")
+        .map_or(0, |n| n as i32 - 1)
+        .max(0)
 }
 
 #[test]

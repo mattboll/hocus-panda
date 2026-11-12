@@ -5,16 +5,20 @@
 //!   the agents' group under it (`crate::column`): an 18 px header, "À
 //!   FAIRE" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its
 //!   right the `+` (22 × 18, radius 6, its
-//!   14 px plus `text.dim`, lit `0.06` under the pointer); a 22 px line per
+//!   14 px plus `text.dim`, lit `0.06` under the pointer); a line per
 //!   task, at most 3 (fewer on a short bar, once Today gave way: the
-//!   column's room): its 14 px box (radius 4, a 1.5 px `0.38` border) in
-//!   a 22 × 22 button 4 px past the group's left, lit under the pointer,
-//!   then 4 px and the title (13 px, `text`, cut with an ellipsis; resting
-//!   600 ms on a cut title shows it whole in a tooltip); past 3, a 20 px
-//!   "+ N autres" (12.5 px, `text.faint`), a button opening the tasks'
-//!   popover. No task: "Rien à faire." (13 px, `text.faint`). The field to
-//!   add a task is its first line, 26 px (2 px above and under), radius 7,
-//!   `0.06`, a 1 px `rgba(108,194,135,0.65)` border, 13 px.
+//!   column's room, as tall as the lines are): its 14 px box (radius 4, a
+//!   1.5 px `0.38` border) in a 22 × 22 button 4 px past the group's left,
+//!   lit under the pointer, then 4 px and the title (13 px, `text`),
+//!   wrapped onto 3 rows at most, 18 px apart, the third ending with an
+//!   ellipsis when it goes on (resting 600 ms on a title so cut shows it
+//!   whole in a tooltip); the line is 22 px, 18 more a row past the first,
+//!   the box beside the first; past 3, a 20 px "+ N autres" (12.5 px,
+//!   `text.faint`), a button opening the tasks' popover. No task: "Rien à
+//!   faire." (13 px, `text.faint`). The field to add a task is its first
+//!   line, 26 px (2 px above and under), radius 7, `0.06`, a 1 px
+//!   `rgba(108,194,135,0.65)` border, 13 px: its text wraps as it is
+//!   typed, the field growing 19 px a row up to 5, then scrolling.
 //! - A ticked box fills with `#6CC287` and shows a dark check (`#0b1020`),
 //!   its title `text.faint` and struck through; "Pas enregistré" (12 px,
 //!   `#F7A77A`) takes the title's place for 3 s when the source refused.
@@ -80,8 +84,11 @@ const ADD_RADIUS: f32 = 6.0;
 const PLUS: f32 = 14.0;
 /// A task's line: 22 px; its box's button 22 × 22, 4 px past the group's
 /// left, radius 6; the box 14 px, radius 4, its border 1.5 px; the title
-/// 4 px after the button, 13 px.
+/// 4 px after the button, 13 px, on 3 rows at most, 18 px apart (13 px
+/// at the kit's line height), each past the first making the line taller.
 pub const LINE: f32 = 22.0;
+const TITLE_ROWS: usize = 3;
+pub const TITLE_ROW: f32 = 18.0;
 const BUTTON: f32 = 22.0;
 const BUTTON_OUT: f32 = 4.0;
 const BUTTON_RADIUS: f32 = 6.0;
@@ -128,11 +135,15 @@ const EASE_IN: (f32, f32, f32, f32) = (0.42, 0.0, 1.0, 1.0);
 struct Row {
     key: Key,
     look: Look,
-    /// Its title, and as cut to its room (none: it fits).
+    /// Its title, and as shown: wrapped onto 3 rows at most, cut with an
+    /// ellipsis past them (`cut`).
     title: String,
-    cut: Option<String>,
+    shown: Vec<String>,
+    cut: bool,
     top: f32,
+    /// Its height now (less while it closes), and at rest.
     height: f32,
+    full: f32,
     alpha: f32,
 }
 
@@ -141,6 +152,7 @@ struct Row {
 struct Laid {
     /// 0: nothing shows.
     height: f32,
+    /// The field, as tall as its text's rows.
     field: Option<Rectangle>,
     rows: Vec<Row>,
     /// "Rien à faire."'s middle.
@@ -170,14 +182,68 @@ fn title_x() -> f32 {
     -BUTTON_OUT + BUTTON + TITLE_GAP
 }
 
-/// `lines` laid out, and the field if open on `bar`'s group, cut with
-/// `width`.
+/// The room across for a line's title.
+fn title_room() -> f32 {
+    WIDTH - title_x()
+}
+
+/// `title` in rows that fit `room` as `width` measures them (between
+/// words, a word too long broken where it must), `most` of them at most
+/// (none: all): the last then ends with an ellipsis. And whether it was
+/// cut so.
+pub fn title_rows(
+    title: &str,
+    room: f32,
+    most: Option<usize>,
+    width: impl Fn(&str) -> f32,
+) -> (Vec<String>, bool) {
+    let ranges = field::view::wrap(title, room, &width);
+    let shown = |r: &std::ops::Range<usize>| title[r.clone()].to_owned();
+    let most = match most {
+        Some(most) if ranges.len() > most.max(1) => most.max(1),
+        _ => return (ranges.iter().map(shown).collect(), false),
+    };
+    let mut rows: Vec<String> = ranges[..most - 1].iter().map(shown).collect();
+    // The last row shown, shortened until its ellipsis fits after it.
+    let mut last: Vec<char> = title[ranges[most - 1].clone()].chars().collect();
+    let ended = loop {
+        let said = last.iter().collect::<String>().trim_end().to_owned() + "…";
+        if last.is_empty() || width(&said) <= room {
+            break said;
+        }
+        last.pop();
+    };
+    rows.push(ended);
+    (rows, true)
+}
+
+/// A line's height for its title's `rows`: 22 px, 18 more a row past the
+/// first.
+fn line_height(rows: usize) -> f32 {
+    LINE + rows.saturating_sub(1) as f32 * TITLE_ROW
+}
+
+/// The group's field's text: 13 px, wrapped onto 5 rows at most.
+fn field_style() -> Style {
+    Style::wrapped(TITLE, MANROPE, super::FIELD_ROWS)
+}
+
+/// The group's field's height if it is open on bar `bar`: 26 px for its
+/// first row, a row more for each other in view.
+fn field_height(bar: &str) -> Option<f32> {
+    let style = field_style();
+    super::field_height(&At::Group(bar.to_owned()), WIDTH - 2.0 * FIELD_PAD, style)
+        .map(|text| FIELD + (text - style.line).max(0.0))
+}
+
+/// `lines` laid out, and the field if open on `bar`'s group (`field` px
+/// tall), wrapped and cut with `width`.
 fn lay_out(
     lines: &Lines,
-    field: bool,
+    field: Option<f32>,
     most: usize,
     words: Words,
-    mut width: impl FnMut(&str, f32) -> f32,
+    width: impl Fn(&str, f32) -> f32,
     card: Option<crate::setup::card::Card>,
 ) -> Laid {
     if let Some(card) = card {
@@ -192,12 +258,12 @@ fn lay_out(
         return Laid::default();
     }
     let mut y = HEADER;
-    let field = field.then(|| {
-        let rect = Rectangle::new(Point::new(0.0, y + FIELD_MARGIN), Size::new(WIDTH, FIELD));
-        y += FIELD + 2.0 * FIELD_MARGIN;
+    let field = field.map(|height| {
+        let rect = Rectangle::new(Point::new(0.0, y + FIELD_MARGIN), Size::new(WIDTH, height));
+        y += height + 2.0 * FIELD_MARGIN;
         rect
     });
-    let room = WIDTH - title_x();
+    let room = title_room();
     // The lines that stay, at most `most`, with those going among them;
     // one coming in under them fades in as they close.
     let going: Vec<f32> = lines.lines.iter().filter_map(|l| l.going).collect();
@@ -213,28 +279,30 @@ fn lay_out(
         if !goes && staying == most {
             continue;
         }
+        let (shown, cut) = title_rows(&line.title, room, Some(TITLE_ROWS), |t| width(t, TITLE));
+        let full = line_height(shown.len());
         let (height, alpha) = match line.going {
             Some(t) => {
                 let t = bezier(EASE_IN, t);
-                (LINE * (1.0 - t), 1.0 - t)
+                (full * (1.0 - t), 1.0 - t)
             }
-            None if staying + going.len() >= most => (LINE, closing.max(0.0)),
-            None => (LINE, 1.0),
+            None if staying + going.len() >= most => (full, closing.max(0.0)),
+            None => (full, 1.0),
         };
         // One coming in shows as the others close: fully once they did.
         let alpha = if going.is_empty() { 1.0 } else { alpha };
         if !goes {
             staying += 1;
         }
-        let cut = (width(&line.title, TITLE) > room)
-            .then(|| kit::elide(&line.title, room, |t| width(t, TITLE)));
         rows.push(Row {
             key: line.key.clone(),
             look: line.look,
             title: line.title.clone(),
+            shown,
             cut,
             top: y,
             height,
+            full,
             alpha,
         });
         y += height;
@@ -278,7 +346,7 @@ fn resting_height(laid: &Laid) -> f32 {
     if laid.height <= 0.0 {
         return 0.0;
     }
-    laid.height + laid.rows.iter().map(|r| LINE - r.height).sum::<f32>()
+    laid.height + laid.rows.iter().map(|r| r.full - r.height).sum::<f32>()
 }
 
 /// The least the group takes once its lines gave way (`laid` laid out
@@ -288,7 +356,7 @@ fn least_of(laid: &Laid) -> f32 {
     if laid.card.is_some() || laid.height <= 0.0 {
         return laid.height;
     }
-    let field = laid.field.map_or(0.0, |_| FIELD + 2.0 * FIELD_MARGIN);
+    let field = laid.field.map_or(0.0, |f| f.height + 2.0 * FIELD_MARGIN);
     let last = if laid.empty.is_some() {
         LINE
     } else if !laid.rows.is_empty() || laid.more.is_some() {
@@ -299,22 +367,26 @@ fn least_of(laid: &Laid) -> f32 {
     HEADER + field + last
 }
 
-/// How many of `open` tasks' lines show in `room` (the field over them if
-/// `field`), at most 3: all of them when they fit, else as many as fit
-/// over "+ N", none at the least. The to-do list gives way after Today
-/// (§4, `crate::column`).
-pub fn lines_that_fit(open: usize, field: bool, room: f32) -> usize {
-    let head = HEADER
-        + if field {
-            FIELD + 2.0 * FIELD_MARGIN
-        } else {
-            0.0
-        };
-    if open <= GROUP_LINES && head + open as f32 * LINE <= room {
+/// How many of the open tasks' lines, `heights` tall from the first,
+/// show in `room` (the field over them if open, `field` px tall), at most
+/// 3: all of them when they fit, else as many as fit over "+ N", none at
+/// the least. The to-do list gives way after Today (§4,
+/// `crate::column`).
+pub fn lines_that_fit(heights: &[f32], field: Option<f32>, room: f32) -> usize {
+    let head = HEADER + field.map_or(0.0, |h| h + 2.0 * FIELD_MARGIN);
+    if heights.len() <= GROUP_LINES && head + heights.iter().sum::<f32>() <= room {
         return GROUP_LINES;
     }
-    let fit = ((room - head - MORE) / LINE).floor().max(0.0);
-    (fit as usize).min(GROUP_LINES)
+    let mut taken = head + MORE;
+    let mut fit = 0;
+    for height in heights.iter().take(GROUP_LINES) {
+        taken += height;
+        if taken > room {
+            break;
+        }
+        fit += 1;
+    }
+    fit
 }
 
 // --- Where the surface goes ------------------------------------------------------------
@@ -556,13 +628,24 @@ pub fn moved() {
     }
 }
 
-/// Bar `bar`'s room for its lines now (none counted for the field), as
-/// many as fit: what its group lays out at most.
+/// Bar `bar`'s room for its lines now (the field counted, as tall as its
+/// text), as many as fit: what its group lays out at most.
 fn most_for(bar: &str, lines: &Lines) -> usize {
-    let open = lines.lines.iter().filter(|l| l.going.is_none()).count();
-    let field = super::field().is_some_and(|f| f.at == At::Group(bar.to_owned()));
+    // One past the most tells whether "+ N" shows.
+    let heights: Vec<f32> = lines
+        .lines
+        .iter()
+        .filter(|l| l.going.is_none())
+        .take(GROUP_LINES + 1)
+        .map(|l| {
+            let (rows, _) = title_rows(&l.title, title_room(), Some(TITLE_ROWS), |t| {
+                kit::measure(t, TITLE, MANROPE)
+            });
+            line_height(rows.len())
+        })
+        .collect();
     let room = crate::column::room(bar, crate::column::Part::Tasks);
-    lines_that_fit(open, field, room)
+    lines_that_fit(&heights, field_height(bar), room)
 }
 
 /// The column's room changed: the groups whose lines it changes draw
@@ -732,13 +815,14 @@ pub fn unsaved(f: &mut Frame, words: Words, at: Point, alpha: f32) {
     ));
 }
 
-/// The field at `rect`, open at `at`: what was typed, its selection and
-/// its caret while it holds the keyboard, else the placeholder.
+/// The field at `rect`, open at `at`: what was typed (set in `style`,
+/// `pad` px in, wrapped as tall as `rect`), its selection and its caret
+/// while it holds the keyboard, else the placeholder.
 pub fn field(
     f: &mut Frame,
     at: &super::At,
     rect: Rectangle,
-    (size, radius, pad): (f32, f32, f32),
+    (style, radius, pad): (Style, f32, f32),
     words: Words,
     alpha: f32,
 ) {
@@ -766,7 +850,7 @@ pub fn field(
             left: rect.x + pad,
             middle: rect.center_y(),
             width: rect.width - 2.0 * pad,
-            style: Style::one(size, MANROPE),
+            style,
         },
         words.placeholder(),
         &look,
@@ -813,7 +897,8 @@ pub struct Group {
 enum Over {
     Item(Item),
     Field,
-    /// A cut title: its whole text, and where it is (the bar's frame).
+    /// A title cut past its 3 rows: its whole text, and where it is (the
+    /// bar's frame).
     Title(String, Rectangle),
 }
 
@@ -912,42 +997,31 @@ impl Group {
         if let Some(rect) = laid.field.filter(|r| r.contains(at_group)) {
             return Some((Over::Field, rect));
         }
-        laid.rows
-            .iter()
-            .filter(|r| r.cut.is_some())
-            .find_map(|row| {
-                let rect = Rectangle::new(
-                    Point::new(title_x(), row.top),
-                    Size::new(WIDTH - title_x(), row.height),
-                );
-                rect.contains(at_group).then(|| {
-                    let on = Rectangle::new(Point::new(o.x + rect.x, o.y + rect.y), rect.size());
-                    (Over::Title(row.title.clone(), on), on)
-                })
+        laid.rows.iter().filter(|r| r.cut).find_map(|row| {
+            let rect = Rectangle::new(
+                Point::new(title_x(), row.top),
+                Size::new(WIDTH - title_x(), row.height),
+            );
+            rect.contains(at_group).then(|| {
+                let on = Rectangle::new(Point::new(o.x + rect.x, o.y + rect.y), rect.size());
+                (Over::Title(row.title.clone(), on), on)
             })
+        })
     }
 
     /// What it shows, laid out from `lines`, `most` of them at most.
     fn lay(&self, lines: &Lines, most: usize) -> Laid {
-        let field = super::field().is_some_and(|f| f.at == At::Group(self.bar.clone()));
+        let field = field_height(&self.bar);
         // The mini form shows no card (Day.5's calendar carries the offer).
         let card = crate::setup::card_shows()
             && crate::column::groups().tasks
             && self.forms.iter().any(|(form, _)| *form == Form::Full);
         let card_words = crate::setup::Words::new(crate::clock::time::Lang::of_messages());
-        let fonts = iced::advanced::graphics::text::font_system().write();
-        match fonts {
-            Ok(mut system) => {
-                let mut width = |t: &str, size| kit::measure_in(system.raw(), t, size, MANROPE);
-                let card = card.then(|| crate::setup::card::lay(card_words, &mut width));
-                lay_out(lines, field, most, self.words, width, card)
-            }
-            Err(_) => {
-                let width = |t: &str, size| t.chars().count() as f32 * size * 0.55;
-                let card = card.then(|| crate::setup::card::lay(card_words, width));
-                lay_out(lines, field, most, self.words, width, card)
-            }
-        }
+        // Measured once each: a long title's rows are measured word by
+        // word, and laid out again at each draw.
+        let width = |t: &str, size| kit::measure(t, size, MANROPE);
+        let card = card.then(|| crate::setup::card::lay(card_words, width));
+        lay_out(lines, field, most, self.words, width, card)
     }
 
     /// What it shows changed: said, with its boxes' names, for tests.
@@ -965,8 +1039,19 @@ impl Group {
                 }
             })
             .collect();
+        // How many rows each title takes, "…" when cut past them; the
+        // field's rows in view.
+        let titles: Vec<String> = laid
+            .rows
+            .iter()
+            .map(|r| format!("{}{}", r.shown.len(), if r.cut { "…" } else { "" }))
+            .collect();
+        let field = laid.field.map_or(0, |f| {
+            1 + ((f.height - FIELD) / field_style().line).round().max(0.0) as usize
+        });
         let said = format!(
-            "form={} shows={} card={} add=«{}» rows=[{}] more={} empty={} count={} item=«{}»",
+            "form={} shows={} card={} add=«{}» rows=[{}] more={} empty={} count={} item=«{}» \
+             titles=[{}] field_rows={}",
             form.map_or("switching", Form::name),
             laid.height > 0.0,
             laid.card.is_some(),
@@ -977,6 +1062,8 @@ impl Group {
             laid.mini
                 .map_or_else(|| "none".to_owned(), |n| n.to_string()),
             laid.mini.map(|n| self.words.count(n)).unwrap_or_default(),
+            titles.join(","),
+            field,
         );
         if state.said.as_ref() == Some(&said) {
             return;
@@ -1058,7 +1145,7 @@ impl Group {
                 f,
                 &At::Group(self.bar.clone()),
                 at(rect),
-                (TITLE, FIELD_RADIUS, FIELD_PAD),
+                (field_style(), FIELD_RADIUS, FIELD_PAD),
                 self.words,
                 alpha,
             );
@@ -1087,17 +1174,16 @@ impl Group {
                 let mine = row.acts();
                 let lit = mine && hover == Some(item);
                 tick_box(f, button, row.look.ticked(), lit, a);
+                // The first row beside the box, the others under it.
                 let middle = Point::new(o.x + title_x(), o.y + row.top + LINE / 2.0);
                 match row.look {
                     Look::Unsaved { .. } => unsaved(f, self.words, middle, a),
-                    look => title(
-                        f,
-                        row.cut.as_deref().unwrap_or(&row.title),
-                        middle,
-                        TITLE,
-                        look.ticked(),
-                        a,
-                    ),
+                    look => {
+                        for (i, said) in row.shown.iter().enumerate() {
+                            let at = middle + Vector::new(0.0, i as f32 * TITLE_ROW);
+                            title(f, said, at, TITLE, look.ticked(), a);
+                        }
+                    }
                 }
             });
             if row.acts() {
@@ -1129,7 +1215,7 @@ impl Row {
     /// Whether its box acts: not on its way out (with motion), nor a task
     /// added whose card is not made yet.
     fn acts(&self) -> bool {
-        self.height >= LINE && !matches!(self.key, Key::Adding(_))
+        self.height >= self.full && !matches!(self.key, Key::Adding(_))
     }
 }
 
@@ -1434,7 +1520,7 @@ mod tests {
         let lines = Lines { shows: true, lines };
         lay_out(
             &lines,
-            field,
+            field.then_some(FIELD),
             GROUP_LINES,
             Words::new(crate::clock::time::Lang::French),
             |t, size| t.chars().count() as f32 * size * 0.5,
@@ -1488,7 +1574,7 @@ mod tests {
         // No source: nothing.
         let none = lay_out(
             &Lines::default(),
-            false,
+            None,
             GROUP_LINES,
             Words::new(crate::clock::time::Lang::French),
             |_, _| 0.0,
@@ -1499,18 +1585,39 @@ mod tests {
 
     #[test]
     fn on_a_short_bar_its_lines_give_way_to_the_rest_its_header_staying() {
+        let lines = |n: usize| vec![LINE; n];
         // All of them when they fit, 3 at most.
-        assert_eq!(lines_that_fit(2, false, f32::INFINITY), GROUP_LINES);
-        assert_eq!(lines_that_fit(3, false, 18.0 + 3.0 * 22.0), GROUP_LINES);
+        assert_eq!(lines_that_fit(&lines(2), None, f32::INFINITY), GROUP_LINES);
         assert_eq!(
-            lines_that_fit(7, false, 18.0 + 3.0 * 22.0 + 20.0),
+            lines_that_fit(&lines(3), None, 18.0 + 3.0 * 22.0),
             GROUP_LINES
         );
-        // Else as many as fit over "+ N", the field counted.
-        assert_eq!(lines_that_fit(3, false, 18.0 + 3.0 * 22.0 - 1.0), 2);
-        assert_eq!(lines_that_fit(7, false, 18.0 + 22.0 + 20.0), 1);
-        assert_eq!(lines_that_fit(7, true, 18.0 + 30.0 + 22.0 + 20.0), 1);
-        assert_eq!(lines_that_fit(7, false, 18.0 + 20.0), 0);
+        assert_eq!(
+            lines_that_fit(&lines(4), None, 18.0 + 3.0 * 22.0 + 20.0),
+            GROUP_LINES
+        );
+        // Else as many as fit over "+ N", the field counted, as tall as
+        // its text.
+        assert_eq!(lines_that_fit(&lines(3), None, 18.0 + 3.0 * 22.0 - 1.0), 2);
+        assert_eq!(lines_that_fit(&lines(4), None, 18.0 + 22.0 + 20.0), 1);
+        assert_eq!(
+            lines_that_fit(&lines(4), Some(26.0), 18.0 + 30.0 + 22.0 + 20.0),
+            1
+        );
+        assert_eq!(
+            lines_that_fit(&lines(4), Some(45.0), 18.0 + 30.0 + 22.0 + 20.0),
+            0
+        );
+        assert_eq!(lines_that_fit(&lines(4), None, 18.0 + 20.0), 0);
+        // Taller lines, fewer of them: a title on 3 rows is 58 px.
+        assert_eq!(
+            lines_that_fit(&[22.0, 58.0, 22.0], None, 18.0 + 3.0 * 22.0 + 20.0),
+            1
+        );
+        assert_eq!(
+            lines_that_fit(&[22.0, 58.0, 22.0], None, 18.0 + 22.0 + 58.0 + 20.0),
+            2
+        );
         // Laid out with none: the header and "+ 7 autres", its least.
         let seven: Vec<Line> = (0..7).map(|i| line(&i.to_string(), Look::Open)).collect();
         let lines = Lines {
@@ -1519,7 +1626,7 @@ mod tests {
         };
         let none = lay_out(
             &lines,
-            false,
+            None,
             0,
             Words::new(crate::clock::time::Lang::French),
             |t, size| t.chars().count() as f32 * size * 0.5,
@@ -1532,6 +1639,33 @@ mod tests {
         assert_eq!(least_of(&all), 18.0 + 20.0);
         // Nothing open: the header and "Rien à faire.".
         assert_eq!(least_of(&laid(Vec::new(), false)), 18.0 + 22.0);
+    }
+
+    #[test]
+    fn a_long_title_wraps_onto_3_rows_its_line_growing_then_ends_with_an_ellipsis() {
+        // 6.5 px a character at 13 px: 23 in the title's 150 px.
+        let mut lines: Vec<Line> = (0..3).map(|i| line(&i.to_string(), Look::Open)).collect();
+        lines[1].title = "Relire la spécification du paiement".to_owned();
+        lines[2].title = "Mettre à jour le changelog, la documentation du paiement \
+                          et les captures de l'écran des réglages avant la démo"
+            .to_owned();
+        let l = laid(lines, false);
+        let shown: Vec<(usize, bool)> = l.rows.iter().map(|r| (r.shown.len(), r.cut)).collect();
+        assert_eq!(shown, [(1, false), (2, false), (3, true)]);
+        assert_eq!(l.rows[1].shown, ["Relire la spécification", "du paiement"]);
+        assert!(l.rows[2].shown[2].ends_with('…'), "{:?}", l.rows[2].shown);
+        // 22 px, 18 more a row past the first.
+        assert_eq!(
+            l.rows.iter().map(|r| r.full).collect::<Vec<_>>(),
+            [22.0, 40.0, 58.0]
+        );
+        assert_eq!(l.rows[2].top, 18.0 + 22.0 + 40.0);
+        assert_eq!(l.height, 18.0 + 22.0 + 40.0 + 58.0);
+        // In the popover, whole.
+        let (all, cut) = title_rows(&l.rows[2].title, 150.0, None, |t| {
+            t.chars().count() as f32 * 6.5
+        });
+        assert!(all.len() > 3 && !cut, "{all:?}");
     }
 
     #[test]

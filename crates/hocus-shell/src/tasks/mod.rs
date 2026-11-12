@@ -15,8 +15,10 @@
 //! ([`crate::day::on_change`]): nothing here is polled.
 //!
 //! The field to add a task opens as the first line of the group or the
-//! popover, one at a time; `Enter` adds, `Esc` closes, a click elsewhere
-//! closes it when empty and lets the keyboard go when not.
+//! popover, one at a time: one line of text, wrapped as it is typed, the
+//! field growing to [`FIELD_ROWS`] rows, then scrolling; `Enter` adds (no
+//! line break goes in), `Esc` closes, a click elsewhere closes it when
+//! empty and lets the keyboard go when not.
 
 pub mod draw;
 
@@ -52,6 +54,9 @@ pub const CLOSE: Duration = Duration::from_millis(300);
 pub const UNSAVED: Duration = Duration::from_secs(3);
 /// The longest title the field takes, in characters.
 const LONGEST: usize = 200;
+/// The field's rows in view at most as its text wraps; past them it
+/// scrolls.
+pub const FIELD_ROWS: usize = 5;
 
 // --- What the views show ---------------------------------------------------------------
 
@@ -173,7 +178,8 @@ pub struct Field {
     pub focused: bool,
 }
 
-/// The field open: the shell's text field (#771), on one line.
+/// The field open: the shell's text field (#771), one line of text
+/// wrapped onto rows.
 #[derive(Debug)]
 struct Open {
     at: At,
@@ -662,6 +668,16 @@ pub fn draw_field(
             open.entry.draw(f, place, placeholder, look, open.focused);
         }
     });
+}
+
+/// The height of the field's text, if open at `at`, laid out `width`
+/// across in `style`: its rows in view, which its box grows by.
+pub fn field_height(at: &At, width: f32, style: field::view::Style) -> Option<f32> {
+    ui(|ui| {
+        let open = ui.field.as_ref().filter(|open| open.at == *at)?;
+        // The placeholder is one row: what it says counts for nothing.
+        Some(open.entry.height(width, style, ""))
+    })
 }
 
 /// `with` the popover's field, if it is open there (the kit's field,

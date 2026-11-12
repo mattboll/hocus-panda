@@ -1,9 +1,9 @@
 //! A field laid out and drawn: what it shows (its text, masked for a
-//! secret, an input method's preedit at the caret), in rows (on lines,
-//! wrapped between words, a word too long broken where it must),
-//! scrolled to keep the caret in view (down its rows on lines, across on
-//! one), where a point falls in it, and drawn with its selection behind
-//! the text, the preedit underlined and the caret.
+//! secret, an input method's preedit at the caret), in rows (on lines, or
+//! one line wrapped: between words, a word too long broken where it
+//! must), scrolled to keep the caret in view (down its rows when it
+//! wraps, across on one row), where a point falls in it, and drawn with
+//! its selection behind the text, the preedit underlined and the caret.
 //!
 //! Offsets here are in what is shown ([`Laid::shown`]); the field's own
 //! are mapped to and from them, so a field laid out is also the
@@ -31,7 +31,8 @@ pub struct Style {
     /// A row's height.
     pub line: f32,
     pub font: Font,
-    /// The rows in view at most (1 on one line).
+    /// The rows in view at most: 1, its text on one row scrolled across;
+    /// more, it wraps ([`Style::wrapped`]) and scrolls down its rows.
     pub rows: usize,
     pub measure: Measure,
     /// The placeholder's size and font.
@@ -51,6 +52,16 @@ impl Style {
             measure: crate::popover::kit::measure,
             hint: (size, font),
             reveal: false,
+        }
+    }
+
+    /// `size` in `font`, wrapped onto rows as it is typed: as many in view
+    /// as it takes, `rows` at most, then it scrolls. A [`Kind::Line`]
+    /// stays one line of text (no break goes in), shown on rows.
+    pub fn wrapped(size: f32, font: Font, rows: usize) -> Self {
+        Self {
+            rows: rows.max(1),
+            ..Self::one(size, font)
         }
     }
 }
@@ -177,6 +188,7 @@ impl Laid {
         let measure = |s: &str| (style.measure)(s, style.size, style.font);
         let rows = match field.kind() {
             Kind::Lines => wrap(&shown, width, measure),
+            Kind::Line if style.rows > 1 => wrap(&shown, width, measure),
             Kind::Line | Kind::Secret => std::iter::once(0..shown.len()).collect(),
         };
         let shown_caret = match preedit {

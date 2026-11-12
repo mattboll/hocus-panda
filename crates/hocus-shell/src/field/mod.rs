@@ -18,9 +18,10 @@
 //!   writing to it are the surface's.
 //! - [`keys::act`], what a key asks of a field.
 //! - [`view`], a field laid out (its rows, wrapped; scrolled to keep the
-//!   caret in view), where a point falls in it, and drawn: its text, the
-//!   selection in the theme's selection colour, the preedit underlined,
-//!   the caret.
+//!   caret in view; one line of text wraps too where its style says so,
+//!   [`view::Style::wrapped`]), where a point falls in it, and drawn: its
+//!   text, the selection in the theme's selection colour, the preedit
+//!   underlined, the caret.
 //!
 //! [`ime`] asks the compositor for an input method while a field has the
 //! keyboard.
@@ -48,7 +49,8 @@ use std::{cell::Cell, ops::Range};
 /// What a field holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// Text on one line: a line break pasted is a space.
+    /// Text on one line: a line break pasted is a space. Drawn on one row
+    /// scrolled across, or wrapped onto rows ([`view::Style::wrapped`]).
     Line,
     /// Text on lines of its own (a line break goes in). No surface has one
     /// since the secretary's drawer went.
