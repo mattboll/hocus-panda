@@ -485,7 +485,14 @@ impl State {
     /// Where a new window goes and whether it takes the focus; it opens
     /// animated.
     pub fn map_window(&mut self, window: Window) {
-        let Some(output) = self.output_under_pointer() else {
+        // An application an agent launched onto a desktop opens there
+        // (docs/design/mcp.md, "Out of sight").
+        let launched = app_id(&window).and_then(|app| self.mcp_launched_for(&app));
+        let Some(output) = launched
+            .as_ref()
+            .map(|(_, output, _)| output.clone())
+            .or_else(|| self.output_under_pointer())
+        else {
             tracing::warn!("a window with no output to show on");
             self.arrivals.unmapped.push(window);
             return;
@@ -525,12 +532,15 @@ impl State {
         let (x, y) = model::place(area, (size.w, size.h), &same_app);
         // On the desktop its screen shows, or its rule's there.
         let current = self.strip(&output).current();
-        let desktop = rule
+        let desktop = launched
             .as_ref()
-            .and_then(|r| r.desktop)
-            .map(|d| d - 1)
+            .map(|(_, _, desktop)| *desktop)
+            .or_else(|| rule.as_ref().and_then(|r| r.desktop).map(|d| d - 1))
             .filter(|d| *d < self.strip(&output).count())
             .unwrap_or(current);
+        if let Some((at, _, _)) = launched {
+            self.mcp_launched_took(at);
+        }
         let elsewhere = desktop != current;
         // Opening out of sight, it takes no focus.
         let takes_focus = self.takes_focus(&window) && !elsewhere;

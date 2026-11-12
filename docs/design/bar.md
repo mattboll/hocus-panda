@@ -151,7 +151,7 @@ group where it is.
 | 2 | Next meeting | Card (Day.2, variant B): 6 px colour bar, title (bold, 1 line, ellipsis), `HH:MM · dans N min`; a click opens the meeting, a button joins its call. Hidden when nothing remains today (as built, Day.2) | 44 px |
 | — | In use | The sign of what uses the microphone, the camera or the screen, under the card (5.12, as built): a tile a kind in use; none when nothing is | 36 px |
 | 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
-| 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, cut, whole in a tooltip after 600 ms); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line (+ 20 px for "+ N", + 30 px for the field) |
+| 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, wrapped onto 3 rows at most, 18 px apart, the line growing 18 px a row; past 3 rows the third ends with an ellipsis, the title whole in a tooltip after 600 ms; #792); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line, 18 more a title's row past the first (+ 20 px for "+ N", + 30 px for the field, 19 more a row as its text wraps, 5 rows at most) |
 | 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 56 px head (#649), `AGENTS` and the total over her line; "Sources" in her briefing. One 46 px row per agent (4.1, track 4 "the lines"; #649): its panda (42 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted; a waiting or stuck agent's row is a 68 px card with what it asks or why it failed (§7 A). Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 66 px + 46 px a row, 68 px a card (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
 | — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the overview (windows.md §12b); none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
@@ -805,9 +805,11 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   to-do item and from the full form's "+ N autres", its top on what
   opened it: "À faire" / "To do" (14 px, bold), the count of open tasks
   (12 px, `text.dim`) and a `+` as the group's; the field to add a task as
-  its first line when open (30 px, radius 8); up to 6 tasks on 30 px
-  lines, which tick as the group's; past 6 the list scrolls and "+ N
-  autres" under it says how many are past the six; none: "Rien à faire."
+  its first line when open (30 px, radius 8, growing 20 px a row as its
+  text wraps, 5 rows at most, #792); up to 6 tasks on 30 px lines, their
+  titles whole, wrapped (18 px a row past the first), which tick as the
+  group's; past 6 the list scrolls and "+ N autres" under it says how
+  many are past the six; none: "Rien à faire."
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, phone (KDE Connect: battery, notifications, send a
@@ -1915,7 +1917,9 @@ field (a secret is one word).
   `release`), it says what came of it (`Outcome`: the same, moved,
   edited, to copy, cut, to paste); the surface reads and writes the
   clipboard.
-  Its kinds: `Line` (one line: a line break pasted is a space), `Lines`
+  Its kinds: `Line` (one line: a line break pasted is a space; drawn on
+  one row scrolled across, or wrapped onto rows when its style says so,
+  `view::Style::wrapped`: the task to add, #792), `Lines`
   (a line break goes in; no surface has one now) and `Secret` (one line,
   masked unless shown on purpose, never copied nor cut out, no history,
   a word is its whole, its room taken once and its text overwritten with
@@ -1926,8 +1930,9 @@ field (a secret is one word).
   `Shift+Delete`, `Shift+Insert`, `Ctrl+Z`, `Ctrl+Shift+Z` and `Ctrl+Y`,
   what is typed. Enter, Tab and Escape stay the surface's.
 - **Laid out** (`field::view::Laid`): its rows (on lines, broken between
-  words, a word too long broken where it must; one line for a secret, a
-  dot a character), scrolled to keep the caret in view (down its rows,
+  words, a word too long broken where it must; a `Line` so too when
+  wrapped, its box growing with its rows in view up to the style's most;
+  one line for a secret, a dot a character), scrolled to keep the caret in view (down its rows,
   or across), where a point falls in it, and its rows are the lines Home,
   End, Up and Down follow (`field::Lines`; Up and Down keep their place
   across). Drawn with the selection behind its text in the theme's
@@ -3815,7 +3820,8 @@ spec (issue #428).
   sign, or the clock), the agents' item under it (#599). Its surface (`hocus-bar-tasks`, under the windows with the
   bar's others, 5.13) is the bar inside its rim, 5 px around what it
   draws for the keyboard's ring, as tall as the group (18 px, 22 px a
-  line, 20 px for "+ N", 30 px for the field) or the item (34 px), one
+  line and 18 more a title's row past the first, 20 px for "+ N", 30 px
+  for the field and 19 more a row past its first) or the item (34 px), one
   pixel taking no pointer when nothing shows. Today laid out again (or
   the meeting card, the sign of what is in use coming) moves it, and the
   agents' group under it. While the bar
@@ -3826,9 +3832,13 @@ spec (issue #428).
   no group and no item. A board with nothing open: the header and "Rien
   à faire." (13 px, `text.faint`). The group shows 3 lines; "+ 4 autres"
   / "+ 1 autre" (12.5 px, `text.faint`, a button lit under the pointer
-  6 px past its text) opens the tasks' popover. A title too long is cut
-  with an ellipsis; resting 600 ms on it shows it whole in the bar's
-  tooltip (5.14, as Today's lines), beside the bar.
+  6 px past its text) opens the tasks' popover. A long title wraps
+  (#792) between its words (a word too long broken where it must) onto
+  3 rows at most, 18 px apart, the box beside the first; its line grows
+  18 px a row past the first, and the group still shows 3 tasks at most,
+  fewer when the column's room lacks for their heights. Past 3 rows the
+  third ends with an ellipsis; resting 600 ms on a title so cut shows it
+  whole in the bar's tooltip (5.14, as Today's lines), beside the bar.
 - **Ticking**: a click on the box (or `Space`, `Enter` while it holds the
   keyboard) ticks it at once: `#6CC287`, a dark check (`#0b1020`), the
   title `text.faint` and struck through. The source is told at once
@@ -3850,7 +3860,10 @@ spec (issue #428).
   as the first line, 26 px with 2 px above and under, radius 7,
   `rgba(255,255,255,0.06)`, a 1 px `rgba(108,194,135,0.65)` border, 13 px,
   "Nouvelle tâche…" / "New task…" while empty, a caret (it does not
-  blink: nothing draws at rest). The group's surface takes the keyboard
+  blink: nothing draws at rest). Its text wraps as it is typed (#792;
+  the shell's field on one line, `Style::wrapped`), the field growing
+  19 px a row up to 5 rows, then scrolling to keep the caret in view;
+  Up and Down go a row up and down. No line break goes in. The group's surface takes the keyboard
   (exclusively, while the field holds it). `Enter` adds the task at the top
   of the board's add column (`Change::Add`, no due date) and closes the
   field; empty, it adds nothing. `Esc` closes it; a click elsewhere closes
@@ -3869,10 +3882,13 @@ spec (issue #428).
 - **The tasks' popover** (§9): 280 wide, the popovers' glass, 8 px left of
   the bar, its top on the item or the line that opened it. "À faire" (14 px
   bold), the count (12 px, `text.dim`), the `+`; the field as its first
-  line (30 px, radius 8, 13.5 px); up to 6 tasks on 30 px lines (the box in
-  a 26 × 26 button, the title 13.5 px), ticking as the group's; past 6 the
-  wheel scrolls the list (a 6 px thumb) and "+ N autres" under it says how
-  many are past the six. Opened by hovering, it takes the keyboard when
+  line (30 px, radius 8, 13.5 px; it wraps and grows 20 px a row up to 5
+  rows, as the group's, #792); up to 6 tasks on 30 px lines (the box in
+  a 26 × 26 button, the title 13.5 px, whole: wrapped onto as many rows as
+  it takes, 18 px apart, the line 18 px taller a row past the first),
+  ticking as the group's; past 6 the wheel scrolls the list (the first
+  six in view, whatever their heights; a 6 px thumb) and "+ N autres"
+  under it says how many are past the six. Opened by hovering, it takes the keyboard when
   its field opens. `Tab` goes through the `+` and each box, `Space` or
   `Enter` acts, `Esc` closes the field, then the popover.
 - **The keyboard in the bar**: the `+`, each box and "+ N autres" are the
@@ -3891,12 +3907,18 @@ spec (issue #428).
   stream. At rest nothing wakes or draws.
 - **Measured headless** (`crates/hocus-compositor/tests/tasks.rs`), the
   real shell on the CPU, a fixture's board of the test's own, in French:
-  three tasks in the column's order and "+ 4 autres", the surface 18 + 3 ×
-  22 + 20 px (and 5 px around) right under the clock (no meeting, no
-  event, no agent; the agents' group under it since #599), a cut
-  title whole in the tooltip, "+ 4 autres" opening the popover (6 rows,
-  "+ 1 autre", 280 wide, its top on the line)
+  three tasks in the column's order and "+ 4 autres", the surface 18 px,
+  the lines' heights and 20 px (and 5 px around) right under the clock
+  (no meeting, no event, no agent; the agents' group under it since
+  #599), "+ 4 autres" opening the popover (6 rows, "+ 1 autre", 280
+  wide, its top on the line)
   (`the_group_shows_three_tasks_in_the_columns_order_and_the_rest_in_its_popover`);
+  a long title on 3 rows ending cut, its line 58 px, one on 2 rows whole,
+  resting on the cut one showing it whole, none on the other
+  (`a_long_title_wraps_onto_3_rows_its_line_taller_then_ends_cut_shown_whole_on_a_rest`);
+  the field growing 19 px a row as a long task is typed, to 5 rows, and
+  `Enter` adding it whole on one line
+  (`the_field_wraps_and_grows_to_5_rows_as_one_types_and_enter_adds_it_on_one_line`);
   a tick reaching the fixture at once, the line going 1.5 s after as the
   shell measured it, the next task coming in
   (`a_tick_reaches_the_source_at_once_and_its_line_goes_after_1_5_s`); a

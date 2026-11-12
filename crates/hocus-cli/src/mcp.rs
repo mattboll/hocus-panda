@@ -255,10 +255,10 @@ impl Bridge {
                 "launch: say which application with `app`, a desktop entry's id or name",
             );
         };
-        if let Some(odd) = args
-            .as_object()
-            .and_then(|a| a.keys().find(|k| !matches!(k.as_str(), "app" | "intent")))
-        {
+        if let Some(odd) = args.as_object().and_then(|a| {
+            a.keys()
+                .find(|k| !matches!(k.as_str(), "app" | "desktop" | "output" | "intent"))
+        }) {
             return failed(&format!("launch: unknown field `{odd}`"));
         }
         let locale = hocus_xdg::desktop::Locale::from_env();
@@ -281,6 +281,9 @@ impl Bridge {
                 "argv": entry.argv,
                 "terminal": entry.terminal,
                 "dir": entry.dir,
+                "wm_class": entry.wm_class,
+                "desktop": args.get("desktop").cloned().unwrap_or(Value::Null),
+                "output": args.get("output").cloned().unwrap_or(Value::Null),
                 "intent": args.get("intent").cloned().unwrap_or(Value::Null),
             }),
         )
@@ -502,7 +505,8 @@ fn tools() -> Vec<Value> {
             "name": "focus_window",
             "title": "Focus a window",
             "description": "Brings a window forward with the keyboard, on its desktop; a minimized \
-                one comes back. Shown to the user first.",
+                one comes back. A window of another desktop shows that desktop: only when the \
+                user asked to see it. Shown to the user first.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "window": window, "intent": intent },
@@ -536,8 +540,10 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "switch_desktop",
             "title": "Switch desktop",
-            "description": "A screen shows another of its desktops. Shown to the user first; the \
-                user can undo it.",
+            "description": "A screen shows another of its desktops: it changes what the user \
+                sees, so only when the user asked to see that desktop. To work out of sight, \
+                launch onto another desktop or move a window there instead. Shown to the user \
+                first; the user can undo it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -554,12 +560,16 @@ fn tools() -> Vec<Value> {
             "name": "launch",
             "title": "Launch an application",
             "description": "Starts an installed application, by its desktop entry's id \
-                (org.mozilla.firefox) or its name (Firefox), as the launcher does. Shown to the \
-                user first.",
+                (org.mozilla.firefox) or its name (Firefox), as the launcher does. With \
+                `desktop`, its first window opens on that desktop, out of the user's sight: \
+                prefer it to work without disturbing the user. What the user sees never changes. \
+                Shown to the user first.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "app": { "type": "string", "description": "A desktop entry's id or name." },
+                    "desktop": { "type": "integer", "minimum": 1, "description": "The desktop its first window opens on, from 1; the one the user sees by default." },
+                    "output": { "type": "string", "description": "That desktop's screen, from list_outputs; the pointer's by default." },
                     "intent": intent,
                 },
                 "required": ["app", "intent"],

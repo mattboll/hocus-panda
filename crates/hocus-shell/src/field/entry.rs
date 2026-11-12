@@ -9,7 +9,10 @@
 //! where the surface says, in its font, and remembers where: a press
 //! finds its place in the text from it.
 //!
-//! On one line: the surfaces' fields all are.
+//! The surfaces' fields are all on one line: on one row scrolled across,
+//! or wrapped onto rows as it is typed (the task to add,
+//! [`Style::wrapped`]), the caret then going up and down its rows as
+//! drawn.
 
 use std::{
     cell::Cell,
@@ -167,8 +170,19 @@ impl Entry {
     }
 
     fn apply(&mut self, act: Act) -> Took {
-        let lines = OneLine(self.field.text().len());
-        match self.field.apply(act, &lines) {
+        // Wrapped, the caret goes along its rows as last drawn (Up, Down,
+        // Home, End); else its one line.
+        let laid = self
+            .seen
+            .get()
+            .filter(|place| place.style.rows > 1)
+            .and_then(|_| self.laid(""));
+        let one = OneLine(self.field.text().len());
+        let lines: &dyn Lines = match &laid {
+            Some(laid) => laid,
+            None => &one,
+        };
+        match self.field.apply(act, lines) {
             Outcome::Same => Took::Same,
             Outcome::Moved => Took::Moved,
             Outcome::Edited => Took::Edited,
@@ -258,6 +272,13 @@ impl Entry {
     /// The place in its text nearest `p`, as it was last drawn.
     fn at(&self, p: Point) -> usize {
         self.laid("").map_or(self.field.text().len(), |l| l.at(p))
+    }
+
+    /// Its text's height laid out `width` across in `style` (`placeholder`
+    /// while empty): its rows in view. A surface sizes its box by it, the
+    /// field growing as it wraps.
+    pub fn height(&self, width: f32, style: Style, placeholder: &str) -> f32 {
+        Laid::new(&self.field, width, style, placeholder).height()
     }
 
     /// Laid out where it was last drawn.
@@ -419,6 +440,40 @@ mod tests {
         entry.press(Point::new(10.0 + 10.0 * 6.0, 20.0));
         entry.press(Point::new(10.0 + 10.0 * 6.0, 20.0));
         assert_eq!(&entry.text()[entry.field.selection()], "trois");
+    }
+
+    #[test]
+    fn one_line_wrapped_grows_to_its_most_rows_then_scrolls_and_up_goes_a_row_up() {
+        let style = Style {
+            rows: 3,
+            ..place().style
+        };
+        let mut entry = Entry::new(Kind::Line, 200);
+        // 6 px a character in 60: ten a row.
+        let height = |entry: &Entry| entry.height(60.0, style, "Nouvelle tâche…");
+        assert_eq!(height(&entry), 20.0, "empty: one row, the placeholder's");
+        typed(&mut entry, "un deux trois");
+        assert_eq!(height(&entry), 40.0, "« un deux », « trois »");
+        typed(&mut entry, " quatre cinq six sept huit neuf");
+        assert_eq!(height(&entry), 60.0, "three rows in view at most");
+        // Drawn, it scrolled to keep the caret, at its end, in view.
+        let place = Place {
+            width: 60.0,
+            style,
+            ..place()
+        };
+        entry.seen.set(Some(place));
+        let laid = entry.laid("").expect("drawn");
+        assert!(laid.rows.len() > 3 && laid.scroll.first > 0, "{laid:?}");
+        // Up goes a row up, not to the start as on one row.
+        let none = Modifiers::empty();
+        let end = entry.text().len();
+        entry.key(&Key::Named(Named::ArrowUp), none, None);
+        assert!(entry.field.caret() > 0 && entry.field.caret() < end);
+        // Enter is the surface's; a line break pasted is a space.
+        assert_eq!(entry.key(&Key::Named(Named::Enter), none, None), Took::No);
+        assert!(entry.paste("a\nb"));
+        assert!(!entry.text().contains('\n'));
     }
 
     #[test]
