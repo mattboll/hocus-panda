@@ -2664,6 +2664,9 @@ and = " and "
 not_reopened = { other = "{listed} could not be reopened." }
 
 
+[compositor.creatures]
+other_tab = "{name} · other tab"
+
 [compositor.overview]
 badge_waiting = { other = "{n} waiting" }
 badge_stuck = { other = "{n} stuck" }

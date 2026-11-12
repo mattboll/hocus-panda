@@ -55,6 +55,7 @@ mod captures_live;
 mod child_signals;
 mod clipboard;
 mod contrast;
+mod creatures;
 mod cursor;
 mod day;
 mod day_sources;

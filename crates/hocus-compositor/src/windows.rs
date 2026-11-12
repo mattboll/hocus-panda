@@ -1478,6 +1478,8 @@ impl State {
         self.tick_walls();
         // The snow (#795).
         moving |= self.tick_snow(now);
+        // The agents as creatures on their windows (#796).
+        moving |= self.tick_creatures(now);
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         self.departures.leaving.retain(|l| match &l.burn {

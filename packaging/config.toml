@@ -545,7 +545,9 @@
 # agent's good news.
 # fireworks = false
 # confetti = false
-# The agents: each agent's panda on the edge of its window.
+# The agents: each agent's panda on the edge of its window, playing its
+# state (one over each herdr pane; another tab's small, tagged); none on
+# a maximised window, they stay in the bar.
 # creatures = false
 
 # [magnifier]

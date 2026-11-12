@@ -5,8 +5,8 @@
 use serde::Deserialize;
 
 /// The fourteen effects, grouped as Settings › Appearance › Effects shows
-/// them. Only `flames` plays yet; the others' switches are kept for their
-/// tickets.
+/// them. The flames, the snow and the creatures play so far; the others'
+/// switches are kept for their tickets.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Effects {
@@ -28,5 +28,7 @@ pub struct Effects {
     pub fireworks: bool,
     pub confetti: bool,
     // The agents.
+    /// Each agent's panda sits on its window's top edge, playing its
+    /// state (#796).
     pub creatures: bool,
 }

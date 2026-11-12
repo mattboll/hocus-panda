@@ -16,7 +16,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            Offscreen, Renderer,
+            ImportMem, Offscreen, Renderer,
             element::{Element, Id, Kind, RenderElement},
             gles::{Capability, GlesError, GlesFrame, GlesRenderer, GlesTexture, ffi},
             pixman::PixmanRenderer,
@@ -61,6 +61,12 @@ enum What {
     /// Shapes of the snow (#795): those drawn over what is under them,
     /// then those added to it, where they may show.
     Shapes { over: Mesh, added: Mesh, clip: Clip },
+    /// Pieces of a picture each drawn on a quad of its own (the creatures'
+    /// parts, #796): [`SPRITE_FLOATS`] floats a vertex, six a quad.
+    Sprites {
+        texture: Rc<dyn Any>,
+        vertices: Vec<f32>,
+    },
     /// Nothing: what stands for an effect where it must not be seen (behind
     /// the glass, blurred once and kept).
     Blank,
@@ -68,6 +74,10 @@ enum What {
 
 /// Other windows and the bar an effect stays off, at most this many.
 pub const HOLES: usize = 8;
+
+/// A sprite's vertex: where it is (output-local, physical), where in its
+/// sheet (0 to 1), how opaque.
+pub const SPRITE_FLOATS: usize = 5;
 
 /// Where an effect may draw, output-local and physical (`x0, y0, x1, y1`):
 /// within `keep`, out of each of `holes` (the other windows and the bar:
@@ -197,6 +207,23 @@ impl FireElement {
         }
     }
 
+    /// The pieces of `texture` (a sheet, [`Fire::sheet`]) laid by
+    /// `vertices` (output-local, physical) within `geometry`.
+    pub fn sprites(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        texture: Rc<dyn Any>,
+        vertices: Vec<f32>,
+    ) -> Self {
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Sprites { texture, vertices },
+        }
+    }
+
     /// Nothing over `geometry`, never changing.
     pub fn blank(id: Id, geometry: Rectangle<i32, Physical>) -> Self {
         Self {
@@ -227,6 +254,10 @@ pub trait Fire: Renderer + Sized {
         look: BurnLook,
     ) -> Option<FireElement>;
 
+    /// A sheet of pictures for [`FireElement::sprites`]: `rgba`
+    /// (premultiplied, `size` pixels) made a texture. `None`: not drawn so.
+    fn sheet(&mut self, rgba: &[u8], size: (i32, i32)) -> Option<Rc<dyn Any>>;
+
     fn draw_fire(
         frame: &mut Self::Frame<'_, '_>,
         element: &FireElement,
@@ -248,6 +279,10 @@ impl Fire for PixmanRenderer {
         _geometry: Rectangle<i32, Physical>,
         _look: BurnLook,
     ) -> Option<FireElement> {
+        None
+    }
+
+    fn sheet(&mut self, _rgba: &[u8], _size: (i32, i32)) -> Option<Rc<dyn Any>> {
         None
     }
 
@@ -520,6 +555,31 @@ void main() {
 }
 ";
 
+/// A piece of a sheet, as opaque as its vertices say (premultiplied).
+const SPRITE_VERTEX: &str = "#version 100
+uniform mat3 matrix;
+attribute vec2 position;
+attribute vec2 local;
+attribute float shade;
+varying vec2 v_uv;
+varying float v_shade;
+void main() {
+    gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
+    v_uv = local;
+    v_shade = shade;
+}
+";
+
+const SPRITE: &str = "#version 100
+precision highp float;
+uniform sampler2D tex;
+varying vec2 v_uv;
+varying float v_shade;
+void main() {
+    gl_FragColor = texture2D(tex, v_uv) * v_shade;
+}
+";
+
 /// The effects' programs of a renderer's context, made once; `None` where
 /// they do not compile, and the effects do not play.
 #[derive(Debug)]
@@ -531,6 +591,9 @@ struct Programs {
     light: Program,
     sparks: Program,
     shapes: Program,
+    sprites: Program,
+    /// The sprites' opacity attribute.
+    shade: ffi::types::GLint,
     /// The sparks' other attributes.
     colour: ffi::types::GLint,
     shape: ffi::types::GLint,
@@ -589,8 +652,13 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 &with_clip(SHAPES, "varying vec2 v_at;\n"),
                 &["matrix", "keep", "holes", "count"],
             )?;
+            let sprites = compile_with(gl, SPRITE_VERTEX, SPRITE, &["matrix", "tex"])?;
             let attrib =
                 |p: &Program, n: &std::ffi::CStr| gl.GetAttribLocation(p.program, n.as_ptr());
+            let shade = attrib(&sprites, c"shade");
+            if shade < 0 || sprites.position < 0 || sprites.local < 0 {
+                return Err("the sprites' attributes are missing".to_owned());
+            }
             let (colour, shape) = (attrib(&sparks, c"colour"), attrib(&sparks, c"shape"));
             if colour < 0 || shape < 0 || sparks.position < 0 || sparks.local < 0 {
                 return Err("the particles' attributes are missing".to_owned());
@@ -609,6 +677,8 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 light,
                 sparks,
                 shapes,
+                sprites,
+                shade,
                 colour,
                 shape,
                 shapes_attribs,
@@ -662,6 +732,15 @@ impl Fire for GlesRenderer {
                 look,
             },
         })
+    }
+
+    fn sheet(&mut self, rgba: &[u8], size: (i32, i32)) -> Option<Rc<dyn Any>> {
+        programs(self)?;
+        let texture: GlesTexture = self
+            .import_memory(rgba, Fourcc::Abgr8888, size.into(), false)
+            .map_err(|err| tracing::warn!(%err, "no sheet for the creatures"))
+            .ok()?;
+        Some(Rc::new(texture))
     }
 
     fn draw_fire(
@@ -750,8 +829,90 @@ impl Fire for GlesRenderer {
                     }
                 })
             }
+            What::Sprites { texture, vertices } => {
+                let Some(texture) = texture.downcast_ref::<GlesTexture>() else {
+                    return Ok(());
+                };
+                let tex = texture.tex_id();
+                let projection = *frame.projection();
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the frame's context is current.
+                    unsafe {
+                        let boxes = scissors(gl, &projection, dst, damage);
+                        sprites(gl, &programs, &matrix, instancing, tex, vertices, &boxes);
+                    }
+                })
+            }
             What::Blank => Ok(()),
         }
+    }
+}
+
+/// Draws the sprites `vertices` of the sheet `tex` over what is under
+/// them, cut to each of `boxes` in turn.
+///
+/// # Safety
+///
+/// The context must be current, its scissor test on (as smithay's frame
+/// has it).
+#[allow(unsafe_code)]
+unsafe fn sprites(
+    gl: &ffi::Gles2,
+    programs: &Programs,
+    matrix: &[f32; 9],
+    instancing: bool,
+    tex: ffi::types::GLuint,
+    vertices: &[f32],
+    boxes: &[[i32; 4]],
+) {
+    let p = &programs.sprites;
+    let n = vertices.len() / SPRITE_FLOATS;
+    if n == 0 {
+        return;
+    }
+    let attribs = [
+        (p.position as u32, 2, 0),
+        (p.local as u32, 2, 2),
+        (programs.shade as u32, 1, 4),
+    ];
+    let stride = (SPRITE_FLOATS * std::mem::size_of::<f32>()) as ffi::types::GLsizei;
+    let mut viewport = [0i32; 4];
+    // SAFETY: the context is current; the vertices outlive each draw call,
+    // every attribute enabled here is disabled again and the scissor given
+    // back, as smithay's own draws expect.
+    unsafe {
+        gl.GetIntegerv(ffi::VIEWPORT, viewport.as_mut_ptr());
+        gl.UseProgram(p.program);
+        gl.UniformMatrix3fv(p.at("matrix"), 1, ffi::FALSE, matrix.as_ptr());
+        bind(gl, 0, tex, false);
+        gl.Uniform1i(p.at("tex"), 0);
+        gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
+        gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+        for (at, size, offset) in attribs {
+            gl.EnableVertexAttribArray(at);
+            if instancing {
+                gl.VertexAttribDivisor(at, 0);
+            }
+            gl.VertexAttribPointer(
+                at,
+                size,
+                ffi::FLOAT,
+                ffi::FALSE,
+                stride,
+                vertices.as_ptr().add(offset) as *const _,
+            );
+        }
+        for [x, y, w, h] in boxes {
+            gl.Scissor(*x, *y, *w, *h);
+            gl.DrawArrays(ffi::TRIANGLES, 0, n as ffi::types::GLsizei);
+        }
+        let [x, y, w, h] = viewport;
+        gl.Scissor(x, y, w, h);
+        for (at, _, _) in attribs {
+            gl.DisableVertexAttribArray(at);
+        }
+        gl.BindTexture(ffi::TEXTURE_2D, 0);
     }
 }
 

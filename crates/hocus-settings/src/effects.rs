@@ -27,7 +27,7 @@ const AGENTS: RowGroup = RowGroup {
 };
 
 /// The effects the desktop plays so far: the others' rows say "Bientôt".
-pub const BUILT: &[&str] = &["effects.snow", "effects.flames"];
+pub const BUILT: &[&str] = &["effects.snow", "effects.flames", "effects.creatures"];
 
 /// Whether `id` is an effect's row not built yet.
 pub fn soon(id: &str) -> bool {
@@ -214,9 +214,9 @@ mod tests {
     use super::*;
 
     /// Fourteen, each with its key of `[effects]`, off by default; the
-    /// snow and the flames built.
+    /// snow, the flames and the creatures built.
     #[test]
-    fn fourteen_effects_off_by_default_the_snow_and_the_flames_built() {
+    fn fourteen_effects_off_by_default_the_snow_the_flames_and_the_creatures_built() {
         let all = settings();
         assert_eq!(all.len(), 14);
         for s in all {
@@ -231,7 +231,7 @@ mod tests {
             assert_eq!(s.id, format!("effects.{}", key[1]));
             assert_eq!(
                 soon(s.id),
-                !["effects.snow", "effects.flames"].contains(&s.id)
+                !["effects.snow", "effects.flames", "effects.creatures"].contains(&s.id)
             );
         }
     }

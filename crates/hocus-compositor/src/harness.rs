@@ -263,6 +263,25 @@ impl Headless {
             .count()
     }
 
+    /// The agents' creatures drawn in the last frame on a screen (#796):
+    /// each one's window, its agent, its box (global, logical: x, y,
+    /// width, height).
+    pub fn creatures(&self) -> Vec<(WindowId, u64, [f64; 4])> {
+        self.app.state.fx.creatures.drawn()
+    }
+
+    /// The windows the creatures sit on, and how many on each, as decided.
+    pub fn creatures_sitting(&self) -> Vec<(WindowId, usize)> {
+        self.app
+            .state
+            .fx
+            .creatures
+            .shown
+            .iter()
+            .map(|(id, c)| (*id, c.len()))
+            .collect()
+    }
+
     /// Whether it snows (#795): the snow kept, falling or still.
     pub fn snowing(&self) -> bool {
         self.app.state.fx.snow.is_some()

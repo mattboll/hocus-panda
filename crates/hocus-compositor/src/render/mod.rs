@@ -6,6 +6,7 @@
 //! bar is in front (`crate::front`), and the layers under them; and what
 //! clients are told once a frame is out.
 
+mod creatures;
 mod layers;
 mod leaving;
 mod snow;
@@ -667,8 +668,11 @@ impl State {
         let now = self.now();
         self.frames.drawn_at.set(Some(now));
         // The snow's programs made before it is drawn (#795).
-        if self.fx.snow.is_some() && purpose.screen() {
+        if (self.fx.snow.is_some() || !self.fx.creatures.shown.is_empty()) && purpose.screen() {
             renderer.effects_ready();
+        }
+        if purpose.screen() {
+            self.fx.creatures.frame_starts(now);
         }
         let mut elements: Vec<OutputElement<R>> = Vec::new();
         let Some(area) = self.space.output_geometry(output) else {
