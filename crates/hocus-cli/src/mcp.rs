@@ -45,11 +45,16 @@ const INVALID_PARAMS: i64 = -32602;
 const UNSUPPORTED_VERSION: i64 = -32022;
 
 const INSTRUCTIONS: &str = "The windows, desktops, screens and settings of a Hocuspanda \
-    desktop. Read them with list_windows, list_desktops, list_outputs and get_settings; when \
-    this agent may act, focus and move windows, send them to another desktop, switch desktops, \
-    launch an application and change a setting. Say what each action is for with `intent`, in \
-    one short line: the user sees it on what you touch before it happens, and then a summary \
-    they can undo. The user may stop every agent at once; a refusal says why.";
+    desktop. Read them with list_windows, list_desktops, list_outputs and get_settings, a \
+    window's pixels with capture and its elements with accessibility_tree; when this agent may \
+    act, focus, move and close windows, send them to another desktop, switch desktops, launch \
+    an application, change a setting, and click, scroll, type and press keys in the windows of \
+    the applications the user allowed, through a pointer and a keyboard of your own (the \
+    user's stay theirs). Aim at an element by its label rather than at pixels when the tree \
+    has it. Say what each action is for with `intent`, in one short line: the user sees it on \
+    what you touch before it happens, and then a summary. Some actions wait for the user's \
+    answer (a password field, an application they marked); the user may take over or stop \
+    every agent at once; a refusal says why.";
 
 /// The connection to the compositor.
 struct Line {
@@ -66,10 +71,12 @@ pub struct Bridge {
     protocol: Option<&'static str>,
 }
 
-/// A tool's result: what it says, its data, and whether it failed.
+/// A tool's result: what it says, its data, a capture's PNG (base64),
+/// and whether it failed.
 struct Done {
     text: String,
     data: Option<Value>,
+    image: Option<String>,
     error: bool,
 }
 
@@ -223,8 +230,15 @@ impl Bridge {
             "launch" => self.launch(&args),
             _ => self.ask(name, args),
         };
+        let mut content = vec![json!({ "type": "text", "text": done.text })];
+        if let Some(png) = done.image {
+            content.insert(
+                0,
+                json!({ "type": "image", "data": png, "mimeType": "image/png" }),
+            );
+        }
         let mut result = json!({
-            "content": [{ "type": "text", "text": done.text }],
+            "content": content,
             "isError": done.error,
         });
         if let (Some(data), Some(fields)) = (done.data, result.as_object_mut()) {
@@ -279,10 +293,16 @@ impl Bridge {
                 error: Some(why), ..
             }) => failed(&why),
             Ok(Answer { ok, .. }) => {
-                let data = ok.unwrap_or(Value::Null);
+                let mut data = ok.unwrap_or(Value::Null);
+                // A capture's picture is content of its own, not text.
+                let image = data
+                    .as_object_mut()
+                    .and_then(|d| d.remove("png"))
+                    .and_then(|p| p.as_str().map(str::to_owned));
                 Done {
                     text: serde_json::to_string_pretty(&data).unwrap_or_default(),
                     data: data.is_object().then_some(data),
+                    image,
                     error: false,
                 }
             }
@@ -385,6 +405,7 @@ fn failed(why: &str) -> Done {
     Done {
         text: why.to_owned(),
         data: None,
+        image: None,
         error: true,
     }
 }
@@ -423,6 +444,10 @@ fn tools() -> Vec<Value> {
     let none = json!({ "type": "object", "properties": {}, "additionalProperties": false });
     let read = json!({ "readOnlyHint": true, "openWorldHint": false });
     let act = json!({ "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false });
+    // What goes into an application cannot be taken back.
+    let input = json!({ "readOnlyHint": false, "destructiveHint": true, "openWorldHint": true });
+    let label = json!({ "type": "string", "description": "An element's label, from accessibility_tree: exactly, else the one label that holds it." });
+    let role = json!({ "type": "string", "description": "Its role (push button, entry), among several of one label." });
     vec![
         json!({
             "name": "list_windows",
@@ -561,6 +586,153 @@ fn tools() -> Vec<Value> {
             },
             "annotations": act,
         }),
+        json!({
+            "name": "click",
+            "title": "Click in a window",
+            "description": "Clicks in a window of an application the user allowed, through this \
+                agent's own pointer (the user's stays where it is; nothing comes forward), even \
+                on a desktop no screen shows. Aim with x, y from the window's top left (logical \
+                pixels; its centre when left out), or with the label (and role) of an element of \
+                accessibility_tree. The agent's keyboard follows its clicks. Shown to the user \
+                first; may wait for their answer. Cannot be undone.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": window,
+                    "x": { "type": "number", "minimum": 0 },
+                    "y": { "type": "number", "minimum": 0 },
+                    "label": label,
+                    "role": role,
+                    "button": { "type": "string", "enum": ["left", "right", "middle"], "default": "left" },
+                    "count": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1 },
+                    "intent": intent,
+                },
+                "required": ["window", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": input,
+        }),
+        json!({
+            "name": "scroll",
+            "title": "Scroll in a window",
+            "description": "Scrolls at a point of a window (aimed as click aims), dy logical pixels, \
+                15 a notch of the wheel, down positive. Shown to the user first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": window,
+                    "x": { "type": "number", "minimum": 0 },
+                    "y": { "type": "number", "minimum": 0 },
+                    "label": label,
+                    "role": role,
+                    "dy": { "type": "number" },
+                    "intent": intent,
+                },
+                "required": ["window", "dy", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": input,
+        }),
+        json!({
+            "name": "type",
+            "title": "Type text",
+            "description": "Types text into a window of an application the user allowed, with the \
+                keyboard layout in effect, through this agent's own keyboard (never the desktop's \
+                shortcuts). Click its field first. A password field asks the user first. What is \
+                typed is never kept, only counted. Cannot be undone.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": window,
+                    "text": { "type": "string", "maxLength": hocus_agents::mcp::MAX_TYPED },
+                    "intent": intent,
+                },
+                "required": ["window", "text", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": input,
+        }),
+        json!({
+            "name": "press_keys",
+            "title": "Press keys",
+            "description": "Presses one combination in a window, as shortcuts are written: Ctrl+S, \
+                Return, Shift+Tab, Ctrl+Shift+T. It goes to the window alone. Cannot be undone.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": window,
+                    "keys": { "type": "string" },
+                    "intent": intent,
+                },
+                "required": ["window", "keys", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": input,
+        }),
+        json!({
+            "name": "close_window",
+            "title": "Close a window",
+            "description": "Asks a window's application to close it, as its close button does: the \
+                application may ask to save first, in a dialog of its own. Says whether it went, \
+                stays, or shows that dialog (then act in it, or leave it to the user). For an \
+                application the user marked, they confirm it first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "window": window, "intent": intent },
+                "required": ["window", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": { "readOnlyHint": false, "destructiveHint": true, "openWorldHint": false },
+        }),
+        json!({
+            "name": "wait_for",
+            "title": "Wait for a window or an element",
+            "description": "Waits until a window is shown (app_id, and/or a part of its title), or \
+                an element of a window's tree (window and label); with gone, until none is. \
+                timeout_ms 5000 by default, 30000 at most. Says whether it came.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "app_id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "window": window,
+                    "label": label,
+                    "gone": { "type": "boolean", "default": false },
+                    "timeout_ms": { "type": "integer", "minimum": 0, "maximum": hocus_agents::mcp::MAX_WAIT_MS },
+                },
+                "additionalProperties": false,
+            },
+            "annotations": read,
+        }),
+        json!({
+            "name": "capture",
+            "title": "Capture a window",
+            "description": "A PNG of a window as its application draws it, even on a desktop no \
+                screen shows; its logical size and scale (pixels per logical pixel), so that a \
+                point of it is x / scale from its top left. A password manager's comes black.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "window": window },
+                "required": ["window"],
+                "additionalProperties": false,
+            },
+            "annotations": read,
+        }),
+        json!({
+            "name": "accessibility_tree",
+            "title": "A window's elements",
+            "description": "What a window's application tells screen readers: its elements depth \
+                first, each with its role, label, rect from the window's top left, depth, and \
+                whether it is focused, disabled, selected, checked, and a field's text (never a \
+                password's). Partial when it is large. Only for applications the user allowed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "window": window },
+                "required": ["window"],
+                "additionalProperties": false,
+            },
+            "annotations": read,
+        }),
     ]
 }
 
@@ -646,7 +818,7 @@ mod tests {
         assert_eq!(
             ask(
                 &mut b,
-                r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"close_window"}}"#
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"drag"}}"#
             )["error"]["code"],
             INVALID_PARAMS
         );
