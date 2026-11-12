@@ -76,10 +76,12 @@ pub fn levels(reach: f64) -> (usize, f32) {
 
 /// A blur done: its texture (the renderer's), its id (new each time it is
 /// done again), the region of the output it covers (physical,
-/// output-local) and the texture's size.
+/// output-local) and the texture's size; and what it blurred, sharp, at
+/// the region's size.
 #[derive(Debug)]
 pub struct Blurred<T> {
     pub texture: T,
+    pub behind: T,
     pub id: Id,
     pub region: Rectangle<i32, Physical>,
     pub size: Size<i32, Buffer>,
@@ -104,7 +106,14 @@ impl Panes {
         self.0.remove(&launcher_pane(output));
         self.0.remove(&capture_pane(output));
         self.0.remove(&editor_pane(output));
+        self.0.remove(&rain_pane(output));
     }
+}
+
+/// The name of the pane of the wallpaper the rain on the glass blurs on
+/// `output` (#802).
+pub fn rain_pane(output: &str) -> String {
+    format!("{output} rain")
 }
 
 /// The name of the pane under the capture's editor on `output` (5.9).
@@ -375,6 +384,7 @@ impl Glass for GlesRenderer {
         let blurred = Blurred {
             size: level.size(),
             texture: level,
+            behind: frosted.behind.clone(),
             id: frosted.id.clone(),
             region,
         };

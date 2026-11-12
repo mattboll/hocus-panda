@@ -11,7 +11,7 @@ langue").
 |---|---|---|---|
 | The wallpaper | Neige qui tient | `snow` | #795 (built) |
 | | Aurore en musique | `aurora` | #801 |
-| | Pluie sur la vitre | `rain-on-glass` | #802 |
+| | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
 | | Bassin de koïs | `koi` | #803 |
 | | Lucioles du soir | `fireflies` | #804 |
 | | La lumière du jour | `daylight` | #805 |
@@ -361,6 +361,53 @@ the focus to another window; none on a maximised window; off, nothing;
 still with reduced motion, nothing drawn per frame); its screenshots,
 `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
 garland::shots`.
+
+## Rain on the glass (#802)
+
+With `rain-on-glass = true`, the wallpaper becomes wet glass, as the
+board "Pluie sur la vitre" does: its JS ported (`effects/raindrops.rs`),
+its shader `RAIN_FS` (`draw.rs`, `RAIN`), its lengths in logical pixels.
+There is no weather on the desktop: it rains whenever the switch is on.
+
+- **The drops**: as many per pixel as the board's over its 1200 × 720
+  (900 still at first, 1100 at most, six more a step; 20 big ones at
+  first, 2.4 more a second), warmed up as the board's (300 steps of
+  1/30 s). A big drop grows where it formed, then from 13 px slides at
+  `30 + 14 r` px/s (eased, stuttering one step in seventeen), wavering,
+  swallowing the still drops it touches (up to 24 px), wiping its trail
+  (6 radii above it), leaving a small drop now and then. Stepped at 60
+  steps a second (the board's frames) with a seeded generator; the still
+  drops in a grid of 32 px cells, so a big drop looks only at those near.
+- **The glass**: the board's two pictures, the wallpaper sharp and blurred
+  (18 px of standard deviation, as the board's `blur(9px)` at half size,
+  scaled about its middle as its margin did), made once by the glass's
+  blur (`glass.rs`, a pane of its own; again only with a new wallpaper).
+  Each frame the drops' map is drawn at half the logical size (each drop
+  a lens: its normal and thickness as colour, `Shape::Drop`), then the
+  glass from it: through a drop the sharp wallpaper moved against its
+  normal, brightened by its thickness, darkened at its rim, a highlight
+  from the upper left; between them the blurred wallpaper at 82 %.
+- **Where**: over the wallpaper, under the bottom and background layers,
+  the snow, the windows and the bar; opaque (the wallpaper under it is
+  not drawn). Behind the glass of the bar stands the fogged glass alone,
+  which never changes. A moving wallpaper (#433) waits while it rains on
+  its screen: the rain refracts its still picture. With the snow on too,
+  both show: the snow falls in front of the wet glass.
+- **Its cost**: the drops' map (some 1 700 small quads at 1440 × 900, at
+  half size) and the glass drawn again where drops changed, about 30
+  rectangles, 3 % of the screen, a frame (`FireElement`'s damage since its
+  last commit); the simulation on the CPU, a few hundred comparisons a
+  step.
+- **When**: moving where it shows, a frame each refresh; with reduced
+  motion drawn still (its drops where they are), nothing per frame; none
+  in the power saver, while a screen is shared or recorded, on the CPU,
+  nor in a capture.
+
+Tests: `tests/rain_on_glass.rs` (on GLES on Mesa's software device: the
+wallpaper fogs and its drops move, the window's pixels untouched; off,
+nothing; still with reduced motion, nothing drawn per frame); its
+screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only rain_on_glass::shots`.
 
 ## Not built yet
 

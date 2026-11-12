@@ -415,6 +415,7 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
     let shown = bed.open()?;
     for live in [
         "effects.snow",
+        "effects.rain-on-glass",
         "effects.flames",
         "effects.shatter",
         "effects.jelly",

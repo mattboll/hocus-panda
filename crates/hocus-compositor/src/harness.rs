@@ -300,6 +300,13 @@ impl Headless {
         Some((garland.window, garland.bulbs()))
     }
 
+    /// The rain on the glass (#802) on screen `name`, while it is on: its
+    /// still drops and its big ones.
+    pub fn raindrops(&self, name: &str) -> Option<(usize, usize)> {
+        let rain = self.app.state.fx.raindrops.as_ref()?;
+        Some(rain.panes.get(name)?.counts())
+    }
+
     /// Whether it snows (#795): the snow kept, falling or still.
     pub fn snowing(&self) -> bool {
         self.app.state.fx.snow.is_some()

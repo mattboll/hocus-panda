@@ -10,6 +10,7 @@ mod creatures;
 mod garland;
 mod layers;
 mod leaving;
+mod raindrops;
 mod snow;
 mod stack;
 
@@ -676,7 +677,8 @@ impl State {
         // The snow's programs made before it is drawn (#795).
         if (self.fx.snow.is_some()
             || !self.fx.creatures.shown.is_empty()
-            || self.fx.garland.is_some())
+            || self.fx.garland.is_some()
+            || self.fx.raindrops.is_some())
             && purpose.screen()
         {
             renderer.effects_ready();
@@ -867,6 +869,13 @@ impl State {
             Pick::All,
             &mut elements,
         );
+        // The rain on the glass (#802), right over the wallpaper, which it
+        // covers; the fogged glass alone in its place while the glass is
+        // blurred.
+        let rain = self.raindrops_layer(renderer, &frame).map(|(fog, layer)| {
+            elements.push(OutputElements::Fire(fog));
+            layer
+        });
         // A wallpaper that moves (#433): still behind the glass, which is
         // blurred from what is behind it below; moving on the screen, put
         // in its place once the glass is done.
@@ -885,6 +894,7 @@ impl State {
         for (layer, blank) in [
             (garland, self.garland_blank()),
             (snow, self.snow_blank(&frame)),
+            (rain, self.raindrops_stand_in(&frame)),
         ] {
             if let Some(layer) = layer
                 && let Some(blank) = blank

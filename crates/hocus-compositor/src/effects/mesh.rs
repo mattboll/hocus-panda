@@ -35,6 +35,10 @@ pub enum Shape {
     /// A glow from its middle to nothing at its edge, by the profile the
     /// shape's second number names ([`Glow`]).
     Glow = 6,
+    /// A drop of rain as the map of the drops holds it (#802): a lens
+    /// whose colour is its normal (red across, green down, from 0 to 1)
+    /// and its thickness (blue), opaque but its rim (the board's sprite).
+    Drop = 7,
 }
 
 /// The glows' profiles: how opaque from the middle out, the board's

@@ -103,6 +103,7 @@ mod power;
 mod power_actions;
 mod radial;
 mod rain;
+mod rain_on_glass;
 mod recording;
 mod reminders;
 mod scales;
