@@ -25,9 +25,9 @@ with `initialize` (`2025-11-25`, `2025-06-18`, `2025-03-26`,
 `UnsupportedProtocolVersionError` (-32022) listing those it does. It holds
 one connection to the compositor's control socket (`--socket`, else
 `$HOCUS_SOCKET`, else beside `$WAYLAND_DISPLAY`), opened with the line
-`mcp NAME`, then one JSON object a line each way: `{"id":1,"tool":
-"list_windows","args":{}}`, answered `{"id":1,"ok":…}` or
-`{"id":1,"error":"…"}`. The compositor does every tool: the rights, what
+`mcp NAME`, answered by a hello (`{"id":0,"ok":"hocuspanda"}`), then one
+JSON object a line each way: `{"id":1,"tool":"list_windows","args":{}}`,
+answered `{"id":1,"ok":…}` or `{"id":1,"error":"…"}`. The compositor does every tool: the rights, what
 shows, the journal and undoing are in one place.
 
 ```sh
@@ -129,3 +129,39 @@ to a request's actions as they were left: a window moved since by the
 user goes back too, a window closed since is skipped. Settings' undo
 writes the file as the Settings would; the Settings' recent changes do
 not list an agent's.
+
+## As built (2026-11-12, lot A)
+
+- **Where**: `crates/hocus-cli/src/mcp.rs` (the MCP server, its tools'
+  schemas, `launch`'s desktop entry found with hocus-xdg), the line's
+  types in `hocus-agents` (`mcp`), the compositor's `src/mcp.rs` (rights,
+  queue, show timer, requests, undo, journal, stop), what the shell is
+  told in `hocus-link` (`McpShown`), the shell's `src/mcp/` (tag, toast,
+  words) and `popover/journal.rs`.
+- **The keys**: `[agents] show-before-ms` (the file's kebab case) and
+  `[[agents.mcp]]`; `[shortcuts] stop-agents` (also in the actions
+  palette, "Arrêter tous les agents").
+- **The tag** is one card, the name's violet band over the intent, so
+  that the compositor rounds its corners on the CPU as it does the
+  bubbles'; the window's ring is the compositor's, 2 px at 55 % violet, 2
+  px outside the window, on the screen only (never in a capture or a
+  share). A desktop's tile is ringed only while an action on it shows.
+- **The toast** says the request's first intent quoted under its
+  sentence (no "il y a 4 s": nothing draws for a clock), "Ne s'annule
+  pas" when nothing of it can be undone. A setting is named by its key
+  (`changé appearance.theme`): the Settings' row names are theirs, not
+  the shell's.
+- **The journal's popover** lists requests (one line each, as the toast
+  sums them up) and refusals, the last 8; the journal itself (the
+  `journal` tool) keeps every call. Its "Annuler" works while the
+  request is among the last 20.
+- **The agents' group**: a row per MCP agent seen this session, its mark
+  (its initial on the violet) and what it does on two lines; a click
+  opens the journal. Its rows count in the group's total, not in the
+  secretary's line.
+- **Tests** (`crates/hocus-compositor/tests/mcp.rs`), each with a real
+  `hocus mcp`: initialize and the tools, `list_windows`, a read agent and
+  an unknown one refused, a move shown before it is done and its toast,
+  a setting put back by the toast's Annuler (the real shell, clicked),
+  the stop key. Screenshots of scenes 1, 2 and 4: `HOCUS_SHOTS=DIR cargo
+  nextest run -p hocus-compositor mcp::shots --run-ignored only`.
