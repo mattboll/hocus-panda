@@ -535,8 +535,9 @@
 # daylight = false
 # depth = false
 # The windows: a closing window burns from the bottom up in 1.7 s
-# (instead of the closing animation; not a dialog), shatters into glass,
-# wobbles like jelly; a garland hangs under the active window.
+# (instead of the closing animation; not a dialog), shatters into glass;
+# a dragged window deforms like jelly (instead of [windows] wobble); a
+# garland hangs under the active window.
 # flames = false
 # shatter = false
 # jelly = false

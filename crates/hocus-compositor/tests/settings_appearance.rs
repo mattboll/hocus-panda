@@ -413,7 +413,12 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
         return Ok(());
     };
     let shown = bed.open()?;
-    for live in ["effects.snow", "effects.flames", "effects.creatures"] {
+    for live in [
+        "effects.snow",
+        "effects.flames",
+        "effects.jelly",
+        "effects.creatures",
+    ] {
         assert_eq!(row(&shown, live)["value"], "non", "{live}");
         assert_eq!(row(&shown, live)["inert"], false, "{live}");
     }

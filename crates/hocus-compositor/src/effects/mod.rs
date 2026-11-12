@@ -9,7 +9,8 @@
 //! their edges (`crate::render::snow`), and the windows' motion
 //! ([`motion`]). Built with its first effects: closing a window in flames
 //! ([`flames`], #794), snow that settles ([`snow`], #795); then the agents
-//! as creatures on their windows ([`creatures`], #796).
+//! as creatures on their windows ([`creatures`], #796), and windows in
+//! jelly ([`jelly`], #797).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -21,6 +22,7 @@
 pub mod creatures;
 pub mod draw;
 pub mod flames;
+pub mod jelly;
 pub mod mesh;
 pub mod motion;
 pub mod particles;
@@ -94,5 +96,16 @@ impl State {
             return false;
         }
         true
+    }
+
+    /// Whether window `id`, dragged now, goes in jelly (#797): the jelly
+    /// is on, the effects may play, and no fullscreen window is in front
+    /// on its screen.
+    pub(crate) fn jellies(&self, id: WindowId) -> bool {
+        self.config.effects.jelly
+            && self.effects_still().is_none()
+            && !self
+                .output_of(id)
+                .is_some_and(|o| self.fullscreen_in_front(&o))
     }
 }

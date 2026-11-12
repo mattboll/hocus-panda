@@ -501,21 +501,26 @@ impl State {
     }
 
     /// A window wobbling: drawn into its picture and bent. `None` when the
-    /// renderer cannot: it is then drawn rigid.
+    /// renderer cannot, or it is still: it is then drawn as it is. The
+    /// jelly of the effect (#797) bends on the screen alone, never in a
+    /// capture, a share's or a recording's frames.
     fn bent_window<R>(
         &self,
         renderer: &mut R,
         id: WindowId,
         look: &Look,
-        output_origin: Point<f64, Logical>,
-        scale: f64,
+        frame: &Frame,
     ) -> Option<BentElement>
     where
         R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let (output_origin, scale) = (frame.origin, frame.scale);
         let (wid, jelly) = self.wobble.as_ref()?;
-        if *wid != id || look.alpha < 1.0 {
+        if *wid != id || look.alpha < 1.0 || jelly.still() {
+            return None;
+        }
+        if jelly.is_gel() && !frame.purpose.screen() {
             return None;
         }
         let (w, h) = jelly.size();

@@ -1504,11 +1504,12 @@ impl State {
                 moving = true;
             }
         }
+        // A jelly held still asks for no frame: the next move wakes it.
         if let Some((_, jelly)) = &mut self.wobble {
             jelly.advance(now);
             if jelly.settled() {
                 self.wobble = None;
-            } else {
+            } else if !jelly.still() {
                 moving = true;
             }
         }

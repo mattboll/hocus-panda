@@ -18,7 +18,7 @@ langue").
 | | Bureaux en profondeur | `depth` | #806 |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
 | | Éclats de verre | `shatter` | #798 |
-| | Fenêtres en gelée | `jelly` | #797 |
+| | Fenêtres en gelée | `jelly` | #797 (built) |
 | | Guirlande sous la fenêtre active | `garland` | #799 |
 | The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
 | | Bonne nouvelle d'un agent : confettis | `confetti` | #811 |
@@ -144,6 +144,40 @@ device, its flames over and above it, the page of text beside it
 untouched, gone within 5 s and nothing drawn after; on pixman, with reduced motion or the switch off, the standard
 close); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only effects::shots`.
+
+## Windows in jelly (#797)
+
+With `jelly = true`, a window dragged deforms like jelly, in place of the
+standard wobble ([windows.md](windows.md) §6, `[windows] wobble`), as the
+board "Fenêtres en gelée" does: its spring mesh ported
+(`effects/jelly.rs`), drawn by the wobble's bent mesh (`wobble.rs`), its
+lengths in logical pixels.
+
+- 22 × 16 points over the window, each pulled to its place on the rigid
+  window by a damped spring: held, stiffest near the hand (`22 + 1100
+  e^(-d/55)`, damped `3.2 + 12 e^(-d/90)`), the points within 6 px of it
+  pinned; let go, all at 120 damped 5.5, a few swings before it lies
+  still. Neighbours along a row are kept near their spacing (8 % of the
+  gap a step). Stepped 180 times a second (the board's three a frame).
+- The grid's columns and rows are cut so that one of each passes under
+  the hand: the point held is pinned, and follows the pointer exactly
+  (the board's grid seldom has a point within 6 px of the hand).
+- Once every point is back at its place and still (0.5 px, 6 px/s),
+  held or let go, the window is drawn as it is, not through the mesh: its
+  text straight, pixel for pixel; and no frame is asked for while it is
+  held still.
+- Its content is the window itself, deformed: no other window nor the bar
+  is drawn over. On the screen only: a capture, a share or a recording
+  shows the window straight. Decided as the drag starts: with reduced
+  motion, the power saver, a share or a recording, on the CPU, or with a
+  fullscreen window in front on its screen, the drag is as without it
+  (the standard wobble if it is on).
+
+Tests: `tests/window_effects.rs` (on GLES on Mesa's software device: a
+window dragged bends, and once settled is as it was before, pixel for
+pixel, nothing drawn after; on pixman, with reduced motion or the switch
+off, a drag is rigid); its screenshots, `HOCUS_SHOTS=DIR cargo nextest
+run -p hocus-compositor --run-ignored only window_effects::shots`.
 
 ## Snow that settles (#795)
 
