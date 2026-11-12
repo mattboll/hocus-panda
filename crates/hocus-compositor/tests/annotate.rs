@@ -231,7 +231,11 @@ impl Bed {
     }
 
     fn drag(&mut self, from: (f64, f64), to: (f64, f64)) -> anyhow::Result<()> {
-        self.hp.pointer_move(from.0, from.1);
+        // A move after the pointer comes in, as for a click: iced's
+        // `CursorEntered` has no place, and read in one batch with the
+        // press and the moves after it, the press took the batch's last
+        // (the arrow began at the third step).
+        common::point(&mut self.hp, from)?;
         self.idle(Duration::from_millis(40))?;
         self.hp.button(BTN_LEFT, true);
         self.idle(Duration::from_millis(30))?;
