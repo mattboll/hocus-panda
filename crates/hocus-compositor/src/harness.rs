@@ -293,6 +293,13 @@ impl Headless {
             .collect()
     }
 
+    /// The garland (#799), while it shows: the window it hangs under, and
+    /// its bulbs' points (global, logical).
+    pub fn garland(&self) -> Option<(WindowId, Vec<(f64, f64)>)> {
+        let garland = self.app.state.fx.garland.as_ref()?;
+        Some((garland.window, garland.bulbs()))
+    }
+
     /// Whether it snows (#795): the snow kept, falling or still.
     pub fn snowing(&self) -> bool {
         self.app.state.fx.snow.is_some()

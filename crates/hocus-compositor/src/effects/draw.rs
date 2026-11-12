@@ -546,7 +546,8 @@ void main() {
 /// The shapes of [`super::mesh`]: a fill as its vertices say; a flake, a
 /// soft disc; a clump, an ellipse lit from its upper left (the board's
 /// two-point gradient, white from a focus at (-0.3, -0.3) to blue at its
-/// edge); a box blurred by a Gaussian (or sharp, its edges smoothed).
+/// edge); a box blurred by a Gaussian (or sharp, its edges smoothed); a
+/// box with round corners, an oval and a glow (the garland's, #799).
 /// Nothing where the clip says not.
 const SHAPES: &str = "#version 100
 precision highp float;
@@ -592,10 +593,33 @@ void main() {
         float t = clamp((b + sqrt(b * b + a * dot(q, q))) / a, 0.0, 1.0);
         vec3 c = mix(vec3(1.0), vec3(201.0, 213.0, 232.0) / 255.0, t);
         gl_FragColor = vec4(c, 1.0) * cover * v_colour.a;
-    } else {
+    } else if (kind < 3.5) {
         float cx = blurred(v_shape.y, v_local.x, v_shape.w);
         float cy = blurred(v_shape.z, v_local.y, v_shape.w);
         gl_FragColor = v_colour * cx * cy;
+    } else if (kind < 4.5) {
+        vec2 q = abs(v_local) - (v_shape.yz - vec2(v_shape.w));
+        float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_shape.w;
+        gl_FragColor = v_colour * clamp(0.5 - d, 0.0, 1.0);
+    } else if (kind < 5.5) {
+        float cover = clamp((1.0 - length(v_local)) * v_shape.y + 0.5, 0.0, 1.0);
+        gl_FragColor = v_colour * cover;
+    } else {
+        float d = length(v_local);
+        float a;
+        if (v_shape.y < 0.5) {
+            a = d < 0.12 ? mix(0.55, 0.32, d / 0.12)
+                : d < 0.35 ? mix(0.32, 0.10, (d - 0.12) / 0.23)
+                : d < 0.7 ? mix(0.10, 0.025, (d - 0.35) / 0.35)
+                : mix(0.025, 0.0, clamp((d - 0.7) / 0.3, 0.0, 1.0));
+        } else if (v_shape.y < 1.5) {
+            a = d < 0.3 ? mix(1.0, 0.85, d / 0.3)
+                : d < 0.6 ? mix(0.85, 0.25, (d - 0.3) / 0.3)
+                : mix(0.25, 0.0, clamp((d - 0.6) / 0.4, 0.0, 1.0));
+        } else {
+            a = clamp(1.0 - d, 0.0, 1.0);
+        }
+        gl_FragColor = v_colour * a;
     }
 }
 ";

@@ -418,6 +418,7 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
         "effects.flames",
         "effects.shatter",
         "effects.jelly",
+        "effects.garland",
         "effects.creatures",
     ] {
         assert_eq!(row(&shown, live)["value"], "non", "{live}");
