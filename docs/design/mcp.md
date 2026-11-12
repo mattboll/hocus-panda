@@ -278,3 +278,33 @@ not list an agent's.
   a setting put back by the toast's Annuler (the real shell, clicked),
   the stop key. Screenshots of scenes 1, 2 and 4: `HOCUS_SHOTS=DIR cargo
   nextest run -p hocus-compositor mcp::shots --run-ignored only`.
+
+## As built (2026-11-12, lot B)
+
+- **Where**: the compositor's `src/mcp/` (`seat.rs` the agent's seat and
+  its input, `apps.rs` the card, take over, closing, `wait_for` and the
+  trees asked, `atspi.rs` the reader on its thread, `capture.rs`,
+  `draw.rs` the pointer and its ring), `text_input.rs` (each text input
+  its seat's, a password's purpose), the shell's `src/mcp/card.rs`.
+- **The pointer** is the mockup's arrow and ring, drawn by the compositor
+  on the CPU once per scale (the shell's surfaces have no alpha on the
+  CPU); its name, and its intent before it acts, are the shell's tag
+  beside it ([`McpAt::Pointer`], `McpShown::pointers`), never in a
+  capture or a share.
+- **Closing**: the compositor cannot know about unsaved work, so the
+  card's text says why it asks (`confirm-apps`), never "will be lost".
+- **The settings' words** in the toast stay lot A's table of the
+  settings agents most often change: the key of every row is the
+  Settings' model's (`hocus-settings`), which the shell does not link;
+  one table for every key would mean moving that mapping into a crate
+  both read, not a small change.
+- **Not ported from v0**: an agent clicking the shell's own elements
+  (`shell = true`), turning the session's accessibility on while agents
+  are there (`org.a11y.Status`), the column's live thumbnail of the
+  agent's window.
+- **Tests** (`tests/mcp.rs`, a real `hocus mcp` each): a click through
+  the agent's seat with the user's focus kept, typing and the stop key
+  into a window alone, a click by label on a fake tree, a password
+  field's card refused, taking over, a capture on a desktop no screen
+  shows. Scenes 1 and 3: `HOCUS_SHOTS=DIR cargo nextest run -p
+  hocus-compositor mcp::shots_in_apps --run-ignored only`.
