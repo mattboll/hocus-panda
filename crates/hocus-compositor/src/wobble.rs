@@ -18,6 +18,7 @@
 
 use std::{any::Any, cell::RefCell, rc::Rc, time::Duration};
 
+use crate::effects::jelly::Gel;
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -61,9 +62,134 @@ const MESH_MAX: usize = 48;
 /// A picture kept by the renderer: its size and its texture.
 pub(crate) type Kept = (Size<i32, BufferCoords>, Rc<dyn Any>);
 
-/// A window bending.
+/// A window bending: the standard wobble's springs, or the jelly of the
+/// effect (#797, `crate::effects::jelly`), chosen as the drag starts.
 #[derive(Debug)]
 pub struct Jelly {
+    body: Body,
+    /// The window's size, logical.
+    w: f64,
+    h: f64,
+    /// The picture of the window, kept from frame to frame while its size
+    /// stays: the renderer's texture, its size.
+    pub(crate) picture: RefCell<Option<Kept>>,
+    pub(crate) id: Id,
+    commits: RefCell<CommitCounter>,
+}
+
+#[derive(Debug)]
+enum Body {
+    Wobble(Springs),
+    /// The effect's (#797): drawn on the screen only, never in a capture.
+    Gel(Box<Gel>),
+}
+
+impl Jelly {
+    /// The standard wobble of a window `size` large held at `held` (from
+    /// its corner, logical).
+    pub fn new(size: (f64, f64), held: (f64, f64), now: Duration) -> Self {
+        Self::with(Body::Wobble(Springs::new(size, held, now)), size)
+    }
+
+    /// The effect's jelly (#797).
+    pub fn gel(size: (f64, f64), held: (f64, f64), now: Duration) -> Self {
+        Self::with(Body::Gel(Box::new(Gel::new(size, held, now))), size)
+    }
+
+    fn with(body: Body, size: (f64, f64)) -> Self {
+        Self {
+            body,
+            w: size.0.max(1.0),
+            h: size.1.max(1.0),
+            picture: RefCell::new(None),
+            id: Id::new(),
+            commits: RefCell::new(CommitCounter::default()),
+        }
+    }
+
+    /// The window's size it was made for.
+    pub fn size(&self) -> (f64, f64) {
+        (self.w, self.h)
+    }
+
+    /// Whether it is the effect's jelly (#797).
+    pub fn is_gel(&self) -> bool {
+        matches!(self.body, Body::Gel(_))
+    }
+
+    /// The window moved by (`dx`, `dy`): its points stay where they were,
+    /// the springs will bring them along; the held one goes with the hand.
+    pub fn moved(&mut self, dx: f64, dy: f64, now: Duration) {
+        match &mut self.body {
+            Body::Wobble(s) => s.moved(dx, dy, now),
+            Body::Gel(g) => g.moved(dx, dy, now),
+        }
+    }
+
+    /// Nothing holds it any more: it settles.
+    pub fn release(&mut self) {
+        match &mut self.body {
+            Body::Wobble(s) => s.release(),
+            Body::Gel(g) => g.release(),
+        }
+    }
+
+    pub fn is_held(&self) -> bool {
+        match &self.body {
+            Body::Wobble(s) => s.is_held(),
+            Body::Gel(g) => g.is_held(),
+        }
+    }
+
+    /// The springs, up to `now`.
+    pub fn advance(&mut self, now: Duration) {
+        match &mut self.body {
+            Body::Wobble(s) => s.advance(now),
+            Body::Gel(g) => g.advance(now),
+        }
+    }
+
+    /// Every point at its place and still, held or not: the window is
+    /// drawn as it is, straight, and no frame is asked for it.
+    pub fn still(&self) -> bool {
+        match &self.body {
+            Body::Wobble(s) => s.still(),
+            Body::Gel(g) => g.still(REST, REST_SPEED),
+        }
+    }
+
+    /// Let go, and back at rest.
+    pub fn settled(&self) -> bool {
+        !self.is_held() && self.still()
+    }
+
+    /// The largest displacement, logical.
+    pub fn largest(&self) -> f64 {
+        match &self.body {
+            Body::Wobble(s) => s.largest(),
+            Body::Gel(g) => g.largest(),
+        }
+    }
+
+    /// The displacement at (`u`, `v`) across the window, from 0 to 1.
+    pub fn at(&self, u: f64, v: f64) -> (f64, f64) {
+        match &self.body {
+            Body::Wobble(s) => s.at(u, v),
+            Body::Gel(g) => g.at(u * self.w, v * self.h),
+        }
+    }
+
+    /// A new commit for the bent element: it changes every frame.
+    fn next_commit(&self) -> CommitCounter {
+        let mut c = self.commits.borrow_mut();
+        c.increment();
+        *c
+    }
+}
+
+/// The standard wobble's springs.
+#[derive(Debug)]
+struct Springs {
     /// Cells across and down; the grid has one more point each way.
     gx: usize,
     gy: usize,
@@ -79,16 +205,11 @@ pub struct Jelly {
     /// The point under the pointer; none once let go.
     anchor: Option<usize>,
     last: Duration,
-    /// The picture of the window, kept from frame to frame while its size
-    /// stays: the renderer's texture, its size.
-    pub(crate) picture: RefCell<Option<Kept>>,
-    pub(crate) id: Id,
-    commits: RefCell<CommitCounter>,
 }
 
-impl Jelly {
+impl Springs {
     /// A window `size` large held at `held` (from its corner, logical).
-    pub fn new(size: (f64, f64), held: (f64, f64), now: Duration) -> Self {
+    fn new(size: (f64, f64), held: (f64, f64), now: Duration) -> Self {
         let (w, h) = (size.0.max(1.0), size.1.max(1.0));
         let cells = |len: f64| ((len / CELL).round() as usize).clamp(CELLS.0, CELLS.1);
         let (gx, gy) = (cells(w), cells(h));
@@ -118,20 +239,10 @@ impl Jelly {
             hold,
             anchor: Some(aj * (gx + 1) + ai),
             last: now,
-            picture: RefCell::new(None),
-            id: Id::new(),
-            commits: RefCell::new(CommitCounter::default()),
         }
     }
 
-    /// The window's size it was made for.
-    pub fn size(&self) -> (f64, f64) {
-        (self.w, self.h)
-    }
-
-    /// The window moved by (`dx`, `dy`): its points stay where they were,
-    /// the springs will bring them along; the held one goes with the hand.
-    pub fn moved(&mut self, dx: f64, dy: f64, now: Duration) {
+    fn moved(&mut self, dx: f64, dy: f64, now: Duration) {
         self.advance(now);
         for (k, d) in self.d.iter_mut().enumerate() {
             if Some(k) != self.anchor {
@@ -142,12 +253,11 @@ impl Jelly {
         self.clamp();
     }
 
-    /// Nothing holds it any more: it settles.
-    pub fn release(&mut self) {
+    fn release(&mut self) {
         self.anchor = None;
     }
 
-    pub fn is_held(&self) -> bool {
+    fn is_held(&self) -> bool {
         self.anchor.is_some()
     }
 
@@ -159,8 +269,7 @@ impl Jelly {
         }
     }
 
-    /// The springs, up to `now`.
-    pub fn advance(&mut self, now: Duration) {
+    fn advance(&mut self, now: Duration) {
         let mut left = now.saturating_sub(self.last).min(CATCH_UP);
         self.last = now;
         while !left.is_zero() {
@@ -220,18 +329,14 @@ impl Jelly {
         }
     }
 
-    /// Let go, and back at rest.
-    pub fn settled(&self) -> bool {
-        self.anchor.is_none()
-            && self
-                .d
-                .iter()
-                .zip(&self.v)
-                .all(|(d, v)| d.0.hypot(d.1) < REST && v.0.hypot(v.1) < REST_SPEED)
+    fn still(&self) -> bool {
+        self.d
+            .iter()
+            .zip(&self.v)
+            .all(|(d, v)| d.0.hypot(d.1) < REST && v.0.hypot(v.1) < REST_SPEED)
     }
 
-    /// The largest displacement, logical.
-    pub fn largest(&self) -> f64 {
+    fn largest(&self) -> f64 {
         self.d.iter().map(|d| d.0.hypot(d.1)).fold(0.0, f64::max)
     }
 
@@ -242,7 +347,7 @@ impl Jelly {
         reason = "i < gx and j < gy: the four corners are points of the grid, which has \
                   (gx + 1) × (gy + 1)"
     )]
-    pub fn at(&self, u: f64, v: f64) -> (f64, f64) {
+    fn at(&self, u: f64, v: f64) -> (f64, f64) {
         let x = (u * self.gx as f64).clamp(0.0, self.gx as f64);
         let y = (v * self.gy as f64).clamp(0.0, self.gy as f64);
         let i = (x as usize).min(self.gx - 1);
@@ -257,13 +362,6 @@ impl Jelly {
             (1.0 - fu) * (1.0 - fv) * a + fu * (1.0 - fv) * b + (1.0 - fu) * fv * c + fu * fv * d
         };
         (mix(a.0, b.0, c.0, d.0), mix(a.1, b.1, c.1, d.1))
-    }
-
-    /// A new commit for the bent element: it changes every frame.
-    fn next_commit(&self) -> CommitCounter {
-        let mut c = self.commits.borrow_mut();
-        c.increment();
-        *c
     }
 }
 

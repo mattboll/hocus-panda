@@ -252,6 +252,17 @@ impl Headless {
         self.app.state.departures.leaving.len()
     }
 
+    /// Windows shattering now, or their last shards falling (#798).
+    pub fn shattering(&self) -> usize {
+        self.app
+            .state
+            .departures
+            .leaving
+            .iter()
+            .filter(|l| l.shatter.is_some())
+            .count()
+    }
+
     /// Windows burning now, or their last sparks (#794).
     pub fn burning(&self) -> usize {
         self.app

@@ -1,5 +1,5 @@
 //! Where a dragged window would snap, and the windows leaving: fading,
-//! through their rain (#432), or burning (#794).
+//! through their rain (#432), burning (#794) or shattering (#798).
 
 use smithay::{
     backend::renderer::{ImportAll, ImportMem, Renderer, Texture},
@@ -9,12 +9,14 @@ use smithay::{
 use super::{Frame, OutputElement, OutputElements};
 use crate::{
     State,
-    decoration::{self, Outside, Rounded, preview_elements},
+    decoration::{self, Outside, Rounded, ShadowStyle, preview_elements},
     effects::{
         FireElement,
         draw::{BurnLook, Clip, LightLook},
         flames::{Burn, LIGHT, MARGIN, MARGIN_ABOVE},
+        mesh::Mesh,
         particles::vertices,
+        shatter::{EDGE, Phase, Shatter},
     },
     going::Shaders,
     motion::lerp,
@@ -88,6 +90,13 @@ impl State {
             if let Some(burn) = &leaving.burn {
                 if frame.purpose.screen() {
                     self.burn_elements(renderer, frame, leaving, burn, elements);
+                }
+                continue;
+            }
+            // Shattering (#798): on the screen alone too.
+            if let Some(shatter) = &leaving.shatter {
+                if frame.purpose.screen() {
+                    self.shatter_elements(renderer, frame, leaving, shatter, elements);
                 }
                 continue;
             }
@@ -304,6 +313,158 @@ impl State {
                     }
                 }
             }
+        }
+    }
+
+    /// A window shattering (#798), front first: while it cracks, its
+    /// cracks and the flash, then the window whole over its shadow; then
+    /// its shards, its shadow going. They stay off the bar (the board's
+    /// panel is in front of them); the shards are the window's own
+    /// picture, as the windows leaving are, over the windows. Where the
+    /// renderer has no shards, its picture fades as they would fly.
+    fn shatter_elements<R>(
+        &self,
+        renderer: &mut R,
+        frame: &Frame,
+        leaving: &crate::windows::Leaving,
+        shatter: &Shatter,
+        elements: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let Frame {
+            now,
+            output,
+            area,
+            origin,
+            scale,
+            ..
+        } = *frame;
+        shatter.advance(now);
+        let phase = shatter.phase(now);
+        if phase == Phase::Over {
+            return;
+        }
+        let screen: Rectangle<i32, Physical> =
+            Rectangle::from_size(area.size.to_f64().to_physical_precise_round(scale));
+        let local = Rectangle::<f64, Logical>::new(shatter.rect.loc - origin, shatter.rect.size);
+        let far = 1.0e7;
+        let bar = self.bar_rect(output, now).map(|r| {
+            [
+                (r.loc.x * scale) as f32,
+                (r.loc.y * scale) as f32,
+                ((r.loc.x + r.size.w) * scale) as f32,
+                ((r.loc.y + r.size.h) * scale) as f32,
+            ]
+        });
+        let clip = Clip::new([-far, -far, far, far], bar, 1.0);
+        let at = (origin.x, origin.y);
+        if let Phase::Crack { grow } = phase {
+            let cracks = shatter.cracks(grow, at, scale);
+            if let Some([x, y, w, h]) = cracks.bounds() {
+                let geometry = Rectangle::new((x, y).into(), (w, h).into());
+                if geometry.overlaps(screen) {
+                    elements.push(OutputElements::Fire(FireElement::shapes(
+                        shatter.ids[0].clone(),
+                        shatter.next_commit(),
+                        geometry,
+                        cracks,
+                        Mesh::default(),
+                        clip,
+                    )));
+                }
+            }
+        }
+        let (vertices, [x0, y0, x1, y1]) = shatter.glass(now, at, scale);
+        let (x0, y0) = (x0.floor() as i32, y0.floor() as i32);
+        let geometry: Rectangle<i32, Physical> = Rectangle::new(
+            (x0, y0).into(),
+            (
+                (x1.ceil() as i32 - x0).max(0),
+                (y1.ceil() as i32 - y0).max(0),
+            )
+                .into(),
+        );
+        let radius = (decoration::RADIUS * scale).round() as i32;
+        if !vertices.is_empty() && geometry.overlaps(screen) {
+            let picture = Picture {
+                window: local,
+                extent: Rectangle::from_size(local.size),
+                scale,
+            };
+            let first = shatter
+                .picture
+                .borrow()
+                .as_ref()
+                .is_none_or(|(s, _)| *s != picture.buffer_size());
+            let clip_px = Rectangle::from_size(local.size.to_physical_precise_round(scale));
+            let parts: Vec<_> = if first {
+                leaving
+                    .picture
+                    .stretched(renderer, Rectangle::from_size(local.size), scale, 1.0)
+                    .into_iter()
+                    .map(|e| Rounded::new(e, clip_px, radius, Outside::Shown, scale))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let element = renderer.shards(
+                shatter.ids[1].clone(),
+                shatter.next_commit(),
+                &shatter.picture,
+                &picture,
+                &parts,
+                geometry,
+                vertices,
+                EDGE * scale as f32,
+                clip,
+            );
+            match element {
+                Some(element) => elements.push(OutputElements::Fire(element)),
+                None => {
+                    let since = match phase {
+                        Phase::Fly { since } => since,
+                        _ => 0.0,
+                    };
+                    let alpha = (1.0 - since / 0.45).max(0.0);
+                    let clip = Rectangle::new(
+                        local.loc.to_physical_precise_round(scale),
+                        local.size.to_physical_precise_round(scale),
+                    );
+                    elements.extend(
+                        leaving
+                            .picture
+                            .stretched(renderer, local, scale, alpha)
+                            .into_iter()
+                            .map(|e| {
+                                OutputElements::Picture(Rounded::new(
+                                    e,
+                                    clip,
+                                    radius,
+                                    Outside::Shown,
+                                    scale,
+                                ))
+                            }),
+                    );
+                }
+            }
+        }
+        let shadow = shatter.shadow(now);
+        if shadow > 0.0 {
+            elements.extend(
+                decoration::shadow_elements(
+                    renderer,
+                    &self.textures,
+                    &shatter.shadow_ids,
+                    ShadowStyle::FOCUSED,
+                    local,
+                    scale,
+                    shadow,
+                )
+                .into_iter()
+                .map(OutputElements::Shadow),
+            );
         }
     }
 

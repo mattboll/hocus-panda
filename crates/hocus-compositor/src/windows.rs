@@ -24,6 +24,7 @@ use smithay::{
 use crate::{
     State,
     decoration::FrameIds,
+    effects::Closing,
     focus::KeyboardFocus,
     model::{self, Edges, Mode, Rect, Snap, SnapResult, WindowId, Zone},
     motion::{self, Bezier, Tween},
@@ -32,6 +33,9 @@ use crate::{
 
 /// How long a spawn shortcut lets the next new window take the focus.
 const SPAWN_FOCUS: Duration = Duration::from_secs(10);
+/// A window closing this soon after a press on it was closed by that
+/// click: it shatters from there (#798).
+const CLICKED: Duration = Duration::from_millis(1500);
 
 /// A window the desktop shows, and its motions under way.
 #[derive(Debug)]
@@ -212,6 +216,9 @@ pub struct Leaving {
     /// Burning (#794): drawn where it was, through the flames, until its
     /// last sparks are gone.
     pub burn: Option<crate::effects::flames::Burn>,
+    /// Shattering (#798): drawn where it was, cracking then in shards,
+    /// until the last has fallen.
+    pub shatter: Option<crate::effects::shatter::Shatter>,
 }
 
 /// Where a dragged window would snap, and since when the pointer is there.
@@ -837,16 +844,28 @@ impl State {
         let Some(from) = self.visual_rect(id, now) else {
             return;
         };
-        let burn = (!minimizing && self.burns_on_close(id)).then(|| {
+        let effect = if minimizing {
+            None
+        } else {
+            self.close_effect(id)
+        };
+        let burn = (effect == Some(Closing::Flames)).then(|| {
             self.departures.burns = self.departures.burns.wrapping_add(1);
             tracing::debug!(window = id.0, "closes in flames");
             crate::effects::flames::Burn::new(now, from, self.departures.burns)
         });
-        let rain = (!minimizing && burn.is_none())
+        let shatter = (effect == Some(Closing::Shatter)).then(|| {
+            self.departures.shatters = self.departures.shatters.wrapping_add(1);
+            let hit = self.shatter_hit(from, now);
+            tracing::debug!(window = id.0, ?hit, "closes in glass");
+            let floor = self.shatter_floor(from);
+            crate::effects::shatter::Shatter::new(now, from, hit, floor, self.departures.shatters)
+        });
+        let rain = (!minimizing && effect.is_none())
             .then(|| self.rain_on_close(id, (from.size.w, from.size.h), now))
             .flatten();
         let reduced = self.reduced_motion();
-        let to = if reduced || rain.is_some() || burn.is_some() {
+        let to = if reduced || rain.is_some() || effect.is_some() {
             from
         } else if minimizing {
             self.bar_place(id).unwrap_or(from)
@@ -864,6 +883,9 @@ impl State {
         let tween = match (&rain, &burn) {
             (Some(rain), _) => Tween::new(now, rain.duration(), Bezier::LINEAR),
             (_, Some(_)) => Tween::new(now, crate::effects::flames::BURN, Bezier::LINEAR),
+            _ if shatter.is_some() => {
+                Tween::new(now, crate::effects::shatter::LONGEST, Bezier::LINEAR)
+            }
             _ => Tween::new(now, duration, curve),
         };
         self.departures.leaving.push(Leaving {
@@ -874,8 +896,36 @@ impl State {
             fade: tween,
             rain,
             burn,
+            shatter,
         });
         self.redraw = true;
+    }
+
+    /// Where a window over `from` closing now cracks (#798): where it was
+    /// just clicked (its close button), else its middle.
+    fn shatter_hit(&self, from: Rectangle<f64, Logical>, now: Duration) -> (f64, f64) {
+        self.pointer
+            .last_press
+            .filter(|(at, when)| now.saturating_sub(*when) <= CLICKED && from.contains(*at))
+            .map_or(
+                (
+                    from.loc.x + from.size.w / 2.0,
+                    from.loc.y + from.size.h / 2.0,
+                ),
+                |(at, _)| (at.x, at.y),
+            )
+    }
+
+    /// The bottom of the screens under a window over `from` (global): its
+    /// shards are gone past it.
+    fn shatter_floor(&self, from: Rectangle<f64, Logical>) -> f64 {
+        let (x0, x1) = (from.loc.x, from.loc.x + from.size.w);
+        self.space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .filter(|g| f64::from(g.loc.x) < x1 && f64::from(g.loc.x + g.size.w) > x0)
+            .map(|g| f64::from(g.loc.y + g.size.h))
+            .fold(from.loc.y + from.size.h, f64::max)
     }
 
     /// Where the bar is on the window's output, as a small box: where a
@@ -1482,13 +1532,20 @@ impl State {
         moving |= self.tick_creatures(now);
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
-        self.departures.leaving.retain(|l| match &l.burn {
-            Some(burn) => {
-                burn.advance(now);
-                !burn.done(now)
-            }
-            None => !l.tween.done(now),
-        });
+        // A shattering one until its last shard has fallen (#798).
+        self.departures
+            .leaving
+            .retain(|l| match (&l.burn, &l.shatter) {
+                (Some(burn), _) => {
+                    burn.advance(now);
+                    !burn.done(now)
+                }
+                (_, Some(shatter)) => {
+                    shatter.advance(now);
+                    !shatter.done(now)
+                }
+                _ => !l.tween.done(now),
+            });
         moving |= !self.departures.leaving.is_empty();
         if let Some(preview) = &self.snap.preview {
             if preview.shown(now) {
@@ -1504,11 +1561,12 @@ impl State {
                 moving = true;
             }
         }
+        // A jelly held still asks for no frame: the next move wakes it.
         if let Some((_, jelly)) = &mut self.wobble {
             jelly.advance(now);
             if jelly.settled() {
                 self.wobble = None;
-            } else {
+            } else if !jelly.still() {
                 moving = true;
             }
         }

@@ -160,7 +160,7 @@ impl State {
                     faded.alpha *= fade;
                     self.framed_window(renderer, *id, &faded, origin, scale, out);
                 }
-                None => match self.bent_window(renderer, *id, look, origin, scale) {
+                None => match self.bent_window(renderer, *id, look, frame) {
                     Some(bent) => out.push(OutputElements::Bent(bent)),
                     None => self.framed_window(renderer, *id, look, origin, scale, out),
                 },

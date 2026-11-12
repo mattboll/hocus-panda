@@ -9,7 +9,9 @@
 //! their edges (`crate::render::snow`), and the windows' motion
 //! ([`motion`]). Built with its first effects: closing a window in flames
 //! ([`flames`], #794), snow that settles ([`snow`], #795); then the agents
-//! as creatures on their windows ([`creatures`], #796).
+//! as creatures on their windows ([`creatures`], #796), windows in jelly
+//! ([`jelly`], #797) and shattering into glass as they close
+//! ([`shatter`], #798).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -21,10 +23,12 @@
 pub mod creatures;
 pub mod draw;
 pub mod flames;
+pub mod jelly;
 pub mod mesh;
 pub mod motion;
 pub mod particles;
 pub mod rig;
+pub mod shatter;
 pub mod snow;
 pub mod snow_look;
 pub mod snowing;
@@ -73,16 +77,18 @@ impl State {
         }
     }
 
-    /// Whether window `id`, closing now, burns (#794): the flames are on,
-    /// the effects may play, and it is an application's window (not a
-    /// dialog) that is not fullscreen nor under a fullscreen one.
-    pub(crate) fn burns_on_close(&self, id: WindowId) -> bool {
-        if !self.config.effects.flames {
-            return false;
+    /// How window `id`, closing now, goes (#794, #798): in flames or in
+    /// glass when one is on, the effects may play, and it is an
+    /// application's window (not a dialog) that is not fullscreen nor
+    /// under a fullscreen one. Both on, they take turns.
+    pub(crate) fn close_effect(&mut self, id: WindowId) -> Option<Closing> {
+        let (flames, shatter) = (self.config.effects.flames, self.config.effects.shatter);
+        if !flames && !shatter {
+            return None;
         }
         if let Some(still) = self.effects_still() {
-            tracing::debug!(window = id.0, ?still, "closes without flames");
-            return false;
+            tracing::debug!(window = id.0, ?still, "closes as standard");
+            return None;
         }
         let fullscreen = self.model.mode(id) == Mode::Fullscreen
             || self
@@ -90,9 +96,40 @@ impl State {
                 .is_some_and(|o| self.fullscreen_in_front(&o));
         let dialog = self.model.parent(id).is_some();
         if fullscreen || dialog {
-            tracing::debug!(window = id.0, fullscreen, dialog, "closes without flames");
-            return false;
+            tracing::debug!(window = id.0, fullscreen, dialog, "closes as standard");
+            return None;
         }
-        true
+        Some(if flames && shatter {
+            self.departures.turns = self.departures.turns.wrapping_add(1);
+            if self.departures.turns % 2 == 1 {
+                Closing::Flames
+            } else {
+                Closing::Shatter
+            }
+        } else if flames {
+            Closing::Flames
+        } else {
+            Closing::Shatter
+        })
     }
+
+    /// Whether window `id`, dragged now, goes in jelly (#797): the jelly
+    /// is on, the effects may play, and no fullscreen window is in front
+    /// on its screen.
+    pub(crate) fn jellies(&self, id: WindowId) -> bool {
+        self.config.effects.jelly
+            && self.effects_still().is_none()
+            && !self
+                .output_of(id)
+                .is_some_and(|o| self.fullscreen_in_front(&o))
+    }
+}
+
+/// How a window closing goes, by an effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Closing {
+    /// It burns (#794).
+    Flames,
+    /// It shatters into glass (#798).
+    Shatter,
 }

@@ -942,6 +942,7 @@ impl State {
         }
         if state == ButtonState::Pressed {
             self.pointer_refocus(time);
+            self.pointer.last_press = Some((pointer.current_location(), self.now()));
         }
         // A press away from the authentication dialog does nothing (7.5).
         if state == ButtonState::Pressed && self.auth_keeps_pointer(pointer.current_location()) {

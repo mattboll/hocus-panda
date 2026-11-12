@@ -10,7 +10,7 @@
 //! The flames' shader is the board's (`FLAME_FS` of "Fermer en flammes"),
 //! from WebGL into GLSL ES 1.00 as it was: its lengths in logical pixels.
 
-use std::{any::Any, rc::Rc};
+use std::{any::Any, cell::RefCell, rc::Rc};
 
 use smithay::{
     backend::{
@@ -26,10 +26,10 @@ use smithay::{
     utils::{Buffer as BufferCoords, Physical, Point, Rectangle, Scale, Transform},
 };
 
-use super::{flames::Burn, mesh::Mesh, particles::FLOATS};
+use super::{flames::Burn, mesh::Mesh, particles::FLOATS, shatter::SHARD_FLOATS};
 use crate::{
     matrix::{Program, bind, compile_with, quads},
-    wobble::Picture,
+    wobble::{Kept, Picture},
 };
 
 /// An effect's part drawn this frame.
@@ -66,6 +66,15 @@ enum What {
     Sprites {
         texture: Rc<dyn Any>,
         vertices: Vec<f32>,
+    },
+    /// A window's picture whole, or in shards (#798):
+    /// [`super::shatter::SHARD_FLOATS`] floats a vertex, three a triangle;
+    /// their edges `width` wide (physical), where they may show.
+    Shards {
+        texture: Rc<dyn Any>,
+        vertices: Vec<f32>,
+        width: f32,
+        clip: Clip,
     },
     /// Nothing: what stands for an effect where it must not be seen (behind
     /// the glass, blurred once and kept).
@@ -254,6 +263,27 @@ pub trait Fire: Renderer + Sized {
         look: BurnLook,
     ) -> Option<FireElement>;
 
+    /// Draws `parts` (output-local, as if the picture's corner were at
+    /// theirs) into `kept` the first time, and gives the element drawing
+    /// it whole or in shards by `vertices` (output-local, physical) within
+    /// `geometry` (#798). `None`: not drawn so.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "what a shatter's frame is drawn from"
+    )]
+    fn shards<E: RenderElement<Self>>(
+        &mut self,
+        id: Id,
+        commit: CommitCounter,
+        kept: &RefCell<Option<Kept>>,
+        picture: &Picture,
+        parts: &[E],
+        geometry: Rectangle<i32, Physical>,
+        vertices: Vec<f32>,
+        width: f32,
+        clip: Clip,
+    ) -> Option<FireElement>;
+
     /// A sheet of pictures for [`FireElement::sprites`]: `rgba`
     /// (premultiplied, `size` pixels) made a texture. `None`: not drawn so.
     fn sheet(&mut self, rgba: &[u8], size: (i32, i32)) -> Option<Rc<dyn Any>>;
@@ -278,6 +308,21 @@ impl Fire for PixmanRenderer {
         _parts: &[E],
         _geometry: Rectangle<i32, Physical>,
         _look: BurnLook,
+    ) -> Option<FireElement> {
+        None
+    }
+
+    fn shards<E: RenderElement<Self>>(
+        &mut self,
+        _id: Id,
+        _commit: CommitCounter,
+        _kept: &RefCell<Option<Kept>>,
+        _picture: &Picture,
+        _parts: &[E],
+        _geometry: Rectangle<i32, Physical>,
+        _vertices: Vec<f32>,
+        _width: f32,
+        _clip: Clip,
     ) -> Option<FireElement> {
         None
     }
@@ -580,6 +625,47 @@ void main() {
 }
 ";
 
+const SHARD_VERTEX: &str = "#version 100
+uniform mat3 matrix;
+attribute vec2 position;
+attribute vec2 local;
+attribute vec4 look;
+varying vec2 v_uv;
+varying vec4 v_look;
+varying vec2 v_at;
+void main() {
+    gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
+    v_at = position;
+    v_uv = local;
+    v_look = look;
+}
+";
+
+/// The board's shard: its picture, the white of the light it catches and
+/// the dark of its back over it (where the picture is), its outline
+/// stroked across its edge, smoothed over a pixel.
+const SHARD: &str = "#version 100
+precision highp float;
+uniform sampler2D tex;
+uniform float width;
+varying vec2 v_uv;
+varying vec4 v_look;
+varying vec2 v_at;
+
+void main() {
+    if (clipped(v_at)) {
+        gl_FragColor = vec4(0.0);
+        return;
+    }
+    float e = v_look.w;
+    vec4 c = texture2D(tex, clamp(v_uv, 0.0, 1.0)) * clamp(e + 0.5, 0.0, 1.0);
+    c = c * (1.0 - v_look.x) + vec4(1.0) * v_look.x * c.a;
+    c = c * (1.0 - v_look.y) + vec4(10.0 / 255.0, 14.0 / 255.0, 24.0 / 255.0, 1.0) * v_look.y * c.a;
+    float line = clamp(width * 0.5 + 0.5 - abs(e), 0.0, 1.0) * v_look.z;
+    gl_FragColor = c * (1.0 - line) + vec4(220.0 / 255.0, 235.0 / 255.0, 1.0, 1.0) * line;
+}
+";
+
 /// The effects' programs of a renderer's context, made once; `None` where
 /// they do not compile, and the effects do not play.
 #[derive(Debug)]
@@ -592,6 +678,9 @@ struct Programs {
     sparks: Program,
     shapes: Program,
     sprites: Program,
+    shards: Program,
+    /// The shards' look attribute.
+    shard_look: ffi::types::GLint,
     /// The sprites' opacity attribute.
     shade: ffi::types::GLint,
     /// The sparks' other attributes.
@@ -653,8 +742,18 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 &["matrix", "keep", "holes", "count"],
             )?;
             let sprites = compile_with(gl, SPRITE_VERTEX, SPRITE, &["matrix", "tex"])?;
+            let shards = compile_with(
+                gl,
+                SHARD_VERTEX,
+                &with_clip(SHARD, "varying vec2 v_at;\n"),
+                &["matrix", "tex", "width", "keep", "holes", "count"],
+            )?;
             let attrib =
                 |p: &Program, n: &std::ffi::CStr| gl.GetAttribLocation(p.program, n.as_ptr());
+            let shard_look = attrib(&shards, c"look");
+            if shard_look < 0 || shards.position < 0 || shards.local < 0 {
+                return Err("the shards' attributes are missing".to_owned());
+            }
             let shade = attrib(&sprites, c"shade");
             if shade < 0 || sprites.position < 0 || sprites.local < 0 {
                 return Err("the sprites' attributes are missing".to_owned());
@@ -678,6 +777,8 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 sparks,
                 shapes,
                 sprites,
+                shards,
+                shard_look,
                 shade,
                 colour,
                 shape,
@@ -701,28 +802,7 @@ impl Fire for GlesRenderer {
         look: BurnLook,
     ) -> Option<FireElement> {
         programs(self)?;
-        let size = picture.buffer_size();
-        let kept = {
-            let mut kept = burn.picture.borrow_mut();
-            match kept.as_ref().filter(|(s, _)| *s == size) {
-                Some((_, texture)) => texture.clone(),
-                None => {
-                    let mut texture: GlesTexture =
-                        Offscreen::<GlesTexture>::create_buffer(self, Fourcc::Abgr8888, size)
-                            .map_err(|err| tracing::warn!(%err, "no picture for a burning window"))
-                            .ok()?;
-                    if let Err(err) =
-                        crate::wobble::draw_picture(self, &mut texture, picture, parts)
-                    {
-                        tracing::warn!(%err, "could not draw a burning window's picture");
-                        return None;
-                    }
-                    let rc: Rc<dyn Any> = Rc::new(texture);
-                    *kept = Some((size, rc.clone()));
-                    rc
-                }
-            }
-        };
+        let kept = keep_picture(self, &burn.picture, picture, parts, "a burning window")?;
         Some(FireElement {
             id: burn.ids[0].clone(),
             commit: burn.next_commit(),
@@ -730,6 +810,33 @@ impl Fire for GlesRenderer {
             what: What::Burn {
                 texture: kept,
                 look,
+            },
+        })
+    }
+
+    fn shards<E: RenderElement<Self>>(
+        &mut self,
+        id: Id,
+        commit: CommitCounter,
+        kept: &RefCell<Option<Kept>>,
+        picture: &Picture,
+        parts: &[E],
+        geometry: Rectangle<i32, Physical>,
+        vertices: Vec<f32>,
+        width: f32,
+        clip: Clip,
+    ) -> Option<FireElement> {
+        programs(self)?;
+        let texture = keep_picture(self, kept, picture, parts, "a shattering window")?;
+        Some(FireElement {
+            id,
+            commit,
+            geometry,
+            what: What::Shards {
+                texture,
+                vertices,
+                width,
+                clip,
             },
         })
     }
@@ -844,8 +951,118 @@ impl Fire for GlesRenderer {
                     }
                 })
             }
+            What::Shards {
+                texture,
+                vertices,
+                width,
+                clip,
+            } => {
+                let Some(texture) = texture.downcast_ref::<GlesTexture>() else {
+                    return Ok(());
+                };
+                let tex = texture.tex_id();
+                let projection = *frame.projection();
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    unsafe {
+                        let boxes = scissors(gl, &projection, dst, damage);
+                        shards(
+                            gl, &programs, &matrix, instancing, tex, vertices, *width, clip, &boxes,
+                        );
+                    }
+                })
+            }
             What::Blank => Ok(()),
         }
+    }
+}
+
+/// The picture `kept` of a window leaving: drawn from `parts` the first
+/// time (or when its size changes), its texture after.
+fn keep_picture<E: RenderElement<GlesRenderer>>(
+    renderer: &mut GlesRenderer,
+    kept: &RefCell<Option<Kept>>,
+    picture: &Picture,
+    parts: &[E],
+    what: &str,
+) -> Option<Rc<dyn Any>> {
+    let size = picture.buffer_size();
+    let mut kept = kept.borrow_mut();
+    if let Some((_, texture)) = kept.as_ref().filter(|(s, _)| *s == size) {
+        return Some(texture.clone());
+    }
+    let mut texture: GlesTexture =
+        Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, size)
+            .map_err(|err| tracing::warn!(%err, "no picture for {what}"))
+            .ok()?;
+    if let Err(err) = crate::wobble::draw_picture(renderer, &mut texture, picture, parts) {
+        tracing::warn!(%err, "could not draw the picture of {what}");
+        return None;
+    }
+    let rc: Rc<dyn Any> = Rc::new(texture);
+    *kept = Some((size, rc.clone()));
+    Some(rc)
+}
+
+/// Draws a window whole or in shards (#798), cut to the frame's damage.
+#[allow(unsafe_code, clippy::too_many_arguments)]
+unsafe fn shards(
+    gl: &ffi::Gles2,
+    programs: &Programs,
+    matrix: &[f32; 9],
+    instancing: bool,
+    tex: ffi::types::GLuint,
+    vertices: &[f32],
+    width: f32,
+    clip: &Clip,
+    boxes: &[[i32; 4]],
+) {
+    let p = &programs.shards;
+    let n = vertices.len() / SHARD_FLOATS;
+    if n == 0 {
+        return;
+    }
+    let attribs = [
+        (p.position as u32, 2, 0),
+        (p.local as u32, 2, 2),
+        (programs.shard_look as u32, 4, 4),
+    ];
+    let stride = (SHARD_FLOATS * std::mem::size_of::<f32>()) as ffi::types::GLsizei;
+    let mut viewport = [0i32; 4];
+    unsafe {
+        gl.GetIntegerv(ffi::VIEWPORT, viewport.as_mut_ptr());
+        gl.UseProgram(p.program);
+        gl.UniformMatrix3fv(p.at("matrix"), 1, ffi::FALSE, matrix.as_ptr());
+        bind(gl, 0, tex, false);
+        gl.Uniform1i(p.at("tex"), 0);
+        gl.Uniform1f(p.at("width"), width);
+        set_clip(gl, p, clip);
+        gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
+        gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+        for (at, size, offset) in attribs {
+            gl.EnableVertexAttribArray(at);
+            if instancing {
+                gl.VertexAttribDivisor(at, 0);
+            }
+            gl.VertexAttribPointer(
+                at,
+                size,
+                ffi::FLOAT,
+                ffi::FALSE,
+                stride,
+                vertices.as_ptr().add(offset) as *const _,
+            );
+        }
+        for [x, y, w, h] in boxes {
+            gl.Scissor(*x, *y, *w, *h);
+            gl.DrawArrays(ffi::TRIANGLES, 0, n as ffi::types::GLsizei);
+        }
+        let [x, y, w, h] = viewport;
+        gl.Scissor(x, y, w, h);
+        for (at, _, _) in attribs {
+            gl.DisableVertexAttribArray(at);
+        }
+        gl.BindTexture(ffi::TEXTURE_2D, 0);
     }
 }
 
