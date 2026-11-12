@@ -181,6 +181,9 @@ pub struct State {
     pub arrivals: Arrivals,
     /// The windows going: their pictures, taken as their surfaces went.
     pub departures: Departures,
+    /// The desktop's effects playing (#793): the snow, the windows'
+    /// motion.
+    pub fx: crate::effects::Live,
     /// Where a dragged window would snap, and the seam's handle.
     pub snap: Snap,
     /// The pointer: what it shows, its grabs, the buttons kept.
@@ -350,6 +353,7 @@ impl State {
             pointer: Pointer::new(cursor_images),
             snap: Snap::default(),
             departures: Departures::default(),
+            fx: crate::effects::Live::default(),
             arrivals: Arrivals::default(),
         })
     }

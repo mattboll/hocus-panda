@@ -132,6 +132,7 @@ mod settings_sound;
 mod settings_time;
 mod settings_wallpaper;
 mod sharing;
+mod snow;
 mod tasks;
 mod theme_shots;
 mod themed_bar;

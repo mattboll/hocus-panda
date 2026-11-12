@@ -8,6 +8,7 @@
 
 mod layers;
 mod leaving;
+mod snow;
 mod stack;
 
 use std::{ops::ControlFlow, time::Duration};
@@ -16,7 +17,7 @@ use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, RendererSuper, Texture,
         element::{
-            AsRenderElements, Kind, RenderElementState, RenderElementStates,
+            AsRenderElements, Element, Kind, RenderElementState, RenderElementStates,
             default_primary_scanout_output_compare,
             memory::MemoryRenderBufferRenderElement,
             render_elements,
@@ -665,6 +666,10 @@ impl State {
         crate::contrast::set_theme(Some(self.theme_choice()));
         let now = self.now();
         self.frames.drawn_at.set(Some(now));
+        // The snow's programs made before it is drawn (#795).
+        if self.fx.snow.is_some() && purpose.screen() {
+            renderer.effects_ready();
+        }
         let mut elements: Vec<OutputElement<R>> = Vec::new();
         let Some(area) = self.space.output_geometry(output) else {
             return elements;
@@ -760,6 +765,10 @@ impl State {
         // The halo over the bar's surfaces and around them, under the
         // popovers beside it (4.4); with the bar under the windows, over
         // them still.
+        // The snow on the bar (#795), right in front of it.
+        if front && let Some(cap) = self.snow_bar_cap(&frame) {
+            elements.push(OutputElements::Fire(cap));
+        }
         let bar_at = self.layer_elements(
             renderer,
             &frame,
@@ -807,6 +816,9 @@ impl State {
         crate::contrast::set(contrast);
         elements.append(&mut overview);
         elements.append(&mut windows);
+        if !front && let Some(cap) = self.snow_bar_cap(&frame) {
+            elements.push(OutputElements::Fire(cap));
+        }
         // Under the windows, the bar, its glass right under it showing
         // what is under the bar: a window over it hides both there.
         self.layer_elements(
@@ -822,6 +834,12 @@ impl State {
         if purpose.screen() {
             self.burn_lights(&frame, &mut elements);
         }
+        // The snow's layer (#795): on the wallpaper, under the windows and
+        // the bar; a blank in its place while the glass is blurred.
+        let snow = self.snow_layer(&frame).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
         self.layer_elements(renderer, &frame, Layer::Bottom, Pick::All, &mut elements);
         self.layer_elements(
             renderer,
@@ -845,6 +863,15 @@ impl State {
                 capture_glass,
             },
         );
+        if let Some(layer) = snow
+            && let Some(blank) = self.snow_blank(&frame)
+            && let Some(at) = elements
+                .iter()
+                .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
+            && let Some(slot) = elements.get_mut(at)
+        {
+            *slot = OutputElements::Fire(layer);
+        }
         elements
     }
 
