@@ -206,7 +206,7 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
         at: (i32, i32),
-        toast: bool,
+        kind: crate::mcp::Surface,
     },
     /// The actions palette's surface on `output` (#736): `size`, its
     /// margins from the screen's top left corner (top, right, bottom,

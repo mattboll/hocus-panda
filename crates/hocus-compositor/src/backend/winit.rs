@@ -158,6 +158,9 @@ impl WinitBackend {
         if state.capture.has_pending() {
             crate::capture::shoot::take::<_, GlesTexture>(self.backend.renderer(), state);
         }
+        if state.mcp_shots_pending() {
+            crate::mcp::capture::take::<_, GlesTexture>(self.backend.renderer(), state);
+        }
         if state.redraw {
             self.backend.window().request_redraw();
         }

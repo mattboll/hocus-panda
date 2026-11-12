@@ -156,6 +156,131 @@ pub struct SetSetting {
     pub intent: Option<String>,
 }
 
+/// Where a click or a scroll lands in a window: a point from its top left
+/// (its centre when left out), or an element of its accessible tree.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Click {
+    pub window: u64,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    /// An element's label, exactly, else the one that holds it.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Its role, among several of one label (`push button`).
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub button: Option<Button>,
+    /// 1 to 3.
+    #[serde(default)]
+    pub count: Option<u8>,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+/// A mouse button.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Button {
+    #[default]
+    Left,
+    Right,
+    Middle,
+}
+
+impl Button {
+    /// Its evdev code.
+    pub fn code(self) -> u32 {
+        match self {
+            Self::Left => 0x110,
+            Self::Right => 0x111,
+            Self::Middle => 0x112,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Scroll {
+    pub window: u64,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Logical pixels, down positive: 15 a notch.
+    pub dy: f64,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+/// The characters a call types at most.
+pub const MAX_TYPED: usize = 500;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Type {
+    pub window: u64,
+    pub text: String,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PressKeys {
+    pub window: u64,
+    /// As the shortcuts write them: `Ctrl+S`, `Return`, `Shift+Tab`.
+    pub keys: String,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloseWindow {
+    pub window: u64,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+/// How long `wait_for` waits at most.
+pub const MAX_WAIT_MS: u32 = 30_000;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WaitFor {
+    /// A window of this app id…
+    #[serde(default)]
+    pub app_id: Option<String>,
+    /// …whose title holds this.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Or an element of this window's tree, by its label.
+    #[serde(default)]
+    pub window: Option<u64>,
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Until none is.
+    #[serde(default)]
+    pub gone: bool,
+    /// 5000 by default.
+    #[serde(default)]
+    pub timeout_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OfWindow {
+    pub window: u64,
+}
+
 /// What a tool asks, read from its name and arguments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "tool", content = "args", rename_all = "snake_case")]
@@ -170,6 +295,14 @@ pub enum Call {
     SwitchDesktop(SwitchDesktop),
     Launch(Launch),
     SetSetting(SetSetting),
+    Click(Click),
+    Scroll(Scroll),
+    Type(Type),
+    PressKeys(PressKeys),
+    CloseWindow(CloseWindow),
+    WaitFor(WaitFor),
+    Capture(OfWindow),
+    AccessibilityTree(OfWindow),
 }
 
 impl Call {
@@ -194,7 +327,37 @@ impl Call {
                 | Self::SwitchDesktop(_)
                 | Self::Launch(_)
                 | Self::SetSetting(_)
+                | Self::Click(_)
+                | Self::Scroll(_)
+                | Self::Type(_)
+                | Self::PressKeys(_)
+                | Self::CloseWindow(_)
         )
+    }
+
+    /// Whether it goes through the agent's own seat into an application's
+    /// window: only into the applications of its `apps`.
+    pub fn inputs(&self) -> bool {
+        matches!(
+            self,
+            Self::Click(_) | Self::Scroll(_) | Self::Type(_) | Self::PressKeys(_)
+        )
+    }
+
+    /// The window it aims at, if it aims at one.
+    pub fn window(&self) -> Option<u64> {
+        match self {
+            Self::FocusWindow(c) => Some(c.window),
+            Self::MoveWindow(c) => Some(c.window),
+            Self::Click(c) => Some(c.window),
+            Self::Scroll(c) => Some(c.window),
+            Self::Type(c) => Some(c.window),
+            Self::PressKeys(c) => Some(c.window),
+            Self::CloseWindow(c) => Some(c.window),
+            Self::Capture(c) | Self::AccessibilityTree(c) => Some(c.window),
+            Self::WaitFor(c) => c.window,
+            _ => None,
+        }
     }
 
     /// What the agent says it does, as it said it.
@@ -205,6 +368,11 @@ impl Call {
             Self::SwitchDesktop(c) => c.intent.as_deref(),
             Self::Launch(c) => c.intent.as_deref(),
             Self::SetSetting(c) => c.intent.as_deref(),
+            Self::Click(c) => c.intent.as_deref(),
+            Self::Scroll(c) => c.intent.as_deref(),
+            Self::Type(c) => c.intent.as_deref(),
+            Self::PressKeys(c) => c.intent.as_deref(),
+            Self::CloseWindow(c) => c.intent.as_deref(),
             _ => None,
         }
     }
@@ -222,6 +390,14 @@ impl Call {
             Self::SwitchDesktop(_) => "switch_desktop",
             Self::Launch(_) => "launch",
             Self::SetSetting(_) => "set_setting",
+            Self::Click(_) => "click",
+            Self::Scroll(_) => "scroll",
+            Self::Type(_) => "type",
+            Self::PressKeys(_) => "press_keys",
+            Self::CloseWindow(_) => "close_window",
+            Self::WaitFor(_) => "wait_for",
+            Self::Capture(_) => "capture",
+            Self::AccessibilityTree(_) => "accessibility_tree",
         }
     }
 }
@@ -276,7 +452,24 @@ mod tests {
         assert!(!Call::ListWindows(Nothing {}).acts());
         let odd = Call::of("move_window", &json!({ "window": 3, "colour": 1 }));
         assert!(odd.is_err_and(|e| e.contains("colour")));
-        assert!(Call::of("close_window", &json!({ "window": 3 })).is_err());
+        assert!(Call::of("drag", &json!({ "window": 3 })).is_err());
+        let typed = Call::of("type", &json!({ "window": 3, "text": "ab", "intent": "x" }));
+        assert!(typed.as_ref().is_ok_and(|t| t.acts() && t.inputs()));
+        let closed = Call::of("close_window", &json!({ "window": 3, "intent": "x" }));
+        assert!(closed.as_ref().is_ok_and(|c| c.acts() && !c.inputs()));
+        let tree = Call::of("accessibility_tree", &json!({ "window": 3 }));
+        assert!(tree.is_ok_and(|t| !t.acts() && t.window() == Some(3)));
+        let click = Call::of(
+            "click",
+            &json!({ "window": 3, "button": "right", "intent": "x" }),
+        );
+        assert!(click.is_ok_and(|c| matches!(
+            c,
+            Call::Click(Click {
+                button: Some(Button::Right),
+                ..
+            })
+        )));
     }
 
     #[test]

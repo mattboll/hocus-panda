@@ -17,16 +17,27 @@
 //! The journal is in memory only, the last [`JOURNAL`] calls acted on or
 //! refused; it reaches the log at debug level alone. `Super+Shift+Escape`
 //! (or the journal's "Tout arrêter") stops every agent until let go.
+//!
+//! In applications (lot B): each connection has a seat of its own
+//! ([`seat`]); applications' trees are read on a thread ([`atspi`]); the
+//! pointer and the ring are drawn here ([`draw`]); the card, take over,
+//! `wait_for`, closing and captures are [`apps`]'.
+
+mod apps;
+pub mod atspi;
+pub mod capture;
+mod draw;
+pub mod seat;
 
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use hocus_agents::mcp::{Answer, Asked, Call};
@@ -43,7 +54,7 @@ use smithay::{
         RegistrationToken, channel,
         timer::{TimeoutAction, Timer},
     },
-    utils::{Logical, Rectangle},
+    utils::{Logical, Point, Rectangle},
 };
 
 use crate::{
@@ -73,8 +84,6 @@ const RING_OFFSET: f64 = 2.0;
 const RING_ALPHA: f32 = 0.95;
 const HALO_WIDTH: f64 = 6.0;
 const HALO_ALPHA: f32 = 0.30;
-/// The tag's place inside a window's top left corner.
-const TAG_IN: i32 = 12;
 /// The tag's top on a screen, under its work area's top.
 const TAG_TOP: i32 = 16;
 /// The toast's distance from the work area's bottom left corner.
@@ -113,6 +122,17 @@ pub enum FromAgent {
     /// A request's settings written back.
     Restored {
         failed: Vec<String>,
+    },
+    /// A window's tree read, for what asked it with `token`.
+    Tree {
+        token: u64,
+        outcome: atspi::Outcome,
+    },
+    /// A capture made into a PNG, or why not.
+    Png {
+        session: u64,
+        id: u64,
+        result: Result<Value, String>,
     },
 }
 
@@ -172,14 +192,29 @@ pub struct Waiting {
     agent: String,
     call: Call,
     intent: String,
+    /// When it was asked: an application takes a seat a moment after it
+    /// comes.
+    since: Instant,
+    /// The user allowed it on its card.
+    confirmed: bool,
 }
+
+/// What an action shows: its tag, the window it rings, and where the
+/// agent's pointer goes (global).
+type Shown = (
+    Option<McpShow>,
+    Option<WindowId>,
+    Option<Point<f64, Logical>>,
+);
 
 /// The action shown now, before it is done.
 #[derive(Debug)]
 struct Showing {
     waiting: Waiting,
-    show: McpShow,
+    show: Option<McpShow>,
     window: Option<WindowId>,
+    /// The agent's pointer there, ringed (global).
+    point: Option<Point<f64, Logical>>,
     timer: Option<RegistrationToken>,
 }
 
@@ -266,6 +301,33 @@ pub struct Mcp {
     dirty: bool,
     ring_ids: RingIds,
     halo_ids: RingIds,
+    /// Each connection's own seat.
+    pub seats: seat::Seats,
+    /// Windows agents acted on, and when: driven while no screen shows
+    /// them.
+    pub driven: Vec<(WindowId, Instant)>,
+    pictures: draw::Pictures,
+    reader: Option<atspi::Reader>,
+    next_token: u64,
+    /// What waits for a window's tree, by token.
+    trees: BTreeMap<u64, apps::TreeFor>,
+    /// The action waiting for the user's answer.
+    card: Option<apps::Card>,
+    next_card: u64,
+    /// The agents the user took over from.
+    pub taken: BTreeSet<String>,
+    waits: Vec<apps::Wait>,
+    wait_timer: Option<RegistrationToken>,
+    /// A window asked to close, until it went or the time is up.
+    closing: Option<apps::Closing>,
+    /// An action whose application has not taken the seat yet.
+    retry: Option<Waiting>,
+    /// The agents' pointers hide when this rings.
+    pointer_timer: Option<RegistrationToken>,
+    /// Captures for the backend to draw, and those waiting for their
+    /// window to draw first.
+    pub shots: Vec<capture::Shot>,
+    pub(crate) shot_waits: Vec<capture::Wait>,
 }
 
 #[derive(Debug)]
@@ -306,6 +368,22 @@ fn refusal_text(refusal: &McpRefusal, agent: &str) -> String {
             "refused: the user stopped every agent; they may let them go on".to_owned()
         }
         McpRefusal::Forbidden => format!("refused: no agent changes [{}]", FORBIDDEN.join("], [")),
+        McpRefusal::NotItsApp => format!(
+            "refused: agent {agent:?} may not use that window's application: its apps in \
+             [[agents.mcp]] do not name it"
+        ),
+        McpRefusal::X11 => "refused: an X11 window (XWayland) has the session's pointer and \
+                            keyboard alone: agents act in Wayland windows"
+            .to_owned(),
+        McpRefusal::TakenOver => format!(
+            "refused: the user took over from agent {agent:?}; its actions are refused until \
+             they hand back"
+        ),
+        McpRefusal::UserRefused => "refused: the user refused it; nothing was done".to_owned(),
+        McpRefusal::NoAnswer => format!(
+            "refused: the user did not answer within {} s; nothing was done",
+            hocus_link::MCP_CARD_WAIT.as_secs()
+        ),
     }
 }
 
@@ -330,12 +408,18 @@ impl State {
             FromAgent::Opened { session, agent, to } => {
                 tracing::info!(agent, session, "an MCP agent connects");
                 self.mcp_seen(&agent);
+                // Its seat comes now: applications take it as it comes.
+                if self.config.agents.mcp.iter().any(|a| a.name == agent) {
+                    self.mcp_seat_join(session, &agent);
+                }
                 self.mcp.conns.insert(session, Conn { agent, to });
             }
             FromAgent::Closed { session } => {
                 if let Some(conn) = self.mcp.conns.remove(&session) {
                     tracing::info!(agent = conn.agent, session, "an MCP agent leaves");
                 }
+                self.mcp_seat_leave(session);
+                self.mcp_session_gone(session);
                 self.mcp.queue.retain(|w| w.session != session);
                 if self
                     .mcp
@@ -363,6 +447,12 @@ impl State {
                     tracing::warn!(?failed, "settings not put back");
                 }
             }
+            FromAgent::Tree { token, outcome } => self.mcp_tree_read(token, outcome),
+            FromAgent::Png {
+                session,
+                id,
+                result,
+            } => self.mcp_answer(session, id, result),
         }
     }
 
@@ -434,6 +524,22 @@ impl State {
         if self.locked() {
             return Some(McpRefusal::Locked);
         }
+        // Into an application's window, or reading its tree: only those
+        // its `apps` name.
+        let reads_tree = matches!(call, Call::AccessibilityTree(_))
+            || matches!(call, Call::WaitFor(w) if w.label.is_some());
+        if (reads_tree || call.inputs())
+            && let Some(id) = call.window().map(WindowId)
+            && let Some(managed) = self.windows.get(&id)
+        {
+            let app = crate::windows::app_id(&managed.window).unwrap_or_default();
+            if !rights.may_use(&app) {
+                return Some(McpRefusal::NotItsApp);
+            }
+            if call.inputs() && managed.window.x11_surface().is_some() {
+                return Some(McpRefusal::X11);
+            }
+        }
         if !call.acts() {
             return None;
         }
@@ -442,6 +548,9 @@ impl State {
         }
         if self.auth_holds() {
             return Some(McpRefusal::Asking);
+        }
+        if self.mcp.taken.contains(agent) {
+            return Some(McpRefusal::TakenOver);
         }
         if let Call::SetSetting(set) = call {
             if FORBIDDEN.contains(&set.key.split('.').next().unwrap_or_default()) {
@@ -516,13 +625,24 @@ impl State {
         if let Err(why) = self.mcp_check(&call) {
             return self.mcp_answer(session, asked.id, Err(why));
         }
-        self.mcp.queue.push_back(Waiting {
+        let waiting = Waiting {
             session,
             id: asked.id,
             agent,
             call,
             intent,
-        });
+            since: Instant::now(),
+            confirmed: false,
+        };
+        // Aimed at an element of its tree: the tree is read first.
+        if let Some(window) = apps::aims_at_label(&waiting.call) {
+            let (session, id) = (waiting.session, waiting.id);
+            if let Err(why) = self.mcp_tree(apps::TreeFor::Aim(Box::new(waiting)), window) {
+                self.mcp_answer(session, id, Err(why));
+            }
+            return;
+        }
+        self.mcp.queue.push_back(waiting);
         self.mcp_next();
     }
 
@@ -585,6 +705,25 @@ impl State {
                 });
                 return None;
             }
+            Call::AccessibilityTree(c) => {
+                let window = match self.mcp_window(c.window) {
+                    Ok(window) => window,
+                    Err(why) => return Some(Err(why)),
+                };
+                return self
+                    .mcp_tree(apps::TreeFor::Tool { session, id }, window)
+                    .err()
+                    .map(Err);
+            }
+            Call::Capture(c) => {
+                let window = match self.mcp_window(c.window) {
+                    Ok(window) => window,
+                    Err(why) => return Some(Err(why)),
+                };
+                self.mcp_capture(session, id, window);
+                return None;
+            }
+            Call::WaitFor(c) => return self.mcp_wait(session, id, c.clone()).err().map(Err),
             _ => return Some(Err("not a reading tool".to_owned())),
         }))
     }
@@ -688,6 +827,42 @@ impl State {
                 Ok(())
             }
             Call::SetSetting(c) => setting_value(&c.key, &c.value).map(|_| ()),
+            Call::Click(c) => {
+                let id = self.mcp_window(c.window)?;
+                if c.count.is_some_and(|n| !(1..=3).contains(&n)) {
+                    return Err("click: a count of 1 to 3".into());
+                }
+                if c.label.is_none() {
+                    self.mcp_point(id, c.x, c.y)?;
+                }
+                Ok(())
+            }
+            Call::Scroll(c) => {
+                let id = self.mcp_window(c.window)?;
+                if c.label.is_none() {
+                    self.mcp_point(id, c.x, c.y)?;
+                }
+                Ok(())
+            }
+            Call::Type(c) => {
+                self.mcp_window(c.window)?;
+                match c.text.chars().count() {
+                    0 => Err("type: nothing to type".into()),
+                    n if n > hocus_agents::mcp::MAX_TYPED => Err(format!(
+                        "type: {} characters at most at once",
+                        hocus_agents::mcp::MAX_TYPED
+                    )),
+                    _ => Ok(()),
+                }
+            }
+            Call::PressKeys(c) => {
+                self.mcp_window(c.window)?;
+                c.keys
+                    .parse::<crate::shortcuts::Chord>()
+                    .map(|_| ())
+                    .map_err(|e| format!("press_keys: {e}"))
+            }
+            Call::CloseWindow(c) => self.mcp_window(c.window).map(|_| ()),
             _ => Ok(()),
         }
     }
@@ -757,12 +932,26 @@ impl State {
         }
         let kind = kind_of(&waiting.call);
         self.mcp_doing(&waiting.agent, McpDoing::Acting(kind));
-        let wait = Duration::from_millis(u64::from(self.config.agents.show_before_ms));
-        let Some((show, window)) = self.mcp_show_of(&waiting) else {
-            return self.mcp_do(waiting);
-        };
+        let mut wait = Duration::from_millis(u64::from(self.config.agents.show_before_ms));
+        let shown = self.mcp_show_of(&waiting);
+        if shown.is_none() {
+            wait = Duration::ZERO;
+        }
+        // Its keyboard comes into the window before typing: its
+        // application says meanwhile what its field is for.
+        if let Some(id) = apps::types_into(&waiting.call)
+            && self.mcp_keys_to(waiting.session, id)
+        {
+            wait = wait.max(apps::SETTLE);
+        }
+        let (show, window, point) = shown.unwrap_or((None, None, None));
+        if let Some(point) = point
+            && let Some(id) = waiting.call.window().map(WindowId)
+        {
+            self.mcp_pointer_shown(&waiting, id, point);
+        }
         if wait.is_zero() {
-            return self.mcp_do(waiting);
+            return self.mcp_go(waiting);
         }
         tracing::debug!(
             agent = waiting.agent,
@@ -781,6 +970,7 @@ impl State {
             waiting,
             show,
             window,
+            point,
             timer,
         });
         self.redraw = true;
@@ -814,7 +1004,7 @@ impl State {
             self.mcp_after(&waiting.agent);
             return self.mcp_next();
         }
-        self.mcp_do(waiting);
+        self.mcp_go(waiting);
     }
 
     /// No action shown any more.
@@ -827,8 +1017,9 @@ impl State {
         self.redraw = true;
     }
 
-    /// What an action shows, and the window it rings.
-    fn mcp_show_of(&self, waiting: &Waiting) -> Option<(McpShow, Option<WindowId>)> {
+    /// What an action shows, the window it rings, and where the agent's
+    /// pointer goes (global).
+    fn mcp_show_of(&self, waiting: &Waiting) -> Option<Shown> {
         let show = |output: &Output, at: McpAt| McpShow {
             agent: waiting.agent.clone(),
             intent: waiting.intent.clone(),
@@ -844,7 +1035,6 @@ impl State {
             ))
         };
         match &waiting.call {
-            Call::FocusWindow(c) => self.mcp_window_show(WindowId(c.window), &show),
             Call::MoveWindow(c) => {
                 let id = WindowId(c.window);
                 match c.desktop {
@@ -853,31 +1043,47 @@ impl State {
                         let output = self.output_of(id)?;
                         let (x, y) = top(&output)?;
                         let index = u8::try_from(desktop.saturating_sub(1)).ok()?;
-                        Some((show(&output, McpAt::Desktop { index, x, y }), None))
+                        Some((
+                            Some(show(&output, McpAt::Desktop { index, x, y })),
+                            None,
+                            None,
+                        ))
                     }
-                    _ => self.mcp_window_show(id, &show),
+                    _ => self.mcp_window_show(waiting, id, &show),
                 }
             }
             Call::SwitchDesktop(c) => {
                 let output = self.mcp_output(c.output.as_deref()).ok()?;
                 let (x, y) = top(&output)?;
                 let index = u8::try_from(c.desktop.saturating_sub(1)).ok()?;
-                Some((show(&output, McpAt::Desktop { index, x, y }), None))
+                Some((
+                    Some(show(&output, McpAt::Desktop { index, x, y })),
+                    None,
+                    None,
+                ))
             }
             Call::Launch(_) | Call::SetSetting(_) => {
                 let output = self.mcp_output(None).ok()?;
                 let (x, y) = top(&output)?;
-                Some((show(&output, McpAt::Screen { x, y }), None))
+                Some((Some(show(&output, McpAt::Screen { x, y })), None, None))
             }
-            _ => None,
+            call => {
+                let id = WindowId(call.window()?);
+                self.mcp_window_show(waiting, id, &show)
+            }
         }
     }
 
+    /// What an action on window `id` shows: the agent's pointer at the
+    /// point it aims at (a click's; where the agent's pointer is in it
+    /// for typing; else the window's top, its middle), the window ringed;
+    /// on a window no screen shows, the tag at the top of its screen.
     fn mcp_window_show(
         &self,
+        waiting: &Waiting,
         id: WindowId,
         show: &dyn Fn(&Output, McpAt) -> McpShow,
-    ) -> Option<(McpShow, Option<WindowId>)> {
+    ) -> Option<Shown> {
         let output = self.output_of(id)?;
         let origin = self.space.output_geometry(&output)?.loc;
         if !self.model.is_shown(id) {
@@ -887,18 +1093,21 @@ impl State {
                 x: area.x - origin.x + area.width / 2,
                 y: area.y - origin.y + TAG_TOP,
             };
-            return Some((show(&output, at), None));
+            return Some((Some(show(&output, at)), None, None));
         }
-        let rect = self.home_rect(id)?;
-        let at = McpAt::Window {
-            x: rect.x - origin.x + TAG_IN,
-            y: rect.y - origin.y + TAG_IN,
+        let point = self.mcp_aim_point(waiting, id)?;
+        let at = McpAt::Pointer {
+            x: (point.x - f64::from(origin.x)).round() as i32,
+            y: (point.y - f64::from(origin.y)).round() as i32,
         };
-        Some((show(&output, at), Some(id)))
+        Some((Some(show(&output, at)), Some(id), Some(point)))
     }
 
     /// Does an action, keeping what it changes for "Annuler".
     fn mcp_do(&mut self, waiting: Waiting) {
+        if waiting.call.inputs() || matches!(waiting.call, Call::CloseWindow(_)) {
+            return self.mcp_do_in_app(waiting);
+        }
         let agent = waiting.agent.clone();
         let result = match &waiting.call {
             Call::FocusWindow(c) => {
@@ -927,8 +1136,18 @@ impl State {
             Call::SetSetting(_) => return self.mcp_write(waiting),
             _ => Err("not an acting tool".to_owned()),
         };
+        self.mcp_done(&waiting, result);
+    }
+
+    /// An action done (or failed): kept in the journal, answered, and the
+    /// next one shown.
+    fn mcp_done(&mut self, waiting: &Waiting, result: Result<(Value, String), String>) {
+        let agent = waiting.agent.clone();
         match result {
-            Ok((value, what)) => {
+            Ok((value, mut what)) => {
+                if waiting.confirmed {
+                    what.push_str("; confirmed by the user");
+                }
                 self.mcp_journal(Entry {
                     at: clock(true),
                     agent: agent.clone(),
@@ -1438,6 +1657,7 @@ impl State {
             }
             refused.insert(0, showing.waiting);
         }
+        refused.extend(self.mcp_held());
         for waiting in refused {
             self.mcp_refuse(
                 waiting.session,
@@ -1465,9 +1685,12 @@ impl State {
                     doing: s.doing.clone(),
                 })
                 .collect(),
-            show: self.mcp.showing.as_ref().map(|s| s.show.clone()),
+            show: self.mcp.showing.as_ref().and_then(|s| s.show.clone()),
             toast: self.mcp.toast.as_ref().map(|(t, _)| t.clone()),
             journal: self.mcp.lines.iter().cloned().collect(),
+            pointers: self.mcp_pointers_told(),
+            card: self.mcp.card.as_ref().map(|c| c.shown.clone()),
+            taken: self.mcp.taken.iter().cloned().collect(),
         }
     }
 
@@ -1481,7 +1704,7 @@ impl State {
             return;
         }
         if self.shell_linked() {
-            self.tell_shell(ToShell::Mcp(shown.clone()));
+            self.tell_shell(ToShell::Mcp(Box::new(shown.clone())));
         }
         self.mcp.told = Some(shown);
     }
@@ -1489,7 +1712,7 @@ impl State {
     /// As the shell connects.
     pub(crate) fn tell_mcp(&mut self) {
         let shown = self.mcp_shown();
-        self.tell_shell(ToShell::Mcp(shown.clone()));
+        self.tell_shell(ToShell::Mcp(Box::new(shown.clone())));
         self.mcp.told = Some(shown);
     }
 
@@ -1506,7 +1729,13 @@ impl State {
         R: Renderer + ImportAll + ImportMem + crate::wobble::Bend + crate::going::Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
-        if self.mcp.showing.as_ref().and_then(|s| s.window) != Some(window) {
+        let ringed = self
+            .mcp
+            .showing
+            .as_ref()
+            .and_then(|s| s.window)
+            .or_else(|| self.mcp_card_window());
+        if ringed != Some(window) {
             return Vec::new();
         }
         let radius = if self.model.mode(window) == Mode::Fullscreen {
@@ -1566,6 +1795,7 @@ fn kind_of(call: &Call) -> McpKind {
         Call::SwitchDesktop(_) => McpKind::Desktop,
         Call::Launch(_) => McpKind::Launch,
         Call::SetSetting(_) => McpKind::Setting,
+        call if call.inputs() => McpKind::Input,
         _ => McpKind::Windows,
     }
 }

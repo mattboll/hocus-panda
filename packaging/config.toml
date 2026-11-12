@@ -381,15 +381,22 @@
 # The agents that act on the desktop through `hocus mcp --agent NAME`
 # (docs/design/mcp.md), one [[agents.mcp]] each, followed live: its name,
 # what it may do ("read": the windows, desktops, screens and settings;
-# "act": arrange windows, switch desktops, launch applications too) and
-# whether it may change settings. An agent the file does not name is
-# refused. Before each action, its intent shows on what it will touch for
-# show-before-ms milliseconds (0: none).
+# "act": arrange and close windows, switch desktops, launch applications
+# too), whether it may change settings, and the applications (app ids,
+# globs) whose windows it may click and type in, through a pointer and a
+# keyboard of its own, and whose accessible trees it reads (none by
+# default). An agent the file does not name is refused. Before each
+# action, its intent shows on what it will touch for show-before-ms
+# milliseconds (0: none). In the applications of confirm-apps, each of an
+# agent's clicks, typing, keys or closing waits for your answer on a card
+# (60 s, then refused); so does typing in a password field anywhere.
 #   [[agents.mcp]]
 #   name = "Claude"
 #   access = "act"
 #   settings = true
+#   apps = ["kitty", "org.mozilla.*"]
 # show-before-ms = 600
+# confirm-apps = ["hocus-settings", "org.keepassxc.KeePassXC", "com.bitwarden.desktop", "1password", "org.gnome.seahorse.Application", "org.gnome.World.Secrets", "org.kde.kwalletmanager5"]
 
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the

@@ -1917,6 +1917,7 @@ name = "hocus-compositor"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "calloop 0.14.5",
  "clap",
  "fontdue",

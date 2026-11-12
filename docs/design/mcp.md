@@ -1,10 +1,10 @@
 # Agents on the desktop, through `hocus mcp` (#440)
 
-Status: lot A of #440, mockup approved 2026-11-12 (tools'
-`mockups/s14-mcp`, scenes 1, 2 and 4;
-<https://claude.ai/artifact/Cd6Ba69odbhqgaFB5ux8pg>). Lot B brings the
-agent's own seat (clicking and typing in applications, their accessible
-trees, captures), the confirmation cards and taking over; lot C the
+Status: lots A and B of #440, mockup approved 2026-11-12 (tools'
+`mockups/s14-mcp`, scenes 1 to 4;
+<https://claude.ai/artifact/Cd6Ba69odbhqgaFB5ux8pg>). Lot B (below, "In
+applications") brings the agent's own seat, applications' accessible
+trees and captures, the confirmation card and taking over; lot C the
 Settings' page of rights (scene 5). Until then the rights are in the
 configuration file.
 
@@ -71,8 +71,8 @@ is the tool's result, `isError: true`, its text saying why.
 | `launch` | `app` (a desktop entry's id, else its name, ignoring case), `intent` | started, as the launcher starts it |
 | `set_setting` | `key` (`appearance.theme`), `value`, `intent` | written into the configuration file in place (hocus-config), `before` and `after`. Only keys `packaging/config.toml` lists, with a value of their default's type |
 
-Closing a window is lot B's: whether it would lose unsaved work needs
-its confirmation card. There is no `arrange`: an agent composes moves.
+There is no `arrange`: an agent composes moves. Lot B's tools are under
+"In applications".
 
 ## What shows
 
@@ -101,6 +101,112 @@ its confirmation card. There is no `arrange`: an agent composes moves.
    refused, the time, "Annuler" on a request that can still be undone;
    "Tout arrêter" at its top.
 
+## In applications (lot B, scenes 1 and 3)
+
+Ported from v0-first-build's `docs/mcp.md` ("A seat of its own",
+"Applications' trees", "It shows before acting", "Take over", "A desktop
+it works on, unseen"), as it held up.
+
+```toml
+[[agents.mcp]]
+name = "Claude"
+access = "act"
+apps = ["kitty", "org.mozilla.*"]   # app ids, globs; none by default
+
+[agents]
+# Each click, typing, keys or closing there waits for the user's card.
+confirm-apps = ["hocus-settings", "org.keepassxc.KeePassXC", "com.bitwarden.desktop",
+                "1password", "org.gnome.seahorse.Application", "org.gnome.World.Secrets",
+                "org.kde.kwalletmanager5"]
+```
+
+`apps` names the applications whose windows an `act` agent may click,
+scroll, type and press keys in, and whose trees any agent reads; another
+is refused ("pas dans ses applications"). Capturing a window and closing
+it are not limited by `apps` (a password manager's window comes black in
+a capture, as in the user's own).
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `click` | `window`, and `x`, `y` (from its top left, logical; its centre when left out) or `label` (and `role`) of its tree; `button` (`left`, `right`, `middle`), `count` (1 to 3), `intent` | where it landed |
+| `scroll` | the same aim, `dy` (logical pixels, 15 a notch, down positive), `intent` | where |
+| `type` | `window`, `text` (500 characters at most, with the layout in effect), `intent` | how many characters |
+| `press_keys` | `window`, `keys` (`Ctrl+S`, `Return`, `Shift+Tab`), `intent` | the keys |
+| `close_window` | `window`, `intent` | `closed`, or why it stays: its own dialog (its title), or it did not go in 2 s |
+| `wait_for` | `app_id` and/or `title` (a part of it), or `window` and `label`; `gone`; `timeout_ms` (5000, at most 30000) | whether it came (or went) |
+| `capture` | `window` | a PNG of it, its logical size and scale |
+| `accessibility_tree` | `window` | its elements, as below |
+
+**A seat of its own.** Each connection of an agent the file names gets a
+`wl_seat` of its own, `agent-NAME`, with a pointer and a keyboard (the
+user's layouts, the one in use): its clicks and keys reach the window
+asked, even under another, while the user's pointer, keyboard focus and
+stacking stay as they are; nothing comes forward for it. Its keyboard
+follows its clicks. The keys it types go to that window alone, never to
+the desktop's shortcuts (the stop key among them). It works on a desktop
+no screen shows too: while it acted on a window there in the last 10 s
+the window gets a frame callback 10 times a second, and a capture of it
+wakes it first and waits for it to draw (200 ms at most). The seat goes
+with the connection. Limits: an application must take every seat (GTK
+and Qt do): one that has not taken the agent's 2 s after it came is
+refused, saying so; X11 windows are refused, saying so; an agent's click
+never starts a move or a resize, nor grabs a menu; its seat's selection
+and cursor shapes are its own (never the clipboard's history).
+
+**Trees** (`accessibility_tree`, and `click`/`scroll`/`wait_for` by
+`label`): what the window's application tells screen readers over
+AT-SPI, on the accessibility bus of the session's bus (`org.a11y.Bus`;
+none nested without `--session-bus`, and the tool says so). Each element
+depth first: `role` (`push button`, `entry`, `password text`), `label`,
+`rect` from the window's top left (as the application says it), `depth`,
+`focused`, `disabled`, `selected`, `checked`, and what a field holds
+(its first 200 characters); a password field's content is never read
+(its role, or a label saying password, passphrase, passcode, PIN, mot de
+passe). Read breadth first within 800 elements, 40 levels and 3 s
+(`partial` says what was left out); what is not showing is left out. The
+window is its application's by the process that drew it, else its app
+id, and its top-level element by its title (and size). A label matches
+exactly, else the one label holding it (ignoring case), `role` choosing
+among several; several left are refused with them listed.
+
+**What shows** (scene 1). The agent's pointer is a violet arrow with its
+name beside it, where it acts and for 10 s after, where a screen shows
+that point. Before an action on a window shown, the pointer and a ring
+(34 px, 2 px of violet and a 6 px halo) go to the point (a click's, else
+the window's top, its middle) with the intent under the name, for
+`show-before-ms`, the window ringed as in lot A; the rights are checked
+again, then it acts. On a window no screen shows, lot A's tag at the top
+of the screen.
+
+**The confirmation card** (scene 3) beside the point, the agent's name
+and what it wants ("Claude veut taper dans « Notes »"), its intent
+quoted, why it asks, and Autoriser (or « Fermer quand même »), Refuser,
+« Je prends la main »; « Sans réponse dans 60 s, c'est refusé. » It
+comes for typing or keys where the window's application says through
+text-input-v3 (on the agent's seat) that the field is for a password or
+a PIN, and for clicks, typing, keys and closing in an application of
+`confirm-apps`. Scrolling never waits. It takes the pointer, and the
+keyboard only once clicked: then Enter allows, Escape refuses. Past 60 s
+it is refused. While it waits the agent's row says "attend ta réponse".
+
+**Taking over**: the card's « Je prends la main » refuses that action,
+brings its window forward with the user's keyboard, and refuses the
+agent's actions ("tu as pris la main") until « Rendre la main » in the
+journal's popover; the agent's row says "tu as la main".
+
+**Closing** asks the application (`xdg_toplevel.close`, or X11's), as
+the window's ✕ does. The compositor cannot know whether the application
+holds unsaved work (no protocol says it), so it never claims to: the card
+asks every time an agent closes a window of a `confirm-apps` application,
+and never for another. The application's own "save changes?" dialog
+stays the application's: the tool says whether the window went, stays,
+or shows a dialog, and the agent decides what to do in it.
+
+**The journal and the toast** count what cannot be undone ("cliqué 2
+fois", "tapé 12 caractères", "fermé 1 fenêtre"): the toast says « Ne
+s'annule pas » for them. What is typed is never kept, its characters
+counted; keys are kept (`Ctrl+S`).
+
 ## The journal
 
 In the compositor's memory only, never on disk nor in its log above
@@ -108,8 +214,8 @@ debug: the last 500 actions and refusals of the session, each with its
 time (as the clock says it), the agent, the tool, what it touched (the
 window's app id and title then, the desktop, the setting's key; a
 setting's value only for keys that are not text), its intent, and the
-refusal's reason. What an agent types will be counted, never kept (lot
-B). `journal` gives an agent its own entries.
+refusal's reason. What an agent types is counted, never kept. `journal`
+gives an agent its own entries.
 
 ## Stop
 
@@ -117,9 +223,9 @@ B). `journal` gives an agent its own entries.
 arrêter" stops every agent: from then on each call is refused (reading
 too), an action shown and not done yet is not done, and the bar's
 agents' row says "arrêté". The same key, or the journal's "Reprendre",
-lets them go on. It lasts until then or the session's end. An agent has
-no keys in this lot; lot B's typing never reaches the desktop's
-shortcuts, so it cannot press it.
+lets them go on. It lasts until then or the session's end. An agent's
+typing never reaches the desktop's shortcuts, so it cannot press it. A
+card waiting is refused too.
 
 ## Limits
 
@@ -172,3 +278,33 @@ not list an agent's.
   a setting put back by the toast's Annuler (the real shell, clicked),
   the stop key. Screenshots of scenes 1, 2 and 4: `HOCUS_SHOTS=DIR cargo
   nextest run -p hocus-compositor mcp::shots --run-ignored only`.
+
+## As built (2026-11-12, lot B)
+
+- **Where**: the compositor's `src/mcp/` (`seat.rs` the agent's seat and
+  its input, `apps.rs` the card, take over, closing, `wait_for` and the
+  trees asked, `atspi.rs` the reader on its thread, `capture.rs`,
+  `draw.rs` the pointer and its ring), `text_input.rs` (each text input
+  its seat's, a password's purpose), the shell's `src/mcp/card.rs`.
+- **The pointer** is the mockup's arrow and ring, drawn by the compositor
+  on the CPU once per scale (the shell's surfaces have no alpha on the
+  CPU); its name, and its intent before it acts, are the shell's tag
+  beside it ([`McpAt::Pointer`], `McpShown::pointers`), never in a
+  capture or a share.
+- **Closing**: the compositor cannot know about unsaved work, so the
+  card's text says why it asks (`confirm-apps`), never "will be lost".
+- **The settings' words** in the toast stay lot A's table of the
+  settings agents most often change: the key of every row is the
+  Settings' model's (`hocus-settings`), which the shell does not link;
+  one table for every key would mean moving that mapping into a crate
+  both read, not a small change.
+- **Not ported from v0**: an agent clicking the shell's own elements
+  (`shell = true`), turning the session's accessibility on while agents
+  are there (`org.a11y.Status`), the column's live thumbnail of the
+  agent's window.
+- **Tests** (`tests/mcp.rs`, a real `hocus mcp` each): a click through
+  the agent's seat with the user's focus kept, typing and the stop key
+  into a window alone, a click by label on a fake tree, a password
+  field's card refused, taking over, a capture on a desktop no screen
+  shows. Scenes 1 and 3: `HOCUS_SHOTS=DIR cargo nextest run -p
+  hocus-compositor mcp::shots_in_apps --run-ignored only`.

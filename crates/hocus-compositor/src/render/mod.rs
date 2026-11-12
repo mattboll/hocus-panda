@@ -705,6 +705,10 @@ impl State {
         self.ink_elements(renderer, output, now, &mut elements);
         // The desktops' dots and Alt+Tab, over everything.
         self.overlay_elements(renderer, output, now, &mut elements);
+        // The MCP agents' pointers, on the screen only.
+        if purpose.screen() {
+            self.mcp_pointer_elements(renderer, output, &mut elements);
+        }
         // A window's opacity changing: its percentage (#735).
         if purpose.screen() {
             self.opacity_elements(renderer, output, &mut elements);
@@ -850,7 +854,9 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let now = self.now();
-        let rect = crate::windows::rectangle(self.rect_of(id)?).to_f64();
+        // Where it is, shown or not: an MCP agent captures windows of
+        // desktops no screen shows too.
+        let rect = crate::windows::rectangle(self.home_rect(id)?).to_f64();
         let mut look = self.look(id, now)?;
         look.visual = rect;
         look.alpha = 1.0;

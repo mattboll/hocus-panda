@@ -332,6 +332,11 @@ their own.
 `hocus mcp --agent NAME` (docs/design/mcp.md) is an MCP server on stdio
 for an agent of the configuration's `[[agents.mcp]]`, on the same control
 socket; its tests (`tests/mcp.rs`) run it beside them (`cargo programs`).
+Each agent's connection gets a `wl_seat` of its own (`agent-NAME`); it
+reads applications' trees on the accessibility bus the session's bus
+names (none nested without `--session-bus`; tests give
+`Config::a11y_bus` a private bus with a fake registry,
+`tests/common/atspi.rs`), never the live session's.
 
 The tools are looked for, and plugged in, in the compositor's `HOME`
 (their settings), `PATH` (their programs) and `XDG_CONFIG_HOME` (herdr):

@@ -700,6 +700,20 @@ impl HeadlessBackend {
                 >(&mut c.renderer, state),
             }
         }
+        // An MCP agent's capture of a window.
+        if state.mcp_shots_pending() {
+            match &mut self.canvas {
+                Canvas::Gles(c) => {
+                    crate::mcp::capture::take::<_, GlesTexture>(&mut c.renderer, state);
+                }
+                Canvas::Pixman(c) => {
+                    crate::mcp::capture::take::<_, pixman::Image<'static, 'static>>(
+                        &mut c.renderer,
+                        state,
+                    )
+                }
+            }
+        }
         if !state.redraw || self.frame_timer.is_some() {
             return;
         }
