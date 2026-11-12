@@ -37,6 +37,11 @@ fn bed(shell: bool) -> anyhow::Result<Bed> {
 
 /// The same, its configuration `text`.
 fn bed_with(shell: bool, text: &str) -> anyhow::Result<Bed> {
+    bed_on(shell, text, None)
+}
+
+/// The same, applications' trees read on the accessibility bus `a11y`.
+fn bed_on(shell: bool, text: &str, a11y: Option<String>) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     for sub in ["home", "config", "state/hocuspanda", "cache"] {
@@ -46,9 +51,12 @@ fn bed_with(shell: bool, text: &str) -> anyhow::Result<Bed> {
     let file = root.join("config/config.toml");
     std::fs::write(&file, text)?;
     let log = root.join("shell.log");
+    let read = toml::from_str::<Config>(text)?;
     let config = Config {
         file: Some(file.clone()),
-        agents: toml::from_str::<Config>(text)?.agents,
+        agents: read.agents,
+        keyboard: read.keyboard,
+        a11y_bus: a11y,
         plain_background: true,
         lang: hocus_words::Lang::French,
         ..Config::default()
@@ -233,10 +241,17 @@ fn initialize_then_the_tools() -> anyhow::Result<()> {
         "switch_desktop",
         "launch",
         "set_setting",
+        "click",
+        "scroll",
+        "type",
+        "press_keys",
+        "close_window",
+        "wait_for",
+        "capture",
+        "accessibility_tree",
     ] {
         assert!(names.contains(&name), "{name} not in {names:?}");
     }
-    assert!(!names.contains(&"close_window"), "lot B's");
     Ok(())
 }
 
@@ -322,8 +337,10 @@ fn a_move_shows_its_intent_first_then_the_window_moves() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("gone"))?;
     assert_eq!(show.agent, "Claude");
     assert_eq!(show.intent, "Range le terminal à gauche");
+    // The agent's pointer on the window's top, its middle, the tag
+    // beside it.
     assert!(
-        matches!(show.at, hocus_link::McpAt::Window { .. }),
+        matches!(show.at, hocus_link::McpAt::Pointer { y, .. } if y == rect.y + 12),
         "{show:?}"
     );
     assert_eq!(
@@ -553,5 +570,341 @@ fn shots() -> anyhow::Result<()> {
     anyhow::ensure!(open, "no journal");
     common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
     shoot(&mut bed.hp, &out, "scene-4-journal")?;
+    Ok(())
+}
+
+// --- In applications (lot B) ------------------------------------------------
+
+/// Claude acts in the windows of `acted` and `mail`, Typist on a US
+/// keyboard, so that the keys' codes are known.
+const IN_APPS: &str = "[keyboard]\nlayouts = [\"us\"]\n\n[agents]\nshow-before-ms = 0\n\n\
+                       [[agents.mcp]]\nname = \"Claude\"\naccess = \"act\"\n\
+                       apps = [\"acted*\", \"mail\"]\n";
+
+const AGENT_SEAT: &str = "agent-Claude";
+
+/// An acted window (`app_id`, 400 × 300), taking every seat.
+fn acted(
+    hp: &mut Headless,
+    app_id: &'static str,
+    secret: bool,
+) -> anyhow::Result<(u64, common::ClientHandle)> {
+    let (_, handle) = common::open_showing(
+        hp,
+        app_id,
+        common::Shows::Acted {
+            app_id,
+            size: (400, 300),
+            secret,
+        },
+    )?;
+    let id = hp
+        .windows()
+        .iter()
+        .find(|w| w.app_id.as_deref() == Some(app_id))
+        .map(|w| w.id.0)
+        .ok_or_else(|| anyhow::anyhow!("no {app_id}"))?;
+    Ok((id, handle))
+}
+
+/// What seat `seat` gave the client so far.
+fn seated(handle: &common::ClientHandle, seat: &str, got: &mut Vec<common::Seated>) {
+    while let Ok(event) = handle.events.try_recv() {
+        if let common::Event::OnSeat(name, what) = event
+            && name == seat
+        {
+            got.push(what);
+        }
+    }
+}
+
+/// The focused window's app id.
+fn focused(hp: &Headless) -> Option<String> {
+    hp.windows()
+        .into_iter()
+        .find(|w| w.focused)
+        .and_then(|w| w.app_id)
+}
+
+#[test]
+fn a_click_lands_through_the_agents_seat_and_the_users_focus_stays() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, IN_APPS)?;
+    let (id, handle) = acted(&mut bed.hp, "acted", false)?;
+    // The user's window over it, with the keyboard.
+    common::open(&mut bed.hp, "foot", (640, 400))?;
+    assert_eq!(focused(&bed.hp).as_deref(), Some("foot"));
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let result = agent.tool(
+        &mut bed.hp,
+        "click",
+        json!({ "window": id, "x": 40, "y": 30, "intent": "Clique dans la fenêtre" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["x"], 40.0, "{result}");
+    let mut got = Vec::new();
+    let pressed = bed.hp.dispatch_until(WAIT, |_| {
+        seated(&handle, AGENT_SEAT, &mut got);
+        got.contains(&common::Seated::Press(0x110))
+    })?;
+    anyhow::ensure!(pressed, "no press on the agent's seat: {got:?}");
+    assert!(got.contains(&common::Seated::Enter), "{got:?}");
+    // Its keyboard followed its click; the user's stayed.
+    assert!(got.contains(&common::Seated::Focus(true)), "{got:?}");
+    assert_eq!(focused(&bed.hp).as_deref(), Some("foot"));
+    // The pointer shows, its name beside it.
+    let pointers = bed.hp.mcp_shown().pointers;
+    assert!(pointers.iter().any(|p| p.agent == "Claude"), "{pointers:?}");
+    // Not an application of its: refused.
+    let rect = common::rect_of(&bed.hp, "foot").ok_or_else(|| anyhow::anyhow!("no foot"))?;
+    let other = bed
+        .hp
+        .windows()
+        .iter()
+        .find(|w| w.app_id.as_deref() == Some("foot"))
+        .map(|w| w.id.0);
+    let result = agent.tool(
+        &mut bed.hp,
+        "click",
+        json!({ "window": other, "intent": "Clique" }),
+    )?;
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("apps"), "{result}");
+    assert_eq!(common::rect_of(&bed.hp, "foot"), Some(rect));
+    Ok(())
+}
+
+#[test]
+fn typing_reaches_the_window_alone_and_never_the_shortcuts() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, IN_APPS)?;
+    let (id, handle) = acted(&mut bed.hp, "acted", false)?;
+    common::open(&mut bed.hp, "foot", (640, 400))?;
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let result = agent.tool(
+        &mut bed.hp,
+        "type",
+        json!({ "window": id, "text": "aB", "intent": "Tape un mot" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["typed"], 2);
+    // The stop key, typed by the agent: the window's, never the desktop's.
+    let result = agent.tool(
+        &mut bed.hp,
+        "press_keys",
+        json!({ "window": id, "keys": "Super+Shift+Escape", "intent": "Essaie" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    let mut got = Vec::new();
+    let typed = bed.hp.dispatch_until(WAIT, |_| {
+        seated(&handle, AGENT_SEAT, &mut got);
+        got.contains(&common::Seated::Key(KEY_ESC, true))
+    })?;
+    anyhow::ensure!(typed, "the keys did not come: {got:?}");
+    let pressed: Vec<u32> = got
+        .iter()
+        .filter_map(|g| match g {
+            common::Seated::Key(code, true) => Some(*code),
+            _ => None,
+        })
+        .collect();
+    // a, then Shift and b, then Super, Shift, Escape.
+    assert_eq!(
+        pressed,
+        [30, KEY_LEFTSHIFT, 48, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC]
+    );
+    assert!(!bed.hp.mcp_shown().stopped, "the agent stopped itself");
+    assert_eq!(focused(&bed.hp).as_deref(), Some("foot"));
+    // Its journal counts what it typed, never keeps it.
+    let journal = agent.tool(&mut bed.hp, "journal", json!({}))?;
+    let said = journal.to_string();
+    assert!(said.contains("type 2 characters"), "{said}");
+    assert!(!said.contains("aB"), "{said}");
+    Ok(())
+}
+
+#[test]
+fn a_click_by_label_through_the_applications_tree() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (mut bus, address) = common::private_bus(dir.path())?;
+    let tree = common::atspi::FakeTree::start(
+        &address,
+        "mail",
+        vec![common::atspi::Element::compose("Nouveau message")],
+    )?;
+    let run = || -> anyhow::Result<()> {
+        let mut bed = bed_on(false, IN_APPS, Some(address.clone()))?;
+        let (id, handle) = acted(&mut bed.hp, "mail", false)?;
+        let mut agent = mcp(&bed.hp, "Claude")?;
+        let read = agent.tool(&mut bed.hp, "accessibility_tree", json!({ "window": id }))?;
+        assert_eq!(read["isError"], false, "{read}");
+        let elements = read["structuredContent"]["elements"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let labelled = |label: &str| {
+            elements
+                .iter()
+                .find(|e| e["label"] == label)
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(labelled("Envoyer")["role"], "push button", "{read}");
+        assert_eq!(labelled("Sujet")["value"], "Déjeuner vendredi", "{read}");
+        // A password's content is never read.
+        assert!(labelled("Mot de passe").get("value").is_none(), "{read}");
+        assert!(!tree.read().iter().any(|l| l == "Mot de passe"));
+        let result = agent.tool(
+            &mut bed.hp,
+            "click",
+            json!({ "window": id, "label": "envoyer", "intent": "Envoie le message" }),
+        )?;
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(result["structuredContent"]["x"], 334.0, "{result}");
+        assert_eq!(result["structuredContent"]["y"], 264.0, "{result}");
+        let mut got = Vec::new();
+        let pressed = bed.hp.dispatch_until(WAIT, |_| {
+            seated(&handle, AGENT_SEAT, &mut got);
+            got.contains(&common::Seated::Press(0x110))
+        })?;
+        anyhow::ensure!(pressed, "no press: {got:?}");
+        // Several labels hold it: refused, listed.
+        let result = agent.tool(
+            &mut bed.hp,
+            "click",
+            json!({ "window": id, "label": "r", "role": "push button", "intent": "x" }),
+        )?;
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(text(&result).contains("2 elements"), "{result}");
+        Ok(())
+    };
+    let ran = run();
+    drop(tree);
+    // Ours, by its own handle.
+    let _ = bus.kill();
+    let _ = bus.wait();
+    ran
+}
+
+/// The card of the action shown now, once it shows.
+fn card(bed: &mut Bed) -> anyhow::Result<hocus_link::McpCard> {
+    let shown = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().card.is_some())?;
+    anyhow::ensure!(shown, "no card");
+    bed.hp
+        .mcp_shown()
+        .card
+        .ok_or_else(|| anyhow::anyhow!("gone"))
+}
+
+#[test]
+fn a_password_field_asks_the_user_first_and_refuse_refuses() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, IN_APPS)?;
+    let (id, handle) = acted(&mut bed.hp, "acted-bank", true)?;
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let asked = agent.send(
+        "tools/call",
+        json!({ "name": "type", "arguments": {
+            "window": id, "text": "1234", "intent": "Tape le code"
+        } }),
+    )?;
+    let card = card(&mut bed)?;
+    assert_eq!(card.why, hocus_link::McpWhy::Password, "{card:?}");
+    assert_eq!(card.intent, "Tape le code");
+    assert!(
+        matches!(card.ask, hocus_link::McpAsk::Type { .. }),
+        "{card:?}"
+    );
+    let row = bed.hp.mcp_shown().agents;
+    assert!(
+        row.iter().any(|r| r.doing == hocus_link::McpDoing::Asking),
+        "{row:?}"
+    );
+    bed.hp.mcp_reply(card.id, hocus_link::McpReply::Refuse);
+    let answer = agent.answer(&mut bed.hp, asked)?;
+    assert_eq!(answer["result"]["isError"], true, "{answer}");
+    assert!(text(&answer["result"]).contains("refused it"), "{answer}");
+    assert!(bed.hp.mcp_shown().card.is_none());
+    let mut got = Vec::new();
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(200))?;
+    seated(&handle, AGENT_SEAT, &mut got);
+    assert!(
+        !got.iter().any(|g| matches!(g, common::Seated::Key(..))),
+        "typed anyway: {got:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn taking_over_refuses_the_agent_until_handed_back() -> anyhow::Result<()> {
+    let config = IN_APPS.replace(
+        "show-before-ms = 0\n",
+        "show-before-ms = 0\nconfirm-apps = [\"acted\"]\n",
+    );
+    let mut bed = bed_with(false, &config)?;
+    let (id, _handle) = acted(&mut bed.hp, "acted", false)?;
+    common::open(&mut bed.hp, "foot", (640, 400))?;
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let asked = agent.send(
+        "tools/call",
+        json!({ "name": "click", "arguments": { "window": id, "intent": "Valide" } }),
+    )?;
+    let card = card(&mut bed)?;
+    assert!(
+        matches!(&card.why, hocus_link::McpWhy::App { name } if name == "acted"),
+        "{card:?}"
+    );
+    bed.hp.mcp_reply(card.id, hocus_link::McpReply::TakeOver);
+    let answer = agent.answer(&mut bed.hp, asked)?;
+    assert_eq!(answer["result"]["isError"], true, "{answer}");
+    // The window comes forward with the user's keyboard.
+    let forward = bed
+        .hp
+        .dispatch_until(WAIT, |hp| focused(hp).as_deref() == Some("acted"))?;
+    anyhow::ensure!(forward, "the window did not come forward");
+    assert_eq!(bed.hp.mcp_shown().taken, ["Claude"]);
+    let result = agent.tool(
+        &mut bed.hp,
+        "move_window",
+        json!({ "window": id, "x": 0, "intent": "À gauche" }),
+    )?;
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("took over"), "{result}");
+    bed.hp.mcp_hand_back("Claude");
+    let result = agent.tool(
+        &mut bed.hp,
+        "move_window",
+        json!({ "window": id, "x": 0, "intent": "À gauche" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    Ok(())
+}
+
+#[test]
+fn a_window_on_a_desktop_no_screen_shows_is_captured() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, IN_APPS)?;
+    let (id, _handle) = acted(&mut bed.hp, "acted", false)?;
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let sent = agent.tool(
+        &mut bed.hp,
+        "move_window",
+        json!({ "window": id, "desktop": 2, "intent": "Sur le bureau 2" }),
+    )?;
+    assert_eq!(sent["isError"], false, "{sent}");
+    let window = hocus_compositor::model::WindowId(id);
+    let unseen = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !hp.state().model.is_shown(window))?;
+    anyhow::ensure!(unseen, "still shown");
+    let shot = agent.tool(&mut bed.hp, "capture", json!({ "window": id }))?;
+    assert_eq!(shot["isError"], false, "{shot}");
+    assert_eq!(shot["content"][0]["type"], "image", "{shot}");
+    assert_eq!(shot["structuredContent"]["width"], 400, "{shot}");
+    use base64::Engine;
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(shot["content"][0]["data"].as_str().unwrap_or_default())?;
+    let image = image::load_from_memory(&png)?.to_rgba8();
+    assert_eq!((image.width(), image.height()), (400, 300));
+    // Its application's drawing, not nothing.
+    assert!(image.pixels().any(|p| p.0[3] > 0), "an empty capture");
     Ok(())
 }
