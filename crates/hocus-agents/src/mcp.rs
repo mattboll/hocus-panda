@@ -281,6 +281,21 @@ pub struct OfWindow {
     pub window: u64,
 }
 
+/// One of an acting agent's rights, a check box of the Settings' page
+/// each (`[[agents.mcp]]`' `windows`, `desktops`, `settings`, `input`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Right {
+    /// Arrange, move, bring forward and close windows.
+    Windows,
+    /// Switch desktops, send a window to another, launch applications.
+    Desktops,
+    /// Change settings.
+    Settings,
+    /// Click, scroll, type and press keys in the applications of its
+    /// `apps`.
+    Input,
+}
+
 /// What a tool asks, read from its name and arguments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "tool", content = "args", rename_all = "snake_case")]
@@ -342,6 +357,28 @@ impl Call {
             self,
             Self::Click(_) | Self::Scroll(_) | Self::Type(_) | Self::PressKeys(_)
         )
+    }
+
+    /// What of an agent's rights it needs, beyond `access = "act"`
+    /// (docs/design/mcp.md, "Rights"): none for a reading tool.
+    pub fn needs(&self) -> Vec<Right> {
+        match self {
+            Self::FocusWindow(_) | Self::CloseWindow(_) => vec![Right::Windows],
+            Self::MoveWindow(m) => {
+                let placed = [m.x, m.y, m.width, m.height].iter().any(Option::is_some);
+                match (placed, m.desktop.is_some()) {
+                    (true, true) => vec![Right::Windows, Right::Desktops],
+                    (false, true) => vec![Right::Desktops],
+                    _ => vec![Right::Windows],
+                }
+            }
+            Self::SwitchDesktop(_) | Self::Launch(_) => vec![Right::Desktops],
+            Self::SetSetting(_) => vec![Right::Settings],
+            Self::Click(_) | Self::Scroll(_) | Self::Type(_) | Self::PressKeys(_) => {
+                vec![Right::Input]
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// The window it aims at, if it aims at one.
@@ -470,6 +507,35 @@ mod tests {
                 ..
             })
         )));
+    }
+
+    #[test]
+    fn each_acting_call_needs_its_check_box() {
+        let call = |tool: &str, args: Value| Call::of(tool, &args).map(|c| c.needs());
+        assert_eq!(call("list_windows", Value::Null), Ok(vec![]));
+        assert_eq!(
+            call("close_window", json!({ "window": 1 })),
+            Ok(vec![Right::Windows])
+        );
+        assert_eq!(
+            call("move_window", json!({ "window": 1, "desktop": 2 })),
+            Ok(vec![Right::Desktops])
+        );
+        assert_eq!(
+            call("move_window", json!({ "window": 1, "x": 0, "desktop": 2 })),
+            Ok(vec![Right::Windows, Right::Desktops])
+        );
+        assert_eq!(
+            call(
+                "launch",
+                json!({ "id": "foot", "name": "Foot", "argv": ["foot"] })
+            ),
+            Ok(vec![Right::Desktops])
+        );
+        assert_eq!(
+            call("type", json!({ "window": 1, "text": "a" })),
+            Ok(vec![Right::Input])
+        );
     }
 
     #[test]

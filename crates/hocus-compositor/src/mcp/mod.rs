@@ -40,7 +40,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_agents::mcp::{Answer, Asked, Call};
+use hocus_agents::mcp::{Answer, Asked, Call, Right};
 use hocus_config::toml_edit;
 use hocus_link::{
     MCP_JOURNAL_SHOWN, MCP_TOAST, McpAt, McpDoing, McpKind, McpLine, McpRefusal, McpRow, McpSaid,
@@ -362,6 +362,16 @@ fn refusal_text(refusal: &McpRefusal, agent: &str) -> String {
         McpRefusal::NoSettings => {
             format!("refused: agent {agent:?} may not change settings ([[agents.mcp]] settings)")
         }
+        McpRefusal::NoWindows => format!(
+            "refused: agent {agent:?} may not arrange or close windows ([[agents.mcp]] windows)"
+        ),
+        McpRefusal::NoDesktops => format!(
+            "refused: agent {agent:?} may not switch desktops nor launch applications \
+             ([[agents.mcp]] desktops)"
+        ),
+        McpRefusal::NoInput => format!(
+            "refused: agent {agent:?} may not click nor type in applications ([[agents.mcp]] input)"
+        ),
         McpRefusal::Locked => "refused: the session is locked".to_owned(),
         McpRefusal::Asking => "refused: a password is being asked for".to_owned(),
         McpRefusal::Stopped => {
@@ -552,15 +562,21 @@ impl State {
         if self.mcp.taken.contains(agent) {
             return Some(McpRefusal::TakenOver);
         }
-        if let Call::SetSetting(set) = call {
-            if FORBIDDEN.contains(&set.key.split('.').next().unwrap_or_default()) {
-                return Some(McpRefusal::Forbidden);
-            }
-            if !rights.settings {
-                return Some(McpRefusal::NoSettings);
-            }
+        if let Call::SetSetting(set) = call
+            && FORBIDDEN.contains(&set.key.split('.').next().unwrap_or_default())
+        {
+            return Some(McpRefusal::Forbidden);
         }
-        None
+        // Each right its check box of the Settings' page.
+        call.needs()
+            .into_iter()
+            .find(|right| !rights.holds(*right))
+            .map(|right| match right {
+                Right::Windows => McpRefusal::NoWindows,
+                Right::Desktops => McpRefusal::NoDesktops,
+                Right::Settings => McpRefusal::NoSettings,
+                Right::Input => McpRefusal::NoInput,
+            })
     }
 
     /// Refuses call `id`, keeping it in the journal.
