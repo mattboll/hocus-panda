@@ -283,9 +283,19 @@ impl State {
                 let recent = s.last.is_some_and(|l| l.elapsed() < DRIVEN_FOR);
                 let now = showing == Some(s.session) || asking == Some(s.session);
                 (self.model.is_shown(on) && self.windows.contains_key(&on) && (recent || now))
-                    .then(|| (s.agent.clone(), s.session, at, showing == Some(s.session)))
+                    .then(|| (s.agent.clone(), s.session, at, now))
             })
             .collect()
+    }
+
+    /// The window whose action waits on the card: ringed as it was shown.
+    pub(super) fn mcp_card_window(&self) -> Option<WindowId> {
+        let card = self.mcp.card.as_ref()?;
+        card.waiting
+            .call
+            .window()
+            .map(WindowId)
+            .filter(|id| self.model.is_shown(*id))
     }
 
     /// The pointers on `output`, for its drawing.

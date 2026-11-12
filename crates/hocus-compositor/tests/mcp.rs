@@ -908,3 +908,97 @@ fn a_window_on_a_desktop_no_screen_shows_is_captured() -> anyhow::Result<()> {
     assert!(image.pixels().any(|p| p.0[3] > 0), "an empty capture");
     Ok(())
 }
+
+/// The mockup's scenes 1 (the agent's pointer, its ring and its intent on
+/// what it will touch) and 3 (the card), dark, ×1, for the maintainer's
+/// eyes: `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+/// mcp::shots_in_apps --run-ignored only`.
+#[test]
+#[ignore = "screenshots, on demand"]
+fn shots_in_apps() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        eprintln!("HOCUS_SHOTS is not set: no shots");
+        return Ok(());
+    };
+    let config = "[keyboard]\nlayouts = [\"us\"]\n\n[agents]\nshow-before-ms = 4000\n\
+                  confirm-apps = [\"notes\"]\n\n[[agents.mcp]]\nname = \"Claude\"\n\
+                  access = \"act\"\napps = [\"kitty*\", \"notes\"]\n";
+    let mut bed = bed_with(true, config)?;
+    let (first, kitty) = acted(&mut bed.hp, "kitty", false)?;
+    let (second, kitty_2) = acted(&mut bed.hp, "kitty-2", false)?;
+    let _ = kitty
+        .commands
+        .send(common::Command::Title("kitty — ~/github/hocus-panda"));
+    let _ = kitty_2.commands.send(common::Command::Title("kitty"));
+    let browser = common::open(&mut bed.hp, "firefox", (700, 560)).map(|_| {
+        bed.hp
+            .windows()
+            .iter()
+            .find(|w| w.app_id.as_deref() == Some("firefox"))
+            .map(|w| w.id.0)
+            .unwrap_or_default()
+    })?;
+    use hocus_compositor::model::{Rect, WindowId};
+    for (id, rect) in [
+        (first, Rect::new(380, 120, 620, 420)),
+        (second, Rect::new(380, 600, 620, 400)),
+        (browser, Rect::new(1040, 200, 600, 640)),
+    ] {
+        bed.hp.place_window(WindowId(id), rect);
+    }
+    common::at_rest(&mut bed.hp)?;
+    let mut claude = mcp(&bed.hp, "Claude")?;
+    // 1: its pointer, its ring and its intent, before it moves the window.
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "move_window", "arguments": {
+            "window": first, "x": 24, "y": 24, "width": 620, "height": 480,
+            "intent": "Range les deux terminaux à gauche, l'un sous l'autre"
+        } }),
+    )?;
+    let tagged = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.drawn_layers(hocus_link::MCP_TAG_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(tagged, "no tag");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(800))?;
+    shoot(&mut bed.hp, &out, "scene-1-pointer")?;
+    claude.answer(&mut bed.hp, asked)?;
+    // 1 again: a click in the browser's window, its point ringed.
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "click", "arguments": {
+            "window": second, "x": 300, "y": 200, "intent": "Clique dans le terminal du bas"
+        } }),
+    )?;
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(800))?;
+    shoot(&mut bed.hp, &out, "scene-1-click")?;
+    claude.answer(&mut bed.hp, asked)?;
+    // 3: closing a window of an application to confirm.
+    let (notes, notes_client) = acted(&mut bed.hp, "notes", false)?;
+    let _ = notes_client
+        .commands
+        .send(common::Command::Title("Notes — Courses (modifié)"));
+    bed.hp
+        .place_window(WindowId(notes), Rect::new(120, 160, 540, 400));
+    common::at_rest(&mut bed.hp)?;
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "close_window", "arguments": {
+            "window": notes, "intent": "Ferme les fenêtres dont je n'ai plus besoin"
+        } }),
+    )?;
+    let carded = bed
+        .hp
+        .dispatch_until(std::time::Duration::from_secs(15), |hp| {
+            !hp.drawn_layers(hocus_link::MCP_CARD_NAMESPACE).is_empty()
+        })?;
+    anyhow::ensure!(carded, "no card");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(800))?;
+    shoot(&mut bed.hp, &out, "scene-3-card")?;
+    // Its Refuser, clicked.
+    let at = control_at(&mut bed, hocus_link::MCP_CARD_NAMESPACE, "mcp-card:Refuse")?;
+    common::click_on(&mut bed.hp, at, hocus_link::MCP_CARD_NAMESPACE)?;
+    let answer = claude.answer(&mut bed.hp, asked)?;
+    anyhow::ensure!(answer["result"]["isError"] == true, "{answer}");
+    Ok(())
+}

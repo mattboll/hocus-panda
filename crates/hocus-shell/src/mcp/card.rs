@@ -131,7 +131,7 @@ fn room() -> f32 {
 /// What it lays out: its head cut to its room, the quote's and the why's
 /// lines, its buttons in rows.
 struct Laid {
-    head: String,
+    head: Vec<String>,
     quote: Vec<String>,
     why: Vec<String>,
     rows: Vec<Vec<Target>>,
@@ -139,7 +139,7 @@ struct Laid {
 
 fn lay(words: Words, card: &McpCard) -> Laid {
     let mark = kit::measure(words.to_confirm(), MARK, MANROPE_BOLD) + 8.0;
-    let head = kit::elide(&words.wants(card), room() - mark, |t| {
+    let head = kit::wrap(&words.wants(card), room() - mark, |t| {
         kit::measure(t, HEAD, MANROPE_BOLD)
     });
     let quote = kit::wrap(
@@ -188,7 +188,7 @@ pub fn place(words: Words, card: &McpCard) -> ((u32, u32), (i32, i32)) {
     let laid = lay(words, card);
     let rows = laid.rows.len() as f32;
     let height = 2.0 * (PAD + 1.0)
-        + HEAD * LINE
+        + laid.head.len() as f32 * HEAD * LINE
         + GAP
         + QUOTE_PAD.top
         + laid.quote.len() as f32 * SAID * LINE
@@ -243,18 +243,21 @@ pub fn view<'a>(id: window::Id, card: McpCard) -> Element<'a, Message> {
 
 fn build<'a>(words: Words, card: &McpCard, focus: Option<Target>) -> El<'a> {
     let laid = lay(words, card);
-    let head = row![
-        style::said(laid.head.clone(), HEAD, MANROPE_BOLD, TEXT.get()),
-        space::horizontal(),
-        style::said(
-            words.to_confirm().to_uppercase(),
-            MARK,
-            MANROPE_BOLD,
-            AMBER.get()
-        ),
-    ]
-    .align_y(Vertical::Center)
-    .height(HEAD * LINE);
+    let mut head_lines = column![];
+    for line in &laid.head {
+        head_lines = head_lines.push(style::said(line.clone(), HEAD, MANROPE_BOLD, TEXT.get()));
+    }
+    let mark = container(style::said(
+        words.to_confirm().to_uppercase(),
+        MARK,
+        MANROPE_BOLD,
+        AMBER.get(),
+    ))
+    .height(HEAD * LINE)
+    .align_y(Vertical::Center);
+    let head = row![head_lines, space::horizontal(), mark]
+        .align_y(Vertical::Top)
+        .height(laid.head.len() as f32 * HEAD * LINE);
     let mut quote_lines = column![];
     for line in &laid.quote {
         quote_lines = quote_lines.push(style::said(line.clone(), SAID, MANROPE, TEXT.get()));
@@ -288,7 +291,7 @@ fn build<'a>(words: Words, card: &McpCard, focus: Option<Target>) -> El<'a> {
         MANROPE,
         FAINT.get(),
     );
-    let said = format!("{}. {}", laid.head, words.why_card(card));
+    let said = format!("{}. {}", words.wants(card), words.why_card(card));
     container(control(
         column![head, quote, why, buttons, note].spacing(GAP),
         "mcp-card",

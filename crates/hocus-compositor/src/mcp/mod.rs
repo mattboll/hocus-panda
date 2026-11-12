@@ -1729,7 +1729,13 @@ impl State {
         R: Renderer + ImportAll + ImportMem + crate::wobble::Bend + crate::going::Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
-        if self.mcp.showing.as_ref().and_then(|s| s.window) != Some(window) {
+        let ringed = self
+            .mcp
+            .showing
+            .as_ref()
+            .and_then(|s| s.window)
+            .or_else(|| self.mcp_card_window());
+        if ringed != Some(window) {
             return Vec::new();
         }
         let radius = if self.model.mode(window) == Mode::Fullscreen {
