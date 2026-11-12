@@ -1129,6 +1129,22 @@ fn row(
     };
     let height = row_height(line.look);
     let rect = Rectangle::new(Point::new(-ROW_OUT, y), Size::new(width, height));
+    if crate::mcp::is_row(line.id) {
+        // Its name over what it does, beside its mark (the mockup's
+        // `.agent-row`).
+        use crate::mcp::row::{GAP, MARK, NAME, WORD};
+        let room = width - 2.0 * ROW_PAD - MARK - GAP;
+        return Row {
+            id: line.id,
+            look: line.look,
+            name: crate::popover::kit::elide(&line.name, room, |t| {
+                measure(t, NAME, MANROPE_SEMIBOLD)
+            }),
+            word: crate::popover::kit::elide(&word, room, |t| measure(t, WORD, MANROPE)),
+            rect,
+            note: Vec::new(),
+        };
+    }
     if !line.look.carded() {
         let room =
             width - 2.0 * ROW_PAD - PANDA - 2.0 * PANDA_GAP - measure(&word, AGENT_WORD, MANROPE);

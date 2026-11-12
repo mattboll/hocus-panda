@@ -216,6 +216,28 @@ fn build<'a>(words: Words) -> El<'a> {
 
 fn entry<'a>(words: Words, line: &McpLine, focus: Option<Target>) -> El<'a> {
     let (said, under, refused) = words.line(line);
+    // Cut to the room the dot and the time leave.
+    let time = crate::popover::kit::measure(&line.at, TIME, MANROPE);
+    let room = WIDTH as f32
+        - 2.0 * (BORDER + PAD)
+        - ENTRY_PAD.left
+        - ENTRY_PAD.right
+        - DOT
+        - 2.0 * GAP
+        - time
+        - 1.0;
+    let said = crate::popover::kit::elide(&said, room, |t| {
+        crate::popover::kit::measure(t, SAID, MANROPE)
+    });
+    let undoes = matches!(line.said, McpSaid::Did { undo: Some(_), .. });
+    let under_room = if undoes {
+        room - crate::popover::kit::measure(words.undo(), UNDER, MANROPE) - 12.0
+    } else {
+        room
+    };
+    let under = crate::popover::kit::elide(&under, under_room, |t| {
+        crate::popover::kit::measure(t, UNDER, MANROPE)
+    });
     let dot = drawn(DOT, DOT, move |f, size| {
         let colour = if refused { RED.get() } else { AGENT.get() };
         f.fill(

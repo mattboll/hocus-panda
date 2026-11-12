@@ -608,7 +608,7 @@ fn mcp_colours(acting: bool) -> (Color, Color) {
 /// the agents' violet on its soft fill, ringed.
 fn mcp_mark(f: &mut Frame, at: Point, side: f32, name: &str, shown: f32) {
     let agent = crate::mcp::tag::AGENT.get();
-    let radius = side.min(26.0) / 2.0;
+    let radius = side / 2.0 - 0.5;
     let circle = Path::circle(at, radius);
     f.fill(&circle, faded(Color { a: 0.16, ..agent }, shown));
     f.stroke(
@@ -1495,15 +1495,38 @@ impl Group {
                 (rect.x + ROW_PAD, PANDA)
             };
             if mcp {
-                // Its mark in the agents' violet: its initial in a ring.
+                use crate::mcp::row::{GAP, MARK, NAME, WORD};
+                // Its mark in the agents' violet, its name over what it
+                // does.
+                let x = rect.x + ROW_PAD;
                 mcp_mark(
                     f,
-                    Point::new(left + side / 2.0, middle),
-                    side,
+                    Point::new(x + MARK / 2.0, middle),
+                    MARK,
                     &row.name,
                     shown,
                 );
-            } else if super::pandas() {
+                let text = x + MARK + GAP;
+                let (name, said) = (NAME * LINE, WORD * LINE);
+                let top = middle - (name + said) / 2.0;
+                f.fill_text(kit::text_in(
+                    kit::MANROPE_SEMIBOLD,
+                    said_at(
+                        &row.name,
+                        Point::new(text, top + name / 2.0),
+                        NAME,
+                        faded(TEXT.get(), shown),
+                    ),
+                ));
+                f.fill_text(said_at(
+                    &row.word,
+                    Point::new(text, top + name + said / 2.0),
+                    WORD,
+                    faded(word, shown),
+                ));
+                continue;
+            }
+            if super::pandas() {
                 let place = Rectangle::new(
                     Point::new(left, middle - side / 2.0 + hop),
                     Size::new(side, side),

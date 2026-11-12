@@ -28,6 +28,15 @@ use crate::{
     popover::{self, Effect, Item},
 };
 
+/// An MCP agent's row in the agents' group: its mark, 26 px, its name
+/// over what it does, 8 px after it.
+pub mod row {
+    pub const MARK: f32 = 26.0;
+    pub const GAP: f32 = 8.0;
+    pub const NAME: f32 = 13.0;
+    pub const WORD: f32 = 11.5;
+}
+
 /// The agents' rows' ids in the agents' group: above any the compositor
 /// gives its other agents.
 pub const ROW_BASE: u64 = 1 << 48;

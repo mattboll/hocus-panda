@@ -32,6 +32,11 @@ struct Bed {
 /// The compositor on a 1920 × 1080 screen, its configuration [`CONFIG`];
 /// with the real shell when `shell`.
 fn bed(shell: bool) -> anyhow::Result<Bed> {
+    bed_with(shell, CONFIG)
+}
+
+/// The same, its configuration `text`.
+fn bed_with(shell: bool, text: &str) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     for sub in ["home", "config", "state/hocuspanda", "cache"] {
@@ -39,11 +44,11 @@ fn bed(shell: bool) -> anyhow::Result<Bed> {
     }
     std::fs::write(root.join("state/hocuspanda/day-sources"), "later\n")?;
     let file = root.join("config/config.toml");
-    std::fs::write(&file, CONFIG)?;
+    std::fs::write(&file, text)?;
     let log = root.join("shell.log");
     let config = Config {
         file: Some(file.clone()),
-        agents: toml::from_str::<Config>(CONFIG)?.agents,
+        agents: toml::from_str::<Config>(text)?.agents,
         plain_background: true,
         lang: hocus_words::Lang::French,
         ..Config::default()
@@ -433,5 +438,120 @@ fn the_stop_key_refuses_every_call_until_pressed_again() -> anyhow::Result<()> {
     anyhow::ensure!(going, "still stopped");
     let result = agent.tool(&mut bed.hp, "list_windows", json!({}))?;
     assert_eq!(result["isError"], false, "{result}");
+    Ok(())
+}
+
+/// The screen as it shows now, saved as `name.png` in `out`.
+fn shoot(hp: &mut Headless, out: &Path, name: &str) -> anyhow::Result<()> {
+    common::at_rest(hp)?;
+    let (w, h, px) = hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(u32::try_from(w)?, u32::try_from(h)?, rgba)
+        .ok_or_else(|| anyhow::anyhow!("no image"))?;
+    std::fs::create_dir_all(out)?;
+    let file = out.join(format!("{name}.png"));
+    image.save(&file)?;
+    eprintln!("{}", file.display());
+    Ok(())
+}
+
+/// The mockup's scenes 1, 2 and 4 (tools' `mockups/s14-mcp`), dark, ×1,
+/// for the maintainer's eyes: `HOCUS_SHOTS=DIR cargo nextest run -p
+/// hocus-compositor mcp::shots --run-ignored only`.
+#[test]
+#[ignore = "screenshots, on demand"]
+fn shots() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        eprintln!("HOCUS_SHOTS is not set: no shots");
+        return Ok(());
+    };
+    // Long enough to be caught on screen.
+    let config = format!("[agents]\nshow-before-ms = 3000\n{CONFIG}");
+    let mut bed = bed_with(true, &config)?;
+    common::open(&mut bed.hp, "kitty", (520, 320))?;
+    common::open(&mut bed.hp, "firefox", (700, 560))?;
+    common::open(&mut bed.hp, "kitty-2", (520, 320))?;
+    let id_of = |hp: &Headless, app: &str| {
+        hp.windows()
+            .iter()
+            .find(|w| w.app_id.as_deref() == Some(app))
+            .map(|w| w.id.0)
+            .unwrap_or_default()
+    };
+    let (first, second) = (id_of(&bed.hp, "kitty"), id_of(&bed.hp, "kitty-2"));
+    let browser = id_of(&bed.hp, "firefox");
+    use hocus_compositor::model::{Rect, WindowId};
+    for (id, rect) in [
+        (first, Rect::new(380, 120, 620, 420)),
+        (second, Rect::new(380, 600, 620, 400)),
+        (browser, Rect::new(1040, 200, 600, 640)),
+    ] {
+        bed.hp.place_window(WindowId(id), rect);
+    }
+    common::at_rest(&mut bed.hp)?;
+    let mut claude = mcp(&bed.hp, "Claude")?;
+    // 1: shown before it acts.
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "move_window", "arguments": {
+            "window": first, "x": 24, "y": 24, "width": 620, "height": 480,
+            "intent": "Range les deux terminaux à gauche, l'un sous l'autre"
+        } }),
+    )?;
+    let tagged = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.drawn_layers(hocus_link::MCP_TAG_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(tagged, "no tag");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+    shoot(&mut bed.hp, &out, "scene-1-shown-before")?;
+    claude.answer(&mut bed.hp, asked)?;
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "move_window", "arguments": {
+            "window": second, "x": 24, "y": 528, "width": 620, "height": 500,
+            "intent": "Range les deux terminaux à gauche, l'un sous l'autre"
+        } }),
+    )?;
+    claude.answer(&mut bed.hp, asked)?;
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "set_setting", "arguments": {
+            "key": "appearance.theme", "value": "dark", "intent": "Passe le thème en sombre"
+        } }),
+    )?;
+    claude.answer(&mut bed.hp, asked)?;
+    // A read agent's refusal, for the journal.
+    let mut looker = mcp(&bed.hp, "Looker")?;
+    looker.tool(
+        &mut bed.hp,
+        "launch",
+        json!({ "app": "nope", "intent": "Ouvre Firefox" }),
+    )?;
+    looker.tool(
+        &mut bed.hp,
+        "switch_desktop",
+        json!({ "desktop": 2, "intent": "Va sur le bureau 2" }),
+    )?;
+    // 2: the toast.
+    let toasted = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.drawn_layers(hocus_link::MCP_TOAST_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(toasted, "no toast");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+    shoot(&mut bed.hp, &out, "scene-2-toast")?;
+    // 4: the journal, from the toast's Voir.
+    let at = control_at(&mut bed, hocus_link::MCP_TOAST_NAMESPACE, "mcp-toast:See")?;
+    common::click_on(&mut bed.hp, at, hocus_link::MCP_TOAST_NAMESPACE)?;
+    let open = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+    anyhow::ensure!(open, "no journal");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+    shoot(&mut bed.hp, &out, "scene-4-journal")?;
     Ok(())
 }
