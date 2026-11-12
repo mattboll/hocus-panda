@@ -163,7 +163,7 @@ impl Matrix for PixmanRenderer {
     }
 }
 
-const VERTEX: &str = "#version 100
+pub(crate) const VERTEX: &str = "#version 100
 uniform mat3 matrix;
 attribute vec2 position;
 attribute vec2 local;
@@ -501,15 +501,15 @@ void main() {
 
 /// A program's place and its uniforms' places, by name.
 #[derive(Debug, Clone)]
-struct Program {
-    program: ffi::types::GLuint,
-    position: ffi::types::GLint,
-    local: ffi::types::GLint,
+pub(crate) struct Program {
+    pub(crate) program: ffi::types::GLuint,
+    pub(crate) position: ffi::types::GLint,
+    pub(crate) local: ffi::types::GLint,
     uniforms: Vec<(&'static str, ffi::types::GLint)>,
 }
 
 impl Program {
-    fn at(&self, name: &str) -> ffi::types::GLint {
+    pub(crate) fn at(&self, name: &str) -> ffi::types::GLint {
         self.uniforms
             .iter()
             .find(|(n, _)| *n == name)
@@ -544,6 +544,24 @@ unsafe fn compile(
     fragment: &str,
     uniforms: &[&'static str],
 ) -> Result<Program, String> {
+    // SAFETY: the caller's.
+    unsafe { compile_with(gl, VERTEX, fragment, uniforms) }
+}
+
+/// Compiles and links `fragment` with `vertex`, and finds `uniforms`; the
+/// attributes `position` and `local` are looked for (-1 where there are
+/// none).
+///
+/// # Safety
+///
+/// The renderer's context must be current, as `with_context` makes it.
+#[allow(unsafe_code)]
+pub(crate) unsafe fn compile_with(
+    gl: &ffi::Gles2,
+    vertex: &str,
+    fragment: &str,
+    uniforms: &[&'static str],
+) -> Result<Program, String> {
     // SAFETY: called with the context current; every pointer handed to GL
     // points to a live local for the duration of the call.
     unsafe {
@@ -566,7 +584,7 @@ unsafe fn compile(
                 Ok(id)
             }
         };
-        let vs = shader(ffi::VERTEX_SHADER, VERTEX)?;
+        let vs = shader(ffi::VERTEX_SHADER, vertex)?;
         let fs = match shader(ffi::FRAGMENT_SHADER, fragment) {
             Ok(fs) => fs,
             Err(err) => {
@@ -690,7 +708,7 @@ fn make(renderer: &mut GlesRenderer) -> Result<Glyphs, String> {
     })
 }
 
-fn rgb(c: [u8; 3]) -> [f32; 3] {
+pub(crate) fn rgb(c: [u8; 3]) -> [f32; 3] {
     c.map(|v| f32::from(v) / 255.0)
 }
 
@@ -709,7 +727,7 @@ fn rgb(c: [u8; 3]) -> [f32; 3] {
 ///
 /// The frame's context must be current, as `with_context` makes it.
 #[allow(unsafe_code)]
-unsafe fn quads(
+pub(crate) unsafe fn quads(
     gl: &ffi::Gles2,
     program: &Program,
     matrix: &[f32; 9],
@@ -796,7 +814,7 @@ fn corners(
 ///
 /// The context must be current.
 #[allow(unsafe_code)]
-unsafe fn bind(gl: &ffi::Gles2, unit: u32, texture: ffi::types::GLuint, sharp: bool) {
+pub(crate) unsafe fn bind(gl: &ffi::Gles2, unit: u32, texture: ffi::types::GLuint, sharp: bool) {
     let filter = if sharp { ffi::NEAREST } else { ffi::LINEAR } as i32;
     // SAFETY: the context is current.
     unsafe {

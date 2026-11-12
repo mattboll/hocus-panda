@@ -31,6 +31,25 @@ const SWATCH: f32 = 24.0;
 const SWATCH_GAP: f32 = 1.0;
 
 impl App {
+    /// "Bientôt" beside an effect not built yet (#793), its switch inert.
+    pub(super) fn soon_chip<'a>(&self, setting: &Setting) -> Option<El<'a>> {
+        crate::effects::soon(setting.id).then(|| {
+            let soon = hocus_words::settings::effects::SOON
+                .get(self.lang)
+                .to_owned();
+            container(t(soon, 10.5, FAINT.get()).font(BOLD))
+                .padding([1, 6])
+                .style(|_: &Theme| container::Style {
+                    background: Some(Background::Color(crate::theme::ink(rgba(
+                        255, 255, 255, 0.07,
+                    )))),
+                    border: border(5.0, 0.0, Color::TRANSPARENT),
+                    ..container::Style::default()
+                })
+                .into()
+        })
+    }
+
     /// The theme chosen now, as the file says it.
     fn scheme_now(&self) -> Scheme {
         match self.value(Slot {

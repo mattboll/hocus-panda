@@ -2229,6 +2229,7 @@ impl App {
             || self.desktops_inert(setting)
             || self.power_inert(setting)
             || self.agents_inert(setting)
+            || crate::effects::soon(setting.id)
         {
             return true;
         }

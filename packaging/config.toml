@@ -519,6 +519,35 @@
 # held shows a laser. Off, they do nothing and pass to the window.
 # enabled = true
 
+# [effects]
+# The desktop's effects, for the fun of it (docs/design/effects.md), each
+# on its own. None plays with reduced motion or the power saver, over a
+# fullscreen window, while a screen is shared or recorded, nor ever in a
+# capture; drawing on the CPU, none does.
+# On the wallpaper: snow that settles on the windows and the bar, an
+# aurora following the music, rain on the glass, a koi pond, evening
+# fireflies, the daylight turning with the hour, desktops in depth.
+# snow = false
+# aurora = false
+# rain-on-glass = false
+# koi = false
+# fireflies = false
+# daylight = false
+# depth = false
+# The windows: a closing window burns from the bottom up in 1.7 s
+# (instead of the closing animation; not a dialog), shatters into glass,
+# wobbles like jelly; a garland hangs under the active window.
+# flames = false
+# shatter = false
+# jelly = false
+# garland = false
+# The moments: fireworks when an agent's tests pass, confetti for an
+# agent's good news.
+# fireworks = false
+# confetti = false
+# The agents: each agent's panda on the edge of its window.
+# creatures = false
+
 # [magnifier]
 # The magnifier (docs/design/accessibility.md): the screen under the
 # pointer drawn larger, from 1 to 16 times, by the desktop; screenshots,

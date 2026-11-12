@@ -64,6 +64,7 @@ pub mod bluetooth;
 pub mod captures;
 pub mod desktops;
 pub mod devices;
+pub mod effects;
 pub mod keyboard;
 pub mod keys;
 pub mod lang;

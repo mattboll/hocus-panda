@@ -108,6 +108,76 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "effects.aurora",
+        name: hocus_words::settings::effects::AURORA,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.confetti",
+        name: hocus_words::settings::effects::CONFETTI,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.creatures",
+        name: hocus_words::settings::effects::CREATURES,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.daylight",
+        name: hocus_words::settings::effects::DAYLIGHT,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.depth",
+        name: hocus_words::settings::effects::DEPTH,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.fireflies",
+        name: hocus_words::settings::effects::FIREFLIES,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.fireworks",
+        name: hocus_words::settings::effects::FIREWORKS,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.flames",
+        name: hocus_words::settings::effects::FLAMES,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.garland",
+        name: hocus_words::settings::effects::GARLAND,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.jelly",
+        name: hocus_words::settings::effects::JELLY,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.koi",
+        name: hocus_words::settings::effects::KOI,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.rain-on-glass",
+        name: hocus_words::settings::effects::RAIN_ON_GLASS,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.shatter",
+        name: hocus_words::settings::effects::SHATTER,
+        said: Said::Switch,
+    },
+    Label {
+        key: "effects.snow",
+        name: hocus_words::settings::effects::SNOW,
+        said: Said::Switch,
+    },
+    Label {
         key: "idle.delay",
         name: hocus_words::settings::power::DIM_THE_SCREEN_AFTER,
         said: Said::Choices(&[("60", hocus_words::settings::power::N_1_MIN), ("120", hocus_words::settings::power::N_2_MIN), ("180", hocus_words::settings::power::N_3_MIN), ("300", hocus_words::settings::power::N_5_MIN), ("600", hocus_words::settings::power::N_10_MIN), ("900", hocus_words::settings::power::N_15_MIN), ("1800", hocus_words::settings::power::N_30_MIN), ("off", hocus_words::settings::agents::NEVER)]),

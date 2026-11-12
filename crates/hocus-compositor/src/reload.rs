@@ -260,6 +260,11 @@ impl State {
             }
             followed.push("[overview]");
         }
+        // The desktop's effects (#434): read as each starts.
+        if new.effects != self.config.effects {
+            self.config.effects = new.effects.clone();
+            followed.push("[effects]");
+        }
         // The magnifier (#424): on or off, its zoom; the rest read where
         // used.
         if self.magnifier_config_changed(&new.magnifier) {
