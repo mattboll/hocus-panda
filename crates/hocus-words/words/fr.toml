@@ -2655,6 +2655,9 @@ and = " et "
 not_reopened = { one = "{listed} n’a pas pu être rouverte.", other = "{listed} n’ont pas pu être rouvertes." }
 
 
+[compositor.creatures]
+other_tab = "{name} · autre onglet"
+
 [compositor.overview]
 badge_waiting = { one = "{n} t’attend", other = "{n} t’attendent" }
 badge_stuck = { one = "{n} bloqué", other = "{n} bloqués" }

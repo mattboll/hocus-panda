@@ -185,6 +185,8 @@ struct Herdr {
     terminals: Vec<Vec<u32>>,
     /// Ids for its panes' agents.
     ids: HashMap<String, u64>,
+    /// The panes of the tab it shows, where each is across its terminal.
+    layout: Option<herdr::Layout>,
 }
 
 /// The agents' sources and model.
@@ -606,8 +608,13 @@ impl Compositor {
         let now = self.now_us();
         let herdr = &mut self.agents.herdr;
         match news {
-            News::Agents { agents, terminals } => {
+            News::Agents {
+                agents,
+                terminals,
+                layout,
+            } => {
                 herdr.running = true;
+                herdr.layout = layout;
                 let before: HashMap<String, (Option<State>, u64)> = herdr
                     .agents
                     .drain(..)
@@ -645,10 +652,12 @@ impl Compositor {
                     agent.focused = agent.pane == pane;
                 }
             }
+            News::Layout(layout) => herdr.layout = Some(layout),
             News::Gone => {
                 herdr.running = false;
                 herdr.agents.clear();
                 herdr.terminals.clear();
+                herdr.layout = None;
             }
         }
     }
@@ -1041,6 +1050,25 @@ impl Compositor {
             .map(|(pane, _)| pane.pane.clone())
     }
 
+    /// Where agent `id`'s pane is across herdr's terminal when herdr shows
+    /// it (it is in the tab herdr shows, #796): its first column's share
+    /// of the terminal's width, and its width's.
+    pub(crate) fn herdr_pane_shown(&self, id: u64) -> Option<(f64, f64)> {
+        let pane = self.herdr_pane(id)?;
+        let layout = self.agents.herdr.layout.as_ref()?;
+        let columns = f64::from(layout.columns.max(1));
+        layout
+            .panes
+            .iter()
+            .find(|(p, _, _)| *p == pane)
+            .map(|(_, x, w)| (f64::from(*x) / columns, f64::from(*w) / columns))
+    }
+
+    /// Whether agent `id` runs in one of herdr's panes.
+    pub(crate) fn in_herdr(&self, id: u64) -> bool {
+        self.herdr_pane(id).is_some()
+    }
+
     /// herdr selects `pane` (§8 step 3), on a thread: its socket is no
     /// work for the loop.
     fn select_herdr_pane(&self, pane: String) {
@@ -1115,6 +1143,8 @@ impl Compositor {
         self.halo_agents(&seen);
         // The overview's badges (8.5 A).
         self.overview_agents(&agents);
+        // The creatures on their windows (#796).
+        self.creatures_agents(&agents);
         self.agents.running = agents.len();
         self.agents_tell_settings();
         if !self.shell_linked() {

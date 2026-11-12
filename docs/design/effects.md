@@ -22,7 +22,7 @@ langue").
 | | Guirlande sous la fenêtre active | `garland` | #799 |
 | The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
 | | Bonne nouvelle d'un agent : confettis | `confetti` | #811 |
-| The agents | Les agents en créatures | `creatures` | #796 |
+| The agents | Les agents en créatures | `creatures` | #796 (built) |
 
 ## When they stop
 
@@ -190,6 +190,59 @@ shaken sheds its snow in clumps, and moved slowly does not; off, on
 pixman or still, nothing drawn frame after frame); its screenshots,
 `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
 snow::shots`.
+
+## The agents as creatures (#796)
+
+With `creatures = true`, each agent's panda sits on the top edge of its
+agent's window and plays its state, as the board "Les agents en
+créatures" does: the bar's validated drawings (`hocus-pandas`), moving
+on and on with the board's motion (`hocus_pandas::creature`: working
+types, its laptop's star pulsing, bobbing; waiting sways its held-out
+hat, its "?" hops, its rings go out; resting breathes as two "z" rise;
+done hops, squashing as it lands, waving its hat among its confetti;
+stuck puffs its smoke as the pandas canvas does). Each agent its own
+phase.
+
+- **Where**: one agent in a window, large (92 px), on the top edge's
+  right corner, 12 px in. herdr: one panda (72 px) over each pane of the
+  tab herdr shows that an agent runs in (`pane.layout` and its
+  `layout.updated` events give each pane's columns; the terminal's are
+  the panes' area's reach, herdr's sidebar on its left); herdr's other
+  tabs' agents stay in the bar. Several agents in one window (a
+  terminal's tabs: the desktop knows the window, not the tab): the shown
+  tab's on the left corner (84 px, 18 px in), the others small (52 px,
+  60 % opaque) beside it, each standing on its name tag ("blog · autre
+  onglet"), as many as fit. The shown one is the one the window's title
+  names, else the one that started working last (the user just wrote to
+  it), else the one whose state changed last.
+- **Never over what the window shows**: a panda's feet rest 3 px into
+  the window's top edge, a tag's bottom 4 px: within the top 8 px a
+  decoration may cover. Drawn right in front of its window (the snow's
+  caps' place): a window in front covers it.
+- **No free edge, no panda**: none on a maximised or fullscreen window,
+  nor on one without room above it on its screen; the pandas stay in
+  the bar.
+- **How it is drawn** (`effects/rig.rs`): a mood's drawing is cut where
+  its moving parts begin and end, each piece drawn once with resvg into
+  one sheet (a texture) per mood and size; each frame lays each piece on
+  a quad of its own, moved by its parts' poses (`FireElement::sprites`,
+  one draw call a panda, cut to the frame's damage). Nothing is drawn on
+  the CPU while it moves. At rest the pieces are the drawing, pixel for
+  pixel (each piece falls on whole pixels, in its sheet as on the
+  screen).
+- **When**: moving where one shows (its window on the desktop shown, on
+  a screen that is on with no fullscreen window), a frame each refresh;
+  with reduced motion still, nothing drawn per frame; none in the power
+  saver, while a screen is shared or recorded, on the CPU, nor in a
+  capture.
+
+Tests: `tests/creatures.rs` (on GLES on Mesa's software device: a panda
+on an agent's window's right corner, its feet on the edge, the window's
+pixels below its top 8 untouched, moving, gone with its agent; none on a
+maximised window; none with the switch off, still with reduced motion);
+its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only creatures::shots` (foot terminals, each a process of
+its own; a fake herdr).
 
 ## Not built yet
 

@@ -8,7 +8,8 @@
 //! one call ([`mesh`]), the layer under the windows and the decorations on
 //! their edges (`crate::render::snow`), and the windows' motion
 //! ([`motion`]). Built with its first effects: closing a window in flames
-//! ([`flames`], #794), snow that settles ([`snow`], #795).
+//! ([`flames`], #794), snow that settles ([`snow`], #795); then the agents
+//! as creatures on their windows ([`creatures`], #796).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -17,11 +18,13 @@
 //! have played plays as it does without the effect); nothing drawn per
 //! frame once it is over.
 
+pub mod creatures;
 pub mod draw;
 pub mod flames;
 pub mod mesh;
 pub mod motion;
 pub mod particles;
+pub mod rig;
 pub mod snow;
 pub mod snow_look;
 pub mod snowing;
@@ -37,6 +40,8 @@ pub struct Live {
     pub snow: Option<snow::Snow>,
     /// The snows started so far, for their seeds.
     snows: u64,
+    /// The agents as creatures on their windows (#796).
+    pub creatures: creatures::Creatures,
 }
 
 use crate::{State, model::Mode, model::WindowId};
