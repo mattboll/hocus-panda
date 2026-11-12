@@ -626,7 +626,7 @@ impl State {
             return false;
         }
         let pandas = new.pandas != self.config.agents.pandas;
-        self.config.agents = *new;
+        self.config.agents = new.clone();
         let (now, motion) = (self.now(), self.halo_motion());
         if self.halo.set_rules(Rules::of(new), now, motion) {
             self.redraw = true;

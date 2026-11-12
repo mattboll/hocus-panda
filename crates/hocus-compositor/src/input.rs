@@ -380,7 +380,9 @@ impl State {
                 shortcuts.action(&unshifted, typed, self.nested)
             });
         let action = action.filter(|(a, _)| {
-            !inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier())
+            // The agents' stop works whatever holds the keys back.
+            *a == Action::StopAgents
+                || (!inhibited && (!auth || matches!(a, Action::Level(_)) || a.magnifier()))
         });
         if let Some((action, chord)) = action {
             self.keyboard.kept_keys.insert(code);

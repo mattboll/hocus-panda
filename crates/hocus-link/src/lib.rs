@@ -40,6 +40,7 @@ pub mod input;
 mod leave;
 pub mod locale;
 mod lock;
+pub mod mcp;
 pub mod moving;
 mod record;
 mod share;
@@ -91,6 +92,11 @@ pub use leave::{
 pub use lock::{
     LOCK_FADE, LOCK_FADE_REDUCED, LOCK_NAMESPACE, LOCK_PART, LOCK_SHAKE, LOCK_WAIT, LockAsk,
     LockFocus, LockPhase, LockShown,
+};
+pub use mcp::{
+    MCP_JOURNAL_SHOWN, MCP_TAG_NAMESPACE, MCP_TAG_RADIUS, MCP_TOAST, MCP_TOAST_NAMESPACE,
+    MCP_TOAST_RADIUS, McpAt, McpDoing, McpKind, McpLine, McpRefusal, McpRow, McpSaid, McpShow,
+    McpShown, McpSummary, McpToast,
 };
 pub use record::{RECORD_COUNTDOWN, RECORD_FPS, RecordAsk, RecordFormat, Recorded, RecordingShown};
 pub use share::{

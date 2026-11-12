@@ -329,6 +329,10 @@ the notifications, so only on a bus of your own next to a live session;
 its tests (`crates/hocus-compositor/tests/idle.rs`) start a dbus-daemon of
 their own.
 
+`hocus mcp --agent NAME` (docs/design/mcp.md) is an MCP server on stdio
+for an agent of the configuration's `[[agents.mcp]]`, on the same control
+socket; its tests (`tests/mcp.rs`) run it beside them (`cargo programs`).
+
 The tools are looked for, and plugged in, in the compositor's `HOME`
 (their settings), `PATH` (their programs) and `XDG_CONFIG_HOME` (herdr):
 next to a live session, give the nested compositor a fresh `HOME`, or

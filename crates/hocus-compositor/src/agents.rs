@@ -96,6 +96,8 @@ pub enum Heard {
     /// A connection that follows the mice and touchpads (`hocus msg
     /// input-devices follow`): the loop writes to it as they change.
     Follow(std::os::unix::net::UnixStream),
+    /// An MCP agent's line (`hocus mcp`, docs/design/mcp.md).
+    Mcp(crate::mcp::FromAgent),
 }
 
 /// A go-to waiting for herdr's terminal to be found: the agent, its row,
@@ -213,8 +215,9 @@ pub struct Agents {
     seen: HashMap<u64, u64>,
     /// Commits of the agents' surfaces, for tests: none at rest.
     pub commits: u64,
-    /// For the threads that look for herdr's clients.
-    sender: Option<channel::Sender<Heard>>,
+    /// For the threads that look for herdr's clients, and the MCP
+    /// agents' settings' threads.
+    pub(crate) sender: Option<channel::Sender<Heard>>,
 }
 
 /// Starts the sources: the control socket always (`hocus agent` works in
@@ -314,6 +317,20 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
                 }
                 break;
             }
+            if let Some(agent) = hocus_agents::mcp::agent_of(&line) {
+                // An agent's line stays open, on threads of its own.
+                let sender = sender.clone();
+                let Ok(line_stream) = stream.try_clone() else {
+                    break;
+                };
+                let started = std::thread::Builder::new()
+                    .name("mcp line".to_owned())
+                    .spawn(move || crate::mcp::serve(line_stream, sender, agent));
+                if let Err(err) = started {
+                    tracing::warn!(%err, "an MCP agent's line is not served");
+                }
+                break;
+            }
             if Question::of(&line) == Some(Question::InputDevices { follow: true }) {
                 // The loop keeps it, and writes without waiting.
                 if let Ok(kept) = stream.try_clone()
@@ -399,6 +416,10 @@ impl Compositor {
             }
             Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
             Heard::Screens(heard) => self.displays_heard(heard),
+            Heard::Mcp(from) => {
+                self.mcp_heard(from);
+                return;
+            }
             Heard::Asked(Question::A11y, reply) => {
                 // The shell answers, a moment later.
                 self.ask_a11y(reply);

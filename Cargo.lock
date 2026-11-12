@@ -1878,6 +1878,7 @@ version = "1.0.0"
 dependencies = [
  "hocus-link",
  "rustix 1.1.6",
+ "serde",
  "serde_json",
  "tempfile",
  "toml_edit",
@@ -1905,6 +1906,7 @@ dependencies = [
  "hocus-day",
  "hocus-panic",
  "hocus-perf",
+ "hocus-xdg",
  "jiff",
  "serde_json",
  "tempfile",

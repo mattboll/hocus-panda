@@ -309,6 +309,38 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             },
             id,
         }],
+        Effect::Agent {
+            id,
+            output,
+            size,
+            at: (x, y),
+            toast,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Left,
+                // From the screen's corner, whatever the bar keeps.
+                exclusive_zone: Some(-1),
+                margin: Some((y.max(0), 0, 0, x.max(0))),
+                keyboard_interactivity: KeyboardInteractivity::None,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: !toast,
+                namespace: Some(
+                    if toast {
+                        hocus_link::MCP_TOAST_NAMESPACE
+                    } else {
+                        hocus_link::MCP_TAG_NAMESPACE
+                    }
+                    .to_owned(),
+                ),
+            },
+            id,
+        }],
         Effect::Emoji {
             id,
             output,

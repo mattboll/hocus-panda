@@ -146,6 +146,8 @@ impl State {
                 ns if hocus_link::is_reminder(ns) => Some((own, hocus_link::REMINDER_RADIUS)),
                 hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),
                 hocus_link::TIP_NAMESPACE => Some((own, hocus_link::TIP_RADIUS)),
+                hocus_link::MCP_TAG_NAMESPACE => Some((own, hocus_link::MCP_TAG_RADIUS)),
+                hocus_link::MCP_TOAST_NAMESPACE => Some((own, hocus_link::MCP_TOAST_RADIUS)),
                 hocus_link::CLOCK_NAMESPACE
                 | hocus_link::LEVELS_NAMESPACE
                 | hocus_link::CONNECTIONS_NAMESPACE

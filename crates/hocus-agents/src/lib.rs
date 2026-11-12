@@ -17,11 +17,13 @@
 //! The compositor's control socket (`<socket>.control`, [`SOCKET_ENV`])
 //! takes the lines written and read here: a [`Report`], a [`Question`]
 //! (`hocus msg idle`, `lock`, `outputs`, `input-devices`, `a11y`), a
-//! [`ProgramAsk`] (`hocus msg shell status|restart`); and the Settings'
-//! own, `msg screens` (the compositor's `displays.rs`).
+//! [`ProgramAsk`] (`hocus msg shell status|restart`); an agent's MCP line
+//! ([`mcp`], `mcp NAME`); and the Settings' own, `msg screens` (the
+//! compositor's `displays.rs`).
 
 pub mod herdr;
 pub mod hooks;
+pub mod mcp;
 pub mod process;
 pub mod tools;
 pub mod watch;

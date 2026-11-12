@@ -311,7 +311,9 @@ fn clip_keep<'de, D: Deserializer<'de>>(deserializer: D) -> Result<hocus_link::C
 /// How the bar calls the user for the agents, `[agents]` (6.16): the
 /// halo (bar.md §6), its reminder, the panda peeking out (§7 C) and the
 /// pandas in the agents' rows (4.1). The meetings' halo is not theirs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// And the agents that act on the desktop through `hocus mcp`, with their
+/// rights (docs/design/mcp.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Agents {
     pub halo: HaloRule,
@@ -322,6 +324,12 @@ pub struct Agents {
     /// Off: a dot of the state's colour in each agent's row instead of
     /// its panda.
     pub pandas: bool,
+    /// How long an MCP agent's intent shows on what it will touch before
+    /// it acts, milliseconds (0: it acts at once).
+    #[serde(rename = "show-before-ms")]
+    pub show_before_ms: u32,
+    /// `[[agents.mcp]]`: the agents `hocus mcp --agent NAME` may serve.
+    pub mcp: Vec<McpAgent>,
 }
 
 impl Default for Agents {
@@ -331,8 +339,34 @@ impl Default for Agents {
             remind: Remind::Five,
             peek: PeekRule::WaitingAndDone,
             pandas: true,
+            show_before_ms: 600,
+            mcp: Vec::new(),
         }
     }
+}
+
+/// An agent of `[[agents.mcp]]` and its rights (docs/design/mcp.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpAgent {
+    /// What it shows under, and `hocus mcp --agent`'s name.
+    pub name: String,
+    #[serde(default)]
+    pub access: McpAccess,
+    /// Whether it may change settings.
+    #[serde(default)]
+    pub settings: bool,
+}
+
+/// What an MCP agent may do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpAccess {
+    /// Read the windows, desktops, screens and settings.
+    #[default]
+    Read,
+    /// And act on them.
+    Act,
 }
 
 /// What of the agents lights the halo.
@@ -989,12 +1023,33 @@ mod tests {
                 remind: Remind::Ten,
                 peek: PeekRule::Off,
                 pandas: false,
+                ..Agents::default()
             }
         );
         let config: Config = toml::from_str("[agents]\nremind = \"never\"\npeek = \"waiting\"\n")?;
         assert_eq!(config.agents.remind.after(), None);
         assert_eq!(config.agents.peek, PeekRule::Waiting);
         assert_eq!(config.agents.halo, HaloRule::All);
+        let config: Config = toml::from_str(
+            "[agents]\nshow-before-ms = 0\n[[agents.mcp]]\nname = \"Claude\"\naccess = \"act\"\n\
+             settings = true\n[[agents.mcp]]\nname = \"look\"\n",
+        )?;
+        assert_eq!(config.agents.show_before_ms, 0);
+        assert_eq!(
+            config.agents.mcp,
+            [
+                super::McpAgent {
+                    name: "Claude".into(),
+                    access: super::McpAccess::Act,
+                    settings: true,
+                },
+                super::McpAgent {
+                    name: "look".into(),
+                    access: super::McpAccess::Read,
+                    settings: false,
+                },
+            ]
+        );
         assert_eq!(
             Remind::Two.after(),
             Some(std::time::Duration::from_secs(120))
@@ -1004,6 +1059,8 @@ mod tests {
             "[agents]\nremind = \"3m\"\n",
             "[agents]\npeek = \"done\"\n",
             "[agents]\nwave = true\n",
+            "[[agents.mcp]]\nname = \"a\"\naccess = \"all\"\n",
+            "[[agents.mcp]]\naccess = \"act\"\n",
         ] {
             assert!(toml::from_str::<Config>(bad).is_err(), "{bad:?}");
         }

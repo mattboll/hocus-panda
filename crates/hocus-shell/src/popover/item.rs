@@ -103,6 +103,9 @@ pub enum Item {
     /// The music player's tile over the desktops (s12): its popover, by a
     /// click.
     Music,
+    /// An MCP agent's row in the agents' group (docs/design/mcp.md): the
+    /// agents' journal, by a click (or the toast's "Voir").
+    Journal,
 }
 
 impl Item {
@@ -162,6 +165,7 @@ impl Item {
             Self::DayChoose | Self::DayLater => false,
             // Resting on the clock stays harmless (Day.5).
             Self::Calendar => false,
+            Self::Journal => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
             _ => form == Form::Mini,
@@ -186,6 +190,7 @@ impl Item {
             Self::WindowMenu(_) => window_menu::WIDTH,
             Self::WindowsMore => desktop::WIDTH,
             Self::Music => music::WIDTH,
+            Self::Journal => journal::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -216,6 +221,7 @@ impl Item {
             Self::Windows => windows::height(bar),
             Self::WindowMenu(id) => window_menu::height(id),
             Self::Music => music::height(),
+            Self::Journal => journal::height(),
             Self::WindowsMore => desktop::height(
                 bar,
                 0,
@@ -277,6 +283,7 @@ impl Item {
             Self::DayLater => {}
             Self::Calendar => calendar::opening(),
             Self::Music => music::opening(),
+            Self::Journal => journal::opening(),
             Self::Windows => windows::opening(),
             Self::WindowMenu(_) => window_menu::opening(),
             Self::Window(_) | Self::WindowClose(_) => {}
@@ -314,7 +321,8 @@ impl Item {
             | Self::WindowsMore
             | Self::Windows
             | Self::WindowMenu(_)
-            | Self::Music => {}
+            | Self::Music
+            | Self::Journal => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -369,7 +377,8 @@ impl Item {
                 | Self::Plug(_)
                 | Self::Decline
                 | Self::Agent(_)
-                | Self::Secretary,
+                | Self::Secretary
+                | Self::Journal,
                 _,
             ) => AGENTS_NAMESPACE,
         }
@@ -398,6 +407,7 @@ impl Item {
                 | Self::Windows
                 | Self::WindowsMore
                 | Self::WindowMenu(_)
+                | Self::Journal
         ) && !self.agents()
     }
 
