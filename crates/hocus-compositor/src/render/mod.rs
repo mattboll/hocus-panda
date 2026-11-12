@@ -106,6 +106,9 @@ render_elements! {
     Rain = crate::matrix::RainElement,
     /// A wallpaper that moves (#433).
     Wall = crate::matrix::WallElement,
+    /// The desktop's effects (#793): a window burning, its sparks, its
+    /// light (#794).
+    Fire = crate::effects::FireElement,
 }
 
 /// What an output's elements are drawn for.

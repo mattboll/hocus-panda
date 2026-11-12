@@ -345,8 +345,7 @@ fn light([r, g, b]: [u8; 3]) -> bool {
 }
 
 #[test]
-fn the_page_shows_its_five_groups_and_choosing_light_turns_the_desktop_light() -> anyhow::Result<()>
-{
+fn the_page_shows_its_groups_and_choosing_light_turns_the_desktop_light() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -370,6 +369,20 @@ fn the_page_shows_its_five_groups_and_choosing_light_turns_the_desktop_light() -
             "locale.date",
             "locale.time",
             "appearance.bar-clock",
+            "effects.snow",
+            "effects.aurora",
+            "effects.rain-on-glass",
+            "effects.koi",
+            "effects.fireflies",
+            "effects.daylight",
+            "effects.depth",
+            "effects.flames",
+            "effects.shatter",
+            "effects.jelly",
+            "effects.garland",
+            "effects.fireworks",
+            "effects.confetti",
+            "effects.creatures",
         ]
     );
     assert_eq!(shown["theme"], "dark");
@@ -388,6 +401,29 @@ fn the_page_shows_its_five_groups_and_choosing_light_turns_the_desktop_light() -
     bed.until((BAR_LEFT + 5, 540), light)?;
     let window = bed.window()?;
     bed.until((window.x + 600, window.bottom() - 12), light)?;
+    Ok(())
+}
+
+/// The effects (#793): off by default; the flames' switch writes
+/// `[effects] flames`, the effects not built yet are inert.
+#[test]
+fn the_flames_switch_writes_its_key_and_the_effects_to_come_are_inert() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    assert_eq!(row(&shown, "effects.flames")["value"], "non");
+    assert_eq!(row(&shown, "effects.flames")["inert"], false);
+    assert_eq!(row(&shown, "effects.snow")["inert"], true);
+    assert_eq!(row(&shown, "effects.creatures")["inert"], true);
+    bed.click("control:effects.flames")?;
+    let text = bed.written(|t| t.contains("[effects]\nflames = true"))?;
+    assert!(text.starts_with("# My desktop, by hand."), "{text}");
+    // A switch to come takes no click.
+    bed.click("control:effects.snow")?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    let text = std::fs::read_to_string(bed.file())?;
+    assert!(!text.contains("snow"), "{text}");
     Ok(())
 }
 
@@ -746,6 +782,47 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.shell_said("the clock shows", &["date=\"jeu. 5 nov.\""])?;
     bed.hp.pointer_move(400.0, 1060.0);
     save(&mut bed, "page-light-12h-short.png", None)?;
+    Ok(())
+}
+
+/// The effects' rows for the maintainer (#793), into `HOCUS_SHOTS`: the
+/// flames on, the others to come.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_effects() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(&format!("{FILE}\n[effects]\nflames = true\n"))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.reveal("row:effects.creatures")?;
+    bed.hp.pointer_move(400.0, 1060.0);
+    common::at_rest(&mut bed.hp)?;
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    let window = bed.window()?;
+    let (w, h, bytes) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+        .ok_or_else(|| anyhow::anyhow!("no image"))?;
+    let image = image::imageops::crop_imm(
+        &image,
+        window.x.max(0) as u32,
+        window.y.max(0) as u32,
+        window.width as u32,
+        window.height as u32,
+    )
+    .to_image();
+    let path = out.join("settings-effects.png");
+    image.save(&path)?;
+    eprintln!("{}", path.display());
     Ok(())
 }
 

@@ -209,6 +209,9 @@ pub struct Leaving {
     pub fade: Tween,
     /// Leaving in a rain (#432): drawn where it was, through the rain.
     pub rain: Option<crate::rain::Rain>,
+    /// Burning (#794): drawn where it was, through the flames, until its
+    /// last sparks are gone.
+    pub burn: Option<crate::effects::flames::Burn>,
 }
 
 /// Where a dragged window would snap, and since when the pointer is there.
@@ -834,11 +837,16 @@ impl State {
         let Some(from) = self.visual_rect(id, now) else {
             return;
         };
-        let rain = (!minimizing)
+        let burn = (!minimizing && self.burns_on_close(id)).then(|| {
+            self.departures.burns = self.departures.burns.wrapping_add(1);
+            tracing::debug!(window = id.0, "closes in flames");
+            crate::effects::flames::Burn::new(now, from, self.departures.burns)
+        });
+        let rain = (!minimizing && burn.is_none())
             .then(|| self.rain_on_close(id, (from.size.w, from.size.h), now))
             .flatten();
         let reduced = self.reduced_motion();
-        let to = if reduced || rain.is_some() {
+        let to = if reduced || rain.is_some() || burn.is_some() {
             from
         } else if minimizing {
             self.bar_place(id).unwrap_or(from)
@@ -853,9 +861,10 @@ impl State {
             (false, true) => (motion::MINIMIZE, Bezier::EASE_IN),
             (false, false) => (motion::CLOSE, Bezier::EASE_IN),
         };
-        let tween = match &rain {
-            Some(rain) => Tween::new(now, rain.duration(), Bezier::LINEAR),
-            None => Tween::new(now, duration, curve),
+        let tween = match (&rain, &burn) {
+            (Some(rain), _) => Tween::new(now, rain.duration(), Bezier::LINEAR),
+            (_, Some(_)) => Tween::new(now, crate::effects::flames::BURN, Bezier::LINEAR),
+            _ => Tween::new(now, duration, curve),
         };
         self.departures.leaving.push(Leaving {
             picture,
@@ -864,6 +873,7 @@ impl State {
             tween,
             fade: tween,
             rain,
+            burn,
         });
         self.redraw = true;
     }
@@ -1466,7 +1476,15 @@ impl State {
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
-        self.departures.leaving.retain(|l| !l.tween.done(now));
+        // A burning window lingers until its last sparks are gone (#794),
+        // stepped here too should no screen draw it.
+        self.departures.leaving.retain(|l| match &l.burn {
+            Some(burn) => {
+                burn.advance(now);
+                !burn.done(now)
+            }
+            None => !l.tween.done(now),
+        });
         moving |= !self.departures.leaving.is_empty();
         if let Some(preview) = &self.snap.preview {
             if preview.shown(now) {

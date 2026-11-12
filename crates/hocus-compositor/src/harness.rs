@@ -246,6 +246,23 @@ impl Headless {
         self.app.state.rains()
     }
 
+    /// Windows closed and still leaving the screen: fading, raining or
+    /// burning.
+    pub fn leaving(&self) -> usize {
+        self.app.state.departures.leaving.len()
+    }
+
+    /// Windows burning now, or their last sparks (#794).
+    pub fn burning(&self) -> usize {
+        self.app
+            .state
+            .departures
+            .leaving
+            .iter()
+            .filter(|l| l.burn.is_some())
+            .count()
+    }
+
     /// Whether window `app_id` opens in a rain now.
     pub fn raining(&self, app_id: &str) -> bool {
         self.app.state.windows.values().any(|m| {

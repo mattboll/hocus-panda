@@ -28,6 +28,7 @@ mod decoration;
 mod desktop_set;
 pub mod desktops;
 mod displays;
+mod effects;
 mod emoji;
 mod focus;
 mod foreign;

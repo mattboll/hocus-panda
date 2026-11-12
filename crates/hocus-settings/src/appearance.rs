@@ -588,6 +588,10 @@ pub fn settings() -> &'static [Setting] {
                 needs: None,
             },
         ]
+        .into_iter()
+        // Its last groups: the desktop's effects (#793).
+        .chain(crate::effects::settings().iter().cloned())
+        .collect()
     })
 }
 
@@ -780,7 +784,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_has_its_five_groups_in_order() {
+    fn the_page_has_its_groups_in_order() {
         let mut groups: Vec<&str> = settings()
             .iter()
             .map(|s| s.group.label.get(hocus_words::Lang::French))
@@ -793,7 +797,11 @@ mod tests {
                 "TEXTE",
                 "CURSEUR",
                 "MOUVEMENT ET LISIBILITÉ",
-                "LANGUE ET FORMATS"
+                "LANGUE ET FORMATS",
+                "EFFETS · LE FOND D’ÉCRAN",
+                "EFFETS · LES FENÊTRES",
+                "EFFETS · LES MOMENTS",
+                "EFFETS · LES AGENTS",
             ]
         );
     }

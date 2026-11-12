@@ -984,6 +984,7 @@ impl App {
             || self.desktops_inert(setting)
             || self.agents_inert(setting)
             || self.captures_inert(setting)
+            || crate::effects::soon(setting.id)
         {
             INERT
         } else {
@@ -997,7 +998,8 @@ impl App {
         let chip = self
             .bar_chip(setting)
             .or_else(|| self.captures_new(setting).then(|| self.new_chip()))
-            .or_else(|| self.mouse_chip(setting));
+            .or_else(|| self.mouse_chip(setting))
+            .or_else(|| self.soon_chip(setting));
         let name: El<'_> = match chip {
             Some(chip) => row![name, chip]
                 .spacing(8)

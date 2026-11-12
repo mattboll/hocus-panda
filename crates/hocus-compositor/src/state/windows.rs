@@ -42,6 +42,8 @@ pub struct Departures {
     pub leaving: Vec<Leaving>,
     /// The windows' rains so far, for their seeds (#432).
     pub rain_seeds: u32,
+    /// The windows burnt so far, for their seeds (#794).
+    pub burns: u32,
 }
 
 #[derive(Debug)]
