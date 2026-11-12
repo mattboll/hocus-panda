@@ -817,6 +817,11 @@ impl State {
             &mut elements,
         );
         let bar_glass_at = if front { glass_at } else { elements.len() };
+        // A burning window's warm light (#794): on the wallpaper, under
+        // the windows and the bar.
+        if purpose.screen() {
+            self.burn_lights(&frame, &mut elements);
+        }
         self.layer_elements(renderer, &frame, Layer::Bottom, Pick::All, &mut elements);
         self.layer_elements(
             renderer,

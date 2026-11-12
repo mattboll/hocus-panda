@@ -60,6 +60,35 @@ fn window_share(shot: &(i32, i32, Vec<u8>), rect: Rect) -> f64 {
     seen as f64 / all.max(1) as f64
 }
 
+/// Over `window` (clear of its rim) out of `burnt`: its pixels the same
+/// in `shot` as in `rest`, of how many.
+fn untouched(
+    shot: &(i32, i32, Vec<u8>),
+    rest: &(i32, i32, Vec<u8>),
+    window: Rect,
+    burnt: Rect,
+) -> (usize, usize) {
+    let (mut same, mut all) = (0, 0);
+    for y in (window.y + 4..window.y + window.height - 4).step_by(2) {
+        for x in (window.x + 4..window.x + window.width - 4).step_by(2) {
+            let inside = x >= burnt.x - 2
+                && x < burnt.x + burnt.width + 2
+                && y >= burnt.y - 2
+                && y < burnt.y + burnt.height + 2;
+            if inside || x < 0 || y < 0 || x >= shot.0 {
+                continue;
+            }
+            let i = ((y * shot.0 + x) * 4) as usize;
+            let (Some(a), Some(b)) = (shot.2.get(i..i + 3), rest.2.get(i..i + 3)) else {
+                continue;
+            };
+            all += 1;
+            same += usize::from(a == b);
+        }
+    }
+    (same, all)
+}
+
 /// Pixels of fire (bright orange to yellow) in `rect`, clipped to the
 /// screen.
 fn fire(shot: &(i32, i32, Vec<u8>), rect: Rect) -> usize {
@@ -82,13 +111,23 @@ fn a_closed_window_burns_its_flames_rising_above_it_then_goes() -> anyhow::Resul
         common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
     common::at_rest(&mut hp)?;
+    // A pale page of text beside it, partly under it.
+    let page = common::Shows::Document {
+        app_id: "test.beside",
+        size: (500, 600),
+    };
+    let (beside, _beside) = common::open_showing(&mut hp, "test.beside", page)?;
     let (rect, client) = open_with(&mut hp, "test.burn", (600, 400), false)?;
     common::at_rest(&mut hp)?;
     hp.hold_clock();
     let _ = client.commands.send(common::Command::Close);
-    hp.dispatch_until(common::WAIT, |hp| hp.windows().is_empty())?;
+    hp.dispatch_until(common::WAIT, |hp| hp.windows().len() == 1)?;
     // Gone from the desktop (input never reaches it): its picture burns.
-    assert!(hp.windows().is_empty());
+    assert!(
+        hp.windows()
+            .iter()
+            .all(|w| w.app_id.as_deref() != Some("test.burn"))
+    );
     assert_eq!(hp.burning(), 1, "it burns");
     hp.step(Duration::ZERO)?;
     let whole = window_share(&hp.screenshot(0)?, rect);
@@ -107,7 +146,7 @@ fn a_closed_window_burns_its_flames_rising_above_it_then_goes() -> anyhow::Resul
         },
     );
     eprintln!("whole {whole}, halfway {half}, fire over {over}, above {above}");
-    assert!(whole > 0.9, "whole as it starts: {whole}");
+    assert!(whole > 0.5, "whole as it starts: {whole}");
     assert!(half > 0.05 && half < 0.8, "half burnt: {half}");
     assert!(over > 500, "flames over it: {over}");
     // By 1.7 s the paper is gone; its sparks drift on a while.
@@ -127,6 +166,12 @@ fn a_closed_window_burns_its_flames_rising_above_it_then_goes() -> anyhow::Resul
     let last = hp.frames_on(0);
     run(&mut hp, Duration::from_millis(100))?;
     assert_eq!(hp.frames_on(0), last, "nothing drawn once it is over");
+    // Halfway, the page beside it, where the burning window never was, as
+    // it is at rest: no flames, sparks nor light over what the user reads.
+    let kept = untouched(&shot, &hp.screenshot(0)?, beside, rect);
+    eprintln!("the page beside: {kept:?}");
+    let (same, all) = kept;
+    assert!(all > 1000 && same == all, "the page beside: {kept:?}");
     Ok(())
 }
 

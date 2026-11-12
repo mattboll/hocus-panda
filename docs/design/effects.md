@@ -38,6 +38,11 @@ Every effect follows the same rules (`State::effects_still`, in
 - none on the CPU: pixman draws no shader, and what would have played
   plays as it does without the effect (a closing window closes as
   standard);
+- never over what the user reads: around a window effect, nothing is
+  drawn over the other windows nor the bar (each effect's shader is told
+  their rectangles, the nearest eight, and draws nothing there), and a
+  light falls on the wallpaper alone, drawn under the windows and the
+  bar;
 - once an effect is over, nothing more is drawn for it, and no frame is
   asked for.
 
@@ -62,7 +67,10 @@ starts holding, leaves one under way to end.
   frames' pace (and in tests on the held clock); drawn as one batch of
   quads a blend: smoke over what is under it, embers added to it.
 - **A light** (`draw.rs`): a radial gradient screened over what is under
-  it (`ONE, ONE_MINUS_SRC_COLOR`).
+  it (`ONE, ONE_MINUS_SRC_COLOR`), in the place of the layers under the
+  windows: on the wallpaper only.
+- **Where they may draw** (`draw.rs`, `Clip`): a rectangle to stay
+  within, and the other windows' and the bar's to stay out of.
 
 The fragment shaders compute in high precision: Mesa's software device
 takes `mediump` as 16 bits, whose squared distances overflow past 256 px.
@@ -79,23 +87,30 @@ board's `FLAME_FS` ported to GLSL ES 1.00, its lengths in logical pixels:
 - ahead of the front the paper scorches, wavers in the heat and glows on
   a flickering rim; behind it, charred flakes with sparks;
 - flames rise over the paper still there and up to 120 px above the
-  window, fading out in the last 18 % of the burn;
+  window, fading out in the last 18 % of the burn; around the window, and
+  where its paper is gone, never over another window or the bar;
 - the window's soft shadow fades out in the first 22 %;
 - seven embers a step along the front and a puff of smoke seven times in
-  ten, while it burns; the embers left are swept away 2.8 s after it
-  starts, the smoke drifts out on its own (all gone by 5 s);
+  ten, while it burns, shown within the window's place and above it
+  (fading out over 16 px at its sides) and never over another window or
+  the bar; the embers left are swept away 2.8 s after it starts, the
+  smoke drifts out on its own (all gone by 5 s);
 - a warm light (orange to red, 620 px around the window's middle at the
   front) as bright as the fire, which rises then falls over the burn,
-  flickering.
+  flickering, on the wallpaper alone.
+
+The board drew the light, the embers and the smoke over everything; on
+the desktop they would wash out a pale window behind into a white haze
+(#794's review), so they keep off the windows and the bar.
 
 The window leaves the desktop as it starts (its picture alone burns):
 input never reaches it, and the next window takes the focus at once. Its
-sparks, its picture and its light are drawn front first over the windows,
-as the windows leaving are.
+sparks and its picture are drawn over the windows, as the windows
+leaving are; its light under them.
 
 Tests: `tests/effects.rs` (a window burning on GLES on Mesa's software
-device, its flames over and above it, gone within 5 s and nothing drawn
-after; on pixman, with reduced motion or the switch off, the standard
+device, its flames over and above it, the page of text beside it
+untouched, gone within 5 s and nothing drawn after; on pixman, with reduced motion or the switch off, the standard
 close); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only effects::shots`.
 

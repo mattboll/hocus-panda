@@ -12,7 +12,7 @@ use crate::{
     decoration::{self, Outside, Rounded, preview_elements},
     effects::{
         FireElement,
-        draw::{BurnLook, LightLook},
+        draw::{BurnLook, Clip, LightLook},
         flames::{Burn, LIGHT, MARGIN, MARGIN_ABOVE},
         particles::vertices,
     },
@@ -179,9 +179,10 @@ impl State {
         }
     }
 
-    /// A window burning (#794), front first: its sparks, its picture
-    /// through the flames while the paper lasts, the warm light on what is
-    /// under it while it burns. Where the renderer has no flames, its
+    /// A window burning (#794), front first: its sparks, then its picture
+    /// through the flames while the paper lasts; both stay off the other
+    /// windows and the bar around it (its light goes under them,
+    /// [`Self::burn_lights`]). Where the renderer has no flames, its
     /// picture fades over the burn instead.
     fn burn_elements<R>(
         &self,
@@ -222,6 +223,7 @@ impl State {
                     geometry,
                     smoke,
                     embers,
+                    self.burn_clip(frame, local, true),
                 )));
             }
         }
@@ -274,6 +276,7 @@ impl State {
                     radius: decoration::RADIUS as f32,
                     front: burn.front(now),
                     time: burn.time(now),
+                    clip: self.burn_clip(frame, local, false),
                 };
                 match renderer.burn(burn, &picture, &parts, geometry, look) {
                     Some(element) => elements.push(OutputElements::Fire(element)),
@@ -302,32 +305,104 @@ impl State {
                 }
             }
         }
-        let fire = burn.fire(now);
-        if fire > 0.01 {
-            let cx = local.loc.x + local.size.w / 2.0;
-            let cy = local.loc.y.max(burn.front_y(now) - origin.y);
-            let reach = Rectangle::<f64, Logical>::new(
-                (cx - LIGHT, cy - LIGHT).into(),
-                (2.0 * LIGHT, 2.0 * LIGHT).into(),
-            )
-            .to_physical_precise_round(scale);
-            if let Some(geometry) = reach.intersection(screen) {
-                let look = LightLook {
-                    centre: [
-                        (cx * scale) as f32 - geometry.loc.x as f32,
-                        (cy * scale) as f32 - geometry.loc.y as f32,
-                    ],
-                    inner: (10.0 * scale) as f32,
-                    outer: (LIGHT * scale) as f32,
-                    strength: fire * burn.flicker(now),
-                };
-                elements.push(OutputElements::Fire(FireElement::light(
-                    burn.ids[2].clone(),
-                    burn.next_commit(),
-                    geometry,
-                    look,
-                )));
+    }
+
+    /// The warm light of each window burning (#794), on the wallpaper
+    /// alone: drawn under the windows and the bar, never over what the
+    /// user reads.
+    pub(super) fn burn_lights<R>(&self, frame: &Frame, elements: &mut Vec<OutputElement<R>>)
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let Frame {
+            now,
+            area,
+            origin,
+            scale,
+            ..
+        } = *frame;
+        let screen: Rectangle<i32, Physical> =
+            Rectangle::from_size(area.size.to_f64().to_physical_precise_round(scale));
+        for burn in self
+            .departures
+            .leaving
+            .iter()
+            .filter_map(|l| l.burn.as_ref())
+        {
+            let local = Rectangle::<f64, Logical>::new(burn.rect.loc - origin, burn.rect.size);
+            let fire = burn.fire(now);
+            if fire > 0.01 {
+                let cx = local.loc.x + local.size.w / 2.0;
+                let cy = local.loc.y.max(burn.front_y(now) - origin.y);
+                let reach = Rectangle::<f64, Logical>::new(
+                    (cx - LIGHT, cy - LIGHT).into(),
+                    (2.0 * LIGHT, 2.0 * LIGHT).into(),
+                )
+                .to_physical_precise_round(scale);
+                if let Some(geometry) = reach.intersection(screen) {
+                    let look = LightLook {
+                        centre: [
+                            (cx * scale) as f32 - geometry.loc.x as f32,
+                            (cy * scale) as f32 - geometry.loc.y as f32,
+                        ],
+                        inner: (10.0 * scale) as f32,
+                        outer: (LIGHT * scale) as f32,
+                        strength: fire * burn.flicker(now),
+                    };
+                    elements.push(OutputElements::Fire(FireElement::light(
+                        burn.ids[2].clone(),
+                        burn.next_commit(),
+                        geometry,
+                        look,
+                    )));
+                }
             }
         }
+    }
+
+    /// Where a burn over `local` (output-local, logical) may draw its
+    /// sparks (`sparks`: within the window and above it) or its flames
+    /// around it: out of the windows shown and the bar, those near it
+    /// first.
+    fn burn_clip(&self, frame: &Frame, local: Rectangle<f64, Logical>, sparks: bool) -> Clip {
+        let Frame {
+            now,
+            output,
+            origin,
+            scale,
+            ..
+        } = *frame;
+        let s = scale as f32;
+        let phys = |r: Rectangle<f64, Logical>| {
+            [
+                (r.loc.x * scale) as f32,
+                (r.loc.y * scale) as f32,
+                ((r.loc.x + r.size.w) * scale) as f32,
+                ((r.loc.y + r.size.h) * scale) as f32,
+            ]
+        };
+        let near = Rectangle::<f64, Logical>::new(
+            (local.loc.x - LIGHT, local.loc.y - LIGHT).into(),
+            (local.size.w + 2.0 * LIGHT, local.size.h + 2.0 * LIGHT).into(),
+        );
+        let windows = self
+            .window_looks(frame, self.overview_cover(now))
+            .into_iter()
+            .map(|(_, look)| Rectangle::new(look.visual.loc - origin, look.visual.size));
+        let bar = self.bar_rect(output, now);
+        let holes = bar
+            .into_iter()
+            .chain(windows)
+            .filter(|r| r.overlaps(near))
+            .map(phys);
+        let far = 1.0e7;
+        let keep = if sparks {
+            let [x0, _, x1, y1] = phys(local);
+            [x0, -far, x1, y1]
+        } else {
+            [-far, -far, far, far]
+        };
+        Clip::new(keep, holes, 16.0 * s)
     }
 }

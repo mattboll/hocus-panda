@@ -52,8 +52,55 @@ enum What {
     /// A warm light, screened over what is under it.
     Light(LightLook),
     /// Particles: the smoke's quads and the embers', as
-    /// [`super::particles::vertices`] lays them.
-    Sparks { smoke: Vec<f32>, embers: Vec<f32> },
+    /// [`super::particles::vertices`] lays them, and where they may show.
+    Sparks {
+        smoke: Vec<f32>,
+        embers: Vec<f32>,
+        clip: Clip,
+    },
+}
+
+/// Other windows and the bar an effect stays off, at most this many.
+pub const HOLES: usize = 8;
+
+/// Where an effect may draw, output-local and physical (`x0, y0, x1, y1`):
+/// within `keep`, out of each of `holes` (the other windows and the bar:
+/// what the user reads). An effect never brightens them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Clip {
+    pub keep: [f32; 4],
+    pub holes: [[f32; 4]; HOLES],
+    pub count: usize,
+    /// How far in from `keep`'s sides the sparks fade out, pixels.
+    pub fade: f32,
+}
+
+impl Clip {
+    /// Within `keep`, out of the first [`HOLES`] of `holes`.
+    pub fn new(keep: [f32; 4], holes: impl IntoIterator<Item = [f32; 4]>, fade: f32) -> Self {
+        let mut clip = Self {
+            keep,
+            holes: [[0.0; 4]; HOLES],
+            count: 0,
+            fade,
+        };
+        for (slot, hole) in clip.holes.iter_mut().zip(holes) {
+            *slot = hole;
+            clip.count += 1;
+        }
+        clip
+    }
+
+    /// The same, from an element's corner `at`.
+    fn from(&self, at: Point<i32, Physical>) -> Self {
+        let (x, y) = (at.x as f32, at.y as f32);
+        let shift = |r: [f32; 4]| [r[0] - x, r[1] - y, r[2] - x, r[3] - y];
+        Self {
+            keep: shift(self.keep),
+            holes: self.holes.map(shift),
+            ..*self
+        }
+    }
 }
 
 /// What the flames' shader is told.
@@ -71,6 +118,9 @@ pub struct BurnLook {
     pub front: f32,
     /// Its clock, seconds.
     pub time: f32,
+    /// Where its shadow and its flames may show around it; within the
+    /// window, all of it.
+    pub clip: Clip,
 }
 
 /// A warm light: its centre and radii, element-local and physical, and
@@ -107,12 +157,17 @@ impl FireElement {
         geometry: Rectangle<i32, Physical>,
         smoke: Vec<f32>,
         embers: Vec<f32>,
+        clip: Clip,
     ) -> Self {
         Self {
             id,
             commit,
             geometry,
-            what: What::Sparks { smoke, embers },
+            what: What::Sparks {
+                smoke,
+                embers,
+                clip,
+            },
         }
     }
 }
@@ -167,6 +222,8 @@ impl Fire for PixmanRenderer {
 /// heat wobble and a glowing, flickering rim, charred flakes with sparks
 /// behind it, flames rising over the paper still there and up to 120 px
 /// above the window, and a soft shadow fading out early in the burn.
+/// Around the window, and where its paper is gone, nothing is drawn over
+/// the other windows nor the bar ([`Clip`]).
 const BURN: &str = "#version 100
 precision highp float;
 uniform sampler2D tex;
@@ -209,6 +266,11 @@ void main() {
     vec2 p = v_px / px + corner;
     vec2 uv = p / size;
     float sd = sdBox(p - size * 0.5, size * 0.5, radius);
+    bool hole = clipped(v_px);
+    if (sd > 0.0 && hole) {
+        gl_FragColor = vec4(0.0);
+        return;
+    }
     float inside = 1.0 - smoothstep(-0.75, 0.75, sd);
     vec4 col = vec4(0.0);
     float burning = step(0.001, t);
@@ -234,7 +296,8 @@ void main() {
         col = vec4(c * charA * inside, charA * inside * 0.9);
     }
     float dUp = b + above;
-    if (burning > 0.0 && t < 0.995 && dUp > -0.02) {
+    // No flames over another window seen where the paper is gone.
+    if (burning > 0.0 && t < 0.995 && dUp > -0.02 && !(hole && b <= 0.0)) {
         vec2 q = vec2(uv.x * 6.0, uv.y * 2.8 + time * 2.2);
         float n = fbm(q) * 0.8 + fbm(q * 2.4 + 9.0) * 0.4;
         float h = 0.16 + 0.12 * noise(vec2(uv.x * 5.0, time * 0.9));
@@ -280,6 +343,29 @@ void main() {
 }
 ";
 
+/// Where an effect may draw ([`Clip`]): `p` in `keep`'s and the holes'
+/// space.
+const CLIP: &str = "
+uniform vec4 keep;
+uniform vec4 holes[8];
+uniform float count;
+bool clipped(vec2 p) {
+    if (p.x < keep.x || p.y < keep.y || p.x >= keep.z || p.y >= keep.w) {
+        return true;
+    }
+    for (int i = 0; i < 8; i++) {
+        if (float(i) >= count) {
+            break;
+        }
+        vec4 h = holes[i];
+        if (p.x >= h.x && p.y >= h.y && p.x < h.z && p.y < h.w) {
+            return true;
+        }
+    }
+    return false;
+}
+";
+
 /// The particles' quads: their place, their place across the quad, their
 /// colour and their shape, as [`super::particles::vertices`] lays them.
 const SPARKS_VERTEX: &str = "#version 100
@@ -291,8 +377,10 @@ attribute vec4 shape;
 varying vec2 v_local;
 varying vec4 v_colour;
 varying vec4 v_shape;
+varying vec2 v_at;
 void main() {
     gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
+    v_at = position;
     v_local = local;
     v_colour = colour;
     v_shape = shape;
@@ -308,15 +396,18 @@ precision highp float;
 varying vec2 v_local;
 varying vec4 v_colour;
 varying vec4 v_shape;
+varying vec2 v_at;
+uniform float fade;
 
 void main() {
     float d = length(v_local);
-    if (d >= 1.0) {
+    if (d >= 1.0 || clipped(v_at)) {
         gl_FragColor = vec4(0.0);
         return;
     }
+    float sides = clamp(min(v_at.x - keep.x, keep.z - v_at.x) / fade, 0.0, 1.0);
     if (v_shape.x < 0.5) {
-        gl_FragColor = v_colour * (1.0 - d);
+        gl_FragColor = v_colour * (1.0 - d) * sides;
         return;
     }
     vec4 h0 = vec4(1.0, 150.0 / 255.0, 60.0 / 255.0, 1.0) * 0.55;
@@ -324,7 +415,7 @@ void main() {
     vec4 halo = d < 0.35 ? mix(h0, h1, d / 0.35) : mix(h1, vec4(0.0), (d - 0.35) / 0.65);
     float a = v_colour.a;
     float cover = clamp((v_shape.y - d) * v_shape.z + 0.5, 0.0, 1.0);
-    gl_FragColor = halo * a + vec4(v_colour.rgb, 1.0) * a * cover;
+    gl_FragColor = (halo * a + vec4(v_colour.rgb, 1.0) * a * cover) * sides;
 }
 ";
 
@@ -365,12 +456,15 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
     // SAFETY: `with_context` makes the renderer's context current.
     renderer
         .with_context(|gl| unsafe {
+            let with_clip =
+                |source: &str, after: &str| source.replacen(after, &format!("{after}{CLIP}"), 1);
             let burn = compile_with(
                 gl,
                 crate::matrix::VERTEX,
-                BURN,
+                &with_clip(BURN, "varying vec2 v_px;\n"),
                 &[
-                    "matrix", "tex", "size", "corner", "px", "radius", "t", "time",
+                    "matrix", "tex", "size", "corner", "px", "radius", "t", "time", "keep",
+                    "holes", "count",
                 ],
             )?;
             let light = compile_with(
@@ -379,7 +473,12 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 LIGHT,
                 &["matrix", "centre", "inner", "outer", "strength"],
             )?;
-            let sparks = compile_with(gl, SPARKS_VERTEX, SPARKS, &["matrix"])?;
+            let sparks = compile_with(
+                gl,
+                SPARKS_VERTEX,
+                &with_clip(SPARKS, "varying vec2 v_at;\n"),
+                &["matrix", "keep", "holes", "count", "fade"],
+            )?;
             let attrib = |n: &std::ffi::CStr| gl.GetAttribLocation(sparks.program, n.as_ptr());
             let (colour, shape) = (attrib(c"colour"), attrib(c"shape"));
             if colour < 0 || shape < 0 || sparks.position < 0 || sparks.local < 0 {
@@ -477,6 +576,7 @@ impl Fire for GlesRenderer {
                             gl.Uniform1f(p.at("radius"), look.radius);
                             gl.Uniform1f(p.at("t"), look.front);
                             gl.Uniform1f(p.at("time"), look.time);
+                            set_clip(gl, p, &look.clip.from(corner));
                         });
                     }
                 })
@@ -500,14 +600,38 @@ impl Fire for GlesRenderer {
                     }
                 })
             }
-            What::Sparks { smoke, embers } => frame.with_context(|gl| {
+            What::Sparks {
+                smoke,
+                embers,
+                clip,
+            } => frame.with_context(|gl| {
                 #[allow(unsafe_code)]
                 // SAFETY: the frame's context is current.
                 unsafe {
-                    sparks(gl, &programs, &matrix, instancing, smoke, embers);
+                    sparks(gl, &programs, &matrix, instancing, smoke, embers, clip);
                 }
             }),
         }
+    }
+}
+
+/// Tells program `p` (in use) where it may draw.
+///
+/// # Safety
+///
+/// The context must be current, `p` in use.
+#[allow(unsafe_code)]
+unsafe fn set_clip(gl: &ffi::Gles2, p: &Program, clip: &Clip) {
+    let [x0, y0, x1, y1] = clip.keep;
+    // SAFETY: the context is current; the holes outlive the call.
+    unsafe {
+        gl.Uniform4f(p.at("keep"), x0, y0, x1, y1);
+        gl.Uniform4fv(
+            p.at("holes"),
+            HOLES as ffi::types::GLsizei,
+            clip.holes.as_ptr() as *const f32,
+        );
+        gl.Uniform1f(p.at("count"), clip.count as f32);
     }
 }
 
@@ -524,6 +648,7 @@ unsafe fn sparks(
     instancing: bool,
     smoke: &[f32],
     embers: &[f32],
+    clip: &Clip,
 ) {
     let p = &programs.sparks;
     let attribs = [
@@ -539,6 +664,8 @@ unsafe fn sparks(
     unsafe {
         gl.UseProgram(p.program);
         gl.UniformMatrix3fv(p.at("matrix"), 1, ffi::FALSE, matrix.as_ptr());
+        set_clip(gl, p, clip);
+        gl.Uniform1f(p.at("fade"), clip.fade.max(1.0));
         gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
         for (at, _, _) in attribs {
             gl.EnableVertexAttribArray(at);
