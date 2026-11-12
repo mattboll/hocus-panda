@@ -358,7 +358,7 @@ impl App {
     fn time_zone_done(&mut self, choice: Choice, doing: Doing) -> Task<Message> {
         let lang = self.lang;
         match doing {
-            Doing::New => {
+            Doing::New | Doing::Once => {
                 let text = words::time_zone(lang, &choice.after_said);
                 self.undo.push(super::Undo::Time(choice));
                 self.redo.clear();

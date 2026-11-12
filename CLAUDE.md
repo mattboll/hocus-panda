@@ -336,7 +336,16 @@ Each agent's connection gets a `wl_seat` of its own (`agent-NAME`); it
 reads applications' trees on the accessibility bus the session's bus
 names (none nested without `--session-bus`; tests give
 `Config::a11y_bus` a private bus with a fake registry,
-`tests/common/atspi.rs`), never the live session's.
+`tests/common/atspi.rs`), never the live session's. The agents' rights
+are set in Settings › Act on the desktop (`hocus settings act-on-desktop`),
+whose « Brancher » runs `claude mcp add --scope user` from the `PATH` and
+`HOME` the Settings were given: next to a live session, start them with a
+`HOME` and a `PATH` of their own, or it writes into your real
+`~/.claude.json`. Their tests (`tests/settings_acting.rs`) put a fake
+`claude` on theirs. `hocus_config::labels` (every key's name, as the
+Settings' rows say it, for the agents' toast) is generated from the
+Settings' model: `HOCUS_LABELS_WRITE=1 cargo test -p hocus-settings
+the_labels_are_the_rows` after changing a row.
 
 The tools are looked for, and plugged in, in the compositor's `HOME`
 (their settings), `PATH` (their programs) and `XDG_CONFIG_HOME` (herdr):

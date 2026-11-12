@@ -401,16 +401,51 @@ pub struct McpAgent {
     pub name: String,
     #[serde(default)]
     pub access: McpAccess,
+    /// Whether an `act` agent may arrange, move, bring forward and close
+    /// windows.
+    #[serde(default = "yes")]
+    pub windows: bool,
+    /// Whether it may switch desktops, send a window to another and
+    /// launch applications.
+    #[serde(default = "yes")]
+    pub desktops: bool,
     /// Whether it may change settings.
     #[serde(default)]
     pub settings: bool,
+    /// Whether it may click, scroll, type and press keys in the
+    /// applications of `apps`.
+    #[serde(default = "yes")]
+    pub input: bool,
     /// The applications (app ids, globs) whose windows it may click and
     /// type in and whose trees it reads; none by default.
     #[serde(default)]
     pub apps: Vec<String>,
+    /// The program the Settings plugged it into (`"claude-code"`), which
+    /// their « Débrancher » unplugs too; none for one named by hand.
+    #[serde(default)]
+    pub client: Option<String>,
+    /// The day the Settings plugged it in (`"2026-11-12"`), which its card
+    /// says.
+    #[serde(default)]
+    pub since: Option<String>,
+}
+
+const fn yes() -> bool {
+    true
 }
 
 impl McpAgent {
+    /// Whether it holds `right`.
+    pub const fn holds(&self, right: hocus_agents::mcp::Right) -> bool {
+        use hocus_agents::mcp::Right;
+        match right {
+            Right::Windows => self.windows,
+            Right::Desktops => self.desktops,
+            Right::Settings => self.settings,
+            Right::Input => self.input,
+        }
+    }
+
     /// Whether its input may go into a window of `app_id`.
     pub fn may_use(&self, app_id: &str) -> bool {
         self.apps.iter().any(|glob| app_glob(glob, app_id))
@@ -1100,17 +1135,36 @@ mod tests {
                 super::McpAgent {
                     name: "Claude".into(),
                     access: super::McpAccess::Act,
+                    windows: true,
+                    desktops: true,
                     settings: true,
+                    input: true,
                     apps: Vec::new(),
+                    client: None,
+                    since: None,
                 },
                 super::McpAgent {
                     name: "look".into(),
                     access: super::McpAccess::Read,
+                    windows: true,
+                    desktops: true,
                     settings: false,
+                    input: true,
                     apps: Vec::new(),
+                    client: None,
+                    since: None,
                 },
             ]
         );
+        let config: Config = toml::from_str(
+            "[[agents.mcp]]\nname = \"C\"\naccess = \"act\"\nwindows = false\ninput = false\n\
+             client = \"claude-code\"\nsince = \"2026-11-12\"\n",
+        )?;
+        let c = &config.agents.mcp[0];
+        use hocus_agents::mcp::Right;
+        assert!(!c.holds(Right::Windows) && c.holds(Right::Desktops));
+        assert!(!c.holds(Right::Settings) && !c.holds(Right::Input));
+        assert_eq!(c.client.as_deref(), Some("claude-code"));
         assert!(super::app_glob("org.mozilla.*", "org.mozilla.firefox"));
         assert!(super::app_glob("KITTY", "kitty"));
         assert!(!super::app_glob("kitty", "kitty-2"));

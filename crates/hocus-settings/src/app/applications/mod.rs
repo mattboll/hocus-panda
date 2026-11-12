@@ -700,7 +700,7 @@ impl App {
             }
         };
         match doing {
-            Doing::New => {
+            Doing::New | Doing::Once => {
                 // The entry just added comes last, lit as a search result.
                 if let (
                     Choice::Startup {

@@ -1963,6 +1963,7 @@ name = "hocus-config"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "hocus-words",
  "tempfile",
  "thiserror 2.0.21",
  "toml_edit",
@@ -2088,6 +2089,7 @@ dependencies = [
  "fontdue",
  "hocus-a11y",
  "hocus-bluetooth",
+ "hocus-config",
  "hocus-day",
  "hocus-link",
  "hocus-network",

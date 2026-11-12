@@ -290,6 +290,12 @@ pub enum McpRefusal {
     ReadOnly,
     /// It may not change settings.
     NoSettings,
+    /// It may not arrange or close windows.
+    NoWindows,
+    /// It may not switch desktops nor launch applications.
+    NoDesktops,
+    /// It may not click nor type in applications.
+    NoInput,
     /// The session is locked.
     Locked,
     /// A password is asked for.

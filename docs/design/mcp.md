@@ -1,12 +1,12 @@
 # Agents on the desktop, through `hocus mcp` (#440)
 
-Status: lots A and B of #440, mockup approved 2026-11-12 (tools'
-`mockups/s14-mcp`, scenes 1 to 4;
+Status: lots A, B and C of #440, mockup approved 2026-11-12 (tools'
+`mockups/s14-mcp`, scenes 1 to 5;
 <https://claude.ai/artifact/Cd6Ba69odbhqgaFB5ux8pg>). Lot B (below, "In
 applications") brings the agent's own seat, applications' accessible
 trees and captures, the confirmation card and taking over; lot C the
-Settings' page of rights (scene 5). Until then the rights are in the
-configuration file.
+Settings' page of rights (scene 5, "Agir sur le bureau",
+docs/design/settings.md), which writes the file below.
 
 An agent (Claude Code, Codex, any MCP client) uses the desktop through
 `hocus mcp`: the natural language is the client's, the desktop offers
@@ -30,8 +30,11 @@ JSON object a line each way: `{"id":1,"tool":"list_windows","args":{}}`,
 answered `{"id":1,"ok":…}` or `{"id":1,"error":"…"}`. The compositor does every tool: the rights, what
 shows, the journal and undoing are in one place.
 
+Settings › Agir sur le bureau › « Brancher un autre agent… » plugs
+Claude Code in, with the user's click:
+
 ```sh
-claude mcp add hocuspanda -- hocus mcp --agent Claude
+claude mcp add --scope user hocuspanda -- hocus mcp --agent Claude
 ```
 
 ## Rights
@@ -40,8 +43,17 @@ claude mcp add hocuspanda -- hocus mcp --agent Claude
 [[agents.mcp]]
 name = "Claude"        # what it shows under, and --agent's NAME
 access = "act"         # "read" (default): only the reading tools
+windows = true         # arrange, move, bring forward, close (default true)
+desktops = true        # switch desktops, send a window, launch (default true)
 settings = true        # may change settings (default false)
+input = true           # click and type in its apps (default true)
+client = "claude-code" # what the Settings plugged it into, and the day
+since = "2026-11-12"
 ```
+
+Each right is a check box of the Settings' page; an `act` agent's call
+needing one it does not hold is refused, saying which (`move_window` with
+a place needs `windows`, with a desktop `desktops`).
 
 Read at every call, followed live: a right taken away applies to the
 next call. A name the file does not list is refused, every call. A `read`
@@ -293,11 +305,8 @@ not list an agent's.
   capture or a share.
 - **Closing**: the compositor cannot know about unsaved work, so the
   card's text says why it asks (`confirm-apps`), never "will be lost".
-- **The settings' words** in the toast stay lot A's table of the
-  settings agents most often change: the key of every row is the
-  Settings' model's (`hocus-settings`), which the shell does not link;
-  one table for every key would mean moving that mapping into a crate
-  both read, not a small change.
+- **The settings' words** in the toast: lot A's table until lot C (see
+  there).
 - **Not ported from v0**: an agent clicking the shell's own elements
   (`shell = true`), turning the session's accessibility on while agents
   are there (`org.a11y.Status`), the column's live thumbnail of the
@@ -308,3 +317,35 @@ not list an agent's.
   field's card refused, taking over, a capture on a desktop no screen
   shows. Scenes 1 and 3: `HOCUS_SHOTS=DIR cargo nextest run -p
   hocus-compositor mcp::shots_in_apps --run-ignored only`.
+
+## As built (2026-11-12, lot C)
+
+- **The page**: Settings › Agir sur le bureau (docs/design/settings.md,
+  "Agir sur le bureau"), a section of its own after Agents, as the
+  mockup's sidebar shows it. The rights the mockup draws as four check
+  boxes are four keys of the agent's table (`windows`, `desktops`,
+  `settings`, `input`); `windows`, `desktops` and `input` default to true
+  so that lot A's and B's files keep what they allowed, `settings` to
+  false. The compositor checks them at each call (`Call::needs`,
+  `hocus-agents`; refusals `no-windows`, `no-desktops`, `no-input`).
+- **Plugging in**: Claude Code's MCP server is added in its user's scope
+  (`claude mcp add --scope user`), so that "dans tous tes projets" holds;
+  the agent is written here only once `claude` took it, read-only, with
+  `client` and `since`. Without `claude` on the PATH the sheet shows the
+  line to paste and « Brancher » adds the agent here. Another client gets
+  the JSON of the server and an agent named "Agent" (no field to name it
+  in this lot).
+- **« Voir son journal »** asks the compositor (`mcp-journal` on the
+  Settings' line), which tells the shell (`ToShell::Journal`): the
+  journal's popover opens on the focused screen's bar.
+- **The settings' words**: every key a row of the Settings writes is
+  named by `hocus_config::labels` (its row's name, its choices' labels, on
+  or off for a switch, a number with its unit), generated from the
+  Settings' model and checked against it by its test; the shell's table
+  of nine went. Keys several rows share (`[keyboard] options`) and the
+  shortcuts (which no agent changes) are left out: "changé un réglage".
+- **Tests**: `tests/settings_acting.rs` (the page, with a fake `claude`),
+  `hocus-agents`' `each_acting_call_needs_its_check_box`, the shell's
+  `a_request_is_one_sentence` (a key lot A's table did not have, named by
+  its row). Scene 5: `HOCUS_SHOTS=DIR cargo nextest run -p
+  hocus-compositor settings_acting::shots --run-ignored only`.

@@ -379,17 +379,21 @@
 # pandas = true
 #
 # The agents that act on the desktop through `hocus mcp --agent NAME`
-# (docs/design/mcp.md), one [[agents.mcp]] each, followed live: its name,
-# what it may do ("read": the windows, desktops, screens and settings;
-# "act": arrange and close windows, switch desktops, launch applications
-# too), whether it may change settings, and the applications (app ids,
-# globs) whose windows it may click and type in, through a pointer and a
-# keyboard of its own, and whose accessible trees it reads (none by
-# default). An agent the file does not name is refused. Before each
-# action, its intent shows on what it will touch for show-before-ms
-# milliseconds (0: none). In the applications of confirm-apps, each of an
-# agent's clicks, typing, keys or closing waits for your answer on a card
-# (60 s, then refused); so does typing in a password field anywhere.
+# (docs/design/mcp.md), one [[agents.mcp]] each, followed live; Settings ›
+# Act on the desktop writes them. Its name, what it may do ("read": look
+# at the windows, desktops, screens and settings; "act": act on them too),
+# and, acting, its rights: windows (arrange, move, close them; true by
+# default), desktops (switch them, launch applications; true), settings
+# (change them; false), input (click and type, through a pointer and a
+# keyboard of its own, in the applications of apps; true). apps: the
+# applications (app ids, globs) whose windows it may click and type in and
+# whose accessible trees it reads (none by default). client and since:
+# the program the Settings plugged it into ("claude-code") and the day.
+# An agent the file does not name is refused. Before each action, its
+# intent shows on what it will touch for show-before-ms milliseconds (0:
+# none). In the applications of confirm-apps, each of an agent's clicks,
+# typing, keys or closing waits for your answer on a card (60 s, then
+# refused); so does typing in a password field anywhere.
 #   [[agents.mcp]]
 #   name = "Claude"
 #   access = "act"
