@@ -95,8 +95,8 @@ pub use lock::{
 };
 pub use mcp::{
     MCP_JOURNAL_SHOWN, MCP_TAG_NAMESPACE, MCP_TAG_RADIUS, MCP_TOAST, MCP_TOAST_NAMESPACE,
-    MCP_TOAST_RADIUS, McpAt, McpDoing, McpKind, McpLine, McpRefusal, McpRow, McpSaid, McpShow,
-    McpShown, McpSummary, McpToast,
+    MCP_TOAST_RADIUS, McpAt, McpDoing, McpKind, McpLine, McpRefusal, McpRow, McpSaid, McpSet,
+    McpShow, McpShown, McpSummary, McpToast,
 };
 pub use record::{RECORD_COUNTDOWN, RECORD_FPS, RecordAsk, RecordFormat, Recorded, RecordingShown};
 pub use share::{

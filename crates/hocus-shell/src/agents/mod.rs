@@ -419,7 +419,7 @@ fn change(with: impl FnOnce(&mut Said)) {
         return;
     }
     let shows = after.shows(now_us());
-    let brief = Brief::of(&after.agents);
+    let brief = Brief::of(&after.all());
     tracing::debug!(
         shows = %words.said(&shows),
         secretary = %words.line(&brief),
@@ -451,7 +451,7 @@ pub fn lay_out() -> Layout {
     layout(
         &words,
         &shows,
-        &Brief::of(&said.agents),
+        &Brief::of(&said.all()),
         crate::popover::kit::measure,
     )
 }

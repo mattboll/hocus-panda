@@ -145,22 +145,27 @@ not list an agent's.
   palette, "Arrêter tous les agents").
 - **The tag** is one card, the name's violet band over the intent, so
   that the compositor rounds its corners on the CPU as it does the
-  bubbles'; the window's ring is the compositor's, 2 px at 55 % violet, 2
-  px outside the window, on the screen only (never in a capture or a
-  share). A desktop's tile is ringed only while an action on it shows.
+  bubbles'; the window's ring is the compositor's, 3 px of violet 2 px
+  outside the window and a 6 px violet halo around it, on the screen
+  only (never in a capture or a share). A desktop's tile takes the same
+  violet (a soft fill, 3 px inside, a 3 px halo) only while an action on
+  it shows.
 - **The toast** says the request's first intent quoted under its
   sentence (no "il y a 4 s": nothing draws for a clock), "Ne s'annule
-  pas" when nothing of it can be undone. A setting is named by its key
-  (`changé appearance.theme`): the Settings' row names are theirs, not
-  the shell's.
+  pas" when nothing of it can be undone. A setting is said with the
+  Settings' own words, its row's name and its choice's label ("mis
+  « Thème » sur « Sombre »", "activé « Mouvements réduits »"), from a
+  table of the settings agents most often change (the shell does not
+  link the Settings' model); another is "changé un réglage". The journal
+  says it the same way.
 - **The journal's popover** lists requests (one line each, as the toast
   sums them up) and refusals, the last 8; the journal itself (the
   `journal` tool) keeps every call. Its "Annuler" works while the
   request is among the last 20.
 - **The agents' group**: a row per MCP agent seen this session, its mark
   (its initial on the violet) and what it does on two lines; a click
-  opens the journal. Its rows count in the group's total, not in the
-  secretary's line.
+  opens the journal. An agent acting counts as at work in the group's
+  head.
 - **Tests** (`crates/hocus-compositor/tests/mcp.rs`), each with a real
   `hocus mcp`: initialize and the tools, `list_windows`, a read agent and
   an unknown one refused, a move shown before it is done and its toast,

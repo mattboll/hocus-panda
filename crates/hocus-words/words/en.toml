@@ -2664,7 +2664,11 @@ moved = { one = "arranged {n} window", other = "arranged {n} windows" }
 focused = { one = "brought {n} window forward", other = "brought {n} windows forward" }
 switched = "showed desktop {n}"
 launched = "opened {name}"
-setting = "changed {key}"
+set_to = "set “{name}” to “{value}”"
+turned_on = "turned “{name}” on"
+turned_off = "turned “{name}” off"
+changed = "changed “{name}”"
+changed_a_setting = "changed a setting"
 settings = { one = "changed {n} setting", other = "changed {n} settings" }
 and = " and "
 did = "{agent} {what}"
