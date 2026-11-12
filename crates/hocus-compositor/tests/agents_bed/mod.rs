@@ -216,7 +216,7 @@ impl Bed {
     }
 
     /// Launched on `page`, its window open with the keyboard.
-    fn launch(&mut self, page: &str) -> anyhow::Result<()> {
+    pub fn launch(&mut self, page: &str) -> anyhow::Result<()> {
         self.hp.launch(hocus_link::Launch {
             id: APP_ID.to_owned(),
             terminal: false,

@@ -1,4 +1,4 @@
-//! The settings' model: the 19 sections in their 5 groups, and every
+//! The settings' model: the 20 sections in their 5 groups, and every
 //! setting a section holds, with what the window needs to show it, find
 //! it and write it.
 //!
@@ -52,7 +52,7 @@ impl Group {
     }
 }
 
-/// The nineteen sections, in the sidebar's order.
+/// The twenty sections, in the sidebar's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionId {
     Appearance,
@@ -69,6 +69,8 @@ pub enum SectionId {
     Desktops,
     Apps,
     Agents,
+    /// The agents that act on the desktop, their rights (#440).
+    Acting,
     Captures,
     Power,
     Account,
@@ -93,7 +95,7 @@ pub struct Section {
 }
 
 impl SectionId {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Bar,
@@ -108,6 +110,7 @@ impl SectionId {
         Self::Desktops,
         Self::Apps,
         Self::Agents,
+        Self::Acting,
         Self::Captures,
         Self::Power,
         Self::Account,
@@ -240,6 +243,14 @@ impl SectionId {
                 Icon::Agents,
                 "6.16",
             ),
+            Self::Acting => s(
+                "act-on-desktop",
+                Work,
+                words::ACT_ON_THE_DESKTOP,
+                words::THE_AGENTS_YOU_PLUG_IN_HERE,
+                Icon::Acting,
+                "#440",
+            ),
             Self::Captures => s(
                 "captures",
                 Work,
@@ -310,6 +321,8 @@ pub enum Icon {
     Desktops,
     Apps,
     Agents,
+    /// An agent's pointer: Agir sur le bureau.
+    Acting,
     Captures,
     Power,
     Account,
@@ -369,6 +382,7 @@ impl Icon {
             Self::Agents => {
                 "M12 20.5 A7.5 7.5 0 1 0 12 5.5 A7.5 7.5 0 1 0 12 20.5 Z M5.2 9 A2.6 2.6 0 1 1 8.6 5.6 M18.8 9 A2.6 2.6 0 1 0 15.4 5.6 M9.5 12.5 V13.5 M14.5 12.5 V13.5"
             }
+            Self::Acting => "M5.5 3.5 V18 L9.5 14.2 L12.3 20.5 L14.8 19.4 L12.1 13.2 H17.5 Z",
             Self::Captures => {
                 "M3.5 8 H7 L9 5 H15 L17 8 H20.5 V19 H3.5 Z M12 16.2 A3 3 0 1 0 12 10.2 A3 3 0 1 0 12 16.2 Z"
             }
@@ -957,6 +971,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Power => crate::power::outside(),
         SectionId::Desktops => crate::desktops::outside(),
         SectionId::Agents => crate::agents::outside(),
+        SectionId::Acting => crate::acting::outside(),
         SectionId::Apps => crate::applications::outside(),
         SectionId::Captures => crate::captures::outside(),
         _ => &[],
@@ -988,8 +1003,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nineteen_sections_in_five_groups() {
-        assert_eq!(SectionId::ALL.len(), 19);
+    fn twenty_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 20);
         let count = |g| {
             SectionId::ALL
                 .iter()
@@ -998,7 +1013,7 @@ mod tests {
         };
         assert_eq!(
             Group::ALL.map(count),
-            [5, 4, 2, 4, 4],
+            [5, 4, 2, 5, 4],
             "the mockup's groups"
         );
         // Each group's sections come together, in the groups' order.

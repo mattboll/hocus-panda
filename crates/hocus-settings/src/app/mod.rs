@@ -11,6 +11,7 @@
 //! sliding, a menu opening) ask for frames only while they move.
 
 mod account;
+mod acting_page;
 mod agents_page;
 mod appearance_page;
 mod applications;
@@ -241,6 +242,9 @@ enum Undo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Doing {
     New,
+    /// A change with no undo: its toast says it, without "Annuler" (an
+    /// agent plugged in or out, which another program's file follows).
+    Once,
     Undo,
     Redo,
 }
@@ -352,6 +356,8 @@ pub enum Message {
     Power(power_page::Msg),
     /// The Agents page's (6.16).
     Agents(agents_page::Msg),
+    /// Agir sur le bureau's (#440).
+    Acting(acting_page::Msg),
     /// The Applications page's (6.15).
     Apps(applications::Msg),
     /// The Performances page's (#655).
@@ -448,6 +454,8 @@ pub struct App {
     /// The Agents page: the tools as the compositor says them, the
     /// consent sheet, the preview and the pandas' motions (6.16).
     agents: agents_page::State,
+    /// Agir sur le bureau: its sheet, its menu, `claude` running (#440).
+    acting: acting_page::State,
     /// The Applications page: what its thread read, its menus and sheet
     /// (6.15).
     apps: applications::State,
@@ -469,6 +477,7 @@ impl App {
         network.joining = start.join.clone();
         let power = power_page::State::start(&sender);
         let agents = agents_page::State::with(&sender);
+        let acting = acting_page::State::with(&sender);
         let apps = applications::State::new(sender.clone());
         let perf = perf_page::State::new(&sender, start.places.state.clone());
         let to_worker = sender.clone();
@@ -555,6 +564,7 @@ impl App {
             network,
             power,
             agents,
+            acting,
             apps,
             perf,
         };
@@ -682,6 +692,7 @@ impl App {
             || self.trial_moving(now)
             || self.rules_moving(now)
             || self.agents_moving(now)
+            || self.acting_moving(now)
             || self.apps_moving(now)
             || self.captures_moving(now)
     }
@@ -774,6 +785,10 @@ impl App {
                 }
                 // The Agents page's consent sheet takes every key (6.16).
                 if let Some(task) = self.agents_key_first(&key) {
+                    return task;
+                }
+                // Agir sur le bureau's sheet and menus (#440).
+                if let Some(task) = self.acting_key_first(&key) {
                     return task;
                 }
                 // The time zone picker's, the time's fields' (6.11).
@@ -951,6 +966,7 @@ impl App {
             Message::Network(msg) => self.network_update(msg),
             Message::Power(msg) => self.power_update(msg),
             Message::Agents(msg) => self.agents_update(msg),
+            Message::Acting(msg) => self.acting_update(msg),
             Message::Apps(msg) => self.apps_update(msg),
             Message::Perf(msg) => self.perf_update(msg),
         }
@@ -1050,6 +1066,7 @@ impl App {
                         self.redo.clear();
                         self.toast(said.done, ToastAction::Undo, TOAST)
                     }
+                    Doing::Once => self.toast(said.done, ToastAction::None, TOAST),
                     Doing::Undo => {
                         self.redo.push(Undo::File(change));
                         self.light = Some((said.row, Instant::now()));
@@ -1079,7 +1096,7 @@ impl App {
         let name = self.slot_name(setting, slot);
         let now = self.said_value(slot);
         match pending.doing {
-            Doing::New => {
+            Doing::New | Doing::Once => {
                 self.undo.push(Undo::File(change));
                 self.redo.clear();
                 let text = match pending.say {
@@ -1792,6 +1809,9 @@ impl App {
         if section == SectionId::Agents {
             return self.agents_controls();
         }
+        if section == SectionId::Acting {
+            return self.acting_controls();
+        }
         if section == SectionId::Captures {
             return self.captures_controls();
         }
@@ -2039,6 +2059,7 @@ impl App {
             Control::Network(stop) => self.network_key(stop, named),
             Control::Power(stop) => self.power_key(stop, named),
             Control::Agents(stop) => self.agents_key(stop, named),
+            Control::Acting(stop) => self.acting_key(&stop, named),
             Control::Apps(stop) => self.apps_key(stop, named, modifiers),
             Control::Screens(control) => self.screens_control_key(&control, named, modifiers.alt()),
             Control::Segmented => {
@@ -2329,6 +2350,8 @@ enum Control {
     Power(power_page::Stop),
     /// The Agents page's own (6.16).
     Agents(agents_page::Stop),
+    /// Agir sur le bureau's own (#440).
+    Acting(acting_page::Stop),
     /// The Applications page's own (6.15).
     Apps(applications::Stop),
 }

@@ -1087,7 +1087,7 @@ fn network_said(choice: &Choice, lang: Lang, doing: Doing) -> String {
     }
     .get(lang);
     match doing {
-        Doing::New => said.to_owned(),
+        Doing::New | Doing::Once => said.to_owned(),
         Doing::Undo => words::undone(lang, back),
         Doing::Redo => words::redone_2(lang, said.to_lowercase()),
     }

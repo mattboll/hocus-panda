@@ -270,6 +270,10 @@ pub enum ToShell {
     /// session menu (7.4) opens on `output`'s bar, as a click on the footer's
     /// user opens it.
     SessionMenu { output: String },
+    /// The Settings' « Voir son journal » (docs/design/mcp.md): the agents'
+    /// journal opens on `output`'s bar, as a click on an agent's row opens
+    /// it.
+    Journal { output: String },
     /// What the bar's menu of a window shows (#723), the answer to
     /// [`ToCompositor::WindowMenu`](crate::ToCompositor::WindowMenu) ([`WindowMenu`]).
     WindowMenu(WindowMenu),

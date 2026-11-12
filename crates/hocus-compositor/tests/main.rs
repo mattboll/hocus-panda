@@ -113,6 +113,7 @@ mod session_menu;
 mod session_restore;
 mod settings;
 mod settings_account;
+mod settings_acting;
 mod settings_agents;
 mod settings_appearance;
 mod settings_applications;

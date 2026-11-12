@@ -980,6 +980,10 @@ impl Shell {
                 popover::session::open(&output);
                 Task::none()
             }
+            ToShell::Journal { output } => {
+                popover::open_journal(&output);
+                Task::none()
+            }
             ToShell::WindowMenu(menu) => {
                 popover::window_menu::answer(menu);
                 Task::none()
@@ -1843,6 +1847,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::SessionMenu { output } => {
                             popover::session::open(&output);
+                            continue;
+                        }
+                        ToShell::Journal { output } => {
+                            popover::open_journal(&output);
                             continue;
                         }
                         // `Super+B` (bar.md §11) is not taken here: it

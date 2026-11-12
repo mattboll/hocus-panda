@@ -488,7 +488,7 @@ impl App {
             Choice::Picture { .. } => model::AVATAR,
         };
         match doing {
-            Doing::New => {
+            Doing::New | Doing::Once => {
                 self.undo.push(super::Undo::Account(choice));
                 self.redo.clear();
                 self.toast(done, ToastAction::Undo, TOAST)

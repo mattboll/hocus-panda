@@ -52,6 +52,7 @@
 pub mod accessibility;
 pub mod account;
 pub mod accounts;
+pub mod acting;
 pub mod activate;
 pub mod agents;
 pub mod app;

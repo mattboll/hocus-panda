@@ -814,6 +814,32 @@ impl Controller {
         effects
     }
 
+    /// The agents' journal opens on `output`'s bar (else the first),
+    /// beside the agents' group, as a click on an agent's row opens it:
+    /// the Settings' « Voir son journal ». Open already, it stays.
+    pub fn open_journal(&mut self, output: &str, now: Instant) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if self.open_item() == Some(Item::Journal) {
+            return effects;
+        }
+        let bar = if self.bars.contains_key(output) {
+            output.to_owned()
+        } else {
+            match self.bars.keys().min() {
+                Some(bar) => bar.clone(),
+                None => return effects,
+            }
+        };
+        let from = self
+            .ring
+            .find(&bar, AGENTS_NAMESPACE, Item::Journal)
+            .unwrap_or_else(|| Rectangle::new(Point::new(-50.0, 120.0), Size::new(40.0, 34.0)));
+        self.unfocus(&mut effects);
+        self.close(now, &mut effects);
+        self.open(&bar, Item::Journal, from, Opened::Click, &mut effects);
+        effects
+    }
+
     /// The notifications' history opens on `output`'s bar (else the
     /// first), beside the footer's bell: the summary of what was held
     /// while sharing links to it (5.11).
@@ -1571,6 +1597,13 @@ pub fn open_history(output: &str) {
 
 /// `Super+V` (5.6): the clipboard's history opens on `output`'s bar, or
 /// closes.
+/// The agents' journal opens on `output`'s bar (the Settings asked).
+pub fn open_journal(output: &str) {
+    let effects = with(|c| c.open_journal(output, Instant::now()));
+    send(effects);
+    changed(Item::Journal);
+}
+
 pub fn toggle_clipboard(output: &str) {
     let effects = with(|c| c.toggle_clipboard(output, Instant::now()));
     send(effects);
