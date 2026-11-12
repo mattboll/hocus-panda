@@ -281,8 +281,9 @@ struct Kept {
     inside: bool,
     /// The build whose tree a handled message outdated.
     outdated: Option<u64>,
-    /// The keys come for the tree to be built.
-    held: Vec<Event>,
+    /// The keys come for the tree to be built, and what the pointer did
+    /// behind them, each with the pointer as it had it.
+    held: Vec<(Event, mouse::Cursor)>,
     /// The keys that reached another surface, still to go through.
     queued: Vec<Pressed>,
     /// What the tree showed when last said in the log.
@@ -399,10 +400,18 @@ impl<L: Clone + Send + 'static> Around<'_, L> {
         viewport: &Rectangle,
     ) -> bool {
         // The keys wait for the tree built after what was handled: the
-        // ring's order, a field, are as it shows them.
+        // ring's order, a field, are as it shows them. The pointer's
+        // events wait behind keys that wait: a click would otherwise act
+        // before the keys typed ahead of it (an `Escape` that drops a
+        // text came after "Copier et fermer", which kept it).
         let kept = tree.state.downcast_mut::<Kept>();
-        if kept.outdated == Some(self.build) && matches!(event, Event::Keyboard(_)) {
-            kept.held.push(event.clone());
+        let waits = match event {
+            Event::Keyboard(_) => kept.outdated == Some(self.build),
+            Event::Mouse(_) | Event::Touch(_) => !kept.held.is_empty(),
+            _ => false,
+        };
+        if waits {
+            kept.held.push((event.clone(), cursor));
             shell.capture_event();
             return false;
         }
@@ -639,9 +648,9 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
                 handled = true;
                 tree.state.downcast_mut::<Kept>().outdated = Some(self.build);
             }
-            for event in &held {
+            for (event, cursor) in &held {
                 handled |= self.dispatch(
-                    tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+                    tree, event, layout, *cursor, renderer, clipboard, shell, viewport,
                 );
                 if handled {
                     tree.state.downcast_mut::<Kept>().outdated = Some(self.build);

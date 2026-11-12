@@ -189,6 +189,7 @@ fn handle(message: Msg) {
                 }
             }
             Msg::Escape if e.typing.is_some() => {
+                tracing::debug!("a text dropped");
                 e.typing = None;
                 e.focus = None;
             }
