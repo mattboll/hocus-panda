@@ -142,6 +142,16 @@ pub struct Launch {
     pub terminal: bool,
     #[serde(default)]
     pub dir: Option<String>,
+    /// Its entry's `StartupWMClass`: the id its windows may go by.
+    #[serde(default)]
+    pub wm_class: Option<String>,
+    /// The desktop its first window opens on, from 1; the shown one
+    /// without it. What the user sees never changes.
+    #[serde(default)]
+    pub desktop: Option<u32>,
+    /// The screen of that desktop; the pointer's by default.
+    #[serde(default)]
+    pub output: Option<String>,
     #[serde(default)]
     pub intent: Option<String>,
 }

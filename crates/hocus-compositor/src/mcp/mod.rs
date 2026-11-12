@@ -278,6 +278,23 @@ struct Seen {
     doing: McpDoing,
 }
 
+/// How long an application launched onto a desktop has to open its
+/// first window there.
+const LAUNCH_WAIT: Duration = Duration::from_secs(30);
+
+/// An application an agent launched onto a desktop: its first window opens
+/// there, out of the user's sight.
+#[derive(Debug)]
+struct Launched {
+    /// The ids its windows may go by, lowercase: its entry's id, the id's
+    /// last part, its `StartupWMClass`.
+    app_ids: Vec<String>,
+    output: Output,
+    /// From 0.
+    desktop: usize,
+    until: Instant,
+}
+
 /// The agents, their lines, what they show and what they did.
 #[derive(Debug, Default)]
 pub struct Mcp {
@@ -303,6 +320,9 @@ pub struct Mcp {
     halo_ids: RingIds,
     /// Each connection's own seat.
     pub seats: seat::Seats,
+    /// Applications agents launched onto a desktop, until their first
+    /// window comes.
+    launched: Vec<Launched>,
     /// Windows agents acted on, and when: driven while no screen shows
     /// them.
     pub driven: Vec<(WindowId, Instant)>,
@@ -1136,19 +1156,7 @@ impl State {
             }
             Call::MoveWindow(c) => self.mcp_move(&agent, &waiting.intent, c),
             Call::SwitchDesktop(c) => self.mcp_switch(&agent, &waiting.intent, c),
-            Call::Launch(c) => {
-                self.mcp_request(&agent, &waiting.intent, McpKind::Launch);
-                let launch = hocus_link::Launch {
-                    id: c.id.clone(),
-                    terminal: c.terminal,
-                    dir: c.dir.clone().unwrap_or_default(),
-                    argv: c.argv.clone(),
-                };
-                self.launch(launch);
-                let name = c.name.clone();
-                self.mcp_counted(&agent, |s| s.launched.push(name));
-                Ok((json!({ "launched": c.id }), c.name.clone()))
-            }
+            Call::Launch(c) => self.mcp_launch(&agent, &waiting.intent, c),
             Call::SetSetting(_) => return self.mcp_write(waiting),
             _ => Err("not an acting tool".to_owned()),
         };
@@ -1191,6 +1199,84 @@ impl State {
             id.0,
             crate::windows::title_of(self, id)
         )
+    }
+
+    /// Starts `c`'s application; given a desktop, its first window is
+    /// awaited there.
+    fn mcp_launch(
+        &mut self,
+        agent: &str,
+        intent: &str,
+        c: &hocus_agents::mcp::Launch,
+    ) -> Result<(Value, String), String> {
+        let place = match c.desktop {
+            Some(desktop) => {
+                let output = match c.output.as_deref() {
+                    Some(name) => self.mcp_output(Some(name))?,
+                    None => self
+                        .output_under_pointer()
+                        .ok_or("no screen to open it on")?,
+                };
+                let to = self.mcp_desktop_on(&output, desktop)?;
+                Some((output, to, desktop))
+            }
+            None => None,
+        };
+        self.mcp_request(agent, intent, McpKind::Launch);
+        let said = match &place {
+            Some((output, _, desktop)) => {
+                json!({ "launched": c.id, "desktop": desktop, "output": output.name() })
+            }
+            None => json!({ "launched": c.id }),
+        };
+        if let Some((output, to, desktop)) = place {
+            let last = c.id.rsplit('.').next().unwrap_or(&c.id);
+            let mut app_ids = vec![c.id.to_lowercase(), last.to_lowercase()];
+            app_ids.extend(c.wm_class.as_deref().map(str::to_lowercase));
+            app_ids.dedup();
+            let now = Instant::now();
+            self.mcp.launched.retain(|l| l.until > now);
+            self.mcp.launched.push(Launched {
+                app_ids,
+                output,
+                desktop: to,
+                until: now + LAUNCH_WAIT,
+            });
+            if let Some(request) = self.mcp.open.get_mut(agent) {
+                request.desktop = Some(desktop);
+            }
+        }
+        self.launch(hocus_link::Launch {
+            id: c.id.clone(),
+            terminal: c.terminal,
+            dir: c.dir.clone().unwrap_or_default(),
+            argv: c.argv.clone(),
+        });
+        let name = c.name.clone();
+        self.mcp_counted(agent, |s| s.launched.push(name));
+        Ok((said, c.name.clone()))
+    }
+
+    /// Where a window of `app_id` about to open goes, when an agent
+    /// launched its application onto a desktop: that launch's screen and
+    /// desktop. [`Self::mcp_launched_took`] says it went there.
+    pub(crate) fn mcp_launched_for(&self, app_id: &str) -> Option<(usize, Output, usize)> {
+        let app = app_id.to_lowercase();
+        let last = app.rsplit('.').next().unwrap_or(&app).to_owned();
+        let now = Instant::now();
+        self.mcp
+            .launched
+            .iter()
+            .enumerate()
+            .find(|(_, l)| l.until > now && l.app_ids.iter().any(|a| *a == app || *a == last))
+            .map(|(i, l)| (i, l.output.clone(), l.desktop))
+    }
+
+    /// The launch `at` of [`Self::mcp_launched_for`] got its window.
+    pub(crate) fn mcp_launched_took(&mut self, at: usize) {
+        if at < self.mcp.launched.len() {
+            self.mcp.launched.remove(at);
+        }
     }
 
     fn mcp_move(

@@ -132,10 +132,16 @@ impl Drop for Mcp {
 }
 
 fn mcp(hp: &Headless, agent: &str) -> anyhow::Result<Mcp> {
+    mcp_with(hp, agent, &[])
+}
+
+/// The same, with these variables (the desktop entries it finds).
+fn mcp_with(hp: &Headless, agent: &str, env: &[(&str, &Path)]) -> anyhow::Result<Mcp> {
     let socket = hp
         .control_socket()
         .ok_or_else(|| anyhow::anyhow!("no control socket"))?;
     let mut child = Command::new(common::hocus_program())
+        .envs(env.iter().copied())
         .arg("--socket")
         .arg(socket)
         .args(["mcp", "--agent", agent])
@@ -670,6 +676,73 @@ fn a_click_lands_through_the_agents_seat_and_the_users_focus_stays() -> anyhow::
     assert_eq!(result["isError"], true, "{result}");
     assert!(text(&result).contains("apps"), "{result}");
     assert_eq!(common::rect_of(&bed.hp, "foot"), Some(rect));
+    Ok(())
+}
+
+/// The desktops (from 1) of the `acted` windows, as list_windows says.
+fn acted_desktops(agent: &mut Mcp, hp: &mut Headless) -> anyhow::Result<Vec<u64>> {
+    let result = agent.tool(hp, "list_windows", json!({}))?;
+    Ok(result["structuredContent"]["windows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|w| w["app_id"] == "acted")
+        .filter_map(|w| w["desktop"].as_u64())
+        .collect())
+}
+
+/// #790: an application an agent launches onto another desktop opens
+/// there, and the desktop the user sees stays.
+#[test]
+fn a_launch_onto_another_desktop_opens_there_out_of_sight() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, IN_APPS)?;
+    let data = bed._dir.path().join("data");
+    std::fs::create_dir_all(data.join("applications"))?;
+    std::fs::write(
+        data.join("applications/acted.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Acted\nExec=true\n",
+    )?;
+    let env = [
+        ("XDG_DATA_HOME", data.as_path()),
+        ("XDG_DATA_DIRS", data.as_path()),
+    ];
+    let mut agent = mcp_with(&bed.hp, "Claude", &env)?;
+    let result = agent.tool(
+        &mut bed.hp,
+        "launch",
+        json!({ "app": "Acted", "desktop": 2, "intent": "Ouvre Acted sur le bureau 2" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["desktop"], 2, "{result}");
+    // Out of sight, the harness lists it not: as the agent sees it.
+    let shows = common::Shows::Window {
+        app_id: "acted",
+        size: (400, 300),
+        popup: false,
+    };
+    let _client = common::client(bed.hp.socket(), Some(shows))?;
+    let mut desktops = Vec::new();
+    for _ in 0..200 {
+        bed.hp.dispatch(std::time::Duration::from_millis(10))?;
+        desktops = acted_desktops(&mut agent, &mut bed.hp)?;
+        if !desktops.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(desktops, [2]);
+    assert_eq!(bed.hp.desktop().0, 0, "the user's desktop changed");
+    // Its next window opens where the user is, as any.
+    common::open(&mut bed.hp, "acted", (400, 300))?;
+    let mut desktops = acted_desktops(&mut agent, &mut bed.hp)?;
+    desktops.sort_unstable();
+    assert_eq!(desktops, [1, 2]);
+    // A desktop the screen has not: refused, nothing started.
+    let result = agent.tool(
+        &mut bed.hp,
+        "launch",
+        json!({ "app": "Acted", "desktop": 9, "intent": "Ouvre Acted" }),
+    )?;
+    assert_eq!(result["isError"], true, "{result}");
     Ok(())
 }
 
