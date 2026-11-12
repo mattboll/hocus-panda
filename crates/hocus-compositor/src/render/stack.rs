@@ -146,6 +146,10 @@ impl State {
             {
                 out.push(OutputElements::Fire(cap));
             }
+            // Its garland (#799), right in front of it.
+            if let Some(garland) = self.garland_front(frame, *id, look, looks) {
+                out.push(OutputElements::Fire(garland));
+            }
             // Raining (#432): through the rain, else fading over its time.
             let rain = look.rain.map(|fade| {
                 (

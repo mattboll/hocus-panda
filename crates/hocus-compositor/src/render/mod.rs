@@ -7,6 +7,7 @@
 //! clients are told once a frame is out.
 
 mod creatures;
+mod garland;
 mod layers;
 mod leaving;
 mod snow;
@@ -673,7 +674,11 @@ impl State {
         let now = self.now();
         self.frames.drawn_at.set(Some(now));
         // The snow's programs made before it is drawn (#795).
-        if (self.fx.snow.is_some() || !self.fx.creatures.shown.is_empty()) && purpose.screen() {
+        if (self.fx.snow.is_some()
+            || !self.fx.creatures.shown.is_empty()
+            || self.fx.garland.is_some())
+            && purpose.screen()
+        {
             renderer.effects_ready();
         }
         if purpose.screen() {
@@ -843,8 +848,13 @@ impl State {
         if purpose.screen() {
             self.burn_lights(&frame, &mut elements);
         }
-        // The snow's layer (#795): on the wallpaper, under the windows and
-        // the bar; a blank in its place while the glass is blurred.
+        // The garland's halos (#799), then the snow's layer (#795): on
+        // the wallpaper, under the windows and the bar; a blank in their
+        // place while the glass is blurred.
+        let garland = self.garland_layer(&frame, &looks).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
         let snow = self.snow_layer(&frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
@@ -872,14 +882,19 @@ impl State {
                 capture_glass,
             },
         );
-        if let Some(layer) = snow
-            && let Some(blank) = self.snow_blank(&frame)
-            && let Some(at) = elements
-                .iter()
-                .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
-            && let Some(slot) = elements.get_mut(at)
-        {
-            *slot = OutputElements::Fire(layer);
+        for (layer, blank) in [
+            (garland, self.garland_blank()),
+            (snow, self.snow_blank(&frame)),
+        ] {
+            if let Some(layer) = layer
+                && let Some(blank) = blank
+                && let Some(at) = elements
+                    .iter()
+                    .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
+                && let Some(slot) = elements.get_mut(at)
+            {
+                *slot = OutputElements::Fire(layer);
+            }
         }
         elements
     }

@@ -5,8 +5,8 @@
 use serde::Deserialize;
 
 /// The fourteen effects, grouped as Settings › Appearance › Effects shows
-/// them. The flames, the glass, the jelly, the snow and the creatures
-/// play so far; the others' switches are kept for their tickets.
+/// them. The flames, the glass, the jelly, the garland, the snow and the
+/// creatures play so far; the others' switches are kept for their tickets.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Effects {
@@ -27,6 +27,7 @@ pub struct Effects {
     /// A dragged window deforms like jelly, in place of the standard
     /// wobble (#797).
     pub jelly: bool,
+    /// A garland hangs under the active window (#799).
     pub garland: bool,
     // The moments.
     pub fireworks: bool,

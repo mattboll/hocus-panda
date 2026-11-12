@@ -70,6 +70,7 @@ mod emoji;
 mod featured;
 mod footer;
 mod foreign;
+mod garland;
 mod gestures;
 mod glass;
 mod headless;

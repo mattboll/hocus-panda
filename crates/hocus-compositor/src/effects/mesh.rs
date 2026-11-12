@@ -22,6 +22,33 @@ pub enum Shape {
     /// A box (its half sizes, pixels) blurred by a Gaussian (its standard
     /// deviation, pixels; under half a pixel, sharp).
     Box = 3,
+    /// A box with round corners (its half sizes and its corners' radius,
+    /// pixels; its place across in pixels from its middle), its edges
+    /// smoothed over a pixel: a stroke's piece is one whose radius is its
+    /// half height (#799).
+    Rounded = 4,
+    /// An oval: its place across from -1 to 1 on its radii, its colour
+    /// its vertices' (a linear gradient laid on its corners); its edge
+    /// smoothed over the pixels its radius (the shape's second number)
+    /// spans.
+    Oval = 5,
+    /// A glow from its middle to nothing at its edge, by the profile the
+    /// shape's second number names ([`Glow`]).
+    Glow = 6,
+}
+
+/// The glows' profiles: how opaque from the middle out, the board's
+/// gradients' stops (#799).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Glow {
+    /// A bulb's halo: 55 % at its middle, 32 % at 12 %, 10 % at 35 %,
+    /// 2.5 % at 70 %, nothing at its edge.
+    Halo = 0,
+    /// A bulb's core: whole, 85 % at 30 %, 25 % at 60 %, nothing at its
+    /// edge.
+    Core = 1,
+    /// A glint: whole, half at half, nothing at its edge.
+    Glint = 2,
 }
 
 /// A column of a fill: its place across, and its rows from the top down
@@ -89,8 +116,24 @@ impl Mesh {
         shape: Shape,
         numbers: [f32; 3],
     ) {
+        self.quad_of(corners, locals, [colour; 4], shape, numbers);
+    }
+
+    /// The same, each corner a colour of its own: what lies between
+    /// mixed (a linear gradient).
+    pub fn quad_of(
+        &mut self,
+        corners: [[f32; 2]; 4],
+        locals: [[f32; 2]; 4],
+        colours: [[f32; 4]; 4],
+        shape: Shape,
+        numbers: [f32; 3],
+    ) {
         let mut at = [0u16; 4];
-        for (slot, (c, l)) in at.iter_mut().zip(corners.into_iter().zip(locals)) {
+        for (slot, ((c, l), colour)) in at
+            .iter_mut()
+            .zip(corners.into_iter().zip(locals).zip(colours))
+        {
             match self.vertex(c, l, colour, shape, numbers) {
                 Some(i) => *slot = i,
                 None => return,

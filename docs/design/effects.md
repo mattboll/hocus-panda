@@ -19,7 +19,7 @@ langue").
 | The windows | Fermer en flammes | `flames` | #794 (built) |
 | | Éclats de verre | `shatter` | #798 (built) |
 | | Fenêtres en gelée | `jelly` | #797 (built) |
-| | Guirlande sous la fenêtre active | `garland` | #799 |
+| | Guirlande sous la fenêtre active | `garland` | #799 (built) |
 | The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
 | | Bonne nouvelle d'un agent : confettis | `confetti` | #811 |
 | The agents | Les agents en créatures | `creatures` | #796 (built) |
@@ -314,7 +314,54 @@ its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
 --run-ignored only creatures::shots` (foot terminals, each a process of
 its own; a fake herdr).
 
+## A garland under the active window (#799)
+
+With `garland = true`, a string of lights hangs under the focused window,
+as the board "Guirlande" does: its rope ported (`effects/garland.rs`, the
+look in `render/garland.rs`), its lengths in logical pixels.
+
+- **The rope**: 34 points pinned at five (0, 8, 16, 25, 33) evenly along
+  the window's bottom edge, 8 px in from its sides, 1 px below it; 16 %
+  longer than its span. Verlet with gravity (900 px/s²), damped (0.992 a
+  step), in a wind of its own (`sin(0.7t)·30 + sin(1.9t)·12`; with the
+  snow falling, 0.4 of the snow's), its links pulled back fourteen times a
+  step when stretched; 120 steps a second (the board's two a frame), from
+  its start, catching up 12 at most. It swings as its window moves, its
+  pins dragging it.
+- **The bulbs**: fifteen, on the odd points that are not pins, in five
+  colours in turn, each a pendulum swung by its point's speed (±1.1 rad).
+  A dark socket, an oval of glass lit by the board's gradient, an added
+  core and glint; their level twinkles a chase along the string, then at
+  random, then breathing, nine seconds each.
+- **Their halos**: the board's radial gradient (240 px across at most)
+  added to the wallpaper on the layer under the windows (in front of the
+  snow's), so that it never lights a window nor the bar; the cord is lit
+  by them as the board's is (their light added to its colour).
+- **Never over what is read**: drawn right in front of its window (a
+  window in front covers it), never on that window nor on the bar. Like
+  the board's, it hangs over a window behind it. On its way to another
+  window it is drawn on none (on the wallpaper alone).
+- **Following the focus**: when another window takes the keyboard, it
+  jumps there in 0.8 s (eased out), lifted 110 px midway. None on a
+  maximised or fullscreen window, nor on one with less than 20 px under
+  it on its screen, nor while locked: it goes, and hangs again at rest
+  under the next window it may.
+- **When**: moving, a frame each refresh, damage its own box (the cord and
+  bulbs; the halos'). With reduced motion it hangs still, its bulbs lit
+  (80 %) without twinkling, nothing drawn per frame (drawn again only as
+  its window moves). None in the power saver, while a screen is shared or
+  recorded, on the CPU, nor in a capture.
+
+Not built: the board's second garland across the top of the wallpaper,
+and the December proposal ("Des guirlandes pour les fêtes ?").
+
+Tests: `tests/garland.rs` (on GLES on Mesa's software device: below the
+focused window, its pixels untouched, moving within its box; following
+the focus to another window; none on a maximised window; off, nothing;
+still with reduced motion, nothing drawn per frame); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
+garland::shots`.
+
 ## Not built yet
 
-The garland (#799) hangs under the active window as an edge's
-decoration; the other effects come with their tickets.
+The other effects come with their tickets.

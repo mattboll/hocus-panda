@@ -32,6 +32,7 @@ pub const BUILT: &[&str] = &[
     "effects.flames",
     "effects.shatter",
     "effects.jelly",
+    "effects.garland",
     "effects.creatures",
 ];
 
@@ -220,9 +221,10 @@ mod tests {
     use super::*;
 
     /// Fourteen, each with its key of `[effects]`, off by default; the
-    /// snow, the flames, the glass, the jelly and the creatures built.
+    /// snow, the flames, the glass, the jelly, the garland and the
+    /// creatures built.
     #[test]
-    fn fourteen_effects_off_by_default_five_built() {
+    fn fourteen_effects_off_by_default_six_built() {
         let all = settings();
         assert_eq!(all.len(), 14);
         for s in all {
@@ -240,6 +242,7 @@ mod tests {
                 "effects.flames",
                 "effects.shatter",
                 "effects.jelly",
+                "effects.garland",
                 "effects.creatures",
             ];
             assert_eq!(soon(s.id), !built.contains(&s.id));

@@ -10,8 +10,9 @@
 //! ([`motion`]). Built with its first effects: closing a window in flames
 //! ([`flames`], #794), snow that settles ([`snow`], #795); then the agents
 //! as creatures on their windows ([`creatures`], #796), windows in jelly
-//! ([`jelly`], #797) and shattering into glass as they close
-//! ([`shatter`], #798).
+//! ([`jelly`], #797), shattering into glass as they close
+//! ([`shatter`], #798), and a garland under the active window
+//! ([`garland`], #799).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -23,6 +24,7 @@
 pub mod creatures;
 pub mod draw;
 pub mod flames;
+pub mod garland;
 pub mod jelly;
 pub mod mesh;
 pub mod motion;
@@ -46,6 +48,10 @@ pub struct Live {
     snows: u64,
     /// The agents as creatures on their windows (#796).
     pub creatures: creatures::Creatures,
+    /// The garland under the active window, while it shows (#799).
+    pub garland: Option<garland::Garland>,
+    /// The garlands hung so far, for their seeds.
+    garlands: u64,
 }
 
 use crate::{State, model::Mode, model::WindowId};
