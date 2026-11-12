@@ -666,11 +666,19 @@ fn undo_and_redo() -> anyhow::Result<()> {
     let (file, before, thumb) = bed.capture()?;
     let places = bed.edit(thumb)?;
     // Two arrows: the second undone, redone, undone by the button.
-    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
-    bed.drag(places.image(40.0, 200.0), places.image(260.0, 200.0))?;
+    // Each step waits for the editor to have it: under load, a key or a
+    // click could otherwise reach it before the drag's release.
+    bed.draw(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    bed.draw(places.image(40.0, 200.0), places.image(260.0, 200.0))?;
+    let mark = bed.mark();
     bed.key(&[KEY_LEFTCTRL, KEY_Z])?;
+    bed.logged_since(mark, "a mark undone")?;
+    let mark = bed.mark();
     bed.key(&[KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_Z])?;
+    bed.logged_since(mark, "a mark redone")?;
+    let mark = bed.mark();
     bed.click(places.at("undo"))?;
+    bed.logged_since(mark, "a mark undone")?;
     // A text begun, then left with `Escape`: nothing.
     bed.click(places.at("text"))?;
     bed.click(places.image(40.0, 300.0))?;
