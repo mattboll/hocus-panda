@@ -93,6 +93,9 @@ pub enum Action {
     /// The actions palette, for the focused window; open, it closes
     /// (#736, `crate::actions`).
     Actions,
+    /// Every MCP agent stopped, or let go on (docs/design/mcp.md): even
+    /// while a window holds the shortcuts back.
+    StopAgents,
 }
 
 impl Action {
@@ -334,6 +337,7 @@ shortcuts! {
     magnifier_out: ["Super+minus", "Super+KP_Subtract"] => Action::MagnifierOut,
     magnifier_off: ["Super+Escape"] => Action::MagnifierOff,
     screen_reader: ["Super+Alt+S"] => Action::ScreenReader,
+    stop_agents: ["Super+Shift+Escape"] => Action::StopAgents,
 }
 
 impl Shortcuts {
@@ -481,6 +485,7 @@ impl State {
             Action::MagnifierOff => self.magnifier_off(),
             Action::ScreenReader => self.toggle_screen_reader(),
             Action::Actions => self.toggle_actions(),
+            Action::StopAgents => self.mcp_toggle_stop(),
         }
     }
 

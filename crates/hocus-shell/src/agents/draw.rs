@@ -593,6 +593,37 @@ fn colours(look: Look) -> (Color, Color) {
     (word, tint)
 }
 
+/// An MCP agent's row's word and tint: the agents' violet while it acts
+/// (the mockup's `.agent-row.acting`), dim otherwise.
+fn mcp_colours(acting: bool) -> (Color, Color) {
+    let agent = crate::mcp::tag::AGENT.get();
+    if acting {
+        (agent, Color { a: 0.16, ..agent })
+    } else {
+        (DIM.get(), Color::TRANSPARENT)
+    }
+}
+
+/// An MCP agent's mark, centred on `at`, `side` across: its initial in
+/// the agents' violet on its soft fill, ringed.
+fn mcp_mark(f: &mut Frame, at: Point, side: f32, name: &str, shown: f32) {
+    let agent = crate::mcp::tag::AGENT.get();
+    let radius = side / 2.0 - 0.5;
+    let circle = Path::circle(at, radius);
+    f.fill(&circle, faded(Color { a: 0.16, ..agent }, shown));
+    f.stroke(
+        &circle,
+        iced::widget::canvas::Stroke::default()
+            .with_color(faded(Color { a: 0.55, ..agent }, shown))
+            .with_width(1.0),
+    );
+    let letter = name.chars().next().map(String::from).unwrap_or_default();
+    f.fill_text(kit::text_in(
+        MANROPE_BOLD,
+        said(&letter, at, 12.0, faded(agent, shown), Alignment::Center),
+    ));
+}
+
 /// Under high contrast, the bar on the left of a row that concerns the
 /// user (waiting, stuck, to see), in its state's colour, in place of its
 /// tint: 3 px wide (bar.md §13).
@@ -1093,7 +1124,13 @@ impl Group {
             items.push((Item::Decline, at(card.decline)));
         }
         for row in &layout.rows {
-            items.push((Item::Agent(row.id), at(row.rect)));
+            // An MCP agent's row opens its journal (docs/design/mcp.md).
+            let item = if crate::mcp::is_row(row.id) {
+                Item::Journal
+            } else {
+                Item::Agent(row.id)
+            };
+            items.push((item, at(row.rect)));
         }
         items
     }
@@ -1404,7 +1441,13 @@ impl Group {
             .iter()
             .map(|row| (row, state.moving.get(&row.id)));
         for (row, moving) in leaving.chain(rows) {
-            let (word, tint) = colours(row.look);
+            let mcp = crate::mcp::is_row(row.id);
+            let acting = mcp && crate::mcp::row_acting(row.id);
+            let (word, tint) = if mcp {
+                mcp_colours(acting)
+            } else {
+                colours(row.look)
+            };
             let (y, tint, shown, hop) = moving.map_or((row.rect.y, tint, 1.0, 0.0), |m| {
                 m.at(now, row.rect.y, tint)
             });
@@ -1432,7 +1475,12 @@ impl Group {
                 let bar = Rectangle::new(rect.position(), Size::new(CONTRAST_BAR, rect.height));
                 f.fill(&kit::rounded(bar, CONTRAST_BAR / 2.0), faded(word, shown));
             }
-            if state.hover == Some(Item::Agent(row.id)) {
+            let hovered = if mcp {
+                state.hover == Some(Item::Journal)
+            } else {
+                state.hover == Some(Item::Agent(row.id))
+            };
+            if hovered {
                 f.fill(&kit::rounded(rect, radius), faded(ROW_HOVER.get(), shown));
             }
             let middle = rect.center_y();
@@ -1446,6 +1494,38 @@ impl Group {
             } else {
                 (rect.x + ROW_PAD, PANDA)
             };
+            if mcp {
+                use crate::mcp::row::{GAP, MARK, NAME, WORD};
+                // Its mark in the agents' violet, its name over what it
+                // does.
+                let x = rect.x + ROW_PAD;
+                mcp_mark(
+                    f,
+                    Point::new(x + MARK / 2.0, middle),
+                    MARK,
+                    &row.name,
+                    shown,
+                );
+                let text = x + MARK + GAP;
+                let (name, said) = (NAME * LINE, WORD * LINE);
+                let top = middle - (name + said) / 2.0;
+                f.fill_text(kit::text_in(
+                    kit::MANROPE_SEMIBOLD,
+                    said_at(
+                        &row.name,
+                        Point::new(text, top + name / 2.0),
+                        NAME,
+                        faded(TEXT.get(), shown),
+                    ),
+                ));
+                f.fill_text(said_at(
+                    &row.word,
+                    Point::new(text, top + name + said / 2.0),
+                    WORD,
+                    faded(word, shown),
+                ));
+                continue;
+            }
             if super::pandas() {
                 let place = Rectangle::new(
                     Point::new(left, middle - side / 2.0 + hop),
@@ -1703,6 +1783,7 @@ pub fn node(
             let minutes = now_us.saturating_sub(agent.since) / 60_000_000;
             words.agent(&crate::a11y::plain(&agent.name), look, minutes)
         }
+        Item::Journal => crate::mcp::Words::new(lang).journal().to_owned(),
         Item::Sources => "Sources".to_owned(),
         Item::AnotherTool => super::Words::new(lang).another().to_owned(),
         Item::Plug(tool) => format!("{} {}", super::Words::new(lang).plug(), tool.title()),

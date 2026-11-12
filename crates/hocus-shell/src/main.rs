@@ -57,6 +57,7 @@ mod layouts;
 mod levels;
 mod locale;
 mod lock;
+mod mcp;
 mod meeting;
 mod music;
 mod network;
@@ -807,6 +808,11 @@ impl Shell {
                 agents::set_agents(list);
                 Task::none()
             }
+            ToShell::Mcp(shown) => Task::batch(
+                popover::messages(mcp::set(*shown))
+                    .into_iter()
+                    .map(Task::done),
+            ),
             ToShell::Peek(peek) => {
                 agents::peek::peek(peek);
                 Task::none()
@@ -972,6 +978,10 @@ impl Shell {
             }
             ToShell::SessionMenu { output } => {
                 popover::session::open(&output);
+                Task::none()
+            }
+            ToShell::Journal { output } => {
+                popover::open_journal(&output);
                 Task::none()
             }
             ToShell::WindowMenu(menu) => {
@@ -1837,6 +1847,10 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::SessionMenu { output } => {
                             popover::session::open(&output);
+                            continue;
+                        }
+                        ToShell::Journal { output } => {
+                            popover::open_journal(&output);
                             continue;
                         }
                         // `Super+B` (bar.md §11) is not taken here: it

@@ -309,6 +309,36 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             },
             id,
         }],
+        Effect::Agent {
+            id,
+            output,
+            size,
+            at: (x, y),
+            kind,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Left,
+                // From the screen's corner, whatever the bar keeps.
+                exclusive_zone: Some(-1),
+                margin: Some((y.max(0), 0, 0, x.max(0))),
+                // The card takes the keyboard once clicked, never before.
+                keyboard_interactivity: if kind == crate::mcp::Surface::Card {
+                    KeyboardInteractivity::OnDemand
+                } else {
+                    KeyboardInteractivity::None
+                },
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: kind == crate::mcp::Surface::Tag,
+                namespace: Some(kind.namespace().to_owned()),
+            },
+            id,
+        }],
         Effect::Emoji {
             id,
             output,

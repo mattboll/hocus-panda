@@ -1878,6 +1878,7 @@ version = "1.0.0"
 dependencies = [
  "hocus-link",
  "rustix 1.1.6",
+ "serde",
  "serde_json",
  "tempfile",
  "toml_edit",
@@ -1905,6 +1906,7 @@ dependencies = [
  "hocus-day",
  "hocus-panic",
  "hocus-perf",
+ "hocus-xdg",
  "jiff",
  "serde_json",
  "tempfile",
@@ -1915,6 +1917,7 @@ name = "hocus-compositor"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "calloop 0.14.5",
  "clap",
  "fontdue",
@@ -1960,6 +1963,7 @@ name = "hocus-config"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "hocus-words",
  "tempfile",
  "thiserror 2.0.21",
  "toml_edit",
@@ -2085,6 +2089,7 @@ dependencies = [
  "fontdue",
  "hocus-a11y",
  "hocus-bluetooth",
+ "hocus-config",
  "hocus-day",
  "hocus-link",
  "hocus-network",

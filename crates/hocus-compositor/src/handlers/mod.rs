@@ -41,7 +41,11 @@ impl SeatHandler for State {
         &mut self.protocols.seat_state
     }
 
-    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+    fn cursor_image(&mut self, seat: &Seat<Self>, image: CursorImageStatus) {
+        // An MCP agent's pointer has the shape of its own.
+        if *seat != self.seat {
+            return;
+        }
         self.pointer.cursor = image;
         self.redraw = true;
     }
@@ -55,6 +59,14 @@ impl SeatHandler for State {
             .and_then(|s| self.display_handle.get_client(s.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client.clone());
         set_primary_focus(&self.display_handle, seat, client);
+        // An MCP agent's keyboard: its text inputs alone follow it.
+        if *seat != self.seat {
+            let surface = focused.and_then(|f| f.wl_surface()).map(|s| s.into_owned());
+            self.emoji
+                .inputs
+                .focus_changed_on(Some(seat), surface.as_ref());
+            return;
+        }
         self.clipboard_focus_changed();
         self.emoji_focus_changed(focused);
         self.magnifier_focus_changed(focused);
@@ -75,8 +87,13 @@ impl SelectionHandler for State {
         &mut self,
         ty: SelectionTarget,
         source: Option<SelectionSource>,
-        _seat: Seat<Self>,
+        seat: Seat<Self>,
     ) {
+        // An MCP agent's selection stays its own seat's: never the
+        // clipboard's history, nor X11's.
+        if seat != self.seat {
+            return;
+        }
         let types = source.map(|s| s.mime_types());
         if ty == SelectionTarget::Clipboard
             && let Some(types) = &types

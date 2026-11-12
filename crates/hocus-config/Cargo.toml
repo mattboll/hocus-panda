@@ -16,6 +16,8 @@ workspace = true
 toml_edit.workspace = true
 # Its errors, by what went wrong (MIT or Apache-2.0).
 thiserror.workspace = true
+# Its keys' names in the user's words (`labels`).
+hocus-words.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

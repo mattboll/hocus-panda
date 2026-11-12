@@ -1,6 +1,7 @@
 //! Test clients: real Wayland clients on threads of their own, connected
 //! to an in-process headless compositor that the test drives.
 
+pub mod atspi;
 pub mod counting;
 
 use std::{os::unix::net::UnixStream, path::Path, sync::mpsc, time::Duration};
@@ -54,6 +55,10 @@ use wayland_protocols::{
         ext_idle_notifier_v1::ExtIdleNotifierV1,
     },
     wp::{
+        cursor_shape::v1::client::{
+            wp_cursor_shape_device_v1::WpCursorShapeDeviceV1,
+            wp_cursor_shape_manager_v1::WpCursorShapeManagerV1,
+        },
         idle_inhibit::zv1::client::{
             zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1,
             zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
@@ -440,6 +445,16 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size that takes every seat's pointer and
+    /// keyboard, and a text input on each (enabled as it takes that seat's
+    /// keyboard, for a password when `secret`), and says what each seat
+    /// gives it, by the seat's name ([`Event::OnSeat`]), as an MCP agent's
+    /// seat reaches an application (docs/design/mcp.md).
+    Acted {
+        app_id: &'static str,
+        size: (u32, u32),
+        secret: bool,
+    },
     /// An xdg toplevel of this size that says what its pointer gets:
     /// [`Event::Pointer`].
     Pointing {
@@ -479,6 +494,9 @@ pub enum Shows {
 /// What the test asks of a client.
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// An acted client asks a cursor shape device for each pointer its
+    /// seats gave it, as toolkits do when the pointer comes in.
+    CursorShapes,
     Fullscreen(bool),
     /// Takes the clipboard (it must hold the keyboard), then says
     /// [`Event::Copied`] once the compositor has it.
@@ -559,6 +577,8 @@ pub enum Event {
     Pasted(String),
     /// A pointing client's pointer got this.
     Pointer(Pointed),
+    /// An acted client got this from seat `0` ([`Shows::Acted`]).
+    OnSeat(String, Seated),
     /// Its idle notification (made with `input` or not) became idle.
     Idled {
         input: bool,
@@ -587,6 +607,29 @@ pub enum Pointed {
     Release,
     /// The wheel (or a touchpad's scroll).
     Axis,
+}
+
+/// What an acted client gets from a seat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seated {
+    /// Its pointer came in.
+    Enter,
+    /// A button (its evdev code) pressed.
+    Press(u32),
+    Release,
+    Axis,
+    /// Its keyboard came in (`true`) or left.
+    Focus(bool),
+    /// A key (its evdev code), pressed or released.
+    Key(u32, bool),
+}
+
+/// An acted client's objects of a seat: its name, and whether its text
+/// input says it takes a password.
+#[derive(Debug, Clone)]
+pub struct OfSeat {
+    name: String,
+    secret: bool,
 }
 
 /// A client running on its thread.
@@ -650,6 +693,7 @@ fn run_client(
         popup_on_press: false,
         hiding: false,
         pointing: false,
+        acted: None,
         moving: None,
         margin: 0,
         cell: 0,
@@ -672,6 +716,8 @@ fn run_client(
         caret: None,
         text_inputs: None,
         text_input: None,
+        cursor_shapes: None,
+        pointers: Vec::new(),
         committing: None,
         ctrl: false,
         writing: false,
@@ -720,6 +766,26 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.hiding = true;
+        }
+        Some(Shows::Acted {
+            app_id,
+            size,
+            secret,
+        }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.acted = Some(secret);
+            client.text_inputs = globals
+                .bind::<ZwpTextInputManagerV3, _, _>(&qh, 1..=1, ())
+                .ok();
+            client.cursor_shapes = globals
+                .bind::<WpCursorShapeManagerV1, _, _>(&qh, 1..=1, ())
+                .ok();
         }
         Some(Shows::Pointing { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -934,6 +1000,13 @@ fn run_client(
                     };
                     client.copy(conn, &qh, clip);
                 }
+                (Command::CursorShapes, _) => {
+                    if let Some(manager) = &client.cursor_shapes {
+                        for pointer in &client.pointers {
+                            manager.get_pointer(pointer, &qh, ());
+                        }
+                    }
+                }
                 (Command::Close, _) => client.window = None,
                 (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
@@ -1063,6 +1136,9 @@ struct Client {
     hiding: bool,
     /// Says what its pointer gets ([`Shows::Pointing`]).
     pointing: bool,
+    /// An acted client's, and whether its text inputs take a password
+    /// ([`Shows::Acted`]).
+    acted: Option<bool>,
     /// Moves itself ([`Shows::Moving`]): the left press's serial, until
     /// the motion after it asks for the move.
     moving: Option<Option<u32>>,
@@ -1101,6 +1177,10 @@ struct Client {
     caret: Option<(i32, i32, i32, i32)>,
     text_inputs: Option<ZwpTextInputManagerV3>,
     text_input: Option<ZwpTextInputV3>,
+    /// An acted client's cursor shape manager, and the pointers its seats
+    /// gave it.
+    cursor_shapes: Option<WpCursorShapeManagerV1>,
+    pointers: Vec<wl_pointer::WlPointer>,
     committing: Option<String>,
     ctrl: bool,
     writing: bool,
@@ -1324,6 +1404,27 @@ impl SeatHandler for Client {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        if let Some(secret) = self.acted {
+            let name = self
+                .seats
+                .info(&seat)
+                .and_then(|i| i.name)
+                .unwrap_or_default();
+            let of = OfSeat { name, secret };
+            match capability {
+                Capability::Pointer => {
+                    self.pointers.push(seat.get_pointer(qh, of));
+                }
+                Capability::Keyboard => {
+                    seat.get_keyboard(qh, of.clone());
+                    if let Some(manager) = &self.text_inputs {
+                        manager.get_text_input(&seat, qh, of);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         if capability == Capability::Pointer
             && (self.popup_on_press || self.hiding || self.pointing || self.moving.is_some())
         {
@@ -2022,6 +2123,30 @@ pub fn last_json(path: &Path, marker: &str) -> Option<serde_json::Value> {
     serde_json::from_str(&line[at..]).ok()
 }
 
+impl Dispatch<WpCursorShapeManagerV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &WpCursorShapeManagerV1,
+        _: <WpCursorShapeManagerV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WpCursorShapeDeviceV1, ()> for Client {
+    fn event(
+        _: &mut Self,
+        _: &WpCursorShapeDeviceV1,
+        _: <WpCursorShapeDeviceV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
 impl Dispatch<ZwpTextInputManagerV3, ()> for Client {
     fn event(
         _: &mut Self,
@@ -2064,6 +2189,84 @@ impl Dispatch<ZwpTextInputV3, ()> for Client {
                 if let Some(text) = client.committing.take() {
                     let _ = client.events.send(Event::Committed(text));
                 }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// An acted client's pointer, of seat `of`.
+impl Dispatch<wl_pointer::WlPointer, OfSeat> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        of: &OfSeat,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let seated = match event {
+            wl_pointer::Event::Enter { .. } => Seated::Enter,
+            wl_pointer::Event::Button { button, state, .. } => {
+                if state == wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed) {
+                    Seated::Press(button)
+                } else {
+                    Seated::Release
+                }
+            }
+            wl_pointer::Event::Axis { .. } => Seated::Axis,
+            _ => return,
+        };
+        let _ = client.events.send(Event::OnSeat(of.name.clone(), seated));
+    }
+}
+
+/// An acted client's keyboard, of seat `of`.
+impl Dispatch<wl_keyboard::WlKeyboard, OfSeat> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_keyboard::WlKeyboard,
+        event: wl_keyboard::Event,
+        of: &OfSeat,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let seated = match event {
+            wl_keyboard::Event::Enter { .. } => Seated::Focus(true),
+            wl_keyboard::Event::Leave { .. } => Seated::Focus(false),
+            wl_keyboard::Event::Key { key, state, .. } => Seated::Key(
+                key,
+                state == wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed),
+            ),
+            _ => return,
+        };
+        let _ = client.events.send(Event::OnSeat(of.name.clone(), seated));
+    }
+}
+
+/// An acted client's text input of seat `of`: enabled as its keyboard
+/// comes, for a password when it is one.
+impl Dispatch<ZwpTextInputV3, OfSeat> for Client {
+    fn event(
+        _: &mut Self,
+        input: &ZwpTextInputV3,
+        event: zwp_text_input_v3::Event,
+        of: &OfSeat,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwp_text_input_v3::{ContentHint, ContentPurpose};
+        match event {
+            zwp_text_input_v3::Event::Enter { .. } => {
+                input.enable();
+                if of.secret {
+                    input.set_content_type(ContentHint::SensitiveData, ContentPurpose::Password);
+                }
+                input.commit();
+            }
+            zwp_text_input_v3::Event::Leave { .. } => {
+                input.disable();
+                input.commit();
             }
             _ => {}
         }

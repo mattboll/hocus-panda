@@ -67,9 +67,9 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 19 sections fit 760 px
+it, 720 wide at most, padded 6 40 72 32. All 20 sections fit 760 px
 without scrolling (the sidebar's rows 28 px tall since Accessibilité
-came, 27 px since Performances came).
+came, 27 px since Performances came, 26 px since Agir sur le bureau came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -1691,6 +1691,61 @@ compositor (bar.md "6.16").
   suivi ; « Suivre herdr » le reprend."; "Changés récemment" on the home
   does not list the tools yet; "Enregistré" does not wait for the
   watcher's answer.
+
+## Agir sur le bureau (#440)
+
+The agents that act on the desktop through `hocus mcp` (docs/design/mcp.md,
+mockup scene 5), in the Work group after Agents (`hocus settings
+act-on-desktop`; "Réglages › Agir sur le bureau" in the actions palette).
+Crate `hocus-settings`: `acting.rs` (the file's agents, Claude Code's
+command), `app/acting_page.rs`.
+
+- **A card per `[[agents.mcp]]` agent**, in the file's order: its mark
+  (its initial in violet), its name (its client's, "Claude Code", when the
+  page plugged it in), "Branché le 12 novembre · dans tous tes projets"
+  (`since`, `client`; "Nommé dans ta configuration" for one named by
+  hand), « Regarder | Agir » (`access`), the four rights as check boxes,
+  two a line (`windows`, `desktops`, `settings`, `input`; inert at 45 %
+  while it only looks), "APPLICATIONS OÙ IL PEUT CLIQUER ET TAPER" (`apps`
+  as chips with their ✕, « + Ajouter » listing the applications installed
+  that are not there yet), « Voir son journal » (the compositor's line
+  `mcp-journal`: the bar's journal opens on the focused screen) and
+  « Débrancher ». No agent: one line says an agent the page does not list
+  is refused.
+- **"TOUJOURS DEMANDER AVANT D'AGIR DANS"**: `[agents] confirm-apps` as
+  chips, « + Ajouter » the same way.
+- **"Montrer avant chaque clic"**: `show-before-ms` on (600, the
+  default) or off (0); its line says the time.
+- **« Brancher un autre agent… »** opens a sheet: « Claude Code | Un autre
+  client MCP » (Claude Code inert once plugged in). Claude Code: what it
+  does (Hocuspanda added to Claude Code as an MCP server in all the
+  user's projects, and Claude here, read-only), the line it runs (`claude
+  mcp add --scope user hocuspanda -- hocus mcp --agent Claude`) with
+  « Copier », and, `claude` not on the `PATH`, that it is to be pasted in
+  a terminal. Another client: the server as JSON to copy, and that
+  « Brancher » adds "Agent" (then "Agent 2"…) here, read-only. Nothing is
+  run or written before the sheet's « Brancher »; `Esc` cancels. Claude
+  Code's agent is added once `claude` took it (on a thread, 20 s at most);
+  refused, the toast says Claude Code's words.
+- **Writes**: each change at once, in place, as `["agents", "mcp", NAME,
+  KEY]` (the store writes in the `[[agents.mcp]]` table of that `name`,
+  its other lines and comments kept; `["agents", "mcp", NAME]` alone the
+  whole table, added after the others or taken out), with its toast and
+  "Annuler". An agent plugged in or out has no "Annuler" (a write
+  `Doing::Once`): Claude Code's own file would not follow it; « Débrancher »
+  runs `claude mcp remove --scope user hocuspanda` too for an agent the page
+  plugged into Claude Code.
+- **Words**: `settings.acting` in the catalogue. The mockup's "Fermer avec
+  des données non enregistrées : demande d'abord" is said "Fermer une
+  application de la liste ci-dessous : il te demande d'abord": the
+  compositor cannot know about unsaved work (mcp.md, lot B).
+- **Tests** (`crates/hocus-compositor/tests/settings_acting.rs`, the
+  Agents' bed, a fake `claude` on its `PATH` writing its arguments down):
+  an agent of the file listed and its rights written back, comments kept,
+  the compositor following; « Brancher » running `claude` only after the
+  sheet's click; « Débrancher » taking it out of both. Screenshots:
+  `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+  settings_acting::shots --run-ignored only`.
 
 ## Applications (6.15)
 

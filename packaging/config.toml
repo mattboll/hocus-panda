@@ -300,6 +300,10 @@
 # Starts the screen reader (Orca), or stops it; on the lock screen too
 # (docs/design/screen-reader.md).
 # screen-reader = "Super+Alt+S"
+# Stops every agent acting on the desktop through hocus mcp, and lets them
+# go on again (docs/design/mcp.md); it works whatever holds the keys
+# back, and an agent's keys never press it.
+# stop-agents = "Super+Shift+Escape"
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Super+Alt and the wheel over a window make it more or less
@@ -373,6 +377,30 @@
 # remind = "5m"
 # peek = "waiting-and-done"
 # pandas = true
+#
+# The agents that act on the desktop through `hocus mcp --agent NAME`
+# (docs/design/mcp.md), one [[agents.mcp]] each, followed live; Settings ›
+# Act on the desktop writes them. Its name, what it may do ("read": look
+# at the windows, desktops, screens and settings; "act": act on them too),
+# and, acting, its rights: windows (arrange, move, close them; true by
+# default), desktops (switch them, launch applications; true), settings
+# (change them; false), input (click and type, through a pointer and a
+# keyboard of its own, in the applications of apps; true). apps: the
+# applications (app ids, globs) whose windows it may click and type in and
+# whose accessible trees it reads (none by default). client and since:
+# the program the Settings plugged it into ("claude-code") and the day.
+# An agent the file does not name is refused. Before each action, its
+# intent shows on what it will touch for show-before-ms milliseconds (0:
+# none). In the applications of confirm-apps, each of an agent's clicks,
+# typing, keys or closing waits for your answer on a card (60 s, then
+# refused); so does typing in a password field anywhere.
+#   [[agents.mcp]]
+#   name = "Claude"
+#   access = "act"
+#   settings = true
+#   apps = ["kitty", "org.mozilla.*"]
+# show-before-ms = 600
+# confirm-apps = ["hocus-settings", "org.keepassxc.KeePassXC", "com.bitwarden.desktop", "1password", "org.gnome.seahorse.Application", "org.gnome.World.Secrets", "org.kde.kwalletmanager5"]
 
 # [idle]
 # How long without input (keyboard, pointer, touchpad) on AC before the

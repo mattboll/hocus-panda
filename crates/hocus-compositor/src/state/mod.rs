@@ -154,6 +154,9 @@ pub struct State {
     pub shell: crate::shell::Shell,
     /// The agents and their sources (4.0).
     pub agents: crate::agents::Agents,
+    /// The agents acting on the desktop through `hocus mcp`
+    /// (docs/design/mcp.md).
+    pub mcp: crate::mcp::Mcp,
     /// The screens' settings, their trials and the Settings' lines (6.9).
     pub(crate) displays: crate::displays::Displays,
     /// The screens' identities and their sets (windows.md §12).
@@ -327,6 +330,7 @@ impl State {
             panel,
             shell: crate::shell::Shell::default(),
             agents: crate::agents::Agents::default(),
+            mcp: crate::mcp::Mcp::default(),
             displays: crate::displays::Displays::default(),
             screen_sets,
             input_devices: crate::input_devices::InputDevices::default(),

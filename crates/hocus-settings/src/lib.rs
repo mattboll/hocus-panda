@@ -2,7 +2,7 @@
 //! its own that writes the desktop's configuration file so that nobody has
 //! to edit it, keeping what the user wrote there by hand.
 //!
-//! - [`model`]: the 19 sections in 5 groups, and the settings each holds;
+//! - [`model`]: the 20 sections in 5 groups, and the settings each holds;
 //!   a section's ticket fills its own ([`power`] is the first, [`mouse`]
 //!   the mice and touchpads; [`screens`] draws its page itself, from the
 //!   compositor's line; [`sound`]'s live in PipeWire, [`network`]'s in
@@ -52,6 +52,7 @@
 pub mod accessibility;
 pub mod account;
 pub mod accounts;
+pub mod acting;
 pub mod activate;
 pub mod agents;
 pub mod app;

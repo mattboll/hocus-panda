@@ -135,6 +135,11 @@ pub struct Config {
     /// file.
     #[serde(skip)]
     pub pipewire_remote: Option<PathBuf>,
+    /// The accessibility bus MCP agents read applications' trees on, when
+    /// not the one the session's bus names (`org.a11y.Bus`): tests give
+    /// one of their own. Not part of the file.
+    #[serde(skip)]
+    pub a11y_bus: Option<String>,
     /// The videos' folder, where recordings are saved in a folder of their
     /// own (5.10): `$XDG_VIDEOS_DIR`, else xdg-user-dirs', else `~/Videos`.
     /// Not part of the file; `None` records nothing (tests, unless they
@@ -311,7 +316,9 @@ fn clip_keep<'de, D: Deserializer<'de>>(deserializer: D) -> Result<hocus_link::C
 /// How the bar calls the user for the agents, `[agents]` (6.16): the
 /// halo (bar.md §6), its reminder, the panda peeking out (§7 C) and the
 /// pandas in the agents' rows (4.1). The meetings' halo is not theirs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// And the agents that act on the desktop through `hocus mcp`, with their
+/// rights (docs/design/mcp.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Agents {
     pub halo: HaloRule,
@@ -322,6 +329,54 @@ pub struct Agents {
     /// Off: a dot of the state's colour in each agent's row instead of
     /// its panda.
     pub pandas: bool,
+    /// How long an MCP agent's intent shows on what it will touch before
+    /// it acts, milliseconds (0: it acts at once).
+    #[serde(rename = "show-before-ms")]
+    pub show_before_ms: u32,
+    /// `[[agents.mcp]]`: the agents `hocus mcp --agent NAME` may serve.
+    pub mcp: Vec<McpAgent>,
+    /// The applications (app ids, globs) where each click, typing, keys or
+    /// closing of an agent waits for the user's card: the settings and the
+    /// usual password managers by default.
+    #[serde(rename = "confirm-apps")]
+    pub confirm_apps: Vec<String>,
+}
+
+/// `[agents] confirm-apps`' default.
+pub const CONFIRM_APPS: [&str; 7] = [
+    "hocus-settings",
+    "org.keepassxc.KeePassXC",
+    "com.bitwarden.desktop",
+    "1password",
+    "org.gnome.seahorse.Application",
+    "org.gnome.World.Secrets",
+    "org.kde.kwalletmanager5",
+];
+
+impl Agents {
+    /// Whether an agent's input into `app_id` waits for the user.
+    pub fn confirms(&self, app_id: &str) -> bool {
+        self.confirm_apps.iter().any(|glob| app_glob(glob, app_id))
+    }
+}
+
+/// Whether `app_id` is one `glob` names: `*` for any run of characters,
+/// ignoring case (`org.mozilla.*`).
+pub fn app_glob(glob: &str, app_id: &str) -> bool {
+    fn from(glob: &[char], text: &[char]) -> bool {
+        match glob.split_first() {
+            None => text.is_empty(),
+            Some(('*', rest)) => {
+                (0..=text.len()).any(|i| from(rest, text.get(i..).unwrap_or_default()))
+            }
+            Some((c, rest)) => text
+                .split_first()
+                .is_some_and(|(t, more)| t.to_lowercase().eq(c.to_lowercase()) && from(rest, more)),
+        }
+    }
+    let glob: Vec<char> = glob.trim().chars().collect();
+    let text: Vec<char> = app_id.chars().collect();
+    !app_id.is_empty() && from(&glob, &text)
 }
 
 impl Default for Agents {
@@ -331,8 +386,81 @@ impl Default for Agents {
             remind: Remind::Five,
             peek: PeekRule::WaitingAndDone,
             pandas: true,
+            show_before_ms: 600,
+            mcp: Vec::new(),
+            confirm_apps: CONFIRM_APPS.iter().map(|a| (*a).to_owned()).collect(),
         }
     }
+}
+
+/// An agent of `[[agents.mcp]]` and its rights (docs/design/mcp.md).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpAgent {
+    /// What it shows under, and `hocus mcp --agent`'s name.
+    pub name: String,
+    #[serde(default)]
+    pub access: McpAccess,
+    /// Whether an `act` agent may arrange, move, bring forward and close
+    /// windows.
+    #[serde(default = "yes")]
+    pub windows: bool,
+    /// Whether it may switch desktops, send a window to another and
+    /// launch applications.
+    #[serde(default = "yes")]
+    pub desktops: bool,
+    /// Whether it may change settings.
+    #[serde(default)]
+    pub settings: bool,
+    /// Whether it may click, scroll, type and press keys in the
+    /// applications of `apps`.
+    #[serde(default = "yes")]
+    pub input: bool,
+    /// The applications (app ids, globs) whose windows it may click and
+    /// type in and whose trees it reads; none by default.
+    #[serde(default)]
+    pub apps: Vec<String>,
+    /// The program the Settings plugged it into (`"claude-code"`), which
+    /// their « Débrancher » unplugs too; none for one named by hand.
+    #[serde(default)]
+    pub client: Option<String>,
+    /// The day the Settings plugged it in (`"2026-11-12"`), which its card
+    /// says.
+    #[serde(default)]
+    pub since: Option<String>,
+}
+
+const fn yes() -> bool {
+    true
+}
+
+impl McpAgent {
+    /// Whether it holds `right`.
+    pub const fn holds(&self, right: hocus_agents::mcp::Right) -> bool {
+        use hocus_agents::mcp::Right;
+        match right {
+            Right::Windows => self.windows,
+            Right::Desktops => self.desktops,
+            Right::Settings => self.settings,
+            Right::Input => self.input,
+        }
+    }
+
+    /// Whether its input may go into a window of `app_id`.
+    pub fn may_use(&self, app_id: &str) -> bool {
+        self.apps.iter().any(|glob| app_glob(glob, app_id))
+    }
+}
+
+/// What an MCP agent may do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpAccess {
+    /// Read the windows, desktops, screens and settings.
+    #[default]
+    Read,
+    /// And act on them.
+    Act,
 }
 
 /// What of the agents lights the halo.
@@ -989,12 +1117,60 @@ mod tests {
                 remind: Remind::Ten,
                 peek: PeekRule::Off,
                 pandas: false,
+                ..Agents::default()
             }
         );
         let config: Config = toml::from_str("[agents]\nremind = \"never\"\npeek = \"waiting\"\n")?;
         assert_eq!(config.agents.remind.after(), None);
         assert_eq!(config.agents.peek, PeekRule::Waiting);
         assert_eq!(config.agents.halo, HaloRule::All);
+        let config: Config = toml::from_str(
+            "[agents]\nshow-before-ms = 0\n[[agents.mcp]]\nname = \"Claude\"\naccess = \"act\"\n\
+             settings = true\n[[agents.mcp]]\nname = \"look\"\n",
+        )?;
+        assert_eq!(config.agents.show_before_ms, 0);
+        assert_eq!(
+            config.agents.mcp,
+            [
+                super::McpAgent {
+                    name: "Claude".into(),
+                    access: super::McpAccess::Act,
+                    windows: true,
+                    desktops: true,
+                    settings: true,
+                    input: true,
+                    apps: Vec::new(),
+                    client: None,
+                    since: None,
+                },
+                super::McpAgent {
+                    name: "look".into(),
+                    access: super::McpAccess::Read,
+                    windows: true,
+                    desktops: true,
+                    settings: false,
+                    input: true,
+                    apps: Vec::new(),
+                    client: None,
+                    since: None,
+                },
+            ]
+        );
+        let config: Config = toml::from_str(
+            "[[agents.mcp]]\nname = \"C\"\naccess = \"act\"\nwindows = false\ninput = false\n\
+             client = \"claude-code\"\nsince = \"2026-11-12\"\n",
+        )?;
+        let c = &config.agents.mcp[0];
+        use hocus_agents::mcp::Right;
+        assert!(!c.holds(Right::Windows) && c.holds(Right::Desktops));
+        assert!(!c.holds(Right::Settings) && !c.holds(Right::Input));
+        assert_eq!(c.client.as_deref(), Some("claude-code"));
+        assert!(super::app_glob("org.mozilla.*", "org.mozilla.firefox"));
+        assert!(super::app_glob("KITTY", "kitty"));
+        assert!(!super::app_glob("kitty", "kitty-2"));
+        assert!(!super::app_glob("*", ""));
+        assert!(Agents::default().confirms("org.keepassxc.KeePassXC"));
+        assert!(!Agents::default().confirms("kitty"));
         assert_eq!(
             Remind::Two.after(),
             Some(std::time::Duration::from_secs(120))
@@ -1004,6 +1180,8 @@ mod tests {
             "[agents]\nremind = \"3m\"\n",
             "[agents]\npeek = \"done\"\n",
             "[agents]\nwave = true\n",
+            "[[agents.mcp]]\nname = \"a\"\naccess = \"all\"\n",
+            "[[agents.mcp]]\naccess = \"act\"\n",
         ] {
             assert!(toml::from_str::<Config>(bad).is_err(), "{bad:?}");
         }

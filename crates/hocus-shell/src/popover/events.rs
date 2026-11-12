@@ -197,6 +197,17 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
     },
+    /// An MCP agent's tag (docs/design/mcp.md) on `output`, `size`
+    /// large, its top left at `at` (logical, from the screen's), taking
+    /// neither the keyboard nor the pointer; or its toast (`toast`), which
+    /// takes the pointer for its buttons.
+    Agent {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+        at: (i32, i32),
+        kind: crate::mcp::Surface,
+    },
     /// The actions palette's surface on `output` (#736): `size`, its
     /// margins from the screen's top left corner (top, right, bottom,
     /// left), holding the keyboard.

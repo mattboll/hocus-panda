@@ -231,7 +231,11 @@ impl Bed {
     }
 
     fn drag(&mut self, from: (f64, f64), to: (f64, f64)) -> anyhow::Result<()> {
-        self.hp.pointer_move(from.0, from.1);
+        // A move after the pointer comes in, as for a click: iced's
+        // `CursorEntered` has no place, and read in one batch with the
+        // press and the moves after it, the press took the batch's last
+        // (the arrow began at the third step).
+        common::point(&mut self.hp, from)?;
         self.idle(Duration::from_millis(40))?;
         self.hp.button(BTN_LEFT, true);
         self.idle(Duration::from_millis(30))?;
@@ -666,16 +670,26 @@ fn undo_and_redo() -> anyhow::Result<()> {
     let (file, before, thumb) = bed.capture()?;
     let places = bed.edit(thumb)?;
     // Two arrows: the second undone, redone, undone by the button.
-    bed.drag(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
-    bed.drag(places.image(40.0, 200.0), places.image(260.0, 200.0))?;
+    // Each step waits for the editor to have it: under load, a key or a
+    // click could otherwise reach it before the drag's release.
+    bed.draw(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    bed.draw(places.image(40.0, 200.0), places.image(260.0, 200.0))?;
+    let mark = bed.mark();
     bed.key(&[KEY_LEFTCTRL, KEY_Z])?;
+    bed.logged_since(mark, "a mark undone")?;
+    let mark = bed.mark();
     bed.key(&[KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_Z])?;
+    bed.logged_since(mark, "a mark redone")?;
+    let mark = bed.mark();
     bed.click(places.at("undo"))?;
+    bed.logged_since(mark, "a mark undone")?;
     // A text begun, then left with `Escape`: nothing.
     bed.click(places.at("text"))?;
     bed.click(places.image(40.0, 300.0))?;
     bed.key(&[KEY_O])?;
+    let mark = bed.mark();
     bed.key(&[KEY_ESC])?;
+    bed.logged_since(mark, "a text dropped")?;
     assert_eq!(
         bed.hp.capture_editor_surfaces().len(),
         1,
@@ -696,6 +710,33 @@ fn undo_and_redo() -> anyhow::Result<()> {
         old.get_pixel(60, 300),
         "the text left is there"
     );
+    Ok(())
+}
+
+/// A text typed, `Escape`, and "Copier et fermer" clicked at once, before
+/// the editor drew again: the click acts after the keys, and the text
+/// dropped is not in the saved image.
+#[test]
+fn a_click_right_after_escape_comes_after_it() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell)?;
+    let (file, before, thumb) = bed.capture()?;
+    let places = bed.edit(thumb)?;
+    bed.draw(places.image(40.0, 60.0), places.image(260.0, 60.0))?;
+    bed.click(places.at("text"))?;
+    bed.click(places.image(40.0, 300.0))?;
+    common::point(&mut bed.hp, places.at("copy"))?;
+    bed.idle(Duration::from_millis(100))?;
+    let mark = bed.mark();
+    chord(&mut bed.hp, &[KEY_O]);
+    chord(&mut bed.hp, &[KEY_ESC]);
+    bed.hp.button(BTN_LEFT, true);
+    bed.hp.button(BTN_LEFT, false);
+    bed.logged_since(mark, "the annotated capture is written")?;
+    let (old, new) = (png(&before)?, png(&std::fs::read(&file)?)?);
+    assert_eq!(new.get_pixel(60, 300), old.get_pixel(60, 300), "the text");
     Ok(())
 }
 

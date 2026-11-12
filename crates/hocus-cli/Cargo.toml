@@ -26,6 +26,8 @@ hocus-day.workspace = true
 hocus-perf.workspace = true
 jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 clap.workspace = true
+# `hocus mcp`'s `launch`: the desktop entry an agent names.
+hocus-xdg.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

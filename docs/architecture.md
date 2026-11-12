@@ -47,7 +47,7 @@ flowchart LR
 |---|---|---|---|
 | Wayland, shell | `WAYLAND_SOCKET`, a connection the compositor made | standard protocols (wlr-layer-shell for every shell surface) | smithay / iced_layershell |
 | Shell's line | `<wayland socket>.shell` (`HOCUS_SHELL_SOCKET`) | one JSON object a line, `{"kind":…,"data":…}`, after a hello naming the protocol's version; facts and requests, never a question the loop waits on | `hocus-link` (`ToShell`, `ToCompositor`, `wire`) |
-| Control socket | `<wayland socket>.control` (`HOCUS_SOCKET`) | one line of words: `agent …` reports, `msg idle\|lock\|outputs\|input-devices [follow]\|a11y`, `msg shell status\|restart`, the Settings' `msg screens` | `hocus-agents` (`Report`, `Question`, `ProgramAsk`) |
+| Control socket | `<wayland socket>.control` (`HOCUS_SOCKET`) | one line of words: `agent …` reports, `msg idle\|lock\|outputs\|input-devices [follow]\|a11y`, `msg shell status\|restart`, the Settings' `msg screens`; `mcp NAME` opens an agent's line of JSON objects (docs/design/mcp.md) | `hocus-agents` (`Report`, `Question`, `ProgramAsk`, `mcp`) |
 | Configuration | `$XDG_CONFIG_HOME/hocuspanda/config.toml` (`HOCUS_CONFIG`) | TOML, edited in place; defaults in `packaging/config.toml` | `hocus-config` |
 | D-Bus | the bus `--session-bus` names (or the session's, on a virtual terminal), the system bus | freedesktop interfaces | zbus in each crate |
 
@@ -58,7 +58,7 @@ flowchart LR
 | `hocus-compositor` | the `hocuspanda` binary, its `State`, and the in-process test harness (`Headless`) | config, geometry, link, pandas, words, panic, agents, xdg, perf |
 | `hocus-shell` | the `hocuspanda-shell` binary, its surfaces and the widget kit (`src/ui`) | words, link, pandas, panic, a11y, xdg, day, sound, bluetooth, network |
 | `hocus-settings` | the `hocus-settings` binary: its model of every setting, its pages | words, config, agents, link, pandas, panic, perf, geometry, sound, bluetooth, network, xdg |
-| `hocus-cli` | the `hocus` binary | agents, panic, day, perf |
+| `hocus-cli` | the `hocus` binary (`hocus mcp` among its commands) | agents, panic, day, perf, xdg |
 | `hocus-link` | the shell's line: its messages, wire and version; the surfaces' namespaces and the measures both sides draw by; the theme's tokens | words |
 | `hocus-agents` | the control socket's lines; agents' states, the tools' hooks, plugging tools in, herdr, a process's ancestry | link |
 | `hocus-config` | the configuration file read and written in place; every default (`defaults`, from `packaging/config.toml`) | — |

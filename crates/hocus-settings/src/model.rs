@@ -1,4 +1,4 @@
-//! The settings' model: the 19 sections in their 5 groups, and every
+//! The settings' model: the 20 sections in their 5 groups, and every
 //! setting a section holds, with what the window needs to show it, find
 //! it and write it.
 //!
@@ -52,7 +52,7 @@ impl Group {
     }
 }
 
-/// The nineteen sections, in the sidebar's order.
+/// The twenty sections, in the sidebar's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionId {
     Appearance,
@@ -69,6 +69,8 @@ pub enum SectionId {
     Desktops,
     Apps,
     Agents,
+    /// The agents that act on the desktop, their rights (#440).
+    Acting,
     Captures,
     Power,
     Account,
@@ -93,7 +95,7 @@ pub struct Section {
 }
 
 impl SectionId {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Bar,
@@ -108,6 +110,7 @@ impl SectionId {
         Self::Desktops,
         Self::Apps,
         Self::Agents,
+        Self::Acting,
         Self::Captures,
         Self::Power,
         Self::Account,
@@ -240,6 +243,14 @@ impl SectionId {
                 Icon::Agents,
                 "6.16",
             ),
+            Self::Acting => s(
+                "act-on-desktop",
+                Work,
+                words::ACT_ON_THE_DESKTOP,
+                words::THE_AGENTS_YOU_PLUG_IN_HERE,
+                Icon::Acting,
+                "#440",
+            ),
             Self::Captures => s(
                 "captures",
                 Work,
@@ -310,6 +321,8 @@ pub enum Icon {
     Desktops,
     Apps,
     Agents,
+    /// An agent's pointer: Agir sur le bureau.
+    Acting,
     Captures,
     Power,
     Account,
@@ -369,6 +382,7 @@ impl Icon {
             Self::Agents => {
                 "M12 20.5 A7.5 7.5 0 1 0 12 5.5 A7.5 7.5 0 1 0 12 20.5 Z M5.2 9 A2.6 2.6 0 1 1 8.6 5.6 M18.8 9 A2.6 2.6 0 1 0 15.4 5.6 M9.5 12.5 V13.5 M14.5 12.5 V13.5"
             }
+            Self::Acting => "M5.5 3.5 V18 L9.5 14.2 L12.3 20.5 L14.8 19.4 L12.1 13.2 H17.5 Z",
             Self::Captures => {
                 "M3.5 8 H7 L9 5 H15 L17 8 H20.5 V19 H3.5 Z M12 16.2 A3 3 0 1 0 12 10.2 A3 3 0 1 0 12 16.2 Z"
             }
@@ -957,6 +971,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Power => crate::power::outside(),
         SectionId::Desktops => crate::desktops::outside(),
         SectionId::Agents => crate::agents::outside(),
+        SectionId::Acting => crate::acting::outside(),
         SectionId::Apps => crate::applications::outside(),
         SectionId::Captures => crate::captures::outside(),
         _ => &[],
@@ -988,8 +1003,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nineteen_sections_in_five_groups() {
-        assert_eq!(SectionId::ALL.len(), 19);
+    fn twenty_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 20);
         let count = |g| {
             SectionId::ALL
                 .iter()
@@ -998,7 +1013,7 @@ mod tests {
         };
         assert_eq!(
             Group::ALL.map(count),
-            [5, 4, 2, 4, 4],
+            [5, 4, 2, 5, 4],
             "the mockup's groups"
         );
         // Each group's sections come together, in the groups' order.
@@ -1172,6 +1187,172 @@ mod tests {
             }
         }
         assert!(rows > 100, "{rows} rows");
+    }
+
+    /// `hocus_config::labels`, the table the shell names settings with,
+    /// is these rows' keys, names and choices: written again with
+    /// `HOCUS_LABELS_WRITE=1`.
+    #[test]
+    fn the_labels_are_the_rows() {
+        let table = labels_table();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../hocus-config/src/labels_table.rs"
+        );
+        if std::env::var_os("HOCUS_LABELS_WRITE").is_some() {
+            std::fs::write(path, &table).expect("the table written");
+        }
+        let now = std::fs::read_to_string(path).unwrap_or_default();
+        assert!(
+            now == table,
+            "hocus-config's labels are not the rows: HOCUS_LABELS_WRITE=1 cargo test -p \
+             hocus-settings the_labels_are_the_rows"
+        );
+        // And what the lookup says is what the rows say, of each key one
+        // row writes alone.
+        let shared = shared_keys();
+        for setting in all_settings() {
+            for place in setting.places.all() {
+                if matches!(setting.places, Places::Page(_)) || shared.contains(&place.dotted()) {
+                    continue;
+                }
+                let label = hocus_config::labels::of(&place.dotted());
+                // A name made per desktop ("Bureau 3") is no constant of
+                // the catalogue: only the shortcuts', which no agent changes.
+                let Some(label) = label else {
+                    assert_eq!(
+                        place.key.first(),
+                        Some(&"shortcuts"),
+                        "{} has no label",
+                        setting.id
+                    );
+                    continue;
+                };
+                assert!(
+                    Lang::ALL
+                        .iter()
+                        .any(|l| label.name.get(*l) == setting.name.get(*l)),
+                    "{}",
+                    setting.id
+                );
+            }
+        }
+    }
+
+    /// The keys several rows write (`[keyboard] options`' families): the
+    /// table names none of them, a row's name saying only its part.
+    fn shared_keys() -> Vec<String> {
+        let mut seen: Vec<String> = Vec::new();
+        let mut shared = Vec::new();
+        for setting in all_settings() {
+            for place in setting.places.all() {
+                let key = place.dotted();
+                if seen.contains(&key) {
+                    shared.push(key);
+                } else {
+                    seen.push(key);
+                }
+            }
+        }
+        shared
+    }
+
+    /// The labels' table as Rust: each catalogue text by its constant.
+    fn labels_table() -> String {
+        use std::collections::BTreeMap;
+        // Each plain text of the catalogue, by what it says in every
+        // language: its constants' paths.
+        let mut by_said: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
+        let all: Vec<Vec<(String, String)>> =
+            Lang::ALL.iter().map(|l| hocus_words::every(*l)).collect();
+        for (i, (key, _)) in all[0].iter().enumerate() {
+            if key.contains('[') {
+                continue;
+            }
+            let said: Vec<String> = all.iter().map(|texts| texts[i].1.clone()).collect();
+            if said.iter().any(|t| t.contains('{')) {
+                continue;
+            }
+            by_said.entry(said).or_default().push(key.clone());
+        }
+        const KEYWORDS: [&str; 38] = [
+            "as", "async", "await", "break", "const", "continue", "dyn", "else", "enum", "extern",
+            "false", "fn", "for", "gen", "if", "impl", "in", "let", "loop", "match", "mod", "move",
+            "mut", "pub", "ref", "return", "static", "struct", "trait", "true", "type", "unsafe",
+            "use", "where", "while", "abstract", "final", "try",
+        ];
+        let text = |t: &Words| -> Option<String> {
+            let said: Vec<String> = Lang::ALL.iter().map(|l| t.get(*l).to_owned()).collect();
+            if let Some(key) = by_said.get(&said).and_then(|keys| keys.iter().min()) {
+                let mut parts: Vec<String> = key
+                    .split('.')
+                    .map(|p| {
+                        if KEYWORDS.contains(&p) {
+                            format!("r#{p}")
+                        } else {
+                            p.to_owned()
+                        }
+                    })
+                    .collect();
+                if let Some(last) = parts.last_mut() {
+                    *last = last.trim_start_matches("r#").to_ascii_uppercase();
+                }
+                return Some(format!("hocus_words::{}", parts.join("::")));
+            }
+            said.windows(2)
+                .all(|w| w[0] == w[1])
+                .then(|| format!("Text::same({:?})", said[0]))
+        };
+        let shared = shared_keys();
+        let mut rows: BTreeMap<String, String> = BTreeMap::new();
+        for setting in all_settings() {
+            if matches!(setting.places, Places::Page(_)) {
+                continue;
+            }
+            let Some(name) = text(&setting.name) else {
+                continue;
+            };
+            for place in setting.places.all() {
+                if shared.contains(&place.dotted()) {
+                    continue;
+                }
+                let said = match &setting.kind {
+                    Kind::Switch => "Said::Switch".to_owned(),
+                    Kind::Menu(choices) | Kind::Segmented(choices) => {
+                        let items: Vec<String> = choices
+                            .iter()
+                            .filter_map(|c| {
+                                let value = place.codec.write(&c.value)?;
+                                let value = match value.as_str() {
+                                    Some(word) => word.to_owned(),
+                                    None => value.decorated("", "").to_string(),
+                                };
+                                Some(format!("({value:?}, {})", text(&c.label)?))
+                            })
+                            .collect();
+                        format!("Said::Choices(&[{}])", items.join(", "))
+                    }
+                    Kind::Slider { unit, .. } => format!("Said::Number({unit:?})"),
+                    _ => "Said::Other".to_owned(),
+                };
+                rows.entry(place.dotted()).or_insert_with(|| {
+                    format!(
+                        "    Label {{\n        key: {:?},\n        name: {name},\n        said: {said},\n    }},\n",
+                        place.dotted()
+                    )
+                });
+            }
+        }
+        let mut out = String::from(
+            "// Generated from the Settings' rows: see `labels.rs`. Do not edit.\n\n\
+             /// Every key a row writes, in the dotted keys' order.\n\
+             pub const ALL: &[Label] = &[\n",
+        );
+        for row in rows.values() {
+            out.push_str(row);
+        }
+        out.push_str("];\n");
+        out
     }
 
     #[test]

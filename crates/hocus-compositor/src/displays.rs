@@ -631,6 +631,18 @@ impl State {
                 self.agent_tools_asked(hocus_agents::watch::Ask::UnfollowHerdr);
                 None
             }
+            // « Voir son journal » (docs/design/mcp.md): the agents'
+            // journal opens on the bar of the focused window's screen.
+            (Some("mcp-journal"), None, None) => {
+                let output = self
+                    .bubbles_screen()
+                    .or_else(|| self.space.outputs().next().cloned())
+                    .map(|o| o.name());
+                if let Some(output) = output {
+                    self.tell_shell(hocus_link::ToShell::Journal { output });
+                }
+                None
+            }
             // "Effacer l'historique" (6.17).
             (Some("clipboard-clear"), None, None) => {
                 self.clipboard_clear();

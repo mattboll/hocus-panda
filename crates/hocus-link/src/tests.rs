@@ -87,6 +87,9 @@ fn to_shell() -> Vec<ToShell> {
         ToShell::SessionMenu {
             output: "eDP-1".into(),
         },
+        ToShell::Journal {
+            output: "eDP-1".into(),
+        },
         ToShell::DropOver {
             bar: "eDP-1".into(),
             over: Some(("DP-1".into(), 3)),
@@ -654,6 +657,97 @@ fn to_shell() -> Vec<ToShell> {
             ..ActionsShown::default()
         }),
         ToShell::ActionsEnd,
+        ToShell::Mcp(Box::default()),
+        ToShell::Mcp(Box::new(McpShown {
+            stopped: true,
+            agents: vec![McpRow {
+                id: 1,
+                name: "Claude".into(),
+                doing: McpDoing::Did {
+                    summary: McpSummary {
+                        moved: 3,
+                        settings: vec![McpSet {
+                            key: "appearance.theme".into(),
+                            value: "dark".into(),
+                        }],
+                        ..McpSummary::default()
+                    },
+                    at: "10:43".into(),
+                },
+            }],
+            show: Some(McpShow {
+                agent: "Claude".into(),
+                intent: "Range les terminaux".into(),
+                output: "HEADLESS-1".into(),
+                at: McpAt::Desktop {
+                    index: 1,
+                    x: 900,
+                    y: 16,
+                },
+            }),
+            toast: Some(McpToast {
+                request: 2,
+                agent: "Claude".into(),
+                summary: McpSummary::default(),
+                intent: "range".into(),
+                undo: true,
+                output: "HEADLESS-1".into(),
+                left: 16,
+                bottom: 1064,
+                since: 5,
+            }),
+            journal: vec![McpLine {
+                agent: "Claude".into(),
+                at: "10:38".into(),
+                said: McpSaid::Refused {
+                    tool: "launch".into(),
+                    why: McpRefusal::ReadOnly,
+                },
+            }],
+            pointers: vec![McpPointer {
+                agent: "Claude".into(),
+                output: "HEADLESS-1".into(),
+                x: 160,
+                y: 42,
+            }],
+            card: Some(McpCard {
+                id: 3,
+                agent: "Claude".into(),
+                intent: "Ferme les fenêtres".into(),
+                ask: McpAsk::Keys {
+                    title: "Courses".into(),
+                    keys: "Ctrl+W".into(),
+                },
+                why: McpWhy::App {
+                    name: "Notes".into(),
+                },
+                output: "HEADLESS-1".into(),
+                x: 280,
+                y: 41,
+            }),
+            taken: vec!["Claude".into()],
+        })),
+        ToShell::Mcp(Box::new(McpShown {
+            show: Some(McpShow {
+                agent: "Claude".into(),
+                intent: "Clique sur Envoyer".into(),
+                output: "HEADLESS-1".into(),
+                at: McpAt::Pointer { x: 300, y: 200 },
+            }),
+            card: Some(McpCard {
+                id: 4,
+                agent: "Claude".into(),
+                intent: "Tape le code".into(),
+                ask: McpAsk::Type {
+                    title: "Banque".into(),
+                },
+                why: McpWhy::Password,
+                output: "HEADLESS-1".into(),
+                x: 1,
+                y: 2,
+            }),
+            ..McpShown::default()
+        })),
     ];
     all.extend(LevelKey::ALL.map(ToShell::Level));
     all
@@ -691,6 +785,11 @@ fn to_compositor() -> Vec<ToCompositor> {
             to: DesktopTo::Previous,
         },
         ToCompositor::Bring(42),
+        ToCompositor::McpReply {
+            card: 3,
+            reply: McpReply::TakeOver,
+        },
+        ToCompositor::McpHandBack("Claude".into()),
         ToCompositor::Close(42),
         ToCompositor::Overview,
         ToCompositor::A11yLine("  button \"14 h 32\" <click>".into()),
@@ -802,6 +901,8 @@ fn to_compositor() -> Vec<ToCompositor> {
             arg: None,
             window: None,
         }),
+        ToCompositor::McpUndo(4),
+        ToCompositor::McpStop(true),
     ];
     all.extend(CaptureMode::ALL.map(|mode| ToCompositor::Capture(CaptureAsk::Mode(mode))));
     all.extend(

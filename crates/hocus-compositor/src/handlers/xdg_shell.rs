@@ -112,7 +112,8 @@ impl XdgShellHandler for State {
 
     /// A drag on a client-side header.
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
-        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+        let Some(seat) = Seat::<State>::from_resource(&seat).filter(|s| *s == self.seat) else {
+            // An MCP agent's click never starts moving or resizing one.
             return;
         };
         let wl_surface = surface.wl_surface();
@@ -133,7 +134,8 @@ impl XdgShellHandler for State {
         serial: Serial,
         edges: xdg_toplevel::ResizeEdge,
     ) {
-        let Some(seat) = Seat::<State>::from_resource(&seat) else {
+        let Some(seat) = Seat::<State>::from_resource(&seat).filter(|s| *s == self.seat) else {
+            // An MCP agent's click never starts moving or resizing one.
             return;
         };
         let wl_surface = surface.wl_surface();
@@ -218,6 +220,10 @@ impl XdgShellHandler for State {
         let Some(seat) = Seat::<State>::from_resource(&seat) else {
             return;
         };
+        // An MCP agent's menu shows without taking the user's keyboard.
+        if seat != self.seat {
+            return;
+        }
         let kind = PopupKind::Xdg(surface.clone());
         let Ok(root) = find_popup_root_surface(&kind) else {
             return;

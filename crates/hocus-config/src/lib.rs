@@ -19,6 +19,7 @@ use std::{
 };
 
 pub mod defaults;
+pub mod labels;
 
 pub use toml_edit;
 use toml_edit::DocumentMut;

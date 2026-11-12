@@ -263,7 +263,7 @@ use Glyph as G;
 
 /// A page of the Settings: its slug, its names. The Settings check that
 /// this is their list of sections.
-pub const SETTINGS_PAGES: [(&str, &str, &str); 19] = [
+pub const SETTINGS_PAGES: [(&str, &str, &str); 20] = [
     (
         "appearance",
         "Apparence et langue",
@@ -286,6 +286,7 @@ pub const SETTINGS_PAGES: [(&str, &str, &str); 19] = [
     ("desktops", "Bureaux et fenêtres", "Desktops and windows"),
     ("applications", "Applications", "Applications"),
     ("agents", "Agents", "Agents"),
+    ("act-on-desktop", "Agir sur le bureau", "Act on the desktop"),
     (
         "captures",
         "Captures et presse-papiers",
@@ -314,7 +315,7 @@ macro_rules! settings_pages {
 }
 
 /// The Settings' pages as actions, in [`SETTINGS_PAGES`]' order.
-const PAGES: [Def; 19] = settings_pages! {
+const PAGES: [Def; 20] = settings_pages! {
     "appearance", "Apparence et langue", "Appearance and language";
     "wallpaper", "Fond d’écran", "Wallpaper";
     "bar", "La barre", "The bar";
@@ -329,6 +330,7 @@ const PAGES: [Def; 19] = settings_pages! {
     "desktops", "Bureaux et fenêtres", "Desktops and windows";
     "applications", "Applications", "Applications";
     "agents", "Agents", "Agents";
+    "act-on-desktop", "Agir sur le bureau", "Act on the desktop";
     "captures", "Captures et presse-papiers", "Screenshots and clipboard";
     "power", "Énergie", "Power";
     "account", "Compte", "Account";
@@ -343,7 +345,7 @@ const WORKSPACE: &[&str] = &["espace de travail", "workspace"];
 const MOVE_SCREEN: &[&str] = &["déplacer", "moniteur", "move", "monitor", "display"];
 
 /// The actions, in each category's order.
-const ACTIONS: [Def; 65] = [
+const ACTIONS: [Def; 66] = [
     // The window.
     d(
         "close",
@@ -694,6 +696,15 @@ const ACTIONS: [Def; 65] = [
     )
     .step(Step::Agent)
     .shell(),
+    d(
+        "stop-agents",
+        "Arrêter tous les agents",
+        "Stop every agent",
+        &["agent", "arrêter", "stop", "mcp", "claude"],
+        C::Agents,
+        G::Agent,
+    )
+    .key("stop-agents"),
     // The bar.
     d(
         "terminal",

@@ -54,6 +54,7 @@ pub mod lock;
 mod magnet;
 mod magnifier;
 mod matrix;
+mod mcp;
 pub mod model;
 pub mod motion;
 mod moving;
@@ -111,8 +112,8 @@ pub use config::{
     Agents as AgentsSettings, AltTab, Animation as WindowAnimation, Appearance,
     Capture as CaptureSettings, CaptureFormat, Clipboard as ClipboardSettings, Config,
     Delay as PowerDelay, Desktops, Developer, DragKey, FollowPointer, FormChoice, HaloRule,
-    Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings, NightLight,
-    OldKeys as OldPowerKeys, OnBattery as WallpaperOnBattery, OpenSize, OutputSettings,
+    Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings, McpAccess, McpAgent,
+    NightLight, OldKeys as OldPowerKeys, OnBattery as WallpaperOnBattery, OpenSize, OutputSettings,
     Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
     Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, Remind,
     Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
@@ -409,6 +410,8 @@ impl App {
         state.tick();
         // The agents' changes of this turn, in one line.
         state.flush_agents();
+        // What the MCP agents show (docs/design/mcp.md), when it changed.
+        state.flush_mcp();
         // The screen the notifications' bubbles show on, when it changed.
         state.flush_bubbles_screen();
         // The screens a fullscreen window covers, when they changed.

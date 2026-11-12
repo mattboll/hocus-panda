@@ -711,6 +711,37 @@ impl Items for Tiles {
                             faded(DROP_RING.get(), alpha),
                         );
                     }
+                    // The desktop an MCP agent is about to show, or send a
+                    // window to (docs/design/mcp.md): its tile in the
+                    // agents' violet.
+                    if let Some(index) = crate::mcp::tile(&desktops.output)
+                        && index < desktops.count
+                    {
+                        let rect = self.rect(form, size, (row, usize::from(index)), &groups);
+                        let radius = match form {
+                            Form::Full => TILE_RADIUS,
+                            Form::Mini => DOT_RADIUS,
+                        };
+                        // Its soft fill, 3 px of the violet inside its edge,
+                        // and a 3 px halo outside it.
+                        let agent = crate::mcp::tag::AGENT.get();
+                        f.fill(
+                            &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+                            faded(Color { a: 0.18, ..agent }, alpha),
+                        );
+                        inner_ring(f, rect, radius, 3.0, faded(agent, alpha));
+                        let halo = Rectangle::new(
+                            Point::new(rect.x - 3.0, rect.y - 3.0),
+                            Size::new(rect.width + 6.0, rect.height + 6.0),
+                        );
+                        inner_ring(
+                            f,
+                            halo,
+                            radius + 3.0,
+                            3.0,
+                            faded(Color { a: 0.30, ..agent }, alpha),
+                        );
+                    }
                     // The ring on its way.
                     if moving {
                         let rect = self.ring(state, form, size, row, now);

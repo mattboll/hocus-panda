@@ -886,10 +886,12 @@ fn the_wheel_goes_a_desktop_a_notch_and_stops_at_the_ends() -> anyhow::Result<()
                 ..Setup::default()
             },
         )?;
-        let (x, y) = bed.middle(1);
-        bed.hp.pointer_move(x - 1.0, y);
-        bed.hp.pointer_move(x, y);
-        wait(&mut bed.hp, Duration::from_millis(200))?;
+        // Once the tiles' surface takes the pointer there, drawn at its
+        // size: on a loaded machine the bar's surfaces settle after the
+        // desktops' first frame, and a wheel sent over a surface not yet
+        // there goes nowhere, the desktop never reached.
+        let at = bed.middle(1);
+        common::over(&mut bed.hp, at, hocus_link::DESKTOPS_NAMESPACE)?;
         // Down, a notch at a time: the next, up to the last, no further.
         for expected in [1, 2, 3, 3, 3] {
             bed.hp.wheel(1);

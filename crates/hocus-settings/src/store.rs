@@ -113,6 +113,8 @@ pub struct Snapshot {
     pub bar: Box<crate::bar::File>,
     /// The rules per application (6.14).
     pub rules: Box<crate::desktops::Rules>,
+    /// The agents that act on the desktop, and how (docs/design/mcp.md).
+    pub acting: Box<crate::acting::File>,
 }
 
 /// A set of screens the file arranges: its name ([`set_name`]), its
@@ -241,6 +243,7 @@ pub fn read(text: &str) -> Snapshot {
             wallpaper: Box::new(crate::wallpaper::File::of(&doc)),
             bar: Box::new(crate::bar::File::of(&doc)),
             rules: Box::new(crate::desktops::Rules(crate::desktops::rules_of(&doc))),
+            acting: Box::new(crate::acting::File::of(&doc)),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -258,6 +261,7 @@ pub fn read(text: &str) -> Snapshot {
             wallpaper: Box::default(),
             bar: Box::default(),
             rules: Box::default(),
+            acting: Box::default(),
         },
     }
 }
@@ -692,9 +696,114 @@ fn put_set(root: &mut Table, index: Option<usize>, table: Option<Table>) {
     }
 }
 
+/// The key, if it is in an MCP agent's table: `["agents", "mcp", NAME,
+/// …]`, the `[[agents.mcp]]` table whose `name` is NAME (docs/design/mcp.md);
+/// `["agents", "mcp", NAME]` alone is that whole table, as an inline table,
+/// added after the others or taken out.
+fn in_mcp(key: &[String]) -> Option<(&str, &[String])> {
+    match key {
+        [agents, mcp, name, rest @ ..] if agents == "agents" && mcp == "mcp" => {
+            Some((name.as_str(), rest))
+        }
+        _ => None,
+    }
+}
+
+fn mcp_name(table: &Table) -> Option<&str> {
+    table.get("name").and_then(Item::as_str)
+}
+
+/// A key of agent `name`'s table written into `doc`, its other lines and
+/// their comments kept.
+fn write_mcp_key(
+    doc: &mut DocumentMut,
+    name: &str,
+    rest: &[String],
+    value: Option<&str>,
+) -> Result<(), String> {
+    let new = value
+        .map(|text| {
+            text.parse::<toml_edit::Value>()
+                .map_err(|err| format!("{text}: {err}"))
+        })
+        .transpose()?;
+    let agents = doc.as_table_mut().entry("agents").or_insert_with(|| {
+        let mut made = Table::new();
+        made.set_implicit(true);
+        Item::Table(made)
+    });
+    let agents = agents.as_table_mut().ok_or("agents is not a table")?;
+    let mut tables = agents
+        .get("mcp")
+        .and_then(Item::as_array_of_tables)
+        .cloned()
+        .unwrap_or_default();
+    let index = tables.iter().position(|t| mcp_name(t) == Some(name));
+    if rest.is_empty() {
+        match (index, new) {
+            (Some(i), None) => {
+                tables.remove(i);
+            }
+            (at, Some(value)) => {
+                let table = value
+                    .as_inline_table()
+                    .ok_or("an agent is a table")?
+                    .clone()
+                    .into_table();
+                match at.and_then(|i| tables.get_mut(i)) {
+                    Some(old) => *old = table,
+                    None => tables.push(table),
+                }
+            }
+            (None, None) => {}
+        }
+    } else {
+        let Some(table) = index.and_then(|i| tables.get_mut(i)) else {
+            return match new {
+                None => Ok(()),
+                Some(_) => Err(format!("no agent {name} in [[agents.mcp]]")),
+            };
+        };
+        match new {
+            Some(mut new) => {
+                let (last, inner) = rest.split_last().ok_or("an empty key")?;
+                if !inner.is_empty() {
+                    return Err("an agent's keys are its table's own".to_owned());
+                }
+                match table.get_mut(last).and_then(Item::as_value_mut) {
+                    Some(old) => {
+                        *new.decor_mut() = old.decor().clone();
+                        *old = new;
+                    }
+                    None => {
+                        table.insert(last, Item::Value(new));
+                    }
+                }
+            }
+            None => remove_key(table, rest),
+        }
+    }
+    if tables.is_empty() {
+        agents.remove("mcp");
+    } else {
+        agents.insert("mcp", Item::ArrayOfTables(tables));
+    }
+    Ok(())
+}
+
 /// The value at `key`; an array of tables (`[[windows.rules]]`) as an
 /// array of inline tables.
 fn value_at(table: &dyn TableLike, key: &[String]) -> Option<toml_edit::Value> {
+    if let Some((agent, rest)) = in_mcp(key) {
+        let agents = table.get("agents")?.get("mcp")?.as_array_of_tables()?;
+        let found = agents.iter().find(|t| mcp_name(t) == Some(agent))?;
+        if rest.is_empty() {
+            return Some(toml_edit::Value::InlineTable(
+                found.clone().into_inline_table(),
+            ));
+        }
+        return value_at(found, rest);
+    }
     if let Some((set, rest)) = in_set(key) {
         let root = table.get(SCREEN_SETS)?.as_array_of_tables()?;
         let found = root.iter().find(|t| set_of(t) == set)?;
@@ -748,6 +857,10 @@ pub fn write_keys(doc: &mut DocumentMut, edits: &[KeyEdit]) -> Result<(), String
     for edit in edits {
         if let Some((set, rest)) = in_set(&edit.key) {
             write_set_key(doc, set, rest, edit.value.as_deref())?;
+            continue;
+        }
+        if let Some((agent, rest)) = in_mcp(&edit.key) {
+            write_mcp_key(doc, agent, rest, edit.value.as_deref())?;
             continue;
         }
         let (name, tables) = edit.key.split_last().ok_or("an empty key")?;
@@ -1117,6 +1230,55 @@ mod tests {
             assert_eq!(Slot::from_word(&slot.word()), Some(slot));
         }
         assert_eq!(Slot::from_word("power.lid@battery"), None);
+    }
+
+    #[test]
+    fn an_agent_s_table_is_written_in_place_by_its_name() -> Result<(), String> {
+        let text = "# Mine.\n[agents]\nhalo = \"all\"\n\n# Claude, by hand.\n[[agents.mcp]]\n\
+                    name = \"Claude\"\naccess = \"read\" # for now\n";
+        let key = |rest: &[&str]| -> Vec<String> {
+            ["agents", "mcp"]
+                .iter()
+                .chain(rest)
+                .map(|s| (*s).to_owned())
+                .collect()
+        };
+        let edit = |key: Vec<String>, value: Option<&str>| KeyEdit {
+            key,
+            value: value.map(ToOwned::to_owned),
+        };
+        let mut doc = hocus_config::parse(text).map_err(|e| e.to_string())?;
+        write_keys(
+            &mut doc,
+            &[
+                edit(key(&["Claude", "access"]), Some("\"act\"")),
+                edit(key(&["Claude", "apps"]), Some("[\"kitty\"]")),
+                edit(
+                    key(&["Codex"]),
+                    Some("{ name = \"Codex\", access = \"read\" }"),
+                ),
+            ],
+        )?;
+        let written = doc.to_string();
+        assert_eq!(
+            written,
+            "# Mine.\n[agents]\nhalo = \"all\"\n\n# Claude, by hand.\n[[agents.mcp]]\n\
+             name = \"Claude\"\naccess = \"act\" # for now\napps = [\"kitty\"]\n\n\
+             [[agents.mcp]]\nname = \"Codex\"\naccess = \"read\"\n"
+        );
+        let keys = keys_now(&doc, &[key(&["Claude", "access"]), key(&["Nobody"])]);
+        assert_eq!(keys[0].value.as_deref(), Some("\"act\""));
+        assert_eq!(keys[1].value, None);
+        check_keys(
+            &written,
+            &[edit(key(&["Claude", "apps"]), Some("[\"kitty\"]"))],
+        )?;
+        // Taken out, the other stays; the last taken out, no table.
+        write_keys(&mut doc, &[edit(key(&["Claude"]), None)])?;
+        assert!(!doc.to_string().contains("Claude"), "{doc}");
+        write_keys(&mut doc, &[edit(key(&["Codex"]), None)])?;
+        assert_eq!(doc.to_string(), "# Mine.\n[agents]\nhalo = \"all\"\n");
+        Ok(())
     }
 
     #[test]
