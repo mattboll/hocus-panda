@@ -2655,7 +2655,11 @@ moved = { one = "rangé {n} fenêtre", other = "rangé {n} fenêtres" }
 focused = { one = "mis {n} fenêtre au premier plan", other = "mis {n} fenêtres au premier plan" }
 switched = "affiché le bureau {n}"
 launched = "ouvert {name}"
-setting = "changé {key}"
+set_to = "mis « {name} » sur « {value} »"
+turned_on = "activé « {name} »"
+turned_off = "désactivé « {name} »"
+changed = "changé « {name} »"
+changed_a_setting = "changé un réglage"
 settings = { one = "changé {n} réglage", other = "changé {n} réglages" }
 and = " et "
 did = "{agent} a {what}"

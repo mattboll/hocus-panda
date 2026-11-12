@@ -78,8 +78,18 @@ pub struct McpSummary {
     pub switched: Option<u32>,
     /// The applications started, by name.
     pub launched: Vec<String>,
-    /// The settings changed, by key (`appearance.theme`).
-    pub settings: Vec<String>,
+    /// The settings changed, and what they were set to.
+    pub settings: Vec<McpSet>,
+}
+
+/// A setting an agent changed: its key (`appearance.theme`) and its new
+/// value as text (`dark`, `true`, `600`), which the shell words with the
+/// Settings' own labels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpSet {
+    pub key: String,
+    #[serde(serialize_with = "tidy::name")]
+    pub value: String,
 }
 
 impl McpSummary {

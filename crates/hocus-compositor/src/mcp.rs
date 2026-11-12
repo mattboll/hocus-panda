@@ -64,12 +64,15 @@ const REQUESTS: usize = 20;
 /// Sections an agent never writes: its own rights, the keys (the stop
 /// key), what only a developer turns on.
 const FORBIDDEN: [&str; 3] = ["agents", "shortcuts", "developer"];
-/// The window's ring: 2 px, 2 px outside it (the mockup's `outline: 2px
-/// solid var(--agent-ring); outline-offset: 2px`).
-const RING_WIDTH: f64 = 2.0;
+/// The window's ring: 3 px of the agents' violet, 2 px outside it, and
+/// around it a 6 px halo of the violet at 30 % (the mockup's ring's
+/// `box-shadow: 0 0 0 6px var(--agent-soft)`, lifted so that it shows on
+/// a window of any colour).
+const RING_WIDTH: f64 = 3.0;
 const RING_OFFSET: f64 = 2.0;
-/// `--agent-ring`: the agent's violet (the theme's `agent`) at 55 %.
-const RING_ALPHA: f32 = 0.55;
+const RING_ALPHA: f32 = 0.95;
+const HALO_WIDTH: f64 = 6.0;
+const HALO_ALPHA: f32 = 0.30;
 /// The tag's place inside a window's top left corner.
 const TAG_IN: i32 = 12;
 /// The tag's top on a screen, under its work area's top.
@@ -262,6 +265,7 @@ pub struct Mcp {
     pub told: Option<McpShown>,
     dirty: bool,
     ring_ids: RingIds,
+    halo_ids: RingIds,
 }
 
 #[derive(Debug)]
@@ -1154,15 +1158,22 @@ impl State {
                     Call::SetSetting(set) => set.value.clone(),
                     _ => Value::Null,
                 };
+                let value = match &after {
+                    Value::String(text) => text.clone(),
+                    other => other.to_string(),
+                };
                 if let Some(request) = self.mcp.open.get_mut(&agent) {
                     request
                         .before
                         .settings
                         .entry(key.clone())
                         .or_insert(before.clone());
-                    if !request.summary.settings.contains(&key) {
-                        request.summary.settings.push(key.clone());
-                    }
+                    let summary = &mut request.summary.settings;
+                    summary.retain(|s| s.key != key);
+                    summary.push(hocus_link::McpSet {
+                        key: key.clone(),
+                        value,
+                    });
                 }
                 let before = before.as_ref().map(json_of).unwrap_or(Value::Null);
                 // A text's value is not journaled: it may be a path.
@@ -1498,35 +1509,54 @@ impl State {
         if self.mcp.showing.as_ref().and_then(|s| s.window) != Some(window) {
             return Vec::new();
         }
-        let out = RING_OFFSET + RING_WIDTH;
         let radius = if self.model.mode(window) == Mode::Fullscreen {
             0.0
         } else {
             decoration::RADIUS
         };
         let agent = self.theme_choice().tokens().agent;
-        let style = BoxStyle {
-            fill: [0; 4],
-            rim: [agent.r, agent.g, agent.b, (RING_ALPHA * 255.0) as u8],
-            rim_width: (RING_WIDTH * 1000.0) as u32,
-            radius: ((radius + out) * 1000.0) as u32,
+        let around = |out: f64| {
+            Rectangle::new(
+                (visual.loc.x - out, visual.loc.y - out).into(),
+                (visual.size.w + 2.0 * out, visual.size.h + 2.0 * out).into(),
+            )
         };
-        let around = Rectangle::new(
-            (visual.loc.x - out, visual.loc.y - out).into(),
-            (visual.size.w + 2.0 * out, visual.size.h + 2.0 * out).into(),
-        );
-        box_elements(
-            renderer,
-            &self.textures,
-            &self.mcp.ring_ids.0,
-            style,
-            around,
-            scale,
-            1.0,
-        )
-        .into_iter()
-        .map(OutputElements::Frame)
-        .collect()
+        let mut drawn = Vec::new();
+        for (out, width, alpha, ids) in [
+            (
+                RING_OFFSET + RING_WIDTH,
+                RING_WIDTH,
+                RING_ALPHA,
+                &self.mcp.ring_ids.0,
+            ),
+            (
+                RING_OFFSET + RING_WIDTH + HALO_WIDTH,
+                HALO_WIDTH,
+                HALO_ALPHA,
+                &self.mcp.halo_ids.0,
+            ),
+        ] {
+            let style = BoxStyle {
+                fill: [0; 4],
+                rim: [agent.r, agent.g, agent.b, (alpha * 255.0) as u8],
+                rim_width: (width * 1000.0) as u32,
+                radius: ((radius + out) * 1000.0) as u32,
+            };
+            drawn.extend(
+                box_elements(
+                    renderer,
+                    &self.textures,
+                    ids,
+                    style,
+                    around(out),
+                    scale,
+                    1.0,
+                )
+                .into_iter()
+                .map(OutputElements::Frame),
+            );
+        }
+        drawn
     }
 }
 

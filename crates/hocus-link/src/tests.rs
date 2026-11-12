@@ -663,7 +663,10 @@ fn to_shell() -> Vec<ToShell> {
                 doing: McpDoing::Did {
                     summary: McpSummary {
                         moved: 3,
-                        settings: vec!["appearance.theme".into()],
+                        settings: vec![McpSet {
+                            key: "appearance.theme".into(),
+                            value: "dark".into(),
+                        }],
                         ..McpSummary::default()
                     },
                     at: "10:43".into(),

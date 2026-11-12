@@ -332,7 +332,7 @@ impl Laid {
 /// Its height as it shows now beside a bar in `form`.
 pub fn height(form: Form) -> u32 {
     let words = Words::new(Lang::of_messages());
-    let brief = Brief::of(&agents::said().agents);
+    let brief = Brief::of(&agents::said().all());
     (lay_out(&brief, words, agents::now_us(), form, kit::measure).end + PAD_BOTTOM + BORDER).round()
         as u32
 }
@@ -408,7 +408,7 @@ fn build<'a>(id: window::Id, words: Words) -> El<'a> {
     let form = super::with(|c| c.form_of(id)).unwrap_or(Form::Full);
     let said = agents::said();
     let now = agents::now_us();
-    let laid = lay_out(&Brief::of(&said.agents), words, now, form, kit::measure);
+    let laid = lay_out(&Brief::of(&said.all()), words, now, form, kit::measure);
     let at = Instant::now();
     ui(|ui| {
         if ui.laid.as_ref() != Some(&laid) {

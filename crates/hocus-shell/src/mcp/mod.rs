@@ -221,6 +221,43 @@ pub fn toast_shows(request: u64) -> bool {
 
 // --- Words ---------------------------------------------------------------------
 
+/// How a setting's row says its value.
+enum Row {
+    Switch,
+    /// Its choices: the value as the file writes it, its label.
+    Choices(&'static [(&'static str, hocus_words::Text)]),
+    /// A count, said as it is.
+    Number,
+    /// Said by its name alone (a delay, a colour, a path).
+    Other,
+}
+
+/// The Settings' row of the settings agents most often change: its name
+/// and how it says its value, from the words catalogue the Settings show
+/// them with (crate `hocus-settings`' model, which the shell does not
+/// link).
+fn setting_row(key: &str) -> Option<(hocus_words::Text, Row)> {
+    use hocus_words::settings::{accessibility, appearance, desktops, power, screens};
+    const THEMES: &[(&str, hocus_words::Text)] = &[
+        ("dark", appearance::DARK),
+        ("light", appearance::LIGHT),
+        ("frost", appearance::FROST),
+        ("matrix", appearance::MATRIX),
+    ];
+    Some(match key {
+        "appearance.theme" => (appearance::THEME, Row::Choices(THEMES)),
+        "appearance.accent" => (appearance::ACCENT_COLOUR, Row::Other),
+        "appearance.high-contrast" => (accessibility::HIGH_CONTRAST, Row::Switch),
+        "appearance.reduced-motion" => (accessibility::REDUCED_MOTION, Row::Switch),
+        "appearance.reduce-transparency" => (accessibility::REDUCED_TRANSPARENCY, Row::Switch),
+        "night-light.enabled" => (screens::NIGHT_LIGHT_2, Row::Switch),
+        "windows.wobble" => (desktops::WOBBLY_WINDOWS, Row::Switch),
+        "desktops.count" => (desktops::NUMBER_OF_DESKTOPS, Row::Number),
+        "idle.delay" => (power::DIM_THE_SCREEN_AFTER, Row::Other),
+        _ => return None,
+    })
+}
+
 /// What the agents' surfaces say, in the shell's language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Words {
@@ -251,13 +288,54 @@ impl Words {
         }
         match s.settings.as_slice() {
             [] => {}
-            [key] => parts.push(txt::setting(lang, key)),
-            keys => parts.push(txt::settings(lang, keys.len())),
+            sets @ ([_] | [_, _]) => parts.extend(sets.iter().map(|set| self.setting(set))),
+            sets => parts.push(txt::settings(lang, sets.len())),
         }
         match parts.split_last() {
             None => String::new(),
             Some((last, [])) => last.clone(),
             Some((last, rest)) => format!("{}{}{last}", rest.join(", "), txt::AND.get(lang)),
+        }
+    }
+
+    /// A setting changed, in the Settings' own words: its row's name, and
+    /// its choice's label ("mis « Thème » sur « Sombre »"), on or off for
+    /// a switch; one the table does not know, "changé un réglage".
+    pub fn setting(self, set: &hocus_link::McpSet) -> String {
+        let lang = self.lang;
+        let Some((name, kind)) = setting_row(&set.key) else {
+            return txt::CHANGED_A_SETTING.get(lang).to_owned();
+        };
+        let name = name.get(lang);
+        match kind {
+            Row::Switch => match set.value.as_str() {
+                "true" => txt::turned_on(lang, name),
+                "false" => txt::turned_off(lang, name),
+                _ => txt::changed(lang, name),
+            },
+            Row::Choices(choices) => choices
+                .iter()
+                .find(|(value, _)| *value == set.value)
+                .map_or_else(
+                    || txt::changed(lang, name),
+                    |(_, label)| {
+                        txt::set_to(
+                            lang,
+                            txt::SetTo {
+                                name,
+                                value: label.get(lang),
+                            },
+                        )
+                    },
+                ),
+            Row::Number => txt::set_to(
+                lang,
+                txt::SetTo {
+                    name,
+                    value: &set.value,
+                },
+            ),
+            Row::Other => txt::changed(lang, name),
         }
     }
 
@@ -413,12 +491,31 @@ mod tests {
         let fr = Words::new(Lang::French);
         let summary = McpSummary {
             moved: 3,
-            settings: vec!["appearance.theme".into()],
+            settings: vec![hocus_link::McpSet {
+                key: "appearance.theme".into(),
+                value: "dark".into(),
+            }],
             ..McpSummary::default()
         };
         assert_eq!(
             fr.summary(&summary),
-            "rangé 3 fenêtres et changé appearance.theme"
+            "rangé 3 fenêtres et mis « Thème » sur « Sombre »"
+        );
+        let set = |key: &str, value: &str| hocus_link::McpSet {
+            key: key.into(),
+            value: value.into(),
+        };
+        assert_eq!(
+            fr.setting(&set("appearance.reduced-motion", "true")),
+            "activé « Mouvements réduits »"
+        );
+        assert_eq!(
+            fr.setting(&set("idle.delay", "600")),
+            "changé « Assombrir l’écran après »"
+        );
+        assert_eq!(
+            fr.setting(&set("perf.record", "false")),
+            "changé un réglage"
         );
         let more = McpSummary {
             moved: 1,
@@ -433,7 +530,7 @@ mod tests {
         let en = Words::new(Lang::English);
         assert_eq!(
             en.summary(&summary),
-            "arranged 3 windows and changed appearance.theme"
+            "arranged 3 windows and set “Theme” to “Dark”"
         );
         let row = McpRow {
             id: 1,
