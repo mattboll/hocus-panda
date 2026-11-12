@@ -17,7 +17,7 @@ langue").
 | | La lumière du jour | `daylight` | #805 |
 | | Bureaux en profondeur | `depth` | #806 |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
-| | Éclats de verre | `shatter` | #798 |
+| | Éclats de verre | `shatter` | #798 (built) |
 | | Fenêtres en gelée | `jelly` | #797 (built) |
 | | Guirlande sous la fenêtre active | `garland` | #799 |
 | The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
@@ -173,11 +173,44 @@ lengths in logical pixels.
   fullscreen window in front on its screen, the drag is as without it
   (the standard wobble if it is on).
 
+## A closing window shatters into glass (#798)
+
+With `shatter = true`, an application's window that closes (not a
+dialog, not minimised) cracks then breaks into shards that fall, in place
+of the closing animation, as the board "Éclats de verre" does
+(`effects/shatter.rs`, the `SHARD` program in `draw.rs`). The flames'
+sibling: the window leaves the desktop as it starts, its last picture
+alone breaking. With the flames on too, closings take turns: flames,
+then glass.
+
+- **Where it cracks**: where the window was clicked if it closes within
+  1.5 s of a press on it (its close button), else its middle.
+- **The shards**: 22 sites round the hit (within 160 px, most near it)
+  and 16 anywhere on the window; each shard its site's Voronoi cell, the
+  window's picture on it.
+- **The crack** (220 ms): the cells' edges drawn out from the hit over
+  160 ms, 520 px far (1 px, white-blue at 75 %), under a white flash 90 px
+  round, fading; the window whole over its shadow.
+- **The fall**: each shard, after its distance over 900 px/s, thrown from
+  the hit (`240 e^(-d/120) + 18` px/s, up a little near it), falling at
+  1500 px/s², spinning and tilting about an axis of its own: squashed by
+  its tilt's cosine, a white shine as it turns to the light, darker
+  showing its back, its edge lit (1.2 px). Its shadow goes in 120 ms (the
+  board's drops at once). Stepped at 60 steps a second with a seeded
+  generator; over once every shard is 200 px below the screens under it,
+  or 3 s after the break.
+- The shards are the window's own picture, drawn where the windows
+  leaving are (over the windows), and kept off the bar, as the board's
+  panel is in front of them; never in a capture, a share's or a
+  recording's frames; nothing drawn once over.
+
 Tests: `tests/window_effects.rs` (on GLES on Mesa's software device: a
 window dragged bends, and once settled is as it was before, pixel for
-pixel, nothing drawn after; on pixman, with reduced motion or the switch
-off, a drag is rigid); its screenshots, `HOCUS_SHOTS=DIR cargo nextest
-run -p hocus-compositor --run-ignored only window_effects::shots`.
+pixel, nothing drawn after; a window closed cracks whole, breaks, falls,
+and leaves the desktop as it was; on pixman, with reduced motion or the
+switches off, a drag is rigid and a close standard); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
+window_effects::shots`.
 
 ## Snow that settles (#795)
 

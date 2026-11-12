@@ -44,6 +44,11 @@ pub struct Departures {
     pub rain_seeds: u32,
     /// The windows burnt so far, for their seeds (#794).
     pub burns: u32,
+    /// The windows shattered so far, for their seeds (#798).
+    pub shatters: u32,
+    /// The windows closed while the flames and the glass are both on:
+    /// they take turns.
+    pub turns: u32,
 }
 
 #[derive(Debug)]

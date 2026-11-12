@@ -1,7 +1,9 @@
-//! Windows in jelly (#797), docs/design/effects.md, on the held clock and
-//! GLES (Mesa's software device, or the GPU `HOCUS_TEST_GPU` names): a
-//! dragged window bends like jelly and lies straight again, pixel for
-//! pixel; off, with reduced motion or on the CPU, a drag is rigid.
+//! Windows in jelly (#797) and a closing window shattering into glass
+//! (#798), docs/design/effects.md, on the held clock and GLES (Mesa's
+//! software device, or the GPU `HOCUS_TEST_GPU` names): a dragged window
+//! bends like jelly and lies straight again, pixel for pixel; a closed
+//! window cracks, breaks and falls, and leaves the desktop as it was; off,
+//! with reduced motion or on the CPU, a drag is rigid and a close standard.
 
 use crate::common;
 
@@ -17,11 +19,12 @@ fn on(renderer: HeadlessConfig) -> HeadlessConfig {
     }
 }
 
-/// The jelly on; the standard wobble off, so that any bend is the
-/// jelly's.
+/// The jelly and the glass on; the standard wobble off, so that any bend
+/// is the jelly's.
 fn both() -> Config {
     let mut config = Config::default();
     config.effects.jelly = true;
+    config.effects.shatter = true;
     config.windows.wobble = false;
     config
 }
@@ -58,6 +61,23 @@ fn window_share(shot: &(i32, i32, Vec<u8>), rect: Rect) -> f64 {
             let (b, g, r) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
             all += 1;
             seen += u64::from((b - b0).abs() <= 3 && (g - g0).abs() <= 3 && (r - r0).abs() <= 3);
+        }
+    }
+    seen as f64 / all.max(1) as f64
+}
+
+/// Over `rect`, the share of pixels of `shot` as they are in `bare`.
+fn bare_share(shot: &(i32, i32, Vec<u8>), bare: &(i32, i32, Vec<u8>), rect: Rect) -> f64 {
+    let h = shot.2.len() as i32 / 4 / shot.0;
+    let (mut seen, mut all) = (0u64, 0u64);
+    for y in (rect.y..rect.y + rect.height).step_by(2) {
+        for x in (rect.x..rect.x + rect.width).step_by(2) {
+            if x < 0 || y < 0 || x >= shot.0 || y >= h {
+                continue;
+            }
+            let i = ((y * shot.0 + x) * 4) as usize;
+            all += 1;
+            seen += u64::from(shot.2[i..i + 3] == bare.2[i..i + 3]);
         }
     }
     seen as f64 / all.max(1) as f64
@@ -139,7 +159,59 @@ fn a_dragged_window_bends_like_jelly_then_lies_straight() -> anyhow::Result<()> 
 }
 
 #[test]
-fn off_with_reduced_motion_or_on_the_cpu_a_drag_is_rigid() -> anyhow::Result<()> {
+fn a_closed_window_shatters_falls_and_leaves_nothing() -> anyhow::Result<()> {
+    let mut hp = Headless::start_with(on(common::gles()), both())?;
+    if hp.renderer() != "gles" {
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
+    }
+    hp.pointer_move(1000.0, 700.0);
+    common::at_rest(&mut hp)?;
+    let bare = hp.screenshot(0)?;
+    let (rect, client) = open_with(&mut hp, "test.glass", (600, 400), false)?;
+    common::at_rest(&mut hp)?;
+    hp.hold_clock();
+    let _ = client.commands.send(common::Command::Close);
+    hp.dispatch_until(common::WAIT, |hp| hp.windows().is_empty())?;
+    assert_eq!(hp.shattering(), 1, "it shatters");
+    // Cracking: whole still, the desktop nowhere through it.
+    run(&mut hp, Duration::from_millis(100))?;
+    let cracking = bare_share(&hp.screenshot(0)?, &bare, rect);
+    // Its shards flying and falling: the desktop through much of its
+    // place, pieces of it below.
+    run(&mut hp, Duration::from_millis(500))?;
+    let shot = hp.screenshot(0)?;
+    let flying = bare_share(&shot, &bare, rect);
+    run(&mut hp, Duration::from_millis(300))?;
+    let below = Rect::new(
+        rect.x - 100,
+        rect.y + rect.height + 40,
+        rect.width + 200,
+        800,
+    );
+    let fallen = 1.0 - bare_share(&hp.screenshot(0)?, &bare, below);
+    eprintln!("cracking {cracking:.3}, flying {flying:.3}, below {fallen:.4}");
+    assert!(cracking < 0.01, "whole as it cracks: {cracking}");
+    assert!(flying > 0.2, "broken: {flying}");
+    assert!(fallen > 0.01, "falling: {fallen}");
+    // All fallen within 3.3 s, the desktop as it was, nothing drawn after.
+    let mut waited = Duration::ZERO;
+    while hp.shattering() > 0 && waited < Duration::from_secs(3) {
+        run(&mut hp, Duration::from_millis(100))?;
+        waited += Duration::from_millis(100);
+    }
+    assert_eq!(hp.shattering(), 0, "over within 3.3 s");
+    assert_eq!(hp.leaving(), 0);
+    run(&mut hp, Duration::from_millis(100))?;
+    assert_eq!(differ(&bare, &hp.screenshot(0)?), 0, "nothing left behind");
+    let last = hp.frames_on(0);
+    run(&mut hp, Duration::from_millis(200))?;
+    assert_eq!(hp.frames_on(0), last, "nothing drawn once over");
+    Ok(())
+}
+
+#[test]
+fn off_with_reduced_motion_or_on_the_cpu_a_drag_is_rigid_and_a_close_standard() -> anyhow::Result<()>
+{
     let pixman = HeadlessConfig {
         renderer: RendererChoice::Pixman,
         ..HeadlessConfig::default()
@@ -155,7 +227,7 @@ fn off_with_reduced_motion_or_on_the_cpu_a_drag_is_rigid() -> anyhow::Result<()>
     ] {
         let mut hp = Headless::start_with(renderer, config)?;
         common::at_rest(&mut hp)?;
-        let (rect, _client) = open_with(&mut hp, "test.plain", (600, 400), false)?;
+        let (rect, client) = open_with(&mut hp, "test.plain", (600, 400), false)?;
         common::at_rest(&mut hp)?;
         hp.hold_clock();
         let at = (f64::from(rect.x + 120), f64::from(rect.y + 14));
@@ -163,6 +235,13 @@ fn off_with_reduced_motion_or_on_the_cpu_a_drag_is_rigid() -> anyhow::Result<()>
         drag(&mut hp, at, (250.0, 0.0))?;
         assert_eq!(hp.bend(), None, "{case}: rigid");
         release(&mut hp);
+        run(&mut hp, Duration::from_millis(100))?;
+        let _ = client.commands.send(common::Command::Close);
+        hp.dispatch_until(common::WAIT, |hp| hp.windows().is_empty())?;
+        assert_eq!(hp.shattering(), 0, "{case}: no glass");
+        assert_eq!(hp.leaving(), 1, "{case}: it closes as standard");
+        run(&mut hp, Duration::from_millis(400))?;
+        assert_eq!(hp.leaving(), 0, "{case}: gone as standard");
     }
     Ok(())
 }
@@ -191,9 +270,10 @@ fn save(
     Ok(())
 }
 
-/// The jelly for the maintainer, written to `$HOCUS_SHOTS` when it names
-/// a folder, on GLES: a document window shaken as the board's demo shakes
-/// it. Run by hand (`--run-ignored only`).
+/// The jelly and the glass for the maintainer, written to `$HOCUS_SHOTS`
+/// when it names a folder, on GLES: a document window shaken as the
+/// board's demo shakes it, then closed and breaking from a click. Run by
+/// hand (`--run-ignored only`).
 #[test]
 #[ignore = "screenshots, by hand"]
 fn shots() -> anyhow::Result<()> {
@@ -210,7 +290,7 @@ fn shots() -> anyhow::Result<()> {
         app_id: "test.shot",
         size: (560, 400),
     };
-    let (rect, _client) = common::open_showing(&mut hp, "test.shot", shows)?;
+    let (rect, client) = common::open_showing(&mut hp, "test.shot", shows)?;
     common::at_rest(&mut hp)?;
     hp.hold_clock();
     let crop = (0, 0, 1280, 800);
@@ -236,5 +316,29 @@ fn shots() -> anyhow::Result<()> {
     save(&mut hp, &out, "jelly-let-go", crop)?;
     run(&mut hp, Duration::from_secs(3))?;
     save(&mut hp, &out, "jelly-settled", crop)?;
+    // Clicked at its lower right, closed.
+    let Some(rect) = common::rect_of(&hp, "test.shot") else {
+        anyhow::bail!("the window went");
+    };
+    hp.pointer_move(
+        f64::from(rect.x + rect.width * 2 / 3),
+        f64::from(rect.y + rect.height * 3 / 5),
+    );
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
+    let _ = client.commands.send(common::Command::Close);
+    hp.dispatch_until(common::WAIT, |hp| hp.shattering() == 1)?;
+    let mut at = Duration::ZERO;
+    for (ms, name) in [
+        (110u64, "shatter-crack"),
+        (330, "shatter-break"),
+        (520, "shatter-fly"),
+        (820, "shatter-fall"),
+    ] {
+        let to = Duration::from_millis(ms);
+        run(&mut hp, to - at)?;
+        at = to;
+        save(&mut hp, &out, name, crop)?;
+    }
     Ok(())
 }
