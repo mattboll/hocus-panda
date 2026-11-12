@@ -32,7 +32,7 @@ use smithay::{
             RegistrationToken,
             timer::{TimeoutAction, Timer},
         },
-        wayland_server::{Resource, backend::GlobalId},
+        wayland_server::Resource,
     },
     utils::{Logical, Point, SERIAL_COUNTER},
     wayland::seat::WaylandFocus,
@@ -47,9 +47,6 @@ const XKB_OFFSET: u32 = 8;
 pub const DRIVEN_FOR: Duration = Duration::from_secs(10);
 /// How often such a window gets a frame callback.
 const UNSEEN_FRAME: Duration = Duration::from_millis(100);
-/// How long a seat's global stays, disabled, after its agent went: a
-/// client binding it meanwhile is not cut off.
-const GLOBAL_LINGER: Duration = Duration::from_secs(5);
 /// How long an application may take to take a seat that just came.
 pub const BIND_WAIT: Duration = Duration::from_secs(2);
 
@@ -59,10 +56,15 @@ const KEY_LEFTALT: u32 = 56;
 const KEY_RIGHTALT: u32 = 100;
 const KEY_LEFTMETA: u32 = 125;
 
-/// One connection's seat.
+/// An agent's seat, and the connection holding it: none once its agent
+/// went. A seat is never taken away: applications ask for its pointer's
+/// cursor shape after it lost the pointer, which smithay's cursor-shape
+/// manager answers by leaving the object without data, and
+/// wayland-backend panics (the session ended each time an agent went).
+/// The next connection of the agent takes it again.
 #[derive(Debug)]
 pub struct AgentSeat {
-    pub session: u64,
+    pub session: Option<u64>,
     pub agent: String,
     pub seat: Seat<State>,
     /// When it came: applications take it a moment later.
@@ -126,8 +128,35 @@ fn char_keysym(c: char) -> Keysym {
 }
 
 impl State {
-    /// Connection `session` of `agent` gets a seat of its own.
+    /// Connection `session` of `agent` gets a seat of its own: one of the
+    /// agent's no connection holds, else a new one.
     pub(crate) fn mcp_seat_join(&mut self, session: u64, agent: &str) {
+        let names = self.config.xkb_names();
+        let xkb = XkbConfig {
+            model: &names.model,
+            layout: &names.layout,
+            variant: &names.variant,
+            options: (!names.options.is_empty()).then(|| names.options.clone()),
+            ..XkbConfig::default()
+        };
+        if let Some(rested) = self
+            .mcp
+            .seats
+            .list
+            .iter_mut()
+            .find(|s| s.session.is_none() && s.agent == agent)
+        {
+            rested.session = Some(session);
+            rested.since = Instant::now();
+            let keyboard = rested.seat.get_keyboard();
+            if let Some(keyboard) = keyboard
+                && let Err(err) = keyboard.set_xkb_config(self, xkb)
+            {
+                tracing::warn!(?err, agent, "an agent's seat keeps its keyboard's layouts");
+            }
+            tracing::info!(agent, session, "an MCP agent's seat, again");
+            return;
+        }
         let mut name = format!("agent-{agent}");
         while self.mcp.seats.list.iter().any(|s| s.seat.name() == name) {
             self.mcp.seats.next += 1;
@@ -137,14 +166,6 @@ impl State {
             .protocols
             .seat_state
             .new_wl_seat(&self.display_handle, name);
-        let names = self.config.xkb_names();
-        let xkb = XkbConfig {
-            model: &names.model,
-            layout: &names.layout,
-            variant: &names.variant,
-            options: (!names.options.is_empty()).then(|| names.options.clone()),
-            ..XkbConfig::default()
-        };
         if seat.add_keyboard(xkb, 200, 25).is_err()
             && let Err(err) = seat.add_keyboard(XkbConfig::default(), 200, 25)
         {
@@ -153,7 +174,7 @@ impl State {
         seat.add_pointer();
         tracing::info!(agent, session, "an MCP agent's seat");
         self.mcp.seats.list.push(AgentSeat {
-            session,
+            session: Some(session),
             agent: agent.to_owned(),
             seat,
             since: Instant::now(),
@@ -163,23 +184,29 @@ impl State {
         });
     }
 
-    /// The seat of connection `session` goes with it.
+    /// The seat of connection `session` rests once it went: its focus
+    /// leaves, its pointer is no longer drawn, and it waits for the agent's
+    /// next connection.
     pub(crate) fn mcp_seat_leave(&mut self, session: u64) {
-        let Some(i) = self
+        let Some(rested) = self
             .mcp
             .seats
             .list
-            .iter()
-            .position(|s| s.session == session)
+            .iter_mut()
+            .find(|s| s.session == Some(session))
         else {
             return;
         };
-        let mut gone = self.mcp.seats.list.remove(i);
+        rested.session = None;
+        rested.at = None;
+        rested.last = None;
+        rested.unheard = false;
+        let (seat, agent) = (rested.seat.clone(), rested.agent.clone());
         let serial = SERIAL_COUNTER.next_serial();
-        if let Some(keyboard) = gone.seat.get_keyboard() {
+        if let Some(keyboard) = seat.get_keyboard() {
             keyboard.set_focus(self, None, serial);
         }
-        if let Some(pointer) = gone.seat.get_pointer() {
+        if let Some(pointer) = seat.get_pointer() {
             let location = pointer.current_location();
             pointer.motion(
                 self,
@@ -192,25 +219,7 @@ impl State {
             );
             pointer.frame(self);
         }
-        gone.seat.remove_keyboard();
-        gone.seat.remove_pointer();
-        if let Some(global) = gone.seat.global() {
-            self.display_handle.disable_global::<State>(global.clone());
-            let retire = move |app: &mut crate::App, global: GlobalId| {
-                app.state.display_handle.remove_global::<State>(global);
-            };
-            let timer = self.loop_handle.insert_source(
-                Timer::from_duration(GLOBAL_LINGER),
-                move |_, _, app| {
-                    retire(app, global.clone());
-                    TimeoutAction::Drop
-                },
-            );
-            if let Err(err) = timer {
-                tracing::warn!(error = %err.error, "an agent's seat's global stays disabled");
-            }
-        }
-        tracing::info!(agent = gone.agent, session, "an MCP agent's seat went");
+        tracing::info!(agent, session, "an MCP agent's seat went");
         self.redraw = true;
     }
 
@@ -220,7 +229,11 @@ impl State {
     }
 
     pub(crate) fn mcp_seat(&self, session: u64) -> Option<&AgentSeat> {
-        self.mcp.seats.list.iter().find(|s| s.session == session)
+        self.mcp
+            .seats
+            .list
+            .iter()
+            .find(|s| s.session == Some(session))
     }
 
     fn mcp_seat_mut(&mut self, session: u64) -> Option<&mut AgentSeat> {
@@ -228,7 +241,7 @@ impl State {
             .seats
             .list
             .iter_mut()
-            .find(|s| s.session == session)
+            .find(|s| s.session == Some(session))
     }
 
     /// Whether window `id`'s application took the seat of `session`: its
