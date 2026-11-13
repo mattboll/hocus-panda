@@ -139,6 +139,9 @@ pub struct Clip {
     pub count: usize,
     /// How far in from `keep`'s sides the sparks fade out, pixels.
     pub fade: f32,
+    /// The radius of `keep`'s corners, pixels: the shapes are cut to its
+    /// rounded rectangle (the bar's, #800); none at 0.
+    pub corner: f32,
 }
 
 impl Clip {
@@ -149,12 +152,21 @@ impl Clip {
             holes: [[0.0; 4]; HOLES],
             count: 0,
             fade,
+            corner: 0.0,
         };
         for (slot, hole) in clip.holes.iter_mut().zip(holes) {
             *slot = hole;
             clip.count += 1;
         }
         clip
+    }
+
+    /// The same, its corners rounded by `radius` (pixels).
+    pub fn rounded(self, radius: f32) -> Self {
+        Self {
+            corner: radius,
+            ..self
+        }
     }
 
     /// The same, from an element's corner `at`.
@@ -946,15 +958,28 @@ void main() {
 /// two-point gradient, white from a focus at (-0.3, -0.3) to blue at its
 /// edge); a box blurred by a Gaussian (or sharp, its edges smoothed); a
 /// box with round corners, an oval and a glow (the garland's, #799; a
-/// firefly's, #804, its own colours; a firework's spark, #810); a drop
-/// of the rain's map (#802); a lily pad or its shadow (#803). Nothing
-/// where the clip says not.
+/// firefly's, #804, its own colours; a firework's spark, #810, and one
+/// in the bar, #800); a drop of the rain's map (#802); a lily pad or its
+/// shadow (#803). Nothing where the clip says not, nor out of its round
+/// corners when it has some.
 const SHAPES: &str = "#version 100
 precision highp float;
 varying vec2 v_local;
 varying vec4 v_colour;
 varying vec4 v_shape;
 varying vec2 v_at;
+uniform float corner;
+
+float within_corners(vec2 p) {
+    if (corner < 0.5) {
+        return 1.0;
+    }
+    vec2 middle = (keep.xy + keep.zw) * 0.5;
+    vec2 half_size = (keep.zw - keep.xy) * 0.5;
+    vec2 q = abs(p - middle) - (half_size - vec2(corner));
+    float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - corner;
+    return clamp(0.5 - d, 0.0, 1.0);
+}
 
 float erfish(float x) {
     float x2 = x * x;
@@ -1038,6 +1063,11 @@ void main() {
         float r = length(v_local);
         float a = clamp((1.0 - r) * 6.0, 0.0, 1.0);
         gl_FragColor = vec4(v_local * 0.5 + 0.5, sqrt(max(1.0 - r * r, 0.0)), 1.0) * a;
+    } else if (v_shape.y > 4.5) {
+        float d = length(v_local);
+        vec4 c = v_colour;
+        gl_FragColor = d < 0.25 ? mix(vec4(c.a), c * 0.9, d / 0.25)
+            : mix(c * 0.9, vec4(0.0), clamp((d - 0.25) / 0.75, 0.0, 1.0));
     } else if (v_shape.y > 3.5) {
         float d = length(v_local);
         vec4 c = v_colour;
@@ -1073,6 +1103,7 @@ void main() {
         }
         gl_FragColor = v_colour * a;
     }
+    gl_FragColor *= within_corners(v_at);
 }
 ";
 
@@ -1628,7 +1659,7 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 gl,
                 SPARKS_VERTEX,
                 &with_clip(SHAPES, "varying vec2 v_at;\n"),
-                &["matrix", "keep", "holes", "count"],
+                &["matrix", "keep", "holes", "count", "corner"],
             )?;
             let sprites = compile_with(gl, SPRITE_VERTEX, SPRITE, &["matrix", "tex"])?;
             let shards = compile_with(
@@ -2818,6 +2849,7 @@ unsafe fn shapes(
         gl.UseProgram(p.program);
         gl.UniformMatrix3fv(p.at("matrix"), 1, ffi::FALSE, matrix.as_ptr());
         set_clip(gl, p, clip);
+        gl.Uniform1f(p.at("corner"), clip.corner);
         gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
         gl.BindBuffer(ffi::ELEMENT_ARRAY_BUFFER, 0);
         for (at, _, _) in attribs {

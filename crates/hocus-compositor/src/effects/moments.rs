@@ -9,6 +9,11 @@
 //! nor on a screen off or showing a fullscreen window. Once started it
 //! plays to its end, only on the screen (never in a capture, a share's or
 //! a recording's frames), and nothing is drawn for it after.
+//!
+//! Where it plays is decided as it starts too (#800): on the wallpaper,
+//! or, with a maximised window on the desktop the screen shows (no
+//! wallpaper left to see), in the bar's column alone, never over the
+//! window. A fullscreen window covers the bar too: none plays then.
 
 use std::time::Duration;
 
@@ -20,6 +25,16 @@ use super::{
     snow::Holder,
 };
 use crate::State;
+
+/// Where a moment plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// On the wallpaper, behind the windows.
+    Wall,
+    /// In the bar's column, a maximised window hiding the wallpaper
+    /// (#800).
+    Bar,
+}
 
 /// Where the confetti leave the bar, from its side's edge and top
 /// (logical): the board's, at its bar's side, 54 px down.
@@ -50,6 +65,28 @@ impl State {
         Some(output)
     }
 
+    /// Where a moment plays on `output` now: in its bar's column when a
+    /// maximised window shows on its desktop (#800), the bar's zone with
+    /// it (global, logical: `x, y, w, h`); else on its wallpaper.
+    fn moment_place(&self, output: &Output) -> Option<(Place, Option<[f32; 4]>)> {
+        if !self.maximized_shown(output) {
+            return Some((Place::Wall, None));
+        }
+        let area = self.space.output_geometry(output)?;
+        let Some(bar) = self.bar_rect(output, self.now()) else {
+            tracing::debug!(output = output.name(), "no bar for the moment");
+            return None;
+        };
+        let zone = [
+            f64::from(area.loc.x) + bar.loc.x,
+            f64::from(area.loc.y) + bar.loc.y,
+            bar.size.w,
+            bar.size.h,
+        ]
+        .map(|v| v as f32);
+        Some((Place::Bar, Some(zone)))
+    }
+
     /// An agent's tests went green (#810): fireworks, if they may play
     /// and none plays already. Whether they go off.
     pub(crate) fn fireworks_go_off(&mut self) -> bool {
@@ -59,13 +96,23 @@ impl State {
         let Some(output) = self.moment_screen(self.config.effects.fireworks, "fireworks") else {
             return false;
         };
-        let Some(zone) = self.work_area(&output) else {
+        let Some((place, bar)) = self.moment_place(&output) else {
             return false;
         };
-        let zone = [zone.x, zone.y, zone.width, zone.height].map(|v| v as f32);
         self.fx.moments += 1;
-        tracing::debug!(output = output.name(), "fireworks go off");
-        self.fx.fireworks = Some(Show::new(self.now(), self.fx.moments, output.name(), zone));
+        let (now, seed, name) = (self.now(), self.fx.moments, output.name());
+        let show = match bar {
+            Some(zone) => Show::in_bar(now, seed, name, zone),
+            None => {
+                let Some(zone) = self.work_area(&output) else {
+                    return false;
+                };
+                let zone = [zone.x, zone.y, zone.width, zone.height].map(|v| v as f32);
+                Show::new(now, seed, name, zone)
+            }
+        };
+        tracing::debug!(output = output.name(), ?place, "fireworks go off");
+        self.fx.fireworks = Some(show);
         self.redraw = true;
         true
     }
@@ -76,6 +123,26 @@ impl State {
         let Some(output) = self.moment_screen(self.config.effects.confetti, "confetti") else {
             return false;
         };
+        let Some((place, bar)) = self.moment_place(&output) else {
+            return false;
+        };
+        if let Some(zone) = bar {
+            let now = self.now();
+            let name = output.name();
+            let mut confetti = match self.fx.confetti.take() {
+                Some(c) if c.output == name && c.place == Place::Bar => c,
+                _ => {
+                    self.fx.moments += 1;
+                    Confetti::in_bar(now, self.fx.moments, name.clone(), zone)
+                }
+            };
+            confetti.fire_in_bar();
+            confetti.fired = now;
+            tracing::debug!(output = name, ?place, "confetti go off");
+            self.fx.confetti = Some(confetti);
+            self.redraw = true;
+            return true;
+        }
         let (Some(area), Some(work)) =
             (self.space.output_geometry(&output), self.work_area(&output))
         else {
@@ -108,7 +175,7 @@ impl State {
         let above = [work.x as f32, work.width as f32, work.y as f32];
         let name = output.name();
         let mut confetti = match self.fx.confetti.take() {
-            Some(c) if c.output == name => c,
+            Some(c) if c.output == name && c.place == Place::Wall => c,
             _ => {
                 self.fx.moments += 1;
                 let zone = [area.loc.x, area.loc.y, area.size.w, area.size.h].map(|v| v as f32);
@@ -117,7 +184,7 @@ impl State {
         };
         confetti.fire(from, above);
         confetti.fired = now;
-        tracing::debug!(output = name, "confetti go off");
+        tracing::debug!(output = name, ?place, "confetti go off");
         self.fx.confetti = Some(confetti);
         self.redraw = true;
         true
@@ -163,8 +230,17 @@ impl State {
                 moving = true;
             }
         }
-        if let Some(output) = self.fx.confetti.as_ref().map(|c| c.output.clone()) {
-            let ledges = self.confetti_ledges(&output, now);
+        if let Some((output, place)) = self
+            .fx
+            .confetti
+            .as_ref()
+            .map(|c| (c.output.clone(), c.place))
+        {
+            // In the bar's column they settle nowhere.
+            let ledges = match place {
+                Place::Wall => self.confetti_ledges(&output, now),
+                Place::Bar => Vec::new(),
+            };
             if let Some(confetti) = self.fx.confetti.as_mut() {
                 confetti.advance(now, &ledges);
                 if confetti.over(now) {

@@ -771,8 +771,6 @@ with reduced motion, in the power saver, while a screen is shared or
 recorded, on the CPU, while locked, nor on a screen off or showing a
 fullscreen window; the bar says the news all the same. Once over (some
 7 s for the fireworks, under 20 for the confetti), nothing is drawn.
-What a moment draws is decided from its zone alone: the bar's moment
-when a window is maximised (#800) gives it the bar's.
 
 - **When the fireworks go off**: an agent finishes (its state becomes
   `done`) and the last test run of its turn passed, as
@@ -808,6 +806,27 @@ when a window is maximised (#800) gives it the bar's.
   minute or until its row is clicked; an MCP agent's row says why until
   its next request. Off, the bar says it all the same.
 
+- **In the bar, with a maximised window** (#800, the board "Fenêtre
+  maximisée"): when a maximised window shows on the desktop of the
+  moment's screen as it starts, no wallpaper is left to see, and the
+  moment plays in the bar's column alone (`Place::Bar`), never over the
+  window: its zone the bar's, drawn right in front of the bar's surfaces
+  (under its popovers), as the board's canvas over its bar (the one
+  effect drawn over the bar, for a few seconds), cut to the
+  bar's rounded rectangle (14 px) as it is drawn at each frame, and
+  outside what the glass blurs. Its own show, the board's JS ported: the
+  fireworks are three bursts 0.35 s apart, 46 sparks each all round at
+  70 to 120 px/s (slowed, falling at 60 px/s²) across the bar's middle
+  60 %, 140 to 300 px down its top, each spark the board's glow (7 to
+  12 px, white at its middle, its colour at 25 %) added to the bar, no
+  rockets nor flashes, over in some 2.2 s; the confetti a shower of 110
+  cards from up to 120 px above the bar's top, falling slower (160
+  px/s²), settling nowhere (the bar's blocks are not ledges), each gone
+  after 4.5 s, fading over its last 0.7 s, or once out of the bar's
+  bottom; another celebration adds a shower. It stays in the bar to its
+  end, whatever the window does meanwhile. A fullscreen window covers the
+  bar too: none plays then, as for every effect.
+
 The board's toast at the bottom of the screen ("hocus-panda a fini :
 2 040 tests au vert") is not built: the bar's row says it.
 
@@ -816,6 +835,9 @@ agent's hooks saying its tests passed as its turn ends set the fireworks
 off, its row saying so, the window's pixels untouched, over within 10 s
 and nothing drawn after; a red last run, none; `hocus celebrate`'s
 confetti settle on the window's edge and melt, never over what it shows;
-on the CPU, the bar alone says the news); its screenshots,
+with a maximised window, both in the bar's column alone, the window and
+the gaps around it untouched, nothing drawn once over; on the CPU, the
+bar alone says the news); its screenshots, the maximised case among
+them,
 `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
 good_news::shots`.

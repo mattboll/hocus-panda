@@ -67,6 +67,10 @@ pub enum Glow {
     /// colour at 90 % at 15 %, 22 % at 45 %, nothing at its edge (the
     /// board's sprite).
     Spark = 4,
+    /// A firework's spark in the bar (#800, the board "Fenêtre
+    /// maximisée"'s sprite): white at its middle, its vertices' colour at
+    /// 90 % at 25 %, nothing at its edge.
+    Bead = 5,
 }
 
 /// A column of a fill: its place across, and its rows from the top down

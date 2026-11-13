@@ -1041,16 +1041,6 @@ impl State {
         ])
     }
 
-    /// Whether a maximised window shows on `output`'s desktop: it covers
-    /// the work area, and the garland across its top with it.
-    fn maximized_shown(&self, output: &Output) -> bool {
-        self.windows_on(output).into_iter().any(|id| {
-            !self.model.is_minimized(id)
-                && self.on_current_desktop(id)
-                && self.model.mode(id) == Mode::Snapped(Zone::Maximized)
-        })
-    }
-
     /// The garlands across the tops of the screens move on to `now`
     /// (#813): one hung on each screen as it is turned on, following its
     /// work area; paused on a screen that is off, shows a fullscreen or a

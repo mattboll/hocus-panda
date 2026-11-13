@@ -4,7 +4,9 @@
 //! agent-hook`) sets fireworks off behind the windows, its row saying so,
 //! and they end with nothing drawn after; `hocus celebrate` sets confetti
 //! off, which settle on a window's top edge and melt, never over what it
-//! shows, its agent's row saying why. On GLES (Mesa's software device, or
+//! shows, its agent's row saying why. With a maximised window, both play
+//! in the bar's column alone (#800), the window's pixels untouched. On
+//! GLES (Mesa's software device, or
 //! the GPU `HOCUS_TEST_GPU` names); on the CPU, the bar alone says it.
 //! The commands run beside the test's program (`cargo programs`), each a
 //! child of the test's process, whose window is the agent's.
@@ -18,8 +20,11 @@ use std::{
     time::Duration,
 };
 
-use common::{WAIT, open_with};
-use hocus_compositor::{Config, Headless, HeadlessConfig, OutputSpec, model::Rect};
+use common::{KEY_LEFTMETA, KEY_UP, WAIT, open_with};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, OutputSpec,
+    model::{Mode, Rect, Zone},
+};
 use hocus_link::AgentNews;
 use serde_json::json;
 
@@ -318,6 +323,156 @@ fn confetti_settle_on_a_windows_edge_and_melt_never_over_what_it_shows() -> anyh
     Ok(())
 }
 
+/// [`bed`] on GLES, its window maximised then: what it shows, the bar's
+/// column and the window's place.
+fn maximized_bed(
+    config: Config,
+) -> anyhow::Result<(Headless, common::ClientHandle, Shot, Rect, Rect)> {
+    let (mut hp, client, _) = bed(config, false, false)?;
+    let id = hp.windows()[0].id;
+    common::chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
+    let maximized = hp.dispatch_until(WAIT, |hp| hp.mode(id) == Mode::Snapped(Zone::Maximized))?;
+    anyhow::ensure!(maximized, "{:?}", hp.mode(id));
+    run(&mut hp, Duration::from_millis(800))?;
+    let bar = hp
+        .bar_place("HEADLESS-1")
+        .ok_or_else(|| anyhow::anyhow!("no bar"))?;
+    let window = hp
+        .work_area()
+        .ok_or_else(|| anyhow::anyhow!("no work area"))?;
+    let before = hp.screenshot(0)?;
+    Ok((hp, client, before, bar, window))
+}
+
+/// Of `a` and `b`, the pixels that differ in the bar's column `bar`, and
+/// out of it (the window and the gaps around it and the bar).
+fn changed(a: &Shot, b: &Shot, bar: Rect) -> (usize, usize) {
+    let (mut inside, mut outside) = (0, 0);
+    for y in 0..a.1 {
+        for x in 0..a.0 {
+            let i = ((y * a.0 + x) * 4) as usize;
+            if a.2.get(i..i + 3) == b.2.get(i..i + 3) {
+                continue;
+            }
+            if bar.contains(f64::from(x) + 0.5, f64::from(y) + 0.5) {
+                inside += 1;
+            } else {
+                outside += 1;
+            }
+        }
+    }
+    (inside, outside)
+}
+
+/// Waits for `over` within `most`, a frame each tenth of a second; then
+/// nothing more is drawn.
+fn over_then_nothing(
+    hp: &mut Headless,
+    over: impl Fn(&Headless) -> bool,
+    most: Duration,
+) -> anyhow::Result<()> {
+    let mut waited = Duration::ZERO;
+    while !over(hp) && waited < most {
+        hp.step(Duration::from_millis(100))?;
+        waited += Duration::from_millis(100);
+    }
+    anyhow::ensure!(over(hp), "still playing after {most:?}");
+    run(hp, Duration::from_millis(100))?;
+    let frames = hp.frames_on(0);
+    run(hp, Duration::from_millis(500))?;
+    anyhow::ensure!(hp.frames_on(0) == frames, "drawn once over");
+    Ok(())
+}
+
+/// A maximised window, no wallpaper to see: the fireworks burst in the
+/// bar's column alone, nothing of them on the window nor around it; over
+/// within ten seconds, nothing drawn after.
+#[test]
+fn with_a_maximized_window_the_fireworks_burst_in_the_bar_alone() -> anyhow::Result<()> {
+    let (mut hp, _client, before, bar, window) = maximized_bed(moments(true, false))?;
+    hocus(&hp, &["agent", "build", "working"], None)?;
+    hocus(
+        &hp,
+        &["agent", "build", "done", "--tests-passed", "12"],
+        None,
+    )?;
+    let went = hp.dispatch_until(WAIT, |hp| hp.fireworks().is_some())?;
+    anyhow::ensure!(went, "no fireworks");
+    for at in [500, 400, 400] {
+        run(&mut hp, Duration::from_millis(at))?;
+        let (_, sparks) = hp
+            .fireworks()
+            .ok_or_else(|| anyhow::anyhow!("over too soon"))?;
+        // Down the bar, its middle across.
+        assert!(
+            sparks.iter().all(|(x, y)| {
+                (*x as f64) > f64::from(bar.x) - 100.0 && f64::from(*y) > f64::from(bar.y)
+            }),
+            "{sparks:?}"
+        );
+        let shot = hp.screenshot(0)?;
+        let (inside, outside) = changed(&before, &shot, bar);
+        assert!(inside > 300, "the bar lit: {inside} pixels");
+        assert_eq!(outside, 0, "nothing out of the bar's column");
+        let (kept, all) = same(&before, &shot, window);
+        assert_eq!(kept, all, "the window's pixels untouched");
+    }
+    over_then_nothing(
+        &mut hp,
+        |hp| hp.fireworks().is_none(),
+        Duration::from_secs(10),
+    )?;
+    let after = hp.screenshot(0)?;
+    assert_eq!(
+        changed(&before, &after, bar),
+        (0, 0),
+        "nothing left of them"
+    );
+    Ok(())
+}
+
+/// A maximised window: `hocus celebrate`'s confetti fall through the
+/// bar's column alone, settling nowhere, nothing of them on the window
+/// nor around it; gone within five seconds, nothing drawn after.
+#[test]
+fn with_a_maximized_window_the_confetti_fall_in_the_bar_alone() -> anyhow::Result<()> {
+    let (mut hp, _client, before, bar, window) = maximized_bed(moments(false, true))?;
+    hocus(&hp, &["agent", "site", "working"], None)?;
+    hocus(&hp, &["celebrate", "#791 merged on main"], None)?;
+    let went = hp.dispatch_until(WAIT, |hp| hp.confetti().is_some())?;
+    anyhow::ensure!(went, "no confetti");
+    for _ in 0..4 {
+        run(&mut hp, Duration::from_millis(500))?;
+        let (flying, lying) = hp
+            .confetti()
+            .ok_or_else(|| anyhow::anyhow!("gone too soon"))?;
+        assert!(lying.is_empty(), "settled: {lying:?}");
+        let (x0, x1) = (bar.x as f32 - 60.0, (bar.x + bar.width) as f32 + 60.0);
+        assert!(
+            flying.iter().all(|(x, _)| (x0..x1).contains(x)),
+            "{flying:?}"
+        );
+        let shot = hp.screenshot(0)?;
+        let (inside, outside) = changed(&before, &shot, bar);
+        assert!(inside > 300, "in the bar: {inside} pixels");
+        assert_eq!(outside, 0, "nothing out of the bar's column");
+        let (kept, all) = same(&before, &shot, window);
+        assert_eq!(kept, all, "the window's pixels untouched");
+    }
+    over_then_nothing(
+        &mut hp,
+        |hp| hp.confetti().is_none(),
+        Duration::from_secs(5),
+    )?;
+    let after = hp.screenshot(0)?;
+    assert_eq!(
+        changed(&before, &after, bar),
+        (0, 0),
+        "nothing left of them"
+    );
+    Ok(())
+}
+
 /// On the CPU (as with reduced motion, in the power saver or while a
 /// screen is shared), neither plays: the bar alone says the news. Done
 /// without its tests passing, it says none.
@@ -377,7 +532,8 @@ fn save(hp: &mut Headless, out: &Path, name: &str) -> anyhow::Result<()> {
 /// names a folder, on GLES, with the shell's bar (in French) and two
 /// windows: the fireworks mid-burst, the bar's row saying the tests
 /// passed; the confetti flying, then settled on the windows' edges and
-/// the bar's, the row saying why. Run by hand (`--run-ignored only`).
+/// the bar's, the row saying why; then, a window maximised, both in the
+/// bar's column (#800). Run by hand (`--run-ignored only`).
 #[test]
 #[ignore = "screenshots, by hand"]
 fn shots() -> anyhow::Result<()> {
@@ -442,6 +598,56 @@ fn shots() -> anyhow::Result<()> {
         save(&mut hp, &out, "confetti-flying")?;
         run(&mut hp, Duration::from_millis(2350))?;
         save(&mut hp, &out, "confetti-settled")?;
+        // A window maximised: in the bar's column alone (#800).
+        let mut waited = Duration::ZERO;
+        while hp.confetti().is_some() && waited < Duration::from_secs(20) {
+            hp.step(Duration::from_millis(100))?;
+            waited += Duration::from_millis(100);
+        }
+        common::click(&mut hp, (800.0, 500.0))?;
+        common::chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
+        run(&mut hp, Duration::from_millis(800))?;
+        hocus(
+            &hp,
+            &["agent", "hocus-panda", "working", "--pid", &pid],
+            None,
+        )?;
+        hocus(
+            &hp,
+            &[
+                "agent",
+                "hocus-panda",
+                "done",
+                "--pid",
+                &pid,
+                "--tests-passed",
+                "2040",
+            ],
+            None,
+        )?;
+        let went = hp.dispatch_until(WAIT, |hp| hp.fireworks().is_some())?;
+        anyhow::ensure!(went, "no fireworks in the bar");
+        run(&mut hp, Duration::from_millis(700))?;
+        save(&mut hp, &out, "maximized-fireworks")?;
+        run(&mut hp, Duration::from_millis(500))?;
+        save(&mut hp, &out, "maximized-fireworks-later")?;
+        run(&mut hp, Duration::from_secs(3))?;
+        hocus(
+            &hp,
+            &["agent", "hocus-panda", "working", "--pid", &pid],
+            None,
+        )?;
+        hocus(
+            &hp,
+            &["celebrate", "#791 mergée sur main", "--pid", &pid],
+            None,
+        )?;
+        let went = hp.dispatch_until(WAIT, |hp| hp.confetti().is_some())?;
+        anyhow::ensure!(went, "no confetti in the bar");
+        run(&mut hp, Duration::from_millis(1200))?;
+        save(&mut hp, &out, "maximized-confetti")?;
+        run(&mut hp, Duration::from_millis(1800))?;
+        save(&mut hp, &out, "maximized-confetti-later")?;
         Ok(())
     })();
     let _ = Command::new("kill").arg(&pid).status();

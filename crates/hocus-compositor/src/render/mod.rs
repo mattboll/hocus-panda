@@ -848,6 +848,13 @@ impl State {
             let halo = self.halo_elements(renderer, output, bar, now);
             elements.splice(at..at, halo.into_iter().map(OutputElements::Shader));
         }
+        // The moments in the bar's column (#800), right in front of its
+        // surfaces, under its popovers.
+        let mut bar_moments = self.bar_moments(&frame);
+        if front && let Some(at) = bar_at {
+            let moments = std::mem::take(&mut bar_moments);
+            elements.splice(at..at, moments.into_iter().map(OutputElements::Fire));
+        }
         // The panda peeking out (4.5): over the windows, under the bar's
         // surfaces and its halo, out of whose edge it comes.
         self.peek_elements(renderer, output, now, &mut elements);
@@ -875,6 +882,7 @@ impl State {
         elements.append(&mut overview);
         elements.append(&mut windows);
         if !front {
+            elements.extend(bar_moments.into_iter().map(OutputElements::Fire));
             elements.extend(self.confetti_bar(&frame).map(OutputElements::Fire));
             let cap = self.snow_bar_cap(renderer, &frame);
             elements.extend(cap.into_iter().map(OutputElements::Fire));
