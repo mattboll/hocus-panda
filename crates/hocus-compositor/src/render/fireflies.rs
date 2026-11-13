@@ -21,7 +21,7 @@ const FAR: f32 = 1.0e7;
 impl State {
     /// The fireflies over `frame`'s output, when they show there.
     fn fireflies_on(&self, frame: &Frame) -> Option<&Swarm> {
-        if !frame.purpose.screen() || self.fullscreen_in_front(frame.output) {
+        if !frame.purpose.screen() || self.wall_hidden(frame.output) {
             return None;
         }
         self.fireflies_out()?;

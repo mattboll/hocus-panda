@@ -16,7 +16,8 @@
 //! on the wallpaper, rain on the glass ([`raindrops`], #802), a koi pond
 //! ([`koi`], #803), evening fireflies ([`fireflies`], #804) and the
 //! daylight ([`daylight`], #805), following the sun ([`sun`]); and
-//! desktops in depth ([`depth`], #806).
+//! desktops in depth ([`depth`], #806). The wallpaper's effects play
+//! behind the lock too, and in the overview (#807).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -124,6 +125,44 @@ impl State {
             Some(Still::ReducedMotion) => Some(Plays::Still),
             Some(Still::PowerSaver | Still::Shown | Still::Cpu) => None,
         }
+    }
+
+    /// Whether the desktop's own lock shows the wallpaper live, drawn by
+    /// the compositor under it with the wallpaper's effects (#807): one
+    /// of them is on, the lock shows the wallpaper dimmed (not blurred,
+    /// nor a picture of its own), on the GPU, and the shell draws on the
+    /// GPU too (on the CPU its surfaces are opaque). Not the transient
+    /// rules (the power saver, a share): then the still wallpaper is
+    /// drawn.
+    pub(crate) fn lock_live(&self) -> bool {
+        let e = &self.config.effects;
+        let any = e.snow || e.rain_on_glass || e.koi || e.fireflies || e.daylight || e.depth;
+        any && self.config.wallpaper.lock == hocus_link::wallpaper::LockLook::Dimmed
+            && !self.config.plain_background
+            && self.graphics.blur
+            && !self.shell.software
+    }
+
+    /// Whether the desktop's own lock shows now, the wallpaper live
+    /// under it.
+    pub(crate) fn lock_shows_wall(&self) -> bool {
+        self.lock
+            .locked_state()
+            .is_some_and(|l| matches!(l.holder, crate::lock::Holder::Own))
+            && self.lock_live()
+    }
+
+    /// The wallpaper's effects step on at `now`: the snow, the rain on the
+    /// glass, the fireflies, the koi, the daylight, desktops in depth;
+    /// whether one moves.
+    pub(crate) fn tick_wallpaper_effects(&mut self, now: std::time::Duration) -> bool {
+        let mut moving = self.tick_snow(now);
+        moving |= self.tick_raindrops(now);
+        moving |= self.tick_fireflies(now);
+        moving |= self.tick_koi(now);
+        self.tick_daylight();
+        self.tick_depth();
+        moving
     }
 
     /// Why no effect plays now; `None`: they may.

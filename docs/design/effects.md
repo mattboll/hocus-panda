@@ -659,6 +659,38 @@ desktop and the forest by 0.72, drawn 60 times a second at most; nothing
 drawn per frame at rest); its screenshots, `HOCUS_SHOTS=DIR cargo nextest
 run -p hocus-compositor --run-ignored only depth::shots`.
 
+## The live wallpaper on the lock and in the overview (#807)
+
+The wallpaper's effects (the snow, the rain on the glass, the koi, the
+fireflies, the daylight's sky, the landscape in depth) play behind the
+lock and in the overview too, with the same rules.
+
+- **The lock**: with one of them on, the lock showing the wallpaper
+  dimmed (`[wallpaper] lock = "dimmed"`, the default) and the desktop's
+  own lock (not another locker's), the compositor draws the wallpaper
+  under the lock's surface with the effects on it (`State::live_wall`),
+  and the shell leaves the lock's background clear (`live` on the lock's
+  line), its veil over them. Not with the shell on the CPU, whose
+  surfaces are opaque: its lock draws the still wallpaper as before. What shows there is the wallpaper's alone:
+  the snow's flakes, clumps and ground (it falls to the ground alone while
+  locked), never a window's cap, a creature or a garland. The desktop's
+  last frame fades out under the lock as the lock fades in. Blurred or
+  with a picture of its own, the lock is as before. A fullscreen window
+  does not stop them while locked (it is not shown); a screen off stops
+  them, as anywhere; in the power saver, while a screen is shared or
+  recorded, the still wallpaper; in a capture of the lock, the still
+  wallpaper.
+- **The overview**: the effects keep playing on the wallpaper under its
+  dim; the windows laid out take nothing bound to them along (the caps and
+  the creatures fade with the windows as the overview opens).
+
+Tests: `tests/live_wall.rs` (on GLES on Mesa's software device: the
+snow falling behind the lock, its ground at the foot, no cap where the
+windows were, without the shell, whose lock is opaque on the CPU; the
+same in the overview, with it); its screenshots, the shell drawing on
+Mesa's software Vulkan, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only live_wall::shots`.
+
 ## Not built yet
 
 The other effects come with their tickets.

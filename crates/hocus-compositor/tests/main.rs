@@ -87,6 +87,7 @@ mod layouts;
 mod levels;
 mod link;
 mod live_reload;
+mod live_wall;
 mod lock;
 mod lock_external;
 mod lock_shots;

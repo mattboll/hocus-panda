@@ -118,7 +118,7 @@ impl crate::State {
     pub(crate) fn depth_shows_on(&self, output: &Output) -> bool {
         self.depth_plays().is_some()
             && self.fx.depth.is_some()
-            && !self.fullscreen_in_front(output)
+            && !self.wall_hidden(output)
             && !self.koi_shows_on(output)
     }
 

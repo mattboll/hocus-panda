@@ -297,7 +297,7 @@ impl crate::State {
     /// fullscreen window in front), the screen's size (logical).
     pub(crate) fn daylight_on(&self, output: &smithay::output::Output) -> Option<Sky> {
         self.daylight_plays()?;
-        if self.fullscreen_in_front(output) {
+        if self.wall_hidden(output) {
             return None;
         }
         let daylight = self.fx.daylight.as_ref()?;

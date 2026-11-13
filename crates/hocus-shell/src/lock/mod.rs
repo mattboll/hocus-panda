@@ -311,6 +311,7 @@ mod tests {
             focus: LockFocus::Field,
             agents: 0,
             wallpaper: true,
+            live: false,
             motion: true,
             output: "eDP-1".into(),
         }
@@ -366,6 +367,7 @@ mod tests {
             focus: LockFocus::Field,
             agents: 0,
             wallpaper: true,
+            live: false,
             motion: false,
             output: "eDP-1".into(),
         };

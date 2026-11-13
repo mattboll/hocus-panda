@@ -279,6 +279,13 @@ impl State {
             }
     }
 
+    /// Whether a fullscreen window hides `output`'s wallpaper, and the
+    /// effects on it: not while locked, the lock showing the wallpaper
+    /// (#807).
+    pub(crate) fn wall_hidden(&self, output: &Output) -> bool {
+        !self.locked() && self.fullscreen_in_front(output)
+    }
+
     /// Whether the window in front on `output`'s desktop is fullscreen.
     pub(crate) fn fullscreen_in_front(&self, output: &Output) -> bool {
         self.windows_on(output)

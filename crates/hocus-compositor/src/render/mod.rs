@@ -1713,6 +1713,58 @@ impl State {
         ControlFlow::Continue(())
     }
 
+    /// The wallpaper of `output` as the lock shows it (#807), front first:
+    /// on the screen with the wallpaper's effects playing on it (the
+    /// snow's flakes and ground, the fireflies, the koi's pond, the rain on
+    /// the glass, the daylight's sky, the landscape in depth), nothing
+    /// bound to a window; the still wallpaper in a capture.
+    pub(crate) fn live_wall<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        purpose: Purpose,
+        now: Duration,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let mut out = Vec::new();
+        let Some(area) = self.space.output_geometry(output) else {
+            return out;
+        };
+        let frame = Frame {
+            output,
+            purpose,
+            now,
+            area,
+            origin: area.loc.to_f64(),
+            scale: output.current_scale().fractional_scale(),
+        };
+        if purpose.screen() {
+            if let Some((_, snow)) = self.snow_layer(&frame) {
+                out.push(OutputElements::Fire(snow));
+            }
+            if let Some((_, flies)) = self.fireflies_layer(&frame) {
+                out.push(OutputElements::Fire(flies));
+            }
+            if let Some(koi) = self.koi_layer(renderer, &frame) {
+                out.push(OutputElements::Fire(koi.pads));
+                out.push(OutputElements::Fire(koi.water));
+            }
+            let mut sky = self
+                .depth_layer(renderer, &frame)
+                .or_else(|| self.daylight_layer(renderer, &frame))
+                .map(OutputElements::Fire);
+            if let Some((_, rain)) = self.raindrops_layer(renderer, &frame, &mut sky) {
+                out.push(OutputElements::Fire(rain));
+            }
+            out.extend(sky);
+        }
+        out.extend(self.backdrop_element(renderer, output));
+        out
+    }
+
     /// The wallpaper behind everything, and the panes of glass put in
     /// where `at` says, each blurred from what is behind it.
     fn wall_and_glass<R>(
