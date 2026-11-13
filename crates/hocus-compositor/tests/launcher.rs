@@ -23,6 +23,9 @@
 //! Then the launcher larger (issue #518): the sizes × 1.5 throughout, and
 //! fewer columns on a screen too narrow for eight.
 //!
+//! And `Escape` pressed as it opens, the shell reading it with the
+//! surface's first configure, closes it all the same (#821).
+//!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
 use crate::common;
@@ -1008,6 +1011,47 @@ fn an_answer_or_an_address_lists_no_application() -> anyhow::Result<()> {
         cards(&shows)[0].starts_with("*address: Ouvrir localhost:3000 | http://localhost:3000"),
         "{shows}"
     );
+    Ok(())
+}
+
+/// `Escape` pressed as it opens, read by the shell with the launcher's
+/// first configure (a busy shell, #821): iced's window for the surface is
+/// made at that configure's refresh, after the key, which must wait for it
+/// rather than be lost. The shell is held once it has asked for the
+/// surface, before the compositor answers.
+#[test]
+fn escape_read_with_its_first_configure_closes_it() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(0)? else {
+        return Ok(());
+    };
+    let from = bed.mark();
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_SPACE]);
+    // The compositor not running, the shell's requests wait on its socket:
+    // it asks for the surface a moment after it says it opens.
+    let start = Instant::now();
+    while !bed
+        .plain()
+        .get(from..)
+        .is_some_and(|l| l.contains("the launcher opens"))
+    {
+        anyhow::ensure!(start.elapsed() < WAIT, "the launcher never opened");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_secs(2));
+    bed.hp.hold_shell(true)?;
+    let asked = bed.hp.dispatch_until(Duration::from_secs(5), |hp| {
+        hp.launcher_surfaces().len() == 1
+            && hp.keyboard_layer().as_deref() == Some(hocus_link::LAUNCHER_NAMESPACE)
+    });
+    if matches!(asked, Ok(true)) {
+        bed.press(KEY_ESC);
+    }
+    let waited = wait(&mut bed.hp, Duration::from_millis(100));
+    // Let go whatever happened, for the compositor to end it.
+    bed.hp.hold_shell(false)?;
+    anyhow::ensure!(asked?, "the shell had not asked for its surface in 2 s");
+    waited?;
+    assert!(bed.closed()?, "Escape was lost");
     Ok(())
 }
 

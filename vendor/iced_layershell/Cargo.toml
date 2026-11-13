@@ -1,0 +1,105 @@
+# iced_layershell 0.19.1 as published on crates.io (MIT, `LICENSE`), with
+# two changes of Hocuspanda's in `src/multi_window.rs`: the pointer's enter
+# gives its place as a move too (#787), and what comes for a surface before
+# its window is made is kept for it (#821). It replaces the published crate
+# through the workspace's `[patch.crates-io]`. On the next update: the same
+# changes on the new version, or none if upstream makes them.
+
+[package]
+edition = "2024"
+name = "iced_layershell"
+version = "0.19.1"
+authors = [
+    "Decodertalkers <aakari@tutanota.com>",
+    "Aakash Sen Sharma <aakashsensharma@gmail.com>",
+]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "layershell binding for iced"
+readme = "README.md"
+keywords = [
+    "wayland",
+    "wlroots",
+]
+license = "MIT"
+repository = "https://github.com/waycrate/exwlshelleventloop"
+
+[features]
+debug = ["iced_debug/enable"]
+default = ["linux-theme-detection"]
+linux-theme-detection = ["dep:mundy"]
+time-travel = [
+    "iced_exdevtools/time-travel",
+    "debug",
+]
+unconditional-rendering = []
+
+[lib]
+name = "iced_layershell"
+path = "src/lib.rs"
+
+[[test]]
+name = "test_macro"
+path = "tests/test_macro.rs"
+
+[dependencies.enumflags2]
+version = "0.7.11"
+
+[dependencies.futures]
+version = "0.3.31"
+
+[dependencies.iced_core]
+version = "0.14"
+
+[dependencies.iced_debug]
+version = "0.14"
+
+[dependencies.iced_devtools]
+version = "0.14"
+
+[dependencies.iced_exdevtools]
+version = "0.19.1"
+
+[dependencies.iced_futures]
+version = "0.14"
+
+[dependencies.iced_graphics]
+version = "0.14"
+
+[dependencies.iced_layershell_macros]
+version = "0.19.1"
+
+[dependencies.iced_program]
+version = "0.14"
+
+[dependencies.iced_renderer]
+version = "0.14"
+
+[dependencies.iced_runtime]
+version = "0.14"
+
+[dependencies.layershellev]
+version = "0.19.1"
+
+[dependencies.log]
+version = "0.4.22"
+
+[dependencies.mundy]
+version = "0.2.0"
+optional = true
+
+[dependencies.thiserror]
+version = "2.0.12"
+
+[dependencies.tracing]
+version = "0.1.40"
+
+[dependencies.window_clipboard]
+version = "0.5.0"
+
+[dev-dependencies.iced]
+version = "0.14"
