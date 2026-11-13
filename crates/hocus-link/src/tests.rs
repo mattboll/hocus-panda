@@ -264,6 +264,11 @@ fn to_shell() -> Vec<ToShell> {
             count: 4,
             current: 0,
             windows: Vec::new(),
+            projects: vec![DeskProject {
+                desktop: 1,
+                name: "hocus-site".into(),
+                folder: "/home/alex/github/hocus-site".into(),
+            }],
         }),
         ToShell::Desktops(Desktops {
             output: "HDMI-A-1".into(),
@@ -292,6 +297,7 @@ fn to_shell() -> Vec<ToShell> {
                     app: "foot".into(),
                 },
             ],
+            projects: Vec::new(),
         }),
         ToShell::Titles(Titles {
             output: "eDP-1".into(),
@@ -754,6 +760,34 @@ fn to_shell() -> Vec<ToShell> {
             }),
             ..McpShown::default()
         })),
+        ToShell::ProjectForm(ProjectForm {
+            output: "eDP-1".into(),
+            desktop: 1,
+            at: rect,
+            screen: (1920, 1080),
+            terminals: vec![4012],
+            taken: vec!["hocus-panda".into()],
+            folders: vec!["/home/alex/github/hocus-panda".into()],
+        }),
+        ToShell::ProjectCard(ProjectCard {
+            output: "eDP-1".into(),
+            desktop: 0,
+            at: rect,
+            screen: (1920, 1080),
+            name: "hocus-panda".into(),
+            folder: "/home/alex/github/hocus-panda".into(),
+            since: 1_794_550_320,
+            windows: vec![(3, WindowPlace::Left), (5, WindowPlace::Floating)],
+        }),
+        ToShell::ProjectMade {
+            output: "eDP-1".into(),
+            desktop: 1,
+            name: "hocus-site".into(),
+        },
+        ToShell::ProjectRefused(ProjectRefusal::NameTaken("hocus-site".into())),
+        ToShell::ProjectRefused(ProjectRefusal::Name(NameFault::TooLong)),
+        ToShell::ProjectRefused(ProjectRefusal::NoFolder),
+        ToShell::ProjectEnd,
     ];
     all.extend(LevelKey::ALL.map(ToShell::Level));
     all
@@ -996,6 +1030,12 @@ fn to_compositor() -> Vec<ToCompositor> {
             .into_iter()
             .map(|action| ToCompositor::WindowAction { id: 7, action }),
     );
+    all.push(ToCompositor::ProjectMake {
+        output: "eDP-1".into(),
+        desktop: 1,
+        name: "hocus-site".into(),
+        folder: "/home/alex/github/hocus-site".into(),
+    });
     all
 }
 
@@ -1211,6 +1251,7 @@ fn what_reads_and_cannot_be_is_refused() {
             id: 1,
             app: String::new(),
         }],
+        projects: Vec::new(),
     });
     assert!(ToShell::read(&outside.line()).is_err());
     // A group twice in the bar's order.

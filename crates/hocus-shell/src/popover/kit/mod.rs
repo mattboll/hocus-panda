@@ -30,7 +30,7 @@ pub(crate) use app::app_tile;
 pub(crate) use input::{awaited, cycle, first_control, keys, opened_by_keyboard, step};
 pub(crate) use list::{List, SCROLLBAR, Spin, list, name_room, reveal, spinner, stack};
 pub(crate) use slider::{Track, Wheel, forget_scale, popover_scale, scale, set_scale, slider};
-pub(crate) use text::{elide, measure, measure_in, wrap, wrapped, zero_once};
+pub(crate) use text::{elide, elide_start, measure, measure_in, wrap, wrapped, zero_once};
 
 use crate::levels::{
     draw::{ACCENT, FAINT, LINE, MANROPE, TEXT, VALUE, cell, rgb},

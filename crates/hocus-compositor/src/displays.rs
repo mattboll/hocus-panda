@@ -580,6 +580,45 @@ impl State {
             }
             return;
         }
+        // A desktop made a project (docs/design/projects.md §12), as the
+        // overview's form makes it: `project-make SCREEN DESKTOP NAME
+        // FOLDER`, a tab between them when the name or the folder holds
+        // spaces. Answered once the folder is looked at.
+        if let Some(rest) = line.strip_prefix("project-make") {
+            let parts: Vec<&str> = if rest.contains('\t') {
+                rest.split('\t')
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .collect()
+            } else {
+                rest.split_whitespace().collect()
+            };
+            match parts.as_slice() {
+                [screen, desktop, name, folder] => {
+                    let output = self
+                        .space
+                        .outputs()
+                        .find(|o| o.name() == *screen)
+                        .map(smithay::output::Output::name)
+                        .or_else(|| self.connector_of(screen))
+                        .unwrap_or_else(|| (*screen).to_owned());
+                    let desktop = desktop.parse::<usize>().ok().and_then(|d| d.checked_sub(1));
+                    self.project_make(
+                        crate::projects::Asker::Line(session),
+                        &output,
+                        desktop.unwrap_or(usize::MAX),
+                        name,
+                        folder,
+                    );
+                }
+                _ => {
+                    let refused =
+                        serde_json::json!({ "refused": format!("cannot read {line}") }).to_string();
+                    self.displays_send(Some(session), &refused);
+                }
+            }
+            return;
+        }
         let mut words = line.split_whitespace();
         let answer = match (words.next(), words.next(), words.next()) {
             (Some("try"), Some(name), Some(what)) => match what.strip_prefix("mode=") {

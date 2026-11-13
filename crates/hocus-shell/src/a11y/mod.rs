@@ -408,13 +408,13 @@ impl Said {
     }
 
     fn popover(&mut self, words: Words) -> Option<Window> {
-        let (item, active) = crate::popover::with(|c| {
-            let item = c.open_on().map(|(_, item)| item)?;
+        let (bar, item, active) = crate::popover::with(|c| {
+            let (bar, item) = c.open_on()?;
             let active = c.open_surface().is_some_and(|id| c.holds_keyboard(id));
-            Some((item, active))
+            Some((bar.to_owned(), item, active))
         })?;
         let mut shown = surfaces::Popover {
-            title: surfaces::popover_title(item, words),
+            title: surfaces::popover_title(&bar, item, words),
             active,
             ..surfaces::Popover::default()
         };

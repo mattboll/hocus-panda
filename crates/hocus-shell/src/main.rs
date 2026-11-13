@@ -67,6 +67,7 @@ mod pandas;
 mod paste;
 mod pointer;
 mod popover;
+mod project;
 mod reminder;
 mod renderer;
 mod setup;
@@ -419,6 +420,8 @@ struct Shell {
     actions: surfaces::Lent<actions::Palette>,
     /// The emoji picker (5.7).
     emoji: surfaces::Lent<emoji::Picker>,
+    /// A project's form and card, over the overview (docs/design/projects.md).
+    project: surfaces::Lent<project::Projects>,
 }
 
 #[to_layer_message(multi)]
@@ -487,6 +490,7 @@ impl Shell {
             auth: surfaces::Lent::default(),
             actions: surfaces::Lent::default(),
             emoji: surfaces::Lent::default(),
+            project: surfaces::Lent::default(),
         };
         popover::with(|c| c.motion = shell.look.motion);
         pandas::set_lively(shell.look.motion);
@@ -598,6 +602,7 @@ impl Shell {
                 surfaces::Asked::Auth(come) => self.auth_told(auth::Told::Come(come)),
                 surfaces::Asked::Actions(come) => self.actions_told(come),
                 surfaces::Asked::Emoji(come) => self.emoji_told(come),
+                surfaces::Asked::Project(come) => self.project_told(come),
             },
             Message::Resized(id, size) => {
                 if let Some(bar) = self.bars.get_mut(&id) {
@@ -748,8 +753,21 @@ impl Shell {
                 launcher::outside();
                 emoji::outside();
                 actions::close();
-                Task::none()
+                self.project_told(project::Come::Close)
             }
+            ToShell::ProjectForm(form) => self.project_told(project::Come::Form(form)),
+            ToShell::ProjectCard(card) => self.project_told(project::Come::Card(card)),
+            ToShell::ProjectMade {
+                output,
+                desktop,
+                name,
+            } => self.project_told(project::Come::Made {
+                output,
+                desktop,
+                name,
+            }),
+            ToShell::ProjectRefused(why) => self.project_told(project::Come::Refused(why)),
+            ToShell::ProjectEnd => self.project_told(project::Come::Close),
             ToShell::Launcher { output, scale } => {
                 launcher::toggle(output, scale);
                 Task::none()
@@ -1652,6 +1670,7 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             launcher::outside();
                             emoji::outside();
                             actions::close();
+                            project::close();
                             continue;
                         }
                         // The launcher opens, or closes: its own surface.

@@ -145,6 +145,35 @@ pub fn name(index: usize) -> Option<String> {
         .cloned()
 }
 
+/// Desktop `index` (from 0) of screen `output`, if it is a project
+/// (docs/design/projects.md): its name and folder.
+pub fn project(output: &str, index: usize) -> Option<hocus_link::DeskProject> {
+    snapshot(output)?.project(index).cloned()
+}
+
+/// A project's folder as it is shown: from `~` under the home.
+pub fn folder_shown(folder: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    hocus_link::projects::tilde(folder, &home)
+}
+
+/// Desktop `index`'s name on screen `output`: its project's while it is
+/// one (docs/design/projects.md §1), else its own (6.14).
+pub fn name_on(output: &str, index: usize) -> Option<String> {
+    project(output, index)
+        .map(|p| p.name)
+        .or_else(|| name(index))
+}
+
+/// Desktop `index` of screen `output` as screen readers title it: "Bureau
+/// 2, projet hocus-site" for a project, else its name or "Bureau N".
+pub fn said_title(words: crate::levels::model::Words, output: &str, index: usize) -> String {
+    match project(output, index) {
+        Some(project) => words.project_title(index + 1, &project.name),
+        None => words.desktop_title(index + 1, name(index).as_deref()),
+    }
+}
+
 /// The compositor says the desktops' names (`[desktops] names`): kept;
 /// the tiles say them again, and an open list's title shows it.
 pub fn set_names(names: Vec<String>) {
@@ -223,7 +252,9 @@ pub fn title_of_app(ids: &[String]) -> Option<String> {
 /// and the list drawn again if it shows on that bar.
 pub fn set(desktops: Desktops) {
     let output = desktops.output.clone();
-    let count = desktops.count;
+    // Its rows, and whether the full form keeps room for a project's line
+    // over them (docs/design/projects.md §3).
+    let shape = (desktops.count, desktops.projects.is_empty());
     icons::want(desktops.windows.iter().map(|w| w.app.as_str()));
     let mut before = None;
     listed(&output, || {
@@ -232,9 +263,9 @@ pub fn set(desktops: Desktops) {
             .unwrap_or_else(PoisonError::into_inner)
             .get_or_insert_with(HashMap::new)
             .insert(output.clone(), desktops)
-            .map(|d| d.count);
+            .map(|d| (d.count, d.projects.is_empty()));
     });
-    if before != Some(count) {
+    if before != Some(shape) {
         for bar in bars_showing(&output) {
             draw::rows_changed(&bar);
         }
@@ -412,6 +443,7 @@ mod tests {
                 window(1, 2, "firefox"),
                 window(0, 3, "org.gnome.Nautilus"),
             ],
+            projects: Vec::new(),
         };
         let titles = Titles {
             output: "eDP-1".into(),

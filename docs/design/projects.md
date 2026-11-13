@@ -608,3 +608,48 @@ maquette" are approved as drawn.
   heard. Test 7.
 
 A comes first; B needs A; C and D need B and not each other.
+
+## As built
+
+### Lot A, projects on desktops (2026-11-13)
+
+- **The model** (`crates/hocus-compositor/src/projects.rs`): a project is
+  open on one desktop of one screen, by the screen's identity; its file,
+  `$XDG_STATE_HOME/hocuspanda/projects`, is read once as the compositor
+  starts and written by a thread of its own (the directory `0700`, the
+  file `0600`), which also looks at a new project's folder. A project
+  open at log in comes back on its desktop of its screen, the session's
+  restore putting its windows back (the session file's `[[project]]` and
+  `[session] restore = false` come with lot B). Desktops taken out or
+  fewer in the file: a project goes with its desktop; landing on another
+  project's, it is no longer open (lot B closes it first, with its
+  confirmation). A screen unplugged: the project waits for its screen.
+- **Made** by the overview's form (`project-make` on the link) or the
+  Settings' line: `project-make SCREEN DESKTOP NAME FOLDER`, its parts a
+  tab apart when the name or the folder holds spaces, answered
+  `{"project-made": {"id", "name", "screen", "desktop"}}` or
+  `{"refused": …}`.
+- **Its name everywhere**: the bar's `desktops` line (`projects`, per
+  screen), its tiles' and dots' monograms, the full form's line (its room
+  kept while the bar's screen has a project, so that nothing moves as
+  desktops switch; none on a screen without one), the list (300 px, the
+  monogram, the folder), screen readers ("Bureau 2, projet hocus-site, 1
+  fenêtre"), Alt+Tab's suffix, the overview's label (monogram, "1 ·
+  name", folder, "3 fenêtres · 1 agent"), the radial menu, the agents'
+  `list_desktops`, and the pill under the dots as desktops switch.
+- **The overview**: "En faire un projet" under the thumbnail the pointer
+  rests on (and `Tab` past the windows); the form and the card are the
+  shell's surfaces (`crates/hocus-shell/src/project/`), drawn on the
+  popovers' glass, holding the keyboard over the overview; a press beside
+  them closes them, the overview closing too. The form's repositories
+  (§2.3) are looked for on a thread of the shell's, four shown; the
+  terminals' folders come from the windows whose app id is in §8.2's
+  table; the agents' folders' file is read, which lot D writes. Made, the
+  launcher's toast says so.
+- **The card** while open: the header, the desktop's sketch and its
+  windows with where each is, the private windows' line. Its terminals,
+  tabs and agents, and "Fermer le projet…", come with lots B to D, as do
+  the list's details per window.
+- **Tests** (`crates/hocus-compositor/tests/projects.rs`): 1, 2, 3 and
+  12. Screenshots: `HOCUS_SHOTS=… cargo nextest run -p hocus-compositor
+  projects_shots:: --run-ignored only`.

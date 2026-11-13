@@ -42,6 +42,7 @@ pub mod locale;
 mod lock;
 pub mod mcp;
 pub mod moving;
+pub mod projects;
 mod record;
 mod share;
 mod surfaces;
@@ -98,6 +99,11 @@ pub use mcp::{
     MCP_TAG_RADIUS, MCP_TOAST, MCP_TOAST_NAMESPACE, MCP_TOAST_RADIUS, McpAsk, McpAt, McpCard,
     McpDoing, McpKind, McpLine, McpPointer, McpRefusal, McpReply, McpRow, McpSaid, McpSet, McpShow,
     McpShown, McpSummary, McpToast, McpWhy,
+};
+pub use projects::{
+    DeskProject, NAME_MOST, NameFault, PROJECT_CARD_NAMESPACE, PROJECT_CARD_RADIUS,
+    PROJECT_CARD_WIDTH, PROJECT_FORM_NAMESPACE, PROJECT_FORM_RADIUS, PROJECT_FORM_WIDTH,
+    PROJECT_RISE, ProjectCard, ProjectForm, ProjectRefusal, WindowPlace, is_project_surface,
 };
 pub use record::{RECORD_COUNTDOWN, RECORD_FPS, RecordAsk, RecordFormat, Recorded, RecordingShown};
 pub use share::{

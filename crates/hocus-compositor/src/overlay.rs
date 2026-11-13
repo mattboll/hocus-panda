@@ -45,6 +45,8 @@ const DOT_CURRENT: f64 = 22.0;
 const DOT_GAP: f64 = 6.0;
 const DOT_TOP: f64 = 18.0;
 const DOT_OTHER: [u8; 4] = [0xFF, 0xFF, 0xFF, 89];
+/// The project's pill under the dots.
+const PILL_UNDER: f64 = 10.0;
 
 /// The panel: dark at 86 % with a white rim at 12 %; the selection the
 /// accent at 18 % with a 2 px accent ring; a deep shadow.
@@ -389,6 +391,9 @@ impl State {
             }
             x += w + DOT_GAP;
         }
+        // The project arrived on, 10 px under them (docs/design/projects.md
+        // §3), fading with them.
+        self.project_pill_elements(renderer, output, DOT_TOP + DOT + PILL_UNDER, alpha, out);
     }
 
     /// Alt+Tab's panel, appearing or vanishing, on its screen.
@@ -442,7 +447,8 @@ impl State {
             let suffix = if here {
                 String::new()
             } else {
-                crate::desktop_set::suffix(&self.config.desktops, desktop)
+                let name = self.desktop_name(&switcher.output, desktop);
+                crate::desktop_set::suffix(name.as_deref(), desktop)
             };
             let label = place(p.label);
             let width = (label.size.w * scale).floor() as i32;

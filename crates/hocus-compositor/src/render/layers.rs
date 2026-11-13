@@ -96,7 +96,7 @@ impl State {
             let popover = matches!(
                 layer.namespace(),
                 hocus_link::POPOVER_NAMESPACE | hocus_link::EMOJI_NAMESPACE
-            );
+            ) || hocus_link::is_project_surface(layer.namespace());
             // Popovers and reminders' tabs slide from the bar, on its
             // side; the bubbles from the screen's right edge.
             let look = if popover {
@@ -142,6 +142,8 @@ impl State {
                     Some((own, hocus_link::RADIUS))
                 }
                 hocus_link::EMOJI_NAMESPACE => Some((own, hocus_link::EMOJI_RADIUS)),
+                hocus_link::PROJECT_FORM_NAMESPACE => Some((own, hocus_link::PROJECT_FORM_RADIUS)),
+                hocus_link::PROJECT_CARD_NAMESPACE => Some((own, hocus_link::PROJECT_CARD_RADIUS)),
                 ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
                 ns if hocus_link::is_reminder(ns) => Some((own, hocus_link::REMINDER_RADIUS)),
                 hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),

@@ -75,6 +75,10 @@ pub type OverviewWindow = (Option<String>, (f64, f64, f64, f64));
 /// A window dragged in the overview: its app id, the thumbnail it is
 /// over (screen, desktop).
 pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
+
+/// A project as a test sees it: its name, its folder, and, open, its
+/// screen's connector and its desktop (from 0).
+pub type ProjectSeen = (String, std::path::PathBuf, Option<(String, usize)>);
 /// The confetti as a test sees them: those in flight (global, logical),
 /// and those lying, each on its window (`None`: a bar) from its edge's
 /// left end and top (logical).
@@ -2120,6 +2124,89 @@ impl Headless {
             .get(&drag.window)
             .and_then(|m| crate::windows::app_id(&m.window));
         Some((app, drag.over.clone()))
+    }
+
+    /// The projects (docs/design/projects.md): each one's name, folder,
+    /// and, open, its screen's connector and desktop (from 0).
+    pub fn projects(&self) -> Vec<ProjectSeen> {
+        let state = &self.app.state;
+        state
+            .projects
+            .list
+            .iter()
+            .map(|p| {
+                let open = p.open.as_ref().and_then(|o| {
+                    Some((state.connector_of(&o.screen)?, o.desktop.checked_sub(1)?))
+                });
+                (p.name.clone(), p.folder.clone(), open)
+            })
+            .collect()
+    }
+
+    /// The windows that belong to project `name`.
+    pub fn project_windows(&self, name: &str) -> Vec<WindowId> {
+        self.app.state.project_windows(name)
+    }
+
+    /// Screen `output`'s desktops as its bar's tiles are told them.
+    pub fn desktops_view(&self, output: &str) -> Option<hocus_link::Desktops> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == output)?;
+        state.desktops_view(output)
+    }
+
+    /// The suffix Alt+Tab draws after the title of item `at` (another
+    /// desktop's name or number, nothing on the screen's own desktop).
+    pub fn switcher_suffix(&self, at: usize) -> Option<String> {
+        let state = &self.app.state;
+        let switcher = state.switching.open.as_ref()?;
+        let &(_, here, desktop) = switcher.items.get(at)?;
+        Some(if here {
+            String::new()
+        } else {
+            let name = state.desktop_name(&switcher.output, desktop);
+            crate::desktop_set::suffix(name.as_deref(), desktop)
+        })
+    }
+
+    /// The middle of the overview's "En faire un projet" under desktop
+    /// `desktop` of `output`, global, while it shows; and of a project's
+    /// name there.
+    pub fn overview_make(&self, output: &str, desktop: usize) -> Option<(f64, f64)> {
+        let state = &self.app.state;
+        let screen = state
+            .overview_screens()
+            .into_iter()
+            .find(|s| s.output.name() == output)?;
+        let scale = screen.output.current_scale().fractional_scale();
+        let thumb = *screen.thumbs.get(desktop)?;
+        Some(state.overview_make_area(thumb, scale)?.centre())
+    }
+
+    pub fn overview_project_name(&self, output: &str, desktop: usize) -> Option<(f64, f64)> {
+        let state = &self.app.state;
+        let screen = state
+            .overview_screens()
+            .into_iter()
+            .find(|s| s.output.name() == output)?;
+        let scale = screen.output.current_scale().fractional_scale();
+        let thumb = *screen.thumbs.get(desktop)?;
+        Some(
+            state
+                .overview_name_area(&screen.output, desktop, thumb, scale)?
+                .centre(),
+        )
+    }
+
+    /// The jobs given to the projects' thread so far: folders looked at,
+    /// the file written.
+    pub fn project_jobs(&self) -> u64 {
+        self.app.state.projects.jobs
+    }
+
+    /// Whether a project's form or card shows.
+    pub fn project_surface_open(&self) -> bool {
+        self.app.state.panel.popovers.project_open()
     }
 
     /// Whether the radial menu is still drawn going.

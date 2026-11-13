@@ -30,10 +30,10 @@ use crate::{desktops::MAX_COUNT, model::WindowId};
 /// last told.
 pub type Counts = (usize, [u16; MAX_COUNT]);
 
-/// Alt+Tab's suffix to a window of another desktop (from 0): its name,
-/// else its number (6.14).
-pub fn suffix(desktops: &crate::config::Desktops, desktop: usize) -> String {
-    match desktops.name(desktop) {
+/// Alt+Tab's suffix to a window of another desktop (from 0): its name
+/// (its project's, else its own, 6.14), else its number.
+pub fn suffix(name: Option<&str>, desktop: usize) -> String {
+    match name {
         Some(name) => format!(" · {name}"),
         None => format!(" · {}", desktop + 1),
     }
@@ -84,6 +84,8 @@ impl crate::State {
         let count = count.clamp(1, MAX_COUNT);
         self.config.desktops.count = count;
         let last = count - 1;
+        // The projects go with their desktops (docs/design/projects.md §1).
+        self.projects_renumbered(|d| map(d).min(last));
         let ids: Vec<WindowId> = self.model.stack().to_vec();
         for &id in &ids {
             let to = put
@@ -250,9 +252,10 @@ mod tests {
             count: 4,
             names: vec!["Travail".into(), "Courrier".into(), String::new()],
         };
-        assert_eq!(super::suffix(&desktops, 1), " · Courrier");
-        assert_eq!(super::suffix(&desktops, 2), " · 3");
-        assert_eq!(super::suffix(&desktops, 3), " · 4");
+        assert_eq!(super::suffix(desktops.name(1), 1), " · Courrier");
+        assert_eq!(super::suffix(desktops.name(2), 2), " · 3");
+        assert_eq!(super::suffix(desktops.name(3), 3), " · 4");
+        assert_eq!(super::suffix(Some("hocus-site"), 1), " · hocus-site");
     }
 
     #[test]

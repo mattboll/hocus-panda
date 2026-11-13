@@ -36,7 +36,7 @@ use crate::{
     model::WindowId,
     overview::{
         AgentState, BREATHING, CLOSE_BUTTON, DIM, LABEL_GAP, LABEL_LINE, LABEL_SIZE, MINIMIZED,
-        NUMBER_GAP, NUMBER_LINE, NUMBER_SIZE, Overview, Screen, WAVE, close_button,
+        NUMBER_GAP, NUMBER_LINE, NUMBER_SIZE, Overview, Screen, Spot, WAVE, close_button,
     },
     radial_draw::{
         Fonts, advance, argb, fonts, letter_colour, letter_of, paint, rounded, stroke, write,
@@ -107,6 +107,26 @@ const SLEEP_MOST: f64 = 96.0;
 /// The application's tile beside a title.
 const TILE: f64 = 18.0;
 const TILE_GAP: f64 = 8.0;
+/// "En faire un projet" (docs/design/projects.md §2.1): 26 px high, the
+/// accent's rim and tint, a 14 px folder-plus, 11.5 px 700.
+pub const MAKE_HEIGHT: f64 = 26.0;
+const MAKE_TEXT: f32 = 11.5;
+const MAKE_ICON: f64 = 14.0;
+const MAKE_PAD: (f64, f64) = (9.0, 11.0);
+const MAKE_INK: [u8; 4] = [0x7E, 0xE0, 0xA0, 0xFF];
+/// A project's label under its thumbnail: its monogram (7.5 px, 800) on
+/// grey, the accent on the shown desktop, then "1 · hocus-panda" (11.5 px,
+/// 700) on a 16 px line; its folder and what it holds (10.5 px,
+/// `text.faint`) on 14 px lines, 2 px apart.
+const NAME_LINE: f64 = 16.0;
+const NAME_TEXT: f32 = 11.5;
+const NAME_INK: [u8; 4] = [0xD5, 0xDB, 0xE5, 0xFF];
+const MONO_TEXT: f32 = 7.5;
+const MONO_INK: [u8; 4] = [0x0B, 0x10, 0x20, 0xFF];
+const MONO_GREY: [u8; 4] = [0xA9, 0xB2, 0xC2, 0xFF];
+const LABEL_LINES_GAP: f64 = 2.0;
+/// A label reaches this far past its thumbnail's sides.
+const LABEL_OVER: f64 = 18.0;
 
 /// What a picture shows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -142,6 +162,25 @@ enum Pic {
     },
     /// The ✕ over a window.
     Close { scale: u32 },
+    /// "En faire un projet".
+    Make { text: String, scale: u32 },
+    /// The project arrived on, under the desktops' dots as they switch.
+    ProjectPill {
+        mono: String,
+        name: String,
+        folder: String,
+        scale: u32,
+    },
+    /// A project's label under its thumbnail, `width` pixels at most.
+    Project {
+        mono: String,
+        title: String,
+        folder: String,
+        holds: String,
+        current: bool,
+        width: i32,
+        scale: u32,
+    },
 }
 
 /// Where a picture or a box is drawn: each its own element's ids.
@@ -159,6 +198,9 @@ enum Place {
     Ring(String, usize),
     Hover,
     Selection,
+    Make(String, usize),
+    MakeRing,
+    ProjectPill(String),
 }
 
 /// A picture, its size in pixels and its serial: a new one for each
@@ -276,7 +318,281 @@ fn draw(fonts: &Fonts, pic: &Pic, scale: f64) -> Option<(Vec<u8>, (i32, i32))> {
             halo,
         } => draw_panda(*mood, *frame, *side, *halo),
         Pic::Close { .. } => draw_close(scale),
+        Pic::Make { text, .. } => draw_make(fonts, text, scale),
+        Pic::ProjectPill {
+            mono, name, folder, ..
+        } => draw_project_pill(fonts, (mono, name, folder), scale),
+        Pic::Project {
+            mono,
+            title,
+            folder,
+            holds,
+            current,
+            width,
+            ..
+        } => draw_project(fonts, (mono, title, folder, holds), *current, *width, scale),
     }
+}
+
+/// `text` cut to `room` pixels with "…" at its start (a folder's end is
+/// what tells it apart).
+fn cut_start(font: &fontdue::Font, text: &str, px: f32, room: f32) -> String {
+    if advance(font, text, px) <= room {
+        return text.to_owned();
+    }
+    let ellipsis = advance(font, "…", px);
+    let mut chars: std::collections::VecDeque<char> = text.chars().collect();
+    while !chars.is_empty()
+        && advance(font, &chars.iter().collect::<String>(), px) + ellipsis > room
+    {
+        chars.pop_front();
+    }
+    format!("…{}", chars.into_iter().collect::<String>())
+}
+
+/// The folder-plus icon (the mockup's, a 24 px drawing) `side` pixels
+/// square at `(x, y)`, stroked in `ink`.
+fn folder_plus(pixmap: &mut Pixmap, (x, y): (f32, f32), side: f32, ink: [u8; 4]) {
+    let k = side / 24.0;
+    let p = |a: f32, b: f32| (x + a * k, y + b * k);
+    let mut pb = PathBuilder::new();
+    let (a, b) = p(3.0, 7.0);
+    pb.move_to(a, b);
+    let (cx, cy) = p(3.0, 5.0);
+    let (a, b) = p(5.0, 5.0);
+    pb.quad_to(cx, cy, a, b);
+    for (a, b) in [(9.0, 5.0), (11.0, 7.0), (19.0, 7.0)] {
+        let (a, b) = p(a, b);
+        pb.line_to(a, b);
+    }
+    for ((c1, c2), (e1, e2), (l1, l2)) in [
+        ((21.0, 7.0), (21.0, 9.0), (21.0, 17.0)),
+        ((21.0, 19.0), (19.0, 19.0), (5.0, 19.0)),
+        ((3.0, 19.0), (3.0, 17.0), (3.0, 7.0)),
+    ] {
+        let (c1, c2) = p(c1, c2);
+        let (e1, e2) = p(e1, e2);
+        pb.quad_to(c1, c2, e1, e2);
+        let (l1, l2) = p(l1, l2);
+        pb.line_to(l1, l2);
+    }
+    pb.close();
+    for ((a, b), (c, d)) in [((12.0, 11.0), (12.0, 16.0)), ((9.5, 13.5), (14.5, 13.5))] {
+        let (a, b) = p(a, b);
+        let (c, d) = p(c, d);
+        pb.move_to(a, b);
+        pb.line_to(c, d);
+    }
+    if let Some(path) = pb.finish() {
+        let mut stroked = stroke(2.0 * k);
+        stroked.line_cap = tiny_skia::LineCap::Round;
+        stroked.line_join = tiny_skia::LineJoin::Round;
+        pixmap.stroke_path(&path, &paint(ink), &stroked, Transform::identity(), None);
+    }
+}
+
+/// "En faire un projet": a 26 px pill, the accent's tint inside its rim,
+/// the folder-plus and the words in the lighter accent.
+fn draw_make(fonts: &Fonts, text: &str, scale: f64) -> Option<(Vec<u8>, (i32, i32))> {
+    let k = scale as f32;
+    let px = MAKE_TEXT * k;
+    let icon = (MAKE_ICON * scale) as f32;
+    let (left, right) = ((MAKE_PAD.0 * scale) as f32, (MAKE_PAD.1 * scale) as f32);
+    let text_w = advance(&fonts.bold, text, px);
+    let w = (1.0 + left + icon + 6.0 * k + text_w + right + 1.0).ceil() as u32;
+    let h = (MAKE_HEIGHT * scale).ceil() as u32;
+    let mut pixmap = Pixmap::new(w.max(1), h.max(1))?;
+    let (fw, fh) = (w as f32, h as f32);
+    if let Some(path) = rounded(0.5, 0.5, fw - 1.0, fh - 1.0, fh / 2.0 - 0.5) {
+        pixmap.fill_path(
+            &path,
+            &paint([108, 194, 135, 31]),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+        pixmap.stroke_path(
+            &path,
+            &paint([108, 194, 135, 140]),
+            &stroke(k),
+            Transform::identity(),
+            None,
+        );
+    }
+    folder_plus(&mut pixmap, (1.0 + left, (fh - icon) / 2.0), icon, MAKE_INK);
+    write(
+        &mut pixmap,
+        &fonts.bold,
+        text,
+        px,
+        (1.0 + left + icon + 6.0 * k, fh / 2.0 + px * 0.36),
+        MAKE_INK,
+        0.0,
+    );
+    Some((argb(pixmap), (w as i32, h as i32)))
+}
+
+/// The project arrived on (docs/design/projects.md §3): a 30 px pill,
+/// `rgba(14,17,28,0.88)` in the bar's rim, its monogram (9 px, 800, on the
+/// accent), its name (13.5 px, 700), its folder (12 px, `text.faint`).
+fn draw_project_pill(
+    fonts: &Fonts,
+    (mono, name, folder): (&str, &str, &str),
+    scale: f64,
+) -> Option<(Vec<u8>, (i32, i32))> {
+    let k = scale as f32;
+    let (mono_px, name_px, folder_px) = (9.0 * k, 13.5 * k, 12.0 * k);
+    let badge_w = advance(&fonts.bold, mono, mono_px) + 8.0 * k;
+    let badge_h = (mono_px * 1.37 + 4.0 * k).round();
+    let name_w = advance(&fonts.bold, name, name_px);
+    let folder_w = advance(&fonts.semibold, folder, folder_px);
+    let gap = 8.0 * k;
+    let h = (30.0 * k).ceil();
+    let inner = badge_w
+        + gap
+        + name_w
+        + if folder.is_empty() {
+            0.0
+        } else {
+            gap + folder_w
+        };
+    let w = (8.0 * k + inner + 14.0 * k).ceil();
+    let mut pixmap = Pixmap::new(w as u32 + 2, h as u32 + 2)?;
+    if let Some(path) = rounded(1.0, 1.0, w, h, h / 2.0) {
+        pixmap.fill_path(
+            &path,
+            &paint([14, 17, 28, 224]),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+        pixmap.stroke_path(
+            &path,
+            &paint([0xFF, 0xFF, 0xFF, 26]),
+            &stroke(k),
+            Transform::identity(),
+            None,
+        );
+    }
+    let middle = 1.0 + h / 2.0;
+    let mut x = 1.0 + 8.0 * k;
+    if let Some(path) = rounded(x, middle - badge_h / 2.0, badge_w, badge_h, 4.0 * k) {
+        pixmap.fill_path(
+            &path,
+            &paint(ACCENT),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+    write(
+        &mut pixmap,
+        &fonts.bold,
+        mono,
+        mono_px,
+        (x + 4.0 * k, middle + mono_px * 0.36),
+        MONO_INK,
+        0.0,
+    );
+    x += badge_w + gap;
+    write(
+        &mut pixmap,
+        &fonts.bold,
+        name,
+        name_px,
+        (x, middle + name_px * 0.36),
+        TEXT,
+        0.0,
+    );
+    x += name_w + gap;
+    write(
+        &mut pixmap,
+        &fonts.semibold,
+        folder,
+        folder_px,
+        (x, middle + folder_px * 0.36),
+        FAINT,
+        0.0,
+    );
+    let (pw, ph) = (pixmap.width() as i32, pixmap.height() as i32);
+    Some((argb(pixmap), (pw, ph)))
+}
+
+/// A project's label: its monogram and "N · name", its folder, what it
+/// holds, each line centred, `width` pixels at most.
+fn draw_project(
+    fonts: &Fonts,
+    (mono, title, folder, holds): (&str, &str, &str, &str),
+    current: bool,
+    width: i32,
+    scale: f64,
+) -> Option<(Vec<u8>, (i32, i32))> {
+    let k = scale as f32;
+    let room = width as f32 - 4.0 * k;
+    let name_px = NAME_TEXT * k;
+    let small = (NUMBER_SIZE * scale) as f32;
+    let mono_px = MONO_TEXT * k;
+    let badge_w = advance(&fonts.bold, mono, mono_px) + 6.0 * k;
+    let badge_h = (mono_px * 1.37 + 2.0 * k).round();
+    let gap = 6.0 * k;
+    let title = cut(&fonts.bold, title, name_px, room - badge_w - gap);
+    let folder = cut_start(&fonts.semibold, folder, small, room);
+    let holds = cut(&fonts.semibold, holds, small, room);
+    let line1 = badge_w + gap + advance(&fonts.bold, &title, name_px);
+    let line2 = advance(&fonts.semibold, &folder, small);
+    let line3 = advance(&fonts.semibold, &holds, small);
+    let w = (line1.max(line2).max(line3) + 4.0 * k).ceil() as u32;
+    let (name_h, small_h, lines_gap) = (
+        (NAME_LINE * scale) as f32,
+        (NUMBER_LINE * scale) as f32,
+        (LABEL_LINES_GAP * scale) as f32,
+    );
+    let h = (name_h + 2.0 * (lines_gap + small_h)).ceil() as u32;
+    let mut pixmap = Pixmap::new(w.max(1), h.max(1))?;
+    let fw = w as f32;
+    // The first line: the badge, then the name.
+    let x = (fw - line1) / 2.0;
+    let top = (name_h - badge_h) / 2.0;
+    if let Some(path) = rounded(x, top, badge_w, badge_h, 3.0 * k) {
+        pixmap.fill_path(
+            &path,
+            &paint(if current { ACCENT } else { MONO_GREY }),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+    write(
+        &mut pixmap,
+        &fonts.bold,
+        mono,
+        mono_px,
+        (x + 3.0 * k, top + badge_h / 2.0 + mono_px * 0.36),
+        MONO_INK,
+        0.0,
+    );
+    write(
+        &mut pixmap,
+        &fonts.bold,
+        &title,
+        name_px,
+        (x + badge_w + gap, name_h / 2.0 + name_px * 0.36),
+        NAME_INK,
+        1.2 * k,
+    );
+    for (i, (line, line_w)) in [(&folder, line2), (&holds, line3)].into_iter().enumerate() {
+        let middle = name_h + lines_gap + small_h / 2.0 + i as f32 * (small_h + lines_gap);
+        write(
+            &mut pixmap,
+            &fonts.semibold,
+            line,
+            small,
+            ((fw - line_w) / 2.0, middle + small * 0.36),
+            FAINT,
+            1.2 * k,
+        );
+    }
+    Some((argb(pixmap), (w as i32, h as i32)))
 }
 
 /// `text` cut to `room` pixels with "…".
@@ -521,6 +837,171 @@ enum Mark {
 
 fn local(a: Area, origin: Point<f64, Logical>) -> Rectangle<f64, Logical> {
     Rectangle::new((a.x - origin.x, a.y - origin.y).into(), (a.w, a.h).into())
+}
+
+impl State {
+    /// The home a project's folder is shown from (`~`).
+    fn project_home(&self) -> String {
+        self.config
+            .home
+            .as_ref()
+            .map(|h| h.display().to_string())
+            .unwrap_or_default()
+    }
+
+    /// The project arrived on as `output`'s strip moves, its pill centred
+    /// `top` pixels from the screen's top, as opaque as the dots.
+    pub(crate) fn project_pill_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        top: f64,
+        alpha: f32,
+        out: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let Some(project) = self.project_on(output, self.strip(output).current()) else {
+            return;
+        };
+        let Some(geometry) = self.space.output_geometry(output) else {
+            return;
+        };
+        let scale = output.current_scale().fractional_scale();
+        let home = self.project_home();
+        let pic = Pic::ProjectPill {
+            mono: hocus_link::projects::monogram(&project.name),
+            name: project.name.clone(),
+            folder: hocus_link::projects::tilde(&project.folder.display().to_string(), &home),
+            scale: milli(scale),
+        };
+        let Some((_, (w, _), _)) = self.overview_paint.picture(&pic, scale) else {
+            return;
+        };
+        let lw = f64::from(w) / scale;
+        let at = Point::<f64, Logical>::from(((f64::from(geometry.size.w) - lw) / 2.0, top));
+        let mut c = Canvas {
+            renderer,
+            out,
+            origin: geometry.loc.to_f64(),
+            scale,
+            now: Duration::ZERO,
+        };
+        self.overview_picture(
+            &mut c,
+            Place::ProjectPill(output.name()),
+            &pic,
+            at,
+            None,
+            alpha,
+        );
+    }
+
+    /// The picture of the label of desktop `desktop` of `output` under its
+    /// `thumb` (global), if it is a project.
+    fn overview_project_pic(
+        &self,
+        output: &Output,
+        desktop: usize,
+        thumb: Area,
+        scale: f64,
+    ) -> Option<Pic> {
+        use hocus_words::compositor::overview_draw as txt;
+        let project = self.project_on(output, desktop)?;
+        let lang = lang_of(self);
+        let windows: Vec<WindowId> = self
+            .windows_on(output)
+            .into_iter()
+            .filter(|id| self.model.desktop(*id) == desktop && !self.model.is_everywhere(*id))
+            .collect();
+        let agents: usize = self.overview.as_ref().map_or(0, |o| {
+            windows
+                .iter()
+                .map(|id| o.agents.get(id).copied().unwrap_or(0))
+                .sum()
+        });
+        let mut holds = match windows.len() {
+            0 => txt::PROJECT_NO_WINDOW.get(lang).to_owned(),
+            n => txt::project_windows(lang, n),
+        };
+        if agents > 0 {
+            holds.push_str(" · ");
+            holds.push_str(&txt::project_agents(lang, agents));
+        }
+        let home = self.project_home();
+        Some(Pic::Project {
+            mono: hocus_link::projects::monogram(&project.name),
+            title: format!("{} · {}", desktop + 1, project.name),
+            folder: hocus_link::projects::tilde(&project.folder.display().to_string(), &home),
+            holds,
+            current: desktop == self.strip(output).current(),
+            width: ((thumb.w + 2.0 * LABEL_OVER) * scale) as i32,
+            scale: milli(scale),
+        })
+    }
+
+    /// Where a project's name is under its `thumb` (global): the label's
+    /// first line, as wide as the label.
+    pub(crate) fn overview_name_area(
+        &self,
+        output: &Output,
+        desktop: usize,
+        thumb: Area,
+        scale: f64,
+    ) -> Option<Area> {
+        let pic = self.overview_project_pic(output, desktop, thumb, scale)?;
+        let (_, (w, _), _) = self.overview_paint.picture(&pic, scale)?;
+        let lw = f64::from(w) / scale;
+        Some(Area {
+            x: thumb.x + (thumb.w - lw) / 2.0,
+            y: thumb.y + thumb.h + NUMBER_GAP,
+            w: lw,
+            h: NAME_LINE,
+        })
+    }
+
+    /// Where "En faire un projet" is under `thumb` (global).
+    pub(crate) fn overview_make_area(&self, thumb: Area, scale: f64) -> Option<Area> {
+        let pic = Pic::Make {
+            text: hocus_words::compositor::overview_draw::MAKE_PROJECT
+                .get(lang_of(self))
+                .to_owned(),
+            scale: milli(scale),
+        };
+        let (_, (w, h), _) = self.overview_paint.picture(&pic, scale)?;
+        let (lw, lh) = (f64::from(w) / scale, f64::from(h) / scale);
+        Some(Area {
+            x: thumb.x + (thumb.w - lw) / 2.0,
+            y: thumb.y + thumb.h + NUMBER_GAP + NUMBER_LINE + crate::overview::MAKE_GAP,
+            w: lw,
+            h: lh,
+        })
+    }
+
+    /// Whether desktop `desktop` of screen `output`'s button shows: the
+    /// pointer rests on its thumbnail or under it, or the keyboard's ring
+    /// is on it; never while a window is dragged nor on a project.
+    fn overview_button_shows(&self, output: &str, desktop: usize) -> bool {
+        let Some(overview) = self.overview.as_ref().filter(|o| o.open()) else {
+            return false;
+        };
+        if overview.drag.is_some() {
+            return false;
+        }
+        let hovered = matches!(
+            &overview.hover,
+            Some(Spot::Thumb(o, d) | Spot::Make(o, d) | Spot::Below(o, d))
+                if o == output && *d == desktop
+        );
+        let ringed = overview.button.as_deref() == Some(output)
+            && self
+                .space
+                .outputs()
+                .find(|o| o.name() == output)
+                .is_some_and(|o| self.strip(o).current() == desktop);
+        hovered || ringed
+    }
 }
 
 impl State {
@@ -927,8 +1408,79 @@ impl State {
     {
         let scale = c.scale;
         let over = mark == Mark::Over;
-        let names = self.config.desktops.shown_names();
+        let output = self.space.outputs().find(|o| o.name() == name).cloned();
+        let names: Vec<String> = output
+            .as_ref()
+            .map(|o| self.desktop_names_on(o))
+            .unwrap_or_default();
         let name = name.to_owned();
+        // A project's label (docs/design/projects.md §2.1), in place of its
+        // number; "En faire un projet" under the number of the one the
+        // pointer rests on, or the keyboard's ring holds.
+        if !over && let Some(output) = &output {
+            let thumb = Area {
+                x: rect.loc.x + c.origin.x,
+                y: rect.loc.y + c.origin.y,
+                w: rect.size.w,
+                h: rect.size.h,
+            };
+            if let Some(pic) = self.overview_project_pic(output, desktop, thumb, scale) {
+                if let Some((_, (w, _), _)) = self.overview_paint.picture(&pic, scale) {
+                    let lw = f64::from(w) / scale;
+                    let at = Point::<f64, Logical>::from((
+                        rect.loc.x + (rect.size.w - lw) / 2.0,
+                        rect.loc.y + rect.size.h + NUMBER_GAP,
+                    ));
+                    self.overview_picture(
+                        c,
+                        Place::Number(name.clone(), desktop),
+                        &pic,
+                        at,
+                        None,
+                        alpha,
+                    );
+                }
+                if mark == Mark::Current {
+                    self.overview_box(c, Place::Ring(name.clone(), desktop), CURRENT, rect, alpha);
+                }
+                return;
+            }
+            if self.overview_button_shows(&name, desktop)
+                && let Some(area) = self.overview_make_area(thumb, scale)
+            {
+                let pic = Pic::Make {
+                    text: hocus_words::compositor::overview_draw::MAKE_PROJECT
+                        .get(lang_of(self))
+                        .to_owned(),
+                    scale: milli(scale),
+                };
+                self.overview_picture(
+                    c,
+                    Place::Make(name.clone(), desktop),
+                    &pic,
+                    local(area, c.origin).loc,
+                    None,
+                    alpha,
+                );
+                if self
+                    .overview
+                    .as_ref()
+                    .is_some_and(|o| o.button.as_deref() == Some(name.as_str()))
+                {
+                    let around = Area {
+                        x: area.x - SELECTION_OUT,
+                        y: area.y - SELECTION_OUT,
+                        w: area.w + 2.0 * SELECTION_OUT,
+                        h: area.h + 2.0 * SELECTION_OUT,
+                    };
+                    let style = BoxStyle {
+                        radius: ((area.h / 2.0 + SELECTION_OUT) * 1000.0) as u32,
+                        ..SELECTION
+                    };
+                    self.overview_box(c, Place::MakeRing, style, local(around, c.origin), alpha);
+                }
+            }
+        }
         // Under it: its number, or what letting go there does.
         let (text, ink, bold) = if over {
             let words =
@@ -1177,15 +1729,43 @@ mod tests {
                 Pic::Close {
                     scale: milli(scale),
                 },
+                Pic::Make {
+                    text: "En faire un projet".into(),
+                    scale: milli(scale),
+                },
+                Pic::Project {
+                    mono: "HP".into(),
+                    title: "1 · hocus-panda".into(),
+                    folder: "~/github/a/very/long/path/to/hocus-panda".into(),
+                    holds: "3 fenêtres · 1 agent".into(),
+                    current: false,
+                    width: (200.0 * scale) as i32,
+                    scale: milli(scale),
+                },
+                Pic::ProjectPill {
+                    mono: "HS".into(),
+                    name: "hocus-site".into(),
+                    folder: "~/github/hocus-site".into(),
+                    scale: milli(scale),
+                },
             ];
             for pic in &pics {
                 let (pixels, (w, h)) = draw(&fonts, pic, scale).expect("drawn");
                 assert_eq!(pixels.len(), (w * h * 4) as usize, "{pic:?}");
                 assert!(pixels.iter().any(|p| *p != 0), "{pic:?} is empty");
             }
-            // A title is cut to its room.
+            // A title is cut to its room; a project's label too.
             let (_, (w, _)) = draw(&fonts, &pics[0], scale).expect("drawn");
             assert!(w <= (300.0 * scale) as i32 + (4.0 * scale) as i32, "{w}");
+            let (_, (w, h)) = draw(&fonts, &pics[7], scale).expect("drawn");
+            assert!(w <= (200.0 * scale) as i32 + 1, "{w}");
+            assert_eq!(
+                h,
+                ((NAME_LINE + 2.0 * (2.0 + NUMBER_LINE)) * scale).ceil() as i32
+            );
+            // The button and the pill keep their heights.
+            let (_, (_, h)) = draw(&fonts, &pics[6], scale).expect("drawn");
+            assert_eq!(h, (MAKE_HEIGHT * scale).ceil() as i32);
         }
     }
 

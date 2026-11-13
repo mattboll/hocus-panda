@@ -110,6 +110,8 @@ mod polkit;
 mod popover;
 mod power;
 mod power_actions;
+mod projects;
+mod projects_shots;
 mod radial;
 mod rain;
 mod rain_on_glass;

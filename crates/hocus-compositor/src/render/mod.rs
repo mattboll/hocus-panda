@@ -1515,6 +1515,8 @@ impl State {
                 &mut self.graphics.panes.borrow_mut(),
                 &if layer.namespace() == hocus_link::EMOJI_NAMESPACE {
                     crate::glass::emoji_pane(&output.name())
+                } else if hocus_link::is_project_surface(layer.namespace()) {
+                    crate::glass::project_pane(&output.name())
                 } else {
                     crate::glass::popover_pane(&output.name())
                 },

@@ -72,6 +72,16 @@ pub const ACTIONS_SHADOW: ShadowStyle = ShadowStyle {
     ..SHADOW
 };
 
+/// The projects' form and card (docs/design/projects.md): the mockup's
+/// `0 18px 50px rgba(0, 0, 0, 0.55)`.
+pub const PROJECT_SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
+    dy: 18.0,
+    blur: 50.0,
+    alpha: 0.55,
+    radius: hocus_link::PROJECT_FORM_RADIUS,
+};
+
 /// What a surface moved as a popover is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -81,6 +91,8 @@ pub enum Kind {
     Emoji,
     /// The actions palette.
     Actions,
+    /// A project's form or card, under its thumbnail in the overview.
+    Project,
 }
 
 impl Kind {
@@ -88,6 +100,7 @@ impl Kind {
         match namespace {
             EMOJI_NAMESPACE => Self::Emoji,
             ACTIONS_NAMESPACE => Self::Actions,
+            ns if hocus_link::is_project_surface(ns) => Self::Project,
             _ => Self::Popover,
         }
     }
@@ -167,6 +180,10 @@ impl Shown {
             Kind::Popover => SHADOW,
             Kind::Emoji => EMOJI_SHADOW,
             Kind::Actions => ACTIONS_SHADOW,
+            Kind::Project => ShadowStyle {
+                radius: self.radius(),
+                ..PROJECT_SHADOW
+            },
         }
     }
 
@@ -176,6 +193,10 @@ impl Shown {
             Kind::Popover => hocus_link::RADIUS,
             Kind::Emoji => EMOJI_RADIUS,
             Kind::Actions => ACTIONS_RADIUS,
+            Kind::Project if self.layer.namespace() == hocus_link::PROJECT_CARD_NAMESPACE => {
+                hocus_link::PROJECT_CARD_RADIUS
+            }
+            Kind::Project => hocus_link::PROJECT_FORM_RADIUS,
         }
     }
 
@@ -185,6 +206,7 @@ impl Shown {
             Kind::Popover => 0.0,
             Kind::Emoji => EMOJI_RISE,
             Kind::Actions => hocus_link::ACTIONS_DROP,
+            Kind::Project => hocus_link::PROJECT_RISE,
         }
     }
 
@@ -207,13 +229,14 @@ impl Popovers {
         let shown = self.shown(layer)?;
         Some(match shown.kind {
             Kind::Popover => look(shown.opened, shown.closing, now, motion),
-            Kind::Emoji => {
+            Kind::Emoji | Kind::Project => {
                 let look = look(shown.opened, shown.closing, now, motion);
+                let reach = shown.reach();
                 Look {
                     alpha: look.alpha,
                     shift: 0.0,
                     rise: if motion {
-                        EMOJI_RISE * f64::from(1.0 - look.alpha)
+                        reach * f64::from(1.0 - look.alpha)
                     } else {
                         0.0
                     },
@@ -238,6 +261,11 @@ impl Popovers {
     /// The popovers showing and not closing.
     fn open(&self) -> impl Iterator<Item = &Shown> {
         self.shown.iter().filter(|s| s.closing.is_none())
+    }
+
+    /// Whether a project's form or card shows, not closing.
+    pub fn project_open(&self) -> bool {
+        self.open().any(|s| s.kind == Kind::Project)
     }
 }
 
@@ -339,7 +367,8 @@ impl State {
                     l.wl_surface() == &surface
                         && (l.namespace().starts_with("hocus-bar")
                             || l.namespace() == EMOJI_NAMESPACE
-                            || l.namespace() == ACTIONS_NAMESPACE)
+                            || l.namespace() == ACTIONS_NAMESPACE
+                            || hocus_link::is_project_surface(l.namespace()))
                 })
                 .cloned()
         })

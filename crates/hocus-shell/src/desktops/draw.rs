@@ -35,6 +35,17 @@
 //! label: the shape and the sketch say which screen. A click, `Enter` or
 //! the wheel on a group goes to a desktop of its screen.
 //!
+//! Project desktops (docs/design/projects.md §3, boards 3 and 3b): a
+//! project's dot carries its monogram (Manrope 800 at 7.5 px, `#0B1020` on
+//! the accent, `text` on the others); a project's tile carries it at its
+//! bottom right (7 px, on the accent in the current tile, on
+//! `rgba(14,17,28,0.85)` in the others). Over the full form's tiles, a line
+//! for the project the bar's screen shows: a 14 px folder in the accent's
+//! text colour, its name (13 px, 700), its folder under it (Martian Mono
+//! 10.5 px, `text.faint`, cut at its start); its room kept on a desktop
+//! that is not a project while the screen has one, so that nothing moves
+//! as desktops switch.
+//!
 //! A window moved over a tile (8.5 B): the tile lights,
 //! `rgba(108,194,135,0.28)` with a 2 px `#7EE0A0` ring, as where the
 //! window would go; the compositor says which (`drop-over`), knowing where
@@ -113,6 +124,24 @@ const DOT_RADIUS: f32 = 4.0;
 const DOT_FULL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.30));
 const DOT_EMPTY: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const DOT_RING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.12));
+/// A project's monogram on its dot, and on its tile.
+const DOT_MONO: f32 = 7.5;
+const DOT_MONO_INK: Ink = Ink::Fixed(Color::from_rgb8(0x0B, 0x10, 0x20));
+const TILE_MONO: f32 = 7.0;
+const TILE_MONO_GROUND: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.85));
+/// The project's line over the full form's tiles: its room (the mockup's
+/// 46 px from the line's top to the tiles'), its name 13 px, its folder
+/// 10.5 px under it, 21 px in, past the 14 px folder.
+pub const PROJECT_LINE: f32 = 46.0;
+const LINE_NAME: f32 = 13.0;
+const LINE_FOLDER: f32 = 10.5;
+const LINE_ICON: f32 = 14.0;
+const LINE_INDENT: f32 = 21.0;
+const MANROPE_EXTRABOLD: iced::Font = iced::Font {
+    weight: iced::font::Weight::ExtraBold,
+    ..crate::levels::draw::MANROPE
+};
+const MONO: iced::Font = iced::Font::with_name("Martian Mono");
 
 /// A tile a window would be let go on (8.5 B): lit green, ringed 2 px.
 const DROP_FILL: Ink = Ink::Fixed(Color::from_rgba8(108, 194, 135, 0.28));
@@ -184,14 +213,31 @@ fn rows(form: Form, count: usize) -> usize {
 pub struct Group {
     pub count: usize,
     pub tile: f32,
+    /// The full form's room for its project's line over its tiles: the
+    /// bar's own screen's, while one of its desktops is a project.
+    pub line: f32,
 }
 
 impl Group {
-    /// A screen's group: its desktops, if said yet.
-    fn of(screen: &DeskScreen, desktops: Option<&Desktops>) -> Self {
+    /// A screen's group: its desktops, if said yet; the bar's `own`
+    /// screen's has room for its project's line.
+    fn of(screen: &DeskScreen, desktops: Option<&Desktops>, own: bool) -> Self {
         Self {
             count: desktops.map_or(0, |d| usize::from(d.count)),
             tile: tile_height(screen.width, screen.height),
+            line: if own && desktops.is_some_and(|d| !d.projects.is_empty()) {
+                PROJECT_LINE
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// The room over its tiles in `form`.
+    fn above(self, form: Form) -> f32 {
+        match form {
+            Form::Full => self.line,
+            Form::Mini => 0.0,
         }
     }
 
@@ -210,7 +256,7 @@ impl Group {
             Form::Full => TILE_GAP,
             Form::Mini => DOT_GAP,
         };
-        rows * self.height_in(form) + (rows - 1.0) * gap
+        self.above(form) + rows * self.height_in(form) + (rows - 1.0) * gap
     }
 }
 
@@ -234,6 +280,7 @@ fn group_height(form: Form, groups: &[Group]) -> f32 {
         return Group {
             count: 0,
             tile: TILE_HEIGHT,
+            line: 0.0,
         }
         .total(form);
     }
@@ -366,7 +413,8 @@ fn groups_of(bar: &str) -> Vec<Group> {
     shaped(
         super::screens(bar)
             .iter()
-            .map(|s| Group::of(s, super::snapshot(&s.output).as_ref()))
+            .enumerate()
+            .map(|(row, s)| Group::of(s, super::snapshot(&s.output).as_ref(), row == 0))
             .collect(),
     )
 }
@@ -575,7 +623,8 @@ impl State {
         shaped(
             self.shown
                 .iter()
-                .map(|s| Group::of(&s.screen, s.desktops.as_ref()))
+                .enumerate()
+                .map(|(row, s)| Group::of(&s.screen, s.desktops.as_ref(), row == 0))
                 .collect(),
         )
     }
@@ -689,6 +738,18 @@ impl Items for Tiles {
                             Form::Mini => mini(f, rect, desktops, index, !moving, alpha),
                         }
                     }
+                    // The project the bar's screen shows, over its tiles.
+                    if form == Form::Full
+                        && let Some(group) = groups.get(row).filter(|g| g.line > 0.0)
+                    {
+                        let first = self.rect(form, size, (row, 0), &groups);
+                        let top = first.y - group.line;
+                        let width = right - SIDE - (left + SIDE);
+                        let at = Point::new(first.x + 2.0, top);
+                        if let Some(project) = desktops.project(usize::from(desktops.current)) {
+                            project_line(f, at, width - 4.0, project, alpha);
+                        }
+                    }
                     // The tile a moved window is over (8.5 B).
                     if let Some((output, index)) = super::drop_on(&self.bar)
                         && output == desktops.output
@@ -797,6 +858,17 @@ fn full(
     } else {
         inner_ring(f, rect, TILE_RADIUS, 1.0, faded(TILE_RING.get(), alpha));
     }
+    let current = current && ringed;
+    if let Some(project) = shown.project(index) {
+        // Over the sketch, at its corner: drawn last.
+        let mono = project.monogram();
+        let mut windows = on(shown, index).peekable();
+        if windows.peek().is_some() {
+            sketches(f, rect, windows, alpha);
+        }
+        tile_monogram(f, rect, &mono, current, alpha);
+        return;
+    }
     let mut windows = on(shown, index).peekable();
     if windows.peek().is_none() {
         f.fill_text(canvas::Text {
@@ -813,6 +885,16 @@ fn full(
         });
         return;
     }
+    sketches(f, rect, windows, alpha);
+}
+
+/// The windows' sketches in a tile, each with its icon where it has room.
+fn sketches<'a>(
+    f: &mut Frame,
+    rect: Rectangle,
+    windows: impl Iterator<Item = &'a DeskWindow>,
+    alpha: f32,
+) {
     for window in windows {
         let colour = if window.look == Look::Focused {
             SKETCH_FOCUSED
@@ -845,6 +927,127 @@ fn full(
     }
 }
 
+/// A project's monogram at the bottom right of its tile: on the accent in
+/// the current one, on a dark ground in the others.
+fn tile_monogram(f: &mut Frame, rect: Rectangle, mono: &str, current: bool, alpha: f32) {
+    let width = kit::measure(mono, TILE_MONO, MANROPE_EXTRABOLD) + 4.0;
+    let height = TILE_MONO + 2.0;
+    let badge = Rectangle::new(
+        Point::new(
+            (rect.x + rect.width - 3.0 - width).round(),
+            (rect.y + rect.height - 3.0 - height).round(),
+        ),
+        Size::new(width.ceil(), height),
+    );
+    let (ground, ink) = if current {
+        (ACCENT.get(), DOT_MONO_INK.get())
+    } else {
+        (TILE_MONO_GROUND.get(), crate::levels::draw::TEXT.get())
+    };
+    f.fill(
+        &Path::rounded_rectangle(badge.position(), badge.size(), 2.0.into()),
+        faded(ground, alpha),
+    );
+    f.fill_text(canvas::Text {
+        content: mono.to_owned(),
+        position: badge.center(),
+        max_width: f32::INFINITY,
+        color: faded(ink, alpha),
+        size: Pixels(TILE_MONO),
+        line_height: LineHeight::Relative(1.0),
+        font: MANROPE_EXTRABOLD,
+        align_x: Alignment::Center,
+        align_y: alignment::Vertical::Center,
+        shaping: Shaping::Basic,
+    });
+}
+
+/// The project's line over the tiles, its left at `at`, `width` long: the
+/// folder in the accent's text colour, the name, the folder under it.
+fn project_line(
+    f: &mut Frame,
+    at: Point,
+    width: f32,
+    project: &hocus_link::DeskProject,
+    alpha: f32,
+) {
+    let name_line = LINE_NAME * LINE;
+    let ink = faded(crate::theme::ACCENT_TEXT.get(), alpha);
+    folder_icon(
+        f,
+        Point::new(at.x, at.y + (name_line - LINE_ICON) / 2.0),
+        LINE_ICON,
+        ink,
+    );
+    let room = width - LINE_INDENT;
+    let name = kit::elide(&project.name, room, |t| {
+        kit::measure(t, LINE_NAME, crate::levels::draw::MANROPE_BOLD)
+    });
+    f.fill_text(canvas::Text {
+        content: name,
+        position: Point::new(at.x + LINE_INDENT, at.y + name_line / 2.0),
+        max_width: f32::INFINITY,
+        color: faded(crate::levels::draw::TEXT.get(), alpha),
+        size: Pixels(LINE_NAME),
+        line_height: LineHeight::Relative(LINE),
+        font: crate::levels::draw::MANROPE_BOLD,
+        align_x: Alignment::Left,
+        align_y: alignment::Vertical::Center,
+        shaping: Shaping::Advanced,
+    });
+    let folder = kit::elide_start(&super::folder_shown(&project.folder), room, |t| {
+        kit::measure(t, LINE_FOLDER, MONO)
+    });
+    f.fill_text(canvas::Text {
+        content: folder,
+        position: Point::new(
+            at.x + LINE_INDENT,
+            at.y + name_line + 2.0 + LINE_FOLDER * LINE / 2.0,
+        ),
+        max_width: f32::INFINITY,
+        color: faded(FAINT.get(), alpha),
+        size: Pixels(LINE_FOLDER),
+        line_height: LineHeight::Relative(LINE),
+        font: MONO,
+        align_x: Alignment::Left,
+        align_y: alignment::Vertical::Center,
+        shaping: Shaping::Advanced,
+    });
+}
+
+/// A folder (the mockup's 24 px path), `side` px square at `at`, stroked.
+pub fn folder_icon(f: &mut Frame, at: Point, side: f32, ink: Color) {
+    folder_icon_stroked(f, at, side, ink, 2.0 * side / 24.0);
+}
+
+/// The same, its stroke `width` wide.
+pub fn folder_icon_stroked(f: &mut Frame, at: Point, side: f32, ink: Color, width: f32) {
+    let k = side / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
+    let path = Path::new(|b| {
+        b.move_to(p(3.0, 7.0));
+        b.quadratic_curve_to(p(3.0, 5.0), p(5.0, 5.0));
+        b.line_to(p(9.0, 5.0));
+        b.line_to(p(11.0, 7.0));
+        b.line_to(p(19.0, 7.0));
+        b.quadratic_curve_to(p(21.0, 7.0), p(21.0, 9.0));
+        b.line_to(p(21.0, 17.0));
+        b.quadratic_curve_to(p(21.0, 19.0), p(19.0, 19.0));
+        b.line_to(p(5.0, 19.0));
+        b.quadratic_curve_to(p(3.0, 19.0), p(3.0, 17.0));
+        b.close();
+    });
+    f.stroke(
+        &path,
+        Stroke {
+            style: Style::Solid(ink),
+            width,
+            line_join: canvas::LineJoin::Round,
+            ..Stroke::default()
+        },
+    );
+}
+
 /// Where a window's icon goes in its sketch `at`: in its middle, on whole
 /// pixels; none in a sketch smaller than 12 × 12 px.
 pub fn icon_in(at: Rectangle) -> Option<Rectangle> {
@@ -865,13 +1068,34 @@ pub fn icon_in(at: Rectangle) -> Option<Rectangle> {
 /// the ring is on its way), lighter with windows, faint and ringed empty.
 fn mini(f: &mut Frame, rect: Rectangle, shown: &Desktops, index: usize, ringed: bool, alpha: f32) {
     let path = Path::rounded_rectangle(rect.position(), rect.size(), DOT_RADIUS.into());
-    if index == usize::from(shown.current) && ringed {
+    let current = index == usize::from(shown.current) && ringed;
+    if current {
         f.fill(&path, faded(ACCENT.get(), alpha));
     } else if on(shown, index).next().is_some() {
         f.fill(&path, faded(DOT_FULL.get(), alpha));
     } else {
         f.fill(&path, faded(DOT_EMPTY.get(), alpha));
         inner_ring(f, rect, DOT_RADIUS, 1.0, faded(DOT_RING.get(), alpha));
+    }
+    // A project's monogram (docs/design/projects.md §3).
+    if let Some(project) = shown.project(index) {
+        let ink = if current {
+            DOT_MONO_INK.get()
+        } else {
+            crate::levels::draw::TEXT.get()
+        };
+        f.fill_text(canvas::Text {
+            content: project.monogram(),
+            position: rect.center(),
+            max_width: f32::INFINITY,
+            color: faded(ink, alpha),
+            size: Pixels(DOT_MONO),
+            line_height: LineHeight::Relative(1.0),
+            font: MANROPE_EXTRABOLD,
+            align_x: Alignment::Center,
+            align_y: alignment::Vertical::Center,
+            shaping: Shaping::Basic,
+        });
     }
 }
 
@@ -927,7 +1151,8 @@ impl Tiles {
             Form::Full => ((left + SIDE, right - SIDE), at(full)),
             Form::Mini => ((left, right), at(mini)),
         };
-        let top = group_bottom - group_height(form, groups) + group_top(form, groups, row);
+        let above = groups.get(row).map_or(0.0, |g| g.above(form));
+        let top = group_bottom - group_height(form, groups) + group_top(form, groups, row) + above;
         let height = groups.get(row).map_or(TILE_HEIGHT, |g| g.height_in(form));
         tile(form, index, sides, top, height)
     }
@@ -1042,6 +1267,10 @@ impl Tiles {
                     .map(|i| {
                         let name = names.get(i).cloned().flatten();
                         let windows = on(d, i).count();
+                        if let Some(project) = d.project(i) {
+                            let title = self.words.project_title(i + 1, &project.name);
+                            return self.words.desktop_said(&title, windows);
+                        }
                         if row == 0 {
                             self.words.desktop(i + 1, name.as_deref(), windows)
                         } else {
@@ -1124,7 +1353,7 @@ pub fn node(bar: &str, words: crate::a11y::Words, item: Item) -> Option<Node> {
     let titles = super::titles(&screen.output).unwrap_or_default();
     let levels = Words::new(words.lang());
     let i = usize::from(index);
-    let title = levels.desktop_title(i + 1, super::name(i).as_deref());
+    let title = super::said_title(levels, &screen.output, i);
     let current = usize::from(desktops.current) == i;
     let windows: Vec<String> = desktops
         .windows
@@ -1162,6 +1391,7 @@ mod tests {
         Group {
             count,
             tile: TILE_HEIGHT,
+            line: 0.0,
         }
     }
 
@@ -1252,6 +1482,7 @@ mod tests {
         let wide = Group {
             count: 4,
             tile: tile_height(3440, 1440),
+            line: 0.0,
         };
         assert_eq!(laptop.height_in(Form::Mini), 13.0);
         assert_eq!(wide.height_in(Form::Mini), 9.0);

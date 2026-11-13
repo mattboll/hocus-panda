@@ -205,6 +205,18 @@ pub enum ToCompositor {
     McpReply { card: u64, reply: crate::McpReply },
     /// "Rendre la main": agent `0`'s actions go on.
     McpHandBack(String),
+    /// The form's "Créer le projet" (docs/design/projects.md §2.1): desktop
+    /// `desktop` (from 0) of `output` becomes project `name`, of folder
+    /// `folder`. Answered by [`ToShell::ProjectMade`](crate::ToShell::ProjectMade) or
+    /// [`ToShell::ProjectRefused`](crate::ToShell::ProjectRefused).
+    ProjectMake {
+        output: String,
+        desktop: u8,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+        #[serde(serialize_with = "tidy::name")]
+        folder: String,
+    },
 }
 
 impl ToCompositor {

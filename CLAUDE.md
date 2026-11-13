@@ -272,6 +272,12 @@ their own with a fake polkit authority, a fake helper
 (`HOCUS_POLKIT_HELPER`; with it set, polkit's socket is never used) and
 accounts of their own (`HOCUS_AUTH_ETC`).
 
+Project desktops (docs/design/projects.md) are kept in
+`$XDG_STATE_HOME/hocuspanda/projects` by the compositor as soon as one is
+made: next to a live session, give the nested compositor a fresh
+`XDG_STATE_HOME` (or `HOME`). Tests make them on the Settings' line
+(`project-make SCREEN DESKTOP NAME FOLDER`).
+
 Screen captures (`Print`, docs/design/screenshots.md) are saved in
 `$XDG_PICTURES_DIR` (else `user-dirs.dirs`', else `~/Pictures`): next to a
 live session, give the nested compositor a fresh `HOME` (or
