@@ -60,6 +60,7 @@ mod creatures;
 mod cursor;
 mod day;
 mod day_sources;
+mod daylight;
 mod decorations;
 mod desktop_drop;
 mod desktops;

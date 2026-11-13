@@ -1537,8 +1537,9 @@ impl State {
         // The rain on the glass (#802), the evening fireflies (#804).
         moving |= self.tick_raindrops(now);
         moving |= self.tick_fireflies(now);
-        // The koi's pond (#803).
+        // The koi's pond (#803), the daylight (#805).
         moving |= self.tick_koi(now);
+        self.tick_daylight();
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         // A shattering one until its last shard has fallen (#798).

@@ -419,6 +419,7 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
         "effects.rain-on-glass",
         "effects.koi",
         "effects.fireflies",
+        "effects.daylight",
         "effects.flames",
         "effects.shatter",
         "effects.jelly",

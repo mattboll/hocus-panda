@@ -69,6 +69,7 @@ const OFF_INK: [u8; 4] = [0xFF, 0xFF, 0xFF, 64];
 
 /// The ring's shadow, the mockup's `drop-shadow(0 10px 14px)` at 50 %.
 const SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 10.0,
     blur: 28.0,
     alpha: 0.5,

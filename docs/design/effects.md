@@ -14,7 +14,7 @@ langue").
 | | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
 | | Bassin de koïs | `koi` | #803 (built) |
 | | Lucioles du soir | `fireflies` | #804 (built) |
-| | La lumière du jour | `daylight` | #805 |
+| | La lumière du jour | `daylight` | #805 (built) |
 | | Bureaux en profondeur | `depth` | #806 |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
 | | Éclats de verre | `shatter` | #798 (built) |
@@ -528,9 +528,9 @@ koïs" is: its JS ported (`effects/koi.rs`), its shader `KOI_FS`
 - **Where**: in the wallpaper's place, under the bottom and background
   layers, the snow, the fireflies, the windows and the bar; opaque.
   Behind the glass of the bar stand the floor under still water and a
-  blank for the pads, which never change. With the rain on the glass on
-  too, the pond is the wallpaper: the rain needs a still picture to
-  refract, and waits. A moving wallpaper (#433) waits.
+  blank for the pads, which never change. With the rain on the glass or
+  the daylight's sky on too, the pond is the wallpaper: the rain needs a
+  still picture to refract, and waits. A moving wallpaper (#433) waits.
 - **Its cost**, a frame while it moves (60 steps a second), measured on
   the CPU at 1440 × 900 (11 koi, 288 × 180 cells): the step 0.27 ms, the
   meshes 0.19 ms (some 4 800 vertices), the heights made half floats
@@ -550,6 +550,60 @@ turns to a pond whose koi swim, the window's pixels untouched; off,
 nothing; still with reduced motion, nothing drawn per frame); its
 screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
 --run-ignored only koi::shots`.
+
+## Daylight (#805)
+
+With `daylight = true`, the wallpaper is the board "La lumière du jour"'s
+sky at the hour the sun stands for (`effects/daylight.rs`, its shader
+`SKY` in `draw.rs`), and the windows' shadows and edges follow its sun.
+
+- **The hour**: the board's sun rises at 6 and sets at 20. The real day
+  between sunrise and sunset (the sun's upper edge on the horizon, NOAA's
+  equations, at the place of the system's time zone, as the fireflies'
+  evening: `effects/sun.rs`) is laid over 6 to 20, the night until the
+  next sunrise over 20 to 30 (6 the next day); with no sunrise or sunset
+  within a day (near the poles), the board's noon or 1 o'clock. Looked
+  at every minute on the wall clock while the switch is on.
+- **The sky**: the board's keys (5, 6:30, 8, 12, 16:30, 18:30, 19:30, 21,
+  23; past 23 the night goes on to 5's, which the board's slider never
+  reached), its gradient, its stars by night and at dawn and dusk (their
+  places the board's over its 1200 × 720, stretched over the screen), by
+  day the sun's halo, disc and seven rays, by night the moon; its two
+  ridges; the hour's light graded over it (soft light). Drawn once a
+  minute into a picture of the screen's size, opaque, in the wallpaper's
+  place; the glass of the bar blurs it like a wallpaper.
+- **The windows**: their shadow is the board's for the hour, offset
+  away from the sun (`lx × len × 2.2` across, `len × (0.4 + 0.6 elev)`
+  down), longer and softer as it sets (blur `26 + 0.6 len`), darker at
+  noon; what the focus or a move adds to the standard shadow kept. By
+  day, the edge facing the sun lights up: a line of the hour's light at
+  25 % along the window's top and down the side toward the sun, as wide
+  as the board's `lx × 3`, just out of what the window shows.
+- **Not built as the board drew it**: the board graded the hour's light
+  over everything, its windows and its bar too, and laid a gradient of
+  it over the windows' content: both are over what the user reads, so
+  the grade is the sky's alone and the windows keep their pixels. The
+  board lit the side away from its sun (its gradient's angle turned the
+  wrong way); here it is the side facing it, as the ticket says. Its
+  second, contact shadow (`0 2px 6px`) is not drawn.
+- **With the others**: the koi's pond, when on, is the wallpaper in the
+  sky's place (the shadows still turn); the rain on the glass falls over
+  the sky, refracting it (blurred again once a minute); the snow, the
+  fireflies and the garlands show over it.
+- **Its cost**: nothing per frame. Once a minute, the sky drawn again
+  (one pass over the screen, its stars a loop of some 160 to 600), the
+  windows' shadows (a new blur's texture) and the screen once; with the
+  rain on, its fog blurred again.
+- **When**: with reduced motion it shows as it does (nothing moves);
+  none in the power saver, while a screen is shared or recorded, on the
+  CPU, nor in a capture (a capture's windows keep the standard shadow).
+
+Tests: `tests/daylight.rs` (on GLES on Mesa's software device, the sun
+held: the sky of 8 o'clock then of the sunset, the shadow below the
+window another, the window's pixels untouched, nothing drawn per frame;
+off, nothing; with reduced motion, drawn once); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored
+only daylight::shots`.
 
 ## Not built yet
 

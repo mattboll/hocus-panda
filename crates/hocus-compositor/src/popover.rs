@@ -49,6 +49,7 @@ use crate::{
 
 /// The mockup's `box-shadow: 0 14px 40px rgba(0, 0, 0, 0.38)`.
 pub const SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 14.0,
     blur: 40.0,
     alpha: 0.38,
@@ -58,6 +59,7 @@ pub const SHADOW: ShadowStyle = ShadowStyle {
 /// The emoji picker's: the mockup's `0 18px 50px rgba(0, 0, 0, 0.5)`,
 /// zoomed.
 pub const EMOJI_SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 18.0 * EMOJI_ZOOM,
     blur: 50.0 * EMOJI_ZOOM,
     alpha: 0.5,

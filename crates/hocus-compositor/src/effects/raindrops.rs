@@ -470,11 +470,12 @@ impl crate::State {
     }
 
     /// Whether the rain on the glass shows on `output` now: the wallpaper
-    /// it refracts is then its still picture, a moving one waits; the
-    /// koi's pond (#803), which moves, takes its place.
+    /// it refracts is then its still picture (or the daylight's sky,
+    /// #805), a moving one waits; the koi's pond (#803), which moves, takes
+    /// its place.
     pub(crate) fn rain_shows_on(&self, output: &smithay::output::Output) -> bool {
         self.raining_glass().is_some()
-            && !self.config.plain_background
+            && (!self.config.plain_background || self.sky_shows_on(output))
             && !self.koi_shows_on(output)
             && self
                 .fx

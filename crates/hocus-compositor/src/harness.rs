@@ -352,6 +352,16 @@ impl Headless {
         )
     }
 
+    /// The sun (#805) as it is at `at`, whatever the clock says.
+    pub fn hold_sun(&mut self, at: jiff::Timestamp) {
+        self.app.state.hold_sun(at);
+    }
+
+    /// The daylight's hour on its board (#805), while it is on.
+    pub fn daylight_hour(&self) -> Option<f64> {
+        Some(self.app.state.fx.daylight.as_ref()?.hour)
+    }
+
     /// The garlands across the top (#813), while they show: each one's
     /// screen and its bulbs' points (global, logical), by screen.
     pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {

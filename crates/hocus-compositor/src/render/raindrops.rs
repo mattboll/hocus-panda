@@ -16,7 +16,7 @@ use smithay::{
     utils::{Physical, Rectangle},
 };
 
-use super::Frame;
+use super::{Frame, OutputElement};
 use crate::{
     State,
     effects::{FireElement, draw::RainLook, raindrops::Pane},
@@ -46,19 +46,39 @@ impl State {
         self.fx.raindrops.as_ref()?.panes.get(&frame.output.name())
     }
 
-    /// The rain on `frame`'s output: the fogged glass standing for it
-    /// behind the glass of the bar, and itself.
+    /// The rain on `frame`'s output, over `sky` (the daylight's, #805)
+    /// when it is there, which it takes, else the wallpaper: the fogged
+    /// glass standing for it behind the glass of the bar, and itself.
     pub(super) fn raindrops_layer<R>(
         &self,
         renderer: &mut R,
         frame: &Frame,
+        sky: &mut Option<OutputElement<R>>,
+    ) -> Option<(FireElement, FireElement)>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        self.raindrops_on(frame)?;
+        let backdrop = match sky.take() {
+            Some(sky) => sky,
+            None => self.backdrop_element(renderer, frame.output)?,
+        };
+        self.raindrops_over(renderer, frame, backdrop)
+    }
+
+    /// The rain over `backdrop`.
+    fn raindrops_over<R>(
+        &self,
+        renderer: &mut R,
+        frame: &Frame,
+        backdrop: OutputElement<R>,
     ) -> Option<(FireElement, FireElement)>
     where
         R: Renderer + ImportAll + ImportMem + Bend + Shaders + Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let pane = self.raindrops_on(frame)?;
-        let backdrop = self.backdrop_element(renderer, frame.output)?;
         let scale = frame.scale;
         let screen: Rectangle<i32, Physical> =
             Rectangle::from_size(frame.area.size.to_f64().to_physical_precise_round(scale));

@@ -14,7 +14,8 @@
 //! ([`shatter`], #798), and a garland under the active window
 //! ([`garland`], #799), another across the top of the screens (#813);
 //! on the wallpaper, rain on the glass ([`raindrops`], #802), a koi pond
-//! ([`koi`], #803) and evening fireflies ([`fireflies`], #804).
+//! ([`koi`], #803), evening fireflies ([`fireflies`], #804) and the
+//! daylight ([`daylight`], #805), following the sun ([`sun`]).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -24,6 +25,7 @@
 //! frame once it is over.
 
 pub mod creatures;
+pub mod daylight;
 pub mod draw;
 pub mod fireflies;
 pub mod flames;
@@ -39,6 +41,7 @@ pub mod shatter;
 pub mod snow;
 pub mod snow_look;
 pub mod snowing;
+pub mod sun;
 
 pub use draw::{Fire, FireElement};
 
@@ -70,10 +73,16 @@ pub struct Live {
     swarms: u64,
     /// Whether it is evening, while the fireflies are on.
     pub dusk: fireflies::Dusk,
+    /// The daylight, while it is on (#805).
+    pub daylight: Option<daylight::Daylight>,
     /// The koi's pond, while it is on (#803).
     pub koi: Option<koi::Ponds>,
     /// The ponds dug so far, for their seeds.
     ponds: u64,
+    /// The sun looked at every minute, while an effect follows it.
+    pub sun_timer: Option<smithay::reexports::calloop::RegistrationToken>,
+    /// Tests: the sun as it is at this time, whatever the clock says.
+    pub sun_held: Option<jiff::Timestamp>,
 }
 
 use crate::{State, model::Mode, model::WindowId};

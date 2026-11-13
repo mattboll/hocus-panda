@@ -27,6 +27,15 @@ impl State {
     /// is on the strip, `cover` of them under the overview.
     pub(super) fn window_looks(&self, frame: &Frame, cover: Option<f32>) -> Vec<(WindowId, Look)> {
         let Frame { now, area, .. } = *frame;
+        // The daylight's sun (#805): the shadows it casts, the edges it
+        // lights; on the screen alone.
+        let sun = frame
+            .purpose
+            .screen()
+            .then(|| self.daylight_on(frame.output))
+            .flatten();
+        let hour = self.fx.daylight.as_ref().map_or(0, |d| d.generation);
+        let width = f64::from(area.size.w);
         self.model
             .stack()
             .iter()
@@ -38,6 +47,12 @@ impl State {
                 let mut look = self.look(id, now)?;
                 look.visual.loc.x += offset;
                 look.alpha *= alpha;
+                if let Some(sky) = &sun
+                    && self.model.mode(id) != Mode::Fullscreen
+                {
+                    look.shadow = sky.shadow(width, look.shadow);
+                    look.sunlit = sky.lit_edges(width).map(|lit| (lit, hour));
+                }
                 if let Some(cover) = cover {
                     look.alpha *= cover;
                     if look.alpha <= 0.0 {
@@ -47,7 +62,9 @@ impl State {
                 Some((id, look))
             })
             .filter(|(_, look)| {
-                let reach = 2.0 * ShadowStyle::MOVING.blur;
+                let shadow = look.shadow;
+                let reach = 2.0 * ShadowStyle::MOVING.blur.max(shadow.blur)
+                    + shadow.dx.abs().max(shadow.dy.abs());
                 let around = Rectangle::new(
                     look.visual.loc - Point::from((reach, reach)),
                     look.visual.size + (2.0 * reach, 2.0 * reach).into(),

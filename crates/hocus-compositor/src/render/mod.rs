@@ -7,6 +7,7 @@
 //! clients are told once a frame is out.
 
 mod creatures;
+mod daylight;
 mod fireflies;
 mod garland;
 mod koi;
@@ -209,6 +210,9 @@ pub(crate) struct Look {
     /// Raining (#432): the fade it is drawn with where the rain is not
     /// (pixman), over the rain's time.
     rain: Option<f32>,
+    /// Its edges a sun lights (the daylight, #805), and the daylight's
+    /// hour; on the screen alone.
+    sunlit: Option<(crate::effects::daylight::LitEdges, u64)>,
 }
 
 impl Look {
@@ -227,6 +231,7 @@ impl Look {
             own_shadow: true,
             corner: Some(corner),
             rain: None,
+            sunlit: None,
         }
     }
 }
@@ -320,6 +325,7 @@ impl State {
             own_shadow,
             corner: None,
             rain,
+            sunlit: None,
         })
     }
 
@@ -453,6 +459,14 @@ impl State {
                 look.grip * look.alpha,
             ) {
                 out.push(OutputElements::Frame(grip));
+            }
+            // The edges its sun lights (#805), in front of its rims.
+            if let Some((lit, hour)) = &look.sunlit {
+                out.extend(
+                    daylight::lit_edges(lit, rect, scale, look.alpha, &ids.sun, *hour)
+                        .into_iter()
+                        .map(OutputElements::Solid),
+                );
             }
             let focused_width = if self.config.appearance.high_contrast {
                 2.0
@@ -683,6 +697,7 @@ impl State {
             || self.fx.raindrops.is_some()
             || self.fx.fireflies.is_some()
             || self.fx.koi.is_some()
+            || self.fx.daylight.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -892,13 +907,21 @@ impl State {
             elements.push(OutputElements::Fire(k.stand_in));
             (k.pads, k.water)
         });
-        // The rain on the glass (#802), right over the wallpaper, which it
-        // covers; the fogged glass alone in its place while the glass is
-        // blurred.
-        let rain = self.raindrops_layer(renderer, &frame).map(|(fog, layer)| {
-            elements.push(OutputElements::Fire(fog));
-            layer
-        });
+        // The daylight's sky (#805), in the wallpaper's place, drawn once
+        // a minute.
+        let mut sky = self
+            .daylight_layer(renderer, &frame)
+            .map(OutputElements::Fire);
+        // The rain on the glass (#802), right over the wallpaper (or the
+        // sky, which it takes), which it covers; the fogged glass alone in
+        // its place while the glass is blurred.
+        let rain = self
+            .raindrops_layer(renderer, &frame, &mut sky)
+            .map(|(fog, layer)| {
+                elements.push(OutputElements::Fire(fog));
+                layer
+            });
+        elements.extend(sky);
         // A wallpaper that moves (#433): still behind the glass, which is
         // blurred from what is behind it below; moving on the screen, put
         // in its place once the glass is done.

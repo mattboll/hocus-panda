@@ -11,27 +11,18 @@
 //! over the 1000 × 720 left of its bar. Their places are logical pixels
 //! from the corner of their screen's work area (beside the bar).
 //!
-//! When is evening (`Dusk`): the sun below the horizon, at the place of
-//! the system's time zone (its line in `zone1970.tab`; without one, 45°
-//! north at the longitude of its offset from UTC), looked at every minute
-//! on the wall clock, as the user sees the evening.
+//! When is evening (`Dusk`): the sun below the horizon at the place of
+//! the system's time zone ([`super::sun`]), looked at every minute on the
+//! wall clock, as the user sees the evening.
 
-use std::{
-    cell::Cell,
-    collections::HashMap,
-    f64::consts::PI,
-    sync::{Mutex, OnceLock},
-    time::Duration,
-};
+use std::{cell::Cell, collections::HashMap, time::Duration};
 
-use smithay::{
-    backend::renderer::{element::Id, utils::CommitCounter},
-    reexports::calloop::RegistrationToken,
-};
+use smithay::backend::renderer::{element::Id, utils::CommitCounter};
 
 use super::{
     mesh::{Glow, Mesh, Shape},
     particles::{Rng, STEP},
+    sun::sun_down_now,
 };
 
 /// The board's 70 over the 1000 × 720 its fireflies roam.
@@ -289,107 +280,18 @@ impl Fireflies {
 }
 
 /// Whether it is evening, looked at every minute while the fireflies are
-/// on.
+/// on ([`crate::State::watch_sun`]).
 #[derive(Debug, Default)]
 pub struct Dusk {
     pub evening: bool,
     /// Tests: evening or not, whatever the clock says.
     pub held: Option<bool>,
-    pub timer: Option<RegistrationToken>,
 }
 
 impl Dusk {
     pub fn evening(&self) -> bool {
         self.held.unwrap_or(self.evening)
     }
-}
-
-/// Whether the sun is down now where the system's time zone is.
-pub fn sun_down_now() -> bool {
-    let now = jiff::Zoned::now();
-    let (lat, lon) = place(&now);
-    sun_down(lat, lon, now.timestamp())
-}
-
-/// A place: latitude and longitude, degrees; `None`, unknown.
-type Place = Option<(f64, f64)>;
-
-/// Where the time zone of `now` is: its line's place in `zone1970.tab`,
-/// else 45° north at the longitude of its offset (15° an hour). Read once
-/// a zone.
-fn place(now: &jiff::Zoned) -> (f64, f64) {
-    static PLACES: OnceLock<Mutex<HashMap<String, Place>>> = OnceLock::new();
-    let zone = now.time_zone().iana_name().unwrap_or_default().to_owned();
-    let known = PLACES
-        .get_or_init(Default::default)
-        .lock()
-        .ok()
-        .and_then(|mut places| {
-            *places.entry(zone.clone()).or_insert_with(|| {
-                [
-                    "/usr/share/zoneinfo/zone1970.tab",
-                    "/usr/share/zoneinfo/zone.tab",
-                ]
-                .iter()
-                .filter_map(|f| std::fs::read_to_string(f).ok())
-                .find_map(|tab| zone_place(&tab, &zone))
-            })
-        });
-    known.unwrap_or_else(|| (45.0, f64::from(now.offset().seconds()) / 240.0))
-}
-
-/// `zone`'s place in a `zone.tab`: latitude and longitude, degrees.
-fn zone_place(tab: &str, zone: &str) -> Option<(f64, f64)> {
-    tab.lines()
-        .filter(|l| !l.starts_with('#'))
-        .find_map(|line| {
-            let mut fields = line.split('\t');
-            let at = fields.nth(1)?;
-            (fields.next()? == zone).then_some(at)
-        })
-        .and_then(coordinates)
-}
-
-/// ISO 6709 as `zone.tab` writes it: `±DDMM±DDDMM` or `±DDMMSS±DDDMMSS`.
-fn coordinates(at: &str) -> Option<(f64, f64)> {
-    let split = at.get(1..)?.find(['+', '-'])? + 1;
-    let angle = |s: &str, degrees: usize| -> Option<f64> {
-        let sign = if s.starts_with('-') { -1.0 } else { 1.0 };
-        let digits = s.get(1..)?;
-        let d: f64 = digits.get(..degrees)?.parse().ok()?;
-        let m: f64 = digits.get(degrees..degrees + 2)?.parse().ok()?;
-        let sec: f64 = digits
-            .get(degrees + 2..)
-            .filter(|s| !s.is_empty())
-            .map_or(Some(0.0), |s| s.parse().ok())?;
-        Some(sign * (d + m / 60.0 + sec / 3600.0))
-    };
-    Some((angle(at.get(..split)?, 2)?, angle(at.get(split..)?, 3)?))
-}
-
-/// Whether the sun is below the horizon (its upper edge, refraction
-/// counted: -0.833°) at latitude `lat`, longitude `lon` at `when`:
-/// NOAA's equations of the sun's place.
-pub fn sun_down(lat: f64, lon: f64, when: jiff::Timestamp) -> bool {
-    let utc = when.to_zoned(jiff::tz::TimeZone::UTC);
-    let hour =
-        f64::from(utc.hour()) + f64::from(utc.minute()) / 60.0 + f64::from(utc.second()) / 3600.0;
-    let g = 2.0 * PI / 365.0 * (f64::from(utc.day_of_year()) - 1.0 + (hour - 12.0) / 24.0);
-    let eqtime = 229.18
-        * (0.000075 + 0.001868 * g.cos()
-            - 0.032077 * g.sin()
-            - 0.014615 * (2.0 * g).cos()
-            - 0.040849 * (2.0 * g).sin());
-    let decl = 0.006918 - 0.399912 * g.cos() + 0.070257 * g.sin() - 0.006758 * (2.0 * g).cos()
-        + 0.000907 * (2.0 * g).sin()
-        - 0.002697 * (3.0 * g).cos()
-        + 0.00148 * (3.0 * g).sin();
-    let solar_minutes = hour * 60.0 + eqtime + 4.0 * lon;
-    let ha = (solar_minutes / 4.0 - 180.0).to_radians();
-    let lat = lat.to_radians();
-    let cos_zenith = lat.sin() * decl.sin() + lat.cos() * decl.cos() * ha.cos();
-    let elevation = 90.0 - cos_zenith.clamp(-1.0, 1.0).acos().to_degrees();
-    elevation < -0.833
 }
 
 impl crate::State {
@@ -405,7 +307,7 @@ impl crate::State {
     /// on and show no fullscreen window. Whether they move (a frame is
     /// wanted).
     pub(crate) fn tick_fireflies(&mut self, now: Duration) -> bool {
-        self.watch_dusk();
+        self.watch_sun();
         let Some(plays) = self.fireflies_out() else {
             if self.config.effects.fireflies
                 && self.fx.dusk.evening()
@@ -481,39 +383,8 @@ impl crate::State {
         moving
     }
 
-    /// While the fireflies are on, whether it is evening is looked at
-    /// every minute; off, not at all.
-    fn watch_dusk(&mut self) {
-        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-        const EVERY: Duration = Duration::from_secs(60);
-        match (self.config.effects.fireflies, self.fx.dusk.timer.is_some()) {
-            (true, false) => {
-                self.fx.dusk.evening = sun_down_now();
-                tracing::debug!(evening = self.fx.dusk.evening, "looking for the evening");
-                let inserted =
-                    self.loop_handle
-                        .insert_source(Timer::from_duration(EVERY), |_, _, app| {
-                            app.state.dusk_look();
-                            TimeoutAction::ToDuration(EVERY)
-                        });
-                match inserted {
-                    Ok(token) => self.fx.dusk.timer = Some(token),
-                    Err(err) => {
-                        tracing::warn!(%err.error, "the fireflies will not follow the evening");
-                    }
-                }
-            }
-            (false, true) => {
-                if let Some(token) = self.fx.dusk.timer.take() {
-                    self.loop_handle.remove(token);
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Whether it is evening now, on the wall clock.
-    fn dusk_look(&mut self) {
+    pub(super) fn dusk_look(&mut self) {
         let evening = sun_down_now();
         if evening != self.fx.dusk.evening {
             tracing::info!(evening, "the fireflies' evening");
@@ -526,25 +397,6 @@ impl crate::State {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_sun_sets_in_tours_as_the_board_says() {
-        // Tours (47°23′N 0°41′E), 13 November: the sun sets near 17:15
-        // local, 16:15 UTC; it rises near 8:10 local.
-        let (lat, lon) = (47.39, 0.69);
-        let at = |s: &str| s.parse::<jiff::Timestamp>().expect("a time");
-        assert!(!sun_down(lat, lon, at("2026-11-13T15:50:00Z")));
-        assert!(sun_down(lat, lon, at("2026-11-13T16:40:00Z")));
-        assert!(sun_down(lat, lon, at("2026-11-13T23:00:00Z")));
-        assert!(sun_down(lat, lon, at("2026-11-14T06:30:00Z")));
-        assert!(!sun_down(lat, lon, at("2026-11-14T07:40:00Z")));
-        // Paris's place, as zone1970.tab writes it.
-        let tab = "# comment\nFR,MC\t+4852+00220\tEurope/Paris\n";
-        let (lat, lon) = zone_place(tab, "Europe/Paris").expect("Paris");
-        assert!((lat - 48.867).abs() < 0.01 && (lon - 2.333).abs() < 0.01);
-        let (lat, lon) = coordinates("-332448+0703952").expect("seconds");
-        assert!((lat + 33.413).abs() < 0.01 && (lon - 70.664).abs() < 0.01);
-    }
 
     #[test]
     fn they_drift_blink_and_gather_round_the_pointer_at_rest() {
