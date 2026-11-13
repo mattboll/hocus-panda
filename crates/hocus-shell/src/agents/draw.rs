@@ -82,6 +82,8 @@ const CARD: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 const WAITING: (Color, Color) = (rgb(0xF5C46E), Color::from_rgba8(245, 180, 74, 0.12));
 const STUCK: (Color, Color) = (rgb(0xF7A77A), Color::from_rgba8(242, 148, 91, 0.10));
 const TO_SEE: (Color, Color) = (rgb(0x7EE0A0), Color::from_rgba8(108, 194, 135, 0.10));
+/// Good news (#809): the board's violet card.
+const NEWS: (Color, Color) = (rgb(0xB9A7F0), Color::from_rgba8(182, 156, 255, 0.12));
 const RESTING: Ink = Ink::Dark(rgb(0x6A7384));
 const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 /// What a card's agent asks, `#C9D0DC`.
@@ -571,6 +573,7 @@ fn dot(look: Look) -> Color {
         Look::Waiting => rgb(0xF5B44A),
         Look::Stuck => rgb(0xF2945B),
         Look::ToSee => rgb(0x7EE0A0),
+        Look::News => rgb(0xB69CFF),
         Look::Working => rgb(0x6CC287),
         Look::Resting => rgb(0xA9B2C2),
     }
@@ -584,6 +587,7 @@ fn colours(look: Look) -> (Color, Color) {
         Look::Waiting => WAITING,
         Look::Stuck => STUCK,
         Look::ToSee => TO_SEE,
+        Look::News => NEWS,
         Look::Working => (FAINT.get(), Color::TRANSPARENT),
         Look::Resting => (RESTING.get(), Color::TRANSPARENT),
     };

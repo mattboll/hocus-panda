@@ -5,8 +5,7 @@
 use serde::Deserialize;
 
 /// The effects (the board's fourteen, and a second garland), grouped as
-/// Settings › Appearance › Effects shows them. The moments' switches are
-/// kept for their tickets; the others play.
+/// Settings › Appearance › Effects shows them.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Effects {
@@ -37,7 +36,11 @@ pub struct Effects {
     /// the windows (#813).
     pub garland_top: bool,
     // The moments.
+    /// Fireworks behind the windows when an agent finishes with all its
+    /// tests passing (#810).
     pub fireworks: bool,
+    /// Confetti from the bar for an agent's good news, `hocus celebrate`
+    /// (#811).
     pub confetti: bool,
     // The agents.
     /// Each agent's panda sits on its window's top edge, playing its

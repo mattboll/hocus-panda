@@ -354,6 +354,7 @@ fn to_shell() -> Vec<ToShell> {
             window: 0,
             name: "hocus panda".into(),
             note: None,
+            news: None,
         }]),
         ToShell::Agents(vec![
             AgentShown {
@@ -364,6 +365,7 @@ fn to_shell() -> Vec<ToShell> {
                 window: 7,
                 name: "site-web".into(),
                 note: Some(Note::allow("Bash", "npm install")),
+                news: None,
             },
             AgentShown {
                 id: 4,
@@ -373,6 +375,7 @@ fn to_shell() -> Vec<ToShell> {
                 window: 0,
                 name: "migration".into(),
                 note: Note::says("API Error: Rate limit reached"),
+                news: None,
             },
             AgentShown {
                 id: 5,
@@ -382,6 +385,7 @@ fn to_shell() -> Vec<ToShell> {
                 window: 0,
                 name: "infra".into(),
                 note: Some(Note::allow("apply_patch", "")),
+                news: None,
             },
         ]),
         ToShell::Peek(Peek {
@@ -1300,6 +1304,7 @@ fn a_note_is_one_short_line_and_never_logged() {
         window: 0,
         name: "x".into(),
         note,
+        news: None,
     }]);
     let Ok(ToShell::Agents(read)) = ToShell::read(&agents.line()) else {
         panic!("the agents do not read");

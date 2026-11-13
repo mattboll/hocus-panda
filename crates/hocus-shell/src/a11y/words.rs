@@ -107,6 +107,7 @@ impl Words {
             Look::ToSee => txt::DONE_TO_SEE.get(self.lang).to_owned(),
             Look::Working => txt::working_for(self.lang, &since),
             Look::Resting => txt::RESTING.get(self.lang).to_owned(),
+            Look::News => txt::HAS_GOOD_NEWS.get(self.lang).to_owned(),
         };
         format!("{name}, {state}")
     }

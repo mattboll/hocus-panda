@@ -15,6 +15,7 @@ mod garland;
 mod koi;
 mod layers;
 mod leaving;
+mod moments;
 mod raindrops;
 mod snow;
 mod stack;
@@ -215,6 +216,9 @@ pub(crate) struct Look {
     /// Its edges a sun lights (the daylight, #805), and the daylight's
     /// hour; on the screen alone.
     sunlit: Option<(crate::effects::daylight::LitEdges, u64)>,
+    /// Its edges the fireworks' flashes light (#810): top, right,
+    /// bottom, left, and the effects' frame; on the screen alone.
+    flash: Option<([[f32; 4]; 4], u64)>,
 }
 
 impl Look {
@@ -234,6 +238,7 @@ impl Look {
             corner: Some(corner),
             rain: None,
             sunlit: None,
+            flash: None,
         }
     }
 }
@@ -328,6 +333,7 @@ impl State {
             corner: None,
             rain,
             sunlit: None,
+            flash: None,
         })
     }
 
@@ -466,6 +472,14 @@ impl State {
             if let Some((lit, hour)) = &look.sunlit {
                 out.extend(
                     daylight::lit_edges(lit, rect, scale, look.alpha, &ids.sun, *hour)
+                        .into_iter()
+                        .map(OutputElements::Solid),
+                );
+            }
+            // The fireworks' light on its edges (#810).
+            if let Some((edges, frame)) = &look.flash {
+                out.extend(
+                    moments::flash_edges(edges, rect, scale, look.alpha, &ids.flash, *frame)
                         .into_iter()
                         .map(OutputElements::Solid),
                 );
@@ -702,6 +716,8 @@ impl State {
             || self.fx.daylight.is_some()
             || self.fx.depth.is_some()
             || self.fx.aurora.is_some()
+            || self.fx.fireworks.is_some()
+            || self.fx.confetti.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -807,6 +823,7 @@ impl State {
         // them still.
         // The snow on the bar (#795), right in front of it.
         if front {
+            elements.extend(self.confetti_bar(&frame).map(OutputElements::Fire));
             let cap = self.snow_bar_cap(renderer, &frame);
             elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
@@ -858,6 +875,7 @@ impl State {
         elements.append(&mut overview);
         elements.append(&mut windows);
         if !front {
+            elements.extend(self.confetti_bar(&frame).map(OutputElements::Fire));
             let cap = self.snow_bar_cap(renderer, &frame);
             elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
@@ -898,6 +916,16 @@ impl State {
             layer
         });
         let fireflies = self.fireflies_layer(&frame).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
+        // The moments (#810, #811): the confetti in flight, the fireworks,
+        // on the wallpaper too.
+        let confetti = self.confetti_layer(&frame).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
+        let fireworks = self.fireworks_layer(&frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
         });
@@ -963,6 +991,8 @@ impl State {
             (garland, self.garland_blank()),
             (snow, self.snow_blank(&frame)),
             (fireflies, self.fireflies_blank(&frame)),
+            (confetti, self.confetti_blank()),
+            (fireworks, self.fireworks_blank()),
             (rain, self.raindrops_stand_in(&frame)),
             (koi_water, koi_still),
             (koi_pads, koi_blank),

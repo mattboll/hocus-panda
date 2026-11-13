@@ -18,7 +18,9 @@
 //! daylight ([`daylight`], #805), following the sun ([`sun`]);
 //! desktops in depth ([`depth`], #806); and an aurora following the music
 //! ([`aurora`], #801). The wallpaper's effects play behind the lock too,
-//! and in the overview (#807).
+//! and in the overview (#807). The moments ([`moments`]): fireworks as an
+//! agent's tests go green ([`fireworks`], #810), confetti for its good
+//! news ([`confetti`], #811).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -34,17 +36,20 @@
 //! changed, so that what is still around it is not drawn again.
 
 pub mod aurora;
+pub mod confetti;
 pub mod creatures;
 pub mod daylight;
 pub mod depth;
 pub mod draw;
 pub mod fireflies;
+pub mod fireworks;
 pub mod flames;
 pub mod garland;
 pub mod jelly;
 pub mod kept;
 pub mod koi;
 pub mod mesh;
+pub mod moments;
 pub mod motion;
 pub mod particles;
 pub mod raindrops;
@@ -99,6 +104,12 @@ pub struct Live {
     pub koi: Option<koi::Ponds>,
     /// The ponds dug so far, for their seeds.
     ponds: u64,
+    /// The fireworks, while they play (#810).
+    pub fireworks: Option<fireworks::Show>,
+    /// The confetti, while they fly or lie (#811).
+    pub confetti: Option<confetti::Confetti>,
+    /// The moments played so far, for their seeds.
+    moments: u64,
     /// The sun looked at every minute, while an effect follows it.
     pub sun_timer: Option<smithay::reexports::calloop::RegistrationToken>,
     /// Tests: the sun as it is at this time, whatever the clock says.

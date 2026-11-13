@@ -146,6 +146,11 @@ pub enum McpDoing {
     Taken,
     /// Its last request, settled at `at` (the clock's `10:43`).
     Did { summary: McpSummary, at: String },
+    /// It has good news (#809, its `celebrate` tool): what, in one line.
+    Good {
+        #[serde(serialize_with = "tidy::name")]
+        why: String,
+    },
 }
 
 /// What an action is about.

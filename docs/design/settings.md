@@ -1021,10 +1021,10 @@ window is the preview.
 
 - **The effects** (#434, #793, [effects.md](effects.md)): Settings ›
   Appearance › Effects is the page's last four groups, as the summary
-  board "Les quatorze effets" groups them; all off by default. An effect
-  not built yet shows "Bientôt" beside its name and its row is inert
-  (drawn at 45 %, its switch takes no click); "Neige qui tient" and
-  "Fermer en flammes" are built so far.
+  board "Les quatorze effets" groups them; all off by default, all
+  built (the moments last, #810 and #811). An effect not built yet would
+  show "Bientôt" beside its name, its row inert (drawn at 45 %, its
+  switch taking no click).
 - **The keyboard**: 6.1's; the segmented controls and the swatches move
   and choose with `←` and `→`; the link opens with `Enter`.
 - **The search** finds the rows by the spec's nearby words and their keys

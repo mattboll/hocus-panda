@@ -1549,6 +1549,8 @@ impl State {
             effects |= state.tick_garland(now);
             // The garlands across the top of the screens (#813).
             effects |= state.tick_garland_top(now);
+            // The moments: fireworks (#810), confetti (#811).
+            effects |= state.tick_moments(now);
             effects
         });
         if let Some(at) = self.fx.pace.next() {

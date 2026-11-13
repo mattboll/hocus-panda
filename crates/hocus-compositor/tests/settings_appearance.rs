@@ -405,11 +405,10 @@ fn the_page_shows_its_groups_and_choosing_light_turns_the_desktop_light() -> any
     Ok(())
 }
 
-/// The effects (#793): off by default; the snow's and the flames'
-/// switches write `[effects] snow` and `flames`, the effects not built yet
-/// are inert.
+/// The effects (#793): off by default, every one built; the snow's and
+/// the flames' switches write `[effects] snow` and `flames`.
 #[test]
-fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> anyhow::Result<()> {
+fn the_effects_switches_write_their_keys() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -427,22 +426,18 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
         "effects.jelly",
         "effects.garland",
         "effects.garland-top",
+        "effects.fireworks",
+        "effects.confetti",
         "effects.creatures",
     ] {
         assert_eq!(row(&shown, live)["value"], "non", "{live}");
         assert_eq!(row(&shown, live)["inert"], false, "{live}");
     }
-    assert_eq!(row(&shown, "effects.fireworks")["inert"], true);
     bed.click("control:effects.flames")?;
     let text = bed.written(|t| t.contains("[effects]\nflames = true"))?;
     assert!(text.starts_with("# My desktop, by hand."), "{text}");
     bed.click("control:effects.snow")?;
     bed.written(|t| t.contains("snow = true") && t.contains("flames = true"))?;
-    // A switch to come takes no click.
-    bed.click("control:effects.fireworks")?;
-    wait(&mut bed.hp, Duration::from_millis(300))?;
-    let text = std::fs::read_to_string(bed.file())?;
-    assert!(!text.contains("fireworks"), "{text}");
     Ok(())
 }
 
@@ -919,6 +914,7 @@ fn screenshots_of_the_keyboard_and_high_contrast() -> anyhow::Result<()> {
             window: 0,
             name: name.to_owned(),
             note: None,
+            news: None,
         };
         hocus_link::ToShell::Agents(vec![
             agent(1, "site-web", "waiting"),

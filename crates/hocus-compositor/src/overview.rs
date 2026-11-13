@@ -1289,6 +1289,7 @@ mod tests {
             window,
             name: "a".into(),
             note: None,
+            news: None,
         };
         let all = [
             agent(7, "working"),

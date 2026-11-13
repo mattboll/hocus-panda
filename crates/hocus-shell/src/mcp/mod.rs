@@ -238,6 +238,7 @@ fn rows_of(shown: &McpShown) -> Vec<AgentShown> {
             window: 0,
             name: row.name.clone(),
             note: None,
+            news: None,
         })
         .collect()
 }
@@ -260,10 +261,10 @@ pub fn row_word(id: u64) -> String {
 pub fn row_acting(id: u64) -> bool {
     kept(|k| {
         !k.shown.stopped
-            && k.shown
-                .agents
-                .iter()
-                .any(|r| ROW_BASE + r.id == id && matches!(r.doing, McpDoing::Acting(_)))
+            && k.shown.agents.iter().any(|r| {
+                ROW_BASE + r.id == id
+                    && matches!(r.doing, McpDoing::Acting(_) | McpDoing::Good { .. })
+            })
     })
 }
 
@@ -456,6 +457,8 @@ impl Words {
                 let first = first.split(txt::AND.get(lang)).next().unwrap_or_default();
                 txt::row_did(lang, txt::RowDid { at, what: first })
             }
+            // Its good news, as it said it (#809).
+            McpDoing::Good { why } => why.clone(),
         }
     }
 

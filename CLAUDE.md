@@ -312,8 +312,9 @@ compositor is the session (tests: `Headless::allow_screen_reader`).
 
 Agents tell the desktop their state through `hocus` (crate `hocus-cli`,
 docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`
-which Claude Code's and Codex's hooks run once plugged in from the bar.
-It writes to the compositor's control socket, `<socket>.control`
+which Claude Code's and Codex's hooks run once plugged in from the bar;
+their good news with `hocus celebrate WHY` (the moments,
+docs/design/effects.md). It writes to the compositor's control socket, `<socket>.control`
 (`HOCUS_SOCKET` for the programs it starts); `--socket PATH` names one:
 
 ```sh

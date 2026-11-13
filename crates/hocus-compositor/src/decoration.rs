@@ -339,6 +339,8 @@ pub struct FrameIds {
     grip: [Id; 2],
     /// The edges the daylight's sun lights (#805).
     pub sun: [Id; 2],
+    /// The edges the fireworks light (#810).
+    pub flash: [Id; 4],
 }
 
 impl Default for FrameIds {
@@ -351,6 +353,7 @@ impl Default for FrameIds {
             shadow: std::array::from_fn(|_| Id::new()),
             grip: [Id::new(), Id::new()],
             sun: [Id::new(), Id::new()],
+            flash: std::array::from_fn(|_| Id::new()),
         }
     }
 }

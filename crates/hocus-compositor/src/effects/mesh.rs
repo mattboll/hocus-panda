@@ -63,6 +63,10 @@ pub enum Glow {
     /// 95 % lime at 8 %, 35 % green at 25 %, 8 % at 60 %, nothing at its
     /// edge; as opaque as its vertices' alpha.
     Firefly = 3,
+    /// A firework's spark (#810): white at its middle, its vertices'
+    /// colour at 90 % at 15 %, 22 % at 45 %, nothing at its edge (the
+    /// board's sprite).
+    Spark = 4,
 }
 
 /// A column of a fill: its place across, and its rows from the top down
