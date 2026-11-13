@@ -944,6 +944,18 @@ impl State {
             ToCompositor::McpStop(stop) => self.mcp_stop(stop),
             ToCompositor::McpReply { card, reply } => self.mcp_reply(card, reply),
             ToCompositor::McpHandBack(agent) => self.mcp_hand_back(&agent),
+            ToCompositor::ProjectMake {
+                output,
+                desktop,
+                name,
+                folder,
+            } => self.project_make(
+                crate::projects::Asker::Shell,
+                &output,
+                usize::from(desktop),
+                &name,
+                &folder,
+            ),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
             ToCompositor::Ring(row) => self.ring_moved(&row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {

@@ -41,10 +41,29 @@ pub enum Chosen {
     NoPortal,
 }
 
+/// What the chooser is asked: where to save a file, or a folder (the
+/// project's form's "Choisir un autre dossier…", docs/design/projects.md
+/// §2.1), over the surface of `parent`'s namespace.
+#[derive(Debug, Clone, Copy)]
+enum Pick<'a> {
+    Save { name: &'a str, folder: &'a Path },
+    Folder { parent: &'static str },
+}
+
 /// The user chooses where to save `name`, from `folder`, in a dialog
 /// titled `title`; `showing` runs once the chooser shows. Blocks this
 /// thread until they do.
 pub fn save_file(title: &str, name: &str, folder: &Path, showing: impl FnOnce()) -> Chosen {
+    run(title, Pick::Save { name, folder }, showing)
+}
+
+/// The user chooses a folder in a dialog titled `title`, over the shell's
+/// surface of `parent`'s namespace. Blocks this thread until they do.
+pub fn choose_folder(title: &str, parent: &'static str) -> Chosen {
+    run(title, Pick::Folder { parent }, || {})
+}
+
+fn run(title: &str, pick: Pick<'_>, showing: impl FnOnce()) -> Chosen {
     let Some(bus) = std::env::var(NOTIFICATIONS_BUS_ENV)
         .ok()
         .filter(|b| !b.is_empty())
@@ -62,16 +81,10 @@ pub fn save_file(title: &str, name: &str, folder: &Path, showing: impl FnOnce())
             return Chosen::NoPortal;
         }
     };
-    runtime.block_on(choose(&bus, title, name, folder, showing))
+    runtime.block_on(choose(&bus, title, pick, showing))
 }
 
-async fn choose(
-    bus: &str,
-    title: &str,
-    name: &str,
-    folder: &Path,
-    showing: impl FnOnce(),
-) -> Chosen {
+async fn choose(bus: &str, title: &str, pick: Pick<'_>, showing: impl FnOnce()) -> Chosen {
     let asked = async {
         let builder = if bus == "session" {
             Builder::session()
@@ -82,8 +95,12 @@ async fn choose(
         if !there(&connection).await? {
             return Ok(None);
         }
-        let parent = crate::foreign::parent_window(hocus_link::CAPTURE_EDITOR_NAMESPACE).await;
-        let request = ask(&connection, &parent, title, name, folder).await?;
+        let namespace = match pick {
+            Pick::Save { .. } => hocus_link::CAPTURE_EDITOR_NAMESPACE,
+            Pick::Folder { parent } => parent,
+        };
+        let parent = crate::foreign::parent_window(namespace).await;
+        let request = ask(&connection, &parent, title, pick).await?;
         Ok::<_, zbus::Error>(Some((connection, request)))
     };
     let (connection, mut responses) = match tokio::time::timeout(ASK, asked).await {
@@ -145,14 +162,13 @@ async fn there(connection: &Connection) -> zbus::Result<bool> {
     Ok(started.iter().any(|n| n.as_str() == PORTAL))
 }
 
-/// `SaveFile` asked: where its answer comes, listened to before it is
-/// asked.
+/// `SaveFile` (or `OpenFile` for a folder) asked: where its answer comes,
+/// listened to before it is asked.
 async fn ask(
     connection: &Connection,
     parent: &str,
     title: &str,
-    name: &str,
-    folder: &Path,
+    pick: Pick<'_>,
 ) -> zbus::Result<MessageStream> {
     static TOKENS: AtomicU32 = AtomicU32::new(1);
     let token = format!(
@@ -174,19 +190,28 @@ async fn ask(
     let responses = MessageStream::for_match_rule(rule, connection, None).await?;
     let mut options: HashMap<&str, Variant<'_>> = HashMap::new();
     options.insert("handle_token", Variant::from(token.as_str()));
-    options.insert("current_name", Variant::from(name));
     options.insert("modal", Variant::from(true));
-    let mut bytes = folder.as_os_str().as_encoded_bytes().to_vec();
-    bytes.push(0);
-    if !folder.as_os_str().is_empty() {
-        options.insert("current_folder", Variant::from(bytes));
-    }
+    let method = match pick {
+        Pick::Save { name, folder } => {
+            options.insert("current_name", Variant::from(name));
+            let mut bytes = folder.as_os_str().as_encoded_bytes().to_vec();
+            bytes.push(0);
+            if !folder.as_os_str().is_empty() {
+                options.insert("current_folder", Variant::from(bytes));
+            }
+            "SaveFile"
+        }
+        Pick::Folder { .. } => {
+            options.insert("directory", Variant::from(true));
+            "OpenFile"
+        }
+    };
     let reply = connection
         .call_method(
             Some(PORTAL),
             PATH,
             Some(CHOOSER),
-            "SaveFile",
+            method,
             &(parent, title, options),
         )
         .await?;
@@ -252,9 +277,11 @@ mod tests {
             .enable_all()
             .build()
             .expect("a runtime");
-        let chosen = runtime.block_on(choose(&bus, "t", "a.png", dir.path(), || {
-            panic!("no chooser shows")
-        }));
+        let pick = Pick::Save {
+            name: "a.png",
+            folder: dir.path(),
+        };
+        let chosen = runtime.block_on(choose(&bus, "t", pick, || panic!("no chooser shows")));
         assert_eq!(chosen, Chosen::NoPortal);
     }
 }

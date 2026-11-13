@@ -56,6 +56,9 @@ pub const WINDOW_GAP: f64 = 32.0;
 pub const LABEL_GAP: f64 = 10.0;
 pub const LABEL_LINE: f64 = 20.0;
 pub const LABEL_SIZE: f64 = 14.0;
+/// "En faire un projet" (docs/design/projects.md §2.1): 8 px under the
+/// number's line of the thumbnail the pointer rests on.
+pub const MAKE_GAP: f64 = 8.0;
 /// A dragged window's share of its size, under the pointer.
 pub const LIFT: f64 = 0.42;
 /// Where a lifted window hangs from the pointer: this share of its width
@@ -148,6 +151,15 @@ impl Badge {
             AgentState::Idle => txt::badge_resting(lang, n),
         }
     }
+}
+
+/// How many agents each window hosts.
+pub fn agent_counts(agents: &[AgentShown]) -> HashMap<WindowId, usize> {
+    let mut out: HashMap<WindowId, usize> = HashMap::new();
+    for agent in agents.iter().filter(|a| a.window != 0) {
+        *out.entry(WindowId(agent.window)).or_default() += 1;
+    }
+    out
 }
 
 /// The badges of the agents' windows: for each window, its agents in the
@@ -338,6 +350,13 @@ pub enum Spot {
     Window(WindowId),
     /// A desktop's thumbnail: its screen and its desktop (from 0).
     Thumb(String, usize),
+    /// Under a thumbnail, the button that makes its desktop a project
+    /// (docs/design/projects.md §2.1).
+    Make(String, usize),
+    /// A project's name under its thumbnail: its card (§4).
+    Name(String, usize),
+    /// The rest of what is under a thumbnail: its button stays.
+    Below(String, usize),
     /// The rest of a screen.
     Screen(String),
 }
@@ -411,8 +430,12 @@ pub struct Overview {
     pub drag: Option<Drag>,
     /// A window let go nowhere, springing back from there to its place.
     pub back: Option<(WindowId, Area, Tween)>,
-    /// The agents' windows' badges.
+    /// The agents' windows' badges, and how many agents each hosts.
     pub badges: HashMap<WindowId, Badge>,
+    pub agents: HashMap<WindowId, usize>,
+    /// The keyboard's ring is on the button of the desktop this screen
+    /// shows (`Tab` past the windows, docs/design/projects.md §2.1).
+    pub button: Option<String>,
     pub reduced: bool,
 }
 
@@ -447,6 +470,9 @@ impl Overview {
 pub enum Key {
     Close,
     Step(i32, i32),
+    /// `Tab` (forward) or `Shift+Tab`: as the arrows across, and past the
+    /// windows the shown desktop's button.
+    Tab(bool),
     Enter,
     /// `Super+N`: desktop N (from 0) of the selection's screen.
     Show(usize),
@@ -472,9 +498,9 @@ impl Key {
             Keysym::Right => Self::Step(1, 0),
             Keysym::Up => Self::Step(0, -1),
             Keysym::Down => Self::Step(0, 1),
-            Keysym::Tab if shift => Self::Step(-1, 0),
-            Keysym::ISO_Left_Tab => Self::Step(-1, 0),
-            Keysym::Tab => Self::Step(1, 0),
+            Keysym::Tab if shift => Self::Tab(false),
+            Keysym::ISO_Left_Tab => Self::Tab(false),
+            Keysym::Tab => Self::Tab(true),
             Keysym::Return | Keysym::KP_Enter | Keysym::space => Self::Enter,
             _ => Self::Nothing,
         }
@@ -541,7 +567,9 @@ impl State {
             }
             None => now,
         };
-        let badges = badges(&self.agents_shown());
+        let shown = self.agents_shown();
+        let badges = badges(&shown);
+        let agents = agent_counts(&shown);
         let selected = self
             .model
             .focused()
@@ -558,6 +586,8 @@ impl State {
             drag: None,
             back: None,
             badges,
+            agents,
+            button: None,
             reduced,
         });
         self.overview_pointer_off();
@@ -601,6 +631,8 @@ impl State {
         overview.drag = None;
         overview.hover = None;
         tracing::info!(focus = focus.map(|f| f.0), "the overview closes");
+        // A project's form or card goes with it.
+        self.tell_shell(hocus_link::ToShell::ProjectEnd);
         if let Some(id) = focus {
             self.bring(id);
         }
@@ -616,6 +648,7 @@ impl State {
     /// Gone at once (the session locking).
     pub fn drop_overview(&mut self) {
         if self.overview.take().is_some() {
+            self.tell_shell(hocus_link::ToShell::ProjectEnd);
             self.redraw = true;
         }
     }
@@ -624,8 +657,10 @@ impl State {
     pub fn overview_agents(&mut self, agents: &[AgentShown]) {
         if let Some(overview) = &mut self.overview {
             let new = badges(agents);
-            if new != overview.badges {
+            let counts = agent_counts(agents);
+            if new != overview.badges || counts != overview.agents {
                 overview.badges = new;
+                overview.agents = counts;
                 self.redraw = true;
             }
         }
@@ -737,6 +772,9 @@ impl State {
                 return Some(Spot::Thumb(screen.output.name(), desktop));
             }
         }
+        if let Some(spot) = self.overview_spot_below(screen, at) {
+            return Some(spot);
+        }
         let slots = self.overview_slots(screen, self.strip(&screen.output).current());
         let hovered = self.overview.as_ref().and_then(|o| match &o.hover {
             Some(Spot::Window(id) | Spot::Close(id)) => Some(*id),
@@ -754,6 +792,108 @@ impl State {
             }
         }
         Some(Spot::Screen(screen.output.name()))
+    }
+
+    /// What is under a thumbnail at `at` (docs/design/projects.md §2.1): a
+    /// project's name, the button of the one the pointer rests on, or the
+    /// rest of the column down to that button.
+    fn overview_spot_below(&self, screen: &Screen, at: (f64, f64)) -> Option<Spot> {
+        let output = &screen.output;
+        let name = output.name();
+        let scale = output.current_scale().fractional_scale();
+        let resting = self.overview.as_ref().and_then(|o| match &o.hover {
+            Some(Spot::Thumb(n, d) | Spot::Make(n, d) | Spot::Below(n, d)) if *n == name => {
+                Some(*d)
+            }
+            _ => None,
+        });
+        for (desktop, thumb) in screen.thumbs.iter().enumerate() {
+            let column = Area {
+                x: thumb.x,
+                y: thumb.y + thumb.h,
+                w: thumb.w,
+                h: NUMBER_GAP + NUMBER_LINE + MAKE_GAP + crate::overview_draw::MAKE_HEIGHT,
+            };
+            if !column.contains(at.0, at.1) {
+                continue;
+            }
+            if self.project_on(output, desktop).is_some() {
+                if self
+                    .overview_name_area(output, desktop, *thumb, scale)
+                    .is_some_and(|a| a.contains(at.0, at.1))
+                {
+                    return Some(Spot::Name(name, desktop));
+                }
+                return Some(Spot::Below(name, desktop));
+            }
+            if resting == Some(desktop)
+                && self
+                    .overview_make_area(*thumb, scale)
+                    .is_some_and(|a| a.contains(at.0, at.1))
+            {
+                return Some(Spot::Make(name, desktop));
+            }
+            return Some(Spot::Below(name, desktop));
+        }
+        None
+    }
+
+    /// The thumbnail of desktop `desktop` of `output`, global.
+    fn overview_thumb_of(&self, output: &str, desktop: usize) -> Option<(Output, Area)> {
+        self.overview_screens()
+            .into_iter()
+            .find(|s| s.output.name() == output)
+            .and_then(|s| Some((s.output.clone(), *s.thumbs.get(desktop)?)))
+    }
+
+    /// The form that makes desktop `desktop` of `output` a project opens
+    /// under its thumbnail (docs/design/projects.md §2.1).
+    pub fn overview_project_form(&mut self, output: &str, desktop: usize) {
+        let Some((output, thumb)) = self.overview_thumb_of(output, desktop) else {
+            return;
+        };
+        if self.project_on(&output, desktop).is_some() {
+            return;
+        }
+        let at = self.overview_local(&output, thumb);
+        if let Some(form) = self.project_form(&output, desktop, at) {
+            tracing::info!(
+                output = output.name(),
+                desktop = desktop + 1,
+                "the overview opens the project's form"
+            );
+            self.tell_shell(hocus_link::ToShell::ProjectForm(form));
+        }
+    }
+
+    /// A project's card opens under its thumbnail (§4).
+    pub fn overview_project_card(&mut self, output: &str, desktop: usize) {
+        let Some((output, thumb)) = self.overview_thumb_of(output, desktop) else {
+            return;
+        };
+        let at = self.overview_local(&output, thumb);
+        if let Some(card) = self.project_card(&output, desktop, at) {
+            tracing::info!(
+                output = output.name(),
+                desktop = desktop + 1,
+                "the overview opens a project's card"
+            );
+            self.tell_shell(hocus_link::ToShell::ProjectCard(card));
+        }
+    }
+
+    /// `area` (global) from `output`'s top-left corner, whole pixels.
+    fn overview_local(&self, output: &Output, area: Area) -> hocus_link::Rect {
+        let origin = self
+            .space
+            .output_geometry(output)
+            .map_or((0, 0), |g| (g.loc.x, g.loc.y));
+        hocus_link::Rect {
+            x: area.x.round() as i32 - origin.0,
+            y: area.y.round() as i32 - origin.1,
+            width: area.w.round() as i32,
+            height: area.h.round() as i32,
+        }
     }
 
     /// Whether the overview takes the pointer at `at`: open, and not over
@@ -836,7 +976,14 @@ impl State {
             return;
         }
         let hover = match spot {
-            Some(Spot::Thumb(..) | Spot::Window(_) | Spot::Close(_)) => spot,
+            Some(
+                Spot::Thumb(..)
+                | Spot::Window(_)
+                | Spot::Close(_)
+                | Spot::Make(..)
+                | Spot::Name(..)
+                | Spot::Below(..),
+            ) => spot,
             _ => None,
         };
         if overview.hover != hover {
@@ -850,6 +997,12 @@ impl State {
 
     /// A press in the overview.
     pub fn overview_press(&mut self, button: u32, at: Point<f64, Logical>) {
+        // A project's form or card open: a press beside it closes it, and
+        // does nothing else.
+        if self.panel.popovers.project_open() {
+            self.tell_shell(hocus_link::ToShell::ProjectEnd);
+            return;
+        }
         let spot = self.overview_spot((at.x, at.y));
         let Some(overview) = &mut self.overview else {
             return;
@@ -889,6 +1042,9 @@ impl State {
             }
             Spot::Window(id) => self.close_overview(Some(id)),
             Spot::Thumb(output, desktop) => self.overview_show(&output, desktop),
+            Spot::Make(output, desktop) => self.overview_project_form(&output, desktop),
+            Spot::Name(output, desktop) => self.overview_project_card(&output, desktop),
+            Spot::Below(..) => {}
             Spot::Screen(_) => self.close_overview(None),
         }
         true
@@ -926,7 +1082,14 @@ impl State {
         let spot = self.overview_spot((at.x, at.y));
         let target = match &spot {
             Some(Spot::Thumb(output, desktop)) => Some((output.clone(), *desktop)),
-            Some(Spot::Window(_) | Spot::Close(_) | Spot::Screen(_)) => {
+            Some(
+                Spot::Window(_)
+                | Spot::Close(_)
+                | Spot::Screen(_)
+                | Spot::Make(..)
+                | Spot::Name(..)
+                | Spot::Below(..),
+            ) => {
                 let name = match spot.as_ref() {
                     Some(Spot::Screen(name)) => Some(name.clone()),
                     _ => self.space.output_under(at).next().map(Output::name),
@@ -992,12 +1155,30 @@ impl State {
             Key::Close => self.close_overview(None),
             Key::Nothing => {}
             Key::Enter => {
+                if let Some(output) = self.overview.as_ref().and_then(|o| o.button.clone()) {
+                    let desktop = self
+                        .space
+                        .outputs()
+                        .find(|o| o.name() == output)
+                        .map(|o| self.strip(o).current());
+                    if let Some(desktop) = desktop {
+                        self.overview_project_form(&output, desktop);
+                    }
+                    return;
+                }
                 let selected = self.overview.as_ref().and_then(|o| o.selected);
                 self.close_overview(selected);
             }
+            Key::Tab(forward) => self.overview_tab(forward),
             Key::Step(dx, dy) => {
                 let slots = self.overview_slots_all();
                 if let Some(overview) = &mut self.overview {
+                    // Off the button, back to the windows.
+                    if overview.button.take().is_some() {
+                        overview.ring = true;
+                        self.redraw = true;
+                        return;
+                    }
                     let from = overview
                         .selected
                         .filter(|s| slots.iter().any(|(id, _)| id == s));
@@ -1040,6 +1221,48 @@ impl State {
                 self.redraw = true;
             }
         }
+    }
+
+    /// `Tab` and `Shift+Tab`: across the windows as the arrows go, and
+    /// past the last one the shown desktop's "En faire un projet" (of the
+    /// selected window's screen, else the pointer's), unless that desktop
+    /// is a project; back from it to the windows.
+    fn overview_tab(&mut self, forward: bool) {
+        let slots = self.overview_slots_all();
+        let Some(overview) = &self.overview else {
+            return;
+        };
+        if overview.button.is_some() {
+            if !forward {
+                self.overview_key(Key::Step(-1, 0));
+            }
+            return;
+        }
+        let from = overview
+            .selected
+            .filter(|s| slots.iter().any(|(id, _)| id == s));
+        let next = if overview.ring {
+            step(&slots, from, if forward { 1 } else { -1 }, 0)
+        } else {
+            from.or_else(|| slots.first().map(|(id, _)| *id))
+        };
+        let last = forward && (slots.is_empty() || (overview.ring && next == from));
+        let screen = from
+            .and_then(|id| self.output_of(id))
+            .or_else(|| self.output_under_pointer());
+        let button = screen
+            .filter(|_| last)
+            .filter(|o| self.project_on(o, self.strip(o).current()).is_none())
+            .map(|o| o.name());
+        let Some(overview) = &mut self.overview else {
+            return;
+        };
+        match button {
+            Some(output) => overview.button = Some(output),
+            None => overview.selected = next,
+        }
+        overview.ring = true;
+        self.redraw = true;
     }
 
     /// The overview's motions; whether something moves now.
@@ -1332,6 +1555,8 @@ mod tests {
         assert_eq!(Key::of(Keysym::Escape, false, None), Key::Close);
         assert_eq!(Key::of(Keysym::Left, false, None), Key::Step(-1, 0));
         assert_eq!(Key::of(Keysym::Return, false, None), Key::Enter);
+        assert_eq!(Key::of(Keysym::Tab, false, None), Key::Tab(true));
+        assert_eq!(Key::of(Keysym::Tab, true, None), Key::Tab(false));
         assert_eq!(
             Key::of(Keysym::_2, false, Some(crate::Action::Desktop(1))),
             Key::Show(1)
@@ -1360,6 +1585,8 @@ mod tests {
             drag: None,
             back: None,
             badges: HashMap::new(),
+            agents: HashMap::new(),
+            button: None,
             reduced: false,
         };
         assert_eq!(o.shown(ms(1000)), 0.0);

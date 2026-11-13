@@ -251,7 +251,7 @@ impl State {
     }
 
     /// The process of a window's client.
-    fn pid_of(&self, window: &smithay::desktop::Window) -> Option<u32> {
+    pub(crate) fn pid_of(&self, window: &smithay::desktop::Window) -> Option<u32> {
         use smithay::reexports::wayland_server::Resource;
         if let Some(x11) = window.x11_surface() {
             return x11.pid();

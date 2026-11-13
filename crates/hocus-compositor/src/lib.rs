@@ -73,6 +73,7 @@ mod perf;
 mod popover;
 mod popups;
 mod programs;
+mod projects;
 pub mod radial;
 mod radial_draw;
 mod rain;
@@ -282,6 +283,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.start_idle();
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;
+    // The projects kept, and their thread (docs/design/projects.md).
+    projects::start(&event_loop.handle(), &mut state);
     // The day recorded off the loop (#655), the shell's process known.
     state.perf_follow();
     effects::timing::follow(state.config.developer.effects_timing);

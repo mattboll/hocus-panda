@@ -38,7 +38,7 @@ pub fn popover(p: &Popover) -> Window {
 }
 
 /// The popover's title for `item`.
-pub fn popover_title(item: Item, words: Words) -> String {
+pub fn popover_title(bar: &str, item: Item, words: Words) -> String {
     let lang = words.lang();
     let levels = crate::levels::model::Words::new(lang);
     let pick = |fr: &str, en: &str| {
@@ -58,9 +58,10 @@ pub fn popover_title(item: Item, words: Words) -> String {
             .battery_title(crate::levels::snapshot().battery.is_some())
             .to_owned(),
         Item::Keyboard => pick("Disposition du clavier", "Keyboard layout"),
-        Item::Desktop { index, .. } => levels.desktop_title(
-            usize::from(index) + 1,
-            crate::desktops::name(usize::from(index)).as_deref(),
+        Item::Desktop { row, index } => crate::desktops::said_title(
+            levels,
+            &crate::desktops::output_of(bar, row),
+            usize::from(index),
         ),
         Item::Sources | Item::AnotherTool => "Sources".to_owned(),
         Item::Plug(tool) => format!(

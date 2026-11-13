@@ -373,7 +373,12 @@ impl Words {
     /// A desktop's tile for screen readers (3.9): its name, else its
     /// number (from 1), and how many windows it has.
     pub fn desktop(self, number: usize, name: Option<&str>, windows: usize) -> String {
-        let title = self.desktop_title(number, name);
+        self.desktop_said(&self.desktop_title(number, name), windows)
+    }
+
+    /// A desktop's tile for screen readers, titled `title`.
+    pub fn desktop_said(self, title: &str, windows: usize) -> String {
+        let title = title.to_owned();
         match windows {
             0 => txt::no_windows(self.lang(), &title),
             1 => txt::n_1_window(self.lang(), &title),
@@ -428,6 +433,18 @@ impl Words {
             "{}, {}",
             self.screen(built_in, inches, n),
             self.desktop(number, name, windows)
+        )
+    }
+
+    /// A project's desktop for screen readers (docs/design/projects.md §3):
+    /// "Bureau 2, projet hocus-site".
+    pub fn project_title(self, number: usize, name: &str) -> String {
+        hocus_words::shell::project::desktop_project(
+            self.lang,
+            hocus_words::shell::project::DesktopProject {
+                number: &number,
+                name,
+            },
         )
     }
 

@@ -2687,6 +2687,10 @@ badge_resting = "{n} resting"
 
 [compositor.overview_draw]
 drop_on_desktop = "Drop: desktop {desktop}"
+make_project = "Make it a project"
+project_windows = { one = "{n} window", other = "{n} windows" }
+project_agents = { one = "{n} agent", other = "{n} agents" }
+project_no_window = "No window"
 
 
 [shell.footer]
@@ -2836,3 +2840,37 @@ not_shown_before = "No longer shown before acting"
 undone = "Undone: {said}."
 redone = "Redone: {said}."
 remove_app = "Take {app} out"
+
+[shell.project]
+form_title = "Make desktop {number} a project"
+form_line = "Its windows stay where they are. The project keeps this desktop while it is open."
+name = "Name"
+folder_heading = "Folder · recent git repositories"
+no_repository = "No recent git repository."
+other_folder = "Choose another folder…"
+folder_path = "A folder’s path"
+choose_folder = "Choose the project’s folder"
+cancel = "Cancel"
+create = "Create the project"
+name_taken = "A project is already named “{name}”."
+no_folder = "This folder does not exist."
+name_too_long = "40 characters at most."
+desktop_taken = "This desktop is a project already."
+terminals_there = "its terminals are there"
+made = "Desktop {number} is the project “{name}”"
+open_on_desktop = "open · desktop {number}"
+since = "since {time}"
+windows_heading = "WINDOWS · {count}"
+private_never_read = "Private windows are never read nor kept."
+close_project = "Close the project…"
+place_floating = "floating"
+place_maximized = "maximised"
+place_fullscreen = "full screen"
+place_left = "left half"
+place_right = "right half"
+place_top_left = "top-left quarter"
+place_top_right = "top-right quarter"
+place_bottom_left = "bottom-left quarter"
+place_bottom_right = "bottom-right quarter"
+place_minimized = "minimised"
+desktop_project = "Desktop {number}, project {name}"

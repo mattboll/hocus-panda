@@ -619,6 +619,7 @@ impl crate::State {
             count: u8::try_from(strip.count()).unwrap_or(u8::MAX),
             current: u8::try_from(current).unwrap_or(u8::MAX),
             windows,
+            projects: self.projects_view(output),
         })
     }
 
@@ -1523,6 +1524,7 @@ mod tests {
                 id: 1,
                 app: "foot".into(),
             }],
+            projects: Vec::new(),
         };
         let mut told = Told::default();
         assert_eq!(told.offer(view(0, 0), false), Some(view(0, 0)));

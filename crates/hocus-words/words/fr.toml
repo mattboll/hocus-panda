@@ -2678,6 +2678,10 @@ badge_resting = "{n} au repos"
 
 [compositor.overview_draw]
 drop_on_desktop = "Lâcher : bureau {desktop}"
+make_project = "En faire un projet"
+project_windows = { one = "{n} fenêtre", other = "{n} fenêtres" }
+project_agents = { one = "{n} agent", other = "{n} agents" }
+project_no_window = "Aucune fenêtre"
 
 
 [shell.footer]
@@ -2827,3 +2831,37 @@ not_shown_before = "Plus montré avant d’agir"
 undone = "Annulé : {said}."
 redone = "Rétabli : {said}."
 remove_app = "Retirer {app}"
+
+[shell.project]
+form_title = "Faire du bureau {number} un projet"
+form_line = "Ses fenêtres restent où elles sont. Le projet garde ce bureau tant qu'il est ouvert."
+name = "Nom"
+folder_heading = "Dossier · dépôts git récents"
+no_repository = "Aucun dépôt git récent."
+other_folder = "Choisir un autre dossier…"
+folder_path = "Le chemin d’un dossier"
+choose_folder = "Choisir le dossier du projet"
+cancel = "Annuler"
+create = "Créer le projet"
+name_taken = "Un projet s'appelle déjà « {name} »."
+no_folder = "Ce dossier n'existe pas."
+name_too_long = "40 caractères au plus."
+desktop_taken = "Ce bureau est déjà un projet."
+terminals_there = "ses terminaux y sont"
+made = "Le bureau {number} est le projet « {name} »"
+open_on_desktop = "ouvert · bureau {number}"
+since = "depuis {time}"
+windows_heading = "FENÊTRES · {count}"
+private_never_read = "Les fenêtres privées ne sont jamais lues ni gardées."
+close_project = "Fermer le projet…"
+place_floating = "flottante"
+place_maximized = "agrandie"
+place_fullscreen = "plein écran"
+place_left = "moitié gauche"
+place_right = "moitié droite"
+place_top_left = "quart en haut à gauche"
+place_top_right = "quart en haut à droite"
+place_bottom_left = "quart en bas à gauche"
+place_bottom_right = "quart en bas à droite"
+place_minimized = "réduite"
+desktop_project = "Bureau {number}, projet {name}"

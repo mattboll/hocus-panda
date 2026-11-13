@@ -142,6 +142,12 @@ pub fn emoji_pane(output: &str) -> String {
     format!("{output} emoji")
 }
 
+/// The name of the pane under a project's form or card on `output`
+/// (docs/design/projects.md): its own, as a bar's popover may show too.
+pub fn project_pane(output: &str) -> String {
+    format!("{output} project")
+}
+
 /// Renderers that can blur what is behind the bar.
 pub trait Glass: Renderer + Sized {
     /// `behind` (output-local, as drawn on the output) drawn into output

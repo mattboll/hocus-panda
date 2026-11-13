@@ -364,6 +364,30 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             },
             id,
         }],
+        Effect::Project {
+            id,
+            output,
+            size,
+            margin,
+            namespace,
+        } => vec![Message::NewLayerShell {
+            settings: NewLayerShellSettings {
+                size: Some(size),
+                layer: Layer::Overlay,
+                anchor: Anchor::Top | Anchor::Left,
+                exclusive_zone: Some(-1),
+                margin: Some(margin),
+                keyboard_interactivity: KeyboardInteractivity::Exclusive,
+                output_option: if output == crate::ALONE {
+                    OutputOption::Active
+                } else {
+                    OutputOption::OutputName(output)
+                },
+                events_transparent: false,
+                namespace: Some(namespace.to_owned()),
+            },
+            id,
+        }],
         Effect::Actions {
             id,
             output,

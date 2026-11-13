@@ -98,6 +98,7 @@ pub enum Asked {
     Auth(crate::auth::Come),
     Actions(crate::actions::Come),
     Emoji(crate::emoji::Come),
+    Project(crate::project::Come),
 }
 
 /// The loop's end of [`ask`]: a channel's end, made once, not state.

@@ -186,6 +186,7 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
                 state.popover_committed(&layer);
             }
             hocus_link::EMOJI_NAMESPACE => state.popover_committed(&layer),
+            ns if hocus_link::is_project_surface(ns) => state.popover_committed(&layer),
             hocus_link::ACTIONS_NAMESPACE => {
                 state.panel.actions_commits += 1;
                 state.popover_committed(&layer);
