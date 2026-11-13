@@ -29,6 +29,7 @@ const AGENTS: RowGroup = RowGroup {
 /// The effects the desktop plays so far: the others' rows say "Bientôt".
 pub const BUILT: &[&str] = &[
     "effects.snow",
+    "effects.aurora",
     "effects.rain-on-glass",
     "effects.koi",
     "effects.fireflies",
@@ -245,11 +246,9 @@ mod tests {
     use super::*;
 
     /// Fifteen (the board's fourteen, and the second garland), each with
-    /// its key of `[effects]`, off by default; the snow, the rain on the
-    /// glass, the koi, the fireflies, the daylight, depth, the flames, the
-    /// glass, the jelly, the garlands and the creatures built.
+    /// its key of `[effects]`, off by default; all built but the moments.
     #[test]
-    fn fifteen_effects_off_by_default_twelve_built() {
+    fn fifteen_effects_off_by_default_thirteen_built() {
         let all = settings();
         assert_eq!(all.len(), 15);
         for s in all {
@@ -264,6 +263,7 @@ mod tests {
             assert_eq!(s.id, format!("effects.{}", key[1]));
             let built = [
                 "effects.snow",
+                "effects.aurora",
                 "effects.rain-on-glass",
                 "effects.koi",
                 "effects.fireflies",

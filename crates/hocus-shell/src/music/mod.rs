@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{EDGE, Form, MUSIC_NAMESPACE, POPOVER_NAMESPACE};
+use hocus_link::{EDGE, Form, MUSIC_NAMESPACE, POPOVER_NAMESPACE, ToCompositor};
 use iced::{advanced::image, window};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -263,6 +263,7 @@ pub fn changed() {
     if new {
         tracing::debug!(shows = %said, "the music player");
     }
+    tell_playing(shown.front.as_ref().is_some_and(Player::playing));
     if fit_all() {
         crate::column::moved();
     }
@@ -274,6 +275,30 @@ pub fn changed() {
     if popover::with(|c| c.open_item()) == Some(Item::Music) {
         popover::send(vec![Effect::Wake(POPOVER_NAMESPACE)]);
     }
+}
+
+/// Whether the player in front plays, as last told the compositor.
+static TOLD: Mutex<Option<bool>> = Mutex::new(None);
+
+/// Tells the compositor whether the player in front plays, when that
+/// changed since it was last told: the aurora on the wallpaper follows it
+/// (#801). A change of state, never a level: nothing is sent while it
+/// plays on.
+fn tell_playing(playing: bool) {
+    let mut told = TOLD.lock().unwrap_or_else(PoisonError::into_inner);
+    if *told == Some(playing) {
+        return;
+    }
+    if popover::tell(ToCompositor::Music { playing }) {
+        tracing::debug!(playing, "the compositor is told whether the music plays");
+        *told = Some(playing);
+    }
+}
+
+/// The shell is linked again: whether the music plays, told again.
+pub fn linked() {
+    *TOLD.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    tell_playing(shown().front.as_ref().is_some_and(Player::playing));
 }
 
 // --- The tile's surface -----------------------------------------------------------

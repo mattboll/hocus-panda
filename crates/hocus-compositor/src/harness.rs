@@ -378,6 +378,27 @@ impl Headless {
         Some((camera.x, camera.zoom, drawn))
     }
 
+    /// The aurora (#801) on output `index`, while it is on: its time
+    /// (the board's seconds), its pace (1 while the music plays, 0 still),
+    /// and how many times its picture was drawn.
+    pub fn aurora(&self, index: usize) -> Option<(f64, f64, usize)> {
+        let state = &self.app.state;
+        let output = state.space.outputs().nth(index)?;
+        let aurora = state.fx.aurora.as_ref()?;
+        let pane = aurora.panes.get(&output.name())?;
+        Some((aurora.time, aurora.pace, pane.live.draws()))
+    }
+
+    /// Whether the music plays, as the shell said last (#801).
+    pub fn music_playing(&self) -> bool {
+        self.app.state.fx.music
+    }
+
+    /// The music plays, or not, as if the shell said so (#801).
+    pub fn set_music(&mut self, playing: bool) {
+        self.app.state.music_plays(playing);
+    }
+
     /// The garlands across the top (#813), while they show: each one's
     /// screen and its bulbs' points (global, logical), by screen.
     pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {

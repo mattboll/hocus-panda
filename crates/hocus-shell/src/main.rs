@@ -534,6 +534,7 @@ impl Shell {
                 popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
                 meeting::linked();
+                music::linked();
                 clipboard::linked();
                 Task::none()
             }

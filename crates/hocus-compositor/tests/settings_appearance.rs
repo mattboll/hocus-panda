@@ -416,6 +416,7 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
     let shown = bed.open()?;
     for live in [
         "effects.snow",
+        "effects.aurora",
         "effects.rain-on-glass",
         "effects.koi",
         "effects.fireflies",
@@ -431,17 +432,17 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
         assert_eq!(row(&shown, live)["value"], "non", "{live}");
         assert_eq!(row(&shown, live)["inert"], false, "{live}");
     }
-    assert_eq!(row(&shown, "effects.aurora")["inert"], true);
+    assert_eq!(row(&shown, "effects.fireworks")["inert"], true);
     bed.click("control:effects.flames")?;
     let text = bed.written(|t| t.contains("[effects]\nflames = true"))?;
     assert!(text.starts_with("# My desktop, by hand."), "{text}");
     bed.click("control:effects.snow")?;
     bed.written(|t| t.contains("snow = true") && t.contains("flames = true"))?;
     // A switch to come takes no click.
-    bed.click("control:effects.aurora")?;
+    bed.click("control:effects.fireworks")?;
     wait(&mut bed.hp, Duration::from_millis(300))?;
     let text = std::fs::read_to_string(bed.file())?;
-    assert!(!text.contains("aurora"), "{text}");
+    assert!(!text.contains("fireworks"), "{text}");
     Ok(())
 }
 

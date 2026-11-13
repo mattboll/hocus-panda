@@ -10,7 +10,7 @@ langue").
 | Group | Effect | Key | Ticket |
 |---|---|---|---|
 | The wallpaper | Neige qui tient | `snow` | #795 (built) |
-| | Aurore en musique | `aurora` | #801 |
+| | Aurore en musique | `aurora` | #801 (built) |
 | | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
 | | Bassin de koïs | `koi` | #803 (built) |
 | | Lucioles du soir | `fireflies` | #804 (built) |
@@ -50,8 +50,8 @@ Every effect follows the same rules (`State::effects_still`, in
   asked for;
 - none costs more than it shows (#815): an effect that plays on its own
   (the snow, the garlands, the creatures, the rain on the glass, the
-  fireflies, the koi, the camera of desktops in depth, and those to
-  come; under the lock too) moves on at most 60 times a second whatever
+  fireflies, the koi, the aurora, the camera of desktops in depth, and
+  those to come; under the lock too) moves on at most 60 times a second whatever
   the screen's refresh (`effects::Pace`), what it draws staying the same
   between two (a screen at 165 Hz draws it again only where something
   else changed), and it tells the screen only what of it changed: the
@@ -654,8 +654,8 @@ logical pixels.
   a canvas in front of its windows; they would cover what the windows
   show, so here they are the landscape's front layer, behind the windows
   and the bar.
-- **With the others**: the koi's pond, when on, is the wallpaper in its
-  place; the landscape takes the daylight's sky's (the shadows still
+- **With the others**: the koi's pond or the aurora, when on, is the
+  wallpaper in its place; the landscape takes the daylight's sky's (the shadows still
   turn); the rain on the glass falls over it, refracting it; the snow, the
   fireflies and the garlands show over it.
 - **Its cost**: at rest nothing (its picture kept). As the camera moves,
@@ -675,10 +675,61 @@ desktop and the forest by 0.72, drawn 60 times a second at most; nothing
 drawn per frame at rest); its screenshots, `HOCUS_SHOTS=DIR cargo nextest
 run -p hocus-compositor --run-ignored only depth::shots`.
 
+## Aurora following the music (#801)
+
+With `aurora = true`, the wallpaper is the board "Aurore en musique"'s
+night (`effects/aurora.rs`, its shader `AURORA` in `draw.rs`, the board's
+`AURORA_FS` as it was): three curtains of aurora, green at the foot to
+violet at the top, their rays shimmering, over a starry sky and two
+ridges of mountains they light.
+
+- **The music**: while the player of the bar's music block plays, the
+  curtains ripple to the board's drive, its slow swell (`0.35 + 0.65
+  ((sin 0.11 t + 1) / 2)^1.5`, brighter and taller curtains) and its kick
+  at 96 beats a minute (the folds rippling on the beat). The shell tells
+  the compositor whether its player plays (`ToCompositor::Music`, as it
+  connects and when that changes); it reads no sound, so the beat is the
+  board's, not the song's. When the music stops the curtains calm: their
+  pace eases to nothing over some three and a half seconds (their swell
+  and kick with it), and they stand still, dimmer and lower; the music
+  again, they wake in about one and a half. Without music they stand
+  still from the start, at the board's moment (its `t = 12`).
+- **Where**: in the wallpaper's place, under the bottom and background
+  layers, the snow, the fireflies, the windows and the bar; opaque.
+  Behind the glass of the bar stands the aurora as it last stood still,
+  so that the glass is not blurred again at each frame. With the koi's
+  pond on too, the pond is the wallpaper; the aurora takes the place of
+  the landscape in depth and of the daylight's sky (the koi, the aurora,
+  the landscape, the sky: in that order). The rain on the glass waits
+  over it, as over the pond: it needs a still picture to refract. A
+  moving wallpaper (#433) waits.
+- **Its cost**: still, nothing (its picture kept). Moving, the picture
+  drawn again at most 60 times a second (its time the effects' frames',
+  `effects::Pace`), at the board's 0.6 of the screen's logical pixels
+  (its longest side 1600 at most), then laid over the screen; one pass,
+  some 85 lookups of value noise a pixel (five octaves, four times for
+  each curtain, four for the ridges), the whole screen drawn again each
+  frame. The noise's lattice wraps at 1024 cells, and its time goes back
+  every four and a half hours of music, so that the shader keeps its
+  precision.
+- **When**: moving while the music plays, where it shows (a screen on,
+  no fullscreen window in front; not shown, its time waits); with reduced
+  motion drawn still; none in the power saver, while a screen is shared
+  or recorded, on the CPU, nor in a capture. Behind the lock and in the
+  overview, as the others (#807).
+
+Tests: `tests/aurora.rs` (on GLES on Mesa's software device: the
+wallpaper turns to the aurora, the window's pixels untouched; still
+without music, nothing drawn per frame; the music playing, drawn 60
+times a second at most on a 165 Hz screen; stopped, still within
+seconds); `music::the_compositor_is_told_whether_it_plays` (the shell
+tells it); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only aurora::shots`.
+
 ## The live wallpaper on the lock and in the overview (#807)
 
 The wallpaper's effects (the snow, the rain on the glass, the koi, the
-fireflies, the daylight's sky, the landscape in depth) play behind the
+aurora, the fireflies, the daylight's sky, the landscape in depth) play behind the
 lock and in the overview too, with the same rules.
 
 - **The lock**: with one of them on, the lock showing the wallpaper

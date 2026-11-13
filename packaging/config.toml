@@ -528,9 +528,11 @@
 # aurora following the music, rain on the glass, a koi pond, evening
 # fireflies, the daylight turning with the hour, desktops in depth (a
 # switch of desktops then takes 1.5 s, a camera move through a
-# landscape). The koi's pond, the landscape and the daylight's sky take
-# the wallpaper's place (in that order, several on); the rain falls over
-# the sky and the landscape, and waits over the pond.
+# landscape). The koi's pond, the aurora, the landscape and the
+# daylight's sky take the wallpaper's place (in that order, several on);
+# the rain falls over the sky and the landscape, and waits over the pond
+# and the aurora. The aurora ripples while the bar's music plays, and
+# calms to still when it stops.
 # snow = false
 # aurora = false
 # rain-on-glass = false

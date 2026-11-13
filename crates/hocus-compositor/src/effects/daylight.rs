@@ -310,10 +310,12 @@ impl crate::State {
     }
 
     /// Whether the daylight's sky is the wallpaper of `output`: the koi's
-    /// pond or the landscape in depth (#806) takes its place when on too.
+    /// pond, the aurora (#801) or the landscape in depth (#806) takes its
+    /// place when on too.
     pub(crate) fn sky_shows_on(&self, output: &smithay::output::Output) -> bool {
         self.daylight_on(output).is_some()
             && !self.koi_shows_on(output)
+            && !self.aurora_shows_on(output)
             && !self.depth_shows_on(output)
     }
 

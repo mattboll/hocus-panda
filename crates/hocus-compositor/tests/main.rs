@@ -39,6 +39,7 @@ mod agents;
 mod agents_live;
 mod annotate;
 mod appearance;
+mod aurora;
 mod autostart;
 mod away;
 mod away_shots;
