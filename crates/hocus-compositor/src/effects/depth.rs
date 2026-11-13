@@ -11,7 +11,8 @@
 //! where it stands, at the board's pace while depth is on
 //! ([`crate::desktops::Slide::Depth`]). The landscape is drawn by one
 //! shader into a picture of the screen's size (`draw.rs`, `DEPTH`), again
-//! only when the camera moves, at most 60 times a second: at rest nothing
+//! only when the camera moves, at most 60 times a second (the effects'
+//! frames, `effects::Pace`): at rest nothing
 //! is drawn per frame.
 //!
 //! The board drew its nearest row of trees on a canvas in front of its
@@ -33,8 +34,6 @@ use smithay::{
 use super::Plays;
 use crate::wobble::Kept;
 
-/// The landscape's layers drawn per second at most as the camera moves.
-const RATE: f64 = 60.0;
 /// The board's sky drifts this far (logical pixels) over the strip's
 /// whole travel (`-cam / SPAN × 200 × 0.3`).
 const SKY_DRIFT: f64 = 60.0;
@@ -122,16 +121,13 @@ impl crate::State {
             && !self.koi_shows_on(output)
     }
 
-    /// Where `output`'s camera stands at `now`; moving, at the times of
-    /// [`RATE`]'s frames, so that the landscape is drawn again at most so
-    /// often.
+    /// Where `output`'s camera stands at `now`; moving, as of the
+    /// effects' last frame ([`super::Pace`], #815), so that the landscape
+    /// is drawn again at most 60 times a second.
     pub(crate) fn depth_camera(&self, output: &Output, now: Duration) -> Camera {
         let strip = self.strip(output);
         let at = match strip.moves_until() {
-            Some(end) if now < end => {
-                let ticks = (now.as_secs_f64() * RATE).floor();
-                Duration::from_secs_f64(ticks / RATE)
-            }
+            Some(end) if now < end => self.fx.pace.clock.min(now),
             _ => now,
         };
         let stride = self.strip_stride(output);
@@ -159,8 +155,8 @@ impl crate::State {
 
     /// Depth follows its switch: on, a landscape for each screen; off,
     /// gone. In the power saver or while a screen is shared it waits,
-    /// kept.
-    pub(crate) fn tick_depth(&mut self) {
+    /// kept. Whether a camera moves at `now` (the effects' frames go on).
+    pub(crate) fn tick_depth(&mut self, now: Duration) -> bool {
         match (self.depth_plays().is_some(), self.fx.depth.is_some()) {
             (true, false) => {
                 tracing::debug!("desktops in depth");
@@ -181,6 +177,10 @@ impl crate::State {
                 depth.panes.entry(name).or_default();
             }
         }
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        outputs.iter().any(|o| {
+            self.depth_shows_on(o) && self.strip(o).moves_until().is_some_and(|end| now < end)
+        })
     }
 }
 

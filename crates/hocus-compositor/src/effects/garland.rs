@@ -29,7 +29,7 @@ use std::{
 };
 
 use smithay::{
-    backend::renderer::{element::Id, utils::CommitCounter},
+    backend::renderer::element::Id,
     output::Output,
     utils::{Logical, Rectangle},
 };
@@ -164,13 +164,6 @@ struct Jump {
     at: f64,
 }
 
-/// What a part of it drew last on a screen, and its commit.
-#[derive(Debug, Default)]
-pub struct Drawn {
-    pub commit: CommitCounter,
-    pub vertices: Vec<f32>,
-}
-
 /// A string of lights: its points, some pinned, its bulbs, its clock.
 #[derive(Debug)]
 struct Rope {
@@ -183,6 +176,8 @@ struct Rope {
     look: Look,
     start: Duration,
     steps: u64,
+    /// Bumped as it moves or changes its look: drawn again then (#815).
+    changes: u64,
     /// Moving, or drawn still (reduced motion).
     moving: bool,
     /// Still and hanging where its pins are.
@@ -221,6 +216,7 @@ impl Rope {
             look,
             start: now,
             steps: 0,
+            changes: 0,
             moving,
             settled: false,
         };
@@ -244,6 +240,7 @@ impl Rope {
         if moving != self.moving {
             self.moving = moving;
             self.settled = false;
+            self.changes += 1;
             // Going on from where it is, not catching up.
             self.steps = self.steps.max((self.since(now) / STEP) as u64);
         }
@@ -264,6 +261,9 @@ impl Rope {
             self.pins = pins_at(t);
             let wind = wind.unwrap_or_else(|| (t * 0.7).sin() * 30.0 + (t * 1.9).sin() * 12.0);
             self.step(wind * self.look.wind, DAMPING);
+        }
+        if due > self.steps {
+            self.changes += 1;
         }
         self.steps = self.steps.max(due);
     }
@@ -292,6 +292,7 @@ impl Rope {
             b.av = 0.0;
         }
         self.settled = true;
+        self.changes += 1;
         true
     }
 
@@ -558,7 +559,7 @@ pub struct Garland {
     /// behind the glass.
     pub ids: [Id; 3],
     /// What each part drew last on each screen.
-    pub drawn: RefCell<HashMap<(usize, String), Drawn>>,
+    pub drawn: RefCell<HashMap<(usize, String), super::kept::Shown>>,
 }
 
 /// Its pins under `rect`.
@@ -683,6 +684,11 @@ impl Garland {
         self.rope.bulb_points()
     }
 
+    /// Its moves and changes so far: drawn again as they grow.
+    pub fn changes(&self) -> u64 {
+        self.rope.changes
+    }
+
     /// The cord and the bulbs, as drawn right in front of the window:
     /// what goes over what is under it, and what is added to it.
     pub fn front(&self, view: &View) -> (Mesh, Mesh) {
@@ -705,7 +711,7 @@ pub struct Top {
     /// behind the glass.
     pub ids: [Id; 3],
     /// What each part drew last on its screen.
-    pub drawn: RefCell<HashMap<(usize, String), Drawn>>,
+    pub drawn: RefCell<HashMap<(usize, String), super::kept::Shown>>,
 }
 
 /// The festoons across `span`.
@@ -786,6 +792,11 @@ impl Top {
     /// The bulbs' points, global, for the tests.
     pub fn bulbs(&self) -> Vec<(f64, f64)> {
         self.rope.bulb_points()
+    }
+
+    /// Its moves and changes so far: drawn again as they grow.
+    pub fn changes(&self) -> u64 {
+        self.rope.changes
     }
 
     /// Its cord and bulbs: over the wallpaper, and added to it.

@@ -135,6 +135,8 @@ struct OutputBuffer<T, C> {
     /// What those frames drew over, together, since a test last asked
     /// (pixels of the output).
     damaged: Option<Rectangle<i32, Physical>>,
+    /// The pixels drawn over since last asked, every frame's damage added.
+    damaged_area: u64,
 }
 
 /// Creates the renderer and the outputs, and maps them in the space.
@@ -391,6 +393,7 @@ where
             target,
             frames: 0,
             damaged: None,
+            damaged_area: 0,
         });
         self.outputs.sort_by_key(|o| o.output.name());
         Ok(())
@@ -509,6 +512,7 @@ where
             let drawn = result.damage.is_some_and(|d| !d.is_empty());
             if let Some(damage) = result.damage {
                 for rect in damage {
+                    out.damaged_area += (rect.size.w.max(0) as u64) * (rect.size.h.max(0) as u64);
                     out.damaged = Some(out.damaged.map_or(*rect, |d| d.merge(*rect)));
                 }
             }
@@ -585,6 +589,21 @@ impl HeadlessBackend {
         match &mut self.canvas {
             Canvas::Gles(c) => c.outputs.get_mut(index)?.damaged.take(),
             Canvas::Pixman(c) => c.outputs.get_mut(index)?.damaged.take(),
+        }
+    }
+
+    /// How many pixels output `index` drew over since the last call, each
+    /// frame's damage counted.
+    pub fn take_damage_area(&mut self, index: usize) -> u64 {
+        match &mut self.canvas {
+            Canvas::Gles(c) => c
+                .outputs
+                .get_mut(index)
+                .map_or(0, |o| std::mem::take(&mut o.damaged_area)),
+            Canvas::Pixman(c) => c
+                .outputs
+                .get_mut(index)
+                .map_or(0, |o| std::mem::take(&mut o.damaged_area)),
         }
     }
 

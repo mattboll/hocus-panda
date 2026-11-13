@@ -19,7 +19,7 @@ use smithay::{
 use super::{Frame, OutputElement};
 use crate::{
     State,
-    effects::{FireElement, draw::RainLook, raindrops::Pane},
+    effects::{FireElement, draw::RainLook, kept::cells, raindrops::Pane},
     glass::{Frost, Glass, rain_pane},
     going::Shaders,
     wobble::Bend,
@@ -120,16 +120,18 @@ impl State {
             look,
         );
         if let Some((prev, rects)) = drawn.since {
+            // On the screen's cells, which the damage tracker keeps apart
+            // (#815).
             let s = scale as f32;
-            let rects = rects
+            let rects: Vec<[i32; 4]> = rects
                 .iter()
-                .filter_map(|[x0, y0, x1, y1]| {
+                .map(|[x0, y0, x1, y1]| {
                     let (x, y) = ((x0 * s).floor() as i32, (y0 * s).floor() as i32);
                     let (r, b) = ((x1 * s).ceil() as i32, (y1 * s).ceil() as i32);
-                    Rectangle::new((x, y).into(), (r - x, b - y).into()).intersection(screen)
+                    [x, y, r - x, b - y]
                 })
                 .collect();
-            rain = rain.changed_since(prev, rects);
+            rain = rain.changed_since(prev, cells(&rects, screen));
         }
         Some((fog, rain))
     }

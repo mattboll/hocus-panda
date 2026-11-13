@@ -15,11 +15,12 @@
 //! the system's time zone ([`super::sun`]), looked at every minute on the
 //! wall clock, as the user sees the evening.
 
-use std::{cell::Cell, collections::HashMap, time::Duration};
+use std::{cell::RefCell, collections::HashMap, time::Duration};
 
-use smithay::backend::renderer::{element::Id, utils::CommitCounter};
+use smithay::backend::renderer::element::Id;
 
 use super::{
+    kept::Traced,
     mesh::{Glow, Mesh, Shape},
     particles::{Rng, STEP},
     sun::sun_down_now,
@@ -81,11 +82,10 @@ pub struct Swarm {
     /// w, h`).
     pub zone: [f32; 4],
     pub flies: Vec<Fly>,
-    /// Their glows, and the blank standing for them behind the glass.
-    pub ids: [Id; 2],
-    generation: u64,
-    commit: Cell<CommitCounter>,
-    drawn: Cell<u64>,
+    /// The blank standing for them behind the glass.
+    pub blank: Id,
+    /// Their glows as last drawn (#815).
+    pub glows: RefCell<Traced>,
 }
 
 impl Swarm {
@@ -109,10 +109,8 @@ impl Swarm {
         Self {
             zone,
             flies,
-            ids: [Id::new(), Id::new()],
-            generation: 0,
-            commit: Cell::new(CommitCounter::default()),
-            drawn: Cell::new(u64::MAX),
+            blank: Id::new(),
+            glows: RefCell::default(),
         }
     }
 
@@ -156,19 +154,6 @@ impl Swarm {
             }
             f.on = (f.on - dt * 1.3).max(0.0);
         }
-        self.generation += 1;
-    }
-
-    /// The commit of this frame's drawing: a new one when they moved since
-    /// they were last drawn.
-    pub fn commit(&self) -> CommitCounter {
-        let mut c = self.commit.get();
-        if self.drawn.get() != self.generation {
-            c.increment();
-            self.commit.set(c);
-            self.drawn.set(self.generation);
-        }
-        c
     }
 
     /// Their glows on a screen whose corner is `origin` (global, logical)
@@ -244,10 +229,7 @@ impl Fireflies {
         if let Some(swarm) = self.swarms.get_mut(name)
             && swarm.zone[2..] == zone[2..]
         {
-            if swarm.zone != zone {
-                swarm.zone = zone;
-                swarm.generation += 1;
-            }
+            swarm.zone = zone;
             return false;
         }
         let swarm = Swarm::new(zone, &mut self.rng);

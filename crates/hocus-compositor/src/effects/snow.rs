@@ -15,14 +15,17 @@
 //! corner. Drawn by [`super::snow_look`].
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, HashMap},
     time::Duration,
 };
 
-use smithay::backend::renderer::{element::Id, utils::CommitCounter};
+use smithay::backend::renderer::element::Id;
 
-use super::particles::{Rng, STEP};
+use super::{
+    kept::Shown,
+    particles::{Rng, STEP},
+};
 use crate::model::WindowId;
 
 /// A cap's column, logical pixels; its highest.
@@ -65,10 +68,18 @@ pub struct Cap {
     pub y: f32,
     pub w: f32,
     pub h: Vec<f32>,
-    /// Drawn: the same id over its frames, a new commit as it changes.
-    pub id: Id,
-    pub commit: Cell<CommitCounter>,
-    pub drawn: Cell<u64>,
+    /// As last drawn on each screen, by its name.
+    pub drawn: RefCell<HashMap<String, CapDrawn>>,
+}
+
+/// A cap as last drawn on a screen (#815): what its snow was made from
+/// (its columns, and its look), its snow, and its glints.
+#[derive(Debug, Default)]
+pub struct CapDrawn {
+    pub h: Vec<f32>,
+    pub look: [f32; 6],
+    pub shown: Shown,
+    pub glints: Shown,
 }
 
 impl Cap {
@@ -78,9 +89,7 @@ impl Cap {
             y,
             w,
             h: vec![0.0; columns(w, COL)],
-            id: Id::new(),
-            commit: Cell::new(CommitCounter::default()),
-            drawn: Cell::new(u64::MAX),
+            drawn: RefCell::default(),
         }
     }
 
@@ -117,22 +126,6 @@ impl Cap {
     pub fn volume(&self) -> f32 {
         self.h.iter().sum::<f32>() * COL
     }
-
-    /// The commit of this frame's drawing: a new one when the snow
-    /// changed since it was last drawn.
-    pub fn commit(&self, generation: u64) -> CommitCounter {
-        commit_for(&self.commit, &self.drawn, generation)
-    }
-}
-
-fn commit_for(commit: &Cell<CommitCounter>, drawn: &Cell<u64>, generation: u64) -> CommitCounter {
-    let mut c = commit.get();
-    if drawn.get() != generation {
-        c.increment();
-        commit.set(c);
-        drawn.set(generation);
-    }
-    c
 }
 
 fn columns(width: f32, col: f32) -> usize {
@@ -173,11 +166,14 @@ pub struct Field {
     pub flakes: Vec<Flake>,
     pub ground: Vec<f32>,
     pub clumps: Vec<Clump>,
-    /// Drawn: the layer's id, and the still one standing for it behind the
-    /// glass.
-    pub ids: [Id; 2],
-    pub commit: Cell<CommitCounter>,
-    pub drawn: Cell<u64>,
+    /// The still one standing for its layer behind the glass.
+    pub blank: Id,
+    /// Its layer as last drawn, and the snow's generation, the scale and
+    /// whether it fell then (#815).
+    pub shown: RefCell<Shown>,
+    pub drawn: Cell<Option<(u64, u64, bool)>>,
+    /// What it drew where then.
+    pub pieces: RefCell<super::snow_look::Pieces>,
 }
 
 impl Field {
@@ -188,9 +184,10 @@ impl Field {
             flakes: Vec::new(),
             ground: Vec::new(),
             clumps: Vec::new(),
-            ids: [Id::new(), Id::new()],
-            commit: Cell::new(CommitCounter::default()),
-            drawn: Cell::new(u64::MAX),
+            blank: Id::new(),
+            shown: RefCell::default(),
+            drawn: Cell::new(None),
+            pieces: RefCell::default(),
         };
         field.resize(origin, size, rng);
         field
@@ -223,11 +220,6 @@ impl Field {
                 + 3.0 * (x * 0.043).sin();
         }
         self.clumps.retain(|k| k.x >= -40.0 && k.x <= w + 40.0);
-    }
-
-    /// The commit of this frame's drawing.
-    pub fn commit(&self, generation: u64) -> CommitCounter {
-        commit_for(&self.commit, &self.drawn, generation)
     }
 
     /// The ground column under `x`, if on the screen.
