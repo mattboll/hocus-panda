@@ -25,7 +25,10 @@ use smithay::{
     utils::{Logical, Point},
 };
 
-use crate::{State, model::Mode};
+use crate::{
+    State,
+    model::{Mode, Zone},
+};
 
 /// How long the pointer rests against the edge before the bar comes in
 /// front.
@@ -284,6 +287,17 @@ impl State {
     /// (#807).
     pub(crate) fn wall_hidden(&self, output: &Output) -> bool {
         !self.locked() && self.fullscreen_in_front(output)
+    }
+
+    /// Whether a maximised window shows on `output`'s desktop: it covers
+    /// the work area, the wallpaper with it (the garland across its top,
+    /// #813; the moments, #800).
+    pub(crate) fn maximized_shown(&self, output: &Output) -> bool {
+        self.windows_on(output).into_iter().any(|id| {
+            !self.model.is_minimized(id)
+                && self.on_current_desktop(id)
+                && self.model.mode(id) == Mode::Snapped(Zone::Maximized)
+        })
     }
 
     /// Whether the window in front on `output`'s desktop is fullscreen.

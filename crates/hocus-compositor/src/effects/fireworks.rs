@@ -10,9 +10,12 @@
 //! the corner of its zone: the work area of the screen it plays on (the
 //! board's 1200 × 720 but its bar), its rockets' heights scaled with it.
 //! Drawn by `crate::render::moments`: the sparks and the rockets' glows
-//! added to the wallpaper, the flashes screened over it; where it plays
-//! is its zone alone, so that the bar's moment when a window is
-//! maximised (#800) can give it another.
+//! added to the wallpaper, the flashes screened over it.
+//!
+//! With a maximised window there is no wallpaper to see: the show plays
+//! in the bar's column instead (#800, the board "Fenêtre maximisée", its
+//! JS ported), its zone the bar's: three bursts of sparks, no rockets
+//! nor flashes, glowing over the bar.
 
 use std::{cell::RefCell, time::Duration};
 
@@ -21,6 +24,7 @@ use smithay::backend::renderer::element::Id;
 use super::{
     kept::Traced,
     mesh::{Glow, Mesh, Shape},
+    moments::Place,
     particles::{Rng, STEP},
 };
 
@@ -54,6 +58,24 @@ const ROCKET: [f32; 3] = [255.0, 220.0, 170.0];
 const TRAIL_SPARK: [f32; 3] = [255.0, 200.0, 140.0];
 /// A peony's spark crackling.
 const CRACKLE: [f32; 3] = [255.0, 250.0, 230.0];
+
+/// The bar's show (#800): its bursts, one every 0.35 s, each of so many
+/// sparks leaving its middle all round at 70 to 120 px/s, slowed and
+/// falling, each 1 to 1.5 s; across the middle 60 % of the bar, 140 to
+/// 300 px down from its top.
+const BAR_BURSTS: usize = 3;
+const BAR_SPARKS: usize = 46;
+const BAR_EVERY: f32 = 0.35;
+const BAR_DOWN: (f32, f32) = (140.0, 300.0);
+/// The board's colours there (0 to 255): a burst's is every other one.
+const BAR_COLOURS: [[f32; 3]; 6] = [
+    [255.0, 92.0, 92.0],
+    [255.0, 206.0, 102.0],
+    [94.0, 230.0, 168.0],
+    [108.0, 184.0, 255.0],
+    [182.0, 156.0, 255.0],
+    [255.0, 150.0, 210.0],
+];
 
 /// How a rocket bursts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +145,8 @@ pub struct Show {
     pub output: String,
     /// Where (global, logical: `x, y, w, h`).
     pub zone: [f32; 4],
+    /// On the wallpaper, or in the bar's column.
+    pub place: Place,
     rockets: Vec<Rocket>,
     sparks: Vec<Spark>,
     flashes: Vec<Flash>,
@@ -161,8 +185,58 @@ impl Show {
             rng,
             output,
             zone,
+            place: Place::Wall,
             rockets,
             sparks: Vec::new(),
+            flashes: Vec::new(),
+            blank: Id::new(),
+            drawn: RefCell::default(),
+        }
+    }
+
+    /// The board "Fenêtre maximisée"'s show in the bar's column, `zone`
+    /// (global, logical) of screen `output`, from `start` (#800): its
+    /// bursts' sparks all there, each waiting for its burst.
+    pub fn in_bar(start: Duration, seed: u64, output: String, zone: [f32; 4]) -> Self {
+        let mut rng = Rng::new(seed);
+        let [_, _, w, h] = zone;
+        let mut rnd = |a: f32, b: f32| a + rng.next() * (b - a);
+        let mut sparks = Vec::with_capacity(BAR_BURSTS * BAR_SPARKS);
+        for b in 0..BAR_BURSTS {
+            let (x, y) = (rnd(0.2, 0.8) * w, rnd(BAR_DOWN.0, BAR_DOWN.1).min(h * 0.6));
+            let colour = BAR_COLOURS
+                .get((b * 2) % BAR_COLOURS.len())
+                .copied()
+                .unwrap_or(BAR_COLOURS[0]);
+            for i in 0..BAR_SPARKS {
+                let a = i as f32 / BAR_SPARKS as f32 * std::f32::consts::TAU;
+                let speed = rnd(70.0, 120.0);
+                sparks.push(Spark {
+                    x,
+                    y,
+                    vx: a.cos() * speed,
+                    vy: a.sin() * speed,
+                    // Its burst's wait.
+                    life: -(b as f32) * BAR_EVERY,
+                    max: rnd(1.0, 1.5),
+                    colour,
+                    drag: 1.6,
+                    gravity: 60.0,
+                    crackle: false,
+                    small: false,
+                    flicker: 1.0,
+                });
+            }
+        }
+        Self {
+            start,
+            steps: 0,
+            rng,
+            output,
+            zone,
+            place: Place::Bar,
+            rockets: Vec::new(),
+            sparks,
             flashes: Vec::new(),
             blank: Id::new(),
             drawn: RefCell::default(),
@@ -229,6 +303,10 @@ impl Show {
             s.life < s.max
         });
         for s in &mut self.sparks {
+            // Its burst yet to come (the bar's).
+            if s.life < 0.0 {
+                continue;
+            }
             let d = (-s.drag * dt).exp();
             s.vx *= d;
             s.vy = s.vy * d + s.gravity * dt;
@@ -310,6 +388,25 @@ impl Show {
             self.zone[1] - origin.1 as f32,
         );
         let at = |x: f32, y: f32| [(ox + x) * scale, (oy + y) * scale];
+        if self.place == Place::Bar {
+            // The board's sprite, as big and as bright as the spark is
+            // young, added to the bar.
+            for s in self.sparks.iter().filter(|s| s.life >= 0.0) {
+                let k = 1.0 - s.life / s.max;
+                let a = (k * 1.5).min(1.0);
+                let z = (7.0 + 5.0 * k) * scale;
+                let [r, g, b] = s.colour.map(|c| c / 255.0 * a);
+                added.square(
+                    at(s.x, s.y),
+                    [z / 2.0; 2],
+                    [1.0, 1.0],
+                    [r, g, b, a],
+                    Shape::Glow,
+                    [Glow::Bead as u8 as f32, 0.0, 0.0],
+                );
+            }
+            return (added, screened);
+        }
         let t = self.steps as f32 * STEP;
         for f in &self.flashes {
             let a = (1.0 - f.life / FLASH).powi(2) * FLASH_LIGHT;
@@ -509,6 +606,34 @@ mod tests {
             let (added, _) = show.shapes((0.0, 0.0), 1.0);
             assert!(added.vertices.len() / super::super::particles::FLOATS < 65_536);
         }
+    }
+
+    #[test]
+    fn in_the_bar_three_bursts_follow_each_other_then_all_is_gone() {
+        let start = Duration::from_secs(1);
+        let zone = [1060.0, 8.0, 212.0, 784.0];
+        let mut show = Show::in_bar(start, 5, "out".into(), zone);
+        let mut bursts = Vec::new();
+        for tenth in 1..=40 {
+            let now = start + Duration::from_millis(100 * tenth);
+            show.advance(now);
+            bursts.push(show.sparks.iter().filter(|s| s.life >= 0.0).count());
+            // Down the bar, never out of its top nor its bottom (across,
+            // its rounded rectangle cuts them as the board's did).
+            for (_, y) in show.sparks() {
+                assert!(y > zone[1] && y < zone[1] + zone[3], "{y}");
+            }
+            assert!(show.light_on([0.0, 0.0, 1000.0, 700.0]).is_none());
+            if show.over(now) {
+                break;
+            }
+        }
+        // One burst, then two, then three; over within 2.5 s.
+        assert_eq!(bursts[0], BAR_SPARKS);
+        assert_eq!(bursts[5], 2 * BAR_SPARKS);
+        assert_eq!(bursts[7], 3 * BAR_SPARKS);
+        assert!(bursts.len() <= 25, "{}", bursts.len());
+        assert!(show.sparks.is_empty());
     }
 
     #[test]

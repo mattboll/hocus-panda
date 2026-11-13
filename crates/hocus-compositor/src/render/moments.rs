@@ -5,8 +5,11 @@
 //! on the wallpaper too, and those settled right in front of their edge,
 //! above it and on its top few pixels alone.
 //!
-//! What a moment draws is decided here, from its zone: the bar's moment
-//! when a window is maximised (#800) gives it another.
+//! With a maximised window, a moment plays in the bar's column instead
+//! (#800, the board "Fenêtre maximisée"): drawn right in front of the
+//! bar's surfaces (under its popovers), as the board's canvas over the
+//! bar, cut to the bar's rounded rectangle as it is drawn at that frame;
+//! never over the window, nor where the glass blurs.
 
 use smithay::{
     backend::renderer::{
@@ -19,7 +22,9 @@ use smithay::{
 use super::Frame;
 use crate::{
     State,
-    effects::{FireElement, draw::Clip, mesh::Mesh, snow::Holder, snow_look::REACH_BELOW},
+    effects::{
+        FireElement, draw::Clip, mesh::Mesh, moments::Place, snow::Holder, snow_look::REACH_BELOW,
+    },
 };
 
 /// Far enough to keep nothing out.
@@ -50,7 +55,7 @@ impl State {
     /// behind the glass, and themselves.
     pub(super) fn fireworks_layer(&self, frame: &Frame) -> Option<(FireElement, FireElement)> {
         let show = self.fx.fireworks.as_ref()?;
-        if !self.moment_on(frame, &show.output) {
+        if show.place != Place::Wall || !self.moment_on(frame, &show.output) {
             return None;
         }
         let (added, screened) = show.shapes((frame.origin.x, frame.origin.y), frame.scale as f32);
@@ -61,6 +66,65 @@ impl State {
                 .borrow_mut()
                 .shapes(screen, [Mesh::default(), added, screened], clip);
         Some((FireElement::blank(show.blank.clone(), screen), layer))
+    }
+
+    /// The moments playing in the bar's column of `frame`'s output
+    /// (#800), front first: the fireworks' sparks added to the bar, the
+    /// confetti over it; cut to the bar's rounded rectangle as it is
+    /// drawn now.
+    pub(super) fn bar_moments(&self, frame: &Frame) -> Vec<FireElement> {
+        let in_bar =
+            |output: &str, place: Place| place == Place::Bar && self.moment_on(frame, output);
+        let show = self
+            .fx
+            .fireworks
+            .as_ref()
+            .filter(|s| in_bar(&s.output, s.place));
+        let confetti = self
+            .fx
+            .confetti
+            .as_ref()
+            .filter(|c| in_bar(&c.output, c.place));
+        if show.is_none() && confetti.is_none() {
+            return Vec::new();
+        }
+        let Some(bar) = self.bar_rect(frame.output, frame.now) else {
+            return Vec::new();
+        };
+        let Frame { origin, scale, .. } = *frame;
+        let Some(geometry) = bar
+            .to_physical_precise_up::<f64, i32>(scale)
+            .intersection(screen(frame))
+        else {
+            return Vec::new();
+        };
+        let keep = [
+            bar.loc.x,
+            bar.loc.y,
+            bar.loc.x + bar.size.w,
+            bar.loc.y + bar.size.h,
+        ]
+        .map(|v| (v * scale) as f32);
+        let clip = Clip::new(keep, [], 1.0).rounded((hocus_link::RADIUS * scale) as f32);
+        let (origin, scale) = ((origin.x, origin.y), scale as f32);
+        let mut out = Vec::new();
+        if let Some(show) = show {
+            let (added, _) = show.shapes(origin, scale);
+            out.push(show.drawn.borrow_mut().shapes(
+                geometry,
+                [Mesh::default(), added, Mesh::default()],
+                clip,
+            ));
+        }
+        if let Some(confetti) = confetti {
+            let over = confetti.flying(origin, scale);
+            out.push(confetti.drawn.borrow_mut().shapes(
+                geometry,
+                [over, Mesh::default(), Mesh::default()],
+                clip,
+            ));
+        }
+        out
     }
 
     /// The id of the blank standing for the fireworks.
@@ -95,7 +159,7 @@ impl State {
     /// them behind the glass, and themselves.
     pub(super) fn confetti_layer(&self, frame: &Frame) -> Option<(FireElement, FireElement)> {
         let confetti = self.fx.confetti.as_ref()?;
-        if !self.moment_on(frame, &confetti.output) {
+        if confetti.place != Place::Wall || !self.moment_on(frame, &confetti.output) {
             return None;
         }
         let over = confetti.flying((frame.origin.x, frame.origin.y), frame.scale as f32);
