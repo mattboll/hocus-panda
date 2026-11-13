@@ -69,6 +69,7 @@ mod desktops_live;
 mod desktops_screens;
 mod desktops_shots;
 mod effects;
+mod effects_pace;
 mod emoji;
 mod featured;
 mod fireflies;

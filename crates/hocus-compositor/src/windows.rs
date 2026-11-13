@@ -1530,15 +1530,27 @@ impl State {
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
-        // The wallpaper's effects: the snow (#795) first, the garlands'
-        // wind following its.
-        moving |= self.tick_wallpaper_effects(now);
-        // The agents as creatures on their windows (#796).
-        moving |= self.tick_creatures(now);
-        // The garland under the active window (#799).
-        moving |= self.tick_garland(now);
-        // The garlands across the top of the screens (#813).
-        moving |= self.tick_garland_top(now);
+        // The effects that play on their own, at most 60 frames a second
+        // whatever the screens' refresh (#815): between two, they ask for
+        // none.
+        // The agents as creatures on their windows (#796): where they sit
+        // decided at each turn, their motion drawn as of the effects' time.
+        let creatures = self.tick_creatures(now);
+        let clock = self.now();
+        if self.fx.pace.due(clock) {
+            // The wallpaper's effects: the snow (#795) first, the
+            // garlands' wind following its.
+            let mut effects = creatures | self.tick_wallpaper_effects(now);
+            // The garland under the active window (#799).
+            effects |= self.tick_garland(now);
+            // The garlands across the top of the screens (#813).
+            effects |= self.tick_garland_top(now);
+            self.fx.pace.moved(clock, now, effects);
+            moving |= effects;
+        }
+        if let Some(at) = self.fx.pace.next() {
+            wake(at);
+        }
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         // A shattering one until its last shard has fallen (#798).

@@ -220,6 +220,84 @@ impl Mesh {
     }
 }
 
+/// Where `new` draws other than `old` did (#815), in whole pixels: each
+/// triangle of either whose corners moved or changed, at its place in
+/// both, those side by side joined; `out` gets them. Nothing when they
+/// are the same.
+pub fn changes(old: &Mesh, new: &Mesh, out: &mut Vec<[i32; 4]>) {
+    if old.indices == new.indices && old.vertices == new.vertices {
+        return;
+    }
+    fn corner(m: &Mesh, i: u16) -> Option<&[f32]> {
+        let i = usize::from(i) * FLOATS;
+        m.vertices.get(i..i + FLOATS)
+    }
+    // Each vertex the same in both, or not.
+    let same: Vec<bool> = old
+        .vertices
+        .as_chunks::<FLOATS>()
+        .0
+        .iter()
+        .zip(new.vertices.as_chunks::<FLOATS>().0)
+        .map(|(a, b)| a == b)
+        .collect();
+    let bounds = |m: &Mesh, t: &[u16; 3]| -> Option<[i32; 4]> {
+        let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        for i in t {
+            let v = corner(m, *i)?;
+            let (x, y) = (*v.first()?, *v.get(1)?);
+            b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+        }
+        // A pixel more each way: a fringe's last pixel, a soft shape's.
+        let (x0, y0) = (b[0].floor() as i32 - 1, b[1].floor() as i32 - 1);
+        Some([
+            x0,
+            y0,
+            b[2].ceil() as i32 + 1 - x0,
+            b[3].ceil() as i32 + 1 - y0,
+        ])
+    };
+    let mut add = |r: [i32; 4]| {
+        // Joined to the last when that covers little more than both.
+        if let Some(last) = out.last_mut() {
+            let x0 = last[0].min(r[0]);
+            let y0 = last[1].min(r[1]);
+            let x1 = (last[0] + last[2]).max(r[0] + r[2]);
+            let y1 = (last[1] + last[3]).max(r[1] + r[3]);
+            let joined = i64::from(x1 - x0) * i64::from(y1 - y0);
+            let apart = i64::from(last[2]) * i64::from(last[3]) + i64::from(r[2]) * i64::from(r[3]);
+            if joined <= apart + apart / 4 {
+                *last = [x0, y0, x1 - x0, y1 - y0];
+                return;
+            }
+        }
+        out.push(r);
+    };
+    let (a, b) = (
+        old.indices.as_chunks::<3>().0,
+        new.indices.as_chunks::<3>().0,
+    );
+    let n = a.len().max(b.len());
+    let (mut a, mut b) = (a.iter(), b.iter());
+    for _ in 0..n {
+        let (ta, tb) = (a.next(), b.next());
+        if let (Some(ta), Some(tb)) = (ta, tb)
+            && ta == tb
+            && ta
+                .iter()
+                .all(|i| same.get(usize::from(*i)).copied().unwrap_or(false))
+        {
+            continue;
+        }
+        if let Some(r) = ta.and_then(|t| bounds(old, t)) {
+            add(r);
+        }
+        if let Some(r) = tb.and_then(|t| bounds(new, t)) {
+            add(r);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +326,37 @@ mod tests {
         assert_eq!(m.vertices.len() / FLOATS, 4 + 9);
         assert_eq!(m.indices.len(), 6 + 2 * 2 * 2 * 3);
         assert_eq!(m.bounds(), Some([0, 0, 12, 13]));
+    }
+
+    #[test]
+    fn what_changed_is_where_a_shape_moved_alone() {
+        let flake = |m: &mut Mesh, x: f32| {
+            m.square(
+                [x, 10.0],
+                [2.0, 2.0],
+                [1.0, 1.0],
+                [1.0; 4],
+                Shape::Flake,
+                [0.45, 0.0, 0.0],
+            );
+        };
+        let (mut a, mut b) = (Mesh::default(), Mesh::default());
+        for x in [10.0, 100.0, 200.0] {
+            flake(&mut a, x);
+        }
+        let mut out = Vec::new();
+        changes(&a, &a.clone(), &mut out);
+        assert!(out.is_empty());
+        for x in [10.0, 101.0, 200.0] {
+            flake(&mut b, x);
+        }
+        changes(&a, &b, &mut out);
+        // The middle one, where it was and where it is, in one.
+        assert_eq!(out, vec![[97, 7, 7, 6]]);
+        // One more: it too.
+        flake(&mut b, 300.0);
+        out.clear();
+        changes(&a, &b, &mut out);
+        assert_eq!(out, vec![[97, 7, 7, 6], [297, 7, 6, 6]]);
     }
 }

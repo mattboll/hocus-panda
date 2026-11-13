@@ -115,6 +115,106 @@ pub fn layer(field: &Field, scale: f32, falling: bool) -> Mesh {
     mesh
 }
 
+/// What the layer of a screen draws where (#815): each flake's and
+/// clump's box (whole physical pixels, `x0, y0, x1, y1`), the ground's
+/// columns, and the scale and the size they were drawn at.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Pieces {
+    flakes: Vec<[i32; 4]>,
+    clumps: Vec<[i32; 4]>,
+    ground: Vec<f32>,
+    at: (f32, (f32, f32)),
+}
+
+/// What [`layer`] draws where on screen `field` at `scale`.
+pub fn pieces(field: &Field, scale: f32, falling: bool) -> Pieces {
+    let square = |x: f32, y: f32, half: f32| {
+        [
+            ((x - half) * scale).floor() as i32 - 1,
+            ((y - half) * scale).floor() as i32 - 1,
+            ((x + half) * scale).ceil() as i32 + 1,
+            ((y + half) * scale).ceil() as i32 + 1,
+        ]
+    };
+    let (flakes, clumps) = if falling {
+        (
+            field
+                .flakes
+                .iter()
+                .map(|f| {
+                    let across = if f.z < 0.8 { 4.0 } else { 5.0 };
+                    square(f.x, f.y, f.r * across / 2.0)
+                })
+                .collect(),
+            // A clump turned: within its radius each way.
+            field.clumps.iter().map(|k| square(k.x, k.y, k.r)).collect(),
+        )
+    } else {
+        Default::default()
+    };
+    Pieces {
+        flakes,
+        clumps,
+        ground: field.ground.clone(),
+        at: (scale, field.size),
+    }
+}
+
+/// Where the layer changed from `old` to `new` (physical, `x, y, w, h`);
+/// `None`: all of it.
+pub fn layer_changes(old: &Pieces, new: &Pieces) -> Option<Vec<[i32; 4]>> {
+    if old.at != new.at
+        || old.flakes.len() != new.flakes.len()
+        || old.ground.len() != new.ground.len()
+    {
+        return None;
+    }
+    let mut out: Vec<[i32; 4]> = Vec::new();
+    let mut add = |[x0, y0, x1, y1]: [i32; 4]| out.push([x0, y0, x1 - x0, y1 - y0]);
+    for (a, b) in old.flakes.iter().zip(&new.flakes) {
+        if a == b {
+            continue;
+        }
+        // Where it was and where it is, in one when they meet.
+        if a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3] {
+            add([
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]);
+        } else {
+            add(*a);
+            add(*b);
+        }
+    }
+    for k in old.clumps.iter().chain(&new.clumps) {
+        add(*k);
+    }
+    // A column's pile reaches its neighbours'.
+    let (scale, (w, h)) = new.at;
+    let n = new.ground.len();
+    let mut i = 0;
+    while i < n {
+        if old.ground.get(i) == new.ground.get(i) {
+            i += 1;
+            continue;
+        }
+        let from = i;
+        let mut top = 0.0f32;
+        while i < n && old.ground.get(i) != new.ground.get(i) {
+            let at = |g: &[f32]| g.get(i).copied().unwrap_or(0.0);
+            top = top.max(at(&old.ground)).max(at(&new.ground));
+            i += 1;
+        }
+        let x0 = (from.saturating_sub(1) as f32 * GROUND_COL * scale).floor() as i32 - 1;
+        let x1 = ((((i + 1) as f32 * GROUND_COL).min(w)) * scale).ceil() as i32 + 1;
+        let y0 = ((h - top - 1.0) * scale).floor() as i32 - 1;
+        add([x0, y0, x1, (h * scale).ceil() as i32 + 1]);
+    }
+    Some(out)
+}
+
 /// The ground's pile: straight from column to column, white 50 px up to
 /// blue at the bottom.
 fn ground(mesh: &mut Mesh, field: &Field, scale: f32) {
@@ -159,15 +259,15 @@ pub struct CapLook {
     pub glints: Option<f32>,
 }
 
-/// The cap of `cap` as `look` says, over (the shadow, the snow and its
-/// highlight) and added (its glints); `None` when there is too little
-/// snow to show.
+/// The cap of `cap` as `look` says, drawn over what is under it (the
+/// shadow, the snow and its highlight; its glints are [`glints`]); `None`
+/// when there is too little snow to show.
 #[expect(
     clippy::indexing_slicing,
     reason = "a cap of four columns or more, its smoothed heights as many; the outline holds \
               the curve's points from top_from to top_to"
 )]
-pub fn cap(cap: &Cap, look: &CapLook) -> Option<(Mesh, Mesh)> {
+pub fn cap(cap: &Cap, look: &CapLook) -> Option<Mesh> {
     let n = cap.h.len();
     if n < 4 {
         return None;
@@ -278,8 +378,24 @@ pub fn cap(cap: &Cap, look: &CapLook) -> Option<(Mesh, Mesh)> {
         })
         .collect();
     over.columns(&line);
-    // The glints: a twinkling cross on a column in seven, where the snow
-    // lies deep enough.
+    Some(over)
+}
+
+/// The glints of `cap` as `look` says, added to what is under them: a
+/// twinkling cross on a column in seven, where the snow lies deep enough.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "i is a column of the cap, under its count"
+)]
+pub fn glints(cap: &Cap, look: &CapLook) -> Mesh {
+    let n = cap.h.len();
+    let scale = look.scale;
+    let a = look.alpha;
+    let x = (look.edge.loc.x - look.origin.0) as f32;
+    let y = (look.edge.loc.y - look.origin.1) as f32;
+    let w = look.edge.size.w as f32;
+    let col = COL * w / (n as f32 * COL).max(1.0);
+    let p = |x: f32, y: f32| [x * scale, y * scale];
     let mut added = Mesh::default();
     if let Some(time) = look.glints {
         for i in (3..n.saturating_sub(3)).step_by(7) {
@@ -302,7 +418,44 @@ pub fn cap(cap: &Cap, look: &CapLook) -> Option<(Mesh, Mesh)> {
             }
         }
     }
-    Some((over, added))
+    added
+}
+
+/// A cap's columns drawn again only as they move more than this, logical
+/// pixels (#815).
+pub const UNSEEN: f32 = 0.05;
+
+/// Where a cap drawn as `look` changes as its columns go from `old` to
+/// `new` (as many, four or more): from and to (physical, from the look's
+/// origin), nothing when it does not; `None`: all of it (its peak, which
+/// colours all of it, moved; its columns are others).
+pub fn cap_changes(old: &[f32], new: &[f32], look: &CapLook) -> Option<Option<[f32; 2]>> {
+    let n = new.len();
+    if old.len() != n || n < 4 {
+        return None;
+    }
+    let (so, sn) = (smoothed(old), smoothed(new));
+    // Less than this is less than a step of colour, or of an edge's cover.
+    const LEAST: f32 = 0.001;
+    let peak = |s: &[f32]| s.iter().copied().fold(0.0, f32::max);
+    if (peak(&so) - peak(&sn)).abs() > LEAST {
+        return None;
+    }
+    let differ = |i: &usize| match (so.get(*i), sn.get(*i)) {
+        (Some(a), Some(b)) => (a - b).abs() > LEAST,
+        _ => true,
+    };
+    let (Some(lo), Some(hi)) = ((0..n).find(differ), (0..n).rev().find(differ)) else {
+        return Some(None);
+    };
+    // A column's curve reaches the middles of its neighbours; the end
+    // columns their rounded corners, 2 px out.
+    let x = (look.edge.loc.x - look.origin.0) as f32;
+    let w = look.edge.size.w as f32;
+    let col = w / n as f32;
+    let from = x + lo.saturating_sub(1) as f32 * col - 3.0;
+    let to = x + (hi + 2).min(n) as f32 * col + 3.0;
+    Some(Some([from * look.scale, to * look.scale]))
 }
 
 /// The board's 9-tap blur of the columns (four or more), its ends
