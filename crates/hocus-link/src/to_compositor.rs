@@ -114,6 +114,11 @@ pub enum ToCompositor {
     /// or less, in 2 min or less, or neither (none, further, in progress, or
     /// opened by the user).
     Meeting(Option<MeetingNear>),
+    /// Whether the player in the bar's music block plays (s12), sent as the
+    /// shell connects and when it changes: the aurora on the wallpaper
+    /// ripples while it does, and calms when it stops (#801). No level: the
+    /// shell reads no sound.
+    Music { playing: bool },
     /// The clipboard takes `text` (the command the Sources popover shows),
     /// which the compositor offers: the shell's surfaces take no serial to set
     /// it themselves.

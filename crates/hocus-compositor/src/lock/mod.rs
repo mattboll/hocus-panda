@@ -696,6 +696,7 @@ impl State {
                 | T::NextLayout
                 | T::Lock(_)
                 | T::Meeting(_)
+                | T::Music { .. }
                 | T::Auth(_)
                 | T::Leave(hocus_link::LeaveAsk::Cancel)
                 | T::A11yLine(_)

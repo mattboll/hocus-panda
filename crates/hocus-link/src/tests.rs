@@ -825,6 +825,8 @@ fn to_compositor() -> Vec<ToCompositor> {
         ToCompositor::Meeting(Some(MeetingNear::Ten)),
         ToCompositor::Meeting(Some(MeetingNear::Two)),
         ToCompositor::Meeting(None),
+        ToCompositor::Music { playing: true },
+        ToCompositor::Music { playing: false },
         ToCompositor::Copy("hocus agent my-agent waiting".into()),
         ToCompositor::Clip {
             paste: true,

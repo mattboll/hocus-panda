@@ -112,13 +112,14 @@ impl crate::State {
     }
 
     /// Whether the landscape is the wallpaper of `output`: depth plays,
-    /// the wallpaper shows there, and the koi's pond does not take its
-    /// place (the pond first, both on).
+    /// the wallpaper shows there, and neither the koi's pond nor the
+    /// aurora takes its place (they first, on too).
     pub(crate) fn depth_shows_on(&self, output: &Output) -> bool {
         self.depth_plays().is_some()
             && self.fx.depth.is_some()
             && !self.wall_hidden(output)
             && !self.koi_shows_on(output)
+            && !self.aurora_shows_on(output)
     }
 
     /// Where `output`'s camera stands at `now`; moving, as of the

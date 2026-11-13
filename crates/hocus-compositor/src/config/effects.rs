@@ -5,15 +5,15 @@
 use serde::Deserialize;
 
 /// The effects (the board's fourteen, and a second garland), grouped as
-/// Settings › Appearance › Effects shows them. The flames, the glass, the
-/// jelly, the garlands, the snow, the rain on the glass, the fireflies and
-/// the creatures play so far; the others' switches are kept for their
-/// tickets.
+/// Settings › Appearance › Effects shows them. The moments' switches are
+/// kept for their tickets; the others play.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Effects {
     // The wallpaper.
     pub snow: bool,
+    /// The wallpaper is an aurora rippling while the bar's music plays
+    /// (#801).
     pub aurora: bool,
     /// The wallpaper becomes wet glass, drops forming and sliding (#802).
     pub rain_on_glass: bool,

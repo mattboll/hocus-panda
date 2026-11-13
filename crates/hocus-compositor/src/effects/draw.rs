@@ -247,6 +247,24 @@ pub struct DepthLook {
     pub phases: [[f32; 3]; 6],
 }
 
+/// How the aurora following the music is drawn (#801): the screen's size
+/// (logical), the board's time, and its music's swell and kick (0 when it
+/// is still).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AuroraLook {
+    pub size: [f32; 2],
+    pub time: f32,
+    pub amp: f32,
+    pub beat: f32,
+}
+
+impl AuroraLook {
+    /// What it shows, its floats' bits.
+    pub fn key(&self) -> [u32; 3] {
+        [self.time.to_bits(), self.amp.to_bits(), self.beat.to_bits()]
+    }
+}
+
 /// The koi's water's heights as a texture, kept between frames: its size
 /// (cells), and whether it holds half floats (else bytes).
 #[derive(Debug)]
@@ -553,6 +571,17 @@ pub trait Fire: Renderer + Sized {
         look: DepthLook,
     ) -> Option<Rc<dyn Any>>;
 
+    /// The aurora following the music (#801), `size` pixels, kept in
+    /// `kept`: drawn again from `look` when `fresh` or new. `None`: not
+    /// drawn so.
+    fn aurora(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: AuroraLook,
+    ) -> Option<Rc<dyn Any>>;
+
     /// What is under the koi's water (#803), `size` pixels, kept in
     /// `kept`: the pond's floor `floor` (a sheet), and over it `mesh` (the
     /// koi and their shadows), drawn again each time. `None`: not drawn
@@ -656,6 +685,16 @@ impl Fire for PixmanRenderer {
         _size: (i32, i32),
         _fresh: bool,
         _look: DepthLook,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn aurora(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _look: AuroraLook,
     ) -> Option<Rc<dyn Any>> {
         None
     }
@@ -1412,6 +1451,97 @@ void main() {
 }
 ";
 
+/// The board "Aurore en musique"'s night (#801), its `AURORA_FS` from
+/// WebGL as it was, its lengths the board's: `size` is its `uRes`, the
+/// screen's logical size, `res` the picture's pixels (0.6 of them, as its
+/// canvas). Its sky's gradient and twinkling stars, three curtains (each
+/// a fold of sines and noise, rippling on the beat, its rays five octaves
+/// of noise, green at the foot to violet at the top), the two ridges lit by
+/// them, a grain, a vignette and a soft tone curve. One change: the
+/// noise's lattice wraps at 1024 cells (the board's for all it showed), so
+/// that its hash keeps its precision as its time goes on.
+const AURORA: &str = "#version 100
+precision highp float;
+uniform vec2 size;
+uniform vec2 res;
+uniform float time;
+uniform float amp;
+uniform float beat;
+varying vec2 v_px;
+
+float hash(vec2 p) {
+    p = fract(p * vec2(234.34, 435.345));
+    p += dot(p, p + 34.23);
+    return fract(p.x * p.y);
+}
+float lattice(vec2 i) { return hash(mod(i, 1024.0)); }
+float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(lattice(i), lattice(i + vec2(1.0, 0.0)), u.x),
+        mix(lattice(i + vec2(0.0, 1.0)), lattice(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 5; i++) {
+        v += a * noise(p);
+        p = p * 2.02 + 11.7;
+        a *= 0.5;
+    }
+    return v;
+}
+vec3 curtain(vec2 uv, float seed, float base, float t, vec3 low, vec3 high, float gain) {
+    float x = uv.x * (size.x / size.y);
+    float fold = 0.06 * sin(x * 3.1 + t * 0.45 + seed)
+        + 0.05 * (fbm(vec2(x * 0.9 + seed, t * 0.06)) - 0.5) * 2.0;
+    float ripple = 0.022 * beat * sin(x * 18.0 - t * 9.0 + seed);
+    float b = base + fold + ripple;
+    float d = uv.y - b;
+    float below = exp(min(d, 0.0) * 55.0);
+    float above = exp(-max(d, 0.0) * (6.5 - 2.5 * amp));
+    float env = smoothstep(0.38, 0.68, fbm(vec2(x * 0.5 + seed * 3.0, t * 0.025)));
+    float warp = fbm(vec2(x * 1.6 + seed, t * 0.09)) * 4.0;
+    float rays = fbm(vec2(x * 26.0 + warp, t * 0.35 + seed));
+    rays = pow(rays, 2.2) * 2.4;
+    float body = below * above * (0.35 + rays);
+    float edge = exp(-abs(d) * 38.0) * 0.9;
+    vec3 col = mix(low, high * 0.75, smoothstep(0.0, 0.22, d));
+    float shimmer = 0.85 + 0.15 * sin(t * 2.0 + x * 9.0 + seed);
+    return col * (body + edge * (0.4 + rays)) * gain * shimmer * env;
+}
+void main() {
+    vec2 uv = vec2(v_px.x / res.x, 1.0 - v_px.y / res.y);
+    float t = time;
+    vec3 sky = mix(vec3(0.035, 0.07, 0.11), vec3(0.008, 0.012, 0.035), smoothstep(0.1, 1.0, uv.y));
+    vec2 sp = uv * size / 2.5;
+    vec2 cell = floor(sp);
+    float h = hash(cell);
+    if (h > 0.986) {
+        vec2 c = cell + 0.5 + (vec2(hash(cell + 3.1), hash(cell + 7.7)) - 0.5) * 0.6;
+        float d = length(sp - c);
+        float tw = 0.55 + 0.45 * sin(t * (1.0 + h * 3.0) + h * 60.0);
+        sky += vec3(0.85, 0.9, 1.0) * smoothstep(1.1, 0.0, d) * tw * (h - 0.986) * 70.0
+            * smoothstep(0.25, 0.6, uv.y);
+    }
+    float gain = 0.7 + 0.8 * amp;
+    vec3 a = curtain(uv, 1.3, 0.50, t, vec3(0.15, 1.0, 0.55), vec3(0.55, 0.25, 0.95), gain * 0.9);
+    a += curtain(uv, 4.7, 0.62, t * 0.8, vec3(0.1, 0.85, 0.75), vec3(0.85, 0.3, 0.7), gain * 0.55);
+    a += curtain(uv, 9.1, 0.40, t * 1.1, vec3(0.2, 0.95, 0.45), vec3(0.3, 0.5, 1.0), gain * 0.45);
+    vec3 col = sky + a * 0.9;
+    float x = uv.x * (size.x / size.y);
+    float ridgeFar = 0.15 + 0.15 * fbm(vec2(x * 1.1, 2.0)) + 0.035 * fbm(vec2(x * 6.0, 5.0));
+    float ridgeNear = 0.06 + 0.12 * fbm(vec2(x * 1.8 + 7.0, 9.0)) + 0.03 * fbm(vec2(x * 11.0, 1.0));
+    vec3 glowTint = a * 0.08;
+    if (uv.y < ridgeFar) col = mix(col, vec3(0.025, 0.04, 0.06) + glowTint, 0.92);
+    if (uv.y < ridgeNear) col = vec3(0.012, 0.018, 0.028) + glowTint * 0.5;
+    col += (hash(uv * size + t) - 0.5) * 0.018;
+    float vig = smoothstep(1.35, 0.35, length((uv - 0.5) * vec2(1.4, 1.0)));
+    col *= mix(0.75, 1.0, vig);
+    col = col / (1.0 + col * 0.35);
+    gl_FragColor = vec4(pow(col, vec3(0.92)), 1.0);
+}
+";
+
 /// The effects' programs of a renderer's context, made once; `None` where
 /// they do not compile, and the effects do not play.
 #[derive(Debug)]
@@ -1429,6 +1559,7 @@ struct Programs {
     koi: Program,
     sky: Program,
     depth: Program,
+    aurora: Program,
     /// The shards' look attribute.
     shard_look: ffi::types::GLint,
     /// The sprites' opacity attribute.
@@ -1530,6 +1661,12 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 DEPTH,
                 &["matrix", "size", "px", "cam", "zoom", "drift", "ph"],
             )?;
+            let aurora = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                AURORA,
+                &["matrix", "size", "res", "time", "amp", "beat"],
+            )?;
             let attrib =
                 |p: &Program, n: &std::ffi::CStr| gl.GetAttribLocation(p.program, n.as_ptr());
             let shard_look = attrib(&shards, c"look");
@@ -1564,6 +1701,7 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 koi,
                 sky,
                 depth,
+                aurora,
                 shard_look,
                 shade,
                 colour,
@@ -1753,6 +1891,41 @@ impl Fire for GlesRenderer {
         });
         if let Err(err) = drawn {
             tracing::warn!(%err, "could not draw the landscape in depth");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn aurora(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: AuroraLook,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let (mut texture, map) = kept_target(self, kept, size, fresh, "the aurora")?;
+        if let Some(map) = map {
+            return Some(map);
+        }
+        let p = &programs.aurora;
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current.
+            unsafe {
+                quads(gl, p, matrix, instancing, &[whole], whole.loc, |gl| {
+                    gl.Uniform2f(p.at("size"), look.size[0], look.size[1]);
+                    gl.Uniform2f(p.at("res"), size.0 as f32, size.1 as f32);
+                    gl.Uniform1f(p.at("time"), look.time);
+                    gl.Uniform1f(p.at("amp"), look.amp);
+                    gl.Uniform1f(p.at("beat"), look.beat);
+                });
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the aurora");
             return None;
         }
         let rc: Rc<dyn Any> = Rc::new(texture);

@@ -15,9 +15,10 @@
 //! ([`garland`], #799), another across the top of the screens (#813);
 //! on the wallpaper, rain on the glass ([`raindrops`], #802), a koi pond
 //! ([`koi`], #803), evening fireflies ([`fireflies`], #804) and the
-//! daylight ([`daylight`], #805), following the sun ([`sun`]); and
-//! desktops in depth ([`depth`], #806). The wallpaper's effects play
-//! behind the lock too, and in the overview (#807).
+//! daylight ([`daylight`], #805), following the sun ([`sun`]);
+//! desktops in depth ([`depth`], #806); and an aurora following the music
+//! ([`aurora`], #801). The wallpaper's effects play behind the lock too,
+//! and in the overview (#807).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -32,6 +33,7 @@
 //! staying the same between; and each tells the screen only what of it
 //! changed, so that what is still around it is not drawn again.
 
+pub mod aurora;
 pub mod creatures;
 pub mod daylight;
 pub mod depth;
@@ -89,6 +91,10 @@ pub struct Live {
     pub daylight: Option<daylight::Daylight>,
     /// Desktops in depth, while it is on (#806).
     pub depth: Option<depth::Depth>,
+    /// The aurora, while it is on (#801).
+    pub aurora: Option<aurora::Aurora>,
+    /// Whether the bar's player plays, as the shell says (#801).
+    pub music: bool,
     /// The koi's pond, while it is on (#803).
     pub koi: Option<koi::Ponds>,
     /// The ponds dug so far, for their seeds.
@@ -196,7 +202,8 @@ impl State {
     /// drawn.
     pub(crate) fn lock_live(&self) -> bool {
         let e = &self.config.effects;
-        let any = e.snow || e.rain_on_glass || e.koi || e.fireflies || e.daylight || e.depth;
+        let any =
+            e.snow || e.aurora || e.rain_on_glass || e.koi || e.fireflies || e.daylight || e.depth;
         any && self.config.wallpaper.lock == hocus_link::wallpaper::LockLook::Dimmed
             && !self.config.plain_background
             && self.graphics.blur
@@ -213,13 +220,14 @@ impl State {
     }
 
     /// The wallpaper's effects step on at `now`: the snow, the rain on the
-    /// glass, the fireflies, the koi, the daylight, desktops in depth;
-    /// whether one moves.
+    /// glass, the fireflies, the koi, the aurora, the daylight, desktops in
+    /// depth; whether one moves.
     pub(crate) fn tick_wallpaper_effects(&mut self, now: std::time::Duration) -> bool {
         let mut moving = self.tick_snow(now);
         moving |= self.tick_raindrops(now);
         moving |= self.tick_fireflies(now);
         moving |= self.tick_koi(now);
+        moving |= self.tick_aurora(now);
         self.tick_daylight();
         moving |= self.tick_depth(now);
         moving

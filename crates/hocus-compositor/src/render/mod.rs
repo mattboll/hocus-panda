@@ -6,6 +6,7 @@
 //! bar is in front (`crate::front`), and the layers under them; and what
 //! clients are told once a frame is out.
 
+mod aurora;
 mod creatures;
 mod daylight;
 mod depth;
@@ -700,6 +701,7 @@ impl State {
             || self.fx.koi.is_some()
             || self.fx.daylight.is_some()
             || self.fx.depth.is_some()
+            || self.fx.aurora.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -915,6 +917,12 @@ impl State {
             elements.push(OutputElements::Fire(k.stand_in));
             (k.pads, k.water)
         });
+        // The aurora (#801), in the wallpaper's place: as it last stood
+        // still in its place while the glass is blurred.
+        let aurora = self.aurora_layer(renderer, &frame).map(|a| {
+            elements.push(OutputElements::Fire(a.stand_in));
+            a.live
+        });
         // Desktops in depth's landscape (#806), drawn as the camera
         // moves, else the daylight's sky (#805), drawn once a minute: in
         // the wallpaper's place.
@@ -958,6 +966,7 @@ impl State {
             (rain, self.raindrops_stand_in(&frame)),
             (koi_water, koi_still),
             (koi_pads, koi_blank),
+            (aurora, self.aurora_stand_in(&frame)),
         ] {
             if let Some(layer) = layer
                 && let Some(blank) = blank
@@ -1721,8 +1730,8 @@ impl State {
 
     /// The wallpaper of `output` as the lock shows it (#807), front first:
     /// on the screen with the wallpaper's effects playing on it (the
-    /// snow's flakes and ground, the fireflies, the koi's pond, the rain on
-    /// the glass, the daylight's sky, the landscape in depth), nothing
+    /// snow's flakes and ground, the fireflies, the koi's pond, the aurora,
+    /// the rain on the glass, the daylight's sky, the landscape in depth), nothing
     /// bound to a window; the still wallpaper in a capture.
     pub(crate) fn live_wall<R>(
         &self,
@@ -1757,6 +1766,9 @@ impl State {
             if let Some(koi) = self.koi_layer(renderer, &frame) {
                 out.push(OutputElements::Fire(koi.pads));
                 out.push(OutputElements::Fire(koi.water));
+            }
+            if let Some(aurora) = self.aurora_layer(renderer, &frame) {
+                out.push(OutputElements::Fire(aurora.live));
             }
             let mut sky = self
                 .depth_layer(renderer, &frame)
