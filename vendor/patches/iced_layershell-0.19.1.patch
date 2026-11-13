@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index a5754d6..e41d761 100644
+index a5754d6..23d0c5b 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -1,13 +1,9 @@
@@ -22,6 +22,14 @@ index a5754d6..e41d761 100644
  
  [package]
  edition = "2024"
+@@ -107,3 +103,7 @@ version = "0.5.0"
+ 
+ [dev-dependencies.iced]
+ version = "0.14"
++
++# Hocuspanda: upstream declares these and never uses them (cargo machete).
++[package.metadata.cargo-machete]
++ignored = ["iced_devtools", "iced_renderer"]
 diff --git b/LICENSE b/LICENSE
 new file mode 100644
 index 0000000..14c4136

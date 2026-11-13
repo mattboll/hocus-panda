@@ -103,3 +103,7 @@ version = "0.5.0"
 
 [dev-dependencies.iced]
 version = "0.14"
+
+# Hocuspanda: upstream declares these and never uses them (cargo machete).
+[package.metadata.cargo-machete]
+ignored = ["iced_devtools", "iced_renderer"]
