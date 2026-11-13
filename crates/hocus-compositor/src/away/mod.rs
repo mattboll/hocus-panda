@@ -655,6 +655,8 @@ impl State {
             self.away.woke = true;
             // The clock moved on meanwhile: the night light at its hour.
             self.night_light_update();
+            // And the date: December may have come (#813).
+            self.holidays_check();
             self.redraw = true;
             // The user woke it: the screens on, the countdowns from now.
             self.felt(Felt::Other);

@@ -12,7 +12,7 @@
 //! as creatures on their windows ([`creatures`], #796), windows in jelly
 //! ([`jelly`], #797), shattering into glass as they close
 //! ([`shatter`], #798), and a garland under the active window
-//! ([`garland`], #799).
+//! ([`garland`], #799), another across the top of the screens (#813).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -50,6 +50,9 @@ pub struct Live {
     pub creatures: creatures::Creatures,
     /// The garland under the active window, while it shows (#799).
     pub garland: Option<garland::Garland>,
+    /// The garlands across the tops of the screens, by screen, while
+    /// they show (#813).
+    pub tops: std::collections::HashMap<String, garland::Top>,
     /// The garlands hung so far, for their seeds.
     garlands: u64,
 }

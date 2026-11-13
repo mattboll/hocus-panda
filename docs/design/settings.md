@@ -1015,7 +1015,7 @@ window is the preview.
 | | Heure | segmented "14:05 \| 2:05 PM" | `[locale] time = "24h" \| "12h"` (none: the session's locale decides, 12 hours in the English of the countries that write it so) |
 | | L'horloge de la barre | link "La barre ›" | (6.4's `[panel.clock]`) |
 | EFFETS · LE FOND D’ÉCRAN | Neige qui tient ("Elle tombe, se pose sur les fenêtres et la barre, et glisse quand on secoue une fenêtre."), Aurore en musique, Pluie sur la vitre, Bassin de koïs, Lucioles du soir, La lumière du jour, Bureaux en profondeur (each with its line) | switch | `[effects] snow`, `aurora`, `rain-on-glass`, `koi`, `fireflies`, `daylight`, `depth` |
-| EFFETS · LES FENÊTRES | Fermer en flammes ("La fenêtre qu’on ferme brûle de bas en haut, à la place de l’animation de fermeture."), Éclats de verre, Fenêtres en gelée, Guirlande sous la fenêtre active | switch | `[effects] flames`, `shatter`, `jelly`, `garland` |
+| EFFETS · LES FENÊTRES | Fermer en flammes ("La fenêtre qu’on ferme brûle de bas en haut, à la place de l’animation de fermeture."), Éclats de verre, Fenêtres en gelée, Guirlande sous la fenêtre active, Guirlande en haut de l’écran (#813) | switch | `[effects] flames`, `shatter`, `jelly`, `garland`, `garland-top` |
 | EFFETS · LES MOMENTS | Tests au vert : feu d’artifice, Bonne nouvelle d’un agent : confettis | switch | `[effects] fireworks`, `confetti` |
 | EFFETS · LES AGENTS | Les agents en créatures | switch | `[effects] creatures` |
 
