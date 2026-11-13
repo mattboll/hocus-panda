@@ -14,6 +14,7 @@
 
 mod agents_bed;
 mod common;
+mod koi;
 mod settings_page;
 
 // The fake system services of the bar's levels (tests/levels/), and the

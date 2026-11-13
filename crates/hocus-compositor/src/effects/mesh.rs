@@ -39,6 +39,12 @@ pub enum Shape {
     /// whose colour is its normal (red across, green down, from 0 to 1)
     /// and its thickness (blue), opaque but its rim (the board's sprite).
     Drop = 7,
+    /// A lily pad (#803): a disc but a notch, its places across from -1
+    /// to 1; its radius and the pixels a logical one (the shape's second
+    /// and fourth numbers); a shadow (its third number 1) of its
+    /// vertices' colour, else the leaf (the board's gradient from its upper
+    /// left, its veins) as opaque as its vertices' alpha.
+    Pad = 8,
 }
 
 /// The glows' profiles: how opaque from the middle out, the board's

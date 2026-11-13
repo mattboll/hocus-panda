@@ -417,6 +417,7 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
     for live in [
         "effects.snow",
         "effects.rain-on-glass",
+        "effects.koi",
         "effects.fireflies",
         "effects.flames",
         "effects.shatter",
@@ -429,7 +430,7 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
         assert_eq!(row(&shown, live)["inert"], false, "{live}");
     }
     assert_eq!(row(&shown, "effects.aurora")["inert"], true);
-    assert_eq!(row(&shown, "effects.koi")["inert"], true);
+    assert_eq!(row(&shown, "effects.depth")["inert"], true);
     bed.click("control:effects.flames")?;
     let text = bed.written(|t| t.contains("[effects]\nflames = true"))?;
     assert!(text.starts_with("# My desktop, by hand."), "{text}");

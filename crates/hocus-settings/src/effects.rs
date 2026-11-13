@@ -30,6 +30,7 @@ const AGENTS: RowGroup = RowGroup {
 pub const BUILT: &[&str] = &[
     "effects.snow",
     "effects.rain-on-glass",
+    "effects.koi",
     "effects.fireflies",
     "effects.flames",
     "effects.shatter",
@@ -243,10 +244,10 @@ mod tests {
 
     /// Fifteen (the board's fourteen, and the second garland), each with
     /// its key of `[effects]`, off by default; the snow, the rain on the
-    /// glass, the fireflies, the flames, the glass, the jelly, the garlands
-    /// and the creatures built.
+    /// glass, the koi, the fireflies, the flames, the glass, the jelly, the
+    /// garlands and the creatures built.
     #[test]
-    fn fifteen_effects_off_by_default_nine_built() {
+    fn fifteen_effects_off_by_default_ten_built() {
         let all = settings();
         assert_eq!(all.len(), 15);
         for s in all {
@@ -262,6 +263,7 @@ mod tests {
             let built = [
                 "effects.snow",
                 "effects.rain-on-glass",
+                "effects.koi",
                 "effects.fireflies",
                 "effects.flames",
                 "effects.shatter",

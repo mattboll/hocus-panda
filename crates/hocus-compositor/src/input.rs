@@ -1040,6 +1040,9 @@ impl State {
                     self.pointer.kept_buttons.insert(button);
                     return;
                 }
+            } else if button == BTN_LEFT && self.surface_under(at).is_none() {
+                // On the wallpaper: the koi's pond rings (#803).
+                self.koi_click(at);
             }
         }
         pointer.button(

@@ -12,7 +12,7 @@ langue").
 | The wallpaper | Neige qui tient | `snow` | #795 (built) |
 | | Aurore en musique | `aurora` | #801 |
 | | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
-| | Bassin de koïs | `koi` | #803 |
+| | Bassin de koïs | `koi` | #803 (built) |
 | | Lucioles du soir | `fireflies` | #804 (built) |
 | | La lumière du jour | `daylight` | #805 |
 | | Bureaux en profondeur | `depth` | #806 |
@@ -492,6 +492,64 @@ held: glows on the wallpaper, moving, the window's pixels untouched; by
 day or off, nothing; still with reduced motion, nothing drawn per
 frame); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only fireflies::shots`.
+
+## A koi pond (#803)
+
+With `koi = true`, the wallpaper is a pond, as the board "Bassin de
+koïs" is: its JS ported (`effects/koi.rs`), its shader `KOI_FS`
+(`draw.rs`, `KOI`), its lengths in logical pixels.
+
+- **The water**: the board's field of heights, a cell every 5 px (its
+  240 × 144 over 1200 × 720), two wave steps a step (damped 0.978), a
+  drop every 1.5 to 4 s; each koi's head stirs it as it swims. Drawn as
+  the board's shader: what is under the water bent by the heights'
+  normal, tinted, lit where the surface curves up, a highlight from the
+  upper left, the sky's sheen toward the top. The heights go to the GPU
+  in half floats each step (bytes about a half where GLES 2 has none).
+- **The koi**: as many per pixel as the board's seven (its palette in
+  turn), each a spine of fourteen joints bending no more than 0.32 rad
+  at each, wagging, with its tail and side fins flapping, four spots
+  clipped to its body, a sheen from the head, a darker line down its
+  back, its eyes; its shadow 14 px right and 20 px down, blurred 6 px.
+  They wander within the work area (beside the bar). Drawn each step
+  with their shadows over the floor into a picture at the screen's
+  logical size, the board's `under` canvas (`Shape::Box` for the
+  blurred shadows, fills with a pixel's fringe, ovals).
+- **The floor**: the board's gradient, pebbles (as many per pixel as its
+  900) and vignette, drawn once a screen by a worker thread (tiny-skia),
+  then a texture.
+- **The pads**: as many per pixel as the board's six, one in three with
+  a water lily; over the water, bobbing with it, turning a little
+  (`Shape::Pad`: the notched disc, its two-circle gradient and veins).
+- **The pointer**: resting on the water (no window, no bar under it;
+  not moved 3 px for 0.6 s), the koi within 420 px come to it and circle
+  it at 90 px. A left click on the water rings it (26 px, the board's
+  amplitude) and the koi within 260 px flee for 1.4 s.
+- **Where**: in the wallpaper's place, under the bottom and background
+  layers, the snow, the fireflies, the windows and the bar; opaque.
+  Behind the glass of the bar stand the floor under still water and a
+  blank for the pads, which never change. With the rain on the glass on
+  too, the pond is the wallpaper: the rain needs a still picture to
+  refract, and waits. A moving wallpaper (#433) waits.
+- **Its cost**, a frame while it moves (60 steps a second), measured on
+  the CPU at 1440 × 900 (11 koi, 288 × 180 cells): the step 0.27 ms, the
+  meshes 0.19 ms (some 4 800 vertices), the heights made half floats
+  0.6 ms (some 400 kB uploaded); at 2560 × 1440 (30 koi) about three
+  times that. On the GPU: the floor and the koi drawn into the picture,
+  the water over the whole screen (six texture reads a pixel), the pads;
+  the whole screen drawn again each frame, as a moving wallpaper is.
+  Turned on: half a second of the board stepped at once (some 10 ms),
+  the floor drawn by its worker (0.1 to 0.3 s), meanwhile the wallpaper.
+- **When**: moving where it shows; with reduced motion drawn still (the
+  koi where they are, the water as it is), nothing per frame, a click
+  doing nothing; none in the power saver, while a screen is shared or
+  recorded, on the CPU, nor in a capture.
+
+Tests: `tests/koi.rs` (on GLES on Mesa's software device: the wallpaper
+turns to a pond whose koi swim, the window's pixels untouched; off,
+nothing; still with reduced motion, nothing drawn per frame); its
+screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only koi::shots`.
 
 ## Not built yet
 

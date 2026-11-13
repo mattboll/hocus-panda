@@ -9,6 +9,7 @@
 mod creatures;
 mod fireflies;
 mod garland;
+mod koi;
 mod layers;
 mod leaving;
 mod raindrops;
@@ -681,6 +682,7 @@ impl State {
             || self.fx.garland.is_some()
             || self.fx.raindrops.is_some()
             || self.fx.fireflies.is_some()
+            || self.fx.koi.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -882,6 +884,14 @@ impl State {
             Pick::All,
             &mut elements,
         );
+        // The koi's pond (#803), in the wallpaper's place: its pads over
+        // its water; still water and a blank in their place while the
+        // glass is blurred.
+        let koi = self.koi_layer(renderer, &frame).map(|k| {
+            elements.push(OutputElements::Fire(k.pads_blank));
+            elements.push(OutputElements::Fire(k.stand_in));
+            (k.pads, k.water)
+        });
         // The rain on the glass (#802), right over the wallpaper, which it
         // covers; the fogged glass alone in its place while the glass is
         // blurred.
@@ -904,11 +914,17 @@ impl State {
                 capture_glass,
             },
         );
+        let (koi_pads, koi_water) = koi.map_or((None, None), |(p, w)| (Some(p), Some(w)));
+        let (koi_still, koi_blank) = self
+            .koi_stand_ins(&frame)
+            .map_or((None, None), |(w, p)| (Some(w), Some(p)));
         for (layer, blank) in [
             (garland, self.garland_blank()),
             (snow, self.snow_blank(&frame)),
             (fireflies, self.fireflies_blank(&frame)),
             (rain, self.raindrops_stand_in(&frame)),
+            (koi_water, koi_still),
+            (koi_pads, koi_blank),
         ] {
             if let Some(layer) = layer
                 && let Some(blank) = blank
