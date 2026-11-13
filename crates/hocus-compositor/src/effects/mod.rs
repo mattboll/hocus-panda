@@ -20,12 +20,19 @@
 //! recording's frames; never on the CPU (pixman draws none: what would
 //! have played plays as it does without the effect); nothing drawn per
 //! frame once it is over.
+//!
+//! And none costs more than it shows (#815): those that play on their own
+//! (the snow, the garlands, the creatures) move on at most 60 times a
+//! second whatever the screens' refresh ([`Pace`]), what they draw
+//! staying the same between; and each tells the screen only what of it
+//! changed, so that what is still around it is not drawn again.
 
 pub mod creatures;
 pub mod draw;
 pub mod flames;
 pub mod garland;
 pub mod jelly;
+pub mod kept;
 pub mod mesh;
 pub mod motion;
 pub mod particles;
@@ -36,6 +43,8 @@ pub mod snow_look;
 pub mod snowing;
 
 pub use draw::{Fire, FireElement};
+
+use std::time::Duration;
 
 /// What the effects playing now keep from frame to frame.
 #[derive(Debug, Default)]
@@ -55,6 +64,54 @@ pub struct Live {
     pub tops: std::collections::HashMap<String, garland::Top>,
     /// The garlands hung so far, for their seeds.
     garlands: u64,
+    /// When they move on next (#815).
+    pub pace: Pace,
+}
+
+/// The effects' frames: at most this many a second.
+pub const FRAMES: u32 = 60;
+const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FRAMES as u64);
+/// An effect's frame comes this much early at most, to fall on the
+/// screen's frame next to it: at 60 Hz, one a refresh whatever its jitter.
+const EARLY: Duration = Duration::from_millis(4);
+
+/// When the effects that play on their own move on (#815): on a 60 Hz
+/// grid, whatever the screens' refresh, its frames falling on theirs.
+/// Between two, what they draw stays as it is (their elements keep their
+/// commits): a screen at 165 Hz draws them again only where something
+/// else changed.
+#[derive(Debug, Default)]
+pub struct Pace {
+    /// The next due, while one moves; `None`: at the next turn.
+    next: Option<Duration>,
+    /// Their time: what they show is as of it.
+    pub at: Duration,
+    /// Their frames so far, for the tests.
+    pub frames: u64,
+}
+
+impl Pace {
+    /// Whether they move on at `now` (the clock's, not the last frame's).
+    pub fn due(&self, now: Duration) -> bool {
+        self.next.is_none_or(|next| now + EARLY >= next)
+    }
+
+    /// They moved on to `at` at `now`; `moving`: they go on moving, the
+    /// next due a frame on, else at the next turn.
+    pub fn moved(&mut self, now: Duration, at: Duration, moving: bool) {
+        self.at = at;
+        self.next = moving.then(|| {
+            // On the grid, but never so late that two come at once.
+            let on = self.next.unwrap_or(now) + FRAME;
+            on.max(now + FRAME - EARLY)
+        });
+        self.frames += u64::from(moving);
+    }
+
+    /// When they move on next, while they move.
+    pub fn next(&self) -> Option<Duration> {
+        self.next
+    }
 }
 
 use crate::{State, model::Mode, model::WindowId};

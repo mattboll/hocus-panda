@@ -116,8 +116,9 @@ impl State {
             };
             let (texture, sheet) = kept;
             let k = sheet.k;
-            let pose =
-                moving.then(|| creature::look(creature.mood, live.time(now, creature.agent)));
+            // As of the effects' last frame (#815): the same between two.
+            let at = self.fx.pace.at;
+            let pose = moving.then(|| creature::look(creature.mood, live.time(at, creature.agent)));
             let laid = rig.lay(pose.as_ref(), &sheet);
             // Its box on whole pixels, as its sheet is.
             let bx = ((left - origin.x) * scale).round() as f32;

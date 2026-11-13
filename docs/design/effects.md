@@ -47,7 +47,18 @@ Every effect follows the same rules (`State::effects_still`, in
   light falls on the wallpaper alone, drawn under the windows and the
   bar;
 - once an effect is over, nothing more is drawn for it, and no frame is
-  asked for.
+  asked for;
+- none costs more than it shows (#815): an effect that plays on its own
+  (the snow, the garlands, the creatures, and those to come) moves on
+  at most 60 times a second whatever the screen's refresh
+  (`effects::Pace`), what it draws staying the same between two (a
+  screen at 165 Hz draws it again only where something else changed),
+  and it tells the screen only what of it changed: the flakes' places,
+  a cap's columns that grew, the garland's pieces, a panda's box, so
+  that the windows around stay as they were. Its shapes are drawn into a
+  texture kept from frame to frame (`effects/kept.rs`), again only as
+  they change. The windows' own motions (the jelly, the flames, the
+  shards) follow their window at the screen's rate.
 
 An effect is decided as it starts: a switch turned off, or a rule that
 starts holding, leaves one under way to end. An effect that lasts (the

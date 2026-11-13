@@ -7,6 +7,12 @@
 //! over what is under it. Pixman draws none of them: the effects do not
 //! start there.
 //!
+//! The effects that play on their own (#815) draw their shapes into a
+//! texture kept from frame to frame, again only as they change
+//! ([`Fire::keep_shapes`]): the screen then draws that texture where it
+//! is damaged in one call, however many places that is, and tells
+//! [`FireElement::changed_since`] only what changed.
+//!
 //! The flames' shader is the board's (`FLAME_FS` of "Fermer en flammes"),
 //! from WebGL into GLSL ES 1.00 as it was: its lengths in logical pixels.
 
@@ -16,14 +22,14 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            ImportMem, Offscreen, Renderer,
+            Bind, Color32F, Frame, ImportMem, Offscreen, Renderer, Texture,
             element::{Element, Id, Kind, RenderElement},
             gles::{Capability, GlesError, GlesFrame, GlesRenderer, GlesTexture, ffi},
             pixman::PixmanRenderer,
             utils::{CommitCounter, DamageSet, OpaqueRegions},
         },
     },
-    utils::{Buffer as BufferCoords, Physical, Point, Rectangle, Scale, Transform},
+    utils::{Buffer as BufferCoords, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
 use super::{flames::Burn, mesh::Mesh, particles::FLOATS, shatter::SHARD_FLOATS};
@@ -40,6 +46,11 @@ pub struct FireElement {
     /// Physical, output-local.
     geometry: Rectangle<i32, Physical>,
     what: What,
+    /// The commit before this one, and what changed since (from its
+    /// corner); without it, all of it changed.
+    since: Option<(CommitCounter, Vec<Rectangle<i32, Physical>>)>,
+    /// Whether it covers what is under it.
+    opaque: bool,
 }
 
 #[derive(Debug)]
@@ -75,6 +86,12 @@ enum What {
         vertices: Vec<f32>,
         width: f32,
         clip: Clip,
+    },
+    /// Shapes drawn into `texture` ([`Fire::keep_shapes`]), which lies
+    /// over `area` (from the element's corner) (#815).
+    Kept {
+        texture: Rc<dyn Any>,
+        area: Rectangle<i32, Physical>,
     },
     /// Nothing: what stands for an effect where it must not be seen (behind
     /// the glass, blurred once and kept).
@@ -171,6 +188,8 @@ impl FireElement {
             commit,
             geometry,
             what: What::Light(look),
+            since: None,
+            opaque: false,
         }
     }
 
@@ -193,6 +212,8 @@ impl FireElement {
                 embers,
                 clip,
             },
+            since: None,
+            opaque: false,
         }
     }
 }
@@ -213,6 +234,39 @@ impl FireElement {
             commit,
             geometry,
             what: What::Shapes { over, added, clip },
+            since: None,
+            opaque: false,
+        }
+    }
+
+    /// Only `rects` (from its corner) changed since commit `prev`.
+    #[must_use]
+    pub fn changed_since(
+        mut self,
+        prev: CommitCounter,
+        rects: Vec<Rectangle<i32, Physical>>,
+    ) -> Self {
+        self.since = Some((prev, rects));
+        self
+    }
+
+    /// Shapes kept in `texture` ([`Fire::keep_shapes`]), lying over `area`
+    /// within `geometry` (output-local, physical; `area` from its corner)
+    /// (#815).
+    pub fn kept(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        texture: Rc<dyn Any>,
+        area: Rectangle<i32, Physical>,
+    ) -> Self {
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Kept { texture, area },
+            since: None,
+            opaque: false,
         }
     }
 
@@ -230,6 +284,8 @@ impl FireElement {
             commit,
             geometry,
             what: What::Sprites { texture, vertices },
+            since: None,
+            opaque: false,
         }
     }
 
@@ -240,6 +296,8 @@ impl FireElement {
             commit: CommitCounter::default(),
             geometry,
             what: What::Blank,
+            since: None,
+            opaque: false,
         }
     }
 }
@@ -288,6 +346,19 @@ pub trait Fire: Renderer + Sized {
     /// (premultiplied, `size` pixels) made a texture. `None`: not drawn so.
     fn sheet(&mut self, rgba: &[u8], size: (i32, i32)) -> Option<Rc<dyn Any>>;
 
+    /// `over`, then `added` added to what is under them, where `clip`
+    /// says, drawn into a texture over `area` (where the meshes' places
+    /// are, physical), kept in `kept` and made again only for another
+    /// size (#815). `None`: not drawn so.
+    fn keep_shapes(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        area: Rectangle<i32, Physical>,
+        over: &Mesh,
+        added: &Mesh,
+        clip: &Clip,
+    ) -> Option<Rc<dyn Any>>;
+
     fn draw_fire(
         frame: &mut Self::Frame<'_, '_>,
         element: &FireElement,
@@ -328,6 +399,17 @@ impl Fire for PixmanRenderer {
     }
 
     fn sheet(&mut self, _rgba: &[u8], _size: (i32, i32)) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn keep_shapes(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _area: Rectangle<i32, Physical>,
+        _over: &Mesh,
+        _added: &Mesh,
+        _clip: &Clip,
+    ) -> Option<Rc<dyn Any>> {
         None
     }
 
@@ -835,6 +917,8 @@ impl Fire for GlesRenderer {
                 texture: kept,
                 look,
             },
+            since: None,
+            opaque: false,
         })
     }
 
@@ -862,6 +946,8 @@ impl Fire for GlesRenderer {
                 width,
                 clip,
             },
+            since: None,
+            opaque: false,
         })
     }
 
@@ -872,6 +958,37 @@ impl Fire for GlesRenderer {
             .map_err(|err| tracing::warn!(%err, "no sheet for the creatures"))
             .ok()?;
         Some(Rc::new(texture))
+    }
+
+    fn keep_shapes(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        area: Rectangle<i32, Physical>,
+        over: &Mesh,
+        added: &Mesh,
+        clip: &Clip,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let size = Size::<i32, BufferCoords>::from((area.size.w, area.size.h));
+        let mut kept = kept.borrow_mut();
+        let texture = match kept.as_ref().filter(|(s, _)| *s == size) {
+            Some((_, texture)) => texture.clone(),
+            None => {
+                let texture: GlesTexture =
+                    Offscreen::<GlesTexture>::create_buffer(self, Fourcc::Abgr8888, size)
+                        .map_err(|err| tracing::warn!(%err, "no texture for an effect's shapes"))
+                        .ok()?;
+                Rc::new(texture)
+            }
+        };
+        let mut target = texture.downcast_ref::<GlesTexture>()?.clone();
+        if let Err(err) = draw_kept(self, &programs, &mut target, area, [over, added], clip) {
+            tracing::warn!(%err, "could not draw an effect's shapes");
+            *kept = None;
+            return None;
+        }
+        *kept = Some((size, texture.clone()));
+        Some(texture)
     }
 
     fn draw_fire(
@@ -955,7 +1072,7 @@ impl Fire for GlesRenderer {
                     unsafe {
                         let boxes = scissors(gl, &projection, dst, damage);
                         shapes(
-                            gl, &programs, &matrix, instancing, over, added, clip, &boxes,
+                            gl, &programs, &matrix, instancing, over, added, clip, &boxes, false,
                         );
                     }
                 })
@@ -996,6 +1113,55 @@ impl Fire for GlesRenderer {
                     }
                 })
             }
+            What::Kept { texture, area } => {
+                let Some(texture) = texture.downcast_ref::<GlesTexture>() else {
+                    return Ok(());
+                };
+                // In one call however many places the frame redraws; its
+                // area where the element is drawn (stretched, magnified).
+                let k = |to: i32, from: i32| f64::from(to) / f64::from(from.max(1));
+                let (sx, sy) = (
+                    k(dst.size.w, element.geometry.size.w),
+                    k(dst.size.h, element.geometry.size.h),
+                );
+                let within = Rectangle::<i32, Physical>::new(
+                    (
+                        (f64::from(area.loc.x) * sx).round() as i32,
+                        (f64::from(area.loc.y) * sy).round() as i32,
+                    )
+                        .into(),
+                    (
+                        (f64::from(area.size.w) * sx).round() as i32,
+                        (f64::from(area.size.h) * sy).round() as i32,
+                    )
+                        .into(),
+                );
+                let at = Rectangle::new(dst.loc + within.loc, within.size);
+                let damage: Vec<Rectangle<i32, Physical>> = damage
+                    .iter()
+                    .filter_map(|d| {
+                        let mut d = d.intersection(within)?;
+                        d.loc -= within.loc;
+                        Some(d)
+                    })
+                    .collect();
+                if damage.is_empty() {
+                    return Ok(());
+                }
+                let size = texture.size();
+                let src = Rectangle::from_size((f64::from(size.w), f64::from(size.h)).into());
+                frame.render_texture_from_to(
+                    texture,
+                    src,
+                    at,
+                    &damage,
+                    &[],
+                    Transform::Normal,
+                    1.0,
+                    None,
+                    &[],
+                )
+            }
             What::Blank => Ok(()),
         }
     }
@@ -1026,6 +1192,53 @@ fn keep_picture<E: RenderElement<GlesRenderer>>(
     let rc: Rc<dyn Any> = Rc::new(texture);
     *kept = Some((size, rc.clone()));
     Some(rc)
+}
+
+/// Draws `meshes` (over, then added: their colour added, their alpha
+/// not, so that the texture drawn over what is under it adds them to it)
+/// into `target`, which lies over `area` where their places are.
+fn draw_kept(
+    renderer: &mut GlesRenderer,
+    programs: &Programs,
+    target: &mut GlesTexture,
+    area: Rectangle<i32, Physical>,
+    meshes: [&Mesh; 2],
+    clip: &Clip,
+) -> Result<(), String> {
+    let size = area.size;
+    let whole = Rectangle::from_size(size);
+    let instancing = renderer.capabilities().contains(&Capability::Instancing);
+    let mut framebuffer = renderer.bind(target).map_err(|e| e.to_string())?;
+    let mut frame = renderer
+        .render(&mut framebuffer, size, Transform::Normal)
+        .map_err(|e| e.to_string())?;
+    frame
+        .clear(Color32F::TRANSPARENT, &[whole])
+        .map_err(|e| e.to_string())?;
+    let matrix = crate::wobble::placed(frame.projection(), area, whole);
+    let [over, added] = meshes;
+    frame
+        .with_context(|gl| {
+            #[allow(unsafe_code)]
+            // SAFETY: the frame's context is current.
+            unsafe {
+                shapes(
+                    gl,
+                    programs,
+                    &matrix,
+                    instancing,
+                    over,
+                    added,
+                    clip,
+                    &[[0, 0, size.w, size.h]],
+                    true,
+                );
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    // The same context draws the output next, in order: no wait.
+    let _done = frame.finish().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Draws a window whole or in shards (#798), cut to the frame's damage.
@@ -1309,6 +1522,7 @@ unsafe fn shapes(
     added: &Mesh,
     clip: &Clip,
     boxes: &[[i32; 4]],
+    kept: bool,
 ) {
     let p = &programs.shapes;
     let [position, local, colour, shape] = programs.shapes_attribs.map(|a| a as u32);
@@ -1340,14 +1554,13 @@ unsafe fn shapes(
             if mesh.is_empty() {
                 continue;
             }
-            gl.BlendFunc(
-                ffi::ONE,
-                if add {
-                    ffi::ONE
-                } else {
-                    ffi::ONE_MINUS_SRC_ALPHA
-                },
-            );
+            match (add, kept) {
+                (false, _) => gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA),
+                (true, false) => gl.BlendFunc(ffi::ONE, ffi::ONE),
+                // Into a texture: its colour added, its alpha not, so that
+                // drawn over what is under it, it is added to that too.
+                (true, true) => gl.BlendFuncSeparate(ffi::ONE, ffi::ONE, ffi::ZERO, ffi::ONE),
+            }
             for (at, size, offset) in attribs {
                 gl.VertexAttribPointer(
                     at,
@@ -1409,13 +1622,21 @@ impl Element for FireElement {
     ) -> DamageSet<i32, Physical> {
         if commit == Some(self.commit) {
             DamageSet::default()
+        } else if let Some((prev, rects)) = &self.since
+            && commit == Some(*prev)
+        {
+            DamageSet::from_slice(rects)
         } else {
             DamageSet::from_slice(&[Rectangle::from_size(self.geometry.size)])
         }
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        OpaqueRegions::default()
+        if self.opaque {
+            OpaqueRegions::from_slice(&[Rectangle::from_size(self.geometry.size)])
+        } else {
+            OpaqueRegions::default()
+        }
     }
 
     fn alpha(&self) -> f32 {
