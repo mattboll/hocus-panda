@@ -12,7 +12,8 @@
 //! as creatures on their windows ([`creatures`], #796), windows in jelly
 //! ([`jelly`], #797), shattering into glass as they close
 //! ([`shatter`], #798), and a garland under the active window
-//! ([`garland`], #799).
+//! ([`garland`], #799); on the wallpaper, rain on the glass
+//! ([`raindrops`], #802) and evening fireflies ([`fireflies`], #804).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -23,12 +24,14 @@
 
 pub mod creatures;
 pub mod draw;
+pub mod fireflies;
 pub mod flames;
 pub mod garland;
 pub mod jelly;
 pub mod mesh;
 pub mod motion;
 pub mod particles;
+pub mod raindrops;
 pub mod rig;
 pub mod shatter;
 pub mod snow;
@@ -52,6 +55,16 @@ pub struct Live {
     pub garland: Option<garland::Garland>,
     /// The garlands hung so far, for their seeds.
     garlands: u64,
+    /// The rain on the glass, while it is on (#802).
+    pub raindrops: Option<raindrops::Rain>,
+    /// The rains started so far, for their seeds.
+    rains: u64,
+    /// The fireflies, while they are out (#804).
+    pub fireflies: Option<fireflies::Fireflies>,
+    /// The swarms come out so far, for their seeds.
+    swarms: u64,
+    /// Whether it is evening, while the fireflies are on.
+    pub dusk: fireflies::Dusk,
 }
 
 use crate::{State, model::Mode, model::WindowId};
@@ -67,7 +80,30 @@ pub enum Still {
     Cpu,
 }
 
+/// How an effect that lasts shows now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Plays {
+    Moving,
+    /// Drawn still (reduced motion): nothing drawn frame after frame.
+    Still,
+}
+
 impl State {
+    /// How an effect on the wallpaper that lasts, its switch `on`, shows
+    /// now: moving, still with reduced motion; `None`, not at all (in the
+    /// power saver, while a screen is shared or recorded, it waits; on the
+    /// CPU there is none).
+    pub(crate) fn wallpaper_effect(&self, on: bool) -> Option<Plays> {
+        if !on {
+            return None;
+        }
+        match self.effects_still() {
+            None => Some(Plays::Moving),
+            Some(Still::ReducedMotion) => Some(Plays::Still),
+            Some(Still::PowerSaver | Still::Shown | Still::Cpu) => None,
+        }
+    }
+
     /// Why no effect plays now; `None`: they may.
     pub(crate) fn effects_still(&self) -> Option<Still> {
         if self.reduced_motion() {

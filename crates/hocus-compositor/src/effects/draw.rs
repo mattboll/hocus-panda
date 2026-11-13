@@ -16,14 +16,14 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            ImportMem, Offscreen, Renderer,
+            Bind, Color32F, Frame, ImportMem, Offscreen, Renderer, Texture,
             element::{Element, Id, Kind, RenderElement},
             gles::{Capability, GlesError, GlesFrame, GlesRenderer, GlesTexture, ffi},
             pixman::PixmanRenderer,
             utils::{CommitCounter, DamageSet, OpaqueRegions},
         },
     },
-    utils::{Buffer as BufferCoords, Physical, Point, Rectangle, Scale, Transform},
+    utils::{Buffer as BufferCoords, Physical, Point, Rectangle, Scale, Size, Transform},
 };
 
 use super::{flames::Burn, mesh::Mesh, particles::FLOATS, shatter::SHARD_FLOATS};
@@ -40,6 +40,11 @@ pub struct FireElement {
     /// Physical, output-local.
     geometry: Rectangle<i32, Physical>,
     what: What,
+    /// The commit before this one, and what changed since (from its
+    /// corner); without it, all of it changed.
+    since: Option<(CommitCounter, Vec<Rectangle<i32, Physical>>)>,
+    /// Whether it covers what is under it.
+    opaque: bool,
 }
 
 #[derive(Debug)]
@@ -59,8 +64,22 @@ enum What {
         clip: Clip,
     },
     /// Shapes of the snow (#795): those drawn over what is under them,
-    /// then those added to it, where they may show.
-    Shapes { over: Mesh, added: Mesh, clip: Clip },
+    /// then those added to it, then those screened over it (#804), where
+    /// they may show.
+    Shapes {
+        over: Mesh,
+        added: Mesh,
+        screened: Mesh,
+        clip: Clip,
+    },
+    /// The wallpaper as wet glass (#802): its picture sharp and blurred,
+    /// and the map of the drops on it (`None`: the fogged glass alone).
+    Rain {
+        sharp: Rc<dyn Any>,
+        blur: Rc<dyn Any>,
+        drops: Option<Rc<dyn Any>>,
+        look: RainLook,
+    },
     /// Pieces of a picture each drawn on a quad of its own (the creatures'
     /// parts, #796): [`SPRITE_FLOATS`] floats a vertex, six a quad.
     Sprites {
@@ -148,6 +167,18 @@ pub struct BurnLook {
     pub clip: Clip,
 }
 
+/// How the wet glass is drawn (#802): the screen's size (physical), the
+/// blurred picture's place over it (scaled about its middle as the board's,
+/// `uv * zoom + offset`), and how far a drop bends what is seen through it
+/// (in the screen's share, for the board's stage's share).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RainLook {
+    pub screen: [f32; 2],
+    pub zoom: [f32; 2],
+    pub offset: [f32; 2],
+    pub bend: [f32; 2],
+}
+
 /// A warm light: its centre and radii, element-local and physical, and
 /// its strength (the fire's, flickering).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -171,6 +202,8 @@ impl FireElement {
             commit,
             geometry,
             what: What::Light(look),
+            since: None,
+            opaque: false,
         }
     }
 
@@ -193,6 +226,8 @@ impl FireElement {
                 embers,
                 clip,
             },
+            since: None,
+            opaque: false,
         }
     }
 }
@@ -212,8 +247,63 @@ impl FireElement {
             id,
             commit,
             geometry,
-            what: What::Shapes { over, added, clip },
+            what: What::Shapes {
+                over,
+                added,
+                screened: Mesh::default(),
+                clip,
+            },
+            since: None,
+            opaque: false,
         }
+    }
+
+    /// The same, with `screened` screened over what is under them after
+    /// (#804).
+    #[must_use]
+    pub fn screened(mut self, mesh: Mesh) -> Self {
+        if let What::Shapes { screened, .. } = &mut self.what {
+            *screened = mesh;
+        }
+        self
+    }
+
+    /// The wallpaper `sharp` as wet glass over `geometry` (output-local,
+    /// physical): through the drops of the map `drops`, `blur` between
+    /// them (#802). Opaque. `None` drops: the fogged glass alone.
+    pub fn rain(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        textures: [Rc<dyn Any>; 2],
+        drops: Option<Rc<dyn Any>>,
+        look: RainLook,
+    ) -> Self {
+        let [sharp, blur] = textures;
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Rain {
+                sharp,
+                blur,
+                drops,
+                look,
+            },
+            since: None,
+            opaque: true,
+        }
+    }
+
+    /// Only `rects` (from its corner) changed since commit `prev`.
+    #[must_use]
+    pub fn changed_since(
+        mut self,
+        prev: CommitCounter,
+        rects: Vec<Rectangle<i32, Physical>>,
+    ) -> Self {
+        self.since = Some((prev, rects));
+        self
     }
 
     /// The pieces of `texture` (a sheet, [`Fire::sheet`]) laid by
@@ -230,6 +320,8 @@ impl FireElement {
             commit,
             geometry,
             what: What::Sprites { texture, vertices },
+            since: None,
+            opaque: false,
         }
     }
 
@@ -240,6 +332,8 @@ impl FireElement {
             commit: CommitCounter::default(),
             geometry,
             what: What::Blank,
+            since: None,
+            opaque: false,
         }
     }
 }
@@ -288,6 +382,17 @@ pub trait Fire: Renderer + Sized {
     /// (premultiplied, `size` pixels) made a texture. `None`: not drawn so.
     fn sheet(&mut self, rgba: &[u8], size: (i32, i32)) -> Option<Rc<dyn Any>>;
 
+    /// The map of the rain's drops (#802), `size` pixels, kept in `kept`:
+    /// drawn again from `mesh` (its drops, [`super::mesh::Shape::Drop`])
+    /// when `fresh` or new. `None`: not drawn so.
+    fn drop_map(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        mesh: impl FnOnce() -> Mesh,
+    ) -> Option<Rc<dyn Any>>;
+
     fn draw_fire(
         frame: &mut Self::Frame<'_, '_>,
         element: &FireElement,
@@ -328,6 +433,16 @@ impl Fire for PixmanRenderer {
     }
 
     fn sheet(&mut self, _rgba: &[u8], _size: (i32, i32)) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn drop_map(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _mesh: impl FnOnce() -> Mesh,
+    ) -> Option<Rc<dyn Any>> {
         None
     }
 
@@ -547,7 +662,8 @@ void main() {
 /// soft disc; a clump, an ellipse lit from its upper left (the board's
 /// two-point gradient, white from a focus at (-0.3, -0.3) to blue at its
 /// edge); a box blurred by a Gaussian (or sharp, its edges smoothed); a
-/// box with round corners, an oval and a glow (the garland's, #799).
+/// box with round corners, an oval and a glow (the garland's, #799; a
+/// firefly's, #804, its own colours); a drop of the rain's map (#802).
 /// Nothing where the clip says not.
 const SHAPES: &str = "#version 100
 precision highp float;
@@ -604,6 +720,21 @@ void main() {
     } else if (kind < 5.5) {
         float cover = clamp((1.0 - length(v_local)) * v_shape.y + 0.5, 0.0, 1.0);
         gl_FragColor = v_colour * cover;
+    } else if (kind > 6.5) {
+        float r = length(v_local);
+        float a = clamp((1.0 - r) * 6.0, 0.0, 1.0);
+        gl_FragColor = vec4(v_local * 0.5 + 0.5, sqrt(max(1.0 - r * r, 0.0)), 1.0) * a;
+    } else if (v_shape.y > 2.5) {
+        float d = length(v_local);
+        vec4 s0 = vec4(1.0, 1.0, 220.0 / 255.0, 1.0);
+        vec4 s1 = vec4(230.0 / 255.0, 1.0, 140.0 / 255.0, 1.0) * 0.95;
+        vec4 s2 = vec4(190.0 / 255.0, 240.0 / 255.0, 90.0 / 255.0, 1.0) * 0.35;
+        vec4 s3 = vec4(150.0 / 255.0, 220.0 / 255.0, 60.0 / 255.0, 1.0) * 0.08;
+        vec4 c = d < 0.08 ? mix(s0, s1, d / 0.08)
+            : d < 0.25 ? mix(s1, s2, (d - 0.08) / 0.17)
+            : d < 0.6 ? mix(s2, s3, (d - 0.25) / 0.35)
+            : mix(s3, vec4(0.0), clamp((d - 0.6) / 0.4, 0.0, 1.0));
+        gl_FragColor = c * v_colour.a;
     } else {
         float d = length(v_local);
         float a;
@@ -621,6 +752,51 @@ void main() {
         }
         gl_FragColor = v_colour * a;
     }
+}
+";
+
+/// The board's `RAIN_FS` (#802): the wallpaper through the map of the
+/// drops. Each drop a lens: the sharp picture seen through it moved
+/// against its normal, the more the thicker, brightened by its thickness,
+/// darkened at its rim, a highlight from the upper left; between the
+/// drops, the blurred picture darkened (fogged glass). The board's map
+/// came to its shader straight, nothing (0, 0, 0) around its drops, and
+/// was filtered so: at a drop's edge its normal is pulled to the upper
+/// left, a dark and lit outline. The map here is premultiplied, which
+/// filtered is the same but in a drop's own faint rim. `wet` 0: the
+/// fogged glass alone.
+const RAIN: &str = "#version 100
+precision highp float;
+uniform sampler2D sharp;
+uniform sampler2D blur;
+uniform sampler2D drops;
+uniform vec2 screen;
+uniform vec2 zoom;
+uniform vec2 offset;
+uniform vec2 bend;
+uniform float wet;
+varying vec2 v_px;
+
+void main() {
+    vec2 uv = v_px / screen;
+    vec3 fog = texture2D(blur, uv * zoom + offset).rgb * 0.82;
+    vec4 d = texture2D(drops, uv) * wet;
+    float a = d.a;
+    if (a < 0.05) {
+        gl_FragColor = vec4(fog, 1.0);
+        return;
+    }
+    vec3 m = d.rgb;
+    vec2 n = (m.rg - 0.5) * 2.0;
+    float thick = m.b;
+    vec2 ruv = uv - n * (0.010 + 0.022 * thick) * bend;
+    vec3 seen = texture2D(sharp, clamp(ruv, 0.0, 1.0)).rgb;
+    seen *= 1.0 + 0.35 * thick;
+    float rim = smoothstep(0.55, 1.0, length(n)) * 0.55;
+    seen = mix(seen, seen * 0.35, rim);
+    float spec = pow(max(0.0, dot(normalize(vec3(n, 0.65)), normalize(vec3(-0.4, -0.6, 0.7)))), 28.0);
+    seen += vec3(1.0) * spec * 0.55;
+    gl_FragColor = vec4(mix(fog, seen, smoothstep(0.05, 0.6, a)), 1.0);
 }
 ";
 
@@ -703,6 +879,7 @@ struct Programs {
     shapes: Program,
     sprites: Program,
     shards: Program,
+    rain: Program,
     /// The shards' look attribute.
     shard_look: ffi::types::GLint,
     /// The sprites' opacity attribute.
@@ -772,6 +949,14 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 &with_clip(SHARD, "varying vec2 v_at;\n"),
                 &["matrix", "tex", "width", "keep", "holes", "count"],
             )?;
+            let rain = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                RAIN,
+                &[
+                    "matrix", "sharp", "blur", "drops", "screen", "zoom", "offset", "bend", "wet",
+                ],
+            )?;
             let attrib =
                 |p: &Program, n: &std::ffi::CStr| gl.GetAttribLocation(p.program, n.as_ptr());
             let shard_look = attrib(&shards, c"look");
@@ -802,6 +987,7 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 shapes,
                 sprites,
                 shards,
+                rain,
                 shard_look,
                 shade,
                 colour,
@@ -835,6 +1021,8 @@ impl Fire for GlesRenderer {
                 texture: kept,
                 look,
             },
+            since: None,
+            opaque: false,
         })
     }
 
@@ -862,6 +1050,8 @@ impl Fire for GlesRenderer {
                 width,
                 clip,
             },
+            since: None,
+            opaque: false,
         })
     }
 
@@ -872,6 +1062,44 @@ impl Fire for GlesRenderer {
             .map_err(|err| tracing::warn!(%err, "no sheet for the creatures"))
             .ok()?;
         Some(Rc::new(texture))
+    }
+
+    fn drop_map(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        mesh: impl FnOnce() -> Mesh,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let size = Size::<i32, BufferCoords>::from(size);
+        let mut kept = kept.borrow_mut();
+        let had = kept
+            .as_ref()
+            .filter(|(s, _)| *s == size)
+            .map(|(_, t)| t.clone());
+        if let Some(map) = &had
+            && !fresh
+        {
+            return Some(map.clone());
+        }
+        let map = match had {
+            Some(map) => map,
+            None => {
+                let texture: GlesTexture =
+                    Offscreen::<GlesTexture>::create_buffer(self, Fourcc::Abgr8888, size)
+                        .map_err(|err| tracing::warn!(%err, "no map for the rain's drops"))
+                        .ok()?;
+                Rc::new(texture)
+            }
+        };
+        let mut texture = map.downcast_ref::<GlesTexture>()?.clone();
+        if let Err(err) = draw_drops(self, &programs, &mut texture, &mesh()) {
+            tracing::warn!(%err, "could not draw the rain's drops");
+            return None;
+        }
+        *kept = Some((size, map.clone()));
+        Some(map)
     }
 
     fn draw_fire(
@@ -947,7 +1175,12 @@ impl Fire for GlesRenderer {
                     sparks(gl, &programs, &matrix, instancing, smoke, embers, clip);
                 }
             }),
-            What::Shapes { over, added, clip } => {
+            What::Shapes {
+                over,
+                added,
+                screened,
+                clip,
+            } => {
                 let projection = *frame.projection();
                 frame.with_context(|gl| {
                     #[allow(unsafe_code)]
@@ -955,8 +1188,52 @@ impl Fire for GlesRenderer {
                     unsafe {
                         let boxes = scissors(gl, &projection, dst, damage);
                         shapes(
-                            gl, &programs, &matrix, instancing, over, added, clip, &boxes,
+                            gl,
+                            &programs,
+                            &matrix,
+                            instancing,
+                            [over, added, screened],
+                            clip,
+                            &boxes,
                         );
+                    }
+                })
+            }
+            What::Rain {
+                sharp,
+                blur,
+                drops,
+                look,
+            } => {
+                let tex = |t: &Rc<dyn Any>| t.downcast_ref::<GlesTexture>().map(|t| t.tex_id());
+                let (Some(sharp), Some(blur)) = (tex(sharp), tex(blur)) else {
+                    return Ok(());
+                };
+                let drops = drops.as_ref().and_then(tex);
+                let p = &programs.rain;
+                let look = *look;
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the frame's context is current; the third
+                    // unit is given back unbound, as `quads` gives the
+                    // first two.
+                    unsafe {
+                        quads(gl, p, &matrix, instancing, damage, corner, |gl| {
+                            bind(gl, 0, sharp, false);
+                            bind(gl, 1, blur, false);
+                            bind(gl, 2, drops.unwrap_or(blur), false);
+                            gl.Uniform1i(p.at("sharp"), 0);
+                            gl.Uniform1i(p.at("blur"), 1);
+                            gl.Uniform1i(p.at("drops"), 2);
+                            gl.Uniform2f(p.at("screen"), look.screen[0], look.screen[1]);
+                            gl.Uniform2f(p.at("zoom"), look.zoom[0], look.zoom[1]);
+                            gl.Uniform2f(p.at("offset"), look.offset[0], look.offset[1]);
+                            gl.Uniform2f(p.at("bend"), look.bend[0], look.bend[1]);
+                            gl.Uniform1f(p.at("wet"), if drops.is_some() { 1.0 } else { 0.0 });
+                        });
+                        gl.ActiveTexture(ffi::TEXTURE2);
+                        gl.BindTexture(ffi::TEXTURE_2D, 0);
+                        gl.ActiveTexture(ffi::TEXTURE0);
                     }
                 })
             }
@@ -1292,21 +1569,20 @@ unsafe fn scissors(
         .collect()
 }
 
-/// Draws the shapes `over` over, then `added` added, cut to each of
-/// `boxes` in turn.
+/// Draws the shapes `over` over, then `added` added, then `screened`
+/// screened over, cut to each of `boxes` in turn.
 ///
 /// # Safety
 ///
 /// The context must be current, its scissor test on (as smithay's frame
 /// has it).
-#[allow(unsafe_code, clippy::too_many_arguments)]
+#[allow(unsafe_code)]
 unsafe fn shapes(
     gl: &ffi::Gles2,
     programs: &Programs,
     matrix: &[f32; 9],
     instancing: bool,
-    over: &Mesh,
-    added: &Mesh,
+    [over, added, screened]: [&Mesh; 3],
     clip: &Clip,
     boxes: &[[i32; 4]],
 ) {
@@ -1336,18 +1612,15 @@ unsafe fn shapes(
                 gl.VertexAttribDivisor(at, 0);
             }
         }
-        for (mesh, add) in [(over, false), (added, true)] {
+        for (mesh, blend) in [
+            (over, ffi::ONE_MINUS_SRC_ALPHA),
+            (added, ffi::ONE),
+            (screened, ffi::ONE_MINUS_SRC_COLOR),
+        ] {
             if mesh.is_empty() {
                 continue;
             }
-            gl.BlendFunc(
-                ffi::ONE,
-                if add {
-                    ffi::ONE
-                } else {
-                    ffi::ONE_MINUS_SRC_ALPHA
-                },
-            );
+            gl.BlendFunc(ffi::ONE, blend);
             for (at, size, offset) in attribs {
                 gl.VertexAttribPointer(
                     at,
@@ -1375,6 +1648,49 @@ unsafe fn shapes(
             gl.DisableVertexAttribArray(at);
         }
     }
+}
+
+/// Draws the drops of `mesh` into `map`, cleared first.
+fn draw_drops(
+    renderer: &mut GlesRenderer,
+    programs: &Programs,
+    map: &mut GlesTexture,
+    mesh: &Mesh,
+) -> Result<(), String> {
+    let size = map.size();
+    let size = Size::<i32, Physical>::from((size.w, size.h));
+    let whole = Rectangle::from_size(size);
+    let instancing = renderer.capabilities().contains(&Capability::Instancing);
+    let mut target = renderer.bind(map).map_err(|e| e.to_string())?;
+    let mut frame = renderer
+        .render(&mut target, size, Transform::Normal)
+        .map_err(|e| e.to_string())?;
+    frame
+        .clear(Color32F::TRANSPARENT, &[whole])
+        .map_err(|e| e.to_string())?;
+    let matrix = crate::wobble::placed(frame.projection(), whole, whole);
+    let none = Mesh::default();
+    let clip = Clip::new([-1.0e7, -1.0e7, 1.0e7, 1.0e7], [], 1.0);
+    frame
+        .with_context(|gl| {
+            #[allow(unsafe_code)]
+            // SAFETY: the frame's context is current.
+            unsafe {
+                shapes(
+                    gl,
+                    programs,
+                    &matrix,
+                    instancing,
+                    [mesh, &none, &none],
+                    &clip,
+                    &[[0, 0, size.w, size.h]],
+                );
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    // The same context draws the output next, in order: no wait.
+    let _done = frame.finish().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 impl Element for FireElement {
@@ -1409,13 +1725,21 @@ impl Element for FireElement {
     ) -> DamageSet<i32, Physical> {
         if commit == Some(self.commit) {
             DamageSet::default()
+        } else if let Some((prev, rects)) = &self.since
+            && commit == Some(*prev)
+        {
+            DamageSet::from_slice(rects)
         } else {
             DamageSet::from_slice(&[Rectangle::from_size(self.geometry.size)])
         }
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        OpaqueRegions::default()
+        if self.opaque {
+            OpaqueRegions::from_slice(&[Rectangle::from_size(self.geometry.size)])
+        } else {
+            OpaqueRegions::default()
+        }
     }
 
     fn alpha(&self) -> f32 {

@@ -11,9 +11,9 @@ langue").
 |---|---|---|---|
 | The wallpaper | Neige qui tient | `snow` | #795 (built) |
 | | Aurore en musique | `aurora` | #801 |
-| | Pluie sur la vitre | `rain-on-glass` | #802 |
+| | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
 | | Bassin de koïs | `koi` | #803 |
-| | Lucioles du soir | `fireflies` | #804 |
+| | Lucioles du soir | `fireflies` | #804 (built) |
 | | La lumière du jour | `daylight` | #805 |
 | | Bureaux en profondeur | `depth` | #806 |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
@@ -361,6 +361,92 @@ the focus to another window; none on a maximised window; off, nothing;
 still with reduced motion, nothing drawn per frame); its screenshots,
 `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
 garland::shots`.
+
+## Rain on the glass (#802)
+
+With `rain-on-glass = true`, the wallpaper becomes wet glass, as the
+board "Pluie sur la vitre" does: its JS ported (`effects/raindrops.rs`),
+its shader `RAIN_FS` (`draw.rs`, `RAIN`), its lengths in logical pixels.
+There is no weather on the desktop: it rains whenever the switch is on.
+
+- **The drops**: as many per pixel as the board's over its 1200 × 720
+  (900 still at first, 1100 at most, six more a step; 20 big ones at
+  first, 2.4 more a second), warmed up as the board's (300 steps of
+  1/30 s). A big drop grows where it formed, then from 13 px slides at
+  `30 + 14 r` px/s (eased, stuttering one step in seventeen), wavering,
+  swallowing the still drops it touches (up to 24 px), wiping its trail
+  (6 radii above it), leaving a small drop now and then. Stepped at 60
+  steps a second (the board's frames) with a seeded generator; the still
+  drops in a grid of 32 px cells, so a big drop looks only at those near.
+- **The glass**: the board's two pictures, the wallpaper sharp and blurred
+  (18 px of standard deviation, as the board's `blur(9px)` at half size,
+  scaled about its middle as its margin did), made once by the glass's
+  blur (`glass.rs`, a pane of its own; again only with a new wallpaper).
+  Each frame the drops' map is drawn at half the logical size (each drop
+  a lens: its normal and thickness as colour, `Shape::Drop`), then the
+  glass from it: through a drop the sharp wallpaper moved against its
+  normal, brightened by its thickness, darkened at its rim, a highlight
+  from the upper left; between them the blurred wallpaper at 82 %.
+- **Where**: over the wallpaper, under the bottom and background layers,
+  the snow, the windows and the bar; opaque (the wallpaper under it is
+  not drawn). Behind the glass of the bar stands the fogged glass alone,
+  which never changes. A moving wallpaper (#433) waits while it rains on
+  its screen: the rain refracts its still picture. With the snow on too,
+  both show: the snow falls in front of the wet glass.
+- **Its cost**: the drops' map (some 1 700 small quads at 1440 × 900, at
+  half size) and the glass drawn again where drops changed, about 30
+  rectangles, 3 % of the screen, a frame (`FireElement`'s damage since its
+  last commit); the simulation on the CPU, a few hundred comparisons a
+  step.
+- **When**: moving where it shows, a frame each refresh; with reduced
+  motion drawn still (its drops where they are), nothing per frame; none
+  in the power saver, while a screen is shared or recorded, on the CPU,
+  nor in a capture.
+
+Tests: `tests/rain_on_glass.rs` (on GLES on Mesa's software device: the
+wallpaper fogs and its drops move, the window's pixels untouched; off,
+nothing; still with reduced motion, nothing drawn per frame); its
+screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only rain_on_glass::shots`.
+
+## Evening fireflies (#804)
+
+With `fireflies = true`, fireflies come out after sunset, as the board
+"Lucioles du soir" does: its JS ported (`effects/fireflies.rs`), its
+lengths in logical pixels.
+
+- **The evening**: the sun below the horizon (-0.833°, NOAA's equations)
+  at the place of the system's time zone (its line in
+  `/usr/share/zoneinfo/zone1970.tab`; without one, 45° north at the
+  longitude of its offset), on the wall clock, looked at every minute
+  while the switch is on; they come out over 3 s, and go at sunrise.
+- **The swarm**: as many per pixel as the board's 70 over the 1000 × 720
+  left of its bar, over each screen's work area (beside the bar), in its
+  lower 70 %; each drifting on the board's flow field (26 px/s, eased),
+  wrapping round the sides, kept off the top fifth; each blinking every
+  2.5 to 5.5 s (`sin(πt)^0.7` over 0.77 s), nearer ones larger and
+  brighter. Stepped at 60 steps a second with a seeded generator.
+- **The pointer**: resting on the wallpaper (no window, no bar under it;
+  not moved 3 px for 0.8 s), the fireflies within 360 px are drawn to it
+  and circle it at some 70 px. The board's own pointer that wandered when
+  none was on its stage is not built.
+- **The look**: the board's glow (warm white to lime to nothing) added to
+  the wallpaper, 14 to 40 px across its radius; the bright ones' wider
+  glow (2.6 times) screened over it, as the board's front canvas was. The
+  board screened that one over its window too: here it stays on the
+  wallpaper, under the windows and the bar.
+- **Its cost**: some 120 quads at 1440 × 900 and 30 wide ones, in one
+  call each; the box they cover (most of the screen's lower part) drawn
+  again each frame, the wallpaper under it too.
+- **When**: moving, a frame each refresh; with reduced motion still, lit
+  at 60 %, nothing per frame; none by day, in the power saver, while a
+  screen is shared or recorded, on the CPU, nor in a capture.
+
+Tests: `tests/fireflies.rs` (on GLES on Mesa's software device, evening
+held: glows on the wallpaper, moving, the window's pixels untouched; by
+day or off, nothing; still with reduced motion, nothing drawn per
+frame); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only fireflies::shots`.
 
 ## Not built yet
 

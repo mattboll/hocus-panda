@@ -300,6 +300,34 @@ impl Headless {
         Some((garland.window, garland.bulbs()))
     }
 
+    /// The rain on the glass (#802) on screen `name`, while it is on: its
+    /// still drops and its big ones.
+    pub fn raindrops(&self, name: &str) -> Option<(usize, usize)> {
+        let rain = self.app.state.fx.raindrops.as_ref()?;
+        Some(rain.panes.get(name)?.counts())
+    }
+
+    /// The fireflies (#804) over screen `name`, while they are out: where
+    /// each is (global, logical).
+    pub fn fireflies(&self, name: &str) -> Option<Vec<(f64, f64)>> {
+        let flies = self.app.state.fx.fireflies.as_ref()?;
+        let swarm = flies.swarms.get(name)?;
+        let [x, y, _, _] = swarm.zone;
+        Some(
+            swarm
+                .flies
+                .iter()
+                .map(|f| (f64::from(x + f.x), f64::from(y + f.y)))
+                .collect(),
+        )
+    }
+
+    /// Evening for the fireflies (#804), or not, whatever the clock says.
+    pub fn hold_evening(&mut self, evening: bool) {
+        self.app.state.fx.dusk.held = Some(evening);
+        self.app.state.redraw = true;
+    }
+
     /// Whether it snows (#795): the snow kept, falling or still.
     pub fn snowing(&self) -> bool {
         self.app.state.fx.snow.is_some()

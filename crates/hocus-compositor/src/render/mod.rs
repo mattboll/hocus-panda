@@ -7,9 +7,11 @@
 //! clients are told once a frame is out.
 
 mod creatures;
+mod fireflies;
 mod garland;
 mod layers;
 mod leaving;
+mod raindrops;
 mod snow;
 mod stack;
 
@@ -676,7 +678,9 @@ impl State {
         // The snow's programs made before it is drawn (#795).
         if (self.fx.snow.is_some()
             || !self.fx.creatures.shown.is_empty()
-            || self.fx.garland.is_some())
+            || self.fx.garland.is_some()
+            || self.fx.raindrops.is_some()
+            || self.fx.fireflies.is_some())
             && purpose.screen()
         {
             renderer.effects_ready();
@@ -848,14 +852,18 @@ impl State {
         if purpose.screen() {
             self.burn_lights(&frame, &mut elements);
         }
-        // The garland's halos (#799), then the snow's layer (#795): on
-        // the wallpaper, under the windows and the bar; a blank in their
-        // place while the glass is blurred.
+        // The garland's halos (#799), then the snow's layer (#795), then
+        // the fireflies (#804): on the wallpaper, under the windows and
+        // the bar; a blank in their place while the glass is blurred.
         let garland = self.garland_layer(&frame, &looks).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
         });
         let snow = self.snow_layer(&frame).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
+        let fireflies = self.fireflies_layer(&frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
         });
@@ -867,6 +875,13 @@ impl State {
             Pick::All,
             &mut elements,
         );
+        // The rain on the glass (#802), right over the wallpaper, which it
+        // covers; the fogged glass alone in its place while the glass is
+        // blurred.
+        let rain = self.raindrops_layer(renderer, &frame).map(|(fog, layer)| {
+            elements.push(OutputElements::Fire(fog));
+            layer
+        });
         // A wallpaper that moves (#433): still behind the glass, which is
         // blurred from what is behind it below; moving on the screen, put
         // in its place once the glass is done.
@@ -885,6 +900,8 @@ impl State {
         for (layer, blank) in [
             (garland, self.garland_blank()),
             (snow, self.snow_blank(&frame)),
+            (fireflies, self.fireflies_blank(&frame)),
+            (rain, self.raindrops_stand_in(&frame)),
         ] {
             if let Some(layer) = layer
                 && let Some(blank) = blank

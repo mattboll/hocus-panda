@@ -5,16 +5,19 @@
 use serde::Deserialize;
 
 /// The fourteen effects, grouped as Settings › Appearance › Effects shows
-/// them. The flames, the glass, the jelly, the garland, the snow and the
-/// creatures play so far; the others' switches are kept for their tickets.
+/// them. The flames, the glass, the jelly, the garland, the snow, the rain
+/// on the glass, the fireflies and the creatures play so far; the others'
+/// switches are kept for their tickets.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Effects {
     // The wallpaper.
     pub snow: bool,
     pub aurora: bool,
+    /// The wallpaper becomes wet glass, drops forming and sliding (#802).
     pub rain_on_glass: bool,
     pub koi: bool,
+    /// After sunset, fireflies drift and blink over the wallpaper (#804).
     pub fireflies: bool,
     pub daylight: bool,
     pub depth: bool,
