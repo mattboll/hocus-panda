@@ -70,8 +70,22 @@ enum What {
         clip: Clip,
     },
     /// Shapes of the snow (#795): those drawn over what is under them,
-    /// then those added to it, where they may show.
-    Shapes { over: Mesh, added: Mesh, clip: Clip },
+    /// then those added to it, then those screened over it (#804), where
+    /// they may show.
+    Shapes {
+        over: Mesh,
+        added: Mesh,
+        screened: Mesh,
+        clip: Clip,
+    },
+    /// The wallpaper as wet glass (#802): its picture sharp and blurred,
+    /// and the map of the drops on it (`None`: the fogged glass alone).
+    Rain {
+        sharp: Rc<dyn Any>,
+        blur: Rc<dyn Any>,
+        drops: Option<Rc<dyn Any>>,
+        look: RainLook,
+    },
     /// Pieces of a picture each drawn on a quad of its own (the creatures'
     /// parts, #796): [`SPRITE_FLOATS`] floats a vertex, six a quad.
     Sprites {
@@ -86,6 +100,16 @@ enum What {
         vertices: Vec<f32>,
         width: f32,
         clip: Clip,
+    },
+    /// A picture drawn once and kept (the daylight's sky, #805), over all
+    /// its geometry.
+    Picture { texture: Rc<dyn Any> },
+    /// The koi's pond (#803): the picture under its water, seen through
+    /// the water's heights.
+    Koi {
+        under: Rc<dyn Any>,
+        heights: Option<Rc<dyn Any>>,
+        look: KoiLook,
     },
     /// Shapes drawn into `texture` ([`Fire::keep_shapes`]), which lies
     /// over `area` (from the element's corner) (#815).
@@ -165,6 +189,91 @@ pub struct BurnLook {
     pub clip: Clip,
 }
 
+/// How the wet glass is drawn (#802): the screen's size (physical), the
+/// blurred picture's place over it (scaled about its middle as the board's,
+/// `uv * zoom + offset`), and how far a drop bends what is seen through it
+/// (in the screen's share, for the board's stage's share).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RainLook {
+    pub screen: [f32; 2],
+    pub zoom: [f32; 2],
+    pub offset: [f32; 2],
+    pub bend: [f32; 2],
+}
+
+/// How the koi's water is drawn (#803): the screen's size (physical); the
+/// heights' share of the screen (`uv * grid` in their texture) and a cell
+/// of theirs; how far the water bends what is under it (in the screen's
+/// share, for the board's stage's share); the heights' zero (0 in floats,
+/// a half in bytes). Without heights, the water still.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KoiLook {
+    pub screen: [f32; 2],
+    pub grid: [f32; 2],
+    pub texel: [f32; 2],
+    pub bend: [f32; 2],
+    pub zero: f32,
+}
+
+/// How the daylight's sky is drawn (#805), from the board's `frame`: the
+/// screen's size (logical) and its scale; the hour's colours (0 to 1);
+/// the sun's place (logical), whether it is up and its height; how bright
+/// the stars are and how many.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkyLook {
+    pub size: [f32; 2],
+    pub scale: f32,
+    pub top: [f32; 3],
+    pub bottom: [f32; 3],
+    pub light: [f32; 3],
+    pub grade: f32,
+    pub sun: [f32; 2],
+    pub up: bool,
+    pub elev: f32,
+    pub night: f32,
+    pub stars: f32,
+}
+
+/// How the landscape of desktops in depth is drawn (#806): the screen's
+/// size (logical) and its scale, the camera's travel and pull (logical
+/// pixels, 1 at rest), the sky's drift, the layers' phases.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DepthLook {
+    pub size: [f32; 2],
+    pub scale: f32,
+    pub cam: f32,
+    pub zoom: f32,
+    pub drift: f32,
+    pub phases: [[f32; 3]; 6],
+}
+
+/// How the aurora following the music is drawn (#801): the screen's size
+/// (logical), the board's time, and its music's swell and kick (0 when it
+/// is still).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AuroraLook {
+    pub size: [f32; 2],
+    pub time: f32,
+    pub amp: f32,
+    pub beat: f32,
+}
+
+impl AuroraLook {
+    /// What it shows, its floats' bits.
+    pub fn key(&self) -> [u32; 3] {
+        [self.time.to_bits(), self.amp.to_bits(), self.beat.to_bits()]
+    }
+}
+
+/// The koi's water's heights as a texture, kept between frames: its size
+/// (cells), and whether it holds half floats (else bytes).
+#[derive(Debug)]
+pub struct Heights {
+    pub size: (i32, i32),
+    pub texture: Rc<dyn Any>,
+    pub half: bool,
+}
+
 /// A warm light: its centre and radii, element-local and physical, and
 /// its strength (the fire's, flickering).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -233,9 +342,51 @@ impl FireElement {
             id,
             commit,
             geometry,
-            what: What::Shapes { over, added, clip },
+            what: What::Shapes {
+                over,
+                added,
+                screened: Mesh::default(),
+                clip,
+            },
             since: None,
             opaque: false,
+        }
+    }
+
+    /// The same, with `screened` screened over what is under them after
+    /// (#804).
+    #[must_use]
+    pub fn screened(mut self, mesh: Mesh) -> Self {
+        if let What::Shapes { screened, .. } = &mut self.what {
+            *screened = mesh;
+        }
+        self
+    }
+
+    /// The wallpaper `sharp` as wet glass over `geometry` (output-local,
+    /// physical): through the drops of the map `drops`, `blur` between
+    /// them (#802). Opaque. `None` drops: the fogged glass alone.
+    pub fn rain(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        textures: [Rc<dyn Any>; 2],
+        drops: Option<Rc<dyn Any>>,
+        look: RainLook,
+    ) -> Self {
+        let [sharp, blur] = textures;
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Rain {
+                sharp,
+                blur,
+                drops,
+                look,
+            },
+            since: None,
+            opaque: true,
         }
     }
 
@@ -286,6 +437,48 @@ impl FireElement {
             what: What::Sprites { texture, vertices },
             since: None,
             opaque: false,
+        }
+    }
+
+    /// The kept picture `texture` over `geometry` (output-local, physical),
+    /// opaque (#805).
+    pub fn picture(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        texture: Rc<dyn Any>,
+    ) -> Self {
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Picture { texture },
+            since: None,
+            opaque: true,
+        }
+    }
+
+    /// The koi's pond over `geometry` (output-local, physical): `under`
+    /// through the water of `heights` (`None`: still), opaque (#803).
+    pub fn koi(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        under: Rc<dyn Any>,
+        heights: Option<Rc<dyn Any>>,
+        look: KoiLook,
+    ) -> Self {
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Koi {
+                under,
+                heights,
+                look,
+            },
+            since: None,
+            opaque: true,
         }
     }
 
@@ -346,6 +539,70 @@ pub trait Fire: Renderer + Sized {
     /// (premultiplied, `size` pixels) made a texture. `None`: not drawn so.
     fn sheet(&mut self, rgba: &[u8], size: (i32, i32)) -> Option<Rc<dyn Any>>;
 
+    /// The map of the rain's drops (#802), `size` pixels, kept in `kept`:
+    /// drawn again from `mesh` (its drops, [`super::mesh::Shape::Drop`])
+    /// when `fresh` or new. `None`: not drawn so.
+    fn drop_map(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        mesh: impl FnOnce() -> Mesh,
+    ) -> Option<Rc<dyn Any>>;
+
+    /// The daylight's sky (#805), `size` pixels, kept in `kept`: drawn
+    /// again from `look` when `fresh` or new. `None`: not drawn so.
+    fn sky(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: SkyLook,
+    ) -> Option<Rc<dyn Any>>;
+
+    /// The landscape of desktops in depth (#806), `size` pixels, kept in
+    /// `kept`: drawn again from `look` when `fresh` or new. `None`: not
+    /// drawn so.
+    fn depth(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: DepthLook,
+    ) -> Option<Rc<dyn Any>>;
+
+    /// The aurora following the music (#801), `size` pixels, kept in
+    /// `kept`: drawn again from `look` when `fresh` or new. `None`: not
+    /// drawn so.
+    fn aurora(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: AuroraLook,
+    ) -> Option<Rc<dyn Any>>;
+
+    /// What is under the koi's water (#803), `size` pixels, kept in
+    /// `kept`: the pond's floor `floor` (a sheet), and over it `mesh` (the
+    /// koi and their shadows), drawn again each time. `None`: not drawn
+    /// so.
+    fn koi_under(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        floor: &Rc<dyn Any>,
+        mesh: &Mesh,
+    ) -> Option<Rc<dyn Any>>;
+
+    /// The koi's water's `heights` (`size` cells, by rows) into the
+    /// texture kept in `kept`. `None`: not drawn so.
+    fn koi_heights(
+        &mut self,
+        kept: &RefCell<Option<Heights>>,
+        size: (i32, i32),
+        heights: &[f32],
+    ) -> Option<(Rc<dyn Any>, bool)>;
+
     /// `over`, then `added` added to what is under them, where `clip`
     /// says, drawn into a texture over `area` (where the meshes' places
     /// are, physical), kept in `kept` and made again only for another
@@ -399,6 +656,65 @@ impl Fire for PixmanRenderer {
     }
 
     fn sheet(&mut self, _rgba: &[u8], _size: (i32, i32)) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn drop_map(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _mesh: impl FnOnce() -> Mesh,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn sky(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _look: SkyLook,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn depth(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _look: DepthLook,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn aurora(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _look: AuroraLook,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn koi_under(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _floor: &Rc<dyn Any>,
+        _mesh: &Mesh,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn koi_heights(
+        &mut self,
+        _kept: &RefCell<Option<Heights>>,
+        _size: (i32, i32),
+        _heights: &[f32],
+    ) -> Option<(Rc<dyn Any>, bool)> {
         None
     }
 
@@ -629,8 +945,9 @@ void main() {
 /// soft disc; a clump, an ellipse lit from its upper left (the board's
 /// two-point gradient, white from a focus at (-0.3, -0.3) to blue at its
 /// edge); a box blurred by a Gaussian (or sharp, its edges smoothed); a
-/// box with round corners, an oval and a glow (the garland's, #799).
-/// Nothing where the clip says not.
+/// box with round corners, an oval and a glow (the garland's, #799; a
+/// firefly's, #804, its own colours); a drop of the rain's map (#802); a
+/// lily pad or its shadow (#803). Nothing where the clip says not.
 const SHAPES: &str = "#version 100
 precision highp float;
 varying vec2 v_local;
@@ -686,6 +1003,51 @@ void main() {
     } else if (kind < 5.5) {
         float cover = clamp((1.0 - length(v_local)) * v_shape.y + 0.5, 0.0, 1.0);
         gl_FragColor = v_colour * cover;
+    } else if (kind > 7.5) {
+        vec2 p = v_local;
+        float d = length(p);
+        float a = atan(p.y, p.x);
+        float shadow = v_shape.z;
+        float cover = clamp((1.0 - d) * v_shape.y + 0.5, 0.0, 1.0);
+        float notch = shadow > 0.5 ? 0.2 : 0.22;
+        cover *= clamp((abs(a) - notch) * d * v_shape.y + 0.5, 0.0, 1.0);
+        if (shadow > 0.5) {
+            gl_FragColor = v_colour * cover;
+        } else {
+            float r0 = 2.0 * v_shape.w / v_shape.y;
+            vec2 e = vec2(0.3, 0.3);
+            float dr = 1.0 - r0;
+            vec2 q = p + e;
+            float qa = dot(e, e) - dr * dr;
+            float qb = dot(q, e) + r0 * dr;
+            float qc = dot(q, q) - r0 * r0;
+            float t = clamp((qb - sqrt(max(qb * qb - qa * qc, 0.0))) / qa, 0.0, 1.0);
+            vec3 c = mix(vec3(111.0, 174.0, 92.0), vec3(47.0, 107.0, 58.0), t) / 255.0;
+            float a2 = a < 0.0 ? a + 6.2831853 : a;
+            float k = clamp(floor((a2 - 0.4) / 0.62 + 0.5), 0.0, 8.0);
+            float off = a2 - (0.4 + k * 0.62);
+            float far = d * v_shape.y;
+            float dist = cos(off) > 0.0 ? far * abs(sin(off)) : far;
+            float vein = clamp(1.0 - dist / v_shape.w, 0.0, 1.0)
+                * clamp((0.92 - d) * v_shape.y + 0.5, 0.0, 1.0) * 0.25;
+            c = mix(c, vec3(190.0, 230.0, 170.0) / 255.0, vein);
+            gl_FragColor = vec4(c, 1.0) * cover * v_colour.a;
+        }
+    } else if (kind > 6.5) {
+        float r = length(v_local);
+        float a = clamp((1.0 - r) * 6.0, 0.0, 1.0);
+        gl_FragColor = vec4(v_local * 0.5 + 0.5, sqrt(max(1.0 - r * r, 0.0)), 1.0) * a;
+    } else if (v_shape.y > 2.5) {
+        float d = length(v_local);
+        vec4 s0 = vec4(1.0, 1.0, 220.0 / 255.0, 1.0);
+        vec4 s1 = vec4(230.0 / 255.0, 1.0, 140.0 / 255.0, 1.0) * 0.95;
+        vec4 s2 = vec4(190.0 / 255.0, 240.0 / 255.0, 90.0 / 255.0, 1.0) * 0.35;
+        vec4 s3 = vec4(150.0 / 255.0, 220.0 / 255.0, 60.0 / 255.0, 1.0) * 0.08;
+        vec4 c = d < 0.08 ? mix(s0, s1, d / 0.08)
+            : d < 0.25 ? mix(s1, s2, (d - 0.08) / 0.17)
+            : d < 0.6 ? mix(s2, s3, (d - 0.25) / 0.35)
+            : mix(s3, vec4(0.0), clamp((d - 0.6) / 0.4, 0.0, 1.0));
+        gl_FragColor = c * v_colour.a;
     } else {
         float d = length(v_local);
         float a;
@@ -703,6 +1065,323 @@ void main() {
         }
         gl_FragColor = v_colour * a;
     }
+}
+";
+
+/// The board's `RAIN_FS` (#802): the wallpaper through the map of the
+/// drops. Each drop a lens: the sharp picture seen through it moved
+/// against its normal, the more the thicker, brightened by its thickness,
+/// darkened at its rim, a highlight from the upper left; between the
+/// drops, the blurred picture darkened (fogged glass). The board's map
+/// came to its shader straight, nothing (0, 0, 0) around its drops, and
+/// was filtered so: at a drop's edge its normal is pulled to the upper
+/// left, a dark and lit outline. The map here is premultiplied, which
+/// filtered is the same but in a drop's own faint rim. `wet` 0: the
+/// fogged glass alone.
+const RAIN: &str = "#version 100
+precision highp float;
+uniform sampler2D sharp;
+uniform sampler2D blur;
+uniform sampler2D drops;
+uniform vec2 screen;
+uniform vec2 zoom;
+uniform vec2 offset;
+uniform vec2 bend;
+uniform float wet;
+varying vec2 v_px;
+
+void main() {
+    vec2 uv = v_px / screen;
+    vec3 fog = texture2D(blur, uv * zoom + offset).rgb * 0.82;
+    vec4 d = texture2D(drops, uv) * wet;
+    float a = d.a;
+    if (a < 0.05) {
+        gl_FragColor = vec4(fog, 1.0);
+        return;
+    }
+    vec3 m = d.rgb;
+    vec2 n = (m.rg - 0.5) * 2.0;
+    float thick = m.b;
+    vec2 ruv = uv - n * (0.010 + 0.022 * thick) * bend;
+    vec3 seen = texture2D(sharp, clamp(ruv, 0.0, 1.0)).rgb;
+    seen *= 1.0 + 0.35 * thick;
+    float rim = smoothstep(0.55, 1.0, length(n)) * 0.55;
+    seen = mix(seen, seen * 0.35, rim);
+    float spec = pow(max(0.0, dot(normalize(vec3(n, 0.65)), normalize(vec3(-0.4, -0.6, 0.7)))), 28.0);
+    seen += vec3(1.0) * spec * 0.55;
+    gl_FragColor = vec4(mix(fog, seen, smoothstep(0.05, 0.6, a)), 1.0);
+}
+";
+
+/// The board's `KOI_FS` (#803): what is under the water seen through it,
+/// bent by its heights' normal, tinted, lit where the water's surface
+/// curves up, with a highlight from the upper left and the sky's sheen
+/// toward the top. Its heights, in the board's floats (or, without them,
+/// its bytes about a half); `still`, flat water.
+const KOI: &str = "#version 100
+precision highp float;
+uniform sampler2D under;
+uniform sampler2D heights;
+uniform vec2 screen;
+uniform vec2 grid;
+uniform vec2 texel;
+uniform vec2 bend;
+uniform float zero;
+uniform float still;
+varying vec2 v_px;
+
+float h(vec2 p) { return still > 0.5 ? 0.0 : texture2D(heights, p).r - zero; }
+void main() {
+    vec2 uv = v_px / screen;
+    vec2 q = uv * grid;
+    vec2 tx = vec2(texel.x, 0.0);
+    vec2 ty = vec2(0.0, texel.y);
+    float c = h(q);
+    float r = h(q + tx);
+    float l = h(q - tx);
+    float d = h(q + ty);
+    float u = h(q - ty);
+    float dx = r - l;
+    float dy = d - u;
+    float lap = r + l + d + u - 4.0 * c;
+    vec3 n = normalize(vec3(-dx * 4.0, -dy * 4.0, 1.0));
+    vec3 seen = texture2D(under, clamp(uv + n.xy * 0.035 * bend, 0.0, 1.0)).rgb;
+    vec3 water = mix(seen, seen * vec3(0.55, 0.85, 0.85) + vec3(0.0, 0.03, 0.04), 0.35);
+    water += vec3(0.75, 0.95, 1.0) * smoothstep(0.004, 0.06, -lap) * 0.28;
+    vec3 lt = normalize(vec3(-0.35, -0.55, 0.75));
+    float spec = pow(max(0.0, dot(reflect(-lt, n), vec3(0.0, 0.0, 1.0))), 60.0);
+    water += vec3(1.0, 0.98, 0.92) * spec * 0.9;
+    float sky = smoothstep(0.0, 1.0, 1.0 - uv.y) * 0.06;
+    water += vec3(0.55, 0.75, 0.85) * sky;
+    gl_FragColor = vec4(water, 1.0);
+}
+";
+
+/// The board "La lumière du jour"'s sky (#805), its canvas drawn as one
+/// shader, in its logical pixels: the gradient (top, bottom at 75 %, the
+/// bottom half darkened at the foot), its stars (1.4 px squares at its
+/// places, `(i × 7919) mod 1200` and `(i × 4513) mod 432` over its 1200 ×
+/// 720, stretched over the screen: on another width the board's own
+/// formula lines them up), by day the sun's
+/// halo (380 px: 55 %, 22 % at 15 %, nothing), its disc (26 px, the light
+/// whitened 40 %) and its seven rays added (from the sun toward the
+/// screen's bottom middle, 0.09 apart, 0.06 wide, fading out over
+/// 1100 px), by night the moon's halo and disc; the two ridges; the hour's
+/// light graded over it all (soft light), as the board's grading canvas.
+const SKY: &str = "#version 100
+precision highp float;
+uniform vec2 size;
+uniform float px;
+uniform vec3 top;
+uniform vec3 bottom;
+uniform vec3 light;
+uniform float grade;
+uniform vec2 sun;
+uniform float up;
+uniform float elev;
+uniform float night;
+uniform float stars;
+varying vec2 v_px;
+
+vec3 over(vec3 c, vec3 s, float a) { return c * (1.0 - a) + s * a; }
+float disc(vec2 p, vec2 at, float r) { return clamp((r - length(p - at)) * px + 0.5, 0.0, 1.0); }
+float ridge(float x, float y0, float amp, float f, float s) {
+    return y0 + sin(x * f + s) * amp + sin(x * f * 2.3 + s) * amp * 0.4;
+}
+float soft(float b, float s) {
+    if (s <= 0.5) {
+        return b - (1.0 - 2.0 * s) * b * (1.0 - b);
+    }
+    float d = b <= 0.25 ? ((16.0 * b - 12.0) * b + 4.0) * b : sqrt(b);
+    return b + (2.0 * s - 1.0) * (d - b);
+}
+void main() {
+    vec2 p = v_px / px;
+    float w = size.x;
+    float h = size.y;
+    float t = p.y / h;
+    vec3 foot = mix(bottom, vec3(10.0, 10.0, 20.0) / 255.0, 0.5);
+    vec3 c = t < 0.75 ? mix(top, bottom, t / 0.75) : mix(bottom, foot, clamp((t - 0.75) / 0.25, 0.0, 1.0));
+    if (night > 0.0 && p.y < h * 0.6 + 2.0) {
+        float half_px = 0.5 / px;
+        for (int i = 0; i < 1024; i++) {
+            float fi = float(i);
+            if (fi >= stars) {
+                break;
+            }
+            vec2 s = vec2(mod(fi * 7919.0, 1200.0) / 1200.0 * w, mod(fi * 4513.0, 432.0) / 432.0 * h * 0.6);
+            vec2 lo = max(p - half_px, s);
+            vec2 hi = min(p + half_px, s + 1.4);
+            float cover = max(hi.x - lo.x, 0.0) * max(hi.y - lo.y, 0.0) * px * px;
+            if (cover > 0.0) {
+                float a = 0.5 * night * (0.4 + 0.6 * mod(fi * 37.0, 10.0) / 10.0);
+                c = over(c, vec3(230.0, 235.0, 255.0) / 255.0, a * min(cover, 1.0));
+            }
+        }
+    }
+    if (up > 0.5) {
+        float d = length(p - sun);
+        float a = d < 57.0 ? mix(0.55, 0.22, d / 57.0) : mix(0.22, 0.0, clamp((d - 57.0) / 323.0, 0.0, 1.0));
+        c = over(c, light, a);
+        c = over(c, mix(light, vec3(1.0), 0.4), disc(p, sun, 26.0));
+        vec2 v = p - sun;
+        float dist = length(v);
+        float base = atan(h - sun.y, w / 2.0 - sun.x);
+        float ang = atan(v.y, v.x);
+        float strength = 0.07 * (1.0 - elev * 0.6);
+        for (int r = 0; r < 7; r++) {
+            float off = ang - (base + (float(r) - 3.0) * 0.09);
+            off = mod(off + 3.14159265, 6.2831853) - 3.14159265;
+            float inside = clamp((0.03 - abs(off)) * dist * px + 0.5, 0.0, 1.0);
+            float along = dist * cos(off);
+            float fall = clamp(1.0 - along / 1100.0, 0.0, 1.0);
+            c += light * strength * fall * inside * step(0.0, along);
+        }
+    } else {
+        vec2 moon = vec2(w * 0.72, h * 0.18);
+        float a = 0.25 * clamp(1.0 - length(p - moon) / 160.0, 0.0, 1.0);
+        c = over(c, vec3(200.0, 210.0, 255.0) / 255.0, a);
+        c = over(c, vec3(232.0, 236.0, 248.0) / 255.0, disc(p, moon, 16.0));
+    }
+    float y1 = ridge(p.x, h * 0.72, 26.0, 0.005, 1.0);
+    c = over(c, mix(bottom, vec3(22.0, 20.0, 40.0) / 255.0, 0.74), clamp((p.y - y1) * px + 0.5, 0.0, 1.0));
+    float y2 = ridge(p.x, h * 0.82, 20.0, 0.008, 3.0);
+    c = over(c, mix(bottom, vec3(10.0, 10.0, 22.0) / 255.0, 0.88), clamp((p.y - y2) * px + 0.5, 0.0, 1.0));
+    c = clamp(c, 0.0, 1.0);
+    vec3 g = vec3(soft(c.r, light.r), soft(c.g, light.g), soft(c.b, light.b));
+    gl_FragColor = vec4(mix(c, g, grade), 1.0);
+}
+";
+
+/// The board "Bureaux en profondeur"'s landscape (#806), its canvases
+/// drawn as one shader, in its logical pixels. The sky: its gradient
+/// (`#1C1B44`, `#5B3E73` at 45 %, `#D9786A` at 72 %, `#F4B27A`) and its
+/// sun's glow (260 px round at 62 % of the screen's width and 200 px, 52 %
+/// of its height), drifting with the camera. Over it six layers, back to
+/// front, each moved by its share of the camera's travel (`f`) and pulled
+/// back about the screen's middle by its share of the camera's pull: the
+/// board's silhouettes (peaks, hills, ground under trees: sums of sines
+/// over its own phases), its trees (triangles, 18 to 58 px tall, 1.6
+/// times on the layer that moves with the windows, 2.6 on the nearest; a
+/// cell each, where the board's canvas went on by a random step: 6 to
+/// 24 px, 90 to 350 px for the nearest), the sunset's haze over the far
+/// ones (`#F4B27A`, `0.18 (1 - f)` at the foot). Below the screen the
+/// layers go on, as the board's 1.35 screens tall did. Composed front to
+/// back: where the near layers cover a pixel whole, the far ones and the
+/// sky are not looked at; a pixel looks at the trees of the cells that
+/// may reach it alone.
+const DEPTH: &str = "#version 100
+precision highp float;
+uniform vec2 size;
+uniform float px;
+uniform float cam;
+uniform float zoom;
+uniform float drift;
+uniform vec3 ph[6];
+varying vec2 v_px;
+
+const vec3 HAZE = vec3(244.0, 178.0, 122.0) / 255.0;
+
+float hash(float n) { return fract(sin(n * 91.3458 + 47.21) * 43758.5453); }
+
+float ground(float x, float base, float amp, vec3 p, float kind) {
+    if (kind < 0.5) {
+        return base - amp * (0.62 * pow(1.0 - abs(sin(x * 0.0024 + p.x)), 1.7)
+            + 0.28 * pow(1.0 - abs(sin(x * 0.0063 + p.y)), 2.0)
+            + 0.06 * sin(x * 0.031 + p.z));
+    }
+    return base - amp * (0.6 * sin(x * 0.0026 + p.x) + 0.3 * sin(x * 0.0071 + p.y)
+        + 0.1 * sin(x * 0.023 + p.z));
+}
+
+/// How much of the layer covers `p` (logical, on the screen), and how
+/// hazy it is there. `kind`: 0 peaks, 1 hills, 2 ground under trees, the
+/// trees of the cells `reach` (from, to) around the pixel's looked at.
+float layer(vec2 p, float f, float level, float amp, vec3 phase, float kind,
+        float cell, float jitter, float tall, float seed, vec2 reach, out float haze) {
+    float z = 1.0 - (1.0 - zoom) * f;
+    vec2 c = size * 0.5;
+    vec2 q = (p - c) / z + c;
+    float x = q.x + cam * f + 20.0;
+    float y = q.y;
+    float s = px * z;
+    float base = size.y * level;
+    float a = clamp((y - ground(x, base, amp, phase, kind)) * s + 0.5, 0.0, 1.0);
+    if (kind > 1.5 && a < 1.0 && y > base - amp + 5.0 - 58.0 * tall) {
+        float i0 = floor(x / cell);
+        for (int k = -3; k <= 3; k++) {
+            if (float(k) < reach.x || float(k) > reach.y) {
+                continue;
+            }
+            float i = i0 + float(k);
+            float tx = (i + 0.5 + jitter * (hash(i + seed) - 0.5)) * cell;
+            float h = (18.0 + 40.0 * hash(i * 1.7 + seed + 3.1)) * tall;
+            float y0 = ground(tx, base, amp, phase, kind) + 6.0;
+            float top = y0 - h;
+            if (y > top - 1.0 && y < y0) {
+                float d = (y - top) * 0.28 - abs(x - tx);
+                a = max(a, clamp(d * 0.963 * s + 0.5, 0.0, 1.0));
+            }
+        }
+    }
+    float from = base - amp * 1.2;
+    haze = 0.18 * max(1.0 - f, 0.0) * clamp((y - from) / (size.y - from), 0.0, 1.0);
+    return a;
+}
+
+void main() {
+    vec2 p = v_px / px;
+    // Front to back: what a nearer layer covers whole is not looked at.
+    vec3 c = vec3(0.0);
+    float covered = 0.0;
+    float haze;
+    float a = layer(p, 1.55, 1.02, 34.0, ph[5], 2.0, 220.0, 0.6, 2.6, 37.0, vec2(-1.0, 1.0), haze);
+    c += (1.0 - covered) * a * vec3(10.0, 10.0, 22.0) / 255.0;
+    covered += (1.0 - covered) * a;
+    if (covered < 0.999) {
+        a = layer(p, 1.0, 0.93, 16.0, ph[4], 2.0, 15.0, 0.8, 1.6, 23.0, vec2(-3.0, 2.0), haze);
+        c += (1.0 - covered) * a * vec3(20.0, 19.0, 39.0) / 255.0;
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.72, 0.84, 26.0, ph[3], 2.0, 15.0, 0.8, 1.0, 11.0, vec2(-2.0, 1.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(36.0, 32.0, 61.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.38, 0.76, 46.0, ph[2], 1.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(59.0, 44.0, 85.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.14, 0.68, 110.0, ph[1], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(90.0, 63.0, 110.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.03, 0.62, 150.0, ph[0], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(126.0, 90.0, 134.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        float t = clamp(p.y / size.y, 0.0, 1.0);
+        vec3 c0 = vec3(28.0, 27.0, 68.0) / 255.0;
+        vec3 c1 = vec3(91.0, 62.0, 115.0) / 255.0;
+        vec3 c2 = vec3(217.0, 120.0, 106.0) / 255.0;
+        vec3 c3 = vec3(244.0, 178.0, 122.0) / 255.0;
+        vec3 sky = t < 0.45 ? mix(c0, c1, t / 0.45)
+            : t < 0.72 ? mix(c1, c2, (t - 0.45) / 0.27)
+            : mix(c2, c3, (t - 0.72) / 0.28);
+        vec2 sun = vec2((size.x + 200.0) * 0.62 - drift, size.y * 0.52);
+        float d = length(p - sun) / 260.0;
+        vec4 glow = d < 0.12
+            ? mix(vec4(255.0, 230.0, 190.0, 242.25), vec4(255.0, 210.0, 160.0, 153.0), d / 0.12)
+            : mix(vec4(255.0, 210.0, 160.0, 153.0), vec4(255.0, 190.0, 140.0, 0.0),
+                clamp((d - 0.12) / 0.88, 0.0, 1.0));
+        sky = mix(sky, glow.rgb / 255.0, glow.a / 255.0);
+        c += (1.0 - covered) * sky;
+    }
+    gl_FragColor = vec4(c, 1.0);
 }
 ";
 
@@ -772,6 +1451,97 @@ void main() {
 }
 ";
 
+/// The board "Aurore en musique"'s night (#801), its `AURORA_FS` from
+/// WebGL as it was, its lengths the board's: `size` is its `uRes`, the
+/// screen's logical size, `res` the picture's pixels (0.6 of them, as its
+/// canvas). Its sky's gradient and twinkling stars, three curtains (each
+/// a fold of sines and noise, rippling on the beat, its rays five octaves
+/// of noise, green at the foot to violet at the top), the two ridges lit by
+/// them, a grain, a vignette and a soft tone curve. One change: the
+/// noise's lattice wraps at 1024 cells (the board's for all it showed), so
+/// that its hash keeps its precision as its time goes on.
+const AURORA: &str = "#version 100
+precision highp float;
+uniform vec2 size;
+uniform vec2 res;
+uniform float time;
+uniform float amp;
+uniform float beat;
+varying vec2 v_px;
+
+float hash(vec2 p) {
+    p = fract(p * vec2(234.34, 435.345));
+    p += dot(p, p + 34.23);
+    return fract(p.x * p.y);
+}
+float lattice(vec2 i) { return hash(mod(i, 1024.0)); }
+float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(lattice(i), lattice(i + vec2(1.0, 0.0)), u.x),
+        mix(lattice(i + vec2(0.0, 1.0)), lattice(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 5; i++) {
+        v += a * noise(p);
+        p = p * 2.02 + 11.7;
+        a *= 0.5;
+    }
+    return v;
+}
+vec3 curtain(vec2 uv, float seed, float base, float t, vec3 low, vec3 high, float gain) {
+    float x = uv.x * (size.x / size.y);
+    float fold = 0.06 * sin(x * 3.1 + t * 0.45 + seed)
+        + 0.05 * (fbm(vec2(x * 0.9 + seed, t * 0.06)) - 0.5) * 2.0;
+    float ripple = 0.022 * beat * sin(x * 18.0 - t * 9.0 + seed);
+    float b = base + fold + ripple;
+    float d = uv.y - b;
+    float below = exp(min(d, 0.0) * 55.0);
+    float above = exp(-max(d, 0.0) * (6.5 - 2.5 * amp));
+    float env = smoothstep(0.38, 0.68, fbm(vec2(x * 0.5 + seed * 3.0, t * 0.025)));
+    float warp = fbm(vec2(x * 1.6 + seed, t * 0.09)) * 4.0;
+    float rays = fbm(vec2(x * 26.0 + warp, t * 0.35 + seed));
+    rays = pow(rays, 2.2) * 2.4;
+    float body = below * above * (0.35 + rays);
+    float edge = exp(-abs(d) * 38.0) * 0.9;
+    vec3 col = mix(low, high * 0.75, smoothstep(0.0, 0.22, d));
+    float shimmer = 0.85 + 0.15 * sin(t * 2.0 + x * 9.0 + seed);
+    return col * (body + edge * (0.4 + rays)) * gain * shimmer * env;
+}
+void main() {
+    vec2 uv = vec2(v_px.x / res.x, 1.0 - v_px.y / res.y);
+    float t = time;
+    vec3 sky = mix(vec3(0.035, 0.07, 0.11), vec3(0.008, 0.012, 0.035), smoothstep(0.1, 1.0, uv.y));
+    vec2 sp = uv * size / 2.5;
+    vec2 cell = floor(sp);
+    float h = hash(cell);
+    if (h > 0.986) {
+        vec2 c = cell + 0.5 + (vec2(hash(cell + 3.1), hash(cell + 7.7)) - 0.5) * 0.6;
+        float d = length(sp - c);
+        float tw = 0.55 + 0.45 * sin(t * (1.0 + h * 3.0) + h * 60.0);
+        sky += vec3(0.85, 0.9, 1.0) * smoothstep(1.1, 0.0, d) * tw * (h - 0.986) * 70.0
+            * smoothstep(0.25, 0.6, uv.y);
+    }
+    float gain = 0.7 + 0.8 * amp;
+    vec3 a = curtain(uv, 1.3, 0.50, t, vec3(0.15, 1.0, 0.55), vec3(0.55, 0.25, 0.95), gain * 0.9);
+    a += curtain(uv, 4.7, 0.62, t * 0.8, vec3(0.1, 0.85, 0.75), vec3(0.85, 0.3, 0.7), gain * 0.55);
+    a += curtain(uv, 9.1, 0.40, t * 1.1, vec3(0.2, 0.95, 0.45), vec3(0.3, 0.5, 1.0), gain * 0.45);
+    vec3 col = sky + a * 0.9;
+    float x = uv.x * (size.x / size.y);
+    float ridgeFar = 0.15 + 0.15 * fbm(vec2(x * 1.1, 2.0)) + 0.035 * fbm(vec2(x * 6.0, 5.0));
+    float ridgeNear = 0.06 + 0.12 * fbm(vec2(x * 1.8 + 7.0, 9.0)) + 0.03 * fbm(vec2(x * 11.0, 1.0));
+    vec3 glowTint = a * 0.08;
+    if (uv.y < ridgeFar) col = mix(col, vec3(0.025, 0.04, 0.06) + glowTint, 0.92);
+    if (uv.y < ridgeNear) col = vec3(0.012, 0.018, 0.028) + glowTint * 0.5;
+    col += (hash(uv * size + t) - 0.5) * 0.018;
+    float vig = smoothstep(1.35, 0.35, length((uv - 0.5) * vec2(1.4, 1.0)));
+    col *= mix(0.75, 1.0, vig);
+    col = col / (1.0 + col * 0.35);
+    gl_FragColor = vec4(pow(col, vec3(0.92)), 1.0);
+}
+";
+
 /// The effects' programs of a renderer's context, made once; `None` where
 /// they do not compile, and the effects do not play.
 #[derive(Debug)]
@@ -785,6 +1555,11 @@ struct Programs {
     shapes: Program,
     sprites: Program,
     shards: Program,
+    rain: Program,
+    koi: Program,
+    sky: Program,
+    depth: Program,
+    aurora: Program,
     /// The shards' look attribute.
     shard_look: ffi::types::GLint,
     /// The sprites' opacity attribute.
@@ -854,6 +1629,44 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 &with_clip(SHARD, "varying vec2 v_at;\n"),
                 &["matrix", "tex", "width", "keep", "holes", "count"],
             )?;
+            let rain = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                RAIN,
+                &[
+                    "matrix", "sharp", "blur", "drops", "screen", "zoom", "offset", "bend", "wet",
+                ],
+            )?;
+            let koi = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                KOI,
+                &[
+                    "matrix", "under", "heights", "screen", "grid", "texel", "bend", "zero",
+                    "still",
+                ],
+            )?;
+            let sky = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                SKY,
+                &[
+                    "matrix", "size", "px", "top", "bottom", "light", "grade", "sun", "up", "elev",
+                    "night", "stars",
+                ],
+            )?;
+            let depth = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                DEPTH,
+                &["matrix", "size", "px", "cam", "zoom", "drift", "ph"],
+            )?;
+            let aurora = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                AURORA,
+                &["matrix", "size", "res", "time", "amp", "beat"],
+            )?;
             let attrib =
                 |p: &Program, n: &std::ffi::CStr| gl.GetAttribLocation(p.program, n.as_ptr());
             let shard_look = attrib(&shards, c"look");
@@ -884,6 +1697,11 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 shapes,
                 sprites,
                 shards,
+                rain,
+                koi,
+                sky,
+                depth,
+                aurora,
                 shard_look,
                 shade,
                 colour,
@@ -958,6 +1776,248 @@ impl Fire for GlesRenderer {
             .map_err(|err| tracing::warn!(%err, "no sheet for the creatures"))
             .ok()?;
         Some(Rc::new(texture))
+    }
+
+    fn drop_map(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        mesh: impl FnOnce() -> Mesh,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let size = Size::<i32, BufferCoords>::from(size);
+        let mut kept = kept.borrow_mut();
+        let had = kept
+            .as_ref()
+            .filter(|(s, _)| *s == size)
+            .map(|(_, t)| t.clone());
+        if let Some(map) = &had
+            && !fresh
+        {
+            return Some(map.clone());
+        }
+        let map = match had {
+            Some(map) => map,
+            None => {
+                let texture: GlesTexture =
+                    Offscreen::<GlesTexture>::create_buffer(self, Fourcc::Abgr8888, size)
+                        .map_err(|err| tracing::warn!(%err, "no map for the rain's drops"))
+                        .ok()?;
+                Rc::new(texture)
+            }
+        };
+        let mut texture = map.downcast_ref::<GlesTexture>()?.clone();
+        if let Err(err) = draw_drops(self, &programs, &mut texture, &mesh()) {
+            tracing::warn!(%err, "could not draw the rain's drops");
+            return None;
+        }
+        *kept = Some((size, map.clone()));
+        Some(map)
+    }
+
+    fn sky(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: SkyLook,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let (mut texture, map) = kept_target(self, kept, size, fresh, "the daylight's sky")?;
+        if let Some(map) = map {
+            return Some(map);
+        }
+        let p = &programs.sky;
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current.
+            unsafe {
+                quads(gl, p, matrix, instancing, &[whole], whole.loc, |gl| {
+                    gl.Uniform2f(p.at("size"), look.size[0], look.size[1]);
+                    gl.Uniform1f(p.at("px"), look.scale);
+                    let [r, g, b] = look.top;
+                    gl.Uniform3f(p.at("top"), r, g, b);
+                    let [r, g, b] = look.bottom;
+                    gl.Uniform3f(p.at("bottom"), r, g, b);
+                    let [r, g, b] = look.light;
+                    gl.Uniform3f(p.at("light"), r, g, b);
+                    gl.Uniform1f(p.at("grade"), look.grade);
+                    gl.Uniform2f(p.at("sun"), look.sun[0], look.sun[1]);
+                    gl.Uniform1f(p.at("up"), if look.up { 1.0 } else { 0.0 });
+                    gl.Uniform1f(p.at("elev"), look.elev);
+                    gl.Uniform1f(p.at("night"), look.night);
+                    gl.Uniform1f(p.at("stars"), look.stars);
+                });
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the daylight's sky");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn depth(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: DepthLook,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let (mut texture, map) = kept_target(self, kept, size, fresh, "the landscape in depth")?;
+        if let Some(map) = map {
+            return Some(map);
+        }
+        let p = &programs.depth;
+        let phases: Vec<f32> = look.phases.iter().flatten().copied().collect();
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current; `phases` holds the six
+            // vec3 the array takes.
+            unsafe {
+                quads(gl, p, matrix, instancing, &[whole], whole.loc, |gl| {
+                    gl.Uniform2f(p.at("size"), look.size[0], look.size[1]);
+                    gl.Uniform1f(p.at("px"), look.scale);
+                    gl.Uniform1f(p.at("cam"), look.cam);
+                    gl.Uniform1f(p.at("zoom"), look.zoom);
+                    gl.Uniform1f(p.at("drift"), look.drift);
+                    gl.Uniform3fv(p.at("ph"), 6, phases.as_ptr());
+                });
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the landscape in depth");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn aurora(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: AuroraLook,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let (mut texture, map) = kept_target(self, kept, size, fresh, "the aurora")?;
+        if let Some(map) = map {
+            return Some(map);
+        }
+        let p = &programs.aurora;
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current.
+            unsafe {
+                quads(gl, p, matrix, instancing, &[whole], whole.loc, |gl| {
+                    gl.Uniform2f(p.at("size"), look.size[0], look.size[1]);
+                    gl.Uniform2f(p.at("res"), size.0 as f32, size.1 as f32);
+                    gl.Uniform1f(p.at("time"), look.time);
+                    gl.Uniform1f(p.at("amp"), look.amp);
+                    gl.Uniform1f(p.at("beat"), look.beat);
+                });
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the aurora");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn koi_under(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        floor: &Rc<dyn Any>,
+        mesh: &Mesh,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let floor = floor.downcast_ref::<GlesTexture>()?.tex_id();
+        let (mut texture, _) = kept_target(self, kept, size, true, "the koi's pond")?;
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        // The floor whole, as a sprite: its corners, their places in it.
+        let mut quad = Vec::with_capacity(6 * SPRITE_FLOATS);
+        for (x, y) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, 0.0), (w, h), (0.0, h)] {
+            quad.extend_from_slice(&[x, y, x / w, y / h, 1.0]);
+        }
+        let none = Mesh::default();
+        let clip = Clip::new([-1.0e7, -1.0e7, 1.0e7, 1.0e7], [], 1.0);
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            let boxes = [[0, 0, whole.size.w, whole.size.h]];
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current.
+            unsafe {
+                sprites(gl, &programs, matrix, instancing, floor, &quad, &boxes);
+                shapes(
+                    gl,
+                    &programs,
+                    matrix,
+                    instancing,
+                    [mesh, &none, &none],
+                    &clip,
+                    &boxes,
+                    false,
+                );
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the koi's pond");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn koi_heights(
+        &mut self,
+        kept: &RefCell<Option<Heights>>,
+        size: (i32, i32),
+        heights: &[f32],
+    ) -> Option<(Rc<dyn Any>, bool)> {
+        programs(self)?;
+        let mut kept = kept.borrow_mut();
+        let region = Rectangle::<i32, BufferCoords>::from_size(size.into());
+        if let Some(had) = kept.as_ref().filter(|k| k.size == size) {
+            let texture = had.texture.downcast_ref::<GlesTexture>()?;
+            let bytes = height_bytes(heights, had.half);
+            if let Err(err) = self.update_memory(texture, &bytes, region) {
+                tracing::warn!(%err, "could not move the koi's water");
+                return None;
+            }
+            return Some((had.texture.clone(), had.half));
+        }
+        // Half floats where the context takes them (GLES 3), as the board's
+        // floats; else bytes about a half, as its fallback.
+        let made = [(true, Fourcc::Abgr16161616f), (false, Fourcc::Abgr8888)]
+            .into_iter()
+            .find_map(|(half, format)| {
+                let bytes = height_bytes(heights, half);
+                let texture: GlesTexture = self
+                    .import_memory(&bytes, format, size.into(), false)
+                    .ok()?;
+                Some((half, texture))
+            });
+        let Some((half, texture)) = made else {
+            tracing::warn!("no texture for the koi's water");
+            return None;
+        };
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept = Some(Heights {
+            size,
+            texture: rc.clone(),
+            half,
+        });
+        Some((rc, half))
     }
 
     fn keep_shapes(
@@ -1064,7 +2124,12 @@ impl Fire for GlesRenderer {
                     sparks(gl, &programs, &matrix, instancing, smoke, embers, clip);
                 }
             }),
-            What::Shapes { over, added, clip } => {
+            What::Shapes {
+                over,
+                added,
+                screened,
+                clip,
+            } => {
                 let projection = *frame.projection();
                 frame.with_context(|gl| {
                     #[allow(unsafe_code)]
@@ -1072,8 +2137,53 @@ impl Fire for GlesRenderer {
                     unsafe {
                         let boxes = scissors(gl, &projection, dst, damage);
                         shapes(
-                            gl, &programs, &matrix, instancing, over, added, clip, &boxes, false,
+                            gl,
+                            &programs,
+                            &matrix,
+                            instancing,
+                            [over, added, screened],
+                            clip,
+                            &boxes,
+                            false,
                         );
+                    }
+                })
+            }
+            What::Rain {
+                sharp,
+                blur,
+                drops,
+                look,
+            } => {
+                let tex = |t: &Rc<dyn Any>| t.downcast_ref::<GlesTexture>().map(|t| t.tex_id());
+                let (Some(sharp), Some(blur)) = (tex(sharp), tex(blur)) else {
+                    return Ok(());
+                };
+                let drops = drops.as_ref().and_then(tex);
+                let p = &programs.rain;
+                let look = *look;
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the frame's context is current; the third
+                    // unit is given back unbound, as `quads` gives the
+                    // first two.
+                    unsafe {
+                        quads(gl, p, &matrix, instancing, damage, corner, |gl| {
+                            bind(gl, 0, sharp, false);
+                            bind(gl, 1, blur, false);
+                            bind(gl, 2, drops.unwrap_or(blur), false);
+                            gl.Uniform1i(p.at("sharp"), 0);
+                            gl.Uniform1i(p.at("blur"), 1);
+                            gl.Uniform1i(p.at("drops"), 2);
+                            gl.Uniform2f(p.at("screen"), look.screen[0], look.screen[1]);
+                            gl.Uniform2f(p.at("zoom"), look.zoom[0], look.zoom[1]);
+                            gl.Uniform2f(p.at("offset"), look.offset[0], look.offset[1]);
+                            gl.Uniform2f(p.at("bend"), look.bend[0], look.bend[1]);
+                            gl.Uniform1f(p.at("wet"), if drops.is_some() { 1.0 } else { 0.0 });
+                        });
+                        gl.ActiveTexture(ffi::TEXTURE2);
+                        gl.BindTexture(ffi::TEXTURE_2D, 0);
+                        gl.ActiveTexture(ffi::TEXTURE0);
                     }
                 })
             }
@@ -1110,6 +2220,68 @@ impl Fire for GlesRenderer {
                         shards(
                             gl, &programs, &matrix, instancing, tex, vertices, *width, clip, &boxes,
                         );
+                    }
+                })
+            }
+            What::Picture { texture } => {
+                let Some(texture) = texture.downcast_ref::<GlesTexture>() else {
+                    return Ok(());
+                };
+                let tex = texture.tex_id();
+                let g = element.geometry;
+                let (x0, y0) = (g.loc.x as f32, g.loc.y as f32);
+                let (x1, y1) = (x0 + g.size.w as f32, y0 + g.size.h as f32);
+                let mut quad = Vec::with_capacity(6 * SPRITE_FLOATS);
+                for (x, y, u, v) in [
+                    (x0, y0, 0.0, 0.0),
+                    (x1, y0, 1.0, 0.0),
+                    (x0, y1, 0.0, 1.0),
+                    (x1, y0, 1.0, 0.0),
+                    (x1, y1, 1.0, 1.0),
+                    (x0, y1, 0.0, 1.0),
+                ] {
+                    quad.extend_from_slice(&[x, y, u, v, 1.0]);
+                }
+                let projection = *frame.projection();
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the frame's context is current.
+                    unsafe {
+                        let boxes = scissors(gl, &projection, dst, damage);
+                        sprites(gl, &programs, &matrix, instancing, tex, &quad, &boxes);
+                    }
+                })
+            }
+            What::Koi {
+                under,
+                heights,
+                look,
+            } => {
+                let tex = |t: &Rc<dyn Any>| t.downcast_ref::<GlesTexture>().map(|t| t.tex_id());
+                let Some(under) = tex(under) else {
+                    return Ok(());
+                };
+                let heights = heights.as_ref().and_then(tex);
+                let p = &programs.koi;
+                let look = *look;
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the frame's context is current; `quads`
+                    // gives the two units back unbound.
+                    unsafe {
+                        quads(gl, p, &matrix, instancing, damage, corner, |gl| {
+                            bind(gl, 0, under, false);
+                            bind(gl, 1, heights.unwrap_or(under), false);
+                            gl.Uniform1i(p.at("under"), 0);
+                            gl.Uniform1i(p.at("heights"), 1);
+                            gl.Uniform2f(p.at("screen"), look.screen[0], look.screen[1]);
+                            gl.Uniform2f(p.at("grid"), look.grid[0], look.grid[1]);
+                            gl.Uniform2f(p.at("texel"), look.texel[0], look.texel[1]);
+                            gl.Uniform2f(p.at("bend"), look.bend[0], look.bend[1]);
+                            gl.Uniform1f(p.at("zero"), look.zero);
+                            let still = if heights.is_some() { 0.0 } else { 1.0 };
+                            gl.Uniform1f(p.at("still"), still);
+                        });
                     }
                 })
             }
@@ -1167,6 +2339,102 @@ impl Fire for GlesRenderer {
     }
 }
 
+/// The koi's water's heights (the board's `cur`) as the texture holds
+/// them: half floats of the board's `cur × 28 / 255`, else bytes of
+/// `128 + cur × 28`; red, the rest nothing (opaque).
+fn height_bytes(heights: &[f32], half: bool) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(heights.len() * if half { 8 } else { 4 });
+    let one = to_half(1.0).to_le_bytes();
+    for h in heights {
+        if half {
+            let r = to_half(h * 28.0 / 255.0).to_le_bytes();
+            bytes.extend_from_slice(&[r[0], r[1], 0, 0, 0, 0, one[0], one[1]]);
+        } else {
+            let r = (128.0 + h * 28.0).clamp(0.0, 255.0) as u8;
+            bytes.extend_from_slice(&[r, 0, 0, 255]);
+        }
+    }
+    bytes
+}
+
+/// `v` as a half float (IEEE 754 binary16), rounded to the nearest; too
+/// small, zero; too large, the largest.
+fn to_half(v: f32) -> u16 {
+    let bits = v.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 0xff) as i32 - 127 + 15;
+    let mant = bits & 0x7f_ffff;
+    if exp <= 0 {
+        if exp < -10 {
+            return sign;
+        }
+        // Subnormal: the implicit bit made explicit, shifted down, rounded.
+        let shift = (14 - exp) as u32;
+        let m = ((mant | 0x80_0000) + (1 << (shift - 1))) >> shift;
+        return sign | m as u16;
+    }
+    if exp >= 31 {
+        return sign | 0x7bff;
+    }
+    let half = sign as u32 | ((exp as u32) << 10) | (mant >> 13);
+    // Round to the nearest: a carry into the exponent is right.
+    (half + ((mant >> 12) & 1)).min(sign as u32 | 0x7bff) as u16
+}
+
+/// The texture kept in `kept` when it is `size`, else a new one: with the
+/// texture itself when it is kept and not `fresh` (nothing to draw).
+fn kept_target(
+    renderer: &mut GlesRenderer,
+    kept: &RefCell<Option<Kept>>,
+    size: (i32, i32),
+    fresh: bool,
+    what: &str,
+) -> Option<(GlesTexture, Option<Rc<dyn Any>>)> {
+    let size = Size::<i32, BufferCoords>::from(size);
+    let had = kept
+        .borrow()
+        .as_ref()
+        .filter(|(s, _)| *s == size)
+        .map(|(_, t)| t.clone());
+    if let Some(map) = had {
+        let texture = map.downcast_ref::<GlesTexture>()?.clone();
+        return Some((texture, (!fresh).then_some(map)));
+    }
+    let texture: GlesTexture =
+        Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, size)
+            .map_err(|err| tracing::warn!(%err, "no texture for {what}"))
+            .ok()?;
+    Some((texture, None))
+}
+
+/// Draws into `target` by `draw` (told the context, the matrix placing
+/// its pixels, its whole rectangle and whether it instances), cleared
+/// first.
+fn offscreen(
+    renderer: &mut GlesRenderer,
+    target: &mut GlesTexture,
+    draw: impl FnOnce(&ffi::Gles2, &[f32; 9], Rectangle<i32, Physical>, bool),
+) -> Result<(), String> {
+    let size = target.size();
+    let size = Size::<i32, Physical>::from((size.w, size.h));
+    let whole = Rectangle::from_size(size);
+    let instancing = renderer.capabilities().contains(&Capability::Instancing);
+    let mut bound = renderer.bind(target).map_err(|e| e.to_string())?;
+    let mut frame = renderer
+        .render(&mut bound, size, Transform::Normal)
+        .map_err(|e| e.to_string())?;
+    frame
+        .clear(Color32F::TRANSPARENT, &[whole])
+        .map_err(|e| e.to_string())?;
+    let matrix = crate::wobble::placed(frame.projection(), whole, whole);
+    frame
+        .with_context(|gl| draw(gl, &matrix, whole, instancing))
+        .map_err(|e| e.to_string())?;
+    // The same context draws the output next, in order: no wait.
+    let _done = frame.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// The picture `kept` of a window leaving: drawn from `parts` the first
 /// time (or when its size changes), its texture after.
 fn keep_picture<E: RenderElement<GlesRenderer>>(
@@ -1217,6 +2485,7 @@ fn draw_kept(
         .map_err(|e| e.to_string())?;
     let matrix = crate::wobble::placed(frame.projection(), area, whole);
     let [over, added] = meshes;
+    let none = Mesh::default();
     frame
         .with_context(|gl| {
             #[allow(unsafe_code)]
@@ -1227,8 +2496,7 @@ fn draw_kept(
                     programs,
                     &matrix,
                     instancing,
-                    over,
-                    added,
+                    [over, added, &none],
                     clip,
                     &[[0, 0, size.w, size.h]],
                     true,
@@ -1505,8 +2773,9 @@ unsafe fn scissors(
         .collect()
 }
 
-/// Draws the shapes `over` over, then `added` added, cut to each of
-/// `boxes` in turn.
+/// Draws the shapes `over` over, then `added` added, then `screened`
+/// screened over, cut to each of `boxes` in turn; `kept`: into a texture
+/// kept ([`Fire::keep_shapes`]).
 ///
 /// # Safety
 ///
@@ -1518,8 +2787,7 @@ unsafe fn shapes(
     programs: &Programs,
     matrix: &[f32; 9],
     instancing: bool,
-    over: &Mesh,
-    added: &Mesh,
+    [over, added, screened]: [&Mesh; 3],
     clip: &Clip,
     boxes: &[[i32; 4]],
     kept: bool,
@@ -1550,16 +2818,20 @@ unsafe fn shapes(
                 gl.VertexAttribDivisor(at, 0);
             }
         }
-        for (mesh, add) in [(over, false), (added, true)] {
+        for (mesh, blend) in [
+            (over, ffi::ONE_MINUS_SRC_ALPHA),
+            (added, ffi::ONE),
+            (screened, ffi::ONE_MINUS_SRC_COLOR),
+        ] {
             if mesh.is_empty() {
                 continue;
             }
-            match (add, kept) {
-                (false, _) => gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA),
-                (true, false) => gl.BlendFunc(ffi::ONE, ffi::ONE),
+            if kept && blend == ffi::ONE {
                 // Into a texture: its colour added, its alpha not, so that
                 // drawn over what is under it, it is added to that too.
-                (true, true) => gl.BlendFuncSeparate(ffi::ONE, ffi::ONE, ffi::ZERO, ffi::ONE),
+                gl.BlendFuncSeparate(ffi::ONE, ffi::ONE, ffi::ZERO, ffi::ONE);
+            } else {
+                gl.BlendFunc(ffi::ONE, blend);
             }
             for (at, size, offset) in attribs {
                 gl.VertexAttribPointer(
@@ -1588,6 +2860,50 @@ unsafe fn shapes(
             gl.DisableVertexAttribArray(at);
         }
     }
+}
+
+/// Draws the drops of `mesh` into `map`, cleared first.
+fn draw_drops(
+    renderer: &mut GlesRenderer,
+    programs: &Programs,
+    map: &mut GlesTexture,
+    mesh: &Mesh,
+) -> Result<(), String> {
+    let size = map.size();
+    let size = Size::<i32, Physical>::from((size.w, size.h));
+    let whole = Rectangle::from_size(size);
+    let instancing = renderer.capabilities().contains(&Capability::Instancing);
+    let mut target = renderer.bind(map).map_err(|e| e.to_string())?;
+    let mut frame = renderer
+        .render(&mut target, size, Transform::Normal)
+        .map_err(|e| e.to_string())?;
+    frame
+        .clear(Color32F::TRANSPARENT, &[whole])
+        .map_err(|e| e.to_string())?;
+    let matrix = crate::wobble::placed(frame.projection(), whole, whole);
+    let none = Mesh::default();
+    let clip = Clip::new([-1.0e7, -1.0e7, 1.0e7, 1.0e7], [], 1.0);
+    frame
+        .with_context(|gl| {
+            #[allow(unsafe_code)]
+            // SAFETY: the frame's context is current.
+            unsafe {
+                shapes(
+                    gl,
+                    programs,
+                    &matrix,
+                    instancing,
+                    [mesh, &none, &none],
+                    &clip,
+                    &[[0, 0, size.w, size.h]],
+                    false,
+                );
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    // The same context draws the output next, in order: no wait.
+    let _done = frame.finish().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 impl Element for FireElement {
@@ -1658,5 +2974,21 @@ impl<R: Fire> RenderElement<R> for FireElement {
         _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
         R::draw_fire(frame, self, dst, damage)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn halves_round_as_floats_do() {
+        assert_eq!(to_half(1.0), 0x3c00);
+        assert_eq!(to_half(-2.0), 0xc000);
+        assert_eq!(to_half(0.0), 0);
+        assert_eq!(to_half(65504.0), 0x7bff);
+        assert_eq!(to_half(1.0e9), 0x7bff);
+        assert_eq!(to_half(0.1), 0x2e66);
+        assert_eq!(to_half(-1.0e-5), 0x80a8);
     }
 }

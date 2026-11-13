@@ -59,6 +59,7 @@ const KEPT: usize = 64;
 /// The thumbnail's shadow, the mockup's `0 16px 44px rgba(0, 0, 0, 0.5)`,
 /// zoomed.
 const THUMB_SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 16.0 * LAUNCHER_ZOOM,
     blur: 44.0 * LAUNCHER_ZOOM,
     alpha: 0.5,

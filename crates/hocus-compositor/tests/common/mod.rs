@@ -2636,3 +2636,74 @@ fn document_text(w: i32, h: i32) -> Vec<u8> {
     }
     cover
 }
+
+/// A compositor for an effect's screenshots, its configuration, its
+/// windows' clients and the shell's home (dropped last).
+pub type Desk = (
+    Headless,
+    hocus_compositor::Config,
+    Vec<ClientHandle>,
+    tempfile::TempDir,
+);
+
+/// What the screenshots of an effect on the wallpaper show (#802, #804),
+/// on GLES at 1440 × 900 over "Nuit": the shell's bar (in French) and two
+/// windows of text, at rest; the clock held.
+pub fn effects_desk() -> anyhow::Result<Desk> {
+    let home = tempfile::tempdir()?;
+    let at = |sub: &str| home.path().join(sub).display().to_string();
+    for sub in ["home", "config", "cache", "state", "data"] {
+        std::fs::create_dir_all(home.path().join(sub))?;
+    }
+    let script = shell_script(
+        home.path(),
+        &shell_program(),
+        &[
+            ("LC_ALL", "fr_FR.UTF-8".to_owned()),
+            ("LANG", "fr_FR.UTF-8".to_owned()),
+            ("HOME", at("home")),
+            ("XDG_CONFIG_HOME", at("config")),
+            ("XDG_CACHE_HOME", at("cache")),
+            ("XDG_STATE_HOME", at("state")),
+            ("XDG_DATA_HOME", at("data")),
+        ],
+    )?;
+    let mut config = hocus_compositor::Config::default();
+    config.wallpaper.picture = hocus_link::wallpaper::Picture::of("night").unwrap_or_default();
+    let mut hp = Headless::start_with_shell(
+        hocus_compositor::HeadlessConfig {
+            outputs: vec![hocus_compositor::OutputSpec::new(1440, 900)],
+            ..gles()
+        },
+        config.clone(),
+        Some(script),
+    )?;
+    anyhow::ensure!(hp.renderer() == "gles", "no GLES here");
+    let up = hp.dispatch_until(Duration::from_secs(20), |hp| hp.levels_commits() > 0)?;
+    anyhow::ensure!(up, "no bar");
+    let mut clients = Vec::new();
+    for (app_id, rect) in [
+        ("test.notes", Rect::new(110, 150, 430, 300)),
+        ("test.page", Rect::new(620, 300, 520, 380)),
+    ] {
+        let (_, client) = open_showing(
+            &mut hp,
+            app_id,
+            Shows::Document {
+                app_id,
+                size: (rect.width as u32, rect.height as u32),
+            },
+        )?;
+        clients.push(client);
+        let id = hp
+            .windows()
+            .into_iter()
+            .find(|w| w.app_id.as_deref() == Some(app_id))
+            .map(|w| w.id)
+            .context("no such window")?;
+        hp.place_window(id, rect);
+    }
+    wait(&mut hp, Duration::from_secs(2))?;
+    hp.hold_clock();
+    Ok((hp, config, clients, home))
+}

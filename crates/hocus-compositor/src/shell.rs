@@ -877,6 +877,8 @@ impl State {
         // The meeting's halo is the shell's to say: its next one says it
         // again.
         self.meeting_near(None);
+        // And whether the music plays (#801).
+        self.music_plays(false);
         if self.shell.software {
             self.shell.software = false;
             self.redraw = true;
@@ -968,6 +970,7 @@ impl State {
                     hocus_link::MeetingNear::Two => crate::halo::Meeting::InTwo,
                 }));
             }
+            ToCompositor::Music { playing } => self.music_plays(playing),
             ToCompositor::Copy(text) => self.copy_text(text),
             ToCompositor::Clip { paste, clip } => self.clip_asked(paste, clip),
             ToCompositor::ClipboardCount { items, pinned } => {

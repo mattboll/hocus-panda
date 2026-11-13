@@ -35,6 +35,16 @@ pub enum Shape {
     /// A glow from its middle to nothing at its edge, by the profile the
     /// shape's second number names ([`Glow`]).
     Glow = 6,
+    /// A drop of rain as the map of the drops holds it (#802): a lens
+    /// whose colour is its normal (red across, green down, from 0 to 1)
+    /// and its thickness (blue), opaque but its rim (the board's sprite).
+    Drop = 7,
+    /// A lily pad (#803): a disc but a notch, its places across from -1
+    /// to 1; its radius and the pixels a logical one (the shape's second
+    /// and fourth numbers); a shadow (its third number 1) of its
+    /// vertices' colour, else the leaf (the board's gradient from its upper
+    /// left, its veins) as opaque as its vertices' alpha.
+    Pad = 8,
 }
 
 /// The glows' profiles: how opaque from the middle out, the board's
@@ -49,6 +59,10 @@ pub enum Glow {
     Core = 1,
     /// A glint: whole, half at half, nothing at its edge.
     Glint = 2,
+    /// A firefly's glow (#804): its own colours, warm white at its middle,
+    /// 95 % lime at 8 %, 35 % green at 25 %, 8 % at 60 %, nothing at its
+    /// edge; as opaque as its vertices' alpha.
+    Firefly = 3,
 }
 
 /// A column of a fill: its place across, and its rows from the top down

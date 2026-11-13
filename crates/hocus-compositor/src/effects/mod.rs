@@ -12,7 +12,13 @@
 //! as creatures on their windows ([`creatures`], #796), windows in jelly
 //! ([`jelly`], #797), shattering into glass as they close
 //! ([`shatter`], #798), and a garland under the active window
-//! ([`garland`], #799), another across the top of the screens (#813).
+//! ([`garland`], #799), another across the top of the screens (#813);
+//! on the wallpaper, rain on the glass ([`raindrops`], #802), a koi pond
+//! ([`koi`], #803), evening fireflies ([`fireflies`], #804) and the
+//! daylight ([`daylight`], #805), following the sun ([`sun`]);
+//! desktops in depth ([`depth`], #806); and an aurora following the music
+//! ([`aurora`], #801). The wallpaper's effects play behind the lock too,
+//! and in the overview (#807).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -27,20 +33,27 @@
 //! staying the same between; and each tells the screen only what of it
 //! changed, so that what is still around it is not drawn again.
 
+pub mod aurora;
 pub mod creatures;
+pub mod daylight;
+pub mod depth;
 pub mod draw;
+pub mod fireflies;
 pub mod flames;
 pub mod garland;
 pub mod jelly;
 pub mod kept;
+pub mod koi;
 pub mod mesh;
 pub mod motion;
 pub mod particles;
+pub mod raindrops;
 pub mod rig;
 pub mod shatter;
 pub mod snow;
 pub mod snow_look;
 pub mod snowing;
+pub mod sun;
 
 pub use draw::{Fire, FireElement};
 
@@ -64,6 +77,32 @@ pub struct Live {
     pub tops: std::collections::HashMap<String, garland::Top>,
     /// The garlands hung so far, for their seeds.
     garlands: u64,
+    /// The rain on the glass, while it is on (#802).
+    pub raindrops: Option<raindrops::Rain>,
+    /// The rains started so far, for their seeds.
+    rains: u64,
+    /// The fireflies, while they are out (#804).
+    pub fireflies: Option<fireflies::Fireflies>,
+    /// The swarms come out so far, for their seeds.
+    swarms: u64,
+    /// Whether it is evening, while the fireflies are on.
+    pub dusk: fireflies::Dusk,
+    /// The daylight, while it is on (#805).
+    pub daylight: Option<daylight::Daylight>,
+    /// Desktops in depth, while it is on (#806).
+    pub depth: Option<depth::Depth>,
+    /// The aurora, while it is on (#801).
+    pub aurora: Option<aurora::Aurora>,
+    /// Whether the bar's player plays, as the shell says (#801).
+    pub music: bool,
+    /// The koi's pond, while it is on (#803).
+    pub koi: Option<koi::Ponds>,
+    /// The ponds dug so far, for their seeds.
+    ponds: u64,
+    /// The sun looked at every minute, while an effect follows it.
+    pub sun_timer: Option<smithay::reexports::calloop::RegistrationToken>,
+    /// Tests: the sun as it is at this time, whatever the clock says.
+    pub sun_held: Option<jiff::Timestamp>,
     /// When they move on next (#815).
     pub pace: Pace,
 }
@@ -86,6 +125,8 @@ pub struct Pace {
     next: Option<Duration>,
     /// Their time: what they show is as of it.
     pub at: Duration,
+    /// The clock's when they last moved on (`at` is the last frame's).
+    pub clock: Duration,
     /// Their frames so far, for the tests.
     pub frames: u64,
 }
@@ -100,6 +141,7 @@ impl Pace {
     /// next due a frame on, else at the next turn.
     pub fn moved(&mut self, now: Duration, at: Duration, moving: bool) {
         self.at = at;
+        self.clock = now;
         self.next = moving.then(|| {
             // On the grid, but never so late that two come at once.
             let on = self.next.unwrap_or(now) + FRAME;
@@ -127,7 +169,86 @@ pub enum Still {
     Cpu,
 }
 
+/// How an effect that lasts shows now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Plays {
+    Moving,
+    /// Drawn still (reduced motion): nothing drawn frame after frame.
+    Still,
+}
+
 impl State {
+    /// How an effect on the wallpaper that lasts, its switch `on`, shows
+    /// now: moving, still with reduced motion; `None`, not at all (in the
+    /// power saver, while a screen is shared or recorded, it waits; on the
+    /// CPU there is none).
+    pub(crate) fn wallpaper_effect(&self, on: bool) -> Option<Plays> {
+        if !on {
+            return None;
+        }
+        match self.effects_still() {
+            None => Some(Plays::Moving),
+            Some(Still::ReducedMotion) => Some(Plays::Still),
+            Some(Still::PowerSaver | Still::Shown | Still::Cpu) => None,
+        }
+    }
+
+    /// Whether the desktop's own lock shows the wallpaper live, drawn by
+    /// the compositor under it with the wallpaper's effects (#807): one
+    /// of them is on, the lock shows the wallpaper dimmed (not blurred,
+    /// nor a picture of its own), on the GPU, and the shell draws on the
+    /// GPU too (on the CPU its surfaces are opaque). Not the transient
+    /// rules (the power saver, a share): then the still wallpaper is
+    /// drawn.
+    pub(crate) fn lock_live(&self) -> bool {
+        let e = &self.config.effects;
+        let any =
+            e.snow || e.aurora || e.rain_on_glass || e.koi || e.fireflies || e.daylight || e.depth;
+        any && self.config.wallpaper.lock == hocus_link::wallpaper::LockLook::Dimmed
+            && !self.config.plain_background
+            && self.graphics.blur
+            && !self.shell.software
+    }
+
+    /// Whether the desktop's own lock shows now, the wallpaper live
+    /// under it.
+    pub(crate) fn lock_shows_wall(&self) -> bool {
+        self.lock
+            .locked_state()
+            .is_some_and(|l| matches!(l.holder, crate::lock::Holder::Own))
+            && self.lock_live()
+    }
+
+    /// The wallpaper's effects step on at `now`: the snow, the rain on the
+    /// glass, the fireflies, the koi, the aurora, the daylight, desktops in
+    /// depth; whether one moves.
+    pub(crate) fn tick_wallpaper_effects(&mut self, now: std::time::Duration) -> bool {
+        let mut moving = self.tick_snow(now);
+        moving |= self.tick_raindrops(now);
+        moving |= self.tick_fireflies(now);
+        moving |= self.tick_koi(now);
+        moving |= self.tick_aurora(now);
+        self.tick_daylight();
+        moving |= self.tick_depth(now);
+        moving
+    }
+
+    /// The effects that play on their own step on by `step` at `now`,
+    /// when [`Pace`] says they are due (#815): whether they move.
+    pub(crate) fn tick_paced(
+        &mut self,
+        now: Duration,
+        step: impl FnOnce(&mut Self, Duration) -> bool,
+    ) -> bool {
+        let clock = self.now();
+        if !self.fx.pace.due(clock) {
+            return false;
+        }
+        let moving = step(self, now);
+        self.fx.pace.moved(clock, now, moving);
+        moving
+    }
+
     /// Why no effect plays now; `None`: they may.
     pub(crate) fn effects_still(&self) -> Option<Still> {
         if self.reduced_motion() {

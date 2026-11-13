@@ -56,6 +56,7 @@ use crate::{
 
 /// The dialog's `0 24px 60px rgba(0,0,0,0.50)`.
 const SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 24.0,
     blur: 60.0,
     alpha: 0.5,

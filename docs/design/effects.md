@@ -10,12 +10,12 @@ langue").
 | Group | Effect | Key | Ticket |
 |---|---|---|---|
 | The wallpaper | Neige qui tient | `snow` | #795 (built) |
-| | Aurore en musique | `aurora` | #801 |
-| | Pluie sur la vitre | `rain-on-glass` | #802 |
-| | Bassin de koïs | `koi` | #803 |
-| | Lucioles du soir | `fireflies` | #804 |
-| | La lumière du jour | `daylight` | #805 |
-| | Bureaux en profondeur | `depth` | #806 |
+| | Aurore en musique | `aurora` | #801 (built) |
+| | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
+| | Bassin de koïs | `koi` | #803 (built) |
+| | Lucioles du soir | `fireflies` | #804 (built) |
+| | La lumière du jour | `daylight` | #805 (built) |
+| | Bureaux en profondeur | `depth` | #806 (built) |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
 | | Éclats de verre | `shatter` | #798 (built) |
 | | Fenêtres en gelée | `jelly` | #797 (built) |
@@ -49,16 +49,21 @@ Every effect follows the same rules (`State::effects_still`, in
 - once an effect is over, nothing more is drawn for it, and no frame is
   asked for;
 - none costs more than it shows (#815): an effect that plays on its own
-  (the snow, the garlands, the creatures, and those to come) moves on
-  at most 60 times a second whatever the screen's refresh
-  (`effects::Pace`), what it draws staying the same between two (a
-  screen at 165 Hz draws it again only where something else changed),
-  and it tells the screen only what of it changed: the flakes' places,
-  a cap's columns that grew, the garland's pieces, a panda's box, so
-  that the windows around stay as they were. Its shapes are drawn into a
-  texture kept from frame to frame (`effects/kept.rs`), again only as
-  they change. The windows' own motions (the jelly, the flames, the
-  shards) follow their window at the screen's rate.
+  (the snow, the garlands, the creatures, the rain on the glass, the
+  fireflies, the koi, the aurora, the camera of desktops in depth, and
+  those to come; under the lock too) moves on at most 60 times a second whatever
+  the screen's refresh (`effects::Pace`), what it draws staying the same
+  between two (a screen at 165 Hz draws it again only where something
+  else changed), and it tells the screen only what of it changed: the
+  flakes' places, a cap's columns that grew, the garland's pieces, a
+  panda's box, the drops that moved, each firefly's glow, the koi's
+  pads, so that the windows around stay as they were. The koi's water
+  tells where its heights moved enough to be seen and around the koi
+  that swam; while they swim it ripples all over, and all of it is drawn
+  again. The snow's shapes are drawn into a texture kept from frame to
+  frame (`effects/kept.rs`), again only as they change. The daylight is
+  drawn again once a minute. The windows' own motions (the jelly, the
+  flames, the shards) follow their window at the screen's rate.
 
 An effect is decided as it starts: a switch turned off, or a rule that
 starts holding, leaves one under way to end. An effect that lasts (the
@@ -417,6 +422,341 @@ switches, not again that year nor by the next session, again the next
 December). Their screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only -E 'test(/^garland::shots/) |
 test(/^holidays::shots$/)'`.
+
+## Rain on the glass (#802)
+
+With `rain-on-glass = true`, the wallpaper becomes wet glass, as the
+board "Pluie sur la vitre" does: its JS ported (`effects/raindrops.rs`),
+its shader `RAIN_FS` (`draw.rs`, `RAIN`), its lengths in logical pixels.
+There is no weather on the desktop: it rains whenever the switch is on.
+
+- **The drops**: as many per pixel as the board's over its 1200 × 720
+  (900 still at first, 1100 at most, six more a step; 20 big ones at
+  first, 2.4 more a second), warmed up as the board's (300 steps of
+  1/30 s). A big drop grows where it formed, then from 13 px slides at
+  `30 + 14 r` px/s (eased, stuttering one step in seventeen), wavering,
+  swallowing the still drops it touches (up to 24 px), wiping its trail
+  (6 radii above it), leaving a small drop now and then. Stepped at 60
+  steps a second (the board's frames) with a seeded generator; the still
+  drops in a grid of 32 px cells, so a big drop looks only at those near.
+- **The glass**: the board's two pictures, the wallpaper sharp and blurred
+  (18 px of standard deviation, as the board's `blur(9px)` at half size,
+  scaled about its middle as its margin did), made once by the glass's
+  blur (`glass.rs`, a pane of its own; again only with a new wallpaper).
+  Each frame the drops' map is drawn at half the logical size (each drop
+  a lens: its normal and thickness as colour, `Shape::Drop`), then the
+  glass from it: through a drop the sharp wallpaper moved against its
+  normal, brightened by its thickness, darkened at its rim, a highlight
+  from the upper left; between them the blurred wallpaper at 82 %.
+- **Where**: over the wallpaper, under the bottom and background layers,
+  the snow, the windows and the bar; opaque (the wallpaper under it is
+  not drawn). Behind the glass of the bar stands the fogged glass alone,
+  which never changes. A moving wallpaper (#433) waits while it rains on
+  its screen: the rain refracts its still picture. With the snow on too,
+  both show: the snow falls in front of the wet glass.
+- **Its cost**: the drops' map (some 1 700 small quads at 1440 × 900, at
+  half size) and the glass drawn again where drops changed, about 30
+  rectangles, 3 % of the screen, a frame (`FireElement`'s damage since its
+  last commit); the simulation on the CPU, a few hundred comparisons a
+  step.
+- **When**: moving where it shows, a frame each refresh; with reduced
+  motion drawn still (its drops where they are), nothing per frame; none
+  in the power saver, while a screen is shared or recorded, on the CPU,
+  nor in a capture.
+
+Tests: `tests/rain_on_glass.rs` (on GLES on Mesa's software device: the
+wallpaper fogs and its drops move, the window's pixels untouched; off,
+nothing; still with reduced motion, nothing drawn per frame); its
+screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only rain_on_glass::shots`.
+
+## Evening fireflies (#804)
+
+With `fireflies = true`, fireflies come out after sunset, as the board
+"Lucioles du soir" does: its JS ported (`effects/fireflies.rs`), its
+lengths in logical pixels.
+
+- **The evening**: the sun below the horizon (-0.833°, NOAA's equations)
+  at the place of the system's time zone (its line in
+  `/usr/share/zoneinfo/zone1970.tab`; without one, 45° north at the
+  longitude of its offset), on the wall clock, looked at every minute
+  while the switch is on; they come out over 3 s, and go at sunrise.
+- **The swarm**: as many per pixel as the board's 70 over the 1000 × 720
+  left of its bar, over each screen's work area (beside the bar), in its
+  lower 70 %; each drifting on the board's flow field (26 px/s, eased),
+  wrapping round the sides, kept off the top fifth; each blinking every
+  2.5 to 5.5 s (`sin(πt)^0.7` over 0.77 s), nearer ones larger and
+  brighter. Stepped at 60 steps a second with a seeded generator.
+- **The pointer**: resting on the wallpaper (no window, no bar under it;
+  not moved 3 px for 0.8 s), the fireflies within 360 px are drawn to it
+  and circle it at some 70 px. The board's own pointer that wandered when
+  none was on its stage is not built.
+- **The look**: the board's glow (warm white to lime to nothing) added to
+  the wallpaper, 14 to 40 px across its radius; the bright ones' wider
+  glow (2.6 times) screened over it, as the board's front canvas was. The
+  board screened that one over its window too: here it stays on the
+  wallpaper, under the windows and the bar.
+- **Its cost**: some 120 quads at 1440 × 900 and 30 wide ones, in one
+  call each; the box they cover (most of the screen's lower part) drawn
+  again each frame, the wallpaper under it too.
+- **When**: moving, a frame each refresh; with reduced motion still, lit
+  at 60 %, nothing per frame; none by day, in the power saver, while a
+  screen is shared or recorded, on the CPU, nor in a capture.
+
+Tests: `tests/fireflies.rs` (on GLES on Mesa's software device, evening
+held: glows on the wallpaper, moving, the window's pixels untouched; by
+day or off, nothing; still with reduced motion, nothing drawn per
+frame); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only fireflies::shots`.
+
+## A koi pond (#803)
+
+With `koi = true`, the wallpaper is a pond, as the board "Bassin de
+koïs" is: its JS ported (`effects/koi.rs`), its shader `KOI_FS`
+(`draw.rs`, `KOI`), its lengths in logical pixels.
+
+- **The water**: the board's field of heights, a cell every 5 px (its
+  240 × 144 over 1200 × 720), two wave steps a step (damped 0.978), a
+  drop every 1.5 to 4 s; each koi's head stirs it as it swims. Drawn as
+  the board's shader: what is under the water bent by the heights'
+  normal, tinted, lit where the surface curves up, a highlight from the
+  upper left, the sky's sheen toward the top. The heights go to the GPU
+  in half floats each step (bytes about a half where GLES 2 has none).
+- **The koi**: as many per pixel as the board's seven (its palette in
+  turn), each a spine of fourteen joints bending no more than 0.32 rad
+  at each, wagging, with its tail and side fins flapping, four spots
+  clipped to its body, a sheen from the head, a darker line down its
+  back, its eyes; its shadow 14 px right and 20 px down, blurred 6 px.
+  They wander within the work area (beside the bar). Drawn each step
+  with their shadows over the floor into a picture at the screen's
+  logical size, the board's `under` canvas (`Shape::Box` for the
+  blurred shadows, fills with a pixel's fringe, ovals).
+- **The floor**: the board's gradient, pebbles (as many per pixel as its
+  900) and vignette, drawn once a screen by a worker thread (tiny-skia),
+  then a texture.
+- **The pads**: as many per pixel as the board's six, one in three with
+  a water lily; over the water, bobbing with it, turning a little
+  (`Shape::Pad`: the notched disc, its two-circle gradient and veins).
+- **The pointer**: resting on the water (no window, no bar under it;
+  not moved 3 px for 0.6 s), the koi within 420 px come to it and circle
+  it at 90 px. A left click on the water rings it (26 px, the board's
+  amplitude) and the koi within 260 px flee for 1.4 s.
+- **Where**: in the wallpaper's place, under the bottom and background
+  layers, the snow, the fireflies, the windows and the bar; opaque.
+  Behind the glass of the bar stand the floor under still water and a
+  blank for the pads, which never change. With the rain on the glass or
+  the daylight's sky on too, the pond is the wallpaper: the rain needs a
+  still picture to refract, and waits. A moving wallpaper (#433) waits.
+- **Its cost**, a frame while it moves (60 steps a second), measured on
+  the CPU at 1440 × 900 (11 koi, 288 × 180 cells): the step 0.27 ms, the
+  meshes 0.19 ms (some 4 800 vertices), the heights made half floats
+  0.6 ms (some 400 kB uploaded); at 2560 × 1440 (30 koi) about three
+  times that. On the GPU: the floor and the koi drawn into the picture,
+  the water over the whole screen (six texture reads a pixel), the pads;
+  the whole screen drawn again each frame, as a moving wallpaper is.
+  Turned on: half a second of the board stepped at once (some 10 ms),
+  the floor drawn by its worker (0.1 to 0.3 s), meanwhile the wallpaper.
+- **When**: moving where it shows; with reduced motion drawn still (the
+  koi where they are, the water as it is), nothing per frame, a click
+  doing nothing; none in the power saver, while a screen is shared or
+  recorded, on the CPU, nor in a capture.
+
+Tests: `tests/koi.rs` (on GLES on Mesa's software device: the wallpaper
+turns to a pond whose koi swim, the window's pixels untouched; off,
+nothing; still with reduced motion, nothing drawn per frame); its
+screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only koi::shots`.
+
+## Daylight (#805)
+
+With `daylight = true`, the wallpaper is the board "La lumière du jour"'s
+sky at the hour the sun stands for (`effects/daylight.rs`, its shader
+`SKY` in `draw.rs`), and the windows' shadows and edges follow its sun.
+
+- **The hour**: the board's sun rises at 6 and sets at 20. The real day
+  between sunrise and sunset (the sun's upper edge on the horizon, NOAA's
+  equations, at the place of the system's time zone, as the fireflies'
+  evening: `effects/sun.rs`) is laid over 6 to 20, the night until the
+  next sunrise over 20 to 30 (6 the next day); with no sunrise or sunset
+  within a day (near the poles), the board's noon or 1 o'clock. Looked
+  at every minute on the wall clock while the switch is on.
+- **The sky**: the board's keys (5, 6:30, 8, 12, 16:30, 18:30, 19:30, 21,
+  23; past 23 the night goes on to 5's, which the board's slider never
+  reached), its gradient, its stars by night and at dawn and dusk (their
+  places the board's over its 1200 × 720, stretched over the screen), by
+  day the sun's halo, disc and seven rays, by night the moon; its two
+  ridges; the hour's light graded over it (soft light). Drawn once a
+  minute into a picture of the screen's size, opaque, in the wallpaper's
+  place; the glass of the bar blurs it like a wallpaper.
+- **The windows**: their shadow is the board's for the hour, offset
+  away from the sun (`lx × len × 2.2` across, `len × (0.4 + 0.6 elev)`
+  down), longer and softer as it sets (blur `26 + 0.6 len`), darker at
+  noon; what the focus or a move adds to the standard shadow kept. By
+  day, the edge facing the sun lights up: a line of the hour's light at
+  25 % along the window's top and down the side toward the sun, as wide
+  as the board's `lx × 3`, just out of what the window shows.
+- **Not built as the board drew it**: the board graded the hour's light
+  over everything, its windows and its bar too, and laid a gradient of
+  it over the windows' content: both are over what the user reads, so
+  the grade is the sky's alone and the windows keep their pixels. The
+  board lit the side away from its sun (its gradient's angle turned the
+  wrong way); here it is the side facing it, as the ticket says. Its
+  second, contact shadow (`0 2px 6px`) is not drawn.
+- **With the others**: the koi's pond, when on, is the wallpaper in the
+  sky's place (the shadows still turn); the rain on the glass falls over
+  the sky, refracting it (blurred again once a minute); the snow, the
+  fireflies and the garlands show over it.
+- **Its cost**: nothing per frame. Once a minute, the sky drawn again
+  (one pass over the screen, its stars a loop of some 160 to 600), the
+  windows' shadows (a new blur's texture) and the screen once; with the
+  rain on, its fog blurred again.
+- **When**: with reduced motion it shows as it does (nothing moves);
+  none in the power saver, while a screen is shared or recorded, on the
+  CPU, nor in a capture (a capture's windows keep the standard shadow).
+
+Tests: `tests/daylight.rs` (on GLES on Mesa's software device, the sun
+held: the sky of 8 o'clock then of the sunset, the shadow below the
+window another, the window's pixels untouched, nothing drawn per frame;
+off, nothing; with reduced motion, drawn once); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored
+only daylight::shots`.
+
+## Desktops in depth (#806)
+
+With `depth = true`, the wallpaper is the board "Bureaux en profondeur"'s
+landscape and switching desktops is a camera move through it
+(`effects/depth.rs`, its shader `DEPTH` in `draw.rs`), its lengths in
+logical pixels.
+
+- **The landscape**: the board's sky (its gradient and its sun's glow,
+  drifting 60 px over the strip's whole travel) and its six layers, back
+  to front: two ranges of peaks, hills, a forest, the forest the windows
+  stand in, the nearest trees; their silhouettes the board's sums of
+  sines (its phases, from its seeded generator), their trees a triangle a
+  cell where the board stepped by random (6 to 24 px; 90 to 350 px for the
+  nearest, 2.6 times as tall), the sunset's haze over the far ones. Drawn
+  by one shader into a picture of the screen's size, in the wallpaper's
+  place (the screen's own wallpaper is not drawn); the layers go on below
+  the screen, as the board's 1.35 screens tall did.
+- **The camera**: it follows each screen's strip of desktops, a desktop
+  a screen's width and the strip's gap. Each layer moves by its share of
+  the camera's travel, the board's 0.03, 0.14, 0.38, 0.72, 1 and 1.55:
+  the forest at 1 moves with the windows, the nearest trees pass faster.
+  Nothing follows the pointer (the board's camera moved on its switches
+  alone).
+- **The switch**: with depth on, a switch of desktops (the keys, the bar's
+  tiles, the overview's thumbnails) takes the board's 1.5 s, in-out cubic,
+  in place of the strip's 320 ms; the camera pulls back on the way
+  (`1 - 0.1 sin(πk)` halfway), the windows sliding with the strip drawn
+  smaller about the screen's middle by as much, each layer by its share
+  of it. A swipe of three fingers follows the fingers as without it.
+- **Not built as the board drew it**: the board drew its nearest trees on
+  a canvas in front of its windows; they would cover what the windows
+  show, so here they are the landscape's front layer, behind the windows
+  and the bar.
+- **With the others**: the koi's pond or the aurora, when on, is the
+  wallpaper in its place; the landscape takes the daylight's sky's (the shadows still
+  turn); the rain on the glass falls over it, refracting it; the snow, the
+  fireflies and the garlands show over it.
+- **Its cost**: at rest nothing (its picture kept). As the camera moves,
+  the picture drawn again at most 60 times a second (the camera's time
+  the effects' frames', `effects::Pace`), one pass over the screen: a few sines a
+  layer, seven trees looked at a pixel on the three wooded ones; the
+  screen drawn again each frame, as the windows slide anyway.
+- **When**: with reduced motion the landscape stands where the desktop
+  shown puts it, the switch a fade as without depth; none in the power
+  saver, while a screen is shared or recorded, on the CPU, nor in a
+  capture (a capture's windows are not pulled back).
+
+Tests: `tests/depth.rs` (on GLES on Mesa's software device: the landscape
+in the wallpaper's place, the window's pixels untouched; a switch at
+165 Hz halfway at 0.75 s pulled back to 0.9, the hills moved by 0.38 of a
+desktop and the forest by 0.72, drawn 60 times a second at most; nothing
+drawn per frame at rest); its screenshots, `HOCUS_SHOTS=DIR cargo nextest
+run -p hocus-compositor --run-ignored only depth::shots`.
+
+## Aurora following the music (#801)
+
+With `aurora = true`, the wallpaper is the board "Aurore en musique"'s
+night (`effects/aurora.rs`, its shader `AURORA` in `draw.rs`, the board's
+`AURORA_FS` as it was): three curtains of aurora, green at the foot to
+violet at the top, their rays shimmering, over a starry sky and two
+ridges of mountains they light.
+
+- **The music**: while the player of the bar's music block plays, the
+  curtains ripple to the board's drive, its slow swell (`0.35 + 0.65
+  ((sin 0.11 t + 1) / 2)^1.5`, brighter and taller curtains) and its kick
+  at 96 beats a minute (the folds rippling on the beat). The shell tells
+  the compositor whether its player plays (`ToCompositor::Music`, as it
+  connects and when that changes); it reads no sound, so the beat is the
+  board's, not the song's. When the music stops the curtains calm: their
+  pace eases to nothing over some three and a half seconds (their swell
+  and kick with it), and they stand still, dimmer and lower; the music
+  again, they wake in about one and a half. Without music they stand
+  still from the start, at the board's moment (its `t = 12`).
+- **Where**: in the wallpaper's place, under the bottom and background
+  layers, the snow, the fireflies, the windows and the bar; opaque.
+  Behind the glass of the bar stands the aurora as it last stood still,
+  so that the glass is not blurred again at each frame. With the koi's
+  pond on too, the pond is the wallpaper; the aurora takes the place of
+  the landscape in depth and of the daylight's sky (the koi, the aurora,
+  the landscape, the sky: in that order). The rain on the glass waits
+  over it, as over the pond: it needs a still picture to refract. A
+  moving wallpaper (#433) waits.
+- **Its cost**: still, nothing (its picture kept). Moving, the picture
+  drawn again at most 60 times a second (its time the effects' frames',
+  `effects::Pace`), at the board's 0.6 of the screen's logical pixels
+  (its longest side 1600 at most), then laid over the screen; one pass,
+  some 85 lookups of value noise a pixel (five octaves, four times for
+  each curtain, four for the ridges), the whole screen drawn again each
+  frame. The noise's lattice wraps at 1024 cells, and its time goes back
+  every four and a half hours of music, so that the shader keeps its
+  precision.
+- **When**: moving while the music plays, where it shows (a screen on,
+  no fullscreen window in front; not shown, its time waits); with reduced
+  motion drawn still; none in the power saver, while a screen is shared
+  or recorded, on the CPU, nor in a capture. Behind the lock and in the
+  overview, as the others (#807).
+
+Tests: `tests/aurora.rs` (on GLES on Mesa's software device: the
+wallpaper turns to the aurora, the window's pixels untouched; still
+without music, nothing drawn per frame; the music playing, drawn 60
+times a second at most on a 165 Hz screen; stopped, still within
+seconds); `music::the_compositor_is_told_whether_it_plays` (the shell
+tells it); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only aurora::shots`.
+
+## The live wallpaper on the lock and in the overview (#807)
+
+The wallpaper's effects (the snow, the rain on the glass, the koi, the
+aurora, the fireflies, the daylight's sky, the landscape in depth) play behind the
+lock and in the overview too, with the same rules.
+
+- **The lock**: with one of them on, the lock showing the wallpaper
+  dimmed (`[wallpaper] lock = "dimmed"`, the default) and the desktop's
+  own lock (not another locker's), the compositor draws the wallpaper
+  under the lock's surface with the effects on it (`State::live_wall`),
+  and the shell leaves the lock's background clear (`live` on the lock's
+  line), its veil over them. Not with the shell on the CPU, whose
+  surfaces are opaque: its lock draws the still wallpaper as before. What shows there is the wallpaper's alone:
+  the snow's flakes, clumps and ground (it falls to the ground alone while
+  locked), never a window's cap, a creature or a garland. The desktop's
+  last frame fades out under the lock as the lock fades in. Blurred or
+  with a picture of its own, the lock is as before. A fullscreen window
+  does not stop them while locked (it is not shown); a screen off stops
+  them, as anywhere; in the power saver, while a screen is shared or
+  recorded, the still wallpaper; in a capture of the lock, the still
+  wallpaper.
+- **The overview**: the effects keep playing on the wallpaper under its
+  dim; the windows laid out take nothing bound to them along (the caps and
+  the creatures fade with the windows as the overview opens).
+
+Tests: `tests/live_wall.rs` (on GLES on Mesa's software device: the
+snow falling behind the lock, its ground at the foot, no cap where the
+windows were, without the shell, whose lock is opaque on the CPU; the
+same in the overview, with it); its screenshots, the shell drawing on
+Mesa's software Vulkan, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only live_wall::shots`.
 
 ## Not built yet
 

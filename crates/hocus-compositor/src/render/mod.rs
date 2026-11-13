@@ -6,10 +6,16 @@
 //! bar is in front (`crate::front`), and the layers under them; and what
 //! clients are told once a frame is out.
 
+mod aurora;
 mod creatures;
+mod daylight;
+mod depth;
+mod fireflies;
 mod garland;
+mod koi;
 mod layers;
 mod leaving;
+mod raindrops;
 mod snow;
 mod stack;
 
@@ -206,6 +212,9 @@ pub(crate) struct Look {
     /// Raining (#432): the fade it is drawn with where the rain is not
     /// (pixman), over the rain's time.
     rain: Option<f32>,
+    /// Its edges a sun lights (the daylight, #805), and the daylight's
+    /// hour; on the screen alone.
+    sunlit: Option<(crate::effects::daylight::LitEdges, u64)>,
 }
 
 impl Look {
@@ -224,6 +233,7 @@ impl Look {
             own_shadow: true,
             corner: Some(corner),
             rain: None,
+            sunlit: None,
         }
     }
 }
@@ -317,6 +327,7 @@ impl State {
             own_shadow,
             corner: None,
             rain,
+            sunlit: None,
         })
     }
 
@@ -450,6 +461,14 @@ impl State {
                 look.grip * look.alpha,
             ) {
                 out.push(OutputElements::Frame(grip));
+            }
+            // The edges its sun lights (#805), in front of its rims.
+            if let Some((lit, hour)) = &look.sunlit {
+                out.extend(
+                    daylight::lit_edges(lit, rect, scale, look.alpha, &ids.sun, *hour)
+                        .into_iter()
+                        .map(OutputElements::Solid),
+                );
             }
             let focused_width = if self.config.appearance.high_contrast {
                 2.0
@@ -677,6 +696,12 @@ impl State {
         if (self.fx.snow.is_some()
             || !self.fx.creatures.shown.is_empty()
             || self.fx.garland.is_some()
+            || self.fx.raindrops.is_some()
+            || self.fx.fireflies.is_some()
+            || self.fx.koi.is_some()
+            || self.fx.daylight.is_some()
+            || self.fx.depth.is_some()
+            || self.fx.aurora.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -852,9 +877,9 @@ impl State {
             self.burn_lights(&frame, &mut elements);
         }
         // The garland's halos (#799), the garland across the top (#813),
-        // then the snow's layer (#795): on the wallpaper, under the
-        // windows and the bar; a blank in their place while the glass is
-        // blurred.
+        // then the snow's layer (#795), then the fireflies (#804): on the
+        // wallpaper, under the windows and the bar; a blank in their place
+        // while the glass is blurred.
         let garland = self
             .garland_layer(renderer, &frame, &looks)
             .map(|(blank, layer)| {
@@ -872,6 +897,10 @@ impl State {
             elements.push(OutputElements::Fire(blank));
             layer
         });
+        let fireflies = self.fireflies_layer(&frame).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
         self.layer_elements(renderer, &frame, Layer::Bottom, Pick::All, &mut elements);
         self.layer_elements(
             renderer,
@@ -880,6 +909,37 @@ impl State {
             Pick::All,
             &mut elements,
         );
+        // The koi's pond (#803), in the wallpaper's place: its pads over
+        // its water; still water and a blank in their place while the
+        // glass is blurred.
+        let koi = self.koi_layer(renderer, &frame).map(|k| {
+            elements.push(OutputElements::Fire(k.pads_blank));
+            elements.push(OutputElements::Fire(k.stand_in));
+            (k.pads, k.water)
+        });
+        // The aurora (#801), in the wallpaper's place: as it last stood
+        // still in its place while the glass is blurred.
+        let aurora = self.aurora_layer(renderer, &frame).map(|a| {
+            elements.push(OutputElements::Fire(a.stand_in));
+            a.live
+        });
+        // Desktops in depth's landscape (#806), drawn as the camera
+        // moves, else the daylight's sky (#805), drawn once a minute: in
+        // the wallpaper's place.
+        let mut sky = self
+            .depth_layer(renderer, &frame)
+            .or_else(|| self.daylight_layer(renderer, &frame))
+            .map(OutputElements::Fire);
+        // The rain on the glass (#802), right over the wallpaper (or the
+        // sky, which it takes), which it covers; the fogged glass alone in
+        // its place while the glass is blurred.
+        let rain = self
+            .raindrops_layer(renderer, &frame, &mut sky)
+            .map(|(fog, layer)| {
+                elements.push(OutputElements::Fire(fog));
+                layer
+            });
+        elements.extend(sky);
         // A wallpaper that moves (#433): still behind the glass, which is
         // blurred from what is behind it below; moving on the screen, put
         // in its place once the glass is done.
@@ -895,9 +955,18 @@ impl State {
                 capture_glass,
             },
         );
+        let (koi_pads, koi_water) = koi.map_or((None, None), |(p, w)| (Some(p), Some(w)));
+        let (koi_still, koi_blank) = self
+            .koi_stand_ins(&frame)
+            .map_or((None, None), |(w, p)| (Some(w), Some(p)));
         for (layer, blank) in [
             (garland, self.garland_blank()),
             (snow, self.snow_blank(&frame)),
+            (fireflies, self.fireflies_blank(&frame)),
+            (rain, self.raindrops_stand_in(&frame)),
+            (koi_water, koi_still),
+            (koi_pads, koi_blank),
+            (aurora, self.aurora_stand_in(&frame)),
         ] {
             if let Some(layer) = layer
                 && let Some(blank) = blank
@@ -1657,6 +1726,61 @@ impl State {
             self.record_elements(output, elements);
         }
         ControlFlow::Continue(())
+    }
+
+    /// The wallpaper of `output` as the lock shows it (#807), front first:
+    /// on the screen with the wallpaper's effects playing on it (the
+    /// snow's flakes and ground, the fireflies, the koi's pond, the aurora,
+    /// the rain on the glass, the daylight's sky, the landscape in depth), nothing
+    /// bound to a window; the still wallpaper in a capture.
+    pub(crate) fn live_wall<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        purpose: Purpose,
+        now: Duration,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let mut out = Vec::new();
+        let Some(area) = self.space.output_geometry(output) else {
+            return out;
+        };
+        let frame = Frame {
+            output,
+            purpose,
+            now,
+            area,
+            origin: area.loc.to_f64(),
+            scale: output.current_scale().fractional_scale(),
+        };
+        if purpose.screen() {
+            if let Some((_, snow)) = self.snow_layer(renderer, &frame) {
+                out.push(OutputElements::Fire(snow));
+            }
+            if let Some((_, flies)) = self.fireflies_layer(&frame) {
+                out.push(OutputElements::Fire(flies));
+            }
+            if let Some(koi) = self.koi_layer(renderer, &frame) {
+                out.push(OutputElements::Fire(koi.pads));
+                out.push(OutputElements::Fire(koi.water));
+            }
+            if let Some(aurora) = self.aurora_layer(renderer, &frame) {
+                out.push(OutputElements::Fire(aurora.live));
+            }
+            let mut sky = self
+                .depth_layer(renderer, &frame)
+                .or_else(|| self.daylight_layer(renderer, &frame))
+                .map(OutputElements::Fire);
+            if let Some((_, rain)) = self.raindrops_layer(renderer, &frame, &mut sky) {
+                out.push(OutputElements::Fire(rain));
+            }
+            out.extend(sky);
+        }
+        out.extend(self.backdrop_element(renderer, output));
+        out
     }
 
     /// The wallpaper behind everything, and the panes of glass put in

@@ -4,7 +4,8 @@
 //!
 //! No player, no tile; a player playing shows its tile and its popover;
 //! the tile's button sends `PlayPause`; two players, the last to play in
-//! front, the other listed, a click bringing it forward. And the mockup's
+//! front, the other listed, a click bringing it forward; the compositor
+//! told whether it plays. And the mockup's
 //! states shot (`HOCUS_MUSIC_SHOTS=/some/dir`, ignored otherwise).
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
@@ -590,6 +591,24 @@ fn a_player_playing_shows_its_tile_and_its_popover() -> anyhow::Result<()> {
         anyhow::ensure!(said.contains(text), "{text:?} not in {said}");
     }
     anyhow::ensure!(said.contains("−2:"), "no time left in {said}");
+    Ok(())
+}
+
+/// The compositor is told whether the player in front plays (#801: the
+/// aurora follows it).
+#[test]
+fn the_compositor_is_told_whether_it_plays() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start()? else {
+        return Ok(());
+    };
+    anyhow::ensure!(!bed.hp.music_playing(), "no music yet");
+    let dir = bed.dir.path().to_owned();
+    let client = bed.player("spotify", brassens(&dir, "Playing"))?;
+    let told = bed.hp.dispatch_until(WAIT, |hp| hp.music_playing())?;
+    anyhow::ensure!(told, "never told it plays");
+    bed.change(&client, |s| s.status = "Paused".to_owned())?;
+    let told = bed.hp.dispatch_until(WAIT, |hp| !hp.music_playing())?;
+    anyhow::ensure!(told, "never told it stopped");
     Ok(())
 }
 

@@ -164,6 +164,17 @@ impl State {
         if !self.graphics.blur || self.config.plain_background {
             return None;
         }
+        // The rain on the glass refracts its still picture (#802); the
+        // koi's pond, the aurora, the daylight's sky and the landscape in
+        // depth take its place (#803, #801, #805, #806).
+        if self.rain_shows_on(output)
+            || self.koi_shows_on(output)
+            || self.aurora_shows_on(output)
+            || self.sky_shows_on(output)
+            || self.depth_shows_on(output)
+        {
+            return None;
+        }
         match self.wallpaper_look(&output.name()).picture {
             Picture::Moving(moving) => Some(moving),
             _ => None,

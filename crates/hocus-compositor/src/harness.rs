@@ -300,6 +300,105 @@ impl Headless {
         Some((garland.window, garland.bulbs()))
     }
 
+    /// The rain on the glass (#802) on screen `name`, while it is on: its
+    /// still drops and its big ones.
+    pub fn raindrops(&self, name: &str) -> Option<(usize, usize)> {
+        let rain = self.app.state.fx.raindrops.as_ref()?;
+        Some(rain.panes.get(name)?.counts())
+    }
+
+    /// The fireflies (#804) over screen `name`, while they are out: where
+    /// each is (global, logical).
+    pub fn fireflies(&self, name: &str) -> Option<Vec<(f64, f64)>> {
+        let flies = self.app.state.fx.fireflies.as_ref()?;
+        let swarm = flies.swarms.get(name)?;
+        let [x, y, _, _] = swarm.zone;
+        Some(
+            swarm
+                .flies
+                .iter()
+                .map(|f| (f64::from(x + f.x), f64::from(y + f.y)))
+                .collect(),
+        )
+    }
+
+    /// Evening for the fireflies (#804), or not, whatever the clock says.
+    pub fn hold_evening(&mut self, evening: bool) {
+        self.app.state.fx.dusk.held = Some(evening);
+        self.app.state.redraw = true;
+    }
+
+    /// The koi (#803) in the pond of screen `name`, while it shows: where
+    /// each one's head is (global, logical).
+    pub fn koi(&self, name: &str) -> Option<Vec<(f64, f64)>> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == name)?;
+        if !state.koi_shows_on(output) {
+            return None;
+        }
+        let area = state.space.output_geometry(output)?;
+        let pond = state.fx.koi.as_ref()?.panes.get(name)?;
+        Some(
+            pond.koi
+                .iter()
+                .map(|k| {
+                    let [x, y] = k.spine[0];
+                    (
+                        f64::from(area.loc.x) + f64::from(x),
+                        f64::from(area.loc.y) + f64::from(y),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// The sun (#805) as it is at `at`, whatever the clock says.
+    pub fn hold_sun(&mut self, at: jiff::Timestamp) {
+        self.app.state.hold_sun(at);
+    }
+
+    /// The daylight's hour on its board (#805), while it is on.
+    pub fn daylight_hour(&self) -> Option<f64> {
+        Some(self.app.state.fx.daylight.as_ref()?.hour)
+    }
+
+    /// Desktops in depth (#806) on output `index`, while it is on: where
+    /// its camera stands now (logical pixels along the strip, and its
+    /// pull, 1 at rest), and how many times its landscape was drawn.
+    pub fn depth(&self, index: usize) -> Option<(f64, f64, usize)> {
+        let state = &self.app.state;
+        let output = state.space.outputs().nth(index)?;
+        let pane = state.fx.depth.as_ref()?.panes.get(&output.name())?;
+        let camera = state.depth_camera(output, state.now());
+        let drawn = pane
+            .commit
+            .get()
+            .distance(Some(Default::default()))
+            .unwrap_or(0);
+        Some((camera.x, camera.zoom, drawn))
+    }
+
+    /// The aurora (#801) on output `index`, while it is on: its time
+    /// (the board's seconds), its pace (1 while the music plays, 0 still),
+    /// and how many times its picture was drawn.
+    pub fn aurora(&self, index: usize) -> Option<(f64, f64, usize)> {
+        let state = &self.app.state;
+        let output = state.space.outputs().nth(index)?;
+        let aurora = state.fx.aurora.as_ref()?;
+        let pane = aurora.panes.get(&output.name())?;
+        Some((aurora.time, aurora.pace, pane.live.draws()))
+    }
+
+    /// Whether the music plays, as the shell said last (#801).
+    pub fn music_playing(&self) -> bool {
+        self.app.state.fx.music
+    }
+
+    /// The music plays, or not, as if the shell said so (#801).
+    pub fn set_music(&mut self, playing: bool) {
+        self.app.state.music_plays(playing);
+    }
+
     /// The garlands across the top (#813), while they show: each one's
     /// screen and its bulbs' points (global, logical), by screen.
     pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {

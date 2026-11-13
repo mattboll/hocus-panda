@@ -198,14 +198,17 @@ pub enum Changed {
 }
 
 /// The side of the cells what changed is told in, physical pixels.
-const CELL: i32 = 16;
+pub(crate) const CELL: i32 = 16;
 
 /// `rects` (from `geometry`'s corner) told as what of them falls in each
 /// cell of a grid on the screen's pixels, the cells' in rows: the damage
 /// tracker joins rectangles scattered over the screen (the flakes) into
 /// a few large ones, but keeps those that stand apart on its rows and
 /// columns as they are.
-fn cells(rects: &[[i32; 4]], geometry: Rectangle<i32, Physical>) -> Vec<Rectangle<i32, Physical>> {
+pub(crate) fn cells(
+    rects: &[[i32; 4]],
+    geometry: Rectangle<i32, Physical>,
+) -> Vec<Rectangle<i32, Physical>> {
     let (gx, gy) = (geometry.loc.x, geometry.loc.y);
     let (w, h) = (geometry.size.w, geometry.size.h);
     // Each rectangle's part in each cell it crosses (on the screen,
@@ -256,6 +259,145 @@ fn cells(rects: &[[i32; 4]], geometry: Rectangle<i32, Physical>) -> Vec<Rectangl
         done(b);
     }
     out
+}
+
+/// A part of an effect of few shapes drawn straight on the screen (the
+/// fireflies' glows, the koi's pads): what it drew last on a screen, to
+/// tell only what of it changed (#815).
+#[derive(Debug)]
+pub struct Traced {
+    pub id: Id,
+    commit: CommitCounter,
+    last: Option<(Rectangle<i32, Physical>, [Mesh; 3], Clip)>,
+    /// The commit before this one, and what changed since.
+    since: Option<(CommitCounter, Vec<Rectangle<i32, Physical>>)>,
+}
+
+impl Default for Traced {
+    fn default() -> Self {
+        Self {
+            id: Id::new(),
+            commit: CommitCounter::default(),
+            last: None,
+            since: None,
+        }
+    }
+}
+
+impl Traced {
+    /// `over`, `added` and `screened` where `clip` says, within
+    /// `geometry` (output-local, physical; their places from its corner):
+    /// a new commit only when they changed, telling where.
+    pub fn shapes(
+        &mut self,
+        geometry: Rectangle<i32, Physical>,
+        meshes: [Mesh; 3],
+        clip: Clip,
+    ) -> FireElement {
+        let same_place = self
+            .last
+            .as_ref()
+            .is_some_and(|(g, _, c)| *g == geometry && *c == clip);
+        let changed = match &self.last {
+            Some((_, last, _)) if same_place => {
+                let mut rects = Vec::new();
+                for (a, b) in last.iter().zip(&meshes) {
+                    mesh::changes(a, b, &mut rects);
+                }
+                (!rects.is_empty()).then_some(Some(rects))
+            }
+            _ => Some(None),
+        };
+        if let Some(rects) = changed {
+            let prev = self.commit;
+            self.commit.increment();
+            self.since = rects.map(|rects| (prev, cells(&rects, geometry)));
+        }
+        let [over, added, screened] = meshes.clone();
+        self.last = Some((geometry, meshes, clip));
+        let element =
+            FireElement::shapes(self.id.clone(), self.commit, geometry, over, added, clip)
+                .screened(screened);
+        match &self.since {
+            Some((prev, rects)) => element.changed_since(*prev, rects.clone()),
+            None => element,
+        }
+    }
+}
+
+/// What changed of a screen-wide effect, by the [`CELL`]s of the screen
+/// it falls in (#815): for an effect whose changes are many and spread
+/// (the koi's water), told as rows of whole cells, not as each change.
+#[derive(Debug)]
+pub struct Tiles {
+    across: usize,
+    down: usize,
+    dirty: Vec<bool>,
+}
+
+impl Tiles {
+    /// Over a screen `size` (physical).
+    pub fn new(size: (i32, i32)) -> Self {
+        let across = (size.0.max(0) as usize).div_ceil(CELL as usize);
+        let down = (size.1.max(0) as usize).div_ceil(CELL as usize);
+        Self {
+            across,
+            down,
+            dirty: vec![false; across * down],
+        }
+    }
+
+    /// `x0, y0, x1, y1` (physical) changed.
+    pub fn mark(&mut self, [x0, y0, x1, y1]: [f32; 4]) {
+        let cell = CELL as f32;
+        let at = |v: f32, n: usize| v.clamp(0.0, n as f32) as usize;
+        let (i0, i1) = (
+            at((x0 / cell).floor(), self.across),
+            at((x1 / cell).ceil(), self.across),
+        );
+        let (j0, j1) = (
+            at((y0 / cell).floor(), self.down),
+            at((y1 / cell).ceil(), self.down),
+        );
+        for j in j0..j1 {
+            let row = j * self.across;
+            if let Some(cells) = self.dirty.get_mut(row + i0..row + i1) {
+                cells.fill(true);
+            }
+        }
+    }
+
+    /// How many of its cells changed, of how many.
+    pub fn count(&self) -> (usize, usize) {
+        (self.dirty.iter().filter(|d| **d).count(), self.dirty.len())
+    }
+
+    /// What changed, each row's runs of cells, within `size` (physical).
+    pub fn rects(&self, size: (i32, i32)) -> Vec<Rectangle<i32, Physical>> {
+        let mut out = Vec::new();
+        for (j, row) in self.dirty.chunks(self.across.max(1)).enumerate() {
+            let mut i = 0;
+            while i < row.len() {
+                if !row.get(i).copied().unwrap_or(false) {
+                    i += 1;
+                    continue;
+                }
+                let start = i;
+                while row.get(i).copied().unwrap_or(false) {
+                    i += 1;
+                }
+                let (x, y) = (start as i32 * CELL, j as i32 * CELL);
+                let (w, h) = (
+                    (i as i32 * CELL).min(size.0) - x,
+                    (y + CELL).min(size.1) - y,
+                );
+                if w > 0 && h > 0 {
+                    out.push(Rectangle::new((x, y).into(), (w, h).into()));
+                }
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]

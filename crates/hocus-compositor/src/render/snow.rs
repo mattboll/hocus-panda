@@ -34,7 +34,7 @@ const REACH: f64 = 10.0;
 impl State {
     /// Whether the snow shows on `frame`'s output, and how.
     fn snow_on(&self, frame: &Frame) -> Option<Snowing> {
-        if !frame.purpose.screen() || self.fullscreen_in_front(frame.output) {
+        if !frame.purpose.screen() || self.wall_hidden(frame.output) {
             return None;
         }
         self.fx.snow.as_ref()?;

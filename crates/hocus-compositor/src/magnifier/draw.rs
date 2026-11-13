@@ -60,6 +60,7 @@ const HINT: [u8; 4] = [0x8C, 0x96, 0xA8, 0xFF];
 pub(crate) const ACCENT: [u8; 4] = [0x7E, 0xE0, 0xA0, 0xFF];
 const BUTTON_FILL: [u8; 4] = [255, 255, 255, 20];
 pub(crate) const PILL_SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 8.0,
     blur: 24.0,
     alpha: 0.45,

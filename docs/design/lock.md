@@ -186,6 +186,11 @@ Sizes in logical pixels (`crates/hocus-shell/src/lock/draw.rs`):
   live blur of the screen: the lock never shows windows.
   It is a canvas of its own under the rest: iced draws a canvas' images
   over its shapes.
+  With a wallpaper's effect on (the snow, the koi…, `"dimmed"`, the shell
+  on the GPU), the compositor draws the wallpaper under the lock instead,
+  the effects playing on it, and the shell leaves its background clear
+  (`live` on the lock's line), the veil over them
+  ([effects.md](effects.md), #807).
 - **The clock**: `HH:MM`, Martian Mono 400, 112 px, `text`, in cells as
   wide as a `0` (the colon 0.55 of it); the date 16 px under, Manrope
   22 px, `text.dim`; its top 330 px above the middle, 90 px on the other

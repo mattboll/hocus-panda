@@ -696,6 +696,7 @@ impl State {
                 | T::NextLayout
                 | T::Lock(_)
                 | T::Meeting(_)
+                | T::Music { .. }
                 | T::Auth(_)
                 | T::Leave(hocus_link::LeaveAsk::Cancel)
                 | T::A11yLine(_)
@@ -732,6 +733,7 @@ impl State {
             focus,
             agents,
             wallpaper: !self.config.plain_background,
+            live: self.lock_live(),
             motion: self.popover_motion(),
             output: output.clone(),
         };
