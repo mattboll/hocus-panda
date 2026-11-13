@@ -13,7 +13,7 @@ langue").
 | | Aurore en musique | `aurora` | #801 |
 | | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
 | | Bassin de koïs | `koi` | #803 |
-| | Lucioles du soir | `fireflies` | #804 |
+| | Lucioles du soir | `fireflies` | #804 (built) |
 | | La lumière du jour | `daylight` | #805 |
 | | Bureaux en profondeur | `depth` | #806 |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
@@ -408,6 +408,45 @@ wallpaper fogs and its drops move, the window's pixels untouched; off,
 nothing; still with reduced motion, nothing drawn per frame); its
 screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
 --run-ignored only rain_on_glass::shots`.
+
+## Evening fireflies (#804)
+
+With `fireflies = true`, fireflies come out after sunset, as the board
+"Lucioles du soir" does: its JS ported (`effects/fireflies.rs`), its
+lengths in logical pixels.
+
+- **The evening**: the sun below the horizon (-0.833°, NOAA's equations)
+  at the place of the system's time zone (its line in
+  `/usr/share/zoneinfo/zone1970.tab`; without one, 45° north at the
+  longitude of its offset), on the wall clock, looked at every minute
+  while the switch is on; they come out over 3 s, and go at sunrise.
+- **The swarm**: as many per pixel as the board's 70 over the 1000 × 720
+  left of its bar, over each screen's work area (beside the bar), in its
+  lower 70 %; each drifting on the board's flow field (26 px/s, eased),
+  wrapping round the sides, kept off the top fifth; each blinking every
+  2.5 to 5.5 s (`sin(πt)^0.7` over 0.77 s), nearer ones larger and
+  brighter. Stepped at 60 steps a second with a seeded generator.
+- **The pointer**: resting on the wallpaper (no window, no bar under it;
+  not moved 3 px for 0.8 s), the fireflies within 360 px are drawn to it
+  and circle it at some 70 px. The board's own pointer that wandered when
+  none was on its stage is not built.
+- **The look**: the board's glow (warm white to lime to nothing) added to
+  the wallpaper, 14 to 40 px across its radius; the bright ones' wider
+  glow (2.6 times) screened over it, as the board's front canvas was. The
+  board screened that one over its window too: here it stays on the
+  wallpaper, under the windows and the bar.
+- **Its cost**: some 120 quads at 1440 × 900 and 30 wide ones, in one
+  call each; the box they cover (most of the screen's lower part) drawn
+  again each frame, the wallpaper under it too.
+- **When**: moving, a frame each refresh; with reduced motion still, lit
+  at 60 %, nothing per frame; none by day, in the power saver, while a
+  screen is shared or recorded, on the CPU, nor in a capture.
+
+Tests: `tests/fireflies.rs` (on GLES on Mesa's software device, evening
+held: glows on the wallpaper, moving, the window's pixels untouched; by
+day or off, nothing; still with reduced motion, nothing drawn per
+frame); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only fireflies::shots`.
 
 ## Not built yet
 

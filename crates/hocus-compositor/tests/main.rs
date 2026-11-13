@@ -68,6 +68,7 @@ mod desktops_shots;
 mod effects;
 mod emoji;
 mod featured;
+mod fireflies;
 mod footer;
 mod foreign;
 mod garland;

@@ -13,7 +13,7 @@
 //! ([`jelly`], #797), shattering into glass as they close
 //! ([`shatter`], #798), and a garland under the active window
 //! ([`garland`], #799); on the wallpaper, rain on the glass
-//! ([`raindrops`], #802).
+//! ([`raindrops`], #802) and evening fireflies ([`fireflies`], #804).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -24,6 +24,7 @@
 
 pub mod creatures;
 pub mod draw;
+pub mod fireflies;
 pub mod flames;
 pub mod garland;
 pub mod jelly;
@@ -58,6 +59,12 @@ pub struct Live {
     pub raindrops: Option<raindrops::Rain>,
     /// The rains started so far, for their seeds.
     rains: u64,
+    /// The fireflies, while they are out (#804).
+    pub fireflies: Option<fireflies::Fireflies>,
+    /// The swarms come out so far, for their seeds.
+    swarms: u64,
+    /// Whether it is evening, while the fireflies are on.
+    pub dusk: fireflies::Dusk,
 }
 
 use crate::{State, model::Mode, model::WindowId};

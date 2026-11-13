@@ -53,6 +53,10 @@ pub enum Glow {
     Core = 1,
     /// A glint: whole, half at half, nothing at its edge.
     Glint = 2,
+    /// A firefly's glow (#804): its own colours, warm white at its middle,
+    /// 95 % lime at 8 %, 35 % green at 25 %, 8 % at 60 %, nothing at its
+    /// edge; as opaque as its vertices' alpha.
+    Firefly = 3,
 }
 
 /// A column of a fill: its place across, and its rows from the top down

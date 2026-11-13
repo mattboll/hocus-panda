@@ -1532,8 +1532,9 @@ impl State {
         moving |= self.tick_creatures(now);
         // The garland under the active window (#799).
         moving |= self.tick_garland(now);
-        // The rain on the glass (#802).
+        // The rain on the glass (#802), the evening fireflies (#804).
         moving |= self.tick_raindrops(now);
+        moving |= self.tick_fireflies(now);
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         // A shattering one until its last shard has fallen (#798).

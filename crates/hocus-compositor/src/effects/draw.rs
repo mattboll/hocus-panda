@@ -64,8 +64,14 @@ enum What {
         clip: Clip,
     },
     /// Shapes of the snow (#795): those drawn over what is under them,
-    /// then those added to it, where they may show.
-    Shapes { over: Mesh, added: Mesh, clip: Clip },
+    /// then those added to it, then those screened over it (#804), where
+    /// they may show.
+    Shapes {
+        over: Mesh,
+        added: Mesh,
+        screened: Mesh,
+        clip: Clip,
+    },
     /// The wallpaper as wet glass (#802): its picture sharp and blurred,
     /// and the map of the drops on it (`None`: the fogged glass alone).
     Rain {
@@ -241,10 +247,25 @@ impl FireElement {
             id,
             commit,
             geometry,
-            what: What::Shapes { over, added, clip },
+            what: What::Shapes {
+                over,
+                added,
+                screened: Mesh::default(),
+                clip,
+            },
             since: None,
             opaque: false,
         }
+    }
+
+    /// The same, with `screened` screened over what is under them after
+    /// (#804).
+    #[must_use]
+    pub fn screened(mut self, mesh: Mesh) -> Self {
+        if let What::Shapes { screened, .. } = &mut self.what {
+            *screened = mesh;
+        }
+        self
     }
 
     /// The wallpaper `sharp` as wet glass over `geometry` (output-local,
@@ -641,8 +662,8 @@ void main() {
 /// soft disc; a clump, an ellipse lit from its upper left (the board's
 /// two-point gradient, white from a focus at (-0.3, -0.3) to blue at its
 /// edge); a box blurred by a Gaussian (or sharp, its edges smoothed); a
-/// box with round corners, an oval and a glow (the garland's, #799); a
-/// drop of the rain's map (#802).
+/// box with round corners, an oval and a glow (the garland's, #799; a
+/// firefly's, #804, its own colours); a drop of the rain's map (#802).
 /// Nothing where the clip says not.
 const SHAPES: &str = "#version 100
 precision highp float;
@@ -703,6 +724,17 @@ void main() {
         float r = length(v_local);
         float a = clamp((1.0 - r) * 6.0, 0.0, 1.0);
         gl_FragColor = vec4(v_local * 0.5 + 0.5, sqrt(max(1.0 - r * r, 0.0)), 1.0) * a;
+    } else if (v_shape.y > 2.5) {
+        float d = length(v_local);
+        vec4 s0 = vec4(1.0, 1.0, 220.0 / 255.0, 1.0);
+        vec4 s1 = vec4(230.0 / 255.0, 1.0, 140.0 / 255.0, 1.0) * 0.95;
+        vec4 s2 = vec4(190.0 / 255.0, 240.0 / 255.0, 90.0 / 255.0, 1.0) * 0.35;
+        vec4 s3 = vec4(150.0 / 255.0, 220.0 / 255.0, 60.0 / 255.0, 1.0) * 0.08;
+        vec4 c = d < 0.08 ? mix(s0, s1, d / 0.08)
+            : d < 0.25 ? mix(s1, s2, (d - 0.08) / 0.17)
+            : d < 0.6 ? mix(s2, s3, (d - 0.25) / 0.35)
+            : mix(s3, vec4(0.0), clamp((d - 0.6) / 0.4, 0.0, 1.0));
+        gl_FragColor = c * v_colour.a;
     } else {
         float d = length(v_local);
         float a;
@@ -1143,7 +1175,12 @@ impl Fire for GlesRenderer {
                     sparks(gl, &programs, &matrix, instancing, smoke, embers, clip);
                 }
             }),
-            What::Shapes { over, added, clip } => {
+            What::Shapes {
+                over,
+                added,
+                screened,
+                clip,
+            } => {
                 let projection = *frame.projection();
                 frame.with_context(|gl| {
                     #[allow(unsafe_code)]
@@ -1155,7 +1192,7 @@ impl Fire for GlesRenderer {
                             &programs,
                             &matrix,
                             instancing,
-                            [over, added],
+                            [over, added, screened],
                             clip,
                             &boxes,
                         );
@@ -1532,8 +1569,8 @@ unsafe fn scissors(
         .collect()
 }
 
-/// Draws the shapes `over` over, then `added` added, cut to each of
-/// `boxes` in turn.
+/// Draws the shapes `over` over, then `added` added, then `screened`
+/// screened over, cut to each of `boxes` in turn.
 ///
 /// # Safety
 ///
@@ -1545,7 +1582,7 @@ unsafe fn shapes(
     programs: &Programs,
     matrix: &[f32; 9],
     instancing: bool,
-    [over, added]: [&Mesh; 2],
+    [over, added, screened]: [&Mesh; 3],
     clip: &Clip,
     boxes: &[[i32; 4]],
 ) {
@@ -1575,7 +1612,11 @@ unsafe fn shapes(
                 gl.VertexAttribDivisor(at, 0);
             }
         }
-        for (mesh, blend) in [(over, ffi::ONE_MINUS_SRC_ALPHA), (added, ffi::ONE)] {
+        for (mesh, blend) in [
+            (over, ffi::ONE_MINUS_SRC_ALPHA),
+            (added, ffi::ONE),
+            (screened, ffi::ONE_MINUS_SRC_COLOR),
+        ] {
             if mesh.is_empty() {
                 continue;
             }
@@ -1640,7 +1681,7 @@ fn draw_drops(
                     programs,
                     &matrix,
                     instancing,
-                    [mesh, &none],
+                    [mesh, &none, &none],
                     &clip,
                     &[[0, 0, size.w, size.h]],
                 );
