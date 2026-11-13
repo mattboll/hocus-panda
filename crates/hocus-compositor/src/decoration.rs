@@ -44,11 +44,12 @@ pub const HANDLE_THICKNESS: f64 = GRIP_SIZE.1;
 /// The snap preview: the accent at 12 % with a 1 px accent rim.
 const PREVIEW_FILL: [u8; 4] = [0x6C, 0xC2, 0x87, 31];
 
-/// A shadow: offset down, blur (CSS's: twice the deviation), darkest
-/// alpha, and the corner radius of what casts it, which it is not drawn
-/// under.
+/// A shadow: offset across and down, blur (CSS's: twice the deviation),
+/// darkest alpha, and the corner radius of what casts it, which it is not
+/// drawn under.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadowStyle {
+    pub dx: f64,
     pub dy: f64,
     pub blur: f64,
     pub alpha: f32,
@@ -57,12 +58,14 @@ pub struct ShadowStyle {
 
 impl ShadowStyle {
     pub const UNFOCUSED: Self = Self {
+        dx: 0.0,
         dy: 12.0,
         blur: 36.0,
         alpha: 0.35,
         radius: RADIUS,
     };
     pub const FOCUSED: Self = Self {
+        dx: 0.0,
         dy: 12.0,
         blur: 36.0,
         alpha: 0.45,
@@ -70,6 +73,7 @@ impl ShadowStyle {
     };
     /// Deeper while the window moves (§6); the offset is the prototype's.
     pub const MOVING: Self = Self {
+        dx: 0.0,
         dy: 18.0,
         blur: 48.0,
         alpha: 0.5,
@@ -333,6 +337,8 @@ pub struct FrameIds {
     /// One for each tone: the pill changing tone is a new element, which
     /// the damage tracker draws again even once the pill is still.
     grip: [Id; 2],
+    /// The edges the daylight's sun lights (#805).
+    pub sun: [Id; 2],
 }
 
 impl Default for FrameIds {
@@ -344,6 +350,7 @@ impl Default for FrameIds {
             ring: std::array::from_fn(|_| Id::new()),
             shadow: std::array::from_fn(|_| Id::new()),
             grip: [Id::new(), Id::new()],
+            sun: [Id::new(), Id::new()],
         }
     }
 }
@@ -1043,7 +1050,10 @@ where
     }
     let radius = (style.radius * scale).round() as i32;
     let shadow = textures.shadow(style.blur, scale, window.size);
-    let offset = Point::<i32, Physical>::from((0, (style.dy * scale).round() as i32));
+    let offset = Point::<i32, Physical>::from((
+        (style.dx * scale).round() as i32,
+        (style.dy * scale).round() as i32,
+    ));
     let thirds = |start: i32, len: i32, span: Span| {
         let (c, total) = (span.corner(), len + 2 * span.reach);
         let start = start - span.reach;

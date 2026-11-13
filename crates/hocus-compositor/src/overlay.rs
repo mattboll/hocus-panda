@@ -61,6 +61,7 @@ const SELECTION: BoxStyle = BoxStyle {
     radius: 12_000,
 };
 const PANEL_SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 30.0,
     blur: 80.0,
     alpha: 0.55,

@@ -95,6 +95,16 @@ enum What {
         width: f32,
         clip: Clip,
     },
+    /// A picture drawn once and kept (the daylight's sky, #805), over all
+    /// its geometry.
+    Picture { texture: Rc<dyn Any> },
+    /// The koi's pond (#803): the picture under its water, seen through
+    /// the water's heights.
+    Koi {
+        under: Rc<dyn Any>,
+        heights: Option<Rc<dyn Any>>,
+        look: KoiLook,
+    },
     /// Nothing: what stands for an effect where it must not be seen (behind
     /// the glass, blurred once and kept).
     Blank,
@@ -177,6 +187,48 @@ pub struct RainLook {
     pub zoom: [f32; 2],
     pub offset: [f32; 2],
     pub bend: [f32; 2],
+}
+
+/// How the koi's water is drawn (#803): the screen's size (physical); the
+/// heights' share of the screen (`uv * grid` in their texture) and a cell
+/// of theirs; how far the water bends what is under it (in the screen's
+/// share, for the board's stage's share); the heights' zero (0 in floats,
+/// a half in bytes). Without heights, the water still.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KoiLook {
+    pub screen: [f32; 2],
+    pub grid: [f32; 2],
+    pub texel: [f32; 2],
+    pub bend: [f32; 2],
+    pub zero: f32,
+}
+
+/// How the daylight's sky is drawn (#805), from the board's `frame`: the
+/// screen's size (logical) and its scale; the hour's colours (0 to 1);
+/// the sun's place (logical), whether it is up and its height; how bright
+/// the stars are and how many.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkyLook {
+    pub size: [f32; 2],
+    pub scale: f32,
+    pub top: [f32; 3],
+    pub bottom: [f32; 3],
+    pub light: [f32; 3],
+    pub grade: f32,
+    pub sun: [f32; 2],
+    pub up: bool,
+    pub elev: f32,
+    pub night: f32,
+    pub stars: f32,
+}
+
+/// The koi's water's heights as a texture, kept between frames: its size
+/// (cells), and whether it holds half floats (else bytes).
+#[derive(Debug)]
+pub struct Heights {
+    pub size: (i32, i32),
+    pub texture: Rc<dyn Any>,
+    pub half: bool,
 }
 
 /// A warm light: its centre and radii, element-local and physical, and
@@ -325,6 +377,48 @@ impl FireElement {
         }
     }
 
+    /// The kept picture `texture` over `geometry` (output-local, physical),
+    /// opaque (#805).
+    pub fn picture(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        texture: Rc<dyn Any>,
+    ) -> Self {
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Picture { texture },
+            since: None,
+            opaque: true,
+        }
+    }
+
+    /// The koi's pond over `geometry` (output-local, physical): `under`
+    /// through the water of `heights` (`None`: still), opaque (#803).
+    pub fn koi(
+        id: Id,
+        commit: CommitCounter,
+        geometry: Rectangle<i32, Physical>,
+        under: Rc<dyn Any>,
+        heights: Option<Rc<dyn Any>>,
+        look: KoiLook,
+    ) -> Self {
+        Self {
+            id,
+            commit,
+            geometry,
+            what: What::Koi {
+                under,
+                heights,
+                look,
+            },
+            since: None,
+            opaque: true,
+        }
+    }
+
     /// Nothing over `geometry`, never changing.
     pub fn blank(id: Id, geometry: Rectangle<i32, Physical>) -> Self {
         Self {
@@ -393,6 +487,37 @@ pub trait Fire: Renderer + Sized {
         mesh: impl FnOnce() -> Mesh,
     ) -> Option<Rc<dyn Any>>;
 
+    /// The daylight's sky (#805), `size` pixels, kept in `kept`: drawn
+    /// again from `look` when `fresh` or new. `None`: not drawn so.
+    fn sky(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: SkyLook,
+    ) -> Option<Rc<dyn Any>>;
+
+    /// What is under the koi's water (#803), `size` pixels, kept in
+    /// `kept`: the pond's floor `floor` (a sheet), and over it `mesh` (the
+    /// koi and their shadows), drawn again each time. `None`: not drawn
+    /// so.
+    fn koi_under(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        floor: &Rc<dyn Any>,
+        mesh: &Mesh,
+    ) -> Option<Rc<dyn Any>>;
+
+    /// The koi's water's `heights` (`size` cells, by rows) into the
+    /// texture kept in `kept`. `None`: not drawn so.
+    fn koi_heights(
+        &mut self,
+        kept: &RefCell<Option<Heights>>,
+        size: (i32, i32),
+        heights: &[f32],
+    ) -> Option<(Rc<dyn Any>, bool)>;
+
     fn draw_fire(
         frame: &mut Self::Frame<'_, '_>,
         element: &FireElement,
@@ -443,6 +568,35 @@ impl Fire for PixmanRenderer {
         _fresh: bool,
         _mesh: impl FnOnce() -> Mesh,
     ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn sky(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _look: SkyLook,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn koi_under(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _floor: &Rc<dyn Any>,
+        _mesh: &Mesh,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn koi_heights(
+        &mut self,
+        _kept: &RefCell<Option<Heights>>,
+        _size: (i32, i32),
+        _heights: &[f32],
+    ) -> Option<(Rc<dyn Any>, bool)> {
         None
     }
 
@@ -663,8 +817,8 @@ void main() {
 /// two-point gradient, white from a focus at (-0.3, -0.3) to blue at its
 /// edge); a box blurred by a Gaussian (or sharp, its edges smoothed); a
 /// box with round corners, an oval and a glow (the garland's, #799; a
-/// firefly's, #804, its own colours); a drop of the rain's map (#802).
-/// Nothing where the clip says not.
+/// firefly's, #804, its own colours); a drop of the rain's map (#802); a
+/// lily pad or its shadow (#803). Nothing where the clip says not.
 const SHAPES: &str = "#version 100
 precision highp float;
 varying vec2 v_local;
@@ -720,6 +874,36 @@ void main() {
     } else if (kind < 5.5) {
         float cover = clamp((1.0 - length(v_local)) * v_shape.y + 0.5, 0.0, 1.0);
         gl_FragColor = v_colour * cover;
+    } else if (kind > 7.5) {
+        vec2 p = v_local;
+        float d = length(p);
+        float a = atan(p.y, p.x);
+        float shadow = v_shape.z;
+        float cover = clamp((1.0 - d) * v_shape.y + 0.5, 0.0, 1.0);
+        float notch = shadow > 0.5 ? 0.2 : 0.22;
+        cover *= clamp((abs(a) - notch) * d * v_shape.y + 0.5, 0.0, 1.0);
+        if (shadow > 0.5) {
+            gl_FragColor = v_colour * cover;
+        } else {
+            float r0 = 2.0 * v_shape.w / v_shape.y;
+            vec2 e = vec2(0.3, 0.3);
+            float dr = 1.0 - r0;
+            vec2 q = p + e;
+            float qa = dot(e, e) - dr * dr;
+            float qb = dot(q, e) + r0 * dr;
+            float qc = dot(q, q) - r0 * r0;
+            float t = clamp((qb - sqrt(max(qb * qb - qa * qc, 0.0))) / qa, 0.0, 1.0);
+            vec3 c = mix(vec3(111.0, 174.0, 92.0), vec3(47.0, 107.0, 58.0), t) / 255.0;
+            float a2 = a < 0.0 ? a + 6.2831853 : a;
+            float k = clamp(floor((a2 - 0.4) / 0.62 + 0.5), 0.0, 8.0);
+            float off = a2 - (0.4 + k * 0.62);
+            float far = d * v_shape.y;
+            float dist = cos(off) > 0.0 ? far * abs(sin(off)) : far;
+            float vein = clamp(1.0 - dist / v_shape.w, 0.0, 1.0)
+                * clamp((0.92 - d) * v_shape.y + 0.5, 0.0, 1.0) * 0.25;
+            c = mix(c, vec3(190.0, 230.0, 170.0) / 255.0, vein);
+            gl_FragColor = vec4(c, 1.0) * cover * v_colour.a;
+        }
     } else if (kind > 6.5) {
         float r = length(v_local);
         float a = clamp((1.0 - r) * 6.0, 0.0, 1.0);
@@ -797,6 +981,146 @@ void main() {
     float spec = pow(max(0.0, dot(normalize(vec3(n, 0.65)), normalize(vec3(-0.4, -0.6, 0.7)))), 28.0);
     seen += vec3(1.0) * spec * 0.55;
     gl_FragColor = vec4(mix(fog, seen, smoothstep(0.05, 0.6, a)), 1.0);
+}
+";
+
+/// The board's `KOI_FS` (#803): what is under the water seen through it,
+/// bent by its heights' normal, tinted, lit where the water's surface
+/// curves up, with a highlight from the upper left and the sky's sheen
+/// toward the top. Its heights, in the board's floats (or, without them,
+/// its bytes about a half); `still`, flat water.
+const KOI: &str = "#version 100
+precision highp float;
+uniform sampler2D under;
+uniform sampler2D heights;
+uniform vec2 screen;
+uniform vec2 grid;
+uniform vec2 texel;
+uniform vec2 bend;
+uniform float zero;
+uniform float still;
+varying vec2 v_px;
+
+float h(vec2 p) { return still > 0.5 ? 0.0 : texture2D(heights, p).r - zero; }
+void main() {
+    vec2 uv = v_px / screen;
+    vec2 q = uv * grid;
+    vec2 tx = vec2(texel.x, 0.0);
+    vec2 ty = vec2(0.0, texel.y);
+    float c = h(q);
+    float r = h(q + tx);
+    float l = h(q - tx);
+    float d = h(q + ty);
+    float u = h(q - ty);
+    float dx = r - l;
+    float dy = d - u;
+    float lap = r + l + d + u - 4.0 * c;
+    vec3 n = normalize(vec3(-dx * 4.0, -dy * 4.0, 1.0));
+    vec3 seen = texture2D(under, clamp(uv + n.xy * 0.035 * bend, 0.0, 1.0)).rgb;
+    vec3 water = mix(seen, seen * vec3(0.55, 0.85, 0.85) + vec3(0.0, 0.03, 0.04), 0.35);
+    water += vec3(0.75, 0.95, 1.0) * smoothstep(0.004, 0.06, -lap) * 0.28;
+    vec3 lt = normalize(vec3(-0.35, -0.55, 0.75));
+    float spec = pow(max(0.0, dot(reflect(-lt, n), vec3(0.0, 0.0, 1.0))), 60.0);
+    water += vec3(1.0, 0.98, 0.92) * spec * 0.9;
+    float sky = smoothstep(0.0, 1.0, 1.0 - uv.y) * 0.06;
+    water += vec3(0.55, 0.75, 0.85) * sky;
+    gl_FragColor = vec4(water, 1.0);
+}
+";
+
+/// The board "La lumière du jour"'s sky (#805), its canvas drawn as one
+/// shader, in its logical pixels: the gradient (top, bottom at 75 %, the
+/// bottom half darkened at the foot), its stars (1.4 px squares at its
+/// places, `(i × 7919) mod 1200` and `(i × 4513) mod 432` over its 1200 ×
+/// 720, stretched over the screen: on another width the board's own
+/// formula lines them up), by day the sun's
+/// halo (380 px: 55 %, 22 % at 15 %, nothing), its disc (26 px, the light
+/// whitened 40 %) and its seven rays added (from the sun toward the
+/// screen's bottom middle, 0.09 apart, 0.06 wide, fading out over
+/// 1100 px), by night the moon's halo and disc; the two ridges; the hour's
+/// light graded over it all (soft light), as the board's grading canvas.
+const SKY: &str = "#version 100
+precision highp float;
+uniform vec2 size;
+uniform float px;
+uniform vec3 top;
+uniform vec3 bottom;
+uniform vec3 light;
+uniform float grade;
+uniform vec2 sun;
+uniform float up;
+uniform float elev;
+uniform float night;
+uniform float stars;
+varying vec2 v_px;
+
+vec3 over(vec3 c, vec3 s, float a) { return c * (1.0 - a) + s * a; }
+float disc(vec2 p, vec2 at, float r) { return clamp((r - length(p - at)) * px + 0.5, 0.0, 1.0); }
+float ridge(float x, float y0, float amp, float f, float s) {
+    return y0 + sin(x * f + s) * amp + sin(x * f * 2.3 + s) * amp * 0.4;
+}
+float soft(float b, float s) {
+    if (s <= 0.5) {
+        return b - (1.0 - 2.0 * s) * b * (1.0 - b);
+    }
+    float d = b <= 0.25 ? ((16.0 * b - 12.0) * b + 4.0) * b : sqrt(b);
+    return b + (2.0 * s - 1.0) * (d - b);
+}
+void main() {
+    vec2 p = v_px / px;
+    float w = size.x;
+    float h = size.y;
+    float t = p.y / h;
+    vec3 foot = mix(bottom, vec3(10.0, 10.0, 20.0) / 255.0, 0.5);
+    vec3 c = t < 0.75 ? mix(top, bottom, t / 0.75) : mix(bottom, foot, clamp((t - 0.75) / 0.25, 0.0, 1.0));
+    if (night > 0.0 && p.y < h * 0.6 + 2.0) {
+        float half_px = 0.5 / px;
+        for (int i = 0; i < 1024; i++) {
+            float fi = float(i);
+            if (fi >= stars) {
+                break;
+            }
+            vec2 s = vec2(mod(fi * 7919.0, 1200.0) / 1200.0 * w, mod(fi * 4513.0, 432.0) / 432.0 * h * 0.6);
+            vec2 lo = max(p - half_px, s);
+            vec2 hi = min(p + half_px, s + 1.4);
+            float cover = max(hi.x - lo.x, 0.0) * max(hi.y - lo.y, 0.0) * px * px;
+            if (cover > 0.0) {
+                float a = 0.5 * night * (0.4 + 0.6 * mod(fi * 37.0, 10.0) / 10.0);
+                c = over(c, vec3(230.0, 235.0, 255.0) / 255.0, a * min(cover, 1.0));
+            }
+        }
+    }
+    if (up > 0.5) {
+        float d = length(p - sun);
+        float a = d < 57.0 ? mix(0.55, 0.22, d / 57.0) : mix(0.22, 0.0, clamp((d - 57.0) / 323.0, 0.0, 1.0));
+        c = over(c, light, a);
+        c = over(c, mix(light, vec3(1.0), 0.4), disc(p, sun, 26.0));
+        vec2 v = p - sun;
+        float dist = length(v);
+        float base = atan(h - sun.y, w / 2.0 - sun.x);
+        float ang = atan(v.y, v.x);
+        float strength = 0.07 * (1.0 - elev * 0.6);
+        for (int r = 0; r < 7; r++) {
+            float off = ang - (base + (float(r) - 3.0) * 0.09);
+            off = mod(off + 3.14159265, 6.2831853) - 3.14159265;
+            float inside = clamp((0.03 - abs(off)) * dist * px + 0.5, 0.0, 1.0);
+            float along = dist * cos(off);
+            float fall = clamp(1.0 - along / 1100.0, 0.0, 1.0);
+            c += light * strength * fall * inside * step(0.0, along);
+        }
+    } else {
+        vec2 moon = vec2(w * 0.72, h * 0.18);
+        float a = 0.25 * clamp(1.0 - length(p - moon) / 160.0, 0.0, 1.0);
+        c = over(c, vec3(200.0, 210.0, 255.0) / 255.0, a);
+        c = over(c, vec3(232.0, 236.0, 248.0) / 255.0, disc(p, moon, 16.0));
+    }
+    float y1 = ridge(p.x, h * 0.72, 26.0, 0.005, 1.0);
+    c = over(c, mix(bottom, vec3(22.0, 20.0, 40.0) / 255.0, 0.74), clamp((p.y - y1) * px + 0.5, 0.0, 1.0));
+    float y2 = ridge(p.x, h * 0.82, 20.0, 0.008, 3.0);
+    c = over(c, mix(bottom, vec3(10.0, 10.0, 22.0) / 255.0, 0.88), clamp((p.y - y2) * px + 0.5, 0.0, 1.0));
+    c = clamp(c, 0.0, 1.0);
+    vec3 g = vec3(soft(c.r, light.r), soft(c.g, light.g), soft(c.b, light.b));
+    gl_FragColor = vec4(mix(c, g, grade), 1.0);
 }
 ";
 
@@ -880,6 +1204,8 @@ struct Programs {
     sprites: Program,
     shards: Program,
     rain: Program,
+    koi: Program,
+    sky: Program,
     /// The shards' look attribute.
     shard_look: ffi::types::GLint,
     /// The sprites' opacity attribute.
@@ -957,6 +1283,24 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                     "matrix", "sharp", "blur", "drops", "screen", "zoom", "offset", "bend", "wet",
                 ],
             )?;
+            let koi = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                KOI,
+                &[
+                    "matrix", "under", "heights", "screen", "grid", "texel", "bend", "zero",
+                    "still",
+                ],
+            )?;
+            let sky = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                SKY,
+                &[
+                    "matrix", "size", "px", "top", "bottom", "light", "grade", "sun", "up", "elev",
+                    "night", "stars",
+                ],
+            )?;
             let attrib =
                 |p: &Program, n: &std::ffi::CStr| gl.GetAttribLocation(p.program, n.as_ptr());
             let shard_look = attrib(&shards, c"look");
@@ -988,6 +1332,8 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 sprites,
                 shards,
                 rain,
+                koi,
+                sky,
                 shard_look,
                 shade,
                 colour,
@@ -1100,6 +1446,136 @@ impl Fire for GlesRenderer {
         }
         *kept = Some((size, map.clone()));
         Some(map)
+    }
+
+    fn sky(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: SkyLook,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let (mut texture, map) = kept_target(self, kept, size, fresh, "the daylight's sky")?;
+        if let Some(map) = map {
+            return Some(map);
+        }
+        let p = &programs.sky;
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current.
+            unsafe {
+                quads(gl, p, matrix, instancing, &[whole], whole.loc, |gl| {
+                    gl.Uniform2f(p.at("size"), look.size[0], look.size[1]);
+                    gl.Uniform1f(p.at("px"), look.scale);
+                    let [r, g, b] = look.top;
+                    gl.Uniform3f(p.at("top"), r, g, b);
+                    let [r, g, b] = look.bottom;
+                    gl.Uniform3f(p.at("bottom"), r, g, b);
+                    let [r, g, b] = look.light;
+                    gl.Uniform3f(p.at("light"), r, g, b);
+                    gl.Uniform1f(p.at("grade"), look.grade);
+                    gl.Uniform2f(p.at("sun"), look.sun[0], look.sun[1]);
+                    gl.Uniform1f(p.at("up"), if look.up { 1.0 } else { 0.0 });
+                    gl.Uniform1f(p.at("elev"), look.elev);
+                    gl.Uniform1f(p.at("night"), look.night);
+                    gl.Uniform1f(p.at("stars"), look.stars);
+                });
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the daylight's sky");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn koi_under(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        floor: &Rc<dyn Any>,
+        mesh: &Mesh,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let floor = floor.downcast_ref::<GlesTexture>()?.tex_id();
+        let (mut texture, _) = kept_target(self, kept, size, true, "the koi's pond")?;
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        // The floor whole, as a sprite: its corners, their places in it.
+        let mut quad = Vec::with_capacity(6 * SPRITE_FLOATS);
+        for (x, y) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, 0.0), (w, h), (0.0, h)] {
+            quad.extend_from_slice(&[x, y, x / w, y / h, 1.0]);
+        }
+        let none = Mesh::default();
+        let clip = Clip::new([-1.0e7, -1.0e7, 1.0e7, 1.0e7], [], 1.0);
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            let boxes = [[0, 0, whole.size.w, whole.size.h]];
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current.
+            unsafe {
+                sprites(gl, &programs, matrix, instancing, floor, &quad, &boxes);
+                shapes(
+                    gl,
+                    &programs,
+                    matrix,
+                    instancing,
+                    [mesh, &none, &none],
+                    &clip,
+                    &boxes,
+                );
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the koi's pond");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn koi_heights(
+        &mut self,
+        kept: &RefCell<Option<Heights>>,
+        size: (i32, i32),
+        heights: &[f32],
+    ) -> Option<(Rc<dyn Any>, bool)> {
+        programs(self)?;
+        let mut kept = kept.borrow_mut();
+        let region = Rectangle::<i32, BufferCoords>::from_size(size.into());
+        if let Some(had) = kept.as_ref().filter(|k| k.size == size) {
+            let texture = had.texture.downcast_ref::<GlesTexture>()?;
+            let bytes = height_bytes(heights, had.half);
+            if let Err(err) = self.update_memory(texture, &bytes, region) {
+                tracing::warn!(%err, "could not move the koi's water");
+                return None;
+            }
+            return Some((had.texture.clone(), had.half));
+        }
+        // Half floats where the context takes them (GLES 3), as the board's
+        // floats; else bytes about a half, as its fallback.
+        let made = [(true, Fourcc::Abgr16161616f), (false, Fourcc::Abgr8888)]
+            .into_iter()
+            .find_map(|(half, format)| {
+                let bytes = height_bytes(heights, half);
+                let texture: GlesTexture = self
+                    .import_memory(&bytes, format, size.into(), false)
+                    .ok()?;
+                Some((half, texture))
+            });
+        let Some((half, texture)) = made else {
+            tracing::warn!("no texture for the koi's water");
+            return None;
+        };
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept = Some(Heights {
+            size,
+            texture: rc.clone(),
+            half,
+        });
+        Some((rc, half))
     }
 
     fn draw_fire(
@@ -1273,9 +1749,167 @@ impl Fire for GlesRenderer {
                     }
                 })
             }
+            What::Picture { texture } => {
+                let Some(texture) = texture.downcast_ref::<GlesTexture>() else {
+                    return Ok(());
+                };
+                let tex = texture.tex_id();
+                let g = element.geometry;
+                let (x0, y0) = (g.loc.x as f32, g.loc.y as f32);
+                let (x1, y1) = (x0 + g.size.w as f32, y0 + g.size.h as f32);
+                let mut quad = Vec::with_capacity(6 * SPRITE_FLOATS);
+                for (x, y, u, v) in [
+                    (x0, y0, 0.0, 0.0),
+                    (x1, y0, 1.0, 0.0),
+                    (x0, y1, 0.0, 1.0),
+                    (x1, y0, 1.0, 0.0),
+                    (x1, y1, 1.0, 1.0),
+                    (x0, y1, 0.0, 1.0),
+                ] {
+                    quad.extend_from_slice(&[x, y, u, v, 1.0]);
+                }
+                let projection = *frame.projection();
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the frame's context is current.
+                    unsafe {
+                        let boxes = scissors(gl, &projection, dst, damage);
+                        sprites(gl, &programs, &matrix, instancing, tex, &quad, &boxes);
+                    }
+                })
+            }
+            What::Koi {
+                under,
+                heights,
+                look,
+            } => {
+                let tex = |t: &Rc<dyn Any>| t.downcast_ref::<GlesTexture>().map(|t| t.tex_id());
+                let Some(under) = tex(under) else {
+                    return Ok(());
+                };
+                let heights = heights.as_ref().and_then(tex);
+                let p = &programs.koi;
+                let look = *look;
+                frame.with_context(|gl| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the frame's context is current; `quads`
+                    // gives the two units back unbound.
+                    unsafe {
+                        quads(gl, p, &matrix, instancing, damage, corner, |gl| {
+                            bind(gl, 0, under, false);
+                            bind(gl, 1, heights.unwrap_or(under), false);
+                            gl.Uniform1i(p.at("under"), 0);
+                            gl.Uniform1i(p.at("heights"), 1);
+                            gl.Uniform2f(p.at("screen"), look.screen[0], look.screen[1]);
+                            gl.Uniform2f(p.at("grid"), look.grid[0], look.grid[1]);
+                            gl.Uniform2f(p.at("texel"), look.texel[0], look.texel[1]);
+                            gl.Uniform2f(p.at("bend"), look.bend[0], look.bend[1]);
+                            gl.Uniform1f(p.at("zero"), look.zero);
+                            let still = if heights.is_some() { 0.0 } else { 1.0 };
+                            gl.Uniform1f(p.at("still"), still);
+                        });
+                    }
+                })
+            }
             What::Blank => Ok(()),
         }
     }
+}
+
+/// The koi's water's heights (the board's `cur`) as the texture holds
+/// them: half floats of the board's `cur × 28 / 255`, else bytes of
+/// `128 + cur × 28`; red, the rest nothing (opaque).
+fn height_bytes(heights: &[f32], half: bool) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(heights.len() * if half { 8 } else { 4 });
+    let one = to_half(1.0).to_le_bytes();
+    for h in heights {
+        if half {
+            let r = to_half(h * 28.0 / 255.0).to_le_bytes();
+            bytes.extend_from_slice(&[r[0], r[1], 0, 0, 0, 0, one[0], one[1]]);
+        } else {
+            let r = (128.0 + h * 28.0).clamp(0.0, 255.0) as u8;
+            bytes.extend_from_slice(&[r, 0, 0, 255]);
+        }
+    }
+    bytes
+}
+
+/// `v` as a half float (IEEE 754 binary16), rounded to the nearest; too
+/// small, zero; too large, the largest.
+fn to_half(v: f32) -> u16 {
+    let bits = v.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 0xff) as i32 - 127 + 15;
+    let mant = bits & 0x7f_ffff;
+    if exp <= 0 {
+        if exp < -10 {
+            return sign;
+        }
+        // Subnormal: the implicit bit made explicit, shifted down, rounded.
+        let shift = (14 - exp) as u32;
+        let m = ((mant | 0x80_0000) + (1 << (shift - 1))) >> shift;
+        return sign | m as u16;
+    }
+    if exp >= 31 {
+        return sign | 0x7bff;
+    }
+    let half = sign as u32 | ((exp as u32) << 10) | (mant >> 13);
+    // Round to the nearest: a carry into the exponent is right.
+    (half + ((mant >> 12) & 1)).min(sign as u32 | 0x7bff) as u16
+}
+
+/// The texture kept in `kept` when it is `size`, else a new one: with the
+/// texture itself when it is kept and not `fresh` (nothing to draw).
+fn kept_target(
+    renderer: &mut GlesRenderer,
+    kept: &RefCell<Option<Kept>>,
+    size: (i32, i32),
+    fresh: bool,
+    what: &str,
+) -> Option<(GlesTexture, Option<Rc<dyn Any>>)> {
+    let size = Size::<i32, BufferCoords>::from(size);
+    let had = kept
+        .borrow()
+        .as_ref()
+        .filter(|(s, _)| *s == size)
+        .map(|(_, t)| t.clone());
+    if let Some(map) = had {
+        let texture = map.downcast_ref::<GlesTexture>()?.clone();
+        return Some((texture, (!fresh).then_some(map)));
+    }
+    let texture: GlesTexture =
+        Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, size)
+            .map_err(|err| tracing::warn!(%err, "no texture for {what}"))
+            .ok()?;
+    Some((texture, None))
+}
+
+/// Draws into `target` by `draw` (told the context, the matrix placing
+/// its pixels, its whole rectangle and whether it instances), cleared
+/// first.
+fn offscreen(
+    renderer: &mut GlesRenderer,
+    target: &mut GlesTexture,
+    draw: impl FnOnce(&ffi::Gles2, &[f32; 9], Rectangle<i32, Physical>, bool),
+) -> Result<(), String> {
+    let size = target.size();
+    let size = Size::<i32, Physical>::from((size.w, size.h));
+    let whole = Rectangle::from_size(size);
+    let instancing = renderer.capabilities().contains(&Capability::Instancing);
+    let mut bound = renderer.bind(target).map_err(|e| e.to_string())?;
+    let mut frame = renderer
+        .render(&mut bound, size, Transform::Normal)
+        .map_err(|e| e.to_string())?;
+    frame
+        .clear(Color32F::TRANSPARENT, &[whole])
+        .map_err(|e| e.to_string())?;
+    let matrix = crate::wobble::placed(frame.projection(), whole, whole);
+    frame
+        .with_context(|gl| draw(gl, &matrix, whole, instancing))
+        .map_err(|e| e.to_string())?;
+    // The same context draws the output next, in order: no wait.
+    let _done = frame.finish().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// The picture `kept` of a window leaving: drawn from `parts` the first
@@ -1761,5 +2395,21 @@ impl<R: Fire> RenderElement<R> for FireElement {
         _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
         R::draw_fire(frame, self, dst, damage)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn halves_round_as_floats_do() {
+        assert_eq!(to_half(1.0), 0x3c00);
+        assert_eq!(to_half(-2.0), 0xc000);
+        assert_eq!(to_half(0.0), 0);
+        assert_eq!(to_half(65504.0), 0x7bff);
+        assert_eq!(to_half(1.0e9), 0x7bff);
+        assert_eq!(to_half(0.1), 0x2e66);
+        assert_eq!(to_half(-1.0e-5), 0x80a8);
     }
 }

@@ -1,7 +1,7 @@
 //! Apparence › Effets / Appearance › Effects (#434, #793): the desktop's
 //! effects, one switch each, all off by default, grouped as the summary
 //! board "Les quatorze effets" groups them (the wallpaper, the windows,
-//! the moments, the agents). Each writes its key of `[effects]`; the
+//! the moments, the agents); the second garland (#813) beside the first. Each writes its key of `[effects]`; the
 //! effects not built yet show "Bientôt" and their switch is inert.
 
 use hocus_words::settings::effects as words;
@@ -30,11 +30,14 @@ const AGENTS: RowGroup = RowGroup {
 pub const BUILT: &[&str] = &[
     "effects.snow",
     "effects.rain-on-glass",
+    "effects.koi",
     "effects.fireflies",
+    "effects.daylight",
     "effects.flames",
     "effects.shatter",
     "effects.jelly",
     "effects.garland",
+    "effects.garland-top",
     "effects.creatures",
 ];
 
@@ -125,8 +128,8 @@ pub fn settings() -> &'static [Setting] {
                 words::DAYLIGHT,
                 words::DAYLIGHT_LINE,
                 (
-                    &["soleil", "ombres", "lumière", "effet"],
-                    &["sun", "shadows", "light", "effect"],
+                    &["soleil", "ciel", "ombres", "lumière", "effet"],
+                    &["sun", "sky", "shadows", "light", "effect"],
                 ),
             ),
             effect(
@@ -182,6 +185,24 @@ pub fn settings() -> &'static [Setting] {
                 ),
             ),
             effect(
+                "effects.garland-top",
+                &["effects", "garland-top"],
+                WINDOWS,
+                words::GARLAND_TOP,
+                words::GARLAND_TOP_LINE,
+                (
+                    &["guirlande", "noël", "fêtes", "haut", "effet"],
+                    &[
+                        "garland",
+                        "christmas",
+                        "holidays",
+                        "lights",
+                        "top",
+                        "effect",
+                    ],
+                ),
+            ),
+            effect(
                 "effects.fireworks",
                 &["effects", "fireworks"],
                 MOMENTS,
@@ -222,13 +243,14 @@ pub fn settings() -> &'static [Setting] {
 mod tests {
     use super::*;
 
-    /// Fourteen, each with its key of `[effects]`, off by default; the
-    /// snow, the rain on the glass, the fireflies, the flames, the glass,
-    /// the jelly, the garland and the creatures built.
+    /// Fifteen (the board's fourteen, and the second garland), each with
+    /// its key of `[effects]`, off by default; the snow, the rain on the
+    /// glass, the koi, the fireflies, the daylight, the flames, the glass,
+    /// the jelly, the garlands and the creatures built.
     #[test]
-    fn fourteen_effects_off_by_default_eight_built() {
+    fn fifteen_effects_off_by_default_eleven_built() {
         let all = settings();
-        assert_eq!(all.len(), 14);
+        assert_eq!(all.len(), 15);
         for s in all {
             let key = s.places.of(crate::model::Source::Ac).key;
             assert_eq!(key[0], "effects", "{}", s.id);
@@ -242,11 +264,14 @@ mod tests {
             let built = [
                 "effects.snow",
                 "effects.rain-on-glass",
+                "effects.koi",
                 "effects.fireflies",
+                "effects.daylight",
                 "effects.flames",
                 "effects.shatter",
                 "effects.jelly",
                 "effects.garland",
+                "effects.garland-top",
                 "effects.creatures",
             ];
             assert_eq!(soon(s.id), !built.contains(&s.id));

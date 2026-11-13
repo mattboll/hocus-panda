@@ -38,6 +38,7 @@ use crate::{
 const SHADE: [f32; 4] = [6.0 / 255.0, 8.0 / 255.0, 14.0 / 255.0, 0.55];
 /// The chooser's `0 22px 60px rgba(0, 0, 0, 0.5)`, zoomed.
 const SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 22.0 * LAUNCHER_ZOOM,
     blur: 60.0 * LAUNCHER_ZOOM,
     alpha: 0.5,

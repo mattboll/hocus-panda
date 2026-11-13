@@ -328,6 +328,63 @@ impl Headless {
         self.app.state.redraw = true;
     }
 
+    /// The koi (#803) in the pond of screen `name`, while it shows: where
+    /// each one's head is (global, logical).
+    pub fn koi(&self, name: &str) -> Option<Vec<(f64, f64)>> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == name)?;
+        if !state.koi_shows_on(output) {
+            return None;
+        }
+        let area = state.space.output_geometry(output)?;
+        let pond = state.fx.koi.as_ref()?.panes.get(name)?;
+        Some(
+            pond.koi
+                .iter()
+                .map(|k| {
+                    let [x, y] = k.spine[0];
+                    (
+                        f64::from(area.loc.x) + f64::from(x),
+                        f64::from(area.loc.y) + f64::from(y),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    /// The sun (#805) as it is at `at`, whatever the clock says.
+    pub fn hold_sun(&mut self, at: jiff::Timestamp) {
+        self.app.state.hold_sun(at);
+    }
+
+    /// The daylight's hour on its board (#805), while it is on.
+    pub fn daylight_hour(&self) -> Option<f64> {
+        Some(self.app.state.fx.daylight.as_ref()?.hour)
+    }
+
+    /// The garlands across the top (#813), while they show: each one's
+    /// screen and its bulbs' points (global, logical), by screen.
+    pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {
+        let mut tops: Vec<_> = self
+            .app
+            .state
+            .fx
+            .tops
+            .iter()
+            .map(|(name, top)| (name.clone(), top.bulbs()))
+            .collect();
+        tops.sort_by(|a, b| a.0.cmp(&b.0));
+        tops
+    }
+
+    /// The wall clock's date (`year`, `month`, `day`) in place of the
+    /// system's, and the garlands' proposal looked at again (#813).
+    pub fn holidays_date(&mut self, year: i16, month: i8, day: i8) -> anyhow::Result<()> {
+        self.app.state.holidays.clock = Some(jiff::civil::Date::new(year, month, day)?);
+        self.app.state.holidays_check();
+        Ok(())
+    }
+
     /// Whether it snows (#795): the snow kept, falling or still.
     pub fn snowing(&self) -> bool {
         self.app.state.fx.snow.is_some()

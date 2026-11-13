@@ -111,6 +111,7 @@ const DISC_STYLE: BoxStyle = BoxStyle {
 const NUMBER: f64 = 48.0 * Z;
 /// The toolbar's shadow, the mockup's `0 14px 40px rgba(0, 0, 0, 0.45)`.
 const TOOLBAR_SHADOW: ShadowStyle = ShadowStyle {
+    dx: 0.0,
     dy: 14.0 * Z,
     blur: 40.0 * Z,
     alpha: 0.45,

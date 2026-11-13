@@ -14,6 +14,7 @@
 
 mod agents_bed;
 mod common;
+mod koi;
 mod settings_page;
 
 // The fake system services of the bar's levels (tests/levels/), and the
@@ -59,6 +60,7 @@ mod creatures;
 mod cursor;
 mod day;
 mod day_sources;
+mod daylight;
 mod decorations;
 mod desktop_drop;
 mod desktops;
@@ -75,6 +77,7 @@ mod garland;
 mod gestures;
 mod glass;
 mod headless;
+mod holidays;
 mod idle;
 mod in_use;
 mod ink;

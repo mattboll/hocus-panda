@@ -7,8 +7,10 @@
 //! clients are told once a frame is out.
 
 mod creatures;
+mod daylight;
 mod fireflies;
 mod garland;
+mod koi;
 mod layers;
 mod leaving;
 mod raindrops;
@@ -208,6 +210,9 @@ pub(crate) struct Look {
     /// Raining (#432): the fade it is drawn with where the rain is not
     /// (pixman), over the rain's time.
     rain: Option<f32>,
+    /// Its edges a sun lights (the daylight, #805), and the daylight's
+    /// hour; on the screen alone.
+    sunlit: Option<(crate::effects::daylight::LitEdges, u64)>,
 }
 
 impl Look {
@@ -226,6 +231,7 @@ impl Look {
             own_shadow: true,
             corner: Some(corner),
             rain: None,
+            sunlit: None,
         }
     }
 }
@@ -319,6 +325,7 @@ impl State {
             own_shadow,
             corner: None,
             rain,
+            sunlit: None,
         })
     }
 
@@ -452,6 +459,14 @@ impl State {
                 look.grip * look.alpha,
             ) {
                 out.push(OutputElements::Frame(grip));
+            }
+            // The edges its sun lights (#805), in front of its rims.
+            if let Some((lit, hour)) = &look.sunlit {
+                out.extend(
+                    daylight::lit_edges(lit, rect, scale, look.alpha, &ids.sun, *hour)
+                        .into_iter()
+                        .map(OutputElements::Solid),
+                );
             }
             let focused_width = if self.config.appearance.high_contrast {
                 2.0
@@ -680,7 +695,10 @@ impl State {
             || !self.fx.creatures.shown.is_empty()
             || self.fx.garland.is_some()
             || self.fx.raindrops.is_some()
-            || self.fx.fireflies.is_some())
+            || self.fx.fireflies.is_some()
+            || self.fx.koi.is_some()
+            || self.fx.daylight.is_some()
+            || !self.fx.tops.is_empty())
             && purpose.screen()
         {
             renderer.effects_ready();
@@ -852,12 +870,18 @@ impl State {
         if purpose.screen() {
             self.burn_lights(&frame, &mut elements);
         }
-        // The garland's halos (#799), then the snow's layer (#795), then
-        // the fireflies (#804): on the wallpaper, under the windows and
-        // the bar; a blank in their place while the glass is blurred.
+        // The garland's halos (#799), the garland across the top (#813),
+        // then the snow's layer (#795), then the fireflies (#804): on the
+        // wallpaper, under the windows and the bar; a blank in their place
+        // while the glass is blurred.
         let garland = self.garland_layer(&frame, &looks).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
+        });
+        let top = self.garland_top_layer(&frame).map(|(blank, layers)| {
+            let id = blank.id().clone();
+            elements.push(OutputElements::Fire(blank));
+            (id, layers)
         });
         let snow = self.snow_layer(&frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
@@ -875,13 +899,29 @@ impl State {
             Pick::All,
             &mut elements,
         );
-        // The rain on the glass (#802), right over the wallpaper, which it
-        // covers; the fogged glass alone in its place while the glass is
-        // blurred.
-        let rain = self.raindrops_layer(renderer, &frame).map(|(fog, layer)| {
-            elements.push(OutputElements::Fire(fog));
-            layer
+        // The koi's pond (#803), in the wallpaper's place: its pads over
+        // its water; still water and a blank in their place while the
+        // glass is blurred.
+        let koi = self.koi_layer(renderer, &frame).map(|k| {
+            elements.push(OutputElements::Fire(k.pads_blank));
+            elements.push(OutputElements::Fire(k.stand_in));
+            (k.pads, k.water)
         });
+        // The daylight's sky (#805), in the wallpaper's place, drawn once
+        // a minute.
+        let mut sky = self
+            .daylight_layer(renderer, &frame)
+            .map(OutputElements::Fire);
+        // The rain on the glass (#802), right over the wallpaper (or the
+        // sky, which it takes), which it covers; the fogged glass alone in
+        // its place while the glass is blurred.
+        let rain = self
+            .raindrops_layer(renderer, &frame, &mut sky)
+            .map(|(fog, layer)| {
+                elements.push(OutputElements::Fire(fog));
+                layer
+            });
+        elements.extend(sky);
         // A wallpaper that moves (#433): still behind the glass, which is
         // blurred from what is behind it below; moving on the screen, put
         // in its place once the glass is done.
@@ -897,11 +937,17 @@ impl State {
                 capture_glass,
             },
         );
+        let (koi_pads, koi_water) = koi.map_or((None, None), |(p, w)| (Some(p), Some(w)));
+        let (koi_still, koi_blank) = self
+            .koi_stand_ins(&frame)
+            .map_or((None, None), |(w, p)| (Some(w), Some(p)));
         for (layer, blank) in [
             (garland, self.garland_blank()),
             (snow, self.snow_blank(&frame)),
             (fireflies, self.fireflies_blank(&frame)),
             (rain, self.raindrops_stand_in(&frame)),
+            (koi_water, koi_still),
+            (koi_pads, koi_blank),
         ] {
             if let Some(layer) = layer
                 && let Some(blank) = blank
@@ -912,6 +958,13 @@ impl State {
             {
                 *slot = OutputElements::Fire(layer);
             }
+        }
+        if let Some((blank, layers)) = top
+            && let Some(at) = elements
+                .iter()
+                .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
+        {
+            elements.splice(at..=at, layers.map(OutputElements::Fire));
         }
         elements
     }

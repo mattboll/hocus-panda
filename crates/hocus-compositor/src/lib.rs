@@ -42,6 +42,7 @@ mod grip_tone;
 pub mod halo;
 mod handlers;
 mod harness;
+mod holidays;
 pub mod hot_corner;
 pub mod idle;
 mod ink;
@@ -293,6 +294,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
     state.magnifier_start();
     // The night light at the clock's hour (#436).
     state.night_light_update();
+    // In December, the garlands proposed once a year (#813).
+    state.holidays_check();
     state.programs.wait(options.spawn, options.session);
     if options.session {
         state.autostart = session::autostart::Autostart::Waiting(hocus_xdg::autostart::dirs());

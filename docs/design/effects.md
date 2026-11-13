@@ -1,7 +1,7 @@
 # The desktop's effects (#434)
 
-Effects for the fun of it, fourteen of them, prototyped and approved on
-the effects canvas ("Effets du bureau"; sources in the maintainer's
+Effects for the fun of it, fourteen of them (and a second garland, #813),
+prototyped and approved on the effects canvas ("Effets du bureau"; sources in the maintainer's
 `hocus-panda-tools/mockups/s15-fx`). Each is off by default and has its
 own switch, `[effects]` in the configuration and its row in Settings ›
 Appearance › Effects ([settings.md](settings.md), "Apparence et
@@ -12,14 +12,15 @@ langue").
 | The wallpaper | Neige qui tient | `snow` | #795 (built) |
 | | Aurore en musique | `aurora` | #801 |
 | | Pluie sur la vitre | `rain-on-glass` | #802 (built) |
-| | Bassin de koïs | `koi` | #803 |
+| | Bassin de koïs | `koi` | #803 (built) |
 | | Lucioles du soir | `fireflies` | #804 (built) |
-| | La lumière du jour | `daylight` | #805 |
+| | La lumière du jour | `daylight` | #805 (built) |
 | | Bureaux en profondeur | `depth` | #806 |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
 | | Éclats de verre | `shatter` | #798 (built) |
 | | Fenêtres en gelée | `jelly` | #797 (built) |
 | | Guirlande sous la fenêtre active | `garland` | #799 (built) |
+| | Guirlande en haut de l'écran | `garland-top` | #813 (built) |
 | The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
 | | Bonne nouvelle d'un agent : confettis | `confetti` | #811 |
 | The agents | Les agents en créatures | `creatures` | #796 (built) |
@@ -352,15 +353,59 @@ look in `render/garland.rs`), its lengths in logical pixels.
   its window moves). None in the power saver, while a screen is shared or
   recorded, on the CPU, nor in a capture.
 
-Not built: the board's second garland across the top of the wallpaper,
-and the December proposal ("Des guirlandes pour les fêtes ?").
+## A garland across the top (#813)
+
+With `garland-top = true` (its own row, beside the first's), the board's
+second rope hangs across the top of each screen's work area, all of it on
+the layer under the windows (cord and bulbs over their halos): a window
+there covers it; never on the bar (its cord and bulbs kept off it).
+
+- **The rope**: the board's `top` (48 points pinned every twelve, 10 %
+  slack, a bulb every third point from the third, coloured `i·7 mod 5`),
+  its festoons kept about the board's width: one each ~310 px of the
+  span (two at least, sixteen at most), twelve links each, four bulbs
+  each. Its pins at the work area's top, evenly from 28 px past its left
+  side to 28 px past its right one (the gap and the board's 20 px
+  overhang): no end shows, the bar's side going under the bar. Moved with
+  the work area (the bar's form); hung again when that changes its number
+  of festoons.
+- **Its look**: the board's `drawWire(bg, top, 0.7)` and
+  `drawBulbs(bg, top, time·0.8, (mode + 1) % 3, 0.75, 0.75)`: bulbs and
+  halos three quarters of the first's size and light, its cord at 70 %,
+  twinkling at 0.8 of the pace a way ahead; in twice the wind.
+- **When**: as the first, but paused (not stepped, nothing drawn per
+  frame) on a screen that is off, shows a fullscreen or a maximised
+  window (it is not seen), and while locked. Still and lit with reduced
+  motion; none in the power saver, while shared or recorded, on the CPU,
+  nor in a capture.
+
+## The garlands proposed in December (#813)
+
+Once a year, in December (the wall clock's date where the user is), the
+desktop asks in a notification of its own (5.3, through the shell's
+server, as its other notifications): "Des guirlandes pour les fêtes ?"
+(English: "Garlands for the holidays?"), **Oui** / **Non**. Oui turns
+both garlands on, writing `[effects] garland` and `garland-top` into the
+configuration file as the Settings do (`hocus-config`; the desktop
+follows the file). Non, or closing it, does nothing. Either way it is not
+asked again that year: the year it was shown in is kept in
+`$XDG_STATE_HOME/hocuspanda/garlands-asked`. Not asked with either
+garland on, with reduced motion, without a notifications' bus or a
+configuration file. Looked at as the session starts (waiting up to two
+minutes for the shell's server), as the machine wakes and at each
+midnight (`src/holidays.rs`); never per frame.
 
 Tests: `tests/garland.rs` (on GLES on Mesa's software device: below the
 focused window, its pixels untouched, moving within its box; following
 the focus to another window; none on a maximised window; off, nothing;
-still with reduced motion, nothing drawn per frame); its screenshots,
-`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
-garland::shots`.
+still with reduced motion, nothing drawn per frame; the second across
+the top of the work area, a window there untouched, still with reduced
+motion); `tests/holidays.rs` (a held date and a notifications' server of
+the test's own: asked on the first of December, Oui writing both
+switches, not again that year nor by the next session, again the next
+December). Their screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only -E 'test(/^garland::shots/) |
+test(/^holidays::shots$/)'`.
 
 ## Rain on the glass (#802)
 
@@ -447,6 +492,118 @@ held: glows on the wallpaper, moving, the window's pixels untouched; by
 day or off, nothing; still with reduced motion, nothing drawn per
 frame); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only fireflies::shots`.
+
+## A koi pond (#803)
+
+With `koi = true`, the wallpaper is a pond, as the board "Bassin de
+koïs" is: its JS ported (`effects/koi.rs`), its shader `KOI_FS`
+(`draw.rs`, `KOI`), its lengths in logical pixels.
+
+- **The water**: the board's field of heights, a cell every 5 px (its
+  240 × 144 over 1200 × 720), two wave steps a step (damped 0.978), a
+  drop every 1.5 to 4 s; each koi's head stirs it as it swims. Drawn as
+  the board's shader: what is under the water bent by the heights'
+  normal, tinted, lit where the surface curves up, a highlight from the
+  upper left, the sky's sheen toward the top. The heights go to the GPU
+  in half floats each step (bytes about a half where GLES 2 has none).
+- **The koi**: as many per pixel as the board's seven (its palette in
+  turn), each a spine of fourteen joints bending no more than 0.32 rad
+  at each, wagging, with its tail and side fins flapping, four spots
+  clipped to its body, a sheen from the head, a darker line down its
+  back, its eyes; its shadow 14 px right and 20 px down, blurred 6 px.
+  They wander within the work area (beside the bar). Drawn each step
+  with their shadows over the floor into a picture at the screen's
+  logical size, the board's `under` canvas (`Shape::Box` for the
+  blurred shadows, fills with a pixel's fringe, ovals).
+- **The floor**: the board's gradient, pebbles (as many per pixel as its
+  900) and vignette, drawn once a screen by a worker thread (tiny-skia),
+  then a texture.
+- **The pads**: as many per pixel as the board's six, one in three with
+  a water lily; over the water, bobbing with it, turning a little
+  (`Shape::Pad`: the notched disc, its two-circle gradient and veins).
+- **The pointer**: resting on the water (no window, no bar under it;
+  not moved 3 px for 0.6 s), the koi within 420 px come to it and circle
+  it at 90 px. A left click on the water rings it (26 px, the board's
+  amplitude) and the koi within 260 px flee for 1.4 s.
+- **Where**: in the wallpaper's place, under the bottom and background
+  layers, the snow, the fireflies, the windows and the bar; opaque.
+  Behind the glass of the bar stand the floor under still water and a
+  blank for the pads, which never change. With the rain on the glass or
+  the daylight's sky on too, the pond is the wallpaper: the rain needs a
+  still picture to refract, and waits. A moving wallpaper (#433) waits.
+- **Its cost**, a frame while it moves (60 steps a second), measured on
+  the CPU at 1440 × 900 (11 koi, 288 × 180 cells): the step 0.27 ms, the
+  meshes 0.19 ms (some 4 800 vertices), the heights made half floats
+  0.6 ms (some 400 kB uploaded); at 2560 × 1440 (30 koi) about three
+  times that. On the GPU: the floor and the koi drawn into the picture,
+  the water over the whole screen (six texture reads a pixel), the pads;
+  the whole screen drawn again each frame, as a moving wallpaper is.
+  Turned on: half a second of the board stepped at once (some 10 ms),
+  the floor drawn by its worker (0.1 to 0.3 s), meanwhile the wallpaper.
+- **When**: moving where it shows; with reduced motion drawn still (the
+  koi where they are, the water as it is), nothing per frame, a click
+  doing nothing; none in the power saver, while a screen is shared or
+  recorded, on the CPU, nor in a capture.
+
+Tests: `tests/koi.rs` (on GLES on Mesa's software device: the wallpaper
+turns to a pond whose koi swim, the window's pixels untouched; off,
+nothing; still with reduced motion, nothing drawn per frame); its
+screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only koi::shots`.
+
+## Daylight (#805)
+
+With `daylight = true`, the wallpaper is the board "La lumière du jour"'s
+sky at the hour the sun stands for (`effects/daylight.rs`, its shader
+`SKY` in `draw.rs`), and the windows' shadows and edges follow its sun.
+
+- **The hour**: the board's sun rises at 6 and sets at 20. The real day
+  between sunrise and sunset (the sun's upper edge on the horizon, NOAA's
+  equations, at the place of the system's time zone, as the fireflies'
+  evening: `effects/sun.rs`) is laid over 6 to 20, the night until the
+  next sunrise over 20 to 30 (6 the next day); with no sunrise or sunset
+  within a day (near the poles), the board's noon or 1 o'clock. Looked
+  at every minute on the wall clock while the switch is on.
+- **The sky**: the board's keys (5, 6:30, 8, 12, 16:30, 18:30, 19:30, 21,
+  23; past 23 the night goes on to 5's, which the board's slider never
+  reached), its gradient, its stars by night and at dawn and dusk (their
+  places the board's over its 1200 × 720, stretched over the screen), by
+  day the sun's halo, disc and seven rays, by night the moon; its two
+  ridges; the hour's light graded over it (soft light). Drawn once a
+  minute into a picture of the screen's size, opaque, in the wallpaper's
+  place; the glass of the bar blurs it like a wallpaper.
+- **The windows**: their shadow is the board's for the hour, offset
+  away from the sun (`lx × len × 2.2` across, `len × (0.4 + 0.6 elev)`
+  down), longer and softer as it sets (blur `26 + 0.6 len`), darker at
+  noon; what the focus or a move adds to the standard shadow kept. By
+  day, the edge facing the sun lights up: a line of the hour's light at
+  25 % along the window's top and down the side toward the sun, as wide
+  as the board's `lx × 3`, just out of what the window shows.
+- **Not built as the board drew it**: the board graded the hour's light
+  over everything, its windows and its bar too, and laid a gradient of
+  it over the windows' content: both are over what the user reads, so
+  the grade is the sky's alone and the windows keep their pixels. The
+  board lit the side away from its sun (its gradient's angle turned the
+  wrong way); here it is the side facing it, as the ticket says. Its
+  second, contact shadow (`0 2px 6px`) is not drawn.
+- **With the others**: the koi's pond, when on, is the wallpaper in the
+  sky's place (the shadows still turn); the rain on the glass falls over
+  the sky, refracting it (blurred again once a minute); the snow, the
+  fireflies and the garlands show over it.
+- **Its cost**: nothing per frame. Once a minute, the sky drawn again
+  (one pass over the screen, its stars a loop of some 160 to 600), the
+  windows' shadows (a new blur's texture) and the screen once; with the
+  rain on, its fog blurred again.
+- **When**: with reduced motion it shows as it does (nothing moves);
+  none in the power saver, while a screen is shared or recorded, on the
+  CPU, nor in a capture (a capture's windows keep the standard shadow).
+
+Tests: `tests/daylight.rs` (on GLES on Mesa's software device, the sun
+held: the sky of 8 o'clock then of the sunset, the shadow below the
+window another, the window's pixels untouched, nothing drawn per frame;
+off, nothing; with reduced motion, drawn once); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored
+only daylight::shots`.
 
 ## Not built yet
 

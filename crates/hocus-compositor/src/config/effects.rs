@@ -4,10 +4,11 @@
 
 use serde::Deserialize;
 
-/// The fourteen effects, grouped as Settings › Appearance › Effects shows
-/// them. The flames, the glass, the jelly, the garland, the snow, the rain
-/// on the glass, the fireflies and the creatures play so far; the others'
-/// switches are kept for their tickets.
+/// The effects (the board's fourteen, and a second garland), grouped as
+/// Settings › Appearance › Effects shows them. The flames, the glass, the
+/// jelly, the garlands, the snow, the rain on the glass, the fireflies and
+/// the creatures play so far; the others' switches are kept for their
+/// tickets.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Effects {
@@ -32,6 +33,9 @@ pub struct Effects {
     pub jelly: bool,
     /// A garland hangs under the active window (#799).
     pub garland: bool,
+    /// Another hangs across the top of each screen's work area, under
+    /// the windows (#813).
+    pub garland_top: bool,
     // The moments.
     pub fireworks: bool,
     pub confetti: bool,

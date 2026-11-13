@@ -3,7 +3,8 @@
 //! `HOCUS_TEST_GPU` names): it hangs below the focused window and never
 //! on it, moving; it follows the focus to another window; none on a
 //! maximised window; off, nothing; still with reduced motion, nothing
-//! drawn frame after frame.
+//! drawn frame after frame. And the second across the top (#813), under
+//! the windows.
 
 use crate::common;
 
@@ -252,6 +253,70 @@ fn off_nothing_and_still_with_reduced_motion() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The garland across the top (#813): on the wallpaper at the top of the
+/// work area, festooned between its pins; a window there covers it, its
+/// pixels untouched; still with reduced motion, nothing drawn frame after
+/// frame.
+#[test]
+fn across_the_top_under_the_windows() -> anyhow::Result<()> {
+    let (mut hp, [_, right], _clients) = bed()?;
+    let area = hp
+        .work_area()
+        .ok_or_else(|| anyhow::anyhow!("no work area"))?;
+    // The right window up against the top of the work area.
+    let up = Rect { y: area.y, ..RIGHT };
+    hp.place_window(right, up);
+    run(&mut hp, Duration::from_millis(300))?;
+    let before = hp.screenshot(0)?;
+    let mut config = Config::default();
+    config.effects.garland_top = true;
+    hp.reconfigure(config.clone());
+    run(&mut hp, Duration::from_millis(1500))?;
+    let tops = hp.garland_tops();
+    anyhow::ensure!(tops.len() == 1, "{tops:?}");
+    let bulbs = &tops[0].1;
+    assert!(bulbs.len() >= 8, "{bulbs:?}");
+    assert!(
+        bulbs
+            .iter()
+            .all(|(_, y)| { *y > f64::from(area.y) && *y < f64::from(area.y + 120) }),
+        "at the top: {bulbs:?}"
+    );
+    assert!(
+        bulbs.iter().any(|(x, _)| *x < f64::from(area.x + 200))
+            && bulbs
+                .iter()
+                .any(|(x, _)| *x > f64::from(area.right() - 200)),
+        "across: {bulbs:?}"
+    );
+    let shot = hp.screenshot(0)?;
+    // Lit on the wallpaper at the top, left of the window.
+    let band = Rect::new(area.x, area.y, up.x - area.x - 20, 100);
+    let (kept, all) = same(&before, &shot, band);
+    assert!(
+        all - kept > all / 5,
+        "a garland at the top: {kept} of {all} kept"
+    );
+    // The window's pixels (but its round corners) untouched.
+    let within = Rect::new(up.x + 12, up.y + 12, up.width - 24, up.height - 24);
+    let (kept, all) = same(&before, &shot, within);
+    assert_eq!(kept, all, "the window's pixels untouched");
+    let frames = hp.frames_on(0);
+    run(&mut hp, Duration::from_millis(300))?;
+    assert!(hp.frames_on(0) > frames + 5, "it moves");
+    // Reduced motion: still, lit, nothing drawn per frame.
+    config.appearance.reduced_motion = true;
+    hp.reconfigure(config);
+    run(&mut hp, Duration::from_millis(100))?;
+    assert_eq!(hp.garland_tops().len(), 1);
+    let last = hp.frames_on(0);
+    run(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.frames_on(0), last, "nothing drawn per frame");
+    let (kept, all) = same(&before, &hp.screenshot(0)?, band);
+    assert!(all - kept > all / 5, "still lit: {kept} of {all} kept");
+    Ok(())
+}
+
 // --- The screenshots ------------------------------------------------------------
 
 /// A screenshot of output 0 saved as `name`.png in `out`.
@@ -271,15 +336,21 @@ fn save(hp: &mut Headless, out: &Path, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The garland for the maintainer, written to `$HOCUS_SHOTS` when it
-/// names a folder, on GLES, with the shell's bar: under the active window
-/// of two; with the snow on too; then after the other window took the
-/// focus. Run by hand (`--run-ignored only`).
-#[test]
-#[ignore = "screenshots, by hand"]
-fn shots() -> anyhow::Result<()> {
+/// The screenshots' bed: on GLES, with the shell's bar, the night
+/// wallpaper, two document windows (the page focused), the clock held;
+/// `None` without `$HOCUS_SHOTS`.
+struct Shots {
+    hp: Headless,
+    config: Config,
+    out: std::path::PathBuf,
+    notes: Rect,
+    _home: tempfile::TempDir,
+    _clients: [common::ClientHandle; 2],
+}
+
+fn shots_bed() -> anyhow::Result<Option<Shots>> {
     let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
-        return Ok(());
+        return Ok(None);
     };
     std::fs::create_dir_all(&out)?;
     let home = tempfile::tempdir()?;
@@ -315,7 +386,7 @@ fn shots() -> anyhow::Result<()> {
     anyhow::ensure!(up, "no bar");
     let notes = Rect::new(110, 280, 420, 320);
     let page = Rect::new(500, 190, 520, 380);
-    let (_, _notes) = common::open_showing(
+    let (_, notes_client) = common::open_showing(
         &mut hp,
         "test.notes",
         common::Shows::Document {
@@ -323,7 +394,7 @@ fn shots() -> anyhow::Result<()> {
             size: (notes.width as u32, notes.height as u32),
         },
     )?;
-    let (_, _page) = common::open_showing(
+    let (_, page_client) = common::open_showing(
         &mut hp,
         "test.page",
         common::Shows::Document {
@@ -335,6 +406,33 @@ fn shots() -> anyhow::Result<()> {
     hp.place_window(id_of(&hp, "test.page")?, page);
     common::wait(&mut hp, Duration::from_secs(2))?;
     hp.hold_clock();
+    Ok(Some(Shots {
+        hp,
+        config,
+        out,
+        notes,
+        _home: home,
+        _clients: [notes_client, page_client],
+    }))
+}
+
+/// The garland for the maintainer, written to `$HOCUS_SHOTS` when it
+/// names a folder: under the active window of two; with the snow on too;
+/// then after the other window took the focus. Run by hand
+/// (`--run-ignored only`).
+#[test]
+#[ignore = "screenshots, by hand"]
+fn shots() -> anyhow::Result<()> {
+    let Some(Shots {
+        mut hp,
+        mut config,
+        out,
+        notes,
+        ..
+    }) = shots_bed()?
+    else {
+        return Ok(());
+    };
     config.effects.garland = true;
     hp.reconfigure(config.clone());
     run(&mut hp, Duration::from_millis(2300))?;
@@ -351,5 +449,41 @@ fn shots() -> anyhow::Result<()> {
     common::click(&mut hp, (f64::from(notes.x + 60), f64::from(notes.y + 200)))?;
     run(&mut hp, Duration::from_secs(2))?;
     save(&mut hp, &out, "garland-other-window")?;
+    Ok(())
+}
+
+/// Both garlands for the maintainer (#813), into `$HOCUS_SHOTS`: the one
+/// across the top alone; both, two windows and the bar; the page window
+/// moved up against the top, covering it; still, with reduced motion.
+#[test]
+#[ignore = "screenshots, by hand"]
+fn shots_across_the_top() -> anyhow::Result<()> {
+    let Some(Shots {
+        mut hp,
+        mut config,
+        out,
+        ..
+    }) = shots_bed()?
+    else {
+        return Ok(());
+    };
+    config.effects.garland_top = true;
+    hp.reconfigure(config.clone());
+    run(&mut hp, Duration::from_millis(2300))?;
+    save(&mut hp, &out, "garland-top")?;
+    config.effects.garland = true;
+    hp.reconfigure(config.clone());
+    run(&mut hp, Duration::from_millis(2300))?;
+    save(&mut hp, &out, "garlands-both")?;
+    let area = hp
+        .work_area()
+        .ok_or_else(|| anyhow::anyhow!("no work area"))?;
+    hp.place_window(id_of(&hp, "test.page")?, Rect::new(500, area.y, 520, 380));
+    run(&mut hp, Duration::from_millis(2300))?;
+    save(&mut hp, &out, "garlands-window-at-the-top")?;
+    config.appearance.reduced_motion = true;
+    hp.reconfigure(config);
+    run(&mut hp, Duration::from_millis(300))?;
+    save(&mut hp, &out, "garlands-reduced-motion")?;
     Ok(())
 }

@@ -1435,13 +1435,13 @@ snow_line = "It falls, settles on the windows and the bar, and slides off a shak
 aurora = "Aurora to the music"
 aurora_line = "The wallpaper ripples to what plays in the bar."
 rain_on_glass = "Rain on the glass"
-rain_on_glass_line = "On rainy days, drops run down the wallpaper, never over the windows."
+rain_on_glass_line = "Drops run down wet glass over the wallpaper, never over the windows."
 koi = "Koi pond"
 koi_line = "The carp swim, and come to the pointer."
 fireflies = "Evening fireflies"
 fireflies_line = "After sunset, they drift and blink over the wallpaper."
 daylight = "Daylight"
-daylight_line = "The windows’ shadows turn with the sun; in the evening, the light grows warm."
+daylight_line = "The wallpaper becomes the sky of the hour, and the windows’ shadows turn with the sun."
 depth = "Desktops in depth"
 depth_line = "Switching desktops travels through a landscape."
 flames = "Close in flames"
@@ -1452,6 +1452,8 @@ jelly = "Jelly windows"
 jelly_line = "A dragged window bends like jelly, then settles."
 garland = "A garland under the active window"
 garland_line = "It hangs under the active window, never over what you read."
+garland_top = "A garland across the top"
+garland_top_line = "It hangs across the top of the screen, behind the windows."
 fireworks = "Tests pass: fireworks"
 fireworks_line = "When an agent finishes with all its tests passing, once, behind the windows."
 confetti = "An agent’s good news: confetti"
@@ -2666,6 +2668,11 @@ not_reopened = { other = "{listed} could not be reopened." }
 
 [compositor.creatures]
 other_tab = "{name} · other tab"
+
+[compositor.holidays]
+ask = "Garlands for the holidays?"
+yes = "Yes"
+no = "No"
 
 [compositor.overview]
 badge_waiting = { other = "{n} waiting" }
