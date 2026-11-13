@@ -1441,7 +1441,11 @@ impl State {
             // The wallpapers that move stop (#433).
             self.tick_walls();
             if self.lock_shows_wall() {
-                moving |= self.tick_wallpaper_effects(now);
+                // At most 60 frames a second there too (#815).
+                moving |= self.tick_paced(now, Self::tick_wallpaper_effects);
+                if !moving && let Some(at) = self.fx.pace.next() {
+                    self.wake_at(at);
+                }
             }
             self.judge_still(moving, as_of_frame);
             return;
@@ -1536,18 +1540,17 @@ impl State {
         // The agents as creatures on their windows (#796): where they sit
         // decided at each turn, their motion drawn as of the effects' time.
         let creatures = self.tick_creatures(now);
-        let clock = self.now();
-        if self.fx.pace.due(clock) {
+        moving |= self.tick_paced(now, |state, now| {
             // The wallpaper's effects: the snow (#795) first, the
-            // garlands' wind following its.
-            let mut effects = creatures | self.tick_wallpaper_effects(now);
+            // garlands' wind following its; the rain on the glass, the
+            // fireflies, the koi, the daylight, desktops in depth.
+            let mut effects = creatures | state.tick_wallpaper_effects(now);
             // The garland under the active window (#799).
-            effects |= self.tick_garland(now);
+            effects |= state.tick_garland(now);
             // The garlands across the top of the screens (#813).
-            effects |= self.tick_garland_top(now);
-            self.fx.pace.moved(clock, now, effects);
-            moving |= effects;
-        }
+            effects |= state.tick_garland_top(now);
+            effects
+        });
         if let Some(at) = self.fx.pace.next() {
             wake(at);
         }

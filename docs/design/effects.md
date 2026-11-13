@@ -49,16 +49,21 @@ Every effect follows the same rules (`State::effects_still`, in
 - once an effect is over, nothing more is drawn for it, and no frame is
   asked for;
 - none costs more than it shows (#815): an effect that plays on its own
-  (the snow, the garlands, the creatures, and those to come) moves on
-  at most 60 times a second whatever the screen's refresh
-  (`effects::Pace`), what it draws staying the same between two (a
-  screen at 165 Hz draws it again only where something else changed),
-  and it tells the screen only what of it changed: the flakes' places,
-  a cap's columns that grew, the garland's pieces, a panda's box, so
-  that the windows around stay as they were. Its shapes are drawn into a
-  texture kept from frame to frame (`effects/kept.rs`), again only as
-  they change. The windows' own motions (the jelly, the flames, the
-  shards) follow their window at the screen's rate.
+  (the snow, the garlands, the creatures, the rain on the glass, the
+  fireflies, the koi, the camera of desktops in depth, and those to
+  come; under the lock too) moves on at most 60 times a second whatever
+  the screen's refresh (`effects::Pace`), what it draws staying the same
+  between two (a screen at 165 Hz draws it again only where something
+  else changed), and it tells the screen only what of it changed: the
+  flakes' places, a cap's columns that grew, the garland's pieces, a
+  panda's box, the drops that moved, each firefly's glow, the koi's
+  pads, so that the windows around stay as they were. The koi's water
+  tells where its heights moved enough to be seen and around the koi
+  that swam; while they swim it ripples all over, and all of it is drawn
+  again. The snow's shapes are drawn into a texture kept from frame to
+  frame (`effects/kept.rs`), again only as they change. The daylight is
+  drawn again once a minute. The windows' own motions (the jelly, the
+  flames, the shards) follow their window at the screen's rate.
 
 An effect is decided as it starts: a switch turned off, or a rule that
 starts holding, leaves one under way to end. An effect that lasts (the
@@ -655,7 +660,7 @@ logical pixels.
   fireflies and the garlands show over it.
 - **Its cost**: at rest nothing (its picture kept). As the camera moves,
   the picture drawn again at most 60 times a second (the camera's time
-  taken at 60ths of a second), one pass over the screen: a few sines a
+  the effects' frames', `effects::Pace`), one pass over the screen: a few sines a
   layer, seven trees looked at a pixel on the three wooded ones; the
   screen drawn again each frame, as the windows slide anyway.
 - **When**: with reduced motion the landscape stands where the desktop

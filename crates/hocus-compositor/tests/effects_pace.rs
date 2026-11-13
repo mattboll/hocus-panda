@@ -2,7 +2,8 @@
 //! docs/design/effects.md), on the held clock and on GLES (Mesa's
 //! software device, or the GPU `HOCUS_TEST_GPU` names): they move on at
 //! most 60 times a second whatever the screen's refresh, and the snow
-//! falling tells the screen its flakes' places alone, not the screen.
+//! falling tells the screen its flakes' places alone, not the screen; the
+//! koi's pond and the rain on the glass the same.
 
 use crate::common;
 
@@ -95,5 +96,59 @@ fn snow_falling_redraws_its_flakes_not_the_screen() -> anyhow::Result<()> {
     );
     assert!(drawn >= 55, "it falls: {drawn} frames");
     assert!(each < screen / 4, "{each} pixels a frame of {screen}");
+    Ok(())
+}
+
+/// A second at 165 Hz: the effects' frames.
+fn at_165_hz(hp: &mut Headless) -> anyhow::Result<u64> {
+    let moved = hp.effect_frames();
+    for _ in 0..165 {
+        hp.step(Duration::from_nanos(6_060_606))?;
+    }
+    Ok(hp.effect_frames() - moved)
+}
+
+#[test]
+fn the_koi_and_the_rain_on_the_glass_move_on_60_times_a_second_too() -> anyhow::Result<()> {
+    let screen = (SCREEN.0 * SCREEN.1) as u64;
+    for name in ["koi", "rain"] {
+        let mut config = Config::default();
+        config.effects.koi = name == "koi";
+        config.effects.rain_on_glass = name == "rain";
+        let (mut hp, _client) = bed(config)?;
+        // The pond's floor is drawn by a worker.
+        let shows =
+            |hp: &Headless| hp.koi("HEADLESS-1").is_some() || hp.raindrops("HEADLESS-1").is_some();
+        for _ in 0..500 {
+            if shows(&hp) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            hp.step(Duration::from_micros(16_667))?;
+        }
+        anyhow::ensure!(shows(&hp), "no {name}");
+        let moved = at_165_hz(&mut hp)?;
+        assert!((57..=61).contains(&moved), "{name}: {moved} effect frames");
+        // At 60 Hz: the rain tells its drops' places alone. The koi's
+        // water ripples all over as they swim: all of it changes.
+        hp.take_damage_area(0);
+        let drawn = hp.frames_on(0);
+        for _ in 0..60 {
+            hp.step(Duration::from_micros(16_667))?;
+        }
+        let drawn = hp.frames_on(0) - drawn;
+        let each = hp.take_damage_area(0) / drawn.max(1);
+        eprintln!(
+            "{name}: {moved} frames a second at 165 Hz; {drawn} at 60 Hz, {each} pixels \
+             drawn over each ({} %)",
+            each * 100 / screen
+        );
+        if name == "rain" {
+            assert!(
+                each < screen / 4,
+                "{name}: {each} pixels a frame of {screen}"
+            );
+        }
+    }
     Ok(())
 }

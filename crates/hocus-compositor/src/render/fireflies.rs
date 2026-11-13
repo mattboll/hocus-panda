@@ -29,18 +29,27 @@ impl State {
     }
 
     /// Their glows on `frame`'s output: the blank standing for them behind
-    /// the glass, and themselves.
+    /// the glass, and themselves, telling only what of them changed
+    /// (#815).
     pub(super) fn fireflies_layer(&self, frame: &Frame) -> Option<(FireElement, FireElement)> {
         let swarm = self.fireflies_on(frame)?;
         let flies = self.fx.fireflies.as_ref()?;
         let moving = self.fireflies_out() == Some(Plays::Moving);
-        let alpha = if moving { flies.out(frame.now) } else { 1.0 };
+        // As of the effects' last frame: the same between two.
+        let alpha = if moving {
+            flies.out(self.fx.pace.at)
+        } else {
+            1.0
+        };
         let (added, screened) = swarm.glows(
             (frame.origin.x, frame.origin.y),
             frame.scale as f32,
             alpha,
             moving,
         );
+        if added.is_empty() && screened.is_empty() {
+            return None;
+        }
         let screen: Rectangle<i32, Physical> = Rectangle::from_size(
             frame
                 .area
@@ -48,38 +57,18 @@ impl State {
                 .to_f64()
                 .to_physical_precise_round(frame.scale),
         );
-        let [x0, y0, x1, y1] = [&added, &screened]
-            .iter()
-            .filter_map(|m| m.bounds())
-            .map(|[x, y, w, h]| [x, y, x + w, y + h])
-            .reduce(|a, b| {
-                [
-                    a[0].min(b[0]),
-                    a[1].min(b[1]),
-                    a[2].max(b[2]),
-                    a[3].max(b[3]),
-                ]
-            })?;
-        let geometry =
-            Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into()).intersection(screen)?;
         let clip = Clip::new([-FAR, -FAR, FAR, FAR], [], 1.0);
-        Some((
-            FireElement::blank(swarm.ids[1].clone(), screen),
-            FireElement::shapes(
-                swarm.ids[0].clone(),
-                swarm.commit(),
-                geometry,
-                Mesh::default(),
-                added,
-                clip,
-            )
-            .screened(screened),
-        ))
+        let glows =
+            swarm
+                .glows
+                .borrow_mut()
+                .shapes(screen, [Mesh::default(), added, screened], clip);
+        Some((FireElement::blank(swarm.blank.clone(), screen), glows))
     }
 
     /// The id of the blank standing for the fireflies on `frame`'s output.
     pub(super) fn fireflies_blank(&self, frame: &Frame) -> Option<Id> {
         let flies = self.fx.fireflies.as_ref()?;
-        Some(flies.swarms.get(&frame.output.name())?.ids[1].clone())
+        Some(flies.swarms.get(&frame.output.name())?.blank.clone())
     }
 }

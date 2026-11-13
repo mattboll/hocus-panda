@@ -119,6 +119,8 @@ pub struct Pace {
     next: Option<Duration>,
     /// Their time: what they show is as of it.
     pub at: Duration,
+    /// The clock's when they last moved on (`at` is the last frame's).
+    pub clock: Duration,
     /// Their frames so far, for the tests.
     pub frames: u64,
 }
@@ -133,6 +135,7 @@ impl Pace {
     /// next due a frame on, else at the next turn.
     pub fn moved(&mut self, now: Duration, at: Duration, moving: bool) {
         self.at = at;
+        self.clock = now;
         self.next = moving.then(|| {
             // On the grid, but never so late that two come at once.
             let on = self.next.unwrap_or(now) + FRAME;
@@ -218,7 +221,23 @@ impl State {
         moving |= self.tick_fireflies(now);
         moving |= self.tick_koi(now);
         self.tick_daylight();
-        self.tick_depth();
+        moving |= self.tick_depth(now);
+        moving
+    }
+
+    /// The effects that play on their own step on by `step` at `now`,
+    /// when [`Pace`] says they are due (#815): whether they move.
+    pub(crate) fn tick_paced(
+        &mut self,
+        now: Duration,
+        step: impl FnOnce(&mut Self, Duration) -> bool,
+    ) -> bool {
+        let clock = self.now();
+        if !self.fx.pace.due(clock) {
+            return false;
+        }
+        let moving = step(self, now);
+        self.fx.pace.moved(clock, now, moving);
         moving
     }
 

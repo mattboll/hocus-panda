@@ -26,10 +26,14 @@ use std::{
     time::Duration,
 };
 
-use smithay::backend::renderer::{element::Id, utils::CommitCounter};
+use smithay::{
+    backend::renderer::{element::Id, utils::CommitCounter},
+    utils::{Physical, Rectangle},
+};
 
 use super::{
     draw::Heights,
+    kept::Traced,
     mesh::{Mesh, Shape},
     particles::{Rng, STEP},
 };
@@ -217,6 +221,17 @@ enum Floor {
     Made,
 }
 
+/// The koi's water as last drawn on its screen (#815): what it was drawn
+/// from, the screen's scale and size, the commit it was drawn at and what
+/// changed since the one before.
+#[derive(Debug, Default)]
+pub struct Water {
+    pub heights: Vec<f32>,
+    pub under: Mesh,
+    pub at: Option<(u64, (i32, i32))>,
+    pub since: Option<(CommitCounter, Vec<Rectangle<i32, Physical>>)>,
+}
+
 /// The pond on one screen.
 #[derive(Debug)]
 pub struct Pond {
@@ -239,10 +254,14 @@ pub struct Pond {
     /// A new one each step.
     generation: u64,
     /// Its water, the still water standing for it behind the glass of the
-    /// bar, its pads, and the blank standing for them there.
-    pub ids: [Id; 4],
+    /// bar, and the blank standing for its pads there.
+    pub ids: [Id; 3],
     commit: Cell<CommitCounter>,
     drawn: Cell<u64>,
+    /// Its water as last drawn, to tell what of it changed (#815).
+    pub water: RefCell<Water>,
+    /// Its pads as last drawn.
+    pub pads_drawn: RefCell<Traced>,
     floor: RefCell<Option<Floor>>,
     /// The floor's texture, and the still water's commit.
     pub floor_texture: RefCell<Option<Rc<dyn std::any::Any>>>,
@@ -303,6 +322,8 @@ impl Pond {
             ids: std::array::from_fn(|_| Id::new()),
             commit: Cell::new(CommitCounter::default()),
             drawn: Cell::new(u64::MAX),
+            water: RefCell::default(),
+            pads_drawn: RefCell::default(),
             floor: RefCell::new(spawned.ok().map(|_| Floor::Drawing(rx))),
             floor_texture: RefCell::new(None),
             floor_commit: Cell::new(CommitCounter::default()),
@@ -513,15 +534,17 @@ impl Pond {
     }
 
     /// The commit of this frame's drawing: a new one when it moved since
-    /// it was last drawn.
-    pub fn commit(&self) -> CommitCounter {
+    /// it was last drawn, with the one before then.
+    pub fn commit(&self) -> (CommitCounter, Option<CommitCounter>) {
         let mut c = self.commit.get();
         if self.drawn.get() != self.generation {
+            let prev = c;
             c.increment();
             self.commit.set(c);
             self.drawn.set(self.generation);
+            return (c, Some(prev));
         }
-        c
+        (c, None)
     }
 
     pub fn generation(&self) -> u64 {
