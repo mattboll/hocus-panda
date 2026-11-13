@@ -575,17 +575,20 @@ Decided by the maintainer (2026-11-13):
 - F. Yes: Settings › Desktops, « Retenir les onglets des projets », on
   by default. Private windows are never read either way.
 
-Still open (on the canvas too, "Questions ouvertes"):
+With the canvas's approval, the maintainer took these defaults:
 
-- A. The project's full name always in the mini form? (The canvas: the
-  monogram only, the name as desktops switch.)
-- E. herdr: bring back its session, or only its agents?
-- G. Projects in the Settings (rename, change the folder, forget)?
-- H. Nine projects open and a tenth asked: what is said, what is offered?
-- I. Projects found without the word "projet" (typing "hocus")?
+- A. The mini bar shows the monogram only; the full name shows as
+  desktops switch.
+- E. herdr: only its agents come back, not its session.
+- G. Projects in the Settings (rename, change the folder, forget): not
+  in this sprint.
+- H. A tenth project when nine desktops are taken: a message says the
+  nine desktops are taken and offers to close a project.
+- I. The launcher finds a project by its name too ("hocus"), without the
+  word "projet".
 
-The small choices the canvas made, to confirm: listed in its note
-"Petits choix faits pour la maquette".
+The small choices of the canvas's note "Petits choix faits pour la
+maquette" are approved as drawn.
 
 ## 14. Lots
 
