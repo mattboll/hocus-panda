@@ -245,7 +245,7 @@ impl crate::State {
         let outputs: Vec<Output> = self.space.outputs().cloned().collect();
         let shown = outputs
             .iter()
-            .any(|o| self.output_powered(o) && self.aurora_shows_on(o));
+            .any(|o| self.output_powered(o) && self.aurora_shows_on(o) && !self.wall_unseen(o));
         let playing = self.fx.music && plays == Some(Plays::Moving);
         let Some(aurora) = self.fx.aurora.as_mut() else {
             return false;

@@ -32,6 +32,7 @@ impl State {
     /// the glass, and themselves, telling only what of them changed
     /// (#815).
     pub(super) fn fireflies_layer(&self, frame: &Frame) -> Option<(FireElement, FireElement)> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Fireflies);
         let swarm = self.fireflies_on(frame)?;
         let flies = self.fx.fireflies.as_ref()?;
         let moving = self.fireflies_out() == Some(Plays::Moving);

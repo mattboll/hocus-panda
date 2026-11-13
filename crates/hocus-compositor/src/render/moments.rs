@@ -54,6 +54,7 @@ impl State {
     /// The fireworks on `frame`'s output: the blank standing for them
     /// behind the glass, and themselves.
     pub(super) fn fireworks_layer(&self, frame: &Frame) -> Option<(FireElement, FireElement)> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Moments);
         let show = self.fx.fireworks.as_ref()?;
         if show.place != Place::Wall || !self.moment_on(frame, &show.output) {
             return None;
@@ -73,6 +74,7 @@ impl State {
     /// confetti over it; cut to the bar's rounded rectangle as it is
     /// drawn now.
     pub(super) fn bar_moments(&self, frame: &Frame) -> Vec<FireElement> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Moments);
         let in_bar =
             |output: &str, place: Place| place == Place::Bar && self.moment_on(frame, output);
         let show = self
@@ -140,6 +142,7 @@ impl State {
         frame: &Frame,
         visual: Rectangle<f64, Logical>,
     ) -> Option<[[f32; 4]; 4]> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Moments);
         let show = self.fx.fireworks.as_ref()?;
         if !self.moment_on(frame, &show.output) {
             return None;
@@ -158,6 +161,7 @@ impl State {
     /// The confetti in flight on `frame`'s output: the blank standing for
     /// them behind the glass, and themselves.
     pub(super) fn confetti_layer(&self, frame: &Frame) -> Option<(FireElement, FireElement)> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Moments);
         let confetti = self.fx.confetti.as_ref()?;
         if confetti.place != Place::Wall || !self.moment_on(frame, &confetti.output) {
             return None;
@@ -188,6 +192,7 @@ impl State {
         edge: Rectangle<f64, Logical>,
         alpha: f32,
     ) -> Option<FireElement> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Moments);
         let confetti = self.fx.confetti.as_ref()?;
         if !self.moment_on(frame, &confetti.output) || !confetti.lies_on(holder) {
             return None;
@@ -216,6 +221,7 @@ impl State {
 
     /// The confetti settled on the bar of `frame`'s output, when it shows.
     pub(super) fn confetti_bar(&self, frame: &Frame) -> Option<FireElement> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Moments);
         self.fx.confetti.as_ref()?;
         let holder = Holder::Bar(frame.output.name());
         let edge = self.snow_edge(&holder, frame.now)?;

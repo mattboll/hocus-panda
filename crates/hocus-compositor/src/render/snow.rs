@@ -44,12 +44,14 @@ impl State {
     /// The snow's layer on `frame`'s output: the element standing for it
     /// behind the glass (blank, so that the glass is not blurred again at
     /// each of its frames), and itself: made again only as the snow moves
-    /// on, telling the flakes' places alone (#815).
+    /// on, telling the flakes' places alone, those where the wallpaper
+    /// shows alone drawn (#815).
     pub(super) fn snow_layer<R: Fire>(
         &self,
         renderer: &mut R,
         frame: &Frame,
     ) -> Option<(FireElement, FireElement)> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Snow);
         let snowing = self.snow_on(frame)?;
         let snow = self.fx.snow.as_ref()?;
         let field = snow.fields.get(&frame.output.name())?;
@@ -67,7 +69,7 @@ impl State {
             Some(again) if field.drawn.get() == drawn => again,
             _ => {
                 let scale = frame.scale as f32;
-                let mesh = snow_look::layer(field, scale, falling);
+                let mesh = snow_look::layer(field, scale, falling, frame.wall_seen);
                 // Where it changed: each flake's places, the ground's
                 // columns that grew, the clumps'.
                 let pieces = snow_look::pieces(field, scale, falling);
@@ -115,6 +117,7 @@ impl State {
         edge: Rectangle<f64, Logical>,
         alpha: f32,
     ) -> Option<Vec<FireElement>> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Snow);
         let snowing = self.snow_on(frame)?;
         let snow = self.fx.snow.as_ref()?;
         let cap = snow.caps.get(holder)?;
@@ -214,11 +217,16 @@ impl State {
         };
         // Its glints over it, an element of their own: they twinkle at
         // each of the snow's frames, the snow under them changes less.
-        let glints = body.as_ref().and_then(|_| {
-            let glints = snow_look::glints(cap, &look);
-            drawn
-                .glints
-                .shapes(renderer, geometry, Mesh::default(), glints, clip)
+        let glints = body.as_ref().map(|_| {
+            // Drawn straight: in the output's places, as shapes are.
+            let mut glints = snow_look::glints(cap, &look);
+            glints.shift(geometry.loc.x as f32, geometry.loc.y as f32);
+            let hole = [ex0 - s + gx, ey0 + gy, ex1 + s + gx, ey1 + gy];
+            drawn.glints.shapes(
+                geometry,
+                [Mesh::default(), glints, Mesh::default()],
+                Clip::new([-FAR, -FAR, FAR, FAR], [hole], 1.0),
+            )
         });
         Some(glints.into_iter().chain(body).collect())
     }

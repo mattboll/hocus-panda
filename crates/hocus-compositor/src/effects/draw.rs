@@ -51,6 +51,12 @@ pub struct FireElement {
     since: Option<(CommitCounter, Vec<Rectangle<i32, Physical>>)>,
     /// Whether it covers what is under it.
     opaque: bool,
+    /// The effect it is part of, while their cost is measured.
+    fx: Option<super::timing::Fx>,
+    /// What of it opaque elements in front cover (from its corner): no
+    /// change there is told, nobody would see it (#815). Uncovered, the
+    /// damage tracker draws it again there.
+    covered: Vec<Rectangle<i32, Physical>>,
 }
 
 #[derive(Debug)]
@@ -284,6 +290,8 @@ pub struct Heights {
     pub size: (i32, i32),
     pub texture: Rc<dyn Any>,
     pub half: bool,
+    /// The texels as last given, written again in place (#815).
+    bytes: Vec<u8>,
 }
 
 /// A warm light: its centre and radii, element-local and physical, and
@@ -310,6 +318,8 @@ impl FireElement {
             geometry,
             what: What::Light(look),
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         }
     }
@@ -334,6 +344,8 @@ impl FireElement {
                 clip,
             },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         }
     }
@@ -361,6 +373,8 @@ impl FireElement {
                 clip,
             },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         }
     }
@@ -398,8 +412,24 @@ impl FireElement {
                 look,
             },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: true,
         }
+    }
+
+    /// Opaque elements in front of it cover `covered` (output-local,
+    /// physical): what changes there is not told (#815).
+    pub fn cover(&mut self, covered: &[Rectangle<i32, Physical>]) {
+        let at = self.geometry.loc;
+        self.covered = covered
+            .iter()
+            .filter_map(|r| r.intersection(self.geometry))
+            .map(|mut r| {
+                r.loc -= at;
+                r
+            })
+            .collect();
     }
 
     /// Only `rects` (from its corner) changed since commit `prev`.
@@ -429,6 +459,8 @@ impl FireElement {
             geometry,
             what: What::Kept { texture, area },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         }
     }
@@ -448,6 +480,8 @@ impl FireElement {
             geometry,
             what: What::Sprites { texture, vertices },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         }
     }
@@ -466,6 +500,8 @@ impl FireElement {
             geometry,
             what: What::Picture { texture },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: true,
         }
     }
@@ -490,6 +526,8 @@ impl FireElement {
                 look,
             },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: true,
         }
     }
@@ -502,6 +540,8 @@ impl FireElement {
             geometry,
             what: What::Blank,
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         }
     }
@@ -1775,6 +1815,8 @@ impl Fire for GlesRenderer {
                 look,
             },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         })
     }
@@ -1804,6 +1846,8 @@ impl Fire for GlesRenderer {
                 clip,
             },
             since: None,
+            fx: super::timing::building(),
+            covered: Vec::new(),
             opaque: false,
         })
     }
@@ -2026,27 +2070,29 @@ impl Fire for GlesRenderer {
         programs(self)?;
         let mut kept = kept.borrow_mut();
         let region = Rectangle::<i32, BufferCoords>::from_size(size.into());
-        if let Some(had) = kept.as_ref().filter(|k| k.size == size) {
-            let texture = had.texture.downcast_ref::<GlesTexture>()?;
-            let bytes = height_bytes(heights, had.half);
-            if let Err(err) = self.update_memory(texture, &bytes, region) {
+        if let Some(had) = kept.as_mut().filter(|k| k.size == size) {
+            let texture = had.texture.clone();
+            let gles = texture.downcast_ref::<GlesTexture>()?;
+            write_heights(&mut had.bytes, heights, had.half);
+            if let Err(err) = self.update_memory(gles, &had.bytes, region) {
                 tracing::warn!(%err, "could not move the koi's water");
                 return None;
             }
-            return Some((had.texture.clone(), had.half));
+            return Some((texture, had.half));
         }
         // Half floats where the context takes them (GLES 3), as the board's
         // floats; else bytes about a half, as its fallback.
         let made = [(true, Fourcc::Abgr16161616f), (false, Fourcc::Abgr8888)]
             .into_iter()
             .find_map(|(half, format)| {
-                let bytes = height_bytes(heights, half);
+                let mut bytes = Vec::new();
+                write_heights(&mut bytes, heights, half);
                 let texture: GlesTexture = self
                     .import_memory(&bytes, format, size.into(), false)
                     .ok()?;
-                Some((half, texture))
+                Some((half, texture, bytes))
             });
-        let Some((half, texture)) = made else {
+        let Some((half, texture, bytes)) = made else {
             tracing::warn!("no texture for the koi's water");
             return None;
         };
@@ -2055,6 +2101,7 @@ impl Fire for GlesRenderer {
             size,
             texture: rc.clone(),
             half,
+            bytes,
         });
         Some((rc, half))
     }
@@ -2170,21 +2217,41 @@ impl Fire for GlesRenderer {
                 clip,
             } => {
                 let projection = *frame.projection();
+                // Each damaged rectangle in the shapes' places, for each
+                // draw cut to it to take the shapes that reach it alone
+                // (#815): not all of them again for each.
+                let (kx, ky) = (
+                    element.geometry.size.w as f32 / dst.size.w.max(1) as f32,
+                    element.geometry.size.h as f32 / dst.size.h.max(1) as f32,
+                );
+                // Their places are the output's, from the element's corner
+                // on (`placed`).
+                let (gx, gy) = (element.geometry.loc.x as f32, element.geometry.loc.y as f32);
+                let within: Vec<[f32; 4]> = damage
+                    .iter()
+                    .map(|d| {
+                        let (x, y) = (gx + d.loc.x as f32 * kx, gy + d.loc.y as f32 * ky);
+                        let (w, h) = (d.size.w as f32 * kx, d.size.h as f32 * ky);
+                        [x - 1.0, y - 1.0, x + w + 1.0, y + h + 1.0]
+                    })
+                    .collect();
                 frame.with_context(|gl| {
                     #[allow(unsafe_code)]
                     // SAFETY: the frame's context is current.
                     unsafe {
-                        let boxes = scissors(gl, &projection, dst, damage);
-                        shapes(
-                            gl,
-                            &programs,
-                            &matrix,
-                            instancing,
-                            [over, added, screened],
-                            clip,
-                            &boxes,
-                            false,
-                        );
+                        for (d, within) in damage.iter().zip(&within) {
+                            let boxes = scissors(gl, &projection, dst, std::slice::from_ref(d));
+                            shapes_within(
+                                gl,
+                                &programs,
+                                &matrix,
+                                instancing,
+                                [over, added, screened],
+                                clip,
+                                &boxes,
+                                Some(*within),
+                            );
+                        }
                     }
                 })
             }
@@ -2381,19 +2448,32 @@ impl Fire for GlesRenderer {
 /// The koi's water's heights (the board's `cur`) as the texture holds
 /// them: half floats of the board's `cur × 28 / 255`, else bytes of
 /// `128 + cur × 28`; red, the rest nothing (opaque).
-fn height_bytes(heights: &[f32], half: bool) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(heights.len() * if half { 8 } else { 4 });
-    let one = to_half(1.0).to_le_bytes();
-    for h in heights {
-        if half {
-            let r = to_half(h * 28.0 / 255.0).to_le_bytes();
-            bytes.extend_from_slice(&[r[0], r[1], 0, 0, 0, 0, one[0], one[1]]);
+/// `heights` as the texels of the water's texture, into `bytes`: made
+/// once, then only their red written again (#815).
+fn write_heights(bytes: &mut Vec<u8>, heights: &[f32], half: bool) {
+    let texel = if half { 8 } else { 4 };
+    if bytes.len() != heights.len() * texel {
+        bytes.clear();
+        let one = to_half(1.0).to_le_bytes();
+        let blank: &[u8] = if half {
+            &[0, 0, 0, 0, 0, 0, one[0], one[1]]
         } else {
-            let r = (128.0 + h * 28.0).clamp(0.0, 255.0) as u8;
-            bytes.extend_from_slice(&[r, 0, 0, 255]);
+            &[0, 0, 0, 255]
+        };
+        for _ in heights {
+            bytes.extend_from_slice(blank);
         }
     }
-    bytes
+    for (texel, h) in bytes.chunks_exact_mut(texel).zip(heights) {
+        if half {
+            let r = to_half(h * 28.0 / 255.0).to_le_bytes();
+            if let Some(red) = texel.get_mut(..2) {
+                red.copy_from_slice(&r);
+            }
+        } else if let Some(r) = texel.first_mut() {
+            *r = (128.0 + h * 28.0).clamp(0.0, 255.0) as u8;
+        }
+    }
 }
 
 /// `v` as a half float (IEEE 754 binary16), rounded to the nearest; too
@@ -2826,11 +2906,57 @@ unsafe fn shapes(
     programs: &Programs,
     matrix: &[f32; 9],
     instancing: bool,
-    [over, added, screened]: [&Mesh; 3],
+    meshes: [&Mesh; 3],
     clip: &Clip,
     boxes: &[[i32; 4]],
     kept: bool,
 ) {
+    // SAFETY: as this function's.
+    unsafe {
+        draw_shapes(
+            gl, programs, matrix, instancing, meshes, clip, boxes, kept, None,
+        );
+    }
+}
+
+/// The same on the screen, cut to `boxes`, of the shapes that reach
+/// `within` (their places' space) alone.
+///
+/// # Safety
+///
+/// As [`shapes`]'.
+#[allow(unsafe_code, clippy::too_many_arguments)]
+unsafe fn shapes_within(
+    gl: &ffi::Gles2,
+    programs: &Programs,
+    matrix: &[f32; 9],
+    instancing: bool,
+    meshes: [&Mesh; 3],
+    clip: &Clip,
+    boxes: &[[i32; 4]],
+    within: Option<[f32; 4]>,
+) {
+    // SAFETY: as this function's.
+    unsafe {
+        draw_shapes(
+            gl, programs, matrix, instancing, meshes, clip, boxes, false, within,
+        );
+    }
+}
+
+#[allow(unsafe_code, clippy::too_many_arguments)]
+unsafe fn draw_shapes(
+    gl: &ffi::Gles2,
+    programs: &Programs,
+    matrix: &[f32; 9],
+    instancing: bool,
+    [over, added, screened]: [&Mesh; 3],
+    clip: &Clip,
+    boxes: &[[i32; 4]],
+    kept: bool,
+    within: Option<[f32; 4]>,
+) {
+    let mut some = Vec::new();
     let p = &programs.shapes;
     let [position, local, colour, shape] = programs.shapes_attribs.map(|a| a as u32);
     let attribs = [
@@ -2883,13 +3009,23 @@ unsafe fn shapes(
                     mesh.vertices.as_ptr().add(offset) as *const _,
                 );
             }
+            let indices = match within {
+                Some(rect) => {
+                    mesh.indices_within(rect, &mut some);
+                    &some
+                }
+                None => &mesh.indices,
+            };
+            if indices.is_empty() {
+                continue;
+            }
             for [x, y, w, h] in boxes {
                 gl.Scissor(*x, *y, *w, *h);
                 gl.DrawElements(
                     ffi::TRIANGLES,
-                    mesh.indices.len() as ffi::types::GLsizei,
+                    indices.len() as ffi::types::GLsizei,
                     ffi::UNSIGNED_SHORT,
-                    mesh.indices.as_ptr() as *const _,
+                    indices.as_ptr() as *const _,
                 );
             }
         }
@@ -2976,15 +3112,22 @@ impl Element for FireElement {
         _scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        if commit == Some(self.commit) {
-            DamageSet::default()
+        let all = [Rectangle::from_size(self.geometry.size)];
+        let changed: &[Rectangle<i32, Physical>] = if commit == Some(self.commit) {
+            return DamageSet::default();
         } else if let Some((prev, rects)) = &self.since
             && commit == Some(*prev)
         {
-            DamageSet::from_slice(rects)
+            rects
         } else {
-            DamageSet::from_slice(&[Rectangle::from_size(self.geometry.size)])
+            &all
+        };
+        if self.covered.is_empty() {
+            return DamageSet::from_slice(changed);
         }
+        Rectangle::subtract_rects_many(changed.iter().copied(), self.covered.iter().copied())
+            .into_iter()
+            .collect()
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
@@ -3013,6 +3156,7 @@ impl<R: Fire> RenderElement<R> for FireElement {
         damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
+        let _measure = super::timing::draw(self.fx);
         R::draw_fire(frame, self, dst, damage)
     }
 }

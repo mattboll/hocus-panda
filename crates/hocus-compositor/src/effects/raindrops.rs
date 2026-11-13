@@ -515,7 +515,7 @@ impl crate::State {
                 continue;
             };
             let name = output.name();
-            if self.output_powered(output) && !self.wall_hidden(output) {
+            if self.output_powered(output) && !self.wall_unseen(output) {
                 on.push(name.clone());
             }
             screens.push((name, (area.size.w as f32, area.size.h as f32)));
@@ -530,9 +530,9 @@ impl crate::State {
         let names: Vec<&str> = screens.iter().map(|(n, _)| n.as_str()).collect();
         rain.retain_panes(&names);
         let moving = plays == super::Plays::Moving && !on.is_empty();
-        if moving {
-            rain.advance(now, &on);
-        }
+        // Waiting, its clock goes on all the same: back, it does not
+        // catch up on what nobody saw, all at once (#815).
+        rain.advance(now, if moving { &on } else { &[] });
         if made {
             self.redraw = true;
         }

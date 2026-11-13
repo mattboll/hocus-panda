@@ -12,6 +12,7 @@
 use smithay::utils::{Logical, Rectangle};
 
 use super::{
+    kept::Seen,
     mesh::{Mesh, Shape},
     snow::{COL, Cap, Field, GROUND_COL},
 };
@@ -64,7 +65,7 @@ fn gradient(stops: &[(f32, [f32; 3])], t: f32) -> [f32; 3] {
 
 /// The layer under the windows of screen `field` (its corner the output's):
 /// the ground's pile, and with `falling` the flakes and the clumps.
-pub fn layer(field: &Field, scale: f32, falling: bool) -> Mesh {
+pub fn layer(field: &Field, scale: f32, falling: bool, seen: &Seen) -> Mesh {
     let mut mesh = Mesh::default();
     if falling {
         for f in &field.flakes {
@@ -75,6 +76,12 @@ pub fn layer(field: &Field, scale: f32, falling: bool) -> Mesh {
                 _ => (0.25, 5.0),
             };
             let half = f.r * across / 2.0 * scale;
+            // Behind a window, unseen: not drawn (#815). Seen again, it
+            // has moved on and is drawn where it is then.
+            let (x, y) = (f.x * scale, f.y * scale);
+            if !seen.shows([x - half, y - half, x + half, y + half]) {
+                continue;
+            }
             let alpha = 0.25 + 0.65 * f.z;
             mesh.square(
                 [f.x * scale, f.y * scale],
@@ -89,6 +96,11 @@ pub fn layer(field: &Field, scale: f32, falling: bool) -> Mesh {
     ground(&mut mesh, field, scale);
     if falling {
         for k in &field.clumps {
+            // Turned, its corners reach 1.3 of its radius.
+            let (x, y, r) = (k.x * scale, k.y * scale, k.r * 1.3 * scale);
+            if !seen.shows([x - r, y - r, x + r, y + r]) {
+                continue;
+            }
             let (sin, cos) = k.rot.sin_cos();
             let (rx, ry) = (k.r, k.r * 0.8);
             let corner = |u: f32, v: f32| {

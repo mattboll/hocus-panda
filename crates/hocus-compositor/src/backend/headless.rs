@@ -137,6 +137,8 @@ struct OutputBuffer<T, C> {
     damaged: Option<Rectangle<i32, Physical>>,
     /// The pixels drawn over since last asked, every frame's damage added.
     damaged_area: u64,
+    /// How many rectangles it drew over, since asked last.
+    damaged_rects: u64,
 }
 
 /// Creates the renderer and the outputs, and maps them in the space.
@@ -394,6 +396,7 @@ where
             frames: 0,
             damaged: None,
             damaged_area: 0,
+            damaged_rects: 0,
         });
         self.outputs.sort_by_key(|o| o.output.name());
         Ok(())
@@ -483,6 +486,7 @@ where
                 continue;
             }
             let started = std::time::Instant::now();
+            let _frame = crate::effects::timing::frame();
             let shown = magnifier::screen(renderer, state, &out.output, true, &mut out.lens);
             let elements = &shown.elements;
             let mut framebuffer = match renderer.bind(&mut out.target) {
@@ -513,6 +517,7 @@ where
             if let Some(damage) = result.damage {
                 for rect in damage {
                     out.damaged_area += (rect.size.w.max(0) as u64) * (rect.size.h.max(0) as u64);
+                    out.damaged_rects += 1;
                     out.damaged = Some(out.damaged.map_or(*rect, |d| d.merge(*rect)));
                 }
             }
@@ -604,6 +609,20 @@ impl HeadlessBackend {
                 .outputs
                 .get_mut(index)
                 .map_or(0, |o| std::mem::take(&mut o.damaged_area)),
+        }
+    }
+
+    /// How many rectangles output `index` drew over since the last call.
+    pub fn take_damage_rects(&mut self, index: usize) -> u64 {
+        match &mut self.canvas {
+            Canvas::Gles(c) => c
+                .outputs
+                .get_mut(index)
+                .map_or(0, |o| std::mem::take(&mut o.damaged_rects)),
+            Canvas::Pixman(c) => c
+                .outputs
+                .get_mut(index)
+                .map_or(0, |o| std::mem::take(&mut o.damaged_rects)),
         }
     }
 

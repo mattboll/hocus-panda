@@ -408,19 +408,30 @@ impl Pond {
     fn waves(&mut self) {
         let (gw, gh) = self.grid;
         let (cur, prev) = (&self.cur, &mut self.prev);
-        for j in 1..gh - 1 {
+        // Row by row, each with the rows above and below: no index looked
+        // up but by the slices, which the compiler runs four at a time
+        // (#815).
+        for j in 1..gh.saturating_sub(1) {
             let row = j * gw;
-            for i in 1..gw - 1 {
-                let k = row + i;
-                if let (Some(l), Some(r), Some(u), Some(d), Some(p)) = (
-                    cur.get(k - 1),
-                    cur.get(k + 1),
-                    cur.get(k - gw),
-                    cur.get(k + gw),
-                    prev.get_mut(k),
-                ) {
-                    *p = ((l + r + u + d) * 0.5 - *p) * 0.978;
-                }
+            let (Some(up), Some(here), Some(down), Some(out)) = (
+                cur.get(row - gw..row),
+                cur.get(row..row + gw),
+                cur.get(row + gw..row + 2 * gw),
+                prev.get_mut(row..row + gw),
+            ) else {
+                continue;
+            };
+            let inner = gw.saturating_sub(2);
+            let lanes = out
+                .iter_mut()
+                .skip(1)
+                .zip(here.iter())
+                .zip(here.iter().skip(2))
+                .zip(up.iter().skip(1))
+                .zip(down.iter().skip(1))
+                .take(inner);
+            for ((((p, l), r), u), d) in lanes {
+                *p = ((l + r + u + d) * 0.5 - *p) * 0.978;
             }
         }
         std::mem::swap(&mut self.cur, &mut self.prev);
@@ -1376,7 +1387,7 @@ impl crate::State {
                 continue;
             };
             let name = output.name();
-            let on = self.output_powered(output) && !self.wall_hidden(output);
+            let on = self.output_powered(output) && !self.wall_unseen(output);
             let size = (area.size.w as f32, area.size.h as f32);
             let zone = [
                 (zone.x - area.loc.x) as f32,
@@ -1420,9 +1431,9 @@ impl crate::State {
             })
             .collect();
         let moving = plays == super::Plays::Moving && !on.is_empty();
-        if moving {
-            ponds.advance(now, &on);
-        }
+        // Waiting, its clock goes on all the same: back, it does not
+        // catch up on what nobody saw, all at once (#815).
+        ponds.advance(now, if moving { &on } else { &[] });
         if dug || fresh {
             self.redraw = true;
         }

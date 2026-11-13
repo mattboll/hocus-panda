@@ -61,9 +61,24 @@ Every effect follows the same rules (`State::effects_still`, in
   tells where its heights moved enough to be seen and around the koi
   that swam; while they swim it ripples all over, and all of it is drawn
   again. The snow's shapes are drawn into a texture kept from frame to
-  frame (`effects/kept.rs`), again only as they change. The daylight is
+  frame (`effects/kept.rs`), again only as they change, its flakes only
+  where the wallpaper shows; shapes drawn straight on the screen (the
+  fireflies, the koi's pads, a cap's glints) are drawn, in each place
+  the screen draws again, those that reach it alone. The daylight is
   drawn again once a minute. The windows' own motions (the jelly, the
-  flames, the shards) follow their window at the screen's rate.
+  flames, the shards) follow their window at the screen's rate. Nothing
+  is told as changed under what is opaque in front of it (a window): the
+  windows over an effect are not drawn again for it.
+  Changes many and spread (the flakes, the drops) are told by rows of
+  cells of 32 to 128 pixels, a few hundred rectangles at most (all of
+  it once they cover half of it): the damage
+  tracker's time goes by rectangle more than by pixel. Under windows
+  and the bar covering 90 % of the screen or more (a maximised window),
+  as a wallpaper that moves stops (#433), the rain on the glass, the koi, the fireflies
+  and the aurora wait, their clocks going on; the snow falls on, its
+  flakes drawn only where the wallpaper shows (the margins), its caps as
+  ever. What each costs on the live session: docs/performance.md, "The
+  effects' cost".
 
 An effect is decided as it starts: a switch turned off, or a rule that
 starts holding, leaves one under way to end. An effect that lasts (the

@@ -1539,18 +1539,24 @@ impl State {
         // none.
         // The agents as creatures on their windows (#796): where they sit
         // decided at each turn, their motion drawn as of the effects' time.
-        let creatures = self.tick_creatures(now);
+        use crate::effects::{timed, timing::Fx};
+        let creatures = {
+            let _measure = crate::effects::timing::tick(Fx::Creatures);
+            self.tick_creatures(now)
+        };
         moving |= self.tick_paced(now, |state, now| {
+            crate::effects::timing::stepped(Fx::Creatures, creatures);
             // The wallpaper's effects: the snow (#795) first, the
             // garlands' wind following its; the rain on the glass, the
             // fireflies, the koi, the daylight, desktops in depth.
             let mut effects = creatures | state.tick_wallpaper_effects(now);
-            // The garland under the active window (#799).
-            effects |= state.tick_garland(now);
-            // The garlands across the top of the screens (#813).
-            effects |= state.tick_garland_top(now);
+            // The garland under the active window (#799), the garlands
+            // across the top of the screens (#813).
+            effects |= timed(Fx::Garland, || {
+                state.tick_garland(now) | state.tick_garland_top(now)
+            });
             // The moments: fireworks (#810), confetti (#811).
-            effects |= state.tick_moments(now);
+            effects |= timed(Fx::Moments, || state.tick_moments(now));
             effects
         });
         if let Some(at) = self.fx.pace.next() {

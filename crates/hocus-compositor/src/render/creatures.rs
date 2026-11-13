@@ -41,6 +41,7 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Creatures);
         if !frame.purpose.screen() || self.fullscreen_in_front(frame.output) {
             return;
         }

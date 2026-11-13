@@ -190,6 +190,7 @@ impl WinitBackend {
 
     fn render(&mut self, state: &mut State) {
         let started = std::time::Instant::now();
+        let _frame = crate::effects::timing::frame();
         state.redraw = false;
         self.show_host_cursor(state);
         let age = self.backend.buffer_age().unwrap_or(0);

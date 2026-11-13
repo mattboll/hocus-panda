@@ -59,6 +59,7 @@ pub mod snow;
 pub mod snow_look;
 pub mod snowing;
 pub mod sun;
+pub mod timing;
 
 pub use draw::{Fire, FireElement};
 
@@ -169,6 +170,16 @@ impl Pace {
 
 use crate::{State, model::Mode, model::WindowId};
 
+/// Effect `fx`'s step, `step`, measured while their cost is (#815):
+/// whether it moves.
+pub(crate) fn timed(fx: timing::Fx, step: impl FnOnce() -> bool) -> bool {
+    let measure = timing::tick(fx);
+    let moving = step();
+    drop(measure);
+    timing::stepped(fx, moving);
+    moving
+}
+
 /// Why the effects do not play now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Still {
@@ -234,13 +245,17 @@ impl State {
     /// glass, the fireflies, the koi, the aurora, the daylight, desktops in
     /// depth; whether one moves.
     pub(crate) fn tick_wallpaper_effects(&mut self, now: std::time::Duration) -> bool {
-        let mut moving = self.tick_snow(now);
-        moving |= self.tick_raindrops(now);
-        moving |= self.tick_fireflies(now);
-        moving |= self.tick_koi(now);
-        moving |= self.tick_aurora(now);
-        self.tick_daylight();
-        moving |= self.tick_depth(now);
+        use timing::Fx;
+        let mut moving = timed(Fx::Snow, || self.tick_snow(now));
+        moving |= timed(Fx::Rain, || self.tick_raindrops(now));
+        moving |= timed(Fx::Fireflies, || self.tick_fireflies(now));
+        moving |= timed(Fx::Koi, || self.tick_koi(now));
+        moving |= timed(Fx::Aurora, || self.tick_aurora(now));
+        timed(Fx::Daylight, || {
+            self.tick_daylight();
+            false
+        });
+        moving |= timed(Fx::Depth, || self.tick_depth(now));
         moving
     }
 
@@ -258,6 +273,15 @@ impl State {
         let moving = step(self, now);
         self.fx.pace.moved(clock, now, moving);
         moving
+    }
+
+    /// Whether the wallpaper of `output` is as good as unseen: a
+    /// fullscreen window over it, or windows and the bar covering 90 % of
+    /// it or more (a maximised window), as a wallpaper that moves stops
+    /// (#433); the rain on the glass, the koi, the fireflies and the
+    /// aurora then wait (#815).
+    pub(crate) fn wall_unseen(&self, output: &smithay::output::Output) -> bool {
+        self.wall_hidden(output) || self.covered_with_bar(output) >= crate::moving::COVERED
     }
 
     /// Why no effect plays now; `None`: they may.

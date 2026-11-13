@@ -362,6 +362,9 @@
 # one in its place. Followed live; turned off, a program given gives way
 # to the installed one at once.
 # live-reload = false
+# Every 5 s, what each effect playing costs the compositor's loop, in its
+# log (docs/performance.md, "The effects' cost"). Followed live.
+# effects-timing = false
 
 # [agents]
 # How the bar calls you for the agents (Claude Code, Codex, herdr, and

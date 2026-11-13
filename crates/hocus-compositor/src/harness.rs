@@ -1274,6 +1274,15 @@ impl Headless {
             .map_or(0, |h| h.take_damage_area(index))
     }
 
+    /// How many rectangles output `index` (in the order given) drew over
+    /// since the last call, each frame's counted.
+    pub fn take_damage_rects(&mut self, index: usize) -> u64 {
+        self.app
+            .backend
+            .headless_mut()
+            .map_or(0, |h| h.take_damage_rects(index))
+    }
+
     /// The clocks' surfaces as the shell placed them: their screen, and
     /// where they are (global).
     pub fn clock_surfaces(&self) -> Vec<(String, Rect)> {

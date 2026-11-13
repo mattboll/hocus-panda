@@ -73,6 +73,7 @@ impl State {
         look: &Look,
         looks: &[(WindowId, Look)],
     ) -> Option<FireElement> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Garland);
         let garland = self.garland_on(frame)?;
         if garland.window != id {
             return None;
@@ -140,6 +141,7 @@ impl State {
         frame: &Frame,
         looks: &[(WindowId, Look)],
     ) -> Option<(FireElement, FireElement)> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Garland);
         let garland = self.garland_on(frame)?;
         let (_, look) = looks.iter().find(|(id, _)| *id == garland.window)?;
         let view = Self::garland_view(frame, garland, look.visual, look.alpha);
@@ -188,6 +190,7 @@ impl State {
         renderer: &mut R,
         frame: &Frame,
     ) -> Option<(FireElement, [FireElement; 2])> {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Garland);
         if !frame.purpose.screen() || self.fullscreen_in_front(frame.output) {
             return None;
         }

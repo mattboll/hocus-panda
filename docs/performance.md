@@ -278,3 +278,102 @@ one, which replaces it once the panes are done. Between its frames it is
 drawn again only in the places that changed over it, each apart (eight
 to a draw call, nothing allocated), never their bounds: the damage
 tracker draws again what is over it only where it is damaged.
+
+## The effects' cost (#815)
+
+The effects that play on their own (docs/design/effects.md) are measured
+where they cost: on the live session. With
+
+```toml
+[developer]
+effects-timing = true
+```
+
+(followed live; off by default) the compositor writes, every 5 s, at info
+level under `hocus_compositor::effects` (`journalctl --user -t hocuspanda`
+on a session), for example:
+
+```text
+an effect's cost effect="snow" steps_a_second="60.0" us_a_step=412 tick=95 build=210 draw=107
+the frames' cost frames_a_second="61.2" us_a_frame=690
+```
+
+- one line per effect that moved in those 5 s: its steps a second (60 at
+  most, `effects::Pace`), and the loop's CPU time a step, in µs: its
+  `tick` (its simulation), the `build` of its elements (its meshes, what
+  it draws into its textures) and the `draw` calls it submitted. CPU time
+  of the loop's thread (`CLOCK_THREAD_CPUTIME_ID`): what it waits for, the
+  GPU or a fence, is not counted; what the GPU does, neither;
+- one line for the frames, whatever drew them: how many a second, and
+  the CPU time each took, all of it (the elements, the damage, the draws,
+  the effects' within). An effect's own line can be small while it costs
+  through the frames it asks for: compare `us_a_frame` with the effect
+  on and off.
+
+The same, headless, on Mesa's software device (no GPU touched), with the
+real shell, a terminal maximised and two floating, at the maintainer's
+screen's size:
+
+```sh
+env -i HOME=$(mktemp -d) PATH=/usr/bin:/bin XDG_RUNTIME_DIR=$(mktemp -d) \
+    LP_NUM_THREADS=3 ICED_BACKEND=tiny-skia RUST_LOG=hocus_compositor::effects=info \
+    taskset -c 0-3 target/release/hocuspanda --backend headless --renderer gles-software \
+    --output 2560x1600@1.25 --no-xwayland --config FILE --spawn foot
+```
+
+Read it for what the compositor's own code does; not for a GPU's frame:
+llvmpipe draws on the CPU (its threads, `llvmpipe-N`, apart from the
+loop's), and the loop's thread does part of its work (vertices, clears,
+uploads) that a GPU does itself, so `draw`, and the `build` of an effect
+that draws into a texture, are larger there than on a GPU.
+
+Measured so (2026-11-13, 2560 × 1600 at 1.25, a terminal maximised and
+two floating, or the two floating alone; `LP_NUM_THREADS=3`, four cores),
+the loop's thread's CPU, before and after #815's second pass, each effect
+alone; in µs a step, its tick / build / draw (llvmpipe holds the frame
+rate down, so the steps a second differ; compare the milliseconds a step):
+
+| Effect | Windows | Before | After | Loop's ms a step |
+|---|---|---|---|---|
+| snow | maximised | 32.7 % at 35/s; 83 / 2 131 / 190 | 14.9 % at 42/s; 71 / 2 010 / 374 | 9.5 → 3.6 |
+| snow | floating | 24.5 % at 34/s; 121 / 1 222 / 1 017 | 7.9 % at 24/s; 178 / 1 219 / 337 | 7.3 → 3.3 |
+| koi | maximised | 10.4 % at 24/s | waits: 0.1 % | 4.3 → 0 |
+| koi | floating | 6.7 % at 14/s; 1 116 / 1 733 / 778 | 5.5 % at 15/s; 345 / 1 463 / 450 | 4.7 → 3.6 |
+| rain on the glass | maximised | 14.1 % at 46/s | waits: 0.2 % | 3.1 → 0 |
+| rain on the glass | floating | 13.1 % at 47/s; 27 / 1 549 / 209 | 10.0 % at 48/s; 23 / 1 359 / 150 | 2.8 → 2.1 |
+| fireflies (evening) | maximised | 44.5 % at 27/s; 38 / 463 / 4 719 | waits: 0.2 % | 16.5 → 0 |
+| fireflies (evening) | floating | 90.5 % at 5/s; 107 / 552 / 170 264 | 17.2 % at 39/s; 40 / 65 / 3 028 | 177 → 4.4 |
+| garland | floating | 12.2 % at 38/s; 42 / 387 / 365 | 4.9 % at 43/s; 38 / 374 / 60 | 3.2 → 1.2 |
+| creatures | floating | 4.2 % at 58/s | 4.4 % at 58/s | 0.7 → 0.8 |
+| snow, garland, creatures | floating | 30.8 % at 25/s | 8.6 % at 22/s | 12.5 → 4.0 |
+
+What it cost, and what changed:
+
+- **The damage tracker's rectangles.** The snow's flakes were told in
+  some 3 000 cells of 16 px a frame; smithay's damage tracker took 1.7
+  ms a frame on them before drawing anything, and as much again drawing.
+  Changes many and spread are now told by rows of cells of 32 to 128 px,
+  a few hundred rectangles at most, all of the element once they cover
+  half of it (`effects/kept.rs`, `cells`).
+- **What is behind a window.** Nothing an effect changes under an opaque
+  element in front of it (a window that says it is opaque) is told: the
+  windows over it are not drawn again (`render/mod.rs`, `cover_effects`).
+  The snow's flakes are drawn only where the wallpaper shows
+  (`kept::Seen`).
+- **The wallpaper under a maximised window.** With windows and the bar
+  covering 90 % of a screen or more, the rain on the glass, the koi, the
+  fireflies and the aurora wait, their clocks going on, as a wallpaper
+  that moves stops (`State::wall_unseen`).
+- **The fireflies' glows** were drawn whole for each damaged cell, a
+  few thousand times a step (170 ms a step on llvmpipe, the live
+  session's 59 %). Shapes drawn straight now take, in each place, those
+  that reach it alone, and the glows, which cover most of the screen,
+  are told as all of it, in one.
+- **The koi's water**: its waves stepped row by row (vectorised), its
+  heights' texels written in place, not allocated each step.
+- A cap's glints, which twinkle at each step, are drawn straight, not
+  into a texture first.
+
+On a GPU, `draw` and the textures' parts of `build` (the snow's flakes,
+the koi under their water, the drops' map) cost the loop far less than
+here, where llvmpipe's vertices, clears and uploads run on it.

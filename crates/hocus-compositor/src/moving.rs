@@ -183,6 +183,26 @@ impl State {
 
     /// How much of `output` the windows shown cover, from 0 to 1.
     pub fn covered(&self, output: &Output) -> f64 {
+        self.covered_and(output, None)
+    }
+
+    /// How much of `output` the windows shown and its bar cover, from 0
+    /// to 1: what of the wallpaper the effects on it show (#815), never
+    /// under the bar (its glass is blurred from what stands for them).
+    pub(crate) fn covered_with_bar(&self, output: &Output) -> f64 {
+        let bar = self.bar_rect(output, self.now()).and_then(|b| {
+            let at = self.space.output_geometry(output)?.loc.to_f64();
+            Some((
+                at.x + b.loc.x,
+                at.y + b.loc.y,
+                at.x + b.loc.x + b.size.w,
+                at.y + b.loc.y + b.size.h,
+            ))
+        });
+        self.covered_and(output, bar)
+    }
+
+    fn covered_and(&self, output: &Output, also: Option<(f64, f64, f64, f64)>) -> f64 {
         let Some(screen) = self.space.output_geometry(output) else {
             return 0.0;
         };
@@ -200,6 +220,7 @@ impl State {
                     f64::from(r.loc.y + r.size.h),
                 ))
             })
+            .chain(also)
             .collect();
         let whole = f64::from(screen.size.w) * f64::from(screen.size.h);
         if whole <= 0.0 {

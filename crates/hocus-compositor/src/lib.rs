@@ -284,6 +284,7 @@ fn start(options: Options) -> anyhow::Result<Started> {
     agents::start(&event_loop.handle(), &mut state)?;
     // The day recorded off the loop (#655), the shell's process known.
     state.perf_follow();
+    effects::timing::follow(state.config.developer.effects_timing);
     wallpaper::start(&event_loop.handle(), &mut state);
     if let Some(file) = state.config.file.clone() {
         reload::start(&event_loop.handle(), &file, &state.config);
