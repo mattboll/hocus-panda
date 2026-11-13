@@ -1132,6 +1132,21 @@ impl Headless {
         Some(Rect::new(d.loc.x, d.loc.y, d.size.w, d.size.h))
     }
 
+    /// The frames the effects that play on their own moved on so far
+    /// (#815): at most 60 a second.
+    pub fn effect_frames(&self) -> u64 {
+        self.app.state.fx.pace.frames
+    }
+
+    /// How many pixels output `index` (in the order given) drew over since
+    /// the last call, each frame's damage counted.
+    pub fn take_damage_area(&mut self, index: usize) -> u64 {
+        self.app
+            .backend
+            .headless_mut()
+            .map_or(0, |h| h.take_damage_area(index))
+    }
+
     /// The clocks' surfaces as the shell placed them: their screen, and
     /// where they are (global).
     pub fn clock_surfaces(&self) -> Vec<(String, Rect)> {

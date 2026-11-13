@@ -781,8 +781,9 @@ impl State {
         // popovers beside it (4.4); with the bar under the windows, over
         // them still.
         // The snow on the bar (#795), right in front of it.
-        if front && let Some(cap) = self.snow_bar_cap(&frame) {
-            elements.push(OutputElements::Fire(cap));
+        if front {
+            let cap = self.snow_bar_cap(renderer, &frame);
+            elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
         let bar_at = self.layer_elements(
             renderer,
@@ -831,8 +832,9 @@ impl State {
         crate::contrast::set(contrast);
         elements.append(&mut overview);
         elements.append(&mut windows);
-        if !front && let Some(cap) = self.snow_bar_cap(&frame) {
-            elements.push(OutputElements::Fire(cap));
+        if !front {
+            let cap = self.snow_bar_cap(renderer, &frame);
+            elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
         // Under the windows, the bar, its glass right under it showing
         // what is under the bar: a window over it hides both there.
@@ -853,16 +855,20 @@ impl State {
         // then the snow's layer (#795): on the wallpaper, under the
         // windows and the bar; a blank in their place while the glass is
         // blurred.
-        let garland = self.garland_layer(&frame, &looks).map(|(blank, layer)| {
-            elements.push(OutputElements::Fire(blank));
-            layer
-        });
-        let top = self.garland_top_layer(&frame).map(|(blank, layers)| {
-            let id = blank.id().clone();
-            elements.push(OutputElements::Fire(blank));
-            (id, layers)
-        });
-        let snow = self.snow_layer(&frame).map(|(blank, layer)| {
+        let garland = self
+            .garland_layer(renderer, &frame, &looks)
+            .map(|(blank, layer)| {
+                elements.push(OutputElements::Fire(blank));
+                layer
+            });
+        let top = self
+            .garland_top_layer(renderer, &frame)
+            .map(|(blank, layers)| {
+                let id = blank.id().clone();
+                elements.push(OutputElements::Fire(blank));
+                (id, layers)
+            });
+        let snow = self.snow_layer(renderer, &frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
         });

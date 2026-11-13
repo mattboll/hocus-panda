@@ -8,7 +8,7 @@
 //! share's or a recording's frames.
 
 use smithay::{
-    backend::renderer::{element::Id, utils::CommitCounter},
+    backend::renderer::element::Id,
     utils::{Logical, Physical, Rectangle},
 };
 
@@ -16,9 +16,10 @@ use super::{Frame, Look};
 use crate::{
     State,
     effects::{
-        FireElement,
+        Fire, FireElement,
         draw::Clip,
-        garland::{Drawn, Garland, View},
+        garland::{Garland, View},
+        kept::Shown,
         mesh::Mesh,
     },
     model::WindowId,
@@ -64,8 +65,9 @@ impl State {
     /// The garland's cord and bulbs, when it hangs under window `id`,
     /// drawn where it is (`look`): right in front of it. Jumping to it,
     /// over none of the windows `looks` shows: on the wallpaper alone.
-    pub(super) fn garland_front(
+    pub(super) fn garland_front<R: Fire>(
         &self,
+        renderer: &mut R,
         frame: &Frame,
         id: WindowId,
         look: &Look,
@@ -76,7 +78,6 @@ impl State {
             return None;
         }
         let view = Self::garland_view(frame, garland, look.visual, look.alpha);
-        let (over, added) = garland.front(&view);
         let phys = |r: Rectangle<f64, Logical>| {
             let s = frame.scale;
             [
@@ -116,39 +117,47 @@ impl State {
                 .chain(others.into_iter().map(phys)),
             1.0,
         );
-        let geometry = bounds(frame, [&over, &added])?;
-        let commit = drawn(&garland.drawn, FRONT, frame, &over, &added, &clip);
-        Some(FireElement::shapes(
-            garland.ids[0].clone(),
-            commit,
-            geometry,
-            over,
-            added,
+        let made_of = made_of(garland.changes(), &view);
+        show(
+            renderer,
+            &garland.drawn,
+            &garland.ids,
+            FRONT,
+            frame,
+            made_of,
             clip,
-        ))
+            || garland.front(&view),
+        )
     }
 
     /// The garland's halos on `frame`'s output, its window drawn as
     /// `looks` say: the element standing for them behind the glass (blank,
     /// so that the glass is not blurred again at each of their frames),
     /// and themselves.
-    pub(super) fn garland_layer(
+    pub(super) fn garland_layer<R: Fire>(
         &self,
+        renderer: &mut R,
         frame: &Frame,
         looks: &[(WindowId, Look)],
     ) -> Option<(FireElement, FireElement)> {
         let garland = self.garland_on(frame)?;
         let (_, look) = looks.iter().find(|(id, _)| *id == garland.window)?;
         let view = Self::garland_view(frame, garland, look.visual, look.alpha);
-        let halos = garland.halos(&view);
-        let none = Mesh::default();
-        let geometry = bounds(frame, [&none, &halos])?;
         let clip = Clip::new([-FAR, -FAR, FAR, FAR], [], 1.0);
-        let commit = drawn(&garland.drawn, HALOS, frame, &none, &halos, &clip);
-        let screen = screen(frame);
+        let made_of = made_of(garland.changes(), &view);
+        let layer = show(
+            renderer,
+            &garland.drawn,
+            &garland.ids,
+            HALOS,
+            frame,
+            made_of,
+            clip,
+            || (Mesh::default(), garland.halos(&view)),
+        )?;
         Some((
-            FireElement::blank(garland.ids[2].clone(), screen),
-            FireElement::shapes(garland.ids[1].clone(), commit, geometry, none, halos, clip),
+            FireElement::blank(garland.ids[2].clone(), screen(frame)),
+            layer,
         ))
     }
 
@@ -174,8 +183,9 @@ impl State {
     /// shows there: the element standing for it behind the glass (blank),
     /// and what it is, front first: its cord and bulbs (off the bar), its
     /// halos.
-    pub(super) fn garland_top_layer(
+    pub(super) fn garland_top_layer<R: Fire>(
         &self,
+        renderer: &mut R,
         frame: &Frame,
     ) -> Option<(FireElement, [FireElement; 2])> {
         if !frame.purpose.screen() || self.fullscreen_in_front(frame.output) {
@@ -188,30 +198,30 @@ impl State {
             scale: frame.scale as f32,
             alpha: 1.0,
         };
-        let (over, added) = top.front(&view);
-        let halos = top.halos(&view);
-        let none = Mesh::default();
         let off_bar = Clip::new([-FAR, -FAR, FAR, FAR], self.garland_bar(frame), 1.0);
         let anywhere = Clip::new([-FAR, -FAR, FAR, FAR], [], 1.0);
-        let front_at = bounds(frame, [&over, &added]);
-        let halos_at = bounds(frame, [&none, &halos]);
-        let (front_at, halos_at) = front_at.zip(halos_at)?;
-        let front = FireElement::shapes(
-            top.ids[0].clone(),
-            drawn(&top.drawn, FRONT, frame, &over, &added, &off_bar),
-            front_at,
-            over,
-            added,
+        let made_of = made_of(top.changes(), &view);
+        let front = show(
+            renderer,
+            &top.drawn,
+            &top.ids,
+            FRONT,
+            frame,
+            made_of.clone(),
             off_bar,
+            || top.front(&view),
         );
-        let halos = FireElement::shapes(
-            top.ids[1].clone(),
-            drawn(&top.drawn, HALOS, frame, &none, &halos, &anywhere),
-            halos_at,
-            none,
-            halos,
+        let halos = show(
+            renderer,
+            &top.drawn,
+            &top.ids,
+            HALOS,
+            frame,
+            made_of,
             anywhere,
+            || (Mesh::default(), top.halos(&view)),
         );
+        let (front, halos) = front.zip(halos)?;
         Some((
             FireElement::blank(top.ids[2].clone(), screen(frame)),
             [front, halos],
@@ -229,45 +239,44 @@ fn screen(frame: &Frame) -> Rectangle<i32, Physical> {
     )
 }
 
-/// What `meshes` cover on `frame`'s output, when anything.
-fn bounds(frame: &Frame, meshes: [&Mesh; 2]) -> Option<Rectangle<i32, Physical>> {
-    let [x0, y0, x1, y1] = meshes
-        .iter()
-        .filter_map(|m| m.bounds())
-        .map(|[x, y, w, h]| [x, y, x + w, y + h])
-        .reduce(|a, b| {
-            [
-                a[0].min(b[0]),
-                a[1].min(b[1]),
-                a[2].max(b[2]),
-                a[3].max(b[3]),
-            ]
-        })?;
-    Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into()).intersection(screen(frame))
+/// What a garland's part is drawn from: its rope's changes and where.
+fn made_of(changes: u64, view: &View) -> Vec<f64> {
+    vec![
+        changes as f64,
+        view.shift.0,
+        view.shift.1,
+        f64::from(view.scale),
+        f64::from(view.alpha),
+    ]
 }
 
-/// The commit of `part` of a garland on `frame`'s output, as `kept` (what
-/// it drew last) says: a new one when what it draws changed since it last
-/// drew it there.
-fn drawn(
-    kept: &RefCell<HashMap<(usize, String), Drawn>>,
+/// `part` of a garland on `frame`'s output, over the whole screen, its
+/// shapes (over and added) from `shapes`: made again only when what it
+/// is `made_of` or `clip` changed, telling what changed (#815).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a part's shapes and where they go"
+)]
+fn show<R: Fire>(
+    renderer: &mut R,
+    kept: &RefCell<HashMap<(usize, String), Shown>>,
+    ids: &[Id; 3],
     part: usize,
     frame: &Frame,
-    over: &Mesh,
-    added: &Mesh,
-    clip: &Clip,
-) -> CommitCounter {
-    let mut now = Vec::with_capacity(over.vertices.len() + added.vertices.len() + 40);
-    now.extend_from_slice(&over.vertices);
-    now.push(over.vertices.len() as f32);
-    now.extend_from_slice(&added.vertices);
-    now.extend_from_slice(&clip.keep);
-    now.extend(clip.holes.iter().flatten());
+    made_of: Vec<f64>,
+    clip: Clip,
+    shapes: impl FnOnce() -> (Mesh, Mesh),
+) -> Option<FireElement> {
+    let id = ids.get(part).cloned().unwrap_or_else(Id::new);
     let mut kept = kept.borrow_mut();
-    let last = kept.entry((part, frame.output.name())).or_default();
-    if last.vertices != now {
-        last.commit.increment();
-        last.vertices = now;
+    let shown = kept
+        .entry((part, frame.output.name()))
+        .or_insert_with(|| Shown::new(id));
+    let screen = screen(frame);
+    if let Some(again) = shown.again_for(&made_of, screen, &clip) {
+        return Some(again);
     }
-    last.commit
+    let (over, added) = shapes();
+    shown.made_of = made_of;
+    shown.shapes(renderer, screen, over, added, clip)
 }
