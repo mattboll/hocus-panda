@@ -380,6 +380,7 @@ fn the_page_shows_its_groups_and_choosing_light_turns_the_desktop_light() -> any
             "effects.shatter",
             "effects.jelly",
             "effects.garland",
+            "effects.garland-top",
             "effects.fireworks",
             "effects.confetti",
             "effects.creatures",
@@ -419,6 +420,7 @@ fn the_built_effects_switches_write_their_keys_and_those_to_come_are_inert() -> 
         "effects.shatter",
         "effects.jelly",
         "effects.garland",
+        "effects.garland-top",
         "effects.creatures",
     ] {
         assert_eq!(row(&shown, live)["value"], "non", "{live}");
@@ -806,16 +808,40 @@ fn screenshots_of_the_effects() -> anyhow::Result<()> {
         return Ok(());
     };
     std::fs::create_dir_all(&out)?;
-    let Some(mut bed) = Bed::start(&format!("{FILE}\n[effects]\nsnow = true\nflames = true\n"))?
-    else {
+    shoot_the_effects(
+        &out,
+        &format!("{FILE}\n[effects]\nsnow = true\nflames = true\n"),
+        &[
+            ("row:effects.depth", "settings-effects-snow"),
+            ("row:effects.creatures", "settings-effects"),
+        ],
+    )
+}
+
+/// The garlands' rows for the maintainer (#813), into `HOCUS_SHOTS`: both
+/// on, side by side among the windows' effects.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_garlands() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    shoot_the_effects(
+        &out,
+        &format!("{FILE}\n[effects]\ngarland = true\ngarland-top = true\n"),
+        &[("row:effects.confetti", "settings-effects-garlands")],
+    )
+}
+
+/// The Appearance page on `file`, each of `rows` revealed in turn and the
+/// window saved as its name, into `out`.
+fn shoot_the_effects(out: &Path, file: &str, rows: &[(&str, &str)]) -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(file)? else {
         return Ok(());
     };
     bed.open()?;
-    // The wallpaper's group, the snow on; then the rest down to the agents.
-    for (row, name) in [
-        ("row:effects.depth", "settings-effects-snow"),
-        ("row:effects.creatures", "settings-effects"),
-    ] {
+    for &(row, name) in rows {
         bed.reveal(row)?;
         bed.hp.pointer_move(400.0, 1060.0);
         common::at_rest(&mut bed.hp)?;

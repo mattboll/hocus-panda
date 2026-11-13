@@ -676,7 +676,8 @@ impl State {
         // The snow's programs made before it is drawn (#795).
         if (self.fx.snow.is_some()
             || !self.fx.creatures.shown.is_empty()
-            || self.fx.garland.is_some())
+            || self.fx.garland.is_some()
+            || !self.fx.tops.is_empty())
             && purpose.screen()
         {
             renderer.effects_ready();
@@ -848,12 +849,18 @@ impl State {
         if purpose.screen() {
             self.burn_lights(&frame, &mut elements);
         }
-        // The garland's halos (#799), then the snow's layer (#795): on
-        // the wallpaper, under the windows and the bar; a blank in their
-        // place while the glass is blurred.
+        // The garland's halos (#799), the garland across the top (#813),
+        // then the snow's layer (#795): on the wallpaper, under the
+        // windows and the bar; a blank in their place while the glass is
+        // blurred.
         let garland = self.garland_layer(&frame, &looks).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
+        });
+        let top = self.garland_top_layer(&frame).map(|(blank, layers)| {
+            let id = blank.id().clone();
+            elements.push(OutputElements::Fire(blank));
+            (id, layers)
         });
         let snow = self.snow_layer(&frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
@@ -895,6 +902,13 @@ impl State {
             {
                 *slot = OutputElements::Fire(layer);
             }
+        }
+        if let Some((blank, layers)) = top
+            && let Some(at) = elements
+                .iter()
+                .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
+        {
+            elements.splice(at..=at, layers.map(OutputElements::Fire));
         }
         elements
     }

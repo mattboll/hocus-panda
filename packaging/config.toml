@@ -538,11 +538,13 @@
 # cracks where it was clicked and shatters into glass (instead of the
 # closing animation; not a dialog; both on, they take turns); a dragged
 # window deforms like jelly (instead of [windows] wobble); a garland hangs
-# under the active window.
+# under the active window; another across the top of each screen, under
+# the windows (in December the desktop offers both, once a year).
 # flames = false
 # shatter = false
 # jelly = false
 # garland = false
+# garland-top = false
 # The moments: fireworks when an agent's tests pass, confetti for an
 # agent's good news.
 # fireworks = false

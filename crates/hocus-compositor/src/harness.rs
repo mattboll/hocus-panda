@@ -300,6 +300,29 @@ impl Headless {
         Some((garland.window, garland.bulbs()))
     }
 
+    /// The garlands across the top (#813), while they show: each one's
+    /// screen and its bulbs' points (global, logical), by screen.
+    pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {
+        let mut tops: Vec<_> = self
+            .app
+            .state
+            .fx
+            .tops
+            .iter()
+            .map(|(name, top)| (name.clone(), top.bulbs()))
+            .collect();
+        tops.sort_by(|a, b| a.0.cmp(&b.0));
+        tops
+    }
+
+    /// The wall clock's date (`year`, `month`, `day`) in place of the
+    /// system's, and the garlands' proposal looked at again (#813).
+    pub fn holidays_date(&mut self, year: i16, month: i8, day: i8) -> anyhow::Result<()> {
+        self.app.state.holidays.clock = Some(jiff::civil::Date::new(year, month, day)?);
+        self.app.state.holidays_check();
+        Ok(())
+    }
+
     /// Whether it snows (#795): the snow kept, falling or still.
     pub fn snowing(&self) -> bool {
         self.app.state.fx.snow.is_some()

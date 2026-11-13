@@ -1532,6 +1532,8 @@ impl State {
         moving |= self.tick_creatures(now);
         // The garland under the active window (#799).
         moving |= self.tick_garland(now);
+        // The garlands across the top of the screens (#813).
+        moving |= self.tick_garland_top(now);
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         // A shattering one until its last shard has fallen (#798).

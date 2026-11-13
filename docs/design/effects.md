@@ -1,7 +1,7 @@
 # The desktop's effects (#434)
 
-Effects for the fun of it, fourteen of them, prototyped and approved on
-the effects canvas ("Effets du bureau"; sources in the maintainer's
+Effects for the fun of it, fourteen of them (and a second garland, #813),
+prototyped and approved on the effects canvas ("Effets du bureau"; sources in the maintainer's
 `hocus-panda-tools/mockups/s15-fx`). Each is off by default and has its
 own switch, `[effects]` in the configuration and its row in Settings ›
 Appearance › Effects ([settings.md](settings.md), "Apparence et
@@ -20,6 +20,7 @@ langue").
 | | Éclats de verre | `shatter` | #798 (built) |
 | | Fenêtres en gelée | `jelly` | #797 (built) |
 | | Guirlande sous la fenêtre active | `garland` | #799 (built) |
+| | Guirlande en haut de l'écran | `garland-top` | #813 (built) |
 | The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
 | | Bonne nouvelle d'un agent : confettis | `confetti` | #811 |
 | The agents | Les agents en créatures | `creatures` | #796 (built) |
@@ -352,15 +353,59 @@ look in `render/garland.rs`), its lengths in logical pixels.
   its window moves). None in the power saver, while a screen is shared or
   recorded, on the CPU, nor in a capture.
 
-Not built: the board's second garland across the top of the wallpaper,
-and the December proposal ("Des guirlandes pour les fêtes ?").
+## A garland across the top (#813)
+
+With `garland-top = true` (its own row, beside the first's), the board's
+second rope hangs across the top of each screen's work area, all of it on
+the layer under the windows (cord and bulbs over their halos): a window
+there covers it; never on the bar (its cord and bulbs kept off it).
+
+- **The rope**: the board's `top` (48 points pinned every twelve, 10 %
+  slack, a bulb every third point from the third, coloured `i·7 mod 5`),
+  its festoons kept about the board's width: one each ~310 px of the
+  span (two at least, sixteen at most), twelve links each, four bulbs
+  each. Its pins at the work area's top, evenly from 28 px past its left
+  side to 28 px past its right one (the gap and the board's 20 px
+  overhang): no end shows, the bar's side going under the bar. Moved with
+  the work area (the bar's form); hung again when that changes its number
+  of festoons.
+- **Its look**: the board's `drawWire(bg, top, 0.7)` and
+  `drawBulbs(bg, top, time·0.8, (mode + 1) % 3, 0.75, 0.75)`: bulbs and
+  halos three quarters of the first's size and light, its cord at 70 %,
+  twinkling at 0.8 of the pace a way ahead; in twice the wind.
+- **When**: as the first, but paused (not stepped, nothing drawn per
+  frame) on a screen that is off, shows a fullscreen or a maximised
+  window (it is not seen), and while locked. Still and lit with reduced
+  motion; none in the power saver, while shared or recorded, on the CPU,
+  nor in a capture.
+
+## The garlands proposed in December (#813)
+
+Once a year, in December (the wall clock's date where the user is), the
+desktop asks in a notification of its own (5.3, through the shell's
+server, as its other notifications): "Des guirlandes pour les fêtes ?"
+(English: "Garlands for the holidays?"), **Oui** / **Non**. Oui turns
+both garlands on, writing `[effects] garland` and `garland-top` into the
+configuration file as the Settings do (`hocus-config`; the desktop
+follows the file). Non, or closing it, does nothing. Either way it is not
+asked again that year: the year it was shown in is kept in
+`$XDG_STATE_HOME/hocuspanda/garlands-asked`. Not asked with either
+garland on, with reduced motion, without a notifications' bus or a
+configuration file. Looked at as the session starts (waiting up to two
+minutes for the shell's server), as the machine wakes and at each
+midnight (`src/holidays.rs`); never per frame.
 
 Tests: `tests/garland.rs` (on GLES on Mesa's software device: below the
 focused window, its pixels untouched, moving within its box; following
 the focus to another window; none on a maximised window; off, nothing;
-still with reduced motion, nothing drawn per frame); its screenshots,
-`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
-garland::shots`.
+still with reduced motion, nothing drawn per frame; the second across
+the top of the work area, a window there untouched, still with reduced
+motion); `tests/holidays.rs` (a held date and a notifications' server of
+the test's own: asked on the first of December, Oui writing both
+switches, not again that year nor by the next session, again the next
+December). Their screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only -E 'test(/^garland::shots/) |
+test(/^holidays::shots$/)'`.
 
 ## Not built yet
 

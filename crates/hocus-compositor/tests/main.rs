@@ -74,6 +74,7 @@ mod garland;
 mod gestures;
 mod glass;
 mod headless;
+mod holidays;
 mod idle;
 mod in_use;
 mod ink;
