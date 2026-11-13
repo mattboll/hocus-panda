@@ -1364,6 +1364,169 @@ async fn notify_quietly_on(
     }
 }
 
+/// What became of a notification asking something ([`notify_asking`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Asked {
+    /// It is out: the server took it.
+    Shown,
+    /// One of its actions was chosen, by its key.
+    Chose(String),
+    /// Closed unanswered, or it could not be sent.
+    Gone,
+}
+
+/// The longest a notification asking something waits for the server to
+/// be there: at the session's start, the shell is not yet.
+const SERVER_WAIT: Duration = Duration::from_secs(120);
+
+/// A notification of normal urgency asking `summary`, its `actions` (key,
+/// label) as its buttons, off the loop: once the server is there (it
+/// waits for it a while), then until it is answered or closed. Its thread
+/// tells `said` what became of it, [`Asked::Shown`] first.
+pub fn notify_asking(
+    bus: Bus,
+    summary: String,
+    actions: Vec<(&'static str, String)>,
+    said: impl Fn(Asked) + Send + 'static,
+) {
+    let started = std::thread::Builder::new()
+        .name("notification".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match runtime {
+                Ok(runtime) => runtime.block_on(notify_asking_on(bus, summary, actions, &said)),
+                Err(err) => {
+                    tracing::warn!(%err, "no runtime for a notification");
+                    said(Asked::Gone);
+                }
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "a notification is not sent");
+    }
+}
+
+async fn notify_asking_on(
+    bus: Bus,
+    summary: String,
+    actions: Vec<(&'static str, String)>,
+    said: &(impl Fn(Asked) + Send),
+) {
+    use futures_util::StreamExt as _;
+    use zbus::{MatchRule, MessageStream, message::Type};
+    const NOTIFICATIONS: &str = "org.freedesktop.Notifications";
+    let builder = match &bus {
+        Bus::Given(address) => zbus::connection::Builder::address(address.as_str()),
+        Bus::Session => zbus::connection::Builder::session(),
+    };
+    let connection = match builder.build().await {
+        Ok(connection) => connection,
+        Err(err) => {
+            tracing::warn!(%err, summary, "no session bus: a notification is not sent");
+            said(Asked::Gone);
+            return;
+        }
+    };
+    // The server there (the shell takes its name as it starts).
+    let since = Instant::now();
+    loop {
+        let owned = connection
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "NameHasOwner",
+                &(NOTIFICATIONS,),
+            )
+            .await
+            .and_then(|reply| reply.body().deserialize::<bool>());
+        if owned.unwrap_or(false) {
+            break;
+        }
+        if since.elapsed() > SERVER_WAIT {
+            tracing::warn!(
+                summary,
+                "no notifications' server: a notification is not sent"
+            );
+            said(Asked::Gone);
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    // Listened to before it is sent, so that no answer is missed.
+    let rule = MatchRule::builder()
+        .msg_type(Type::Signal)
+        .interface(NOTIFICATIONS)
+        .path("/org/freedesktop/Notifications")
+        .build();
+    let stream = match rule {
+        Ok(rule) => MessageStream::for_match_rule(rule, &connection, None).await,
+        Err(err) => Err(err),
+    };
+    let mut hints: std::collections::HashMap<&str, zbus::Variant<'_>> =
+        std::collections::HashMap::new();
+    hints.insert("urgency", zbus::Variant::from(1u8));
+    hints.insert("desktop-entry", zbus::Variant::from("hocus-settings"));
+    let listed: Vec<&str> = actions
+        .iter()
+        .flat_map(|(key, label)| [*key, label.as_str()])
+        .collect();
+    let sent = connection
+        .call_method(
+            Some(NOTIFICATIONS),
+            "/org/freedesktop/Notifications",
+            Some(NOTIFICATIONS),
+            "Notify",
+            &(
+                "Hocuspanda",
+                0u32,
+                "",
+                summary.as_str(),
+                "",
+                listed,
+                hints,
+                -1i32,
+            ),
+        )
+        .await;
+    let id: u32 = match sent.and_then(|reply| reply.body().deserialize()) {
+        Ok(id) => id,
+        Err(err) => {
+            tracing::warn!(%err, summary, "a notification is not sent");
+            said(Asked::Gone);
+            return;
+        }
+    };
+    said(Asked::Shown);
+    let Ok(mut stream) = stream else {
+        said(Asked::Gone);
+        return;
+    };
+    while let Some(Ok(message)) = stream.next().await {
+        let header = message.header();
+        let member = header.member().map(|m| m.as_str());
+        if member == Some("ActionInvoked")
+            && let Ok((of, key)) = message.body().deserialize::<(u32, String)>()
+            && of == id
+        {
+            said(Asked::Chose(key));
+            return;
+        }
+        if member == Some("NotificationClosed")
+            && message
+                .body()
+                .deserialize::<(u32, u32)>()
+                .is_ok_and(|(of, _)| of == id)
+        {
+            said(Asked::Gone);
+            return;
+        }
+    }
+    said(Asked::Gone);
+}
+
 async fn notify_on(bus: Bus, icon: &str, summary: String) {
     let builder = match &bus {
         Bus::Given(address) => zbus::connection::Builder::address(address.as_str()),

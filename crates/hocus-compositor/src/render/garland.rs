@@ -1,9 +1,11 @@
-//! The garland drawn (#799): its cord and bulbs right in front of the
-//! window it hangs under, as the snow's caps, so that a window in front
-//! covers it; never on that window, nor on the bar. Their halos on the
-//! wallpaper, under the windows and the bar (a light on the wallpaper
-//! alone), in the layer's place behind the glass. On the screen alone:
-//! never in a capture, a share's or a recording's frames.
+//! The garlands drawn (#799, #813). The first's cord and bulbs right in
+//! front of the window it hangs under, as the snow's caps, so that a
+//! window in front covers it; never on that window, nor on the bar. Their
+//! halos on the wallpaper, under the windows and the bar (a light on the
+//! wallpaper alone), in the layer's place behind the glass. The second's,
+//! across the top of each screen, all there: its cord and bulbs (never on
+//! the bar) over its halos. On the screen alone: never in a capture, a
+//! share's or a recording's frames.
 
 use smithay::{
     backend::renderer::{element::Id, utils::CommitCounter},
@@ -16,11 +18,13 @@ use crate::{
     effects::{
         FireElement,
         draw::Clip,
-        garland::{Garland, View},
+        garland::{Drawn, Garland, View},
         mesh::Mesh,
     },
     model::WindowId,
 };
+
+use std::{cell::RefCell, collections::HashMap};
 
 /// Far enough to keep nothing out.
 const FAR: f32 = 1.0e7;
@@ -85,15 +89,7 @@ impl State {
         // Never on its window, nor on the bar under the windows; on its
         // way, on no window (those nearest it first).
         let window = phys(look.visual);
-        let bar = self.bar_rect(frame.output, frame.now).map(|b| {
-            let s = frame.scale as f32;
-            [
-                b.loc.x as f32 * s,
-                b.loc.y as f32 * s,
-                (b.loc.x + b.size.w) as f32 * s,
-                (b.loc.y + b.size.h) as f32 * s,
-            ]
-        });
+        let bar = self.garland_bar(frame);
         let mut others: Vec<Rectangle<f64, Logical>> = if garland.jumping() {
             looks
                 .iter()
@@ -121,7 +117,7 @@ impl State {
             1.0,
         );
         let geometry = bounds(frame, [&over, &added])?;
-        let commit = drawn(garland, FRONT, frame, &over, &added, &clip);
+        let commit = drawn(&garland.drawn, FRONT, frame, &over, &added, &clip);
         Some(FireElement::shapes(
             garland.ids[0].clone(),
             commit,
@@ -148,7 +144,7 @@ impl State {
         let none = Mesh::default();
         let geometry = bounds(frame, [&none, &halos])?;
         let clip = Clip::new([-FAR, -FAR, FAR, FAR], [], 1.0);
-        let commit = drawn(garland, HALOS, frame, &none, &halos, &clip);
+        let commit = drawn(&garland.drawn, HALOS, frame, &none, &halos, &clip);
         let screen = screen(frame);
         Some((
             FireElement::blank(garland.ids[2].clone(), screen),
@@ -159,6 +155,67 @@ impl State {
     /// The id of the blank standing for the garland's halos.
     pub(super) fn garland_blank(&self) -> Option<Id> {
         Some(self.fx.garland.as_ref()?.ids[2].clone())
+    }
+    /// The bar on `frame`'s output (output-local, physical), which the
+    /// garlands' cords and bulbs keep off.
+    fn garland_bar(&self, frame: &Frame) -> Option<[f32; 4]> {
+        self.bar_rect(frame.output, frame.now).map(|b| {
+            let s = frame.scale as f32;
+            [
+                b.loc.x as f32 * s,
+                b.loc.y as f32 * s,
+                (b.loc.x + b.size.w) as f32 * s,
+                (b.loc.y + b.size.h) as f32 * s,
+            ]
+        })
+    }
+
+    /// The garland across the top of `frame`'s output (#813), when it
+    /// shows there: the element standing for it behind the glass (blank),
+    /// and what it is, front first: its cord and bulbs (off the bar), its
+    /// halos.
+    pub(super) fn garland_top_layer(
+        &self,
+        frame: &Frame,
+    ) -> Option<(FireElement, [FireElement; 2])> {
+        if !frame.purpose.screen() || self.fullscreen_in_front(frame.output) {
+            return None;
+        }
+        self.garlanding_top()?;
+        let top = self.fx.tops.get(&frame.output.name())?;
+        let view = View {
+            shift: (-frame.origin.x, -frame.origin.y),
+            scale: frame.scale as f32,
+            alpha: 1.0,
+        };
+        let (over, added) = top.front(&view);
+        let halos = top.halos(&view);
+        let none = Mesh::default();
+        let off_bar = Clip::new([-FAR, -FAR, FAR, FAR], self.garland_bar(frame), 1.0);
+        let anywhere = Clip::new([-FAR, -FAR, FAR, FAR], [], 1.0);
+        let front_at = bounds(frame, [&over, &added]);
+        let halos_at = bounds(frame, [&none, &halos]);
+        let (front_at, halos_at) = front_at.zip(halos_at)?;
+        let front = FireElement::shapes(
+            top.ids[0].clone(),
+            drawn(&top.drawn, FRONT, frame, &over, &added, &off_bar),
+            front_at,
+            over,
+            added,
+            off_bar,
+        );
+        let halos = FireElement::shapes(
+            top.ids[1].clone(),
+            drawn(&top.drawn, HALOS, frame, &none, &halos, &anywhere),
+            halos_at,
+            none,
+            halos,
+            anywhere,
+        );
+        Some((
+            FireElement::blank(top.ids[2].clone(), screen(frame)),
+            [front, halos],
+        ))
     }
 }
 
@@ -189,10 +246,11 @@ fn bounds(frame: &Frame, meshes: [&Mesh; 2]) -> Option<Rectangle<i32, Physical>>
     Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into()).intersection(screen(frame))
 }
 
-/// The commit of `part` of `garland` on `frame`'s output: a new one when
-/// what it draws changed since it last drew it there.
+/// The commit of `part` of a garland on `frame`'s output, as `kept` (what
+/// it drew last) says: a new one when what it draws changed since it last
+/// drew it there.
 fn drawn(
-    garland: &Garland,
+    kept: &RefCell<HashMap<(usize, String), Drawn>>,
     part: usize,
     frame: &Frame,
     over: &Mesh,
@@ -205,7 +263,7 @@ fn drawn(
     now.extend_from_slice(&added.vertices);
     now.extend_from_slice(&clip.keep);
     now.extend(clip.holes.iter().flatten());
-    let mut kept = garland.drawn.borrow_mut();
+    let mut kept = kept.borrow_mut();
     let last = kept.entry((part, frame.output.name())).or_default();
     if last.vertices != now {
         last.commit.increment();

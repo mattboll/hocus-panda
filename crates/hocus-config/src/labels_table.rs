@@ -153,6 +153,11 @@ pub const ALL: &[Label] = &[
         said: Said::Switch,
     },
     Label {
+        key: "effects.garland-top",
+        name: hocus_words::settings::effects::GARLAND_TOP,
+        said: Said::Switch,
+    },
+    Label {
         key: "effects.jelly",
         name: hocus_words::settings::effects::JELLY,
         said: Said::Switch,

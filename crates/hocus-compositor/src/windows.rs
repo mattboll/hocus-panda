@@ -1532,6 +1532,8 @@ impl State {
         moving |= self.tick_creatures(now);
         // The garland under the active window (#799).
         moving |= self.tick_garland(now);
+        // The garlands across the top of the screens (#813).
+        moving |= self.tick_garland_top(now);
         // The rain on the glass (#802), the evening fireflies (#804).
         moving |= self.tick_raindrops(now);
         moving |= self.tick_fireflies(now);
