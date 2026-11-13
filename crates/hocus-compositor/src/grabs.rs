@@ -254,17 +254,18 @@ impl PointerGrab<State> for MoveGrab {
             let moved = location - before;
             let moved = magnet::unpulled((moved.x, moved.y), self.pull, pull);
             let now = state.now();
-            let wobbles = !self.rigid && !over_tile && state.wobbles();
+            // In jelly (#797), else wobbling as standard.
+            let gel = state.jellies(self.id);
+            let wobbles = !self.rigid && !over_tile && (gel || state.wobbles());
             if wobbles && state.wobble.as_ref().is_none_or(|(w, _)| *w != self.id) {
                 let held = self.from - self.initial.to_f64();
-                state.wobble = Some((
-                    self.id,
-                    Jelly::new(
-                        (f64::from(size.w), f64::from(size.h)),
-                        (held.x, held.y),
-                        now,
-                    ),
-                ));
+                let size = (f64::from(size.w), f64::from(size.h));
+                let jelly = if gel {
+                    Jelly::gel(size, (held.x, held.y), now)
+                } else {
+                    Jelly::new(size, (held.x, held.y), now)
+                };
+                state.wobble = Some((self.id, jelly));
             }
             if let Some((w, jelly)) = &mut state.wobble
                 && *w == self.id

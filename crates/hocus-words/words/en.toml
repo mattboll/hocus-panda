@@ -1452,6 +1452,8 @@ jelly = "Jelly windows"
 jelly_line = "A dragged window bends like jelly, then settles."
 garland = "A garland under the active window"
 garland_line = "It hangs under the active window, never over what you read."
+garland_top = "A garland across the top"
+garland_top_line = "It hangs across the top of the screen, behind the windows."
 fireworks = "Tests pass: fireworks"
 fireworks_line = "When an agent finishes with all its tests passing, once, behind the windows."
 confetti = "An agent’s good news: confetti"
@@ -2666,6 +2668,11 @@ not_reopened = { other = "{listed} could not be reopened." }
 
 [compositor.creatures]
 other_tab = "{name} · other tab"
+
+[compositor.holidays]
+ask = "Garlands for the holidays?"
+yes = "Yes"
+no = "No"
 
 [compositor.overview]
 badge_waiting = { other = "{n} waiting" }

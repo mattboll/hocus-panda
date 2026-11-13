@@ -1443,6 +1443,8 @@ jelly = "Fenêtres en gelée"
 jelly_line = "La fenêtre qu’on traîne se déforme comme une gelée, puis se pose."
 garland = "Guirlande sous la fenêtre active"
 garland_line = "Elle pend sous la fenêtre active, sans jamais passer sur ce qu’on lit."
+garland_top = "Guirlande en haut de l’écran"
+garland_top_line = "Elle pend en travers du haut de l’écran, derrière les fenêtres."
 fireworks = "Tests au vert : feu d’artifice"
 fireworks_line = "Quand un agent finit avec tous ses tests au vert, une fois, derrière les fenêtres."
 confetti = "Bonne nouvelle d’un agent : confettis"
@@ -2657,6 +2659,11 @@ not_reopened = { one = "{listed} n’a pas pu être rouverte.", other = "{listed
 
 [compositor.creatures]
 other_tab = "{name} · autre onglet"
+
+[compositor.holidays]
+ask = "Des guirlandes pour les fêtes ?"
+yes = "Oui"
+no = "Non"
 
 [compositor.overview]
 badge_waiting = { one = "{n} t’attend", other = "{n} t’attendent" }

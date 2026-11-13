@@ -1,7 +1,7 @@
 # The desktop's effects (#434)
 
-Effects for the fun of it, fourteen of them, prototyped and approved on
-the effects canvas ("Effets du bureau"; sources in the maintainer's
+Effects for the fun of it, fourteen of them (and a second garland, #813),
+prototyped and approved on the effects canvas ("Effets du bureau"; sources in the maintainer's
 `hocus-panda-tools/mockups/s15-fx`). Each is off by default and has its
 own switch, `[effects]` in the configuration and its row in Settings ›
 Appearance › Effects ([settings.md](settings.md), "Apparence et
@@ -17,9 +17,10 @@ langue").
 | | La lumière du jour | `daylight` | #805 |
 | | Bureaux en profondeur | `depth` | #806 |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
-| | Éclats de verre | `shatter` | #798 |
-| | Fenêtres en gelée | `jelly` | #797 |
-| | Guirlande sous la fenêtre active | `garland` | #799 |
+| | Éclats de verre | `shatter` | #798 (built) |
+| | Fenêtres en gelée | `jelly` | #797 (built) |
+| | Guirlande sous la fenêtre active | `garland` | #799 (built) |
+| | Guirlande en haut de l'écran | `garland-top` | #813 (built) |
 | The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
 | | Bonne nouvelle d'un agent : confettis | `confetti` | #811 |
 | The agents | Les agents en créatures | `creatures` | #796 (built) |
@@ -46,7 +47,18 @@ Every effect follows the same rules (`State::effects_still`, in
   light falls on the wallpaper alone, drawn under the windows and the
   bar;
 - once an effect is over, nothing more is drawn for it, and no frame is
-  asked for.
+  asked for;
+- none costs more than it shows (#815): an effect that plays on its own
+  (the snow, the garlands, the creatures, and those to come) moves on
+  at most 60 times a second whatever the screen's refresh
+  (`effects::Pace`), what it draws staying the same between two (a
+  screen at 165 Hz draws it again only where something else changed),
+  and it tells the screen only what of it changed: the flakes' places,
+  a cap's columns that grew, the garland's pieces, a panda's box, so
+  that the windows around stay as they were. Its shapes are drawn into a
+  texture kept from frame to frame (`effects/kept.rs`), again only as
+  they change. The windows' own motions (the jelly, the flames, the
+  shards) follow their window at the screen's rate.
 
 An effect is decided as it starts: a switch turned off, or a rule that
 starts holding, leaves one under way to end. An effect that lasts (the
@@ -144,6 +156,76 @@ device, its flames over and above it, the page of text beside it
 untouched, gone within 5 s and nothing drawn after; on pixman, with reduced motion or the switch off, the standard
 close); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only effects::shots`.
+
+## Windows in jelly (#797)
+
+With `jelly = true`, a window dragged deforms like jelly, in place of the
+standard wobble ([windows.md](windows.md) §6, `[windows] wobble`), as the
+board "Fenêtres en gelée" does: its spring mesh ported
+(`effects/jelly.rs`), drawn by the wobble's bent mesh (`wobble.rs`), its
+lengths in logical pixels.
+
+- 22 × 16 points even over the window, each pulled to its place on the
+  rigid window by a damped spring: held, stiffest near the hand (`22 +
+  1100 e^(-d/55)`, damped `3.2 + 12 e^(-d/90)`), the points within 6 px
+  of it pinned; let go, all at 120 damped 5.5, a few swings before it
+  lies still. Stepped 180 times a second (the board's three a frame).
+- The hand holds the window as the board's does, by that stiffness
+  falling off smoothly: the window under it follows the pointer closely
+  (some 10 px behind in a hard shake), with no crease.
+- Each point is pulled toward its four neighbours' displacements (300
+  /s²) where the board kept neighbours along a row near their spacing:
+  the board's pull, with a point lagging up or down, folded the sheet
+  into a zig-zag near the hand; this bends it smoothly.
+- Once every point is back at its place and still (0.5 px, 6 px/s),
+  held or let go, the window is drawn as it is, not through the mesh: its
+  text straight, pixel for pixel; and no frame is asked for while it is
+  held still.
+- Its content is the window itself, deformed: no other window nor the bar
+  is drawn over. On the screen only: a capture, a share or a recording
+  shows the window straight. Decided as the drag starts: with reduced
+  motion, the power saver, a share or a recording, on the CPU, or with a
+  fullscreen window in front on its screen, the drag is as without it
+  (the standard wobble if it is on).
+
+## A closing window shatters into glass (#798)
+
+With `shatter = true`, an application's window that closes (not a
+dialog, not minimised) cracks then breaks into shards that fall, in place
+of the closing animation, as the board "Éclats de verre" does
+(`effects/shatter.rs`, the `SHARD` program in `draw.rs`). The flames'
+sibling: the window leaves the desktop as it starts, its last picture
+alone breaking. With the flames on too, closings take turns: flames,
+then glass.
+
+- **Where it cracks**: where the window was clicked if it closes within
+  1.5 s of a press on it (its close button), else its middle.
+- **The shards**: 22 sites round the hit (within 160 px, most near it)
+  and 16 anywhere on the window; each shard its site's Voronoi cell, the
+  window's picture on it.
+- **The crack** (220 ms): the cells' edges drawn out from the hit over
+  160 ms, 520 px far (1 px, white-blue at 75 %), under a white flash 90 px
+  round, fading; the window whole over its shadow.
+- **The fall**: each shard, after its distance over 900 px/s, thrown from
+  the hit (`240 e^(-d/120) + 18` px/s, up a little near it), falling at
+  1500 px/s², spinning and tilting about an axis of its own: squashed by
+  its tilt's cosine, a white shine as it turns to the light, darker
+  showing its back, its edge lit (1.2 px). Its shadow goes in 120 ms (the
+  board's drops at once). Stepped at 60 steps a second with a seeded
+  generator; over once every shard is 200 px below the screens under it,
+  or 3 s after the break.
+- The shards are the window's own picture, drawn where the windows
+  leaving are (over the windows), and kept off the bar, as the board's
+  panel is in front of them; never in a capture, a share's or a
+  recording's frames; nothing drawn once over.
+
+Tests: `tests/window_effects.rs` (on GLES on Mesa's software device: a
+window dragged bends, and once settled is as it was before, pixel for
+pixel, nothing drawn after; a window closed cracks whole, breaks, falls,
+and leaves the desktop as it was; on pixman, with reduced motion or the
+switches off, a drag is rigid and a close standard); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
+window_effects::shots`.
 
 ## Snow that settles (#795)
 
@@ -244,7 +326,98 @@ its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
 --run-ignored only creatures::shots` (foot terminals, each a process of
 its own; a fake herdr).
 
+## A garland under the active window (#799)
+
+With `garland = true`, a string of lights hangs under the focused window,
+as the board "Guirlande" does: its rope ported (`effects/garland.rs`, the
+look in `render/garland.rs`), its lengths in logical pixels.
+
+- **The rope**: 34 points pinned at five (0, 8, 16, 25, 33) evenly along
+  the window's bottom edge, 8 px in from its sides, 1 px below it; 16 %
+  longer than its span. Verlet with gravity (900 px/s²), damped (0.992 a
+  step), in a wind of its own (`sin(0.7t)·30 + sin(1.9t)·12`; with the
+  snow falling, 0.4 of the snow's), its links pulled back fourteen times a
+  step when stretched; 120 steps a second (the board's two a frame), from
+  its start, catching up 12 at most. It swings as its window moves, its
+  pins dragging it.
+- **The bulbs**: fifteen, on the odd points that are not pins, in five
+  colours in turn, each a pendulum swung by its point's speed (±1.1 rad).
+  A dark socket, an oval of glass lit by the board's gradient, an added
+  core and glint; their level twinkles a chase along the string, then at
+  random, then breathing, nine seconds each.
+- **Their halos**: the board's radial gradient (240 px across at most)
+  added to the wallpaper on the layer under the windows (in front of the
+  snow's), so that it never lights a window nor the bar; the cord is lit
+  by them as the board's is (their light added to its colour).
+- **Never over what is read**: drawn right in front of its window (a
+  window in front covers it), never on that window nor on the bar. Like
+  the board's, it hangs over a window behind it. On its way to another
+  window it is drawn on none (on the wallpaper alone).
+- **Following the focus**: when another window takes the keyboard, it
+  jumps there in 0.8 s (eased out), lifted 110 px midway. None on a
+  maximised or fullscreen window, nor on one with less than 20 px under
+  it on its screen, nor while locked: it goes, and hangs again at rest
+  under the next window it may.
+- **When**: moving, a frame each refresh, damage its own box (the cord and
+  bulbs; the halos'). With reduced motion it hangs still, its bulbs lit
+  (80 %) without twinkling, nothing drawn per frame (drawn again only as
+  its window moves). None in the power saver, while a screen is shared or
+  recorded, on the CPU, nor in a capture.
+
+## A garland across the top (#813)
+
+With `garland-top = true` (its own row, beside the first's), the board's
+second rope hangs across the top of each screen's work area, all of it on
+the layer under the windows (cord and bulbs over their halos): a window
+there covers it; never on the bar (its cord and bulbs kept off it).
+
+- **The rope**: the board's `top` (48 points pinned every twelve, 10 %
+  slack, a bulb every third point from the third, coloured `i·7 mod 5`),
+  its festoons kept about the board's width: one each ~310 px of the
+  span (two at least, sixteen at most), twelve links each, four bulbs
+  each. Its pins at the work area's top, evenly from 28 px past its left
+  side to 28 px past its right one (the gap and the board's 20 px
+  overhang): no end shows, the bar's side going under the bar. Moved with
+  the work area (the bar's form); hung again when that changes its number
+  of festoons.
+- **Its look**: the board's `drawWire(bg, top, 0.7)` and
+  `drawBulbs(bg, top, time·0.8, (mode + 1) % 3, 0.75, 0.75)`: bulbs and
+  halos three quarters of the first's size and light, its cord at 70 %,
+  twinkling at 0.8 of the pace a way ahead; in twice the wind.
+- **When**: as the first, but paused (not stepped, nothing drawn per
+  frame) on a screen that is off, shows a fullscreen or a maximised
+  window (it is not seen), and while locked. Still and lit with reduced
+  motion; none in the power saver, while shared or recorded, on the CPU,
+  nor in a capture.
+
+## The garlands proposed in December (#813)
+
+Once a year, in December (the wall clock's date where the user is), the
+desktop asks in a notification of its own (5.3, through the shell's
+server, as its other notifications): "Des guirlandes pour les fêtes ?"
+(English: "Garlands for the holidays?"), **Oui** / **Non**. Oui turns
+both garlands on, writing `[effects] garland` and `garland-top` into the
+configuration file as the Settings do (`hocus-config`; the desktop
+follows the file). Non, or closing it, does nothing. Either way it is not
+asked again that year: the year it was shown in is kept in
+`$XDG_STATE_HOME/hocuspanda/garlands-asked`. Not asked with either
+garland on, with reduced motion, without a notifications' bus or a
+configuration file. Looked at as the session starts (waiting up to two
+minutes for the shell's server), as the machine wakes and at each
+midnight (`src/holidays.rs`); never per frame.
+
+Tests: `tests/garland.rs` (on GLES on Mesa's software device: below the
+focused window, its pixels untouched, moving within its box; following
+the focus to another window; none on a maximised window; off, nothing;
+still with reduced motion, nothing drawn per frame; the second across
+the top of the work area, a window there untouched, still with reduced
+motion); `tests/holidays.rs` (a held date and a notifications' server of
+the test's own: asked on the first of December, Oui writing both
+switches, not again that year nor by the next session, again the next
+December). Their screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+hocus-compositor --run-ignored only -E 'test(/^garland::shots/) |
+test(/^holidays::shots$/)'`.
+
 ## Not built yet
 
-The garland (#799) hangs under the active window as an edge's
-decoration; the other effects come with their tickets.
+The other effects come with their tickets.

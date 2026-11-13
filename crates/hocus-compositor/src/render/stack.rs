@@ -136,15 +136,19 @@ impl State {
             // Its creatures (#796), right in front of it.
             self.creature_elements(renderer, frame, *id, look, out);
             // Its snow (#795), right in front of it.
-            if look.decorated
-                && let Some(cap) = self.snow_cap(
+            if look.decorated {
+                let cap = self.snow_cap(
+                    renderer,
                     frame,
                     &crate::effects::snow::Holder::Window(*id),
                     look.visual,
                     look.alpha,
-                )
-            {
-                out.push(OutputElements::Fire(cap));
+                );
+                out.extend(cap.into_iter().map(OutputElements::Fire));
+            }
+            // Its garland (#799), right in front of it.
+            if let Some(garland) = self.garland_front(renderer, frame, *id, look, looks) {
+                out.push(OutputElements::Fire(garland));
             }
             // Raining (#432): through the rain, else fading over its time.
             let rain = look.rain.map(|fade| {
@@ -160,7 +164,7 @@ impl State {
                     faded.alpha *= fade;
                     self.framed_window(renderer, *id, &faded, origin, scale, out);
                 }
-                None => match self.bent_window(renderer, *id, look, origin, scale) {
+                None => match self.bent_window(renderer, *id, look, frame) {
                     Some(bent) => out.push(OutputElements::Bent(bent)),
                     None => self.framed_window(renderer, *id, look, origin, scale, out),
                 },

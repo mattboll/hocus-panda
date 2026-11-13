@@ -252,6 +252,17 @@ impl Headless {
         self.app.state.departures.leaving.len()
     }
 
+    /// Windows shattering now, or their last shards falling (#798).
+    pub fn shattering(&self) -> usize {
+        self.app
+            .state
+            .departures
+            .leaving
+            .iter()
+            .filter(|l| l.shatter.is_some())
+            .count()
+    }
+
     /// Windows burning now, or their last sparks (#794).
     pub fn burning(&self) -> usize {
         self.app
@@ -280,6 +291,36 @@ impl Headless {
             .iter()
             .map(|(id, c)| (*id, c.len()))
             .collect()
+    }
+
+    /// The garland (#799), while it shows: the window it hangs under, and
+    /// its bulbs' points (global, logical).
+    pub fn garland(&self) -> Option<(WindowId, Vec<(f64, f64)>)> {
+        let garland = self.app.state.fx.garland.as_ref()?;
+        Some((garland.window, garland.bulbs()))
+    }
+
+    /// The garlands across the top (#813), while they show: each one's
+    /// screen and its bulbs' points (global, logical), by screen.
+    pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {
+        let mut tops: Vec<_> = self
+            .app
+            .state
+            .fx
+            .tops
+            .iter()
+            .map(|(name, top)| (name.clone(), top.bulbs()))
+            .collect();
+        tops.sort_by(|a, b| a.0.cmp(&b.0));
+        tops
+    }
+
+    /// The wall clock's date (`year`, `month`, `day`) in place of the
+    /// system's, and the garlands' proposal looked at again (#813).
+    pub fn holidays_date(&mut self, year: i16, month: i8, day: i8) -> anyhow::Result<()> {
+        self.app.state.holidays.clock = Some(jiff::civil::Date::new(year, month, day)?);
+        self.app.state.holidays_check();
+        Ok(())
     }
 
     /// Whether it snows (#795): the snow kept, falling or still.
@@ -1089,6 +1130,21 @@ impl Headless {
     pub fn take_damage(&mut self, index: usize) -> Option<Rect> {
         let d = self.app.backend.headless_mut()?.take_damage(index)?;
         Some(Rect::new(d.loc.x, d.loc.y, d.size.w, d.size.h))
+    }
+
+    /// The frames the effects that play on their own moved on so far
+    /// (#815): at most 60 a second.
+    pub fn effect_frames(&self) -> u64 {
+        self.app.state.fx.pace.frames
+    }
+
+    /// How many pixels output `index` (in the order given) drew over since
+    /// the last call, each frame's damage counted.
+    pub fn take_damage_area(&mut self, index: usize) -> u64 {
+        self.app
+            .backend
+            .headless_mut()
+            .map_or(0, |h| h.take_damage_area(index))
     }
 
     /// The clocks' surfaces as the shell placed them: their screen, and

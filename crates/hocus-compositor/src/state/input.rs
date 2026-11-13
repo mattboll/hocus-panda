@@ -9,6 +9,7 @@ use smithay::{
         pointer::{CursorIcon, CursorImageStatus},
     },
     output::Output,
+    utils::{Logical, Point},
 };
 
 use crate::{cursor::CursorImages, model::WindowId, popups::PopupGrab};
@@ -28,6 +29,9 @@ pub struct Pointer {
     pub last_grip_press: Option<(WindowId, Duration)>,
     /// Buttons whose press the desktop kept: their release too.
     pub kept_buttons: HashSet<u32>,
+    /// The last press, where (global) and when: a window closed by a
+    /// click shatters from there (#798).
+    pub last_press: Option<(Point<f64, Logical>, Duration)>,
     pub popup_grab: Option<PopupGrab>,
     /// What the pointer shows, as the client under it sets it.
     pub cursor: CursorImageStatus,
@@ -62,6 +66,7 @@ impl Pointer {
             frame_cursor: None,
             last_grip_press: None,
             kept_buttons: HashSet::new(),
+            last_press: None,
             popup_grab: None,
             cursor: CursorImageStatus::default_named(),
             cursor_images,

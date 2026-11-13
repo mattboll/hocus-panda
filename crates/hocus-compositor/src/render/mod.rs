@@ -7,6 +7,7 @@
 //! clients are told once a frame is out.
 
 mod creatures;
+mod garland;
 mod layers;
 mod leaving;
 mod snow;
@@ -501,21 +502,26 @@ impl State {
     }
 
     /// A window wobbling: drawn into its picture and bent. `None` when the
-    /// renderer cannot: it is then drawn rigid.
+    /// renderer cannot, or it is still: it is then drawn as it is. The
+    /// jelly of the effect (#797) bends on the screen alone, never in a
+    /// capture, a share's or a recording's frames.
     fn bent_window<R>(
         &self,
         renderer: &mut R,
         id: WindowId,
         look: &Look,
-        output_origin: Point<f64, Logical>,
-        scale: f64,
+        frame: &Frame,
     ) -> Option<BentElement>
     where
         R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let (output_origin, scale) = (frame.origin, frame.scale);
         let (wid, jelly) = self.wobble.as_ref()?;
-        if *wid != id || look.alpha < 1.0 {
+        if *wid != id || look.alpha < 1.0 || jelly.still() {
+            return None;
+        }
+        if jelly.is_gel() && !frame.purpose.screen() {
             return None;
         }
         let (w, h) = jelly.size();
@@ -668,7 +674,12 @@ impl State {
         let now = self.now();
         self.frames.drawn_at.set(Some(now));
         // The snow's programs made before it is drawn (#795).
-        if (self.fx.snow.is_some() || !self.fx.creatures.shown.is_empty()) && purpose.screen() {
+        if (self.fx.snow.is_some()
+            || !self.fx.creatures.shown.is_empty()
+            || self.fx.garland.is_some()
+            || !self.fx.tops.is_empty())
+            && purpose.screen()
+        {
             renderer.effects_ready();
         }
         if purpose.screen() {
@@ -770,8 +781,9 @@ impl State {
         // popovers beside it (4.4); with the bar under the windows, over
         // them still.
         // The snow on the bar (#795), right in front of it.
-        if front && let Some(cap) = self.snow_bar_cap(&frame) {
-            elements.push(OutputElements::Fire(cap));
+        if front {
+            let cap = self.snow_bar_cap(renderer, &frame);
+            elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
         let bar_at = self.layer_elements(
             renderer,
@@ -820,8 +832,9 @@ impl State {
         crate::contrast::set(contrast);
         elements.append(&mut overview);
         elements.append(&mut windows);
-        if !front && let Some(cap) = self.snow_bar_cap(&frame) {
-            elements.push(OutputElements::Fire(cap));
+        if !front {
+            let cap = self.snow_bar_cap(renderer, &frame);
+            elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
         // Under the windows, the bar, its glass right under it showing
         // what is under the bar: a window over it hides both there.
@@ -838,9 +851,24 @@ impl State {
         if purpose.screen() {
             self.burn_lights(&frame, &mut elements);
         }
-        // The snow's layer (#795): on the wallpaper, under the windows and
-        // the bar; a blank in its place while the glass is blurred.
-        let snow = self.snow_layer(&frame).map(|(blank, layer)| {
+        // The garland's halos (#799), the garland across the top (#813),
+        // then the snow's layer (#795): on the wallpaper, under the
+        // windows and the bar; a blank in their place while the glass is
+        // blurred.
+        let garland = self
+            .garland_layer(renderer, &frame, &looks)
+            .map(|(blank, layer)| {
+                elements.push(OutputElements::Fire(blank));
+                layer
+            });
+        let top = self
+            .garland_top_layer(renderer, &frame)
+            .map(|(blank, layers)| {
+                let id = blank.id().clone();
+                elements.push(OutputElements::Fire(blank));
+                (id, layers)
+            });
+        let snow = self.snow_layer(renderer, &frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
         });
@@ -867,14 +895,26 @@ impl State {
                 capture_glass,
             },
         );
-        if let Some(layer) = snow
-            && let Some(blank) = self.snow_blank(&frame)
+        for (layer, blank) in [
+            (garland, self.garland_blank()),
+            (snow, self.snow_blank(&frame)),
+        ] {
+            if let Some(layer) = layer
+                && let Some(blank) = blank
+                && let Some(at) = elements
+                    .iter()
+                    .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
+                && let Some(slot) = elements.get_mut(at)
+            {
+                *slot = OutputElements::Fire(layer);
+            }
+        }
+        if let Some((blank, layers)) = top
             && let Some(at) = elements
                 .iter()
                 .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
-            && let Some(slot) = elements.get_mut(at)
         {
-            *slot = OutputElements::Fire(layer);
+            elements.splice(at..=at, layers.map(OutputElements::Fire));
         }
         elements
     }

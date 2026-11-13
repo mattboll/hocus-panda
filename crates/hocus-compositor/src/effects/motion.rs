@@ -1,6 +1,6 @@
 //! How the windows move (#793): each one's velocity and acceleration, from
 //! where it is drawn frame to frame, for the effects that react to it (the
-//! snow shed by a window shaken, #795; the jelly and the garland to come).
+//! snow shed by a window shaken, #795).
 
 use std::{collections::HashMap, time::Duration};
 
