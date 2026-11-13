@@ -165,8 +165,13 @@ impl State {
             return None;
         }
         // The rain on the glass refracts its still picture (#802); the
-        // koi's pond and the daylight's sky take its place (#803, #805).
-        if self.rain_shows_on(output) || self.koi_shows_on(output) || self.sky_shows_on(output) {
+        // koi's pond, the daylight's sky and the landscape in depth take
+        // its place (#803, #805, #806).
+        if self.rain_shows_on(output)
+            || self.koi_shows_on(output)
+            || self.sky_shows_on(output)
+            || self.depth_shows_on(output)
+        {
             return None;
         }
         match self.wallpaper_look(&output.name()).picture {

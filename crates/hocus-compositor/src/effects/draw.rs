@@ -222,6 +222,19 @@ pub struct SkyLook {
     pub stars: f32,
 }
 
+/// How the landscape of desktops in depth is drawn (#806): the screen's
+/// size (logical) and its scale, the camera's travel and pull (logical
+/// pixels, 1 at rest), the sky's drift, the layers' phases.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DepthLook {
+    pub size: [f32; 2],
+    pub scale: f32,
+    pub cam: f32,
+    pub zoom: f32,
+    pub drift: f32,
+    pub phases: [[f32; 3]; 6],
+}
+
 /// The koi's water's heights as a texture, kept between frames: its size
 /// (cells), and whether it holds half floats (else bytes).
 #[derive(Debug)]
@@ -497,6 +510,17 @@ pub trait Fire: Renderer + Sized {
         look: SkyLook,
     ) -> Option<Rc<dyn Any>>;
 
+    /// The landscape of desktops in depth (#806), `size` pixels, kept in
+    /// `kept`: drawn again from `look` when `fresh` or new. `None`: not
+    /// drawn so.
+    fn depth(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: DepthLook,
+    ) -> Option<Rc<dyn Any>>;
+
     /// What is under the koi's water (#803), `size` pixels, kept in
     /// `kept`: the pond's floor `floor` (a sheet), and over it `mesh` (the
     /// koi and their shadows), drawn again each time. `None`: not drawn
@@ -577,6 +601,16 @@ impl Fire for PixmanRenderer {
         _size: (i32, i32),
         _fresh: bool,
         _look: SkyLook,
+    ) -> Option<Rc<dyn Any>> {
+        None
+    }
+
+    fn depth(
+        &mut self,
+        _kept: &RefCell<Option<Kept>>,
+        _size: (i32, i32),
+        _fresh: bool,
+        _look: DepthLook,
     ) -> Option<Rc<dyn Any>> {
         None
     }
@@ -1124,6 +1158,138 @@ void main() {
 }
 ";
 
+/// The board "Bureaux en profondeur"'s landscape (#806), its canvases
+/// drawn as one shader, in its logical pixels. The sky: its gradient
+/// (`#1C1B44`, `#5B3E73` at 45 %, `#D9786A` at 72 %, `#F4B27A`) and its
+/// sun's glow (260 px round at 62 % of the screen's width and 200 px, 52 %
+/// of its height), drifting with the camera. Over it six layers, back to
+/// front, each moved by its share of the camera's travel (`f`) and pulled
+/// back about the screen's middle by its share of the camera's pull: the
+/// board's silhouettes (peaks, hills, ground under trees: sums of sines
+/// over its own phases), its trees (triangles, 18 to 58 px tall, 1.6
+/// times on the layer that moves with the windows, 2.6 on the nearest; a
+/// cell each, where the board's canvas went on by a random step: 6 to
+/// 24 px, 90 to 350 px for the nearest), the sunset's haze over the far
+/// ones (`#F4B27A`, `0.18 (1 - f)` at the foot). Below the screen the
+/// layers go on, as the board's 1.35 screens tall did. Composed front to
+/// back: where the near layers cover a pixel whole, the far ones and the
+/// sky are not looked at; a pixel looks at the trees of the cells that
+/// may reach it alone.
+const DEPTH: &str = "#version 100
+precision highp float;
+uniform vec2 size;
+uniform float px;
+uniform float cam;
+uniform float zoom;
+uniform float drift;
+uniform vec3 ph[6];
+varying vec2 v_px;
+
+const vec3 HAZE = vec3(244.0, 178.0, 122.0) / 255.0;
+
+float hash(float n) { return fract(sin(n * 91.3458 + 47.21) * 43758.5453); }
+
+float ground(float x, float base, float amp, vec3 p, float kind) {
+    if (kind < 0.5) {
+        return base - amp * (0.62 * pow(1.0 - abs(sin(x * 0.0024 + p.x)), 1.7)
+            + 0.28 * pow(1.0 - abs(sin(x * 0.0063 + p.y)), 2.0)
+            + 0.06 * sin(x * 0.031 + p.z));
+    }
+    return base - amp * (0.6 * sin(x * 0.0026 + p.x) + 0.3 * sin(x * 0.0071 + p.y)
+        + 0.1 * sin(x * 0.023 + p.z));
+}
+
+/// How much of the layer covers `p` (logical, on the screen), and how
+/// hazy it is there. `kind`: 0 peaks, 1 hills, 2 ground under trees, the
+/// trees of the cells `reach` (from, to) around the pixel's looked at.
+float layer(vec2 p, float f, float level, float amp, vec3 phase, float kind,
+        float cell, float jitter, float tall, float seed, vec2 reach, out float haze) {
+    float z = 1.0 - (1.0 - zoom) * f;
+    vec2 c = size * 0.5;
+    vec2 q = (p - c) / z + c;
+    float x = q.x + cam * f + 20.0;
+    float y = q.y;
+    float s = px * z;
+    float base = size.y * level;
+    float a = clamp((y - ground(x, base, amp, phase, kind)) * s + 0.5, 0.0, 1.0);
+    if (kind > 1.5 && a < 1.0 && y > base - amp + 5.0 - 58.0 * tall) {
+        float i0 = floor(x / cell);
+        for (int k = -3; k <= 3; k++) {
+            if (float(k) < reach.x || float(k) > reach.y) {
+                continue;
+            }
+            float i = i0 + float(k);
+            float tx = (i + 0.5 + jitter * (hash(i + seed) - 0.5)) * cell;
+            float h = (18.0 + 40.0 * hash(i * 1.7 + seed + 3.1)) * tall;
+            float y0 = ground(tx, base, amp, phase, kind) + 6.0;
+            float top = y0 - h;
+            if (y > top - 1.0 && y < y0) {
+                float d = (y - top) * 0.28 - abs(x - tx);
+                a = max(a, clamp(d * 0.963 * s + 0.5, 0.0, 1.0));
+            }
+        }
+    }
+    float from = base - amp * 1.2;
+    haze = 0.18 * max(1.0 - f, 0.0) * clamp((y - from) / (size.y - from), 0.0, 1.0);
+    return a;
+}
+
+void main() {
+    vec2 p = v_px / px;
+    // Front to back: what a nearer layer covers whole is not looked at.
+    vec3 c = vec3(0.0);
+    float covered = 0.0;
+    float haze;
+    float a = layer(p, 1.55, 1.02, 34.0, ph[5], 2.0, 220.0, 0.6, 2.6, 37.0, vec2(-1.0, 1.0), haze);
+    c += (1.0 - covered) * a * vec3(10.0, 10.0, 22.0) / 255.0;
+    covered += (1.0 - covered) * a;
+    if (covered < 0.999) {
+        a = layer(p, 1.0, 0.93, 16.0, ph[4], 2.0, 15.0, 0.8, 1.6, 23.0, vec2(-3.0, 2.0), haze);
+        c += (1.0 - covered) * a * vec3(20.0, 19.0, 39.0) / 255.0;
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.72, 0.84, 26.0, ph[3], 2.0, 15.0, 0.8, 1.0, 11.0, vec2(-2.0, 1.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(36.0, 32.0, 61.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.38, 0.76, 46.0, ph[2], 1.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(59.0, 44.0, 85.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.14, 0.68, 110.0, ph[1], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(90.0, 63.0, 110.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        a = layer(p, 0.03, 0.62, 150.0, ph[0], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
+        c += (1.0 - covered) * a * mix(vec3(126.0, 90.0, 134.0) / 255.0, HAZE, haze);
+        covered += (1.0 - covered) * a;
+    }
+    if (covered < 0.999) {
+        float t = clamp(p.y / size.y, 0.0, 1.0);
+        vec3 c0 = vec3(28.0, 27.0, 68.0) / 255.0;
+        vec3 c1 = vec3(91.0, 62.0, 115.0) / 255.0;
+        vec3 c2 = vec3(217.0, 120.0, 106.0) / 255.0;
+        vec3 c3 = vec3(244.0, 178.0, 122.0) / 255.0;
+        vec3 sky = t < 0.45 ? mix(c0, c1, t / 0.45)
+            : t < 0.72 ? mix(c1, c2, (t - 0.45) / 0.27)
+            : mix(c2, c3, (t - 0.72) / 0.28);
+        vec2 sun = vec2((size.x + 200.0) * 0.62 - drift, size.y * 0.52);
+        float d = length(p - sun) / 260.0;
+        vec4 glow = d < 0.12
+            ? mix(vec4(255.0, 230.0, 190.0, 242.25), vec4(255.0, 210.0, 160.0, 153.0), d / 0.12)
+            : mix(vec4(255.0, 210.0, 160.0, 153.0), vec4(255.0, 190.0, 140.0, 0.0),
+                clamp((d - 0.12) / 0.88, 0.0, 1.0));
+        sky = mix(sky, glow.rgb / 255.0, glow.a / 255.0);
+        c += (1.0 - covered) * sky;
+    }
+    gl_FragColor = vec4(c, 1.0);
+}
+";
+
 /// A piece of a sheet, as opaque as its vertices say (premultiplied).
 const SPRITE_VERTEX: &str = "#version 100
 uniform mat3 matrix;
@@ -1206,6 +1372,7 @@ struct Programs {
     rain: Program,
     koi: Program,
     sky: Program,
+    depth: Program,
     /// The shards' look attribute.
     shard_look: ffi::types::GLint,
     /// The sprites' opacity attribute.
@@ -1301,6 +1468,12 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                     "night", "stars",
                 ],
             )?;
+            let depth = compile_with(
+                gl,
+                crate::matrix::VERTEX,
+                DEPTH,
+                &["matrix", "size", "px", "cam", "zoom", "drift", "ph"],
+            )?;
             let attrib =
                 |p: &Program, n: &std::ffi::CStr| gl.GetAttribLocation(p.program, n.as_ptr());
             let shard_look = attrib(&shards, c"look");
@@ -1334,6 +1507,7 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 rain,
                 koi,
                 sky,
+                depth,
                 shard_look,
                 shade,
                 colour,
@@ -1485,6 +1659,44 @@ impl Fire for GlesRenderer {
         });
         if let Err(err) = drawn {
             tracing::warn!(%err, "could not draw the daylight's sky");
+            return None;
+        }
+        let rc: Rc<dyn Any> = Rc::new(texture);
+        *kept.borrow_mut() = Some((Size::from(size), rc.clone()));
+        Some(rc)
+    }
+
+    fn depth(
+        &mut self,
+        kept: &RefCell<Option<Kept>>,
+        size: (i32, i32),
+        fresh: bool,
+        look: DepthLook,
+    ) -> Option<Rc<dyn Any>> {
+        let programs = programs(self)?;
+        let (mut texture, map) = kept_target(self, kept, size, fresh, "the landscape in depth")?;
+        if let Some(map) = map {
+            return Some(map);
+        }
+        let p = &programs.depth;
+        let phases: Vec<f32> = look.phases.iter().flatten().copied().collect();
+        let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
+            #[allow(unsafe_code)]
+            // SAFETY: the target's frame is current; `phases` holds the six
+            // vec3 the array takes.
+            unsafe {
+                quads(gl, p, matrix, instancing, &[whole], whole.loc, |gl| {
+                    gl.Uniform2f(p.at("size"), look.size[0], look.size[1]);
+                    gl.Uniform1f(p.at("px"), look.scale);
+                    gl.Uniform1f(p.at("cam"), look.cam);
+                    gl.Uniform1f(p.at("zoom"), look.zoom);
+                    gl.Uniform1f(p.at("drift"), look.drift);
+                    gl.Uniform3fv(p.at("ph"), 6, phases.as_ptr());
+                });
+            }
+        });
+        if let Err(err) = drawn {
+            tracing::warn!(%err, "could not draw the landscape in depth");
             return None;
         }
         let rc: Rc<dyn Any> = Rc::new(texture);

@@ -8,6 +8,7 @@
 
 mod creatures;
 mod daylight;
+mod depth;
 mod fireflies;
 mod garland;
 mod koi;
@@ -698,6 +699,7 @@ impl State {
             || self.fx.fireflies.is_some()
             || self.fx.koi.is_some()
             || self.fx.daylight.is_some()
+            || self.fx.depth.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -907,10 +909,12 @@ impl State {
             elements.push(OutputElements::Fire(k.stand_in));
             (k.pads, k.water)
         });
-        // The daylight's sky (#805), in the wallpaper's place, drawn once
-        // a minute.
+        // Desktops in depth's landscape (#806), drawn as the camera
+        // moves, else the daylight's sky (#805), drawn once a minute: in
+        // the wallpaper's place.
         let mut sky = self
-            .daylight_layer(renderer, &frame)
+            .depth_layer(renderer, &frame)
+            .or_else(|| self.daylight_layer(renderer, &frame))
             .map(OutputElements::Fire);
         // The rain on the glass (#802), right over the wallpaper (or the
         // sky, which it takes), which it covers; the fogged glass alone in

@@ -1540,6 +1540,8 @@ impl State {
         // The koi's pond (#803), the daylight (#805).
         moving |= self.tick_koi(now);
         self.tick_daylight();
+        // Desktops in depth (#806): moving with the strip.
+        self.tick_depth();
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         // A shattering one until its last shard has fallen (#798).

@@ -36,6 +36,14 @@ impl State {
             .flatten();
         let hour = self.fx.daylight.as_ref().map_or(0, |d| d.generation);
         let width = f64::from(area.size.w);
+        // Desktops in depth (#806): the windows sliding with the strip
+        // pull back about the screen's middle with the camera.
+        let pull = if frame.purpose.screen() {
+            self.depth_pull(frame.output, now)
+        } else {
+            1.0
+        };
+        let middle = area.to_f64().loc + area.to_f64().size.downscale(2.0).to_point();
         self.model
             .stack()
             .iter()
@@ -47,6 +55,10 @@ impl State {
                 let mut look = self.look(id, now)?;
                 look.visual.loc.x += offset;
                 look.alpha *= alpha;
+                if pull < 1.0 && self.slides_with_strip(id) {
+                    look.visual.loc = middle + (look.visual.loc - middle).upscale(pull);
+                    look.visual.size = look.visual.size.upscale(pull);
+                }
                 if let Some(sky) = &sun
                     && self.model.mode(id) != Mode::Fullscreen
                 {

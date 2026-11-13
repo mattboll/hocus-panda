@@ -15,7 +15,8 @@
 //! ([`garland`], #799), another across the top of the screens (#813);
 //! on the wallpaper, rain on the glass ([`raindrops`], #802), a koi pond
 //! ([`koi`], #803), evening fireflies ([`fireflies`], #804) and the
-//! daylight ([`daylight`], #805), following the sun ([`sun`]).
+//! daylight ([`daylight`], #805), following the sun ([`sun`]); and
+//! desktops in depth ([`depth`], #806).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -26,6 +27,7 @@
 
 pub mod creatures;
 pub mod daylight;
+pub mod depth;
 pub mod draw;
 pub mod fireflies;
 pub mod flames;
@@ -75,6 +77,8 @@ pub struct Live {
     pub dusk: fireflies::Dusk,
     /// The daylight, while it is on (#805).
     pub daylight: Option<daylight::Daylight>,
+    /// Desktops in depth, while it is on (#806).
+    pub depth: Option<depth::Depth>,
     /// The koi's pond, while it is on (#803).
     pub koi: Option<koi::Ponds>,
     /// The ponds dug so far, for their seeds.

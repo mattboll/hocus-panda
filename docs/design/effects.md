@@ -15,7 +15,7 @@ langue").
 | | Bassin de koïs | `koi` | #803 (built) |
 | | Lucioles du soir | `fireflies` | #804 (built) |
 | | La lumière du jour | `daylight` | #805 (built) |
-| | Bureaux en profondeur | `depth` | #806 |
+| | Bureaux en profondeur | `depth` | #806 (built) |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
 | | Éclats de verre | `shatter` | #798 (built) |
 | | Fenêtres en gelée | `jelly` | #797 (built) |
@@ -604,6 +604,60 @@ window another, the window's pixels untouched, nothing drawn per frame;
 off, nothing; with reduced motion, drawn once); its screenshots,
 `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored
 only daylight::shots`.
+
+## Desktops in depth (#806)
+
+With `depth = true`, the wallpaper is the board "Bureaux en profondeur"'s
+landscape and switching desktops is a camera move through it
+(`effects/depth.rs`, its shader `DEPTH` in `draw.rs`), its lengths in
+logical pixels.
+
+- **The landscape**: the board's sky (its gradient and its sun's glow,
+  drifting 60 px over the strip's whole travel) and its six layers, back
+  to front: two ranges of peaks, hills, a forest, the forest the windows
+  stand in, the nearest trees; their silhouettes the board's sums of
+  sines (its phases, from its seeded generator), their trees a triangle a
+  cell where the board stepped by random (6 to 24 px; 90 to 350 px for the
+  nearest, 2.6 times as tall), the sunset's haze over the far ones. Drawn
+  by one shader into a picture of the screen's size, in the wallpaper's
+  place (the screen's own wallpaper is not drawn); the layers go on below
+  the screen, as the board's 1.35 screens tall did.
+- **The camera**: it follows each screen's strip of desktops, a desktop
+  a screen's width and the strip's gap. Each layer moves by its share of
+  the camera's travel, the board's 0.03, 0.14, 0.38, 0.72, 1 and 1.55:
+  the forest at 1 moves with the windows, the nearest trees pass faster.
+  Nothing follows the pointer (the board's camera moved on its switches
+  alone).
+- **The switch**: with depth on, a switch of desktops (the keys, the bar's
+  tiles, the overview's thumbnails) takes the board's 1.5 s, in-out cubic,
+  in place of the strip's 320 ms; the camera pulls back on the way
+  (`1 - 0.1 sin(πk)` halfway), the windows sliding with the strip drawn
+  smaller about the screen's middle by as much, each layer by its share
+  of it. A swipe of three fingers follows the fingers as without it.
+- **Not built as the board drew it**: the board drew its nearest trees on
+  a canvas in front of its windows; they would cover what the windows
+  show, so here they are the landscape's front layer, behind the windows
+  and the bar.
+- **With the others**: the koi's pond, when on, is the wallpaper in its
+  place; the landscape takes the daylight's sky's (the shadows still
+  turn); the rain on the glass falls over it, refracting it; the snow, the
+  fireflies and the garlands show over it.
+- **Its cost**: at rest nothing (its picture kept). As the camera moves,
+  the picture drawn again at most 60 times a second (the camera's time
+  taken at 60ths of a second), one pass over the screen: a few sines a
+  layer, seven trees looked at a pixel on the three wooded ones; the
+  screen drawn again each frame, as the windows slide anyway.
+- **When**: with reduced motion the landscape stands where the desktop
+  shown puts it, the switch a fade as without depth; none in the power
+  saver, while a screen is shared or recorded, on the CPU, nor in a
+  capture (a capture's windows are not pulled back).
+
+Tests: `tests/depth.rs` (on GLES on Mesa's software device: the landscape
+in the wallpaper's place, the window's pixels untouched; a switch at
+165 Hz halfway at 0.75 s pulled back to 0.9, the hills moved by 0.38 of a
+desktop and the forest by 0.72, drawn 60 times a second at most; nothing
+drawn per frame at rest); its screenshots, `HOCUS_SHOTS=DIR cargo nextest
+run -p hocus-compositor --run-ignored only depth::shots`.
 
 ## Not built yet
 

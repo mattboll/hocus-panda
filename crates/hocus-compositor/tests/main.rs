@@ -62,6 +62,7 @@ mod day;
 mod day_sources;
 mod daylight;
 mod decorations;
+mod depth;
 mod desktop_drop;
 mod desktops;
 mod desktops_live;
