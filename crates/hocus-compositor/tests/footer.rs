@@ -6,7 +6,8 @@
 //! four buttons in a row along the bar's bottom, each opening its thing
 //! (the clipboard's history, the notifications' history, the launcher, the
 //! user's name and the session menu, tests/session_menu.rs);
-//! the menu opens the launcher on a click, not on a hover; the mini form's
+//! the menu opens the launcher on a click, not on a hover; a press as the
+//! pointer comes in lands where it came in (#787); the mini form's
 //! bell sits over the user's avatar, last of all. The badge still counting is the notifications' tests' (they
 //! click the footer's bell), and its colour is checked there.
 //!
@@ -411,6 +412,49 @@ fn the_menu_opens_the_launcher_on_a_click_not_a_hover() -> anyhow::Result<()> {
         .dispatch_until(WAIT, |hp| hp.launcher_surfaces().len() == 1)?;
     anyhow::ensure!(opened, "a click did not open the launcher");
     assert_eq!(bed.hp.keyboard_layer().as_deref(), Some("hocus-launcher"));
+    Ok(())
+}
+
+/// A press right after the pointer comes in, read by the shell in one
+/// batch with a move after it (a busy shell, #787): it lands where the
+/// pointer came in, on the clipboard, not where it went, on the user.
+#[test]
+fn a_press_as_the_pointer_comes_in_lands_where_it_came_in() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start((1920, 1080))? else {
+        return Ok(());
+    };
+    let (clipboard, user) = (bed.button(0), bed.button(3));
+    let drawn = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.undrawn_at(clipboard.0, clipboard.1).is_empty()
+            && hp.undrawn_at(user.0, user.1).is_empty()
+    })?;
+    anyhow::ensure!(drawn, "the footer is not drawn");
+    let mark = bed.mark();
+    bed.hp.hold_shell(true)?;
+    bed.hp.pointer_move(clipboard.0, clipboard.1);
+    bed.hp.button(BTN_LEFT, true);
+    bed.hp.button(BTN_LEFT, false);
+    bed.hp.pointer_move(user.0, user.1);
+    let waited = wait(&mut bed.hp, Duration::from_millis(100));
+    // Let go whatever happened, for the compositor to end it.
+    bed.hp.hold_shell(false)?;
+    waited?;
+    let (clipboards, users) = (
+        "the clipboard's history shows it",
+        "the session's popover shows it",
+    );
+    let log = bed.log.clone();
+    let opened = bed.hp.dispatch_until(WAIT, |_| {
+        plain(&log)
+            .get(mark..)
+            .is_some_and(|l| l.contains(clipboards) || l.contains(users))
+    })?;
+    anyhow::ensure!(opened, "no popover");
+    let after = bed.plain().get(mark..).unwrap_or_default().to_owned();
+    assert!(
+        after.contains(clipboards) && !after.contains(users),
+        "the press went to the user's button"
+    );
     Ok(())
 }
 
