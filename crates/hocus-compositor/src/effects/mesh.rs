@@ -63,6 +63,14 @@ pub enum Glow {
     /// 95 % lime at 8 %, 35 % green at 25 %, 8 % at 60 %, nothing at its
     /// edge; as opaque as its vertices' alpha.
     Firefly = 3,
+    /// A firework's spark (#810): white at its middle, its vertices'
+    /// colour at 90 % at 15 %, 22 % at 45 %, nothing at its edge (the
+    /// board's sprite).
+    Spark = 4,
+    /// A firework's spark in the bar (#800, the board "Fenêtre
+    /// maximisée"'s sprite): white at its middle, its vertices' colour at
+    /// 90 % at 25 %, nothing at its edge.
+    Bead = 5,
 }
 
 /// A column of a fill: its place across, and its rows from the top down
@@ -114,6 +122,42 @@ impl Mesh {
             Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x), y1.max(y)],
         });
         Some(index)
+    }
+
+    /// Into `out`, the indices of its triangles that reach into `x0, y0,
+    /// x1, y1` (its places' space): what a draw cut to it needs (#815).
+    pub fn indices_within(&self, [x0, y0, x1, y1]: [f32; 4], out: &mut Vec<u16>) {
+        out.clear();
+        let at = |i: u16| {
+            let i = usize::from(i) * FLOATS;
+            match self.vertices.get(i..i + 2) {
+                Some(&[x, y]) => Some((x, y)),
+                _ => None,
+            }
+        };
+        for t in self.indices.as_chunks::<3>().0 {
+            let [i, j, k] = *t;
+            let (Some(a), Some(b), Some(c)) = (at(i), at(j), at(k)) else {
+                continue;
+            };
+            let (lo_x, hi_x) = (a.0.min(b.0).min(c.0), a.0.max(b.0).max(c.0));
+            let (lo_y, hi_y) = (a.1.min(b.1).min(c.1), a.1.max(b.1).max(c.1));
+            if lo_x <= x1 && hi_x >= x0 && lo_y <= y1 && hi_y >= y0 {
+                out.extend_from_slice(t);
+            }
+        }
+    }
+
+    /// Its places moved by `x, y`.
+    pub fn shift(&mut self, x: f32, y: f32) {
+        for v in self.vertices.as_chunks_mut::<FLOATS>().0 {
+            let [vx, vy, ..] = v;
+            *vx += x;
+            *vy += y;
+        }
+        if let Some([x0, y0, x1, y1]) = self.bounds {
+            self.bounds = Some([x0 + x, y0 + y, x1 + x, y1 + y]);
+        }
     }
 
     pub fn triangle(&mut self, a: u16, b: u16, c: u16) {

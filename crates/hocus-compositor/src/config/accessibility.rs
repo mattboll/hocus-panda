@@ -10,6 +10,9 @@ pub struct Developer {
     /// program runs as the shell, which draws the lock screen and the
     /// password dialog, so off unless the user develops the desktop.
     pub live_reload: bool,
+    /// Every 5 s, what each effect playing costs the loop, in the log
+    /// (#815, docs/performance.md, "The effects' cost").
+    pub effects_timing: bool,
 }
 
 /// `[accessibility]` (docs/design/screen-reader.md, #734).

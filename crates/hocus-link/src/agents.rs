@@ -90,6 +90,33 @@ pub struct AgentShown {
     pub name: String,
     /// What it asks for, or why it failed, as its tool said it (4.6).
     pub note: Option<Note>,
+    /// Its good news, while its row says it (#809, #810).
+    #[serde(default)]
+    pub news: Option<AgentNews>,
+}
+
+/// An agent's good news, as its row says it. Its text is never logged,
+/// only its length ([`fmt::Debug`]).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentNews {
+    /// It finished with all its tests passing (#810): how many, when
+    /// known. Said while it is to see.
+    TestsPassed { tests: Option<u32> },
+    /// It has good news (#809, `hocus celebrate`): what, in one short line.
+    Good {
+        #[serde(serialize_with = "tidy::name")]
+        why: String,
+    },
+}
+
+impl fmt::Debug for AgentNews {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TestsPassed { tests } => write!(f, "tests passed ({tests:?})"),
+            Self::Good { why } => write!(f, "good news ({} characters)", why.chars().count()),
+        }
+    }
 }
 
 // The note may hold code or a secret (a command, a file's path): its
@@ -104,6 +131,7 @@ impl fmt::Debug for AgentShown {
             .field("window", &self.window)
             .field("name", &self.name)
             .field("note", &self.note)
+            .field("news", &self.news)
             .finish()
     }
 }

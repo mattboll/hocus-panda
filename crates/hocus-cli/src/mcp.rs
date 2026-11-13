@@ -54,7 +54,8 @@ const INSTRUCTIONS: &str = "The windows, desktops, screens and settings of a Hoc
     has it. Say what each action is for with `intent`, in one short line: the user sees it on \
     what you touch before it happens, and then a summary. Some actions wait for the user's \
     answer (a password field, an application they marked); the user may take over or stop \
-    every agent at once; a refusal says why.";
+    every agent at once; a refusal says why. Good news for the user (a pull request merged, a \
+    deployment, a bug finally fixed): celebrate, with why.";
 
 /// The connection to the compositor.
 struct Line {
@@ -729,6 +730,20 @@ fn tools() -> Vec<Value> {
             "annotations": read,
         }),
         json!({
+            "name": "celebrate",
+            "title": "Celebrate good news",
+            "description": "Tells the user good news, once it is real: a pull request merged, a \
+                deployment done, a bug finally fixed. The desktop's bar says who and why, and \
+                confetti fly when the user has them on. Not for routine steps.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "why": { "type": "string", "maxLength": MAX_INTENT, "description": "The news, in one short line for the user: \"#791 merged on main\"." } },
+                "required": ["why"],
+                "additionalProperties": false,
+            },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
+        }),
+        json!({
             "name": "accessibility_tree",
             "title": "A window's elements",
             "description": "What a window's application tells screen readers: its elements depth \
@@ -848,9 +863,15 @@ mod tests {
     fn every_acting_tool_asks_for_an_intent() {
         for tool in tools() {
             let acts = tool["annotations"]["readOnlyHint"] == false;
+            // Good news says itself: its `why` is what the user sees.
+            let says = if tool["name"] == "celebrate" {
+                "why"
+            } else {
+                "intent"
+            };
             let required = tool["inputSchema"]["required"]
                 .as_array()
-                .is_some_and(|r| r.contains(&json!("intent")));
+                .is_some_and(|r| r.contains(&json!(says)));
             assert_eq!(acts, required, "{}", tool["name"]);
         }
     }

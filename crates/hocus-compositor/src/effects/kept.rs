@@ -199,6 +199,12 @@ pub enum Changed {
 
 /// The side of the cells what changed is told in, physical pixels.
 pub(crate) const CELL: i32 = 16;
+/// At most this many rectangles told for one element: the damage tracker
+/// spends its time on each, more than on the pixels they cover (#815).
+const MOST: usize = 384;
+/// The side of the largest cells of an element whose changes are many and
+/// spread (the flakes, the drops), physical pixels.
+const COARSE: i32 = 128;
 
 /// `rects` (from `geometry`'s corner) told as what of them falls in each
 /// cell of a grid on the screen's pixels, the cells' in rows: the damage
@@ -211,6 +217,26 @@ pub(crate) fn cells(
 ) -> Vec<Rectangle<i32, Physical>> {
     let (gx, gy) = (geometry.loc.x, geometry.loc.y);
     let (w, h) = (geometry.size.w, geometry.size.h);
+    // Twice its area at least, overlapping or not (the fireflies' glows):
+    // all of it, without looking further.
+    let area: i64 = rects
+        .iter()
+        .map(|[_, _, rw, rh]| i64::from(*rw.max(&0)) * i64::from(*rh.max(&0)))
+        .sum();
+    if area >= 2 * i64::from(w) * i64::from(h) {
+        return vec![Rectangle::from_size((w, h).into())];
+    }
+    // Many, or crossing many cells (large glows): by larger cells.
+    let crossed: usize = rects
+        .iter()
+        .map(|[_, _, rw, rh]| {
+            let across = |n: i32| (n.max(0) / CELL) as usize + 2;
+            across(*rw) * across(*rh)
+        })
+        .sum();
+    if rects.len() > MOST || crossed > 16 * MOST {
+        return coarse(rects, (w, h));
+    }
     // Each rectangle's part in each cell it crosses (on the screen,
     // within the element), by cell.
     let mut parts: Vec<((i32, i32), [i32; 4])> = Vec::with_capacity(rects.len() * 2);
@@ -258,7 +284,53 @@ pub(crate) fn cells(
     if let Some((_, b)) = last {
         done(b);
     }
-    out
+    if out.len() <= MOST {
+        return out;
+    }
+    coarse(rects, (w, h))
+}
+
+/// `rects` (within `size`, physical), as many as they are when they are
+/// few; else told by rows of larger cells.
+pub(crate) fn fewer(
+    rects: Vec<Rectangle<i32, Physical>>,
+    size: (i32, i32),
+) -> Vec<Rectangle<i32, Physical>> {
+    if rects.len() <= MOST {
+        return rects;
+    }
+    let rects: Vec<[i32; 4]> = rects
+        .iter()
+        .map(|r| [r.loc.x, r.loc.y, r.size.w, r.size.h])
+        .collect();
+    coarse(&rects, size)
+}
+
+/// `rects` (from an element's corner, within `size`), many and spread:
+/// told by rows of larger cells, twice as large until they are few
+/// enough; all of it once they cover over half of it.
+fn coarse(rects: &[[i32; 4]], size: (i32, i32)) -> Vec<Rectangle<i32, Physical>> {
+    let mut cell = CELL * 2;
+    loop {
+        let mut tiles = Tiles::with_cell(size, cell);
+        for &[x, y, w, h] in rects {
+            tiles.mark([x as f32, y as f32, (x + w) as f32, (y + h) as f32]);
+        }
+        let out = tiles.rects(size);
+        // Over half of it: all of it, in one, which costs the damage
+        // tracker and the draws least (the fireflies' glows, #815).
+        let area: i64 = out
+            .iter()
+            .map(|r| i64::from(r.size.w) * i64::from(r.size.h))
+            .sum();
+        if area * 2 > i64::from(size.0) * i64::from(size.1) {
+            return vec![Rectangle::from_size(size.into())];
+        }
+        if out.len() <= MOST || cell >= COARSE {
+            return out;
+        }
+        cell *= 2;
+    }
 }
 
 /// A part of an effect of few shapes drawn straight on the screen (the
@@ -286,7 +358,7 @@ impl Default for Traced {
 
 impl Traced {
     /// `over`, `added` and `screened` where `clip` says, within
-    /// `geometry` (output-local, physical; their places from its corner):
+    /// `geometry` (output-local, physical; their places the output's):
     /// a new commit only when they changed, telling where.
     pub fn shapes(
         &mut self,
@@ -303,6 +375,11 @@ impl Traced {
                 let mut rects = Vec::new();
                 for (a, b) in last.iter().zip(&meshes) {
                     mesh::changes(a, b, &mut rects);
+                }
+                // The shapes' places are the output's: from its corner.
+                for r in &mut rects {
+                    r[0] -= geometry.loc.x;
+                    r[1] -= geometry.loc.y;
                 }
                 (!rects.is_empty()).then_some(Some(rects))
             }
@@ -330,6 +407,7 @@ impl Traced {
 /// (the koi's water), told as rows of whole cells, not as each change.
 #[derive(Debug)]
 pub struct Tiles {
+    cell: i32,
     across: usize,
     down: usize,
     dirty: Vec<bool>,
@@ -338,9 +416,16 @@ pub struct Tiles {
 impl Tiles {
     /// Over a screen `size` (physical).
     pub fn new(size: (i32, i32)) -> Self {
-        let across = (size.0.max(0) as usize).div_ceil(CELL as usize);
-        let down = (size.1.max(0) as usize).div_ceil(CELL as usize);
+        Self::with_cell(size, CELL)
+    }
+
+    /// Over `size` (physical), in cells of `cell` pixels.
+    pub fn with_cell(size: (i32, i32), cell: i32) -> Self {
+        let cell = cell.max(1);
+        let across = (size.0.max(0) as usize).div_ceil(cell as usize);
+        let down = (size.1.max(0) as usize).div_ceil(cell as usize);
         Self {
+            cell,
             across,
             down,
             dirty: vec![false; across * down],
@@ -349,7 +434,7 @@ impl Tiles {
 
     /// `x0, y0, x1, y1` (physical) changed.
     pub fn mark(&mut self, [x0, y0, x1, y1]: [f32; 4]) {
-        let cell = CELL as f32;
+        let cell = self.cell as f32;
         let at = |v: f32, n: usize| v.clamp(0.0, n as f32) as usize;
         let (i0, i1) = (
             at((x0 / cell).floor(), self.across),
@@ -365,6 +450,26 @@ impl Tiles {
                 cells.fill(true);
             }
         }
+    }
+
+    /// Whether a cell `x0, y0, x1, y1` (physical) crosses is marked.
+    pub fn any(&self, [x0, y0, x1, y1]: [f32; 4]) -> bool {
+        let cell = self.cell as f32;
+        let at = |v: f32, n: usize| v.clamp(0.0, n as f32) as usize;
+        let (i0, i1) = (
+            at((x0 / cell).floor(), self.across),
+            at((x1 / cell).ceil(), self.across),
+        );
+        let (j0, j1) = (
+            at((y0 / cell).floor(), self.down),
+            at((y1 / cell).ceil(), self.down),
+        );
+        (j0..j1).any(|j| {
+            let row = j * self.across;
+            self.dirty
+                .get(row + i0..row + i1)
+                .is_some_and(|cells| cells.contains(&true))
+        })
     }
 
     /// How many of its cells changed, of how many.
@@ -386,10 +491,11 @@ impl Tiles {
                 while row.get(i).copied().unwrap_or(false) {
                     i += 1;
                 }
-                let (x, y) = (start as i32 * CELL, j as i32 * CELL);
+                let cell = self.cell;
+                let (x, y) = (start as i32 * cell, j as i32 * cell);
                 let (w, h) = (
-                    (i as i32 * CELL).min(size.0) - x,
-                    (y + CELL).min(size.1) - y,
+                    (i as i32 * cell).min(size.0) - x,
+                    (y + cell).min(size.1) - y,
                 );
                 if w > 0 && h > 0 {
                     out.push(Rectangle::new((x, y).into(), (w, h).into()));
@@ -417,5 +523,35 @@ mod tests {
         // Cells on the screen: x 10..16 and 16..20, y 20..30 (one cell
         // row, 16..32).
         assert_eq!(out, vec![[0, 0, 6, 10], [6, 0, 4, 10]]);
+    }
+}
+
+/// Where the wallpaper shows on a screen, by its cells: what opaque
+/// elements in front leave of it (#815). What an effect on it draws
+/// elsewhere nobody sees.
+#[derive(Debug, Default)]
+pub struct Seen(Option<Tiles>);
+
+/// All of the wallpaper.
+pub static ALL_SEEN: Seen = Seen(None);
+
+impl Seen {
+    /// `shown` (physical) of a screen `size`.
+    pub fn of(size: (i32, i32), shown: &[Rectangle<i32, Physical>]) -> Self {
+        let mut tiles = Tiles::new(size);
+        for r in shown {
+            tiles.mark([
+                r.loc.x as f32,
+                r.loc.y as f32,
+                (r.loc.x + r.size.w) as f32,
+                (r.loc.y + r.size.h) as f32,
+            ]);
+        }
+        Self(Some(tiles))
+    }
+
+    /// Whether some of `x0, y0, x1, y1` (physical) may show.
+    pub fn shows(&self, rect: [f32; 4]) -> bool {
+        self.0.as_ref().is_none_or(|tiles| tiles.any(rect))
     }
 }

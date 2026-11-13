@@ -65,6 +65,12 @@ impl State {
                     look.shadow = sky.shadow(width, look.shadow);
                     look.sunlit = sky.lit_edges(width).map(|lit| (lit, hour));
                 }
+                // The fireworks' flashes light its edges (#810).
+                if self.model.mode(id) != Mode::Fullscreen {
+                    look.flash = self
+                        .fireworks_light(frame, look.visual)
+                        .map(|edges| (edges, self.fx.pace.frames));
+                }
                 if let Some(cover) = cover {
                     look.alpha *= cover;
                     if look.alpha <= 0.0 {
@@ -106,6 +112,7 @@ impl State {
             area,
             origin,
             scale,
+            ..
         } = *frame;
         let palette_target = palette.and_then(|(_, window, _)| window);
         let mut target = Vec::new();
@@ -174,6 +181,17 @@ impl State {
                     look.alpha,
                 );
                 out.extend(cap.into_iter().map(OutputElements::Fire));
+            }
+            // Its confetti settled (#811), right in front of it.
+            if look.decorated
+                && let Some(lying) = self.confetti_front(
+                    frame,
+                    &crate::effects::snow::Holder::Window(*id),
+                    look.visual,
+                    look.alpha,
+                )
+            {
+                out.push(OutputElements::Fire(lying));
             }
             // Its garland (#799), right in front of it.
             if let Some(garland) = self.garland_front(renderer, frame, *id, look, looks) {

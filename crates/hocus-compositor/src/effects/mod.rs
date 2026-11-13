@@ -18,7 +18,9 @@
 //! daylight ([`daylight`], #805), following the sun ([`sun`]);
 //! desktops in depth ([`depth`], #806); and an aurora following the music
 //! ([`aurora`], #801). The wallpaper's effects play behind the lock too,
-//! and in the overview (#807).
+//! and in the overview (#807). The moments ([`moments`]): fireworks as an
+//! agent's tests go green ([`fireworks`], #810), confetti for its good
+//! news ([`confetti`], #811).
 //!
 //! Every effect follows the same rules: none with reduced motion or in
 //! the power saver, over a fullscreen window, while a screen or a window
@@ -34,17 +36,20 @@
 //! changed, so that what is still around it is not drawn again.
 
 pub mod aurora;
+pub mod confetti;
 pub mod creatures;
 pub mod daylight;
 pub mod depth;
 pub mod draw;
 pub mod fireflies;
+pub mod fireworks;
 pub mod flames;
 pub mod garland;
 pub mod jelly;
 pub mod kept;
 pub mod koi;
 pub mod mesh;
+pub mod moments;
 pub mod motion;
 pub mod particles;
 pub mod raindrops;
@@ -54,6 +59,7 @@ pub mod snow;
 pub mod snow_look;
 pub mod snowing;
 pub mod sun;
+pub mod timing;
 
 pub use draw::{Fire, FireElement};
 
@@ -99,6 +105,12 @@ pub struct Live {
     pub koi: Option<koi::Ponds>,
     /// The ponds dug so far, for their seeds.
     ponds: u64,
+    /// The fireworks, while they play (#810).
+    pub fireworks: Option<fireworks::Show>,
+    /// The confetti, while they fly or lie (#811).
+    pub confetti: Option<confetti::Confetti>,
+    /// The moments played so far, for their seeds.
+    moments: u64,
     /// The sun looked at every minute, while an effect follows it.
     pub sun_timer: Option<smithay::reexports::calloop::RegistrationToken>,
     /// Tests: the sun as it is at this time, whatever the clock says.
@@ -157,6 +169,16 @@ impl Pace {
 }
 
 use crate::{State, model::Mode, model::WindowId};
+
+/// Effect `fx`'s step, `step`, measured while their cost is (#815):
+/// whether it moves.
+pub(crate) fn timed(fx: timing::Fx, step: impl FnOnce() -> bool) -> bool {
+    let measure = timing::tick(fx);
+    let moving = step();
+    drop(measure);
+    timing::stepped(fx, moving);
+    moving
+}
 
 /// Why the effects do not play now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,13 +245,17 @@ impl State {
     /// glass, the fireflies, the koi, the aurora, the daylight, desktops in
     /// depth; whether one moves.
     pub(crate) fn tick_wallpaper_effects(&mut self, now: std::time::Duration) -> bool {
-        let mut moving = self.tick_snow(now);
-        moving |= self.tick_raindrops(now);
-        moving |= self.tick_fireflies(now);
-        moving |= self.tick_koi(now);
-        moving |= self.tick_aurora(now);
-        self.tick_daylight();
-        moving |= self.tick_depth(now);
+        use timing::Fx;
+        let mut moving = timed(Fx::Snow, || self.tick_snow(now));
+        moving |= timed(Fx::Rain, || self.tick_raindrops(now));
+        moving |= timed(Fx::Fireflies, || self.tick_fireflies(now));
+        moving |= timed(Fx::Koi, || self.tick_koi(now));
+        moving |= timed(Fx::Aurora, || self.tick_aurora(now));
+        timed(Fx::Daylight, || {
+            self.tick_daylight();
+            false
+        });
+        moving |= timed(Fx::Depth, || self.tick_depth(now));
         moving
     }
 
@@ -247,6 +273,15 @@ impl State {
         let moving = step(self, now);
         self.fx.pace.moved(clock, now, moving);
         moving
+    }
+
+    /// Whether the wallpaper of `output` is as good as unseen: a
+    /// fullscreen window over it, or windows and the bar covering 90 % of
+    /// it or more (a maximised window), as a wallpaper that moves stops
+    /// (#433); the rain on the glass, the koi, the fireflies and the
+    /// aurora then wait (#815).
+    pub(crate) fn wall_unseen(&self, output: &smithay::output::Output) -> bool {
+        self.wall_hidden(output) || self.covered_with_bar(output) >= crate::moving::COVERED
     }
 
     /// Why no effect plays now; `None`: they may.

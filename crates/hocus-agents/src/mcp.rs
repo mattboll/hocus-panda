@@ -285,6 +285,15 @@ pub struct WaitFor {
     pub timeout_ms: Option<u32>,
 }
 
+/// Good news (#809): the bar says who and why, the confetti fly. Any
+/// agent of `[[agents.mcp]]` may, `read` too: it touches nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Celebrate {
+    /// What the news is, one short line.
+    pub why: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OfWindow {
@@ -328,6 +337,7 @@ pub enum Call {
     WaitFor(WaitFor),
     Capture(OfWindow),
     AccessibilityTree(OfWindow),
+    Celebrate(Celebrate),
 }
 
 impl Call {
@@ -445,6 +455,7 @@ impl Call {
             Self::WaitFor(_) => "wait_for",
             Self::Capture(_) => "capture",
             Self::AccessibilityTree(_) => "accessibility_tree",
+            Self::Celebrate(_) => "celebrate",
         }
     }
 }
@@ -504,6 +515,9 @@ mod tests {
         assert!(typed.as_ref().is_ok_and(|t| t.acts() && t.inputs()));
         let closed = Call::of("close_window", &json!({ "window": 3, "intent": "x" }));
         assert!(closed.as_ref().is_ok_and(|c| c.acts() && !c.inputs()));
+        let news = Call::of("celebrate", &json!({ "why": "#791 merged" }));
+        assert!(news.is_ok_and(|n| !n.acts() && n.needs().is_empty() && n.window().is_none()));
+        assert!(Call::of("celebrate", &Value::Null).is_err());
         let tree = Call::of("accessibility_tree", &json!({ "window": 3 }));
         assert!(tree.is_ok_and(|t| !t.acts() && t.window() == Some(3)));
         let click = Call::of(

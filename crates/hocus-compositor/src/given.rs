@@ -270,6 +270,7 @@ impl State {
             return false;
         }
         self.config.developer = new.clone();
+        crate::effects::timing::follow(new.effects_timing);
         if !new.live_reload && self.shell.given.program().is_some() {
             tracing::info!("the developer mode is off: the installed shell runs again");
             self.shell.given.asked(Restart::Installed);

@@ -27,6 +27,14 @@
 //! which they changed: a burst of reports is one line, and a report that
 //! changes nothing sends none.
 //!
+//! Good news (#809, #810): an agent that finishes with all its tests
+//! passing (the last run of its turn, as its hook or `hocus agent …
+//! --tests-passed` says it) sets its fireworks off, and its row says so
+//! while it is to see; `hocus celebrate WHY` (a line of its own,
+//! [`hocus_agents::Celebration`]) sets the confetti off, and the row of
+//! the agent whose process it is says why for [`GOOD_NEWS`] (a row of its
+//! own when no agent is known for that process).
+//!
 //! A finished agent stays "not seen yet" (`done` to the shell) until the
 //! user has seen it (4.1): its window gets the keyboard after it finished
 //! (or has it as it finishes), or its row in the bar is clicked; it is then
@@ -48,10 +56,11 @@ use anyhow::Context;
 use hocus_agents::{
     Question, Report, Source, State,
     herdr::{self, News},
+    runs::TestRun,
     tools::{Places, Tool},
     watch::{Ask, Snapshot, ToolState as Seen, Watcher},
 };
-use hocus_link::{AgentShown, AgentTool, Row, ToShell, ToolState};
+use hocus_link::{AgentNews, AgentShown, AgentTool, Row, ToShell, ToolState};
 use smithay::{
     reexports::{
         calloop::{
@@ -74,12 +83,16 @@ const MOST_LINES: usize = 64;
 const READ: Duration = Duration::from_secs(1);
 /// How long a question waits for the loop's answer.
 const ANSWER: Duration = Duration::from_secs(2);
+/// How long an agent's row says its good news (#809).
+pub const GOOD_NEWS: Duration = Duration::from_secs(60);
 
 /// What the sources hand the loop.
 #[derive(Debug)]
 pub enum Heard {
     /// A report, and its process's ancestry, nearest first.
     Report(Report, Vec<u32>),
+    /// Good news (`hocus celebrate`), and its process's ancestry.
+    Celebrate(hocus_agents::Celebration, Vec<u32>),
     Tools(Snapshot),
     Herdr(News),
     /// herdr's clients looked for again ([`herdr::terminal_processes`]),
@@ -172,6 +185,23 @@ struct Agent {
     /// What it asks for, or why it failed, as its tool said it in this
     /// state (4.6); never logged but its length.
     note: Option<hocus_agents::Note>,
+    /// How the last tests it ran this turn went (#810).
+    tests: Option<TestRun>,
+    /// It finished with all its tests passing: the `since` of that
+    /// finish, and how many passed.
+    green: Option<(u64, Option<u32>)>,
+    /// Its good news (#809), and until when its row says it.
+    good: Option<(String, Duration)>,
+}
+
+/// Good news of a process no agent is known for: a row of its own, for
+/// as long as it says it.
+#[derive(Debug)]
+struct NewsAlone {
+    id: u64,
+    name: String,
+    why: String,
+    until: Duration,
 }
 
 /// herdr, as last heard.
@@ -217,6 +247,10 @@ pub struct Agents {
     seen: HashMap<u64, u64>,
     /// Commits of the agents' surfaces, for tests: none at rest.
     pub commits: u64,
+    /// Good news of processes no agent is known for (#809).
+    alone: Vec<NewsAlone>,
+    /// The timer that takes good news off the rows once said.
+    news_timer: Option<RegistrationToken>,
     /// For the threads that look for herdr's clients, and the MCP
     /// agents' settings' threads.
     pub(crate) sender: Option<channel::Sender<Heard>>,
@@ -376,6 +410,16 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
                 }
                 break;
             }
+            if let Ok(news) = line.parse::<hocus_agents::Celebration>() {
+                let ancestry = news
+                    .pid
+                    .map(hocus_agents::process::ancestry)
+                    .unwrap_or_default();
+                if sender.send(Heard::Celebrate(news, ancestry)).is_err() {
+                    return;
+                }
+                continue;
+            }
             match line.parse::<Report>() {
                 Ok(report) => {
                     let ancestry = report
@@ -407,6 +451,7 @@ impl Compositor {
                 return;
             }
             Heard::Report(report, ancestry) => self.agent_reported(report, ancestry),
+            Heard::Celebrate(news, ancestry) => self.agent_celebrates(news, &ancestry),
             Heard::Tools(seen) => {
                 tracing::debug!(?seen, "the agents' tools");
                 self.agents.tools = Some(seen);
@@ -509,6 +554,9 @@ impl Compositor {
                     state,
                     since: now,
                     note: None,
+                    tests: None,
+                    green: None,
+                    good: None,
                 });
                 agents.list.len() - 1
             }
@@ -534,6 +582,20 @@ impl Compositor {
             agent.state = state;
             agent.since = now;
         }
+        // Its tests (#810): the last run of its turn counts; finished with
+        // all of them passing, its fireworks go off. Its turn over, they
+        // are forgotten: the next needs a run of its own.
+        if report.tests.is_some() {
+            agent.tests = report.tests;
+        }
+        let mut green = None;
+        if changed && matches!(state, State::Done | State::Failed | State::Idle) {
+            if let (State::Done, Some(TestRun::Passed(n))) = (state, agent.tests) {
+                agent.green = Some((now, n));
+                green = Some(agent.name.clone());
+            }
+            agent.tests = None;
+        }
         agent.note = hocus_agents::next_note(agent.note.take(), changed, report.note);
         // A hook's agent keeps the folder it was first named by: a later
         // event's `cwd` may be a directory the agent went down into.
@@ -548,6 +610,90 @@ impl Compositor {
             agent.pids.push(pid);
             self.watch_exit(pid);
         }
+        if let Some(name) = green {
+            tracing::info!(name, "an agent finished, its tests passing");
+            self.fireworks_go_off();
+        }
+    }
+
+    /// Good news (#809): the row of the agent whose process (or one above
+    /// it) has it says why, else a row of its own; the confetti fly.
+    fn agent_celebrates(&mut self, news: hocus_agents::Celebration, ancestry: &[u32]) {
+        let until = self.now() + GOOD_NEWS;
+        let theirs = |a: &Agent| {
+            news.pid.is_some_and(|p| a.pids.contains(&p))
+                || ancestry.iter().any(|p| a.pids.contains(p))
+        };
+        let who = match self.agents.list.iter_mut().find(|a| theirs(a)) {
+            Some(agent) => {
+                agent.good = Some((news.why.clone(), until));
+                agent.name.clone()
+            }
+            None => {
+                self.agents.next_id += 1;
+                let name = if news.name.is_empty() {
+                    "agent".to_owned()
+                } else {
+                    news.name.clone()
+                };
+                self.agents.alone.push(NewsAlone {
+                    id: self.agents.next_id,
+                    name: name.clone(),
+                    why: news.why.clone(),
+                    until,
+                });
+                name
+            }
+        };
+        // Never its news in the journal: its text is the agent's.
+        tracing::info!(who, "an agent has good news");
+        self.agents.dirty = true;
+        self.news_timer();
+        self.confetti_go_off();
+    }
+
+    /// The timer that takes the good news said long enough off the rows.
+    fn news_timer(&mut self) {
+        if let Some(token) = self.agents.news_timer.take() {
+            self.loop_handle.remove(token);
+        }
+        let now = self.now();
+        let next = self
+            .agents
+            .list
+            .iter()
+            .filter_map(|a| a.good.as_ref().map(|(_, until)| *until))
+            .chain(self.agents.alone.iter().map(|a| a.until))
+            .min();
+        let Some(next) = next else {
+            return;
+        };
+        let timer = smithay::reexports::calloop::timer::Timer::from_duration(
+            next.saturating_sub(now) + Duration::from_millis(1),
+        );
+        match self.loop_handle.insert_source(timer, |_, _, app| {
+            app.state.agents.news_timer = None;
+            app.state.news_said();
+            smithay::reexports::calloop::timer::TimeoutAction::Drop
+        }) {
+            Ok(token) => self.agents.news_timer = Some(token),
+            Err(err) => tracing::warn!(%err.error, "no timer for the agents' good news"),
+        }
+    }
+
+    /// The good news said long enough leaves the rows.
+    pub(crate) fn news_said(&mut self) {
+        let now = self.now();
+        for agent in &mut self.agents.list {
+            if agent.good.as_ref().is_some_and(|(_, until)| *until <= now) {
+                agent.good = None;
+                self.agents.dirty = true;
+            }
+        }
+        let before = self.agents.alone.len();
+        self.agents.alone.retain(|a| a.until > now);
+        self.agents.dirty |= self.agents.alone.len() != before;
+        self.news_timer();
     }
 
     /// Process `pid`'s end forgets its agents.
@@ -769,6 +915,15 @@ impl Compositor {
                 (None, Some(focused)) => in_herdr(focused),
                 (None, None) => (0, How::None("no window above its process"), false),
             };
+            // Its good news while said; else its tests passing, while the
+            // finish they came with is the state shown.
+            let news = match (&agent.good, agent.green) {
+                (Some((why, _)), _) => Some(AgentNews::Good { why: why.clone() }),
+                (None, Some((at, tests))) if at == since && state == State::Done => {
+                    Some(AgentNews::TestsPassed { tests })
+                }
+                _ => None,
+            };
             shown.push(Listed {
                 shown: AgentShown {
                     id: agent.id,
@@ -778,9 +933,28 @@ impl Compositor {
                     window,
                     name,
                     note,
+                    news,
                 },
                 how,
                 looks,
+            });
+        }
+        for alone in &self.agents.alone {
+            shown.push(Listed {
+                shown: AgentShown {
+                    id: alone.id,
+                    state: State::Idle.name().to_owned(),
+                    since: 0,
+                    source: Source::Command.name().to_owned(),
+                    window: 0,
+                    name: alone.name.clone(),
+                    note: None,
+                    news: Some(AgentNews::Good {
+                        why: alone.why.clone(),
+                    }),
+                },
+                how: How::None("good news alone"),
+                looks: false,
             });
         }
         if followed {
@@ -823,6 +997,7 @@ impl Compositor {
                         name,
                         // herdr says no more than its state.
                         note: None,
+                        news: None,
                     },
                     how,
                     looks,
@@ -831,6 +1006,14 @@ impl Compositor {
         }
         shown.sort_by_key(|a| a.shown.id);
         self.mark_seen(&mut shown);
+        // Seen, its tests passing are said no more.
+        for listed in &mut shown {
+            if matches!(listed.shown.news, Some(AgentNews::TestsPassed { .. }))
+                && listed.shown.state != State::Done.name()
+            {
+                listed.shown.news = None;
+            }
+        }
         shown
     }
 
@@ -921,6 +1104,11 @@ impl Compositor {
         if agent.state == State::Done.name() {
             self.agents.seen.insert(id, agent.since);
         }
+        // Its good news, looked at, is said (#809).
+        if let Some(a) = self.agents.list.iter_mut().find(|a| a.id == id) {
+            a.good = None;
+        }
+        self.agents.alone.retain(|a| a.id != id);
         // Its halo ends (§8 step 5), whatever it waits for or failed at.
         self.halo.acknowledge(id);
         let going = GoingTo {

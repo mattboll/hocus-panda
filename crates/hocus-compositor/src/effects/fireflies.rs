@@ -324,7 +324,7 @@ impl crate::State {
                 continue;
             };
             let name = output.name();
-            if self.output_powered(output) && !self.wall_hidden(output) {
+            if self.output_powered(output) && !self.wall_unseen(output) {
                 on.push(name.clone());
             }
             let zone = [zone.x, zone.y, zone.width, zone.height].map(|v| v as f32);
@@ -349,16 +349,17 @@ impl crate::State {
         flies.pointer = Some((at, since));
         let resting = (on_wallpaper && now.saturating_sub(since) > REST_AFTER).then_some(at);
         let moving = plays == super::Plays::Moving && !on.is_empty();
-        if moving {
-            let on: Vec<(String, Option<(f64, f64)>)> = on
-                .into_iter()
-                .map(|name| {
-                    let rest = resting.filter(|_| pointer_screen.as_deref() == Some(name.as_str()));
-                    (name, rest)
-                })
-                .collect();
-            flies.advance(now, &on);
-        }
+        // Waiting, their clock goes on all the same: back, they do not
+        // catch up on what nobody saw, all at once (#815).
+        let on: Vec<(String, Option<(f64, f64)>)> = on
+            .into_iter()
+            .filter(|_| moving)
+            .map(|name| {
+                let rest = resting.filter(|_| pointer_screen.as_deref() == Some(name.as_str()));
+                (name, rest)
+            })
+            .collect();
+        flies.advance(now, &on);
         if made {
             self.redraw = true;
         }

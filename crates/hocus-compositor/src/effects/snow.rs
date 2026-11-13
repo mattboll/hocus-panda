@@ -23,7 +23,7 @@ use std::{
 use smithay::backend::renderer::element::Id;
 
 use super::{
-    kept::Shown,
+    kept::{Shown, Traced},
     particles::{Rng, STEP},
 };
 use crate::model::WindowId;
@@ -79,7 +79,9 @@ pub struct CapDrawn {
     pub h: Vec<f32>,
     pub look: [f32; 6],
     pub shown: Shown,
-    pub glints: Shown,
+    /// Its glints, a few shapes twinkling at each of the snow's frames:
+    /// drawn straight on the screen, not into a texture first (#815).
+    pub glints: Traced,
 }
 
 impl Cap {

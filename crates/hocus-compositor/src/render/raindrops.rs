@@ -59,6 +59,7 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Bend + Shaders + Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Rain);
         self.raindrops_on(frame)?;
         let backdrop = match sky.take() {
             Some(sky) => sky,

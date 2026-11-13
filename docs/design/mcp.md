@@ -92,6 +92,7 @@ is the tool's result, `isError: true`, its text saying why.
 | `switch_desktop` | `desktop`, `output` (default the focused window's screen), `intent` | that screen shows it |
 | `launch` | `app` (a desktop entry's id, else its name, ignoring case), `desktop`, `output` (default the pointer's screen), `intent` | started, as the launcher starts it; with `desktop`, its first window opens there |
 | `set_setting` | `key` (`appearance.theme`), `value`, `intent` | written into the configuration file in place (hocus-config), `before` and `after`. Only keys `packaging/config.toml` lists, with a value of their default's type |
+| `celebrate` | `why` (120 characters at most) | good news (#809): the agent's row says why until its next request, the confetti fly when `[effects] confetti` is on; `celebrated`, and whether the `confetti` flew. Any agent the file names, a `read` one too (it touches nothing); refused while locked or stopped |
 
 There is no `arrange`: an agent composes moves. Lot B's tools are under
 "In applications".

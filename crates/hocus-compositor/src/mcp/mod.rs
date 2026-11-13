@@ -760,6 +760,17 @@ impl State {
                 return None;
             }
             Call::WaitFor(c) => return self.mcp_wait(session, id, c.clone()).err().map(Err),
+            Call::Celebrate(c) => {
+                let why = hocus_link::note_text(&c.why);
+                if why.is_empty() {
+                    return Some(Err("celebrate: say what the news is, with `why`".to_owned()));
+                }
+                // Its row says why, until its next request (#809).
+                self.mcp_doing(agent, McpDoing::Good { why });
+                tracing::info!(agent, "an MCP agent has good news");
+                let confetti = self.confetti_go_off();
+                json!({ "celebrated": true, "confetti": confetti })
+            }
             _ => return Some(Err("not a reading tool".to_owned())),
         }))
     }

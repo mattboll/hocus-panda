@@ -60,6 +60,7 @@ impl State {
     where
         R: Shaders,
     {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Aurora);
         if !frame.purpose.screen() || !self.aurora_shows_on(frame.output) {
             return None;
         }

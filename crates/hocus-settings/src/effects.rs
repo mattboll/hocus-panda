@@ -1,8 +1,9 @@
 //! Apparence › Effets / Appearance › Effects (#434, #793): the desktop's
 //! effects, one switch each, all off by default, grouped as the summary
 //! board "Les quatorze effets" groups them (the wallpaper, the windows,
-//! the moments, the agents); the second garland (#813) beside the first. Each writes its key of `[effects]`; the
-//! effects not built yet show "Bientôt" and their switch is inert.
+//! the moments, the agents); the second garland (#813) beside the first. Each writes its key of `[effects]`; an
+//! effect not built yet would show "Bientôt", its switch inert (all are
+//! built since the moments, #810 and #811).
 
 use hocus_words::settings::effects as words;
 use std::sync::OnceLock;
@@ -40,6 +41,8 @@ pub const BUILT: &[&str] = &[
     "effects.jelly",
     "effects.garland",
     "effects.garland-top",
+    "effects.fireworks",
+    "effects.confetti",
     "effects.creatures",
 ];
 
@@ -248,7 +251,7 @@ mod tests {
     /// Fifteen (the board's fourteen, and the second garland), each with
     /// its key of `[effects]`, off by default; all built but the moments.
     #[test]
-    fn fifteen_effects_off_by_default_thirteen_built() {
+    fn fifteen_effects_off_by_default_all_built() {
         let all = settings();
         assert_eq!(all.len(), 15);
         for s in all {
@@ -261,22 +264,7 @@ mod tests {
                 s.id
             );
             assert_eq!(s.id, format!("effects.{}", key[1]));
-            let built = [
-                "effects.snow",
-                "effects.aurora",
-                "effects.rain-on-glass",
-                "effects.koi",
-                "effects.fireflies",
-                "effects.daylight",
-                "effects.depth",
-                "effects.flames",
-                "effects.shatter",
-                "effects.jelly",
-                "effects.garland",
-                "effects.garland-top",
-                "effects.creatures",
-            ];
-            assert_eq!(soon(s.id), !built.contains(&s.id));
+            assert!(!soon(s.id), "{}", s.id);
         }
     }
 }

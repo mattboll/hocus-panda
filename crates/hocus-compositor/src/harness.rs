@@ -75,6 +75,10 @@ pub type OverviewWindow = (Option<String>, (f64, f64, f64, f64));
 /// A window dragged in the overview: its app id, the thumbnail it is
 /// over (screen, desktop).
 pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
+/// The confetti as a test sees them: those in flight (global, logical),
+/// and those lying, each on its window (`None`: a bar) from its edge's
+/// left end and top (logical).
+pub type ConfettiSeen = (Vec<(f32, f32)>, Vec<(Option<WindowId>, f32, f32)>);
 
 /// What a test can know about a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +309,30 @@ impl Headless {
     pub fn raindrops(&self, name: &str) -> Option<(usize, usize)> {
         let rain = self.app.state.fx.raindrops.as_ref()?;
         Some(rain.panes.get(name)?.counts())
+    }
+
+    /// The fireworks (#810), while they play: their screen, and where each
+    /// spark is (global, logical).
+    pub fn fireworks(&self) -> Option<(String, Vec<(f32, f32)>)> {
+        let show = self.app.state.fx.fireworks.as_ref()?;
+        Some((show.output.clone(), show.sparks()))
+    }
+
+    /// The confetti (#811), while they fly or lie.
+    pub fn confetti(&self) -> Option<ConfettiSeen> {
+        let confetti = self.app.state.fx.confetti.as_ref()?;
+        let (flying, lying) = confetti.places();
+        let lying = lying
+            .into_iter()
+            .map(|(holder, x, y)| {
+                let window = match holder {
+                    crate::effects::snow::Holder::Window(id) => Some(id),
+                    crate::effects::snow::Holder::Bar(_) => None,
+                };
+                (window, x, y)
+            })
+            .collect();
+        Some((flying, lying))
     }
 
     /// The fireflies (#804) over screen `name`, while they are out: where
@@ -1244,6 +1272,15 @@ impl Headless {
             .backend
             .headless_mut()
             .map_or(0, |h| h.take_damage_area(index))
+    }
+
+    /// How many rectangles output `index` (in the order given) drew over
+    /// since the last call, each frame's counted.
+    pub fn take_damage_rects(&mut self, index: usize) -> u64 {
+        self.app
+            .backend
+            .headless_mut()
+            .map_or(0, |h| h.take_damage_rects(index))
     }
 
     /// The clocks' surfaces as the shell placed them: their screen, and

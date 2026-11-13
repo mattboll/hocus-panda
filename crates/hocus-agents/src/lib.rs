@@ -18,13 +18,15 @@
 //! takes the lines written and read here: a [`Report`], a [`Question`]
 //! (`hocus msg idle`, `lock`, `outputs`, `input-devices`, `a11y`), a
 //! [`ProgramAsk`] (`hocus msg shell status|restart`); an agent's MCP line
-//! ([`mcp`], `mcp NAME`); and the Settings' own, `msg screens` (the
-//! compositor's `displays.rs`).
+//! ([`mcp`], `mcp NAME`); an agent's good news ([`Celebration`], `hocus
+//! celebrate`); and the Settings' own, `msg screens` (the compositor's
+//! `displays.rs`).
 
 pub mod herdr;
 pub mod hooks;
 pub mod mcp;
 pub mod process;
+pub mod runs;
 pub mod tools;
 pub mod watch;
 
@@ -257,6 +259,8 @@ pub struct Report {
     /// What it asks for, or why it failed, as its tool says it (never
     /// logged: its [`fmt::Debug`] says its length only).
     pub note: Option<Note>,
+    /// How the tests it just ran went (#810), when it ran some.
+    pub tests: Option<runs::TestRun>,
 }
 
 /// What a line's key may hold: no spaces, no control characters.
@@ -293,7 +297,8 @@ pub fn name_text(name: &str) -> String {
 /// The line on the control socket: `agent SOURCE KEY STATE PID NAME`, with
 /// `ended` for a state that ended and `-` for an unknown process; the name
 /// last, as it may hold spaces; then, when there is one, a tab and the
-/// [`Note`] (`allow TOOL WHAT`, `says TEXT`).
+/// [`Note`] (`allow TOOL WHAT`, `says TEXT`); then, when it ran tests, a
+/// tab and how they went (`tests passed 2040`, `tests failed`).
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.state.map_or("ended", State::name);
@@ -305,8 +310,11 @@ impl fmt::Display for Report {
             key_word(&self.key),
             name_text(&self.name)
         )?;
-        match &self.note {
-            Some(note) => write!(f, "\t{note}"),
+        if let Some(note) = &self.note {
+            write!(f, "\t{note}")?;
+        }
+        match &self.tests {
+            Some(tests) => write!(f, "\t{tests}"),
             None => Ok(()),
         }
     }
@@ -317,12 +325,17 @@ impl FromStr for Report {
 
     fn from_str(line: &str) -> Result<Self, Self::Err> {
         let line = line.trim_end_matches(['\n', '\r']);
-        // The note apart: what is said of a line that does not read never
-        // holds it. One that does not read is left out.
-        let (line, note) = match line.split_once('\t') {
-            Some((line, note)) => (line, note.parse::<Note>().ok()),
-            None => (line, None),
-        };
+        // The note and the tests apart: what is said of a line that does
+        // not read never holds them. One that does not read is left out.
+        let mut fields = line.split('\t');
+        let line = fields.next().unwrap_or_default();
+        let (mut note, mut tests) = (None, None);
+        for field in fields {
+            match field.parse::<runs::TestRun>() {
+                Ok(run) => tests = Some(run),
+                Err(_) => note = note.or_else(|| field.parse::<Note>().ok()),
+            }
+        }
         let mut words = line.splitn(6, ' ');
         if words.next() != Some("agent") {
             return Err(BadLine(format!("not an agent's line: {line:?}")));
@@ -361,7 +374,81 @@ impl FromStr for Report {
             pid,
             name,
             note,
+            tests,
         })
+    }
+}
+
+/// An agent's good news (#809, `hocus celebrate WHY`): the line `celebrate
+/// PID NAME`, then a tab and why. `PID` the process that has it (`-`
+/// unknown), whose agent it is; `NAME` the name it shows under when no
+/// agent is known for that process (its folder), maybe empty.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Celebration {
+    pub pid: Option<u32>,
+    pub name: String,
+    /// What the news is, one short line ([`hocus_link::note_text`]); never
+    /// logged but its length.
+    pub why: String,
+}
+
+impl fmt::Debug for Celebration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Celebration")
+            .field("pid", &self.pid)
+            .field("name", &self.name)
+            .field(
+                "why",
+                &format_args!("{} characters", self.why.chars().count()),
+            )
+            .finish()
+    }
+}
+
+impl Celebration {
+    /// News of `why` (cut as a note's text); none when it says nothing.
+    pub fn new(pid: Option<u32>, name: &str, why: &str) -> Option<Self> {
+        let why = hocus_link::note_text(why);
+        (!why.is_empty()).then(|| Self {
+            pid,
+            name: name_text(name),
+            why,
+        })
+    }
+}
+
+impl fmt::Display for Celebration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pid = self.pid.map_or_else(|| "-".to_owned(), |p| p.to_string());
+        write!(
+            f,
+            "celebrate {pid} {}\t{}",
+            name_text(&self.name),
+            hocus_link::note_text(&self.why)
+        )
+    }
+}
+
+impl FromStr for Celebration {
+    type Err = BadLine;
+
+    fn from_str(line: &str) -> Result<Self, Self::Err> {
+        let line = line.trim_end_matches(['\n', '\r']);
+        let rest = line
+            .strip_prefix("celebrate ")
+            .ok_or_else(|| BadLine("not a celebration".to_owned()))?;
+        let (head, why) = rest
+            .split_once('\t')
+            .ok_or_else(|| BadLine("a celebration without its news".to_owned()))?;
+        let (pid, name) = head.split_once(' ').unwrap_or((head, ""));
+        let pid = match pid {
+            "-" => None,
+            pid => Some(
+                pid.parse()
+                    .map_err(|e| BadLine(format!("a process: {e}")))?,
+            ),
+        };
+        Self::new(pid, name, why).ok_or_else(|| BadLine("news that says nothing".to_owned()))
     }
 }
 
@@ -475,6 +562,7 @@ mod tests {
                 pid: Some(4242),
                 name: "hocus panda".into(),
                 note: Some(Note::allow("Bash", "npm install")),
+                tests: None,
             },
             Report {
                 source: Source::Command,
@@ -483,6 +571,7 @@ mod tests {
                 pid: None,
                 name: "build".into(),
                 note: None,
+                tests: None,
             },
         ];
         for report in reports {
@@ -496,6 +585,7 @@ mod tests {
             pid: None,
             name: "a\tb\nc".into(),
             note: None,
+            tests: None,
         };
         assert_eq!(odd.to_string(), "agent command my_agent idle - a b c");
         for bad in [
@@ -532,6 +622,7 @@ mod tests {
             pid: Some(1),
             name: "site web".into(),
             note: Note::says("API Error:\nRate limit reached"),
+            tests: None,
         };
         let line = failed.to_string();
         assert_eq!(
@@ -547,6 +638,49 @@ mod tests {
             .parse::<Report>()
             .expect_err("no such state");
         assert!(!bad.to_string().contains("secret"), "{bad}");
+    }
+
+    #[test]
+    fn a_report_carries_its_tests_apart_with_or_without_a_note() {
+        let green = Report {
+            source: Source::Command,
+            key: "build".into(),
+            state: Some(State::Done),
+            pid: None,
+            name: "build".into(),
+            note: None,
+            tests: Some(runs::TestRun::Passed(Some(2040))),
+        };
+        let line = green.to_string();
+        assert_eq!(line, "agent command build done - build\ttests passed 2040");
+        assert_eq!(line.parse::<Report>(), Ok(green.clone()));
+        let both = Report {
+            note: Note::says("all good"),
+            tests: Some(runs::TestRun::Failed),
+            ..green
+        };
+        assert_eq!(both.to_string().parse::<Report>(), Ok(both));
+    }
+
+    #[test]
+    fn a_celebration_reads_back_and_is_no_report() {
+        let news = Celebration::new(Some(42), "site web", "#791\tmerged\non main").expect("news");
+        assert_eq!(news.why, "#791 merged on main");
+        let line = news.to_string();
+        assert_eq!(line, "celebrate 42 site web\t#791 merged on main");
+        assert_eq!(line.parse::<Celebration>(), Ok(news));
+        assert!(line.parse::<Report>().is_err());
+        let unnamed: Celebration = "celebrate - \tdeployed".parse().expect("a line");
+        assert_eq!((unnamed.pid, unnamed.name.as_str()), (None, ""));
+        for bad in [
+            "celebrate 1 x",
+            "celebrate 1 x\t  ",
+            "celebrate x y\tz",
+            "agent",
+        ] {
+            assert!(bad.parse::<Celebration>().is_err(), "{bad}");
+        }
+        assert!(Celebration::new(None, "x", " \n").is_none());
     }
 
     #[test]

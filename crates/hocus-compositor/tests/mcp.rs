@@ -255,6 +255,7 @@ fn initialize_then_the_tools() -> anyhow::Result<()> {
         "wait_for",
         "capture",
         "accessibility_tree",
+        "celebrate",
     ] {
         assert!(names.contains(&name), "{name} not in {names:?}");
     }
@@ -284,6 +285,39 @@ fn list_windows_says_each_window() -> anyhow::Result<()> {
         foot["geometry"],
         json!({ "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height })
     );
+    Ok(())
+}
+
+/// `celebrate` (#809): any agent the configuration names, a reading one
+/// too, has good news; its row says why. Without a why, or from an
+/// agent it does not name, refused.
+#[test]
+fn an_agent_celebrates_and_its_row_says_why() -> anyhow::Result<()> {
+    let mut bed = bed(false)?;
+    let mut looker = mcp(&bed.hp, "Looker")?;
+    let result = looker.tool(
+        &mut bed.hp,
+        "celebrate",
+        json!({ "why": "#791 merged\non main" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["celebrated"], true, "{result}");
+    // The confetti are off by default: the row says it alone.
+    assert_eq!(result["structuredContent"]["confetti"], false, "{result}");
+    let rows = bed.hp.mcp_shown().agents;
+    assert!(
+        rows.iter().any(|r| r.name == "Looker"
+            && r.doing
+                == hocus_link::McpDoing::Good {
+                    why: "#791 merged on main".into()
+                }),
+        "{rows:?}"
+    );
+    let result = looker.tool(&mut bed.hp, "celebrate", json!({ "why": "  " }))?;
+    assert_eq!(result["isError"], true, "{result}");
+    let mut nobody = mcp(&bed.hp, "Nobody")?;
+    let result = nobody.tool(&mut bed.hp, "celebrate", json!({ "why": "yes" }))?;
+    assert_eq!(result["isError"], true, "{result}");
     Ok(())
 }
 

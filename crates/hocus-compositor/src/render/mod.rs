@@ -15,6 +15,7 @@ mod garland;
 mod koi;
 mod layers;
 mod leaving;
+mod moments;
 mod raindrops;
 mod snow;
 mod stack;
@@ -215,6 +216,9 @@ pub(crate) struct Look {
     /// Its edges a sun lights (the daylight, #805), and the daylight's
     /// hour; on the screen alone.
     sunlit: Option<(crate::effects::daylight::LitEdges, u64)>,
+    /// Its edges the fireworks' flashes light (#810): top, right,
+    /// bottom, left, and the effects' frame; on the screen alone.
+    flash: Option<([[f32; 4]; 4], u64)>,
 }
 
 impl Look {
@@ -234,6 +238,7 @@ impl Look {
             corner: Some(corner),
             rain: None,
             sunlit: None,
+            flash: None,
         }
     }
 }
@@ -328,6 +333,7 @@ impl State {
             corner: None,
             rain,
             sunlit: None,
+            flash: None,
         })
     }
 
@@ -466,6 +472,14 @@ impl State {
             if let Some((lit, hour)) = &look.sunlit {
                 out.extend(
                     daylight::lit_edges(lit, rect, scale, look.alpha, &ids.sun, *hour)
+                        .into_iter()
+                        .map(OutputElements::Solid),
+                );
+            }
+            // The fireworks' light on its edges (#810).
+            if let Some((edges, frame)) = &look.flash {
+                out.extend(
+                    moments::flash_edges(edges, rect, scale, look.alpha, &ids.flash, *frame)
                         .into_iter()
                         .map(OutputElements::Solid),
                 );
@@ -702,6 +716,8 @@ impl State {
             || self.fx.daylight.is_some()
             || self.fx.depth.is_some()
             || self.fx.aurora.is_some()
+            || self.fx.fireworks.is_some()
+            || self.fx.confetti.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -727,6 +743,7 @@ impl State {
             area,
             origin,
             scale,
+            wall_seen: &crate::effects::kept::ALL_SEEN,
         };
         if self
             .covering_elements(renderer, &frame, &mut elements)
@@ -807,6 +824,7 @@ impl State {
         // them still.
         // The snow on the bar (#795), right in front of it.
         if front {
+            elements.extend(self.confetti_bar(&frame).map(OutputElements::Fire));
             let cap = self.snow_bar_cap(renderer, &frame);
             elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
@@ -830,6 +848,13 @@ impl State {
         {
             let halo = self.halo_elements(renderer, output, bar, now);
             elements.splice(at..at, halo.into_iter().map(OutputElements::Shader));
+        }
+        // The moments in the bar's column (#800), right in front of its
+        // surfaces, under its popovers.
+        let mut bar_moments = self.bar_moments(&frame);
+        if front && let Some(at) = bar_at {
+            let moments = std::mem::take(&mut bar_moments);
+            elements.splice(at..at, moments.into_iter().map(OutputElements::Fire));
         }
         // The panda peeking out (4.5): over the windows, under the bar's
         // surfaces and its halo, out of whose edge it comes.
@@ -858,6 +883,8 @@ impl State {
         elements.append(&mut overview);
         elements.append(&mut windows);
         if !front {
+            elements.extend(bar_moments.into_iter().map(OutputElements::Fire));
+            elements.extend(self.confetti_bar(&frame).map(OutputElements::Fire));
             let cap = self.snow_bar_cap(renderer, &frame);
             elements.extend(cap.into_iter().map(OutputElements::Fire));
         }
@@ -876,6 +903,17 @@ impl State {
         if purpose.screen() {
             self.burn_lights(&frame, &mut elements);
         }
+        // What is in front of the wallpaper is known: where it shows, for
+        // the snow to draw its flakes there alone.
+        let wall_seen = if purpose.screen() && self.fx.snow.is_some() {
+            wall_seen(&elements, area, scale)
+        } else {
+            crate::effects::kept::Seen::default()
+        };
+        let frame = Frame {
+            wall_seen: &wall_seen,
+            ..frame
+        };
         // The garland's halos (#799), the garland across the top (#813),
         // then the snow's layer (#795), then the fireflies (#804): on the
         // wallpaper, under the windows and the bar; a blank in their place
@@ -898,6 +936,16 @@ impl State {
             layer
         });
         let fireflies = self.fireflies_layer(&frame).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
+        // The moments (#810, #811): the confetti in flight, the fireworks,
+        // on the wallpaper too.
+        let confetti = self.confetti_layer(&frame).map(|(blank, layer)| {
+            elements.push(OutputElements::Fire(blank));
+            layer
+        });
+        let fireworks = self.fireworks_layer(&frame).map(|(blank, layer)| {
             elements.push(OutputElements::Fire(blank));
             layer
         });
@@ -963,6 +1011,8 @@ impl State {
             (garland, self.garland_blank()),
             (snow, self.snow_blank(&frame)),
             (fireflies, self.fireflies_blank(&frame)),
+            (confetti, self.confetti_blank()),
+            (fireworks, self.fireworks_blank()),
             (rain, self.raindrops_stand_in(&frame)),
             (koi_water, koi_still),
             (koi_pads, koi_blank),
@@ -984,6 +1034,13 @@ impl State {
                 .rposition(|e| matches!(e, OutputElements::Fire(f) if f.id() == &blank))
         {
             elements.splice(at..=at, layers.map(OutputElements::Fire));
+        }
+        if purpose.screen()
+            && elements
+                .iter()
+                .any(|e| matches!(e, OutputElements::Fire(_)))
+        {
+            cover_effects(&mut elements, scale);
         }
         elements
     }
@@ -1656,6 +1713,71 @@ pub(super) struct Frame<'a> {
     pub area: Rectangle<i32, Logical>,
     pub origin: Point<f64, Logical>,
     pub scale: f64,
+    /// Where the wallpaper shows through what is in front of it: what an
+    /// effect on it draws elsewhere, nobody sees (#815).
+    pub wall_seen: &'a crate::effects::kept::Seen,
+}
+
+/// What of the screen `elements` cover with their opaque parts
+/// (output-local, physical).
+fn opaque_parts<R>(elements: &[OutputElement<R>], scale: f64) -> Vec<Rectangle<i32, Physical>>
+where
+    R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let scale = Scale::from(scale);
+    let mut parts = Vec::new();
+    for e in elements {
+        let at = e.geometry(scale).loc;
+        parts.extend(e.opaque_regions(scale).iter().map(|r| {
+            let mut r = *r;
+            r.loc += at;
+            r
+        }));
+    }
+    parts
+}
+
+/// Where the wallpaper of the screen `area` at `scale` shows through
+/// `elements` (those in front of it) (#815).
+fn wall_seen<R>(
+    elements: &[OutputElement<R>],
+    area: Rectangle<i32, Logical>,
+    scale: f64,
+) -> crate::effects::kept::Seen
+where
+    R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let screen: Rectangle<i32, Physical> =
+        Rectangle::from_size(area.size.to_f64().to_physical_precise_round(scale));
+    let opaque = opaque_parts(elements, scale);
+    if opaque.is_empty() {
+        return crate::effects::kept::Seen::default();
+    }
+    let shown = Rectangle::subtract_rects_many([screen], opaque);
+    crate::effects::kept::Seen::of((screen.size.w, screen.size.h), &shown)
+}
+
+/// Each effect's element told what opaque elements in front of it cover,
+/// where what changes is not told: the damage tracker then draws nothing
+/// again there, not the windows over it either (#815).
+fn cover_effects<R>(elements: &mut [OutputElement<R>], scale: f64)
+where
+    R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let mut covered: Vec<Rectangle<i32, Physical>> = Vec::new();
+    for i in 0..elements.len() {
+        if let Some(OutputElements::Fire(fire)) = elements.get_mut(i)
+            && !covered.is_empty()
+        {
+            fire.cover(&covered);
+        }
+        if let Some(e) = elements.get(i..=i) {
+            covered.extend(opaque_parts(e, scale));
+        }
+    }
 }
 
 /// Where the panes of glass go among the elements, each blurred from what
@@ -1755,6 +1877,7 @@ impl State {
             area,
             origin: area.loc.to_f64(),
             scale: output.current_scale().fractional_scale(),
+            wall_seen: &crate::effects::kept::ALL_SEEN,
         };
         if purpose.screen() {
             if let Some((_, snow)) = self.snow_layer(renderer, &frame) {
