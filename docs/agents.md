@@ -8,7 +8,7 @@ read while it runs. Any other tool can say the same with one command.
 ## The command
 
 ```sh
-hocus agent NAME STATE [--pid PID]
+hocus agent NAME STATE [--pid PID] [--tests-passed [N]]
 ```
 
 - `NAME`: the name the agent shows under (a project, a task). The same
@@ -24,6 +24,11 @@ hocus agent NAME STATE [--pid PID]
   window of the terminal running herdr's client. The agent is forgotten
   when that process ends.
 
+- `--tests-passed [N]`: its tests all passed (N of them, when known). An
+  agent that finishes (`done`) with all its tests passing sets the
+  fireworks off (`[effects] fireworks`, [design/effects.md](design/effects.md),
+  "The moments"), and its row says "au vert" while it is to see.
+
 It writes one line to the desktop's control socket and returns at once;
 outside a Hocuspanda session it fails with a message and exit status 1, a
 state that is not one with status 2. The socket is `$HOCUS_SOCKET` (set
@@ -36,6 +41,35 @@ For example, a build script:
 hocus agent build working
 make && hocus agent build done || hocus agent build failed
 ```
+
+## Good news
+
+```sh
+hocus celebrate WHY [--name NAME] [--pid PID]
+```
+
+An agent's good news, in one short line: a pull request merged, a
+deployment done, a bug finally fixed (`hocus celebrate "#791 merged on
+main"`). The row of the agent whose process ran it (above its shells,
+or `--pid`) says why on a violet card for a minute, or until its row is
+clicked; when no agent is known for that process, a row of its own does,
+named `NAME` (else the current folder's name). The confetti fly when
+`[effects] confetti` is on ([design/effects.md](design/effects.md), "The
+moments"). The line is `celebrate PID NAME`, a tab, then why. Agents
+acting through `hocus mcp` have the same as their `celebrate` tool
+([design/mcp.md](design/mcp.md)).
+
+## Tests that pass
+
+The hooks also say how a shell command's tests went: in `PostToolUse` and
+`PostToolUseFailure`, the command's output is read for a test runner's
+summary line (cargo test, cargo-nextest, pytest, Jest, Vitest, go test):
+all passed, with their count, or one failed; a test command (`cargo
+test`, `nextest`, `pytest`, `npm test`, `jest`, `vitest`, `go test`, `make
+test`) that failed without a summary failed. The last run of a turn
+counts; the turn over, it is forgotten. A turn that ends (`Stop`) with
+its last run green is a finish with all tests passing. On the line, after
+a tab: `tests passed [N]` or `tests failed`.
 
 ## How an agent is named
 

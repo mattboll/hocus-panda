@@ -105,6 +105,7 @@ mod tests {
             window: 0,
             name: name.to_owned(),
             note: None,
+            news: None,
         }
     }
 

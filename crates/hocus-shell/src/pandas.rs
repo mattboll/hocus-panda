@@ -45,7 +45,8 @@ pub fn mood(look: Look) -> Mood {
     match look {
         Look::Waiting => Mood::Waiting,
         Look::Stuck => Mood::Stuck,
-        Look::ToSee => Mood::Done,
+        // Good news: its arms up among its confetti.
+        Look::ToSee | Look::News => Mood::Done,
         Look::Working => Mood::Working,
         Look::Resting => Mood::Resting,
     }

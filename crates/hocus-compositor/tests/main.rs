@@ -79,6 +79,7 @@ mod foreign;
 mod garland;
 mod gestures;
 mod glass;
+mod good_news;
 mod headless;
 mod holidays;
 mod idle;

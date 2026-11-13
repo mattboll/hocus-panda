@@ -946,8 +946,9 @@ void main() {
 /// two-point gradient, white from a focus at (-0.3, -0.3) to blue at its
 /// edge); a box blurred by a Gaussian (or sharp, its edges smoothed); a
 /// box with round corners, an oval and a glow (the garland's, #799; a
-/// firefly's, #804, its own colours); a drop of the rain's map (#802); a
-/// lily pad or its shadow (#803). Nothing where the clip says not.
+/// firefly's, #804, its own colours; a firework's spark, #810); a drop
+/// of the rain's map (#802); a lily pad or its shadow (#803). Nothing
+/// where the clip says not.
 const SHAPES: &str = "#version 100
 precision highp float;
 varying vec2 v_local;
@@ -1037,6 +1038,13 @@ void main() {
         float r = length(v_local);
         float a = clamp((1.0 - r) * 6.0, 0.0, 1.0);
         gl_FragColor = vec4(v_local * 0.5 + 0.5, sqrt(max(1.0 - r * r, 0.0)), 1.0) * a;
+    } else if (v_shape.y > 3.5) {
+        float d = length(v_local);
+        vec4 c = v_colour;
+        vec4 w = vec4(c.a);
+        gl_FragColor = d < 0.15 ? mix(w, c * 0.9, d / 0.15)
+            : d < 0.45 ? mix(c * 0.9, c * 0.22, (d - 0.15) / 0.3)
+            : mix(c * 0.22, vec4(0.0), clamp((d - 0.45) / 0.55, 0.0, 1.0));
     } else if (v_shape.y > 2.5) {
         float d = length(v_local);
         vec4 s0 = vec4(1.0, 1.0, 220.0 / 255.0, 1.0);

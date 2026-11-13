@@ -505,6 +505,7 @@ mod tests {
             window: 7,
             name: name.into(),
             note: None,
+            news: None,
         }
     }
 

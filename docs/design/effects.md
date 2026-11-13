@@ -21,8 +21,8 @@ langue").
 | | Fenêtres en gelée | `jelly` | #797 (built) |
 | | Guirlande sous la fenêtre active | `garland` | #799 (built) |
 | | Guirlande en haut de l'écran | `garland-top` | #813 (built) |
-| The moments | Tests au vert : feu d'artifice | `fireworks` | #810 |
-| | Bonne nouvelle d'un agent : confettis | `confetti` | #811 |
+| The moments | Tests au vert : feu d'artifice | `fireworks` | #810 (built) |
+| | Bonne nouvelle d'un agent : confettis | `confetti` | #811 (built) |
 | The agents | Les agents en créatures | `creatures` | #796 (built) |
 
 ## When they stop
@@ -50,8 +50,8 @@ Every effect follows the same rules (`State::effects_still`, in
   asked for;
 - none costs more than it shows (#815): an effect that plays on its own
   (the snow, the garlands, the creatures, the rain on the glass, the
-  fireflies, the koi, the aurora, the camera of desktops in depth, and
-  those to come; under the lock too) moves on at most 60 times a second whatever
+  fireflies, the koi, the aurora, the camera of desktops in depth, the
+  moments; under the lock too) moves on at most 60 times a second whatever
   the screen's refresh (`effects::Pace`), what it draws staying the same
   between two (a screen at 165 Hz draws it again only where something
   else changed), and it tells the screen only what of it changed: the
@@ -758,6 +758,64 @@ same in the overview, with it); its screenshots, the shell drawing on
 Mesa's software Vulkan, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only live_wall::shots`.
 
-## Not built yet
+## The moments: fireworks and confetti (#810, #811)
 
-The other effects come with their tickets.
+Good news plays once, behind the windows, on the screen the user looks
+at (the bubbles' screen: the focused window's, else the pointer's), as
+the boards "Tests au vert" and "Confettis des bonnes nouvelles" do: their
+JS ported (`effects/fireworks.rs`, `effects/confetti.rs`, when they may
+in `effects/moments.rs`, drawn by `render/moments.rs`), their lengths in
+logical pixels, stepped at 60 steps a second from their start with a
+seeded generator. Decided as they start, with every effect's rules: none
+with reduced motion, in the power saver, while a screen is shared or
+recorded, on the CPU, while locked, nor on a screen off or showing a
+fullscreen window; the bar says the news all the same. Once over (some
+7 s for the fireworks, under 20 for the confetti), nothing is drawn.
+What a moment draws is decided from its zone alone: the bar's moment
+when a window is maximised (#800) gives it the bar's.
+
+- **When the fireworks go off**: an agent finishes (its state becomes
+  `done`) and the last test run of its turn passed, as
+  [docs/agents.md](../agents.md) says: Claude Code's and Codex's hooks
+  read a shell command's output (`PostToolUse`, `PostToolUseFailure`)
+  for a test runner's summary (cargo test, cargo-nextest, pytest, Jest,
+  Vitest, go test), and any tool says `hocus agent NAME done
+  --tests-passed [N]`. A run that fails after one that passed is a
+  failure; a turn without a run, none. One show at a time.
+- **The fireworks**: the board's seven rockets over 2.2 s across the
+  work area (their heights scaled with it), bursting in peonies (150
+  sparks, a third crackling at their end), willows (110, slow, drooping)
+  and rings (90, tilted); each spark a streak back along its path (the
+  board's sky fading under it by a quarter a frame) and a glow, added to
+  the wallpaper; each burst's flash (its colour, 700 px, 0.9 s) screened
+  over the wallpaper, and over the windows' edges alone (a 2 px band
+  just out of them, as bright as the flash there and half again): never
+  on what a window shows.
+- **The confetti**: `hocus celebrate WHY` or the MCP tool (#809): the
+  board's 240 pieces burst from the bar's side facing the windows
+  (54 px down), and its 160 a 960 px shower from above the work area;
+  cards and ribbons (18 %) tumbling, their face's turn shading them and
+  slowing them, under the windows and the bar. A piece falling on the
+  top edge of a window or of the bar (4 px in from its ends) settles
+  there, lying flat a few pixels above it, drawn right in front of its
+  edge (a window in front covers it) and never below its top 8 px
+  (`REACH_BELOW`); it moves with its window and goes with it; it melts
+  after 2.4 s, over 0.9 s. Another celebration while they fly adds a
+  burst.
+- **The bar says which agent**: a finished agent's row says "au vert"
+  in place of "à voir" while it is to see (its name keeps its room); an agent with good
+  news has a violet card (its name, "bonne nouvelle", why under it) for a
+  minute or until its row is clicked; an MCP agent's row says why until
+  its next request. Off, the bar says it all the same.
+
+The board's toast at the bottom of the screen ("hocus-panda a fini :
+2 040 tests au vert") is not built: the bar's row says it.
+
+Tests: `tests/good_news.rs` (on GLES on Mesa's software device: an
+agent's hooks saying its tests passed as its turn ends set the fireworks
+off, its row saying so, the window's pixels untouched, over within 10 s
+and nothing drawn after; a red last run, none; `hocus celebrate`'s
+confetti settle on the window's edge and melt, never over what it shows;
+on the CPU, the bar alone says the news); its screenshots,
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
+good_news::shots`.

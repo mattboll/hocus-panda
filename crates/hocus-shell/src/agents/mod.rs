@@ -29,7 +29,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
-use hocus_link::{AGENTS_NAMESPACE, AgentShown, AgentTool, Note, ToolState};
+use hocus_link::{AGENTS_NAMESPACE, AgentNews, AgentShown, AgentTool, Note, ToolState};
 use iced::{Color, Font, Point, Rectangle, Size};
 
 use crate::theme::Ink;
@@ -152,8 +152,12 @@ pub enum Look {
     Waiting,
     /// It failed: "bloqué", orange.
     Stuck,
-    /// It finished and the user has not seen it yet: "à voir", green.
+    /// It finished and the user has not seen it yet: "à voir", green;
+    /// "au vert" when its tests all passed (#810).
     ToSee,
+    /// It has good news (#809, `hocus celebrate`): a card, violet, saying
+    /// why, for as long as the compositor says it.
+    News,
     /// It works: for how long.
     Working,
     /// Idle, or finished and seen: "repos", its panda asleep.
@@ -164,7 +168,15 @@ impl Look {
     /// Whether its row is a card with what the agent asks or why it failed
     /// (#649): waiting or stuck.
     pub fn carded(self) -> bool {
-        matches!(self, Self::Waiting | Self::Stuck)
+        matches!(self, Self::Waiting | Self::Stuck | Self::News)
+    }
+
+    /// An agent's row's: its good news's while said, else its state's.
+    pub fn of_agent(agent: &AgentShown) -> Self {
+        match agent.news {
+            Some(AgentNews::Good { .. }) => Self::News,
+            _ => Self::of(&agent.state),
+        }
     }
 
     /// The compositor's word for the state (bar.md §10, `hocus-link`).
@@ -209,7 +221,7 @@ pub fn rows_that_fit(looks: &[Look], room: f32) -> usize {
 /// see, working, resting, in the order they came otherwise.
 fn ordered(agents: &[AgentShown]) -> Vec<(Look, &AgentShown)> {
     let mut ordered: Vec<(Look, &AgentShown)> =
-        agents.iter().map(|a| (Look::of(&a.state), a)).collect();
+        agents.iter().map(|a| (Look::of_agent(a), a)).collect();
     ordered.sort_by_key(|(look, a)| {
         let waited = if *look == Look::Waiting { a.since } else { 0 };
         (*look, waited, a.id)
@@ -263,8 +275,11 @@ pub struct Line {
     pub name: String,
     /// How long it has worked, whole minutes (working only).
     pub minutes: u64,
-    /// What it asks for, or why it failed (its card says it, #649).
+    /// What it asks for, or why it failed (its card says it, #649); its
+    /// good news (#809).
     pub note: Option<Note>,
+    /// Its tests all passed as it finished (#810).
+    pub green: bool,
 }
 
 impl Lines {
@@ -295,7 +310,11 @@ impl Lines {
                         Look::Working => now.saturating_sub(a.since) / 60_000_000,
                         _ => 0,
                     },
-                    note: a.note.clone().filter(|_| look.carded()),
+                    note: match (&a.news, look) {
+                        (Some(AgentNews::Good { why }), Look::News) => Note::says(why),
+                        _ => a.note.clone().filter(|_| look.carded()),
+                    },
+                    green: matches!(a.news, Some(AgentNews::TestsPassed { .. })),
                 })
                 .collect(),
         }
@@ -341,7 +360,10 @@ impl Brief {
     /// `agents` as the secretary sees them, in their rows' order.
     pub fn of(agents: &[AgentShown]) -> Self {
         let mut brief = Self::default();
-        for (look, a) in ordered(agents) {
+        for (_, a) in ordered(agents) {
+            // Good news needs nothing of the user: its agent as its state
+            // says.
+            let look = Look::of(&a.state);
             let entry = || Entry {
                 id: a.id,
                 name: a.name.clone(),
@@ -353,7 +375,7 @@ impl Brief {
                 Look::Stuck => brief.stuck.push(entry()),
                 Look::ToSee => brief.to_see.push(entry()),
                 Look::Working => brief.working.push(entry()),
-                Look::Resting => brief.resting.push(entry()),
+                Look::Resting | Look::News => brief.resting.push(entry()),
             }
         }
         brief
@@ -611,7 +633,7 @@ impl Words {
             Look::Stuck => self.pick(txt::STUCK),
             Look::ToSee => self.pick(txt::TO_SEE),
             Look::Working => self.pick(txt::AT_WORK),
-            Look::Resting => self.pick(txt::RESTING),
+            Look::Resting | Look::News => self.pick(txt::RESTING),
         }
     }
 
@@ -734,7 +756,9 @@ impl Words {
         match line.look {
             Look::Waiting => self.pick(txt::WAITING_2).to_owned(),
             Look::Stuck => self.pick(txt::STUCK_2).to_owned(),
+            Look::ToSee if line.green => self.pick(txt::TESTS_PASSED).to_owned(),
             Look::ToSee => self.pick(txt::TO_SEE_2).to_owned(),
+            Look::News => self.pick(txt::HAS_GOOD_NEWS).to_owned(),
             Look::Resting => self.pick(txt::RESTING_2).to_owned(),
             // "1 h 05" from an hour.
             Look::Working if line.minutes >= 60 => {
@@ -1344,7 +1368,38 @@ mod tests {
             window: 0,
             name: name.into(),
             note: None,
+            news: None,
         }
+    }
+
+    /// Good news (#809, #810): tests passing say "au vert" on a finished
+    /// agent's row; news is a card under the waiting and the stuck, its
+    /// why its note, needing nothing of the user.
+    #[test]
+    fn good_news_is_said_on_the_agents_row() {
+        let fr = Words::new(Lang::French);
+        let green = AgentShown {
+            news: Some(AgentNews::TestsPassed { tests: Some(12) }),
+            ..shown(1, "done", 0, "site")
+        };
+        let good = AgentShown {
+            news: Some(AgentNews::Good {
+                why: "#791 mergée".into(),
+            }),
+            ..shown(2, "working", 0, "infra")
+        };
+        let lines = Lines::of(
+            &[good.clone(), green.clone(), shown(3, "waiting", 0, "x")],
+            0,
+        );
+        let looks: Vec<Look> = lines.rows.iter().map(|l| l.look).collect();
+        assert_eq!(looks, [Look::Waiting, Look::ToSee, Look::News]);
+        assert_eq!(fr.word(&lines.rows[1]), "au vert");
+        assert_eq!(fr.word(&lines.rows[2]), "bonne nouvelle");
+        assert_eq!(lines.rows[2].note, Note::says("#791 mergée"));
+        assert!(Look::News.carded());
+        let brief = Brief::of(&[good, green]);
+        assert_eq!((brief.needs(), brief.working.len()), (1, 1));
     }
 
     #[test]
@@ -1606,6 +1661,7 @@ mod tests {
             name: String::new(),
             minutes,
             note: None,
+            green: false,
         };
         assert_eq!(fr.word(&working(12)), "12\u{a0}min");
         assert_eq!(fr.word(&working(65)), "1\u{a0}h\u{a0}05");

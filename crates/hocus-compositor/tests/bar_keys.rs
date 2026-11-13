@@ -211,6 +211,7 @@ fn agent(id: u64, name: &str, state: &str) -> AgentShown {
         window: 0,
         name: name.to_owned(),
         note: None,
+        news: None,
     }
 }
 

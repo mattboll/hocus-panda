@@ -460,7 +460,7 @@ fn content<'a>(laid: &Laid, words: Words, said: &agents::Said, ui: &Ui) -> El<'a
             Look::Stuck => STUCK,
             Look::ToSee => TO_SEE,
             Look::Working => AT_WORK,
-            Look::Resting => RESTING,
+            Look::Resting | Look::News => RESTING,
         };
         let word = words.section(section.look);
         let mut chars = word.chars();

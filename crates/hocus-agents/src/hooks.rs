@@ -23,10 +23,14 @@
 //! [`Note`] (the secretary's briefing, bar.md §7 B): a permission's tool
 //! and its input in one line, the question it asks, the notification's
 //! text, the failure's message.
+//!
+//! A shell command that ran tests says how they went (#810): its output's
+//! summary line, read by [`crate::runs::of_output`] in `PostToolUse` and
+//! `PostToolUseFailure` (a test command that failed without one: failed).
 
 use serde_json::Value;
 
-use crate::{Note, State};
+use crate::{Note, State, runs::TestRun};
 
 /// The tools whose hooks call `hocus agent-hook`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +82,8 @@ pub struct Said {
     pub state: Option<State>,
     /// What it asks for, or why it failed.
     pub note: Option<Note>,
+    /// How the tests a command it ran went, when it ran some.
+    pub tests: Option<TestRun>,
 }
 
 /// What `payload`, from a tool's hook, says; nothing for an event that
@@ -95,6 +101,7 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
             name: text("cwd").and_then(crate::folder),
             state: Some(State::Done),
             note: None,
+            tests: None,
         });
     }
     let event = text("hook_event_name")?;
@@ -138,12 +145,76 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
             .find_map(|key| text(key).and_then(Note::says)),
         _ => None,
     };
+    let tests = match event {
+        "PostToolUse" => test_run(payload, false),
+        "PostToolUseFailure" => test_run(payload, true),
+        _ => None,
+    };
     Some(Said {
         key: text("session_id").unwrap_or_default().to_owned(),
         name: text("cwd").and_then(crate::folder),
         state,
         note,
+        tests,
     })
+}
+
+/// The programs and words that run tests, in a command's line.
+const TEST_COMMANDS: [&str; 8] = [
+    "cargo test",
+    "nextest",
+    "pytest",
+    "npm test",
+    "jest",
+    "vitest",
+    "go test",
+    "make test",
+];
+
+/// How the tests of a shell command's run went, when it ran some: its
+/// output's summary; a command that `failed` and runs tests, without one,
+/// failed.
+fn test_run(payload: &Value, failed: bool) -> Option<TestRun> {
+    let command = payload
+        .pointer("/tool_input/command")
+        .and_then(Value::as_str)?;
+    let mut output = String::new();
+    // Claude Code's `tool_response` is `{stdout, stderr, …}`; a failure
+    // says its `error`. Whatever text either holds is read.
+    for part in [payload.get("tool_response"), payload.get("error")]
+        .into_iter()
+        .flatten()
+    {
+        texts(part, &mut output, 2);
+    }
+    match crate::runs::of_output(&output) {
+        Some(run) => Some(run),
+        None if failed && TEST_COMMANDS.iter().any(|c| command.contains(c)) => {
+            Some(TestRun::Failed)
+        }
+        None => None,
+    }
+}
+
+/// The texts of `value`, `depth` levels down, each on lines of its own.
+fn texts(value: &Value, out: &mut String, depth: u8) {
+    match value {
+        Value::String(text) => {
+            out.push_str(text);
+            out.push('\n');
+        }
+        Value::Object(map) if depth > 0 => {
+            for v in map.values() {
+                texts(v, out, depth - 1);
+            }
+        }
+        Value::Array(list) if depth > 0 => {
+            for v in list {
+                texts(v, out, depth - 1);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A tool's input in one line: what it runs, the file it writes (its
@@ -213,6 +284,7 @@ mod tests {
                 name: Some("hocus-panda".into()),
                 state: Some(State::Idle),
                 note: None,
+                tests: None,
             })
         );
         let prompt = json!({ "session_id": "abc123", "cwd": "/w",
@@ -371,6 +443,68 @@ mod tests {
     }
 
     #[test]
+    fn a_command_that_ran_tests_says_how_they_went() {
+        let tests = |event: &str, command: &str, response: Value| {
+            said(
+                Tool::ClaudeCode,
+                &json!({ "session_id": "s", "hook_event_name": event, "tool_name": "Bash",
+                    "tool_input": { "command": command, "description": "Run the tests" },
+                    "tool_response": response }),
+            )
+            .and_then(|s| s.tests)
+        };
+        let green = json!({ "stdout": "     Summary [ 212.4s] 2040 tests run: 2040 passed, 3 skipped\n",
+            "stderr": "", "interrupted": false, "isImage": false });
+        assert_eq!(
+            tests("PostToolUse", "cargo nextest run --workspace", green),
+            Some(TestRun::Passed(Some(2040)))
+        );
+        let red = json!({ "stdout": "test result: FAILED. 8 passed; 1 failed;" });
+        assert_eq!(
+            tests("PostToolUse", "cargo test", red),
+            Some(TestRun::Failed)
+        );
+        // A failure says its output in `error`; without a summary, a test
+        // command that failed failed.
+        let failure = |command: &str, error: &str| {
+            said(
+                Tool::ClaudeCode,
+                &json!({ "session_id": "s", "hook_event_name": "PostToolUseFailure",
+                    "tool_name": "Bash", "tool_input": { "command": command },
+                    "error": error }),
+            )
+            .and_then(|s| s.tests)
+        };
+        assert_eq!(
+            failure(
+                "pytest -q",
+                "Exit code 1\n==== 1 failed, 3 passed in 0.2s ===="
+            ),
+            Some(TestRun::Failed)
+        );
+        assert_eq!(
+            failure(
+                "cargo nextest run",
+                "Exit code 101\nerror: could not compile"
+            ),
+            Some(TestRun::Failed)
+        );
+        assert_eq!(failure("ls /nope", "Exit code 2"), None);
+        // Another command, another tool: nothing of tests.
+        assert_eq!(tests("PostToolUse", "ls", json!({ "stdout": "a b" })), None);
+        assert_eq!(
+            said(
+                Tool::ClaudeCode,
+                &json!({ "session_id": "s", "hook_event_name": "PostToolUse",
+                    "tool_name": "Write", "tool_input": { "file_path": "/a" },
+                    "tool_response": { "content": "2 tests run: 2 passed" } })
+            )
+            .and_then(|s| s.tests),
+            None
+        );
+    }
+
+    #[test]
     fn codexs_hooks_and_its_notify_program() {
         // The payloads of developers.openai.com/codex/hooks and of the
         // advanced configuration's `notify`.
@@ -398,6 +532,7 @@ mod tests {
                 name: Some("infra".into()),
                 state: Some(State::Done),
                 note: None,
+                tests: None,
             })
         );
         assert_eq!(

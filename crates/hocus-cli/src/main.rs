@@ -1,10 +1,13 @@
 //! `hocus`: tells the Hocuspanda desktop what an agent is doing
 //! (docs/agents.md).
 //!
-//! - `hocus agent NAME STATE [--pid PID]`, for any tool: STATE is
-//!   working, waiting, done, failed or idle (or ended, to forget it). The
-//!   agent is the process that ran the command (above its shells), unless
-//!   `--pid` names it; its window is found above it.
+//! - `hocus agent NAME STATE [--pid PID] [--tests-passed [N]]`, for any
+//!   tool: STATE is working, waiting, done, failed or idle (or ended, to
+//!   forget it). The agent is the process that ran the command (above its
+//!   shells), unless `--pid` names it; its window is found above it. Done
+//!   with all its tests passing, its fireworks go off (#810).
+//! - `hocus celebrate WHY [--name NAME]`: an agent's good news (#809); the
+//!   bar says who and why, the confetti fly.
 //! - `hocus agent-hook TOOL [PAYLOAD]`, what Claude Code's and Codex's
 //!   hooks run once plugged in: the hook's JSON (on standard input, or as
 //!   the argument Codex's `notify` gives) made a state. It never fails and
@@ -122,6 +125,24 @@ enum Command {
         state: String,
         /// The agent's process (default: the one that ran this command,
         /// above its shells). Its window is found above it.
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Its tests all passed (how many, if known): done so, its
+        /// fireworks go off.
+        #[arg(long, value_name = "N", num_args = 0..=1, default_missing_value = "0")]
+        tests_passed: Option<u32>,
+    },
+    /// An agent's good news, in one short line ("#791 merged on main"):
+    /// the bar says who and why, and the confetti fly.
+    Celebrate {
+        /// The news.
+        why: String,
+        /// Who has it, when no agent is known for this process (default:
+        /// this folder's name).
+        #[arg(long)]
+        name: Option<String>,
+        /// The agent's process (default: the one that ran this command,
+        /// above its shells).
         #[arg(long)]
         pid: Option<u32>,
     },
@@ -281,7 +302,33 @@ fn main() -> ExitCode {
         Command::Perf {
             command: PerfCommand::Day { date, json },
         } => perf::day(date.as_deref(), json),
-        Command::Agent { name, state, pid } => {
+        Command::Celebrate { why, name, pid } => {
+            let name = name
+                .or_else(|| {
+                    let here = std::env::current_dir().ok()?;
+                    hocus_agents::folder(&here.to_string_lossy())
+                })
+                .unwrap_or_default();
+            let Some(news) =
+                hocus_agents::Celebration::new(Some(pid.unwrap_or_else(the_agent)), &name, &why)
+            else {
+                eprintln!("hocus: the news says nothing");
+                return ExitCode::from(2);
+            };
+            match send_line(args.socket, &news.to_string()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("hocus: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Command::Agent {
+            name,
+            state,
+            pid,
+            tests_passed,
+        } => {
             let state = match state.as_str() {
                 "ended" => None,
                 word => match word.parse::<State>() {
@@ -299,6 +346,8 @@ fn main() -> ExitCode {
                 pid: Some(pid.unwrap_or_else(the_agent)),
                 name,
                 note: None,
+                tests: tests_passed
+                    .map(|n| hocus_agents::runs::TestRun::Passed(Some(n).filter(|n| *n > 0))),
             };
             match send(args.socket, &report) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -463,6 +512,8 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
             .unwrap_or_default(),
         // What it asks for, or why it failed: one short line.
         note: said.note,
+        // How the tests it just ran went (#810).
+        tests: said.tests,
     };
     // Not in a Hocuspanda session, or it is not listening: nothing to do.
     let _ = send(socket, &report);
@@ -486,6 +537,11 @@ fn socket_path(given: Option<PathBuf>) -> Option<PathBuf> {
 }
 
 fn send(socket: Option<PathBuf>, report: &Report) -> Result<(), String> {
+    send_line(socket, &report.to_string())
+}
+
+/// Writes `line` to the control socket, answered with nothing.
+fn send_line(socket: Option<PathBuf>, line: &str) -> Result<(), String> {
     let path = socket_path(socket)
         .ok_or("no desktop to tell: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
     let mut stream = UnixStream::connect(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -493,7 +549,7 @@ fn send(socket: Option<PathBuf>, report: &Report) -> Result<(), String> {
         .set_write_timeout(Some(WRITE))
         .map_err(|e| e.to_string())?;
     stream
-        .write_all(format!("{report}\n").as_bytes())
+        .write_all(format!("{line}\n").as_bytes())
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
