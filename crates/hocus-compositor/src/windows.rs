@@ -1435,10 +1435,14 @@ impl State {
             }
             (now, _) => (now, false),
         };
-        // Locked (7.1): the lock's own motion alone; nothing else is drawn.
-        if let Some(moving) = self.lock_tick(now) {
+        // Locked (7.1): the lock's own motion alone; nothing else is drawn
+        // but the wallpaper's effects behind the desktop's own lock (#807).
+        if let Some(mut moving) = self.lock_tick(now) {
             // The wallpapers that move stop (#433).
             self.tick_walls();
+            if self.lock_shows_wall() {
+                moving |= self.tick_wallpaper_effects(now);
+            }
             self.judge_still(moving, as_of_frame);
             return;
         }
@@ -1526,20 +1530,15 @@ impl State {
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
-        // The snow (#795).
-        moving |= self.tick_snow(now);
+        // The wallpaper's effects: the snow (#795) first, the garlands'
+        // wind following its.
+        moving |= self.tick_wallpaper_effects(now);
         // The agents as creatures on their windows (#796).
         moving |= self.tick_creatures(now);
         // The garland under the active window (#799).
         moving |= self.tick_garland(now);
         // The garlands across the top of the screens (#813).
         moving |= self.tick_garland_top(now);
-        // The rain on the glass (#802), the evening fireflies (#804).
-        moving |= self.tick_raindrops(now);
-        moving |= self.tick_fireflies(now);
-        // The koi's pond (#803), the daylight (#805).
-        moving |= self.tick_koi(now);
-        self.tick_daylight();
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         // A shattering one until its last shard has fallen (#798).

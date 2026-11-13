@@ -55,10 +55,14 @@ impl State {
         now: Duration,
     ) -> Option<Vec<OutputElement<R>>>
     where
-        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let locked = self.lock.locked_state()?;
+        // The wallpaper live under the desktop's own lock (#807), which
+        // leaves its background clear.
+        let live = self.lock_shows_wall();
+        let mut fade = 1.0;
         let area = self.space.output_geometry(output)?;
         let scale = output.current_scale().fractional_scale();
         let sc = Scale::from(scale);
@@ -80,6 +84,7 @@ impl State {
                         1.0
                     };
                     full = alpha >= 1.0;
+                    fade = alpha;
                     if let Some(geometry) = geometry.filter(|_| alpha > 0.0) {
                         let loc = geometry.loc.to_physical_precise_round(scale);
                         let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
@@ -106,17 +111,20 @@ impl State {
             }
         }
         // The desktop's last frame under the lock fading in: on the screen
-        // only, never in a capture.
+        // only, never in a capture. Under a live lock, it fades out over
+        // the wallpaper as the lock fades in.
         if purpose.screen()
+            && (!live || fade < 1.0)
             && let Frozen::Taken(pictures) = &locked.frozen
             && let Some(picture) = pictures.get(&output.name())
         {
             let size = area.size;
+            let alpha = live.then_some(1.0 - fade);
             match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 (0.0, 0.0),
                 picture,
-                None,
+                alpha,
                 None,
                 Some(size),
                 Kind::Unspecified,
@@ -124,6 +132,9 @@ impl State {
                 Ok(element) => out.push(OutputElements::Backdrop(element)),
                 Err(err) => tracing::debug!(%err, "the frozen frame could not be drawn"),
             }
+        }
+        if live {
+            out.append(&mut self.live_wall(renderer, output, purpose, now));
         }
         out.push(OutputElements::Solid(SolidColorRenderElement::new(
             self.lock.black.clone(),

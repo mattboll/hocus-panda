@@ -33,6 +33,7 @@ pub const BUILT: &[&str] = &[
     "effects.koi",
     "effects.fireflies",
     "effects.daylight",
+    "effects.depth",
     "effects.flames",
     "effects.shatter",
     "effects.jelly",
@@ -245,10 +246,10 @@ mod tests {
 
     /// Fifteen (the board's fourteen, and the second garland), each with
     /// its key of `[effects]`, off by default; the snow, the rain on the
-    /// glass, the koi, the fireflies, the daylight, the flames, the glass,
-    /// the jelly, the garlands and the creatures built.
+    /// glass, the koi, the fireflies, the daylight, depth, the flames, the
+    /// glass, the jelly, the garlands and the creatures built.
     #[test]
-    fn fifteen_effects_off_by_default_eleven_built() {
+    fn fifteen_effects_off_by_default_twelve_built() {
         let all = settings();
         assert_eq!(all.len(), 15);
         for s in all {
@@ -267,6 +268,7 @@ mod tests {
                 "effects.koi",
                 "effects.fireflies",
                 "effects.daylight",
+                "effects.depth",
                 "effects.flames",
                 "effects.shatter",
                 "effects.jelly",

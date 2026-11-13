@@ -297,7 +297,7 @@ impl crate::State {
     /// fullscreen window in front), the screen's size (logical).
     pub(crate) fn daylight_on(&self, output: &smithay::output::Output) -> Option<Sky> {
         self.daylight_plays()?;
-        if self.fullscreen_in_front(output) {
+        if self.wall_hidden(output) {
             return None;
         }
         let daylight = self.fx.daylight.as_ref()?;
@@ -310,9 +310,11 @@ impl crate::State {
     }
 
     /// Whether the daylight's sky is the wallpaper of `output`: the koi's
-    /// pond takes its place when both are on.
+    /// pond or the landscape in depth (#806) takes its place when on too.
     pub(crate) fn sky_shows_on(&self, output: &smithay::output::Output) -> bool {
-        self.daylight_on(output).is_some() && !self.koi_shows_on(output)
+        self.daylight_on(output).is_some()
+            && !self.koi_shows_on(output)
+            && !self.depth_shows_on(output)
     }
 
     /// The daylight follows its switch (#805): on, the hour is the sun's,

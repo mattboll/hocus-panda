@@ -97,6 +97,8 @@ enum Motion {
     Sliding {
         from: f64,
         tween: Tween,
+        /// Desktops in depth (#806): the camera pulls back on the way.
+        pull: bool,
     },
     /// Reduced motion: the previous desktop's windows fade out as the
     /// current one's fade in, nothing moving.
@@ -107,6 +109,24 @@ enum Motion {
     /// Following the fingers.
     Following(Swipe),
 }
+
+/// How a strip goes to another desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slide {
+    /// Reduced motion: the desktops cross-fade, nothing moving.
+    Fade,
+    /// The strip slides (§12).
+    Standard,
+    /// Desktops in depth (#806): a camera move through the landscape, as
+    /// its board's (1.5 s, in-out cubic), pulling back on the way.
+    Depth,
+}
+
+/// The board "Bureaux en profondeur"'s camera move: its time, its curve
+/// (in-out cubic) and how far it pulls back halfway (`1 - 0.1 sin(πk)`).
+pub const DEPTH_SLIDE: Duration = Duration::from_millis(1500);
+const IN_OUT_CUBIC: Bezier = Bezier(0.65, 0.0, 0.35, 1.0);
+pub const PULL: f64 = 0.1;
 
 /// A screen's desktops and the one it shows.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -152,7 +172,7 @@ impl Strip {
         let current = self.current as f64;
         match self.motion {
             Motion::Still | Motion::Fading { .. } => current,
-            Motion::Sliding { from, tween } => motion::lerp(from, current, tween.at(now)),
+            Motion::Sliding { from, tween, .. } => motion::lerp(from, current, tween.at(now)),
             Motion::Following(swipe) => swipe.at(self.count),
         }
     }
@@ -178,14 +198,46 @@ impl Strip {
     /// The slide under way, for windows that travel with it.
     pub fn tween(&self) -> Option<(f64, Tween)> {
         match self.motion {
-            Motion::Sliding { from, tween } => Some((from, tween)),
+            Motion::Sliding { from, tween, .. } => Some((from, tween)),
             _ => None,
+        }
+    }
+
+    /// How far the camera stands back at `now` (desktops in depth, #806):
+    /// 1 at rest, less on the way of a slide that pulls back.
+    pub fn pull(&self, now: Duration) -> f64 {
+        match self.motion {
+            Motion::Sliding {
+                tween, pull: true, ..
+            } => 1.0 - PULL * (std::f64::consts::PI * tween.linear(now)).sin(),
+            _ => 1.0,
+        }
+    }
+
+    /// When the slide or the fade under way ends; `None` at rest or
+    /// following the fingers.
+    pub fn moves_until(&self) -> Option<Duration> {
+        match self.motion {
+            Motion::Sliding { tween, .. } | Motion::Fading { tween, .. } => {
+                Some(tween.start + tween.duration)
+            }
+            Motion::Still | Motion::Following(_) => None,
         }
     }
 
     /// Goes to `to` from wherever the strip is at `now`; the previous
     /// desktop, if it changed.
     pub fn switch(&mut self, to: usize, now: Duration, reduced: bool) -> Option<usize> {
+        let slide = if reduced {
+            Slide::Fade
+        } else {
+            Slide::Standard
+        };
+        self.switch_by(to, now, slide)
+    }
+
+    /// The same, moving as `slide` says.
+    pub fn switch_by(&mut self, to: usize, now: Duration, slide: Slide) -> Option<usize> {
         let to = to.min(self.count - 1);
         let from = self.position(now);
         let previous = self.current;
@@ -197,16 +249,21 @@ impl Strip {
             return None;
         }
         self.current = to;
-        self.motion = if reduced {
-            Motion::Fading {
+        self.motion = match slide {
+            Slide::Fade => Motion::Fading {
                 from: previous,
                 tween: Tween::new(now, motion::FADE_REDUCED, Bezier::LINEAR),
-            }
-        } else {
-            Motion::Sliding {
+            },
+            Slide::Standard => Motion::Sliding {
                 from,
                 tween: Tween::new(now, motion::DESKTOP_SLIDE, Bezier::STRIP),
-            }
+                pull: false,
+            },
+            Slide::Depth => Motion::Sliding {
+                from,
+                tween: Tween::new(now, DEPTH_SLIDE, IN_OUT_CUBIC),
+                pull: true,
+            },
         };
         (to != previous).then_some(previous)
     }
@@ -309,6 +366,7 @@ impl Strip {
             Motion::Sliding {
                 from: at,
                 tween: Tween::new(now, motion::DESKTOP_SLIDE, Bezier::STRIP),
+                pull: false,
             }
         };
         if self.motion == Motion::Still {
@@ -852,6 +910,12 @@ impl crate::State {
         (offset.abs() < 1.0).then_some((offset * self.strip_stride(&output), 1.0))
     }
 
+    /// Whether `id` is drawn where the strip puts it, sliding with it: not
+    /// on all desktops, nor carried along or sent away.
+    pub(crate) fn slides_with_strip(&self, id: WindowId) -> bool {
+        !self.model.is_everywhere(id) && self.windows.get(&id).is_some_and(|m| m.travel.is_none())
+    }
+
     /// One desktop's width on `output`'s strip, logical pixels.
     pub fn strip_stride(&self, output: &Output) -> f64 {
         self.space
@@ -914,7 +978,14 @@ impl crate::State {
         let now = self.now();
         let mut strip = self.strip(output);
         let to = to.min(strip.count() - 1);
-        let changed = strip.switch(to, now, reduced);
+        let slide = if reduced {
+            Slide::Fade
+        } else if self.depth_moves() {
+            Slide::Depth
+        } else {
+            Slide::Standard
+        };
+        let changed = strip.switch_by(to, now, slide);
         self.set_strip(output, strip);
         if changed.is_some() {
             self.apply_desktop(output, to, carried);

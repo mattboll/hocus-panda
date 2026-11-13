@@ -108,6 +108,11 @@ pub struct LockShown {
     pub agents: u32,
     /// The desktop's background is drawn (else its plain colour).
     pub wallpaper: bool,
+    /// The compositor draws the wallpaper under the lock, with the
+    /// effects playing on it (#807): the lock leaves its background clear,
+    /// its veil over it.
+    #[serde(default)]
+    pub live: bool,
     /// Things move (no reduced motion): the field shakes.
     pub motion: bool,
     /// The screen with the form (the bar's, the primary); the others show

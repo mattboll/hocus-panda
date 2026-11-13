@@ -362,6 +362,22 @@ impl Headless {
         Some(self.app.state.fx.daylight.as_ref()?.hour)
     }
 
+    /// Desktops in depth (#806) on output `index`, while it is on: where
+    /// its camera stands now (logical pixels along the strip, and its
+    /// pull, 1 at rest), and how many times its landscape was drawn.
+    pub fn depth(&self, index: usize) -> Option<(f64, f64, usize)> {
+        let state = &self.app.state;
+        let output = state.space.outputs().nth(index)?;
+        let pane = state.fx.depth.as_ref()?.panes.get(&output.name())?;
+        let camera = state.depth_camera(output, state.now());
+        let drawn = pane
+            .commit
+            .get()
+            .distance(Some(Default::default()))
+            .unwrap_or(0);
+        Some((camera.x, camera.zoom, drawn))
+    }
+
     /// The garlands across the top (#813), while they show: each one's
     /// screen and its bulbs' points (global, logical), by screen.
     pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {

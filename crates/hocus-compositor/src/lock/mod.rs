@@ -732,6 +732,7 @@ impl State {
             focus,
             agents,
             wallpaper: !self.config.plain_background,
+            live: self.lock_live(),
             motion: self.popover_motion(),
             output: output.clone(),
         };

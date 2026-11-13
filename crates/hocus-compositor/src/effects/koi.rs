@@ -1289,7 +1289,7 @@ impl crate::State {
                 .as_ref()
                 .and_then(|k| k.panes.get(&output.name()))
                 .is_some_and(Pond::floor_ready)
-            && !self.fullscreen_in_front(output)
+            && !self.wall_hidden(output)
     }
 
     /// A click at `at` (global, logical) on the wallpaper: on a pond, its
@@ -1353,7 +1353,7 @@ impl crate::State {
                 continue;
             };
             let name = output.name();
-            let on = self.output_powered(output) && !self.fullscreen_in_front(output);
+            let on = self.output_powered(output) && !self.wall_hidden(output);
             let size = (area.size.w as f32, area.size.h as f32);
             let zone = [
                 (zone.x - area.loc.x) as f32,

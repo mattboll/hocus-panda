@@ -368,7 +368,11 @@ impl<Message> canvas::Program<Message> for View<'_> {
         let size = bounds.size();
         let now = Instant::now();
         if self.layer == Layer::Back {
-            background(&mut frame, size, lock.shown.wallpaper, &self.output);
+            // The compositor draws the wallpaper live under the lock
+            // (#807): its background stays clear.
+            if !lock.shown.live {
+                background(&mut frame, size, lock.shown.wallpaper, &self.output);
+            }
             return vec![frame.into_geometry()];
         }
         frame.fill_rectangle(Point::ORIGIN, size, VEIL.get());

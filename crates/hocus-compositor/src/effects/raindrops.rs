@@ -482,7 +482,7 @@ impl crate::State {
                 .raindrops
                 .as_ref()
                 .is_some_and(|r| r.panes.contains_key(&output.name()))
-            && !self.fullscreen_in_front(output)
+            && !self.wall_hidden(output)
     }
 
     /// The rain on the glass moves on to `now` (#802): started as it is
@@ -514,7 +514,7 @@ impl crate::State {
                 continue;
             };
             let name = output.name();
-            if self.output_powered(output) && !self.fullscreen_in_front(output) {
+            if self.output_powered(output) && !self.wall_hidden(output) {
                 on.push(name.clone());
             }
             screens.push((name, (area.size.w as f32, area.size.h as f32)));

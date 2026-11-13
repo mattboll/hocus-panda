@@ -8,6 +8,7 @@
 
 mod creatures;
 mod daylight;
+mod depth;
 mod fireflies;
 mod garland;
 mod koi;
@@ -698,6 +699,7 @@ impl State {
             || self.fx.fireflies.is_some()
             || self.fx.koi.is_some()
             || self.fx.daylight.is_some()
+            || self.fx.depth.is_some()
             || !self.fx.tops.is_empty())
             && purpose.screen()
         {
@@ -907,10 +909,12 @@ impl State {
             elements.push(OutputElements::Fire(k.stand_in));
             (k.pads, k.water)
         });
-        // The daylight's sky (#805), in the wallpaper's place, drawn once
-        // a minute.
+        // Desktops in depth's landscape (#806), drawn as the camera
+        // moves, else the daylight's sky (#805), drawn once a minute: in
+        // the wallpaper's place.
         let mut sky = self
-            .daylight_layer(renderer, &frame)
+            .depth_layer(renderer, &frame)
+            .or_else(|| self.daylight_layer(renderer, &frame))
             .map(OutputElements::Fire);
         // The rain on the glass (#802), right over the wallpaper (or the
         // sky, which it takes), which it covers; the fogged glass alone in
@@ -1707,6 +1711,58 @@ impl State {
             self.record_elements(output, elements);
         }
         ControlFlow::Continue(())
+    }
+
+    /// The wallpaper of `output` as the lock shows it (#807), front first:
+    /// on the screen with the wallpaper's effects playing on it (the
+    /// snow's flakes and ground, the fireflies, the koi's pond, the rain on
+    /// the glass, the daylight's sky, the landscape in depth), nothing
+    /// bound to a window; the still wallpaper in a capture.
+    pub(crate) fn live_wall<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        purpose: Purpose,
+        now: Duration,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders + crate::glass::Glass,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let mut out = Vec::new();
+        let Some(area) = self.space.output_geometry(output) else {
+            return out;
+        };
+        let frame = Frame {
+            output,
+            purpose,
+            now,
+            area,
+            origin: area.loc.to_f64(),
+            scale: output.current_scale().fractional_scale(),
+        };
+        if purpose.screen() {
+            if let Some((_, snow)) = self.snow_layer(&frame) {
+                out.push(OutputElements::Fire(snow));
+            }
+            if let Some((_, flies)) = self.fireflies_layer(&frame) {
+                out.push(OutputElements::Fire(flies));
+            }
+            if let Some(koi) = self.koi_layer(renderer, &frame) {
+                out.push(OutputElements::Fire(koi.pads));
+                out.push(OutputElements::Fire(koi.water));
+            }
+            let mut sky = self
+                .depth_layer(renderer, &frame)
+                .or_else(|| self.daylight_layer(renderer, &frame))
+                .map(OutputElements::Fire);
+            if let Some((_, rain)) = self.raindrops_layer(renderer, &frame, &mut sky) {
+                out.push(OutputElements::Fire(rain));
+            }
+            out.extend(sky);
+        }
+        out.extend(self.backdrop_element(renderer, output));
+        out
     }
 
     /// The wallpaper behind everything, and the panes of glass put in

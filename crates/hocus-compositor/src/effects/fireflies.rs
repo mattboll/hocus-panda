@@ -342,7 +342,7 @@ impl crate::State {
                 continue;
             };
             let name = output.name();
-            if self.output_powered(output) && !self.fullscreen_in_front(output) {
+            if self.output_powered(output) && !self.wall_hidden(output) {
                 on.push(name.clone());
             }
             let zone = [zone.x, zone.y, zone.width, zone.height].map(|v| v as f32);

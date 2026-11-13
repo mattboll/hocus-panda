@@ -134,10 +134,13 @@ impl State {
                 })
                 .map(|(h, _)| h.clone())
                 .collect();
-            let active = self.output_powered(output) && !self.fullscreen_in_front(output);
+            let active = self.output_powered(output) && !self.wall_hidden(output);
             fields.push((name.clone(), area, holders.clone()));
             if active {
-                on.push((name, holders));
+                // Locked, the windows and the bar are not shown: it falls
+                // to the ground alone (#807).
+                let lands = if self.locked() { Vec::new() } else { holders };
+                on.push((name, lands));
             }
         }
         let falling = snowing == Snowing::Falling;
