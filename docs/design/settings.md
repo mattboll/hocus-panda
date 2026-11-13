@@ -1014,7 +1014,17 @@ window is the preview.
 | | Date | menu, each choice with today's date beside it: "En toutes lettres" (jeudi 5 novembre), "Abrégée" (jeu. 5 nov.), "En chiffres" (05/11/2026), "Année d'abord" (2026-11-05) | `[locale] date = "long" \| "short" \| "numeric" \| "iso"` |
 | | Heure | segmented "14:05 \| 2:05 PM" | `[locale] time = "24h" \| "12h"` (none: the session's locale decides, 12 hours in the English of the countries that write it so) |
 | | L'horloge de la barre | link "La barre ›" | (6.4's `[panel.clock]`) |
+| EFFETS · LE FOND D’ÉCRAN | Neige qui tient ("Elle tombe, se pose sur les fenêtres et la barre, et glisse quand on secoue une fenêtre."), Aurore en musique, Pluie sur la vitre, Bassin de koïs, Lucioles du soir, La lumière du jour, Bureaux en profondeur (each with its line) | switch | `[effects] snow`, `aurora`, `rain-on-glass`, `koi`, `fireflies`, `daylight`, `depth` |
+| EFFETS · LES FENÊTRES | Fermer en flammes ("La fenêtre qu’on ferme brûle de bas en haut, à la place de l’animation de fermeture."), Éclats de verre, Fenêtres en gelée, Guirlande sous la fenêtre active | switch | `[effects] flames`, `shatter`, `jelly`, `garland` |
+| EFFETS · LES MOMENTS | Tests au vert : feu d’artifice, Bonne nouvelle d’un agent : confettis | switch | `[effects] fireworks`, `confetti` |
+| EFFETS · LES AGENTS | Les agents en créatures | switch | `[effects] creatures` |
 
+- **The effects** (#434, #793, [effects.md](effects.md)): Settings ›
+  Appearance › Effects is the page's last four groups, as the summary
+  board "Les quatorze effets" groups them; all off by default. An effect
+  not built yet shows "Bientôt" beside its name and its row is inert
+  (drawn at 45 %, its switch takes no click); "Neige qui tient" and
+  "Fermer en flammes" are built so far.
 - **The keyboard**: 6.1's; the segmented controls and the swatches move
   and choose with `←` and `→`; the link opens with `Enter`.
 - **The search** finds the rows by the spec's nearby words and their keys

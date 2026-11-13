@@ -246,6 +246,67 @@ impl Headless {
         self.app.state.rains()
     }
 
+    /// Windows closed and still leaving the screen: fading, raining or
+    /// burning.
+    pub fn leaving(&self) -> usize {
+        self.app.state.departures.leaving.len()
+    }
+
+    /// Windows burning now, or their last sparks (#794).
+    pub fn burning(&self) -> usize {
+        self.app
+            .state
+            .departures
+            .leaving
+            .iter()
+            .filter(|l| l.burn.is_some())
+            .count()
+    }
+
+    /// The agents' creatures drawn in the last frame on a screen (#796):
+    /// each one's window, its agent, its box (global, logical: x, y,
+    /// width, height).
+    pub fn creatures(&self) -> Vec<(WindowId, u64, [f64; 4])> {
+        self.app.state.fx.creatures.drawn()
+    }
+
+    /// The windows the creatures sit on, and how many on each, as decided.
+    pub fn creatures_sitting(&self) -> Vec<(WindowId, usize)> {
+        self.app
+            .state
+            .fx
+            .creatures
+            .shown
+            .iter()
+            .map(|(id, c)| (*id, c.len()))
+            .collect()
+    }
+
+    /// Whether it snows (#795): the snow kept, falling or still.
+    pub fn snowing(&self) -> bool {
+        self.app.state.fx.snow.is_some()
+    }
+
+    /// How much snow window `id`'s cap holds, square logical pixels.
+    pub fn snow_cap(&self, id: WindowId) -> Option<f32> {
+        let snow = self.app.state.fx.snow.as_ref()?;
+        Some(
+            snow.caps
+                .get(&crate::effects::snow::Holder::Window(id))?
+                .volume(),
+        )
+    }
+
+    /// The clumps of snow falling now, on every screen.
+    pub fn snow_clumps(&self) -> usize {
+        self.app
+            .state
+            .fx
+            .snow
+            .as_ref()
+            .map_or(0, |s| s.fields.values().map(|f| f.clumps.len()).sum())
+    }
+
     /// Whether window `app_id` opens in a rain now.
     pub fn raining(&self, app_id: &str) -> bool {
         self.app.state.windows.values().any(|m| {

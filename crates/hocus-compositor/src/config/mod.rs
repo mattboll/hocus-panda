@@ -18,6 +18,7 @@ use crate::shortcuts::Shortcuts;
 mod accessibility;
 mod appearance;
 mod devices;
+mod effects;
 mod keyboard;
 mod outputs;
 mod panel;
@@ -27,6 +28,7 @@ mod windows;
 pub use accessibility::*;
 pub use appearance::*;
 pub use devices::*;
+pub use effects::*;
 pub use keyboard::*;
 pub use outputs::*;
 pub use panel::*;
@@ -61,6 +63,8 @@ pub struct Config {
     pub ink: Ink,
     /// The overview's ways in (docs/design/windows.md §12b).
     pub overview: Overview,
+    /// The desktop's effects, each on or off (#434, docs/design/effects.md).
+    pub effects: Effects,
     /// The magnifier (docs/design/accessibility.md, #424).
     pub magnifier: Magnifier,
     /// Warmer colours in the evening (#436, docs/design/windows.md §14).

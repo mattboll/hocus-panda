@@ -66,16 +66,67 @@ pub struct Agent {
     pub focused: bool,
 }
 
+/// The panes herdr shows, its focused tab's (`pane.layout`, and its
+/// `layout.updated` events): where each is across its terminal, in
+/// columns (#796: a creature over each pane an agent runs in).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Layout {
+    pub tab: String,
+    /// The terminal's columns: the panes' area reaches its right side
+    /// (herdr's sidebar is on its left).
+    pub columns: u16,
+    /// Each pane, its first column and how many it spans.
+    pub panes: Vec<(String, u16, u16)>,
+}
+
+impl Layout {
+    /// From herdr's `PaneLayoutSnapshot` (a `pane_layout` result's or a
+    /// `layout_updated` event's `layout`); none when it is not one, or a
+    /// pane is zoomed (it alone shows).
+    pub fn parse(layout: &Value) -> Option<Self> {
+        let number = |v: &Value, key: &str| {
+            v.get(key)
+                .and_then(Value::as_u64)
+                .and_then(|n| u16::try_from(n).ok())
+        };
+        let area = layout.get("area")?;
+        let (x, width) = (number(area, "x")?, number(area, "width")?);
+        let zoomed = layout.get("zoomed").and_then(Value::as_bool) == Some(true);
+        let panes = layout
+            .get("panes")?
+            .as_array()?
+            .iter()
+            .filter_map(|p| {
+                let rect = p.get("rect")?;
+                Some((
+                    p.get("pane_id")?.as_str()?.to_owned(),
+                    number(rect, "x")?,
+                    number(rect, "width")?,
+                ))
+            })
+            .collect();
+        let tab = layout.get("tab_id")?.as_str()?.to_owned();
+        (!zoomed).then(|| Self {
+            tab,
+            columns: x.saturating_add(width),
+            panes,
+        })
+    }
+}
+
 /// What the thread learns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum News {
     /// herdr runs: every agent, and for each of its clients the
     /// processes it runs under (where its terminal's window is), nearest
-    /// first ([`terminal_processes`]).
+    /// first ([`terminal_processes`]); the panes it shows.
     Agents {
         agents: Vec<Agent>,
         terminals: Vec<Vec<u32>>,
+        layout: Option<Layout>,
     },
+    /// The panes of the tab herdr shows moved or were resized.
+    Layout(Layout),
     /// One agent's state changed.
     State { pane: String, state: Option<State> },
     /// herdr focused this pane.
@@ -294,6 +345,17 @@ fn session(
                         None
                     }
                     Some(Event::Focused(pane)) => Some(News::Focused(pane)),
+                    // The shown tab's panes alone: another tab's change
+                    // shows nothing.
+                    Some(Event::Layout(layout))
+                        if listing.layout.as_ref().is_some_and(|l| l.tab == layout.tab) =>
+                    {
+                        (listing.layout.as_ref() != Some(&layout)).then(|| {
+                            listing.layout = Some(layout.clone());
+                            News::Layout(layout)
+                        })
+                    }
+                    Some(Event::Layout(_)) => None,
                     Some(Event::Workspace { id, label }) => {
                         listing.labels.workspaces.insert(id, label);
                         listing.renamed().map(News::Names)
@@ -372,6 +434,7 @@ struct Listing {
     agents: Vec<Agent>,
     terminals: Vec<Vec<u32>>,
     labels: Labels,
+    layout: Option<Layout>,
 }
 
 impl Listing {
@@ -413,10 +476,16 @@ impl Listing {
             Some(before) => before.terminals.clone(),
             None => terminal_processes(proc),
         };
+        // The panes of the tab it shows (the current pane's); an older
+        // herdr without `pane.layout` gives none.
+        let layout = call(socket, "pane.layout", json!({}))
+            .ok()
+            .and_then(|r| Layout::parse(r.get("layout")?));
         Ok(Self {
             agents,
             terminals,
             labels,
+            layout,
         })
     }
 
@@ -424,6 +493,7 @@ impl Listing {
         News::Agents {
             agents: self.agents.clone(),
             terminals: self.terminals.clone(),
+            layout: self.layout.clone(),
         }
     }
 
@@ -498,6 +568,7 @@ fn subscriptions(panes: &[String]) -> Vec<Value> {
         "tab.created",
         "tab.closed",
         "tab.moved",
+        "layout.updated",
     ]
     .iter()
     .map(|t| json!({ "type": t }))
@@ -535,6 +606,8 @@ enum Event {
     /// Tabs came, went or moved: whether a tab's label shows, and the
     /// numbers herdr labels its unnamed ones with, may change.
     Tabs,
+    /// A tab's panes moved or were resized.
+    Layout(Layout),
 }
 
 /// An event line, whichever spelling herdr gives its name.
@@ -564,6 +637,7 @@ fn event(value: &Value) -> Option<Event> {
             state: state(data.get("agent_status")?.as_str()?),
         }),
         "pane_focused" => Some(Event::Focused(text(data, "pane_id")?)),
+        "layout_updated" => Some(Event::Layout(Layout::parse(data.get("layout")?)?)),
         "pane_created"
         | "pane_closed"
         | "pane_exited"
@@ -1010,6 +1084,25 @@ mod tests {
             event(&json!({ "event": "layout_updated", "data": {} })),
             None
         );
+        // The panes of a tab, in columns: the terminal's are the area's
+        // reach (herdr's sidebar on its left).
+        let layout = json!({ "event": "layout.updated", "data": { "type": "layout_updated",
+            "layout": { "workspace_id": "w1", "tab_id": "w1:t1", "zoomed": false,
+                "area": { "x": 26, "y": 1, "width": 94, "height": 39 },
+                "focused_pane_id": "w1:p1", "splits": [],
+                "panes": [
+                    { "pane_id": "w1:p1", "focused": true,
+                        "rect": { "x": 26, "y": 1, "width": 47, "height": 39 } },
+                    { "pane_id": "w1:p2", "focused": false,
+                        "rect": { "x": 73, "y": 1, "width": 47, "height": 39 } } ] } } });
+        assert_eq!(
+            event(&layout),
+            Some(Event::Layout(Layout {
+                tab: "w1:t1".into(),
+                columns: 120,
+                panes: vec![("w1:p1".into(), 26, 47), ("w1:p2".into(), 73, 47)],
+            }))
+        );
         let info = json!({ "type": "pane_process_info", "shell": { "pid": 300 },
             "foreground_pgid": 400,
             "foreground": [ { "pid": 400, "name": "claude", "argv": ["claude"] } ] });
@@ -1324,9 +1417,9 @@ mod tests {
         let asked = fake.all_asked();
         assert_eq!(
             asked.len(),
-            // The agents, the labels, each agent's processes, the
-            // subscription.
-            1 + 2 + AGENTS + 1,
+            // The agents, the labels, each agent's processes, the panes
+            // shown, the subscription.
+            1 + 2 + AGENTS + 1 + 1,
             "{asked:?}"
         );
         std::thread::sleep(TEST_CALM.most + TEST_CALM.quiet * 2);

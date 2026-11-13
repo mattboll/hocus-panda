@@ -133,6 +133,19 @@ impl State {
             } else {
                 &mut windows
             };
+            // Its creatures (#796), right in front of it.
+            self.creature_elements(renderer, frame, *id, look, out);
+            // Its snow (#795), right in front of it.
+            if look.decorated
+                && let Some(cap) = self.snow_cap(
+                    frame,
+                    &crate::effects::snow::Holder::Window(*id),
+                    look.visual,
+                    look.alpha,
+                )
+            {
+                out.push(OutputElements::Fire(cap));
+            }
             // Raining (#432): through the rain, else fading over its time.
             let rain = look.rain.map(|fade| {
                 (

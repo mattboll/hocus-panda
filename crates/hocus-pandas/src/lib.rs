@@ -25,6 +25,8 @@
 
 use std::time::Duration;
 
+pub mod creature;
+
 /// The drawings' view box, `-3 -3.5 126 120.5`: its size.
 pub const VIEW_BOX: (f32, f32) = (126.0, 120.5);
 /// The secretary's: `0 0 120 120`.
@@ -347,6 +349,13 @@ impl Part {
     /// still drawing to its first keyframe until its phase, then whole
     /// cycles while they fit in the window (or until the window's end when
     /// not one does), then back to the still drawing in [`SETTLE`].
+    /// Where it is `t` s into its animation played on and on, from its
+    /// phase: a creature's (#796) part the board does not move otherwise.
+    fn looping(&self, t: f32) -> Pose {
+        self.anim
+            .at(((t - self.phase) / self.period).rem_euclid(1.0), self.ease)
+    }
+
     fn at(&self, window: f32, t: f32) -> Pose {
         let cycles = ((window - self.phase) / self.period).floor();
         let end = if cycles >= 1.0 {
@@ -531,18 +540,18 @@ fn between<T: Copy>(
 /// A part's transform (CSS's `translate rotate scale`, round its origin)
 /// and its opacity.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Pose {
-    dx: f32,
-    dy: f32,
+pub struct Pose {
+    pub dx: f32,
+    pub dy: f32,
     /// Degrees.
-    turn: f32,
-    sx: f32,
-    sy: f32,
-    opacity: f32,
+    pub turn: f32,
+    pub sx: f32,
+    pub sy: f32,
+    pub opacity: f32,
 }
 
 impl Pose {
-    const REST: Self = Self {
+    pub const REST: Self = Self {
         dx: 0.0,
         dy: 0.0,
         turn: 0.0,
@@ -614,12 +623,18 @@ impl Pose {
             && near(self.opacity, 1.0)
     }
 
-    /// Its SVG matrix round `origin`.
-    fn matrix(&self, (ox, oy): (f32, f32)) -> String {
+    /// Its matrix round `origin`, as SVG's `matrix(a b c d e f)` takes it.
+    pub fn affine(&self, (ox, oy): (f32, f32)) -> [f32; 6] {
         let (sin, cos) = self.turn.to_radians().sin_cos();
         let (a, b, c, d) = (cos * self.sx, sin * self.sx, -sin * self.sy, cos * self.sy);
         let e = ox + self.dx - (a * ox + c * oy);
         let f = oy + self.dy - (b * ox + d * oy);
+        [a, b, c, d, e, f]
+    }
+
+    /// Its SVG matrix round `origin`.
+    fn matrix(&self, origin: (f32, f32)) -> String {
+        let [a, b, c, d, e, f] = self.affine(origin);
         format!("matrix({a:.4} {b:.4} {c:.4} {d:.4} {e:.3} {f:.3})")
     }
 }

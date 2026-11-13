@@ -1424,6 +1424,41 @@ frost = "Frost"
 all_desktops = "All desktops"
 this_desktop_only = "This desktop only"
 
+[settings.effects]
+wallpaper = "EFFECTS · THE WALLPAPER"
+windows = "EFFECTS · THE WINDOWS"
+moments = "EFFECTS · THE MOMENTS"
+agents = "EFFECTS · THE AGENTS"
+soon = "Soon"
+snow = "Snow that settles"
+snow_line = "It falls, settles on the windows and the bar, and slides off a shaken window."
+aurora = "Aurora to the music"
+aurora_line = "The wallpaper ripples to what plays in the bar."
+rain_on_glass = "Rain on the glass"
+rain_on_glass_line = "On rainy days, drops run down the wallpaper, never over the windows."
+koi = "Koi pond"
+koi_line = "The carp swim, and come to the pointer."
+fireflies = "Evening fireflies"
+fireflies_line = "After sunset, they drift and blink over the wallpaper."
+daylight = "Daylight"
+daylight_line = "The windows’ shadows turn with the sun; in the evening, the light grows warm."
+depth = "Desktops in depth"
+depth_line = "Switching desktops travels through a landscape."
+flames = "Close in flames"
+flames_line = "A closing window burns from the bottom up, instead of the closing animation."
+shatter = "Shattering glass"
+shatter_line = "A closing window shatters into shards."
+jelly = "Jelly windows"
+jelly_line = "A dragged window bends like jelly, then settles."
+garland = "A garland under the active window"
+garland_line = "It hangs under the active window, never over what you read."
+fireworks = "Tests pass: fireworks"
+fireworks_line = "When an agent finishes with all its tests passing, once, behind the windows."
+confetti = "An agent’s good news: confetti"
+confetti_line = "A merged pull request, a release: the bar says who and why."
+creatures = "The agents as creatures"
+creatures_line = "A panda on the edge of each agent’s window: it types, sleeps, jumps for joy."
+
 [settings.keyboard]
 layouts = "LAYOUTS"
 key_repeat = "KEY REPEAT"
@@ -2628,6 +2663,9 @@ screen_recording_from = "Screen recording from {day} {time}.{ext}"
 and = " and "
 not_reopened = { other = "{listed} could not be reopened." }
 
+
+[compositor.creatures]
+other_tab = "{name} · other tab"
 
 [compositor.overview]
 badge_waiting = { other = "{n} waiting" }
