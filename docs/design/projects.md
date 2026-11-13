@@ -560,17 +560,26 @@ the card, the toasts and the notification, against the canvas.
 
 ## 13. Open questions
 
-On the canvas too ("Questions ouvertes"):
+Decided by the maintainer (2026-11-13):
+
+- B. A new project opens a terminal in its folder only when its desktop
+  is empty (made from the launcher onto an empty desktop); a desktop
+  that already has windows gets nothing new.
+- C. Yes: every terminal, on any desktop, comes back in the folder it
+  was in at log in (the same mechanism as projects', lot B).
+- D. A browser set to restore its own windows keeps doing so at log in;
+  Hocuspanda opens no tabs twice and only puts each browser window back
+  on its project's desktop. Hocuspanda reopens tabs itself when a
+  closed project is reopened, and at log in only for a browser that
+  does not restore its own session.
+- F. Yes: Settings › Desktops, « Retenir les onglets des projets », on
+  by default. Private windows are never read either way.
+
+Still open (on the canvas too, "Questions ouvertes"):
 
 - A. The project's full name always in the mini form? (The canvas: the
   monogram only, the name as desktops switch.)
-- B. Does a new project open a terminal in its folder?
-- C. Do terminals of desktops that are not projects come back in their
-  folders at log in too?
-- D. Firefox or Chromium set to restore their own windows: leave it to
-  them at log in (as now), or take over?
 - E. herdr: bring back its session, or only its agents?
-- F. A setting to never read the tabs?
 - G. Projects in the Settings (rename, change the folder, forget)?
 - H. Nine projects open and a tenth asked: what is said, what is offered?
 - I. Projects found without the word "projet" (typing "hocus")?
