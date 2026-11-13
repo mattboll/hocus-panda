@@ -124,6 +124,42 @@ impl Mesh {
         Some(index)
     }
 
+    /// Into `out`, the indices of its triangles that reach into `x0, y0,
+    /// x1, y1` (its places' space): what a draw cut to it needs (#815).
+    pub fn indices_within(&self, [x0, y0, x1, y1]: [f32; 4], out: &mut Vec<u16>) {
+        out.clear();
+        let at = |i: u16| {
+            let i = usize::from(i) * FLOATS;
+            match self.vertices.get(i..i + 2) {
+                Some(&[x, y]) => Some((x, y)),
+                _ => None,
+            }
+        };
+        for t in self.indices.as_chunks::<3>().0 {
+            let [i, j, k] = *t;
+            let (Some(a), Some(b), Some(c)) = (at(i), at(j), at(k)) else {
+                continue;
+            };
+            let (lo_x, hi_x) = (a.0.min(b.0).min(c.0), a.0.max(b.0).max(c.0));
+            let (lo_y, hi_y) = (a.1.min(b.1).min(c.1), a.1.max(b.1).max(c.1));
+            if lo_x <= x1 && hi_x >= x0 && lo_y <= y1 && hi_y >= y0 {
+                out.extend_from_slice(t);
+            }
+        }
+    }
+
+    /// Its places moved by `x, y`.
+    pub fn shift(&mut self, x: f32, y: f32) {
+        for v in self.vertices.as_chunks_mut::<FLOATS>().0 {
+            let [vx, vy, ..] = v;
+            *vx += x;
+            *vy += y;
+        }
+        if let Some([x0, y0, x1, y1]) = self.bounds {
+            self.bounds = Some([x0 + x, y0 + y, x1 + x, y1 + y]);
+        }
+    }
+
     pub fn triangle(&mut self, a: u16, b: u16, c: u16) {
         self.indices.extend_from_slice(&[a, b, c]);
     }

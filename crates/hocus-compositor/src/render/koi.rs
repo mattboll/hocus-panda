@@ -25,7 +25,7 @@ use crate::{
     effects::{
         FireElement, Plays,
         draw::{Clip, KoiLook},
-        kept::Tiles,
+        kept::{self, Tiles},
         koi::{CELL, Pond, Water},
         mesh::{self, Mesh},
     },
@@ -70,6 +70,7 @@ impl State {
     where
         R: Shaders,
     {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Koi);
         let pond = self.pond_on(frame)?;
         let screen: Rectangle<i32, Physical> = Rectangle::from_size(
             frame
@@ -226,5 +227,5 @@ fn water_changes(
     drawn.under = under;
     let (changed, all) = tiles.count();
     tracing::trace!(changed, all, "the koi's water changed");
-    Some(tiles.rects(size))
+    Some(kept::fewer(tiles.rects(size), size))
 }

@@ -30,6 +30,7 @@ impl State {
     where
         R: Shaders,
     {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Daylight);
         if !frame.purpose.screen() || !self.sky_shows_on(frame.output) {
             return None;
         }

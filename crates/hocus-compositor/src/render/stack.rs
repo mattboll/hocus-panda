@@ -112,6 +112,7 @@ impl State {
             area,
             origin,
             scale,
+            ..
         } = *frame;
         let palette_target = palette.and_then(|(_, window, _)| window);
         let mut target = Vec::new();

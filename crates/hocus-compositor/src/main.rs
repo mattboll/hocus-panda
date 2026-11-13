@@ -112,6 +112,10 @@ enum RendererArg {
     Gles,
     /// Software rendering.
     Pixman,
+    /// GLES on Mesa's software device (llvmpipe), headless only, never a
+    /// GPU: to measure what the compositor's own code costs on a machine
+    /// whose GPU must not be touched (docs/performance.md).
+    GlesSoftware,
 }
 
 fn main() -> ExitCode {
@@ -178,6 +182,7 @@ fn main() -> ExitCode {
         RendererArg::Auto => RendererChoice::Auto,
         RendererArg::Gles => RendererChoice::Gles,
         RendererArg::Pixman => RendererChoice::Pixman,
+        RendererArg::GlesSoftware => RendererChoice::GlesSoftware,
     };
     let options = Options {
         backend: match backend {

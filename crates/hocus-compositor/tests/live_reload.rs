@@ -37,7 +37,10 @@ fn pixman() -> HeadlessConfig {
 /// The developer mode on: a program can be given.
 fn developer() -> Config {
     Config {
-        developer: Developer { live_reload: true },
+        developer: Developer {
+            live_reload: true,
+            ..Developer::default()
+        },
         ..Config::default()
     }
 }

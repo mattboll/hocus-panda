@@ -19,6 +19,7 @@ impl State {
     where
         R: Shaders,
     {
+        let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Depth);
         if !frame.purpose.screen() || !self.depth_shows_on(frame.output) {
             return None;
         }

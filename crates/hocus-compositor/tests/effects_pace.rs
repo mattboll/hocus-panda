@@ -2,15 +2,18 @@
 //! docs/design/effects.md), on the held clock and on GLES (Mesa's
 //! software device, or the GPU `HOCUS_TEST_GPU` names): they move on at
 //! most 60 times a second whatever the screen's refresh, and the snow
-//! falling tells the screen its flakes' places alone, not the screen; the
-//! koi's pond and the rain on the glass the same.
+//! falling tells the screen a few places, not one for each flake; the
+//! koi's pond and the rain on the glass move on at 60 too. Under a maximised
+//! window, the pond waits.
 
 use crate::common;
 
 use std::time::Duration;
 
 use common::open_with;
-use hocus_compositor::{Config, Headless, HeadlessConfig, OutputSpec, model::Rect};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, OpenSize, OutputSpec, WindowRule, model::Rect,
+};
 
 const SCREEN: (i32, i32) = (1280, 800);
 
@@ -76,13 +79,18 @@ fn on_a_165_hz_screen_they_move_on_60_times_a_second() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The snow's flakes, everywhere on the wallpaper and all moving, are told
+/// to the damage tracker in a few places, not one each: its time goes by
+/// the rectangle (a few thousand cost the loop 3 ms a frame) more than by
+/// the pixel, which the GPU draws (#815, second pass).
 #[test]
-fn snow_falling_redraws_its_flakes_not_the_screen() -> anyhow::Result<()> {
+fn snow_falling_tells_the_screen_a_few_places() -> anyhow::Result<()> {
     let mut config = Config::default();
     config.effects.snow = true;
     let (mut hp, _client) = bed(config)?;
     anyhow::ensure!(hp.snowing(), "no snow");
     hp.take_damage_area(0);
+    hp.take_damage_rects(0);
     let drawn = hp.frames_on(0);
     for _ in 0..60 {
         hp.step(Duration::from_micros(16_667))?;
@@ -90,12 +98,13 @@ fn snow_falling_redraws_its_flakes_not_the_screen() -> anyhow::Result<()> {
     let drawn = hp.frames_on(0) - drawn;
     let screen = (SCREEN.0 * SCREEN.1) as u64;
     let each = hp.take_damage_area(0) / drawn.max(1);
+    let rects = hp.take_damage_rects(0) / drawn.max(1);
     eprintln!(
-        "{drawn} frames, {each} pixels drawn over each ({} %)",
+        "{drawn} frames, {rects} rectangles and {each} pixels drawn over each ({} %)",
         each * 100 / screen
     );
     assert!(drawn >= 55, "it falls: {drawn} frames");
-    assert!(each < screen / 4, "{each} pixels a frame of {screen}");
+    assert!(rects <= 400, "{rects} rectangles a frame");
     Ok(())
 }
 
@@ -150,5 +159,49 @@ fn the_koi_and_the_rain_on_the_glass_move_on_60_times_a_second_too() -> anyhow::
             );
         }
     }
+    Ok(())
+}
+
+#[test]
+fn under_a_maximised_window_the_pond_waits() -> anyhow::Result<()> {
+    let mut config = Config::default();
+    config.windows.rules.push(WindowRule {
+        app_id: "test.big".into(),
+        desktop: None,
+        size: OpenSize::Maximized,
+        above: false,
+    });
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![OutputSpec::new(SCREEN.0, SCREEN.1)],
+            ..common::gles()
+        },
+        config.clone(),
+    )?;
+    if hp.renderer() != "gles" {
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
+    }
+    let (_, client) = open_with(&mut hp, "test.big", (400, 300), false)?;
+    common::at_rest(&mut hp)?;
+    hp.hold_clock();
+    let mut koi = config;
+    koi.effects.koi = true;
+    hp.reconfigure(koi);
+    // The pond's floor is drawn by a worker.
+    for _ in 0..500 {
+        if hp.koi("HEADLESS-1").is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        hp.step(Duration::from_micros(16_667))?;
+    }
+    anyhow::ensure!(hp.koi("HEADLESS-1").is_some(), "no pond");
+    let moved = at_165_hz(&mut hp)?;
+    assert_eq!(moved, 0, "the koi swim under the window");
+    // Uncovered, they swim on.
+    let _ = client.commands.send(common::Command::Close);
+    hp.dispatch_until(common::WAIT, |hp| hp.windows().is_empty())?;
+    let moved = at_165_hz(&mut hp)?;
+    assert!((57..=61).contains(&moved), "{moved} effect frames");
     Ok(())
 }

@@ -1143,6 +1143,7 @@ impl TtyBackend {
             return;
         }
         let started = std::time::Instant::now();
+        let _frame = crate::effects::timing::frame();
         let output = screen.output.clone();
         // What the frame did: drawn (or nothing to draw), and what its
         // elements' states were; `None` when it failed.
