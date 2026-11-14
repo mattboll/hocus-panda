@@ -340,6 +340,8 @@ pub struct Card {
     pub surface: window::Id,
     pub shown: ProjectCard,
     pub logged: String,
+    /// Its tabs all shown ("3 de plus"), not four a window.
+    pub more: bool,
 }
 
 /// The confirmation open, and what holds the keyboard there.
@@ -756,6 +758,7 @@ impl Projects {
             surface,
             shown,
             logged: String::new(),
+            more: false,
         }));
         others_close();
     }

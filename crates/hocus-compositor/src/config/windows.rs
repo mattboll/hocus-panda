@@ -12,6 +12,11 @@ pub struct Desktops {
     /// Their names, by position (6.14): one missing or empty is "Bureau
     /// N" (the shell's words).
     pub names: Vec<String>,
+    /// A project's browsers' tabs are read from their session files and
+    /// come back with it (docs/design/projects.md §8.3, §13 F); off, no
+    /// browser file is read and browsers come back as plain applications.
+    #[serde(rename = "remember-tabs")]
+    pub remember_tabs: bool,
 }
 
 impl Default for Desktops {
@@ -19,6 +24,7 @@ impl Default for Desktops {
         Self {
             count: crate::desktops::DEFAULT_COUNT,
             names: Vec::new(),
+            remember_tabs: true,
         }
     }
 }

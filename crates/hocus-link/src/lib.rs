@@ -101,11 +101,12 @@ pub use mcp::{
     McpShown, McpSummary, McpToast, McpWhy,
 };
 pub use projects::{
-    CardWindow, ComingBack, DeskProject, Interrupted, NAME_MOST, NameFault, PROJECT_CARD_NAMESPACE,
-    PROJECT_CARD_RADIUS, PROJECT_CARD_WIDTH, PROJECT_CLOSE_NAMESPACE, PROJECT_CLOSE_RADIUS,
-    PROJECT_CLOSE_WIDTH, PROJECT_DIM, PROJECT_DIM_ALPHA, PROJECT_FORM_NAMESPACE,
-    PROJECT_FORM_RADIUS, PROJECT_FORM_WIDTH, PROJECT_RISE, ProjectCard, ProjectConfirm,
-    ProjectForm, ProjectRefusal, ProjectRow, ProjectState, WindowPlace, is_project_surface,
+    CARD_TABS_MOST, CardTab, CardTabs, CardWindow, ComingBack, DeskProject, Interrupted, NAME_MOST,
+    NameFault, PROJECT_CARD_NAMESPACE, PROJECT_CARD_RADIUS, PROJECT_CARD_WIDTH,
+    PROJECT_CLOSE_NAMESPACE, PROJECT_CLOSE_RADIUS, PROJECT_CLOSE_WIDTH, PROJECT_DIM,
+    PROJECT_DIM_ALPHA, PROJECT_FORM_NAMESPACE, PROJECT_FORM_RADIUS, PROJECT_FORM_WIDTH,
+    PROJECT_RISE, ProjectCard, ProjectConfirm, ProjectForm, ProjectRefusal, ProjectRow,
+    ProjectState, WindowPlace, is_project_surface,
 };
 pub use record::{RECORD_COUNTDOWN, RECORD_FPS, RecordAsk, RecordFormat, Recorded, RecordingShown};
 pub use share::{

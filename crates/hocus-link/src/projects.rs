@@ -227,7 +227,31 @@ pub struct CardWindow {
     pub focused: bool,
     #[serde(default, serialize_with = "tidy::maybe_name")]
     pub terminal: Option<String>,
+    /// A browser window's tabs, when they were read (§4, §8.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tabs: Option<CardTabs>,
 }
+
+/// A browser window's tabs as a card shows them (§4): how many, and the
+/// first ones' titles and hosts, never their whole addresses (§10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardTabs {
+    pub count: u32,
+    pub shown: Vec<CardTab>,
+}
+
+/// A tab's title and host (`github.com`), as the card shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardTab {
+    #[serde(serialize_with = "tidy::title")]
+    pub title: String,
+    #[serde(serialize_with = "tidy::name")]
+    pub host: String,
+}
+
+/// The tabs a card is told of at most: it shows four, then the others as
+/// it opens up (§4).
+pub const CARD_TABS_MOST: usize = 24;
 
 /// A project's card opens (§4): under desktop `desktop`'s thumbnail in the
 /// overview (`at`, logical pixels from its screen's top left corner), or,
@@ -275,6 +299,14 @@ pub enum ComingBack {
         #[serde(serialize_with = "tidy::name")]
         entry: String,
         count: u32,
+    },
+    /// A browser window, with its tabs (`tabs` of them).
+    Browser {
+        #[serde(serialize_with = "tidy::name")]
+        app: String,
+        #[serde(serialize_with = "tidy::name")]
+        entry: String,
+        tabs: u32,
     },
     /// A terminal, in its folder.
     Terminal {

@@ -759,3 +759,56 @@ A comes first; B needs A; C and D need B and not each other.
   (`a_project_follows_its_windows_to_another_screen_and_back`).
   Screenshots: `HOCUS_SHOTS=… cargo nextest run -p hocus-compositor
   projects_shots::closing_and_reopening --run-ignored only`.
+
+### Lot C, browser tabs (2026-11-14)
+
+- **Read** (`crates/hocus-compositor/src/browsers.rs`), on the projects'
+  thread as a card or the confirmation opens and as a project closes, on
+  the session's thread as it ends (the windows on a project's desktop):
+  Firefox's profile locked by a live process (`lock`'s `IP:+PID`), else
+  the one whose session was written last; its
+  `sessionstore-backups/recovery.jsonlz4` (else `sessionstore.jsonlz4`),
+  mozLz4 decoded by an LZ4 block reader of our own (no dependency), its
+  `windows` and `_closedWindows`, a window with `isPrivate` left out.
+  Chromium's (`chromium`, `google-chrome`, `brave-browser`, `vivaldi`,
+  `microsoft-edge` app ids) last used profile and newest
+  `Sessions/Session_*`, its SNSS commands read for windows (normal ones),
+  tabs, their navigations, the shown entry and tab, pinned, tabs and
+  windows closed. A window's title without its browser's suffix is
+  matched with each file window's shown tab's title, then the nearest
+  size, then the order; a title saying private (Private Browsing,
+  Navigation privée, Incognito, InPrivate) is never matched and its
+  window keeps no tabs. Each browser's profile is remembered by the
+  thread, read again once its windows closed (Firefox's lock goes as it
+  quits). The log says how many tabs, never an address nor a title.
+- **Closing** reads the tabs with the other windows, then, once the
+  windows went, a second later the files again (§5 step 3), the closed
+  windows first; what it finds replaces the first read.
+- **Saved** as `[window.browser]` (`kind`, `selected` from 1, `[[window.browser.tab]]`
+  `url`, `title`, `pinned`); a window not found keeps `kind` alone.
+- **Brought back**: one start a window holding its addresses (those with
+  a scheme, never an option, 200 at most): Chromium's `--new-window
+  URL…`; Firefox's `--new-window URL` for one, the addresses alone for
+  several, which Firefox's `nsDefaultCommandLineHandler` opens together
+  in one new window when there is more than one (checked in
+  `BrowserContentHandler.sys.mjs`). The selected tab is not selected
+  again (no browser takes it on its command line). A window not found
+  comes back as a new window and the notification says "Les onglets d’une
+  fenêtre de Firefox n’ont pas pu être lus." At log in, a browser whose
+  preferences reopen its own session (§13 D) starts once without
+  addresses; a window that shows a saved tab's title as it maps takes that
+  place, else the first of its application's.
+- **The setting** `[desktops] remember-tabs` (Settings › Desktops,
+  « Retenir les onglets des projets », on): off, nothing is read and
+  browsers come back as plain applications.
+- **The card** lists "ONGLETS · FIREFOX · 7" per browser window, each
+  tab's title and host (the shell never gets an address), four, then "3
+  de plus" / "Moins"; the confirmation says "Firefox, avec ses 4
+  onglets".
+- **Tests**: test 6
+  (`projects::a_projects_browsers_come_back_with_their_tabs`: a fake
+  Firefox profile and the committed SNSS file
+  `tests/data/Session_13400000000000000`, built by
+  `browsers::tests::snss_file`, `HOCUS_SNSS_WRITE=1` writes it again);
+  unit tests for mozLz4, the session JSON, SNSS, the matching, the
+  addresses given, the profile found.

@@ -523,7 +523,8 @@ fn display_socket() -> PathBuf {
 }
 
 /// An application started by its entry: a window of [`APP_ID`] that closes
-/// when asked, unless [`APP_STUBBORN`] is set. Run alone, it does nothing.
+/// when asked, unless [`APP_STUBBORN`] is set, titled [`TERMINAL_TITLE`]
+/// when it is set. Run alone, it does nothing.
 #[test]
 fn app_program() -> anyhow::Result<()> {
     let Ok(app) = std::env::var(APP_ID) else {
@@ -539,6 +540,9 @@ fn app_program() -> anyhow::Result<()> {
             popup: false,
         }),
     )?;
+    if let Ok(title) = std::env::var(TERMINAL_TITLE) {
+        client.commands.send(common::Command::Title(title.leak()))?;
+    }
     while let Ok(event) = client.events.recv() {
         if event == common::Event::CloseRequested && !stubborn {
             break;
@@ -1367,5 +1371,224 @@ fn a_project_follows_its_windows_to_another_screen_and_back() -> anyhow::Result<
     })?;
     anyhow::ensure!(back, "{:?}", hp.projects());
     assert_eq!(hp.project_windows("hocus-site"), [site]);
+    Ok(())
+}
+
+// --- Lot C: browsers' tabs ----------------------------------------------------------------
+//
+// Test 6 (docs/design/projects.md §12). A fake Firefox profile and a fake
+// Chromium profile in the test's own home; the browsers are stand-ins (the
+// test's own program) that write the arguments they are given.
+
+/// A browser stand-in's entry `app` (its id and its windows' app id): a
+/// wrapper writing its arguments into `marks/APP`, a line each start,
+/// then running [`app_program`].
+fn browser_wrapper(places: &Places, app: &str, name: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let exe = std::env::current_exe()?;
+    let dir = places.root.join("applications");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(places.root.join("marks"))?;
+    let wrapper = places.root.join(format!("{app}-wrapper"));
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n\
+             exec env {APP_ID}={app} '{}' --exact projects::app_program --nocapture\n",
+            places.root.join("marks").join(app).display(),
+            exe.display()
+        ),
+    )?;
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::write(
+        dir.join(format!("{app}.desktop")),
+        format!(
+            "[Desktop Entry]\nType=Application\nName={name}\nCategories=Network;WebBrowser;\n\
+             Exec=sh {}\n",
+            wrapper.display()
+        ),
+    )?;
+    Ok(wrapper)
+}
+
+/// The lines of arguments browser `app`'s stand-in was started with.
+fn browser_marks(places: &Places, app: &str) -> Vec<String> {
+    std::fs::read_to_string(places.root.join("marks").join(app))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// mozLz4 of `data`: its header and size, one LZ4 block of literals.
+fn mozlz4(data: &[u8]) -> Vec<u8> {
+    let mut out = b"mozLz40\0".to_vec();
+    out.extend_from_slice(&u32::try_from(data.len()).unwrap_or(0).to_le_bytes());
+    let n = data.len();
+    if n >= 15 {
+        out.push(0xF0);
+        let mut rest = n - 15;
+        while rest >= 255 {
+            out.push(255);
+            rest -= 255;
+        }
+        out.push(u8::try_from(rest).unwrap_or(0));
+    } else {
+        out.push(u8::try_from(n).unwrap_or(0) << 4);
+    }
+    out.extend_from_slice(data);
+    out
+}
+
+/// A Firefox profile in `home`, running (its lock names this process),
+/// its session holding a window shown as "hocus-site · Accueil" and a
+/// private one; and a Chromium profile whose session is the committed SNSS
+/// file.
+fn browser_profiles(home: &Path) -> anyhow::Result<()> {
+    let root = home.join(".mozilla/firefox");
+    let profile = root.join("t1.default-release");
+    std::fs::create_dir_all(profile.join("sessionstore-backups"))?;
+    std::fs::write(
+        root.join("profiles.ini"),
+        "[Profile0]\nName=default-release\nIsRelative=1\nPath=t1.default-release\nDefault=1\n",
+    )?;
+    std::os::unix::fs::symlink(
+        format!("127.0.1.1:+{}", std::process::id()),
+        profile.join("lock"),
+    )?;
+    let session = r#"{"version":["sessionrestore",1],"windows":[
+        {"tabs":[
+          {"entries":[{"url":"http://localhost:4321/","title":"hocus-site · Accueil"}],"index":1},
+          {"entries":[{"url":"https://example.org/","title":"x"},{"url":"https://docs.astro.build/","title":"Astro Docs"}],"index":2,"pinned":true}],
+         "selected":1,"width":500,"height":400},
+        {"isPrivate":true,"tabs":[{"entries":[{"url":"https://secret.example/","title":"Secret"}],"index":1}],"selected":1}],
+      "_closedWindows":[]}"#;
+    std::fs::write(
+        profile.join("sessionstore-backups/recovery.jsonlz4"),
+        mozlz4(session.as_bytes()),
+    )?;
+    let sessions = home.join(".config/chromium/Default/Sessions");
+    std::fs::create_dir_all(&sessions)?;
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/Session_13400000000000000"),
+        sessions.join("Session_13400000000000000"),
+    )?;
+    Ok(())
+}
+
+/// Test 6: a project's Firefox and Chromium windows are matched by their
+/// titles to their browsers' files, their tabs saved in order with the
+/// one shown, a private window's never; reopened, each comes back as one
+/// new window holding its addresses; one not found comes back without its
+/// tabs, said.
+#[test]
+fn a_projects_browsers_come_back_with_their_tabs() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    browser_profiles(&home)?;
+    let firefox = browser_wrapper(&places, "firefox", "Firefox")?;
+    let chromium = browser_wrapper(&places, "chromium", "Chromium")?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        ..config_with_apps(&places)
+    })?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-site", &places.folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let mut started = Vec::new();
+    for (wrapper, title) in [
+        (&firefox, "hocus-site · Accueil — Mozilla Firefox"),
+        (&firefox, "Secret — Mozilla Firefox Private Browsing"),
+        (&chromium, "smithay · docs.rs - Chromium"),
+        (&chromium, "Not in its file - Chromium"),
+    ] {
+        let before = hp.all_windows().len();
+        started.push(
+            std::process::Command::new("sh")
+                .arg(wrapper)
+                .env("WAYLAND_DISPLAY", hp.socket())
+                .env(TERMINAL_TITLE, title)
+                .spawn()?,
+        );
+        let shown = hp.dispatch_until(WAIT, |hp| hp.all_windows().len() > before)?;
+        anyhow::ensure!(shown, "{title} never showed");
+    }
+    wait(&mut hp, Duration::from_millis(300))?;
+    let opened = |app: &str| browser_marks(&places, app).len();
+    let (firefox_before, chromium_before) = (opened("firefox"), opened("chromium"));
+
+    hp.project_close("hocus-site")
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    closed(&mut hp, "hocus-site")?;
+    for mut child in started {
+        let _ = child.wait();
+    }
+    // Saved: each window found by its title, its tabs in order and the one
+    // shown; the private window's none; the one not found, none read.
+    let mut tabs = hp.project_tabs("hocus-site");
+    tabs.sort();
+    let urls = |u: &[&str]| u.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        tabs,
+        [
+            ("chromium".to_owned(), Some((0, Vec::new()))),
+            (
+                "chromium".to_owned(),
+                Some((
+                    2,
+                    urls(&["https://github.com/a/b/pull/1", "https://docs.rs/smithay"])
+                ))
+            ),
+            ("firefox".to_owned(), None),
+            (
+                "firefox".to_owned(),
+                Some((
+                    1,
+                    urls(&["http://localhost:4321/", "https://docs.astro.build/"])
+                ))
+            ),
+        ]
+    );
+    let file = places
+        .root
+        .join("state/hocuspanda/projects.d/hocus-site.toml");
+    let written = hp.dispatch_until(WAIT, |_| file.exists())?;
+    anyhow::ensure!(written, "no contents' file");
+    let text = std::fs::read_to_string(&file)?;
+    assert!(text.contains("[[window.browser.tab]]"), "{text}");
+    assert!(!text.contains("secret"), "a private window's tab: {text}");
+
+    // Reopened: one new window each, holding its addresses.
+    hp.project_open("hocus-site", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let back = hp.dispatch_until(WAIT, |hp| !hp.project_coming_back("hocus-site"))?;
+    anyhow::ensure!(back, "not back: {:?}", hp.all_windows());
+    let mut firefox_now = browser_marks(&places, "firefox").split_off(firefox_before);
+    firefox_now.sort();
+    assert_eq!(
+        firefox_now,
+        ["", "http://localhost:4321/ https://docs.astro.build/"]
+    );
+    let mut chromium_now = browser_marks(&places, "chromium").split_off(chromium_before);
+    chromium_now.sort();
+    assert_eq!(
+        chromium_now,
+        [
+            "",
+            "--new-window https://github.com/a/b/pull/1 https://docs.rs/smithay"
+        ]
+    );
+    assert_eq!(hp.project_windows("hocus-site").len(), 4);
+    let (summary, body) = hp
+        .project_not_back()
+        .context("the window without its tabs")?;
+    assert_eq!(
+        summary,
+        "hocus-site est revenu, sauf les onglets de Chromium"
+    );
+    assert_eq!(
+        body,
+        "Les onglets d’une fenêtre de Chromium n’ont pas pu être lus."
+    );
     Ok(())
 }

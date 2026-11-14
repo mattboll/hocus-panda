@@ -18,6 +18,7 @@ pub mod auth;
 pub mod away;
 mod backend;
 mod bar_keys;
+mod browsers;
 mod bubbles;
 mod capture;
 mod clipboard;

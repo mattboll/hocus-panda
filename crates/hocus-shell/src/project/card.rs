@@ -16,8 +16,11 @@
 //! "Rouvrir" (closed, the accent) on the right. Closed, its badge and pill
 //! are grey and it says when it was closed.
 //!
-//! The tabs and the agents' conversations come with the lots that read
-//! them (C, D).
+//! Then, past a divider each, a browser window's tabs (lot C): "ONGLETS ·
+//! FIREFOX · 7" and a 26 px row per tab, its title (13 px) and its host
+//! (11.5 px), four, then "3 de plus" (12.5 px, 600, the accent's text),
+//! which shows them all ("Moins" again). The agents' conversations come
+//! with lot D.
 
 use hocus_a11y::Role;
 use iced::{
@@ -77,6 +80,13 @@ const BUTTON: f32 = 36.0;
 const BUTTON_PAD: f32 = 16.0;
 const BUTTON_TEXT: f32 = 13.5;
 const BUTTON_RADIUS: f32 = 9.0;
+const TAB_ROW: f32 = 26.0;
+const TAB_ICON: f32 = 12.0;
+const MORE_TEXT: f32 = 12.5;
+/// The tabs a window shows before "3 de plus".
+const TABS_SHOWN: usize = 4;
+/// The tabs' little squares, as the mockup colours them, by their hosts.
+const TAB_COLOURS: [u32; 6] = [0xEEF1F6, 0xF2945B, 0x8FB3FF, 0xFF7A45, 0xD97757, 0xC3B4FF];
 /// The windows listed at most; the sketch shows them all.
 const MOST: usize = 8;
 
@@ -122,7 +132,76 @@ pub enum Msg {
     Key(crate::popover::Pressed),
     /// "Fermer le projet…" or "Rouvrir".
     Act,
+    /// "3 de plus", or "Moins".
+    More,
     Stale,
+}
+
+/// A browser window's tabs as the card shows them: its heading, its tabs
+/// shown, and its button's words when it has more than four.
+struct Tabs {
+    heading: String,
+    shown: Vec<hocus_link::CardTab>,
+    more: Option<String>,
+}
+
+/// The browsers' windows' tabs, front first.
+fn tab_sections(shown: &hocus_link::ProjectCard, more: bool, words: Words) -> Vec<Tabs> {
+    use hocus_words::shell::project as txt;
+    shown
+        .windows
+        .iter()
+        .filter_map(|w| {
+            let tabs = w.tabs.as_ref().filter(|t| t.count > 0)?;
+            let browser = super::app_name(&w.entry, &w.app).to_uppercase();
+            let heading = txt::tabs_heading(
+                words.lang,
+                txt::TabsHeading {
+                    browser: &browser,
+                    count: tabs.count,
+                },
+            );
+            let count = tabs.count as usize;
+            let button = (count > TABS_SHOWN).then(|| {
+                if more {
+                    txt::TABS_FEWER.get(words.lang).to_owned()
+                } else {
+                    txt::tabs_more(words.lang, count - TABS_SHOWN)
+                }
+            });
+            let shown = tabs
+                .shown
+                .iter()
+                .take(if more { usize::MAX } else { TABS_SHOWN })
+                .cloned()
+                .collect();
+            Some(Tabs {
+                heading,
+                shown,
+                more: button,
+            })
+        })
+        .collect()
+}
+
+fn tabs_height(sections: &[Tabs]) -> f32 {
+    sections
+        .iter()
+        .map(|t| {
+            let n = t.shown.len() as f32;
+            let rows = if n > 0.0 {
+                n * TAB_ROW + (n - 1.0) * ROW_GAP
+            } else {
+                0.0
+            };
+            let button = if t.more.is_some() {
+                ROW_GAP + TAB_ROW
+            } else {
+                0.0
+            };
+            GAP + DIVIDER + GAP + HEADING * LINE + HEADING_BOTTOM + rows + button
+        })
+        .sum()
 }
 
 /// A window of the card: its id, icon's app, title and place.
@@ -186,14 +265,20 @@ fn windows_height(count: usize) -> f32 {
     (HEADING * LINE + HEADING_BOTTOM + rows).max(SKETCH.height)
 }
 
-/// Its size, logical pixels.
-pub fn size(shown: &hocus_link::ProjectCard, _words: Words) -> (u32, u32) {
+/// Its size, logical pixels, its tabs four a window.
+pub fn size(shown: &hocus_link::ProjectCard, words: Words) -> (u32, u32) {
+    size_of(shown, false, words)
+}
+
+/// Its size, logical pixels, its tabs all shown when `more`.
+pub fn size_of(shown: &hocus_link::ProjectCard, more: bool, words: Words) -> (u32, u32) {
     let private = PRIVATE * LINE + 2.0 * PRIVATE_PAD.0;
     let height = 2.0 * (BORDER + PAD)
         + BADGE
         + GAP
         + windows_height(shown.windows.len())
         + terminals_height(terminals(shown).len())
+        + tabs_height(&tab_sections(shown, more, words))
         + GAP
         + private
         + GAP
@@ -235,6 +320,7 @@ fn handle(projects: &Lent<Projects>, message: Msg) {
         let effects = match &message {
             Msg::Stale => Vec::new(),
             Msg::Act => act(p, now),
+            Msg::More => more(p),
             Msg::Key(pressed) => key(p, pressed, now),
         };
         (effects, p.due().is_some())
@@ -248,6 +334,23 @@ fn handle(projects: &Lent<Projects>, message: Msg) {
     if due {
         crate::surfaces::ask(crate::surfaces::Asked::Project(super::Come::Tick));
     }
+}
+
+/// "3 de plus" or "Moins": the card grows or shrinks to its tabs.
+fn more(p: &mut Projects) -> Vec<Effect> {
+    let Some(card) = p.card.as_deref_mut() else {
+        return Vec::new();
+    };
+    card.more = !card.more;
+    let size = size_of(&card.shown, card.more, super::words());
+    let place = super::place(card.shown.at, size, card.shown.screen);
+    let mut effects = vec![Effect::Resize {
+        id: card.surface,
+        size,
+        margin: Some((place.1, 0, 0, place.0)),
+    }];
+    effects.extend(super::woken());
+    effects
 }
 
 /// "Fermer le projet…" (its confirmation) or "Rouvrir": the card closes.
@@ -326,8 +429,20 @@ fn shows(card: &Card, rows: &[Row], words: Words) -> String {
         .map(|r| format!("{} ({})", r.title, words.place(r.place)))
         .collect();
     let (pill, when) = pill_and_when(&card.shown, words);
+    let tabs: Vec<(String, Vec<String>)> = tab_sections(&card.shown, card.more, words)
+        .into_iter()
+        .map(|t| {
+            (
+                t.heading,
+                t.shown
+                    .iter()
+                    .map(|tab| format!("{} ({})", tab.title, tab.host))
+                    .collect(),
+            )
+        })
+        .collect();
     format!(
-        "name={:?} state={pill:?} folder={:?} when={when:?} windows={windows:?} terminals={:?}",
+        "name={:?} state={pill:?} folder={:?} when={when:?} windows={windows:?} terminals={:?} tabs={tabs:?}",
         card.shown.name,
         card.shown.folder,
         terminals(&card.shown),
@@ -547,6 +662,13 @@ fn content<'a>(card: &Card, rows: &[Row], words: Words) -> El<'a> {
             .push(Space::new().height(GAP))
             .push(list);
     }
+    for tabs in tab_sections(shown, card.more, words) {
+        all = all
+            .push(Space::new().height(GAP))
+            .push(rule())
+            .push(Space::new().height(GAP))
+            .push(tabs_list(tabs));
+    }
     let all = all
         .push(Space::new().height(GAP))
         .push(ui::line(private, words.private()))
@@ -560,6 +682,98 @@ fn content<'a>(card: &Card, rows: &[Row], words: Words) -> El<'a> {
             left: BORDER + PAD,
         })
         .into()
+}
+
+/// A browser window's tabs: its heading, a row each (its square, title
+/// and host), then "3 de plus" when it has more.
+fn tabs_list<'a>(tabs: Tabs) -> El<'a> {
+    let heading = tabs.heading;
+    let mut list = column![ui::line(
+        container(spaced_by(
+            &heading,
+            HEADING,
+            MANROPE_BOLD,
+            FAINT.get(),
+            0.08
+        ))
+        .padding(Padding {
+            left: ROW_PAD,
+            bottom: HEADING_BOTTOM,
+            ..Padding::ZERO
+        })
+        .height(HEADING * LINE + HEADING_BOTTOM),
+        heading.clone(),
+    )];
+    let mut rows = column![].spacing(ROW_GAP);
+    for tab in &tabs.shown {
+        rows = rows.push(tab_row(tab));
+    }
+    list = list.push(rows);
+    if let Some(word) = tabs.more {
+        let face = container(said(
+            word.clone(),
+            MORE_TEXT,
+            MANROPE_SEMIBOLD,
+            crate::theme::ACCENT_TEXT.get(),
+        ))
+        .center_y(Length::Fill)
+        .padding(Padding {
+            left: ROW_PAD,
+            right: ROW_PAD,
+            ..Padding::ZERO
+        });
+        let pressed = iced::widget::button(face)
+            .padding(0)
+            .height(TAB_ROW)
+            .style(|_, _| crate::ui::style::clear())
+            .on_press(Msg::More);
+        list = list
+            .push(Space::new().height(ROW_GAP))
+            .push(ui::control(pressed, "project:More", Role::Button, word).activate(Msg::More));
+    }
+    list.into()
+}
+
+/// A tab's row: a little square of its host's colour, its title, its host.
+fn tab_row<'a>(tab: &hocus_link::CardTab) -> El<'a> {
+    let host_w = kit::measure(&tab.host, PLACE, MANROPE);
+    let room = INNER - 2.0 * ROW_PAD - TAB_ICON - 10.0 - host_w - 12.0;
+    let title = kit::elide(&tab.title, room, |t| kit::measure(t, TITLE, MANROPE));
+    let colour = TAB_COLOURS
+        .get(
+            tab.host.bytes().fold(0usize, |h, b| {
+                h.wrapping_mul(31).wrapping_add(usize::from(b))
+            }) % TAB_COLOURS.len(),
+        )
+        .copied()
+        .unwrap_or(0xEEF1F6);
+    let square = drawn(TAB_ICON, TAB_ICON, move |f, s| {
+        f.fill(
+            &Path::rounded_rectangle(Point::ORIGIN, s, 3.0.into()),
+            rgb(colour),
+        );
+    });
+    let line = row![
+        square,
+        gap(10.0),
+        said(title, TITLE, MANROPE, TEXT.get()),
+        iced::widget::space::horizontal(),
+        said(tab.host.clone(), PLACE, MANROPE, FAINT.get()),
+    ]
+    .align_y(Vertical::Center);
+    ui::line(
+        container(line)
+            .padding(Padding {
+                left: ROW_PAD,
+                right: ROW_PAD,
+                ..Padding::ZERO
+            })
+            .width(INNER)
+            .height(TAB_ROW)
+            .align_y(Vertical::Center),
+        format!("{}, {}", tab.title, tab.host),
+    )
+    .into()
 }
 
 /// A 1 px divider across.
@@ -880,6 +1094,7 @@ mod tests {
                     rect: [0, 0, 100, 100],
                     focused: false,
                     terminal: terminal.then(|| "/home/alex".to_owned()),
+                    tabs: None,
                 })
                 .collect(),
         };

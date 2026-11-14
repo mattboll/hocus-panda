@@ -1386,6 +1386,8 @@ number_of_desktops = "Number of desktops"
 on_every_screen_1_to_9 = "On every screen, 1 to 9; each switches its own."
 their_names = "Their names"
 click_a_name_to_change_it = "Click a name to change it. It shows when hovering its tile in the bar and in Alt+Tab; with no name, “Desktop 3”."
+remember_projects_tabs = "Remember projects’ tabs"
+firefox_and_chromium_tabs_come_back = "The tabs of a project’s Firefox and Chromium windows come back when it reopens, read from the browsers’ session files. Private windows are never read."
 move_from_anywhere = "Move from anywhere"
 hold_the_key_and_drag_anywhere = "Hold the key and drag anywhere in the window; its title bar always works."
 resize_from_anywhere = "Resize from anywhere"
@@ -2667,6 +2669,7 @@ screen_recording_from = "Screen recording from {day} {time}.{ext}"
 [compositor.session_restore]
 and = " and "
 not_reopened = { other = "{listed} could not be reopened." }
+tabs_unread = "The tabs of a {browser} window could not be read."
 
 
 [compositor.projects]
@@ -2674,6 +2677,7 @@ its_folder = "its folder"
 and_others = { one = "{shown} and {n} other", other = "{shown} and {n} others" }
 back_but = "{name} came back, but for {what}"
 folder_gone = "The folder {folder} no longer exists."
+their_tabs = "{browser}’s tabs"
 
 [compositor.creatures]
 other_tab = "{name} · other tab"
@@ -2873,6 +2877,10 @@ confirm_title = "Close the project {name}?"
 confirm_line = "Its windows close. When you reopen it, everything comes back in its place:"
 back_windows = "{app}, its {n} windows"
 back_terminal = "A terminal in {folder}"
+back_tabs = { one = "{app}, with its tab", other = "{app}, with its {n} tabs" }
+tabs_heading = "TABS · {browser} · {count}"
+tabs_more = "{n} more"
+tabs_fewer = "Fewer"
 not_back = "{app} will not come back"
 agent_working = "{tool} is still working: closing interrupts its answer."
 agent_waiting = "{tool} is waiting for you: closing interrupts it."

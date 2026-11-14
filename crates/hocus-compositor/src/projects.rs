@@ -145,41 +145,73 @@ pub(crate) enum Job {
     Check { serial: u64, folder: PathBuf },
     /// The file, as it now says.
     Write(String),
-    /// What `windows` are (§8): their desktop entries, and the terminals'
+    /// What `windows` are (§8): their desktop entries, the terminals'
     /// folders and programs, for `serial`, in the project of folder
-    /// `within`.
+    /// `within`; and, `browsers` given, the browsers' tabs (§8.3).
     Read {
         serial: u64,
         windows: Vec<Seen>,
         within: PathBuf,
+        browsers: Option<crate::browsers::Places>,
+    },
+    /// The browsers' windows of a project closed, their tabs read again
+    /// once they are gone (§5 step 3), for `serial`.
+    Tabs {
+        serial: u64,
+        windows: Vec<(WindowId, crate::browsers::Asked)>,
+        browsers: crate::browsers::Places,
     },
     /// Project `id`'s contents' file written, or taken out (none).
     Contents { id: String, text: Option<String> },
 }
 
-/// A window handed to the thread to be read.
-#[derive(Debug, Clone)]
+/// A window handed to the thread to be read: its title and size find a
+/// browser's in its file (never logged).
+#[derive(Clone)]
 pub(crate) struct Seen {
     pub id: WindowId,
     pub app_id: String,
     pub pid: Option<u32>,
+    pub title: String,
+    pub size: (i32, i32),
+}
+
+impl std::fmt::Debug for Seen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Seen")
+            .field("id", &self.id)
+            .field("app_id", &self.app_id)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A window as the thread read it: its desktop entry and the name it
-/// gives the application, and, a terminal's, its folder and program.
+/// gives the application; a terminal's folder and program; a browser's
+/// tabs (none for a private window, or when they are not read).
 #[derive(Debug, Clone)]
 pub(crate) struct Found {
     pub id: WindowId,
     pub entry: Option<String>,
     pub name: String,
     pub terminal: Option<crate::terminals::Found>,
+    pub browser: Option<crate::browsers::SavedBrowser>,
 }
 
 /// What it answers.
 #[derive(Debug)]
 pub enum Done {
-    Checked { serial: u64, directory: bool },
-    Read { serial: u64, found: Vec<Found> },
+    Checked {
+        serial: u64,
+        directory: bool,
+    },
+    Read {
+        serial: u64,
+        found: Vec<Found>,
+    },
+    Tabs {
+        serial: u64,
+        found: Vec<(WindowId, Option<crate::browsers::SavedBrowser>)>,
+    },
 }
 
 /// The projects, and what is on its way for them.
@@ -216,6 +248,9 @@ impl std::fmt::Debug for Job {
             Self::Read {
                 serial, windows, ..
             } => write!(f, "Read({serial}, {} windows)", windows.len()),
+            Self::Tabs {
+                serial, windows, ..
+            } => write!(f, "Tabs({serial}, {} windows)", windows.len()),
             Self::Contents { text, .. } => {
                 write!(
                     f,
@@ -308,12 +343,39 @@ fn read_contents(dir: &Path, id: &str) -> Vec<crate::session::restore::SavedWind
 }
 
 /// Reads `windows` (§8): each one's desktop entry, a terminal's folder and
-/// program in the project of folder `within`.
+/// program in the project of folder `within`, and, `browsers` given, a
+/// browser's tabs.
 fn read_windows(
     entries: &mut crate::session::restore::Entries,
+    reader: &mut crate::browsers::Reader,
     windows: &[Seen],
     within: &Path,
+    browsers: Option<&crate::browsers::Places>,
 ) -> Vec<Found> {
+    let asked: Vec<(WindowId, crate::browsers::Asked)> = windows
+        .iter()
+        .filter_map(|seen| {
+            Some((
+                seen.id,
+                crate::browsers::Asked {
+                    browser: crate::browsers::of_app(&seen.app_id)?,
+                    title: seen.title.clone(),
+                    size: seen.size,
+                },
+            ))
+        })
+        .collect();
+    let tabs: Vec<(WindowId, Option<crate::browsers::SavedBrowser>)> = match browsers {
+        Some(places) => {
+            let only: Vec<crate::browsers::Asked> = asked.iter().map(|(_, a)| a.clone()).collect();
+            asked
+                .iter()
+                .map(|(id, _)| *id)
+                .zip(reader.read(places, &only, false))
+                .collect()
+        }
+        None => Vec::new(),
+    };
     windows
         .iter()
         .map(|seen| {
@@ -337,6 +399,10 @@ fn read_windows(
                     .map_or_else(|| seen.app_id.clone(), |e| e.name.clone()),
                 entry: entry.map(|e| e.id),
                 terminal,
+                browser: tabs
+                    .iter()
+                    .find(|(id, _)| *id == seen.id)
+                    .and_then(|(_, b)| b.clone()),
             }
         })
         .collect()
@@ -351,6 +417,7 @@ fn work(
     done: &channel::Sender<Done>,
 ) {
     let mut entries = crate::session::restore::Entries::new(applications);
+    let mut reader = crate::browsers::Reader::default();
     while let Ok(job) = jobs.recv() {
         match job {
             Job::Check { serial, folder } => {
@@ -374,9 +441,32 @@ fn work(
                 serial,
                 windows,
                 within,
+                browsers,
             } => {
-                let found = read_windows(&mut entries, &windows, &within);
+                let found = read_windows(
+                    &mut entries,
+                    &mut reader,
+                    &windows,
+                    &within,
+                    browsers.as_ref(),
+                );
                 if done.send(Done::Read { serial, found }).is_err() {
+                    return;
+                }
+            }
+            Job::Tabs {
+                serial,
+                windows,
+                browsers,
+            } => {
+                let only: Vec<crate::browsers::Asked> =
+                    windows.iter().map(|(_, a)| a.clone()).collect();
+                let found = windows
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .zip(reader.read(&browsers, &only, true))
+                    .collect();
+                if done.send(Done::Tabs { serial, found }).is_err() {
                     return;
                 }
             }
@@ -687,6 +777,10 @@ impl State {
                 self.project_read(serial, found);
                 return;
             }
+            Done::Tabs { serial, found } => {
+                self.project_tabs_again(serial, found);
+                return;
+            }
         };
         let Some(at) = self.projects.asked.iter().position(|a| a.serial == serial) else {
             return;
@@ -895,23 +989,44 @@ mod tests {
         use crate::session::restore::{SavedTerminal, SavedWindow, Shape};
         let dir = tempfile::tempdir().expect("a directory");
         let contents = Contents {
-            windows: vec![SavedWindow {
-                entry: "foot".into(),
-                app_id: "foot".into(),
-                screen: "BOE NE160QDM 0".into(),
-                screen_size: [2560, 1600],
-                area: [0, 0, 2364, 1600],
-                desktop: 2,
-                place: [8, 8, 1180, 1584],
-                state: Shape::Left,
-                terminal: Some(SavedTerminal {
-                    folder: "/home/alex/github/hocus-site".into(),
-                }),
-                ..SavedWindow::default()
-            }],
+            windows: vec![
+                SavedWindow {
+                    entry: "foot".into(),
+                    app_id: "foot".into(),
+                    screen: "BOE NE160QDM 0".into(),
+                    screen_size: [2560, 1600],
+                    area: [0, 0, 2364, 1600],
+                    desktop: 2,
+                    place: [8, 8, 1180, 1584],
+                    state: Shape::Left,
+                    terminal: Some(SavedTerminal {
+                        folder: "/home/alex/github/hocus-site".into(),
+                    }),
+                    ..SavedWindow::default()
+                },
+                SavedWindow {
+                    entry: "org.mozilla.firefox".into(),
+                    app_id: "org.mozilla.firefox".into(),
+                    browser: Some(crate::browsers::SavedBrowser {
+                        kind: crate::browsers::Kind::Firefox,
+                        selected: 1,
+                        tabs: vec![crate::browsers::Tab {
+                            url: "http://localhost:4321/".into(),
+                            title: "hocus-site · Accueil".into(),
+                            pinned: true,
+                        }],
+                    }),
+                    ..SavedWindow::default()
+                },
+            ],
         };
         let text = contents.text();
         assert!(text.contains("[window.terminal]"), "{text}");
+        assert!(
+            text.contains("[window.browser]\nkind = \"firefox\""),
+            "{text}"
+        );
+        assert!(text.contains("[[window.browser.tab]]"), "{text}");
         let folder = dir.path().join(CONTENTS);
         write_private(&folder, "hocus-site.toml", &text).expect("written");
         assert_eq!(read_contents(dir.path(), "hocus-site"), contents.windows);

@@ -807,6 +807,11 @@ fn to_shell() -> Vec<ToShell> {
                 ComingBack::NotBack {
                     app: "test.no-entry".into(),
                 },
+                ComingBack::Browser {
+                    app: "firefox".into(),
+                    entry: "firefox".into(),
+                    tabs: 4,
+                },
             ],
             interrupted: vec![
                 Interrupted::Agent {
@@ -1500,5 +1505,12 @@ fn card_window(id: u64, terminal: Option<&str>) -> CardWindow {
         rect: [0, 0, 5000, 10000],
         focused: id == 3,
         terminal: terminal.map(str::to_owned),
+        tabs: (id == 3).then(|| CardTabs {
+            count: 7,
+            shown: vec![CardTab {
+                title: "#789 Project desktops".into(),
+                host: "github.com".into(),
+            }],
+        }),
     }
 }

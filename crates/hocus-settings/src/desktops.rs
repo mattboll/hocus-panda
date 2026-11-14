@@ -43,6 +43,8 @@ pub const DRAW: RowGroup = RowGroup {
 
 pub const COUNT: &str = "desktops.count";
 pub const NAMES: &str = "desktops.names";
+/// A project's browsers' tabs remembered (docs/design/projects.md §13 F).
+pub const REMEMBER_TABS: &str = "desktops.remember-tabs";
 pub const MOVE_KEY: &str = "windows.move-modifier";
 pub const RESIZE_KEY: &str = "windows.resize-modifier";
 pub const MAGNET: &str = "windows.magnet";
@@ -380,6 +382,27 @@ pub fn settings() -> &'static [Setting] {
                 one(&["desktops", "names"], Codec::Texts),
             ),
             setting(
+                REMEMBER_TABS,
+                DESKTOPS,
+                words::REMEMBER_PROJECTS_TABS,
+                words::FIREFOX_AND_CHROMIUM_TABS_COME_BACK,
+                (
+                    &[
+                        "projet",
+                        "onglets",
+                        "firefox",
+                        "chromium",
+                        "navigateur",
+                        "session",
+                    ],
+                    &[
+                        "project", "tabs", "firefox", "chromium", "browser", "session",
+                    ],
+                ),
+                Kind::Switch,
+                switch(&["desktops", "remember-tabs"]),
+            ),
+            setting(
                 MOVE_KEY,
                 MOVE,
                 words::MOVE_FROM_ANYWHERE,
@@ -598,6 +621,7 @@ mod tests {
             [
                 "desktops.count",
                 "desktops.names",
+                "desktops.remember-tabs",
                 "windows.move-modifier",
                 "windows.resize-modifier",
                 "windows.magnet",

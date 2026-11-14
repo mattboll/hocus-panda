@@ -1377,6 +1377,8 @@ number_of_desktops = "Nombre de bureaux"
 on_every_screen_1_to_9 = "Sur chaque écran, de 1 à 9 ; chacun change les siens."
 their_names = "Leurs noms"
 click_a_name_to_change_it = "Clique sur un nom pour le changer. Il se lit au survol de sa vignette dans la barre et dans Alt+Tab ; sans nom, « Bureau 3 »."
+remember_projects_tabs = "Retenir les onglets des projets"
+firefox_and_chromium_tabs_come_back = "Les onglets des fenêtres Firefox et Chromium d’un projet reviennent quand il rouvre, lus dans les fichiers de session des navigateurs. Les fenêtres privées ne sont jamais lues."
 move_from_anywhere = "Déplacer de n’importe où"
 hold_the_key_and_drag_anywhere = "Tiens la touche et glisse n’importe où dans la fenêtre ; sa barre de titre marche toujours."
 resize_from_anywhere = "Redimensionner de n’importe où"
@@ -2658,6 +2660,7 @@ screen_recording_from = "Enregistrement du {day} à {time}.{ext}"
 [compositor.session_restore]
 and = " et "
 not_reopened = { one = "{listed} n’a pas pu être rouverte.", other = "{listed} n’ont pas pu être rouvertes." }
+tabs_unread = "Les onglets d’une fenêtre de {browser} n’ont pas pu être lus."
 
 
 [compositor.projects]
@@ -2665,6 +2668,7 @@ its_folder = "son dossier"
 and_others = { one = "{shown} et {n} autre", other = "{shown} et {n} autres" }
 back_but = "{name} est revenu, sauf {what}"
 folder_gone = "Le dossier {folder} n’existe plus."
+their_tabs = "les onglets de {browser}"
 
 [compositor.creatures]
 other_tab = "{name} · autre onglet"
@@ -2864,6 +2868,10 @@ confirm_title = "Fermer le projet {name} ?"
 confirm_line = "Ses fenêtres se ferment. Quand tu le rouvres, tout revient à sa place :"
 back_windows = "{app}, ses {n} fenêtres"
 back_terminal = "Un terminal dans {folder}"
+back_tabs = { one = "{app}, avec son onglet", other = "{app}, avec ses {n} onglets" }
+tabs_heading = "ONGLETS · {browser} · {count}"
+tabs_more = "{n} de plus"
+tabs_fewer = "Moins"
 not_back = "{app} ne reviendra pas"
 agent_working = "{tool} travaille encore : fermer interrompt sa réponse en cours."
 agent_waiting = "{tool} attend ta réponse : fermer l’interrompt."

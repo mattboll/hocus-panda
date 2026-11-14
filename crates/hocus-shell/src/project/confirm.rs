@@ -151,6 +151,16 @@ pub fn back_rows(shown: &hocus_link::ProjectConfirm, lang: Lang) -> Vec<Back> {
                     },
                 }
             }
+            hocus_link::ComingBack::Browser { app, entry, tabs } => Back {
+                app: app.clone(),
+                said: txt::back_tabs(
+                    lang,
+                    txt::BackTabs {
+                        app: &super::app_name(entry, app),
+                        n: *tabs,
+                    },
+                ),
+            },
             hocus_link::ComingBack::Terminal { app, folder, .. } => Back {
                 app: app.clone(),
                 said: txt::back_terminal(lang, last_part(folder)),
