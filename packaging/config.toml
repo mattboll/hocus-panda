@@ -469,6 +469,12 @@
 # Their names, by position, the same on every screen: the bar's tiles and
 # Alt+Tab say them. One missing or "" is "Bureau N" / "Desktop N".
 # names = []
+# A project's Firefox and Chromium windows keep their tabs: read from the
+# browsers' own session files as the project closes (and at log out),
+# they open again in a new window as it reopens. Private windows are
+# never read. Off: no browser file is read, browsers come back as plain
+# applications.
+# remember-tabs = true
 
 # [windows]
 # The key held to move a window by a drag anywhere in it: "alt", "super"

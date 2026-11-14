@@ -523,7 +523,8 @@ fn display_socket() -> PathBuf {
 }
 
 /// An application started by its entry: a window of [`APP_ID`] that closes
-/// when asked, unless [`APP_STUBBORN`] is set. Run alone, it does nothing.
+/// when asked, unless [`APP_STUBBORN`] is set, titled [`TERMINAL_TITLE`]
+/// when it is set. Run alone, it does nothing.
 #[test]
 fn app_program() -> anyhow::Result<()> {
     let Ok(app) = std::env::var(APP_ID) else {
@@ -539,6 +540,9 @@ fn app_program() -> anyhow::Result<()> {
             popup: false,
         }),
     )?;
+    if let Ok(title) = std::env::var(TERMINAL_TITLE) {
+        client.commands.send(common::Command::Title(title.leak()))?;
+    }
     while let Ok(event) = client.events.recv() {
         if event == common::Event::CloseRequested && !stubborn {
             break;
@@ -1367,5 +1371,473 @@ fn a_project_follows_its_windows_to_another_screen_and_back() -> anyhow::Result<
     })?;
     anyhow::ensure!(back, "{:?}", hp.projects());
     assert_eq!(hp.project_windows("hocus-site"), [site]);
+    Ok(())
+}
+
+// --- Lot C: browsers' tabs ----------------------------------------------------------------
+//
+// Test 6 (docs/design/projects.md §12). A fake Firefox profile and a fake
+// Chromium profile in the test's own home; the browsers are stand-ins (the
+// test's own program) that write the arguments they are given.
+
+/// A browser stand-in's entry `app` (its id and its windows' app id): a
+/// wrapper writing its arguments into `marks/APP`, a line each start,
+/// then running [`app_program`].
+fn browser_wrapper(places: &Places, app: &str, name: &str) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let exe = std::env::current_exe()?;
+    let dir = places.root.join("applications");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(places.root.join("marks"))?;
+    let wrapper = places.root.join(format!("{app}-wrapper"));
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n\
+             exec env {APP_ID}={app} '{}' --exact projects::app_program --nocapture\n",
+            places.root.join("marks").join(app).display(),
+            exe.display()
+        ),
+    )?;
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::write(
+        dir.join(format!("{app}.desktop")),
+        format!(
+            "[Desktop Entry]\nType=Application\nName={name}\nCategories=Network;WebBrowser;\n\
+             Exec=sh {}\n",
+            wrapper.display()
+        ),
+    )?;
+    Ok(wrapper)
+}
+
+/// The lines of arguments browser `app`'s stand-in was started with.
+fn browser_marks(places: &Places, app: &str) -> Vec<String> {
+    std::fs::read_to_string(places.root.join("marks").join(app))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// mozLz4 of `data`: its header and size, one LZ4 block of literals.
+fn mozlz4(data: &[u8]) -> Vec<u8> {
+    let mut out = b"mozLz40\0".to_vec();
+    out.extend_from_slice(&u32::try_from(data.len()).unwrap_or(0).to_le_bytes());
+    let n = data.len();
+    if n >= 15 {
+        out.push(0xF0);
+        let mut rest = n - 15;
+        while rest >= 255 {
+            out.push(255);
+            rest -= 255;
+        }
+        out.push(u8::try_from(rest).unwrap_or(0));
+    } else {
+        out.push(u8::try_from(n).unwrap_or(0) << 4);
+    }
+    out.extend_from_slice(data);
+    out
+}
+
+/// A Firefox profile in `home`, running (its lock names this process),
+/// its session holding a window shown as "hocus-site · Accueil" and a
+/// private one; and a Chromium profile whose session is the committed SNSS
+/// file.
+fn browser_profiles(home: &Path) -> anyhow::Result<()> {
+    let root = home.join(".mozilla/firefox");
+    let profile = root.join("t1.default-release");
+    std::fs::create_dir_all(profile.join("sessionstore-backups"))?;
+    std::fs::write(
+        root.join("profiles.ini"),
+        "[Profile0]\nName=default-release\nIsRelative=1\nPath=t1.default-release\nDefault=1\n",
+    )?;
+    std::os::unix::fs::symlink(
+        format!("127.0.1.1:+{}", std::process::id()),
+        profile.join("lock"),
+    )?;
+    let session = r#"{"version":["sessionrestore",1],"windows":[
+        {"tabs":[
+          {"entries":[{"url":"http://localhost:4321/","title":"hocus-site · Accueil"}],"index":1},
+          {"entries":[{"url":"https://example.org/","title":"x"},{"url":"https://docs.astro.build/","title":"Astro Docs"}],"index":2,"pinned":true}],
+         "selected":1,"width":500,"height":400},
+        {"isPrivate":true,"tabs":[{"entries":[{"url":"https://secret.example/","title":"Secret"}],"index":1}],"selected":1}],
+      "_closedWindows":[]}"#;
+    std::fs::write(
+        profile.join("sessionstore-backups/recovery.jsonlz4"),
+        mozlz4(session.as_bytes()),
+    )?;
+    let sessions = home.join(".config/chromium/Default/Sessions");
+    std::fs::create_dir_all(&sessions)?;
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/Session_13400000000000000"),
+        sessions.join("Session_13400000000000000"),
+    )?;
+    Ok(())
+}
+
+/// Test 6: a project's Firefox and Chromium windows are matched by their
+/// titles to their browsers' files, their tabs saved in order with the
+/// one shown, a private window's never; reopened, each comes back as one
+/// new window holding its addresses; one not found comes back without its
+/// tabs, said.
+#[test]
+fn a_projects_browsers_come_back_with_their_tabs() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    browser_profiles(&home)?;
+    let firefox = browser_wrapper(&places, "firefox", "Firefox")?;
+    let chromium = browser_wrapper(&places, "chromium", "Chromium")?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        ..config_with_apps(&places)
+    })?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-site", &places.folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let mut started = Vec::new();
+    for (wrapper, title) in [
+        (&firefox, "hocus-site · Accueil — Mozilla Firefox"),
+        (&firefox, "Secret — Mozilla Firefox Private Browsing"),
+        (&chromium, "smithay · docs.rs - Chromium"),
+        (&chromium, "Not in its file - Chromium"),
+    ] {
+        let before = hp.all_windows().len();
+        started.push(
+            std::process::Command::new("sh")
+                .arg(wrapper)
+                .env("WAYLAND_DISPLAY", hp.socket())
+                .env(TERMINAL_TITLE, title)
+                .spawn()?,
+        );
+        let shown = hp.dispatch_until(WAIT, |hp| hp.all_windows().len() > before)?;
+        anyhow::ensure!(shown, "{title} never showed");
+    }
+    wait(&mut hp, Duration::from_millis(300))?;
+    let opened = |app: &str| browser_marks(&places, app).len();
+    let (firefox_before, chromium_before) = (opened("firefox"), opened("chromium"));
+
+    hp.project_close("hocus-site")
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    closed(&mut hp, "hocus-site")?;
+    for mut child in started {
+        let _ = child.wait();
+    }
+    // Saved: each window found by its title, its tabs in order and the one
+    // shown; the private window's none; the one not found, none read.
+    let mut tabs = hp.project_tabs("hocus-site");
+    tabs.sort();
+    let urls = |u: &[&str]| u.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        tabs,
+        [
+            ("chromium".to_owned(), Some((0, Vec::new()))),
+            (
+                "chromium".to_owned(),
+                Some((
+                    2,
+                    urls(&["https://github.com/a/b/pull/1", "https://docs.rs/smithay"])
+                ))
+            ),
+            ("firefox".to_owned(), None),
+            (
+                "firefox".to_owned(),
+                Some((
+                    1,
+                    urls(&["http://localhost:4321/", "https://docs.astro.build/"])
+                ))
+            ),
+        ]
+    );
+    let file = places
+        .root
+        .join("state/hocuspanda/projects.d/hocus-site.toml");
+    let written = hp.dispatch_until(WAIT, |_| file.exists())?;
+    anyhow::ensure!(written, "no contents' file");
+    let text = std::fs::read_to_string(&file)?;
+    assert!(text.contains("[[window.browser.tab]]"), "{text}");
+    assert!(!text.contains("secret"), "a private window's tab: {text}");
+
+    // Reopened: one new window each, holding its addresses.
+    hp.project_open("hocus-site", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let back = hp.dispatch_until(WAIT, |hp| !hp.project_coming_back("hocus-site"))?;
+    anyhow::ensure!(back, "not back: {:?}", hp.all_windows());
+    let mut firefox_now = browser_marks(&places, "firefox").split_off(firefox_before);
+    firefox_now.sort();
+    assert_eq!(
+        firefox_now,
+        ["", "http://localhost:4321/ https://docs.astro.build/"]
+    );
+    let mut chromium_now = browser_marks(&places, "chromium").split_off(chromium_before);
+    chromium_now.sort();
+    assert_eq!(
+        chromium_now,
+        [
+            "",
+            "--new-window https://github.com/a/b/pull/1 https://docs.rs/smithay"
+        ]
+    );
+    assert_eq!(hp.project_windows("hocus-site").len(), 4);
+    let (summary, body) = hp
+        .project_not_back()
+        .context("the window without its tabs")?;
+    assert_eq!(
+        summary,
+        "hocus-site est revenu, sauf les onglets de Chromium"
+    );
+    assert_eq!(
+        body,
+        "Les onglets d’une fenêtre de Chromium n’ont pas pu être lus."
+    );
+    Ok(())
+}
+
+// --- Lot D: agents' conversations ---------------------------------------------------------
+//
+// Test 7 (docs/design/projects.md §12). The agent's terminal is the
+// terminal stand-in, which runs what follows its `--`; `claude` is a fake
+// on a `PATH` of the test's that writes its arguments and its folder, then
+// says `SessionStart` (`source` `resume`) through `hocus agent-hook`.
+
+const SESSION: &str = "3f6c2a1e-9b0d-4c55-8e21-7d0a94c1b2e6";
+
+/// The agent's terminal stand-in, `foot`: it writes its arguments and its
+/// folder into `marks/foot`, runs what follows `--` (its `PATH` the
+/// test's `bin` first, its `HOME` the test's, its `SHELL` one that ends at
+/// once), then shows its window.
+fn agent_terminal(places: &Places, bin: &Path, home: &Path) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let exe = std::env::current_exe()?;
+    let dir = places.root.join("applications");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(places.root.join("marks"))?;
+    let wrapper = places.root.join("foot-wrapper");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\t%s\\n' \"$*\" \"$(pwd)\" >> '{marks}'\n\
+             while [ $# -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+             if [ \"$1\" = \"--\" ]; then shift; \
+             ( PATH='{bin}':\"$PATH\" HOME='{home}' SHELL=/bin/true \"$@\" </dev/null >/dev/null 2>&1 & ); fi\n\
+             exec env {TERMINAL_APP}=foot '{exe}' --exact projects::terminal_program --nocapture\n",
+            marks = places.root.join("marks/foot").display(),
+            bin = bin.display(),
+            home = home.display(),
+            exe = exe.display()
+        ),
+    )?;
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::write(
+        dir.join("foot.desktop"),
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Foot\nCategories=System;TerminalEmulator;\n\
+             Exec=sh {}\n",
+            wrapper.display()
+        ),
+    )?;
+    Ok(wrapper)
+}
+
+/// A fake `claude` in `bin`: it writes its arguments and its folder into
+/// `marks/claude`, then its hook says the session started again.
+fn fake_claude(places: &Places, bin: &Path, socket: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(bin)?;
+    let claude = bin.join("claude");
+    std::fs::write(
+        &claude,
+        format!(
+            "#!/bin/sh\nprintf '%s\\t%s\\n' \"$*\" \"$(pwd)\" >> '{marks}'\n\
+             printf '{{\"session_id\":\"%s\",\"hook_event_name\":\"SessionStart\",\"source\":\"resume\",\"cwd\":\"%s\"}}' \"$2\" \"$(pwd)\" \
+             | '{hocus}' --socket '{socket}' agent-hook claude-code\n",
+            marks = places.root.join("marks/claude").display(),
+            hocus = common::hocus_program().display(),
+            socket = socket.display()
+        ),
+    )?;
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+/// The lines `app`'s stand-in wrote: its arguments and its folder.
+fn marks_of(places: &Places, app: &str) -> Vec<(String, PathBuf)> {
+    std::fs::read_to_string(places.root.join("marks").join(app))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .map(|(args, dir)| (args.to_owned(), PathBuf::from(dir)))
+        .collect()
+}
+
+/// Test 7: an agent's hooks' lines with its folder and transcript; closing
+/// saves its conversation with its terminal; reopening starts its terminal
+/// in its folder resuming it (`$SHELL -c 'claude --resume ID; exec
+/// $SHELL'`), heard back; its transcript gone, its terminal opens in the
+/// folder alone and the notification says so.
+#[test]
+fn an_agents_conversation_resumes_in_its_terminal() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    let bin = home.join("bin");
+    let folder = places.folder.canonicalize()?;
+    let transcript = home.join(format!(".claude/projects/x/{SESSION}.jsonl"));
+    std::fs::create_dir_all(transcript.parent().context("its folder")?)?;
+    std::fs::write(&transcript, "{}\n")?;
+    let wrapper = agent_terminal(&places, &bin, &home)?;
+    let agent_places = hocus_agents::tools::Places {
+        home: home.clone(),
+        config_home: home.join(".config"),
+        codex_home: home.join(".codex"),
+        path: vec![bin.clone()],
+        herdr_socket: home.join(".config/herdr/herdr.sock"),
+        processes: home.join("proc"),
+        hocus: common::hocus_program(),
+        state_dir: None,
+    };
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        agent_places: Some(agent_places),
+        ..config_with_apps(&places)
+    })?;
+    let socket = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    fake_claude(&places, &bin, &socket)?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-site", &folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let mut terminal = std::process::Command::new("sh")
+        .arg(&wrapper)
+        .current_dir(&folder)
+        .env("WAYLAND_DISPLAY", hp.socket())
+        .spawn()?;
+    window_of(&mut hp, "foot")?;
+    // Its hooks, as `hocus agent-hook` writes them: the agent's process is
+    // its terminal's.
+    let said = format!(
+        "agent claude-code {SESSION} working {} hocus-site\tcwd {}\ttranscript {}\t\
+         prompt refais la section du haut de l'accueil, plus courte\n",
+        terminal.id(),
+        folder.display(),
+        transcript.display()
+    );
+    UnixStream::connect(&socket)?.write_all(said.as_bytes())?;
+    let mut heard = false;
+    for _ in 0..50 {
+        wait(&mut hp, Duration::from_millis(100))?;
+        if hp.agents().iter().any(|a| a.window != 0) {
+            heard = true;
+            break;
+        }
+    }
+    anyhow::ensure!(heard, "the agent: {:?}", hp.agents());
+
+    hp.project_close("hocus-site")
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    closed(&mut hp, "hocus-site")?;
+    let _ = terminal.wait();
+    assert_eq!(
+        hp.project_agents("hocus-site"),
+        [[
+            "claude-code".to_owned(),
+            SESSION.to_owned(),
+            folder.display().to_string(),
+            transcript.display().to_string()
+        ]]
+    );
+    let file = places
+        .root
+        .join("state/hocuspanda/projects.d/hocus-site.toml");
+    let written = hp.dispatch_until(WAIT, |_| file.exists())?;
+    anyhow::ensure!(written, "no contents' file");
+    let text = std::fs::read_to_string(&file)?;
+    assert!(text.contains("[window.agent]"), "{text}");
+    assert!(
+        text.contains("first-prompt = \"refais la section"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("[window.terminal]"),
+        "the agent's terminal: {text}"
+    );
+    // Its folder is one the form and the launcher propose.
+    let folders = std::fs::read_to_string(places.root.join("state/hocuspanda/folders"))?;
+    assert!(
+        folders.starts_with(&format!("{}\t", folder.display())),
+        "{folders}"
+    );
+
+    // Reopened: its terminal in its folder, resuming it, heard back.
+    hp.project_open("hocus-site", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let back = hp.dispatch_until(WAIT, |hp| !hp.project_coming_back("hocus-site"))?;
+    anyhow::ensure!(back, "not back: {:?}", hp.agents());
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| s.starts_with('/'))
+        .unwrap_or_else(|| "/bin/sh".to_owned());
+    let marks = marks_of(&places, "foot");
+    assert_eq!(
+        marks.last(),
+        Some(&(
+            format!(
+                "--working-directory={} -- {shell} -c claude --resume {SESSION}; exec $SHELL",
+                folder.display()
+            ),
+            folder.clone()
+        )),
+        "{marks:?}"
+    );
+    assert_eq!(
+        marks_of(&places, "claude"),
+        [(format!("--resume {SESSION}"), folder.clone())]
+    );
+    assert!(
+        hp.project_not_back().is_none(),
+        "{:?}",
+        hp.project_not_back()
+    );
+
+    // Its transcript gone: its terminal in its folder alone, said.
+    drop(hp);
+    let gone = home.join("github/blog");
+    std::fs::create_dir_all(&gone)?;
+    closed_project(
+        &places,
+        "blog",
+        &gone,
+        &format!(
+            "{}[window.agent]\ntool = \"claude-code\"\nsession = \"{SESSION}\"\n\
+             folder = \"{}\"\ntranscript = \"{}\"\n",
+            saved("foot"),
+            gone.display(),
+            home.join("nowhere.jsonl").display()
+        ),
+    )?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        ..config_with_apps(&places)
+    })?;
+    hp.project_open("blog", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let told = hp.dispatch_until(WAIT, |hp| hp.project_not_back().is_some())?;
+    anyhow::ensure!(told, "nothing said");
+    let marks = marks_of(&places, "foot");
+    assert_eq!(
+        marks.last(),
+        Some(&(
+            format!("--working-directory={}", gone.display()),
+            gone.clone()
+        )),
+        "{marks:?}"
+    );
+    let (summary, body) = hp.project_not_back().context("said")?;
+    assert_eq!(summary, "blog est revenu, sauf une conversation");
+    assert_eq!(
+        body,
+        "La conversation de Claude Code n’a pas pu reprendre. Son terminal est ouvert dans blog."
+    );
     Ok(())
 }

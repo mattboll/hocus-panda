@@ -108,6 +108,22 @@ WHAT` (it asks to use `TOOL`, one word, on `WHAT`) or `says TEXT`. One
 line, cut to 120 characters. It may hold a command or a path: the desktop
 never logs it.
 
+A hook's line may also carry, each after a tab, its conversation
+(docs/design/projects.md §8.1): `cwd PATH` (the hook's `cwd`),
+`transcript PATH` (its `transcript_path`), both absolute paths, and
+`prompt TEXT` (`UserPromptSubmit`'s prompt, on one line, cut at 60
+characters). The desktop keeps the first `cwd`, the last transcript and
+the first prompt of the agent's session, never logs them, saves them
+with a project the agent's window is on, and resumes the conversation
+there when the project reopens (`claude --resume ID`, `codex resume
+ID`). The first `cwd` of an agent is also written to
+`$XDG_STATE_HOME/hocuspanda/folders`, which the project's form and the
+launcher propose.
+
+```
+agent claude-code 3f6c2a1e working 4242 hocus-site\tcwd /home/alex/github/hocus-site\ttranscript /home/alex/.claude/projects/-home-alex-github-hocus-site/3f6c2a1e.jsonl\tprompt refais la section du haut
+```
+
 ## What the hooks say
 
 `hocus agent-hook TOOL` is what Claude Code's and Codex's hooks run once

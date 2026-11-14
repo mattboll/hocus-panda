@@ -267,6 +267,7 @@ mod tests {
         let desktops = crate::config::Desktops {
             count: 4,
             names: vec!["Travail".into(), "Courrier".into(), String::new()],
+            ..crate::config::Desktops::default()
         };
         assert_eq!(super::suffix(desktops.name(1), 1), " · Courrier");
         assert_eq!(super::suffix(desktops.name(2), 2), " · 3");

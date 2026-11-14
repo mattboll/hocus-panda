@@ -47,7 +47,7 @@ use crate::{
     State,
     model::{Rect, WindowId},
     projects::{Found, Job, OpenOn, Seen, now_text, place_of, seconds_of},
-    session::restore::{Saved, SavedTerminal, SavedWindow, Shape, Whose},
+    session::restore::{Missing, Saved, SavedTerminal, SavedWindow, Shape, Whose},
     windows::rect_of,
 };
 
@@ -67,6 +67,9 @@ pub(crate) enum Reading {
     },
     /// Project `id` closing: its windows' places taken before.
     Close { id: String },
+    /// Project `id` closing: its browsers' tabs read again once their
+    /// windows are gone (§5 step 3).
+    Tabs { id: String },
 }
 
 /// A project closing.
@@ -79,7 +82,14 @@ pub(crate) struct Closing {
     /// once read.
     pub windows: Vec<(WindowId, SavedWindow)>,
     pub phase: ClosingPhase,
+    /// Its browsers' tabs were read again once their windows went (or
+    /// need not be).
+    pub tabs_again: bool,
 }
+
+/// How long after a project's browser windows closed their files are read
+/// again: the browser writes a window closed as it goes (§8.3).
+const TABS_AGAIN_AFTER: Duration = Duration::from_secs(1);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ClosingPhase {
@@ -134,7 +144,39 @@ fn card_window(w: &SavedWindow) -> CardWindow {
         rect: crate::desktops::share(saved_rect(w), screen).unwrap_or_default(),
         focused: false,
         terminal: w.terminal.as_ref().map(|t| t.folder.display().to_string()),
+        tabs: w.browser.as_ref().and_then(card_tabs),
+        agent: w.agent.as_ref().map(|a| card_agent(a, "idle", true)),
     }
+}
+
+/// An agent as a card shows it, in `state`; `closed`, with the command
+/// that will resume it.
+fn card_agent(a: &crate::resume::SavedAgent, state: &str, closed: bool) -> hocus_link::CardAgent {
+    hocus_link::CardAgent {
+        tool: a.title().to_owned(),
+        state: state.to_owned(),
+        prompt: a.first_prompt.clone(),
+        session: a.session.chars().take(8).collect(),
+        folder: a.folder.display().to_string(),
+        resume: closed.then(|| a.command_line()).flatten(),
+    }
+}
+
+/// A browser window's tabs as a card shows them: their titles and hosts,
+/// never their addresses (§10); none when they were not read.
+fn card_tabs(b: &crate::browsers::SavedBrowser) -> Option<hocus_link::CardTabs> {
+    b.read().then(|| hocus_link::CardTabs {
+        count: u32::try_from(b.tabs.len()).unwrap_or(u32::MAX),
+        shown: b
+            .tabs
+            .iter()
+            .take(hocus_link::CARD_TABS_MOST)
+            .map(|t| hocus_link::CardTab {
+                title: t.title.clone(),
+                host: crate::browsers::host_of(&t.url),
+            })
+            .collect(),
+    })
 }
 
 /// The confirmation's dim, the same piece from one frame to the next.
@@ -142,6 +184,22 @@ static DIM: std::sync::OnceLock<smithay::backend::renderer::element::Id> =
     std::sync::OnceLock::new();
 
 impl State {
+    /// Where the browsers keep their session files, when a project's tabs
+    /// are remembered (`[desktops] remember-tabs`, §13 F) and the home is
+    /// known.
+    pub(crate) fn browser_places(&self) -> Option<crate::browsers::Places> {
+        if !self.config.desktops.remember_tabs {
+            return None;
+        }
+        let home = self.config.home.clone()?;
+        let config = self
+            .config
+            .agent_places
+            .as_ref()
+            .map_or_else(|| home.join(".config"), |p| p.config_home.clone());
+        Some(crate::browsers::Places { home, config })
+    }
+
     /// The dim under a project's closing's confirmation on `output`, as
     /// it fades in and out with it (§5, `rgba(7,9,15,0.45)`).
     pub(crate) fn project_dim(
@@ -256,6 +314,8 @@ impl State {
                     id,
                     app_id: crate::windows::app_id(&managed.window).unwrap_or_default(),
                     pid: self.pid_of(&managed.window),
+                    title: crate::windows::title_of(self, id),
+                    size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
                 })
             })
             .collect()
@@ -273,11 +333,13 @@ impl State {
         self.projects.serial += 1;
         self.projects.jobs += 1;
         let serial = self.projects.serial;
+        let browsers = self.browser_places();
         if worker
             .send(Job::Read {
                 serial,
                 windows,
                 within,
+                browsers,
             })
             .is_err()
         {
@@ -348,9 +410,16 @@ impl State {
         }
         let (output, _) = self.project_output(at).ok_or("its screen is not there")?;
         let seen = self.project_seen(at);
+        // Each agent's terminal saved as its agent's (§6, §8.1).
+        let conversations = self.agent_conversations();
         let windows: Vec<(WindowId, SavedWindow)> = seen
             .iter()
             .filter_map(|s| Some((s.id, self.session_window(s.id)?)))
+            .flat_map(|(id, saved)| {
+                crate::session::restore::with_agents(id, saved, &conversations)
+                    .into_iter()
+                    .map(move |w| (id, w))
+            })
             .collect();
         tracing::info!(project = id, windows = windows.len(), "a project closes");
         self.projects.closing.push(Closing {
@@ -358,6 +427,7 @@ impl State {
             output: output.name(),
             windows,
             phase: ClosingPhase::Reading,
+            tabs_again: false,
         });
         if !self.project_read_ask(at, seen, Reading::Close { id: id.clone() }) {
             // Nothing read: closed with what the loop knows.
@@ -376,7 +446,90 @@ impl State {
             Reading::Confirm { id } => self.project_confirm(&id, &found),
             Reading::Card { id, output, at } => self.project_card(&id, &output, at, &found),
             Reading::Close { id } => self.project_closing_read(&id, found),
+            Reading::Tabs { .. } => {}
         }
+    }
+
+    /// The thread read a closing project's browsers' tabs again: those it
+    /// found replace what was read before.
+    pub(crate) fn project_tabs_again(
+        &mut self,
+        serial: u64,
+        found: Vec<(WindowId, Option<crate::browsers::SavedBrowser>)>,
+    ) {
+        let Some(at) = self.projects.reading.iter().position(|(s, _)| *s == serial) else {
+            return;
+        };
+        let (_, reading) = self.projects.reading.remove(at);
+        let Reading::Tabs { id } = reading else {
+            return;
+        };
+        if let Some(closing) = self.projects.closing.iter_mut().find(|c| c.id == id) {
+            for (wid, browser) in found {
+                if let Some((_, saved)) = closing.windows.iter_mut().find(|(w, _)| *w == wid)
+                    && let Some(browser) = browser.filter(crate::browsers::SavedBrowser::read)
+                {
+                    saved.browser = Some(browser);
+                }
+            }
+        }
+        self.project_closed(&id);
+    }
+
+    /// Project `id`'s browsers' windows closed: their files are read again
+    /// a moment later (§5 step 3). Whether it was asked.
+    fn project_tabs_again_ask(&mut self, id: &str, left: &[WindowId]) -> bool {
+        let Some(browsers) = self.browser_places() else {
+            return false;
+        };
+        let Some(closing) = self.projects.closing.iter_mut().find(|c| c.id == id) else {
+            return false;
+        };
+        closing.tabs_again = true;
+        let windows: Vec<(WindowId, crate::browsers::Asked)> = closing
+            .windows
+            .iter()
+            .filter(|(w, s)| !left.contains(w) && s.browser.is_some())
+            .filter_map(|(w, s)| {
+                Some((
+                    *w,
+                    crate::browsers::Asked {
+                        browser: crate::browsers::of_app(&s.app_id)?,
+                        title: s.title.clone(),
+                        size: s.size,
+                    },
+                ))
+            })
+            .collect();
+        if windows.is_empty() || self.projects.worker.is_none() {
+            return false;
+        }
+        self.projects.serial += 1;
+        let serial = self.projects.serial;
+        self.projects
+            .reading
+            .push((serial, Reading::Tabs { id: id.to_owned() }));
+        let job = Job::Tabs {
+            serial,
+            windows,
+            browsers,
+        };
+        let mut job = Some(job);
+        let sent = self.loop_handle.insert_source(
+            Timer::from_duration(TABS_AGAIN_AFTER),
+            move |_, _, app| {
+                if let Some(job) = job.take() {
+                    app.state.projects_job(job);
+                }
+                TimeoutAction::Drop
+            },
+        );
+        if let Err(err) = sent {
+            tracing::warn!(%err.error, "a project's tabs are not read again");
+            self.projects.reading.retain(|(s, _)| *s != serial);
+            return false;
+        }
+        true
     }
 
     /// The confirmation (§5): what comes back, what closing interrupts.
@@ -392,16 +545,42 @@ impl State {
         };
         let mut back: Vec<ComingBack> = Vec::new();
         let mut interrupted: Vec<Interrupted> = Vec::new();
+        let conversations = self.agent_conversations();
         for f in found {
             let app = self
                 .windows
                 .get(&f.id)
                 .and_then(|m| crate::windows::app_id(&m.window))
                 .unwrap_or_default();
+            // An agent's terminal: its agent resumes there (§5).
+            let agents: Vec<&crate::resume::SavedAgent> = conversations
+                .iter()
+                .filter(|(w, ..)| *w == f.id)
+                .map(|(_, a, _)| a)
+                .collect();
+            if f.entry.is_some() && !agents.is_empty() {
+                for agent in agents {
+                    back.push(ComingBack::Agent {
+                        tool: agent.title().to_owned(),
+                        app: app.clone(),
+                    });
+                }
+                continue;
+            }
             match (&f.entry, &f.terminal) {
                 (None, _) => back.push(ComingBack::NotBack {
                     app: f.name.clone(),
                 }),
+                (Some(entry), None) if f.browser.as_ref().is_some_and(|b| b.read()) => {
+                    back.push(ComingBack::Browser {
+                        app,
+                        entry: entry.clone(),
+                        tabs: f
+                            .browser
+                            .as_ref()
+                            .map_or(0, |b| u32::try_from(b.tabs.len()).unwrap_or(u32::MAX)),
+                    });
+                }
                 (Some(entry), Some(terminal)) => {
                     back.push(ComingBack::Terminal {
                         app,
@@ -479,6 +658,7 @@ impl State {
         };
         let screen = rect_of(geometry);
         let focused = self.model.focused();
+        let conversations = self.agent_conversations();
         let windows = found
             .iter()
             .filter(|f| self.windows.contains_key(&f.id))
@@ -500,6 +680,11 @@ impl State {
                     rect,
                     focused: focused == Some(f.id),
                     terminal: f.terminal.as_ref().map(|t| t.folder.display().to_string()),
+                    tabs: f.browser.as_ref().and_then(card_tabs),
+                    agent: conversations
+                        .iter()
+                        .find(|(w, ..)| *w == f.id)
+                        .map(|(_, a, state)| card_agent(a, state, false)),
                 }
             })
             .collect();
@@ -530,17 +715,23 @@ impl State {
         for (wid, saved) in &mut closing.windows {
             if let Some(f) = found.iter().find(|f| f.id == *wid) {
                 saved.entry = f.entry.clone().unwrap_or_default();
-                saved.terminal = f.terminal.as_ref().map(|t| SavedTerminal {
-                    folder: t.folder.clone(),
-                });
+                saved.terminal = f
+                    .terminal
+                    .as_ref()
+                    .filter(|_| saved.agent.is_none())
+                    .map(|t| SavedTerminal {
+                        folder: t.folder.clone(),
+                    });
+                saved.browser.clone_from(&f.browser);
             }
         }
-        let left: Vec<WindowId> = closing
+        let mut left: Vec<WindowId> = closing
             .windows
             .iter()
             .map(|(w, _)| *w)
             .filter(|w| self.windows.contains_key(w))
             .collect();
+        left.dedup();
         let of = id.to_owned();
         let timer = self
             .loop_handle
@@ -598,6 +789,28 @@ impl State {
         let Some(at) = self.projects.closing.iter().position(|c| c.id == id) else {
             return;
         };
+        // Its browsers' windows gone, their tabs are read again first: no
+        // more waiting for its windows meanwhile.
+        if let Some(closing) = self.projects.closing.get_mut(at)
+            && !closing.tabs_again
+        {
+            closing.tabs_again = true;
+            let left = match &mut closing.phase {
+                ClosingPhase::Waiting { left, timer } => {
+                    if let Some(timer) = timer.take() {
+                        self.loop_handle.remove(timer);
+                    }
+                    left.clone()
+                }
+                ClosingPhase::Reading => Vec::new(),
+            };
+            if self.project_tabs_again_ask(id, &left) {
+                return;
+            }
+        }
+        let Some(at) = self.projects.closing.iter().position(|c| c.id == id) else {
+            return;
+        };
         let closing = self.projects.closing.remove(at);
         let left = match closing.phase {
             ClosingPhase::Waiting { left, timer } => {
@@ -619,6 +832,7 @@ impl State {
             .filter(|(w, s)| !left.contains(w) && !s.entry.is_empty())
             .map(|(_, mut s)| {
                 s.pid = None;
+                s.title.clear();
                 s
             })
             .collect();
@@ -662,7 +876,7 @@ impl State {
     }
 
     /// Gives the thread `job`.
-    fn projects_job(&mut self, job: Job) {
+    pub(crate) fn projects_job(&mut self, job: Job) {
         if let Some(worker) = &self.projects.worker {
             self.projects.jobs += 1;
             if worker.send(job).is_err() {
@@ -939,10 +1153,15 @@ impl State {
         self.tell_projects();
     }
 
-    /// What of project `id` did not come back (`names`), and its folder if
-    /// it is gone: one notification, its monogram as its icon.
-    pub(crate) fn project_not_back(&mut self, id: &str, names: Vec<String>, gone: Option<PathBuf>) {
-        if names.is_empty() && gone.is_none() {
+    /// What of project `id` did not come back (`missing`), and its folder
+    /// if it is gone: one notification, its monogram as its icon.
+    pub(crate) fn project_not_back(
+        &mut self,
+        id: &str,
+        missing: Vec<Missing>,
+        gone: Option<PathBuf>,
+    ) {
+        if missing.is_empty() && gone.is_none() {
             return;
         }
         let Some(project) = self.projects.list.iter().find(|p| p.id == id) else {
@@ -957,12 +1176,17 @@ impl State {
             .unwrap_or_default();
         let (summary, body) = not_back_said(
             &project.name,
-            &names,
+            &missing,
             gone.map(|g| link::tilde(&g.display().to_string(), &home.display().to_string()))
                 .as_deref(),
             lang,
         );
-        tracing::info!(project = id, ?names, "a project came back but for some");
+        tracing::info!(
+            project = id,
+            apps = ?Missing::apps(&missing),
+            missing = missing.len(),
+            "a project came back but for some"
+        );
         self.projects.not_back = Some((summary.clone(), body.clone()));
         let Some(bus) = self.shell.bus.clone() else {
             return;
@@ -1015,12 +1239,26 @@ impl State {
 /// a sentence for what did not come back and one for its folder gone.
 pub fn not_back_said(
     name: &str,
-    names: &[String],
+    missing: &[Missing],
     gone: Option<&str>,
     lang: hocus_words::Lang,
 ) -> (String, String) {
     const SHOWN: usize = 3;
     let and = crate::session::restore::and_word(lang);
+    let apps = Missing::apps(missing);
+    // What did not come back, each once, as the summary names it.
+    let mut names: Vec<String> = apps.clone();
+    for m in missing {
+        let said = match m {
+            Missing::App(_) => continue,
+            Missing::Tabs(browser) => txt::their_tabs(lang, browser),
+            Missing::Conversation { .. } => txt::A_CONVERSATION.get(lang).to_owned(),
+        };
+        if !names.contains(&said) {
+            names.push(said);
+        }
+    }
+    let names = names.as_slice();
     let what = if names.is_empty() {
         txt::ITS_FOLDER.get(lang).to_owned()
     } else if names.len() > SHOWN {
@@ -1046,9 +1284,10 @@ pub fn not_back_said(
     };
     let summary = txt::back_but(lang, txt::BackBut { name, what: &what });
     let mut body = Vec::new();
-    if !names.is_empty() {
-        body.push(crate::session::restore::not_back_said(names, lang));
+    if !apps.is_empty() {
+        body.push(crate::session::restore::not_back_said(&apps, lang));
     }
+    body.extend(crate::session::restore::missing_said(missing, lang));
     if let Some(folder) = gone {
         body.push(txt::folder_gone(lang, folder));
     }
@@ -1061,7 +1300,11 @@ mod tests {
 
     #[test]
     fn what_did_not_come_back_is_named_three_at_most() {
-        let names = |n: &[&str]| n.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let names = |n: &[&str]| {
+            n.iter()
+                .map(|s| Missing::App((*s).to_owned()))
+                .collect::<Vec<_>>()
+        };
         let fr = hocus_words::Lang::French;
         let (summary, body) = not_back_said("hocus-site", &names(&["Slack"]), None, fr);
         assert_eq!(summary, "hocus-site est revenu, sauf Slack");
@@ -1080,6 +1323,13 @@ mod tests {
             not_back_said("blog", &[], Some("~/code/blog"), hocus_words::Lang::English);
         assert_eq!(summary, "blog came back, but for its folder");
         assert_eq!(body, "The folder ~/code/blog no longer exists.");
+        // A browser window without its tabs.
+        let (summary, body) = not_back_said("site", &[Missing::Tabs("Firefox".into())], None, fr);
+        assert_eq!(summary, "site est revenu, sauf les onglets de Firefox");
+        assert_eq!(
+            body,
+            "Les onglets d’une fenêtre de Firefox n’ont pas pu être lus."
+        );
     }
 
     #[test]

@@ -807,6 +807,15 @@ fn to_shell() -> Vec<ToShell> {
                 ComingBack::NotBack {
                     app: "test.no-entry".into(),
                 },
+                ComingBack::Browser {
+                    app: "firefox".into(),
+                    entry: "firefox".into(),
+                    tabs: 4,
+                },
+                ComingBack::Agent {
+                    tool: "Claude Code".into(),
+                    app: "kitty".into(),
+                },
             ],
             interrupted: vec![
                 Interrupted::Agent {
@@ -1500,5 +1509,20 @@ fn card_window(id: u64, terminal: Option<&str>) -> CardWindow {
         rect: [0, 0, 5000, 10000],
         focused: id == 3,
         terminal: terminal.map(str::to_owned),
+        tabs: (id == 3).then(|| CardTabs {
+            count: 7,
+            shown: vec![CardTab {
+                title: "#789 Project desktops".into(),
+                host: "github.com".into(),
+            }],
+        }),
+        agent: (id == 5).then(|| CardAgent {
+            tool: "Claude Code".into(),
+            state: "working".into(),
+            prompt: "la ligne du projet dans la barre".into(),
+            session: "3f6c2a1e".into(),
+            folder: "/home/alex/github/hocus-panda".into(),
+            resume: Some("claude --resume 3f6c2a1e".into()),
+        }),
     }
 }

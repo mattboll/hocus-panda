@@ -79,6 +79,11 @@ pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
 /// A project as a test sees it: its name, its folder, and, open, its
 /// screen's connector and its desktop (from 0).
 pub type ProjectSeen = (String, std::path::PathBuf, Option<(String, usize)>);
+
+/// A browser window's tabs a closed project keeps: the one shown (from
+/// 1) and their addresses (the tests).
+pub type SeenTabs = (usize, Vec<String>);
+
 /// The confetti as a test sees them: those in flight (global, logical),
 /// and those lying, each on its window (`None`: a bar) from its edge's
 /// left end and top (logical).
@@ -2263,6 +2268,61 @@ impl Headless {
     /// its summary and body.
     pub fn project_not_back(&self) -> Option<(String, String)> {
         self.app.state.projects.not_back.clone()
+    }
+
+    /// A closed project's agents, as kept in memory: each one's tool,
+    /// session, folder and transcript.
+    pub fn project_agents(&self, name: &str) -> Vec<[String; 4]> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .filter_map(|w| w.agent.as_ref())
+                    .map(|a| {
+                        [
+                            a.tool.clone(),
+                            a.session.clone(),
+                            a.folder.display().to_string(),
+                            a.transcript.display().to_string(),
+                        ]
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// A closed project's browsers' windows, as kept in memory: each
+    /// one's app id, and its tabs' addresses with the one shown (from 1),
+    /// none when it keeps no tabs, empty when they were not read.
+    pub fn project_tabs(&self, name: &str) -> Vec<(String, Option<SeenTabs>)> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .filter(|w| crate::browsers::of_app(&w.app_id).is_some())
+                    .map(|w| {
+                        (
+                            w.app_id.clone(),
+                            w.browser.as_ref().map(|b| {
+                                (b.selected, b.tabs.iter().map(|t| t.url.clone()).collect())
+                            }),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// A closed project's contents, as kept in memory: each window's app

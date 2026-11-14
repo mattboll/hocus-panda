@@ -759,3 +759,103 @@ A comes first; B needs A; C and D need B and not each other.
   (`a_project_follows_its_windows_to_another_screen_and_back`).
   Screenshots: `HOCUS_SHOTS=… cargo nextest run -p hocus-compositor
   projects_shots::closing_and_reopening --run-ignored only`.
+
+### Lot C, browser tabs (2026-11-14)
+
+- **Read** (`crates/hocus-compositor/src/browsers.rs`), on the projects'
+  thread as a card or the confirmation opens and as a project closes, on
+  the session's thread as it ends (the windows on a project's desktop):
+  Firefox's profile locked by a live process (`lock`'s `IP:+PID`), else
+  the one whose session was written last; its
+  `sessionstore-backups/recovery.jsonlz4` (else `sessionstore.jsonlz4`),
+  mozLz4 decoded by an LZ4 block reader of our own (no dependency), its
+  `windows` and `_closedWindows`, a window with `isPrivate` left out.
+  Chromium's (`chromium`, `google-chrome`, `brave-browser`, `vivaldi`,
+  `microsoft-edge` app ids) last used profile and newest
+  `Sessions/Session_*`, its SNSS commands read for windows (normal ones),
+  tabs, their navigations, the shown entry and tab, pinned, tabs and
+  windows closed. A window's title without its browser's suffix is
+  matched with each file window's shown tab's title, then the nearest
+  size, then the order; a title saying private (Private Browsing,
+  Navigation privée, Incognito, InPrivate) is never matched and its
+  window keeps no tabs. Each browser's profile is remembered by the
+  thread, read again once its windows closed (Firefox's lock goes as it
+  quits). The log says how many tabs, never an address nor a title.
+- **Closing** reads the tabs with the other windows, then, once the
+  windows went, a second later the files again (§5 step 3), the closed
+  windows first; what it finds replaces the first read.
+- **Saved** as `[window.browser]` (`kind`, `selected` from 1, `[[window.browser.tab]]`
+  `url`, `title`, `pinned`); a window not found keeps `kind` alone.
+- **Brought back**: one start a window holding its addresses (those with
+  a scheme, never an option, 200 at most): Chromium's `--new-window
+  URL…`; Firefox's `--new-window URL` for one, the addresses alone for
+  several, which Firefox's `nsDefaultCommandLineHandler` opens together
+  in one new window when there is more than one (checked in
+  `BrowserContentHandler.sys.mjs`). The selected tab is not selected
+  again (no browser takes it on its command line). A window not found
+  comes back as a new window and the notification says "Les onglets d’une
+  fenêtre de Firefox n’ont pas pu être lus." At log in, a browser whose
+  preferences reopen its own session (§13 D) starts once without
+  addresses; a window that shows a saved tab's title as it maps takes that
+  place, else the first of its application's.
+- **The setting** `[desktops] remember-tabs` (Settings › Desktops,
+  « Retenir les onglets des projets », on): off, nothing is read and
+  browsers come back as plain applications.
+- **The card** lists "ONGLETS · FIREFOX · 7" per browser window, each
+  tab's title and host (the shell never gets an address), four, then "3
+  de plus" / "Moins"; the confirmation says "Firefox, avec ses 4
+  onglets".
+- **Tests**: test 6
+  (`projects::a_projects_browsers_come_back_with_their_tabs`: a fake
+  Firefox profile and the committed SNSS file
+  `tests/data/Session_13400000000000000`, built by
+  `browsers::tests::snss_file`, `HOCUS_SNSS_WRITE=1` writes it again);
+  unit tests for mozLz4, the session JSON, SNSS, the matching, the
+  addresses given, the profile found.
+
+### Lot D, agents' conversations (2026-11-14)
+
+- **The line** (docs/agents.md): `hocus agent-hook` adds `cwd PATH`,
+  `transcript PATH` (absolute paths) and, for `UserPromptSubmit`, `prompt
+  TEXT` (one line, 60 characters), each after a tab
+  (`hocus_agents::Conversation`, whose `Debug` says none of them). The
+  compositor keeps the first `cwd`, the last transcript and the first
+  prompt with the agent, never logs them, and writes the first `cwd` to
+  `$XDG_STATE_HOME/hocuspanda/folders` (the projects' thread; 200 lines,
+  30 days), which lot A's form reads.
+- **Which agents**: Claude Code's and Codex's whose window, found as the
+  bar finds it (above their process, else herdr's terminal's for an agent
+  in one of its panes), is on the project's desktop. herdr's own session
+  never comes back; each of its hook agents comes back in a terminal of
+  its own at its window's place (§13 E).
+- **Saved** as `[window.agent]` (`tool`, `session`, `folder`, `transcript`,
+  `first-prompt`) with the terminal's entry and place, no
+  `[window.terminal]`: as the project closes, and at log out for the
+  windows on a project's desktop.
+- **Brought back** (`crates/hocus-compositor/src/resume.rs`): the terminal
+  in the folder, its table's command (`terminals::with_command`, §8.2:
+  `-- CMD…`, `-e CMD…`, `-x CMD…`, kitty's bare, Ptyxis' one quoted word)
+  running `$SHELL -c 'claude --resume ID; exec $SHELL'` (`codex resume
+  ID`); the id letters, digits and `-`, not starting with `-`. Codex's
+  hooks' `session_id` is not documented as the id `codex resume` takes
+  (its hooks' page shows `thr_…` ids): the UUID at the end of its
+  transcript's name (`rollout-…-ID.jsonl`) is taken when it is one, else
+  the session's id. Its folder or transcript gone, its program not on
+  the `PATH` (`[agents]`' places' `PATH`, else the compositor's), or a
+  terminal the table does not know: the terminal opens in the folder alone,
+  and the notification says "La conversation de Claude Code n’a pas pu
+  reprendre. Son terminal est ouvert dans hocus-site." (the summary "…
+  sauf une conversation"). **Came back**: any hook of that session within
+  30 s (the first a resumed Claude Code sends is `SessionStart`, `source`
+  `resume`); else counted as not resumed, its terminal left as it is.
+- **The confirmation** says "Claude Code, qui reprendra sa conversation",
+  its panda as its icon, instead of the terminal's row; **the card**'s
+  "AGENTS" shows each agent's panda in its state, "**Claude Code** · «
+  first prompt »", its session and folder (open) or "reprendra : claude
+  --resume …" (closed), and its state ("au travail", "en pause").
+- **Tests**: test 7 (`projects::an_agents_conversation_resumes_in_its_terminal`:
+  the terminal stand-in runs what follows `--`, a fake `claude` on the
+  agents' `PATH` writes its arguments and folder and says `SessionStart`
+  through `hocus agent-hook`; a project whose transcript is gone); unit
+  tests for the id check, Codex's id, the command per terminal, the line's
+  conversation, the folders' file.

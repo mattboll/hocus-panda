@@ -379,6 +379,82 @@ impl Line {
 
 // --- Lot B -----------------------------------------------------------------------
 
+/// The agent's session (lot D).
+const SESSION: &str = "3f6c2a1e-9b0d-4c55-8e21-7d0a94c1b2e6";
+
+/// A running Firefox profile in `home` whose session holds the two
+/// projects' windows' tabs (lot C): its lock names this process.
+fn firefox_profile(home: &Path) -> anyhow::Result<()> {
+    let root = home.join(".mozilla/firefox");
+    let profile = root.join("ab12.default-release");
+    std::fs::create_dir_all(profile.join("sessionstore-backups"))?;
+    std::fs::write(
+        root.join("profiles.ini"),
+        "[Profile0]\nName=default-release\nIsRelative=1\nPath=ab12.default-release\n",
+    )?;
+    std::os::unix::fs::symlink(
+        format!("127.0.1.1:+{}", std::process::id()),
+        profile.join("lock"),
+    )?;
+    let tab = |url: &str, title: &str| {
+        format!("{{\"entries\":[{{\"url\":\"{url}\",\"title\":\"{title}\"}}],\"index\":1}}")
+    };
+    let panda = [
+        tab(
+            "https://github.com/x/hocus-panda/issues/789",
+            "#789 Project desktops",
+        ),
+        tab(
+            "https://docs.rs/smithay/latest/smithay/desktop/struct.Window.html",
+            "smithay::desktop::Window",
+        ),
+        tab(
+            "https://docs.rs/iced/latest/iced/widget/struct.Column.html",
+            "iced · Column",
+        ),
+        tab(
+            "https://searchfox.org/mozilla-central/source/browser/components/sessionstore",
+            "Firefox session store, mozLz4",
+        ),
+        tab(
+            "https://docs.claude.com/en/docs/claude-code/hooks",
+            "Claude Code · Hooks reference",
+        ),
+        tab(
+            "https://developers.openai.com/codex/cli",
+            "Codex CLI · resume",
+        ),
+        tab(
+            "https://github.com/x/hocus-panda/pull/820",
+            "Pull request #820",
+        ),
+    ];
+    let site = [
+        tab("http://localhost:4321/", "hocus-site · Accueil"),
+        tab("https://docs.astro.build/en/getting-started/", "Astro Docs"),
+        tab("https://www.figma.com/design/site-v2", "Figma · Site v2"),
+        tab("https://github.com/x/hocus/issues/42", "Issue #42 · hocus"),
+    ];
+    let session = format!(
+        "{{\"windows\":[{{\"tabs\":[{}],\"selected\":1}},{{\"tabs\":[{}],\"selected\":1}}]}}",
+        panda.join(","),
+        site.join(",")
+    );
+    let data = session.as_bytes();
+    let mut lz4 = b"mozLz40\0".to_vec();
+    lz4.extend_from_slice(&u32::try_from(data.len())?.to_le_bytes());
+    lz4.push(0xF0);
+    let mut rest = data.len() - 15;
+    while rest >= 255 {
+        lz4.push(255);
+        rest -= 255;
+    }
+    lz4.push(u8::try_from(rest)?);
+    lz4.extend_from_slice(data);
+    std::fs::write(profile.join("sessionstore-backups/recovery.jsonlz4"), lz4)?;
+    Ok(())
+}
+
 /// A desktop entry `id` named `name` in `dir`, running `exec`.
 fn entry(dir: &Path, id: &str, name: &str, exec: &str, extra: &str) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
@@ -435,6 +511,7 @@ fn closing_and_reopening_project_desktops() -> anyhow::Result<()> {
     repo(&home, "github/hocus-icons", 6 * 24 * hour)?;
     repo(&home, "code/api-meteo", 96 * hour)?;
     std::fs::create_dir_all(panda.join("crates"))?;
+    firefox_profile(&home)?;
     let exe = std::env::current_exe()?;
     // The applications, the compositor's and the shell's.
     let share = at("share")?;
@@ -683,9 +760,16 @@ fn closing_and_reopening_project_desktops() -> anyhow::Result<()> {
         })?;
         found.context("no shell")?
     };
+    // Its hooks name its folder, its transcript (gone by the time it
+    // reopens: the notification says so) and its first prompt (lot D).
     control(
         &hp,
-        &format!("agent claude-code site working {shell_pid} hocus-site"),
+        &format!(
+            "agent claude-code {SESSION} working {shell_pid} hocus-site\tcwd {}\t\
+             transcript {}\tprompt refais la section du haut de l'accueil, plus courte",
+            site.display(),
+            home.join(".claude/projects/gone.jsonl").display()
+        ),
     )?;
     wait(&mut hp, Duration::from_millis(800))?;
 
@@ -729,6 +813,30 @@ fn closing_and_reopening_project_desktops() -> anyhow::Result<()> {
         &mut hp,
         &out,
         "2-open-card",
+        Some((card.x as u32, card.y as u32, 620, card.height as u32 + 10)),
+    )?;
+    press(&mut hp, KEY_ESC);
+    wait(&mut hp, Duration::from_millis(300))?;
+    press(&mut hp, KEY_ESC);
+    let gone = hp.dispatch_until(WAIT, |hp| hp.overview().is_none())?;
+    anyhow::ensure!(gone, "the overview stays");
+    wait(&mut hp, Duration::from_millis(400))?;
+
+    // 2b. hocus-site's card: its tabs, its agent at work (lots C, D).
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_W]);
+    wait(&mut hp, Duration::from_millis(500))?;
+    let name = hp.overview_project_name(SCREEN, 1).context("no name")?;
+    hp.pointer_move(name.0, name.1);
+    wait(&mut hp, Duration::from_millis(100))?;
+    hp.button(common::BTN_LEFT, true);
+    hp.button(common::BTN_LEFT, false);
+    let card = drawn(&mut hp, hocus_link::PROJECT_CARD_NAMESPACE)?;
+    hp.pointer_move(1100.0, 880.0);
+    wait(&mut hp, Duration::from_millis(300))?;
+    shoot(
+        &mut hp,
+        &out,
+        "2b-open-card-site",
         Some((card.x as u32, card.y as u32, 620, card.height as u32 + 10)),
     )?;
     press(&mut hp, KEY_ESC);
@@ -814,6 +922,20 @@ fn closing_and_reopening_project_desktops() -> anyhow::Result<()> {
     anyhow::ensure!(back, "hocus-site never came back");
     wait(&mut hp, Duration::from_millis(1500))?;
     shoot(&mut hp, &out, "7-reopened", None)?;
+    // Its agent's transcript is gone: its conversation could not resume.
+    let said = hp.dispatch_until(Duration::from_secs(40), |hp| {
+        hp.project_not_back().is_some()
+    })?;
+    anyhow::ensure!(said, "no notification for the conversation");
+    let before = hp.project_not_back();
+    wait(&mut hp, Duration::from_millis(1500))?;
+    shoot(
+        &mut hp,
+        &out,
+        "7b-notification-conversation",
+        Some((1440 - 520, 0, 520, 260)),
+    )?;
+    wait(&mut hp, Duration::from_millis(6000))?;
 
     // 8. blog: Slack is not installed any more: the notification.
     chord(&mut hp, &[KEY_LEFTMETA, KEY_SPACE]);
@@ -824,7 +946,7 @@ fn closing_and_reopening_project_desktops() -> anyhow::Result<()> {
     wait(&mut hp, Duration::from_millis(500))?;
     press(&mut hp, KEY_ENTER);
     let told = hp.dispatch_until(Duration::from_secs(40), |hp| {
-        hp.project_not_back().is_some()
+        hp.project_not_back().is_some() && hp.project_not_back() != before
     })?;
     anyhow::ensure!(told, "no notification");
     wait(&mut hp, Duration::from_millis(2500))?;

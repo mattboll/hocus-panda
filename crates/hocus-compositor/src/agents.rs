@@ -192,6 +192,10 @@ struct Agent {
     green: Option<(u64, Option<u32>)>,
     /// Its good news (#809), and until when its row says it.
     good: Option<(String, Duration)>,
+    /// Its conversation, as its hooks said it (docs/design/projects.md
+    /// §8.1): the first `cwd`, the last transcript's path, the first
+    /// prompt. Never logged.
+    conversation: hocus_agents::Conversation,
 }
 
 /// Good news of a process no agent is known for: a row of its own, for
@@ -557,6 +561,7 @@ impl Compositor {
                     tests: None,
                     green: None,
                     good: None,
+                    conversation: hocus_agents::Conversation::default(),
                 });
                 agents.list.len() - 1
             }
@@ -605,6 +610,20 @@ impl Compositor {
         if !ancestry.is_empty() {
             agent.ancestry = ancestry;
         }
+        // Its conversation (§8.1): the folder it started in, as its name;
+        // its transcript as last said; the first prompt of its session.
+        let said = report.conversation;
+        let folder_new = agent.conversation.cwd.is_none() && said.cwd.is_some();
+        if folder_new {
+            agent.conversation.cwd.clone_from(&said.cwd);
+        }
+        if said.transcript.is_some() {
+            agent.conversation.transcript = said.transcript;
+        }
+        if agent.conversation.prompt.is_none() {
+            agent.conversation.prompt = said.prompt;
+        }
+        let folder = folder_new.then(|| agent.conversation.cwd.clone()).flatten();
         let new_pid = report.pid.filter(|p| !agent.pids.contains(p));
         if let Some(pid) = new_pid {
             agent.pids.push(pid);
@@ -614,6 +633,60 @@ impl Compositor {
             tracing::info!(name, "an agent finished, its tests passing");
             self.fireworks_go_off();
         }
+        if let Some(folder) = folder {
+            // The folders the hooks named, which the project's form and
+            // the launcher propose (§2.3).
+            self.projects_job(crate::projects::Job::Folder(folder.into()));
+        }
+        // A conversation resuming hears its agent (§8.1).
+        if matches!(report.source, Source::ClaudeCode | Source::Codex) {
+            self.comeback_agent_heard(&report.key);
+        }
+    }
+
+    /// The conversations of the agents of Claude Code and Codex whose
+    /// window is known (docs/design/projects.md §8.1): each window's id, the
+    /// conversation as a project keeps it, and its agent's state.
+    pub(crate) fn agent_conversations(&self) -> Vec<(WindowId, crate::resume::SavedAgent, String)> {
+        // Their windows as the bar finds them: above their processes, else
+        // herdr's terminal's for an agent in one of its panes.
+        let windows = self.windows_by_pid();
+        let (herdr_window, _) = self.herdr_window(&windows);
+        let followed = self.herdr_followed();
+        self.agents
+            .list
+            .iter()
+            .filter_map(|agent| {
+                let own = agent
+                    .ancestry
+                    .iter()
+                    .find_map(|pid| windows.get(pid).and_then(|w| w.last()).copied());
+                let in_herdr = followed
+                    && self
+                        .agents
+                        .herdr
+                        .agents
+                        .iter()
+                        .any(|(pane, _)| pane.pids.iter().any(|p| agent.pids.contains(p)));
+                let window = own.or(herdr_window.filter(|_| in_herdr))?;
+                let (source, key) = agent
+                    .keys
+                    .iter()
+                    .find(|(s, _)| matches!(s, Source::ClaudeCode | Source::Codex))?;
+                let c = &agent.conversation;
+                Some((
+                    window,
+                    crate::resume::SavedAgent {
+                        tool: source.name().to_owned(),
+                        session: key.clone(),
+                        folder: c.cwd.clone()?.into(),
+                        transcript: c.transcript.clone().unwrap_or_default().into(),
+                        first_prompt: c.prompt.clone().unwrap_or_default(),
+                    },
+                    agent.state.name().to_owned(),
+                ))
+            })
+            .collect()
     }
 
     /// Good news (#809): the row of the agent whose process (or one above
