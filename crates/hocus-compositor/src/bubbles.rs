@@ -203,7 +203,7 @@ impl State {
 
     /// The topmost window whose application's id is `app`'s, ignoring
     /// case, or its last part (`org.mozilla.firefox`, `firefox`).
-    fn window_of_app(&self, app: &str) -> Option<WindowId> {
+    pub(crate) fn window_of_app(&self, app: &str) -> Option<WindowId> {
         let app = app.trim_end_matches(".desktop").to_lowercase();
         if app.is_empty() {
             return None;
@@ -222,7 +222,7 @@ impl State {
 
     /// The topmost window of process `pid`, else of its nearest parent
     /// that has one.
-    fn window_of_process(&self, pid: u32) -> Option<WindowId> {
+    pub(crate) fn window_of_process(&self, pid: u32) -> Option<WindowId> {
         if pid == 0 {
             return None;
         }

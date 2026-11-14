@@ -7,7 +7,8 @@
 //! one goes to the history, the bar's dot counting it; a replacement
 //! updates its bubble in place; more than three wait under a "+N" chip;
 //! the actions, the card and the ✕ say what they should; an agents' tool
-//! saying its agent waits makes no bubble, its other notifications do.
+//! saying its agent waits makes no bubble, its other notifications do; an
+//! agent's notification opens its conversation in a terminal (#823).
 //!
 //! And 5.4's (issue #394), one per point of its spec: the history lists by
 //! sections, newest first; a click in it invokes the default, raises and
@@ -54,6 +55,8 @@ struct Bed {
     bus: Child,
     runtime: tokio::runtime::Runtime,
     client: zbus::Connection,
+    /// The test's bus's address.
+    address: String,
     heard: Heard,
 }
 
@@ -154,6 +157,7 @@ fn start_with(
         bus,
         runtime,
         client,
+        address,
         heard,
     };
     bed.logged("the notifications are served")?;
@@ -856,6 +860,129 @@ fn an_agents_tool_saying_its_agent_waits_makes_no_bubble() -> anyhow::Result<()>
         ..Notice::default()
     })?;
     bed.shows(1)?;
+    Ok(())
+}
+
+/// An agent working on its own (#823): a fake `claude`, in a folder of the
+/// test's, its transcript in the shell's home, sends a notification on the
+/// test's bus through a program of its own (`busctl`, as `notify-send`
+/// would). A click on its bubble opens the terminal (a stand-in named
+/// `foot`) in that folder resuming its conversation; so does a click on it
+/// in the history.
+#[test]
+fn an_agents_notification_opens_its_conversation_in_a_terminal() -> anyhow::Result<()> {
+    const SESSION: &str = "3f6c2a1e-0b7d-4c55-9a51-2f0e8d1c7b42";
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let busctl = ["/usr/bin/busctl", "/bin/busctl"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| common::missing("busctl (systemd)"));
+    let work = tempfile::tempdir()?;
+    let bin = work.path().join("bin");
+    let folder = work.path().join("hocus-site");
+    std::fs::create_dir_all(&bin)?;
+    std::fs::create_dir_all(&folder)?;
+    let folder = folder.canonicalize()?;
+    let marks = work.path().join("marks");
+    let script = |name: &str, text: String| -> anyhow::Result<()> {
+        let file = bin.join(name);
+        std::fs::write(&file, text)?;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))?;
+        Ok(())
+    };
+    // The terminal's stand-in: what it was asked to run, and where.
+    script(
+        "foot",
+        format!(
+            "#!/bin/sh\nprintf '%s\\t%s\\n' \"$*\" \"$PWD\" >> '{}'\n",
+            marks.display()
+        ),
+    )?;
+    // The agent, its notification sent by a program it runs (not the last
+    // of its script: it stays its parent).
+    script(
+        "claude",
+        format!(
+            "#!/bin/sh\n'{}' --address=\"$HOCUS_TEST_BUS\" -- call org.freedesktop.Notifications \
+             /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
+             'susssasa{{sv}}i' Ada 0 '' 'J’ai trouvé ce que tu voulais' 'pas cher' 0 0 -1 \
+             >/dev/null\nstatus=$?\nexit $status\n",
+            busctl.display()
+        ),
+    )?;
+    let terminal = bin.join("foot");
+    let path = bin.clone();
+    let mut home_of = PathBuf::new();
+    let mut bed = start(&shell, |home, config| {
+        home_of = home.to_path_buf();
+        config.programs.terminal = terminal.display().to_string();
+        config.agent_places = Some(hocus_agents::tools::Places {
+            home: home.to_path_buf(),
+            config_home: home.join(".config"),
+            codex_home: home.join(".codex"),
+            path: vec![path],
+            herdr_socket: home.join(".config/herdr/herdr.sock"),
+            processes: home.join("proc"),
+            hocus: PathBuf::from("hocus"),
+            state_dir: Some(home.join("state")),
+        });
+    })?;
+    // Its transcript, as Claude Code names its folder.
+    let mangled: String = folder
+        .display()
+        .to_string()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let transcripts = home_of.join(".claude/projects").join(mangled);
+    std::fs::create_dir_all(&transcripts)?;
+    std::fs::write(transcripts.join(format!("{SESSION}.jsonl")), "{}\n")?;
+
+    let sent = Command::new(bin.join("claude"))
+        .current_dir(&folder)
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env("HOCUS_TEST_BUS", &bed.address)
+        .status()?;
+    anyhow::ensure!(sent.success(), "the fake agent's notification: {sent}");
+    bed.logged("an agent's conversation's notification")?;
+    let card = bed.shows(1)?[0];
+    bed.click((f64::from(card.x + 150), f64::from(card.y + 30)))?;
+    let shell_program = std::env::var("SHELL")
+        .ok()
+        .filter(|s| s.starts_with('/'))
+        .unwrap_or_else(|| "/bin/sh".to_owned());
+    let want = format!(
+        "--working-directory={} -- {shell_program} -c claude --resume {SESSION}; exec $SHELL\t{}",
+        folder.display(),
+        folder.display()
+    );
+    let lines = |n: usize| {
+        let marks = marks.clone();
+        move |_: &Headless| std::fs::read_to_string(&marks).is_ok_and(|m| m.lines().count() >= n)
+    };
+    let opened = bed.hp.dispatch_until(WAIT, lines(1))?;
+    anyhow::ensure!(opened, "no terminal:\n{}", bed.log());
+    assert_eq!(
+        std::fs::read_to_string(&marks)?.lines().collect::<Vec<_>>(),
+        [want.as_str()]
+    );
+
+    // From the history, the same.
+    bed.open_history()?;
+    let items = bed.history_items();
+    let item = bed.history_item(items.first().map_or("", String::as_str))?;
+    common::point(&mut bed.hp, item)?;
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(item)?;
+    let opened = bed.hp.dispatch_until(WAIT, lines(2))?;
+    anyhow::ensure!(opened, "no terminal from the history:\n{}", bed.log());
+    assert_eq!(
+        std::fs::read_to_string(&marks)?.lines().collect::<Vec<_>>(),
+        [want.as_str(), want.as_str()]
+    );
     Ok(())
 }
 

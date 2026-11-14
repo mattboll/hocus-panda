@@ -133,6 +133,21 @@ pub fn with_command(app: &str, command: &[String]) -> Option<Vec<String>> {
     )
 }
 
+/// The table's id of a terminal started by its program's name (`foot`,
+/// `gnome-terminal`): the app id its windows take.
+pub fn app_of_program(program: &str) -> &str {
+    let name = program.rsplit('/').next().unwrap_or(program);
+    match name {
+        "gnome-terminal" | "gnome-terminal-server" => "org.gnome.terminal",
+        "kgx" | "gnome-console" => "org.gnome.console",
+        "ptyxis" => "org.gnome.ptyxis",
+        "konsole" => "org.kde.konsole",
+        "wezterm" => "org.wezfurlong.wezterm",
+        "ghostty" => "com.mitchellh.ghostty",
+        other => other,
+    }
+}
+
 /// `words` as one line a shell reads back the same: each quoted.
 pub fn shell_words(words: &[String]) -> String {
     words

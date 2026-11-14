@@ -128,6 +128,15 @@ pub enum ToCompositor {
     /// its application's name; `-` for none), else of the process that sent it,
     /// `pid`, or one of its parents (0: not known).
     Raise { pid: u32, app: String },
+    /// A notification of an agent's conversation, without a default action
+    /// of its own, was clicked (#823): as [`Self::Raise`], also the window
+    /// of the agent's process; with none, the compositor opens a terminal
+    /// on the conversation, resuming it in its folder.
+    Converse {
+        pid: u32,
+        app: String,
+        conversation: crate::AgentConversation,
+    },
     /// The user starts an application from the launcher (5.1): the
     /// compositor runs it off its loop, as its own child, its first window
     /// taking the focus on the current desktop.

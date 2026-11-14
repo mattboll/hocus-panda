@@ -42,6 +42,9 @@ pub struct Note {
     /// An agent's tool saying only that the agent waits or has finished:
     /// to the history, no bubble.
     pub agent: bool,
+    /// The conversation of the agent that sent it, when it has no default
+    /// action of its own (#823): a click opens it.
+    pub conversation: Option<hocus_link::AgentConversation>,
     /// What its icon was found by, to find it again for the history after
     /// a restart (an image sent as pixels is not kept).
     pub icon_from: IconFrom,

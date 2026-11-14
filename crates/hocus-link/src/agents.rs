@@ -7,6 +7,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::{BadLine, text::tidy};
 
+/// The conversation of an agent a notification came from (#823,
+/// notifications.md "An agent's conversation"): its tool (`claude-code` or
+/// `codex`), its session's id, its folder (the agent's working directory)
+/// and its transcript, as the shell found them, and the agent's process
+/// then (0: not known). Its `Debug` says its tool alone: its id and paths
+/// are never logged.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConversation {
+    pub tool: String,
+    pub session: String,
+    pub folder: std::path::PathBuf,
+    pub transcript: std::path::PathBuf,
+    pub pid: u32,
+}
+
+impl fmt::Debug for AgentConversation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AgentConversation")
+            .field("tool", &self.tool)
+            .finish_non_exhaustive()
+    }
+}
+
 /// An agents' tool, as the bar shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentTool {

@@ -140,6 +140,13 @@ pub enum Effect {
         pid: u32,
         app: String,
     },
+    /// The compositor brings the window of the application or of its
+    /// agent, else opens its agent's conversation (#823).
+    Converse {
+        pid: u32,
+        app: String,
+        conversation: hocus_link::AgentConversation,
+    },
     /// What the history lists changed: its panel draws again, at its new
     /// size.
     Changed,
@@ -285,6 +292,22 @@ pub struct Stack {
     card: bool,
     next: u64,
     chip: Option<(Extra, usize)>,
+}
+
+/// What a click on `note` asks the compositor: its application's window,
+/// or, without a default action of its own, its agent's conversation when
+/// it has one (#823).
+fn bring(note: &Note) -> Effect {
+    let pid = note.pid;
+    let app = note.entry.clone().unwrap_or_else(|| note.app.clone());
+    match &note.conversation {
+        Some(conversation) if !note.default => Effect::Converse {
+            pid,
+            app,
+            conversation: conversation.clone(),
+        },
+        _ => Effect::Raise { pid, app },
+    }
 }
 
 /// What, changing, is written or drawn again: the history's version, the
@@ -450,10 +473,7 @@ impl Stack {
                         key: "default".to_owned(),
                     }));
                 }
-                effects.push(Effect::Raise {
-                    pid: note.pid,
-                    app: note.entry.clone().unwrap_or_else(|| note.app.clone()),
-                });
+                effects.push(bring(&note));
                 self.history.set_seen(note.id, Sight::Seen);
                 if !note.resident {
                     self.leave(serial, 2, now, effects);
@@ -503,10 +523,7 @@ impl Stack {
                 // A capture has no window to raise: its editor opens; nor a
                 // meeting's reminder: its call does.
                 if super::capture_of(note.id).is_none() && super::reminder_of(note.id).is_none() {
-                    effects.push(Effect::Raise {
-                        pid: note.pid,
-                        app: note.entry.clone().unwrap_or_else(|| note.app.clone()),
-                    });
+                    effects.push(bring(&note));
                 }
                 self.forget(key, now, effects);
             }
@@ -1036,6 +1053,7 @@ pub fn summary(held: &[String], at: i64) -> Option<Note> {
         resident: false,
         pid: 0,
         agent: false,
+        conversation: None,
         icon_from: super::note::IconFrom::default(),
         at,
     })
@@ -1133,6 +1151,7 @@ mod tests {
             resident: false,
             pid: 0,
             agent: false,
+            conversation: None,
             icon_from: crate::notifications::note::IconFrom::default(),
             at: 1_000_000,
         }
@@ -1285,6 +1304,39 @@ mod tests {
         let effects = s.handle(Input::Close(5), t0 + MS(500));
         assert_eq!(signals(&effects), [Signal::Closed { id: 5, reason: 3 }]);
         assert!(s.chip.is_none());
+    }
+
+    #[test]
+    fn an_agent_s_notification_without_a_default_opens_its_conversation() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        let conversation = hocus_link::AgentConversation {
+            tool: "claude-code".to_owned(),
+            session: "3f6c2a1e".to_owned(),
+            folder: "/home/alex/site".into(),
+            transcript: "/home/alex/.claude/projects/-home-alex-site/3f6c2a1e.jsonl".into(),
+            pid: 40,
+        };
+        let mut first = note(1);
+        first.app = "Ada".to_owned();
+        first.pid = 42;
+        first.conversation = Some(conversation.clone());
+        s.handle(notify(first), t0);
+        let effects = s.handle(Input::Card(1), t0);
+        assert!(effects.contains(&Effect::Converse {
+            pid: 42,
+            app: "Ada".to_owned(),
+            conversation: conversation.clone(),
+        }));
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Raise { .. })));
+        // Its own default kept: invoked, its window raised.
+        let mut second = note(2);
+        second.default = true;
+        second.conversation = Some(conversation);
+        s.handle(notify(second), t0);
+        let effects = s.handle(Input::Card(2), t0);
+        assert!(effects.iter().any(|e| matches!(e, Effect::Raise { .. })));
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Converse { .. })));
     }
 
     #[test]

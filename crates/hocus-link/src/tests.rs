@@ -948,6 +948,18 @@ fn to_compositor() -> Vec<ToCompositor> {
             pid: 0,
             app: String::new(),
         },
+        ToCompositor::Converse {
+            pid: 4242,
+            app: "Ada".into(),
+            conversation: AgentConversation {
+                tool: "claude-code".into(),
+                session: "3f6c2a1e-0b7d-4c55-9a51-2f0e8d1c7b42".into(),
+                folder: "/home/alex/github/hocus-site".into(),
+                transcript: "/home/alex/.claude/projects/-home-alex-github-hocus-site/x.jsonl"
+                    .into(),
+                pid: 4240,
+            },
+        },
         ToCompositor::TrayClick { ask: 3, pid: 4242 },
         ToCompositor::TrayClick { ask: 4, pid: 0 },
         ToCompositor::Export {

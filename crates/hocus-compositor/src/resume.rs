@@ -14,6 +14,9 @@
 //! - **Codex**: its hooks' `session_id` is not documented as the id `codex
 //!   resume` takes; the id in its transcript's file name
 //!   (`rollout-…-ID.jsonl`) is, so that one is resumed when it reads.
+//! - **From a notification** (#823, notifications.md "An agent's
+//!   conversation"): a click on the notification of an agent with no window
+//!   opens the user's terminal on its conversation the same way.
 
 use std::path::{Path, PathBuf};
 
@@ -96,6 +99,99 @@ impl SavedAgent {
         self.command_line().is_some()
             && self.transcript.is_file()
             && self.program().is_some_and(|p| on_path(p, path))
+    }
+}
+
+/// What starts the user's terminal (`configured`, else the first found on
+/// `PATH`, `programs::terminal`) in `agent`'s folder resuming its
+/// conversation through `shell`: `None` when its folder or transcript is
+/// gone, its program is not in `path`, or the terminal is not one §8.2's
+/// table can give a command. Looked at off the loop.
+pub fn in_a_terminal(
+    agent: &SavedAgent,
+    configured: &str,
+    terminal_path: Option<&std::ffi::OsStr>,
+    path: &[PathBuf],
+    shell: &str,
+) -> Option<hocus_link::Launch> {
+    if !agent.folder.is_dir() || !agent.resumable(path) {
+        return None;
+    }
+    let terminal = crate::programs::terminal(configured, terminal_path)?;
+    let words: Vec<String> = terminal.split_whitespace().map(str::to_owned).collect();
+    let app = crate::terminals::app_of_program(words.first()?).to_owned();
+    let mut argv = crate::terminals::in_folder(&app, &words, &agent.folder);
+    argv.extend(crate::terminals::with_command(
+        &app,
+        &agent.command(shell)?,
+    )?);
+    Some(hocus_link::Launch {
+        id: app,
+        terminal: false,
+        dir: agent.folder.display().to_string(),
+        argv,
+    })
+}
+
+impl crate::State {
+    /// A notification of an agent's conversation was clicked (#823): a
+    /// window of its application, its sender or its agent is brought, as a
+    /// notification's click does; without one, the user's terminal opens on
+    /// the conversation, resumed in its folder, off the loop. It cannot
+    /// resume: nothing more, as before.
+    pub(crate) fn converse(
+        &mut self,
+        pid: u32,
+        app: &str,
+        conversation: hocus_link::AgentConversation,
+    ) {
+        let window = self
+            .window_of_app(app)
+            .or_else(|| self.window_of_process(pid))
+            .or_else(|| self.window_of_process(conversation.pid));
+        if let Some(id) = window {
+            tracing::debug!(
+                app,
+                pid,
+                window = id.0,
+                "an agent's notification brings its window"
+            );
+            self.window_asked(id.0);
+            return;
+        }
+        let agent = SavedAgent {
+            tool: conversation.tool,
+            session: conversation.session,
+            folder: conversation.folder,
+            transcript: conversation.transcript,
+            first_prompt: String::new(),
+        };
+        let configured = self.config.programs.terminal.clone();
+        let path = self.config.agent_places.as_ref().map_or_else(
+            || path_of(std::env::var_os("PATH").as_deref()),
+            |p| p.path.clone(),
+        );
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|s| s.starts_with('/'))
+            .unwrap_or_else(|| "/bin/sh".to_owned());
+        let env = crate::programs::Env::of(self).with_activation(self.activation_token());
+        crate::programs::on_a_thread("an agent's conversation".to_owned(), move || {
+            let terminal_path = std::env::var_os("PATH");
+            match in_a_terminal(&agent, &configured, terminal_path.as_deref(), &path, &shell) {
+                Some(launch) => {
+                    tracing::info!(
+                        tool = agent.tool,
+                        "an agent's conversation opens in a terminal"
+                    );
+                    crate::programs::launch(launch, None, env);
+                }
+                None => tracing::info!(
+                    tool = agent.tool,
+                    "an agent's conversation cannot resume: its notification opens nothing"
+                ),
+            }
+        });
     }
 }
 

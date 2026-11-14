@@ -1010,6 +1010,11 @@ impl State {
             ToCompositor::Record(ask) => self.record_asked(ask),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
+            ToCompositor::Converse {
+                pid,
+                app,
+                conversation,
+            } => self.converse(pid, &app, conversation),
             ToCompositor::TrayClick { ask, pid } => self.tray_clicked(ask, pid),
             ToCompositor::Export { ask, namespace } => {
                 let handle = self.export_for_shell(&namespace);

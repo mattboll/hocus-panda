@@ -24,6 +24,7 @@
 
 pub mod bell;
 pub mod bubble;
+pub mod conversation;
 pub mod dnd;
 pub mod draw;
 pub mod history;
@@ -684,6 +685,18 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             crate::popover::tell(ToCompositor::Raise { pid, app });
             Vec::new()
         }
+        Effect::Converse {
+            pid,
+            app,
+            conversation,
+        } => {
+            crate::popover::tell(ToCompositor::Converse {
+                pid,
+                app,
+                conversation,
+            });
+            Vec::new()
+        }
         Effect::Changed => {
             crate::popover::changed(crate::popover::Item::Notifications);
             Vec::new()
@@ -765,6 +778,7 @@ pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::ico
         resident: true,
         pid: 0,
         agent: false,
+        conversation: None,
         icon_from: note::IconFrom {
             app_icon: String::new(),
             image_path: Some(image),
@@ -843,6 +857,7 @@ fn reminder_note(
         resident: false,
         pid: 0,
         agent: false,
+        conversation: None,
         icon_from: note::IconFrom::default(),
         at,
     }
@@ -886,6 +901,7 @@ pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
         resident: false,
         pid: 0,
         agent: false,
+        conversation: None,
         icon_from: note::IconFrom::default(),
         at: wall_ms(),
     })));
