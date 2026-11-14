@@ -193,6 +193,18 @@ impl Sky {
         }
     }
 
+    /// How much of the night shows (its stars, 0 to 1): all of it with
+    /// the sun down, fading out as it climbs to a quarter of its height.
+    pub fn night(&self) -> f64 {
+        if !self.sun_up {
+            1.0
+        } else if self.elev < 0.25 {
+            1.0 - self.elev / 0.25
+        } else {
+            0.0
+        }
+    }
+
     /// The board's `lx`: how far the sun is from the screen's middle,
     /// left positive, as a share of its width; by night, a little.
     pub fn lx(&self, w: f64) -> f64 {
@@ -219,6 +231,12 @@ impl Sky {
             colour: [r, g, b, a as f32],
         })
     }
+}
+
+/// How many of the board's stars a screen `w` by `h` (logical) shows: its
+/// 160 over its 1200 × 720, at most 1024.
+pub fn stars(w: f64, h: f64) -> f64 {
+    (w * h * 160.0 / (1200.0 * 720.0)).round().min(1024.0)
 }
 
 /// The edges of a window a sun lights.

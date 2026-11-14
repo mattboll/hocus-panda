@@ -230,6 +230,7 @@ pub struct Record {
     pub body: String,
     pub pid: u32,
     pub agent: bool,
+    pub conversation: Option<hocus_link::AgentConversation>,
     pub at: i64,
     pub unseen: bool,
 }
@@ -245,6 +246,7 @@ impl Record {
             body: note.body.clone(),
             pid: note.pid,
             agent: note.agent,
+            conversation: note.conversation.clone(),
             at: note.at,
             // A bubble on screen as the shell ends was not seen.
             unseen: kept.seen != Sight::Seen,
@@ -268,6 +270,7 @@ impl Record {
             resident: false,
             pid: self.pid,
             agent: self.agent,
+            conversation: self.conversation,
             icon_from: self.icon_from,
             at: self.at,
         };
@@ -293,6 +296,7 @@ pub fn encode(records: &[Record]) -> String {
             "body": r.body,
             "pid": r.pid,
             "agent": r.agent,
+            "conversation": r.conversation,
             "at": r.at,
             "unseen": r.unseen,
         });
@@ -338,6 +342,9 @@ pub fn decode(text: &str, now: i64) -> (Vec<Record>, usize) {
                 .get("agent")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false),
+            conversation: value
+                .get("conversation")
+                .and_then(|c| serde_json::from_value(c.clone()).ok()),
             at,
             unseen: value
                 .get("unseen")
@@ -438,6 +445,7 @@ mod tests {
             resident: false,
             pid: 42,
             agent: false,
+            conversation: None,
             icon_from: IconFrom {
                 app_icon: "slack".to_owned(),
                 image_path: None,
@@ -474,7 +482,18 @@ mod tests {
         let now = 100 * DAY;
         let mut h = History::default();
         h.add(note(1, now - 8 * DAY), Sight::Seen);
-        h.add(note(2, now - DAY), Sight::Unseen);
+        // An agent's conversation (#823) kept: a click after a restart
+        // opens it.
+        let conversation = hocus_link::AgentConversation {
+            tool: "claude-code".to_owned(),
+            session: "3f6c2a1e".to_owned(),
+            folder: "/home/alex/site".into(),
+            transcript: "/home/alex/.claude/projects/-home-alex-site/3f6c2a1e.jsonl".into(),
+            pid: 40,
+        };
+        let mut two = note(2, now - DAY);
+        two.conversation = Some(conversation.clone());
+        h.add(two, Sight::Unseen);
         h.add(note(3, now - 1000), Sight::Showing);
         let records: Vec<Record> = h.items().iter().map(Record::of).collect();
         let text = encode(&records);
@@ -486,6 +505,8 @@ mod tests {
         // A bubble on screen as it was written is not seen.
         assert!(read[0].unseen);
         assert_eq!(read[1].body, "Bonjour\ttout le monde\n« ça va ? »");
+        assert_eq!(read[1].conversation, Some(conversation));
+        assert_eq!(read[0].conversation, None);
         let mut again = History::default();
         again.add(note(1, now), Sight::Showing);
         again.restore(read.into_iter().map(Record::note).collect());
