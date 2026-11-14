@@ -2661,6 +2661,7 @@ screen_recording_from = "Enregistrement du {day} à {time}.{ext}"
 and = " et "
 not_reopened = { one = "{listed} n’a pas pu être rouverte.", other = "{listed} n’ont pas pu être rouvertes." }
 tabs_unread = "Les onglets d’une fenêtre de {browser} n’ont pas pu être lus."
+conversation_not_resumed = "La conversation de {tool} n’a pas pu reprendre. Son terminal est ouvert dans {folder}."
 
 
 [compositor.projects]
@@ -2669,6 +2670,7 @@ and_others = { one = "{shown} et {n} autre", other = "{shown} et {n} autres" }
 back_but = "{name} est revenu, sauf {what}"
 folder_gone = "Le dossier {folder} n’existe plus."
 their_tabs = "les onglets de {browser}"
+a_conversation = "une conversation"
 
 [compositor.creatures]
 other_tab = "{name} · autre onglet"
@@ -2872,6 +2874,15 @@ back_tabs = { one = "{app}, avec son onglet", other = "{app}, avec ses {n} ongle
 tabs_heading = "ONGLETS · {browser} · {count}"
 tabs_more = "{n} de plus"
 tabs_fewer = "Moins"
+back_agent = "{tool}, qui reprendra sa conversation"
+agents_heading = "AGENTS"
+agent_session = "session {session} · {folder}"
+agent_resumes = "reprendra : {command}"
+agent_state_working = "au travail"
+agent_state_waiting = "t’attend"
+agent_state_done = "à voir"
+agent_state_failed = "bloqué"
+agent_state_idle = "en pause"
 not_back = "{app} ne reviendra pas"
 agent_working = "{tool} travaille encore : fermer interrompt sa réponse en cours."
 agent_waiting = "{tool} attend ta réponse : fermer l’interrompt."

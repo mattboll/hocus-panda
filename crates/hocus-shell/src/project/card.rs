@@ -19,8 +19,11 @@
 //! Then, past a divider each, a browser window's tabs (lot C): "ONGLETS ·
 //! FIREFOX · 7" and a 26 px row per tab, its title (13 px) and its host
 //! (11.5 px), four, then "3 de plus" (12.5 px, 600, the accent's text),
-//! which shows them all ("Moins" again). The agents' conversations come
-//! with lot D.
+//! which shows them all ("Moins" again). Then "AGENTS" (lot D): a 40 px
+//! row per agent, its panda in its state (30 px), "**Claude Code** · «
+//! its first prompt »" (13 px), under it its session and folder, or,
+//! closed, the command that will resume it (Martian Mono 11 px), and its
+//! state on the right (11.5 px, the accent's text at work).
 
 use hocus_a11y::Role;
 use iced::{
@@ -81,6 +84,9 @@ const BUTTON_PAD: f32 = 16.0;
 const BUTTON_TEXT: f32 = 13.5;
 const BUTTON_RADIUS: f32 = 9.0;
 const TAB_ROW: f32 = 26.0;
+const AGENT_ROW: f32 = 40.0;
+const AGENT_PANDA: f32 = 30.0;
+const AGENT_LINE: f32 = 11.0;
 const TAB_ICON: f32 = 12.0;
 const MORE_TEXT: f32 = 12.5;
 /// The tabs a window shows before "3 de plus".
@@ -184,6 +190,52 @@ fn tab_sections(shown: &hocus_link::ProjectCard, more: bool, words: Words) -> Ve
         .collect()
 }
 
+/// The agents of its windows.
+fn agents(shown: &hocus_link::ProjectCard) -> Vec<hocus_link::CardAgent> {
+    shown
+        .windows
+        .iter()
+        .filter_map(|w| w.agent.clone())
+        .collect()
+}
+
+fn agents_height(count: usize) -> f32 {
+    if count == 0 {
+        return 0.0;
+    }
+    let n = count.min(MOST) as f32;
+    GAP + DIVIDER + GAP + HEADING * LINE + HEADING_BOTTOM + n * AGENT_ROW + (n - 1.0) * ROW_GAP
+}
+
+/// An agent's state as the card says it.
+fn agent_state(state: &str, lang: crate::clock::time::Lang) -> &'static str {
+    use hocus_words::shell::project as txt;
+    match state {
+        "working" => txt::AGENT_STATE_WORKING,
+        "waiting" => txt::AGENT_STATE_WAITING,
+        "done" | "seen" => txt::AGENT_STATE_DONE,
+        "failed" => txt::AGENT_STATE_FAILED,
+        _ => txt::AGENT_STATE_IDLE,
+    }
+    .get(lang)
+}
+
+/// The line under an agent: its session and folder, or, closed, what will
+/// resume it.
+fn agent_line(agent: &hocus_link::CardAgent, lang: crate::clock::time::Lang) -> String {
+    use hocus_words::shell::project as txt;
+    match &agent.resume {
+        Some(command) => txt::agent_resumes(lang, command),
+        None => txt::agent_session(
+            lang,
+            txt::AgentSession {
+                session: &agent.session,
+                folder: &crate::desktops::folder_shown(&agent.folder),
+            },
+        ),
+    }
+}
+
 fn tabs_height(sections: &[Tabs]) -> f32 {
     sections
         .iter()
@@ -279,6 +331,7 @@ pub fn size_of(shown: &hocus_link::ProjectCard, more: bool, words: Words) -> (u3
         + windows_height(shown.windows.len())
         + terminals_height(terminals(shown).len())
         + tabs_height(&tab_sections(shown, more, words))
+        + agents_height(agents(shown).len())
         + GAP
         + private
         + GAP
@@ -441,8 +494,20 @@ fn shows(card: &Card, rows: &[Row], words: Words) -> String {
             )
         })
         .collect();
+    let agents: Vec<String> = agents(&card.shown)
+        .iter()
+        .map(|a| {
+            format!(
+                "{} · {} · {} ({})",
+                a.tool,
+                a.prompt,
+                agent_line(a, words.lang),
+                agent_state(&a.state, words.lang)
+            )
+        })
+        .collect();
     format!(
-        "name={:?} state={pill:?} folder={:?} when={when:?} windows={windows:?} terminals={:?} tabs={tabs:?}",
+        "name={:?} state={pill:?} folder={:?} when={when:?} windows={windows:?} terminals={:?} tabs={tabs:?} agents={agents:?}",
         card.shown.name,
         card.shown.folder,
         terminals(&card.shown),
@@ -669,6 +734,30 @@ fn content<'a>(card: &Card, rows: &[Row], words: Words) -> El<'a> {
             .push(Space::new().height(GAP))
             .push(tabs_list(tabs));
     }
+    let agents = agents(shown);
+    if !agents.is_empty() {
+        let heading = hocus_words::shell::project::AGENTS_HEADING.get(words.lang);
+        let mut list = column![ui::line(
+            container(spaced_by(heading, HEADING, MANROPE_BOLD, FAINT.get(), 0.08))
+                .padding(Padding {
+                    left: ROW_PAD,
+                    bottom: HEADING_BOTTOM,
+                    ..Padding::ZERO
+                })
+                .height(HEADING * LINE + HEADING_BOTTOM),
+            heading,
+        )];
+        let mut rows = column![].spacing(ROW_GAP);
+        for agent in agents.iter().take(MOST) {
+            rows = rows.push(agent_row(agent, words));
+        }
+        list = list.push(rows);
+        all = all
+            .push(Space::new().height(GAP))
+            .push(rule())
+            .push(Space::new().height(GAP))
+            .push(list);
+    }
     let all = all
         .push(Space::new().height(GAP))
         .push(ui::line(private, words.private()))
@@ -682,6 +771,66 @@ fn content<'a>(card: &Card, rows: &[Row], words: Words) -> El<'a> {
             left: BORDER + PAD,
         })
         .into()
+}
+
+/// An agent's row: its panda in its state, its tool and first prompt,
+/// under them its session or what will resume it, its state.
+fn agent_row<'a>(agent: &hocus_link::CardAgent, words: Words) -> El<'a> {
+    let state = agent_state(&agent.state, words.lang);
+    let state_w = kit::measure(state, PLACE, MANROPE);
+    let room = INNER - 2.0 * ROW_PAD - AGENT_PANDA - 10.0 - state_w - 12.0;
+    let tool_w = kit::measure(&agent.tool, TITLE, MANROPE_BOLD);
+    let prompt = if agent.prompt.is_empty() {
+        String::new()
+    } else {
+        let quoted = match words.lang {
+            crate::clock::time::Lang::French => format!(" · « {} »", agent.prompt),
+            _ => format!(" · “{}”", agent.prompt),
+        };
+        kit::elide(&quoted, room - tool_w, |t| kit::measure(t, TITLE, MANROPE))
+    };
+    let line = agent_line(agent, words.lang);
+    let line_shown = kit::elide(&line, room, |t| kit::measure(t, AGENT_LINE, MARTIAN));
+    let panda = iced::widget::svg(crate::pandas::still(crate::pandas::mood(
+        crate::agents::Look::of(&agent.state),
+    )))
+    .width(AGENT_PANDA)
+    .height(AGENT_PANDA);
+    let state_ink = if agent.state == "working" {
+        crate::theme::ACCENT_TEXT.get()
+    } else {
+        FAINT.get()
+    };
+    let said_as = format!("{}{prompt}, {line}, {state}", agent.tool);
+    let text = column![
+        row![
+            said(agent.tool.clone(), TITLE, MANROPE_BOLD, TEXT.get()),
+            said(prompt, TITLE, MANROPE, TEXT.get()),
+        ],
+        said(line_shown, AGENT_LINE, MARTIAN, FAINT.get()),
+    ]
+    .spacing(1.0);
+    let row = row![
+        panda,
+        gap(10.0),
+        text,
+        iced::widget::space::horizontal(),
+        said(state.to_owned(), PLACE, MANROPE, state_ink),
+    ]
+    .align_y(Vertical::Center);
+    ui::line(
+        container(row)
+            .padding(Padding {
+                left: ROW_PAD,
+                right: ROW_PAD,
+                ..Padding::ZERO
+            })
+            .width(INNER)
+            .height(AGENT_ROW)
+            .align_y(Vertical::Center),
+        said_as,
+    )
+    .into()
 }
 
 /// A browser window's tabs: its heading, a row each (its square, title
@@ -1095,6 +1244,7 @@ mod tests {
                     focused: false,
                     terminal: terminal.then(|| "/home/alex".to_owned()),
                     tabs: None,
+                    agent: None,
                 })
                 .collect(),
         };

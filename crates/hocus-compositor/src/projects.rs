@@ -163,6 +163,41 @@ pub(crate) enum Job {
     },
     /// Project `id`'s contents' file written, or taken out (none).
     Contents { id: String, text: Option<String> },
+    /// An agent's hook named this folder (§2.3): `folders` says so now.
+    Folder(PathBuf),
+}
+
+/// The file of the folders the agents' hooks named (§2.3): a line each,
+/// the path, a tab, the last time in seconds of the Unix epoch, the newest
+/// last.
+pub const FOLDERS: &str = "folders";
+/// Its lines at most, and how old they may be.
+const FOLDERS_MOST: usize = 200;
+const FOLDERS_AGE: u64 = 30 * 24 * 3600;
+
+/// `text`, the folders' file, with `folder` named at `now` (seconds): its
+/// line last, the others older than 30 days out, 200 at most.
+pub fn folders_with(text: &str, folder: &Path, now: u64) -> String {
+    let named = folder.display().to_string();
+    let mut lines: Vec<String> = text
+        .lines()
+        .filter(|line| {
+            let Some((path, at)) = line.split_once('\t') else {
+                return false;
+            };
+            path != named
+                && at
+                    .trim()
+                    .parse::<u64>()
+                    .is_ok_and(|at| now.saturating_sub(at) <= FOLDERS_AGE)
+        })
+        .map(str::to_owned)
+        .collect();
+    lines.push(format!("{named}\t{now}"));
+    let skip = lines.len().saturating_sub(FOLDERS_MOST);
+    let mut out = lines.split_off(skip).join("\n");
+    out.push('\n');
+    out
 }
 
 /// A window handed to the thread to be read: its title and size find a
@@ -251,6 +286,7 @@ impl std::fmt::Debug for Job {
             Self::Tabs {
                 serial, windows, ..
             } => write!(f, "Tabs({serial}, {} windows)", windows.len()),
+            Self::Folder(_) => f.write_str("Folder"),
             Self::Contents { text, .. } => {
                 write!(
                     f,
@@ -468,6 +504,22 @@ fn work(
                     .collect();
                 if done.send(Done::Tabs { serial, found }).is_err() {
                     return;
+                }
+            }
+            Job::Folder(folder) => {
+                let Some(dir) = dir else {
+                    continue;
+                };
+                // Never a folder with a line break: one line each.
+                if folder.to_string_lossy().contains(['\n', '\t']) {
+                    continue;
+                }
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let text = std::fs::read_to_string(dir.join(FOLDERS)).unwrap_or_default();
+                if let Err(err) = write_private(dir, FOLDERS, &folders_with(&text, &folder, now)) {
+                    tracing::warn!(%err, "could not write the agents' folders");
                 }
             }
             Job::Contents { id, text } => {
@@ -1031,6 +1083,20 @@ mod tests {
         write_private(&folder, "hocus-site.toml", &text).expect("written");
         assert_eq!(read_contents(dir.path(), "hocus-site"), contents.windows);
         assert!(read_contents(dir.path(), "blog").is_empty());
+    }
+
+    #[test]
+    fn the_folders_file_keeps_each_folder_once_newest_last() {
+        let now = 40 * 24 * 3600;
+        let text = format!("/old\t{}\n/a\t{}\n/b\t{}\n", 1, now - 60, now - 30);
+        assert_eq!(
+            folders_with(&text, Path::new("/a"), now),
+            format!("/b\t{}\n/a\t{now}\n", now - 30)
+        );
+        let many: String = (0..250).map(|i| format!("/f{i}\t{now}\n")).collect();
+        let kept = folders_with(&many, Path::new("/new"), now);
+        assert_eq!(kept.lines().count(), 200);
+        assert!(kept.ends_with(&format!("/new\t{now}\n")));
     }
 
     #[test]

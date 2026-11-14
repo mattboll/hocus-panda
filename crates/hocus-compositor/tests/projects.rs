@@ -1592,3 +1592,252 @@ fn a_projects_browsers_come_back_with_their_tabs() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+// --- Lot D: agents' conversations ---------------------------------------------------------
+//
+// Test 7 (docs/design/projects.md §12). The agent's terminal is the
+// terminal stand-in, which runs what follows its `--`; `claude` is a fake
+// on a `PATH` of the test's that writes its arguments and its folder, then
+// says `SessionStart` (`source` `resume`) through `hocus agent-hook`.
+
+const SESSION: &str = "3f6c2a1e-9b0d-4c55-8e21-7d0a94c1b2e6";
+
+/// The agent's terminal stand-in, `foot`: it writes its arguments and its
+/// folder into `marks/foot`, runs what follows `--` (its `PATH` the
+/// test's `bin` first, its `HOME` the test's, its `SHELL` one that ends at
+/// once), then shows its window.
+fn agent_terminal(places: &Places, bin: &Path, home: &Path) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let exe = std::env::current_exe()?;
+    let dir = places.root.join("applications");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(places.root.join("marks"))?;
+    let wrapper = places.root.join("foot-wrapper");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\t%s\\n' \"$*\" \"$(pwd)\" >> '{marks}'\n\
+             while [ $# -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+             if [ \"$1\" = \"--\" ]; then shift; \
+             ( PATH='{bin}':\"$PATH\" HOME='{home}' SHELL=/bin/true \"$@\" </dev/null >/dev/null 2>&1 & ); fi\n\
+             exec env {TERMINAL_APP}=foot '{exe}' --exact projects::terminal_program --nocapture\n",
+            marks = places.root.join("marks/foot").display(),
+            bin = bin.display(),
+            home = home.display(),
+            exe = exe.display()
+        ),
+    )?;
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::write(
+        dir.join("foot.desktop"),
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Foot\nCategories=System;TerminalEmulator;\n\
+             Exec=sh {}\n",
+            wrapper.display()
+        ),
+    )?;
+    Ok(wrapper)
+}
+
+/// A fake `claude` in `bin`: it writes its arguments and its folder into
+/// `marks/claude`, then its hook says the session started again.
+fn fake_claude(places: &Places, bin: &Path, socket: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(bin)?;
+    let claude = bin.join("claude");
+    std::fs::write(
+        &claude,
+        format!(
+            "#!/bin/sh\nprintf '%s\\t%s\\n' \"$*\" \"$(pwd)\" >> '{marks}'\n\
+             printf '{{\"session_id\":\"%s\",\"hook_event_name\":\"SessionStart\",\"source\":\"resume\",\"cwd\":\"%s\"}}' \"$2\" \"$(pwd)\" \
+             | '{hocus}' --socket '{socket}' agent-hook claude-code\n",
+            marks = places.root.join("marks/claude").display(),
+            hocus = common::hocus_program().display(),
+            socket = socket.display()
+        ),
+    )?;
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+/// The lines `app`'s stand-in wrote: its arguments and its folder.
+fn marks_of(places: &Places, app: &str) -> Vec<(String, PathBuf)> {
+    std::fs::read_to_string(places.root.join("marks").join(app))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .map(|(args, dir)| (args.to_owned(), PathBuf::from(dir)))
+        .collect()
+}
+
+/// Test 7: an agent's hooks' lines with its folder and transcript; closing
+/// saves its conversation with its terminal; reopening starts its terminal
+/// in its folder resuming it (`$SHELL -c 'claude --resume ID; exec
+/// $SHELL'`), heard back; its transcript gone, its terminal opens in the
+/// folder alone and the notification says so.
+#[test]
+fn an_agents_conversation_resumes_in_its_terminal() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    let bin = home.join("bin");
+    let folder = places.folder.canonicalize()?;
+    let transcript = home.join(format!(".claude/projects/x/{SESSION}.jsonl"));
+    std::fs::create_dir_all(transcript.parent().context("its folder")?)?;
+    std::fs::write(&transcript, "{}\n")?;
+    let wrapper = agent_terminal(&places, &bin, &home)?;
+    let agent_places = hocus_agents::tools::Places {
+        home: home.clone(),
+        config_home: home.join(".config"),
+        codex_home: home.join(".codex"),
+        path: vec![bin.clone()],
+        herdr_socket: home.join(".config/herdr/herdr.sock"),
+        processes: home.join("proc"),
+        hocus: common::hocus_program(),
+        state_dir: None,
+    };
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        agent_places: Some(agent_places),
+        ..config_with_apps(&places)
+    })?;
+    let socket = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    fake_claude(&places, &bin, &socket)?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-site", &folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let mut terminal = std::process::Command::new("sh")
+        .arg(&wrapper)
+        .current_dir(&folder)
+        .env("WAYLAND_DISPLAY", hp.socket())
+        .spawn()?;
+    window_of(&mut hp, "foot")?;
+    // Its hooks, as `hocus agent-hook` writes them: the agent's process is
+    // its terminal's.
+    let said = format!(
+        "agent claude-code {SESSION} working {} hocus-site\tcwd {}\ttranscript {}\t\
+         prompt refais la section du haut de l'accueil, plus courte\n",
+        terminal.id(),
+        folder.display(),
+        transcript.display()
+    );
+    UnixStream::connect(&socket)?.write_all(said.as_bytes())?;
+    let mut heard = false;
+    for _ in 0..50 {
+        wait(&mut hp, Duration::from_millis(100))?;
+        if hp.agents().iter().any(|a| a.window != 0) {
+            heard = true;
+            break;
+        }
+    }
+    anyhow::ensure!(heard, "the agent: {:?}", hp.agents());
+
+    hp.project_close("hocus-site")
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    closed(&mut hp, "hocus-site")?;
+    let _ = terminal.wait();
+    assert_eq!(
+        hp.project_agents("hocus-site"),
+        [[
+            "claude-code".to_owned(),
+            SESSION.to_owned(),
+            folder.display().to_string(),
+            transcript.display().to_string()
+        ]]
+    );
+    let file = places
+        .root
+        .join("state/hocuspanda/projects.d/hocus-site.toml");
+    let written = hp.dispatch_until(WAIT, |_| file.exists())?;
+    anyhow::ensure!(written, "no contents' file");
+    let text = std::fs::read_to_string(&file)?;
+    assert!(text.contains("[window.agent]"), "{text}");
+    assert!(
+        text.contains("first-prompt = \"refais la section"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("[window.terminal]"),
+        "the agent's terminal: {text}"
+    );
+    // Its folder is one the form and the launcher propose.
+    let folders = std::fs::read_to_string(places.root.join("state/hocuspanda/folders"))?;
+    assert!(
+        folders.starts_with(&format!("{}\t", folder.display())),
+        "{folders}"
+    );
+
+    // Reopened: its terminal in its folder, resuming it, heard back.
+    hp.project_open("hocus-site", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let back = hp.dispatch_until(WAIT, |hp| !hp.project_coming_back("hocus-site"))?;
+    anyhow::ensure!(back, "not back: {:?}", hp.agents());
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| s.starts_with('/'))
+        .unwrap_or_else(|| "/bin/sh".to_owned());
+    let marks = marks_of(&places, "foot");
+    assert_eq!(
+        marks.last(),
+        Some(&(
+            format!(
+                "--working-directory={} -- {shell} -c claude --resume {SESSION}; exec $SHELL",
+                folder.display()
+            ),
+            folder.clone()
+        )),
+        "{marks:?}"
+    );
+    assert_eq!(
+        marks_of(&places, "claude"),
+        [(format!("--resume {SESSION}"), folder.clone())]
+    );
+    assert!(
+        hp.project_not_back().is_none(),
+        "{:?}",
+        hp.project_not_back()
+    );
+
+    // Its transcript gone: its terminal in its folder alone, said.
+    drop(hp);
+    let gone = home.join("github/blog");
+    std::fs::create_dir_all(&gone)?;
+    closed_project(
+        &places,
+        "blog",
+        &gone,
+        &format!(
+            "{}[window.agent]\ntool = \"claude-code\"\nsession = \"{SESSION}\"\n\
+             folder = \"{}\"\ntranscript = \"{}\"\n",
+            saved("foot"),
+            gone.display(),
+            home.join("nowhere.jsonl").display()
+        ),
+    )?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        ..config_with_apps(&places)
+    })?;
+    hp.project_open("blog", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let told = hp.dispatch_until(WAIT, |hp| hp.project_not_back().is_some())?;
+    anyhow::ensure!(told, "nothing said");
+    let marks = marks_of(&places, "foot");
+    assert_eq!(
+        marks.last(),
+        Some(&(
+            format!("--working-directory={}", gone.display()),
+            gone.clone()
+        )),
+        "{marks:?}"
+    );
+    let (summary, body) = hp.project_not_back().context("said")?;
+    assert_eq!(summary, "blog est revenu, sauf une conversation");
+    assert_eq!(
+        body,
+        "La conversation de Claude Code n’a pas pu reprendre. Son terminal est ouvert dans blog."
+    );
+    Ok(())
+}

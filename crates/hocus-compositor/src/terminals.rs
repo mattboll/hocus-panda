@@ -104,6 +104,44 @@ pub fn in_folder(app: &str, argv: &[String], folder: &Path) -> Vec<String> {
     out
 }
 
+/// What `argv`'s terminal `app` (after [`in_folder`]) adds to run
+/// `command` in its window (§8.2's command column): none for a terminal the
+/// table does not know.
+pub fn with_command(app: &str, command: &[String]) -> Option<Vec<String>> {
+    let app = app.to_lowercase();
+    let before: &[&str] = match app.as_str() {
+        "foot"
+        | "footclient"
+        | "org.wezfurlong.wezterm"
+        | "org.gnome.terminal"
+        | "org.gnome.console" => &["--"],
+        "kitty" => &[],
+        "alacritty" | "com.mitchellh.ghostty" | "org.kde.konsole" | "xterm" => &["-e"],
+        "xfce4-terminal" => &["-x"],
+        // Ptyxis takes the command as one word.
+        "org.gnome.ptyxis" => {
+            return Some(vec!["-x".to_owned(), shell_words(command)]);
+        }
+        _ => return None,
+    };
+    Some(
+        before
+            .iter()
+            .map(|s| (*s).to_owned())
+            .chain(command.iter().cloned())
+            .collect(),
+    )
+}
+
+/// `words` as one line a shell reads back the same: each quoted.
+pub fn shell_words(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|w| format!("'{}'", w.replace('\'', "'\\''")))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// A process as `/proc/PID/stat` says it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stat {
@@ -323,6 +361,44 @@ mod tests {
         );
         assert_eq!(in_folder("other", &argv(&["other"]), dir), ["other"]);
         assert!(is_terminal_app("Alacritty") && !is_terminal_app("firefox"));
+    }
+
+    #[test]
+    fn a_terminal_runs_a_command_by_its_own_option() {
+        let cmd = ["/bin/zsh", "-c", "claude --resume 3f6c; exec $SHELL"].map(str::to_owned);
+        let with = |app: &str| with_command(app, &cmd);
+        assert_eq!(
+            with("foot"),
+            Some(vec![
+                "--".into(),
+                "/bin/zsh".into(),
+                "-c".into(),
+                "claude --resume 3f6c; exec $SHELL".into()
+            ])
+        );
+        assert_eq!(with("kitty").map(|a| a.len()), Some(3));
+        assert_eq!(
+            with("Alacritty").and_then(|a| a.first().cloned()),
+            Some("-e".into())
+        );
+        assert_eq!(
+            with("xfce4-terminal").and_then(|a| a.first().cloned()),
+            Some("-x".into())
+        );
+        assert_eq!(
+            with("org.gnome.Ptyxis"),
+            Some(vec![
+                "-x".into(),
+                "'/bin/zsh' '-c' 'claude --resume 3f6c; exec $SHELL'".into()
+            ])
+        );
+        assert_eq!(with("org.example.Term"), None);
+        // wezterm: its folder's `start --cwd DIR`, then the command.
+        let dir = Path::new("/srv/site");
+        let mut argv = in_folder("org.wezfurlong.wezterm", &["wezterm".to_owned()], dir);
+        argv.extend(with("org.wezfurlong.wezterm").unwrap_or_default());
+        assert_eq!(argv[..5], ["wezterm", "start", "--cwd", "/srv/site", "--"]);
+        assert_eq!(shell_words(&["it's".to_owned()]), "'it'\\''s'");
     }
 
     #[test]

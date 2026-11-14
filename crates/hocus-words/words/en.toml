@@ -2670,6 +2670,7 @@ screen_recording_from = "Screen recording from {day} {time}.{ext}"
 and = " and "
 not_reopened = { other = "{listed} could not be reopened." }
 tabs_unread = "The tabs of a {browser} window could not be read."
+conversation_not_resumed = "{tool}’s conversation could not resume. Its terminal is open in {folder}."
 
 
 [compositor.projects]
@@ -2678,6 +2679,7 @@ and_others = { one = "{shown} and {n} other", other = "{shown} and {n} others" }
 back_but = "{name} came back, but for {what}"
 folder_gone = "The folder {folder} no longer exists."
 their_tabs = "{browser}’s tabs"
+a_conversation = "a conversation"
 
 [compositor.creatures]
 other_tab = "{name} · other tab"
@@ -2881,6 +2883,15 @@ back_tabs = { one = "{app}, with its tab", other = "{app}, with its {n} tabs" }
 tabs_heading = "TABS · {browser} · {count}"
 tabs_more = "{n} more"
 tabs_fewer = "Fewer"
+back_agent = "{tool}, which will resume its conversation"
+agents_heading = "AGENTS"
+agent_session = "session {session} · {folder}"
+agent_resumes = "will resume: {command}"
+agent_state_working = "at work"
+agent_state_waiting = "waiting for you"
+agent_state_done = "to see"
+agent_state_failed = "stuck"
+agent_state_idle = "paused"
 not_back = "{app} will not come back"
 agent_working = "{tool} is still working: closing interrupts its answer."
 agent_waiting = "{tool} is waiting for you: closing interrupts it."

@@ -2270,6 +2270,33 @@ impl Headless {
         self.app.state.projects.not_back.clone()
     }
 
+    /// A closed project's agents, as kept in memory: each one's tool,
+    /// session, folder and transcript.
+    pub fn project_agents(&self, name: &str) -> Vec<[String; 4]> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .filter_map(|w| w.agent.as_ref())
+                    .map(|a| {
+                        [
+                            a.tool.clone(),
+                            a.session.clone(),
+                            a.folder.display().to_string(),
+                            a.transcript.display().to_string(),
+                        ]
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// A closed project's browsers' windows, as kept in memory: each
     /// one's app id, and its tabs' addresses with the one shown (from 1),
     /// none when it keeps no tabs, empty when they were not read.

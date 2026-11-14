@@ -101,8 +101,7 @@ pub struct SessionProject {
 ///
 /// What a project keeps of a window besides (docs/design/projects.md §6)
 /// goes in tables of its own: `terminal` (lot B), a browser's tabs
-/// (`browser`, lot C); an agent's conversation (`agent`, lot D) is added
-/// beside them.
+/// (`browser`, lot C), an agent's conversation (`agent`, lot D).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct SavedWindow {
@@ -132,6 +131,11 @@ pub struct SavedWindow {
     /// project's desktop only, and only with `[desktops] remember-tabs`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub browser: Option<crate::browsers::SavedBrowser>,
+    /// The conversation of the agent that ran in this terminal (§8.1),
+    /// which it resumes: on a project's desktop only. Its terminal is the
+    /// agent's then, not saved as a plain terminal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<crate::resume::SavedAgent>,
     /// Its client's process, for its thread to read a terminal's folder;
     /// never written.
     #[serde(skip)]
@@ -235,7 +239,16 @@ pub fn starts_of(windows: &[SavedWindow]) -> Vec<Start> {
             folder,
             tabs,
             unread: 0,
+            agent: None,
         };
+        if let Some(agent) = &w.agent {
+            // An agent's terminal on its own, in its folder, resuming it.
+            out.push(Start {
+                agent: Some(agent.clone()),
+                ..start(Some(agent.folder.clone()), None)
+            });
+            continue;
+        }
         match (&w.terminal, tabs) {
             (Some(terminal), _) => out.push(start(Some(terminal.folder.clone()), None)),
             (None, Some(tabs)) => out.push(start(None, Some(tabs))),
@@ -274,6 +287,8 @@ pub struct Start {
     pub folder: Option<PathBuf>,
     pub tabs: Option<(crate::browsers::Browser, Vec<String>)>,
     pub unread: u32,
+    /// The agent whose conversation its terminal resumes (§8.1).
+    pub agent: Option<crate::resume::SavedAgent>,
 }
 
 /// What did not come back, as the notification says it (projects.md §7).
@@ -283,6 +298,9 @@ pub enum Missing {
     App(String),
     /// A browser window whose tabs were not read: its browser's name.
     Tabs(String),
+    /// An agent's conversation that did not resume: its tool, and the
+    /// folder its terminal opened in (its last part).
+    Conversation { tool: String, folder: String },
 }
 
 impl Missing {
@@ -292,7 +310,7 @@ impl Missing {
             .iter()
             .filter_map(|m| match m {
                 Self::App(name) => Some(name.clone()),
-                Self::Tabs(_) => None,
+                Self::Tabs(_) | Self::Conversation { .. } => None,
             })
             .collect()
     }
@@ -366,6 +384,27 @@ pub struct Comeback {
     folder_gone: Option<PathBuf>,
     timer: Option<RegistrationToken>,
     heard: Option<RegistrationToken>,
+    /// The agents' conversations resuming (§8.1).
+    resumes: Vec<Resume>,
+}
+
+/// An agent's conversation resuming: its session's id, its tool, its
+/// folder's last part; whether its hook was heard since.
+#[derive(Debug)]
+struct Resume {
+    session: String,
+    tool: String,
+    folder: String,
+    state: Resuming,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Resuming {
+    /// Its agent's hook is waited for, [`PATIENCE`] at most.
+    Waiting,
+    Back,
+    /// Not started: its transcript or its program is not there.
+    Failed,
 }
 
 #[derive(Debug)]
@@ -426,6 +465,9 @@ pub enum Heard {
     Outcome(usize, Outcome),
     /// The project's folder is not there.
     FolderGone(PathBuf),
+    /// The conversation of session `.0` cannot resume: its terminal opens
+    /// in its folder alone.
+    NotResumed(String),
 }
 
 impl State {
@@ -531,11 +573,34 @@ impl State {
                 browsers: (whose == Whose::Session)
                     .then(|| self.browser_places())
                     .flatten(),
+                path: self.config.agent_places.as_ref().map_or_else(
+                    || crate::resume::path_of(std::env::var_os("PATH").as_deref()),
+                    |p| p.path.clone(),
+                ),
+                shell: std::env::var("SHELL")
+                    .ok()
+                    .filter(|s| s.starts_with('/'))
+                    .unwrap_or_else(|| "/bin/sh".to_owned()),
             },
             to,
         );
+        let resumes = windows
+            .iter()
+            .filter_map(|w| w.agent.as_ref())
+            .map(|a| Resume {
+                session: a.session.clone(),
+                tool: a.title().to_owned(),
+                folder: a
+                    .folder
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| a.folder.display().to_string()),
+                state: Resuming::Waiting,
+            })
+            .collect();
         Comeback {
             whose,
+            resumes,
             pending: windows.into(),
             starts: starts
                 .iter()
@@ -590,6 +655,12 @@ impl State {
                 }
             }
             Heard::FolderGone(folder) => c.folder_gone = Some(folder),
+            Heard::NotResumed(session) => {
+                tracing::info!("an agent's conversation cannot resume");
+                for r in c.resumes.iter_mut().filter(|r| r.session == session) {
+                    r.state = Resuming::Failed;
+                }
+            }
             Heard::Outcome(at, outcome) => {
                 let Some(start) = c.starts.get_mut(at) else {
                     return;
@@ -796,7 +867,10 @@ impl State {
             return;
         };
         let mut say = None;
-        if !c.told && c.starts.iter().all(|a| a.back.decided()) {
+        if !c.told
+            && c.starts.iter().all(|a| a.back.decided())
+            && c.resumes.iter().all(|r| r.state != Resuming::Waiting)
+        {
             c.told = true;
             say = Some(failed_names(c, |b| b == Back::Failed));
         }
@@ -824,6 +898,14 @@ impl State {
             );
         }
         c.pending.clear();
+        for r in c
+            .resumes
+            .iter_mut()
+            .filter(|r| r.state == Resuming::Waiting)
+        {
+            tracing::info!("an agent's conversation was not heard resuming");
+            r.state = Resuming::Failed;
+        }
         let say = (!c.told)
             .then(|| failed_names(c, |b| !matches!(b, Back::Windowed | Back::Autostarted)));
         c.told = true;
@@ -896,13 +978,40 @@ impl State {
         if !names.is_empty() {
             said.push(not_back_said(&names, lang));
         }
-        said.extend(missing_said(missing, None, lang));
+        said.extend(missing_said(missing, lang));
         crate::shell::notify(bus, "dialog-warning", said.join(" "));
     }
 
     /// The applications that did not come back, as last said.
     pub(crate) fn session_not_back(&self) -> &[String] {
         &self.session_restore.not_back
+    }
+
+    /// An agent of session `session` was heard (§8.1): its conversation,
+    /// if one was resuming, came back.
+    pub(crate) fn comeback_agent_heard(&mut self, session: &str) {
+        let restore = &mut self.session_restore;
+        let mut heard = Vec::new();
+        let comebacks = match &mut restore.phase {
+            Phase::Restoring(c) => Some(c),
+            _ => None,
+        }
+        .into_iter()
+        .chain(restore.projects.iter_mut());
+        for c in comebacks {
+            for r in c
+                .resumes
+                .iter_mut()
+                .filter(|r| r.session == session && r.state == Resuming::Waiting)
+            {
+                r.state = Resuming::Back;
+                heard.push(c.whose.clone());
+            }
+        }
+        for whose in heard {
+            tracing::info!(?whose, "an agent's conversation resumed");
+            self.comeback_check(&whose);
+        }
     }
 
     /// Whether the last session is still coming back.
@@ -973,7 +1082,9 @@ impl State {
         let Some(saver) = &self.session_restore.saver else {
             return;
         };
-        let snapshot = (self.session_snapshot(), self.session_projects());
+        // At the session's end, the agents on a project's desktop with
+        // their conversations (§8, §9).
+        let snapshot = (self.session_snapshot(again), self.session_projects());
         if !again && self.session_restore.last.as_ref() == Some(&snapshot) {
             return;
         }
@@ -1070,11 +1181,20 @@ impl State {
     /// The windows as they are, then the saved ones still waiting to come
     /// back (a crash or a log out meanwhile loses none): what the session
     /// is now.
-    fn session_snapshot(&self) -> Vec<SavedWindow> {
+    fn session_snapshot(&self, agents: bool) -> Vec<SavedWindow> {
         let mut out = Vec::new();
+        let conversations = if agents {
+            self.agent_conversations()
+        } else {
+            Vec::new()
+        };
         for id in self.windows.keys() {
             if let Some(saved) = self.session_window(*id) {
-                out.push(saved);
+                if self.project_of(*id).is_some() {
+                    out.extend(with_agents(*id, saved, &conversations));
+                } else {
+                    out.push(saved);
+                }
             }
         }
         match &self.session_restore.phase {
@@ -1133,6 +1253,7 @@ impl State {
                 opacity,
                 terminal: None,
                 browser: None,
+                agent: None,
                 pid: self.pid_of(&managed.window),
                 title: crate::windows::title_of(self, id),
                 size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
@@ -1163,11 +1284,39 @@ impl State {
             opacity,
             terminal: None,
             browser: None,
+            agent: None,
             pid: self.pid_of(&managed.window),
             title: crate::windows::title_of(self, id),
             size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
         })
     }
+}
+
+/// Window `id` as saved, `saved`, as many times as agents ran in it
+/// (`conversations`: herdr's terminal holds several, each coming back in a
+/// terminal of its own, §13 E), each with its conversation: the agent's
+/// terminal, not a plain one.
+pub(crate) fn with_agents(
+    id: WindowId,
+    saved: SavedWindow,
+    conversations: &[(WindowId, crate::resume::SavedAgent, String)],
+) -> Vec<SavedWindow> {
+    let theirs: Vec<&crate::resume::SavedAgent> = conversations
+        .iter()
+        .filter(|(w, ..)| *w == id)
+        .map(|(_, a, _)| a)
+        .collect();
+    if theirs.is_empty() {
+        return vec![saved];
+    }
+    theirs
+        .into_iter()
+        .map(|agent| SavedWindow {
+            agent: Some(agent.clone()),
+            terminal: None,
+            ..saved.clone()
+        })
+        .collect()
 }
 
 /// What of `c` did not come back: its starts whose state `failed` says
@@ -1185,22 +1334,30 @@ fn failed_names(c: &Comeback, failed: impl Fn(Back) -> bool) -> Vec<Missing> {
             out.push(Missing::Tabs(s.name.clone()));
         }
     }
+    for r in c.resumes.iter().filter(|r| r.state == Resuming::Failed) {
+        out.push(Missing::Conversation {
+            tool: r.tool.clone(),
+            folder: r.folder.clone(),
+        });
+    }
     out
 }
 
 /// The sentences of what came back but not whole: a browser window
 /// without its tabs ("Les onglets d'une fenêtre de Firefox n'ont pas pu
-/// être lus.").
-pub fn missing_said(
-    missing: &[Missing],
-    _folder: Option<&str>,
-    lang: hocus_words::Lang,
-) -> Vec<String> {
+/// être lus."), an agent's conversation that did not resume ("La
+/// conversation de Claude Code n'a pas pu reprendre. Son terminal est
+/// ouvert dans hocus-site.").
+pub fn missing_said(missing: &[Missing], lang: hocus_words::Lang) -> Vec<String> {
     missing
         .iter()
         .filter_map(|m| match m {
             Missing::App(_) => None,
             Missing::Tabs(browser) => Some(txt::tabs_unread(lang, browser)),
+            Missing::Conversation { tool, folder } => Some(txt::conversation_not_resumed(
+                lang,
+                txt::ConversationNotResumed { tool, folder },
+            )),
         })
         .collect()
 }
@@ -1409,8 +1566,10 @@ fn save_jobs(dir: &Path, applications: &[PathBuf], jobs: &mpsc::Receiver<Job>) {
             } else {
                 entries.by_id(&window.entry)
             };
-            // Every terminal comes back in its folder (§13, C).
+            // Every terminal comes back in its folder (§13, C); an agent's
+            // in its agent's.
             if window.terminal.is_none()
+                && window.agent.is_none()
                 && let Some(entry) = &entry
             {
                 let shared = windows
@@ -1487,6 +1646,10 @@ struct Relaunch {
     /// At log in, where a browser's preferences say whether it reopens
     /// its own windows (§13 D): then it starts once, without addresses.
     browsers: Option<crate::browsers::Places>,
+    /// The `PATH`'s folders, where an agent's program is looked for, and
+    /// the user's shell its command runs through (§8.1).
+    path: Vec<PathBuf>,
+    shell: String,
 }
 
 /// Starts each of `starts` (desktop entries of `applications`) again, on
@@ -1556,6 +1719,27 @@ fn relaunch(asked: Relaunch, heard: channel::Sender<Heard>) {
                 };
                 launch.argv = crate::terminals::in_folder(app, &entry.argv, folder);
                 launch.dir = folder.display().to_string();
+                if let Some(agent) = &start.agent {
+                    // Its conversation resumes there, unless its folder,
+                    // its transcript or its program is gone, or its
+                    // terminal cannot be given a command.
+                    let command = (folder == &agent.folder && agent.resumable(&asked.path))
+                        .then(|| agent.command(&asked.shell))
+                        .flatten()
+                        .and_then(|c| crate::terminals::with_command(app, &c));
+                    match command {
+                        Some(command) => {
+                            tracing::info!(
+                                app = id,
+                                "an agent's terminal resumes its conversation"
+                            );
+                            launch.argv.extend(command);
+                        }
+                        None => {
+                            let _ = heard.send(Heard::NotResumed(agent.session.clone()));
+                        }
+                    }
+                }
             }
             if let Some((browser, addresses)) = &start.tabs {
                 let itself = asked
@@ -1610,6 +1794,7 @@ mod tests {
             opacity: (desktop == 2).then_some(60),
             terminal: None,
             browser: None,
+            agent: None,
             pid: None,
             title: String::new(),
             size: (0, 0),
@@ -1656,6 +1841,69 @@ mod tests {
             assert_eq!(Shape::of(shape.mode()), shape);
         }
         Ok(())
+    }
+
+    #[test]
+    fn a_browser_window_and_an_agents_terminal_each_start_on_their_own() {
+        let firefox = |tabs: &[&str]| SavedWindow {
+            entry: "firefox".into(),
+            app_id: "firefox".into(),
+            browser: Some(crate::browsers::SavedBrowser {
+                kind: crate::browsers::Kind::Firefox,
+                selected: 1,
+                tabs: tabs
+                    .iter()
+                    .map(|u| crate::browsers::Tab {
+                        url: (*u).into(),
+                        ..crate::browsers::Tab::default()
+                    })
+                    .collect(),
+            }),
+            ..SavedWindow::default()
+        };
+        let agent = SavedWindow {
+            entry: "kitty".into(),
+            app_id: "kitty".into(),
+            agent: Some(crate::resume::SavedAgent {
+                tool: "claude-code".into(),
+                session: "3f6c".into(),
+                folder: "/home/alex/site".into(),
+                ..crate::resume::SavedAgent::default()
+            }),
+            ..SavedWindow::default()
+        };
+        let windows = [
+            firefox(&["https://a/", "https://b/"]),
+            firefox(&[]),
+            firefox(&["https://c/"]),
+            agent,
+        ];
+        let starts = starts_of(&windows);
+        let said: Vec<(&str, Option<Vec<String>>, u32, bool)> = starts
+            .iter()
+            .map(|s| {
+                (
+                    s.entry.as_str(),
+                    s.tabs.as_ref().map(|(_, a)| a.clone()),
+                    s.unread,
+                    s.agent.is_some(),
+                )
+            })
+            .collect();
+        let urls = |u: &[&str]| Some(u.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert_eq!(
+            said,
+            [
+                ("firefox", urls(&["https://a/", "https://b/"]), 0, false),
+                ("firefox", None, 1, false),
+                ("firefox", urls(&["https://c/"]), 0, false),
+                ("kitty", None, 0, true),
+            ]
+        );
+        assert_eq!(
+            starts[3].folder.as_deref(),
+            Some(Path::new("/home/alex/site"))
+        );
     }
 
     #[test]

@@ -230,6 +230,29 @@ pub struct CardWindow {
     /// A browser window's tabs, when they were read (§4, §8.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tabs: Option<CardTabs>,
+    /// The agent that runs in this terminal, or will resume there (§4,
+    /// §8.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<CardAgent>,
+}
+
+/// An agent as a project's card shows it (§4): its tool as people know it,
+/// its state (the bar's word: `working`, `waiting`, `done`, `failed`,
+/// `idle`), its conversation's first prompt, its session's id, its folder,
+/// and, closed, the command that will resume it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardAgent {
+    #[serde(serialize_with = "tidy::name")]
+    pub tool: String,
+    pub state: String,
+    #[serde(serialize_with = "tidy::title")]
+    pub prompt: String,
+    #[serde(serialize_with = "tidy::name")]
+    pub session: String,
+    #[serde(serialize_with = "tidy::name")]
+    pub folder: String,
+    #[serde(default, serialize_with = "tidy::maybe_name")]
+    pub resume: Option<String>,
 }
 
 /// A browser window's tabs as a card shows them (§4): how many, and the
@@ -307,6 +330,14 @@ pub enum ComingBack {
         #[serde(serialize_with = "tidy::name")]
         entry: String,
         tabs: u32,
+    },
+    /// An agent's terminal, which will resume its conversation (`tool` as
+    /// people know it).
+    Agent {
+        #[serde(serialize_with = "tidy::name")]
+        tool: String,
+        #[serde(serialize_with = "tidy::name")]
+        app: String,
     },
     /// A terminal, in its folder.
     Terminal {

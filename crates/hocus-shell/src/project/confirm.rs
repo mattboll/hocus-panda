@@ -126,6 +126,8 @@ pub enum Msg {
 pub struct Back {
     pub app: String,
     pub said: String,
+    /// An agent's row: its panda for an icon.
+    pub panda: bool,
 }
 
 /// What comes back, one row each, in words.
@@ -137,6 +139,7 @@ pub fn back_rows(shown: &hocus_link::ProjectConfirm, lang: Lang) -> Vec<Back> {
             hocus_link::ComingBack::App { app, entry, count } => {
                 let name = super::app_name(entry, app);
                 Back {
+                    panda: false,
                     app: app.clone(),
                     said: if *count > 1 {
                         txt::back_windows(
@@ -151,7 +154,13 @@ pub fn back_rows(shown: &hocus_link::ProjectConfirm, lang: Lang) -> Vec<Back> {
                     },
                 }
             }
+            hocus_link::ComingBack::Agent { tool, app } => Back {
+                app: app.clone(),
+                said: txt::back_agent(lang, tool),
+                panda: true,
+            },
             hocus_link::ComingBack::Browser { app, entry, tabs } => Back {
+                panda: false,
                 app: app.clone(),
                 said: txt::back_tabs(
                     lang,
@@ -162,10 +171,12 @@ pub fn back_rows(shown: &hocus_link::ProjectConfirm, lang: Lang) -> Vec<Back> {
                 ),
             },
             hocus_link::ComingBack::Terminal { app, folder, .. } => Back {
+                panda: false,
                 app: app.clone(),
                 said: txt::back_terminal(lang, last_part(folder)),
             },
             hocus_link::ComingBack::NotBack { app } => Back {
+                panda: false,
                 app: app.clone(),
                 said: txt::not_back(lang, app),
             },
@@ -459,15 +470,22 @@ fn content<'a>(confirm: &super::Confirm, rows: &[Back], warning: &str, words: Wo
                 .filter(|n| !n.is_empty())
                 .unwrap_or(&back.app)
                 .to_owned();
-            let icon = drawn(ICON, ICON, move |f, s| {
-                kit::app_tile(
-                    f,
-                    Rectangle::new(Point::ORIGIN, s),
-                    (found.as_ref(), &letter),
-                    (5.0, 10.0),
-                    1.0,
-                );
-            });
+            let icon: El<'a> = if back.panda {
+                iced::widget::svg(crate::pandas::still(crate::pandas::Mood::Resting))
+                    .width(ICON)
+                    .height(ICON)
+                    .into()
+            } else {
+                drawn(ICON, ICON, move |f, s| {
+                    kit::app_tile(
+                        f,
+                        Rectangle::new(Point::ORIGIN, s),
+                        (found.as_ref(), &letter),
+                        (5.0, 10.0),
+                        1.0,
+                    );
+                })
+            };
             let room = INNER - 2.0 * (ROWS_PAD + BORDER) - 2.0 * ROW_PAD - ICON - 10.0;
             let text = kit::elide(&back.said, room, |t| kit::measure(t, ROW_TEXT, MANROPE));
             let line = row![icon, gap(10.0), said(text, ROW_TEXT, MANROPE, TEXT.get())]

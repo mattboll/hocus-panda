@@ -84,6 +84,9 @@ pub struct Said {
     pub note: Option<Note>,
     /// How the tests a command it ran went, when it ran some.
     pub tests: Option<TestRun>,
+    /// Its folder, its transcript's path, and the prompt just given
+    /// (`UserPromptSubmit`'s): docs/design/projects.md §8.1.
+    pub conversation: crate::Conversation,
 }
 
 /// What `payload`, from a tool's hook, says; nothing for an event that
@@ -102,6 +105,10 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
             state: Some(State::Done),
             note: None,
             tests: None,
+            conversation: crate::Conversation {
+                cwd: text("cwd").and_then(crate::Conversation::path),
+                ..crate::Conversation::default()
+            },
         });
     }
     let event = text("hook_event_name")?;
@@ -156,6 +163,13 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
         state,
         note,
         tests,
+        conversation: crate::Conversation {
+            cwd: text("cwd").and_then(crate::Conversation::path),
+            transcript: text("transcript_path").and_then(crate::Conversation::path),
+            prompt: (event == "UserPromptSubmit")
+                .then(|| text("prompt").and_then(crate::Conversation::prompt_text))
+                .flatten(),
+        },
     })
 }
 
@@ -285,11 +299,20 @@ mod tests {
                 state: Some(State::Idle),
                 note: None,
                 tests: None,
+                conversation: crate::Conversation {
+                    cwd: Some("/home/alex/hocus-panda".into()),
+                    transcript: Some("/Users/.../transcript.jsonl".into()),
+                    prompt: None,
+                },
             })
         );
         let prompt = json!({ "session_id": "abc123", "cwd": "/w",
             "permission_mode": "default", "hook_event_name": "UserPromptSubmit",
             "prompt": "Write a function to calculate the factorial of a number" });
+        assert_eq!(
+            said(Tool::ClaudeCode, &prompt).and_then(|s| s.conversation.prompt),
+            Some("Write a function to calculate the factorial of a number".into())
+        );
         assert_eq!(state(Tool::ClaudeCode, prompt), Some(Some(State::Working)));
         let permission = json!({ "session_id": "abc123", "cwd": "/w",
             "hook_event_name": "PermissionRequest", "tool_name": "Bash",
@@ -366,6 +389,11 @@ mod tests {
         ] {
             let said = said(Tool::ClaudeCode, &common(event)).expect(event);
             assert_eq!(said.name.as_deref(), Some("hocus-panda"), "{event}");
+            assert_eq!(
+                said.conversation.transcript.as_deref(),
+                Some("/home/alex/.claude/projects/x/abc123.jsonl"),
+                "{event}"
+            );
         }
         let mut bare = common("Stop");
         bare.as_object_mut().map(|o| o.remove("cwd"));
@@ -533,6 +561,10 @@ mod tests {
                 state: Some(State::Done),
                 note: None,
                 tests: None,
+                conversation: crate::Conversation {
+                    cwd: Some("/home/alex/infra".into()),
+                    ..crate::Conversation::default()
+                },
             })
         );
         assert_eq!(

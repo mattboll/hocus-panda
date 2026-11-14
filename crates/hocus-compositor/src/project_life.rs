@@ -145,6 +145,20 @@ fn card_window(w: &SavedWindow) -> CardWindow {
         focused: false,
         terminal: w.terminal.as_ref().map(|t| t.folder.display().to_string()),
         tabs: w.browser.as_ref().and_then(card_tabs),
+        agent: w.agent.as_ref().map(|a| card_agent(a, "idle", true)),
+    }
+}
+
+/// An agent as a card shows it, in `state`; `closed`, with the command
+/// that will resume it.
+fn card_agent(a: &crate::resume::SavedAgent, state: &str, closed: bool) -> hocus_link::CardAgent {
+    hocus_link::CardAgent {
+        tool: a.title().to_owned(),
+        state: state.to_owned(),
+        prompt: a.first_prompt.clone(),
+        session: a.session.chars().take(8).collect(),
+        folder: a.folder.display().to_string(),
+        resume: closed.then(|| a.command_line()).flatten(),
     }
 }
 
@@ -396,9 +410,16 @@ impl State {
         }
         let (output, _) = self.project_output(at).ok_or("its screen is not there")?;
         let seen = self.project_seen(at);
+        // Each agent's terminal saved as its agent's (§6, §8.1).
+        let conversations = self.agent_conversations();
         let windows: Vec<(WindowId, SavedWindow)> = seen
             .iter()
             .filter_map(|s| Some((s.id, self.session_window(s.id)?)))
+            .flat_map(|(id, saved)| {
+                crate::session::restore::with_agents(id, saved, &conversations)
+                    .into_iter()
+                    .map(move |w| (id, w))
+            })
             .collect();
         tracing::info!(project = id, windows = windows.len(), "a project closes");
         self.projects.closing.push(Closing {
@@ -524,12 +545,28 @@ impl State {
         };
         let mut back: Vec<ComingBack> = Vec::new();
         let mut interrupted: Vec<Interrupted> = Vec::new();
+        let conversations = self.agent_conversations();
         for f in found {
             let app = self
                 .windows
                 .get(&f.id)
                 .and_then(|m| crate::windows::app_id(&m.window))
                 .unwrap_or_default();
+            // An agent's terminal: its agent resumes there (§5).
+            let agents: Vec<&crate::resume::SavedAgent> = conversations
+                .iter()
+                .filter(|(w, ..)| *w == f.id)
+                .map(|(_, a, _)| a)
+                .collect();
+            if f.entry.is_some() && !agents.is_empty() {
+                for agent in agents {
+                    back.push(ComingBack::Agent {
+                        tool: agent.title().to_owned(),
+                        app: app.clone(),
+                    });
+                }
+                continue;
+            }
             match (&f.entry, &f.terminal) {
                 (None, _) => back.push(ComingBack::NotBack {
                     app: f.name.clone(),
@@ -621,6 +658,7 @@ impl State {
         };
         let screen = rect_of(geometry);
         let focused = self.model.focused();
+        let conversations = self.agent_conversations();
         let windows = found
             .iter()
             .filter(|f| self.windows.contains_key(&f.id))
@@ -643,6 +681,10 @@ impl State {
                     focused: focused == Some(f.id),
                     terminal: f.terminal.as_ref().map(|t| t.folder.display().to_string()),
                     tabs: f.browser.as_ref().and_then(card_tabs),
+                    agent: conversations
+                        .iter()
+                        .find(|(w, ..)| *w == f.id)
+                        .map(|(_, a, state)| card_agent(a, state, false)),
                 }
             })
             .collect();
@@ -673,18 +715,23 @@ impl State {
         for (wid, saved) in &mut closing.windows {
             if let Some(f) = found.iter().find(|f| f.id == *wid) {
                 saved.entry = f.entry.clone().unwrap_or_default();
-                saved.terminal = f.terminal.as_ref().map(|t| SavedTerminal {
-                    folder: t.folder.clone(),
-                });
+                saved.terminal = f
+                    .terminal
+                    .as_ref()
+                    .filter(|_| saved.agent.is_none())
+                    .map(|t| SavedTerminal {
+                        folder: t.folder.clone(),
+                    });
                 saved.browser.clone_from(&f.browser);
             }
         }
-        let left: Vec<WindowId> = closing
+        let mut left: Vec<WindowId> = closing
             .windows
             .iter()
             .map(|(w, _)| *w)
             .filter(|w| self.windows.contains_key(w))
             .collect();
+        left.dedup();
         let of = id.to_owned();
         let timer = self
             .loop_handle
@@ -1205,6 +1252,7 @@ pub fn not_back_said(
         let said = match m {
             Missing::App(_) => continue,
             Missing::Tabs(browser) => txt::their_tabs(lang, browser),
+            Missing::Conversation { .. } => txt::A_CONVERSATION.get(lang).to_owned(),
         };
         if !names.contains(&said) {
             names.push(said);
@@ -1239,7 +1287,7 @@ pub fn not_back_said(
     if !apps.is_empty() {
         body.push(crate::session::restore::not_back_said(&apps, lang));
     }
-    body.extend(crate::session::restore::missing_said(missing, None, lang));
+    body.extend(crate::session::restore::missing_said(missing, lang));
     if let Some(folder) = gone {
         body.push(txt::folder_gone(lang, folder));
     }

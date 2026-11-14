@@ -83,6 +83,7 @@ pub mod record;
 mod reload;
 mod reminders;
 mod render;
+mod resume;
 mod rules;
 mod scales;
 mod screen_reader;
