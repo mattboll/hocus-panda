@@ -224,12 +224,32 @@ impl Server {
             app: app_name.clone(),
             scale: screens_scale(),
         };
+        // An agent's conversation (#823), looked for while its sender is
+        // there; one with its own default keeps it.
+        let home = (!default && pid != 0)
+            .then(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+            .flatten();
         let found = tokio::task::spawn_blocking(move || {
             let icon = icon_of(looked);
-            (icon, note::programs_above(pid))
+            let conversation = home.and_then(|home| {
+                super::conversation::find(
+                    std::path::Path::new("/proc"),
+                    &home,
+                    pid,
+                    std::time::SystemTime::now(),
+                )
+            });
+            (icon, note::programs_above(pid), conversation)
         })
         .await;
-        let (icon, programs) = found.unwrap_or_default();
+        let (icon, programs, conversation) = found.unwrap_or_default();
+        if let Some(conversation) = &conversation {
+            tracing::debug!(
+                id,
+                tool = conversation.tool,
+                "an agent's conversation's notification"
+            );
+        }
         let said = crate::agents::said();
         let agent = note::agent_state(
             &Sender {
@@ -264,6 +284,7 @@ impl Server {
             resident,
             pid,
             agent,
+            conversation,
             icon_from,
             at: super::wall_ms(),
         };

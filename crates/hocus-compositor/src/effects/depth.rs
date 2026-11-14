@@ -48,9 +48,10 @@ pub struct Camera {
     pub drift: f64,
 }
 
-/// What a landscape's picture shows: the camera (its floats' bits), and
-/// its size (physical).
-type Drawn = ([u32; 3], (i32, i32));
+/// What a landscape's picture shows: the camera (its floats' bits), the
+/// daylight's hour (its bits, `u32::MAX` without it: the board's sunset),
+/// and its size (physical).
+type Drawn = ([u32; 4], (i32, i32));
 
 /// The landscape of one screen, drawn as the camera moves.
 #[derive(Debug)]
@@ -96,6 +97,94 @@ pub fn phases() -> [[f32; 3]; 6] {
         }
     }
     out
+}
+
+/// The landscape's sky and what it lights (#822), its colours 0 to 255:
+/// the gradient's four stops (at 0, 45 %, 72 % and the screen's foot), the
+/// sun's glow (its middle, at 12 % of its 260 px, and its edge) and where
+/// it stands (logical, before the camera's drift), whether it is up (else
+/// the moon), the haze over the far layers, the silhouettes tinted toward
+/// `tint` by `tint_k` and darkened to `dim`, the hour's light graded over
+/// it all by `grade`, and how much of the night's stars show.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sky {
+    pub stops: [[f64; 3]; 4],
+    pub glow: [[f64; 3]; 3],
+    pub sun: (f64, f64),
+    pub up: bool,
+    pub haze: [f64; 3],
+    pub tint: [f64; 3],
+    pub tint_k: f64,
+    pub dim: f64,
+    pub light: [f64; 3],
+    pub grade: f64,
+    pub night: f64,
+}
+
+impl Sky {
+    /// The board's sunset, on a screen `w` by `h` (logical): the
+    /// landscape as the board drew it.
+    pub fn sunset(w: f64, h: f64) -> Self {
+        Self {
+            stops: [
+                [28.0, 27.0, 68.0],
+                [91.0, 62.0, 115.0],
+                [217.0, 120.0, 106.0],
+                [244.0, 178.0, 122.0],
+            ],
+            glow: [
+                [255.0, 230.0, 190.0],
+                [255.0, 210.0, 160.0],
+                [255.0, 190.0, 140.0],
+            ],
+            sun: ((w + 200.0) * 0.62, h * 0.52),
+            up: true,
+            haze: [244.0, 178.0, 122.0],
+            tint: [0.0; 3],
+            tint_k: 0.0,
+            dim: 1.0,
+            light: [0.0; 3],
+            grade: 0.0,
+            night: 0.0,
+        }
+    }
+
+    /// The daylight's sky (#805) at its hour: its gradient (top to bottom
+    /// over three quarters of the screen, as the daylight draws it), its
+    /// sun where the daylight puts it, glowing in the hour's light (its
+    /// middle whitened as the daylight's disc), else the moon and the
+    /// stars; the haze the horizon's colour; by day the silhouettes a
+    /// little of it too, by night darker; the hour's light graded over
+    /// it all.
+    pub fn daylit(day: &super::daylight::Sky) -> Self {
+        let c = day.colours;
+        let mix = |p: [f64; 3], q: [f64; 3], t: f64| -> [f64; 3] {
+            let mut out = p;
+            for (o, b) in out.iter_mut().zip(q) {
+                *o += (b - *o) * t;
+            }
+            out
+        };
+        let night = day.night();
+        Self {
+            stops: [
+                c.top,
+                mix(c.top, c.bottom, 0.45 / 0.75),
+                mix(c.top, c.bottom, 0.72 / 0.75),
+                c.bottom,
+            ],
+            glow: [mix(c.light, [255.0; 3], 0.4), c.light, c.light],
+            sun: day.sun,
+            up: day.sun_up,
+            haze: c.bottom,
+            tint: c.bottom,
+            tint_k: 0.2 * (1.0 - night),
+            dim: 1.0 - 0.5 * night,
+            light: c.light,
+            grade: c.grade,
+            night,
+        }
+    }
 }
 
 impl crate::State {
@@ -196,6 +285,45 @@ mod tests {
         // 7 × 16807 / (2³¹ - 1) × 9.
         assert!((f64::from(p[0][0]) - 117_649.0 / 2_147_483_647.0 * 9.0).abs() < 1e-6);
         assert!(p.iter().flatten().all(|v| (0.0..9.0).contains(v)));
+    }
+
+    #[test]
+    fn the_sky_is_the_daylight_s_at_its_hour_else_the_board_s_sunset() {
+        use crate::effects::daylight;
+        let (w, h) = (1280.0, 800.0);
+        // The daylight off: the board's sunset, as it drew it.
+        let sunset = Sky::sunset(w, h);
+        assert_eq!(sunset.stops[3], [244.0, 178.0, 122.0]);
+        assert_eq!(sunset.haze, [244.0, 178.0, 122.0]);
+        assert!(sunset.up && sunset.night == 0.0 && sunset.grade == 0.0 && sunset.dim == 1.0);
+        // Its noon (13 o'clock): the daylight's blue, the sun high, no star.
+        let day = daylight::Sky::at(13.0, w, h);
+        let noon = Sky::daylit(&day);
+        let c = daylight::colours(13.0);
+        assert_eq!(noon.stops[0], c.top);
+        assert_eq!(noon.stops[3], c.bottom);
+        assert_eq!(noon.haze, c.bottom);
+        assert_eq!(noon.glow[1], c.light);
+        assert_eq!(noon.sun, day.sun);
+        assert!(noon.up && noon.night == 0.0 && noon.dim == 1.0);
+        assert!(noon.sun.1 < h * 0.2, "high: {:?}", noon.sun);
+        assert!(
+            noon.stops[0][2] > noon.stops[0][0] + 100.0,
+            "blue: {:?}",
+            noon.stops
+        );
+        // 8 o'clock: low on the left.
+        let morning = Sky::daylit(&daylight::Sky::at(8.0, w, h));
+        assert!(morning.up && morning.sun.0 < w * 0.3 && morning.sun.1 > noon.sun.1);
+        // 22 o'clock: the moon and the stars, the silhouettes darker.
+        let night = Sky::daylit(&daylight::Sky::at(22.0, w, h));
+        assert!(!night.up && night.night == 1.0 && night.dim < 0.6);
+        assert_eq!(night.stops[0], daylight::colours(22.0).top);
+        assert!(
+            night.stops[0].iter().all(|v| *v < 40.0),
+            "dark: {:?}",
+            night.stops
+        );
     }
 
     #[test]

@@ -261,6 +261,88 @@ pub struct Report {
     pub note: Option<Note>,
     /// How the tests it just ran went (#810), when it ran some.
     pub tests: Option<runs::TestRun>,
+    /// Its conversation, as a hook says it (docs/design/projects.md
+    /// §8.1): never logged.
+    pub conversation: Conversation,
+}
+
+/// What a hook says of its agent's conversation (docs/design/projects.md
+/// §8.1): its folder (`cwd`), its transcript's path, and the prompt the
+/// user just gave (`UserPromptSubmit`'s, cut at [`PROMPT_MOST`]
+/// characters). Its `Debug` says none of them: they are never logged.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct Conversation {
+    pub cwd: Option<String>,
+    pub transcript: Option<String>,
+    pub prompt: Option<String>,
+}
+
+impl fmt::Debug for Conversation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Conversation")
+            .field("cwd", &self.cwd.is_some())
+            .field("transcript", &self.transcript.is_some())
+            .field("prompt", &self.prompt.is_some())
+            .finish()
+    }
+}
+
+/// A prompt's characters kept at most, as a project's card shows it (§4).
+pub const PROMPT_MOST: usize = 60;
+
+impl Conversation {
+    /// A path as a line carries it: absolute, without tabs nor line
+    /// breaks (none otherwise).
+    pub fn path(path: &str) -> Option<String> {
+        (path.starts_with('/') && !path.chars().any(char::is_control)).then(|| path.to_owned())
+    }
+
+    /// A prompt as a line carries it: on one line, cut at [`PROMPT_MOST`]
+    /// characters ("…" when cut), trimmed; none when empty.
+    pub fn prompt_text(prompt: &str) -> Option<String> {
+        let flat: String = prompt
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+        let words: Vec<&str> = flat.split_whitespace().collect();
+        let flat = words.join(" ");
+        if flat.is_empty() {
+            return None;
+        }
+        Some(if flat.chars().count() > PROMPT_MOST {
+            let cut: String = flat.chars().take(PROMPT_MOST - 1).collect();
+            format!("{}…", cut.trim_end())
+        } else {
+            flat
+        })
+    }
+
+    fn write(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(cwd) = self.cwd.as_deref().and_then(Self::path) {
+            write!(f, "\tcwd {cwd}")?;
+        }
+        if let Some(path) = self.transcript.as_deref().and_then(Self::path) {
+            write!(f, "\ttranscript {path}")?;
+        }
+        if let Some(prompt) = self.prompt.as_deref().and_then(Self::prompt_text) {
+            write!(f, "\tprompt {prompt}")?;
+        }
+        Ok(())
+    }
+
+    /// Reads a field of a line, if it is one of these.
+    fn read(&mut self, field: &str) -> bool {
+        if let Some(cwd) = field.strip_prefix("cwd ") {
+            self.cwd = Self::path(cwd);
+        } else if let Some(path) = field.strip_prefix("transcript ") {
+            self.transcript = Self::path(path);
+        } else if let Some(prompt) = field.strip_prefix("prompt ") {
+            self.prompt = Self::prompt_text(prompt);
+        } else {
+            return false;
+        }
+        true
+    }
 }
 
 /// What a line's key may hold: no spaces, no control characters.
@@ -298,7 +380,9 @@ pub fn name_text(name: &str) -> String {
 /// `ended` for a state that ended and `-` for an unknown process; the name
 /// last, as it may hold spaces; then, when there is one, a tab and the
 /// [`Note`] (`allow TOOL WHAT`, `says TEXT`); then, when it ran tests, a
-/// tab and how they went (`tests passed 2040`, `tests failed`).
+/// tab and how they went (`tests passed 2040`, `tests failed`); then, each
+/// after a tab, its conversation's `cwd PATH`, `transcript PATH` and
+/// `prompt TEXT` when the hook says them.
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.state.map_or("ended", State::name);
@@ -313,10 +397,10 @@ impl fmt::Display for Report {
         if let Some(note) = &self.note {
             write!(f, "\t{note}")?;
         }
-        match &self.tests {
-            Some(tests) => write!(f, "\t{tests}"),
-            None => Ok(()),
+        if let Some(tests) = &self.tests {
+            write!(f, "\t{tests}")?;
         }
+        self.conversation.write(f)
     }
 }
 
@@ -330,7 +414,11 @@ impl FromStr for Report {
         let mut fields = line.split('\t');
         let line = fields.next().unwrap_or_default();
         let (mut note, mut tests) = (None, None);
+        let mut conversation = Conversation::default();
         for field in fields {
+            if conversation.read(field) {
+                continue;
+            }
             match field.parse::<runs::TestRun>() {
                 Ok(run) => tests = Some(run),
                 Err(_) => note = note.or_else(|| field.parse::<Note>().ok()),
@@ -375,6 +463,7 @@ impl FromStr for Report {
             name,
             note,
             tests,
+            conversation,
         })
     }
 }
@@ -563,6 +652,7 @@ mod tests {
                 name: "hocus panda".into(),
                 note: Some(Note::allow("Bash", "npm install")),
                 tests: None,
+                conversation: Conversation::default(),
             },
             Report {
                 source: Source::Command,
@@ -572,6 +662,7 @@ mod tests {
                 name: "build".into(),
                 note: None,
                 tests: None,
+                conversation: Conversation::default(),
             },
         ];
         for report in reports {
@@ -586,6 +677,7 @@ mod tests {
             name: "a\tb\nc".into(),
             note: None,
             tests: None,
+            conversation: Conversation::default(),
         };
         assert_eq!(odd.to_string(), "agent command my_agent idle - a b c");
         for bad in [
@@ -614,6 +706,50 @@ mod tests {
     }
 
     #[test]
+    fn a_report_carries_its_conversation_apart_never_said() {
+        let report = Report {
+            source: Source::ClaudeCode,
+            key: "3f6c2a1e-9b0d".into(),
+            state: Some(State::Working),
+            pid: Some(7),
+            name: "hocus-site".into(),
+            note: None,
+            tests: Some(runs::TestRun::Failed),
+            conversation: Conversation {
+                cwd: Some("/home/alex/github/hocus site".into()),
+                transcript: Some("/home/alex/.claude/projects/x/3f6c2a1e-9b0d.jsonl".into()),
+                prompt: Some("refais la section\tdu haut".into()),
+            },
+        };
+        let line = report.to_string();
+        assert_eq!(
+            line,
+            "agent claude-code 3f6c2a1e-9b0d working 7 hocus-site\ttests failed\t\
+             cwd /home/alex/github/hocus site\ttranscript /home/alex/.claude/projects/x/3f6c2a1e-9b0d.jsonl\t\
+             prompt refais la section du haut"
+        );
+        let read: Report = line.parse().expect("a line");
+        assert_eq!(
+            read.conversation.prompt.as_deref(),
+            Some("refais la section du haut")
+        );
+        assert_eq!(read.conversation.cwd, report.conversation.cwd);
+        assert_eq!(read.tests, report.tests);
+        let debug = format!("{report:?}");
+        assert!(
+            !debug.contains("alex") && !debug.contains("refais"),
+            "{debug}"
+        );
+        // A relative path is not one; a long prompt is cut.
+        assert_eq!(Conversation::path("x/y"), None);
+        let long = "a".repeat(80);
+        let cut = Conversation::prompt_text(&long).expect("a prompt");
+        assert_eq!(cut.chars().count(), PROMPT_MOST);
+        assert!(cut.ends_with('…'));
+        assert_eq!(Conversation::prompt_text(" \n "), None);
+    }
+
+    #[test]
     fn a_report_carries_its_note_apart() {
         let failed = Report {
             source: Source::ClaudeCode,
@@ -623,6 +759,7 @@ mod tests {
             name: "site web".into(),
             note: Note::says("API Error:\nRate limit reached"),
             tests: None,
+            conversation: Conversation::default(),
         };
         let line = failed.to_string();
         assert_eq!(
@@ -650,6 +787,7 @@ mod tests {
             name: "build".into(),
             note: None,
             tests: Some(runs::TestRun::Passed(Some(2040))),
+            conversation: Conversation::default(),
         };
         let line = green.to_string();
         assert_eq!(line, "agent command build done - build\ttests passed 2040");

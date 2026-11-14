@@ -90,6 +90,22 @@ pub(crate) fn elide(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -
     "…".to_owned()
 }
 
+/// `text` cut at its start with "…" to fit `room` as `width` measures it:
+/// a folder, whose end tells it apart.
+pub(crate) fn elide_start(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> String {
+    if width(text) <= room {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    for skip in 1..chars.len() {
+        let cut = format!("…{}", chars[skip..].iter().collect::<String>());
+        if width(&cut) <= room {
+            return cut;
+        }
+    }
+    "…".to_owned()
+}
+
 /// `text` broken between its words into lines that fit `room` as `width`
 /// measures them; a word too wide alone keeps its own line.
 pub(crate) fn wrap(text: &str, room: f32, mut width: impl FnMut(&str) -> f32) -> Vec<String> {

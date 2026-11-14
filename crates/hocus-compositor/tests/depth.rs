@@ -251,3 +251,34 @@ fn shots() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// The landscape with the daylight on (#822), for the maintainer, written
+/// to `$HOCUS_SHOTS` as [`shots`] is: its sky at the board's 8, 13, 17:30
+/// and 22 o'clock (21 June at 45° N, 0° E, the tests' place). Run by hand
+/// (`--run-ignored only`).
+#[test]
+#[ignore = "screenshots, by hand"]
+fn daylight_shots() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let (mut hp, mut config, _windows, _home) = common::effects_desk()?;
+    let at = |s: &str| s.parse::<jiff::Timestamp>();
+    hp.hold_sun(at("2026-06-21T06:32:00Z")?);
+    config.effects.depth = true;
+    config.effects.daylight = true;
+    hp.reconfigure(config);
+    for (time, name) in [
+        ("2026-06-21T06:32:00Z", "depth-daylight-0800"),
+        ("2026-06-21T12:02:00Z", "depth-daylight-1300"),
+        ("2026-06-21T16:59:00Z", "depth-daylight-1730"),
+        ("2026-06-21T21:28:00Z", "depth-daylight-2200"),
+    ] {
+        hp.hold_sun(at(time)?);
+        run(&mut hp, Duration::from_millis(200))?;
+        eprintln!("{name}: the board's {:?}", hp.daylight_hour());
+        save(&mut hp, &out, name)?;
+    }
+    Ok(())
+}

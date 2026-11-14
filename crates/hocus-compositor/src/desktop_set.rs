@@ -30,10 +30,10 @@ use crate::{desktops::MAX_COUNT, model::WindowId};
 /// last told.
 pub type Counts = (usize, [u16; MAX_COUNT]);
 
-/// Alt+Tab's suffix to a window of another desktop (from 0): its name,
-/// else its number (6.14).
-pub fn suffix(desktops: &crate::config::Desktops, desktop: usize) -> String {
-    match desktops.name(desktop) {
+/// Alt+Tab's suffix to a window of another desktop (from 0): its name
+/// (its project's, else its own, 6.14), else its number.
+pub fn suffix(name: Option<&str>, desktop: usize) -> String {
+    match name {
         Some(name) => format!(" · {name}"),
         None => format!(" · {}", desktop + 1),
     }
@@ -70,6 +70,22 @@ impl crate::State {
         }
     }
 
+    /// The desktops are now `count` for the session alone, a project
+    /// reopening on one more or closing on the last (docs/design/projects.md
+    /// §7): the file's count is not changed.
+    pub(crate) fn renumber_desktops_for_projects(
+        &mut self,
+        count: usize,
+        map: impl Fn(usize) -> usize,
+    ) {
+        self.renumber_desktops(count, map, &[]);
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        for output in &outputs {
+            self.desktops_drawn(output);
+        }
+        self.tell_desktops();
+    }
+
     /// The desktops are now `count` on every screen; a window on desktop
     /// `d` goes to `map(d)`, as does a screen showing `d`, and each of
     /// `put` to its own. Nothing slides: windows show or hide at once, and
@@ -84,6 +100,8 @@ impl crate::State {
         let count = count.clamp(1, MAX_COUNT);
         self.config.desktops.count = count;
         let last = count - 1;
+        // The projects go with their desktops (docs/design/projects.md §1).
+        self.projects_renumbered(|d| map(d).min(last));
         let ids: Vec<WindowId> = self.model.stack().to_vec();
         for &id in &ids {
             let to = put
@@ -249,10 +267,12 @@ mod tests {
         let desktops = crate::config::Desktops {
             count: 4,
             names: vec!["Travail".into(), "Courrier".into(), String::new()],
+            ..crate::config::Desktops::default()
         };
-        assert_eq!(super::suffix(&desktops, 1), " · Courrier");
-        assert_eq!(super::suffix(&desktops, 2), " · 3");
-        assert_eq!(super::suffix(&desktops, 3), " · 4");
+        assert_eq!(super::suffix(desktops.name(1), 1), " · Courrier");
+        assert_eq!(super::suffix(desktops.name(2), 2), " · 3");
+        assert_eq!(super::suffix(desktops.name(3), 3), " · 4");
+        assert_eq!(super::suffix(Some("hocus-site"), 1), " · hocus-site");
     }
 
     #[test]

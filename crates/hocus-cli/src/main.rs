@@ -348,6 +348,7 @@ fn main() -> ExitCode {
                 note: None,
                 tests: tests_passed
                     .map(|n| hocus_agents::runs::TestRun::Passed(Some(n).filter(|n| *n > 0))),
+                conversation: hocus_agents::Conversation::default(),
             };
             match send(args.socket, &report) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -514,6 +515,9 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
         note: said.note,
         // How the tests it just ran went (#810).
         tests: said.tests,
+        // Its folder, transcript and prompt, for its project to resume
+        // it (docs/design/projects.md §8.1).
+        conversation: said.conversation,
     };
     // Not in a Hocuspanda session, or it is not listening: nothing to do.
     let _ = send(socket, &report);

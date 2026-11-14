@@ -108,6 +108,11 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "desktops.remember-tabs",
+        name: hocus_words::settings::desktops::REMEMBER_PROJECTS_TABS,
+        said: Said::Switch,
+    },
+    Label {
         key: "effects.aurora",
         name: hocus_words::settings::effects::AURORA,
         said: Said::Switch,

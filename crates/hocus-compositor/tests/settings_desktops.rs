@@ -347,6 +347,7 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
         [
             "desktops.count",
             "desktops.names",
+            "desktops.remember-tabs",
             "windows.move-modifier",
             "windows.resize-modifier",
             "windows.magnet",
@@ -366,7 +367,8 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
     );
     // The Settings' window is on the first desktop too.
     let shown = bed.shows(|s| s["desktops"]["windows"] == serde_json::json!([1, 2, 0, 0]))?;
-    assert_eq!(shown["rows"][2]["value"], "Alt + glisser");
+    assert_eq!(shown["rows"][2]["value"], "oui");
+    assert_eq!(shown["rows"][3]["value"], "Alt + glisser");
     bed.places_with("chip:3")?;
     bed.places_with("link:keyboard.shortcuts")?;
     Ok(())

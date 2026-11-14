@@ -131,6 +131,50 @@ on the bar when both are true:
 
 Codex's terminal notifications carry no name of Codex's: they are bubbles.
 
+### An agent's conversation (#823)
+
+An agent working on its own (a Claude Code session started without a
+window, by a timer) sends a notification; alone, it lacks its context. A
+click on it opens a terminal on the conversation that sent it, where the
+user reads what led to it and answers ("Sa conversation dans un
+terminal", approved 2026-11-14). The agent is not changed.
+
+- **Which**: a notification without a `default` action (one with its own
+  keeps it: its sender says what a click does), sent by a process under
+  Claude Code or Codex: the sender (`GetConnectionUnixProcessID`) and its
+  parents in `/proc`, up to the first process named `claude` or `codex`
+  (or `node` running one).
+- **Its conversation**, found as the notification comes, on the server's
+  thread, before `Notify` answers (the sender is still there), reading
+  names and times only, never a transcript's content:
+  1. Claude Code: `CLAUDE_CODE_SESSION_ID` in the environment of the
+     sender or of a process between it and `claude` (Claude Code gives it
+     to every command it runs; it is its hooks' `session_id`);
+  2. else the transcript (`*.jsonl`) the agent's process holds open;
+  3. else the newest transcript of its working directory's folder,
+     modified within the 10 minutes before the notification: Claude
+     Code's `~/.claude/projects/<the folder, each character but letters and
+     digits as ->/` (`CLAUDE_CONFIG_DIR` when set), Codex's newest
+     `rollout-…-ID.jsonl` in its last two days' folders of
+     `~/.codex/sessions` (`CODEX_HOME`).
+  Kept with the notification, its tool, session's id, folder (the agent's
+  working directory) and transcript, in the history too (its file), so
+  that a click from the history, after a restart as well, does the same.
+  The log says its tool alone.
+- **The click** (its bubble's card, its item in the history): a window of
+  its application, of its sender or of the agent's process is brought, as
+  before (an agent in a terminal: its terminal). Without one, the user's
+  terminal (`[programs] terminal`, else the first found) opens in the
+  folder running the tool's command through the user's shell, as a
+  project's agent resumes (projects.md §8.1: `$SHELL -c 'claude --resume
+  ID; exec $SHELL'`, `codex resume ID`), the agent's process ended or
+  not. Its transcript or folder gone, its program not on the `PATH`, or a
+  terminal §8.2's table does not know: the click does what it did.
+- **Not built**: the compositor's agents heard by their hooks are not
+  asked: the environment gives the same id without the hooks plugged in,
+  and the agent's process is often gone by the click. Nothing on the
+  bubble says that it opens a conversation (an open question).
+
 ### Bubbles
 
 - **Surfaces**: one layer surface per bubble (namespace

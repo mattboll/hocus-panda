@@ -683,7 +683,7 @@ impl Controller {
             return;
         };
         item.opening();
-        let size = (item.width(), item.height(bar, place.form, true));
+        let size = (item.width(bar), item.height(bar, place.form, true));
         let rect = placed(
             place,
             self.anchor(bar, place.form, item, from, size.1),
@@ -953,10 +953,11 @@ impl Controller {
             return Vec::new();
         };
         let height = open.item.height(&open.bar, place.form, false);
-        if open.rect.height.round() as u32 == height {
+        let width = open.item.width(&open.bar);
+        if open.rect.height.round() as u32 == height && open.rect.width.round() as u32 == width {
             return Vec::new();
         }
-        let size = (open.item.width(), height);
+        let size = (width, height);
         let before = margins(place, open.rect);
         let anchor = anchor(
             &self.ring, &open.bar, place.form, open.item, open.from, height,
@@ -1359,6 +1360,7 @@ pub fn key(
     if crate::launcher::key(key, modifiers, text)
         || crate::emoji::key(key, modifiers, text)
         || crate::actions::key(key, modifiers, text)
+        || crate::project::key(key, modifiers, text)
     {
         return true;
     }

@@ -422,8 +422,9 @@ impl State {
             )));
         }
         // The overview open (8.5 A): its keys are its own, the
-        // modifiers go on.
-        if self.overview_open() && !auth {
+        // modifiers go on; but a project's form over it, which holds the
+        // keyboard, takes them (docs/design/projects.md §2.1).
+        if self.overview_open() && !auth && !self.keyboard_held_by_layer() {
             let sym = keysym.modified_sym();
             if is_modifier(sym) {
                 return Some(FilterResult::Forward);

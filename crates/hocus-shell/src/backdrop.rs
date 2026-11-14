@@ -50,7 +50,7 @@ pub mod tests {
     };
 
     /// A CPU renderer, as the shell's tests have no GPU.
-    fn renderer() -> Renderer {
+    pub fn renderer() -> Renderer {
         let new = <Renderer as Headless>::new(Font::DEFAULT, Pixels(14.0), Some("tiny-skia"));
         block_on(new).expect("the CPU renderer")
     }

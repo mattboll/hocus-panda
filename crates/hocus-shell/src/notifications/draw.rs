@@ -830,6 +830,7 @@ mod tests {
             resident: false,
             pid: 0,
             agent: false,
+            conversation: None,
             icon_from: crate::notifications::note::IconFrom::default(),
             at: 0,
         }

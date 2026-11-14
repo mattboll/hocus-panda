@@ -57,6 +57,8 @@ fn glassy(output: &Output) -> usize {
                     | hocus_link::POPOVER_NAMESPACE
                     | hocus_link::EMOJI_NAMESPACE
                     | hocus_link::LAUNCHER_NAMESPACE
+                    | hocus_link::PROJECT_FORM_NAMESPACE
+                    | hocus_link::PROJECT_CARD_NAMESPACE
             )
         })
         .count()

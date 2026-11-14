@@ -21,9 +21,6 @@ use crate::{
     going::Shaders,
 };
 
-/// The board's stars over its 1200 × 720.
-const STARS_A_PIXEL: f64 = 160.0 / (1200.0 * 720.0);
-
 impl State {
     /// The daylight's sky on `frame`'s output, when it is its wallpaper.
     pub(super) fn daylight_layer<R>(&self, renderer: &mut R, frame: &Frame) -> Option<FireElement>
@@ -50,13 +47,6 @@ impl State {
         let (w, h) = (f64::from(frame.area.size.w), f64::from(frame.area.size.h));
         let c = sky.colours;
         let unit = |v: [f64; 3]| v.map(|c| (c / 255.0) as f32);
-        let night = if !sky.sun_up {
-            1.0
-        } else if sky.elev < 0.25 {
-            1.0 - sky.elev / 0.25
-        } else {
-            0.0
-        };
         let look = SkyLook {
             size: [w as f32, h as f32],
             scale: frame.scale as f32,
@@ -67,8 +57,8 @@ impl State {
             sun: [sky.sun.0 as f32, sky.sun.1 as f32],
             up: sky.sun_up,
             elev: sky.elev as f32,
-            night: night as f32,
-            stars: (w * h * STARS_A_PIXEL).round().min(1024.0) as f32,
+            night: sky.night() as f32,
+            stars: crate::effects::daylight::stars(w, h) as f32,
         };
         let texture = renderer.sky(&pane.kept, size, fresh, look)?;
         if fresh {

@@ -668,7 +668,11 @@ impl App {
         };
         page = page.push(group(
             head(model::DESKTOPS.label.get(lang), Some(per_screen)),
-            vec![self.count_row(), self.names_row()],
+            vec![
+                self.count_row(),
+                self.names_row(),
+                model_row(model::REMEMBER_TABS),
+            ],
         ));
         page = page.push(group(
             head(model::MOVE.label.get(lang), None),

@@ -2707,3 +2707,103 @@ pub fn effects_desk() -> anyhow::Result<Desk> {
     hp.hold_clock();
     Ok((hp, config, clients, home))
 }
+
+/// A notifications server of the test's own, on a session bus of its
+/// own; none without `dbus-daemon`.
+pub struct Notifications {
+    pub address: String,
+    said: std::sync::Arc<std::sync::Mutex<Vec<Note>>>,
+    daemon: std::process::Child,
+    _connection: zbus::Connection,
+    _runtime: tokio::runtime::Runtime,
+}
+
+/// A notification as the server heard it: its summary, its body, and
+/// whether it came with an image (`image-data`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
+    pub summary: String,
+    pub body: String,
+    pub image: bool,
+}
+
+impl Drop for Notifications {
+    fn drop(&mut self) {
+        let _ = self.daemon.kill();
+        let _ = self.daemon.wait();
+    }
+}
+
+struct Server(std::sync::Arc<std::sync::Mutex<Vec<Note>>>);
+
+#[zbus::interface(name = "org.freedesktop.Notifications")]
+impl Server {
+    #[allow(clippy::too_many_arguments)]
+    fn notify(
+        &self,
+        _app: String,
+        _replaces: u32,
+        _icon: String,
+        summary: String,
+        body: String,
+        _actions: Vec<String>,
+        hints: std::collections::HashMap<String, zbus::OwnedVariant>,
+        _timeout: i32,
+    ) -> u32 {
+        let mut said = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        said.push(Note {
+            summary,
+            body,
+            image: hints.contains_key("image-data"),
+        });
+        said.len() as u32
+    }
+}
+
+impl Notifications {
+    pub fn start(dir: &std::path::Path) -> anyhow::Result<Option<Self>> {
+        if std::process::Command::new("dbus-daemon")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            missing("dbus-daemon");
+        }
+        std::fs::create_dir_all(dir)?;
+        let (daemon, address) = private_bus(dir)?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()?;
+        let said = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let connection = runtime.block_on(
+            zbus::connection::Builder::address(address.as_str())
+                .name("org.freedesktop.Notifications")
+                .serve_at("/org/freedesktop/Notifications", Server(said.clone()))
+                .build(),
+        )?;
+        Ok(Some(Self {
+            address,
+            said,
+            daemon,
+            _connection: connection,
+            _runtime: runtime,
+        }))
+    }
+
+    /// The summaries said, in order.
+    pub fn said(&self) -> Vec<String> {
+        self.notes().into_iter().map(|n| n.summary).collect()
+    }
+
+    /// The notifications said, in order.
+    pub fn notes(&self) -> Vec<Note> {
+        self.said
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}

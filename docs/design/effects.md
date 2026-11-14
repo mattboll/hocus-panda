@@ -15,7 +15,7 @@ langue").
 | | Bassin de koïs | `koi` | #803 (built) |
 | | Lucioles du soir | `fireflies` | #804 (built) |
 | | La lumière du jour | `daylight` | #805 (built) |
-| | Bureaux en profondeur | `depth` | #806 (built) |
+| | Bureaux en profondeur | `depth` | #806, #822 (built) |
 | The windows | Fermer en flammes | `flames` | #794 (built) |
 | | Éclats de verre | `shatter` | #798 (built) |
 | | Fenêtres en gelée | `jelly` | #797 (built) |
@@ -653,6 +653,15 @@ logical pixels.
   by one shader into a picture of the screen's size, in the wallpaper's
   place (the screen's own wallpaper is not drawn); the layers go on below
   the screen, as the board's 1.35 screens tall did.
+- **With the daylight (#822)**: with `daylight = true` too, the
+  landscape's sky is the daylight's at its hour (`depth::Sky::daylit`):
+  its gradient, its sun where the daylight puts it, glowing in the hour's
+  light, by night the moon and the daylight's own stars (each of the
+  board's 1200 columns holds one at most, so a pixel looks at two or
+  three, not at all of them); the haze over the far layers is the
+  horizon's colour; by day the silhouettes take a fifth of it, by night
+  they darken to half; the hour's light is graded over it all as over the
+  daylight's sky. Daylight off, the board's sunset as above.
 - **The camera**: it follows each screen's strip of desktops, a desktop
   a screen's width and the strip's gap. Each layer moves by its share of
   the camera's travel, the board's 0.03, 0.14, 0.38, 0.72, 1 and 1.55:
@@ -670,14 +679,16 @@ logical pixels.
   show, so here they are the landscape's front layer, behind the windows
   and the bar.
 - **With the others**: the koi's pond or the aurora, when on, is the
-  wallpaper in its place; the landscape takes the daylight's sky's (the shadows still
-  turn); the rain on the glass falls over it, refracting it; the snow, the
+  wallpaper in its place; the landscape takes the daylight's sky's
+  place, in its colours (above; the shadows still turn); the rain on the glass falls over it, refracting it; the snow, the
   fireflies and the garlands show over it.
 - **Its cost**: at rest nothing (its picture kept). As the camera moves,
   the picture drawn again at most 60 times a second (the camera's time
   the effects' frames', `effects::Pace`), one pass over the screen: a few sines a
   layer, seven trees looked at a pixel on the three wooded ones; the
-  screen drawn again each frame, as the windows slide anyway.
+  screen drawn again each frame, as the windows slide anyway. With the
+  daylight, drawn again when its hour changes too (once a minute at
+  most).
 - **When**: with reduced motion the landscape stands where the desktop
   shown puts it, the switch a fade as without depth; none in the power
   saver, while a screen is shared or recorded, on the CPU, nor in a
@@ -687,8 +698,10 @@ Tests: `tests/depth.rs` (on GLES on Mesa's software device: the landscape
 in the wallpaper's place, the window's pixels untouched; a switch at
 165 Hz halfway at 0.75 s pulled back to 0.9, the hills moved by 0.38 of a
 desktop and the forest by 0.72, drawn 60 times a second at most; nothing
-drawn per frame at rest); its screenshots, `HOCUS_SHOTS=DIR cargo nextest
-run -p hocus-compositor --run-ignored only depth::shots`.
+drawn per frame at rest; the sky's colours at a held hour, a unit test);
+its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+--run-ignored only depth::shots` (with the daylight at 8, 13, 17:30 and
+22: `depth::daylight_shots`).
 
 ## Aurora following the music (#801)
 

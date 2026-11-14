@@ -239,11 +239,14 @@ impl Bed {
         self.logged_since(mark, "the reminder is drawn at rest", holds)
     }
 
-    /// The tabs' surfaces, once `n` are there.
+    /// The tabs' surfaces, once `n` are there with their first buffer:
+    /// a surface is placed as the shell asks for it, and has no size until
+    /// it draws (#816).
     fn tabs(&mut self, n: usize) -> anyhow::Result<Vec<(String, String, Rect)>> {
-        let done = self
-            .hp
-            .dispatch_until(common::WAIT, |hp| hp.reminder_surfaces().len() == n)?;
+        let done = self.hp.dispatch_until(common::WAIT, |hp| {
+            let tabs = hp.reminder_surfaces();
+            tabs.len() == n && tabs.iter().all(|(_, _, r)| r.width > 0 && r.height > 0)
+        })?;
         anyhow::ensure!(
             done,
             "tabs {:?}, not {n}:\n{}",

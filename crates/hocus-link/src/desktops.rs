@@ -11,6 +11,19 @@ pub struct Desktops {
     pub count: u8,
     pub current: u8,
     pub windows: Vec<DeskWindow>,
+    /// Its desktops that are projects (docs/design/projects.md): their
+    /// names say the desktops everywhere.
+    #[serde(default)]
+    pub projects: Vec<crate::DeskProject>,
+}
+
+impl Desktops {
+    /// Desktop `index`'s project (from 0), if it is one.
+    pub fn project(&self, index: usize) -> Option<&crate::DeskProject> {
+        self.projects
+            .iter()
+            .find(|p| usize::from(p.desktop) == index)
+    }
 }
 
 /// A window as its desktop's tile sketches it and its list lists it.

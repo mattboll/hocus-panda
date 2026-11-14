@@ -137,6 +137,8 @@ pub struct State {
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
+    /// The project desktops (docs/design/projects.md).
+    pub projects: crate::projects::Projects,
     /// The windows' states last told the shell (#723).
     pub told_window_states: Option<hocus_link::WindowStates>,
     /// A level key held down (volume, brightness), and the presses kept
@@ -323,6 +325,7 @@ impl State {
             actions: crate::actions::Palette::default(),
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
+            projects: crate::projects::Projects::default(),
             magnifier: crate::magnifier::Magnifier::default(),
             opacity: crate::opacity::Opacity::default(),
             night: crate::night_light::Night::default(),

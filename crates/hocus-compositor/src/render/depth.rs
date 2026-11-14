@@ -1,7 +1,7 @@
 //! Desktops in depth drawn (#806): the landscape in the wallpaper's place,
 //! which it covers, under the layers of the bottom and background, the
 //! other effects, the windows and the bar; drawn into a picture of its
-//! own again only as the camera moves. On the screen alone: never in a
+//! own again only as the camera moves or the daylight's hour changes. On the screen alone: never in a
 //! capture, a share's or a recording's frames.
 
 use smithay::utils::{Physical, Rectangle};
@@ -9,7 +9,11 @@ use smithay::utils::{Physical, Rectangle};
 use super::Frame;
 use crate::{
     State,
-    effects::{FireElement, depth::phases, draw::DepthLook},
+    effects::{
+        FireElement,
+        depth::{Sky, phases},
+        draw::DepthLook,
+    },
     going::Shaders,
 };
 
@@ -34,10 +38,16 @@ impl State {
         );
         let size = (screen.size.w, screen.size.h);
         let camera = self.depth_camera(frame.output, frame.now);
+        let (w, h) = (f64::from(frame.area.size.w), f64::from(frame.area.size.h));
+        // With the daylight on, its sky at its hour (#822); drawn again
+        // when the hour changes, once a minute at most.
+        let day = self.daylight_on(frame.output);
+        let sky = day.map_or_else(|| Sky::sunset(w, h), |day| Sky::daylit(&day));
         let key = [
             (camera.x as f32).to_bits(),
             (camera.zoom as f32).to_bits(),
             (camera.drift as f32).to_bits(),
+            day.map_or(u32::MAX, |day| (day.hour as f32).to_bits()),
         ];
         let fresh = pane.drawn.get() != Some((key, size));
         let look = DepthLook {
@@ -47,6 +57,8 @@ impl State {
             zoom: camera.zoom as f32,
             drift: camera.drift as f32,
             phases: phases(),
+            sky,
+            stars: crate::effects::daylight::stars(w, h) as f32,
         };
         let texture = renderer.depth(&pane.kept, size, fresh, look)?;
         if fresh {

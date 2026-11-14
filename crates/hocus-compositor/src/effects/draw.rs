@@ -254,7 +254,8 @@ pub struct SkyLook {
 
 /// How the landscape of desktops in depth is drawn (#806): the screen's
 /// size (logical) and its scale, the camera's travel and pull (logical
-/// pixels, 1 at rest), the sky's drift, the layers' phases.
+/// pixels, 1 at rest), the sky's drift, the layers' phases, its sky
+/// (#822) and how many of the night's stars it may show.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DepthLook {
     pub size: [f32; 2],
@@ -263,6 +264,8 @@ pub struct DepthLook {
     pub zoom: f32,
     pub drift: f32,
     pub phases: [[f32; 3]; 6],
+    pub sky: super::depth::Sky,
+    pub stars: f32,
 }
 
 /// How the aurora following the music is drawn (#801): the screen's size
@@ -1334,21 +1337,30 @@ void main() {
 
 /// The board "Bureaux en profondeur"'s landscape (#806), its canvases
 /// drawn as one shader, in its logical pixels. The sky: its gradient
-/// (`#1C1B44`, `#5B3E73` at 45 %, `#D9786A` at 72 %, `#F4B27A`) and its
-/// sun's glow (260 px round at 62 % of the screen's width and 200 px, 52 %
-/// of its height), drifting with the camera. Over it six layers, back to
-/// front, each moved by its share of the camera's travel (`f`) and pulled
-/// back about the screen's middle by its share of the camera's pull: the
-/// board's silhouettes (peaks, hills, ground under trees: sums of sines
-/// over its own phases), its trees (triangles, 18 to 58 px tall, 1.6
-/// times on the layer that moves with the windows, 2.6 on the nearest; a
-/// cell each, where the board's canvas went on by a random step: 6 to
-/// 24 px, 90 to 350 px for the nearest), the sunset's haze over the far
-/// ones (`#F4B27A`, `0.18 (1 - f)` at the foot). Below the screen the
-/// layers go on, as the board's 1.35 screens tall did. Composed front to
-/// back: where the near layers cover a pixel whole, the far ones and the
-/// sky are not looked at; a pixel looks at the trees of the cells that
-/// may reach it alone.
+/// (`stops` at 0, 45 %, 72 % and the foot; the board's `#1C1B44`,
+/// `#5B3E73`, `#D9786A`, `#F4B27A`) and its sun's glow (260 px round,
+/// `glow`'s three colours at 95 %, 60 % at 12 %, nothing; the board's at
+/// 62 % of the screen's width and 200 px, 52 % of its height), drifting
+/// with the camera. With the daylight on (#822) they are its sky's at its
+/// hour, and with the sun down the moon stands in its place (the
+/// daylight's halo and disc) and the daylight's stars show: the board's
+/// places, `(i × 7919) mod 1200` across, where a column of its 1200 holds
+/// at most one star, `i = (column × 479) mod 1200` (7919 × 479 ≡ 1), so
+/// that a pixel looks at the two or three columns that may reach it, not
+/// at every star. Over it six layers, back to front, each moved by its
+/// share of the camera's travel (`f`) and pulled back about the screen's
+/// middle by its share of the camera's pull: the board's silhouettes
+/// (peaks, hills, ground under trees: sums of sines over its own phases),
+/// its trees (triangles, 18 to 58 px tall, 1.6 times on the layer that
+/// moves with the windows, 2.6 on the nearest; a cell each, where the
+/// board's canvas went on by a random step: 6 to 24 px, 90 to 350 px for
+/// the nearest), tinted toward `tint` and darkened to `dim`, the haze
+/// over the far ones (`haze`, `0.18 (1 - f)` at the foot). Below the
+/// screen the layers go on, as the board's 1.35 screens tall did. Composed
+/// front to back: where the near layers cover a pixel whole, the far ones
+/// and the sky are not looked at; a pixel looks at the trees of the cells
+/// that may reach it alone. The hour's light graded over it all (soft
+/// light, as the daylight's sky), when `grade` is not 0.
 const DEPTH: &str = "#version 100
 precision highp float;
 uniform vec2 size;
@@ -1357,11 +1369,37 @@ uniform float cam;
 uniform float zoom;
 uniform float drift;
 uniform vec3 ph[6];
+uniform vec3 stops[4];
+uniform vec3 glow[3];
+uniform vec2 sun;
+uniform float up;
+uniform vec3 haze;
+uniform vec3 tint;
+uniform float tint_k;
+uniform float dim;
+uniform vec3 light;
+uniform float grade;
+uniform float night;
+uniform float stars;
 varying vec2 v_px;
 
-const vec3 HAZE = vec3(244.0, 178.0, 122.0) / 255.0;
-
 float hash(float n) { return fract(sin(n * 91.3458 + 47.21) * 43758.5453); }
+
+vec3 over(vec3 c, vec3 s, float a) { return c * (1.0 - a) + s * a; }
+float disc(vec2 p, vec2 at, float r) { return clamp((r - length(p - at)) * px + 0.5, 0.0, 1.0); }
+float soft(float b, float s) {
+    if (s <= 0.5) {
+        return b - (1.0 - 2.0 * s) * b * (1.0 - b);
+    }
+    float d = b <= 0.25 ? ((16.0 * b - 12.0) * b + 4.0) * b : sqrt(b);
+    return b + (2.0 * s - 1.0) * (d - b);
+}
+
+/// A silhouette's colour: the board's, tinted by the hour, darkened by
+/// the night, hazy by `k`.
+vec3 shade(vec3 board, float k) {
+    return mix(mix(board, tint, tint_k) * dim, haze, k);
+}
 
 float ground(float x, float base, float amp, vec3 p, float kind) {
     if (kind < 0.5) {
@@ -1377,7 +1415,7 @@ float ground(float x, float base, float amp, vec3 p, float kind) {
 /// hazy it is there. `kind`: 0 peaks, 1 hills, 2 ground under trees, the
 /// trees of the cells `reach` (from, to) around the pixel's looked at.
 float layer(vec2 p, float f, float level, float amp, vec3 phase, float kind,
-        float cell, float jitter, float tall, float seed, vec2 reach, out float haze) {
+        float cell, float jitter, float tall, float seed, vec2 reach, out float hz) {
     float z = 1.0 - (1.0 - zoom) * f;
     vec2 c = size * 0.5;
     vec2 q = (p - c) / z + c;
@@ -1404,7 +1442,7 @@ float layer(vec2 p, float f, float level, float amp, vec3 phase, float kind,
         }
     }
     float from = base - amp * 1.2;
-    haze = 0.18 * max(1.0 - f, 0.0) * clamp((y - from) / (size.y - from), 0.0, 1.0);
+    hz = 0.18 * max(1.0 - f, 0.0) * clamp((y - from) / (size.y - from), 0.0, 1.0);
     return a;
 }
 
@@ -1413,52 +1451,85 @@ void main() {
     // Front to back: what a nearer layer covers whole is not looked at.
     vec3 c = vec3(0.0);
     float covered = 0.0;
-    float haze;
-    float a = layer(p, 1.55, 1.02, 34.0, ph[5], 2.0, 220.0, 0.6, 2.6, 37.0, vec2(-1.0, 1.0), haze);
-    c += (1.0 - covered) * a * vec3(10.0, 10.0, 22.0) / 255.0;
+    float hz;
+    float a = layer(p, 1.55, 1.02, 34.0, ph[5], 2.0, 220.0, 0.6, 2.6, 37.0, vec2(-1.0, 1.0), hz);
+    c += (1.0 - covered) * a * shade(vec3(10.0, 10.0, 22.0) / 255.0, 0.0);
     covered += (1.0 - covered) * a;
     if (covered < 0.999) {
-        a = layer(p, 1.0, 0.93, 16.0, ph[4], 2.0, 15.0, 0.8, 1.6, 23.0, vec2(-3.0, 2.0), haze);
-        c += (1.0 - covered) * a * vec3(20.0, 19.0, 39.0) / 255.0;
+        a = layer(p, 1.0, 0.93, 16.0, ph[4], 2.0, 15.0, 0.8, 1.6, 23.0, vec2(-3.0, 2.0), hz);
+        c += (1.0 - covered) * a * shade(vec3(20.0, 19.0, 39.0) / 255.0, 0.0);
         covered += (1.0 - covered) * a;
     }
     if (covered < 0.999) {
-        a = layer(p, 0.72, 0.84, 26.0, ph[3], 2.0, 15.0, 0.8, 1.0, 11.0, vec2(-2.0, 1.0), haze);
-        c += (1.0 - covered) * a * mix(vec3(36.0, 32.0, 61.0) / 255.0, HAZE, haze);
+        a = layer(p, 0.72, 0.84, 26.0, ph[3], 2.0, 15.0, 0.8, 1.0, 11.0, vec2(-2.0, 1.0), hz);
+        c += (1.0 - covered) * a * shade(vec3(36.0, 32.0, 61.0) / 255.0, hz);
         covered += (1.0 - covered) * a;
     }
     if (covered < 0.999) {
-        a = layer(p, 0.38, 0.76, 46.0, ph[2], 1.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
-        c += (1.0 - covered) * a * mix(vec3(59.0, 44.0, 85.0) / 255.0, HAZE, haze);
+        a = layer(p, 0.38, 0.76, 46.0, ph[2], 1.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), hz);
+        c += (1.0 - covered) * a * shade(vec3(59.0, 44.0, 85.0) / 255.0, hz);
         covered += (1.0 - covered) * a;
     }
     if (covered < 0.999) {
-        a = layer(p, 0.14, 0.68, 110.0, ph[1], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
-        c += (1.0 - covered) * a * mix(vec3(90.0, 63.0, 110.0) / 255.0, HAZE, haze);
+        a = layer(p, 0.14, 0.68, 110.0, ph[1], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), hz);
+        c += (1.0 - covered) * a * shade(vec3(90.0, 63.0, 110.0) / 255.0, hz);
         covered += (1.0 - covered) * a;
     }
     if (covered < 0.999) {
-        a = layer(p, 0.03, 0.62, 150.0, ph[0], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), haze);
-        c += (1.0 - covered) * a * mix(vec3(126.0, 90.0, 134.0) / 255.0, HAZE, haze);
+        a = layer(p, 0.03, 0.62, 150.0, ph[0], 0.0, 1.0, 0.0, 1.0, 0.0, vec2(0.0), hz);
+        c += (1.0 - covered) * a * shade(vec3(126.0, 90.0, 134.0) / 255.0, hz);
         covered += (1.0 - covered) * a;
     }
     if (covered < 0.999) {
         float t = clamp(p.y / size.y, 0.0, 1.0);
-        vec3 c0 = vec3(28.0, 27.0, 68.0) / 255.0;
-        vec3 c1 = vec3(91.0, 62.0, 115.0) / 255.0;
-        vec3 c2 = vec3(217.0, 120.0, 106.0) / 255.0;
-        vec3 c3 = vec3(244.0, 178.0, 122.0) / 255.0;
-        vec3 sky = t < 0.45 ? mix(c0, c1, t / 0.45)
-            : t < 0.72 ? mix(c1, c2, (t - 0.45) / 0.27)
-            : mix(c2, c3, (t - 0.72) / 0.28);
-        vec2 sun = vec2((size.x + 200.0) * 0.62 - drift, size.y * 0.52);
-        float d = length(p - sun) / 260.0;
-        vec4 glow = d < 0.12
-            ? mix(vec4(255.0, 230.0, 190.0, 242.25), vec4(255.0, 210.0, 160.0, 153.0), d / 0.12)
-            : mix(vec4(255.0, 210.0, 160.0, 153.0), vec4(255.0, 190.0, 140.0, 0.0),
-                clamp((d - 0.12) / 0.88, 0.0, 1.0));
-        sky = mix(sky, glow.rgb / 255.0, glow.a / 255.0);
+        vec3 sky = t < 0.45 ? mix(stops[0], stops[1], t / 0.45)
+            : t < 0.72 ? mix(stops[1], stops[2], (t - 0.45) / 0.27)
+            : mix(stops[2], stops[3], (t - 0.72) / 0.28);
+        if (night > 0.0 && p.y < size.y * 0.6 + 2.0) {
+            float unit = size.x / 1200.0;
+            float half_px = 0.5 / px;
+            float bx = mod(p.x + drift, size.x);
+            float lo = floor((bx - half_px - 1.4) / unit);
+            float hi = floor((bx + half_px) / unit);
+            for (int k = 0; k < 8; k++) {
+                float col = lo + float(k);
+                if (col > hi) {
+                    break;
+                }
+                float fi = mod(mod(col, 1200.0) * 479.0, 1200.0);
+                if (fi >= stars) {
+                    continue;
+                }
+                vec2 s = vec2(col * unit, mod(fi * 4513.0, 432.0) / 432.0 * size.y * 0.6);
+                vec2 q = vec2(bx, p.y);
+                vec2 from = max(q - half_px, s);
+                vec2 to = min(q + half_px, s + 1.4);
+                float cover = max(to.x - from.x, 0.0) * max(to.y - from.y, 0.0) * px * px;
+                if (cover > 0.0) {
+                    float sa = 0.5 * night * (0.4 + 0.6 * mod(fi * 37.0, 10.0) / 10.0);
+                    sky = over(sky, vec3(230.0, 235.0, 255.0) / 255.0, sa * min(cover, 1.0));
+                }
+            }
+        }
+        if (up > 0.5) {
+            vec2 at = vec2(sun.x - drift, sun.y);
+            float d = length(p - at) / 260.0;
+            vec4 g = d < 0.12
+                ? mix(vec4(glow[0], 0.95), vec4(glow[1], 0.6), d / 0.12)
+                : mix(vec4(glow[1], 0.6), vec4(glow[2], 0.0), clamp((d - 0.12) / 0.88, 0.0, 1.0));
+            sky = mix(sky, g.rgb, g.a);
+        } else {
+            vec2 moon = vec2(size.x * 0.72 - drift, size.y * 0.18);
+            float ma = 0.25 * clamp(1.0 - length(p - moon) / 160.0, 0.0, 1.0);
+            sky = over(sky, vec3(200.0, 210.0, 255.0) / 255.0, ma);
+            sky = over(sky, vec3(232.0, 236.0, 248.0) / 255.0, disc(p, moon, 16.0));
+        }
         c += (1.0 - covered) * sky;
+    }
+    if (grade > 0.0) {
+        c = clamp(c, 0.0, 1.0);
+        vec3 g = vec3(soft(c.r, light.r), soft(c.g, light.g), soft(c.b, light.b));
+        c = mix(c, g, grade);
     }
     gl_FragColor = vec4(c, 1.0);
 }
@@ -1738,7 +1809,10 @@ fn make(renderer: &mut GlesRenderer) -> Result<Programs, String> {
                 gl,
                 crate::matrix::VERTEX,
                 DEPTH,
-                &["matrix", "size", "px", "cam", "zoom", "drift", "ph"],
+                &[
+                    "matrix", "size", "px", "cam", "zoom", "drift", "ph", "stops", "glow", "sun",
+                    "up", "haze", "tint", "tint_k", "dim", "light", "grade", "night", "stars",
+                ],
             )?;
             let aurora = compile_with(
                 gl,
@@ -1957,10 +2031,14 @@ impl Fire for GlesRenderer {
         }
         let p = &programs.depth;
         let phases: Vec<f32> = look.phases.iter().flatten().copied().collect();
+        let sky = look.sky;
+        let unit = |c: &[f64; 3]| c.map(|v| (v / 255.0) as f32);
+        let stops: Vec<f32> = sky.stops.iter().flat_map(unit).collect();
+        let glow: Vec<f32> = sky.glow.iter().flat_map(unit).collect();
         let drawn = offscreen(self, &mut texture, |gl, matrix, whole, instancing| {
             #[allow(unsafe_code)]
-            // SAFETY: the target's frame is current; `phases` holds the six
-            // vec3 the array takes.
+            // SAFETY: the target's frame is current; `phases`, `stops` and
+            // `glow` hold the six, four and three vec3 their arrays take.
             unsafe {
                 quads(gl, p, matrix, instancing, &[whole], whole.loc, |gl| {
                     gl.Uniform2f(p.at("size"), look.size[0], look.size[1]);
@@ -1969,6 +2047,21 @@ impl Fire for GlesRenderer {
                     gl.Uniform1f(p.at("zoom"), look.zoom);
                     gl.Uniform1f(p.at("drift"), look.drift);
                     gl.Uniform3fv(p.at("ph"), 6, phases.as_ptr());
+                    gl.Uniform3fv(p.at("stops"), 4, stops.as_ptr());
+                    gl.Uniform3fv(p.at("glow"), 3, glow.as_ptr());
+                    gl.Uniform2f(p.at("sun"), sky.sun.0 as f32, sky.sun.1 as f32);
+                    gl.Uniform1f(p.at("up"), if sky.up { 1.0 } else { 0.0 });
+                    let [r, g, b] = unit(&sky.haze);
+                    gl.Uniform3f(p.at("haze"), r, g, b);
+                    let [r, g, b] = unit(&sky.tint);
+                    gl.Uniform3f(p.at("tint"), r, g, b);
+                    gl.Uniform1f(p.at("tint_k"), sky.tint_k as f32);
+                    gl.Uniform1f(p.at("dim"), sky.dim as f32);
+                    let [r, g, b] = unit(&sky.light);
+                    gl.Uniform3f(p.at("light"), r, g, b);
+                    gl.Uniform1f(p.at("grade"), sky.grade as f32);
+                    gl.Uniform1f(p.at("night"), sky.night as f32);
+                    gl.Uniform1f(p.at("stars"), look.stars);
                 });
             }
         });

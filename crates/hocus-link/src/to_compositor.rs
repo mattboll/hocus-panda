@@ -128,6 +128,15 @@ pub enum ToCompositor {
     /// its application's name; `-` for none), else of the process that sent it,
     /// `pid`, or one of its parents (0: not known).
     Raise { pid: u32, app: String },
+    /// A notification of an agent's conversation, without a default action
+    /// of its own, was clicked (#823): as [`Self::Raise`], also the window
+    /// of the agent's process; with none, the compositor opens a terminal
+    /// on the conversation, resuming it in its folder.
+    Converse {
+        pid: u32,
+        app: String,
+        conversation: crate::AgentConversation,
+    },
     /// The user starts an application from the launcher (5.1): the
     /// compositor runs it off its loop, as its own child, its first window
     /// taking the focus on the current desktop.
@@ -205,6 +214,39 @@ pub enum ToCompositor {
     McpReply { card: u64, reply: crate::McpReply },
     /// "Rendre la main": agent `0`'s actions go on.
     McpHandBack(String),
+    /// The form's "Créer le projet" (docs/design/projects.md §2.1): desktop
+    /// `desktop` (from 0) of `output` becomes project `name`, of folder
+    /// `folder`. Answered by [`ToShell::ProjectMade`](crate::ToShell::ProjectMade) or
+    /// [`ToShell::ProjectRefused`](crate::ToShell::ProjectRefused).
+    ProjectMake {
+        output: String,
+        desktop: u8,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+        #[serde(serialize_with = "tidy::name")]
+        folder: String,
+    },
+    /// "Fermer le projet…" on project `name` (its list in the bar, its
+    /// card): its confirmation, answered by
+    /// [`ToShell::ProjectConfirm`](crate::ToShell::ProjectConfirm).
+    ProjectCloseAsk(#[serde(serialize_with = "tidy::name")] String),
+    /// The confirmation's "Fermer le projet": project `name` closes (§5).
+    ProjectClose(#[serde(serialize_with = "tidy::name")] String),
+    /// Closed project `name` reopens (§7) on `output`, the launcher's.
+    ProjectOpen {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+    },
+    /// Open project `name`: its desktop shows.
+    ProjectGo(#[serde(serialize_with = "tidy::name")] String),
+    /// The launcher's "Créer le projet « … »" (§2.2): folder `folder` is a
+    /// project, on the desktop of `output` §7 chooses.
+    ProjectNew {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        folder: String,
+    },
 }
 
 impl ToCompositor {

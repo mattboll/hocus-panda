@@ -796,6 +796,8 @@ impl State {
         if marked {
             self.tell_window_states(false);
         }
+        // A project closing waits for its windows (docs/design/projects.md §5).
+        self.projects_window_gone(id);
         self.session_changed();
         self.redraw = true;
     }

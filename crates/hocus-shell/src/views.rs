@@ -465,6 +465,16 @@ impl Shell {
         Self::with_tick(effects, due, || surfaces::Asked::Emoji(emoji::Come::Tick))
     }
 
+    /// A project's form or card told `come`: what it does, and its next
+    /// tick (a surface faded out), if one is due.
+    pub(super) fn project_told(&mut self, come: project::Come) -> Task<Message> {
+        let effects = self.project.update(come, self.now);
+        let due = self.project.get_mut().due();
+        Self::with_tick(effects, due, || {
+            surfaces::Asked::Project(project::Come::Tick)
+        })
+    }
+
     /// The capture's toolbar (5.8), its thumbnail or its editor (5.9), if
     /// its surface is `id`.
     pub(super) fn capture_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
@@ -651,6 +661,7 @@ impl Shell {
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
                 .or_else(|| self.emoji.view(id, &context))
+                .or_else(|| self.project.view(id, &context))
                 .or_else(|| self.actions.view(id, &context))
                 .or_else(|| self.capture_view(id))
                 .or_else(|| self.auth.view(id, &context))

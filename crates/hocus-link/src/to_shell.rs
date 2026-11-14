@@ -293,6 +293,46 @@ pub enum ToShell {
     /// What the agents acting through `hocus mcp` show (docs/design/mcp.md):
     /// sent as the shell connects and whenever it changes.
     Mcp(Box<crate::McpShown>),
+    /// The overview's "En faire un projet" (docs/design/projects.md §2.1):
+    /// the form opens under the desktop's thumbnail ([`ProjectForm`](crate::ProjectForm)).
+    ProjectForm(crate::ProjectForm),
+    /// A click on a project's name in the overview (§4): its card opens
+    /// under its thumbnail ([`ProjectCard`](crate::ProjectCard)).
+    ProjectCard(crate::ProjectCard),
+    /// The project the form asked for is made: desktop `desktop` (from 0) of
+    /// `output` is project `name`. The form closes, a toast says so.
+    ProjectMade {
+        output: String,
+        desktop: u8,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+    },
+    /// The project the form asked for was not made: the form says why.
+    ProjectRefused(crate::ProjectRefusal),
+    /// The overview closed: the form and the card close with it.
+    ProjectEnd,
+    /// The projects, as the launcher lists them (§2.2): sent as the shell
+    /// connects and whenever one is made, opens or closes.
+    Projects(Vec<crate::ProjectRow>),
+    /// "Fermer le projet…": the confirmation shows (§5).
+    ProjectConfirm(crate::ProjectConfirm),
+    /// Project `name` on `output` is closed, `kept` windows saved; those
+    /// of `stayed` did not close (§5): a toast says so.
+    ProjectClosed {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+        kept: u32,
+        #[serde(serialize_with = "tidy::names")]
+        stayed: Vec<String>,
+    },
+    /// Project `name` cannot open on `output`: its nine desktops are taken
+    /// (§7, §13 H). The launcher says so and offers to close a project.
+    ProjectNoRoom {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+    },
 }
 
 impl ToShell {

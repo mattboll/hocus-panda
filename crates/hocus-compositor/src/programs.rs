@@ -317,6 +317,39 @@ pub fn spawn_terminal(configured: String, env: Env) {
     });
 }
 
+/// The terminal (`configured`, else the first found) opens in `folder`
+/// (docs/design/projects.md §13, B): its working directory, and its own
+/// option where §8.2's table has one.
+pub fn spawn_terminal_in(configured: String, folder: PathBuf, env: Env) {
+    on_a_thread("terminal".to_owned(), move || {
+        let path = std::env::var_os("PATH");
+        let Some(command) = terminal(&configured, path.as_deref()) else {
+            tracing::warn!("no terminal in PATH; set [programs] terminal in config.toml");
+            return;
+        };
+        let program = command.split_whitespace().next().unwrap_or_default();
+        let program = program.rsplit('/').next().unwrap_or(program);
+        let extra: Vec<String> = crate::terminals::in_folder(program, &[], &folder)
+            .into_iter()
+            .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
+            .collect();
+        let command = if extra.is_empty() {
+            command
+        } else {
+            format!("{command} {}", extra.join(" "))
+        };
+        let mut cmd = env.command("/bin/sh");
+        cmd.arg("-c").arg(&command).current_dir(&folder);
+        match cmd.spawn() {
+            Ok(mut child) => {
+                tracing::info!(pid = child.id(), "a terminal in a project's folder");
+                let _ = child.wait();
+            }
+            Err(err) => tracing::warn!(%err, "could not start the terminal"),
+        }
+    });
+}
+
 /// The terminal's command: the configured one, or the first of
 /// [`TERMINALS`] that is an executable file in `path`.
 pub fn terminal(configured: &str, path: Option<&OsStr>) -> Option<String> {

@@ -75,6 +75,15 @@ pub type OverviewWindow = (Option<String>, (f64, f64, f64, f64));
 /// A window dragged in the overview: its app id, the thumbnail it is
 /// over (screen, desktop).
 pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
+
+/// A project as a test sees it: its name, its folder, and, open, its
+/// screen's connector and its desktop (from 0).
+pub type ProjectSeen = (String, std::path::PathBuf, Option<(String, usize)>);
+
+/// A browser window's tabs a closed project keeps: the one shown (from
+/// 1) and their addresses (the tests).
+pub type SeenTabs = (usize, Vec<String>);
+
 /// The confetti as a test sees them: those in flight (global, logical),
 /// and those lying, each on its window (`None`: a bar) from its edge's
 /// left end and top (logical).
@@ -2120,6 +2129,238 @@ impl Headless {
             .get(&drag.window)
             .and_then(|m| crate::windows::app_id(&m.window));
         Some((app, drag.over.clone()))
+    }
+
+    /// The projects (docs/design/projects.md): each one's name, folder,
+    /// and, open, its screen's connector and desktop (from 0).
+    pub fn projects(&self) -> Vec<ProjectSeen> {
+        let state = &self.app.state;
+        state
+            .projects
+            .list
+            .iter()
+            .map(|p| {
+                let open = p.open.as_ref().and_then(|o| {
+                    Some((state.connector_of(&o.screen)?, o.desktop.checked_sub(1)?))
+                });
+                (p.name.clone(), p.folder.clone(), open)
+            })
+            .collect()
+    }
+
+    /// The windows that belong to project `name`.
+    pub fn project_windows(&self, name: &str) -> Vec<WindowId> {
+        self.app.state.project_windows(name)
+    }
+
+    /// Screen `output`'s desktops as its bar's tiles are told them.
+    pub fn desktops_view(&self, output: &str) -> Option<hocus_link::Desktops> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == output)?;
+        state.desktops_view(output)
+    }
+
+    /// The suffix Alt+Tab draws after the title of item `at` (another
+    /// desktop's name or number, nothing on the screen's own desktop).
+    pub fn switcher_suffix(&self, at: usize) -> Option<String> {
+        let state = &self.app.state;
+        let switcher = state.switching.open.as_ref()?;
+        let &(_, here, desktop) = switcher.items.get(at)?;
+        Some(if here {
+            String::new()
+        } else {
+            let name = state.desktop_name(&switcher.output, desktop);
+            crate::desktop_set::suffix(name.as_deref(), desktop)
+        })
+    }
+
+    /// The middle of the overview's "En faire un projet" under desktop
+    /// `desktop` of `output`, global, while it shows; and of a project's
+    /// name there.
+    pub fn overview_make(&self, output: &str, desktop: usize) -> Option<(f64, f64)> {
+        let state = &self.app.state;
+        let screen = state
+            .overview_screens()
+            .into_iter()
+            .find(|s| s.output.name() == output)?;
+        let scale = screen.output.current_scale().fractional_scale();
+        let thumb = *screen.thumbs.get(desktop)?;
+        Some(state.overview_make_area(thumb, scale)?.centre())
+    }
+
+    pub fn overview_project_name(&self, output: &str, desktop: usize) -> Option<(f64, f64)> {
+        let state = &self.app.state;
+        let screen = state
+            .overview_screens()
+            .into_iter()
+            .find(|s| s.output.name() == output)?;
+        let scale = screen.output.current_scale().fractional_scale();
+        let thumb = *screen.thumbs.get(desktop)?;
+        Some(
+            state
+                .overview_name_area(&screen.output, desktop, thumb, scale)?
+                .centre(),
+        )
+    }
+
+    /// The jobs given to the projects' thread so far: folders looked at,
+    /// the file written.
+    pub fn project_jobs(&self) -> u64 {
+        self.app.state.projects.jobs
+    }
+
+    /// Project `name` closes, as its confirmation's "Fermer le projet"
+    /// does (docs/design/projects.md §5); why not, if it cannot.
+    pub fn project_close(&mut self, name: &str) -> Result<(), String> {
+        self.app.state.project_close(name)
+    }
+
+    /// "Fermer le projet…" on project `name`: its confirmation, once read.
+    pub fn project_close_ask(&mut self, name: &str) {
+        self.app.state.project_close_ask(name);
+    }
+
+    /// [`crate::project_life::CLOSE_PATIENCE`] is over for the projects
+    /// closing, as their timers say it: the windows still there stay.
+    pub fn project_close_patience_over(&mut self) {
+        let ids: Vec<String> = self
+            .app
+            .state
+            .projects
+            .closing
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+        for id in ids {
+            self.app.state.project_closing_over(&id);
+        }
+    }
+
+    /// The last project that found no free desktop.
+    pub fn project_no_room(&self) -> Option<String> {
+        self.app.state.projects.no_room.clone()
+    }
+
+    /// Whether a project is closing: its windows read, or asked to close.
+    pub fn project_closing(&self) -> bool {
+        !self.app.state.projects.closing.is_empty()
+    }
+
+    /// Closed project `name` reopens on `output` (§7): the desktop it
+    /// opens on (from 0), or why not.
+    pub fn project_open(&mut self, name: &str, output: &str) -> Result<usize, String> {
+        self.app.state.project_open(name, output)
+    }
+
+    /// Whether project `name`'s windows are still coming back.
+    pub fn project_coming_back(&self, name: &str) -> bool {
+        let state = &self.app.state;
+        let key = hocus_link::projects::name_key(name);
+        state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .is_some_and(|p| state.project_coming_back(&p.id))
+    }
+
+    /// The last notification of a project that came back but for some:
+    /// its summary and body.
+    pub fn project_not_back(&self) -> Option<(String, String)> {
+        self.app.state.projects.not_back.clone()
+    }
+
+    /// A closed project's agents, as kept in memory: each one's tool,
+    /// session, folder and transcript.
+    pub fn project_agents(&self, name: &str) -> Vec<[String; 4]> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .filter_map(|w| w.agent.as_ref())
+                    .map(|a| {
+                        [
+                            a.tool.clone(),
+                            a.session.clone(),
+                            a.folder.display().to_string(),
+                            a.transcript.display().to_string(),
+                        ]
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// A closed project's browsers' windows, as kept in memory: each
+    /// one's app id, and its tabs' addresses with the one shown (from 1),
+    /// none when it keeps no tabs, empty when they were not read.
+    pub fn project_tabs(&self, name: &str) -> Vec<(String, Option<SeenTabs>)> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .filter(|w| crate::browsers::of_app(&w.app_id).is_some())
+                    .map(|w| {
+                        (
+                            w.app_id.clone(),
+                            w.browser.as_ref().map(|b| {
+                                (b.selected, b.tabs.iter().map(|t| t.url.clone()).collect())
+                            }),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// A closed project's contents, as kept in memory: each window's app
+    /// id, state and terminal's folder.
+    pub fn project_contents(
+        &self,
+        name: &str,
+    ) -> Vec<(String, String, Option<std::path::PathBuf>)> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .map(|w| {
+                        (
+                            w.app_id.clone(),
+                            format!("{:?}", w.state),
+                            w.terminal.as_ref().map(|t| t.folder.clone()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The desktops' count, every screen's.
+    pub fn desktops_count(&self) -> usize {
+        self.app.state.config.desktops.count
+    }
+
+    /// Whether a project's form or card shows.
+    pub fn project_surface_open(&self) -> bool {
+        self.app.state.panel.popovers.project_open()
     }
 
     /// Whether the radial menu is still drawn going.

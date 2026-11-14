@@ -173,9 +173,9 @@ impl Item {
     }
 
     /// Its popover's width, logical pixels.
-    pub(super) fn width(self) -> u32 {
+    pub(super) fn width(self, bar: &str) -> u32 {
         match self {
-            Self::Desktop { .. } => desktop::WIDTH,
+            Self::Desktop { row, index } => desktop::width(bar, row, index),
             Self::Secretary => briefing::WIDTH,
             Self::Notifications => history::WIDTH,
             Self::Clipboard => clipboard::WIDTH,
@@ -188,7 +188,11 @@ impl Item {
             Self::Calendar => calendar::WIDTH,
             Self::Windows => windows::WIDTH,
             Self::WindowMenu(_) => window_menu::WIDTH,
-            Self::WindowsMore => desktop::WIDTH,
+            Self::WindowsMore => desktop::width(
+                bar,
+                0,
+                u8::try_from(crate::desktops::current(bar)).unwrap_or(u8::MAX),
+            ),
             Self::Music => music::WIDTH,
             Self::Journal => journal::WIDTH,
             item if item.agents() => agents::WIDTH,

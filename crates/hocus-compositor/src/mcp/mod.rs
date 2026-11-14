@@ -809,7 +809,7 @@ impl State {
                     .map(|d| {
                         json!({
                             "number": d + 1,
-                            "name": self.config.desktops.name(d),
+                            "name": self.desktop_name(output, d),
                             "windows": on.iter().filter(|id| self.model.desktop(**id) == d).count(),
                         })
                     })

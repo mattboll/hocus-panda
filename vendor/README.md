@@ -1,7 +1,7 @@
 # Vendored crates
 
-One crate of crates.io is built from here with a small change, through
-`[patch.crates-io]` in the workspace's `Cargo.toml`. Its directory is the
+Two crates of crates.io are built from here with a small change, through
+`[patch.crates-io]` in the workspace's `Cargo.toml`. Each directory is the
 published crate plus one patch file, nothing else: `scripts/vendor.sh
 --check` rebuilds it from the crates.io tarball and the patch and fails on
 any difference, in CI (`vendor` job).
@@ -9,6 +9,7 @@ any difference, in CI (`vendor` job).
 | Crate | Version | Patch | Issue | Upstream |
 |---|---|---|---|---|
 | `iced_tiny_skia` | 0.14.1 | [`patches/iced_tiny_skia-0.14.1.patch`](patches/iced_tiny_skia-0.14.1.patch) | #662 | not proposed |
+| `iced_layershell` | 0.19.1 | [`patches/iced_layershell-0.19.1.patch`](patches/iced_layershell-0.19.1.patch) | #787, #821 | not proposed |
 
 ## Why
 
@@ -20,8 +21,21 @@ any difference, in CI (`vendor` job).
   for whole frames; they draw only when something changes
   ([docs/design/settings.md](../docs/design/settings.md)). 18 lines in
   `src/window/compositor.rs` and `src/lib.rs`.
+- **`iced_layershell`: the pointer's enter gives its place** (#787). iced
+  hands every event of a batch the cursor as it is after the batch, and
+  its `CursorEntered` has no place, so a press read in one batch with the
+  enter and a move after it (a busy shell) landed where the pointer went,
+  not where it came in. The enter is followed by a move to its place, as
+  winit does. In `src/multi_window.rs`.
+- **`iced_layershell`: what comes for a surface before its window is made
+  is kept for it** (#821). The window is made at the refresh of the
+  surface's first configure, which comes after the other events read in
+  the same batch: a key pressed as the launcher opened, read with that
+  configure (a busy shell), was dropped, and the launcher stayed. Those
+  events now wait for the window, at most 256 of them. In
+  `src/multi_window.rs`.
 
-The patch also replaces the header of the published `Cargo.toml` with a
+Each patch also replaces the header of the published `Cargo.toml` with a
 note of the change, and adds the crate's licence text (the tarball carries
 none; MIT asks that it goes with copies).
 
@@ -55,9 +69,9 @@ scripts/vendor.sh --check    # what CI runs
    tarball and applies the patch, and stops if it no longer applies; then
    make the change by hand in `vendor/<crate>` and run
    `scripts/vendor.sh --diff`.
-3. The version in `[workspace.dependencies]` (`iced` and `iced_tiny_skia`
-   are held at exact versions there: both move together), `cargo update -p
-   <crate>`, and this table.
+3. The version in `[workspace.dependencies]` (`iced`, `iced_tiny_skia`
+   and `iced_layershell` are held at exact versions there: they move
+   together), `cargo update -p <crate>`, and this table.
 
 When upstream offers the change, the directory, its patch, its line in
 `[patch.crates-io]` and in `scripts/vendor.sh` all go.

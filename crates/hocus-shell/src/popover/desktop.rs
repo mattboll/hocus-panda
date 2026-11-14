@@ -17,6 +17,12 @@
 //! windows opening, closing and retitling while it shows: the
 //! compositor's lines draw this surface alone ([`crate::desktops`]).
 //!
+//! A project's (docs/design/projects.md §3) is 300 px wide: its monogram,
+//! its name and the count on the first line, its folder under it (Martian
+//! Mono 10.5 px, `text.faint`); under its rows, a divider and "Fermer le
+//! projet…" (34 px, a folder with a cross), which asks for its
+//! confirmation (§5).
+//!
 //! Built with the shell's widget kit ([`crate::ui`]), as the Wi-Fi's.
 
 use hocus_words::shell::popover_desktop as txt;
@@ -53,14 +59,59 @@ type El<'a> = Element<'a, Msg>;
 
 // --- The mockup's sizes, at ×1 ------------------------------------------------
 
-/// Its width, narrower than the other popovers'.
+/// Its width, narrower than the other popovers'; a project's wider.
 pub const WIDTH: u32 = 240;
+pub const PROJECT_WIDTH: u32 = 300;
 const BORDER: f32 = 1.0;
 const PAD_TOP: f32 = 10.0;
 const PAD_SIDE: f32 = 12.0;
 const PAD_BOTTOM: f32 = 12.0;
 const LEFT: f32 = BORDER + PAD_SIDE;
 const RIGHT: f32 = WIDTH as f32 - BORDER - PAD_SIDE;
+/// A project's monogram before its name (9 px, 800, on the accent), its
+/// folder's line under the title (10.5 px, Martian Mono).
+const MONO: f32 = 9.0;
+const MONO_GAP: f32 = 8.0;
+const FOLDER: f32 = 10.5;
+const MARTIAN: iced::Font = iced::Font::with_name("Martian Mono");
+const MANROPE_EXTRABOLD: iced::Font = iced::Font {
+    weight: iced::font::Weight::ExtraBold,
+    ..MANROPE
+};
+
+/// A project's last row: a divider 4 px from what is around it, then
+/// "Fermer le projet…", 34 px.
+const CLOSE_RULE: f32 = 1.0;
+const CLOSE_RULE_GAP: f32 = 4.0;
+const CLOSE_ROW: f32 = 34.0;
+
+/// The room "Fermer le projet…" takes under a project's rows.
+fn close_room(project: bool) -> f32 {
+    if project {
+        2.0 * CLOSE_RULE_GAP + CLOSE_RULE + CLOSE_ROW
+    } else {
+        0.0
+    }
+}
+
+/// How much wider than 240 px a list is: a project's 60.
+fn wider(project: bool) -> f32 {
+    if project {
+        (PROJECT_WIDTH - WIDTH) as f32
+    } else {
+        0.0
+    }
+}
+
+/// The list's width for desktop `index` of bar `bar`'s row `row`.
+pub fn width(bar: &str, row: u8, index: u8) -> u32 {
+    let output = desktops::output_of(bar, row);
+    if desktops::project(&output, usize::from(index)).is_some() {
+        PROJECT_WIDTH
+    } else {
+        WIDTH
+    }
+}
 /// The header: "Bureau N" 14 px 700, "M fenêtres" 12 px; 26 px high, 4 px
 /// above what follows.
 const HEADER_TOP: f32 = BORDER + PAD_TOP;
@@ -73,9 +124,14 @@ const CONTENT_TOP: f32 = HEADER_TOP + HEADER + GAP;
 const SCREEN: f32 = 12.0;
 const SCREEN_LINE: f32 = 18.0;
 
-/// Where the content starts: under the screen's line when there is one.
+/// Where the content starts: under the screen's line and the project's
+/// folder's when there are.
 fn content_top(screen: bool) -> f32 {
     CONTENT_TOP + if screen { SCREEN_LINE } else { 0.0 }
+}
+
+fn content_top_of(screen: bool, project: bool) -> f32 {
+    content_top(screen) + if project { SCREEN_LINE } else { 0.0 }
 }
 /// "Aucune fenêtre.": 13 px, 2 px above and under; then the rows' (empty)
 /// place, 4 px under it, as the mockup's column has it.
@@ -118,12 +174,16 @@ fn end(rows: usize, top: f32) -> f32 {
     }
 }
 
-/// The list of `rows` windows: its viewport and its rows' height.
-fn list_of(rows: usize, top: f32) -> List {
+/// The list of `rows` windows: its viewport and its rows' height, the
+/// list `more` px wider than 240.
+fn list_of(rows: usize, top: f32, more: f32) -> List {
     List {
         view: Rectangle::new(
             Point::new(LEFT - ROW_OUT, top),
-            Size::new(RIGHT - LEFT + 2.0 * ROW_OUT, rows_height(rows.min(MOST))),
+            Size::new(
+                RIGHT + more - LEFT + 2.0 * ROW_OUT,
+                rows_height(rows.min(MOST)),
+            ),
         ),
         content: rows_height(rows),
     }
@@ -147,10 +207,11 @@ fn height_of(rows: usize, top: f32) -> u32 {
 /// 8.4) as it is now.
 pub fn height(bar: &str, row: u8, index: u8) -> u32 {
     let output = desktops::output_of(bar, row);
+    let project = desktops::project(&output, usize::from(index)).is_some();
     height_of(
         desktops::rows(&output, usize::from(index)).len(),
-        content_top(row > 0),
-    )
+        content_top_of(row > 0, project),
+    ) + close_room(project) as u32
 }
 
 /// A desktop's list on its surface.
@@ -174,8 +235,11 @@ struct Source {
     /// Another screen's: the line saying which.
     screen: Option<String>,
     rows: Vec<Row>,
-    /// Its name (6.14) or "Bureau N", whole.
+    /// Its name (its project's, else 6.14's) or "Bureau N", whole.
     title: String,
+    /// Its project, if it is one: its monogram, its folder, shown, and its
+    /// name.
+    project: Option<(String, String, String)>,
 }
 
 /// What it shows now, as the controller and the compositor say (none
@@ -202,8 +266,15 @@ fn source(id: window::Id, words: Words) -> Option<Source> {
     let rows = desktops::rows(&output, usize::from(index));
     let title = words.desktop_title(
         usize::from(index) + 1,
-        desktops::name(usize::from(index)).as_deref(),
+        desktops::name_on(&output, usize::from(index)).as_deref(),
     );
+    let project = desktops::project(&output, usize::from(index)).map(|p| {
+        (
+            p.monogram(),
+            desktops::folder_shown(&p.folder),
+            p.name.clone(),
+        )
+    });
     Some(Source {
         bar,
         item,
@@ -212,13 +283,15 @@ fn source(id: window::Id, words: Words) -> Option<Source> {
         screen,
         rows,
         title,
+        project,
     })
 }
 
-/// A row, by its window's id.
+/// A row, by its window's id; a project's "Fermer le projet…".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Window(u64),
+    CloseProject,
 }
 
 impl Target {
@@ -326,8 +399,13 @@ fn content<'a>(words: Words, shown: Option<&Source>, ui: &mut Ui) -> El<'a> {
     let mut all: Vec<El<'a>> = Vec::new();
     if let Some(shown) = shown {
         let count = words.windows(shown.rows.len()).unwrap_or_default();
-        let list = list_of(shown.rows.len(), content_top(shown.screen.is_some()));
-        let room = title_room(list.scrolls());
+        let more = wider(shown.project.is_some());
+        let list = list_of(
+            shown.rows.len(),
+            content_top_of(shown.screen.is_some(), shown.project.is_some()),
+            more,
+        );
+        let room = title_room(list.scrolls()) + more;
         let titles: Vec<String> = shown
             .rows
             .iter()
@@ -336,19 +414,61 @@ fn content<'a>(words: Words, shown: Option<&Source>, ui: &mut Ui) -> El<'a> {
         say(words, shown, &count, &titles, ui);
         // A long name keeps 8 px before the count.
         let counted = kit::measure(&count, COUNT, MANROPE);
-        let header_room = RIGHT - LEFT - if count.is_empty() { 0.0 } else { counted + 8.0 };
+        let badge = shown.project.as_ref().map(|(mono, ..)| {
+            let w = kit::measure(mono, MONO, MANROPE_EXTRABOLD) + 8.0;
+            (mono.clone(), w.ceil())
+        });
+        let header_room = RIGHT + more
+            - LEFT
+            - if count.is_empty() { 0.0 } else { counted + 8.0 }
+            - badge.as_ref().map_or(0.0, |(_, w)| w + MONO_GAP);
         let title = kit::elide(&shown.title, header_room, |t| {
             kit::measure(t, TITLE, MANROPE_BOLD)
         });
-        let line = row![
-            said(title, TITLE, MANROPE_BOLD, TEXT.get()),
-            space::horizontal(),
-            said(count, COUNT, MANROPE, FAINT.get()),
-        ]
-        .align_y(Vertical::Center);
+        let mut line = row![].align_y(Vertical::Center);
+        if let Some((mono, w)) = badge {
+            let height = (MONO * LINE + 4.0).round();
+            let face = drawn(w, height, move |f, s| {
+                let rect = Rectangle::new(Point::ORIGIN, s);
+                f.fill(
+                    &iced::widget::canvas::Path::rounded_rectangle(
+                        rect.position(),
+                        rect.size(),
+                        4.0.into(),
+                    ),
+                    crate::theme::ACCENT.get(),
+                );
+                f.fill_text(iced::widget::canvas::Text {
+                    content: mono.clone(),
+                    position: rect.center(),
+                    max_width: f32::INFINITY,
+                    color: iced::Color::from_rgb8(0x0B, 0x10, 0x20),
+                    size: iced::Pixels(MONO),
+                    line_height: iced::widget::text::LineHeight::Relative(1.0),
+                    font: MANROPE_EXTRABOLD,
+                    align_x: iced::widget::text::Alignment::Center,
+                    align_y: Vertical::Center,
+                    shaping: iced::widget::text::Shaping::Basic,
+                });
+            });
+            line = line.push(face).push(gap(MONO_GAP));
+        }
+        let line = line
+            .push(said(title, TITLE, MANROPE_BOLD, TEXT.get()))
+            .push(space::horizontal())
+            .push(said(count, COUNT, MANROPE, FAINT.get()));
         all.push(parts::inset(
             container(line).height(HEADER).align_y(Vertical::Center),
         ));
+        if let Some((_, folder, _)) = &shown.project {
+            let folder = kit::elide_start(folder, RIGHT + more - LEFT, |t| {
+                kit::measure(t, FOLDER, MARTIAN)
+            });
+            let line = container(said(folder.clone(), FOLDER, MARTIAN, FAINT.get()))
+                .height(SCREEN_LINE)
+                .align_y(Vertical::Center);
+            all.push(ui::line(parts::inset(line), folder).into());
+        }
         if let Some(screen) = &shown.screen {
             let line = container(said(screen.clone(), SCREEN, MANROPE, FAINT.get()))
                 .height(SCREEN_LINE)
@@ -366,6 +486,9 @@ fn content<'a>(words: Words, shown: Option<&Source>, ui: &mut Ui) -> El<'a> {
             all.push(ui::line(parts::inset(empty), words.no_window()).into());
         } else {
             all.push(rows(words, shown, &titles, list, ui.focus));
+        }
+        if shown.project.is_some() {
+            all.push(close_project(words, more, ui.focus));
         }
     }
     container(iced::widget::Column::with_children(all))
@@ -459,6 +582,79 @@ fn rows<'a>(
     keyed_column([(key, list)]).into()
 }
 
+/// A project's "Fermer le projet…", under a divider.
+fn close_project<'a>(words: Words, more: f32, focus: Option<Target>) -> El<'a> {
+    let word = hocus_words::shell::project::CLOSE_PROJECT.get(words.lang());
+    let line = row![
+        drawn(ICON, ICON, |f, s| folder_closing(f, s, TEXT.get())),
+        gap(10.0),
+        said(word, NAME, MANROPE, TEXT.get())
+    ]
+    .align_y(Vertical::Center);
+    let pressed = iced::widget::button(container(line).center_y(Length::Fill))
+        .padding(Padding {
+            left: ROW_PAD,
+            ..Padding::ZERO
+        })
+        .width(Length::Fill)
+        .height(CLOSE_ROW)
+        .style(|_, status| {
+            if style::lit(status) {
+                style::hovered(FILL.get(), SMALL_RADIUS)
+            } else {
+                style::clear()
+            }
+        })
+        .on_press(Msg::Act(Target::CloseProject));
+    let target = Target::CloseProject;
+    let declared = control(pressed, target.id(), Role::Button, word)
+        .focus(focus == Some(target), Msg::Focus(target), SMALL_RADIUS)
+        .activate(Msg::Act(target));
+    let width = RIGHT + more - LEFT + 2.0 * ROW_OUT;
+    column![
+        Space::new().height(CLOSE_RULE_GAP),
+        container(Space::new().width(width).height(CLOSE_RULE)).style(|_| container::Style {
+            background: Some(iced::Color::from_rgba8(255, 255, 255, 0.06).into()),
+            ..container::Style::default()
+        }),
+        Space::new().height(CLOSE_RULE_GAP),
+        container(declared).width(width),
+    ]
+    .into()
+}
+
+/// A folder with a cross (the mockup's 24 px drawing), `size` large.
+fn folder_closing(f: &mut iced::widget::canvas::Frame, size: Size, ink: iced::Color) {
+    use iced::widget::canvas::{LineCap, LineJoin, Path, Stroke};
+    let k = size.width / 24.0;
+    let p = |x: f32, y: f32| Point::new(x * k, y * k);
+    let stroke = Stroke {
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        ..Stroke::default().with_color(ink).with_width(1.8 * k)
+    };
+    f.stroke(
+        &Path::new(|b| {
+            b.move_to(p(3.0, 7.0));
+            b.quadratic_curve_to(p(3.0, 5.0), p(5.0, 5.0));
+            b.line_to(p(9.0, 5.0));
+            b.line_to(p(11.0, 7.0));
+            b.line_to(p(19.0, 7.0));
+            b.quadratic_curve_to(p(21.0, 7.0), p(21.0, 9.0));
+            b.line_to(p(21.0, 17.0));
+            b.quadratic_curve_to(p(21.0, 19.0), p(19.0, 19.0));
+            b.line_to(p(5.0, 19.0));
+            b.quadratic_curve_to(p(3.0, 19.0), p(3.0, 17.0));
+            b.close();
+            b.move_to(p(9.5, 11.5));
+            b.line_to(p(14.5, 16.5));
+            b.move_to(p(14.5, 11.5));
+            b.line_to(p(9.5, 16.5));
+        }),
+        stroke,
+    );
+}
+
 /// What it shows, said in the log as it changes.
 fn say(words: Words, shown: &Source, count: &str, titles: &[String], ui: &mut Ui) {
     if ui.said.as_ref() == Some(shown) {
@@ -499,6 +695,22 @@ fn handle(message: Msg) {
             super::send(vec![Effect::Bring(id)]);
             event(Seen::Chosen);
         }
+        Msg::Act(Target::CloseProject) => {
+            let name = ui(|ui| {
+                ui.shown
+                    .as_ref()
+                    .and_then(|s| s.project.as_ref())
+                    .map(|p| p.2.clone())
+            });
+            if let Some(name) = name {
+                tracing::debug!(name, "a desktop's list closes its project");
+                super::send(vec![Effect::Tell(
+                    hocus_link::ToCompositor::ProjectCloseAsk(name),
+                )]);
+                event(Seen::Chosen);
+            }
+        }
+        Msg::Menu(Target::CloseProject) => {}
         Msg::Menu(Target::Window(id)) => {
             let shown = ui(|ui| ui.shown.clone());
             if let Some(shown) = shown
@@ -549,10 +761,15 @@ mod tests {
         assert_eq!(TITLE_ROOM, 189.0);
         // Past 8 rows, 8 show and the rest scrolls.
         assert_eq!(height_of(12, CONTENT_TOP), height_of(8, CONTENT_TOP));
-        assert!(!list_of(8, CONTENT_TOP).scrolls());
+        assert!(!list_of(8, CONTENT_TOP, 0.0).scrolls());
         assert_eq!(
-            list_of(12, CONTENT_TOP).most_scroll(),
+            list_of(12, CONTENT_TOP, 0.0).most_scroll(),
             4.0 * (ROW + ROW_GAP)
+        );
+        // A project's: its folder's line under its title.
+        assert_eq!(
+            height_of(1, content_top_of(false, true)),
+            height_of(1, CONTENT_TOP) + 18
         );
     }
 }

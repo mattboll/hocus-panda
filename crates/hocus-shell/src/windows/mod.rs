@@ -713,6 +713,7 @@ mod tests {
                 window(1, 4, Look::Plain),
                 window(0, 5, Look::Minimized),
             ],
+            projects: Vec::new(),
         };
         let recent = Recent {
             output: "eDP-1".into(),

@@ -67,9 +67,9 @@ only when the maintainer asks to see a change (CLAUDE.md, "Hard rules").
 - Every dependency's version is declared once, in `[workspace.dependencies]`
   of the root `Cargo.toml`; the crates take them with `workspace = true`
   and add the features they need. A new dependency goes there first.
-- `iced` and `iced_tiny_skia` are held at exact versions: the second is
-  built from `vendor/` with a patch made on that version
-  ([vendor/README.md](../vendor/README.md)).
+- `iced`, `iced_tiny_skia` and `iced_layershell` are held at exact
+  versions: the last two are built from `vendor/` with a patch made on
+  that version ([vendor/README.md](../vendor/README.md)).
 
 ## What runs when
 

@@ -757,7 +757,7 @@ impl State {
         let scale = output.current_scale().fractional_scale();
         let lang = self.radial_lang();
         let armed = radial.armed(now);
-        let names = self.config.desktops.shown_names();
+        let names = self.desktop_names_on(output);
         let key = LookKey {
             scale: (scale * 1000.0).round() as u32,
             lit: radial.lit,

@@ -226,6 +226,17 @@ pub enum Effect {
         size: (u32, u32),
         margin: (i32, i32, i32, i32),
     },
+    /// A project's form or card opens (docs/design/projects.md): a surface
+    /// `size` large, of `namespace`, on `output`, its margins from the
+    /// screen's top left corner (top, right, bottom, left), holding the
+    /// keyboard.
+    Project {
+        id: window::Id,
+        output: String,
+        size: (u32, u32),
+        margin: (i32, i32, i32, i32),
+        namespace: &'static str,
+    },
     /// A line to the compositor.
     Tell(ToCompositor),
     /// The calendar opens on `bar` on `day`, `event` chosen (Day.5): from
