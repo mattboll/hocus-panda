@@ -19,11 +19,21 @@
 //!   open; its desktop's sketch and windows, where each one is; that
 //!   private windows are never read. `Esc` closes it.
 //!
+//! - **The confirmation** (`hocus-project-close`, 480 px, §5, board 4),
+//!   centred on the project's screen over the compositor's dim: what
+//!   will come back, what closing interrupts, "Annuler" and "Fermer le
+//!   projet" (`Enter` closes, `Esc` cancels).
+//! - **Closed** (§5): a toast says so and how it comes back. The card of
+//!   a closed project opens centred, from the launcher (`→` on its row),
+//!   with "Rouvrir".
+//!
 //! The compositor moves them in and out as the emoji picker, draws their
 //! glass and shadow, gives them the keys over the overview, and closes
-//! them with the overview (`project-end`).
+//! them with the overview (`project-end`). The projects it says
+//! (`projects`) are kept here for the launcher's rows ([`rows`]).
 
 pub mod card;
+pub mod confirm;
 pub mod form;
 pub mod repos;
 
@@ -35,8 +45,9 @@ use std::{
 };
 
 use hocus_link::{
-    NameFault, POPOVER_CLOSE, PROJECT_CARD_NAMESPACE, PROJECT_FORM_NAMESPACE, ProjectCard,
-    ProjectForm, ProjectRefusal, Rect, ToCompositor, WindowPlace,
+    NameFault, POPOVER_CLOSE, PROJECT_CARD_NAMESPACE, PROJECT_CLOSE_NAMESPACE,
+    PROJECT_FORM_NAMESPACE, ProjectCard, ProjectConfirm, ProjectForm, ProjectRefusal, ProjectRow,
+    Rect, ToCompositor, WindowPlace,
 };
 use iced::{Element, keyboard, window};
 use iced_layershell::reexport::KeyboardInteractivity;
@@ -331,12 +342,58 @@ pub struct Card {
     pub logged: String,
 }
 
+/// The confirmation open, and what holds the keyboard there.
+#[derive(Debug)]
+pub struct Confirm {
+    pub surface: window::Id,
+    pub shown: ProjectConfirm,
+    pub focus: confirm::Focus,
+    pub logged: String,
+}
+
+/// The projects as the compositor last said them.
+static ROWS: std::sync::Mutex<Vec<ProjectRow>> = std::sync::Mutex::new(Vec::new());
+
+/// The projects, as the launcher lists them.
+pub fn rows() -> Vec<ProjectRow> {
+    ROWS.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+/// The compositor said the projects: kept, and an open launcher shows them.
+pub fn set_rows(rows: Vec<ProjectRow>) {
+    tracing::debug!(projects = rows.len(), "the projects");
+    *ROWS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = rows;
+    crate::launcher::changed();
+}
+
+/// An application's name, by its desktop entry (else its app id), as the
+/// launcher lists it.
+pub fn app_name(entry: &str, app: &str) -> String {
+    let catalog = crate::launcher::apps::catalog();
+    let found = |id: &str| {
+        catalog
+            .apps
+            .iter()
+            .find(|a| !id.is_empty() && a.entry.id.eq_ignore_ascii_case(id))
+            .map(|a| a.entry.name.clone())
+    };
+    found(entry).or_else(|| found(app)).unwrap_or_else(|| {
+        let id = if entry.is_empty() { app } else { entry };
+        id.rsplit('.').next().unwrap_or(id).to_owned()
+    })
+}
+
 /// The form and the card, and their surfaces fading out: the shell's own
 /// (#773).
 #[derive(Debug, Default)]
 pub struct Projects {
     pub form: Option<Box<Form>>,
     pub card: Option<Box<Card>>,
+    pub confirm: Option<Box<Confirm>>,
     closing: Vec<(window::Id, Instant)>,
     asked: Option<Instant>,
     serial: u64,
@@ -352,6 +409,15 @@ static HOLDING: AtomicBool = AtomicBool::new(false);
 pub enum Come {
     Form(ProjectForm),
     Card(ProjectCard),
+    /// "Fermer le projet…": the confirmation.
+    Confirm(ProjectConfirm),
+    /// A project closed: the toast.
+    Closed {
+        output: String,
+        name: String,
+        kept: u32,
+        stayed: Vec<String>,
+    },
     Made {
         output: String,
         desktop: u8,
@@ -376,13 +442,25 @@ pub enum Come {
 /// Where a surface `size` large opens under `at` (its thumbnail) on a
 /// screen `screen` large: its margins from the screen's top left corner,
 /// centred under the thumbnail, 48 px under it, on the screen.
-pub fn place(at: Rect, size: (u32, u32), screen: (i32, i32)) -> (i32, i32) {
+pub fn place(at: Option<Rect>, size: (u32, u32), screen: (i32, i32)) -> (i32, i32) {
+    let Some(at) = at else {
+        return centred(size, screen);
+    };
     let (w, h) = (size.0 as i32, size.1 as i32);
     let x = at.x + at.width / 2 - w / 2;
     let y = at.y + at.height + UNDER;
     let x = x.min(screen.0 - EDGE - w).max(EDGE);
     let y = y.min(screen.1 - EDGE - h).max(EDGE);
     (x, y)
+}
+
+/// Where a surface `size` large opens centred on a screen `screen` large.
+pub fn centred(size: (u32, u32), screen: (i32, i32)) -> (i32, i32) {
+    let (w, h) = (size.0 as i32, size.1 as i32);
+    (
+        ((screen.0 - w) / 2).max(EDGE),
+        ((screen.1 - h) / 2).max(EDGE),
+    )
 }
 
 /// A press outside, another surface: they close, if they are open; asked
@@ -421,10 +499,15 @@ impl Projects {
         self.card.as_deref().filter(|c| c.surface == id)
     }
 
+    pub fn confirm_on(&self, id: window::Id) -> Option<&Confirm> {
+        self.confirm.as_deref().filter(|c| c.surface == id)
+    }
+
     /// Whether surface `id` is one of theirs, open or fading out.
     pub fn is_surface(&self, id: window::Id) -> bool {
         self.form_on(id).is_some()
             || self.card_on(id).is_some()
+            || self.confirm_on(id).is_some()
             || self.closing.iter().any(|(c, _)| *c == id)
     }
 
@@ -444,17 +527,34 @@ impl Projects {
         match come {
             Come::Form(ask) => self.open_form(ask, now, &mut effects),
             Come::Card(shown) => self.open_card(shown, now, &mut effects),
+            Come::Confirm(shown) => self.open_confirm(shown, now, &mut effects),
+            Come::Closed {
+                output,
+                name,
+                kept,
+                stayed,
+            } => {
+                let (said, then) =
+                    confirm::closed_said(Words::new(Lang::of_messages()), &name, kept, &stayed);
+                effects.extend(crate::launcher::toast::show_then(
+                    output,
+                    said,
+                    Some(then),
+                    now,
+                ));
+            }
             Come::Made {
                 output,
                 desktop,
                 name,
             } => {
+                // The form's, or the launcher's folder made a project.
+                tracing::info!(desktop = desktop + 1, "the project is made");
                 if self.form.as_ref().is_some_and(|f| f.waiting) {
-                    tracing::info!(desktop = desktop + 1, "the project is made");
                     self.close(now, &mut effects);
-                    let said = words().made(usize::from(desktop) + 1, &name);
-                    effects.extend(crate::launcher::toast::show(output, said, now));
                 }
+                let said = words().made(usize::from(desktop) + 1, &name);
+                effects.extend(crate::launcher::toast::show(output, said, now));
             }
             Come::Refused(why) => {
                 if let Some(form) = &mut self.form {
@@ -499,13 +599,12 @@ impl Projects {
                 }
             }
             Come::Key(pressed) => {
-                if let Some(id) = self.form.as_ref().map(|f| f.surface) {
+                if self.confirm.is_some() {
+                    effects.extend(confirm::key(self, &pressed, now));
+                } else if let Some(id) = self.form.as_ref().map(|f| f.surface) {
                     effects.extend(form::key(self, id, &pressed, now));
-                } else if matches!(
-                    pressed.key,
-                    keyboard::Key::Named(keyboard::key::Named::Escape)
-                ) {
-                    self.close(now, &mut effects);
+                } else if self.card.is_some() {
+                    effects.extend(card::key(self, &pressed, now));
                 }
                 effects.extend(woken());
             }
@@ -540,7 +639,7 @@ impl Projects {
     /// Whether they hold the keyboard, for other threads.
     fn said(&self) {
         HOLDING.store(
-            self.form.is_some() || self.card.is_some(),
+            self.form.is_some() || self.card.is_some() || self.confirm.is_some(),
             Ordering::Relaxed,
         );
     }
@@ -564,6 +663,39 @@ impl Projects {
                 PROJECT_CARD_NAMESPACE.to_owned(),
             )));
         }
+        if let Some(confirm) = self.confirm.take() {
+            tracing::debug!("the project's confirmation closes");
+            self.closing.push((confirm.surface, now + POPOVER_CLOSE));
+            effects.push(Effect::Keyboard(
+                confirm.surface,
+                KeyboardInteractivity::None,
+            ));
+            effects.push(Effect::Tell(ToCompositor::Closing(
+                PROJECT_CLOSE_NAMESPACE.to_owned(),
+            )));
+        }
+    }
+
+    fn open_confirm(&mut self, shown: ProjectConfirm, now: Instant, effects: &mut Vec<Effect>) {
+        self.close(now, effects);
+        let surface = window::Id::unique();
+        let size = confirm::size(&shown, words());
+        let place = centred(size, shown.screen);
+        tracing::debug!(name = shown.name, ?place, "a project's confirmation opens");
+        effects.push(Effect::Project {
+            id: surface,
+            output: shown.output.clone(),
+            size,
+            margin: (place.1, 0, 0, place.0),
+            namespace: PROJECT_CLOSE_NAMESPACE,
+        });
+        self.confirm = Some(Box::new(Confirm {
+            surface,
+            shown,
+            focus: confirm::Focus::Close,
+            logged: String::new(),
+        }));
+        others_close();
     }
 
     fn open_form(&mut self, ask: ProjectForm, now: Instant, effects: &mut Vec<Effect>) {
@@ -589,7 +721,7 @@ impl Projects {
             ask,
         };
         form.size = form::size(&form, words());
-        form.place = place(form.ask.at, form.size, form.ask.screen);
+        form.place = place(Some(form.ask.at), form.size, form.ask.screen);
         tracing::debug!(
             desktop = form.ask.desktop + 1,
             place = ?form.place,
@@ -610,13 +742,9 @@ impl Projects {
     fn open_card(&mut self, shown: ProjectCard, now: Instant, effects: &mut Vec<Effect>) {
         self.close(now, effects);
         let surface = window::Id::unique();
-        let size = card::size(&shown);
+        let size = card::size(&shown, words());
         let place = place(shown.at, size, shown.screen);
-        tracing::debug!(
-            desktop = shown.desktop + 1,
-            ?place,
-            "a project's card opens"
-        );
+        tracing::debug!(name = shown.name, ?place, "a project's card opens");
         effects.push(Effect::Project {
             id: surface,
             output: shown.output.clone(),
@@ -707,13 +835,21 @@ impl Surface for Lent<Projects> {
     }
 
     fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
-        let (ours, card) = self.read(|p| (p.is_surface(id), p.card_on(id).is_some()))?;
+        let (ours, card, confirm) = self.read(|p| {
+            (
+                p.is_surface(id),
+                p.card_on(id).is_some(),
+                p.confirm_on(id).is_some(),
+            )
+        })?;
         if !ours {
             return None;
         }
         // One fading out shows what it showed: the compositor fades its
         // last frame.
-        Some(if card {
+        Some(if confirm {
+            confirm::view(self, id, words(), context.look.glass)
+        } else if card {
             card::view(self, id, words(), context.look.glass)
         } else {
             form::view(self, id, words(), context.look.glass)
@@ -734,11 +870,19 @@ mod tests {
             height: 100,
         };
         // The mockup's: 400 px, its left at 388, its top 48 px under.
-        assert_eq!(place(thumb, (400, 380), (1440, 900)), (388, 196));
+        assert_eq!(place(Some(thumb), (400, 380), (1440, 900)), (388, 196));
         // Near the right edge: pushed in.
         let right = Rect { x: 1300, ..thumb };
-        assert_eq!(place(right, (400, 380), (1440, 900)).0, 1440 - 8 - 400);
-        assert_eq!(place(Rect { x: 0, ..thumb }, (600, 300), (1440, 900)).0, 8);
+        assert_eq!(
+            place(Some(right), (400, 380), (1440, 900)).0,
+            1440 - 8 - 400
+        );
+        assert_eq!(
+            place(Some(Rect { x: 0, ..thumb }), (600, 300), (1440, 900)).0,
+            8
+        );
+        // No thumbnail: centred, as the confirmation.
+        assert_eq!(place(None, (480, 400), (1440, 900)), (480, 250));
     }
 
     #[test]

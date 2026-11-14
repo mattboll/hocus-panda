@@ -15,6 +15,14 @@
 //! columns (1104 px for eight): a result's (102 px), an address's (81 px)
 //! above the grid, and the web search's (75 px) last, 12 px under each.
 //!
+//! A project's row (docs/design/projects.md §2.2, board 2) is a card 54 px
+//! high (81 on the board, drawn × 1.5): its monogram on a 34 px badge
+//! (the accent's gradient open, grey closed), its name (14 px, 700) and a
+//! pill "ouvert" / "fermé", under them its folder, where it is and what it
+//! holds (10.7 px, `#8C96A8`); a repository's 50 px, a dashed badge with a
+//! folder, "Créer le projet « … »" (13.3 px, 600), its path and its last
+//! commit. What `Enter` does shows on the right while it is selected.
+//!
 //! Each tile, card and emoji is a button of the kit, placed where the grid
 //! lays it out; a tile's icon and name stay drawn. The field holds the
 //! keyboard throughout: every key goes to the launcher ([`super::key_on`]).
@@ -164,6 +172,40 @@ const EMOJI_CELL_RADIUS: f32 = z(10.0);
 const EMOJI_SIZE: f32 = z(26.0);
 const EMOJI_CARD: f32 = EMOJI_PAD.height * 2.0 + EMOJI_HEAD_LINE + EMOJI_HEAD_GAP + EMOJI_CELL;
 const EMOJI_CARD_FILL: Ink = Ink::Accent(0.10);
+/// The projects' rows (board 2, drawn × 1.5 there): 81 and 75 px high, a
+/// 51 px badge 15 px in, 18 px before the lines (21 px 700 and 16 px, 4
+/// apart), the hint 15 px, 24 px from the right; their names' pill 13.5 px
+/// 700, 2 by 9 px in, radius 9. Nothing found: 20 px, 39 px down.
+const PROJECT_ROW: f32 = z(54.0);
+const REPO_ROW: f32 = z(50.0);
+const PROJECT_PAD_LEFT: f32 = z(10.0);
+const PROJECT_PAD_RIGHT: f32 = z(16.0);
+const PROJECT_BADGE: f32 = z(34.0);
+const PROJECT_BADGE_RADIUS: f32 = z(10.0);
+const PROJECT_MONO: f32 = z(11.33);
+const PROJECT_GAP: f32 = z(12.0);
+const PROJECT_NAME: f32 = z(14.0);
+const REPO_NAME: f32 = z(13.33);
+const PROJECT_SUB: f32 = z(10.67);
+const PROJECT_LINES_GAP: f32 = z(2.67);
+const PROJECT_HINT: f32 = z(10.0);
+const PILL_TEXT: f32 = z(9.0);
+const PILL_PAD: Size = Size::new(z(6.0), z(1.33));
+const PILL_RADIUS: f32 = z(6.0);
+const PILL_GAP: f32 = z(8.0);
+const NOTICE: f32 = z(13.33);
+const NOTICE_TOP: f32 = z(26.0);
+const NOTICE_ROW: f32 = z(48.0);
+const PROJECT_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.035));
+const PROJECT_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.07));
+const OPEN_PILL: Ink = Ink::Accent(0.18);
+const OPEN_PILL_TEXT: Ink = Ink::Dark(rgb(0x7EE0A0));
+const CLOSED_PILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const CLOSED_PILL_TEXT: Ink = Ink::Dark(rgb(0xA9B2C2));
+const DASHED: Ink = Ink::Dark(Color::from_rgba8(169, 178, 194, 0.5));
+const AMBER_FILL: Ink = Ink::Dark(Color::from_rgba8(245, 180, 74, 0.10));
+const AMBER_RIM: Ink = Ink::Dark(Color::from_rgba8(245, 180, 74, 0.28));
+const AMBER_TEXT: Ink = Ink::Dark(rgb(0xF5D29A));
 
 const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 const FIELD_RIM: Ink = Ink::Accent(0.45);
@@ -263,6 +305,10 @@ fn height_of(row: &Row) -> f32 {
         Row::Tiles(_) => TILE_ROW,
         Row::Card(card, _) => card.row(),
         Row::Emoji(_) => EMOJI_CARD + CARD_UNDER,
+        Row::Project(_) => PROJECT_ROW + CARD_UNDER,
+        Row::Repo(_) => REPO_ROW + CARD_UNDER,
+        Row::Notice { amber: true, .. } => PROJECT_ROW + CARD_UNDER,
+        Row::Notice { amber: false, .. } => NOTICE_TOP + NOTICE_ROW,
     }
 }
 
@@ -334,6 +380,11 @@ pub struct Layout {
     pub cards: Vec<(usize, Card, Rectangle)>,
     /// The emoji row's card, and its emoji: their places, and where.
     pub emoji: Option<(Rectangle, Vec<(usize, Rectangle)>)>,
+    /// The projects' and the repositories' rows shown: their places, and
+    /// where.
+    pub projects: Vec<(usize, Rectangle)>,
+    /// What the projects' rows say instead or first, and where.
+    pub notice: Option<(String, bool, Rectangle)>,
     /// The scroll mark, when the grid overflows.
     pub mark: Option<Rectangle>,
 }
@@ -346,12 +397,32 @@ impl Layout {
         let mut tiles = Vec::new();
         let mut cards = Vec::new();
         let mut emoji = None;
+        let mut projects = Vec::new();
+        let mut notice = None;
         let left = area.x + PANEL_PAD;
         // A card is as wide as the tiles' columns.
         let card_width = grid.columns as f32 * TILE.width;
         let mut y = area.y;
-        for row in grid.rows.get(offset..end).unwrap_or_default() {
+        for (i, row) in grid
+            .rows
+            .get(offset..end)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
             match row {
+                // The projects' headings are the cards', 4 px in (board 2).
+                Row::Head(label)
+                    if matches!(
+                        grid.rows.get(offset + i + 1),
+                        Some(Row::Project(_) | Row::Repo(_))
+                    ) =>
+                {
+                    heads.push((
+                        *label,
+                        Rectangle::new(Point::new(left, y), Size::new(card_width, HEAD)),
+                    ));
+                }
                 Row::Head(label) => heads.push((
                     *label,
                     Rectangle::new(Point::new(area.x, y), Size::new(area.width, HEAD)),
@@ -391,6 +462,26 @@ impl Layout {
                         .collect();
                     emoji = Some((card, cells));
                 }
+                Row::Project(at) | Row::Repo(at) => projects.push((
+                    *at,
+                    Rectangle::new(
+                        Point::new(left, y),
+                        Size::new(card_width, height_of(row) - CARD_UNDER),
+                    ),
+                )),
+                Row::Notice { text, amber } => {
+                    notice = Some((
+                        text.clone(),
+                        *amber,
+                        Rectangle::new(
+                            Point::new(left, y),
+                            Size::new(
+                                card_width,
+                                if *amber { PROJECT_ROW } else { height_of(row) },
+                            ),
+                        ),
+                    ));
+                }
             }
             y += height_of(row);
         }
@@ -413,6 +504,8 @@ impl Layout {
             cards,
             emoji,
             mark,
+            projects,
+            notice,
         }
     }
 
@@ -577,13 +670,117 @@ fn shows(open: &Open, words: Words, size: Size) -> String {
             Some(format!("{mark}{}", table.emoji.get(*e)?.with_tone(tone)))
         })
         .collect();
+    let projects: Vec<String> = layout
+        .projects
+        .iter()
+        .map(|(at, _)| {
+            let (main, _, sub, hint) = project_lines(words, open, *at);
+            let mark = if *at == open.selected { "*" } else { "" };
+            format!("{mark}{main} | {sub} | {hint}")
+        })
+        .collect();
+    let notice = layout
+        .notice
+        .as_ref()
+        .map(|(text, ..)| text.clone())
+        .unwrap_or_default();
     format!(
         "query={:?} heads={rows:?} tiles={lines:?} cards={cards:?} offset={} mark={} \
-         tooltip=\"{tooltip}\" emoji={emoji:?}",
+         tooltip=\"{tooltip}\" emoji={emoji:?} projects={projects:?} notice={notice:?}",
         open.query.text(),
         open.offset,
         layout.mark.is_some(),
     )
+}
+
+/// A project's or a repository's row (place `at`): its name, its pill (a
+/// project's: "ouvert" or "fermé"), what it says under it, and what
+/// `Enter` does.
+fn project_lines(
+    words: Words,
+    open: &Open,
+    at: usize,
+) -> (String, Option<(String, bool)>, String, String) {
+    use hocus_words::shell::project as txt;
+    let lang = words.lang();
+    if let Some(repo) = open.repo(at) {
+        let path = crate::desktops::folder_shown(&repo.path.display().to_string());
+        let sub = match repo.when {
+            Some(when) => {
+                let ago = crate::project::Words::new(lang).when(when);
+                format!("{path} · {}", txt::last_commit(lang, ago))
+            }
+            None => path,
+        };
+        return (
+            txt::create_named(lang, repo.name()),
+            None,
+            sub,
+            txt::HINT_CREATE.get(lang).to_owned(),
+        );
+    }
+    let Some(project) = open.project(at) else {
+        return Default::default();
+    };
+    let folder = crate::desktops::folder_shown(&project.folder);
+    match project.state {
+        hocus_link::ProjectState::Open { desktop, .. } => {
+            let windows = crate::desktops::snapshot(&project.output)
+                .map(|d| d.windows.iter().filter(|w| w.desktop == desktop).count())
+                .unwrap_or(0);
+            let sub = format!(
+                "{folder} · {} · {}",
+                txt::on_desktop(lang, usize::from(desktop) + 1),
+                txt::windows_count(lang, windows as u64)
+            );
+            let hint = if open.grid.no_room {
+                txt::HINT_CLOSE
+            } else {
+                txt::HINT_GO
+            };
+            (
+                project.name.clone(),
+                Some((txt::OPEN_PILL.get(lang).to_owned(), true)),
+                sub,
+                hint.get(lang).to_owned(),
+            )
+        }
+        hocus_link::ProjectState::Closed { at } => {
+            let when = crate::project::card::closed_when(at, lang);
+            let holds = holds(&project.windows, lang);
+            let sub = if holds.is_empty() {
+                format!("{folder} · {when}")
+            } else {
+                format!("{folder} · {when} · {holds}")
+            };
+            (
+                project.name.clone(),
+                Some((txt::CLOSED_PILL.get(lang).to_owned(), false)),
+                sub,
+                txt::HINT_REOPEN.get(lang).to_owned(),
+            )
+        }
+    }
+}
+
+/// What a closed project holds: its applications by name, each once, and
+/// how many terminals ("Firefox, 2 terminaux").
+fn holds(windows: &[hocus_link::CardWindow], lang: crate::clock::time::Lang) -> String {
+    let mut said: Vec<String> = Vec::new();
+    let terminals = windows.iter().filter(|w| w.terminal.is_some()).count();
+    for w in windows.iter().filter(|w| w.terminal.is_none()) {
+        let name = crate::project::app_name(&w.entry, &w.app);
+        if !said.contains(&name) {
+            said.push(name);
+        }
+    }
+    if terminals > 0 {
+        said.push(hocus_words::shell::project::terminals_count(
+            lang,
+            terminals as u64,
+        ));
+    }
+    said.join(", ")
 }
 
 /// A card's two lines: what it is, and under it what it says more.
@@ -807,6 +1004,12 @@ fn content<'a>(open: &Open, words: Words, layout: &Layout, size: Size) -> El<'a>
     }
     if let Some((card, cells)) = &layout.emoji {
         all.push(place(emoji_view(open, words, *card, cells), *card));
+    }
+    for (at, rect) in &layout.projects {
+        all.push(place(project_view(open, words, *at, *rect), *rect));
+    }
+    if let Some((text, amber, rect)) = &layout.notice {
+        all.push(place(notice_view(text, *amber, *rect), *rect));
     }
     if let Some(mark) = layout.mark {
         all.push(place(
@@ -1045,6 +1248,222 @@ fn card_view<'a>(open: &Open, words: Words, card: Card, at: usize, rect: Rectang
     let control = control(pressed, id_of(at), Role::Button, main)
         .node(|n| n.describe(sub).selected(selected));
     mouse_area(control).on_enter(Msg::Hover(at)).into()
+}
+
+/// A project's or a repository's row (place `at`) at `rect`.
+fn project_view<'a>(open: &Open, words: Words, at: usize, rect: Rectangle) -> El<'a> {
+    let selected = at == open.selected;
+    let (main, pill, sub, hint) = project_lines(words, open, at);
+    let repo = open.repo(at).is_some();
+    let hint_width = kit::measure(&hint, PROJECT_HINT, MANROPE);
+    let room = (rect.width
+        - PROJECT_PAD_LEFT
+        - PROJECT_BADGE
+        - PROJECT_GAP
+        - PROJECT_GAP
+        - hint_width
+        - PROJECT_PAD_RIGHT)
+        .max(0.0);
+    let main_size = if repo { REPO_NAME } else { PROJECT_NAME };
+    let main_font = if repo { MANROPE_SEMIBOLD } else { MANROPE_BOLD };
+    let pill_width = pill.as_ref().map_or(0.0, |(t, _)| {
+        PILL_GAP + kit::measure(t, PILL_TEXT, MANROPE_BOLD) + 2.0 * PILL_PAD.width
+    });
+    let shown_main = kit::elide(&main, room - pill_width, |t| {
+        kit::measure(t, main_size, main_font)
+    });
+    let shown_sub = kit::elide(&sub, room, |t| kit::measure(t, PROJECT_SUB, MANROPE));
+    let mut first =
+        row![said(shown_main, main_size, main_font, TEXT.get())].align_y(Vertical::Center);
+    if let Some((text, lit)) = pill {
+        first = first.push(gap(PILL_GAP)).push(
+            container(said(
+                text,
+                PILL_TEXT,
+                MANROPE_BOLD,
+                if lit {
+                    OPEN_PILL_TEXT
+                } else {
+                    CLOSED_PILL_TEXT
+                }
+                .get(),
+            ))
+            .padding(Padding {
+                top: PILL_PAD.height,
+                bottom: PILL_PAD.height,
+                left: PILL_PAD.width,
+                right: PILL_PAD.width,
+            })
+            .style(move |_| container::Style {
+                background: Some(if lit { OPEN_PILL } else { CLOSED_PILL }.get().into()),
+                border: iced::Border {
+                    radius: PILL_RADIUS.into(),
+                    ..iced::Border::default()
+                },
+                ..container::Style::default()
+            }),
+        );
+    }
+    let badge: El<'a> = match open.project(at) {
+        Some(project) => {
+            let mono = hocus_link::projects::monogram(&project.name);
+            let lit = matches!(project.state, hocus_link::ProjectState::Open { .. });
+            drawn(PROJECT_BADGE, PROJECT_BADGE, move |f, s| {
+                project_badge(f, Rectangle::new(Point::ORIGIN, s), &mono, lit);
+            })
+        }
+        None => drawn(PROJECT_BADGE, PROJECT_BADGE, |f, s| {
+            repo_badge(f, Rectangle::new(Point::ORIGIN, s));
+        }),
+    };
+    let mut line = row![
+        gap(PROJECT_PAD_LEFT),
+        badge,
+        gap(PROJECT_GAP),
+        column![
+            first,
+            Space::new().height(PROJECT_LINES_GAP),
+            said(shown_sub, PROJECT_SUB, MANROPE, CARD_SUB_INK.get()),
+        ],
+        iced::widget::space::horizontal(),
+    ]
+    .height(rect.height)
+    .align_y(Vertical::Center);
+    if selected {
+        line = line.push(said(hint, PROJECT_HINT, MANROPE, CARD_SUB_INK.get()));
+    }
+    line = line.push(gap(PROJECT_PAD_RIGHT));
+    let pressed = button(line)
+        .padding(0)
+        .width(rect.width)
+        .height(rect.height)
+        .style(move |_, _| {
+            if selected {
+                chosen(SELECTED_FILL, SELECTED_RIM, CARD_RADIUS)
+            } else {
+                chosen(PROJECT_FILL, PROJECT_RIM, CARD_RADIUS)
+            }
+        })
+        .on_press(Msg::Act(at));
+    let control = control(pressed, id_of(at), Role::Button, main)
+        .node(|n| n.describe(sub).selected(selected));
+    mouse_area(control).on_enter(Msg::Hover(at)).into()
+}
+
+/// What the projects' rows say: nothing found (centred, faint), or no free
+/// desktop (the waiting state's amber, in a card).
+fn notice_view<'a>(text: &str, amber: bool, rect: Rectangle) -> El<'a> {
+    if !amber {
+        return ui::line(
+            container(said(text.to_owned(), NOTICE, MANROPE, CARD_SUB_INK.get()))
+                .padding(Padding {
+                    top: NOTICE_TOP,
+                    ..Padding::ZERO
+                })
+                .center_x(rect.width)
+                .height(rect.height),
+            text.to_owned(),
+        )
+        .into();
+    }
+    ui::line(
+        container(said(
+            text.to_owned(),
+            NOTICE,
+            MANROPE_SEMIBOLD,
+            AMBER_TEXT.get(),
+        ))
+        .center_y(rect.height)
+        .width(rect.width)
+        .padding(Padding {
+            left: CARD_PAD,
+            right: CARD_PAD,
+            ..Padding::ZERO
+        })
+        .style(|_| container::Style {
+            background: Some(AMBER_FILL.get().into()),
+            border: iced::Border {
+                color: AMBER_RIM.get(),
+                width: 1.0,
+                radius: CARD_RADIUS.into(),
+            },
+            ..container::Style::default()
+        }),
+        text.to_owned(),
+    )
+    .into()
+}
+
+/// A project's badge: its monogram on the accent's gradient (open) or
+/// grey (closed).
+fn project_badge(f: &mut Frame, rect: Rectangle, mono: &str, open: bool) {
+    let (from, to, ink) = if open {
+        (rgb(0x3FA66B), rgb(0x7EE0A0), rgb(0x0B1020))
+    } else {
+        (rgb(0x3A4256), rgb(0x5C6678), rgb(0xEEF1F6))
+    };
+    let fill = gradient::Linear::new(rect.position(), Point::new(rect.width, rect.height))
+        .add_stop(0.0, from)
+        .add_stop(1.0, to);
+    f.fill(
+        &Path::rounded_rectangle(rect.position(), rect.size(), PROJECT_BADGE_RADIUS.into()),
+        canvas::Fill::from(fill),
+    );
+    f.fill_text(canvas::Text {
+        content: mono.to_owned(),
+        position: rect.center(),
+        max_width: f32::INFINITY,
+        color: ink,
+        size: Pixels(PROJECT_MONO),
+        line_height: LineHeight::Relative(1.0),
+        font: iced::Font {
+            weight: iced::font::Weight::ExtraBold,
+            ..MANROPE
+        },
+        align_x: Alignment::Center,
+        align_y: alignment::Vertical::Center,
+        shaping: Shaping::Basic,
+    });
+}
+
+/// A repository's badge: a dashed rim, a folder with a plus.
+fn repo_badge(f: &mut Frame, rect: Rectangle) {
+    let inset = Rectangle::new(
+        Point::new(rect.x + 0.75, rect.y + 0.75),
+        Size::new(rect.width - 1.5, rect.height - 1.5),
+    );
+    f.stroke(
+        &Path::rounded_rectangle(inset.position(), inset.size(), PROJECT_BADGE_RADIUS.into()),
+        Stroke {
+            line_dash: canvas::LineDash {
+                segments: &[z(3.0), z(3.0)],
+                offset: 0,
+            },
+            ..Stroke::default().with_color(DASHED.get()).with_width(1.5)
+        },
+    );
+    let side = z(17.33);
+    let at = Rectangle::new(
+        Point::new(rect.center_x() - side / 2.0, rect.center_y() - side / 2.0),
+        Size::new(side, side),
+    );
+    crate::project::form::folder(f, at, rgb(0xA9B2C2), 1.7);
+    let k = side / 24.0;
+    let p = |x: f32, y: f32| Point::new(at.x + x * k, at.y + y * k);
+    f.stroke(
+        &Path::new(|b| {
+            b.move_to(p(12.0, 11.0));
+            b.line_to(p(12.0, 16.0));
+            b.move_to(p(9.5, 13.5));
+            b.line_to(p(14.5, 13.5));
+        }),
+        Stroke {
+            line_cap: canvas::LineCap::Round,
+            ..Stroke::default()
+                .with_color(rgb(0xA9B2C2))
+                .with_width(1.7 * k)
+        },
+    );
 }
 
 /// The emoji row's card (5.7) at `card`: green while one of its emoji is

@@ -797,6 +797,8 @@ impl State {
             None
         };
         self.layer_elements(renderer, &frame, Layer::Overlay, Pick::All, &mut elements);
+        // A project's closing's confirmation over its dim (projects.md §5).
+        elements.extend(self.project_dim(output, now).map(OutputElements::Solid));
         // The bar's own surfaces go under the windows unless the pointer
         // brought it in front (#519); its popovers, its halo, the peek and
         // the bubbles stay above them.
@@ -1493,8 +1495,12 @@ impl State {
                 continue;
             };
             let rise = shown.reach();
-            // The palette is nearly opaque: no glass under it.
-            if look.alpha <= 0.0 || shown.kind == crate::popover::Kind::Actions {
+            // The palette and a project's confirmation are nearly opaque:
+            // no glass under them.
+            if look.alpha <= 0.0
+                || shown.kind == crate::popover::Kind::Actions
+                || layer.namespace() == hocus_link::PROJECT_CLOSE_NAMESPACE
+            {
                 continue;
             }
             let reach = crate::glass::REACH;

@@ -768,6 +768,26 @@ impl Shell {
             }),
             ToShell::ProjectRefused(why) => self.project_told(project::Come::Refused(why)),
             ToShell::ProjectEnd => self.project_told(project::Come::Close),
+            ToShell::Projects(rows) => {
+                project::set_rows(rows);
+                Task::none()
+            }
+            ToShell::ProjectConfirm(shown) => self.project_told(project::Come::Confirm(shown)),
+            ToShell::ProjectClosed {
+                output,
+                name,
+                kept,
+                stayed,
+            } => self.project_told(project::Come::Closed {
+                output,
+                name,
+                kept,
+                stayed,
+            }),
+            ToShell::ProjectNoRoom { output, name } => {
+                launcher::no_room(output, &name);
+                Task::none()
+            }
             ToShell::Launcher { output, scale } => {
                 launcher::toggle(output, scale);
                 Task::none()

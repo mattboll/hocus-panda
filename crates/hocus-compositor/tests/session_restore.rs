@@ -9,12 +9,7 @@
 
 use crate::common;
 
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{path::PathBuf, time::Duration};
 
 use common::{Shows, WAIT, client, open, wait};
 use hocus_compositor::{
@@ -384,7 +379,7 @@ fn those_that_do_not_come_back_are_named_in_one_notification() -> anyhow::Result
         window("test.fails"),
         window("test.uninstalled")
     ))?;
-    let notifications = Notifications::start(&tree)?;
+    let notifications = common::Notifications::start(&tree.path("bus"))?;
     let mut config = tree.config();
     config.lang = hocus_words::Lang::French;
     let mut hp = match &notifications {
@@ -447,86 +442,4 @@ fn the_setting_off_restores_nothing() -> anyhow::Result<()> {
     assert_eq!(tree.marks("marked"), 0);
     assert!(!hp.session_restoring());
     Ok(())
-}
-
-/// A notifications server of the test's own, on a session bus of its
-/// own; none without `dbus-daemon`.
-struct Notifications {
-    address: String,
-    said: Arc<Mutex<Vec<String>>>,
-    daemon: std::process::Child,
-    _connection: zbus::Connection,
-    _runtime: tokio::runtime::Runtime,
-}
-
-impl Drop for Notifications {
-    fn drop(&mut self) {
-        let _ = self.daemon.kill();
-        let _ = self.daemon.wait();
-    }
-}
-
-struct Server(Arc<Mutex<Vec<String>>>);
-
-#[zbus::interface(name = "org.freedesktop.Notifications")]
-impl Server {
-    #[allow(clippy::too_many_arguments)]
-    fn notify(
-        &self,
-        _app: String,
-        _replaces: u32,
-        _icon: String,
-        summary: String,
-        _body: String,
-        _actions: Vec<String>,
-        _hints: HashMap<String, zbus::OwnedVariant>,
-        _timeout: i32,
-    ) -> u32 {
-        let mut said = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        said.push(summary);
-        said.len() as u32
-    }
-}
-
-impl Notifications {
-    fn start(tree: &Tree) -> anyhow::Result<Option<Self>> {
-        if std::process::Command::new("dbus-daemon")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
-            common::missing("dbus-daemon");
-        }
-        let dir: &Path = &tree.path("bus");
-        std::fs::create_dir_all(dir)?;
-        let (daemon, address) = common::private_bus(dir)?;
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()?;
-        let said = Arc::new(Mutex::new(Vec::new()));
-        let connection = runtime.block_on(
-            zbus::connection::Builder::address(address.as_str())
-                .name("org.freedesktop.Notifications")
-                .serve_at("/org/freedesktop/Notifications", Server(said.clone()))
-                .build(),
-        )?;
-        Ok(Some(Self {
-            address,
-            said,
-            daemon,
-            _connection: connection,
-            _runtime: runtime,
-        }))
-    }
-
-    fn said(&self) -> Vec<String> {
-        self.said
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
 }

@@ -311,6 +311,28 @@ pub enum ToShell {
     ProjectRefused(crate::ProjectRefusal),
     /// The overview closed: the form and the card close with it.
     ProjectEnd,
+    /// The projects, as the launcher lists them (§2.2): sent as the shell
+    /// connects and whenever one is made, opens or closes.
+    Projects(Vec<crate::ProjectRow>),
+    /// "Fermer le projet…": the confirmation shows (§5).
+    ProjectConfirm(crate::ProjectConfirm),
+    /// Project `name` on `output` is closed, `kept` windows saved; those
+    /// of `stayed` did not close (§5): a toast says so.
+    ProjectClosed {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+        kept: u32,
+        #[serde(serialize_with = "tidy::names")]
+        stayed: Vec<String>,
+    },
+    /// Project `name` cannot open on `output`: its nine desktops are taken
+    /// (§7, §13 H). The launcher says so and offers to close a project.
+    ProjectNoRoom {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+    },
 }
 
 impl ToShell {

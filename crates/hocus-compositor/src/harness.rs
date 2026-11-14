@@ -2204,6 +2204,100 @@ impl Headless {
         self.app.state.projects.jobs
     }
 
+    /// Project `name` closes, as its confirmation's "Fermer le projet"
+    /// does (docs/design/projects.md §5); why not, if it cannot.
+    pub fn project_close(&mut self, name: &str) -> Result<(), String> {
+        self.app.state.project_close(name)
+    }
+
+    /// "Fermer le projet…" on project `name`: its confirmation, once read.
+    pub fn project_close_ask(&mut self, name: &str) {
+        self.app.state.project_close_ask(name);
+    }
+
+    /// [`crate::project_life::CLOSE_PATIENCE`] is over for the projects
+    /// closing, as their timers say it: the windows still there stay.
+    pub fn project_close_patience_over(&mut self) {
+        let ids: Vec<String> = self
+            .app
+            .state
+            .projects
+            .closing
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+        for id in ids {
+            self.app.state.project_closing_over(&id);
+        }
+    }
+
+    /// The last project that found no free desktop.
+    pub fn project_no_room(&self) -> Option<String> {
+        self.app.state.projects.no_room.clone()
+    }
+
+    /// Whether a project is closing: its windows read, or asked to close.
+    pub fn project_closing(&self) -> bool {
+        !self.app.state.projects.closing.is_empty()
+    }
+
+    /// Closed project `name` reopens on `output` (§7): the desktop it
+    /// opens on (from 0), or why not.
+    pub fn project_open(&mut self, name: &str, output: &str) -> Result<usize, String> {
+        self.app.state.project_open(name, output)
+    }
+
+    /// Whether project `name`'s windows are still coming back.
+    pub fn project_coming_back(&self, name: &str) -> bool {
+        let state = &self.app.state;
+        let key = hocus_link::projects::name_key(name);
+        state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .is_some_and(|p| state.project_coming_back(&p.id))
+    }
+
+    /// The last notification of a project that came back but for some:
+    /// its summary and body.
+    pub fn project_not_back(&self) -> Option<(String, String)> {
+        self.app.state.projects.not_back.clone()
+    }
+
+    /// A closed project's contents, as kept in memory: each window's app
+    /// id, state and terminal's folder.
+    pub fn project_contents(
+        &self,
+        name: &str,
+    ) -> Vec<(String, String, Option<std::path::PathBuf>)> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .map(|w| {
+                        (
+                            w.app_id.clone(),
+                            format!("{:?}", w.state),
+                            w.terminal.as_ref().map(|t| t.folder.clone()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The desktops' count, every screen's.
+    pub fn desktops_count(&self) -> usize {
+        self.app.state.config.desktops.count
+    }
+
     /// Whether a project's form or card shows.
     pub fn project_surface_open(&self) -> bool {
         self.app.state.panel.popovers.project_open()

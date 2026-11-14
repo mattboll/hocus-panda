@@ -70,6 +70,22 @@ impl crate::State {
         }
     }
 
+    /// The desktops are now `count` for the session alone, a project
+    /// reopening on one more or closing on the last (docs/design/projects.md
+    /// §7): the file's count is not changed.
+    pub(crate) fn renumber_desktops_for_projects(
+        &mut self,
+        count: usize,
+        map: impl Fn(usize) -> usize,
+    ) {
+        self.renumber_desktops(count, map, &[]);
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        for output in &outputs {
+            self.desktops_drawn(output);
+        }
+        self.tell_desktops();
+    }
+
     /// The desktops are now `count` on every screen; a window on desktop
     /// `d` goes to `map(d)`, as does a screen showing `d`, and each of
     /// `put` to its own. Nothing slides: windows show or hide at once, and

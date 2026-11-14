@@ -16,12 +16,15 @@ use std::{
 };
 
 use anyhow::Context;
-use common::{Command, KEY_1, KEY_2, KEY_3, KEY_ESC, KEY_LEFTMETA, WAIT, chord, wait};
+use common::{
+    Command, KEY_1, KEY_2, KEY_3, KEY_DOWN, KEY_ESC, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, wait,
+};
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice};
 
 const SCREEN: &str = "HEADLESS-1";
 const KEY_W: u32 = 17;
 const KEY_ENTER: u32 = 28;
+const KEY_SPACE: u32 = 57;
 
 /// The screen as `name.png`, and its right part ×2 as `name-zoom.png`
 /// when `zoom` names a rectangle to look at.
@@ -372,4 +375,501 @@ impl Line {
         anyhow::ensure!(made, "no project made");
         Ok(())
     }
+}
+
+// --- Lot B -----------------------------------------------------------------------
+
+/// A desktop entry `id` named `name` in `dir`, running `exec`.
+fn entry(dir: &Path, id: &str, name: &str, exec: &str, extra: &str) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(
+        dir.join(format!("{id}.desktop")),
+        format!("[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\n{extra}"),
+    )?;
+    Ok(())
+}
+
+/// The process whose parent is `pid`, as `/proc` says.
+fn child_of(pid: u32) -> Option<u32> {
+    std::fs::read_dir("/proc").ok()?.find_map(|e| {
+        let e = e.ok()?;
+        let stat = std::fs::read_to_string(e.path().join("stat")).ok()?;
+        let (head, rest) = stat.rsplit_once(')')?;
+        let ppid: u32 = rest.split_whitespace().nth(1)?.parse().ok()?;
+        (ppid == pid)
+            .then(|| head.split_whitespace().next()?.parse().ok())
+            .flatten()
+    })
+}
+
+/// A line to the control socket, answered or not.
+fn control(hp: &Headless, line: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+    let path = hp.control_socket().context("no control socket")?;
+    let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+    stream.write_all(format!("{line}\n").as_bytes())?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "screenshots for the maintainer, by hand"]
+fn closing_and_reopening_project_desktops() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS") else {
+        eprintln!("HOCUS_SHOTS names no folder");
+        return Ok(());
+    };
+    let out = PathBuf::from(out);
+    std::fs::create_dir_all(&out)?;
+    let shell = common::shell_program();
+    let dir = tempfile::tempdir()?;
+    let at = |sub: &str| -> anyhow::Result<PathBuf> {
+        let path = dir.path().join(sub);
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    };
+    let home = at("home")?;
+    let hour = Duration::from_secs(3600);
+    let panda = repo(&home, "github/hocus-panda", hour / 4)?;
+    let site = repo(&home, "github/hocus-site", hour / 2)?;
+    repo(&home, "github/hocus-panda-tools", 2 * hour)?;
+    repo(&home, "github/hocus-icons", 6 * 24 * hour)?;
+    repo(&home, "code/api-meteo", 96 * hour)?;
+    std::fs::create_dir_all(panda.join("crates"))?;
+    let exe = std::env::current_exe()?;
+    // The applications, the compositor's and the shell's.
+    let share = at("share")?;
+    let apps = share.join("applications");
+    let app = |id: &str| {
+        format!(
+            "env HOCUS_TEST_PROJECT_APP={id} \"{}\" --exact projects::app_program --nocapture",
+            exe.display()
+        )
+    };
+    entry(
+        &apps,
+        "firefox",
+        "Firefox",
+        &app("firefox"),
+        "Icon=firefox\n",
+    )?;
+    entry(
+        &apps,
+        "kitty",
+        "kitty",
+        &app("kitty"),
+        "Categories=TerminalEmulator;\n",
+    )?;
+    entry(&apps, "slack", "Slack", "/nonexistent/slack", "")?;
+    // The terminal: a wrapper starting the test's stand-in.
+    let npm = dir.path().join("npm");
+    std::fs::write(&npm, "#!/usr/bin/perl\n$0 = \"npm run dev\"; sleep 600;\n")?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755))?;
+    }
+    let wrapper = |name: &str, run: Option<&Path>, title: &str| -> anyhow::Result<PathBuf> {
+        use std::os::unix::fs::PermissionsExt;
+        let file = dir.path().join(name);
+        let run = run.map_or_else(String::new, |r| {
+            format!(" HOCUS_TEST_PROJECT_RUN='{}'", r.display())
+        });
+        std::fs::write(
+            &file,
+            format!(
+                "#!/bin/sh\nexec env HOCUS_TEST_PROJECT_TERMINAL=foot \
+                 HOCUS_TEST_PROJECT_TITLE='{title}'{run} '{}' --exact projects::terminal_program --nocapture\n",
+                exe.display()
+            ),
+        )?;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))?;
+        Ok(file)
+    };
+    let plain = wrapper("foot-plain", None, "~/github/hocus-site")?;
+    let crates = wrapper("foot-crates", None, "~/github/hocus-panda/crates")?;
+    let dev = wrapper("foot-dev", Some(&npm), "npm run dev — ~/github/hocus-site")?;
+    entry(
+        &apps,
+        "foot",
+        "Foot",
+        &format!("sh {}", plain.display()),
+        "Categories=System;TerminalEmulator;\n",
+    )?;
+    // Closed projects: blog (Slack is no longer installed), api-meteo.
+    let state = at("state/hocuspanda")?;
+    let yesterday = jiff::Zoned::now()
+        .yesterday()?
+        .with()
+        .hour(18)
+        .minute(40)
+        .second(0)
+        .build()?;
+    let saved_window = |app: &str, place: [i32; 4], state: &str, terminal: Option<&Path>| {
+        let terminal = terminal.map_or_else(String::new, |f| {
+            format!("[window.terminal]\nfolder = \"{}\"\n", f.display())
+        });
+        format!(
+            "[[window]]\nentry = \"{app}\"\napp-id = \"{app}\"\nscreen = \"{SCREEN}\"\n\
+             screen-size = [1440, 900]\narea = [8, 8, 1368, 884]\ndesktop = 1\n\
+             place = {place:?}\nstate = \"{state}\"\n{terminal}"
+        )
+    };
+    let blog = home.join("code/blog");
+    std::fs::create_dir_all(&blog)?;
+    std::fs::create_dir_all(state.join("projects.d"))?;
+    std::fs::write(
+        state.join("projects"),
+        format!(
+            "[[project]]\nid = \"blog\"\nname = \"blog\"\nfolder = \"{}\"\n\
+             made = \"2026-11-01T10:00:00+01:00\"\nclosed = \"{}\"\n\n\
+             [[project]]\nid = \"api-meteo\"\nname = \"api-meteo\"\nfolder = \"{}\"\n\
+             made = \"2026-10-01T10:00:00+01:00\"\nclosed = \"2026-11-02T18:40:00+01:00\"\n",
+            blog.display(),
+            yesterday
+                .timestamp()
+                .display_with_offset(yesterday.offset()),
+            home.join("code/api-meteo").display(),
+        ),
+    )?;
+    std::fs::write(
+        state.join("projects.d/blog.toml"),
+        format!(
+            "{}{}{}",
+            saved_window("firefox", [8, 8, 700, 860], "left", None),
+            saved_window("foot", [760, 120, 600, 400], "floating", Some(&blog)),
+            saved_window("slack", [200, 200, 800, 600], "floating", None),
+        ),
+    )?;
+    std::fs::write(
+        state.join("projects.d/api-meteo.toml"),
+        saved_window(
+            "foot",
+            [300, 200, 600, 400],
+            "floating",
+            Some(&home.join("code/api-meteo")),
+        ),
+    )?;
+
+    let (bus, address) = common::private_bus(dir.path())?;
+    let mut bus = bus;
+    let env = [
+        ("HOME", home.display().to_string()),
+        ("XDG_CONFIG_HOME", at("config")?.display().to_string()),
+        ("XDG_CACHE_HOME", at("cache")?.display().to_string()),
+        ("XDG_STATE_HOME", at("state")?.display().to_string()),
+        ("XDG_DATA_HOME", at("data")?.display().to_string()),
+        ("XDG_DATA_DIRS", share.display().to_string()),
+        ("LC_ALL", "fr_FR.UTF-8".to_owned()),
+        ("LANG", "fr_FR.UTF-8".to_owned()),
+        ("HOCUS_USER_NAME", "Alex".to_owned()),
+    ];
+    let script = common::shell_script(dir.path(), &shell, &env)?;
+    let mut config = Config::default();
+    config.panel.form = FormChoice::Mini;
+    config.locale.language = hocus_link::locale::Language::Chosen(hocus_words::Lang::French);
+    config.lang = hocus_words::Lang::French;
+    config.home = Some(home.clone());
+    config.state_dir = Some(state.clone());
+    config.applications = vec![apps.clone()];
+    config.desktops.names = vec![String::new(), String::new(), "Discussions".into()];
+    let mut hp = Headless::start_on_bus(
+        HeadlessConfig {
+            outputs: vec!["1440x900".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config.clone(),
+        Some(script),
+        Some(address),
+    )?;
+    let up = hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE).len() == 1
+    })?;
+    anyhow::ensure!(up, "no desktops' tiles");
+    hp.pointer_move(700.0, 450.0);
+
+    // Desktop 1, hocus-panda: Firefox on the left, Claude Code, a
+    // terminal in its crates.
+    let mut clients = vec![window(
+        &mut hp,
+        "firefox",
+        "#789 Project desktops — Mozilla Firefox",
+        (690, 470),
+    )?];
+    chord(&mut hp, &[KEY_LEFTMETA, common::KEY_LEFT]);
+    clients.push(window(
+        &mut hp,
+        "kitty",
+        "Claude Code — hocus-panda",
+        (620, 460),
+    )?);
+    let kitty = hp
+        .all_windows()
+        .into_iter()
+        .find(|w| w.1.as_deref() == Some("kitty"))
+        .map(|w| w.0)
+        .context("no kitty")?;
+    hp.place_window(kitty, hocus_compositor::model::Rect::new(740, 60, 620, 460));
+    let mut children = Vec::new();
+    let start =
+        |hp: &Headless, wrapper: &Path, folder: &Path| -> anyhow::Result<std::process::Child> {
+            Ok(std::process::Command::new("sh")
+                .arg(wrapper)
+                .current_dir(folder)
+                .env("WAYLAND_DISPLAY", hp.socket())
+                .spawn()?)
+        };
+    children.push(start(&hp, &crates, &panda.join("crates"))?);
+    let ok = hp.dispatch_until(WAIT, |hp| {
+        hp.all_windows()
+            .iter()
+            .any(|w| w.1.as_deref() == Some("foot"))
+    })?;
+    anyhow::ensure!(ok, "no terminal");
+    let foot = hp
+        .all_windows()
+        .into_iter()
+        .find(|w| w.1.as_deref() == Some("foot"))
+        .map(|w| w.0)
+        .context("no foot")?;
+    hp.place_window(foot, hocus_compositor::model::Rect::new(780, 560, 520, 300));
+    // Desktop 3: a chat.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_3]);
+    clients.push(window(&mut hp, "slack", "Slack — L’équipe", (820, 600))?);
+    // Desktop 2, hocus-site: Firefox, a terminal for Claude Code, npm run
+    // dev.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    let site_browser = window(
+        &mut hp,
+        "firefox",
+        "hocus-site · Accueil — Mozilla Firefox",
+        (700, 500),
+    )?;
+    chord(&mut hp, &[KEY_LEFTMETA, common::KEY_LEFT]);
+    let agent_terminal = start(&hp, &plain, &site)?;
+    let agent_pid = agent_terminal.id();
+    children.push(agent_terminal);
+    let both = |hp: &Headless| {
+        hp.all_windows()
+            .iter()
+            .filter(|w| w.1.as_deref() == Some("foot"))
+            .count()
+    };
+    let ok = hp.dispatch_until(WAIT, |hp| both(hp) == 2)?;
+    anyhow::ensure!(ok, "no second terminal");
+    children.push(start(&hp, &dev, &site)?);
+    let ok = hp.dispatch_until(WAIT, |hp| both(hp) == 3)?;
+    anyhow::ensure!(ok, "no third terminal");
+    wait(&mut hp, Duration::from_millis(400))?;
+    let mut feet: Vec<_> = hp
+        .all_windows()
+        .into_iter()
+        .filter(|w| w.1.as_deref() == Some("foot") && w.2 == 1)
+        .map(|w| w.0)
+        .collect();
+    feet.sort();
+    if let [a, b] = feet[..] {
+        hp.place_window(a, hocus_compositor::model::Rect::new(744, 40, 610, 380));
+        hp.place_window(b, hocus_compositor::model::Rect::new(744, 440, 610, 300));
+    }
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-panda", &panda)?;
+    line.make(&mut hp, 2, "hocus-site", &site)?;
+    // Claude Code at work in the first terminal of hocus-site.
+    let shell_pid = {
+        let mut found = None;
+        hp.dispatch_until(WAIT, |_| {
+            found = child_of(agent_pid);
+            found.is_some()
+        })?;
+        found.context("no shell")?
+    };
+    control(
+        &hp,
+        &format!("agent claude-code site working {shell_pid} hocus-site"),
+    )?;
+    wait(&mut hp, Duration::from_millis(800))?;
+
+    // 1. The list of hocus-site's dot: "Fermer le projet…" under its rows.
+    let dot = hp
+        .desk_tile_middles()
+        .into_iter()
+        .find(|(_, _, d, _)| *d == 1)
+        .map(|(.., m)| m)
+        .context("no dot")?;
+    hp.pointer_move(dot.0 - 1.0, dot.1);
+    hp.pointer_move(dot.0, dot.1);
+    let list = drawn(&mut hp, hocus_link::POPOVER_NAMESPACE)?;
+    shoot(
+        &mut hp,
+        &out,
+        "1-list-close",
+        Some((
+            list.x as u32 - 10,
+            list.y as u32 - 10,
+            list.width as u32 + 90,
+            list.height as u32 + 20,
+        )),
+    )?;
+    hp.pointer_move(700.0, 450.0);
+    wait(&mut hp, Duration::from_millis(600))?;
+
+    // 2. hocus-panda's card in the overview: every window in its sketch,
+    // its terminal's folder.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_W]);
+    wait(&mut hp, Duration::from_millis(500))?;
+    let name = hp.overview_project_name(SCREEN, 0).context("no name")?;
+    hp.pointer_move(name.0, name.1);
+    wait(&mut hp, Duration::from_millis(100))?;
+    hp.button(common::BTN_LEFT, true);
+    hp.button(common::BTN_LEFT, false);
+    let card = drawn(&mut hp, hocus_link::PROJECT_CARD_NAMESPACE)?;
+    hp.pointer_move(1100.0, 850.0);
+    wait(&mut hp, Duration::from_millis(300))?;
+    shoot(
+        &mut hp,
+        &out,
+        "2-open-card",
+        Some((card.x as u32, card.y as u32, 620, card.height as u32 + 10)),
+    )?;
+    press(&mut hp, KEY_ESC);
+    wait(&mut hp, Duration::from_millis(300))?;
+    press(&mut hp, KEY_ESC);
+    let gone = hp.dispatch_until(WAIT, |hp| hp.overview().is_none())?;
+    anyhow::ensure!(gone, "the overview stays");
+    wait(&mut hp, Duration::from_millis(400))?;
+
+    // 3. Closing hocus-site: its confirmation, what comes back and what
+    // stops.
+    hp.project_close_ask("hocus-site");
+    let confirm = drawn(&mut hp, hocus_link::PROJECT_CLOSE_NAMESPACE)?;
+    wait(&mut hp, Duration::from_millis(300))?;
+    shoot(
+        &mut hp,
+        &out,
+        "3-confirm",
+        Some((
+            (confirm.x - 20).max(0) as u32,
+            (confirm.y - 20).max(0) as u32,
+            confirm.width as u32 + 40,
+            confirm.height as u32 + 40,
+        )),
+    )?;
+    // 4. Closed: the toast. The browser closes when asked, as Firefox.
+    press(&mut hp, KEY_ENTER);
+    let asked = hp.dispatch_until(WAIT, |_| {
+        site_browser
+            .events
+            .try_iter()
+            .any(|e| e == common::Event::CloseRequested)
+    })?;
+    anyhow::ensure!(asked, "the browser was never asked to close");
+    site_browser.commands.send(Command::Close)?;
+    let closed = hp.dispatch_until(Duration::from_secs(40), |hp| {
+        hp.projects()
+            .iter()
+            .any(|p| p.0 == "hocus-site" && p.2.is_none())
+    })?;
+    anyhow::ensure!(closed, "hocus-site never closed");
+    drawn(&mut hp, hocus_link::LAUNCHER_TOAST_NAMESPACE)?;
+    shoot(&mut hp, &out, "4-closed-toast", Some((200, 700, 1040, 200)))?;
+    wait(&mut hp, Duration::from_millis(2500))?;
+
+    // 5. The launcher, "projet hoc": the open one, the closed one, the
+    // repositories.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_1]);
+    wait(&mut hp, Duration::from_millis(500))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_SPACE]);
+    drawn(&mut hp, hocus_link::LAUNCHER_NAMESPACE)?;
+    for key in [25, 19, 24, 36, 18, 20, KEY_SPACE, 35, 24, 46] {
+        press(&mut hp, key);
+    }
+    wait(&mut hp, Duration::from_millis(1500))?;
+    shoot(&mut hp, &out, "5-launcher-projet", None)?;
+    // 6. → on the closed one: its card.
+    press(&mut hp, KEY_DOWN);
+    wait(&mut hp, Duration::from_millis(200))?;
+    shoot(&mut hp, &out, "5b-launcher-closed-selected", None)?;
+    press(&mut hp, KEY_RIGHT);
+    let card = drawn(&mut hp, hocus_link::PROJECT_CARD_NAMESPACE)?;
+    wait(&mut hp, Duration::from_millis(300))?;
+    shoot(
+        &mut hp,
+        &out,
+        "6-closed-card",
+        Some((
+            (card.x - 20).max(0) as u32,
+            (card.y - 20).max(0) as u32,
+            card.width as u32 + 40,
+            card.height as u32 + 40,
+        )),
+    )?;
+    // 7. "Rouvrir": its windows come back on the empty desktop.
+    press(&mut hp, KEY_ENTER);
+    let back = hp.dispatch_until(Duration::from_secs(40), |hp| {
+        hp.projects()
+            .iter()
+            .any(|p| p.0 == "hocus-site" && p.2.is_some())
+            && !hp.project_coming_back("hocus-site")
+    })?;
+    anyhow::ensure!(back, "hocus-site never came back");
+    wait(&mut hp, Duration::from_millis(1500))?;
+    shoot(&mut hp, &out, "7-reopened", None)?;
+
+    // 8. blog: Slack is not installed any more: the notification.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_SPACE]);
+    drawn(&mut hp, hocus_link::LAUNCHER_NAMESPACE)?;
+    for key in [25, 19, 24, 36, 18, 20, KEY_SPACE, 48, 38, 24, 34] {
+        press(&mut hp, key);
+    }
+    wait(&mut hp, Duration::from_millis(500))?;
+    press(&mut hp, KEY_ENTER);
+    let told = hp.dispatch_until(Duration::from_secs(40), |hp| {
+        hp.project_not_back().is_some()
+    })?;
+    anyhow::ensure!(told, "no notification");
+    wait(&mut hp, Duration::from_millis(2500))?;
+    shoot(
+        &mut hp,
+        &out,
+        "8-notification",
+        Some((1440 - 520, 0, 520, 260)),
+    )?;
+    shoot(&mut hp, &out, "8b-blog-back", None)?;
+
+    // 9. Nine desktops taken: the launcher says so, offers to close one.
+    config.desktops.count = 9;
+    hp.reconfigure(config);
+    wait(&mut hp, Duration::from_millis(500))?;
+    for key in 2..=10 {
+        let desktop = key - 2;
+        let free = hp.all_windows().iter().all(|w| w.2 != desktop as usize);
+        if free {
+            chord(&mut hp, &[KEY_LEFTMETA, key]);
+            wait(&mut hp, Duration::from_millis(400))?;
+            clients.push(window(&mut hp, "slack", "Slack", (500, 400))?);
+        }
+    }
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_1]);
+    wait(&mut hp, Duration::from_millis(500))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_SPACE]);
+    drawn(&mut hp, hocus_link::LAUNCHER_NAMESPACE)?;
+    for key in [25, 19, 24, 36, 18, 20, KEY_SPACE, 30, 25, 23] {
+        press(&mut hp, key);
+    }
+    wait(&mut hp, Duration::from_millis(500))?;
+    press(&mut hp, KEY_ENTER);
+    let refused = hp.dispatch_until(WAIT, |hp| hp.project_no_room().is_some())?;
+    anyhow::ensure!(refused, "api-meteo opened");
+    wait(&mut hp, Duration::from_millis(1500))?;
+    shoot(&mut hp, &out, "9-no-room", None)?;
+
+    drop(clients);
+    drop(hp);
+    for mut child in children {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let _ = bus.kill();
+    let _ = bus.wait();
+    Ok(())
 }

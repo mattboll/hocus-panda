@@ -8,6 +8,9 @@
 //! [`LAUNCHER_TOAST`]; the compositor fades it in, rising 12 px, and out,
 //! as the mockup's `toast-in`. Its sizes are the mockup's × the
 //! launcher's [`ZOOM`] (#518).
+//!
+//! A project closed (docs/design/projects.md §5, board 4) says so in the
+//! same toast at the board's own size, then, fainter, how it comes back.
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -46,11 +49,19 @@ const RIM: Ink = Ink::Accent(0.45);
 /// both count from the toast's first frame.
 const LINGER: Duration = Duration::from_millis(100);
 
+/// The second part's ink (`#8C96A8`) and its gap.
+const THEN: Ink = Ink::Dark(Color::from_rgb8(0x8C, 0x96, 0xA8));
+const THEN_GAP: f32 = 14.0;
+
 /// The toast shown.
 #[derive(Debug, Clone)]
 struct Shown {
     id: window::Id,
     said: String,
+    /// What it says after, fainter.
+    then: Option<String>,
+    /// Its sizes are the launcher's mockup's × this.
+    zoom: f32,
     /// When it goes: counted from its first frame once it is drawn, as the
     /// compositor's motion is. A loaded machine draws it well after it
     /// was asked for, and counted from then it went before its fade out.
@@ -66,8 +77,30 @@ fn with<T>(with: impl FnOnce(&mut Option<Shown>) -> T) -> T {
 
 /// `said` shows on `output` from `now`, in place of a toast shown.
 pub fn show(output: String, said: String, now: Instant) -> Vec<Effect> {
-    let width = kit::measure(&said, SIZE, MANROPE_SEMIBOLD) + 2.0 * PAD.width + 2.0;
-    let height = SIZE * LINE + 2.0 * PAD.height + 2.0;
+    shown(output, said, None, ZOOM, now)
+}
+
+/// `said`, then `then` fainter, at the mockup's own size (a project
+/// closed, §5).
+pub fn show_then(output: String, said: String, then: Option<String>, now: Instant) -> Vec<Effect> {
+    shown(output, said, then, 1.0, now)
+}
+
+fn shown(
+    output: String,
+    said: String,
+    then: Option<String>,
+    zoom: f32,
+    now: Instant,
+) -> Vec<Effect> {
+    let k = zoom / ZOOM;
+    let size = SIZE * k;
+    let then_width = then.as_ref().map_or(0.0, |t| {
+        THEN_GAP * zoom + kit::measure(t, size, crate::levels::draw::MANROPE)
+    });
+    let width =
+        kit::measure(&said, size, MANROPE_SEMIBOLD) + then_width + 2.0 * PAD.width * k + 2.0;
+    let height = size * LINE + 2.0 * PAD.height * k + 2.0;
     let id = window::Id::unique();
     let mut effects = Vec::new();
     with(|toast| {
@@ -78,6 +111,8 @@ pub fn show(output: String, said: String, now: Instant) -> Vec<Effect> {
         *toast = Some(Shown {
             id,
             said,
+            then,
+            zoom,
             until: now + LAUNCHER_TOAST + LINGER,
             drawn: false,
         });
@@ -140,16 +175,17 @@ impl<Message> canvas::Program<Message> for View {
                 shown.drawn = true;
                 shown.until = Instant::now() + LAUNCHER_TOAST + LINGER;
             }
-            Some(shown.said.clone())
+            Some(shown.clone())
         });
-        if let Some(said) = said {
-            draw(&mut frame, &said, bounds.size(), self.software);
+        if let Some(shown) = said {
+            draw(&mut frame, &shown, bounds.size(), self.software);
         }
         vec![frame.into_geometry()]
     }
 }
 
-fn draw(f: &mut Frame, said: &str, size: Size, software: bool) {
+fn draw(f: &mut Frame, shown: &Shown, size: Size, software: bool) {
+    let k = shown.zoom / ZOOM;
     let rect = Rectangle::new(Point::ORIGIN, size);
     let fill = if software {
         Color {
@@ -159,23 +195,50 @@ fn draw(f: &mut Frame, said: &str, size: Size, software: bool) {
     } else {
         FILL.get()
     };
-    f.fill(&kit::rounded(rect, RADIUS), fill);
+    f.fill(&kit::rounded(rect, RADIUS * k), fill);
     let rim = Rectangle::new(
         Point::new(0.5, 0.5),
         Size::new(size.width - 1.0, size.height - 1.0),
     );
     f.stroke(
-        &kit::rounded(rim, RADIUS - 0.5),
+        &kit::rounded(rim, RADIUS * k - 0.5),
         Stroke::default().with_color(RIM.get()).with_width(1.0),
     );
+    let text = SIZE * k;
+    let Some(then) = &shown.then else {
+        f.fill_text(kit::text_in(
+            MANROPE_SEMIBOLD,
+            kit::text(
+                shown.said.clone(),
+                rect.center(),
+                text,
+                TEXT.get(),
+                Alignment::Center,
+            ),
+        ));
+        return;
+    };
+    let x = PAD.width * k + 1.0;
+    let middle = rect.center_y();
     f.fill_text(kit::text_in(
         MANROPE_SEMIBOLD,
         kit::text(
-            said.to_owned(),
-            rect.center(),
-            SIZE,
+            shown.said.clone(),
+            Point::new(x, middle),
+            text,
             TEXT.get(),
-            Alignment::Center,
+            Alignment::Left,
+        ),
+    ));
+    let x = x + kit::measure(&shown.said, text, MANROPE_SEMIBOLD) + THEN_GAP * shown.zoom;
+    f.fill_text(kit::text_in(
+        crate::levels::draw::MANROPE,
+        kit::text(
+            then.clone(),
+            Point::new(x, middle),
+            text,
+            THEN.get(),
+            Alignment::Left,
         ),
     ));
 }

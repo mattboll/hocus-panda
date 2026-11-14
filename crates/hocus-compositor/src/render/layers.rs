@@ -144,6 +144,9 @@ impl State {
                 hocus_link::EMOJI_NAMESPACE => Some((own, hocus_link::EMOJI_RADIUS)),
                 hocus_link::PROJECT_FORM_NAMESPACE => Some((own, hocus_link::PROJECT_FORM_RADIUS)),
                 hocus_link::PROJECT_CARD_NAMESPACE => Some((own, hocus_link::PROJECT_CARD_RADIUS)),
+                hocus_link::PROJECT_CLOSE_NAMESPACE => {
+                    Some((own, hocus_link::PROJECT_CLOSE_RADIUS))
+                }
                 ns if hocus_link::is_bubble(ns) => Some((own, hocus_link::RADIUS)),
                 ns if hocus_link::is_reminder(ns) => Some((own, hocus_link::REMINDER_RADIUS)),
                 hocus_link::BUBBLES_WAITING_NAMESPACE => Some((own, 10.0)),

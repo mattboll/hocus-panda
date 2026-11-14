@@ -217,6 +217,27 @@ pub enum ToCompositor {
         #[serde(serialize_with = "tidy::name")]
         folder: String,
     },
+    /// "Fermer le projet…" on project `name` (its list in the bar, its
+    /// card): its confirmation, answered by
+    /// [`ToShell::ProjectConfirm`](crate::ToShell::ProjectConfirm).
+    ProjectCloseAsk(#[serde(serialize_with = "tidy::name")] String),
+    /// The confirmation's "Fermer le projet": project `name` closes (§5).
+    ProjectClose(#[serde(serialize_with = "tidy::name")] String),
+    /// Closed project `name` reopens (§7) on `output`, the launcher's.
+    ProjectOpen {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        name: String,
+    },
+    /// Open project `name`: its desktop shows.
+    ProjectGo(#[serde(serialize_with = "tidy::name")] String),
+    /// The launcher's "Créer le projet « … »" (§2.2): folder `folder` is a
+    /// project, on the desktop of `output` §7 chooses.
+    ProjectNew {
+        output: String,
+        #[serde(serialize_with = "tidy::name")]
+        folder: String,
+    },
 }
 
 impl ToCompositor {

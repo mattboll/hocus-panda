@@ -34,6 +34,18 @@
 //! to eight, found as the emoji picker finds them ([`crate::emoji`]):
 //! `Enter` inserts the selected one, the first at first, into the window
 //! that had the keyboard before the launcher opened.
+//!
+//! Projects (docs/design/projects.md §2.2, board 2): `projet` or `project`
+//! then a space lists only "PROJETS" (those whose name holds the rest, the
+//! open ones first, then the closed, newest closed first) and "DÉPÔTS GIT
+//! RÉCENTS" (three at most, found on a thread, none a project's folder),
+//! no application nor web row; nothing found says so. A project is found
+//! by its name without the word too (§13, I), its row before the
+//! applications. `Enter` on an open project goes to its desktop, on a
+//! closed one reopens it, on a repository makes it a project; `→` on a
+//! closed one shows its card. Nine desktops taken, the compositor says
+//! so: the launcher opens again on the open projects, `Enter` asking to
+//! close one (§13, H).
 
 pub mod answers;
 pub mod apps;
@@ -138,6 +150,27 @@ impl Words {
     pub fn copied(self, value: &str) -> String {
         txt::copied(self.lang, value)
     }
+
+    pub fn projects_heading(self) -> &'static str {
+        self.pick(hocus_words::shell::project::PROJECTS_HEADING)
+    }
+
+    pub fn repos_heading(self) -> &'static str {
+        self.pick(hocus_words::shell::project::REPOS_HEADING)
+    }
+
+    pub fn nothing_for(self, term: &str) -> String {
+        hocus_words::shell::project::nothing_for(self.lang, term)
+    }
+
+    /// Nine desktops taken: the notice's two sentences.
+    pub fn no_room(self, name: &str) -> String {
+        format!(
+            "{} {}",
+            self.pick(hocus_words::shell::project::NO_ROOM),
+            hocus_words::shell::project::no_room_for(self.lang, name)
+        )
+    }
 }
 
 /// A wide row of the launcher's: a calculation's or a conversion's result,
@@ -156,6 +189,10 @@ pub enum Item {
     App(usize),
     Card(Card),
     Emoji(usize),
+    /// A project, its place in [`Grid::projects`].
+    Project(usize),
+    /// A git repository, its place in [`Grid::repos`].
+    Repo(usize),
 }
 
 /// An address typed, and what opens.
@@ -174,6 +211,15 @@ pub enum Row {
     Card(Card, usize),
     /// The emoji a `:` query finds, in a card of their own.
     Emoji(Vec<usize>),
+    /// A project's row, or a repository's (their places in [`Grid::flat`]).
+    Project(usize),
+    Repo(usize),
+    /// What the projects' rows say instead or before: nothing found, or
+    /// no free desktop (amber).
+    Notice {
+        text: String,
+        amber: bool,
+    },
 }
 
 /// What the grid shows: its rows, and what each of their places holds, in
@@ -186,6 +232,11 @@ pub struct Grid {
     pub answer: Option<answers::Answer>,
     pub address: Option<Address>,
     pub columns: usize,
+    /// The projects and repositories listed, which their items name.
+    pub projects: Vec<hocus_link::ProjectRow>,
+    pub repos: Vec<crate::project::repos::Repo>,
+    /// Nine desktops taken: `Enter` on a project asks to close it.
+    pub no_room: bool,
 }
 
 impl Default for Grid {
@@ -196,8 +247,35 @@ impl Default for Grid {
             answer: None,
             address: None,
             columns: COLUMNS,
+            projects: Vec::new(),
+            repos: Vec::new(),
+            no_room: false,
         }
     }
+}
+
+/// What the projects' rows are made of: the projects the compositor said,
+/// the repositories found, and the project waiting for a free desktop.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Places<'a> {
+    pub projects: &'a [hocus_link::ProjectRow],
+    pub repos: &'a [crate::project::repos::Repo],
+    pub no_room: Option<&'a str>,
+}
+
+/// The repositories shown at most (§2.2).
+const REPOS_MOST: usize = 3;
+
+/// A text as names are compared: case and accents aside.
+fn folded(text: &str) -> String {
+    hocus_link::projects::name_key(text)
+}
+
+/// What follows `projet ` or `project ` at the field's start, if it does.
+pub fn project_term(query: &str) -> Option<&str> {
+    let trimmed = query.trim_start();
+    let (word, rest) = trimmed.split_once(' ')?;
+    matches!(folded(word).as_str(), "projet" | "project").then(|| rest.trim())
 }
 
 /// What the field is read with besides the applications: how numbers are
@@ -217,6 +295,7 @@ impl Grid {
         query: &str,
         reading: Reading,
         columns: usize,
+        places: Places<'_>,
     ) -> Self {
         let words = reading.words;
         let count = |i: usize| {
@@ -231,6 +310,14 @@ impl Grid {
             columns: columns.clamp(1, COLUMNS),
             ..Self::default()
         };
+        if let Some(name) = places.no_room {
+            grid.no_room_rows(words, name, places.projects);
+            return grid;
+        }
+        if let Some(term) = project_term(query) {
+            grid.project_rows(words, term, places);
+            return grid;
+        }
         if query.trim().is_empty() {
             let mut frequent: Vec<usize> =
                 (0..catalog.apps.len()).filter(|i| count(*i) > 0).collect();
@@ -271,6 +358,9 @@ impl Grid {
                 });
                 grid.card(Card::Address);
             } else {
+                // A project found by its name, before the applications
+                // (§13, I).
+                grid.projects_named(words, typed, places.projects, false);
                 let apps: Vec<(&search::Folded, u32)> = catalog
                     .apps
                     .iter()
@@ -283,6 +373,80 @@ impl Grid {
             grid.card(Card::Web);
         }
         grid
+    }
+
+    /// The projects whose name holds `term` (all of them for none), the
+    /// open ones first, then the closed by when they closed, newest first,
+    /// under their heading; only the open ones when `open_only`.
+    fn projects_named(
+        &mut self,
+        words: Words,
+        term: &str,
+        projects: &[hocus_link::ProjectRow],
+        open_only: bool,
+    ) {
+        use hocus_link::ProjectState;
+        let term = folded(term);
+        let mut found: Vec<&hocus_link::ProjectRow> = projects
+            .iter()
+            .filter(|p| folded(&p.name).contains(&term))
+            .filter(|p| !open_only || matches!(p.state, ProjectState::Open { .. }))
+            .collect();
+        found.sort_by_key(|p| match p.state {
+            ProjectState::Open { desktop, .. } => (0, i64::from(desktop)),
+            ProjectState::Closed { at } => (1, -at),
+        });
+        if found.is_empty() {
+            return;
+        }
+        self.rows.push(Row::Head(words.projects_heading()));
+        for project in found {
+            let at = self.flat.len();
+            self.flat.push(Item::Project(self.projects.len()));
+            self.projects.push(project.clone());
+            self.rows.push(Row::Project(at));
+        }
+    }
+
+    /// `projet …`'s rows: the projects, then three recent repositories
+    /// that are no project's; nothing found, it says so.
+    fn project_rows(&mut self, words: Words, term: &str, places: Places<'_>) {
+        self.projects_named(words, term, places.projects, false);
+        let wanted = folded(term);
+        let taken: Vec<&str> = places.projects.iter().map(|p| p.folder.as_str()).collect();
+        let repos: Vec<&crate::project::repos::Repo> = places
+            .repos
+            .iter()
+            .filter(|r| folded(&r.name()).contains(&wanted))
+            .filter(|r| !taken.contains(&r.path.to_string_lossy().as_ref()))
+            .take(REPOS_MOST)
+            .collect();
+        if !repos.is_empty() {
+            self.rows.push(Row::Head(words.repos_heading()));
+            for repo in repos {
+                let at = self.flat.len();
+                self.flat.push(Item::Repo(self.repos.len()));
+                self.repos.push(repo.clone());
+                self.rows.push(Row::Repo(at));
+            }
+        }
+        if self.flat.is_empty() && !term.is_empty() {
+            self.rows.push(Row::Notice {
+                text: words.nothing_for(term),
+                amber: false,
+            });
+        }
+    }
+
+    /// Nine desktops taken for project `name`: it says so, and lists the
+    /// open projects to close one.
+    fn no_room_rows(&mut self, words: Words, name: &str, projects: &[hocus_link::ProjectRow]) {
+        self.no_room = true;
+        self.rows.push(Row::Notice {
+            text: words.no_room(name),
+            amber: true,
+        });
+        self.projects_named(words, "", projects, true);
     }
 
     fn chunk(&mut self, apps: &[usize]) {
@@ -305,8 +469,10 @@ impl Grid {
             Row::Tiles(tiles) | Row::Emoji(tiles) => {
                 tiles.iter().position(|t| *t == at).map(|c| (r, c))
             }
-            Row::Card(_, place) => (*place == at).then_some((r, 0)),
-            Row::Head(_) => None,
+            Row::Card(_, place) | Row::Project(place) | Row::Repo(place) => {
+                (*place == at).then_some((r, 0))
+            }
+            Row::Head(_) | Row::Notice { .. } => None,
         })
     }
 
@@ -335,8 +501,10 @@ impl Grid {
                         Row::Tiles(tiles) | Row::Emoji(tiles) => tiles
                             .get(column.min(tiles.len().saturating_sub(1)))
                             .copied(),
-                        Row::Card(_, place) => Some(*place),
-                        Row::Head(_) => None,
+                        Row::Card(_, place) | Row::Project(place) | Row::Repo(place) => {
+                            Some(*place)
+                        }
+                        Row::Head(_) | Row::Notice { .. } => None,
                     })
                     .unwrap_or(at)
             }
@@ -381,6 +549,9 @@ pub struct Open {
     pub wheel: crate::popover::kit::Wheel,
     /// What it last said it shows, in the log.
     pub logged: String,
+    /// The project waiting for a free desktop (§13, H), until the field
+    /// changes.
+    pub no_room: Option<String>,
 }
 
 impl Open {
@@ -397,12 +568,26 @@ impl Open {
             words,
             numbers: answers::Numbers::new(Lang::of_numbers()),
         };
+        let projects = crate::project::rows();
+        if project_term(self.query.text()).is_some() {
+            repos_wanted(&projects);
+        }
+        let repos = REPOS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .1
+            .clone();
         Grid::of(
             &self.catalog,
             &self.counts,
             self.query.text(),
             reading,
             columns,
+            Places {
+                projects: &projects,
+                repos: &repos,
+                no_room: self.no_room.as_deref(),
+            },
         )
     }
 
@@ -423,8 +608,67 @@ impl Open {
     pub fn app(&self, at: usize) -> Option<&apps::App> {
         match self.grid.flat.get(at)? {
             Item::App(i) => self.catalog.apps.get(*i),
-            Item::Card(_) | Item::Emoji(_) => None,
+            Item::Card(_) | Item::Emoji(_) | Item::Project(_) | Item::Repo(_) => None,
         }
+    }
+
+    /// The project of place `at`.
+    pub fn project(&self, at: usize) -> Option<&hocus_link::ProjectRow> {
+        match self.grid.flat.get(at)? {
+            Item::Project(i) => self.grid.projects.get(*i),
+            _ => None,
+        }
+    }
+
+    /// The repository of place `at`.
+    pub fn repo(&self, at: usize) -> Option<&crate::project::repos::Repo> {
+        match self.grid.flat.get(at)? {
+            Item::Repo(i) => self.grid.repos.get(*i),
+            _ => None,
+        }
+    }
+}
+
+/// The recent repositories (§2.3), as last found, and whether a look is
+/// under way.
+static REPOS: Mutex<(bool, Vec<crate::project::repos::Repo>)> = Mutex::new((false, Vec::new()));
+
+/// The repositories are looked for again on a thread (the look itself is
+/// kept a minute), unless a look is under way; found, an open launcher
+/// shows them.
+fn repos_wanted(projects: &[hocus_link::ProjectRow]) {
+    {
+        let mut repos = REPOS.lock().unwrap_or_else(PoisonError::into_inner);
+        if repos.0 {
+            return;
+        }
+        repos.0 = true;
+    }
+    let folders: Vec<std::path::PathBuf> = projects
+        .iter()
+        .map(|p| std::path::PathBuf::from(&p.folder))
+        .collect();
+    let started = std::thread::Builder::new()
+        .name("launcher repositories".to_owned())
+        .spawn(move || {
+            let found = crate::project::repos::Places::from_env()
+                .map(|places| crate::project::repos::find(&places, &[], &folders))
+                .unwrap_or_default();
+            let changed = {
+                let mut repos = REPOS.lock().unwrap_or_else(PoisonError::into_inner);
+                let changed = repos.1 != found;
+                repos.1 = found;
+                repos.0 = false;
+                changed
+            };
+            if changed {
+                tracing::debug!("the launcher's repositories");
+                self::changed();
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "no thread to look for the repositories");
+        REPOS.lock().unwrap_or_else(PoisonError::into_inner).0 = false;
     }
 }
 
@@ -465,7 +709,8 @@ pub fn wake() {
     crate::popover::send(vec![Effect::Wake(LAUNCHER_NAMESPACE)]);
 }
 
-/// The applications changed: an open launcher shows them.
+/// The applications, the projects or the repositories changed: an open
+/// launcher shows them.
 pub fn changed() {
     let open = with(|l| match &mut l.phase {
         Phase::Open(open) => {
@@ -501,6 +746,7 @@ pub fn toggle(output: String, scale: u32) {
         let surface = window::Id::unique();
         let catalog = apps::catalog();
         let counts = apps::counts();
+        let given = scale;
         let scale = (scale as f32 / 120.0).max(0.5);
         let mut open = Open {
             surface,
@@ -518,7 +764,9 @@ pub fn toggle(output: String, scale: u32) {
             tooltip: None,
             wheel: crate::popover::kit::Wheel::default(),
             logged: String::new(),
+            no_room: None,
         };
+        *SCALE.lock().unwrap_or_else(PoisonError::into_inner) = Some(given);
         open.regrid(words());
         let wanted = (icon_names(&open), scale);
         tracing::debug!(output, apps = open.catalog.apps.len(), "the launcher opens");
@@ -536,6 +784,33 @@ pub fn toggle(output: String, scale: u32) {
         icons::want(names.iter().map(String::as_str), view::ICON as u32, scale);
     }
     crate::popover::send(effects);
+}
+
+/// The scale the launcher last opened at, in 120ths of the screen's: the
+/// one it opens again at when nine desktops are taken.
+static SCALE: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Project `name` could not open on `output`, nine desktops taken (§13,
+/// H): the launcher opens there again, saying so, the open projects
+/// listed to close one.
+pub fn no_room(output: String, name: &str) {
+    tracing::info!(name, "no free desktop for a project");
+    let open = with(|l| matches!(l.phase, Phase::Open(_)));
+    if !open {
+        let scale = SCALE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .unwrap_or(120);
+        toggle(output, scale);
+    }
+    with(|l| {
+        if let Phase::Open(open) = &mut l.phase {
+            open.no_room = Some(name.to_owned());
+            open.query.set("");
+            open.regrid(words());
+        }
+    });
+    wake();
 }
 
 /// The actions palette's "Chercher « … » dans le lanceur" (#736): it opens
@@ -698,6 +973,41 @@ pub fn act(id: window::Id, at: usize) {
                 }
             }
             Some(Item::Card(Card::Web)) => effects.extend(browse(&answers::web(open.query.text()))),
+            Some(Item::Project(_)) => {
+                let Some(project) = open.project(at) else {
+                    return effects;
+                };
+                let name = project.name.clone();
+                let tell = if open.grid.no_room {
+                    tracing::debug!(name, "the launcher asks to close a project");
+                    ToCompositor::ProjectCloseAsk(name)
+                } else {
+                    match project.state {
+                        hocus_link::ProjectState::Open { .. } => {
+                            tracing::debug!(name, "the launcher goes to a project");
+                            ToCompositor::ProjectGo(name)
+                        }
+                        hocus_link::ProjectState::Closed { .. } => {
+                            tracing::debug!(name, "the launcher reopens a project");
+                            ToCompositor::ProjectOpen {
+                                output: open.output.clone(),
+                                name,
+                            }
+                        }
+                    }
+                };
+                effects.push(Effect::Tell(tell));
+            }
+            Some(Item::Repo(_)) => {
+                let Some(repo) = open.repo(at) else {
+                    return effects;
+                };
+                tracing::debug!("the launcher makes a project of a repository");
+                effects.push(Effect::Tell(ToCompositor::ProjectNew {
+                    output: open.output.clone(),
+                    folder: repo.path.display().to_string(),
+                }));
+            }
             Some(Item::Emoji(e)) => {
                 let Some(emoji) = crate::emoji::data::table().emoji.get(*e) else {
                     return effects;
@@ -780,6 +1090,7 @@ pub fn key_on(
         Web,
         Draw,
         Paste,
+        Card(usize),
     }
     let words = words();
     let then = with(|l| {
@@ -801,6 +1112,15 @@ pub fn key_on(
                     Then::Act(open.selected)
                 }
             }
+            // `→` on a closed project: its card.
+            Key::Named(Named::ArrowRight)
+                if !held
+                    && open.project(open.selected).is_some_and(|p| {
+                        matches!(p.state, hocus_link::ProjectState::Closed { .. })
+                    }) =>
+            {
+                Then::Card(open.selected)
+            }
             // Across the grid; with Shift or Ctrl, in the field.
             Key::Named(Named::ArrowLeft) if !held => arrow(Arrow::Left, open),
             Key::Named(Named::ArrowRight) if !held => arrow(Arrow::Right, open),
@@ -810,6 +1130,7 @@ pub fn key_on(
                 Took::No | Took::Same => Then::Nothing,
                 Took::Moved => Then::Draw,
                 Took::Edited => {
+                    open.no_room = None;
                     open.regrid(words);
                     Then::Draw
                 }
@@ -837,6 +1158,37 @@ pub fn key_on(
             paste(id);
             true
         }
+        Some(Then::Card(at)) => {
+            closed_card(id, at);
+            true
+        }
+    }
+}
+
+/// `→` on closed project `at`: its card, centred on the launcher's
+/// screen, the launcher closing.
+fn closed_card(id: window::Id, at: usize) {
+    let card = with(|l| {
+        let open = l.open_on(id)?;
+        let project = open.project(at)?;
+        Some(hocus_link::ProjectCard {
+            output: open.output.clone(),
+            at: None,
+            screen: (open.size.width as i32, open.size.height as i32),
+            name: project.name.clone(),
+            folder: project.folder.clone(),
+            state: project.state,
+            windows: project.windows.clone(),
+        })
+    });
+    if let Some(card) = card {
+        tracing::debug!(
+            name = card.name,
+            "the launcher shows a closed project's card"
+        );
+        crate::surfaces::ask(crate::surfaces::Asked::Project(crate::project::Come::Card(
+            card,
+        )));
     }
 }
 
@@ -869,6 +1221,7 @@ pub fn took(id: window::Id, took: Took, words: Words) {
     match took {
         Took::Edited => with(|l| {
             if let Some(open) = l.open_mut(id) {
+                open.no_room = None;
                 open.regrid(words);
             }
         }),
@@ -983,7 +1336,14 @@ mod tests {
     #[test]
     fn a_colon_shows_a_row_of_emoji_first_the_web_last() {
         let catalog = catalog(&["Chat", "Firefox"]);
-        let grid = Grid::of(&catalog, &HashMap::new(), ":chat", reading(true), COLUMNS);
+        let grid = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            ":chat",
+            reading(true),
+            COLUMNS,
+            Places::default(),
+        );
         let Some(Row::Emoji(places)) = grid.rows.first() else {
             panic!("no emoji row: {:?}", grid.rows);
         };
@@ -1002,9 +1362,23 @@ mod tests {
         assert_eq!(grid.step(0, Arrow::Right), 1);
         assert_eq!(grid.step(0, Arrow::Down), grid.flat.len() - 1);
         // A colon alone, or nothing found: no row.
-        let alone = Grid::of(&catalog, &HashMap::new(), ":", reading(true), COLUMNS);
+        let alone = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            ":",
+            reading(true),
+            COLUMNS,
+            Places::default(),
+        );
         assert!(!alone.rows.iter().any(|r| matches!(r, Row::Emoji(_))));
-        let none = Grid::of(&catalog, &HashMap::new(), ":zzzz", reading(true), COLUMNS);
+        let none = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            ":zzzz",
+            reading(true),
+            COLUMNS,
+            Places::default(),
+        );
         assert!(!none.rows.iter().any(|r| matches!(r, Row::Emoji(_))));
     }
 
@@ -1014,14 +1388,28 @@ mod tests {
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let catalog = catalog(&names);
         // Nothing launched yet: no frequent row.
-        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(true), COLUMNS);
+        let grid = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "",
+            reading(true),
+            COLUMNS,
+            Places::default(),
+        );
         assert_eq!(grid.rows[0], Row::Head("TOUTES LES APPLICATIONS"));
         assert_eq!(grid.rows.len(), 3);
         let counts: HashMap<String, u32> = [("app 05", 3), ("app 01", 7), ("app 09", 3)]
             .into_iter()
             .map(|(id, n)| (id.to_owned(), n))
             .collect();
-        let grid = Grid::of(&catalog, &counts, "", reading(true), COLUMNS);
+        let grid = Grid::of(
+            &catalog,
+            &counts,
+            "",
+            reading(true),
+            COLUMNS,
+            Places::default(),
+        );
         assert_eq!(grid.rows[0], Row::Head("FRÉQUENTES"));
         // The most launched first, ties from A to Z.
         assert_eq!(&grid.flat[..3], &apps(&[1, 5, 9])[..]);
@@ -1035,7 +1423,14 @@ mod tests {
         let names: Vec<String> = (0..20).map(|i| format!("App {i:02}")).collect();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let catalog = catalog(&names);
-        let grid = Grid::of(&catalog, &HashMap::new(), "", reading(false), COLUMNS);
+        let grid = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "",
+            reading(false),
+            COLUMNS,
+            Places::default(),
+        );
         // Rows of 8, 8 and 4 under the heading.
         assert_eq!(grid.step(0, Arrow::Left), 0);
         assert_eq!(grid.step(7, Arrow::Right), 8);
@@ -1047,7 +1442,14 @@ mod tests {
         assert_eq!(grid.step(19, Arrow::Right), 19);
         // On a screen with room for five columns: rows of 5, 5, 5 and 5,
         // the same places in the same order.
-        let narrow = Grid::of(&catalog, &HashMap::new(), "", reading(false), 5);
+        let narrow = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "",
+            reading(false),
+            5,
+            Places::default(),
+        );
         assert_eq!(narrow.rows.len(), 1 + 4);
         assert_eq!(narrow.flat, grid.flat);
         assert_eq!(narrow.step(3, Arrow::Down), 8);
@@ -1057,13 +1459,27 @@ mod tests {
     #[test]
     fn typing_filters_the_grid_best_first_and_the_web_comes_last() {
         let catalog = catalog(&["Firefox", "Fichiers", "kitty"]);
-        let grid = Grid::of(&catalog, &HashMap::new(), "fire", reading(true), COLUMNS);
+        let grid = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "fire",
+            reading(true),
+            COLUMNS,
+            Places::default(),
+        );
         assert_eq!(grid.rows, [Row::Tiles(vec![0]), Row::Card(Card::Web, 1)]);
         assert_eq!(grid.flat, [Item::App(0), Item::Card(Card::Web)]);
         // Down from the tile: the web row; and back up.
         assert_eq!(grid.step(0, Arrow::Down), 1);
         assert_eq!(grid.step(1, Arrow::Up), 0);
-        let none = Grid::of(&catalog, &HashMap::new(), "zzz", reading(true), COLUMNS);
+        let none = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "zzz",
+            reading(true),
+            COLUMNS,
+            Places::default(),
+        );
         assert_eq!(none.rows, [Row::Card(Card::Web, 0)]);
     }
 
@@ -1076,6 +1492,7 @@ mod tests {
             "12 × (3 + 4)",
             reading(true),
             COLUMNS,
+            Places::default(),
         );
         assert_eq!(grid.flat, [Item::Card(Card::Answer), Item::Card(Card::Web)]);
         assert_eq!(grid.answer.as_ref().map(|a| a.main.as_str()), Some("84"));
@@ -1085,6 +1502,7 @@ mod tests {
             "github.com",
             reading(true),
             COLUMNS,
+            Places::default(),
         );
         assert_eq!(
             grid.flat,
@@ -1101,5 +1519,103 @@ mod tests {
             words.search_web("crêpes"),
             "Chercher «\u{a0}crêpes\u{a0}» sur le web"
         );
+    }
+
+    #[test]
+    fn projet_lists_the_projects_open_first_then_three_repositories() {
+        use hocus_link::{ProjectRow, ProjectState};
+        let row = |name: &str, state| ProjectRow {
+            name: name.into(),
+            folder: format!("/home/alex/github/{name}"),
+            output: String::new(),
+            state,
+            windows: Vec::new(),
+        };
+        let projects = [
+            row("hocus-old", ProjectState::Closed { at: 100 }),
+            row("hocus-site", ProjectState::Closed { at: 200 }),
+            row("blog", ProjectState::Closed { at: 300 }),
+            row(
+                "hocus-panda",
+                ProjectState::Open {
+                    desktop: 0,
+                    since: 0,
+                },
+            ),
+        ];
+        let repo = |name: &str| crate::project::repos::Repo {
+            path: format!("/home/alex/github/{name}").into(),
+            when: None,
+            terminals: false,
+        };
+        let repos = [
+            repo("hocus-site"),
+            repo("hocus-cli"),
+            repo("hocus-icons"),
+            repo("hocus-tools"),
+            repo("hocus-more"),
+        ];
+        let places = Places {
+            projects: &projects,
+            repos: &repos,
+            no_room: None,
+        };
+        let catalog = catalog(&["Hocus App"]);
+        let grid = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "Projet hoc",
+            reading(true),
+            COLUMNS,
+            places,
+        );
+        let names: Vec<String> = grid.projects.iter().map(|p| p.name.clone()).collect();
+        assert_eq!(names, ["hocus-panda", "hocus-site", "hocus-old"]);
+        // Three repositories, none a project's folder; no application, no
+        // web row.
+        let repos: Vec<String> = grid
+            .repos
+            .iter()
+            .map(crate::project::repos::Repo::name)
+            .collect();
+        assert_eq!(repos, ["hocus-cli", "hocus-icons", "hocus-tools"]);
+        assert!(
+            grid.flat
+                .iter()
+                .all(|i| matches!(i, Item::Project(_) | Item::Repo(_)))
+        );
+        // Nothing found says so.
+        let none = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "projet zut",
+            reading(true),
+            COLUMNS,
+            places,
+        );
+        assert!(matches!(&none.rows[..], [Row::Notice { amber: false, .. }]));
+        // By its name alone, before the applications (§13, I).
+        let named = Grid::of(
+            &catalog,
+            &HashMap::new(),
+            "hocus-p",
+            reading(true),
+            COLUMNS,
+            places,
+        );
+        assert_eq!(named.flat.first(), Some(&Item::Project(0)));
+        assert_eq!(named.projects[0].name, "hocus-panda");
+        // Nine desktops taken: the open ones, to close one.
+        let full = Places {
+            no_room: Some("blog"),
+            ..places
+        };
+        let full = Grid::of(&catalog, &HashMap::new(), "", reading(true), COLUMNS, full);
+        assert!(full.no_room);
+        assert!(matches!(full.rows[0], Row::Notice { amber: true, .. }));
+        assert_eq!(full.projects.len(), 1);
+        assert_eq!(project_term("projet "), Some(""));
+        assert_eq!(project_term("PROJECT hoc"), Some("hoc"));
+        assert_eq!(project_term("projets x"), None);
     }
 }

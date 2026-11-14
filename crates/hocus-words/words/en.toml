@@ -2669,6 +2669,12 @@ and = " and "
 not_reopened = { other = "{listed} could not be reopened." }
 
 
+[compositor.projects]
+its_folder = "its folder"
+and_others = { one = "{shown} and {n} other", other = "{shown} and {n} others" }
+back_but = "{name} came back, but for {what}"
+folder_gone = "The folder {folder} no longer exists."
+
 [compositor.creatures]
 other_tab = "{name} · other tab"
 
@@ -2842,6 +2848,40 @@ redone = "Redone: {said}."
 remove_app = "Take {app} out"
 
 [shell.project]
+closed_pill = "closed"
+open_pill = "open"
+on_desktop = "on desktop {number}"
+closed_today = "closed at {time}"
+closed_yesterday = "closed yesterday at {time}"
+closed_on = "closed on {date}"
+windows_count = { one = "{n} window", other = "{n} windows" }
+terminals_count = { one = "{n} terminal", other = "{n} terminals" }
+hint_go = "Enter goes there"
+hint_reopen = "Enter reopens it"
+hint_create = "Enter creates it"
+hint_close = "Enter closes it…"
+projects_heading = "PROJECTS"
+repos_heading = "RECENT GIT REPOSITORIES"
+create_named = "Create the project “{name}”"
+last_commit = "last commit {when}"
+nothing_for = "No project or git repository for “{term}”."
+no_room = "No free desktop: close a project or a window."
+no_room_for = "“{name}” waits for a free desktop."
+terminals_heading = "TERMINALS"
+reopen = "Reopen"
+confirm_title = "Close the project {name}?"
+confirm_line = "Its windows close. When you reopen it, everything comes back in its place:"
+back_windows = "{app}, its {n} windows"
+back_terminal = "A terminal in {folder}"
+not_back = "{app} will not come back"
+agent_working = "{tool} is still working: closing interrupts its answer."
+agent_waiting = "{tool} is waiting for you: closing interrupts it."
+program_stops = "{program} stops; its terminal comes back in the folder, without running the command again."
+close_confirm = "Close the project"
+closed_toast = { one = "{name} is closed, its window kept.", other = "{name} is closed, its {n} windows kept." }
+closed_empty = "{name} is closed."
+stayed = { one = "{names} stays open.", other = "{names} stay open." }
+closed_then = "Super+Space, “project {name}”: it comes back."
 form_title = "Make desktop {number} a project"
 form_line = "Its windows stay where they are. The project keeps this desktop while it is open."
 name = "Name"
