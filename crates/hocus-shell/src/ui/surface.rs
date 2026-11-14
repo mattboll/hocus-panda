@@ -268,9 +268,14 @@ impl<'a, L: Clone + Send + 'static> Around<'a, L> {
     }
 
     /// On a background of its own (the clipboard's tint), filling the
-    /// surface.
+    /// surface. The stack fills it too: iced's takes its first layer's
+    /// size, and a background that shrinks (the launcher's on the GPU,
+    /// nothing) left the content no room, the surface drawn empty.
     pub fn on(self, background: impl Into<El<'a, Message>>) -> El<'a, Message> {
-        iced::widget::stack![background.into(), Element::new(self)].into()
+        iced::widget::stack![background.into(), Element::new(self)]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
@@ -788,5 +793,43 @@ impl<M> canvas::Program<M> for Glass {
         let mut f = canvas::Frame::new(renderer, bounds.size());
         kit::background(&mut f, bounds.size(), self.0);
         vec![f.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, rc::Rc};
+
+    use iced::{
+        Length, Size,
+        advanced::{layout::Limits, widget::Tree},
+        widget::Space,
+        window,
+    };
+
+    use super::Around;
+
+    /// The launcher's case on the GPU: nothing behind its content, which
+    /// still has the whole surface (#789, the launcher drawn empty).
+    #[test]
+    fn a_background_that_shrinks_leaves_the_content_the_whole_surface() {
+        let room = Rc::new(Cell::new(Size::ZERO));
+        let told = Rc::clone(&room);
+        let content = crate::ui::sized::Sized::new(
+            Space::new().width(Length::Fill).height(Length::Fill),
+            move |size| told.set(size),
+        );
+        let mut surface = Around::new(window::Id::unique(), content, |()| {}, ())
+            .own_by(|| {}, || true)
+            .on(Space::new());
+        let mut tree = Tree::new(surface.as_widget());
+        let renderer = crate::backdrop::tests::renderer();
+        let whole = Size::new(1280.0, 800.0);
+        let node =
+            surface
+                .as_widget_mut()
+                .layout(&mut tree, &renderer, &Limits::new(Size::ZERO, whole));
+        assert_eq!(node.size(), whole);
+        assert_eq!(room.get(), whole);
     }
 }
