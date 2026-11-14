@@ -847,6 +847,8 @@ impl State {
         self.tell_desktops();
         self.tell_window_states(true);
         self.tell_agents();
+        self.projects.told = None;
+        self.tell_projects();
         self.tell_mcp();
         self.tell_bubbles_screen();
         self.tell_fullscreen_again();
@@ -956,6 +958,19 @@ impl State {
                 &name,
                 &folder,
             ),
+            ToCompositor::ProjectCloseAsk(name) => self.project_close_ask(&name),
+            ToCompositor::ProjectClose(name) => {
+                if let Err(why) = self.project_close(&name) {
+                    tracing::info!(why, "a project does not close");
+                }
+            }
+            ToCompositor::ProjectOpen { output, name } => {
+                if let Err(why) = self.project_open(&name, &output) {
+                    tracing::info!(why, "a project does not reopen");
+                }
+            }
+            ToCompositor::ProjectGo(name) => self.project_go(&name),
+            ToCompositor::ProjectNew { output, folder } => self.project_new(&output, &folder),
             ToCompositor::GoToAgent { id, row } => self.go_to_agent(id, row),
             ToCompositor::Ring(row) => self.ring_moved(&row),
             ToCompositor::Plug(tool) => match crate::agents::tool(&tool) {
@@ -1540,6 +1555,131 @@ async fn notify_asking_on(
         }
     }
     said(Asked::Gone);
+}
+
+/// A project's notification (docs/design/projects.md §7): `summary` and
+/// `body`, its `monogram` drawn on the accent's gradient as its image, off
+/// the loop.
+pub fn notify_project(bus: Bus, monogram: String, summary: String, body: String) {
+    let started = std::thread::Builder::new()
+        .name("notification".to_owned())
+        .spawn(move || {
+            let image = monogram_image(&monogram);
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match runtime {
+                Ok(runtime) => runtime.block_on(notify_project_on(bus, image, summary, body)),
+                Err(err) => tracing::warn!(%err, "no runtime for a notification"),
+            }
+        });
+    if let Err(err) = started {
+        tracing::warn!(%err, "a notification is not sent");
+    }
+}
+
+/// The side of a project's monogram as a notification's image.
+const MONOGRAM_SIDE: u32 = 64;
+
+/// `monogram` on a rounded square of the accent's gradient (the mockup's
+/// `#3FA66B` to `#7EE0A0`), `#0B1020`, 800: RGBA, [`MONOGRAM_SIDE`] square.
+fn monogram_image(monogram: &str) -> Option<Vec<u8>> {
+    use tiny_skia::{
+        Color, FillRule, GradientStop, LinearGradient, Paint, Pixmap, Point, SpreadMode, Transform,
+    };
+    let side = MONOGRAM_SIDE as f32;
+    let mut pixmap = Pixmap::new(MONOGRAM_SIDE, MONOGRAM_SIDE)?;
+    let shader = LinearGradient::new(
+        Point::from_xy(0.0, 0.0),
+        Point::from_xy(side, side),
+        vec![
+            GradientStop::new(0.0, Color::from_rgba8(0x3F, 0xA6, 0x6B, 255)),
+            GradientStop::new(1.0, Color::from_rgba8(0x7E, 0xE0, 0xA0, 255)),
+        ],
+        SpreadMode::Pad,
+        Transform::identity(),
+    )?;
+    let paint = Paint {
+        shader,
+        anti_alias: true,
+        ..Paint::default()
+    };
+    let path = crate::radial_draw::rounded(0.0, 0.0, side, side, side * 9.0 / 32.0)?;
+    pixmap.fill_path(
+        &path,
+        &paint,
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
+    if let Some(fonts) = crate::radial_draw::fonts() {
+        let px = side * 11.0 / 32.0;
+        let width = crate::radial_draw::advance(&fonts.bold, monogram, px);
+        crate::radial_draw::write(
+            &mut pixmap,
+            &fonts.bold,
+            monogram,
+            px,
+            ((side - width) / 2.0, side / 2.0 + px * 0.36),
+            [0x0B, 0x10, 0x20, 255],
+            0.0,
+        );
+    }
+    // Premultiplied to straight alpha, as the hint carries it.
+    let mut rgba = pixmap.take();
+    for [r, g, b, a] in rgba.as_chunks_mut::<4>().0 {
+        let alpha = u32::from(*a);
+        if alpha > 0 && alpha < 255 {
+            for c in [r, g, b] {
+                *c = u8::try_from(u32::from(*c) * 255 / alpha).unwrap_or(u8::MAX);
+            }
+        }
+    }
+    Some(rgba)
+}
+
+async fn notify_project_on(bus: Bus, image: Option<Vec<u8>>, summary: String, body: String) {
+    let builder = match &bus {
+        Bus::Given(address) => zbus::connection::Builder::address(address.as_str()),
+        Bus::Session => zbus::connection::Builder::session(),
+    };
+    let connection = match builder.build().await {
+        Ok(connection) => connection,
+        Err(err) => {
+            tracing::warn!(%err, "no session bus: a notification is not sent");
+            return;
+        }
+    };
+    let mut hints: std::collections::HashMap<&str, zbus::Variant<'_>> =
+        std::collections::HashMap::new();
+    if let Some(data) = image {
+        let side = MONOGRAM_SIDE as i32;
+        hints.insert(
+            "image-data",
+            zbus::Variant::new((side, side, side * 4, true, 8i32, 4i32, data)),
+        );
+    }
+    let sent = connection
+        .call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            &(
+                "Hocuspanda",
+                0u32,
+                "",
+                summary.as_str(),
+                body.as_str(),
+                Vec::<&str>::new(),
+                hints,
+                -1i32,
+            ),
+        )
+        .await;
+    if let Err(err) = sent {
+        tracing::warn!(%err, "a notification is not sent");
+    }
 }
 
 async fn notify_on(bus: Bus, icon: &str, summary: String) {

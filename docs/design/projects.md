@@ -647,9 +647,115 @@ A comes first; B needs A; C and D need B and not each other.
   table; the agents' folders' file is read, which lot D writes. Made, the
   launcher's toast says so.
 - **The card** while open: the header, the desktop's sketch and its
-  windows with where each is, the private windows' line. Its terminals,
-  tabs and agents, and "Fermer le projet…", come with lots B to D, as do
-  the list's details per window.
+  windows with where each is, the private windows' line. Its terminals
+  and "Fermer le projet…" came with lot B; its tabs and agents, and the
+  list's details per window, come with lots C and D.
 - **Tests** (`crates/hocus-compositor/tests/projects.rs`): 1, 2, 3 and
   12. Screenshots: `HOCUS_SHOTS=… cargo nextest run -p hocus-compositor
   projects_shots:: --run-ignored only`.
+
+### Lot B, closing and reopening, applications and terminals (2026-11-14)
+
+- **Closing** (`crates/hocus-compositor/src/project_life.rs`): "Fermer le
+  projet…" in the list of a project's tile or dot (under a divider) and
+  on its open card asks for the confirmation (`ToCompositor::ProjectCloseAsk`):
+  the project's windows are read off the loop first (the projects'
+  thread: each window's desktop entry, a terminal's folder and program,
+  §8.2), then the shell's dialog (`hocus-project-close`, 480 px, centred
+  on the project's screen) shows what comes back (an application and how
+  many windows, "Un terminal dans hocus-site", "… ne reviendra pas" for a
+  window without a desktop entry) and, in amber, an agent working or
+  waiting on the desktop and each terminal's foreground program. The
+  compositor draws its dim (`rgba(7,9,15,0.45)`) under it; from the
+  overview, the overview closes first. `Enter` closes, `Esc` cancels, the
+  keyboard rests on "Fermer le projet". Confirmed (`ProjectClose`, or
+  `project-close NAME` on the Settings' line), the windows' places are
+  taken on the loop, read off it, and each window is asked to close as
+  `Super+Q` does; the project waits for them, 30 s at most; one still
+  there stays, on what is then a plain desktop, and the toast names it.
+  Those that closed are written to `projects.d/ID.toml` (`0600`), the
+  project is closed, a desktop the session added for it taken out, and a
+  toast says "hocus-site est fermé, ses 3 fenêtres gardées." then, fainter,
+  "Super+Espace, « projet hocus-site » : il revient." (at the board's own
+  size, not the launcher's × 1.5).
+- **The saved format** (§9): a window is the session's `[[window]]` with a
+  `[window.terminal]` table (`folder`); lots C and D add `[window.browser]`
+  and `[window.agent]` beside it. The session's file gains `[[project]]`
+  (`id`, `screen`, `desktop`) for each open project.
+- **Terminals** (`crates/hocus-compositor/src/terminals.rs`): a window
+  whose entry has `TerminalEmulator` in its categories, or whose app id is
+  in §8.2's table. The client's children with a controlling terminal are
+  its shells (`/proc/PID/stat`, `cwd`); one window of its process: its
+  first shell; several (a terminal's server): the last started inside the
+  project's folder, else that folder (outside a project, the last
+  started). The foreground program is `tpgid`'s command line when it is
+  not the shell's group. Every terminal on any desktop is saved with its
+  folder by the session's thread (§13, C), read again as the session
+  ends; started again with its folder as its working directory and the
+  table's option.
+- **Reopening** (`project-open NAME [SCREEN]`, the launcher, the closed
+  card's "Rouvrir"): the current desktop when free (no window of its own,
+  not a project, nothing coming back to it), else the first free one,
+  else one more (the session's, `[desktops] count` in the file
+  untouched), nine at most; none free, `ProjectNoRoom`: the launcher opens
+  again saying "Plus de bureau libre : ferme un projet ou une fenêtre.
+  « blog » attend un bureau libre." in amber over the open projects, whose
+  `Enter` is then "Entrée le ferme…" (their confirmation) (§13, H). The
+  screen switches there, then the windows come back through the session
+  restore's machinery, generalised (`session/restore.rs`, `Comeback`):
+  each application once, each terminal in its folder (its folder gone:
+  `$HOME`), the windows matched by app id in order to their places on that
+  desktop, 30 s of patience; the project's file goes once everything came
+  back or was dropped. What did not come back is one notification, its
+  image the project's monogram (`image-data`, drawn by the compositor):
+  "blog est revenu, sauf Slack", its body the session's sentence ("Slack
+  n'a pas pu être rouverte.") and "Le dossier ~/code/blog n'existe plus."
+  when the folder went; three names at most, then "et 2 autres".
+- **The launcher** (board 2): `projet` / `project` then a space lists
+  "PROJETS" (open first by desktop, then closed newest first) and "DÉPÔTS
+  GIT RÉCENTS" (three, the shell's thread, none a project's folder), no
+  application nor web row; nothing found says so. A project's name alone
+  finds it too, its row before the applications (§13, I). `Enter`: an
+  open one's desktop (`ProjectGo`), a closed one reopens (`ProjectOpen`),
+  a repository becomes a project (`ProjectNew`) on the desktop §7
+  chooses, named after its folder, a terminal opening in it when that
+  desktop is empty (§13, B). `→` on a closed one shows its card, centred.
+  The compositor tells the shell the projects (`projects` line) as it
+  connects and as they change: a closed one's windows are what will come
+  back.
+- **The card** (board 5), open and closed: the sketch draws every window
+  at its place and size, back to front, each in its rim (the focused one
+  in the accent) with its icon; "TERMINAUX" lists each terminal's folder
+  and application; "Fermer le projet…" (open) or "Rouvrir" (closed, the
+  accent). Closed: grey badge and pill "fermé", "fermé hier à 18:40" /
+  "fermé le 2 novembre".
+- **Log out and log in** (§9): `[session] restore = true`, the projects
+  stay open in their file and their windows come back on their desktops
+  with the session's (terminals in their folders). `false`: as the next
+  session begins, each project still open is closed, its windows of the
+  session's file (on its screen and desktop) its contents; done then
+  rather than at log out, so that a session that ended without logging
+  out (a crash) closes them too.
+- **A screen unplugged** (§1): a project goes with its windows onto the
+  same-numbered desktop of the screen they go to, unless that one is a
+  project (it then waits for its screen); the screen back, it goes back
+  (`away-from` in the projects' file).
+- **Not in this lot**: the list's per-window details ("7 onglets", a
+  terminal's folder, "agent au travail") — a terminal's folder there would
+  be read as the list opens, which §8 does not allow; the tabs (C), the
+  agents' rows, resume commands and the confirmation's "qui reprendra sa
+  conversation" (D).
+- **Tests** (`crates/hocus-compositor/tests/projects.rs`): 4
+  (`closing_saves_the_windows_that_close_and_leaves_a_plain_desktop`), 5
+  (`a_terminal_comes_back_in_its_shells_folder`: the test's own program
+  as `foot`, its shell a `sleep` on a pty of its own), 8
+  (`reopening_takes_the_current_empty_desktop_else_the_first_else_one_more`),
+  9 (`what_did_not_come_back_is_named_in_one_notification`, a
+  notifications server on a bus of the test's), 10
+  (`log_out_and_in_brings_the_open_projects_back_or_closes_them`), 11
+  (`the_launcher_lists_projects_then_repositories_and_enter_does_each`, the
+  real shell: here rather than in `launcher.rs`, beside the projects'
+  harness), and the screen's
+  (`a_project_follows_its_windows_to_another_screen_and_back`).
+  Screenshots: `HOCUS_SHOTS=… cargo nextest run -p hocus-compositor
+  projects_shots::closing_and_reopening --run-ignored only`.

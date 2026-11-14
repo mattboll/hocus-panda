@@ -81,10 +81,28 @@ const WRAPPERS: [&str; 7] = ["env", "flatpak", "snap", "sh", "bash", "dex", "gtk
 pub struct Saved {
     #[serde(rename = "window")]
     pub windows: Vec<SavedWindow>,
+    /// The projects open as it ended (docs/design/projects.md §9).
+    #[serde(rename = "project", skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<SessionProject>,
+}
+
+/// A project open as the session ended: its id, screen and desktop (from
+/// 1). With `[session] restore = false`, its windows of this file become
+/// its contents, and it is closed.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SessionProject {
+    pub id: String,
+    pub screen: String,
+    pub desktop: usize,
 }
 
 /// A window as saved. Places are logical pixels from its screen's
 /// top-left corner.
+///
+/// What a project keeps of a window besides (docs/design/projects.md §6)
+/// goes in tables of its own: `terminal` (lot B); a browser's tabs
+/// (`browser`, lot C) and an agent's conversation (`agent`, lot D) are
+/// added beside it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct SavedWindow {
@@ -107,6 +125,19 @@ pub struct SavedWindow {
     /// Its opacity in percent (#735), when not opaque.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opacity: Option<u8>,
+    /// A terminal's folder (§8.2), which it opens in again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<SavedTerminal>,
+    /// Its client's process, for its thread to read a terminal's folder;
+    /// never written.
+    #[serde(skip)]
+    pub pid: Option<u32>,
+}
+
+/// A terminal window's folder.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SavedTerminal {
+    pub folder: PathBuf,
 }
 
 /// A window's state, as saved.
@@ -142,7 +173,7 @@ impl Shape {
         }
     }
 
-    fn mode(self) -> Mode {
+    pub(crate) fn mode(self) -> Mode {
         let zone = match self {
             Self::Floating => return Mode::Floating,
             Self::Fullscreen => return Mode::Fullscreen,
@@ -171,18 +202,41 @@ impl Saved {
              # log in ([session] restore in config.toml). Written by Hocuspanda.\n{body}"
         )
     }
+}
 
-    /// The applications to start: each entry once, in the order of their
-    /// first window.
-    pub fn entries(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for w in &self.windows {
-            if !w.entry.is_empty() && !out.contains(&w.entry) {
-                out.push(w.entry.clone());
+/// What starts to bring `windows` back: each application once, in the
+/// order of their first window, and each terminal with a folder on its own
+/// (§8.2).
+pub fn starts_of(windows: &[SavedWindow]) -> Vec<Start> {
+    let mut out: Vec<Start> = Vec::new();
+    for w in windows.iter().filter(|w| !w.entry.is_empty()) {
+        match &w.terminal {
+            Some(terminal) => out.push(Start {
+                entry: w.entry.clone(),
+                app_id: w.app_id.clone(),
+                folder: Some(terminal.folder.clone()),
+            }),
+            None => {
+                if !out.iter().any(|s| s.entry == w.entry && s.folder.is_none()) {
+                    out.push(Start {
+                        entry: w.entry.clone(),
+                        app_id: w.app_id.clone(),
+                        folder: None,
+                    });
+                }
             }
         }
-        out
     }
+    out
+}
+
+/// A program started to bring windows back: its desktop entry, the app id
+/// of its windows, and the folder a terminal opens in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Start {
+    pub entry: String,
+    pub app_id: String,
+    pub folder: Option<PathBuf>,
 }
 
 fn array(r: Rect) -> [i32; 4] {
@@ -201,10 +255,13 @@ fn never(id: &str) -> bool {
     NEVER.iter().any(|n| id.eq_ignore_ascii_case(n))
 }
 
-/// The session's saving and restoring, on the loop.
+/// The session's saving and restoring, on the loop, and the projects'
+/// windows coming back (docs/design/projects.md §7), the same way.
 #[derive(Debug, Default)]
 pub struct Restore {
     phase: Phase,
+    /// The closed projects reopening, each its windows coming back.
+    projects: Vec<Comeback>,
     /// The saving thread; none: nothing is saved (not a session).
     saver: Option<mpsc::Sender<Job>>,
     /// The save asked for after a change.
@@ -212,7 +269,7 @@ pub struct Restore {
     /// Logging out: the windows that close are not the session's.
     held: bool,
     /// What the thread was last given.
-    last: Option<Vec<SavedWindow>>,
+    last: Option<(Vec<SavedWindow>, Vec<SessionProject>)>,
     /// The applications that did not come back, as last said.
     not_back: Vec<String>,
 }
@@ -225,23 +282,35 @@ enum Phase {
     /// Read as the compositor started; the applications start once the
     /// bar shows.
     Waiting(Vec<SavedWindow>),
-    Restoring(Restoring),
+    Restoring(Comeback),
     Done,
 }
 
+/// Whose windows come back: the last session's, or a project's (its id).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Whose {
+    Session,
+    Project(String),
+}
+
+/// Windows coming back: the saved places not taken yet, the programs
+/// started for them.
 #[derive(Debug)]
-struct Restoring {
+pub struct Comeback {
+    whose: Whose,
     /// The saved windows not back yet, in their order.
     pending: VecDeque<SavedWindow>,
-    apps: Vec<App>,
+    starts: Vec<Started>,
     /// Those that did not come back were said.
     told: bool,
+    /// The project's folder is gone: its terminals opened in `$HOME`.
+    folder_gone: Option<PathBuf>,
     timer: Option<RegistrationToken>,
     heard: Option<RegistrationToken>,
 }
 
 #[derive(Debug)]
-struct App {
+struct Started {
     entry: String,
     name: String,
     back: Back,
@@ -270,39 +339,51 @@ impl Back {
 
 /// What the saving thread does, in the order asked.
 enum Job {
-    Write(Vec<SavedWindow>),
+    /// The windows, the projects open, and the projects' folders by
+    /// their screens and desktops (from 1).
+    Write(
+        Vec<SavedWindow>,
+        Vec<SessionProject>,
+        Vec<(String, usize, PathBuf)>,
+    ),
     /// Answers once everything asked before is done.
     Flush(mpsc::Sender<()>),
 }
 
-/// What the restoring threads say.
+/// What the restoring threads say of start `.0` (its place in the
+/// comeback's starts).
 #[derive(Debug)]
 pub enum Heard {
     /// An application's name, and whether the autostart starts it.
     Named {
-        entry: String,
+        at: usize,
         name: String,
         autostarted: bool,
     },
-    Outcome(String, Outcome),
+    Outcome(usize, Outcome),
+    /// The project's folder is not there.
+    FolderGone(PathBuf),
 }
 
 impl State {
     /// The compositor is the user's session (or a test asks as much),
     /// before its loop runs: the session is saved from now on, and the
     /// last one, read now, is restored once the bar shows unless
-    /// `[session] restore` is off.
+    /// `[session] restore` is off: then the projects open as it ended
+    /// are closed, its windows on their desktops their contents.
     pub(crate) fn session_begin(&mut self) {
         let Some(dir) = self.config.state_dir.clone() else {
             return;
         };
         self.session_restore.saver = start_saver(dir.clone(), self.config.applications.clone());
+        let read = read_saved(&dir);
         if !self.config.session.restore {
             tracing::info!("the last session is not restored: [session] restore = false");
             self.session_restore.phase = Phase::Done;
+            self.projects_left_open(&read);
             return;
         }
-        let windows: Vec<SavedWindow> = read_saved(&dir)
+        let windows: Vec<SavedWindow> = read
             .windows
             .into_iter()
             .filter(|w| !w.entry.is_empty() && !never(&w.entry) && !never(&w.app_id))
@@ -328,124 +409,193 @@ impl State {
         let Phase::Waiting(windows) = std::mem::take(&mut self.session_restore.phase) else {
             return;
         };
-        let saved = Saved { windows };
-        let entries = saved.entries();
+        let comeback = self.comeback_start(Whose::Session, windows, autostart, None);
+        self.session_restore.phase = Phase::Restoring(comeback);
+    }
+
+    /// `windows` come back for `whose`: each start off the loop, as
+    /// session children, the places taken as their windows map, those
+    /// not taken dropped after [`PATIENCE`]. A project's `folder` is
+    /// looked at: gone, its terminals open in `$HOME`.
+    pub(crate) fn comeback_start(
+        &mut self,
+        whose: Whose,
+        windows: Vec<SavedWindow>,
+        autostart: Vec<PathBuf>,
+        folder: Option<PathBuf>,
+    ) -> Comeback {
+        let starts = starts_of(&windows);
         tracing::info!(
-            windows = saved.windows.len(),
-            applications = ?entries,
-            "the last session comes back"
+            ?whose,
+            windows = windows.len(),
+            starts = ?starts.iter().map(|s| s.entry.as_str()).collect::<Vec<_>>(),
+            "windows come back"
         );
         let (to, from) = channel::channel::<Heard>();
+        let of = whose.clone();
         let heard = self
             .loop_handle
-            .insert_source(from, |event, _, app| {
+            .insert_source(from, move |event, _, app| {
                 if let channel::Event::Msg(heard) = event {
-                    app.state.session_heard(heard);
+                    app.state.comeback_heard(&of, heard);
                 }
             })
             .map_err(|err| tracing::warn!(%err.error, "the restored applications are not heard"))
             .ok();
+        let of = whose.clone();
         let timer = self
             .loop_handle
-            .insert_source(Timer::from_duration(PATIENCE), |_, _, app| {
-                if let Phase::Restoring(r) = &mut app.state.session_restore.phase {
-                    r.timer = None;
+            .insert_source(Timer::from_duration(PATIENCE), move |_, _, app| {
+                if let Some(c) = app.state.comeback_mut(&of) {
+                    c.timer = None;
                 }
-                app.state.session_restore_over();
+                app.state.comeback_over(&of);
                 TimeoutAction::Drop
             })
             .map_err(|err| tracing::warn!(%err.error, "the restore has no end"))
             .ok();
-        self.session_restore.phase = Phase::Restoring(Restoring {
-            pending: saved.windows.into(),
-            apps: entries
+        relaunch(
+            Relaunch {
+                starts: starts.clone(),
+                applications: self.config.applications.clone(),
+                autostart,
+                env: Env::of(self),
+                terminal: self.config.programs.terminal.clone(),
+                folder,
+                home: self.config.home.clone(),
+            },
+            to,
+        );
+        Comeback {
+            whose,
+            pending: windows.into(),
+            starts: starts
                 .iter()
-                .map(|e| App {
-                    entry: e.clone(),
-                    name: e.clone(),
+                .map(|s| Started {
+                    entry: s.entry.clone(),
+                    name: s.entry.clone(),
                     back: Back::Starting,
                 })
                 .collect(),
             told: false,
+            folder_gone: None,
             timer,
             heard,
-        });
-        relaunch(
-            entries,
-            self.config.applications.clone(),
-            autostart,
-            Env::of(self),
-            self.config.programs.terminal.clone(),
-            to,
-        );
+        }
     }
 
-    fn session_heard(&mut self, heard: Heard) {
-        let Phase::Restoring(r) = &mut self.session_restore.phase else {
+    /// A project's windows come back.
+    pub(crate) fn comeback_add(&mut self, comeback: Comeback) {
+        self.session_restore.projects.push(comeback);
+    }
+
+    fn comeback_mut(&mut self, whose: &Whose) -> Option<&mut Comeback> {
+        match whose {
+            Whose::Session => match &mut self.session_restore.phase {
+                Phase::Restoring(c) => Some(c),
+                _ => None,
+            },
+            Whose::Project(_) => self
+                .session_restore
+                .projects
+                .iter_mut()
+                .find(|c| c.whose == *whose),
+        }
+    }
+
+    fn comeback_heard(&mut self, whose: &Whose, heard: Heard) {
+        let Some(c) = self.comeback_mut(whose) else {
             return;
         };
         match heard {
             Heard::Named {
-                entry,
+                at,
                 name,
                 autostarted,
             } => {
-                if let Some(app) = r.apps.iter_mut().find(|a| a.entry == entry) {
-                    app.name = name;
-                    if autostarted && app.back == Back::Starting {
-                        app.back = Back::Autostarted;
+                if let Some(start) = c.starts.get_mut(at) {
+                    start.name = name;
+                    if autostarted && start.back == Back::Starting {
+                        start.back = Back::Autostarted;
                     }
                 }
             }
-            Heard::Outcome(entry, outcome) => {
-                let Some(app) = r.apps.iter_mut().find(|a| a.entry == entry) else {
+            Heard::FolderGone(folder) => c.folder_gone = Some(folder),
+            Heard::Outcome(at, outcome) => {
+                let Some(start) = c.starts.get_mut(at) else {
                     return;
                 };
-                if app.back.decided() {
+                if start.back.decided() {
                     return;
                 }
                 let failed = match outcome {
                     Outcome::Started => {
-                        app.back = Back::Running;
+                        start.back = Back::Running;
                         false
                     }
                     Outcome::Ended(true) => {
-                        app.back = Back::Ended;
+                        start.back = Back::Ended;
                         false
                     }
                     Outcome::Failed | Outcome::Ended(false) => {
-                        app.back = Back::Failed;
+                        start.back = Back::Failed;
                         true
                     }
                 };
                 if failed {
-                    tracing::info!(app = entry, "a restored application did not come back");
-                    r.pending.retain(|w| w.entry != entry);
+                    let entry = start.entry.clone();
+                    tracing::info!(app = entry, "an application did not come back");
+                    // Its windows wait no more, unless another start of
+                    // the same entry may bring them.
+                    let more = c
+                        .starts
+                        .iter()
+                        .any(|s| s.entry == entry && !s.back.decided());
+                    if !more {
+                        c.pending.retain(|w| w.entry != entry);
+                    } else if let Some(at) = c.pending.iter().position(|w| w.entry == entry) {
+                        c.pending.remove(at);
+                    }
                 }
             }
         }
-        self.session_check_done();
+        self.comeback_check(whose);
     }
 
     /// Window `id` of `window` mapped (not a dialog): it takes the first
-    /// saved place of its application still waiting.
+    /// saved place of its application still waiting, the last session's
+    /// first, then a reopening project's.
     pub(crate) fn session_window_mapped(&mut self, id: WindowId, window: &Window) {
-        if let Phase::Restoring(r) = &mut self.session_restore.phase
-            && let Some(app) = app_id(window)
-            && let Some(at) = r.pending.iter().position(|w| w.app_id == app).or_else(|| {
-                r.pending
-                    .iter()
-                    .position(|w| w.app_id.eq_ignore_ascii_case(&app))
-            })
-            && let Some(saved) = r.pending.remove(at)
-        {
-            if let Some(a) = r.apps.iter_mut().find(|a| a.entry == saved.entry)
-                && a.back != Back::Autostarted
-            {
-                a.back = Back::Windowed;
+        if let Some(app) = app_id(window) {
+            let restore = &mut self.session_restore;
+            let comebacks = match &mut restore.phase {
+                Phase::Restoring(c) => Some(c),
+                _ => None,
             }
-            self.session_put_back(id, &saved);
-            self.session_check_done();
+            .into_iter()
+            .chain(restore.projects.iter_mut());
+            let mut taken = None;
+            for c in comebacks {
+                if let Some(at) = c.pending.iter().position(|w| w.app_id == app).or_else(|| {
+                    c.pending
+                        .iter()
+                        .position(|w| w.app_id.eq_ignore_ascii_case(&app))
+                }) && let Some(saved) = c.pending.remove(at)
+                {
+                    if let Some(s) = c.starts.iter_mut().find(|s| {
+                        s.entry == saved.entry
+                            && !matches!(s.back, Back::Windowed | Back::Autostarted)
+                    }) {
+                        s.back = Back::Windowed;
+                    }
+                    taken = Some((c.whose.clone(), saved));
+                    break;
+                }
+            }
+            if let Some((whose, saved)) = taken {
+                self.session_put_back(id, &saved);
+                self.comeback_check(&whose);
+            }
         }
         self.session_changed();
     }
@@ -453,11 +603,15 @@ impl State {
     /// The size a window about to open is first told: its saved place's,
     /// when it will take one floating.
     pub(crate) fn session_first_size(&self, window: &Window) -> Option<(i32, i32)> {
-        let Phase::Restoring(r) = &self.session_restore.phase else {
-            return None;
-        };
         let app = app_id(window)?;
-        let saved = r.pending.iter().find(|w| w.app_id == app)?;
+        let restore = &self.session_restore;
+        let saved = match &restore.phase {
+            Phase::Restoring(c) => Some(c),
+            _ => None,
+        }
+        .into_iter()
+        .chain(restore.projects.iter())
+        .find_map(|c| c.pending.iter().find(|w| w.app_id == app))?;
         (saved.state == Shape::Floating).then(|| (saved.place[2].max(1), saved.place[3].max(1)))
     }
 
@@ -550,69 +704,91 @@ impl State {
         self.redraw = true;
     }
 
-    /// Once every application came back or failed, those that did not are
-    /// said; once every window is back too, the restore is over.
-    fn session_check_done(&mut self) {
-        let Phase::Restoring(r) = &mut self.session_restore.phase else {
+    /// Once every start came back or failed, those that did not are said;
+    /// once every window is back too, the comeback is over.
+    fn comeback_check(&mut self, whose: &Whose) {
+        let Some(c) = self.comeback_mut(whose) else {
             return;
         };
         let mut say = None;
-        if !r.told && r.apps.iter().all(|a| a.back.decided()) {
-            r.told = true;
-            say = Some(
-                r.apps
-                    .iter()
-                    .filter(|a| a.back == Back::Failed)
-                    .map(|a| a.name.clone())
-                    .collect::<Vec<String>>(),
-            );
+        if !c.told && c.starts.iter().all(|a| a.back.decided()) {
+            c.told = true;
+            say = Some(failed_names(c, |b| b == Back::Failed));
         }
-        let over = r.told && r.pending.is_empty();
+        let over = c.told && c.pending.is_empty();
+        let gone = c.folder_gone.clone();
         if let Some(names) = say {
-            self.session_report(names);
+            self.comeback_report(whose, names, gone);
         }
         if over {
-            self.session_restore_finish();
+            self.comeback_finish(whose);
         }
     }
 
-    /// [`PATIENCE`] after the applications started: the places not taken
-    /// are dropped; the applications without a window did not come back.
-    fn session_restore_over(&mut self) {
-        let Phase::Restoring(r) = &mut self.session_restore.phase else {
+    /// [`PATIENCE`] after the starts: the places not taken are dropped;
+    /// the applications without a window did not come back.
+    fn comeback_over(&mut self, whose: &Whose) {
+        let Some(c) = self.comeback_mut(whose) else {
             return;
         };
-        if !r.pending.is_empty() {
+        if !c.pending.is_empty() {
             tracing::info!(
-                left = r.pending.len(),
-                "the last session's places not taken are dropped"
+                left = c.pending.len(),
+                ?whose,
+                "places not taken are dropped"
             );
         }
-        r.pending.clear();
-        let say = (!r.told).then(|| {
-            r.apps
-                .iter()
-                .filter(|a| !matches!(a.back, Back::Windowed | Back::Autostarted))
-                .map(|a| a.name.clone())
-                .collect::<Vec<String>>()
-        });
-        r.told = true;
+        c.pending.clear();
+        let say = (!c.told)
+            .then(|| failed_names(c, |b| !matches!(b, Back::Windowed | Back::Autostarted)));
+        c.told = true;
+        let gone = c.folder_gone.clone();
         if let Some(names) = say {
-            self.session_report(names);
+            self.comeback_report(whose, names, gone);
         }
-        self.session_restore_finish();
+        self.comeback_finish(whose);
     }
 
-    fn session_restore_finish(&mut self) {
-        let Phase::Restoring(r) = std::mem::replace(&mut self.session_restore.phase, Phase::Done)
-        else {
+    fn comeback_finish(&mut self, whose: &Whose) {
+        let comeback = match whose {
+            Whose::Session => {
+                match std::mem::replace(&mut self.session_restore.phase, Phase::Done) {
+                    Phase::Restoring(c) => Some(c),
+                    other => {
+                        self.session_restore.phase = other;
+                        None
+                    }
+                }
+            }
+            Whose::Project(_) => {
+                let at = self
+                    .session_restore
+                    .projects
+                    .iter()
+                    .position(|c| c.whose == *whose);
+                at.map(|at| self.session_restore.projects.remove(at))
+            }
+        };
+        let Some(comeback) = comeback else {
             return;
         };
-        for token in [r.timer, r.heard].into_iter().flatten() {
+        for token in [comeback.timer, comeback.heard].into_iter().flatten() {
             self.loop_handle.remove(token);
         }
-        tracing::info!("the last session is back");
+        match whose {
+            Whose::Session => tracing::info!("the last session is back"),
+            Whose::Project(id) => self.project_back(id),
+        }
         self.session_changed();
+    }
+
+    /// What did not come back for `whose`, `names`; `gone`, a project's
+    /// folder that is not there: one notification.
+    fn comeback_report(&mut self, whose: &Whose, names: Vec<String>, gone: Option<PathBuf>) {
+        match whose {
+            Whose::Session => self.session_report(names),
+            Whose::Project(id) => self.project_not_back(id, names, gone),
+        }
     }
 
     /// The applications that did not come back, `names`: one notification.
@@ -645,6 +821,34 @@ impl State {
         )
     }
 
+    /// Whether project `id`'s windows are still coming back.
+    pub(crate) fn project_coming_back(&self, id: &str) -> bool {
+        self.session_restore
+            .projects
+            .iter()
+            .any(|c| c.whose == Whose::Project(id.to_owned()))
+    }
+
+    /// The windows still waiting to come back on `screen`'s desktop
+    /// `desktop` (from 1): a project's desktop reopening is not empty.
+    pub(crate) fn coming_back_to(&self, screen: &str, desktop: usize) -> bool {
+        let restore = &self.session_restore;
+        let session = match &restore.phase {
+            Phase::Waiting(w) => w.iter().any(|w| w.screen == screen && w.desktop == desktop),
+            Phase::Restoring(c) => c
+                .pending
+                .iter()
+                .any(|w| w.screen == screen && w.desktop == desktop),
+            Phase::Off | Phase::Done => false,
+        };
+        session
+            || restore.projects.iter().any(|c| {
+                c.pending
+                    .iter()
+                    .any(|w| w.screen == screen && w.desktop == desktop)
+            })
+    }
+
     // --- Saving ------------------------------------------------------------------------
 
     /// Windows changed: the session is saved a moment later.
@@ -668,24 +872,58 @@ impl State {
 
     /// Saves the session now, if it changed since it last was.
     pub(crate) fn session_save(&mut self) {
+        self.session_save_as(false);
+    }
+
+    /// Saves the session now; `again`, even when its windows did not
+    /// change: the terminals' folders, which the thread reads, may have.
+    fn session_save_as(&mut self, again: bool) {
         let Some(saver) = &self.session_restore.saver else {
             return;
         };
-        let snapshot = self.session_snapshot();
-        if self.session_restore.last.as_ref() == Some(&snapshot) {
+        let snapshot = (self.session_snapshot(), self.session_projects());
+        if !again && self.session_restore.last.as_ref() == Some(&snapshot) {
             return;
         }
-        if saver.send(Job::Write(snapshot.clone())).is_err() {
+        let folders = self
+            .projects
+            .list
+            .iter()
+            .filter_map(|p| {
+                let open = p.open.as_ref()?;
+                Some((open.screen.clone(), open.desktop, p.folder.clone()))
+            })
+            .collect();
+        if saver
+            .send(Job::Write(snapshot.0.clone(), snapshot.1.clone(), folders))
+            .is_err()
+        {
             tracing::warn!("the session's thread is gone: not saved");
             return;
         }
         self.session_restore.last = Some(snapshot);
     }
 
+    /// The projects open now, as the session's file keeps them.
+    fn session_projects(&self) -> Vec<SessionProject> {
+        self.projects
+            .list
+            .iter()
+            .filter_map(|p| {
+                let open = p.open.as_ref()?;
+                Some(SessionProject {
+                    id: p.id.clone(),
+                    screen: open.screen.clone(),
+                    desktop: open.desktop,
+                })
+            })
+            .collect()
+    }
+
     /// Log out asks the windows to close: the session as it is now is
-    /// saved, and nothing after.
+    /// saved, its terminals' folders read again, and nothing after.
     pub(crate) fn session_leaving(&mut self) {
-        self.session_save();
+        self.session_save_as(true);
         self.session_restore.held = true;
         if let Some(token) = self.session_restore.timer.take() {
             self.loop_handle.remove(token);
@@ -701,7 +939,7 @@ impl State {
     /// and written before it goes, [`EXIT_PATIENCE`] at most.
     pub fn session_end(&mut self) {
         if !self.session_restore.held {
-            self.session_save();
+            self.session_save_as(true);
         }
         if !self.session_flush(EXIT_PATIENCE) {
             tracing::warn!("the session's last save was not written in time");
@@ -745,12 +983,16 @@ impl State {
             Phase::Restoring(r) => out.extend(r.pending.iter().cloned()),
             Phase::Off | Phase::Done => {}
         }
+        // A project's windows still coming back are its desktop's.
+        for c in &self.session_restore.projects {
+            out.extend(c.pending.iter().cloned());
+        }
         out
     }
 
     /// Window `id` as saved, its entry left to the thread: none for a
     /// dialog, the Settings and the shell's.
-    fn session_window(&self, id: WindowId) -> Option<SavedWindow> {
+    pub(crate) fn session_window(&self, id: WindowId) -> Option<SavedWindow> {
         if self.model.parent(id).is_some() {
             return None;
         }
@@ -790,6 +1032,8 @@ impl State {
                 above,
                 everywhere,
                 opacity,
+                terminal: None,
+                pid: self.pid_of(&managed.window),
             });
         }
         let output = self.output_of(id)?;
@@ -815,8 +1059,27 @@ impl State {
             above,
             everywhere,
             opacity,
+            terminal: None,
+            pid: self.pid_of(&managed.window),
         })
     }
+}
+
+/// The names of `c`'s starts whose state `failed` says did not come back,
+/// each once.
+fn failed_names(c: &Comeback, failed: impl Fn(Back) -> bool) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for s in c.starts.iter().filter(|s| failed(s.back)) {
+        if !names.contains(&s.name) {
+            names.push(s.name.clone());
+        }
+    }
+    names
+}
+
+/// " et " / " and ": the last of a list's joint.
+pub fn and_word(lang: hocus_words::Lang) -> &'static str {
+    txt::AND.get(lang)
 }
 
 /// "Slack et Signal n'ont pas pu être rouvertes." / "Slack and Signal
@@ -872,13 +1135,20 @@ fn start_saver(dir: PathBuf, applications: Vec<PathBuf>) -> Option<mpsc::Sender<
 
 /// The desktop entries, read again when an app id finds none and they
 /// were read a while ago (an application installed meanwhile).
-struct Entries {
+pub(crate) struct Entries {
     applications: Vec<PathBuf>,
     read: Option<(Vec<Entry>, Instant)>,
 }
 
 impl Entries {
     const AGAIN_AFTER: Duration = Duration::from_secs(30);
+
+    pub(crate) fn new(applications: Vec<PathBuf>) -> Self {
+        Self {
+            applications,
+            read: None,
+        }
+    }
 
     fn scan(&self) -> Vec<Entry> {
         desktop::scan_applications(
@@ -888,17 +1158,18 @@ impl Entries {
         )
     }
 
-    fn for_app(&mut self, app_id: &str) -> Option<String> {
+    /// The entry of the windows of `app_id`.
+    pub(crate) fn for_app(&mut self, app_id: &str) -> Option<Entry> {
         if self.read.is_none() {
             self.read = Some((self.scan(), Instant::now()));
         }
         let found = |read: &Option<(Vec<Entry>, Instant)>| {
             read.as_ref()
                 .and_then(|(e, _)| desktop::entry_for_app(e, app_id))
-                .map(|e| e.id.clone())
+                .cloned()
         };
-        if let Some(id) = found(&self.read) {
-            return Some(id);
+        if let Some(entry) = found(&self.read) {
+            return Some(entry);
         }
         if self
             .read
@@ -910,27 +1181,58 @@ impl Entries {
         }
         None
     }
+
+    /// The entry of id `id`.
+    pub(crate) fn by_id(&mut self, id: &str) -> Option<Entry> {
+        if self.read.is_none() {
+            self.read = Some((self.scan(), Instant::now()));
+        }
+        self.read
+            .as_ref()
+            .and_then(|(e, _)| e.iter().find(|e| e.id == id))
+            .cloned()
+    }
+}
+
+/// The folder of terminal window `window` of `entry` (§8.2), its process
+/// serving `windows` windows, in the project of folder `within` if it is
+/// in one: read from `/proc`, off the loop.
+pub(crate) fn terminal_of(
+    window: &SavedWindow,
+    entry: &Entry,
+    windows: usize,
+    within: Option<&Path>,
+) -> Option<crate::terminals::Found> {
+    if !crate::terminals::is_terminal_entry(entry)
+        && !crate::terminals::is_terminal_app(&window.app_id)
+    {
+        return None;
+    }
+    crate::terminals::read(window.pid?, windows, within)
 }
 
 fn save_jobs(dir: &Path, applications: &[PathBuf], jobs: &mpsc::Receiver<Job>) {
-    let mut entries = Entries {
-        applications: applications.to_vec(),
-        read: None,
-    };
+    let mut entries = Entries::new(applications.to_vec());
     let mut written: Option<String> = None;
     while let Ok(job) = jobs.recv() {
-        let windows = match job {
+        let (windows, projects, folders) = match job {
             Job::Flush(done) => {
                 let _ = done.send(());
                 continue;
             }
-            Job::Write(windows) => windows,
+            Job::Write(windows, projects, folders) => (windows, projects, folders),
         };
-        let mut saved = Saved::default();
-        for mut window in windows {
-            if window.entry.is_empty() {
+        let mut saved = Saved {
+            windows: Vec::new(),
+            projects,
+        };
+        for mut window in windows.iter().cloned() {
+            let entry = if window.entry.is_empty() {
                 match entries.for_app(&window.app_id) {
-                    Some(id) if !never(&id) => window.entry = id,
+                    Some(e) if !never(&e.id) => {
+                        window.entry.clone_from(&e.id);
+                        Some(e)
+                    }
                     Some(_) => continue,
                     None => {
                         tracing::debug!(
@@ -940,6 +1242,27 @@ fn save_jobs(dir: &Path, applications: &[PathBuf], jobs: &mpsc::Receiver<Job>) {
                         continue;
                     }
                 }
+            } else {
+                entries.by_id(&window.entry)
+            };
+            // Every terminal comes back in its folder (§13, C).
+            if window.terminal.is_none()
+                && let Some(entry) = &entry
+            {
+                let shared = windows
+                    .iter()
+                    .filter(|w| w.pid.is_some() && w.pid == window.pid)
+                    .count();
+                let within = folders
+                    .iter()
+                    .find(|(screen, desktop, _)| {
+                        *screen == window.screen && *desktop == window.desktop
+                    })
+                    .map(|(.., f)| f.as_path());
+                window.terminal =
+                    terminal_of(&window, entry, shared, within).map(|found| SavedTerminal {
+                        folder: found.folder,
+                    });
             }
             saved.windows.push(window);
         }
@@ -985,52 +1308,84 @@ fn starts_app(entry: &autostart::Entry, app: Option<&Entry>, id: &str) -> bool {
         || program(&app.argv).is_some_and(|p| program(&entry.argv) == Some(p))
 }
 
-/// Starts each of `apps` (desktop entries of `applications`) again, on
-/// threads: those that `autostart`'s entries start are only named.
-fn relaunch(
-    apps: Vec<String>,
+/// What [`relaunch`] starts, and with what.
+struct Relaunch {
+    starts: Vec<Start>,
     applications: Vec<PathBuf>,
-    autostart_dirs: Vec<PathBuf>,
+    /// The start-up applications' directories: those they start are only
+    /// named (the last session's only).
+    autostart: Vec<PathBuf>,
     env: Env,
     terminal: String,
-    heard: channel::Sender<Heard>,
-) {
-    on_a_thread("restore the session".to_owned(), move || {
+    /// A project's folder, looked at: gone, its terminals open in `home`.
+    folder: Option<PathBuf>,
+    home: Option<PathBuf>,
+}
+
+/// Starts each of `starts` (desktop entries of `applications`) again, on
+/// threads, each terminal in its folder (§8.2): those that the autostart
+/// starts are only named.
+fn relaunch(asked: Relaunch, heard: channel::Sender<Heard>) {
+    on_a_thread("bring windows back".to_owned(), move || {
         let locale = Locale::from_env();
         let desktops = [super::DESKTOP.to_owned()];
-        let entries = desktop::scan_applications(&applications, &locale, &desktops);
-        let starting: Vec<autostart::Entry> = autostart::scan(&autostart_dirs, &locale, &desktops)
+        let entries = desktop::scan_applications(&asked.applications, &locale, &desktops);
+        let starting: Vec<autostart::Entry> = autostart::scan(&asked.autostart, &locale, &desktops)
             .into_iter()
             .filter(autostart::Entry::starts)
             .collect();
-        for id in apps {
+        let home = asked
+            .home
+            .clone()
+            .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("/"));
+        let gone = asked.folder.as_ref().filter(|f| !f.is_dir()).cloned();
+        if let Some(folder) = &gone {
+            tracing::info!("a project's folder is gone: its terminals open in the home");
+            let _ = heard.send(Heard::FolderGone(folder.clone()));
+        }
+        for (at, start) in asked.starts.into_iter().enumerate() {
+            let id = start.entry.clone();
             let found = entries.iter().find(|e| e.id == id);
-            let autostarted = starting.iter().any(|a| starts_app(a, found, &id));
+            let autostarted =
+                start.folder.is_none() && starting.iter().any(|a| starts_app(a, found, &id));
             let name = found.map_or_else(|| id.clone(), |e| e.name.clone());
             let _ = heard.send(Heard::Named {
-                entry: id.clone(),
+                at,
                 name,
                 autostarted,
             });
             if autostarted {
-                tracing::info!(app = id, "of the last session, the autostart starts it");
+                tracing::info!(app = id, "the autostart starts it");
                 continue;
             }
             let Some(entry) = found else {
-                tracing::warn!(app = id, "of the last session, no longer installed");
-                let _ = heard.send(Heard::Outcome(id, Outcome::Failed));
+                tracing::warn!(app = id, "no longer installed");
+                let _ = heard.send(Heard::Outcome(at, Outcome::Failed));
                 continue;
             };
-            let launch = hocus_link::Launch {
+            let mut launch = hocus_link::Launch {
                 id: entry.id.clone(),
                 terminal: entry.terminal,
                 dir: entry.dir.clone().unwrap_or_default(),
                 argv: entry.argv.clone(),
             };
-            let term = launch.terminal.then(|| terminal.clone());
+            if let Some(folder) = &start.folder {
+                // A folder that went (the project's, or one under it):
+                // the home.
+                let folder = if folder.is_dir() { folder } else { &home };
+                let app = if crate::terminals::is_terminal_app(&start.app_id) {
+                    &start.app_id
+                } else {
+                    &entry.id
+                };
+                launch.argv = crate::terminals::in_folder(app, &entry.argv, folder);
+                launch.dir = folder.display().to_string();
+            }
+            let term = launch.terminal.then(|| asked.terminal.clone());
             let to = heard.clone();
-            programs::launch_watched(launch, term, env.clone(), move |outcome| {
-                let _ = to.send(Heard::Outcome(id.clone(), outcome));
+            programs::launch_watched(launch, term, asked.env.clone(), move |outcome| {
+                let _ = to.send(Heard::Outcome(at, outcome));
             });
         }
     });
@@ -1054,16 +1409,47 @@ mod tests {
             above: desktop == 2,
             everywhere: false,
             opacity: (desktop == 2).then_some(60),
+            terminal: None,
+            pid: None,
+        };
+        let terminal = |folder: &str| SavedWindow {
+            terminal: Some(SavedTerminal {
+                folder: folder.into(),
+            }),
+            ..window("foot", 1, Shape::Left)
         };
         let saved = Saved {
             windows: vec![
                 window("firefox", 1, Shape::Maximized),
+                terminal("/home/alex/site"),
                 window("slack", 2, Shape::Floating),
                 window("firefox", 3, Shape::TopLeft),
+                terminal("/home/alex/site/src"),
             ],
+            projects: vec![SessionProject {
+                id: "hocus-site".into(),
+                screen: "DEL U3423WE 7XY1234".into(),
+                desktop: 1,
+            }],
         };
-        assert_eq!(Saved::parse(&saved.text())?, saved);
-        assert_eq!(saved.entries(), ["firefox", "slack"]);
+        let text = saved.text();
+        assert!(text.contains("[window.terminal]"), "{text}");
+        assert!(text.contains("[[project]]"), "{text}");
+        assert_eq!(Saved::parse(&text)?, saved);
+        // Each application once, each terminal on its own in its folder.
+        let starts: Vec<(String, Option<PathBuf>)> = starts_of(&saved.windows)
+            .into_iter()
+            .map(|s| (s.entry, s.folder))
+            .collect();
+        assert_eq!(
+            starts,
+            [
+                ("firefox".to_owned(), None),
+                ("foot".to_owned(), Some("/home/alex/site".into())),
+                ("slack".to_owned(), None),
+                ("foot".to_owned(), Some("/home/alex/site/src".into())),
+            ]
+        );
         for shape in [Shape::Floating, Shape::Fullscreen, Shape::BottomRight] {
             assert_eq!(Shape::of(shape.mode()), shape);
         }

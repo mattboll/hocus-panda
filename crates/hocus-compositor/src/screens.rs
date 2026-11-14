@@ -171,6 +171,8 @@ impl State {
             "a screen went: its windows move"
         );
         let moved: Vec<WindowId> = leaving.iter().map(|l| l.0).collect();
+        // Its projects go with their windows (docs/design/projects.md §1).
+        self.projects_screen_gone(&key, &target);
         for (id, rect, restore, earlier) in leaving {
             let desktop = self.model.desktop(id);
             let placed = match self.model.mode(id) {
@@ -358,6 +360,8 @@ impl State {
         ) else {
             return;
         };
+        // Projects that followed their windows away come back with them.
+        self.projects_screen_back(&key);
         let returning: Vec<WindowId> = self
             .windows
             .iter()

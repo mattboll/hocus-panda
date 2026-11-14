@@ -872,14 +872,13 @@ impl State {
             return;
         };
         let at = self.overview_local(&output, thumb);
-        if let Some(card) = self.project_card(&output, desktop, at) {
-            tracing::info!(
-                output = output.name(),
-                desktop = desktop + 1,
-                "the overview opens a project's card"
-            );
-            self.tell_shell(hocus_link::ToShell::ProjectCard(card));
-        }
+        tracing::info!(
+            output = output.name(),
+            desktop = desktop + 1,
+            "the overview opens a project's card"
+        );
+        // Its terminals' folders are read first, off the loop.
+        self.project_card_ask(&output, desktop, at);
     }
 
     /// `area` (global) from `output`'s top-left corner, whole pixels.

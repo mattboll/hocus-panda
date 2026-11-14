@@ -38,22 +38,8 @@ use crate::{
 /// The state file the projects are kept in.
 pub const FILE: &str = "projects";
 
-/// The terminals whose folders the form proposes first (§2.3, §8.2's
-/// table), by their app ids, lower case.
-const TERMINALS: [&str; 12] = [
-    "foot",
-    "footclient",
-    "kitty",
-    "alacritty",
-    "org.wezfurlong.wezterm",
-    "com.mitchellh.ghostty",
-    "org.gnome.terminal",
-    "org.gnome.console",
-    "org.gnome.ptyxis",
-    "org.kde.konsole",
-    "xfce4-terminal",
-    "xterm",
-];
+/// The folder of the closed projects' contents (§9): `ID.toml` each.
+pub const CONTENTS: &str = "projects.d";
 
 /// The projects as kept.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -91,6 +77,36 @@ pub struct Project {
     /// Where it is open; none while it is closed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open: Option<OpenOn>,
+    /// Its screen unplugged, it followed its windows to another (§1): the
+    /// screen it goes back to when that one comes back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away_from: Option<String>,
+    /// Closed, what comes back when it reopens: its `projects.d` file,
+    /// read as the compositor starts and kept here.
+    #[serde(skip)]
+    pub contents: Vec<crate::session::restore::SavedWindow>,
+}
+
+/// A closed project's contents as its file keeps them (§9).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Contents {
+    #[serde(rename = "window")]
+    pub windows: Vec<crate::session::restore::SavedWindow>,
+}
+
+impl Contents {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        toml::from_str(text).map_err(|e| e.to_string())
+    }
+
+    pub fn text(&self) -> String {
+        let body = toml::to_string(self).unwrap_or_default();
+        format!(
+            "# A closed project's windows, which come back when it reopens\n\
+             # (docs/design/projects.md §9). Written by Hocuspanda.\n{body}"
+        )
+    }
 }
 
 /// The desktop a project is: its screen's identity and the desktop's
@@ -101,12 +117,15 @@ pub struct OpenOn {
     pub desktop: usize,
 }
 
-/// Who asked for a project: the shell's form, or a Settings' line (its
-/// session), which is answered.
+/// Who asked for a project: the shell's form, a Settings' line (its
+/// session), which is answered, or the launcher's folder row, after which
+/// its desktop shows, a terminal opening in its folder when it is empty
+/// (§13, B).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Asker {
     Shell,
     Line(u64),
+    Launcher { empty: bool },
 }
 
 /// A project asked for, waiting for its folder to be looked at.
@@ -121,29 +140,72 @@ struct Asked {
 }
 
 /// What the projects' thread is asked.
-enum Job {
+pub(crate) enum Job {
     /// Whether `folder` is a directory, for project `serial`.
     Check { serial: u64, folder: PathBuf },
     /// The file, as it now says.
     Write(String),
+    /// What `windows` are (§8): their desktop entries, and the terminals'
+    /// folders and programs, for `serial`, in the project of folder
+    /// `within`.
+    Read {
+        serial: u64,
+        windows: Vec<Seen>,
+        within: PathBuf,
+    },
+    /// Project `id`'s contents' file written, or taken out (none).
+    Contents { id: String, text: Option<String> },
+}
+
+/// A window handed to the thread to be read.
+#[derive(Debug, Clone)]
+pub(crate) struct Seen {
+    pub id: WindowId,
+    pub app_id: String,
+    pub pid: Option<u32>,
+}
+
+/// A window as the thread read it: its desktop entry and the name it
+/// gives the application, and, a terminal's, its folder and program.
+#[derive(Debug, Clone)]
+pub(crate) struct Found {
+    pub id: WindowId,
+    pub entry: Option<String>,
+    pub name: String,
+    pub terminal: Option<crate::terminals::Found>,
 }
 
 /// What it answers.
 #[derive(Debug)]
 pub enum Done {
     Checked { serial: u64, directory: bool },
+    Read { serial: u64, found: Vec<Found> },
 }
 
 /// The projects, and what is on its way for them.
 #[derive(Debug, Default)]
 pub struct Projects {
     pub list: Vec<Project>,
-    worker: Option<mpsc::Sender<Job>>,
+    pub(crate) worker: Option<mpsc::Sender<Job>>,
     asked: Vec<Asked>,
-    serial: u64,
+    pub(crate) serial: u64,
     /// The jobs given to the thread: a folder looked at, the file written
     /// (the tests: none at rest).
     pub jobs: u64,
+    /// What waits for the thread's reading of windows.
+    pub(crate) reading: Vec<(u64, crate::project_life::Reading)>,
+    /// The projects closing (§5).
+    pub(crate) closing: Vec<crate::project_life::Closing>,
+    /// Desktops the session added for projects reopening (§7), taken out
+    /// as they close.
+    pub(crate) added: usize,
+    /// What the shell was last told of them, for the launcher.
+    pub(crate) told: Option<Vec<hocus_link::ProjectRow>>,
+    /// The last notification of a project that came back but for some:
+    /// its summary and body (the tests).
+    pub not_back: Option<(String, String)>,
+    /// The last project that found no free desktop (the tests).
+    pub no_room: Option<String>,
 }
 
 impl std::fmt::Debug for Job {
@@ -151,12 +213,22 @@ impl std::fmt::Debug for Job {
         match self {
             Self::Check { serial, .. } => write!(f, "Check({serial})"),
             Self::Write(_) => f.write_str("Write"),
+            Self::Read {
+                serial, windows, ..
+            } => write!(f, "Read({serial}, {} windows)", windows.len()),
+            Self::Contents { text, .. } => {
+                write!(
+                    f,
+                    "Contents({})",
+                    if text.is_some() { "write" } else { "remove" }
+                )
+            }
         }
     }
 }
 
 /// Now, as the file says it: RFC 3339, local time.
-fn now_text() -> String {
+pub(crate) fn now_text() -> String {
     let now = jiff::Zoned::now();
     now.timestamp()
         .display_with_offset(now.offset())
@@ -165,7 +237,7 @@ fn now_text() -> String {
 
 /// The seconds of the Unix epoch of a time the file says; now when it
 /// does not read.
-fn seconds_of(text: Option<&str>) -> i64 {
+pub(crate) fn seconds_of(text: Option<&str>) -> i64 {
     text.and_then(|t| t.parse::<jiff::Timestamp>().ok())
         .unwrap_or_else(jiff::Timestamp::now)
         .as_second()
@@ -191,11 +263,17 @@ fn read_kept(dir: &Path) -> Kept {
 /// Writes the projects' file in `dir` through a temporary file, so that it
 /// is never read half written: the directory `0700`, the file `0600`.
 fn write_kept(dir: &Path, text: &str) -> std::io::Result<()> {
+    write_private(dir, FILE, text)
+}
+
+/// Writes file `name` in `dir`, for its owner alone, through a temporary
+/// file: the directory `0700`, the file `0600`.
+fn write_private(dir: &Path, name: &str, text: &str) -> std::io::Result<()> {
     if !dir.exists() {
         std::fs::create_dir_all(dir)?;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
-    let partial = dir.join(format!("{FILE}.new"));
+    let partial = dir.join(format!("{name}.new"));
     {
         use std::io::Write as _;
         let mut file = std::fs::OpenOptions::new()
@@ -206,11 +284,73 @@ fn write_kept(dir: &Path, text: &str) -> std::io::Result<()> {
             .open(&partial)?;
         file.write_all(text.as_bytes())?;
     }
-    std::fs::rename(&partial, dir.join(FILE))
+    std::fs::rename(&partial, dir.join(name))
 }
 
-/// The projects' thread: it looks at folders and writes the file.
-fn work(dir: Option<&Path>, jobs: &mpsc::Receiver<Job>, done: &channel::Sender<Done>) {
+/// Closed project `id`'s contents in `dir` (none when its file is not
+/// there or does not read, said in the log).
+fn read_contents(dir: &Path, id: &str) -> Vec<crate::session::restore::SavedWindow> {
+    let file = dir.join(CONTENTS).join(format!("{id}.toml"));
+    match std::fs::read_to_string(&file) {
+        Ok(text) => Contents::parse(&text).map_or_else(
+            |err| {
+                tracing::warn!(file = %file.display(), %err, "a project's contents do not read");
+                Vec::new()
+            },
+            |c| c.windows,
+        ),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(err) => {
+            tracing::warn!(file = %file.display(), %err, "a project's contents not read");
+            Vec::new()
+        }
+    }
+}
+
+/// Reads `windows` (§8): each one's desktop entry, a terminal's folder and
+/// program in the project of folder `within`.
+fn read_windows(
+    entries: &mut crate::session::restore::Entries,
+    windows: &[Seen],
+    within: &Path,
+) -> Vec<Found> {
+    windows
+        .iter()
+        .map(|seen| {
+            let entry = entries.for_app(&seen.app_id);
+            let shared = windows
+                .iter()
+                .filter(|w| w.pid.is_some() && w.pid == seen.pid)
+                .count();
+            let terminal = entry.as_ref().and_then(|entry| {
+                let window = crate::session::restore::SavedWindow {
+                    app_id: seen.app_id.clone(),
+                    pid: seen.pid,
+                    ..Default::default()
+                };
+                crate::session::restore::terminal_of(&window, entry, shared, Some(within))
+            });
+            Found {
+                id: seen.id,
+                name: entry
+                    .as_ref()
+                    .map_or_else(|| seen.app_id.clone(), |e| e.name.clone()),
+                entry: entry.map(|e| e.id),
+                terminal,
+            }
+        })
+        .collect()
+}
+
+/// The projects' thread: it looks at folders and windows, and writes the
+/// files.
+fn work(
+    dir: Option<&Path>,
+    applications: Vec<PathBuf>,
+    jobs: &mpsc::Receiver<Job>,
+    done: &channel::Sender<Done>,
+) {
+    let mut entries = crate::session::restore::Entries::new(applications);
     while let Ok(job) = jobs.recv() {
         match job {
             Job::Check { serial, folder } => {
@@ -230,6 +370,41 @@ fn work(dir: Option<&Path>, jobs: &mpsc::Receiver<Job>, done: &channel::Sender<D
                     }
                 }
             }
+            Job::Read {
+                serial,
+                windows,
+                within,
+            } => {
+                let found = read_windows(&mut entries, &windows, &within);
+                if done.send(Done::Read { serial, found }).is_err() {
+                    return;
+                }
+            }
+            Job::Contents { id, text } => {
+                let Some(dir) = dir else {
+                    continue;
+                };
+                let folder = dir.join(CONTENTS);
+                let file = format!("{id}.toml");
+                let written = match &text {
+                    Some(text) => {
+                        if !dir.exists() {
+                            let _ = write_private(dir, ".keep", "");
+                        }
+                        write_private(&folder, &file, text)
+                    }
+                    None => match std::fs::remove_file(folder.join(&file)) {
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                        other => other,
+                    },
+                };
+                match written {
+                    Ok(()) => tracing::debug!(written = text.is_some(), "a project's contents"),
+                    Err(err) => {
+                        tracing::warn!(%err, "could not write a project's contents");
+                    }
+                }
+            }
         }
     }
 }
@@ -240,6 +415,9 @@ pub fn start(handle: &smithay::reexports::calloop::LoopHandle<'static, App>, sta
     let dir = state.config.state_dir.clone();
     if let Some(dir) = &dir {
         state.projects.list = read_kept(dir).projects;
+        for project in state.projects.list.iter_mut().filter(|p| p.open.is_none()) {
+            project.contents = read_contents(dir, &project.id);
+        }
         tracing::info!(
             projects = state.projects.list.len(),
             open = state
@@ -262,9 +440,10 @@ pub fn start(handle: &smithay::reexports::calloop::LoopHandle<'static, App>, sta
         return;
     }
     let (to, jobs) = mpsc::channel();
+    let applications = state.config.applications.clone();
     let started = std::thread::Builder::new()
         .name("projects".to_owned())
-        .spawn(move || work(dir.as_deref(), &jobs, &done));
+        .spawn(move || work(dir.as_deref(), applications, &jobs, &done));
     match started {
         Ok(_) => state.projects.worker = Some(to),
         Err(err) => tracing::warn!(%err, "no thread for the projects"),
@@ -291,10 +470,17 @@ pub fn place_of(mode: Mode, minimized: bool) -> WindowPlace {
     }
 }
 
-/// Whether an app id is a terminal's (§8.2's table).
-pub fn is_terminal(app: &str) -> bool {
-    let app = app.to_lowercase();
-    TERMINALS.contains(&app.as_str())
+/// The zone a saved window's state snaps it to, if it does.
+pub fn zone_of(shape: crate::session::restore::Shape) -> Option<Zone> {
+    match shape.mode() {
+        Mode::Snapped(zone) => Some(zone),
+        Mode::Floating | Mode::Fullscreen => None,
+    }
+}
+
+/// Where a saved window is, as the card says it.
+pub fn place_of_shape(shape: crate::session::restore::Shape) -> WindowPlace {
+    place_of(shape.mode(), false)
 }
 
 /// Why a project was refused, for a Settings' line.
@@ -402,7 +588,7 @@ impl State {
             .filter_map(|id| {
                 let managed = self.windows.get(&id)?;
                 let app = crate::windows::app_id(&managed.window)?;
-                is_terminal(&app).then(|| self.pid_of(&managed.window))?
+                crate::terminals::is_terminal_app(&app).then(|| self.pid_of(&managed.window))?
             })
             .collect();
         pids.sort_unstable();
@@ -485,6 +671,7 @@ impl State {
         tracing::info!(?why, "a project refused");
         match by {
             Asker::Shell => self.tell_shell(ToShell::ProjectRefused(why.clone())),
+            Asker::Launcher { .. } => {}
             Asker::Line(session) => {
                 let said = serde_json::json!({ "refused": refusal_said(why) }).to_string();
                 self.displays_send(Some(session), &said);
@@ -494,7 +681,13 @@ impl State {
 
     /// The projects' thread answered.
     fn projects_done(&mut self, done: Done) {
-        let Done::Checked { serial, directory } = done;
+        let (serial, directory) = match done {
+            Done::Checked { serial, directory } => (serial, directory),
+            Done::Read { serial, found } => {
+                self.project_read(serial, found);
+                return;
+            }
+        };
         let Some(at) = self.projects.asked.iter().position(|a| a.serial == serial) else {
             return;
         };
@@ -529,9 +722,19 @@ impl State {
                 screen: screen.clone(),
                 desktop: asked.desktop + 1,
             }),
+            away_from: None,
+            contents: Vec::new(),
         });
         self.projects_changed();
         match asked.by {
+            Asker::Launcher { empty } => {
+                self.project_made_from_launcher(&asked.output, asked.desktop, &asked.folder, empty);
+                self.tell_shell(ToShell::ProjectMade {
+                    output: asked.output.clone(),
+                    desktop: u8::try_from(asked.desktop).unwrap_or(u8::MAX),
+                    name: asked.name.clone(),
+                });
+            }
             Asker::Shell => self.tell_shell(ToShell::ProjectMade {
                 output: asked.output.clone(),
                 desktop: u8::try_from(asked.desktop).unwrap_or(u8::MAX),
@@ -569,6 +772,7 @@ impl State {
         for output in &outputs {
             self.desktops_drawn(output);
         }
+        self.tell_projects();
         self.redraw = true;
     }
 
@@ -604,38 +808,6 @@ impl State {
         if changed {
             self.projects_changed();
         }
-    }
-
-    /// Project `project`'s card, as it shows under `at` on `output`.
-    pub(crate) fn project_card(
-        &self,
-        output: &Output,
-        desktop: usize,
-        at: hocus_link::Rect,
-    ) -> Option<hocus_link::ProjectCard> {
-        let project = self.project_on(output, desktop)?;
-        let geometry = self.space.output_geometry(output)?;
-        let windows = self
-            .overview_windows(output, desktop)
-            .into_iter()
-            .filter(|id| !self.model.is_everywhere(*id))
-            .map(|id| {
-                (
-                    id.0,
-                    place_of(self.model.mode(id), self.model.is_minimized(id)),
-                )
-            })
-            .collect();
-        Some(hocus_link::ProjectCard {
-            output: output.name(),
-            desktop: u8::try_from(desktop).ok()?,
-            at,
-            screen: (geometry.size.w, geometry.size.h),
-            name: project.name.clone(),
-            folder: project.folder.display().to_string(),
-            since: seconds_of(project.opened.as_deref().or(Some(&project.made))),
-            windows,
-        })
     }
 
     /// The form that makes desktop `desktop` of `output` a project, as it
@@ -683,6 +855,8 @@ mod tests {
                         screen: "BOE NE160QDM 0".into(),
                         desktop: 2,
                     }),
+                    away_from: None,
+                    contents: Vec::new(),
                 },
                 Project {
                     id: "blog".into(),
@@ -692,6 +866,8 @@ mod tests {
                     opened: None,
                     closed: Some("2026-11-12T18:40:00+01:00".into()),
                     open: None,
+                    away_from: None,
+                    contents: Vec::new(),
                 },
             ],
         };
@@ -715,6 +891,34 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_projects_contents_read_back_as_written() {
+        use crate::session::restore::{SavedTerminal, SavedWindow, Shape};
+        let dir = tempfile::tempdir().expect("a directory");
+        let contents = Contents {
+            windows: vec![SavedWindow {
+                entry: "foot".into(),
+                app_id: "foot".into(),
+                screen: "BOE NE160QDM 0".into(),
+                screen_size: [2560, 1600],
+                area: [0, 0, 2364, 1600],
+                desktop: 2,
+                place: [8, 8, 1180, 1584],
+                state: Shape::Left,
+                terminal: Some(SavedTerminal {
+                    folder: "/home/alex/github/hocus-site".into(),
+                }),
+                ..SavedWindow::default()
+            }],
+        };
+        let text = contents.text();
+        assert!(text.contains("[window.terminal]"), "{text}");
+        let folder = dir.path().join(CONTENTS);
+        write_private(&folder, "hocus-site.toml", &text).expect("written");
+        assert_eq!(read_contents(dir.path(), "hocus-site"), contents.windows);
+        assert!(read_contents(dir.path(), "blog").is_empty());
+    }
+
+    #[test]
     fn a_seconds_time_reads_from_the_file() {
         assert_eq!(seconds_of(Some("1970-01-01T01:00:10+01:00")), 10);
         assert!(seconds_of(Some("not a time")) > 1_700_000_000);
@@ -728,7 +932,5 @@ mod tests {
             WindowPlace::Left
         );
         assert_eq!(place_of(Mode::Fullscreen, true), WindowPlace::Minimized);
-        assert!(is_terminal("Alacritty") && is_terminal("foot"));
-        assert!(!is_terminal("org.mozilla.firefox"));
     }
 }

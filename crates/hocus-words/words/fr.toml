@@ -2660,6 +2660,12 @@ and = " et "
 not_reopened = { one = "{listed} n’a pas pu être rouverte.", other = "{listed} n’ont pas pu être rouvertes." }
 
 
+[compositor.projects]
+its_folder = "son dossier"
+and_others = { one = "{shown} et {n} autre", other = "{shown} et {n} autres" }
+back_but = "{name} est revenu, sauf {what}"
+folder_gone = "Le dossier {folder} n’existe plus."
+
 [compositor.creatures]
 other_tab = "{name} · autre onglet"
 
@@ -2833,6 +2839,40 @@ redone = "Rétabli : {said}."
 remove_app = "Retirer {app}"
 
 [shell.project]
+closed_pill = "fermé"
+open_pill = "ouvert"
+on_desktop = "sur le bureau {number}"
+closed_today = "fermé à {time}"
+closed_yesterday = "fermé hier à {time}"
+closed_on = "fermé le {date}"
+windows_count = { one = "{n} fenêtre", other = "{n} fenêtres" }
+terminals_count = { one = "{n} terminal", other = "{n} terminaux" }
+hint_go = "Entrée y va"
+hint_reopen = "Entrée le rouvre"
+hint_create = "Entrée le crée"
+hint_close = "Entrée le ferme…"
+projects_heading = "PROJETS"
+repos_heading = "DÉPÔTS GIT RÉCENTS"
+create_named = "Créer le projet « {name} »"
+last_commit = "dernier commit {when}"
+nothing_for = "Aucun projet ni dépôt git pour « {term} »."
+no_room = "Plus de bureau libre : ferme un projet ou une fenêtre."
+no_room_for = "« {name} » attend un bureau libre."
+terminals_heading = "TERMINAUX"
+reopen = "Rouvrir"
+confirm_title = "Fermer le projet {name} ?"
+confirm_line = "Ses fenêtres se ferment. Quand tu le rouvres, tout revient à sa place :"
+back_windows = "{app}, ses {n} fenêtres"
+back_terminal = "Un terminal dans {folder}"
+not_back = "{app} ne reviendra pas"
+agent_working = "{tool} travaille encore : fermer interrompt sa réponse en cours."
+agent_waiting = "{tool} attend ta réponse : fermer l’interrompt."
+program_stops = "{program} s’arrête ; son terminal reviendra dans le dossier, sans relancer la commande."
+close_confirm = "Fermer le projet"
+closed_toast = { one = "{name} est fermé, sa fenêtre gardée.", other = "{name} est fermé, ses {n} fenêtres gardées." }
+closed_empty = "{name} est fermé."
+stayed = { one = "{names} reste ouverte.", other = "{names} restent ouvertes." }
+closed_then = "Super+Espace, « projet {name} » : il revient."
 form_title = "Faire du bureau {number} un projet"
 form_line = "Ses fenêtres restent où elles sont. Le projet garde ce bureau tant qu'il est ouvert."
 name = "Nom"

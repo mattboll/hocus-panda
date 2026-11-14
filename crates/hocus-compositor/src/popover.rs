@@ -196,6 +196,9 @@ impl Shown {
             Kind::Project if self.layer.namespace() == hocus_link::PROJECT_CARD_NAMESPACE => {
                 hocus_link::PROJECT_CARD_RADIUS
             }
+            Kind::Project if self.layer.namespace() == hocus_link::PROJECT_CLOSE_NAMESPACE => {
+                hocus_link::PROJECT_CLOSE_RADIUS
+            }
             Kind::Project => hocus_link::PROJECT_FORM_RADIUS,
         }
     }

@@ -771,14 +771,61 @@ fn to_shell() -> Vec<ToShell> {
         }),
         ToShell::ProjectCard(ProjectCard {
             output: "eDP-1".into(),
-            desktop: 0,
-            at: rect,
+            at: Some(rect),
             screen: (1920, 1080),
             name: "hocus-panda".into(),
             folder: "/home/alex/github/hocus-panda".into(),
-            since: 1_794_550_320,
-            windows: vec![(3, WindowPlace::Left), (5, WindowPlace::Floating)],
+            state: ProjectState::Open {
+                desktop: 0,
+                since: 1_794_550_320,
+            },
+            windows: vec![card_window(3, None), card_window(5, Some("/home/alex"))],
         }),
+        ToShell::Projects(vec![ProjectRow {
+            name: "blog".into(),
+            folder: "/home/alex/code/blog".into(),
+            output: String::new(),
+            state: ProjectState::Closed { at: 1_794_550_320 },
+            windows: vec![card_window(0, Some("/home/alex/code/blog"))],
+        }]),
+        ToShell::ProjectConfirm(ProjectConfirm {
+            output: "eDP-1".into(),
+            screen: (1920, 1080),
+            name: "hocus-site".into(),
+            folder: "/home/alex/github/hocus-site".into(),
+            back: vec![
+                ComingBack::App {
+                    app: "firefox".into(),
+                    entry: "firefox".into(),
+                    count: 1,
+                },
+                ComingBack::Terminal {
+                    app: "foot".into(),
+                    entry: "foot".into(),
+                    folder: "/home/alex/github/hocus-site".into(),
+                },
+                ComingBack::NotBack {
+                    app: "test.no-entry".into(),
+                },
+            ],
+            interrupted: vec![
+                Interrupted::Agent {
+                    tool: "Claude Code".into(),
+                    waiting: false,
+                },
+                Interrupted::Program("npm run dev".into()),
+            ],
+        }),
+        ToShell::ProjectClosed {
+            output: "eDP-1".into(),
+            name: "hocus-site".into(),
+            kept: 3,
+            stayed: vec!["Gedit".into()],
+        },
+        ToShell::ProjectNoRoom {
+            output: "eDP-1".into(),
+            name: "blog".into(),
+        },
         ToShell::ProjectMade {
             output: "eDP-1".into(),
             desktop: 1,
@@ -1036,6 +1083,19 @@ fn to_compositor() -> Vec<ToCompositor> {
         name: "hocus-site".into(),
         folder: "/home/alex/github/hocus-site".into(),
     });
+    all.extend([
+        ToCompositor::ProjectCloseAsk("hocus-site".into()),
+        ToCompositor::ProjectClose("hocus-site".into()),
+        ToCompositor::ProjectOpen {
+            output: "eDP-1".into(),
+            name: "blog".into(),
+        },
+        ToCompositor::ProjectGo("hocus-site".into()),
+        ToCompositor::ProjectNew {
+            output: "eDP-1".into(),
+            folder: "/home/alex/github/hocus-cli".into(),
+        },
+    ]);
     all
 }
 
@@ -1428,4 +1488,17 @@ fn the_switch_overshoots_a_little_and_lands() {
         .fold(f64::MAX, f64::min);
     assert!((44.0..56.0).contains(&narrowest), "{narrowest}");
     assert!(ease(0.3) > 0.7, "quick to start");
+}
+
+fn card_window(id: u64, terminal: Option<&str>) -> CardWindow {
+    CardWindow {
+        id,
+        app: "foot".into(),
+        entry: "foot".into(),
+        title: "~/github".into(),
+        place: WindowPlace::Left,
+        rect: [0, 0, 5000, 10000],
+        focused: id == 3,
+        terminal: terminal.map(str::to_owned),
+    }
 }

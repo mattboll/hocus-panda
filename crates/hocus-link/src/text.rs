@@ -86,6 +86,18 @@ pub(crate) mod tidy {
         serializer.collect_seq(titles.iter().map(|(id, title)| (id, title_text(title))))
     }
 
+    /// A name, when there is one.
+    #[allow(clippy::ref_option)]
+    pub fn maybe_name<S: Serializer>(
+        text: &Option<String>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match text {
+            Some(text) => serializer.serialize_some(&screen_name(text)),
+            None => serializer.serialize_none(),
+        }
+    }
+
     /// A line of the screen readers' tree ([`a11y_text`]).
     pub fn a11y<S: Serializer>(text: &str, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&a11y_text(text))

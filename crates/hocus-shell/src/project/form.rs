@@ -184,7 +184,7 @@ pub fn refit(form: &mut Form) -> Vec<Effect> {
         return super::woken();
     }
     form.size = size;
-    let place = super::place(form.ask.at, size, form.ask.screen);
+    let place = super::place(Some(form.ask.at), size, form.ask.screen);
     let margin = (place != form.place).then_some((place.1, 0, 0, place.0));
     form.place = place;
     let mut effects = vec![Effect::Resize {
