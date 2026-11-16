@@ -155,6 +155,13 @@ impl After {
             self.taken.remove(&oldest);
         }
     }
+
+    /// Whether the editor shows at `at`, its fade in over.
+    pub(super) fn editor_at_rest(&self, at: Duration) -> bool {
+        self.editor
+            .as_ref()
+            .is_some_and(|(_, since)| at >= *since + CAPTURE_EDITOR_IN)
+    }
 }
 
 /// `path` as a `file://` address, its bytes outside RFC 3986's unreserved
