@@ -110,7 +110,7 @@ const STUCK: Ink = Ink::Dark(rgb(0xF7A77A));
 const TO_SEE: Ink = Ink::Dark(rgb(0x7EE0A0));
 /// The mini form's last two (4.7): `text.dim`, and the resting rows' word.
 const AT_WORK: Ink = DIM;
-const RESTING: Ink = Ink::Dark(rgb(0x6A7384));
+const RESTING: Ink = Ink::Dark(rgb(0x737373));
 
 /// What can be clicked in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

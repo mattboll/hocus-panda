@@ -90,7 +90,7 @@ const STUCK: (Color, Color) = (rgb(0xF7A77A), Color::from_rgba8(242, 148, 91, 0.
 const TO_SEE: (Color, Color) = (rgb(0x7EE0A0), Color::from_rgba8(108, 194, 135, 0.10));
 /// Good news (#809): the board's violet card.
 const NEWS: (Color, Color) = (rgb(0xB9A7F0), Color::from_rgba8(182, 156, 255, 0.12));
-const RESTING: Ink = Ink::Dark(rgb(0x6A7384));
+const RESTING: Ink = Ink::Dark(rgb(0x737373));
 const ROW_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 /// What a card's agent asks, `#C9D0DC`.
 const NOTE_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
@@ -103,7 +103,7 @@ const DOT: f32 = 10.0;
 /// The calm rows' dots (#831): to see, in the background, resting.
 const DOT_TO_SEE: Ink = Ink::Dark(rgb(0x7EE0A0));
 const DOT_BACKGROUND: Ink = Ink::Dark(rgb(0x8FB8F0));
-const DOT_RESTING: Ink = Ink::Dark(rgb(0x7C8597));
+const DOT_RESTING: Ink = Ink::Dark(rgb(0x858585));
 /// Resting on a row this long shows its tooltip (as Today's lines).
 const TIP: Duration = Duration::from_millis(600);
 /// The rows' motion: the slide, the fades and the tint, the hop.
@@ -588,7 +588,7 @@ fn dot(look: Look) -> Color {
         Look::News => rgb(0xB69CFF),
         Look::Working => rgb(0x6CC287),
         Look::Background => rgb(0x8FB8F0),
-        Look::Resting => rgb(0xA9B2C2),
+        Look::Resting => rgb(0xB1B1B1),
     }
 }
 
