@@ -229,6 +229,11 @@ fn a_frame_of_a_big_screen() -> anyhow::Result<()> {
     if hp.renderer() != "gles" {
         common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
+    // Midday, whatever the clock says: in the evening the fireflies come
+    // out over the whole screen, and the frames counted here would be
+    // theirs.
+    hp.hold_evening(false);
+    hp.hold_sun("2026-11-16T12:00:00Z".parse()?);
     let up = hp.dispatch_until(Duration::from_secs(60), |hp| {
         !hp.drawn_layers(hocus_link::NAMESPACE).is_empty() && !hp.shell_on_cpu()
     })?;
