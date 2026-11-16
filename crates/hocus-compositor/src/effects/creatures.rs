@@ -67,6 +67,9 @@ pub const TAG_PAD: f64 = 7.0;
 pub const TAG_IN: f64 = 4.0;
 /// The narrowest panda drawn; a smaller room shows none.
 const NARROWEST: f64 = 36.0;
+/// How far around its window a creature, its tag and its hops may draw
+/// (logical pixels).
+const REACH: f64 = 200.0;
 /// A sheet not drawn with for this long is let go.
 const KEPT: Duration = Duration::from_secs(30);
 
@@ -334,6 +337,21 @@ impl State {
                     .output_of(*id)
                     .is_some_and(|o| self.output_powered(&o) && !self.fullscreen_in_front(&o))
         })
+    }
+
+    /// The creatures moved: the screens of the windows they sit on draw
+    /// again, the others build no scene for them (#826).
+    pub(crate) fn creatures_moved(&mut self, now: Duration) {
+        let ids: Vec<WindowId> = self
+            .fx
+            .creatures
+            .shown
+            .keys()
+            .copied()
+            .filter(|id| self.strip_offset(*id, now).is_some())
+            .collect();
+        let on = self.screens_around(ids, REACH);
+        self.effect_moved("creatures", on);
     }
 
     /// Each window's creatures, from the agents as last listed.

@@ -1439,12 +1439,13 @@ impl State {
         };
         // Locked (7.1): the lock's own motion alone; nothing else is drawn
         // but the wallpaper's effects behind the desktop's own lock (#807).
-        if let Some(mut moving) = self.lock_tick(now) {
+        if let Some(moving) = self.lock_tick(now) {
             // The wallpapers that move stop (#433).
             self.tick_walls();
             if self.lock_shows_wall() {
-                // At most 60 frames a second there too (#815).
-                moving |= self.tick_paced(now, Self::tick_wallpaper_effects);
+                // At most 60 frames a second there too (#815), on the
+                // screens they play on (#826).
+                self.tick_paced(now, Self::tick_wallpaper_effects);
                 if !moving && let Some(at) = self.fx.pace.next() {
                     self.turn_at(at);
                 }
@@ -1540,7 +1541,7 @@ impl State {
         self.tick_walls();
         // The effects that play on their own, at most 60 frames a second
         // whatever the screens' refresh (#815): between two, they ask for
-        // none.
+        // none; each asks for the screens it moves on alone (#826).
         // The agents as creatures on their windows (#796): where they sit
         // decided at each turn, their motion drawn as of the effects' time.
         use crate::effects::{timed, timing::Fx};
@@ -1548,24 +1549,25 @@ impl State {
             let _measure = crate::effects::timing::tick(Fx::Creatures);
             self.tick_creatures(now)
         };
-        moving |= self.tick_paced(now, |state, now| {
-            crate::effects::timing::stepped(Fx::Creatures, creatures);
+        self.tick_paced(now, |state, now| {
             // The wallpaper's effects: the snow (#795) first, the
             // garlands' wind following its; the rain on the glass, the
             // fireflies, the koi, the daylight, desktops in depth.
-            let mut effects = creatures | state.tick_wallpaper_effects(now);
-            // The garland under the active window (#799), the garlands
-            // across the top of the screens (#813), those asking for
-            // their own screens alone (#826).
-            let mut under = false;
-            timed(Fx::Garland, || {
-                under = state.tick_garland(now);
-                under | state.tick_garland_top(now)
-            });
-            effects |= under;
+            let mut effects = state.tick_wallpaper_effects(now);
+            // The garland under the active window (#799).
+            effects |= timed(Fx::Garland, || state.tick_garland(now));
             // The moments: fireworks (#810), confetti (#811).
             effects |= timed(Fx::Moments, || state.tick_moments(now));
             effects
+        });
+        // The creatures and the garlands across the top of the screens
+        // (#813), at most 30 times a second (#826).
+        self.tick_paced_by(now, true, |state, now| {
+            crate::effects::timing::stepped(Fx::Creatures, creatures);
+            if creatures {
+                state.creatures_moved(now);
+            }
+            creatures | timed(Fx::Garland, || state.tick_garland_top(now))
         });
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
@@ -1616,8 +1618,13 @@ impl State {
         }
         // The effects' next step wakes the loop, which asks for the
         // screens it moves on, not every screen (#826).
-        if !moving && let Some(at) = self.fx.pace.next() {
-            self.turn_at(at);
+        if !moving {
+            for at in [self.fx.pace.next(), self.fx.slow.next()]
+                .into_iter()
+                .flatten()
+            {
+                self.turn_at(at);
+            }
         }
     }
 

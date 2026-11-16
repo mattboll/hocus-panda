@@ -52,7 +52,9 @@ Every effect follows the same rules (`State::effects_still`, in
   (the snow, the garlands, the creatures, the rain on the glass, the
   fireflies, the koi, the aurora, the camera of desktops in depth, the
   moments; under the lock too) moves on at most 60 times a second whatever
-  the screen's refresh (`effects::Pace`), what it draws staying the same
+  the screen's refresh (`effects::Pace`; the creatures and the garland
+  across the top 30, #826), on the screens it plays on alone (a
+  screen where nothing of it moves builds no scene for it), what it draws staying the same
   between two (a screen at 165 Hz draws it again only where something
   else changed), and it tells the screen only what of it changed: the
   flakes' places, a cap's columns that grew, the garland's pieces, a
@@ -333,7 +335,9 @@ phase.
   pixel (each piece falls on whole pixels, in its sheet as on the
   screen).
 - **When**: moving where one shows (its window on the desktop shown, on
-  a screen that is on with no fullscreen window), a frame each refresh;
+  a screen that is on with no fullscreen window), at most 30 frames a
+  second (#826), its motion as smooth (each pose of its time, not of a
+  step), on its window's screens alone: another builds no scene for it;
   with reduced motion still, nothing drawn per frame; none in the power
   saver, while a screen is shared or recorded, on the CPU, nor in a
   capture.
@@ -406,9 +410,10 @@ there covers it; never on the bar (its cord and bulbs kept off it).
   twinkling at 0.8 of the pace a way ahead; in twice the wind.
 - **When**: as the first, but paused (not stepped, nothing drawn per
   frame) on a screen that is off, shows a fullscreen or a maximised
-  window (it is not seen), and while locked. Its motion asks for the
-  frames of its own screen alone: another screen builds no scene for it
-  (#826). Still and lit with reduced motion; none in the power saver,
+  window (it is not seen), and while locked. It moves on at most 30
+  times a second (#826), its rope stepped of its time as the first's
+  (120 steps a second, caught up), and asks for the frames of its own
+  screen alone: another screen builds no scene for it. Still and lit with reduced motion; none in the power saver,
   while shared or recorded, on the CPU, nor in a capture.
 
 ## The garlands proposed in December (#813)

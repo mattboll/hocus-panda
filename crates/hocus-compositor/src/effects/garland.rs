@@ -810,6 +810,10 @@ impl Top {
     }
 }
 
+/// How far around its window the garland under it, its swing and its
+/// bulbs' halos reach (logical pixels).
+const REACH_AROUND: f64 = 320.0;
+
 /// Where a garland is drawn on a screen: global logical pixels moved by
 /// `shift`, then scaled into the screen's (output-local, physical);
 /// `alpha` of it.
@@ -1019,6 +1023,14 @@ impl State {
         };
         if moving {
             garland.advance(now, wind);
+            // Its window's screens, around its bulbs' halos; any on its
+            // way to another window (#826).
+            let on = if garland.jump.is_some() {
+                Vec::new()
+            } else {
+                self.screens_around([id], REACH_AROUND)
+            };
+            self.effect_moved("garland", on);
             true
         } else {
             if garland.hold() {

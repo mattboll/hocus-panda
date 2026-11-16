@@ -78,6 +78,87 @@ impl State {
         }
     }
 
+    /// An effect moved on `screens`: they draw again (#826); none
+    /// known, every screen.
+    pub(crate) fn moved_on_screens(&mut self, screens: Vec<Output>) {
+        if screens.is_empty() {
+            let all: Vec<Output> = self.space.outputs().cloned().collect();
+            self.frames.moved_on.extend(all);
+        } else {
+            self.frames.moved_on.extend(screens);
+        }
+    }
+
+    /// Effect `which` moved on `screens`: they draw again, and those it
+    /// moved on at its last step, which it may have left (#826).
+    pub(crate) fn effect_moved(&mut self, which: &'static str, screens: Vec<Output>) {
+        let before = self.fx.was_on.insert(which, screens.clone());
+        let mut all = screens;
+        for output in before.into_iter().flatten() {
+            if !all.contains(&output) {
+                all.push(output);
+            }
+        }
+        self.moved_on_screens(all);
+    }
+
+    /// The screens what is drawn on windows `ids` reaches, `around` them
+    /// (logical pixels): every screen while windows are drawn elsewhere
+    /// than at their place.
+    pub(crate) fn screens_around(
+        &self,
+        ids: impl IntoIterator<Item = WindowId>,
+        around: f64,
+    ) -> Vec<Output> {
+        if self.drawn_elsewhere() {
+            return self.space.outputs().cloned().collect();
+        }
+        let now = self.now();
+        let mut screens: Vec<Output> = Vec::new();
+        for id in ids {
+            let Some(area) = self.window_area(id, now) else {
+                continue;
+            };
+            let reach = Point::from((around, around));
+            let area = Rectangle::new(
+                area.loc - reach,
+                area.size + Size::from((2.0 * around, 2.0 * around)),
+            );
+            for output in self.screens_over(area) {
+                if !screens.contains(&output) {
+                    screens.push(output);
+                }
+            }
+        }
+        screens
+    }
+
+    /// The screens whose wallpaper shows (on, not as good as unseen)
+    /// and `also` takes: where a wallpaper's effect moves.
+    pub(crate) fn walls_seen(&self, also: impl Fn(&Self, &Output) -> bool) -> Vec<Output> {
+        self.space
+            .outputs()
+            .filter(|o| self.output_powered(o) && also(self, o))
+            .cloned()
+            .collect()
+    }
+
+    /// Where window `id` is drawn (global), on its strip; `None` out of
+    /// sight.
+    fn window_area(
+        &self,
+        id: WindowId,
+        now: std::time::Duration,
+    ) -> Option<Rectangle<f64, Logical>> {
+        self.strip_offset(id, now)
+            .zip(self.look(id, now))
+            .map(|((dx, _), look)| {
+                let mut visual = look.visual;
+                visual.loc.x += dx;
+                visual
+            })
+    }
+
     /// `surface` committed: the screens it shows on draw again.
     pub(crate) fn redraw_for(&mut self, surface: &WlSurface) {
         self.commits.any = true;
@@ -129,7 +210,7 @@ impl State {
     /// screen: in the overview, as Alt+Tab's thumbnails, beside the
     /// actions palette, moving, or pulled back by depth's camera; or
     /// locked.
-    fn drawn_elsewhere(&self) -> bool {
+    pub(crate) fn drawn_elsewhere(&self) -> bool {
         let now = self.now();
         self.overview.is_some()
             || self.switching.open.is_some()
@@ -147,15 +228,7 @@ impl State {
     /// its last commit; `None` when it is drawn elsewhere than then: its
     /// frame and its shadow moved with it.
     fn window_screens(&self, id: WindowId, window: &Window) -> Option<Vec<Output>> {
-        let now = self.now();
-        let visual = self
-            .strip_offset(id, now)
-            .zip(self.look(id, now))
-            .map(|((dx, _), look)| {
-                let mut visual = look.visual;
-                visual.loc.x += dx;
-                visual
-            });
+        let visual = self.window_area(id, self.now());
         let data = window.user_data();
         data.insert_if_missing(Drawn::default);
         let mut drawn = data.get::<Drawn>()?.0.borrow_mut();
@@ -191,7 +264,7 @@ impl State {
     }
 
     /// The screens `area` (global) overlaps.
-    fn screens_over(&self, area: Rectangle<f64, Logical>) -> Vec<Output> {
+    pub(crate) fn screens_over(&self, area: Rectangle<f64, Logical>) -> Vec<Output> {
         self.space
             .outputs()
             .filter(|o| {
