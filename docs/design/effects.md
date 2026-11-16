@@ -53,11 +53,15 @@ Every effect follows the same rules (`State::effects_still`, in
   fireflies, the koi, the aurora, the camera of desktops in depth, the
   moments; under the lock too) moves on at most 60 times a second whatever
   the screen's refresh (`effects::Pace`; the creatures and the garland
-  across the top 30, #826), on the screens it plays on alone (a
+  across the top 30, #826), all on one clock (`effects::Clock`: the 30
+  on every other of the 60), a step coming up to half its time early to
+  take a frame a screen draws anyway (an application's) rather than one
+  of its own just after, on the screens it plays on alone (a
   screen where nothing of it moves builds no scene for it), what it draws staying the same
   between two (a screen at 165 Hz draws it again only where something
   else changed), and it tells the screen only what of it changed: the
-  flakes' places, a cap's columns that grew, the garland's pieces, a
+  flakes' places, a cap's columns that grew, the garland's pieces (the
+  one across the top, which swings all along, its strip), a
   panda's box, the drops that moved, each firefly's glow, the koi's
   pads, so that the windows around stay as they were. The koi's water
   tells where its heights moved enough to be seen and around the koi

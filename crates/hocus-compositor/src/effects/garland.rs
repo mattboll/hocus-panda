@@ -327,7 +327,10 @@ impl Rope {
                     continue;
                 };
                 let (dx, dy) = (q.x - p.x, q.y - p.y);
-                let d = dx.hypot(dy).max(1e-6);
+                // Not `hypot`, which guards against what never comes here
+                // (lengths past 1e150) at several times the cost: this is
+                // done thousands of times a step.
+                let d = (dx * dx + dy * dy).sqrt().max(1e-6);
                 if d > len {
                     let k = (d - len) / d * 0.5;
                     p.x += dx * k;
@@ -422,13 +425,26 @@ impl Rope {
         let s = view.scale;
         let k = self.look.scale;
         let path: Vec<[f32; 2]> = self.path().into_iter().map(|p| view.at(p)).collect();
-        // The halos' light on the cord, at `p` (physical).
+        // The halos' light on the cord, at `p` (physical): each halo's
+        // centre, reach, colour and level found once, not for each piece
+        // of the cord; a halo lights nothing past its reach (on a wide
+        // screen, a few of its forty bulbs light each piece).
+        let halos: Vec<([f32; 2], f32, [f32; 3], f32)> = lit
+            .iter()
+            .map(|(b, _, c, l)| {
+                let centre = view.at((b.x, b.y + 10.0 * k));
+                let hs = (120.0 * k * (0.6 + 0.4 * *l)) as f32 * s;
+                (centre, hs, *c, *l as f32)
+            })
+            .collect();
         let light = |p: [f32; 2]| -> [f32; 3] {
             let mut sum = [0.0f32; 3];
-            for (b, _, c, l) in &lit {
-                let [cx, cy] = view.at((b.x, b.y + 10.0 * k));
-                let hs = (120.0 * k * (0.6 + 0.4 * *l)) as f32 * s;
-                let a = halo(((p[0] - cx).hypot(p[1] - cy)) / hs) * (*l as f32) * 0.85;
+            for ([cx, cy], hs, c, l) in &halos {
+                let (dx, dy) = (p[0] - cx, p[1] - cy);
+                if dx.abs() >= *hs || dy.abs() >= *hs {
+                    continue;
+                }
+                let a = halo((dx * dx + dy * dy).sqrt() / hs) * l * 0.85;
                 for (sum, c) in sum.iter_mut().zip(c) {
                     *sum += c * a;
                 }
@@ -861,7 +877,7 @@ fn halo(d: f32) -> f32 {
 /// A stroke's piece from `a` to `b`, `half` its width, round at its ends.
 fn capsule(mesh: &mut Mesh, a: [f32; 2], b: [f32; 2], half: f32, colour: [f32; 4]) {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-    let len = dx.hypot(dy);
+    let len = (dx * dx + dy * dy).sqrt();
     let (ux, uy) = if len > 1e-4 {
         (dx / len, dy / len)
     } else {
