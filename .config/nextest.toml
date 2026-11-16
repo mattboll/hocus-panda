@@ -37,8 +37,7 @@ retries = 0
 # Installing them on CI takes them out of this list.
 # And a test that fails by chance, until its issue is fixed: the recording's
 # read-back on GLES (#838), the Settings' lit row going out (#845), a
-# Bluetooth device read while connecting (#846), Today's line clicked too
-# soon (#847).
+# Bluetooth device read while connecting (#846).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -51,7 +50,6 @@ not (
         | test(=recording::on_gles_the_frames_read_back_off_the_loop_come_upright)
         | test(=settings_bar::the_places_follow_a_light_going_out)
         | test(=settings_bluetooth::a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect)
-        | test(=today::a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar)
     ))
 )
 """
