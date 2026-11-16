@@ -2,9 +2,10 @@
 //! the user puts over the bar covers it and takes the pointer there; the
 //! pointer pushed against the screen's edge over the bar, still there
 //! 300 ms later, brings the bar in front until it leaves the bar; the
-//! windows the desktop places still keep off the bar; its popovers, its
-//! halo and the bubbles stay above a window covering it; a fullscreen
-//! window covers it, pushed or not; and nothing is drawn at rest.
+//! windows the desktop places still keep off the bar, and a window's
+//! shadow stops at its edge; its popovers, its halo and the bubbles stay
+//! above a window covering it; a fullscreen window covers it, pushed or
+//! not; and nothing is drawn at rest.
 //!
 //! Plain layer surfaces of the test's stand for the shell's, each of its
 //! own colour, in the bar's, a popover's and a bubble's namespaces: what
@@ -284,7 +285,6 @@ fn a_maximised_window_still_stops_at_the_bar() -> anyhow::Result<()> {
     pointer_at(&mut hp, (400, 400));
     chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
     wait_for_rect(&mut hp, "max", area)?;
-    // Past the window's shadow, which falls on the bar under it.
     shows(
         &mut hp,
         (BAR_RECT.x + 100, ROW),
@@ -297,6 +297,42 @@ fn a_maximised_window_still_stops_at_the_bar() -> anyhow::Result<()> {
         WINDOW_COLOUR,
         "the maximised window",
     )?;
+    Ok(())
+}
+
+/// A window's shadow stops at the bar's edge: beside a window right
+/// against the bar, its shadow darkens the gap between them, and the bar
+/// shows its own colour up to its edge.
+#[test]
+fn a_windows_shadow_stops_at_the_bars_edge() -> anyhow::Result<()> {
+    let mut hp = start(RendererChoice::Pixman, None)?;
+    let gap = (BAR_RECT.x - 4, ROW);
+    let wallpaper = pixel(&mut hp, gap)?;
+    open(&mut hp, "beside", (600, 800))?;
+    let id = hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some("beside"))
+        .map(|w| w.id)
+        .ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let rect = Rect::new(BAR_RECT.x - 8 - 600, 100, 600, 800);
+    hp.place_window(id, rect);
+    wait_for_rect(&mut hp, "beside", rect)?;
+    wait(&mut hp, Duration::from_millis(200))?;
+    let shadowed = pixel(&mut hp, gap)?;
+    assert!(
+        shadowed.iter().sum::<i32>() + 6 < wallpaper.iter().sum::<i32>(),
+        "a shadow in the gap: {shadowed:?}, the wallpaper {wallpaper:?}"
+    );
+    let (w, _, px) = hp.screenshot(0)?;
+    for y in rect.y + 20..rect.y + rect.height - 20 {
+        for x in BAR_RECT.x..BAR_RECT.x + 60 {
+            let i = ((y * w + x) * 4) as usize;
+            let p = &px[i..i + 4];
+            let got = [i32::from(p[2]), i32::from(p[1]), i32::from(p[0])];
+            assert!(is(got, BAR), "the bar at {x}, {y} shows {got:?}");
+        }
+    }
     Ok(())
 }
 

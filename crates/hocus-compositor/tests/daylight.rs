@@ -2,15 +2,18 @@
 //! (Mesa's software device, or the GPU `HOCUS_TEST_GPU` names), the sun
 //! held at times of the test's (tests run in UTC: 45° N, 0° E): the
 //! wallpaper is the sky of the hour, the window's shadow turns with the
-//! sun and its pixels stay as they were; nothing is drawn frame after
-//! frame; off, nothing.
+//! sun and its pixels stay as they were, a snapped window throws none;
+//! nothing is drawn frame after frame; off, nothing.
 
 use crate::common;
 
 use std::{path::Path, time::Duration};
 
-use common::open_with;
-use hocus_compositor::{Config, Headless, HeadlessConfig, OutputSpec, model::Rect};
+use common::{KEY_LEFTMETA, KEY_RIGHT, WAIT, open_with};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, OutputSpec,
+    model::{Mode, Rect, Zone},
+};
 
 const STEP: Duration = Duration::from_micros(16_667);
 const WINDOW: Rect = Rect {
@@ -175,6 +178,57 @@ fn off_nothing_and_with_reduced_motion_drawn_once() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A snapped window, maximised too, throws no sun shadow over the bar and
+/// the screen's edges beside it: floating at a place, it throws the
+/// sun's; snapped there, its own alone, the sky as it was beside it.
+#[test]
+fn a_snapped_window_throws_no_sun_shadow() -> anyhow::Result<()> {
+    // 18:07: the board's sunset, the sun on the right: shadows go left.
+    let (mut hp, _client) = bed("2026-06-21T18:07:00Z")?;
+    hp.reconfigure(daylight(true, false));
+    run(&mut hp, STEP * 3)?;
+    let sky = hp.screenshot(0)?;
+    let id = hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some("test.daylight"))
+        .map(|w| w.id)
+        .ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let area = hp
+        .work_area()
+        .ok_or_else(|| anyhow::anyhow!("no work area"))?;
+    let half = Zone::Right.rect(area);
+    // Left of the half, past where a window's own shadow reaches (45 px),
+    // under where the first place's sun shadow reaches.
+    let beside = Rect {
+        x: half.x - 100,
+        y: 680,
+        width: 40,
+        height: 80,
+    };
+    hp.place_window(id, half);
+    let placed = hp.dispatch_until(WAIT, |hp| {
+        hp.windows().iter().any(|w| w.id == id && w.rect == half)
+    })?;
+    anyhow::ensure!(placed, "not placed");
+    run(&mut hp, Duration::from_millis(800))?;
+    assert_eq!(hp.mode(id), Mode::Floating);
+    let floating = hp.screenshot(0)?;
+    let (kept, all) = same(&sky, &floating, beside);
+    assert!(
+        kept < all / 2,
+        "floating, the sun's shadow: {kept} of {all} kept"
+    );
+    common::chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
+    let snapped = hp.dispatch_until(WAIT, |hp| hp.mode(id) == Mode::Snapped(Zone::Right))?;
+    anyhow::ensure!(snapped, "{:?}", hp.mode(id));
+    run(&mut hp, Duration::from_millis(800))?;
+    let snapped = hp.screenshot(0)?;
+    let (kept, all) = same(&sky, &snapped, beside);
+    assert_eq!(kept, all, "snapped, no sun shadow beside it");
+    Ok(())
+}
+
 // --- The screenshots ------------------------------------------------------------
 
 /// A screenshot of output 0 saved as `name`.png in `out`.
@@ -219,6 +273,67 @@ fn shots() -> anyhow::Result<()> {
         hp.hold_sun(at(time)?);
         run(&mut hp, Duration::from_millis(200))?;
         save(&mut hp, &out, name)?;
+    }
+    Ok(())
+}
+
+/// The windows' shadows by the bar with the daylight on, for the
+/// maintainer, written to `$HOCUS_SHOTS` as [`shots`] is, in the dark
+/// theme and the light one: a window floating right against the bar, then
+/// maximised, in the morning (the board's 8 o'clock: the shadows go
+/// toward the bar) and at 13. Run by hand (`--run-ignored only`).
+#[test]
+#[ignore = "screenshots, by hand"]
+fn bar_shadow_shots() -> anyhow::Result<()> {
+    use hocus_link::theme::Scheme;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    for (theme, called) in [(Scheme::Dark, "dark"), (Scheme::Light, "light")] {
+        let (mut hp, mut config, _windows, _home) = common::effects_desk()?;
+        hp.hold_sun(at("2026-06-21T06:30:00Z")?);
+        config.effects.daylight = true;
+        config.appearance.theme = theme;
+        hp.reconfigure(config);
+        let id = hp
+            .windows()
+            .into_iter()
+            .find(|w| w.app_id.as_deref() == Some("test.page"))
+            .map(|w| w.id)
+            .ok_or_else(|| anyhow::anyhow!("no window"))?;
+        let bar = hp
+            .bar_place("HEADLESS-1")
+            .ok_or_else(|| anyhow::anyhow!("no bar"))?;
+        let beside = Rect {
+            x: bar.x - 8 - 620,
+            y: 140,
+            width: 620,
+            height: 560,
+        };
+        hp.place_window(id, beside);
+        run(&mut hp, Duration::from_millis(1500))?;
+        for (time, hour) in [
+            ("2026-06-21T06:30:00Z", "0800"),
+            ("2026-06-21T12:02:00Z", "1300"),
+        ] {
+            hp.hold_sun(at(time)?);
+            run(&mut hp, Duration::from_millis(200))?;
+            save(&mut hp, &out, &format!("shadow-{called}-beside-bar-{hour}"))?;
+        }
+        common::chord(&mut hp, &[KEY_LEFTMETA, common::KEY_UP]);
+        let maximized =
+            hp.dispatch_until(WAIT, |hp| hp.mode(id) == Mode::Snapped(Zone::Maximized))?;
+        anyhow::ensure!(maximized, "{:?}", hp.mode(id));
+        run(&mut hp, Duration::from_millis(800))?;
+        for (time, hour) in [
+            ("2026-06-21T06:30:00Z", "0800"),
+            ("2026-06-21T12:02:00Z", "1300"),
+        ] {
+            hp.hold_sun(at(time)?);
+            run(&mut hp, Duration::from_millis(200))?;
+            save(&mut hp, &out, &format!("shadow-{called}-maximized-{hour}"))?;
+        }
     }
     Ok(())
 }

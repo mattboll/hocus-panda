@@ -452,6 +452,10 @@ impl State {
         }
         let shadow = shatter.shadow(now);
         if shadow > 0.0 {
+            // Stopping at the bar's edge, as a window's (#519).
+            let off = self.bar_column(output, now).map(|r| {
+                Rectangle::new(r.loc - origin, r.size).to_physical_precise_up::<f64, i32>(scale)
+            });
             elements.extend(
                 decoration::shadow_elements(
                     renderer,
@@ -463,6 +467,7 @@ impl State {
                     shadow,
                 )
                 .into_iter()
+                .filter_map(|piece| piece.kept_off(off))
                 .map(OutputElements::Shadow),
             );
         }

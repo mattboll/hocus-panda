@@ -707,6 +707,25 @@ impl State {
         ))
     }
 
+    /// The column of the bar on `output` at `now`, global: from the bar's
+    /// inner edge to the screen's edge behind it, top to bottom.
+    pub(crate) fn bar_column(
+        &self,
+        output: &Output,
+        now: Duration,
+    ) -> Option<Rectangle<f64, Logical>> {
+        let g = self.space.output_geometry(output)?.to_f64();
+        let bar = self.bar_rect(output, now)?;
+        let (left, right) = match self.bar_side() {
+            Side::Right => (g.loc.x + bar.loc.x, g.loc.x + g.size.w),
+            Side::Left => (g.loc.x, g.loc.x + bar.loc.x + bar.size.w),
+        };
+        Some(Rectangle::new(
+            (left, g.loc.y).into(),
+            (right - left, g.size.h).into(),
+        ))
+    }
+
     /// The forms chosen so far, written on a thread: a file is no work for
     /// the loop.
     fn remember_forms(&self) {
