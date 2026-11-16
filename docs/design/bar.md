@@ -2481,8 +2481,9 @@ the heads) are display options for later (#491).
   pane, whose getting the keyboard sees only the pane herdr shows (4.3c).
 - **In the background** (#831, approved 2026-11-16; mockup
   `s21-background`): seen, an agent whose turn ended and that left
-  something running (a command in the background, a sub-agent, a wake-up
-  armed: docs/agents.md, "In the background") is told to the shell as
+  something running (a command in the background, a sub-agent: as
+  Claude Code's `Stop` lists them; docs/agents.md, "In the background")
+  is told to the shell as
   `background`, « en fond », and `seen` once nothing runs; « à voir »
   wins until it is seen. The calm rows trade their word for a 9 px dot,
   its right edge 6 px in (in a room of 14 px, which the name gains): to

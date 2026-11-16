@@ -1,14 +1,15 @@
 //! What the agents left running after their turn (#831): « en fond »
 //! rather than « repos » once the user looked ([`hocus_agents::background`]).
 //!
-//! Kept on the loop, for each agent of Claude Code's or Codex's hooks: the
-//! sub-agents its hooks said started and not stopped, a wake-up armed, and
-//! its children found running. Those are read in `/proc` by a worker
-//! thread of their own, never on the loop, which sends what it found back
-//! by the agents' channel: once as the agent's turn ends (`Stop`), again
-//! as a sub-agent of it stops, then every [`EVERY`] while one still runs
-//! (or one too young to count may), and no more once none does. Nothing is
-//! read while no agent's turn has ended.
+//! Kept on the loop, for each agent of Claude Code's or Codex's hooks.
+//! Claude Code's say it: the tasks its `Stop` or `SubagentStop` last
+//! listed in flight, until its next turn; and the sub-agents started and
+//! not stopped. Its processes are never read. A Codex agent's children
+//! found running are read in `/proc` by a worker thread of their own,
+//! never on the loop, which sends what it found back by the agents'
+//! channel: once as the agent's turn ends (`Stop`), then every [`EVERY`]
+//! while one still runs (or one too young to count may), and no more once
+//! none does. Nothing is read while no Codex agent's turn has ended.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -19,7 +20,7 @@ use std::{
 
 use hocus_agents::{
     Source, State,
-    background::{self, Configured, Found, Ran, Running as Said, Watched},
+    background::{self, Found, Ran, Running as Said, Watched},
 };
 use smithay::reexports::calloop::{
     channel,
@@ -40,12 +41,13 @@ pub(crate) struct Running {
     /// its MCP servers'.
     first_heard: u64,
     first_turn: Option<u64>,
-    /// Its children as last read since its turn ended.
+    /// Its children as last read since its turn ended (Codex's).
     processes: Found,
     /// The sub-agents started and not stopped, by id.
     subagents: BTreeSet<String>,
-    /// A wake-up armed, until its next turn.
-    wake_up: bool,
+    /// The tasks in flight its tool last listed (Claude Code's), until
+    /// its next turn.
+    tasks: u32,
 }
 
 impl Running {
@@ -55,17 +57,18 @@ impl Running {
             first_turn: None,
             processes: Found::default(),
             subagents: BTreeSet::new(),
-            wake_up: false,
+            tasks: 0,
         }
     }
 
     /// Whether something it started still runs.
     pub(crate) fn any(&self) -> bool {
-        self.processes.runs() || !self.subagents.is_empty() || self.wake_up
+        self.processes.runs() || !self.subagents.is_empty() || self.tasks > 0
     }
 
     /// Its state went from `before` to `now`: its first turn's start is
-    /// kept; a new turn disarms its wake-up and forgets its children.
+    /// kept; a new turn forgets its tasks and its children (what ended
+    /// brought it back, or its next turn's end lists what still runs).
     pub(crate) fn turned(&mut self, before: State, now: State) {
         if now != State::Working {
             return;
@@ -74,18 +77,18 @@ impl Running {
             self.first_turn = Some(background::now_ticks().0);
         }
         if before.ended_its_turn() {
-            self.wake_up = false;
+            self.tasks = 0;
             self.processes = Found::default();
         }
     }
 }
 
-/// An agent whose children the worker reads, and where its MCP servers
-/// are configured.
+/// An agent whose children the worker reads, and Codex's `config.toml`,
+/// where its MCP servers are configured.
 #[derive(Debug)]
 pub(crate) struct Job {
     watched: Watched,
-    configured: Option<Configured>,
+    configured: Option<PathBuf>,
 }
 
 /// The worker reading the agents' children: what it is given to read goes
@@ -132,40 +135,31 @@ fn work(given: &mpsc::Receiver<Vec<Job>>, heard: &channel::Sender<Heard>) {
 
 /// A file's time and length, as last read.
 type Stamp = Option<(SystemTime, u64)>;
-/// A file of MCP servers, read for an agent's project.
-type Read = (PathBuf, Option<PathBuf>);
 /// Its servers' command lines.
 type Lines = Vec<Vec<String>>;
 
-/// The MCP servers' command lines, by file and project, kept while their
-/// file does not change (`~/.claude.json` may be large).
+/// The MCP servers' command lines, by file, kept while it does not change.
 #[derive(Default)]
 struct Servers {
-    read: HashMap<Read, (Stamp, Lines)>,
+    read: HashMap<PathBuf, (Stamp, Lines)>,
 }
 
 impl Servers {
-    fn of(&mut self, configured: &Configured) -> Lines {
-        let cwd = configured.cwd.as_deref();
-        background::mcp_files(configured)
-            .into_iter()
-            .flat_map(|file| {
-                let stamp = std::fs::metadata(&file)
-                    .ok()
-                    .and_then(|m| Some((m.modified().ok()?, m.len())));
-                let key = (file.clone(), cwd.map(Path::to_path_buf));
-                match self.read.get(&key) {
-                    Some((kept, servers)) if *kept == stamp => servers.clone(),
-                    _ => {
-                        let servers = std::fs::read_to_string(&file)
-                            .map(|text| background::mcp_servers(&file, &text, cwd))
-                            .unwrap_or_default();
-                        self.read.insert(key, (stamp, servers.clone()));
-                        servers
-                    }
-                }
-            })
-            .collect()
+    fn of(&mut self, file: &Path) -> Lines {
+        let stamp = std::fs::metadata(file)
+            .ok()
+            .and_then(|m| Some((m.modified().ok()?, m.len())));
+        match self.read.get(file) {
+            Some((kept, servers)) if *kept == stamp => servers.clone(),
+            _ => {
+                let servers = std::fs::read_to_string(file)
+                    .map(|text| background::mcp_servers(&text))
+                    .unwrap_or_default();
+                self.read
+                    .insert(file.to_path_buf(), (stamp, servers.clone()));
+                servers
+            }
+        }
     }
 }
 
@@ -183,38 +177,38 @@ impl Compositor {
             return;
         };
         let running = &mut agent.running;
-        let stopped = match ran.running {
+        match ran.running {
             Said::SubagentStarted(id) => {
                 running.subagents.insert(id);
-                false
             }
-            Said::SubagentStopped(id) => running.subagents.remove(&id),
-            Said::WakeUp => {
-                running.wake_up = true;
-                false
+            Said::SubagentStopped(id) => {
+                running.subagents.remove(&id);
             }
-        };
+            // All that is in flight, background sub-agents among them: a
+            // sub-agent whose end was never said is not counted on.
+            Said::Tasks(n) => {
+                running.tasks = n;
+                running.subagents.clear();
+            }
+        }
         tracing::debug!(
             id = agent.id,
             subagents = running.subagents.len(),
-            wake_up = running.wake_up,
+            tasks = running.tasks,
             "what an agent left running"
         );
-        let id = agent.id;
         self.agents.dirty = true;
-        // What the sub-agent started may run on after it.
-        if stopped {
-            self.read_children(&[id]);
-        }
     }
 
-    /// Agent `id`'s turn just ended: its children are read.
+    /// Agent `id`'s turn just ended: its children are read (Codex's).
     pub(crate) fn agent_turn_ended(&mut self, id: u64) {
         self.read_children(&[id]);
     }
 
-    /// The agents among `ids` whose turn ended, of the hooks' tools, have
-    /// their children read off the loop.
+    /// The agents among `ids` whose turn ended, of Codex's hooks, have
+    /// their children read off the loop. Claude Code's say what they left
+    /// running: its language servers, an MCP server's relay, a shell left
+    /// over would read as work in `/proc`.
     fn read_children(&mut self, ids: &[u64]) {
         let Some(jobs) = &self.agents.children else {
             return;
@@ -225,12 +219,11 @@ impl Compositor {
             .list
             .iter()
             .filter(|a| ids.contains(&a.id) && a.state == State::Done)
+            .filter(|a| {
+                a.keys.iter().any(|k| k.0 == Source::Codex)
+                    && !a.keys.iter().any(|k| k.0 == Source::ClaudeCode)
+            })
             .filter_map(|a| {
-                let source = a
-                    .keys
-                    .iter()
-                    .map(|k| k.0)
-                    .find(|s| matches!(s, Source::ClaudeCode | Source::Codex))?;
                 let pid = *a.pids.first()?;
                 Some(Job {
                     watched: Watched {
@@ -239,12 +232,7 @@ impl Compositor {
                         since: a.running.first_turn.unwrap_or(a.running.first_heard),
                         servers: Vec::new(),
                     },
-                    configured: places.map(|p| Configured {
-                        source,
-                        home: p.home.clone(),
-                        codex_home: p.codex_home.clone(),
-                        cwd: a.conversation.cwd.as_ref().map(PathBuf::from),
-                    }),
+                    configured: places.map(|p| p.codex_home.join("config.toml")),
                 })
             })
             .collect();
