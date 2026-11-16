@@ -44,6 +44,9 @@ impl State {
             1.0
         };
         let middle = area.to_f64().loc + area.to_f64().size.downscale(2.0).to_point();
+        // The windows' shadows stop at the bar's edge, with or without the
+        // sun: under the windows (#519), the bar would wear them.
+        let shadow_off = self.bar_column(frame.output, now);
         self.model
             .stack()
             .iter()
@@ -59,11 +62,22 @@ impl State {
                     look.visual.loc = middle + (look.visual.loc - middle).upscale(pull);
                     look.visual.size = look.visual.size.upscale(pull);
                 }
-                if let Some(sky) = &sun
-                    && self.model.mode(id) != Mode::Fullscreen
-                {
-                    look.shadow = sky.shadow(width, look.shadow);
-                    look.sunlit = sky.lit_edges(width).map(|lit| (lit, hour));
+                look.shadow_off = shadow_off;
+                if let Some(sky) = &sun {
+                    match self.model.mode(id) {
+                        Mode::Fullscreen => {}
+                        // Snapped, maximised too, against the bar and the
+                        // screen's edges: no sun shadow thrown over them,
+                        // its own kept; the sun lights its edges all the
+                        // same.
+                        Mode::Snapped(_) => {
+                            look.sunlit = sky.lit_edges(width).map(|lit| (lit, hour));
+                        }
+                        Mode::Floating => {
+                            look.shadow = sky.shadow(width, look.shadow);
+                            look.sunlit = sky.lit_edges(width).map(|lit| (lit, hour));
+                        }
+                    }
                 }
                 // The fireworks' flashes light its edges (#810).
                 if self.model.mode(id) != Mode::Fullscreen {

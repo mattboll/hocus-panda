@@ -216,6 +216,15 @@ impl Headless {
             .map_or(0, |h| h.frames_on(index))
     }
 
+    /// Scenes built so far for output `index`, whether they drew
+    /// something or not (#826).
+    pub fn scenes_on(&self, index: usize) -> u64 {
+        self.app
+            .backend
+            .headless()
+            .map_or(0, |h| h.scenes_on(index))
+    }
+
     /// The frames of output `name`'s moving wallpaper so far (#433).
     pub fn wall_ticks(&self, name: &str) -> u64 {
         self.app
@@ -1661,6 +1670,7 @@ impl Headless {
         let state = &self.app.state;
         state.frames.still
             && !state.redraw
+            && !state.commits.pending()
             && state.frames.drawn_at.get().is_some()
             && state.frames.wake.is_none_or(|at| at > state.now())
     }

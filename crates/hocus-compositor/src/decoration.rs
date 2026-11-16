@@ -1103,6 +1103,7 @@ where
                     dst,
                     hole: window,
                     radius,
+                    out: None,
                 }),
                 Err(err) => tracing::warn!(?err, "could not draw a window's shadow"),
             }
@@ -1167,6 +1168,40 @@ pub struct ShadowPiece<R: Renderer> {
     dst: Rectangle<i32, Physical>,
     hole: Rectangle<i32, Physical>,
     radius: i32,
+    /// Where it is not drawn either: the bar's column, where a window's
+    /// shadow stops.
+    out: Option<Rectangle<i32, Physical>>,
+}
+
+impl<R: Renderer> ShadowPiece<R> {
+    /// The piece kept off `out` (physical, as its own place); `None` when
+    /// all of it is there.
+    pub fn kept_off(mut self, out: Option<Rectangle<i32, Physical>>) -> Option<Self> {
+        if out.is_some_and(|o| o.contains_rect(self.dst)) {
+            return None;
+        }
+        self.out = out.filter(|o| o.overlaps(self.dst));
+        Some(self)
+    }
+}
+
+/// What of `d` is outside `cut`, in up to four rectangles, into `out`.
+fn minus(d: Rectangle<i32, Physical>, cut: Rectangle<i32, Physical>, out: &mut Rects) {
+    let Some(i) = d.intersection(cut) else {
+        out.push(d);
+        return;
+    };
+    let (d1, i1) = (d.loc + d.size.to_point(), i.loc + i.size.to_point());
+    for (x0, y0, x1, y1) in [
+        (d.loc.x, d.loc.y, d1.x, i.loc.y),
+        (d.loc.x, i1.y, d1.x, d1.y),
+        (d.loc.x, i.loc.y, i.loc.x, i1.y),
+        (i1.x, i.loc.y, d1.x, i1.y),
+    ] {
+        if x1 > x0 && y1 > y0 {
+            out.push(Rectangle::from_extremities((x0, y0), (x1, y1)));
+        }
+    }
 }
 
 impl<R: Renderer> Element for ShadowPiece<R> {
@@ -1232,28 +1267,18 @@ where
         // piece's own place, which the glass moves (`glass.rs`).
         let mut hole = self.hole;
         hole.loc -= self.dst.loc;
+        let out = self.out.map(|mut o| {
+            o.loc -= self.dst.loc;
+            o
+        });
         let radius = self.radius;
-        if !damage.iter().any(|d| d.overlaps(hole)) {
+        let off = out.filter(|o| damage.iter().any(|d| d.overlaps(*o)));
+        if off.is_none() && !damage.iter().any(|d| d.overlaps(hole)) {
             return self.inner.draw(frame, src, dst, damage, opaque_regions);
         }
         let mut outside = Rects::default();
         for &d in damage {
-            match d.intersection(hole) {
-                None => outside.push(d),
-                Some(i) => {
-                    let (d1, i1) = (d.loc + d.size.to_point(), i.loc + i.size.to_point());
-                    for (x0, y0, x1, y1) in [
-                        (d.loc.x, d.loc.y, d1.x, i.loc.y),
-                        (d.loc.x, i1.y, d1.x, d1.y),
-                        (d.loc.x, i.loc.y, i.loc.x, i1.y),
-                        (i1.x, i.loc.y, d1.x, i1.y),
-                    ] {
-                        if x1 > x0 && y1 > y0 {
-                            outside.push(Rectangle::from_extremities((x0, y0), (x1, y1)));
-                        }
-                    }
-                }
-            }
+            minus(d, hole, &mut outside);
         }
         let r = radius.min(hole.size.w / 2).min(hole.size.h / 2).max(0);
         for (left, top) in [(true, true), (false, true), (true, false), (false, false)] {
@@ -1284,6 +1309,13 @@ where
                     outside.push(d);
                 }
             }
+        }
+        if let Some(off) = off {
+            let mut kept = Rects::default();
+            for &d in outside.as_slice() {
+                minus(d, off, &mut kept);
+            }
+            outside = kept;
         }
         let outside = outside.as_slice();
         if outside.is_empty() {

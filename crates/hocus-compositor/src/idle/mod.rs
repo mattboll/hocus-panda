@@ -430,7 +430,7 @@ impl State {
     }
 
     /// The surface at the root of `surface`'s subsurfaces and popups.
-    fn root_surface(&self, surface: &WlSurface) -> WlSurface {
+    pub(crate) fn root_surface(&self, surface: &WlSurface) -> WlSurface {
         let mut root = surface.clone();
         // A popup's parent may be a subsurface, of a popup...: a few
         // levels at most, bounded all the same.
@@ -450,7 +450,7 @@ impl State {
         root
     }
 
-    fn window_of_surface(&self, surface: &WlSurface) -> Option<WindowId> {
+    pub(crate) fn window_of_surface(&self, surface: &WlSurface) -> Option<WindowId> {
         self.windows
             .iter()
             .find(|(_, m)| m.window.wl_surface().is_some_and(|s| *s == *surface))

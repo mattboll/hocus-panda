@@ -503,6 +503,14 @@ pub enum Command {
     Copy(Clip),
     /// Takes the clipboard with a PNG image (`image/png`), as [`Command::Copy`].
     CopyPng(&'static [u8]),
+    /// Opens a popup that takes no grab, as a browser's tab preview:
+    /// `size` large, below `anchor` (x, y, width, height from its window's
+    /// corner), slid or flipped to stay on the screen; [`Event::PopupAt`]
+    /// says where it went.
+    Popup {
+        anchor: (i32, i32, i32, i32),
+        size: (i32, i32),
+    },
     /// Closes its window, as an application quitting.
     Close,
     /// Destroys its layer surface.
@@ -561,6 +569,8 @@ pub struct Clip {
 pub enum Event {
     Globals(Vec<String>),
     PopupShown,
+    /// Where its popup was put, from its window's corner.
+    PopupAt(i32, i32),
     PopupDone,
     /// The compositor asked its window to close; it stays.
     CloseRequested,
@@ -1007,6 +1017,7 @@ fn run_client(
                         }
                     }
                 }
+                (Command::Popup { anchor, size }, _) => client.open_tip(&qh, anchor, size),
                 (Command::Close, _) => client.window = None,
                 (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
@@ -1313,6 +1324,36 @@ impl Client {
     }
 }
 
+impl Client {
+    /// A popup under `anchor` that takes no grab ([`Command::Popup`]).
+    fn open_tip(&mut self, qh: &QueueHandle<Self>, anchor: (i32, i32, i32, i32), size: (i32, i32)) {
+        use wayland_protocols::xdg::shell::client::xdg_positioner::{
+            Anchor as Edge, ConstraintAdjustment, Gravity,
+        };
+        let (Some(window), Some(xdg)) = (&self.window, &self.xdg) else {
+            return;
+        };
+        let Ok(positioner) = XdgPositioner::new(xdg) else {
+            return;
+        };
+        positioner.set_size(size.0, size.1);
+        positioner.set_anchor_rect(anchor.0, anchor.1, anchor.2, anchor.3);
+        positioner.set_anchor(Edge::BottomLeft);
+        positioner.set_gravity(Gravity::BottomRight);
+        positioner.set_constraint_adjustment(
+            ConstraintAdjustment::SlideX
+                | ConstraintAdjustment::SlideY
+                | ConstraintAdjustment::FlipY,
+        );
+        let Ok(popup) = Popup::new(window.xdg_surface(), &positioner, qh, &self.compositor, xdg)
+        else {
+            return;
+        };
+        popup.wl_surface().commit();
+        self.popup = Some(popup);
+    }
+}
+
 impl WindowHandler for Client {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
         let _ = self.events.send(Event::CloseRequested);
@@ -1362,6 +1403,9 @@ impl PopupHandler for Client {
         let size = (config.width.max(1) as u32, config.height.max(1) as u32);
         self.draw(&surface, size);
         let _ = self.events.send(Event::PopupShown);
+        let _ = self
+            .events
+            .send(Event::PopupAt(config.position.0, config.position.1));
     }
 
     fn done(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Popup) {

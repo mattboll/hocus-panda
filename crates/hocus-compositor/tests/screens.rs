@@ -1,15 +1,17 @@
 //! Two screens, headless (docs/design/windows.md §9): a snap, by dragging
 //! or by the keys, lands on the screen it was made on, and stays there as
 //! its work area changes, through fullscreen and back, and as a snapped
-//! pair is resized.
+//! pair is resized; a window's popup opens on the window's screen. A
+//! window's drawing builds the scenes of its own screen alone (#826).
 
 use crate::common;
 
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, Command, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP,
-    Shows, WAIT, chord, client, open, open_with, rect_of, two_screens, wait, wait_for_rect,
+    BTN_LEFT, Command, Event, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT,
+    KEY_UP, Shows, WAIT, chord, client, open, open_showing, open_with, rect_of, two_screens, wait,
+    wait_for_rect,
 };
 use hocus_compositor::{
     Headless,
@@ -125,6 +127,75 @@ fn the_keys_snap_on_the_windows_screen_and_a_pair_stays_there() -> anyhow::Resul
     let area = bar_on_second(&mut hp, area)?;
     wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area))?;
     wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area))?;
+    Ok(())
+}
+
+/// A window's popup opens on the window's screen, at its anchor, even when
+/// the window's own shadow reaches onto the screen beside it (a browser's
+/// tab preview).
+#[test]
+fn a_popup_opens_on_its_windows_screen() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    let (_, window) = open_showing(
+        &mut hp,
+        "test.tabs",
+        Shows::Shadowed {
+            app_id: "test.tabs",
+            size: (800, 600),
+            margin: 30,
+        },
+    )?;
+    let id = id_of(&hp, "test.tabs").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    // 10 px into the second screen: its shadow 20 px onto the first.
+    let rect = Rect::new(1920 + 10, 200, 800, 600);
+    hp.place_window(id, rect);
+    wait_for_rect(&mut hp, "test.tabs", rect)?;
+    window.commands.send(Command::Popup {
+        anchor: (200, 0, 150, 30),
+        size: (300, 200),
+    })?;
+    let mut at = None;
+    hp.dispatch_until(WAIT, |_| {
+        while let Ok(event) = window.events.try_recv() {
+            if let Event::PopupAt(x, y) = event {
+                at = Some((x, y));
+            }
+        }
+        at.is_some()
+    })?;
+    assert_eq!(
+        at,
+        Some((200, 30)),
+        "under its anchor, on the second screen"
+    );
+    Ok(())
+}
+
+/// A window drawing on and on (a video, a terminal scrolling) asks for
+/// the scenes of its screen alone: the other screen, where nothing
+/// changes, builds none (#826).
+#[test]
+fn a_windows_drawing_builds_its_own_screens_scenes_alone() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    let (_, window) = open_with(&mut hp, "test.video", (800, 600), false)?;
+    let id = id_of(&hp, "test.video").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let rect = Rect::new(400, 200, 800, 600);
+    hp.place_window(id, rect);
+    wait_for_rect(&mut hp, "test.video", rect)?;
+    common::at_rest(&mut hp)?;
+    let (first, second) = (hp.scenes_on(0), hp.scenes_on(1));
+    // A second of frames at 60 a second, each another colour.
+    for i in 0..60u32 {
+        let colour = 0xff00_0000 | (i * 4) << 16 | (255 - i * 4);
+        window.commands.send(Command::Header(colour))?;
+        wait(&mut hp, Duration::from_micros(16_667))?;
+    }
+    let (first, second) = (hp.scenes_on(0) - first, hp.scenes_on(1) - second);
+    assert!(first >= 20, "its screen drew it: {first} scenes");
+    assert!(
+        second <= 2,
+        "the other screen, where nothing changed, built {second} scenes (its own: {first})"
+    );
     Ok(())
 }
 

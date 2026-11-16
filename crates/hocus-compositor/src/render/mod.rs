@@ -219,6 +219,9 @@ pub(crate) struct Look {
     /// Its edges the fireworks' flashes light (#810): top, right,
     /// bottom, left, and the effects' frame; on the screen alone.
     flash: Option<([[f32; 4]; 4], u64)>,
+    /// Where its shadow stops, global: the bar's column of the output
+    /// drawn. The window itself goes over the bar as before (#519).
+    shadow_off: Option<Rectangle<f64, Logical>>,
 }
 
 impl Look {
@@ -239,6 +242,7 @@ impl Look {
             rain: None,
             sunlit: None,
             flash: None,
+            shadow_off: None,
         }
     }
 }
@@ -334,6 +338,7 @@ impl State {
             rain,
             sunlit: None,
             flash: None,
+            shadow_off: None,
         })
     }
 
@@ -518,6 +523,9 @@ impl State {
         }
         self.window_parts(renderer, id, look, origin, scale, out);
         if look.decorated && !look.own_shadow {
+            let off = look.shadow_off.map(|r| {
+                Rectangle::new(r.loc - origin, r.size).to_physical_precise_up::<f64, i32>(scale)
+            });
             out.extend(
                 shadow_elements(
                     renderer,
@@ -529,6 +537,7 @@ impl State {
                     look.alpha,
                 )
                 .into_iter()
+                .filter_map(|piece| piece.kept_off(off))
                 .map(OutputElements::Shadow),
             );
         }

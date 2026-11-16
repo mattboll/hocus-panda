@@ -91,8 +91,11 @@ pub struct State {
     /// The window moving, and the one wobbling.
     pub moving: Option<WindowId>,
     pub wobble: Option<(WindowId, Jelly)>,
-    /// Something changed on screen since the last frame.
+    /// Something changed on screen since the last frame: every screen
+    /// draws again.
     pub redraw: bool,
+    /// The screens clients' commits ask to draw again, besides (#826).
+    pub commits: crate::redraw::Commits,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
     /// The bar's tiles, and a window moved over them (8.5 B).
@@ -308,6 +311,7 @@ impl State {
             moving: None,
             wobble: None,
             redraw: true,
+            commits: crate::redraw::Commits::default(),
             strips: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),
             going: None,

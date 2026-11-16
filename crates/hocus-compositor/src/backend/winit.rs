@@ -161,7 +161,8 @@ impl WinitBackend {
         if state.mcp_shots_pending() {
             crate::mcp::capture::take::<_, GlesTexture>(self.backend.renderer(), state);
         }
-        if state.redraw {
+        // One screen: a commit anywhere draws it.
+        if state.redraw || state.commits.pending() {
             self.backend.window().request_redraw();
         }
     }
@@ -192,6 +193,7 @@ impl WinitBackend {
         let started = std::time::Instant::now();
         let _frame = crate::effects::timing::frame();
         state.redraw = false;
+        state.commits.take();
         self.show_host_cursor(state);
         let age = self.backend.buffer_age().unwrap_or(0);
         let shown = magnifier::screen(

@@ -80,6 +80,7 @@ pub mod radial;
 mod radial_draw;
 mod rain;
 pub mod record;
+mod redraw;
 mod reload;
 mod reminders;
 mod render;

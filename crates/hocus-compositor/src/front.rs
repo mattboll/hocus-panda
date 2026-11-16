@@ -265,21 +265,11 @@ impl State {
     /// Whether `at` (global) is in the column of screen `name`'s bar: from
     /// the bar's inner edge to the screen's edge behind it, top to bottom.
     fn in_bar_column(&self, name: &str, at: Point<f64, Logical>) -> bool {
-        let Some(output) = self.space.outputs().find(|o| o.name() == name) else {
-            return false;
-        };
-        let (Some(g), Some(bar)) = (
-            self.space.output_geometry(output),
-            self.bar_rect(output, self.now()),
-        ) else {
-            return false;
-        };
-        let g = g.to_f64();
-        g.contains(at)
-            && match self.bar_side() {
-                hocus_link::Side::Right => at.x >= g.loc.x + bar.loc.x,
-                hocus_link::Side::Left => at.x < g.loc.x + bar.loc.x + bar.size.w,
-            }
+        self.space
+            .outputs()
+            .find(|o| o.name() == name)
+            .and_then(|o| self.bar_column(o, self.now()))
+            .is_some_and(|column| column.contains(at))
     }
 
     /// Whether a fullscreen window hides `output`'s wallpaper, and the
