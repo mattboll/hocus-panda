@@ -302,6 +302,24 @@ impl Bed {
         Ok(out)
     }
 
+    /// The pixels of `rect` (global) once they are as `want` says, in
+    /// the last frame drawn: what the shell draws comes a frame or more
+    /// after what it logs, later on a loaded machine. The last seen, else.
+    fn pixels_until(
+        &mut self,
+        rect: Rect,
+        mut want: impl FnMut(&[u8]) -> bool,
+    ) -> anyhow::Result<Vec<u8>> {
+        let start = Instant::now();
+        loop {
+            let pixels = self.pixels(rect)?;
+            if want(&pixels) || start.elapsed() > WAIT {
+                return Ok(pixels);
+            }
+            wait(&mut self.hp, Duration::from_millis(20))?;
+        }
+    }
+
     /// The light pixels in `rect` (global).
     fn ink(&mut self, rect: Rect) -> anyhow::Result<usize> {
         let pixels = self.pixels(rect)?;
@@ -434,15 +452,18 @@ fn a_click_on_the_row_goes_to_the_next_layout_and_the_row_follows_round_and_roun
     bed.logged_after(mark, &shows("Anglais (US)", "US"))?;
     bed.hp.pointer_move(600.0, 500.0);
     bed.settle()?;
-    assert_ne!(bed.pixels(row)?, first, "the row did not change");
-    // Again: back to the first, which the row shows as it was.
+    let changed = bed.pixels_until(row, |p| p != first)?;
+    assert_ne!(changed, first, "the row did not change");
+    // Again: back to the first, which the row shows as it was once drawn
+    // again, its hover gone with the pointer (#841).
     let mark = bed.mark();
     bed.click(bed.row(false))?;
     bed.group(0)?;
     bed.logged_after(mark, &shows("Français", "FR"))?;
     bed.hp.pointer_move(600.0, 500.0);
     bed.settle()?;
-    assert_eq!(bed.pixels(row)?, first);
+    let back = bed.pixels_until(row, |p| p == first)?;
+    assert_eq!(back, first);
     // The window kept the keyboard: no popover, nothing of the shell's.
     assert!(bed.hp.popover_surfaces().is_empty());
     assert_eq!(bed.hp.keyboard_layer(), None);
@@ -643,21 +664,26 @@ fn the_keyboard_reaches_the_row_where_enter_and_space_go_to_the_next() -> anyhow
         .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
     assert!(closed);
     bed.press(KEY_TAB);
-    wait(&mut bed.hp, Duration::from_millis(300))?;
+    // The ring around the layout's row: the accent's green under it, once
+    // the shell took the Tab and drew it there (#841). The Wi-Fi's row,
+    // which held the keyboard before, is on the same surface.
+    let row = bed.row_rect();
+    let green = |ring: &[u8]| {
+        ring.as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[1] > 150 && p[2] < 140 && p[0] < 170)
+            .count()
+    };
+    let ring = bed.pixels_until(
+        Rect::new(row.x + 40, row.y + row.height + 3, 40, 2),
+        |ring| green(ring) > 20,
+    )?;
+    assert!(green(&ring) > 20, "no ring: {}", green(&ring));
     assert_eq!(
         bed.hp.keyboard_layer().as_deref(),
         Some(hocus_link::CONNECTIONS_NAMESPACE)
     );
-    // The ring around the layout's row: the accent's green under it.
-    let row = bed.row_rect();
-    let ring = bed.pixels(Rect::new(row.x + 40, row.y + row.height + 3, 40, 2))?;
-    let green = ring
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .filter(|p| p[1] > 150 && p[2] < 140 && p[0] < 170)
-        .count();
-    assert!(green > 20, "no ring: {green}");
     let mark = bed.mark();
     bed.press(KEY_ENTER);
     let next = bed.hp.dispatch_until(WAIT, |hp| hp.layout() == 1)?;
