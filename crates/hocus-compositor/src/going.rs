@@ -57,13 +57,15 @@ const RING_ALPHA: f64 = 0.55;
 
 /// The colour of a row by the state the shell is told (`hocus-link`'s
 /// words): waiting amber, stuck orange, to see green, working the accent,
-/// resting grey.
+/// in the background blue, resting grey.
 pub fn colour(state: &str) -> [u8; 3] {
     match state {
         "waiting" => [0xF5, 0xB4, 0x4A],
         "failed" => [0xF2, 0x94, 0x5B],
         "done" => [0x7E, 0xE0, 0xA0],
         "working" => [0x6C, 0xC2, 0x87],
+        // In the background (#831): its dot's blue.
+        "background" => [0x8F, 0xB8, 0xF0],
         _ => [0xA9, 0xB2, 0xC2],
     }
 }

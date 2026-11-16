@@ -1070,11 +1070,13 @@ mod tests {
         halo.meeting(Some(Meeting::InTwo), now, Motion::Full);
         assert_eq!(halo.concern(), Some(Concern::MeetingNow));
         halo.meeting(None, now, Motion::Full);
-        // Working, idle and seen agents concern nobody.
+        // Working, idle, seen and in-the-background agents concern nobody
+        // (#831: « en fond » is quiet).
         let calm = [
             agent(1, "working", now),
             agent(2, "idle", now),
             agent(3, "seen", now),
+            agent(4, "background", now),
         ];
         halo.agents(&calm, now, Motion::Full);
         assert_eq!(halo.concern(), None);

@@ -2,7 +2,8 @@
 //! (docs/agents.md).
 //!
 //! - `hocus agent NAME STATE [--pid PID] [--tests-passed [N]]`, for any
-//!   tool: STATE is working, waiting, done, failed or idle (or ended, to
+//!   tool: STATE is working, waiting, done, failed, idle or background
+//!   (its turn over, something it started still runs; or ended, to
 //!   forget it). The agent is the process that ran the command (above its
 //!   shells), unless `--pid` names it; its window is found above it. Done
 //!   with all its tests passing, its fireworks go off (#810).
@@ -121,7 +122,8 @@ enum Command {
     Agent {
         /// The name it shows under.
         name: String,
-        /// working, waiting, done, failed, idle; or ended, to forget it.
+        /// working, waiting, done, failed, idle, background (its turn over,
+        /// something it started still runs); or ended, to forget it.
         state: String,
         /// The agent's process (default: the one that ran this command,
         /// above its shells). Its window is found above it.
@@ -492,17 +494,40 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
         let _ = out.write_all(answer.as_bytes());
         let _ = out.flush();
     }
-    let Some(said) = hooks::said(tool, &value) else {
+    let running = hooks::running(tool, &value);
+    let said = hooks::said(tool, &value);
+    if running.is_none() && said.is_none() {
         return;
-    };
+    }
     let agent = the_agent();
-    let report = Report {
-        source: tool.source(),
-        key: if said.key.is_empty() {
+    let key = |said: &str| {
+        if said.is_empty() {
             format!("pid-{agent}")
         } else {
-            said.key
-        },
+            said.to_owned()
+        }
+    };
+    // What runs on after its turns (#831): a line of its own, after the
+    // report of the same event, if any (a wake-up's `PostToolUse` is still
+    // its turn's).
+    let ran = running.map(|running| hocus_agents::background::Ran {
+        source: tool.source(),
+        key: key(value
+            .get("session_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()),
+        pid: Some(agent),
+        running,
+    });
+    let Some(said) = said else {
+        if let Some(ran) = ran {
+            let _ = send_line(socket, &ran.to_string());
+        }
+        return;
+    };
+    let report = Report {
+        source: tool.source(),
+        key: key(&said.key),
         state: said.state,
         pid: Some(agent),
         // An event without `cwd`: the agent's own directory, where it
@@ -520,7 +545,11 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
         conversation: said.conversation,
     };
     // Not in a Hocuspanda session, or it is not listening: nothing to do.
-    let _ = send(socket, &report);
+    let mut line = report.to_string();
+    if let Some(ran) = ran {
+        line = format!("{line}\n{ran}");
+    }
+    let _ = send_line(socket, &line);
 }
 
 /// The control socket's path.

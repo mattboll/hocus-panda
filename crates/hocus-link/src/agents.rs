@@ -105,6 +105,9 @@ impl FromStr for ToolState {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentShown {
     pub id: u64,
+    /// `working`, `waiting`, `failed`, `idle`; `done` (finished, not seen
+    /// yet), `seen` (finished and seen), `background` (seen, something it
+    /// started still runs, #831).
     pub state: String,
     pub since: u64,
     pub source: String,

@@ -106,7 +106,13 @@ impl Words {
             Look::Stuck => txt::stuck_for(self.lang, &since),
             Look::ToSee => txt::DONE_TO_SEE.get(self.lang).to_owned(),
             Look::Working => txt::working_for(self.lang, &since),
-            Look::Resting => txt::RESTING.get(self.lang).to_owned(),
+            // As its row says it on hover (#831).
+            Look::Background => hocus_words::shell::agents::IN_THE_BACKGROUND_TIP
+                .get(self.lang)
+                .to_owned(),
+            Look::Resting => hocus_words::shell::agents::RESTING_TIP
+                .get(self.lang)
+                .to_owned(),
             Look::News => txt::HAS_GOOD_NEWS.get(self.lang).to_owned(),
         };
         format!("{name}, {state}")

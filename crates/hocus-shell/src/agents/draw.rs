@@ -36,6 +36,12 @@
 //! hops once (650 ms); then nothing moves. None of it with reduced motion
 //! or on the CPU. With `[agents] pandas` off (6.16), a 10 px dot of the
 //! state's colour stands in each panda's place.
+//!
+//! The calm rows (to see, in the background, resting) trade their word for
+//! a 9 px dot (#831): green, blue, grey; the blue one breathes slowly
+//! (2.4 s), drawn again every [`BREATH_STEP`] while one shows, with motion
+//! and the pandas lively only. The word shows on hover, as the bar's
+//! tooltips do, with how long a working one has worked.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -60,8 +66,8 @@ use super::{
     CARD_NOTE, CARD_NOTE_LINE, CARD_PANDA, CARD_PANDA_GAP, CARD_RADIUS, CARD_ROW_RADIUS, CARD_WORD,
     FOLLOWED, HEAD, HEAD_GAP, HEAD_TOP, HEADER, HEADER_RADIUS, IDLE, INTRO, INTRO_LINE, LABEL,
     LINK, Layout, Look, MARK, MARK_GAP, MARK_INK, MARK_LETTER, MARK_RADIUS, MINI_ITEM, MINI_PANDA,
-    MINI_PANDA_IN, MINI_RADIUS, MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP, ROW_PAD,
-    ROW_RADIUS, Row, SAYS, Words,
+    MINI_PANDA_IN, MINI_RADIUS, MINI_TEXT, MORE_TEXT, Mood, NAME, PANDA, PANDA_GAP, ROW_DOT,
+    ROW_PAD, ROW_RADIUS, Row, SAYS, Words,
 };
 use crate::pandas::{self, Burst};
 use crate::theme::Ink;
@@ -94,6 +100,17 @@ const PANDA_BOX: (f32, f32) = (126.0, 120.5);
 const ASLEEP: f32 = 0.55;
 /// The dot in a panda's place, its diameter.
 const DOT: f32 = 10.0;
+/// The calm rows' dots (#831): to see, in the background, resting.
+const DOT_TO_SEE: Ink = Ink::Dark(rgb(0x7EE0A0));
+const DOT_BACKGROUND: Ink = Ink::Dark(rgb(0x8FB8F0));
+const DOT_RESTING: Ink = Ink::Dark(rgb(0x7C8597));
+/// The blue dot's breath, the mockup's: from 35 % to full and back in
+/// 2.4 s, eased in and out; drawn again this often while it breathes.
+const BREATH: Duration = Duration::from_millis(2400);
+const BREATH_LOW: f32 = 0.35;
+const BREATH_STEP: Duration = Duration::from_millis(150);
+/// Resting on a row this long shows its tooltip (as Today's lines).
+const TIP: Duration = Duration::from_millis(600);
 /// The rows' motion: the slide, the fades and the tint, the hop.
 const SLIDE: Duration = Duration::from_millis(450);
 const SLIDE_CURVE: (f32, f32, f32, f32) = (0.2, 0.9, 0.25, 1.0);
@@ -575,8 +592,38 @@ fn dot(look: Look) -> Color {
         Look::ToSee => rgb(0x7EE0A0),
         Look::News => rgb(0xB69CFF),
         Look::Working => rgb(0x6CC287),
+        Look::Background => rgb(0x8FB8F0),
         Look::Resting => rgb(0xA9B2C2),
     }
+}
+
+/// A calm row's dot's colour in place of its word (#831).
+fn row_dot(look: Look) -> Option<Color> {
+    match look {
+        Look::ToSee => Some(DOT_TO_SEE.get()),
+        Look::Background => Some(DOT_BACKGROUND.get()),
+        Look::Resting => Some(DOT_RESTING.get()),
+        _ => None,
+    }
+}
+
+/// The blue dot's opacity `t` into its breath (from any start).
+fn breath(t: Duration) -> f32 {
+    let share = (t.as_secs_f32() / BREATH.as_secs_f32()).fract();
+    // Up over its first half, down over its second, each eased.
+    let up = if share < 0.5 {
+        share * 2.0
+    } else {
+        (1.0 - share) * 2.0
+    };
+    BREATH_LOW + (1.0 - BREATH_LOW) * bezier(EASE_IN_OUT, up)
+}
+
+/// Where the breaths count from: one for every bar, so that their dots
+/// breathe together.
+fn breath_origin() -> Instant {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    *ORIGIN.get_or_init(Instant::now)
 }
 
 /// A row's tint and its word's colour. Under high contrast, no tint: the
@@ -589,6 +636,7 @@ fn colours(look: Look) -> (Color, Color) {
         Look::ToSee => TO_SEE,
         Look::News => NEWS,
         Look::Working => (FAINT.get(), Color::TRANSPARENT),
+        Look::Background => (DOT_BACKGROUND.get(), Color::TRANSPARENT),
         Look::Resting => (RESTING.get(), Color::TRANSPARENT),
     };
     if crate::theme::contrast() && tint.a > 0.0 {
@@ -857,10 +905,12 @@ impl<Message> canvas::Program<Message> for Group {
                                 .rows
                                 .iter()
                                 .filter(|r| {
-                                    state
-                                        .moving
-                                        .get(&r.id)
-                                        .is_some_and(|m| m.hop && m.since == *now)
+                                    // In the background it stays calm (#831).
+                                    r.look != Look::Background
+                                        && state
+                                            .moving
+                                            .get(&r.id)
+                                            .is_some_and(|m| m.hop && m.since == *now)
                                 })
                                 .map(|r| (r.id, r.look))
                                 .collect();
@@ -897,7 +947,12 @@ impl<Message> canvas::Program<Message> for Group {
                     state.hover = None;
                 }
                 state.now = Some(*now);
-                state.tick(*now).then(canvas::Action::request_redraw)
+                if state.tick(*now) {
+                    return Some(canvas::Action::request_redraw());
+                }
+                // A blue dot breathing (#831): the next step of its breath.
+                self.breathes()
+                    .then(|| canvas::Action::request_redraw_at(*now + BREATH_STEP))
             }
             iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
             iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -1039,6 +1094,14 @@ impl Group {
         self.motion && pandas::lively()
     }
 
+    /// Whether a blue dot breathes (#831): one shows in the full form,
+    /// lively.
+    fn breathes(&self) -> bool {
+        self.lively()
+            && self.forms.iter().any(|(form, _)| *form == Form::Full)
+            && layout().is_some_and(|l| l.rows.iter().any(|r| r.look == Look::Background))
+    }
+
     /// The look of agent `id`'s panda as shown: its row's, or the mini
     /// item's waiting one.
     fn look_of(&self, id: u64) -> Option<Look> {
@@ -1056,6 +1119,19 @@ impl Group {
                     .filter(|w| w.0 == id)
                     .map(|_| Look::Waiting)
             })
+    }
+
+    /// What agent row `item` says on hover (#831), if it says something.
+    fn tip_of(&self, item: Item) -> Option<String> {
+        let Item::Agent(id) = item else {
+            return None;
+        };
+        layout()?
+            .rows
+            .into_iter()
+            .find(|r| r.id == id)
+            .map(|r| r.tip)
+            .filter(|tip| !tip.is_empty())
     }
 
     /// The form that shows alone (not switching): its items take the
@@ -1564,6 +1640,22 @@ impl Group {
                     Alignment::Left,
                 ),
             ));
+            if let Some(colour) = row_dot(row.look) {
+                // Its dot in its word's place (#831), the blue one
+                // breathing.
+                let breathing = match row.look {
+                    Look::Background if self.lively() => {
+                        breath(now.saturating_duration_since(breath_origin()))
+                    }
+                    _ => 1.0,
+                };
+                let right = rect.x + rect.width - ROW_PAD;
+                f.fill(
+                    &Path::circle(Point::new(right - ROW_DOT / 2.0, middle), ROW_DOT / 2.0),
+                    faded(colour, breathing * shown),
+                );
+                continue;
+            }
             f.fill_text(said(
                 &row.word,
                 Point::new(rect.x + rect.width - ROW_PAD, middle),
@@ -1652,12 +1744,21 @@ impl Group {
                     popover::event(popover::Event::ItemLeave { at: bar_at });
                 }
                 state.hover = now;
-                // The pointer over an agent's panda replays its mood once.
+                // The pointer over an agent's panda replays its mood once;
+                // in the background it stays calm (#831).
                 if let Some(Item::Agent(id)) = now
                     && self.lively()
                     && let Some(look) = self.look_of(id)
+                    && look != Look::Background
                 {
                     state.play(id, look, Instant::now());
+                }
+                // Its row's word, on hover (#831).
+                match over.and_then(|(item, r)| Some((self.tip_of(item)?, r))) {
+                    Some((tip, r)) => {
+                        crate::tray::tip::hover_text(&self.bar, rect(r), TIP, tip, String::new());
+                    }
+                    None => crate::tray::tip::leave(),
                 }
                 if let Some((item, r)) = over {
                     popover::event(popover::Event::ItemEnter {
@@ -1670,11 +1771,13 @@ impl Group {
             }
             mouse::Event::CursorLeft => {
                 state.hover.take()?;
+                crate::tray::tip::leave();
                 let at = state.last.unwrap_or_default();
                 popover::event(popover::Event::ItemLeave { at });
                 Some(canvas::Action::request_redraw())
             }
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                crate::tray::tip::leave();
                 let event = match over {
                     Some((item, r)) => popover::Event::ItemPress {
                         bar: self.bar.clone(),
@@ -1857,6 +1960,17 @@ mod tests {
                     .is_some_and(|r| r > 0.99)
             );
         }
+    }
+
+    #[test]
+    fn the_blue_dot_breathes_from_a_third_to_full_in_two_seconds_and_a_half() {
+        let at = Duration::from_millis;
+        assert!((breath(at(0)) - BREATH_LOW).abs() < 0.001);
+        assert!((breath(at(1200)) - 1.0).abs() < 0.001);
+        assert!((breath(at(2400)) - BREATH_LOW).abs() < 0.001);
+        // Eased: slow at its ends, and the same going down as up.
+        assert!(breath(at(100)) - breath(at(0)) < breath(at(700)) - breath(at(600)));
+        assert!((breath(at(600)) - breath(at(1800))).abs() < 0.001);
     }
 
     #[test]

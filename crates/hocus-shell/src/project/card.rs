@@ -215,6 +215,7 @@ fn agent_state(state: &str, lang: crate::clock::time::Lang) -> &'static str {
         "waiting" => txt::AGENT_STATE_WAITING,
         "done" | "seen" => txt::AGENT_STATE_DONE,
         "failed" => txt::AGENT_STATE_FAILED,
+        "background" => txt::AGENT_STATE_BACKGROUND,
         _ => txt::AGENT_STATE_IDLE,
     }
     .get(lang)
