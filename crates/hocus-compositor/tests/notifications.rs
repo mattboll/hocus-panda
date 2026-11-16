@@ -1108,7 +1108,15 @@ fn its_close_removes_one_and_clear_all_empties_it() -> anyhow::Result<()> {
     bed.click(clear)?;
     let shows = bed.logged_since(mark, "the history shows")?;
     assert!(shows.contains("history=Rien de neuf"), "{shows}");
-    bed.logged_since(mark, "\"history:Switch\"")?;
+    // The places of a frame drawn after that line: one logged since the
+    // mark but before it, of the history as it was, names the switch too
+    // (#844).
+    let emptied = bed
+        .log()
+        .get(mark..)
+        .and_then(|new| new.find(&shows))
+        .map_or(mark, |at| mark + at + shows.len());
+    bed.logged_since(emptied, "\"history:Switch\"")?;
     let places = bed.history_places();
     let names: Vec<&str> = places.iter().map(|(who, _)| who.as_str()).collect();
     assert_eq!(names, ["Switch"], "{places:?}");
