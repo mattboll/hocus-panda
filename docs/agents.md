@@ -1,7 +1,7 @@
 # Telling the desktop what an agent is doing
 
 Hocuspanda shows each agent's state in its bar: working, waiting for you,
-done, failed, idle (docs/design/bar.md §4 group 3). Claude Code and Codex
+done, failed, idle, in the background (docs/design/bar.md §4 group 3). Claude Code and Codex
 are followed through their hooks, once plugged in from the bar; herdr is
 read while it runs. Any other tool can say the same with one command.
 
@@ -16,7 +16,9 @@ hocus agent NAME STATE [--pid PID] [--tests-passed [N]]
 - `STATE`: `working`, `waiting` (it waits for the user: a permission, a
   question), `done` (its turn ended, nobody looked yet: the bar says "à
   voir" until its window gets the keyboard or its row is clicked, then
-  "repos"), `failed`, `idle`; or `ended`, to forget it.
+  "repos"), `failed`, `idle`, `background` (its turn ended and something
+  it started still runs: "à voir" until looked at, then "en fond", until
+  it says another state); or `ended`, to forget it.
 - `--pid PID`: the agent's process. By default, the process that ran
   `hocus` (above the shells it ran through). The agent's window is the
   first window found above that process (its terminal, its editor); for a
@@ -143,6 +145,8 @@ an answer, and always succeeds.
 | `StopFailure` | yes | | failed |
 | `Interrupt` | | yes | idle |
 | `SessionEnd` | yes | yes | forgotten |
+| `SubagentStart`, `SubagentStop` | yes | | none: a sub-agent running, ended ([In the background](#in-the-background)) |
+| `PostToolUse` of `ScheduleWakeup`, `CronCreate` | yes | | working, and a wake-up armed |
 
 The hooks also say what a waiting agent asks and why a failed one
 stopped: a `PermissionRequest`'s tool and its input in one line (the
@@ -150,12 +154,51 @@ command it runs, the file it writes, by its name), the question of
 `AskUserQuestion`, a waiting `Notification`'s `message`, a
 `StopFailure`'s error message.
 
+A sub-agent's and a wake-up's line is `ran SOURCE KEY PID WHAT`, `WHAT`
+being `subagent-start ID`, `subagent-stop ID` or `wake-up`, after the
+event's report when it has one.
+
 Plugging in writes these hooks into `~/.claude/settings.json` (or
 `~/.codex/config.toml`, with `notify` when there is none), after the
 user's click in the bar, and keeps the file as it was beside it
 (`….before-hocuspanda`); unplugging puts it back, or takes only these
 entries out if the file changed since. Codex runs a new hook only once
-the user trusted it with `/hooks`.
+the user trusted it with `/hooks`. Claude Code plugged in before the sub-agents'
+hooks came (#831) has none of them: unplugging it and plugging it in
+again, from Sources, adds them.
+
+## In the background
+
+An agent whose turn ended may have left something running that will
+bring it back by itself: a command in the background, a sub-agent, a
+wake-up armed, a watch. Once the user looked, its row then says "en
+fond" (a blue dot) rather than "repos"; not looked at
+yet, "à voir" wins (docs/design/bar.md §4 group 3). It is quiet: no halo,
+no panda peeking out, no notification, nothing in the mini form's
+badge. When what ran ends and the agent takes a turn by itself, it works
+again; when it does not come back, it rests (or stays "à voir").
+
+For the agents of Claude Code's and Codex's hooks the desktop tells it by
+itself, from two sources; anything from either is "en fond":
+
+- **Its processes**: the agent's process (the one above its hooks) has
+  children still running. They are read in `/proc` off the desktop's
+  loop, only for agents whose turn ended (`Stop`, Codex's
+  `agent-turn-complete`): once then, again when one of its sub-agents
+  stops, and every 2 s while one runs. Left out: its MCP servers (the
+  children started before its first turn, and those whose command line
+  is one of its configured servers': `mcpServers` in `~/.claude.json`,
+  for the user and for the project, and in the project's `.mcp.json`;
+  `[mcp_servers]` in Codex's `config.toml`), its hooks' own `hocus`, the
+  zombies, and a child younger than a second (counted at the next
+  reading, if it still runs).
+- **Its hooks** (Claude Code): `SubagentStart` and `SubagentStop` count
+  the sub-agents still running (a background sub-agent runs in the
+  agent's own process: no child); a `PostToolUse` of `ScheduleWakeup` or
+  `CronCreate` arms a wake-up until its next turn starts or its session
+  ends.
+
+Any other tool says it with `hocus agent NAME background`.
 
 ## Their notifications
 

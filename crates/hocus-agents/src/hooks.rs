@@ -19,6 +19,12 @@
 //!   `Interrupt`: idle.
 //! - `SessionEnd`: the agent is forgotten.
 //!
+//! What runs on after a turn (#831, [`running`]): Claude Code's
+//! `SubagentStart` and `SubagentStop` (a sub-agent started, ended: a
+//! background one outlives its parent's turn), and a `PostToolUse` of
+//! `ScheduleWakeup` or `CronCreate` (a wake-up armed). They change no
+//! state.
+//!
 //! What the agent asks for, or why it failed, goes with its state as its
 //! [`Note`] (the secretary's briefing, bar.md §7 B): a permission's tool
 //! and its input in one line, the question it asks, the notification's
@@ -171,6 +177,27 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
                 .flatten(),
         },
     })
+}
+
+/// What `payload`, from a tool's hook, says runs on beside its agent's
+/// turns (#831): a sub-agent started or ended (its `agent_id`), a wake-up
+/// armed. Nothing for any other event.
+pub fn running(_tool: Tool, payload: &Value) -> Option<crate::background::Running> {
+    use crate::background::Running;
+    let text = |key: &str| payload.get(key).and_then(Value::as_str);
+    let agent = || {
+        text("agent_id")
+            .filter(|id| !id.is_empty())
+            .map(crate::key_word)
+    };
+    match text("hook_event_name")? {
+        "SubagentStart" => agent().map(Running::SubagentStarted),
+        "SubagentStop" => agent().map(Running::SubagentStopped),
+        "PostToolUse" => {
+            matches!(text("tool_name")?, "ScheduleWakeup" | "CronCreate").then_some(Running::WakeUp)
+        }
+        _ => None,
+    }
 }
 
 /// The programs and words that run tests, in a command's line.
@@ -530,6 +557,44 @@ mod tests {
             .and_then(|s| s.tests),
             None
         );
+    }
+
+    #[test]
+    fn sub_agents_and_wake_ups_say_what_runs_on_and_no_state() {
+        use crate::background::Running;
+        let start = json!({ "session_id": "abc123", "transcript_path": "/x.jsonl",
+            "cwd": "/w", "hook_event_name": "SubagentStart",
+            "agent_id": "agent-abc123", "agent_type": "Explore" });
+        assert_eq!(
+            running(Tool::ClaudeCode, &start),
+            Some(Running::SubagentStarted("agent-abc123".into()))
+        );
+        assert_eq!(said(Tool::ClaudeCode, &start), None);
+        let stop = json!({ "session_id": "abc123", "hook_event_name": "SubagentStop",
+            "stop_hook_active": false, "agent_id": "def456", "agent_type": "Explore",
+            "agent_transcript_path": "/x/subagents/agent-def456.jsonl",
+            "last_assistant_message": "Analysis complete." });
+        assert_eq!(
+            running(Tool::ClaudeCode, &stop),
+            Some(Running::SubagentStopped("def456".into()))
+        );
+        assert_eq!(said(Tool::ClaudeCode, &stop), None);
+        // No id: nothing to count.
+        let bare = json!({ "session_id": "abc123", "hook_event_name": "SubagentStart" });
+        assert_eq!(running(Tool::ClaudeCode, &bare), None);
+        // A wake-up armed: still working, and armed.
+        for tool in ["ScheduleWakeup", "CronCreate"] {
+            let armed = json!({ "session_id": "abc123", "hook_event_name": "PostToolUse",
+                "tool_name": tool, "tool_input": { "prompt": "check the build" },
+                "tool_response": {} });
+            assert_eq!(running(Tool::ClaudeCode, &armed), Some(Running::WakeUp));
+            assert_eq!(state(Tool::ClaudeCode, armed), Some(Some(State::Working)));
+        }
+        let other = json!({ "session_id": "abc123", "hook_event_name": "PostToolUse",
+            "tool_name": "Bash", "tool_input": { "command": "ls" } });
+        assert_eq!(running(Tool::ClaudeCode, &other), None);
+        let stopped = json!({ "session_id": "abc123", "hook_event_name": "Stop" });
+        assert_eq!(running(Tool::ClaudeCode, &stopped), None);
     }
 
     #[test]

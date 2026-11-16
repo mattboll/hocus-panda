@@ -47,6 +47,9 @@ pub fn mood(look: Look) -> Mood {
         Look::Stuck => Mood::Stuck,
         // Good news: its arms up among its confetti.
         Look::ToSee | Look::News => Mood::Done,
+        // Awake, its turn over, something it started still running
+        // (#831): the finished one's pose, which it never plays.
+        Look::Background => Mood::Done,
         Look::Working => Mood::Working,
         Look::Resting => Mood::Resting,
     }

@@ -1254,6 +1254,183 @@ fn a_finished_agent_stays_to_see_until_its_window_gets_the_keyboard() -> anyhow:
     Ok(())
 }
 
+// --- #831: « en fond » --------------------------------------------------------------
+
+/// A process of this test's, a child of the agent its hooks name (this
+/// test's process: `hocus` runs as its child), as a command an agent runs
+/// in the background or an MCP server it starts; ended by its PID when
+/// dropped.
+struct Child(std::process::Child);
+
+impl Child {
+    fn sleep(seconds: &str) -> anyhow::Result<Self> {
+        Ok(Self(Command::new("sleep").arg(seconds).spawn()?))
+    }
+}
+
+impl Drop for Child {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl Bed {
+    /// Claude Code's session `session` in `project` starts, and its first
+    /// turn.
+    fn claude_starts(&mut self, session: &str, project: &str) -> anyhow::Result<()> {
+        self.claude(session, project, "SessionStart", ",\"source\":\"startup\"")?;
+        self.claude(session, project, "UserPromptSubmit", ",\"prompt\":\"go\"")?;
+        self.agent_becomes(project, Some("working"))
+    }
+
+    /// Its turn ends.
+    fn claude_stops(&self, session: &str, project: &str) -> anyhow::Result<()> {
+        self.claude(session, project, "Stop", ",\"stop_hook_active\":false")
+    }
+
+    /// Agent `name`'s states as the shell is told them for `time`.
+    fn states_for(&mut self, name: &str, time: Duration) -> anyhow::Result<Vec<String>> {
+        let mut states: Vec<String> = Vec::new();
+        let start = Instant::now();
+        while start.elapsed() < time {
+            self.hp.dispatch(Duration::from_millis(20))?;
+            if let Some(agent) = self.hp.agents_peek().into_iter().find(|a| a.name == name)
+                && states.last() != Some(&agent.state)
+            {
+                states.push(agent.state);
+            }
+        }
+        Ok(states)
+    }
+}
+
+/// An agent of Claude Code's stops with a command of its still running:
+/// « à voir » while nobody looked (it wins), « en fond » once its window
+/// has the keyboard, « repos » once the command ends.
+#[test]
+fn an_agent_stopping_with_a_child_running_is_to_see_then_in_the_background_then_rests()
+-> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    // Its terminal: a window of this process's. On another desktop, empty:
+    // no window has the keyboard.
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_2]);
+    let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
+    anyhow::ensure!(away, "{:?}", bed.hp.desktop());
+    bed.claude_starts("s1", "site-web")?;
+    // A command in the background, started in its turn, running for more
+    // than a second as its turn ends.
+    wait(&mut bed.hp, Duration::from_millis(50))?;
+    let command = Child::sleep("120")?;
+    wait(&mut bed.hp, Duration::from_millis(1200))?;
+    let from = bed.mark();
+    bed.claude_stops("s1", "site-web")?;
+    bed.agent_becomes("site-web", Some("done"))?;
+    bed.logged_after(from, &["shows=AGENTS 1 · site-web à voir"])?;
+    // Read, and read again: still to see while nobody looked.
+    let states = bed.states_for("site-web", Duration::from_millis(2500))?;
+    assert_eq!(states, ["done"]);
+    // Its window has the keyboard: in the background.
+    let from = bed.mark();
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_1]);
+    bed.agent_becomes("site-web", Some("background"))?;
+    bed.logged_after(from, &["shows=AGENTS 1 · site-web en fond"])?;
+    // Its command ends: it rests.
+    let from = bed.mark();
+    drop(command);
+    bed.agent_becomes("site-web", Some("seen"))?;
+    bed.logged_after(from, &["shows=AGENTS 1 · site-web repos"])?;
+    Ok(())
+}
+
+/// A sub-agent started and not stopped as its parent's turn ends: « en
+/// fond » (its window has the keyboard: seen at once); stopped: « repos ».
+#[test]
+fn a_sub_agent_still_running_keeps_its_agent_in_the_background() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    bed.claude_starts("s2", "docs")?;
+    let subagent = ",\"agent_id\":\"a1b2\",\"agent_type\":\"Explore\"";
+    bed.claude("s2", "docs", "SubagentStart", subagent)?;
+    bed.claude_stops("s2", "docs")?;
+    bed.agent_becomes("docs", Some("background"))?;
+    let states = bed.states_for("docs", Duration::from_millis(2500))?;
+    assert_eq!(states, ["background"]);
+    bed.claude(
+        "s2",
+        "docs",
+        "SubagentStop",
+        &format!("{subagent},\"stop_hook_active\":false"),
+    )?;
+    bed.agent_becomes("docs", Some("seen"))?;
+    Ok(())
+}
+
+/// An agent's MCP servers are no work left running: one started before
+/// its first turn, one started again later as `~/.claude.json` configures
+/// it. Its turn over, it rests.
+#[test]
+fn an_mcp_server_child_does_not_put_its_agent_in_the_background() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    std::fs::write(
+        bed.home().join(".claude.json"),
+        r#"{ "mcpServers": { "docs": { "type": "stdio", "command": "sleep", "args": ["121"] } } }"#,
+    )?;
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    // Started with the session, before its first turn.
+    let _first = Child::sleep("122")?;
+    wait(&mut bed.hp, Duration::from_millis(50))?;
+    bed.claude_starts("s3", "infra")?;
+    // Started again in its turn, as configured.
+    wait(&mut bed.hp, Duration::from_millis(50))?;
+    let _again = Child::sleep("121")?;
+    wait(&mut bed.hp, Duration::from_millis(1200))?;
+    bed.claude_stops("s3", "infra")?;
+    bed.agent_becomes("infra", Some("seen"))?;
+    // Read, and read again: it rests.
+    let states = bed.states_for("infra", Duration::from_millis(2500))?;
+    assert_eq!(states, ["seen"]);
+    Ok(())
+}
+
+/// « en fond » is quiet: no halo, no panda peeking out, for as long as it
+/// lasts.
+#[test]
+fn in_the_background_lights_no_halo_and_no_peek() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    bed.claude_starts("s4", "api")?;
+    wait(&mut bed.hp, Duration::from_millis(50))?;
+    let _command = Child::sleep("120")?;
+    wait(&mut bed.hp, Duration::from_millis(1200))?;
+    bed.settle()?;
+    bed.claude_stops("s4", "api")?;
+    bed.agent_becomes("api", Some("background"))?;
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(2500) {
+        bed.hp.dispatch(Duration::from_millis(20))?;
+        assert_eq!(bed.hp.halo_concern(), None);
+        assert_eq!(bed.hp.peek_out(), None);
+    }
+    assert_eq!(bed.hp.peeks_told(), 0);
+    assert!(bed.hp.peek_surfaces().is_empty());
+    assert_eq!(bed.hp.agents_peek()[0].state, "background");
+    Ok(())
+}
+
 #[test]
 fn a_rows_click_goes_to_the_agents_window_on_its_desktop() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
@@ -1780,11 +1957,25 @@ fn the_streaks_start_fades_to_nothing_at_its_row() -> anyhow::Result<()> {
     bed.hocus(&["agent", "build", "working"], None)?;
     bed.agent_becomes("build", Some("working"))?;
     let row = bed.row("build")?;
-    // The pointer on the row first: its hover is in both pictures.
+    // The pointer on the row first: its hover is in both pictures. Its
+    // tooltip (#831) in neither: the pointer comes back onto the row, and
+    // the first is taken before the tooltip's 600 ms (the click sends it
+    // away).
     bed.hp.pointer_move(row.0 - 1.0, row.1);
     bed.hp.pointer_move(row.0, row.1);
     bed.settle()?;
+    bed.hp.pointer_move(600.0, 500.0);
+    bed.settle()?;
+    bed.hp.pointer_move(row.0, row.1);
+    wait(&mut bed.hp, Duration::from_millis(250))?;
     let (width, _, before) = bed.hp.screenshot(0)?;
+    anyhow::ensure!(
+        bed.hp
+            .drawn_layers(hocus_link::TIP_NAMESPACE)
+            .iter()
+            .all(|(_, r)| r.height <= 1),
+        "the row's tooltip shows already"
+    );
     // A frame of the streak well on its way, at its full alpha.
     let Streak { from, head, .. } = bed.streak_on_its_way(row, "test.terminal")?;
     let (_, _, after) = bed.hp.screenshot(0)?;
@@ -4267,6 +4458,51 @@ fn screenshots_of_the_pandas() -> anyhow::Result<()> {
         .dispatch_until(Duration::from_secs(15), |hp| hp.peek_surfaces().is_empty())?;
     anyhow::ensure!(back, "the peek stays out");
     pandas_shot(&mut bed, &folder, "mini", 260)?;
+    Ok(())
+}
+
+/// #831's screenshots, into `HOCUS_SHOTS`: the bar's agents in the four
+/// calm states (working 12 min, to see, in the background, resting), the
+/// calm rows' dots in place of their words, in the dark theme; then the
+/// word on hover of the one in the background.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_agents_in_the_background() -> anyhow::Result<()> {
+    let Some(folder) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&folder)?;
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    bed.agent_is("hocus-panda", "working")?;
+    bed.agent_is("site-web", "done")?;
+    // Not looked at yet: to see.
+    bed.hocus(&["agent", "docs", "background"], None)?;
+    bed.agent_becomes("docs", Some("done"))?;
+    bed.agent_is("notes", "idle")?;
+    bed.hp.backdate_agents(Duration::from_secs(12 * 60));
+    // Looked at: in the background.
+    bed.settle()?;
+    let docs = bed.row("docs")?;
+    bed.click(docs)?;
+    bed.agent_becomes("docs", Some("background"))?;
+    bed.logged(
+        "shows=AGENTS 4 · site-web à voir · hocus-panda 12\u{a0}min · docs en fond · notes repos",
+    )?;
+    bed.hp.pointer_move(600.0, 500.0);
+    let back = bed
+        .hp
+        .dispatch_until(Duration::from_secs(15), |hp| hp.peek_surfaces().is_empty())?;
+    anyhow::ensure!(back, "the peek stays out");
+    pandas_shot(&mut bed, &folder, "background", 260)?;
+    // Its word on hover.
+    let docs = bed.row("docs")?;
+    bed.hp.pointer_move(docs.0, docs.1);
+    bed.logged("a tooltip shows")?;
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    pandas_shot(&mut bed, &folder, "background-tip", 560)?;
     Ok(())
 }
 

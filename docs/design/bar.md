@@ -152,7 +152,7 @@ group where it is.
 | — | In use | The sign of what uses the microphone, the camera or the screen, under the card (5.12, as built): a tile a kind in use; none when nothing is | 36 px |
 | 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
 | 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, wrapped onto 3 rows at most, 18 px apart, the line growing 18 px a row; past 3 rows the third ends with an ellipsis, the title whole in a tooltip after 600 ms; #792); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line, 18 more a title's row past the first (+ 20 px for "+ N", + 30 px for the field, 19 more a row as its text wraps, 5 rows at most) |
-| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 56 px head (#649), `AGENTS` and the total over her line; "Sources" in her briefing. One 46 px row per agent (4.1, track 4 "the lines"; #649): its panda (42 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", "à voir" (finished, not seen yet) or "repos"; waiting, stuck and to-see rows tinted; a waiting or stuck agent's row is a 68 px card with what it asks or why it failed (§7 A). Waiting first (the longest first), then stuck, to see, working, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 66 px + 46 px a row, 68 px a card (+ 20 px for the rest) |
+| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 56 px head (#649), `AGENTS` and the total over her line; "Sources" in her briefing. One 46 px row per agent (4.1, track 4 "the lines"; #649): its panda (42 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", or, for the calm rows, a 9 px dot whose word shows on hover (#831): "à voir" (finished, not seen yet, green), "en fond" (seen, something it started still runs, blue) or "repos" (grey); waiting, stuck and to-see rows tinted; a waiting or stuck agent's row is a 68 px card with what it asks or why it failed (§7 A). Waiting first (the longest first), then stuck, to see, working, in the background, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 66 px + 46 px a row, 68 px a card (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
 | — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the overview (windows.md §12b); none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
@@ -2446,6 +2446,8 @@ the heads) are display options for later (#491).
     `rgba(108,194,135,0.10)`;
   - resting (idle, or finished and seen): "repos" / "resting", `#6A7384`,
     its panda asleep at 55 %.
+  Since #831 the calm rows trade their word for a dot (below, "In the
+  background").
   Under the pointer a row is lit `rgba(255,255,255,0.06)` and the pointer
   is a hand, as the bar's other rows (the mockup's tints, inline, hide its
   own `:hover`). The name is herdr's for an agent herdr sees (its tab's
@@ -2477,6 +2479,21 @@ the heads) are display options for later (#491).
   agents are also seen as herdr says (it turns `done` into `idle` once the
   pane is looked at); their window is herdr's terminal, shared by every
   pane, whose getting the keyboard sees only the pane herdr shows (4.3c).
+- **In the background** (#831, approved 2026-11-16; mockup
+  `s21-background`): seen, an agent whose turn ended and that left
+  something running (a command in the background, a sub-agent, a wake-up
+  armed: docs/agents.md, "In the background") is told to the shell as
+  `background`, « en fond », and `seen` once nothing runs; « à voir »
+  wins until it is seen. The calm rows trade their word for a 9 px dot,
+  its right edge 6 px in (in a room of 14 px, which the name gains): to
+  see `#7EE0A0` (the row tinted as before), in the background `#8FB8F0`
+  (still: an agent can stay in the background for hours), resting `#7C8597`. On hover (600 ms, the bar's tooltip) a row
+  says its word: "à voir" ("au vert"), "en fond : il reviendra tout
+  seul", "repos : tu peux le fermer", "au travail depuis 12 min"; screen
+  readers say the same. Its panda is awake (the finished one's pose,
+  still: it never plays its mood); waiting, stuck and good-news cards
+  are unchanged. It is quiet: no halo, no peek, no badge in the mini
+  form; it counts with the resting ones in her briefing.
 - **"12 min"** goes on with the clock: at each of its minute changes, the
   shell lays the rows out again if a working agent shows and what they say
   changed, and wakes the group's surface (once for all the bars). Nothing

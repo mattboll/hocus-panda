@@ -160,6 +160,9 @@ pub enum Look {
     News,
     /// It works: for how long.
     Working,
+    /// Finished and seen, and something it started still runs (#831): "en
+    /// fond", a blue dot; it will come back by itself.
+    Background,
     /// Idle, or finished and seen: "repos", its panda asleep.
     Resting,
 }
@@ -169,6 +172,13 @@ impl Look {
     /// (#649): waiting or stuck.
     pub fn carded(self) -> bool {
         matches!(self, Self::Waiting | Self::Stuck | Self::News)
+    }
+
+    /// Whether its row says it with a 9 px dot in place of its word, the
+    /// word on hover (#831): the calm rows, to see, in the background,
+    /// resting.
+    pub fn dotted(self) -> bool {
+        matches!(self, Self::ToSee | Self::Background | Self::Resting)
     }
 
     /// An agent's row's: its good news's while said, else its state's.
@@ -186,6 +196,7 @@ impl Look {
             "failed" => Self::Stuck,
             "done" => Self::ToSee,
             "working" => Self::Working,
+            "background" => Self::Background,
             _ => Self::Resting,
         }
     }
@@ -193,6 +204,16 @@ impl Look {
 
 /// The rows shown, at most.
 pub const MOST_ROWS: usize = 5;
+
+/// How long an agent has worked, as its row says it: "12 min", "1 h 05"
+/// from an hour.
+fn minutes(minutes: u64) -> String {
+    if minutes >= 60 {
+        format!("{}\u{a0}h\u{a0}{:02}", minutes / 60, minutes % 60)
+    } else {
+        format!("{minutes}\u{a0}min")
+    }
+}
 
 /// A row's height: a card for a waiting or stuck agent (#649).
 pub fn row_height(look: Look) -> f32 {
@@ -218,7 +239,8 @@ pub fn rows_that_fit(looks: &[Look], room: f32) -> usize {
 }
 
 /// `agents` in their rows' order: waiting (the longest first), stuck, to
-/// see, working, resting, in the order they came otherwise.
+/// see, working, in the background, resting, in the order they came
+/// otherwise.
 fn ordered(agents: &[AgentShown]) -> Vec<(Look, &AgentShown)> {
     let mut ordered: Vec<(Look, &AgentShown)> =
         agents.iter().map(|a| (Look::of_agent(a), a)).collect();
@@ -375,7 +397,8 @@ impl Brief {
                 Look::Stuck => brief.stuck.push(entry()),
                 Look::ToSee => brief.to_see.push(entry()),
                 Look::Working => brief.working.push(entry()),
-                Look::Resting | Look::News => brief.resting.push(entry()),
+                // Calm, needing nothing of the user (#831).
+                Look::Background | Look::Resting | Look::News => brief.resting.push(entry()),
             }
         }
         brief
@@ -633,7 +656,7 @@ impl Words {
             Look::Stuck => self.pick(txt::STUCK),
             Look::ToSee => self.pick(txt::TO_SEE),
             Look::Working => self.pick(txt::AT_WORK),
-            Look::Resting | Look::News => self.pick(txt::RESTING),
+            Look::Background | Look::Resting | Look::News => self.pick(txt::RESTING),
         }
     }
 
@@ -759,13 +782,23 @@ impl Words {
             Look::ToSee if line.green => self.pick(txt::TESTS_PASSED).to_owned(),
             Look::ToSee => self.pick(txt::TO_SEE_2).to_owned(),
             Look::News => self.pick(txt::HAS_GOOD_NEWS).to_owned(),
+            Look::Background => self.pick(txt::IN_THE_BACKGROUND).to_owned(),
             Look::Resting => self.pick(txt::RESTING_2).to_owned(),
-            // "1 h 05" from an hour.
-            Look::Working if line.minutes >= 60 => {
-                format!("{}\u{a0}h\u{a0}{:02}", line.minutes / 60, line.minutes % 60)
-            }
-            Look::Working => format!("{}\u{a0}min", line.minutes),
+            Look::Working => minutes(line.minutes),
         }
+    }
+
+    /// What an agent's row says on hover (#831): its dot's word, and why
+    /// it matters ("en fond : il reviendra tout seul"); how long it has
+    /// worked ("au travail depuis 12 min"). None for a card, which says it.
+    pub fn tip(self, line: &Line) -> Option<String> {
+        Some(match line.look {
+            Look::Waiting | Look::Stuck | Look::News => return None,
+            Look::Working => txt::working_for(self.lang, minutes(line.minutes)),
+            Look::ToSee => self.word(line),
+            Look::Background => self.pick(txt::IN_THE_BACKGROUND_TIP).to_owned(),
+            Look::Resting => self.pick(txt::RESTING_TIP).to_owned(),
+        })
     }
 
     /// The line for the agents not shown: "+ 2 au repos" when they all
@@ -908,6 +941,10 @@ pub const PANDA: f32 = 42.0;
 pub const PANDA_GAP: f32 = 7.0;
 pub const AGENT_NAME: f32 = 13.5;
 pub const AGENT_WORD: f32 = 12.5;
+/// A calm row's dot in place of its word (#831, the mockup's): 9 px, its
+/// right edge 6 px in, in a room at least 14 px wide.
+pub const ROW_DOT: f32 = 9.0;
+pub const DOT_ROOM: f32 = 14.0;
 /// A waiting or stuck agent's row is a card (#649, level C of the
 /// mockup): 68 px, radius 9, its panda 60 px 2 px in, 8 px before its
 /// name (13.5 px, line 1.2) over the state's word (12 px, 700) over what
@@ -962,7 +999,10 @@ pub struct Row {
     pub id: u64,
     pub look: Look,
     pub name: String,
+    /// The word on its right; empty on a dotted row (#831).
     pub word: String,
+    /// What it says on hover, empty for none.
+    pub tip: String,
     pub rect: Rectangle,
     /// A card's lines of what the agent asks or why it failed (none: a
     /// plain row, or a card with nothing said).
@@ -1165,13 +1205,21 @@ fn row(
                 measure(t, NAME, MANROPE_SEMIBOLD)
             }),
             word: crate::popover::kit::elide(&word, room, |t| measure(t, WORD, MANROPE)),
+            tip: String::new(),
             rect,
             note: Vec::new(),
         };
     }
+    let tip = words.tip(line).unwrap_or_default();
     if !line.look.carded() {
-        let room =
-            width - 2.0 * ROW_PAD - PANDA - 2.0 * PANDA_GAP - measure(&word, AGENT_WORD, MANROPE);
+        // A calm row's dot (#831), in the room its word would take.
+        let (word, word_width) = if line.look.dotted() {
+            (String::new(), DOT_ROOM)
+        } else {
+            let width = measure(&word, AGENT_WORD, MANROPE);
+            (word, width)
+        };
+        let room = width - 2.0 * ROW_PAD - PANDA - 2.0 * PANDA_GAP - word_width;
         return Row {
             id: line.id,
             look: line.look,
@@ -1179,6 +1227,7 @@ fn row(
                 measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
             }),
             word,
+            tip,
             rect,
             note: Vec::new(),
         };
@@ -1203,6 +1252,7 @@ fn row(
             measure(t, AGENT_NAME, MANROPE_SEMIBOLD)
         }),
         word,
+        tip,
         rect,
         note,
     }
@@ -1584,6 +1634,55 @@ mod tests {
         assert_eq!(lines.rows[4].minutes, 12);
         // The two resting ones, the lowest, are not shown.
         assert_eq!((lines.total, lines.hidden, lines.hidden_rest), (7, 2, true));
+    }
+
+    /// #831: in the background after working, before resting; the calm
+    /// rows say their word on hover and draw a dot in its place; it counts
+    /// with the calm, needing nothing of the user.
+    #[test]
+    fn in_the_background_a_row_is_a_dot_its_word_on_hover() {
+        const MIN: u64 = 60_000_000;
+        let fr = Words::new(Lang::French);
+        let en = Words::new(Lang::English);
+        let agents = vec![
+            shown(1, "seen", 0, "notes"),
+            shown(2, "background", 0, "docs"),
+            shown(3, "working", 100 * MIN - 12 * MIN, "build"),
+            shown(4, "done", 0, "api"),
+        ];
+        let lines = Lines::of(&agents, 100 * MIN);
+        let looks: Vec<Look> = lines.rows.iter().map(|l| l.look).collect();
+        assert_eq!(
+            looks,
+            [Look::ToSee, Look::Working, Look::Background, Look::Resting]
+        );
+        let tips: Vec<Option<String>> = lines.rows.iter().map(|l| fr.tip(l)).collect();
+        assert_eq!(
+            tips,
+            [
+                Some("à voir".to_owned()),
+                Some("au travail depuis 12\u{a0}min".to_owned()),
+                Some("en fond\u{a0}: il reviendra tout seul".to_owned()),
+                Some("repos\u{a0}: tu peux le fermer".to_owned()),
+            ]
+        );
+        assert_eq!(fr.word(&lines.rows[2]), "en fond");
+        assert_eq!(en.word(&lines.rows[2]), "in the background");
+        assert_eq!(
+            en.tip(&lines.rows[2]).as_deref(),
+            Some("in the background: it will come back by itself")
+        );
+        let measure = |t: &str, size: f32, _font: Font| t.chars().count() as f32 * size * 0.5;
+        let laid = layout(&fr, &Shows::Lines(lines), &Brief::of(&agents), measure);
+        let words: Vec<&str> = laid.rows.iter().map(|r| r.word.as_str()).collect();
+        assert_eq!(words, ["", "12\u{a0}min", "", ""]);
+        assert!(laid.rows.iter().all(|r| !r.tip.is_empty()));
+        // A card says it: no tip.
+        let card = Lines::of(&[shown(5, "waiting", 0, "x")], 0);
+        assert_eq!(fr.tip(&card.rows[0]), None);
+        let brief = Brief::of(&agents);
+        assert_eq!((brief.needs(), brief.resting.len()), (1, 2));
+        assert_eq!(brief.mood(), Mood::Calm);
     }
 
     #[test]

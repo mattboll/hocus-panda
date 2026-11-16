@@ -17,11 +17,13 @@
 //! The compositor's control socket (`<socket>.control`, [`SOCKET_ENV`])
 //! takes the lines written and read here: a [`Report`], a [`Question`]
 //! (`hocus msg idle`, `lock`, `outputs`, `input-devices`, `a11y`), a
-//! [`ProgramAsk`] (`hocus msg shell status|restart`); an agent's MCP line
+//! [`ProgramAsk`] (`hocus msg shell status|restart`); what a hook says its
+//! agent left running ([`background::Ran`], #831); an agent's MCP line
 //! ([`mcp`], `mcp NAME`); an agent's good news ([`Celebration`], `hocus
 //! celebrate`); and the Settings' own, `msg screens` (the compositor's
 //! `displays.rs`).
 
+pub mod background;
 pub mod herdr;
 pub mod hooks;
 pub mod mcp;
@@ -169,15 +171,21 @@ pub enum State {
     Failed,
     /// Ready, nothing to look at.
     Idle,
+    /// Its turn ended, and something it started still runs: it will come
+    /// back by itself (#831). As `Done` until the user looked, then « en
+    /// fond »; the desktop also tells it of the hooks' agents by itself
+    /// ([`background`]).
+    Background,
 }
 
 impl State {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Working,
         Self::Waiting,
         Self::Done,
         Self::Failed,
         Self::Idle,
+        Self::Background,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -187,7 +195,16 @@ impl State {
             Self::Done => "done",
             Self::Failed => "failed",
             Self::Idle => "idle",
+            Self::Background => "background",
         }
+    }
+
+    /// Whether its turn is over: what it started may still run.
+    pub const fn ended_its_turn(self) -> bool {
+        matches!(
+            self,
+            Self::Done | Self::Failed | Self::Idle | Self::Background
+        )
     }
 }
 
@@ -200,7 +217,7 @@ impl FromStr for State {
             .find(|state| state.name() == s)
             .ok_or_else(|| {
                 BadLine(format!(
-                    "no state {s:?}: working, waiting, done, failed, idle or ended"
+                    "no state {s:?}: working, waiting, done, failed, idle, background or ended"
                 ))
             })
     }

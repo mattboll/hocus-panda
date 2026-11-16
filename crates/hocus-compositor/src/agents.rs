@@ -42,6 +42,15 @@
 //! all its panes: its getting the keyboard shows only the agent of the
 //! pane herdr has focused (herdr also turns `done` into `idle` once a pane
 //! is looked at).
+//!
+//! Seen, an agent of Claude Code's or Codex's hooks whose turn ended and
+//! that left something running (a command in the background, a sub-agent,
+//! a wake-up armed: [`running`], #831) is `background` to the shell, « en
+//! fond », and `seen` (« repos ») once nothing runs; one that says it is
+//! `background` itself (`hocus agent NAME background`) too, until it says
+//! otherwise. Not seen yet, either is `done`: « à voir » wins.
+
+mod running;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -75,8 +84,10 @@ use smithay::{
 
 use crate::{App, State as Compositor, model::WindowId};
 
-/// A finished agent's state once seen, as the shell is told it.
+/// A finished agent's state once seen, as the shell is told it: resting,
+/// or something it started still runs (#831).
 const SEEN: &str = "seen";
+const BACKGROUND: &str = "background";
 
 /// What a reporting connection may hold, lines, and how long it is read.
 const MOST_LINES: usize = 64;
@@ -111,6 +122,10 @@ pub enum Heard {
     Follow(std::os::unix::net::UnixStream),
     /// An MCP agent's line (`hocus mcp`, docs/design/mcp.md).
     Mcp(crate::mcp::FromAgent),
+    /// What a hook says runs on beside its agent's turns (#831).
+    Ran(hocus_agents::background::Ran),
+    /// The agents' children left running, as the worker read them.
+    Running(Vec<(u64, hocus_agents::background::Found)>),
 }
 
 /// A go-to waiting for herdr's terminal to be found: the agent, its row,
@@ -158,12 +173,14 @@ impl How {
 
 /// An agent as the shell is told it, how its window was found, and
 /// whether that window getting the keyboard shows it (herdr's terminal
-/// shows only herdr's focused pane).
+/// shows only herdr's focused pane); whether it left something running
+/// (#831).
 #[derive(Debug)]
 struct Listed {
     shown: AgentShown,
     how: How,
     looks: bool,
+    behind: bool,
 }
 
 /// An agent a hook or a command told about.
@@ -196,6 +213,8 @@ struct Agent {
     /// §8.1): the first `cwd`, the last transcript's path, the first
     /// prompt. Never logged.
     conversation: hocus_agents::Conversation,
+    /// What it left running after its turn (#831).
+    running: running::Running,
 }
 
 /// Good news of a process no agent is known for: a row of its own, for
@@ -258,6 +277,10 @@ pub struct Agents {
     /// For the threads that look for herdr's clients, and the MCP
     /// agents' settings' threads.
     pub(crate) sender: Option<channel::Sender<Heard>>,
+    /// The worker reading what the agents left running (#831), and the
+    /// timer that has it read again.
+    children: Option<std::sync::mpsc::Sender<Vec<running::Job>>>,
+    children_timer: Option<RegistrationToken>,
 }
 
 /// Starts the sources: the control socket always (`hocus agent` works in
@@ -274,6 +297,7 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
         .map_err(|err| err.error)
         .context("could not hear the agents")?;
     state.agents.sender = Some(sender.clone());
+    state.agents.children = running::start(sender.clone());
     let path = hocus_agents::socket_path(&state.socket_path);
     if path.exists() {
         std::fs::remove_file(&path)
@@ -414,6 +438,12 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
                 }
                 break;
             }
+            if let Ok(ran) = line.parse::<hocus_agents::background::Ran>() {
+                if sender.send(Heard::Ran(ran)).is_err() {
+                    return;
+                }
+                continue;
+            }
             if let Ok(news) = line.parse::<hocus_agents::Celebration>() {
                 let ancestry = news
                     .pid
@@ -469,6 +499,11 @@ impl Compositor {
             Heard::Screens(heard) => self.displays_heard(heard),
             Heard::Mcp(from) => {
                 self.mcp_heard(from);
+                return;
+            }
+            Heard::Ran(ran) => self.agent_ran(ran),
+            Heard::Running(found) => {
+                self.agents_children_found(found);
                 return;
             }
             Heard::Asked(Question::A11y, reply) => {
@@ -545,6 +580,7 @@ impl Compositor {
                     a.pids.contains(&pid) && !a.keys.iter().any(|(s, _)| *s == report.source)
                 })
             });
+        let fresh = at.is_none();
         let at = match at {
             Some(index) => index,
             None => {
@@ -562,6 +598,7 @@ impl Compositor {
                     green: None,
                     good: None,
                     conversation: hocus_agents::Conversation::default(),
+                    running: running::Running::new(),
                 });
                 agents.list.len() - 1
             }
@@ -583,10 +620,13 @@ impl Compositor {
             agent.keys.push(key);
         }
         let changed = agent.state != state;
+        agent.running.turned(agent.state, state);
         if agent.state != state {
             agent.state = state;
             agent.since = now;
         }
+        // Its turn ended: what it left running is read (#831).
+        let ended = ((changed || fresh) && state == State::Done).then_some(agent.id);
         // Its tests (#810): the last run of its turn counts; finished with
         // all of them passing, its fireworks go off. Its turn over, they
         // are forgotten: the next needs a run of its own.
@@ -632,6 +672,9 @@ impl Compositor {
         if let Some(name) = green {
             tracing::info!(name, "an agent finished, its tests passing");
             self.fireworks_go_off();
+        }
+        if let Some(id) = ended {
+            self.agent_turn_ended(id);
         }
         if let Some(folder) = folder {
             // The folders the hooks named, which the project's form and
@@ -979,6 +1022,16 @@ impl Compositor {
             }
             sources.sort_unstable();
             sources.dedup();
+            // Something it started still runs (#831): told `done` until
+            // seen ([`Compositor::mark_seen`]); herdr's `idle`, once its
+            // pane was looked at, is that seen.
+            let behind = agent.state == State::Background
+                || (agent.state == State::Done && agent.running.any());
+            let word = match state {
+                State::Background => State::Done.name(),
+                State::Idle if behind => BACKGROUND,
+                state => state.name(),
+            };
             let source: Vec<&str> = sources.iter().map(|s| s.name()).collect();
             let name = hocus_agents::agent_name(herdr_name, Some(&agent.name), herdr_folder)
                 .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
@@ -1000,7 +1053,7 @@ impl Compositor {
             shown.push(Listed {
                 shown: AgentShown {
                     id: agent.id,
-                    state: state.name().to_owned(),
+                    state: word.to_owned(),
                     since,
                     source: source.join("+"),
                     window,
@@ -1010,6 +1063,7 @@ impl Compositor {
                 },
                 how,
                 looks,
+                behind,
             });
         }
         for alone in &self.agents.alone {
@@ -1028,6 +1082,7 @@ impl Compositor {
                 },
                 how: How::None("good news alone"),
                 looks: false,
+                behind: false,
             });
         }
         if followed {
@@ -1074,6 +1129,7 @@ impl Compositor {
                     },
                     how,
                     looks,
+                    behind: false,
                 });
             }
         }
@@ -1140,7 +1196,8 @@ impl Compositor {
     }
 
     /// The finished agents among `listed` whose window has the keyboard
-    /// and shows them are seen; those seen say so (`seen`).
+    /// and shows them are seen; those seen say so: `background` while
+    /// something they started runs (#831), else `seen`.
     fn mark_seen(&mut self, listed: &mut [Listed]) {
         let focused = self.model.focused().map(|w| w.0);
         let seen = &mut self.agents.seen;
@@ -1148,6 +1205,7 @@ impl Compositor {
         for Listed {
             shown: agent,
             looks,
+            behind,
             ..
         } in listed
             .iter_mut()
@@ -1157,7 +1215,8 @@ impl Compositor {
                 seen.insert(agent.id, agent.since);
             }
             if seen.get(&agent.id) == Some(&agent.since) {
-                SEEN.clone_into(&mut agent.state);
+                let word = if *behind { BACKGROUND } else { SEEN };
+                word.clone_into(&mut agent.state);
             }
         }
     }

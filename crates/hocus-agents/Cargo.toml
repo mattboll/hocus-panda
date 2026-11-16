@@ -23,8 +23,9 @@ serde = { workspace = true, features = ["derive"] }
 # layout (MIT or Apache-2.0).
 toml_edit.workspace = true
 # inotify (tools appearing, their settings changing, herdr's socket),
-# poll and eventfd for the watcher's thread.
-rustix = { workspace = true, features = ["fs", "event", "process"] }
+# poll and eventfd for the watcher's thread; the clock processes start
+# on (#831).
+rustix = { workspace = true, features = ["fs", "event", "process", "param", "time"] }
 tracing.workspace = true
 
 [dev-dependencies]

@@ -221,8 +221,9 @@ pub fn has_ours(tool: Tool, text: &str) -> bool {
 
 // --- Claude Code's settings.json ---------------------------------------------------
 
-/// Claude Code's events our hook runs on, and their matchers.
-const CLAUDE_EVENTS: [(&str, Option<&str>); 10] = [
+/// Claude Code's events our hook runs on, and their matchers: the
+/// sub-agents' too, which say what runs on after a turn (#831).
+const CLAUDE_EVENTS: [(&str, Option<&str>); 12] = [
     ("SessionStart", None),
     ("UserPromptSubmit", None),
     ("PreToolUse", Some("AskUserQuestion|ExitPlanMode")),
@@ -235,6 +236,8 @@ const CLAUDE_EVENTS: [(&str, Option<&str>); 10] = [
     ),
     ("Stop", None),
     ("StopFailure", None),
+    ("SubagentStart", None),
+    ("SubagentStop", None),
     ("SessionEnd", None),
 ];
 
