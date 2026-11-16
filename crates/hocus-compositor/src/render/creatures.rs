@@ -191,11 +191,14 @@ impl State {
             if let (Some(words), Some(fonts), Some(tag_w)) = (&creature.tag, fonts, spot.tag) {
                 let milli = (scale * 1000.0).round() as u32;
                 let mut tags = live.tags.borrow_mut();
-                let picture = match tags.get(&(words.clone(), milli)) {
-                    Some(p) => Some(p.clone()),
+                let picture = match tags.get_mut(&(words.clone(), milli)) {
+                    Some((p, used)) => {
+                        *used = now;
+                        Some(p.clone())
+                    }
                     None => draw_tag(fonts, words, scale).map(|(pixels, size)| {
                         let p = (tag_buffer(&pixels, size), size);
-                        tags.insert((words.clone(), milli), p.clone());
+                        tags.insert((words.clone(), milli), (p.clone(), now));
                         p
                     }),
                 };

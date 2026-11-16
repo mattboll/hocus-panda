@@ -303,6 +303,11 @@ impl Headless {
         self.app.state.fx.creatures.drawn()
     }
 
+    /// The creatures' name tags' pictures kept.
+    pub fn creature_tags(&self) -> usize {
+        self.app.state.fx.creatures.tags.borrow().len()
+    }
+
     /// The windows the creatures sit on, and how many on each, as decided.
     pub fn creatures_sitting(&self) -> Vec<(WindowId, usize)> {
         self.app
