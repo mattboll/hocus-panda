@@ -7,6 +7,7 @@ use std::{
     io::{BufRead as _, BufReader, Write as _},
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
@@ -164,8 +165,13 @@ pub fn listen(listener: UnixListener, mut told: impl FnMut(Again) -> bool + Send
     }
 }
 
-/// The socket goes with the window.
+/// The socket goes with the window, once: the program may end after a
+/// new one has taken its place.
 pub fn stop() {
+    static STOPPED: AtomicBool = AtomicBool::new(false);
+    if STOPPED.swap(true, Ordering::SeqCst) {
+        return;
+    }
     if let Some(path) = path() {
         let _ = std::fs::remove_file(path);
     }

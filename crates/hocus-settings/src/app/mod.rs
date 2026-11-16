@@ -81,9 +81,14 @@ const KNOB: Duration = Duration::from_millis(160);
 /// Collections of the places in a row that may disagree before they are
 /// said anyway ([`App::placed`]).
 const UNSETTLED: u8 = 4;
-/// How long a closing window waits for the writes it asked before it
-/// goes anyway (a file on a disk that hangs).
+/// How long the program, its window closed, waits for the writes it asked
+/// before it ends anyway (a file on a disk that hangs).
 const CLOSE_WAIT: Duration = Duration::from_secs(5);
+/// The program ends this long after its window at the soonest. iced tears
+/// the program down in the turn of its loop that ends it, before that
+/// turn's requests reach the compositor: a window closed in the same turn
+/// stayed on screen for as long as the teardown took.
+const GONE_FIRST: Duration = Duration::from_millis(100);
 /// A found row: lit after 250 ms, held 1 s, gone by 2.4 s.
 const LIGHT_WAIT: Duration = Duration::from_millis(250);
 const LIGHT_HELD: Duration = Duration::from_millis(1250);
@@ -262,15 +267,16 @@ struct Pending {
     say: Option<String>,
 }
 
-/// Whether the window stays: asked to close, it goes once the writes it
-/// asked are on disk.
+/// Whether the window stays: asked to close, it goes at once, and the
+/// program ends once the writes it asked are on disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Life {
     Open,
-    /// Waiting for the worker's last writes.
-    Closing,
-    /// Its close asked of iced.
-    Closed,
+    /// The window closed then; the program waits for the worker's last
+    /// writes.
+    Gone(Instant),
+    /// Its end asked of iced.
+    Ending,
 }
 
 /// A slider moving, before its value is written.
@@ -461,6 +467,20 @@ pub struct App {
     apps: applications::State,
     /// The Performances page: the day its thread read (#655).
     perf: perf_page::State,
+}
+
+/// `HOCUS_TEST_SLOW_END=MS`: the program's teardown takes that long, as it
+/// may on a machine with its buses and its GPU; the tests check the window
+/// does not wait for it.
+impl Drop for App {
+    fn drop(&mut self) {
+        let slow = std::env::var("HOCUS_TEST_SLOW_END")
+            .ok()
+            .and_then(|ms| ms.parse().ok());
+        if let Some(ms) = slow {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
+    }
 }
 
 impl App {
@@ -729,10 +749,14 @@ impl App {
         // whatever changed it (a light fading out at a frame too): a test
         // waits for those before it clicks (#684).
         place |= self.shows_serial != shown;
-        let task = if self.life == Life::Closing && self.pending.is_empty() {
-            Task::batch([task, self.close_now()])
-        } else {
-            task
+        let task = match self.life {
+            Life::Gone(at)
+                if self.pending.is_empty()
+                    && self.now.saturating_duration_since(at) >= GONE_FIRST =>
+            {
+                Task::batch([task, self.end()])
+            }
+            _ => task,
         };
         if place {
             Task::batch([task, places(self.wheels, self.shows_serial)])
@@ -925,12 +949,12 @@ impl App {
             }
             Message::Close => self.close(),
             Message::CloseAnyway => {
-                if self.life == Life::Closing {
+                if matches!(self.life, Life::Gone(_)) {
                     tracing::warn!(
                         writes = self.pending.len(),
-                        "the file's worker has not written yet: the window closes anyway"
+                        "the file's worker has not written yet: the program ends anyway"
                     );
-                    self.close_now()
+                    self.end()
                 } else {
                     Task::none()
                 }
@@ -1542,8 +1566,9 @@ impl App {
     }
 
     /// ✕, `Esc`, `Ctrl+W` or the compositor's close: a slider still moving
-    /// is written now, and the window goes once the worker has written
-    /// what it was asked (never waiting on this thread).
+    /// is written now, the window goes at once, and the program ends once
+    /// the worker has written what it was asked (never waiting on this
+    /// thread).
     fn close(&mut self) -> Task<Message> {
         if self.life != Life::Open {
             return Task::none();
@@ -1552,22 +1577,26 @@ impl App {
             let _ = self.change(sliding.slot, Value::Int(sliding.value));
         }
         self.menu = None;
-        if self.pending.is_empty() {
-            return self.close_now();
-        }
-        tracing::info!(
-            writes = self.pending.len(),
-            "closing once the file is written"
-        );
-        self.life = Life::Closing;
-        Task::perform(tokio::time::sleep(CLOSE_WAIT), |()| Message::CloseAnyway)
-    }
-
-    fn close_now(&mut self) -> Task<Message> {
-        self.life = Life::Closed;
+        tracing::info!(writes = self.pending.len(), "the window closes");
+        self.life = Life::Gone(Instant::now());
         self.sound.stop();
         self.bluetooth_close();
-        self.window.map_or_else(iced::exit, window::close)
+        // A launch from now on opens a window of its own.
+        crate::single::stop();
+        let close = self
+            .window
+            .map_or_else(|| window::latest().and_then(window::close), window::close);
+        Task::batch([
+            close,
+            // The program ends at the first message past it, writes done.
+            Task::perform(tokio::time::sleep(GONE_FIRST), |()| Message::Nothing),
+            Task::perform(tokio::time::sleep(CLOSE_WAIT), |()| Message::CloseAnyway),
+        ])
+    }
+
+    fn end(&mut self) -> Task<Message> {
+        self.life = Life::Ending;
+        iced::exit()
     }
 
     fn open_file(&self) {
