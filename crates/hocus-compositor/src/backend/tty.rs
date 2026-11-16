@@ -256,6 +256,9 @@ struct Screen {
     flip: Flip,
     /// Something changed since its last frame.
     dirty: bool,
+    /// Its windows committed nothing new, with frame callbacks to answer
+    /// at its next refresh, without a scene (#840).
+    owed: bool,
     /// Frames presented, for presentation-time.
     presented: u64,
     /// The look at its frame out, while there is one (see [`flip`]).
@@ -618,6 +621,9 @@ fn on_vblank(app: &mut App, crtc: crtc::Handle, metadata: &mut Option<DrmEventMe
     tty.power(state);
     if dirty {
         tty.render(crtc, state);
+    } else {
+        // Frame callbacks owed by commits that changed nothing (#840).
+        tty.refresh(crtc, state);
     }
 }
 
@@ -892,6 +898,7 @@ impl TtyBackend {
             surface,
             flip: Flip::Idle,
             dirty: true,
+            owed: false,
             presented: 0,
             health: None,
             pace: None,
@@ -1041,6 +1048,7 @@ impl TtyBackend {
                 }));
                 screen.flip = Flip::Idle;
                 screen.dirty = false;
+                screen.owed = false;
             }
         }
     }
@@ -1110,8 +1118,10 @@ impl TtyBackend {
             return;
         }
         for screen in self.gpu.screens.values_mut() {
-            if all || some.contains(&screen.output) {
+            if all || some.scenes.contains(&screen.output) {
                 screen.dirty = screen.powered;
+            } else if some.owed.contains(&screen.output) {
+                screen.owed = screen.powered;
             }
         }
         if !self.active {
@@ -1121,11 +1131,31 @@ impl TtyBackend {
             .gpu
             .screens
             .iter()
-            .filter(|(_, s)| s.powered && s.dirty && !s.flip.is_queued() && s.pace.is_none())
+            .filter(|(_, s)| {
+                s.powered && (s.dirty || s.owed) && !s.flip.is_queued() && s.pace.is_none()
+            })
             .map(|(crtc, _)| *crtc)
             .collect();
         for crtc in ready {
+            self.refresh(crtc, state);
+        }
+    }
+
+    /// A screen free to take a frame: drawn if something changed on it,
+    /// else its clients told it refreshed, if they wait to be.
+    fn refresh(&mut self, crtc: crtc::Handle, state: &mut State) {
+        let Some(screen) = self.gpu.screens.get_mut(&crtc) else {
+            return;
+        };
+        if screen.dirty {
             self.render(crtc, state);
+        } else if screen.owed {
+            screen.owed = false;
+            if screen.powered {
+                // As after an empty frame: the next at its next refresh.
+                state.send_frames_unchanged(&screen.output);
+                pace(screen, crtc, state);
+            }
         }
     }
 
@@ -1166,6 +1196,8 @@ impl TtyBackend {
             return;
         };
         screen.dirty = false;
+        // Its clients are told of this frame.
+        screen.owed = false;
         // Off (7.2): nothing is drawn until it is on again.
         if !screen.powered {
             return;
@@ -1331,8 +1363,8 @@ fn pace(screen: &mut Screen, crtc: crtc::Handle, state: &State) {
             let active = tty.active;
             if let Some(screen) = tty.gpu.screens.get_mut(&crtc) {
                 screen.pace = None;
-                if screen.dirty && active && !screen.flip.is_queued() {
-                    tty.render(crtc, state);
+                if active && !screen.flip.is_queued() {
+                    tty.refresh(crtc, state);
                 }
             }
         }

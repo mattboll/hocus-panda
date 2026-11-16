@@ -158,6 +158,9 @@ pub struct FrameCost {
     pub render_ns: u64,
     /// Their elements, all scenes together.
     pub elements: u64,
+    /// The refreshes that told its clients of a frame without building a
+    /// scene: their windows committed nothing new (#840).
+    pub unchanged: u64,
 }
 
 /// Creates the renderer and the outputs, and maps them in the space.
@@ -496,6 +499,17 @@ where
         Ok(())
     }
 
+    /// Tells the clients of the outputs `owed` takes that they refreshed,
+    /// without a scene: nothing new was committed there (#840).
+    fn unchanged(&mut self, state: &State, owed: impl Fn(&Output) -> bool) {
+        for out in &mut self.outputs {
+            if owed(&out.output) && !state.display_off(&out.output) {
+                state.send_frames_unchanged(&out.output);
+                out.cost.unchanged += 1;
+            }
+        }
+    }
+
     /// Draws the outputs `asked` takes, and tells their clients.
     fn render(&mut self, state: &mut State, asked: impl Fn(&Output) -> bool) {
         let Self {
@@ -699,10 +713,17 @@ impl HeadlessBackend {
         // Every output, or those clients' commits show on (#826).
         let all = std::mem::take(&mut state.redraw);
         let some = state.commits.take();
-        let asked = |output: &Output| all || some.contains(output);
+        let asked = |output: &Output| all || some.scenes.contains(output);
+        let owed = |output: &Output| !asked(output) && some.owed.contains(output);
         match &mut self.canvas {
-            Canvas::Gles(c) => c.render(state, asked),
-            Canvas::Pixman(c) => c.render(state, asked),
+            Canvas::Gles(c) => {
+                c.render(state, asked);
+                c.unchanged(state, owed);
+            }
+            Canvas::Pixman(c) => {
+                c.render(state, asked);
+                c.unchanged(state, owed);
+            }
         }
     }
 

@@ -10,13 +10,26 @@
 //! elsewhere than where it is: the overview, Alt+Tab's thumbnails, the
 //! actions palette, a window moving, the lock, or a surface the desktop
 //! does not place itself.
+//!
+//! A window's commit that changes nothing it shows (#840: an application
+//! committing hundreds of times a second, its frame callbacks alone or
+//! its buffer again without damage) asks for no scene: its screens answer
+//! its frame callbacks at their next refresh, without building one.
 
 use smithay::{
+    backend::renderer::utils::{CommitCounter, RendererSurfaceStateUserData, SurfaceView},
     desktop::{Window, WindowSurfaceType, layer_map_for_output},
     input::pointer::CursorImageStatus,
     output::Output,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point, Rectangle, Size},
+    reexports::wayland_server::{Resource, backend::ObjectId, protocol::wl_surface::WlSurface},
+    utils::{Logical, Point, Rectangle, Serial, Size},
+    wayland::{
+        compositor::{
+            TraversalAction, get_children, get_parent, is_sync_subsurface, with_states,
+            with_surface_tree_downward,
+        },
+        shell::xdg::{SurfaceCachedState, XdgToplevelSurfaceData},
+    },
 };
 use std::cell::RefCell;
 
@@ -32,27 +45,63 @@ const CURSOR_REACH: f64 = 256.0;
 #[derive(Debug, Default)]
 pub struct Commits {
     screens: Vec<Output>,
+    /// The screens whose windows committed nothing new, with frame
+    /// callbacks to answer at their next refresh, without a scene (#840).
+    owed: Vec<Output>,
     /// A client committed, whether a screen shows it or not: what a
     /// share or a recording of a window looks at.
     any: bool,
+}
+
+/// What the commits asked of the screens since they last drew.
+#[derive(Debug, Default)]
+pub struct Asked {
+    /// The screens that build a scene.
+    pub scenes: Vec<Output>,
+    /// Those that only tell their clients they refreshed, unless they
+    /// build a scene anyway.
+    pub owed: Vec<Output>,
+}
+
+impl Asked {
+    /// Whether nothing was asked.
+    pub fn is_empty(&self) -> bool {
+        self.scenes.is_empty() && self.owed.is_empty()
+    }
+}
+
+/// What a client's commit changed of what its surface shows (#840).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Change {
+    /// Something, or what cannot be told: its screens draw again.
+    Shown,
+    /// Nothing of a window: its screens answer its frame callbacks at
+    /// their next refresh, without a scene.
+    Nothing,
+    /// A synchronized subsurface's state, applied with its parent's
+    /// commit, which looks at it then.
+    WithParent,
 }
 
 impl Commits {
     /// Whether a client committed, or a screen was asked for, since the
     /// screens last drew.
     pub fn pending(&self) -> bool {
-        self.any || !self.screens.is_empty()
+        self.any || !self.screens.is_empty() || !self.owed.is_empty()
     }
 
-    /// Whether a screen was asked for since the screens last drew.
+    /// Whether a screen was asked for a scene since the screens last drew.
     pub fn on_screens(&self) -> bool {
         !self.screens.is_empty()
     }
 
     /// The screens asked for, forgotten with the commits.
-    pub fn take(&mut self) -> Vec<Output> {
+    pub fn take(&mut self) -> Asked {
         self.any = false;
-        std::mem::take(&mut self.screens)
+        Asked {
+            scenes: std::mem::take(&mut self.screens),
+            owed: std::mem::take(&mut self.owed),
+        }
     }
 
     fn on(&mut self, output: Output) {
@@ -60,7 +109,35 @@ impl Commits {
             self.screens.push(output);
         }
     }
+
+    fn owe(&mut self, output: Output) {
+        if !self.owed.contains(&output) {
+            self.owed.push(output);
+        }
+    }
 }
+
+/// What a surface showed at its last commit: what a commit can change
+/// on the screen (#840).
+#[derive(Debug, Clone, PartialEq)]
+struct Look {
+    /// Its damage, counted: new pixels.
+    damage: CommitCounter,
+    /// Its buffer's size, crop and scale, and its place in its parent;
+    /// `None` without a buffer.
+    view: Option<SurfaceView>,
+    opaque: Vec<Rectangle<i32, Logical>>,
+    /// Its subsurfaces, in their order.
+    children: Vec<ObjectId>,
+    /// A window's geometry and its bounds.
+    geometry: Option<Rectangle<i32, Logical>>,
+    bounds: (Size<i32, Logical>, Size<i32, Logical>),
+    /// The last configure a window took.
+    configure: Option<Serial>,
+}
+
+#[derive(Debug, Default)]
+struct Seen(RefCell<Option<Look>>);
 
 /// Where a window was drawn when it last committed, and the screens its
 /// surfaces covered then: a commit that shrinks it, or closes a popup,
@@ -162,6 +239,53 @@ impl State {
                 visual.loc.x += dx;
                 visual
             })
+    }
+
+    /// What `surface`'s commit changed: nothing only for a mapped
+    /// window's surfaces whose buffers, damage, sizes, places,
+    /// subsurfaces and configure are as they were at their last commit.
+    /// Popups, layer surfaces, cursors and the lock's draw again at each
+    /// commit as before.
+    pub(crate) fn commit_change(&self, surface: &WlSurface) -> Change {
+        if is_sync_subsurface(surface) {
+            return Change::WithParent;
+        }
+        // Each surface's look is kept at every commit, a window's or
+        // not: the first commit of a window that was something else
+        // compares with what it showed then.
+        let same = looks_the_same(surface);
+        let mut root = surface.clone();
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+        if same && self.window_of_surface(&root).is_some() {
+            Change::Nothing
+        } else {
+            Change::Shown
+        }
+    }
+
+    /// `surface`, a window's, committed nothing new: the screens it shows
+    /// on answer its frame callbacks at their next refresh (#840).
+    pub(crate) fn frames_owed_for(&mut self, surface: &WlSurface) {
+        // A share or a recording of it answers them too.
+        self.commits.any = true;
+        if self.redraw {
+            return;
+        }
+        let root = self.root_surface(surface);
+        let window = self.window_of_surface(&root);
+        let screens = match window {
+            Some(id) if !self.drawn_elsewhere() => match self.window_area(id, self.now()) {
+                Some(area) => self.screens_over(area),
+                // Out of sight: nothing to answer, as at a frame drawn.
+                None => Vec::new(),
+            },
+            _ => self.space.outputs().cloned().collect(),
+        };
+        for output in screens {
+            self.commits.owe(output);
+        }
     }
 
     /// `surface` committed: the screens it shows on draw again.
@@ -280,4 +404,64 @@ impl State {
             .cloned()
             .collect()
     }
+}
+
+/// Whether the surfaces of `surface`'s tree show what they showed at
+/// their last commit, each look kept for the next.
+fn looks_the_same(surface: &WlSurface) -> bool {
+    let mut tree = Vec::new();
+    with_surface_tree_downward(
+        surface,
+        (),
+        |_, _, ()| TraversalAction::DoChildren(()),
+        |s, _, ()| tree.push(s.clone()),
+        |_, _, ()| true,
+    );
+    let mut same = true;
+    for s in tree {
+        // Read outside `with_states`, which holds the surface's lock.
+        let children: Vec<ObjectId> = get_children(&s).iter().map(Resource::id).collect();
+        same &= with_states(&s, |states| {
+            let look = states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .and_then(|r| r.lock().ok())
+                .map(|r| {
+                    (
+                        r.current_commit(),
+                        r.view(),
+                        r.opaque_regions().map(<[_]>::to_vec),
+                    )
+                });
+            let Some((damage, view, opaque)) = look else {
+                return false;
+            };
+            // A window's; none is made for a surface without one.
+            let cached = if states.cached_state.has::<SurfaceCachedState>() {
+                *states.cached_state.get::<SurfaceCachedState>().current()
+            } else {
+                SurfaceCachedState::default()
+            };
+            let configure = states
+                .data_map
+                .get::<XdgToplevelSurfaceData>()
+                .and_then(|d| d.lock().ok().map(|d| d.current_serial))
+                .flatten();
+            let look = Look {
+                damage,
+                view,
+                opaque: opaque.unwrap_or_default(),
+                children,
+                geometry: cached.geometry,
+                bounds: (cached.min_size, cached.max_size),
+                configure,
+            };
+            states.data_map.insert_if_missing(Seen::default);
+            let Some(seen) = states.data_map.get::<Seen>() else {
+                return false;
+            };
+            seen.0.replace(Some(look.clone())).as_ref() == Some(&look)
+        });
+    }
+    same
 }

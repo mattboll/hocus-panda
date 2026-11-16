@@ -2,11 +2,19 @@
 //! or by the keys, lands on the screen it was made on, and stays there as
 //! its work area changes, through fullscreen and back, and as a snapped
 //! pair is resized; a window's popup opens on the window's screen. A
-//! window's drawing builds the scenes of its own screen alone (#826).
+//! window's drawing builds the scenes of its own screen alone (#826); a
+//! window committing nothing new builds none, its frame callbacks still
+//! answered at each refresh (#840).
 
 use crate::common;
 
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering::Relaxed},
+    },
+    time::Duration,
+};
 
 use common::{
     BTN_LEFT, Command, Event, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT,
@@ -196,6 +204,101 @@ fn a_windows_drawing_builds_its_own_screens_scenes_alone() -> anyhow::Result<()>
         second <= 2,
         "the other screen, where nothing changed, built {second} scenes (its own: {first})"
     );
+    Ok(())
+}
+
+/// A window on the first screen, then committing nothing new at each of
+/// its frame callbacks for a second (`again`: its buffer attached again
+/// without damage, else its frame callback alone): the scenes and frames
+/// its screen built and drew, the refreshes that told it of a frame
+/// without a scene, and the frame callbacks it was answered.
+fn idle_for_a_second(
+    again: bool,
+) -> anyhow::Result<(Headless, common::ClientHandle, Arc<AtomicU64>, [u64; 4])> {
+    let mut hp = two_screens()?;
+    let (_, window) = open_with(&mut hp, "test.idle", (800, 600), false)?;
+    let id = id_of(&hp, "test.idle").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let rect = Rect::new(400, 200, 800, 600);
+    hp.place_window(id, rect);
+    wait_for_rect(&mut hp, "test.idle", rect)?;
+    common::at_rest(&mut hp)?;
+    let done = Arc::new(AtomicU64::new(0));
+    window.commands.send(Command::Idle {
+        again,
+        done: done.clone(),
+    })?;
+    // Its first commits are looked at once: from then on, a second.
+    wait(&mut hp, Duration::from_millis(100))?;
+    let (scenes, frames, answered) = (hp.scenes_on(0), hp.frames_on(0), done.load(Relaxed));
+    hp.take_frame_cost(0);
+    wait(&mut hp, Duration::from_secs(1))?;
+    let counts = [
+        hp.scenes_on(0) - scenes,
+        hp.frames_on(0) - frames,
+        hp.take_frame_cost(0).unchanged,
+        done.load(Relaxed) - answered,
+    ];
+    eprintln!(
+        "a second idle (again: {again}): {} scenes, {} frames, {} refreshes without a scene, \
+         {} frame callbacks answered",
+        counts[0], counts[1], counts[2], counts[3]
+    );
+    Ok((hp, window, done, counts))
+}
+
+/// A window committing its frame callbacks alone, at each one, as an
+/// application idling (#840): its screen builds no scene for it, and
+/// answers them at each refresh (60 a second headless), not faster.
+#[test]
+fn a_window_committing_its_frame_callbacks_alone_builds_no_scenes() -> anyhow::Result<()> {
+    let (_hp, _window, _, [scenes, frames, unchanged, answered]) = idle_for_a_second(false)?;
+    assert!(scenes <= 2, "{scenes} scenes for nothing new");
+    assert_eq!(frames, 0, "{frames} frames drawn for nothing new");
+    assert!(
+        (20..=62).contains(&answered),
+        "{answered} frame callbacks in a second"
+    );
+    // Told by refreshes without a scene.
+    assert!(unchanged >= 20, "{unchanged} refreshes without a scene");
+    Ok(())
+}
+
+/// The same with its buffer attached again at each commit, without
+/// damage (#840).
+#[test]
+fn a_window_attaching_its_buffer_again_builds_no_scenes() -> anyhow::Result<()> {
+    let (_hp, _window, _, [scenes, frames, unchanged, answered]) = idle_for_a_second(true)?;
+    assert!(scenes <= 2, "{scenes} scenes for nothing new");
+    assert_eq!(frames, 0, "{frames} frames drawn for nothing new");
+    assert!(
+        (20..=62).contains(&answered),
+        "{answered} frame callbacks in a second"
+    );
+    // Told by refreshes without a scene.
+    assert!(unchanged >= 20, "{unchanged} refreshes without a scene");
+    Ok(())
+}
+
+/// A window idling so that draws something new between: its screen
+/// draws it, each time (#840).
+#[test]
+fn an_idle_window_drawing_is_drawn() -> anyhow::Result<()> {
+    let (mut hp, window, done, _) = idle_for_a_second(true)?;
+    let (scenes, frames) = (hp.scenes_on(0), hp.frames_on(0));
+    for i in 0..20u32 {
+        let colour = 0xff00_0000 | (i * 12) << 16 | (255 - i * 12);
+        window.commands.send(Command::Header(colour))?;
+        wait(&mut hp, Duration::from_millis(50))?;
+    }
+    let (scenes, frames) = (hp.scenes_on(0) - scenes, hp.frames_on(0) - frames);
+    assert!(
+        frames >= 15,
+        "{frames} frames for 20 drawings ({scenes} scenes)"
+    );
+    // It went on idling between.
+    let answered = done.load(Relaxed);
+    wait(&mut hp, Duration::from_millis(200))?;
+    assert!(done.load(Relaxed) > answered, "its frame callbacks stopped");
     Ok(())
 }
 
