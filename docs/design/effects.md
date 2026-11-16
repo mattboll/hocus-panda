@@ -52,8 +52,8 @@ Every effect follows the same rules (`State::effects_still`, in
   (the snow, the garlands, the creatures, the rain on the glass, the
   fireflies, the koi, the aurora, the camera of desktops in depth, the
   moments; under the lock too) moves on at most 60 times a second whatever
-  the screen's refresh (`effects::Pace`; the creatures and the garland
-  across the top 30, #826), all on one clock (`effects::Clock`: the 30
+  the screen's refresh (`effects::Pace`; the creatures, the garland
+  across the top and the fireflies 30, #826), all on one clock (`effects::Clock`: the 30
   on every other of the 60), a step coming up to half its time early to
   take a frame a screen draws anyway (an application's) rather than one
   of its own just after, on the screens it plays on alone (a
@@ -62,8 +62,10 @@ Every effect follows the same rules (`State::effects_still`, in
   else changed), and it tells the screen only what of it changed: the
   flakes' places, a cap's columns that grew, the garland's pieces (the
   one across the top, which swings all along, its strip), a
-  panda's box, the drops that moved, each firefly's glow, the koi's
-  pads, so that the windows around stay as they were. The koi's water
+  panda's box, the drops that moved, the box around the fireflies' glows
+  (hundreds of glows moving over most of the screen: told one by one,
+  the frame drew each element in each of hundreds of rectangles), the
+  koi's pads, so that the windows around stay as they were. The koi's water
   tells where its heights moved enough to be seen and around the koi
   that swam; while they swim it ripples all over, and all of it is drawn
   again. The snow's shapes are drawn into a texture kept from frame to
@@ -511,7 +513,9 @@ lengths in logical pixels.
   lower 70 %; each drifting on the board's flow field (26 px/s, eased),
   wrapping round the sides, kept off the top fifth; each blinking every
   2.5 to 5.5 s (`sin(πt)^0.7` over 0.77 s), nearer ones larger and
-  brighter. Stepped at 60 steps a second with a seeded generator.
+  brighter. Stepped at 60 steps a second with a seeded generator, of
+  their time whatever the frames' pace (two a frame at 30 frames a
+  second).
 - **The pointer**: resting on the wallpaper (no window, no bar under it;
   not moved 3 px for 0.8 s), the fireflies within 360 px are drawn to it
   and circle it at some 70 px. The board's own pointer that wandered when
@@ -523,15 +527,25 @@ lengths in logical pixels.
   wallpaper, under the windows and the bar.
 - **Its cost**: some 120 quads at 1440 × 900 and 30 wide ones, in one
   call each; the box they cover (most of the screen's lower part) drawn
-  again each frame, the wallpaper under it too.
-- **When**: moving, a frame each refresh; with reduced motion still, lit
+  again each frame, the wallpaper under it too, told as that one box. On
+  a 3440 × 1440 screen at 50 Hz with the bar, two windows and the
+  garland across the top: 64 frames in 2 s, not 100, of 2 rectangles
+  and 77 % of the screen each (348 rectangles and 47 % told cell by
+  cell, at twelve times the loop's time a frame on Mesa's software
+  device).
+- **When**: moving, at most 30 frames a second (#826) on the effects'
+  clock, with the creatures and the garland across the top, on the
+  screens whose wallpaper is seen alone: another builds no scene for
+  them; with reduced motion still, lit
   at 60 %, nothing per frame; none by day, in the power saver, while a
   screen is shared or recorded, on the CPU, nor in a capture.
 
 Tests: `tests/fireflies.rs` (on GLES on Mesa's software device, evening
 held: glows on the wallpaper, moving, the window's pixels untouched; by
 day or off, nothing; still with reduced motion, nothing drawn per
-frame); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
+frame; 30 frames a second, on the screen they are seen on alone),
+`tests/frame_cost.rs` (in the evening on a 3440 × 1440 screen: 60
+frames of 100 turns at 50 Hz, a few rectangles each); its screenshots, `HOCUS_SHOTS=DIR cargo nextest run -p
 hocus-compositor --run-ignored only fireflies::shots`.
 
 ## A koi pond (#803)

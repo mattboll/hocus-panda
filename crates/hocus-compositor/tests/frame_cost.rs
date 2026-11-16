@@ -1,6 +1,7 @@
 //! What a frame costs on a big screen, on GLES (Mesa's software device, or
 //! the GPU `HOCUS_TEST_GPU` names): the effects that play on their own at
-//! 30 frames a second (the garland across the top, the creatures) step
+//! 30 frames a second (the garland across the top, the creatures, the
+//! fireflies) step
 //! together, on one clock, so that a 50 Hz screen draws at most 30 frames
 //! a second for them, not one for each; and what a frame of a 3440 × 1440
 //! screen with the bar's glass and the effects costs the loop.
@@ -108,6 +109,73 @@ fn the_garland_and_the_creatures_step_together() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// In the evening, the fireflies over a 3440 × 1440 screen, with the
+/// garland across the top and a panda: all three step on one clock, at
+/// most 30 times a second, so that a 50 Hz screen draws at most 30 frames
+/// a second for them, not one each turn; and the fireflies' glows, moving
+/// all over its lower part, tell the box around them as changed, not
+/// hundreds of rectangles the frame draws each element in one by one.
+#[test]
+fn the_fireflies_step_with_the_garland_and_the_creatures() -> anyhow::Result<()> {
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![OutputSpec::new(3440, 1440)],
+            ..common::gles()
+        },
+        slow_effects(|c| c.effects.fireflies = true),
+    )?;
+    if hp.renderer() != "gles" {
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
+    }
+    hp.hold_evening(true);
+    let _clients = windows(
+        &mut hp,
+        [
+            Rect::new(400, 300, 1200, 800),
+            Rect::new(1800, 250, 1100, 900),
+        ],
+    )?;
+    // Out over 3 s, on the machine's clock.
+    common::wait(&mut hp, Duration::from_secs(3))?;
+    let flies = hp.fireflies("HEADLESS-1").map_or(0, |f| f.len());
+    anyhow::ensure!(flies > 300, "{flies} fireflies");
+    anyhow::ensure!(hp.garland_tops().len() == 1, "no garland across the top");
+    hp.hold_clock();
+    for _ in 0..50 {
+        hp.step(AT_50_HZ)?;
+    }
+    hp.take_frame_cost(0);
+    hp.take_damage_area(0);
+    hp.take_damage_rects(0);
+    let frames = hp.frames_on(0);
+    for _ in 0..100 {
+        hp.step(AT_50_HZ)?;
+    }
+    let frames = hp.frames_on(0) - frames;
+    let cost = hp.take_frame_cost(0);
+    let area = hp.take_damage_area(0);
+    let rects = hp.take_damage_rects(0);
+    let screen = 3440 * 1440;
+    let each = area / frames.max(1);
+    // What the loop's thread spent on the screen's scenes, for the record
+    // (on Mesa's software device, the draws' vertices are its work too).
+    eprintln!(
+        "in the evening, 2 s at 50 Hz: {frames} frames, {flies} fireflies; a frame: {} \
+         rectangles, {each} pixels ({} %); {} ms building the scenes, {} ms rendering",
+        rects / frames.max(1),
+        each * 100 / screen,
+        cost.build_ns / 1_000_000,
+        cost.render_ns / 1_000_000,
+    );
+    // 60 of the 100 turns at most, a few more for the windows' own.
+    assert!((20..=63).contains(&frames), "{frames} frames in 2 s");
+    assert!(
+        rects / frames.max(1) <= 8,
+        "{rects} rectangles in {frames} frames"
+    );
+    Ok(())
+}
+
 /// The maintainer's desk: a 3440 × 1440 screen, the bar on its right in
 /// Givre (the shell on wgpu, on Mesa's software Vulkan) over the aurora,
 /// two floating windows, an agent's panda on one, and the effects on:
@@ -161,9 +229,8 @@ fn a_frame_of_a_big_screen() -> anyhow::Result<()> {
     if hp.renderer() != "gles" {
         common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
     }
-    // Midday, whatever the clock says: in the evening the fireflies come
-    // out over the whole screen, and the frames counted here would be
-    // theirs.
+    // Midday, whatever the clock says: the fireflies' evening is measured
+    // above, its bounds its own.
     hp.hold_evening(false);
     hp.hold_sun("2026-11-16T12:00:00Z".parse()?);
     let up = hp.dispatch_until(Duration::from_secs(60), |hp| {

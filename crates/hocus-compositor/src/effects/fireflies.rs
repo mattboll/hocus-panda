@@ -7,7 +7,9 @@
 //! which it screened over everything: here on the wallpaper alone).
 //!
 //! Stepped at a fixed 60 steps a second from their start (the board's
-//! frames), with a seeded generator; as many per pixel as the board's 70
+//! frames), with a seeded generator, whatever the frames' pace: drawn at
+//! most 30 times a second on the effects' clock (#826), two steps a
+//! frame, the same moment as at 60. As many per pixel as the board's 70
 //! over the 1000 × 720 left of its bar. Their places are logical pixels
 //! from the corner of their screen's work area (beside the bar).
 //!
@@ -403,5 +405,25 @@ mod tests {
         assert!(near(&swarm) > before + 5, "{before} → {}", near(&swarm));
         // They stay within the zone (wrapping round its sides).
         assert!(swarm.flies.iter().all(|f| f.x >= -20.0 && f.x <= 1000.0));
+    }
+
+    /// Drawn 60 or 30 times a second (#826), the same moment: their steps
+    /// are of their time, not of the frames.
+    #[test]
+    fn the_same_moment_whatever_the_frames() {
+        let at = |frames: u64| {
+            let mut flies = Fireflies::new(Duration::ZERO, 3);
+            flies.swarm("A", [0.0, 0.0, 1000.0, 720.0]);
+            let on = [("A".to_owned(), Some((500.0, 400.0)))];
+            for frame in 0..=2 * frames {
+                flies.advance(Duration::from_secs(1) * frame as u32 / frames as u32, &on);
+            }
+            flies.swarms["A"]
+                .flies
+                .iter()
+                .map(|f| (f.x, f.y, f.on))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at(60), at(30));
     }
 }

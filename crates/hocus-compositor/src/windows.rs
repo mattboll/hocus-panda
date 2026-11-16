@@ -1443,11 +1443,17 @@ impl State {
             // The wallpapers that move stop (#433).
             self.tick_walls();
             if self.lock_shows_wall() {
-                // At most 60 frames a second there too (#815), on the
-                // screens they play on (#826).
+                // At most 60 frames a second there too (#815), the
+                // fireflies 30, on the screens they play on (#826).
                 self.tick_paced(now, Self::tick_wallpaper_effects);
-                if !moving && let Some(at) = self.fx.pace.next() {
-                    self.turn_at(at);
+                self.tick_paced_by(now, true, Self::tick_wallpaper_slow);
+                if !moving {
+                    for at in [self.fx.pace.next(), self.fx.slow.next()]
+                        .into_iter()
+                        .flatten()
+                    {
+                        self.turn_at(at);
+                    }
                 }
             }
             self.judge_still(moving, as_of_frame);
@@ -1552,7 +1558,7 @@ impl State {
         self.tick_paced(now, |state, now| {
             // The wallpaper's effects: the snow (#795) first, the
             // garlands' wind following its; the rain on the glass, the
-            // fireflies, the koi, the daylight, desktops in depth.
+            // koi, the daylight, desktops in depth.
             let mut effects = state.tick_wallpaper_effects(now);
             // The garland under the active window (#799).
             effects |= timed(Fx::Garland, || state.tick_garland(now));
@@ -1560,14 +1566,15 @@ impl State {
             effects |= timed(Fx::Moments, || state.tick_moments(now));
             effects
         });
-        // The creatures and the garlands across the top of the screens
-        // (#813), at most 30 times a second (#826).
+        // The creatures, the garlands across the top of the screens
+        // (#813) and the fireflies, at most 30 times a second (#826).
         self.tick_paced_by(now, true, |state, now| {
             crate::effects::timing::stepped(Fx::Creatures, creatures);
             if creatures {
                 state.creatures_moved(now);
             }
-            creatures | timed(Fx::Garland, || state.tick_garland_top(now))
+            let tops = timed(Fx::Garland, || state.tick_garland_top(now));
+            creatures | tops | state.tick_wallpaper_slow(now)
         });
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.

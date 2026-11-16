@@ -324,6 +324,31 @@ pub(crate) fn cells(
     coarse(rects, (w, h))
 }
 
+/// How changes (from an element's corner) are told, within its geometry.
+type Told = fn(&[[i32; 4]], Rectangle<i32, Physical>) -> Vec<Rectangle<i32, Physical>>;
+
+/// `rects` (from `geometry`'s corner) told as the one box around them,
+/// within it.
+fn around(rects: &[[i32; 4]], geometry: Rectangle<i32, Physical>) -> Vec<Rectangle<i32, Physical>> {
+    let whole = Rectangle::from_size(geometry.size);
+    rects
+        .iter()
+        .map(|&[x, y, w, h]| [x, y, x + w, y + h])
+        .reduce(|a, b| {
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]
+        })
+        .and_then(|[x0, y0, x1, y1]| {
+            Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into()).intersection(whole)
+        })
+        .into_iter()
+        .collect()
+}
+
 /// `rects` (within `size`, physical), as many as they are when they are
 /// few; else told by rows of larger cells.
 pub(crate) fn fewer(
@@ -400,6 +425,30 @@ impl Traced {
         meshes: [Mesh; 3],
         clip: Clip,
     ) -> FireElement {
+        self.shapes_told(geometry, meshes, clip, cells)
+    }
+
+    /// The same, what changed told as the one box around it: for shapes
+    /// many and all moving over most of the screen (the fireflies' glows),
+    /// whose changes told cell by cell are hundreds of rectangles the
+    /// screen's frame then draws each element in, one by one, at a cost
+    /// on the loop far over that of the pixels around them.
+    pub fn shapes_around(
+        &mut self,
+        geometry: Rectangle<i32, Physical>,
+        meshes: [Mesh; 3],
+        clip: Clip,
+    ) -> FireElement {
+        self.shapes_told(geometry, meshes, clip, around)
+    }
+
+    fn shapes_told(
+        &mut self,
+        geometry: Rectangle<i32, Physical>,
+        meshes: [Mesh; 3],
+        clip: Clip,
+        told: Told,
+    ) -> FireElement {
         let same_place = self
             .last
             .as_ref()
@@ -422,7 +471,7 @@ impl Traced {
         if let Some(rects) = changed {
             let prev = self.commit;
             self.commit.increment();
-            self.since = rects.map(|rects| (prev, cells(&rects, geometry)));
+            self.since = rects.map(|rects| (prev, told(&rects, geometry)));
         }
         let [over, added, screened] = meshes.clone();
         self.last = Some((geometry, meshes, clip));

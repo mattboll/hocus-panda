@@ -119,9 +119,9 @@ pub struct Live {
     pub sun_held: Option<jiff::Timestamp>,
     /// When they move on next (#815).
     pub pace: Pace,
-    /// When the creatures and the garlands across the tops move on next:
-    /// at most 30 a second ([`SLOW_FRAME`]), their motion as smooth, being of
-    /// their time (#826).
+    /// When the creatures, the garlands across the tops and the fireflies
+    /// move on next: at most 30 a second ([`SLOW_FRAME`]), their motion as
+    /// smooth, being of their time (#826).
     pub slow: Pace,
     /// The clock both paces' frames fall on.
     pub clock: Clock,
@@ -136,8 +136,9 @@ pub struct Live {
 /// The effects' frames: at most this many a second.
 pub const FRAMES: u32 = 60;
 const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FRAMES as u64);
-/// The creatures' and the garlands across the tops' frames: at most 30 a
-/// second (#826), on every other of the others' (one clock).
+/// The creatures', the garlands across the tops' and the fireflies'
+/// frames: at most 30 a second (#826), on every other of the others' (one
+/// clock).
 const SLOW_FRAME: Duration = Duration::from_nanos(2 * (1_000_000_000 / FRAMES as u64));
 /// An effect's frame comes this much early at most, to fall on the
 /// screen's frame next to it: at 60 Hz, one a refresh whatever its jitter.
@@ -146,8 +147,8 @@ const EARLY: Duration = Duration::from_millis(4);
 /// The effects' one clock: their frames fall on its ticks, 60 a second,
 /// the slow ones' on every other, from the first frame that moved after
 /// they all stood still (a screen's frame). The 30 a second of the
-/// creatures and the garlands across the tops then fall on frames of
-/// the others, never between two of theirs.
+/// creatures, the garlands across the tops and the fireflies then fall on
+/// frames of the others, never between two of theirs.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Clock {
     origin: Option<Duration>,
@@ -296,8 +297,8 @@ impl State {
     }
 
     /// The wallpaper's effects step on at `now`: the snow, the rain on the
-    /// glass, the fireflies, the koi, the aurora, the daylight, desktops in
-    /// depth; whether one moves. Each on the screens it plays on, the
+    /// glass, the koi, the aurora, the daylight, desktops in depth; whether
+    /// one moves. Each on the screens it plays on, the
     /// others building no scene for it (#826): those it steps on itself.
     pub(crate) fn tick_wallpaper_effects(&mut self, now: std::time::Duration) -> bool {
         use timing::Fx;
@@ -309,10 +310,6 @@ impl State {
         }
         let seen = |s: &Self, o: &Output| !s.wall_unseen(o);
         if timed(Fx::Rain, || self.tick_raindrops(now)) {
-            moving = true;
-            self.moved_on_screens(self.walls_seen(seen));
-        }
-        if timed(Fx::Fireflies, || self.tick_fireflies(now)) {
             moving = true;
             self.moved_on_screens(self.walls_seen(seen));
         }
@@ -335,6 +332,17 @@ impl State {
                 s.depth_shows_on(o) && s.strip(o).moves_until().is_some_and(|end| now < end)
             });
             self.moved_on_screens(on);
+        }
+        moving
+    }
+
+    /// The wallpaper's effects at most 30 times a second step on at `now`
+    /// (#826): the fireflies; whether they move. On the screens they are
+    /// seen on alone.
+    pub(crate) fn tick_wallpaper_slow(&mut self, now: Duration) -> bool {
+        let moving = timed(timing::Fx::Fireflies, || self.tick_fireflies(now));
+        if moving {
+            self.moved_on_screens(self.walls_seen(|s, o| !s.wall_unseen(o)));
         }
         moving
     }
