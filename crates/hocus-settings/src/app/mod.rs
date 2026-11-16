@@ -655,7 +655,10 @@ impl App {
         if let Some(pressed) = self.apps_subscription() {
             subscriptions.push(pressed);
         }
-        if self.moving(Instant::now()) {
+        // At the frame's time, as `update` saw it: a later instant could
+        // find over a motion that `update` kept, and the frames it waits
+        // for to end would never come (#845).
+        if self.moving(self.now) {
             subscriptions.push(window::frames().map(Message::Frame));
         }
         // A pairing code's countdown, each second while its sheet shows.
