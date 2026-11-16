@@ -19,7 +19,7 @@ use crate::{
         Fire, FireElement,
         draw::Clip,
         garland::{Garland, View},
-        kept::Shown,
+        kept::{Changed, Shown},
         mesh::Mesh,
     },
     model::WindowId,
@@ -127,6 +127,7 @@ impl State {
             frame,
             made_of,
             clip,
+            Changed::Shapes,
             || garland.front(&view),
         )
     }
@@ -155,6 +156,7 @@ impl State {
             frame,
             made_of,
             clip,
+            Changed::Shapes,
             || (Mesh::default(), garland.halos(&view)),
         )?;
         Some((
@@ -212,6 +214,7 @@ impl State {
             frame,
             made_of.clone(),
             off_bar,
+            Changed::Bounds,
             || top.front(&view),
         );
         let halos = show(
@@ -222,6 +225,7 @@ impl State {
             frame,
             made_of,
             anywhere,
+            Changed::Bounds,
             || (Mesh::default(), top.halos(&view)),
         );
         let (front, halos) = front.zip(halos)?;
@@ -255,7 +259,8 @@ fn made_of(changes: u64, view: &View) -> Vec<f64> {
 
 /// `part` of a garland on `frame`'s output, over the whole screen, its
 /// shapes (over and added) from `shapes`: made again only when what it
-/// is `made_of` or `clip` changed, telling what changed (#815).
+/// is `made_of` or `clip` changed, telling what changed as `changed`
+/// says (#815).
 #[expect(
     clippy::too_many_arguments,
     reason = "a part's shapes and where they go"
@@ -268,6 +273,7 @@ fn show<R: Fire>(
     frame: &Frame,
     made_of: Vec<f64>,
     clip: Clip,
+    changed: Changed,
     shapes: impl FnOnce() -> (Mesh, Mesh),
 ) -> Option<FireElement> {
     let id = ids.get(part).cloned().unwrap_or_else(Id::new);
@@ -281,5 +287,5 @@ fn show<R: Fire>(
     }
     let (over, added) = shapes();
     shown.made_of = made_of;
-    shown.shapes(renderer, screen, over, added, clip)
+    shown.shapes_by(renderer, screen, over, added, clip, changed)
 }

@@ -93,6 +93,19 @@ impl Shown {
         added: Mesh,
         clip: Clip,
     ) -> Option<FireElement> {
+        self.shapes_by(renderer, geometry, over, added, clip, Changed::Shapes)
+    }
+
+    /// The same, telling what changed as `changed` says when they did.
+    pub fn shapes_by<R: Fire>(
+        &mut self,
+        renderer: &mut R,
+        geometry: Rectangle<i32, Physical>,
+        over: Mesh,
+        added: Mesh,
+        clip: Clip,
+        changed: Changed,
+    ) -> Option<FireElement> {
         if let Some(last) = &self.last
             && last.geometry == geometry
             && last.clip == clip
@@ -103,7 +116,7 @@ impl Shown {
         {
             return self.again(geometry);
         }
-        self.redraw(renderer, geometry, over, added, clip, Changed::Shapes)
+        self.redraw(renderer, geometry, over, added, clip, changed)
     }
 
     /// The same, `over` and `added` changed as `changed` says: drawn into
@@ -162,13 +175,29 @@ impl Shown {
                         let mut rects = Vec::new();
                         mesh::changes(&last.over, &over, &mut rects);
                         mesh::changes(&last.added, &added, &mut rects);
-                        Some(rects)
+                        Some(cells(&rects, geometry))
                     }
-                    Changed::Within(rects) => Some(rects),
+                    Changed::Within(rects) => Some(cells(&rects, geometry)),
+                    Changed::Bounds => Some(
+                        [
+                            last.over.bounds(),
+                            last.added.bounds(),
+                            over.bounds(),
+                            added.bounds(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|[x, y, w, h]| {
+                            // A pixel more each way, as `mesh::changes`.
+                            Rectangle::new((x - 1, y - 1).into(), (w + 2, h + 2).into())
+                                .intersection(whole)
+                        })
+                        .collect(),
+                    ),
                     Changed::All => None,
                 };
                 match rects {
-                    Some(rects) => element.changed_since(prev, cells(&rects, geometry)),
+                    Some(rects) => element.changed_since(prev, rects),
                     None => element,
                 }
             }
@@ -193,6 +222,11 @@ pub enum Changed {
     Shapes,
     /// Within these (from the element's corner, physical: `x, y, w, h`).
     Within(Vec<[i32; 4]>),
+    /// Within where they were and where they are: for shapes that move
+    /// all together across a strip (the garland across the top, #813),
+    /// whose triangles told one by one would cover it all the same, at
+    /// a cost.
+    Bounds,
     /// All of them.
     All,
 }

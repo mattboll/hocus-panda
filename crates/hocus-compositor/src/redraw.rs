@@ -44,6 +44,11 @@ impl Commits {
         self.any || !self.screens.is_empty()
     }
 
+    /// Whether a screen was asked for since the screens last drew.
+    pub fn on_screens(&self) -> bool {
+        !self.screens.is_empty()
+    }
+
     /// The screens asked for, forgotten with the commits.
     pub fn take(&mut self) -> Vec<Output> {
         self.any = false;

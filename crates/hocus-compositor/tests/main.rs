@@ -76,6 +76,7 @@ mod featured;
 mod fireflies;
 mod footer;
 mod foreign;
+mod frame_cost;
 mod garland;
 mod gestures;
 mod glass;

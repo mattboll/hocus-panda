@@ -1292,6 +1292,16 @@ impl Headless {
             .map_or(0, |h| h.take_damage_area(index))
     }
 
+    /// What output `index`'s scenes cost the loop's thread since the last
+    /// call: building their elements, and finding their damage and
+    /// submitting their draws.
+    pub fn take_frame_cost(&mut self, index: usize) -> crate::backend::headless::FrameCost {
+        self.app
+            .backend
+            .headless_mut()
+            .map_or_else(Default::default, |h| h.take_frame_cost(index))
+    }
+
     /// How many rectangles output `index` (in the order given) drew over
     /// since the last call, each frame's counted.
     pub fn take_damage_rects(&mut self, index: usize) -> u64 {

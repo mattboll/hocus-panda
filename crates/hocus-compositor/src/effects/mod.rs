@@ -120,9 +120,11 @@ pub struct Live {
     /// When they move on next (#815).
     pub pace: Pace,
     /// When the creatures and the garlands across the tops move on next:
-    /// at most [`SLOW_FRAMES`] a second, their motion as smooth, being of
+    /// at most 30 a second ([`SLOW_FRAME`]), their motion as smooth, being of
     /// their time (#826).
     pub slow: Pace,
+    /// The clock both paces' frames fall on.
+    pub clock: Clock,
     /// A turn of the loop asked for at this time, for their next step:
     /// nothing is drawn for it but what that step moves (#826).
     pub turn: Option<Duration>,
@@ -134,19 +136,47 @@ pub struct Live {
 /// The effects' frames: at most this many a second.
 pub const FRAMES: u32 = 60;
 const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FRAMES as u64);
-/// The creatures' and the garlands across the tops' frames: at most this
-/// many a second (#826).
-pub const SLOW_FRAMES: u32 = 30;
-const SLOW_FRAME: Duration = Duration::from_nanos(1_000_000_000 / SLOW_FRAMES as u64);
+/// The creatures' and the garlands across the tops' frames: at most 30 a
+/// second (#826), on every other of the others' (one clock).
+const SLOW_FRAME: Duration = Duration::from_nanos(2 * (1_000_000_000 / FRAMES as u64));
 /// An effect's frame comes this much early at most, to fall on the
 /// screen's frame next to it: at 60 Hz, one a refresh whatever its jitter.
 const EARLY: Duration = Duration::from_millis(4);
 
-/// When the effects that play on their own move on (#815): on a 60 Hz
-/// grid, whatever the screens' refresh, its frames falling on theirs.
-/// Between two, what they draw stays as it is (their elements keep their
-/// commits): a screen at 165 Hz draws them again only where something
-/// else changed.
+/// The effects' one clock: their frames fall on its ticks, 60 a second,
+/// the slow ones' on every other, from the first frame that moved after
+/// they all stood still (a screen's frame). The 30 a second of the
+/// creatures and the garlands across the tops then fall on frames of
+/// the others, never between two of theirs.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Clock {
+    origin: Option<Duration>,
+}
+
+impl Clock {
+    /// The first tick of `period` (a multiple of [`FRAME`]) after
+    /// `after`; a clock not started starts at `now`.
+    fn next(&mut self, now: Duration, period: Duration, after: Duration) -> Duration {
+        let origin = *self.origin.get_or_insert(now);
+        let period_ns = period.as_nanos().max(1);
+        let since = after.saturating_sub(origin).as_nanos();
+        let ticks = since / period_ns + 1;
+        let ns = u64::try_from(ticks.saturating_mul(period_ns)).unwrap_or(u64::MAX);
+        origin + Duration::from_nanos(ns)
+    }
+
+    /// Nothing moves on it any more: the next frame that moves starts it
+    /// again, on a screen's frame.
+    fn stop(&mut self) {
+        self.origin = None;
+    }
+}
+
+/// When the effects that play on their own move on (#815): on their one
+/// [`Clock`], whatever the screens' refresh, its frames falling on
+/// theirs. Between two, what they draw stays as it is (their elements
+/// keep their commits): a screen at 165 Hz draws them again only where
+/// something else changed.
 #[derive(Debug, Default)]
 pub struct Pace {
     /// The next due, while one moves; `None`: at the next turn.
@@ -160,21 +190,29 @@ pub struct Pace {
 }
 
 impl Pace {
-    /// Whether they move on at `now` (the clock's, not the last frame's).
-    pub fn due(&self, now: Duration) -> bool {
-        self.next.is_none_or(|next| now + EARLY >= next)
+    /// Whether they move on at `now` (the clock's, not the last frame's),
+    /// their frames `period` apart: when due, or due within half of it
+    /// and a screen draws now anyway (`drawn`), so that their frame is
+    /// that one rather than one more of its own just after.
+    pub fn due(&self, now: Duration, period: Duration, drawn: bool) -> bool {
+        let early = if drawn { period / 2 } else { EARLY };
+        self.next.is_none_or(|next| now + early >= next)
     }
 
     /// They moved on to `at` at `now`; `moving`: they go on moving, the
-    /// next due `frame` on, else at the next turn.
-    pub fn moved(&mut self, now: Duration, at: Duration, moving: bool, frame: Duration) {
+    /// next due on `clock`'s next tick of `period` at least half of it
+    /// on, else at the next turn.
+    pub fn moved(
+        &mut self,
+        clock: &mut Clock,
+        now: Duration,
+        at: Duration,
+        moving: bool,
+        period: Duration,
+    ) {
         self.at = at;
         self.clock = now;
-        self.next = moving.then(|| {
-            // On the grid, but never so late that two come at once.
-            let on = self.next.unwrap_or(now) + frame;
-            on.max(now + frame - EARLY)
-        });
+        self.next = moving.then(|| clock.next(now, period, now + period / 2));
         self.frames += u64::from(moving);
     }
 
@@ -313,7 +351,8 @@ impl State {
         self.tick_paced_by(now, false, step);
     }
 
-    /// The same, at most [`SLOW_FRAMES`] a second with `slow` (#826).
+    /// The same, at most 30 a second ([`SLOW_FRAME`]) with `slow` (#826),
+    /// on the same clock.
     pub(crate) fn tick_paced_by(
         &mut self,
         now: Duration,
@@ -324,14 +363,27 @@ impl State {
         fn pace(fx: &mut Live, slow: bool) -> &mut Pace {
             if slow { &mut fx.slow } else { &mut fx.pace }
         }
-        if !pace(&mut self.fx, slow).due(clock) {
+        let period = if slow { SLOW_FRAME } else { FRAME };
+        // A screen draws this turn anyway: everything, a client's
+        // commit, or what moved on some screens.
+        let drawn = self.redraw || self.commits.on_screens() || !self.frames.moved_on.is_empty();
+        if !pace(&mut self.fx, slow).due(clock, period, drawn) {
             return;
         }
         let before = self.frames.moved_on.len();
         let moving = step(self, now);
         let moved = moving || self.frames.moved_on.len() > before;
-        let frame = if slow { SLOW_FRAME } else { FRAME };
-        pace(&mut self.fx, slow).moved(clock, now, moved, frame);
+        let Live {
+            pace: fast,
+            slow: slower,
+            clock: ticks,
+            ..
+        } = &mut self.fx;
+        let this = if slow { &mut *slower } else { &mut *fast };
+        this.moved(ticks, clock, now, moved, period);
+        if fast.next().is_none() && slower.next().is_none() {
+            ticks.stop();
+        }
     }
 
     /// Whether the wallpaper of `output` is as good as unseen: a
@@ -413,4 +465,95 @@ pub enum Closing {
     Flames,
     /// It shatters into glass (#798).
     Shatter,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MS: Duration = Duration::from_millis(1);
+
+    /// A second of a 50 Hz screen drawn as on a virtual terminal (a frame
+    /// at once when none is out, else at the next refresh), an
+    /// application committing every `app` from 7 ms on, and the slow
+    /// effects moving on, taking the frames drawn anyway with `ride`: the
+    /// frames drawn, and the effects' steps.
+    fn a_second(app: Duration, ride: bool) -> (u64, u64) {
+        let refresh = 20 * MS;
+        let (mut clock, mut slow) = (Clock::default(), Pace::default());
+        let (mut frames, mut out_until, mut dirty) = (0, Duration::ZERO, false);
+        let mut next_app = 7 * MS;
+        for t in (0..1000).map(|ms| ms * MS) {
+            // The refresh: a frame waiting goes out.
+            if t.as_millis().is_multiple_of(refresh.as_millis()) && dirty && t >= out_until {
+                frames += 1;
+                dirty = false;
+                out_until = t + refresh;
+            }
+            let committed = t >= next_app;
+            if committed {
+                next_app += app;
+            }
+            let woken = committed || slow.next().is_none_or(|n| t >= n);
+            if !woken {
+                continue;
+            }
+            if slow.due(t, SLOW_FRAME, ride && committed) {
+                slow.moved(&mut clock, t, t, true, SLOW_FRAME);
+                dirty = true;
+            }
+            dirty |= committed;
+            if dirty && t >= out_until {
+                frames += 1;
+                dirty = false;
+                out_until = refresh * (t.as_millis() / refresh.as_millis() + 1) as u32;
+            }
+        }
+        (frames, slow.frames)
+    }
+
+    /// An application drawing on a 50 Hz screen with the garland across
+    /// the top and the creatures: their frames are its as often as they
+    /// can, never one more, and they move on 30 times a second still.
+    #[test]
+    fn the_slow_effects_take_the_frames_drawn_anyway() {
+        for app in [100, 50, 40, 33, 25, 20].map(|ms| ms * MS) {
+            let (alone, steps_alone) = a_second(app, false);
+            let (riding, steps) = a_second(app, true);
+            eprintln!(
+                "an application every {app:?}: {alone} frames, {riding} riding \
+                 ({steps_alone} and {steps} steps)"
+            );
+            assert!(
+                riding <= alone,
+                "{app:?}: {riding} frames riding, {alone} alone"
+            );
+            assert!((29..=31).contains(&steps), "{app:?}: {steps} steps");
+        }
+        let (alone, riding) = (a_second(50 * MS, false).0, a_second(50 * MS, true).0);
+        assert!(riding + 8 <= alone, "{riding} frames riding, {alone} alone");
+    }
+
+    /// The slow effects' frames are frames of the others.
+    #[test]
+    fn the_slow_frames_fall_on_the_others() {
+        let mut clock = Clock::default();
+        let (mut fast, mut slow) = (Pace::default(), Pace::default());
+        let mut t = Duration::from_millis(1234);
+        let start = t + Duration::from_micros(6_061);
+        for _ in 0..200 {
+            t += Duration::from_micros(6_061);
+            if fast.due(t, FRAME, false) {
+                fast.moved(&mut clock, t, t, true, FRAME);
+            }
+            if slow.due(t, SLOW_FRAME, t.as_millis().is_multiple_of(3)) {
+                slow.moved(&mut clock, t, t, true, SLOW_FRAME);
+            }
+            let (Some(f), Some(s)) = (fast.next(), slow.next()) else {
+                panic!("they move");
+            };
+            let tick = |d: Duration| (d - start).as_nanos() % FRAME.as_nanos();
+            assert_eq!((tick(f), tick(s)), (0, 0), "{f:?} {s:?}");
+        }
+    }
 }
