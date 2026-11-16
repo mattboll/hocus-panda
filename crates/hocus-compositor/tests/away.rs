@@ -440,6 +440,33 @@ fn at_rest_no_wakeup_beyond_the_idle_timer() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// On the real clock, the curtain wakes the loop for its steps and their
+/// frames alone: a step falls due while the frame before it is still out
+/// (a screen waiting for its last frame), and is not a timer at once at
+/// every turn until that frame comes (#828: 70 000 turns a second).
+#[test]
+fn the_curtain_wakes_the_loop_for_its_steps_alone() -> anyhow::Result<()> {
+    let mut config = config();
+    config.idle.delay = Some(SECOND);
+    let mut hp = Headless::start_with(headless(&["2560x1600"])?, config)?;
+    let came = hp.dispatch_until(WAIT, |hp| hp.away() == Shown::Curtain { locks: true })?;
+    anyhow::ensure!(came, "no curtain: {:?}", hp.away());
+    let until = std::time::Instant::now() + SECOND;
+    let mut turns = 0;
+    while let Some(left) = until
+        .checked_duration_since(std::time::Instant::now())
+        .filter(|left| !left.is_zero())
+    {
+        hp.dispatch(left)?;
+        turns += 1;
+    }
+    assert_eq!(hp.away(), Shown::Curtain { locks: true });
+    // Ten steps a second, a frame each: a turn for the step, one for its
+    // frame shown, and a few more on a loaded machine.
+    assert!(turns <= 60, "{turns} turns in a second of the curtain");
+    Ok(())
+}
+
 // --- The pill ------------------------------------------------------------------------
 
 /// The shell draws the pill on the screen under the pointer, centred

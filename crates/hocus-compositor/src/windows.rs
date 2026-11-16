@@ -1669,6 +1669,15 @@ impl State {
 
     /// A frame at `at`, after a pause in which nothing moves.
     fn wake_at(&mut self, at: Duration) {
+        // Due already: the motions are judged as of the last frame drawn,
+        // and the next is late (a screen waits for its last frame to show).
+        // A frame is asked for, which it draws as it can; a timer at once
+        // would fire again at every turn until then, the curtain's steps
+        // waking the loop thousands of times a second (#828).
+        if at <= self.now() {
+            self.redraw = true;
+            return;
+        }
         if self.frames.wake.is_some_and(|w| w <= at) {
             return;
         }
