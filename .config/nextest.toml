@@ -35,6 +35,8 @@ retries = 0
 # test fails without the programs it needs, so these are left out there,
 # by name, and run where the programs are (the default profile).
 # Installing them on CI takes them out of this list.
+# And a test that fails by chance, until its issue is fixed: the Wi-Fi's
+# without NetworkManager (#835).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -44,7 +46,6 @@ not (
         | test(=desktop_drop::an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
-        # Fails by chance (#835).
         | test(=wifi::without_networkmanager_no_row_and_without_wifi_no_list)
     ))
 )
