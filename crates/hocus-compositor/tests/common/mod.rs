@@ -551,6 +551,14 @@ pub enum Command {
         timeout_ms: u32,
         input: bool,
     },
+    /// Commits again at each frame callback with nothing new, as an
+    /// application idling (#840): its frame callback alone, or with
+    /// `again` its last buffer attached again without damage; `done`
+    /// counts the frame callbacks it was answered.
+    Idle {
+        again: bool,
+        done: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    },
 }
 
 /// What a client puts on the clipboard: its types, and the text it writes
@@ -737,6 +745,8 @@ fn run_client(
         exported: None,
         imported: None,
         kde_decoration: None,
+        kept: None,
+        idle: None,
     };
     match shows {
         Some(Shows::Window {
@@ -1082,6 +1092,12 @@ fn run_client(
                     }
                 }
                 (Command::Export, None) => {}
+                (Command::Idle { again, done }, Some(window)) => {
+                    let surface = window.wl_surface().clone();
+                    client.idle = Some((again, done));
+                    client.commit_nothing(&qh, &surface, again);
+                }
+                (Command::Idle { .. }, None) => {}
                 (
                     Command::OpenDialog {
                         app_id,
@@ -1201,6 +1217,10 @@ struct Client {
     exported: Option<ZxdgExportedV2>,
     imported: Option<ZxdgImportedV2>,
     kde_decoration: Option<OrgKdeKwinServerDecoration>,
+    /// The last buffer it drew, for [`Command::Idle`].
+    kept: Option<smithay_client_toolkit::shm::slot::Buffer>,
+    /// Committing nothing new at each frame callback ([`Command::Idle`]).
+    idle: Option<(bool, std::sync::Arc<std::sync::atomic::AtomicU64>)>,
 }
 
 impl Client {
@@ -1302,6 +1322,19 @@ impl Client {
         if buffer.attach_to(surface).is_ok() {
             surface.commit();
         }
+        self.kept = Some(buffer);
+    }
+
+    /// A commit with nothing new but a frame callback, and its last
+    /// buffer attached again without damage if `again`.
+    fn commit_nothing(&self, qh: &QueueHandle<Self>, surface: &wl_surface::WlSurface, again: bool) {
+        surface.frame(qh, surface.clone());
+        if again && let Some(buffer) = &self.kept {
+            // Still the compositor's: attached as it is, not activated
+            // again as a fresh one.
+            surface.attach(Some(buffer.wl_buffer()), 0, 0);
+        }
+        surface.commit();
     }
 
     /// A menu under the press, grabbing the keyboard.
@@ -1575,7 +1608,20 @@ impl CompositorHandler for Client {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    fn frame(
+        &mut self,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _: u32,
+    ) {
+        let Some((again, done)) = &self.idle else {
+            return;
+        };
+        done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let again = *again;
+        self.commit_nothing(qh, surface, again);
+    }
 
     fn surface_enter(
         &mut self,

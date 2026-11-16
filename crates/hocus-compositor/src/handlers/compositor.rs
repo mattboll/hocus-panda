@@ -19,7 +19,7 @@ use smithay::{
 };
 
 use super::{layer_shell, xdg_shell};
-use crate::{State, state::ClientState};
+use crate::{State, redraw::Change, state::ClientState};
 
 /// For clients inserted without a [`ClientState`], which never happens;
 /// but a compositor must not panic on it.
@@ -80,8 +80,13 @@ impl CompositorHandler for State {
         xdg_shell::handle_commit(self, surface);
         self.popups.commit(surface);
         layer_shell::handle_commit(self, surface);
-        // The screens it shows on, not every one (#826).
-        self.redraw_for(surface);
+        // The screens it shows on, not every one (#826); a scene only when
+        // it shows something new (#840).
+        match self.commit_change(surface) {
+            Change::Shown => self.redraw_for(surface),
+            Change::Nothing => self.frames_owed_for(surface),
+            Change::WithParent => {}
+        }
     }
 
     /// A popup or a subsurface leaves the screen at once, without a

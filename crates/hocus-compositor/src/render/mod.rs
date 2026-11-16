@@ -1610,23 +1610,46 @@ where
     )))
 }
 
+/// What a screen's frame showed, as its clients are told it refreshed.
+#[derive(Clone, Copy)]
+enum Shown<'a> {
+    /// A frame drawn: which surfaces it showed.
+    Drawn(&'a RenderElementStates),
+    /// A frame drawn by a backend that does not say what it showed.
+    Unknown,
+    /// No scene built: what the last frame showed.
+    AsLast,
+}
+
 impl State {
     /// Tells the clients shown on `output` that a frame went out, so that
     /// they draw their next one. `states` says which surfaces it showed,
     /// when the backend knows: a surface is then told only by the output
     /// it shows most on.
     pub fn send_frames(&self, output: &Output, states: Option<&RenderElementStates>) {
+        self.tell_frames(output, states.map_or(Shown::Unknown, Shown::Drawn));
+    }
+
+    /// Tells the clients shown on `output` at its last frame that it
+    /// refreshed, though nothing changed there and no scene was built
+    /// (#840): they draw their next frame, if they have one, as they
+    /// would after a frame drawn.
+    pub fn send_frames_unchanged(&self, output: &Output) {
+        self.tell_frames(output, Shown::AsLast);
+    }
+
+    fn tell_frames(&self, output: &Output, shown: Shown<'_>) {
         let now: Duration = self.clock.now().into();
         // Frames are paced by the backend, never throttled here.
         let throttle = Some(Duration::ZERO);
         // A screen unplugged lives on a moment, its global disabled
         // (`crate::screens`): it is no surface's screen any more.
         let primary = |surface: &_, data: &_| -> Option<Output> {
-            match states {
-                Some(_) => {
+            match shown {
+                Shown::Drawn(_) | Shown::AsLast => {
                     surface_primary_scanout_output(surface, data).filter(|o| self.is_plugged(o))
                 }
-                None => Some(output.clone()),
+                Shown::Unknown => Some(output.clone()),
             }
         };
         let compare = scanout_compare(|current, current_state, next, next_state| {
@@ -1643,7 +1666,7 @@ impl State {
             // on none, the screen it shows most on.
             let drawing = self.drawing_output(window);
             window.with_surfaces(|surface, data| {
-                if let Some(states) = states {
+                if let Shown::Drawn(states) = shown {
                     update_surface_primary_scanout_output(surface, output, data, states, compare);
                 }
                 let at = drawing.clone().or_else(|| primary(surface, data));
