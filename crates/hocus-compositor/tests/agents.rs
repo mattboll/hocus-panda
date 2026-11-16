@@ -2735,6 +2735,35 @@ fn acting_ends_the_halo_with_its_fade() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// With a second screen, the bar on the first alone: the halo's and the
+/// peek's motions draw the bar's screen, the other builds no scene for
+/// them (#826).
+#[test]
+fn the_halo_moves_on_the_bars_screen_alone() -> anyhow::Result<()> {
+    let Some(mut bed) = halo_bed(false)? else {
+        return Ok(());
+    };
+    bed.hp.plug_screen(
+        "HEADLESS-2",
+        hocus_compositor::OutputSpec::new(1280, 800),
+        None,
+    )?;
+    bed.agent_is("build", "working")?;
+    bed.settle()?;
+    let (first, second) = (bed.hp.scenes_on(0), bed.hp.scenes_on(1));
+    bed.hocus(&["agent", "build", "waiting"], None)?;
+    let shown = bed.hp.dispatch_until(WAIT, |hp| hp.halo().is_some())?;
+    anyhow::ensure!(shown, "no halo");
+    wait(&mut bed.hp, Duration::from_millis(800))?;
+    let (first, second) = (bed.hp.scenes_on(0) - first, bed.hp.scenes_on(1) - second);
+    assert!(first >= 10, "the bar's screen drew it: {first} scenes");
+    assert!(
+        second <= 2,
+        "the other screen built {second} scenes (the bar's: {first})"
+    );
+    Ok(())
+}
+
 /// With reduced motion, on GLES: no wave; the glow is there within some
 /// 200 ms.
 #[test]

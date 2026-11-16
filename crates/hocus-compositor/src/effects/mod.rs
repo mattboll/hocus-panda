@@ -65,6 +65,8 @@ pub use draw::{Fire, FireElement};
 
 use std::time::Duration;
 
+use smithay::output::Output;
+
 /// What the effects playing now keep from frame to frame.
 #[derive(Debug, Default)]
 pub struct Live {
@@ -117,11 +119,25 @@ pub struct Live {
     pub sun_held: Option<jiff::Timestamp>,
     /// When they move on next (#815).
     pub pace: Pace,
+    /// When the creatures and the garlands across the tops move on next:
+    /// at most [`SLOW_FRAMES`] a second, their motion as smooth, being of
+    /// their time (#826).
+    pub slow: Pace,
+    /// A turn of the loop asked for at this time, for their next step:
+    /// nothing is drawn for it but what that step moves (#826).
+    pub turn: Option<Duration>,
+    /// The screens an effect drawn on windows moved on at its last step,
+    /// by effect: drawn again once more as it leaves them (#826).
+    pub was_on: std::collections::HashMap<&'static str, Vec<smithay::output::Output>>,
 }
 
 /// The effects' frames: at most this many a second.
 pub const FRAMES: u32 = 60;
 const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FRAMES as u64);
+/// The creatures' and the garlands across the tops' frames: at most this
+/// many a second (#826).
+pub const SLOW_FRAMES: u32 = 30;
+const SLOW_FRAME: Duration = Duration::from_nanos(1_000_000_000 / SLOW_FRAMES as u64);
 /// An effect's frame comes this much early at most, to fall on the
 /// screen's frame next to it: at 60 Hz, one a refresh whatever its jitter.
 const EARLY: Duration = Duration::from_millis(4);
@@ -150,14 +166,14 @@ impl Pace {
     }
 
     /// They moved on to `at` at `now`; `moving`: they go on moving, the
-    /// next due a frame on, else at the next turn.
-    pub fn moved(&mut self, now: Duration, at: Duration, moving: bool) {
+    /// next due `frame` on, else at the next turn.
+    pub fn moved(&mut self, now: Duration, at: Duration, moving: bool, frame: Duration) {
         self.at = at;
         self.clock = now;
         self.next = moving.then(|| {
             // On the grid, but never so late that two come at once.
-            let on = self.next.unwrap_or(now) + FRAME;
-            on.max(now + FRAME - EARLY)
+            let on = self.next.unwrap_or(now) + frame;
+            on.max(now + frame - EARLY)
         });
         self.frames += u64::from(moving);
     }
@@ -243,36 +259,79 @@ impl State {
 
     /// The wallpaper's effects step on at `now`: the snow, the rain on the
     /// glass, the fireflies, the koi, the aurora, the daylight, desktops in
-    /// depth; whether one moves.
+    /// depth; whether one moves. Each on the screens it plays on, the
+    /// others building no scene for it (#826): those it steps on itself.
     pub(crate) fn tick_wallpaper_effects(&mut self, now: std::time::Duration) -> bool {
         use timing::Fx;
-        let mut moving = timed(Fx::Snow, || self.tick_snow(now));
-        moving |= timed(Fx::Rain, || self.tick_raindrops(now));
-        moving |= timed(Fx::Fireflies, || self.tick_fireflies(now));
-        moving |= timed(Fx::Koi, || self.tick_koi(now));
-        moving |= timed(Fx::Aurora, || self.tick_aurora(now));
+        let mut moving = false;
+        if timed(Fx::Snow, || self.tick_snow(now)) {
+            moving = true;
+            let on = self.walls_seen(|s, o| !s.wall_hidden(o));
+            self.moved_on_screens(on);
+        }
+        let seen = |s: &Self, o: &Output| !s.wall_unseen(o);
+        if timed(Fx::Rain, || self.tick_raindrops(now)) {
+            moving = true;
+            self.moved_on_screens(self.walls_seen(seen));
+        }
+        if timed(Fx::Fireflies, || self.tick_fireflies(now)) {
+            moving = true;
+            self.moved_on_screens(self.walls_seen(seen));
+        }
+        if timed(Fx::Koi, || self.tick_koi(now)) {
+            moving = true;
+            self.moved_on_screens(self.walls_seen(seen));
+        }
+        if timed(Fx::Aurora, || self.tick_aurora(now)) {
+            moving = true;
+            let on = self.walls_seen(|s, o| s.aurora_shows_on(o) && !s.wall_unseen(o));
+            self.moved_on_screens(on);
+        }
         timed(Fx::Daylight, || {
             self.tick_daylight();
             false
         });
-        moving |= timed(Fx::Depth, || self.tick_depth(now));
+        if timed(Fx::Depth, || self.tick_depth(now)) {
+            moving = true;
+            let on = self.walls_seen(|s, o| {
+                s.depth_shows_on(o) && s.strip(o).moves_until().is_some_and(|end| now < end)
+            });
+            self.moved_on_screens(on);
+        }
         moving
     }
 
     /// The effects that play on their own step on by `step` at `now`,
-    /// when [`Pace`] says they are due (#815): whether they move.
+    /// when [`Pace`] says they are due (#815), `step` saying whether they
+    /// move. Each notes the screens it moves on in `frames.moved_on`:
+    /// only those draw again for it (#826).
     pub(crate) fn tick_paced(
         &mut self,
         now: Duration,
         step: impl FnOnce(&mut Self, Duration) -> bool,
-    ) -> bool {
+    ) {
+        self.tick_paced_by(now, false, step);
+    }
+
+    /// The same, at most [`SLOW_FRAMES`] a second with `slow` (#826).
+    pub(crate) fn tick_paced_by(
+        &mut self,
+        now: Duration,
+        slow: bool,
+        step: impl FnOnce(&mut Self, Duration) -> bool,
+    ) {
         let clock = self.now();
-        if !self.fx.pace.due(clock) {
-            return false;
+        fn pace(fx: &mut Live, slow: bool) -> &mut Pace {
+            if slow { &mut fx.slow } else { &mut fx.pace }
         }
+        if !pace(&mut self.fx, slow).due(clock) {
+            return;
+        }
+        let before = self.frames.moved_on.len();
         let moving = step(self, now);
-        self.fx.pace.moved(clock, now, moving);
-        moving
+        let moved = moving || self.frames.moved_on.len() > before;
+        let frame = if slow { SLOW_FRAME } else { FRAME };
+        pace(&mut self.fx, slow).moved(clock, now, moved, frame);
     }
 
     /// Whether the wallpaper of `output` is as good as unseen: a

@@ -35,6 +35,7 @@ use smithay::{
         gles::element::PixelShaderElement,
         gles::{GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType},
     },
+    desktop::layer_map_for_output,
     output::Output,
     reexports::calloop::{
         RegistrationToken,
@@ -679,6 +680,26 @@ impl State {
         self.arm_reminder();
         // Its panda peeks out once more (4.5).
         self.peek_news();
+    }
+
+    /// Something by the bar moves (the halo, the peek): its screens draw
+    /// again, the others build no scene for it (#826). Whether it has
+    /// one; else every screen draws.
+    pub(crate) fn moved_by_the_bar(&mut self) -> bool {
+        let screens: Vec<Output> = self
+            .space
+            .outputs()
+            .filter(|o| {
+                layer_map_for_output(o).layers().any(|l| {
+                    crate::front::in_the_bar(l.namespace())
+                        || l.namespace() == hocus_link::PEEK_NAMESPACE
+                })
+            })
+            .cloned()
+            .collect();
+        let any = !screens.is_empty();
+        self.frames.moved_on.extend(screens);
+        any
     }
 
     /// The halo moves on; whether it still does.

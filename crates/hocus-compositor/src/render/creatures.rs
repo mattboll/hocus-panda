@@ -117,8 +117,8 @@ impl State {
             };
             let (texture, sheet) = kept;
             let k = sheet.k;
-            // As of the effects' last frame (#815): the same between two.
-            let at = self.fx.pace.at;
+            // As of their last frame (#815, #826): the same between two.
+            let at = self.fx.slow.at;
             let pose = moving.then(|| creature::look(creature.mood, live.time(at, creature.agent)));
             let laid = rig.lay(pose.as_ref(), &sheet);
             // Its box on whole pixels, as its sheet is.

@@ -220,6 +220,8 @@ impl State {
     /// take them off). Whether one moves.
     pub(crate) fn tick_moments(&mut self, now: Duration) -> bool {
         let mut moving = false;
+        // Each on its screen alone (#826).
+        let mut on: Vec<String> = Vec::new();
         if let Some(show) = self.fx.fireworks.as_mut() {
             show.advance(now);
             if show.over(now) {
@@ -228,6 +230,7 @@ impl State {
                 self.redraw = true;
             } else {
                 moving = true;
+                on.push(show.output.clone());
             }
         }
         if let Some((output, place)) = self
@@ -249,8 +252,18 @@ impl State {
                     self.redraw = true;
                 } else {
                     moving = true;
+                    on.push(output);
                 }
             }
+        }
+        if moving {
+            let screens = self
+                .space
+                .outputs()
+                .filter(|o| on.contains(&o.name()))
+                .cloned()
+                .collect();
+            self.moved_on_screens(screens);
         }
         moving
     }

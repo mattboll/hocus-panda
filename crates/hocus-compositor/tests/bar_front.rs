@@ -318,10 +318,19 @@ fn a_windows_shadow_stops_at_the_bars_edge() -> anyhow::Result<()> {
     let rect = Rect::new(BAR_RECT.x - 8 - 600, 100, 600, 800);
     hp.place_window(id, rect);
     wait_for_rect(&mut hp, "beside", rect)?;
-    wait(&mut hp, Duration::from_millis(200))?;
-    let shadowed = pixel(&mut hp, gap)?;
+    // Its shadow comes with its opening's motion, and a loaded machine
+    // draws late: read once the last frame shows it at rest, then as
+    // frames come, for a while at most.
+    common::at_rest(&mut hp)?;
+    let darker = |p: [i32; 3]| p.iter().sum::<i32>() + 6 < wallpaper.iter().sum::<i32>();
+    let until = std::time::Instant::now() + WAIT;
+    let mut shadowed = pixel(&mut hp, gap)?;
+    while !darker(shadowed) && std::time::Instant::now() < until {
+        hp.dispatch(Duration::from_millis(16))?;
+        shadowed = pixel(&mut hp, gap)?;
+    }
     assert!(
-        shadowed.iter().sum::<i32>() + 6 < wallpaper.iter().sum::<i32>(),
+        darker(shadowed),
         "a shadow in the gap: {shadowed:?}, the wallpaper {wallpaper:?}"
     );
     let (w, _, px) = hp.screenshot(0)?;

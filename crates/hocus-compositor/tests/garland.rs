@@ -317,6 +317,43 @@ fn across_the_top_under_the_windows() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The garlands across the tops of two screens, one under a maximised
+/// window (paused, not seen): the other's swing asks for its own screen
+/// alone; the paused one's builds no scene, frame after frame (#826).
+#[test]
+fn a_garland_swinging_on_one_screen_builds_no_scene_on_the_other() -> anyhow::Result<()> {
+    let mut config = Config::default();
+    config.effects.garland_top = true;
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![OutputSpec::new(1280, 800), OutputSpec::new(1280, 800)],
+            ..common::gles()
+        },
+        config,
+    )?;
+    if hp.renderer() != "gles" {
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
+    }
+    let (_, _client) = open_with(&mut hp, "test.full", (600, 400), false)?;
+    let id = id_of(&hp, "test.full")?;
+    hp.place_window(id, Rect::new(1280 + 100, 150, 600, 400));
+    common::chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
+    let maximized = hp.dispatch_until(WAIT, |hp| hp.mode(id) == Mode::Snapped(Zone::Maximized))?;
+    anyhow::ensure!(maximized, "{:?}", hp.mode(id));
+    common::wait(&mut hp, Duration::from_millis(500))?;
+    anyhow::ensure!(hp.garland_tops().len() == 2, "{:?}", hp.garland_tops());
+    let (first, second) = (hp.scenes_on(0), hp.scenes_on(1));
+    let frames = hp.frames_on(0);
+    common::wait(&mut hp, Duration::from_secs(1))?;
+    let (first, second) = (hp.scenes_on(0) - first, hp.scenes_on(1) - second);
+    assert!(hp.frames_on(0) > frames + 10, "the first screen's swings");
+    assert!(
+        second <= 2,
+        "the screen whose garland is paused built {second} scenes (the other: {first})"
+    );
+    Ok(())
+}
+
 // --- The screenshots ------------------------------------------------------------
 
 /// A screenshot of output 0 saved as `name`.png in `out`.

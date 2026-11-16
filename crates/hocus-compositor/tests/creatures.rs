@@ -197,6 +197,52 @@ fn none_with_the_switch_off_and_still_with_reduced_motion() -> anyhow::Result<()
     Ok(())
 }
 
+/// Two screens, an agent's window on the first: its panda moves at most
+/// 30 times a second, drawn on its window's screen alone; the second,
+/// where no creature sits, builds no scene for it (#826).
+#[test]
+fn a_panda_moves_on_its_windows_screen_alone_30_times_a_second() -> anyhow::Result<()> {
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![OutputSpec::new(1280, 800), OutputSpec::new(1280, 800)],
+            ..common::gles()
+        },
+        creatures(false, false),
+    )?;
+    if hp.renderer() != "gles" {
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
+    }
+    let (_, _client) = open_with(
+        &mut hp,
+        "test.terminal",
+        (AT.width as u32, AT.height as u32),
+        false,
+    )?;
+    let id = hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some("test.terminal"))
+        .map(|w| w.id)
+        .ok_or_else(|| anyhow::anyhow!("no window"))?;
+    hp.place_window(id, AT);
+    common::at_rest(&mut hp)?;
+    hocus(&hp, &["agent", "build", "working"])?;
+    hp.reconfigure(creatures(true, false));
+    let sits = hp.dispatch_until(WAIT, |hp| hp.creatures_sitting() == [(id, 1)])?;
+    anyhow::ensure!(sits, "no creature: {:?}", hp.creatures_sitting());
+    common::wait(&mut hp, Duration::from_millis(500))?;
+    let (frames, second) = (hp.frames_on(0), hp.scenes_on(1));
+    common::wait(&mut hp, Duration::from_secs(1))?;
+    let (frames, second) = (hp.frames_on(0) - frames, hp.scenes_on(1) - second);
+    assert!(frames >= 10, "it moves: {frames} frames");
+    assert!(
+        second <= 2,
+        "the screen without creatures built {second} scenes (the other drew {frames} frames)"
+    );
+    assert!(frames <= 33, "{frames} frames in a second");
+    Ok(())
+}
+
 // --- The screenshots ------------------------------------------------------------
 
 /// A screenshot of output 0 saved as `name`.png in `out`.

@@ -40,6 +40,10 @@ pub struct Frames {
     /// Nothing moved as of the last frame drawn, as `tick` judged it then:
     /// that frame shows every motion at its end (the tests' `at_rest`).
     pub still: bool,
+    /// The screens a motion drawn on them alone moved on this turn (the
+    /// garland across a screen's top, the halo and the peek by the bar):
+    /// only they draw again for it, not every screen (#826).
+    pub moved_on: Vec<smithay::output::Output>,
 }
 
 #[derive(Debug, Default)]
