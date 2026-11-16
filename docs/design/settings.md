@@ -2061,10 +2061,12 @@ the search, then leaves the search field, then closes the window;
 nor has the keyboard), `Ctrl+W` and a close the compositor asks (its
 shortcut, for one) all close the window the same way, never
 waiting on its thread: a slider still moving is written at once instead
-of 450 ms later, and the window goes once the file's worker has written
-every change asked (after 5 s at most, with a warning in the log, should
-the disk hang). The program ends with the window ("the Settings closed"
-in its log).
+of 450 ms later, and the window goes at once. The program ends after it,
+once the file's worker has written every change asked (after 5 s at
+most, with a warning in the log, should the disk hang), BlueZ's search
+stopped ("the Settings closed" in its log); a launch meanwhile opens a
+new window. It is an iced daemon, not an application, for that: an
+application is torn down with its last window still on screen.
 
 ## The model, for the sections' tickets
 

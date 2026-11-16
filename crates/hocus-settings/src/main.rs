@@ -116,39 +116,52 @@ fn main() -> ExitCode {
         ..iced::Settings::default()
     };
     settings.fonts = app::fonts().into_iter().map(Cow::Borrowed).collect();
-    let ran = iced::application(move || App::new(start.clone()), App::update, App::view)
-        .title(App::title)
-        .subscription(App::subscription)
-        .scale_factor(App::text_scale)
-        .theme(|_: &App| {
-            if hocus_settings::theme::now().scheme == hocus_link::theme::Scheme::Light {
-                iced::Theme::Light
-            } else {
-                iced::Theme::Dark
-            }
-        })
-        .style(|_: &App, _: &iced::Theme| iced::theme::Style {
-            background_color: app::background(),
-            text_color: app::text(),
-        })
-        .settings(settings)
-        .window(window::Settings {
-            size: iced::Size::new(app::SIZE.0, app::SIZE.1),
-            min_size: Some(iced::Size::new(app::LEAST.0, app::LEAST.1)),
-            // The compositor's decorations (xdg-decoration): under
-            // Hocuspanda, no title bar but its grip at the top edge
-            // (windows.md §7); the header is still the window's own.
-            decorations: true,
-            // ✕, Esc, Ctrl+W and the compositor's close all go through the
-            // window, which writes what is pending first.
-            exit_on_close_request: false,
-            platform_specific: window::settings::PlatformSpecific {
-                application_id: "hocus-settings".to_owned(),
-                ..Default::default()
-            },
-            ..window::Settings::default()
-        })
-        .run();
+    let window = window::Settings {
+        size: iced::Size::new(app::SIZE.0, app::SIZE.1),
+        min_size: Some(iced::Size::new(app::LEAST.0, app::LEAST.1)),
+        // The compositor's decorations (xdg-decoration): under
+        // Hocuspanda, no title bar but its grip at the top edge
+        // (windows.md §7); the header is still the window's own.
+        decorations: true,
+        // ✕, Esc, Ctrl+W and the compositor's close all go through the
+        // window, which writes what is pending first.
+        exit_on_close_request: false,
+        platform_specific: window::settings::PlatformSpecific {
+            application_id: "hocus-settings".to_owned(),
+            ..Default::default()
+        },
+        ..window::Settings::default()
+    };
+    // A daemon, not an application: an application ends with its last
+    // window, its teardown keeping that window on screen; the Settings
+    // end once their window has gone (`App::close`).
+    let ran = iced::daemon(
+        move || {
+            let (app, first) = App::new(start.clone());
+            // As an application's: the window opens, then what it asks.
+            let (_, open) = window::open(window.clone());
+            (app, open.discard().chain(first))
+        },
+        App::update,
+        view,
+    )
+    .title(|app: &App, _| app.title())
+    .subscription(App::subscription)
+    .scale_factor(|app: &App, _| app.text_scale())
+    .theme(|_: &App, _| {
+        if hocus_settings::theme::now().scheme == hocus_link::theme::Scheme::Light {
+            iced::Theme::Light
+        } else {
+            iced::Theme::Dark
+        }
+    })
+    .style(|_: &App, _: &iced::Theme| iced::theme::Style {
+        background_color: app::background(),
+        text_color: app::text(),
+    })
+    .settings(settings)
+    .run();
+    // Gone with the window already, unless iced ended otherwise.
     single::stop();
     // The computer hidden again and the search stopped before the program
     // goes (BlueZ keeps it visible otherwise until its timeout).
@@ -161,6 +174,11 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The window's view: the Settings have one window.
+fn view(app: &App, _: window::Id) -> iced::Element<'_, app::Message> {
+    app.view()
 }
 
 /// The user's name, as the bar says it: `HOCUS_USER_NAME`, else their

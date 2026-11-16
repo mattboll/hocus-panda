@@ -896,6 +896,52 @@ fn the_close_button_esc_and_ctrl_w_close_the_window() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The ✕ takes the window off the screen at once, however long the
+/// program then takes to end (iced tore it down with the window still on
+/// screen, for seconds on the maintainer's machine).
+#[test]
+fn the_window_goes_before_the_program_ends() -> anyhow::Result<()> {
+    const SLOW_END: Duration = Duration::from_millis(1500);
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let script = std::fs::read_to_string(&bed.script)?.replacen(
+        "exec '",
+        &format!(
+            "export HOCUS_TEST_SLOW_END={}\nexec '",
+            SLOW_END.as_millis()
+        ),
+        1,
+    );
+    std::fs::write(&bed.script, script)?;
+    bed.open()?;
+    bed.click("close")?;
+    let clicked = std::time::Instant::now();
+    let gone = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some(APP_ID))
+    })?;
+    let window = clicked.elapsed();
+    anyhow::ensure!(gone, "✕ did not close the window: {}", bed.plain());
+    let log = bed.log.clone();
+    let ended = bed.hp.dispatch_until(WAIT, |_| {
+        std::fs::read_to_string(&log).is_ok_and(|t| t.contains("the Settings closed"))
+    })?;
+    let program = clicked.elapsed();
+    anyhow::ensure!(ended, "the program did not end: {}", bed.plain());
+    eprintln!("the window went in {window:?}, the program ended in {program:?}");
+    assert!(
+        program >= SLOW_END,
+        "the teardown was not slow: {program:?}"
+    );
+    assert!(
+        window < Duration::from_secs(1),
+        "the window stayed {window:?} after ✕, until the program ended"
+    );
+    Ok(())
+}
+
 #[test]
 fn a_change_made_just_before_closing_is_on_disk() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
