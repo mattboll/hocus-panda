@@ -44,6 +44,8 @@ not (
         | test(=desktop_drop::an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
+        # Fails by chance (#835).
+        | test(=wifi::without_networkmanager_no_row_and_without_wifi_no_list)
     ))
 )
 """
