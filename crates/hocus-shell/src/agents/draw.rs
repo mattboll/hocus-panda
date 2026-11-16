@@ -38,10 +38,10 @@
 //! state's colour stands in each panda's place.
 //!
 //! The calm rows (to see, in the background, resting) trade their word for
-//! a 9 px dot (#831): green, blue, grey; the blue one breathes slowly
-//! (2.4 s), drawn again every [`BREATH_STEP`] while one shows, with motion
-//! and the pandas lively only. The word shows on hover, as the bar's
-//! tooltips do, with how long a working one has worked.
+//! a 9 px dot (#831): green, blue, grey, all still (an agent can stay in
+//! the background for hours, and a breathing dot would draw the bar all
+//! that while). The word shows on hover, as the bar's tooltips do, with
+//! how long a working one has worked.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -104,11 +104,6 @@ const DOT: f32 = 10.0;
 const DOT_TO_SEE: Ink = Ink::Dark(rgb(0x7EE0A0));
 const DOT_BACKGROUND: Ink = Ink::Dark(rgb(0x8FB8F0));
 const DOT_RESTING: Ink = Ink::Dark(rgb(0x7C8597));
-/// The blue dot's breath, the mockup's: from 35 % to full and back in
-/// 2.4 s, eased in and out; drawn again this often while it breathes.
-const BREATH: Duration = Duration::from_millis(2400);
-const BREATH_LOW: f32 = 0.35;
-const BREATH_STEP: Duration = Duration::from_millis(150);
 /// Resting on a row this long shows its tooltip (as Today's lines).
 const TIP: Duration = Duration::from_millis(600);
 /// The rows' motion: the slide, the fades and the tint, the hop.
@@ -607,25 +602,6 @@ fn row_dot(look: Look) -> Option<Color> {
     }
 }
 
-/// The blue dot's opacity `t` into its breath (from any start).
-fn breath(t: Duration) -> f32 {
-    let share = (t.as_secs_f32() / BREATH.as_secs_f32()).fract();
-    // Up over its first half, down over its second, each eased.
-    let up = if share < 0.5 {
-        share * 2.0
-    } else {
-        (1.0 - share) * 2.0
-    };
-    BREATH_LOW + (1.0 - BREATH_LOW) * bezier(EASE_IN_OUT, up)
-}
-
-/// Where the breaths count from: one for every bar, so that their dots
-/// breathe together.
-fn breath_origin() -> Instant {
-    static ORIGIN: OnceLock<Instant> = OnceLock::new();
-    *ORIGIN.get_or_init(Instant::now)
-}
-
 /// A row's tint and its word's colour. Under high contrast, no tint: the
 /// word in the state's colour at 7:1, and a bar on the row's left
 /// ([`CONTRAST_BAR`]).
@@ -947,12 +923,7 @@ impl<Message> canvas::Program<Message> for Group {
                     state.hover = None;
                 }
                 state.now = Some(*now);
-                if state.tick(*now) {
-                    return Some(canvas::Action::request_redraw());
-                }
-                // A blue dot breathing (#831): the next step of its breath.
-                self.breathes()
-                    .then(|| canvas::Action::request_redraw_at(*now + BREATH_STEP))
+                state.tick(*now).then(canvas::Action::request_redraw)
             }
             iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
             iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -1092,14 +1063,6 @@ impl Group {
     /// in power saver.
     fn lively(&self) -> bool {
         self.motion && pandas::lively()
-    }
-
-    /// Whether a blue dot breathes (#831): one shows in the full form,
-    /// lively.
-    fn breathes(&self) -> bool {
-        self.lively()
-            && self.forms.iter().any(|(form, _)| *form == Form::Full)
-            && layout().is_some_and(|l| l.rows.iter().any(|r| r.look == Look::Background))
     }
 
     /// The look of agent `id`'s panda as shown: its row's, or the mini
@@ -1641,18 +1604,11 @@ impl Group {
                 ),
             ));
             if let Some(colour) = row_dot(row.look) {
-                // Its dot in its word's place (#831), the blue one
-                // breathing.
-                let breathing = match row.look {
-                    Look::Background if self.lively() => {
-                        breath(now.saturating_duration_since(breath_origin()))
-                    }
-                    _ => 1.0,
-                };
+                // Its dot in its word's place (#831), still.
                 let right = rect.x + rect.width - ROW_PAD;
                 f.fill(
                     &Path::circle(Point::new(right - ROW_DOT / 2.0, middle), ROW_DOT / 2.0),
-                    faded(colour, breathing * shown),
+                    faded(colour, shown),
                 );
                 continue;
             }
@@ -1960,17 +1916,6 @@ mod tests {
                     .is_some_and(|r| r > 0.99)
             );
         }
-    }
-
-    #[test]
-    fn the_blue_dot_breathes_from_a_third_to_full_in_two_seconds_and_a_half() {
-        let at = Duration::from_millis;
-        assert!((breath(at(0)) - BREATH_LOW).abs() < 0.001);
-        assert!((breath(at(1200)) - 1.0).abs() < 0.001);
-        assert!((breath(at(2400)) - BREATH_LOW).abs() < 0.001);
-        // Eased: slow at its ends, and the same going down as up.
-        assert!(breath(at(100)) - breath(at(0)) < breath(at(700)) - breath(at(600)));
-        assert!((breath(at(600)) - breath(at(1800))).abs() < 0.001);
     }
 
     #[test]

@@ -161,7 +161,7 @@ pub enum Look {
     /// It works: for how long.
     Working,
     /// Finished and seen, and something it started still runs (#831): "en
-    /// fond", a blue dot breathing slowly; it will come back by itself.
+    /// fond", a blue dot; it will come back by itself.
     Background,
     /// Idle, or finished and seen: "repos", its panda asleep.
     Resting,

@@ -172,7 +172,7 @@ again, from Sources, adds them.
 An agent whose turn ended may have left something running that will
 bring it back by itself: a command in the background, a sub-agent, a
 wake-up armed, a watch. Once the user looked, its row then says "en
-fond" (a blue dot, breathing slowly) rather than "repos"; not looked at
+fond" (a blue dot) rather than "repos"; not looked at
 yet, "à voir" wins (docs/design/bar.md §4 group 3). It is quiet: no halo,
 no panda peeking out, no notification, nothing in the mini form's
 badge. When what ran ends and the agent takes a turn by itself, it works
