@@ -1045,7 +1045,8 @@ impl State {
     /// (#813): one hung on each screen as it is turned on, following its
     /// work area; paused on a screen that is off, shows a fullscreen or a
     /// maximised window (it is not seen), and while the session is
-    /// locked. Whether one moves (a frame is wanted).
+    /// locked. Whether one moves: its screen, noted in
+    /// `frames.moved_on`, draws again, not every screen (#826).
     pub(crate) fn tick_garland_top(&mut self, now: Duration) -> bool {
         let Some(moving) = self.garlanding_top() else {
             if !self.fx.tops.is_empty() {
@@ -1056,7 +1057,7 @@ impl State {
             return false;
         };
         let locked = self.locked();
-        let screens: Vec<(String, [f64; 3], bool)> = self
+        let screens: Vec<(Output, [f64; 3], bool)> = self
             .space
             .outputs()
             .filter_map(|output| {
@@ -1065,20 +1066,20 @@ impl State {
                     && self.output_powered(output)
                     && !self.fullscreen_in_front(output)
                     && !self.maximized_shown(output);
-                Some((output.name(), span, shown))
+                Some((output.clone(), span, shown))
             })
             .collect();
         let wind = self.garland_wind();
         let before = self.fx.tops.len();
         self.fx
             .tops
-            .retain(|name, _| screens.iter().any(|(n, ..)| n == name));
+            .retain(|name, _| screens.iter().any(|(o, ..)| o.name() == *name));
         if self.fx.tops.len() != before {
             self.redraw = true;
         }
         let mut stepped = false;
-        for (name, span, shown) in screens {
-            let top = match self.fx.tops.entry(name) {
+        for (output, span, shown) in screens {
+            let top = match self.fx.tops.entry(output.name()) {
                 Entry::Occupied(entry) => {
                     let top = entry.into_mut();
                     if !top.hang(span, now, moving) {
@@ -1105,6 +1106,7 @@ impl State {
             if moving {
                 top.advance(now, wind);
                 stepped = true;
+                self.frames.moved_on.push(output);
             } else if top.hold() {
                 self.redraw = true;
             }

@@ -117,6 +117,9 @@ pub struct Live {
     pub sun_held: Option<jiff::Timestamp>,
     /// When they move on next (#815).
     pub pace: Pace,
+    /// A turn of the loop asked for at this time, for their next step:
+    /// nothing is drawn for it but what that step moves (#826).
+    pub turn: Option<Duration>,
 }
 
 /// The effects' frames: at most this many a second.
@@ -260,7 +263,9 @@ impl State {
     }
 
     /// The effects that play on their own step on by `step` at `now`,
-    /// when [`Pace`] says they are due (#815): whether they move.
+    /// when [`Pace`] says they are due (#815): whether they move on every
+    /// screen. Those of one screen alone note it in `frames.moved_on`
+    /// (#826).
     pub(crate) fn tick_paced(
         &mut self,
         now: Duration,
@@ -270,8 +275,10 @@ impl State {
         if !self.fx.pace.due(clock) {
             return false;
         }
+        let before = self.frames.moved_on.len();
         let moving = step(self, now);
-        self.fx.pace.moved(clock, now, moving);
+        let moved = moving || self.frames.moved_on.len() > before;
+        self.fx.pace.moved(clock, now, moved);
         moving
     }
 

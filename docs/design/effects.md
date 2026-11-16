@@ -406,9 +406,10 @@ there covers it; never on the bar (its cord and bulbs kept off it).
   twinkling at 0.8 of the pace a way ahead; in twice the wind.
 - **When**: as the first, but paused (not stepped, nothing drawn per
   frame) on a screen that is off, shows a fullscreen or a maximised
-  window (it is not seen), and while locked. Still and lit with reduced
-  motion; none in the power saver, while shared or recorded, on the CPU,
-  nor in a capture.
+  window (it is not seen), and while locked. Its motion asks for the
+  frames of its own screen alone: another screen builds no scene for it
+  (#826). Still and lit with reduced motion; none in the power saver,
+  while shared or recorded, on the CPU, nor in a capture.
 
 ## The garlands proposed in December (#813)
 

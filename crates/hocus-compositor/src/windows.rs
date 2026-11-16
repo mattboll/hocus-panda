@@ -1446,7 +1446,7 @@ impl State {
                 // At most 60 frames a second there too (#815).
                 moving |= self.tick_paced(now, Self::tick_wallpaper_effects);
                 if !moving && let Some(at) = self.fx.pace.next() {
-                    self.wake_at(at);
+                    self.turn_at(at);
                 }
             }
             self.judge_still(moving, as_of_frame);
@@ -1517,8 +1517,10 @@ impl State {
         }
         moving |= self.tile_drop.tick(now);
         moving |= self.tick_going(now);
-        moving |= self.tick_halo(now);
-        moving |= self.tick_peek(now);
+        // The halo and the peek, drawn by the bar: its screens alone.
+        if self.tick_halo(now) | self.tick_peek(now) {
+            moving |= !self.moved_by_the_bar();
+        }
         moving |= self.bubbles.tick(now);
         moving |= self.capture_tick(now);
         moving |= self.auth_tick(now);
@@ -1553,17 +1555,18 @@ impl State {
             // fireflies, the koi, the daylight, desktops in depth.
             let mut effects = creatures | state.tick_wallpaper_effects(now);
             // The garland under the active window (#799), the garlands
-            // across the top of the screens (#813).
-            effects |= timed(Fx::Garland, || {
-                state.tick_garland(now) | state.tick_garland_top(now)
+            // across the top of the screens (#813), those asking for
+            // their own screens alone (#826).
+            let mut under = false;
+            timed(Fx::Garland, || {
+                under = state.tick_garland(now);
+                under | state.tick_garland_top(now)
             });
+            effects |= under;
             // The moments: fireworks (#810), confetti (#811).
             effects |= timed(Fx::Moments, || state.tick_moments(now));
             effects
         });
-        if let Some(at) = self.fx.pace.next() {
-            wake(at);
-        }
         // A burning window lingers until its last sparks are gone (#794),
         // stepped here too should no screen draw it.
         // A shattering one until its last shard has fallen (#798).
@@ -1611,6 +1614,11 @@ impl State {
         if !moving && let Some(at) = next {
             self.wake_at(at);
         }
+        // The effects' next step wakes the loop, which asks for the
+        // screens it moves on, not every screen (#826).
+        if !moving && let Some(at) = self.fx.pace.next() {
+            self.turn_at(at);
+        }
     }
 
     /// Whether the last frame drawn shows every motion at its end, and
@@ -1620,10 +1628,35 @@ impl State {
     /// may have ended since, its last frame a step short (a panel at
     /// 97 %). One more frame is drawn then, as of now, unless the last
     /// judgement already found everything still: nothing moved since.
+    /// What moves on some screens alone (`frames.moved_on`) asks for
+    /// their frames alone (#826).
     fn judge_still(&mut self, moving: bool, as_of_frame: bool) {
-        self.frames.still = !moving && (as_of_frame || self.frames.still);
-        if moving || !self.frames.still {
+        let on = std::mem::take(&mut self.frames.moved_on);
+        let was_still = self.frames.still;
+        self.frames.still = !moving && on.is_empty() && (as_of_frame || was_still);
+        if moving || !(as_of_frame || was_still) {
             self.redraw = true;
+        }
+        for output in on {
+            self.redraw_on(output);
+        }
+    }
+
+    /// A turn of the loop at `at`, nothing drawn for it: the effects'
+    /// next step, which asks for the screens it moves on itself (#826).
+    fn turn_at(&mut self, at: Duration) {
+        if self.fx.turn.is_some_and(|t| t <= at) {
+            return;
+        }
+        let delay = at.saturating_sub(self.now());
+        let timer = Timer::from_duration(delay);
+        let inserted = self.loop_handle.insert_source(timer, |_, _, app| {
+            app.state.fx.turn = None;
+            TimeoutAction::Drop
+        });
+        match inserted {
+            Ok(_) => self.fx.turn = Some(at),
+            Err(err) => tracing::warn!(%err.error, "the effects' next step has no timer"),
         }
     }
 

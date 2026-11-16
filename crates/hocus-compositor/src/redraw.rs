@@ -4,8 +4,9 @@
 //! screens, a video on one no longer has the other build its scene at
 //! each of its frames to find nothing new.
 //!
-//! What the compositor changes itself still asks every screen for a
-//! frame (`State::redraw`); so does a commit whenever its surface may show
+//! What the compositor changes itself asks every screen for a frame
+//! (`State::redraw`), but for a motion of one screen alone, as the
+//! garland across its top (`State::redraw_on`); so does a commit whenever its surface may show
 //! elsewhere than where it is: the overview, Alt+Tab's thumbnails, the
 //! actions palette, a window moving, the lock, or a surface the desktop
 //! does not place itself.
@@ -25,8 +26,9 @@ use crate::{State, model::WindowId};
 /// pixels): the largest cursors, at their hotspot's farthest.
 const CURSOR_REACH: f64 = 256.0;
 
-/// The screens commits asked to draw again since the screens last drew,
-/// besides every screen (`State::redraw`).
+/// The screens commits, and the compositor's motions of one screen alone,
+/// asked to draw again since the screens last drew, besides every screen
+/// (`State::redraw`).
 #[derive(Debug, Default)]
 pub struct Commits {
     screens: Vec<Output>,
@@ -36,9 +38,10 @@ pub struct Commits {
 }
 
 impl Commits {
-    /// Whether a client committed since the screens last drew.
+    /// Whether a client committed, or a screen was asked for, since the
+    /// screens last drew.
     pub fn pending(&self) -> bool {
-        self.any
+        self.any || !self.screens.is_empty()
     }
 
     /// The screens asked for, forgotten with the commits.
@@ -67,6 +70,14 @@ struct Covered {
 }
 
 impl State {
+    /// `output` draws again for what moves on it alone; the others build
+    /// no scene for it.
+    pub(crate) fn redraw_on(&mut self, output: Output) {
+        if !self.redraw {
+            self.commits.on(output);
+        }
+    }
+
     /// `surface` committed: the screens it shows on draw again.
     pub(crate) fn redraw_for(&mut self, surface: &WlSurface) {
         self.commits.any = true;
