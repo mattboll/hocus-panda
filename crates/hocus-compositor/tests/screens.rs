@@ -1,15 +1,16 @@
 //! Two screens, headless (docs/design/windows.md §9): a snap, by dragging
 //! or by the keys, lands on the screen it was made on, and stays there as
 //! its work area changes, through fullscreen and back, and as a snapped
-//! pair is resized.
+//! pair is resized; a window's popup opens on the window's screen.
 
 use crate::common;
 
 use std::time::Duration;
 
 use common::{
-    BTN_LEFT, Command, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT, KEY_UP,
-    Shows, WAIT, chord, client, open, open_with, rect_of, two_screens, wait, wait_for_rect,
+    BTN_LEFT, Command, Event, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_RIGHT,
+    KEY_UP, Shows, WAIT, chord, client, open, open_showing, open_with, rect_of, two_screens, wait,
+    wait_for_rect,
 };
 use hocus_compositor::{
     Headless,
@@ -125,6 +126,47 @@ fn the_keys_snap_on_the_windows_screen_and_a_pair_stays_there() -> anyhow::Resul
     let area = bar_on_second(&mut hp, area)?;
     wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area))?;
     wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area))?;
+    Ok(())
+}
+
+/// A window's popup opens on the window's screen, at its anchor, even when
+/// the window's own shadow reaches onto the screen beside it (a browser's
+/// tab preview).
+#[test]
+fn a_popup_opens_on_its_windows_screen() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    let (_, window) = open_showing(
+        &mut hp,
+        "test.tabs",
+        Shows::Shadowed {
+            app_id: "test.tabs",
+            size: (800, 600),
+            margin: 30,
+        },
+    )?;
+    let id = id_of(&hp, "test.tabs").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    // 10 px into the second screen: its shadow 20 px onto the first.
+    let rect = Rect::new(1920 + 10, 200, 800, 600);
+    hp.place_window(id, rect);
+    wait_for_rect(&mut hp, "test.tabs", rect)?;
+    window.commands.send(Command::Popup {
+        anchor: (200, 0, 150, 30),
+        size: (300, 200),
+    })?;
+    let mut at = None;
+    hp.dispatch_until(WAIT, |_| {
+        while let Ok(event) = window.events.try_recv() {
+            if let Event::PopupAt(x, y) = event {
+                at = Some((x, y));
+            }
+        }
+        at.is_some()
+    })?;
+    assert_eq!(
+        at,
+        Some((200, 30)),
+        "under its anchor, on the second screen"
+    );
     Ok(())
 }
 

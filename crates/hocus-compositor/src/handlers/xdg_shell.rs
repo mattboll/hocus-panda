@@ -501,7 +501,10 @@ impl State {
         let Some(window) = self.window_for(&root) else {
             return;
         };
-        let Some(output) = self.space.outputs_for_element(&window).into_iter().next() else {
+        // The screen the window is on, as the rest of the desktop has it:
+        // not any its outline touches, which a client's own shadow takes
+        // onto the screen beside it.
+        let Some(output) = self.id_of(&window).and_then(|id| self.output_of(id)) else {
             return;
         };
         let (Some(output_geo), Some(window_geo)) = (
