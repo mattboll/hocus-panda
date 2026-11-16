@@ -141,6 +141,23 @@ struct OutputBuffer<T, C> {
     damaged_area: u64,
     /// How many rectangles it drew over, since asked last.
     damaged_rects: u64,
+    /// What its scenes cost the loop's thread since asked last.
+    cost: FrameCost,
+}
+
+/// What an output's scenes cost the loop's thread (its CPU time, not the
+/// clock's: on Mesa's software device the pixels are drawn on threads of
+/// its own), for the tests of what a frame costs.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FrameCost {
+    /// The scenes built.
+    pub scenes: u64,
+    /// Building their elements, nanoseconds.
+    pub build_ns: u64,
+    /// Their damage found and their draws submitted, nanoseconds.
+    pub render_ns: u64,
+    /// Their elements, all scenes together.
+    pub elements: u64,
 }
 
 /// Creates the renderer and the outputs, and maps them in the space.
@@ -400,6 +417,7 @@ where
             damaged: None,
             damaged_area: 0,
             damaged_rects: 0,
+            cost: FrameCost::default(),
         });
         self.outputs.sort_by_key(|o| o.output.name());
         Ok(())
@@ -493,8 +511,12 @@ where
             }
             let started = std::time::Instant::now();
             let _frame = crate::effects::timing::frame();
+            let built = crate::effects::timing::cpu();
             let shown = magnifier::screen(renderer, state, &out.output, true, &mut out.lens);
             let elements = &shown.elements;
+            let rendering = crate::effects::timing::cpu();
+            out.cost.build_ns += rendering.saturating_sub(built);
+            out.cost.elements += elements.len() as u64;
             let mut framebuffer = match renderer.bind(&mut out.target) {
                 Ok(framebuffer) => framebuffer,
                 Err(err) => {
@@ -519,6 +541,8 @@ where
                     continue;
                 }
             };
+            out.cost.render_ns += crate::effects::timing::cpu().saturating_sub(rendering);
+            out.cost.scenes += 1;
             let drawn = result.damage.is_some_and(|d| !d.is_empty());
             if let Some(damage) = result.damage {
                 for rect in damage {
@@ -630,6 +654,20 @@ impl HeadlessBackend {
                 .outputs
                 .get_mut(index)
                 .map_or(0, |o| std::mem::take(&mut o.damaged_rects)),
+        }
+    }
+
+    /// What output `index`'s scenes cost since the last call.
+    pub fn take_frame_cost(&mut self, index: usize) -> FrameCost {
+        match &mut self.canvas {
+            Canvas::Gles(c) => c
+                .outputs
+                .get_mut(index)
+                .map_or_else(FrameCost::default, |o| std::mem::take(&mut o.cost)),
+            Canvas::Pixman(c) => c
+                .outputs
+                .get_mut(index)
+                .map_or_else(FrameCost::default, |o| std::mem::take(&mut o.cost)),
         }
     }
 

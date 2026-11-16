@@ -109,7 +109,7 @@ pub fn follow(on: bool) {
 }
 
 /// The thread's CPU time, nanoseconds.
-fn cpu() -> u64 {
+pub(crate) fn cpu() -> u64 {
     let t = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
     (t.tv_sec as u64)
         .saturating_mul(1_000_000_000)

@@ -113,7 +113,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
-pub use backend::headless::{HeadlessConfig, RendererChoice};
+pub use backend::headless::{FrameCost, HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
