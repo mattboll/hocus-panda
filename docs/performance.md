@@ -368,7 +368,12 @@ What it cost, and what changed:
   few thousand times a step (170 ms a step on llvmpipe, the live
   session's 59 %). Shapes drawn straight now take, in each place, those
   that reach it alone, and the glows, which cover most of the screen,
-  are told as all of it, in one.
+  are told as all of it, in one. On a 3440 × 1440 screen they covered
+  less than half of it in cells and were told in some 350 rectangles a
+  frame, each element drawn in each (7.7 ms a frame on the loop on
+  llvmpipe): they are now told as the box around them, a few rectangles
+  (0.6 ms), and move on 30 times a second with the creatures and the
+  garland across the top (#826).
 - **The koi's water**: its waves stepped row by row (vectorised), its
   heights' texels written in place, not allocated each step.
 - A cap's glints, which twinkle at each step, are drawn straight, not

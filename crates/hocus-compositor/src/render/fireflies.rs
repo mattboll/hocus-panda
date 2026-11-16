@@ -29,16 +29,16 @@ impl State {
     }
 
     /// Their glows on `frame`'s output: the blank standing for them behind
-    /// the glass, and themselves, telling only what of them changed
-    /// (#815).
+    /// the glass, and themselves, telling the box around what of them
+    /// changed (#815).
     pub(super) fn fireflies_layer(&self, frame: &Frame) -> Option<(FireElement, FireElement)> {
         let _measure = crate::effects::timing::build(crate::effects::timing::Fx::Fireflies);
         let swarm = self.fireflies_on(frame)?;
         let flies = self.fx.fireflies.as_ref()?;
         let moving = self.fireflies_out() == Some(Plays::Moving);
-        // As of the effects' last frame: the same between two.
+        // As of their last frame, 30 a second (#826): the same between two.
         let alpha = if moving {
-            flies.out(self.fx.pace.at)
+            flies.out(self.fx.slow.at)
         } else {
             1.0
         };
@@ -59,11 +59,11 @@ impl State {
                 .to_physical_precise_round(frame.scale),
         );
         let clip = Clip::new([-FAR, -FAR, FAR, FAR], [], 1.0);
-        let glows =
-            swarm
-                .glows
-                .borrow_mut()
-                .shapes(screen, [Mesh::default(), added, screened], clip);
+        let glows = swarm.glows.borrow_mut().shapes_around(
+            screen,
+            [Mesh::default(), added, screened],
+            clip,
+        );
         Some((FireElement::blank(swarm.blank.clone(), screen), glows))
     }
 

@@ -2,14 +2,18 @@
 //! on GLES (Mesa's software device, or the GPU `HOCUS_TEST_GPU` names):
 //! in the evening they glow on the wallpaper, moving, and the window's
 //! pixels stay as they were; by day, or off, nothing; still with reduced
-//! motion, nothing drawn frame after frame.
+//! motion, nothing drawn frame after frame; at most 30 frames a second,
+//! on the screens they are seen on alone.
 
 use crate::common;
 
 use std::{path::Path, time::Duration};
 
-use common::open_with;
-use hocus_compositor::{Config, Headless, HeadlessConfig, OutputSpec, model::Rect};
+use common::{KEY_LEFTMETA, KEY_UP, WAIT, open_with};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, OutputSpec,
+    model::{Mode, Rect, Zone},
+};
 
 const STEP: Duration = Duration::from_micros(16_667);
 /// Across the screen's lower half, where they roam.
@@ -167,6 +171,66 @@ fn by_day_or_off_none_and_still_with_reduced_motion() -> anyhow::Result<()> {
         run(&mut hp, Duration::from_millis(300))?;
         assert_eq!(hp.frames_on(0), last, "{case}: nothing drawn per frame");
     }
+    Ok(())
+}
+
+/// Two screens in the evening, a maximised window on the second (the
+/// wallpaper unseen there, they wait): the fireflies move on the first,
+/// at most 30 times a second on the effects' clock (#826), and the second
+/// builds no scene for them.
+#[test]
+fn they_move_on_the_screen_they_are_seen_on_alone_30_times_a_second() -> anyhow::Result<()> {
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![OutputSpec::new(1280, 800), OutputSpec::new(1280, 800)],
+            ..common::gles()
+        },
+        Config::default(),
+    )?;
+    if hp.renderer() != "gles" {
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
+    }
+    hp.hold_evening(true);
+    common::at_rest(&mut hp)?;
+    let (_, _client) = open_with(&mut hp, "test.full", (600, 400), false)?;
+    let id = hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some("test.full"))
+        .map(|w| w.id)
+        .ok_or_else(|| anyhow::anyhow!("no window"))?;
+    hp.place_window(id, Rect::new(1280 + 100, 150, 600, 400));
+    common::chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
+    let maximized = hp.dispatch_until(WAIT, |hp| hp.mode(id) == Mode::Snapped(Zone::Maximized))?;
+    anyhow::ensure!(maximized, "{:?}", hp.mode(id));
+    common::at_rest(&mut hp)?;
+    hp.reconfigure(fireflies(true, false));
+    // On the machine's clock: the loop wakes for their steps itself.
+    common::wait(&mut hp, Duration::from_millis(500))?;
+    let (Some(first), Some(second)) = (hp.fireflies("HEADLESS-1"), hp.fireflies("HEADLESS-2"))
+    else {
+        anyhow::bail!("no fireflies on both screens");
+    };
+    let (frames, scenes) = (hp.frames_on(0), hp.scenes_on(1));
+    common::wait(&mut hp, Duration::from_secs(1))?;
+    let (frames, scenes) = (hp.frames_on(0) - frames, hp.scenes_on(1) - scenes);
+    eprintln!("a second: {frames} frames on the first screen, {scenes} scenes on the other");
+    assert!(frames >= 10, "they move: {frames} frames");
+    assert!(
+        scenes <= 2,
+        "the screen they wait on built {scenes} scenes (the other drew {frames} frames)"
+    );
+    assert_ne!(hp.fireflies("HEADLESS-1"), Some(first), "they moved");
+    assert_eq!(hp.fireflies("HEADLESS-2"), Some(second), "they wait");
+    // A second of a 60 Hz screen's frames, on the held clock (the
+    // machine's software GLES may draw fewer): one every other.
+    hp.hold_clock();
+    run(&mut hp, Duration::from_millis(100))?;
+    let frames = hp.frames_on(0);
+    run(&mut hp, Duration::from_secs(1))?;
+    let frames = hp.frames_on(0) - frames;
+    eprintln!("a second at 60 Hz: {frames} frames");
+    assert!((25..=31).contains(&frames), "{frames} frames at 60 Hz");
     Ok(())
 }
 
