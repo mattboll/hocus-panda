@@ -2488,8 +2488,8 @@ the heads) are display options for later (#491).
   `background`, « en fond », and `seen` once nothing runs; « à voir »
   wins until it is seen. The calm rows trade their word for a 9 px dot,
   its right edge 6 px in (in a room of 14 px, which the name gains): to
-  see `#7EE0A0` (the row tinted as before), in the background `#8FB8F0`
-  (still: an agent can stay in the background for hours), resting `#858585`
+  see `#7EE0A0` (the row tinted as before), in the background `#4C9AFF`
+  (still: an agent can stay in the background for hours), resting `#5E5E5E`
   (neutral, never bluish). On hover (600 ms, the bar's tooltip) a row
   says its word: "à voir" ("au vert"), "en fond : il reviendra tout
   seul", "repos : tu peux le fermer", "au travail depuis 12 min"; screen
