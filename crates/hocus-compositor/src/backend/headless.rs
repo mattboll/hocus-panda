@@ -69,13 +69,15 @@ pub struct HeadlessConfig {
 }
 
 pub struct HeadlessBackend {
-    canvas: Canvas,
-    /// The frame to come, once something changed.
-    frame_timer: Option<RegistrationToken>,
-    /// Screen sharing's frames (5.11), with the renderer drawing.
+    /// Screen sharing's frames (5.11), with the renderer drawing. Before
+    /// the canvas: they, and the GPU's read-back thread, go before its
+    /// renderer (#838).
     gles_share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
     pixman_share:
         Box<crate::share::frames::Frames<PixmanRenderer, pixman::Image<'static, 'static>>>,
+    canvas: Canvas,
+    /// The frame to come, once something changed.
+    frame_timer: Option<RegistrationToken>,
     /// The night light's temperature the outputs were last handed, and
     /// its gamma ramps (#436): headless has no gamma to set, the tests
     /// read what a screen would get.

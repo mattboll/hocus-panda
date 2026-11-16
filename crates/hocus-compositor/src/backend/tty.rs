@@ -113,13 +113,14 @@ pub struct TtyBackend {
 /// when GLES cannot start there (#333).
 enum Drawing {
     Gles {
+        /// Screen sharing's frames (5.11), on the primary GPU. First: they,
+        /// and the read-back thread, go before its renderer (#838).
+        share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
         /// The renderer of the primary GPU. Kept in smithay's multi-GPU
         /// manager, which other GPUs will join.
         gpus: GpuManager<Api>,
         /// The primary GPU's render node, as `gpus` knows it.
         render_node: DrmNode,
-        /// Screen sharing's frames (5.11), on the primary GPU.
-        share: Box<crate::share::frames::Frames<GlesRenderer, GlesTexture>>,
     },
     Pixman {
         renderer: PixmanRenderer,

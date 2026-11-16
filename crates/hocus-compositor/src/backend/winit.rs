@@ -29,6 +29,9 @@ use crate::{
 const REFRESH_MHZ: i32 = 60_000;
 
 pub struct WinitBackend {
+    /// Screen sharing's frames (5.11). Before the renderer: they, and the
+    /// read-back thread, go before it (#838).
+    share: crate::share::frames::Frames<GlesRenderer, GlesTexture>,
     backend: WinitGraphicsBackend<GlesRenderer>,
     output: Output,
     _global: GlobalId,
@@ -37,8 +40,6 @@ pub struct WinitBackend {
     presented: u64,
     /// The shape last asked of the host's cursor; none while hidden.
     host_cursor: Option<CursorIcon>,
-    /// Screen sharing's frames (5.11).
-    share: crate::share::frames::Frames<GlesRenderer, GlesTexture>,
     /// The window's picture while the magnifier is on (#424).
     lens: magnifier::Lens<GlesTexture>,
 }
