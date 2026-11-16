@@ -352,6 +352,31 @@ impl Bed {
         }
     }
 
+    /// The calendar open, closed with `Esc` once it holds the keyboard.
+    /// Opened from a line while it was open already, it would close and
+    /// open again: the one closing holds the keyboard a moment, and an
+    /// `Esc` it takes is lost (#847). Open from nothing, it is the only
+    /// one.
+    fn close_calendar(&mut self) -> anyhow::Result<()> {
+        let held = self.hp.dispatch_until(common::WAIT, |hp| {
+            hp.keyboard_layer().as_deref() == Some(hocus_link::POPOVER_NAMESPACE)
+                && hp.popover_surfaces().len() == 1
+        })?;
+        anyhow::ensure!(
+            held,
+            "the calendar never held the keyboard: {:?}, {:?}",
+            self.hp.keyboard_layer(),
+            self.hp.popover_surfaces()
+        );
+        self.hp.key(common::KEY_ESC, true);
+        self.hp.key(common::KEY_ESC, false);
+        let closed = self
+            .hp
+            .dispatch_until(common::WAIT, |hp| hp.popover_surfaces().is_empty())?;
+        anyhow::ensure!(closed, "the calendar stayed open");
+        Ok(())
+    }
+
     /// Writes the fixture anew, as an editor saves it.
     fn rewrite(&self, fixture: &str) -> anyhow::Result<()> {
         let new = self.fixture.with_extension("new");
@@ -578,6 +603,7 @@ fn a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar() 
         "the calendar opens",
         &["day=2026-11-04", "focus=Some(Event(EventId(\"workshop\")))"],
     )?;
+    bed.close_calendar()?;
     let mark = bed.mark();
     bed.click_row(0, &ordinary, LINE_X + 80, |_| 2)?;
     bed.logged_since(
@@ -586,12 +612,7 @@ fn a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar() 
         &["day=2026-11-04", "focus=Some(Event("],
     )?;
     // Closed (`Esc`) before the day changes under it.
-    bed.hp.key(common::KEY_ESC, true);
-    bed.hp.key(common::KEY_ESC, false);
-    let closed = bed
-        .hp
-        .dispatch_until(common::WAIT, |hp| hp.popover_surfaces().is_empty())?;
-    anyhow::ensure!(closed, "the calendar stayed open");
+    bed.close_calendar()?;
     // "+ N": the calendar on today.
     let rewritten = bed.mark();
     bed.rewrite(&busy(40))?;
