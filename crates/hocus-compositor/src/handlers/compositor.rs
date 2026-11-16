@@ -80,6 +80,13 @@ impl CompositorHandler for State {
         xdg_shell::handle_commit(self, surface);
         self.popups.commit(surface);
         layer_shell::handle_commit(self, surface);
+        // The screens it shows on, not every one (#826).
+        self.redraw_for(surface);
+    }
+
+    /// A popup or a subsurface leaves the screen at once, without a
+    /// commit to say where it was: every screen draws again.
+    fn destroyed(&mut self, _surface: &WlSurface) {
         self.redraw = true;
     }
 }

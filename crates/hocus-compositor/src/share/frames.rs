@@ -263,7 +263,8 @@ where
     else {
         return;
     };
-    let due = state.redraw || std::mem::take(&mut state.share.streams_due);
+    let due =
+        state.redraw || state.commits.pending() || std::mem::take(&mut state.share.streams_due);
     let now = state.now();
     let ids: Vec<u64> = state.share.shares.keys().copied().collect();
     for id in ids {

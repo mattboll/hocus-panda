@@ -51,7 +51,7 @@ where
     R::TextureId: Send + Clone + Texture + 'static,
     R::Error: Send + Sync + 'static,
 {
-    let due = state.redraw || std::mem::take(&mut state.record.due);
+    let due = state.redraw || state.commits.pending() || std::mem::take(&mut state.record.due);
     let now = state.now();
     let Some(live) = state.record.live() else {
         return;

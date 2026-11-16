@@ -1079,12 +1079,16 @@ impl TtyBackend {
             self.power(state);
             self.night_light(state.night_light_kelvin());
         }
-        if !state.redraw {
+        // Every screen, or those clients' commits show on (#826).
+        let all = std::mem::take(&mut state.redraw);
+        let some = state.commits.take();
+        if !all && some.is_empty() {
             return;
         }
-        state.redraw = false;
         for screen in self.gpu.screens.values_mut() {
-            screen.dirty = screen.powered;
+            if all || some.contains(&screen.output) {
+                screen.dirty = screen.powered;
+            }
         }
         if !self.active {
             return;

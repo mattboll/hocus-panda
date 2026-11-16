@@ -1,7 +1,8 @@
 //! Two screens, headless (docs/design/windows.md §9): a snap, by dragging
 //! or by the keys, lands on the screen it was made on, and stays there as
 //! its work area changes, through fullscreen and back, and as a snapped
-//! pair is resized; a window's popup opens on the window's screen.
+//! pair is resized; a window's popup opens on the window's screen. A
+//! window's drawing builds the scenes of its own screen alone (#826).
 
 use crate::common;
 
@@ -166,6 +167,34 @@ fn a_popup_opens_on_its_windows_screen() -> anyhow::Result<()> {
         at,
         Some((200, 30)),
         "under its anchor, on the second screen"
+    );
+    Ok(())
+}
+
+/// A window drawing on and on (a video, a terminal scrolling) asks for
+/// the scenes of its screen alone: the other screen, where nothing
+/// changes, builds none (#826).
+#[test]
+fn a_windows_drawing_builds_its_own_screens_scenes_alone() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    let (_, window) = open_with(&mut hp, "test.video", (800, 600), false)?;
+    let id = id_of(&hp, "test.video").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let rect = Rect::new(400, 200, 800, 600);
+    hp.place_window(id, rect);
+    wait_for_rect(&mut hp, "test.video", rect)?;
+    common::at_rest(&mut hp)?;
+    let (first, second) = (hp.scenes_on(0), hp.scenes_on(1));
+    // A second of frames at 60 a second, each another colour.
+    for i in 0..60u32 {
+        let colour = 0xff00_0000 | (i * 4) << 16 | (255 - i * 4);
+        window.commands.send(Command::Header(colour))?;
+        wait(&mut hp, Duration::from_micros(16_667))?;
+    }
+    let (first, second) = (hp.scenes_on(0) - first, hp.scenes_on(1) - second);
+    assert!(first >= 20, "its screen drew it: {first} scenes");
+    assert!(
+        second <= 2,
+        "the other screen, where nothing changed, built {second} scenes (its own: {first})"
     );
     Ok(())
 }

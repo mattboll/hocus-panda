@@ -132,6 +132,8 @@ struct OutputBuffer<T, C> {
     damage_tracker: OutputDamageTracker,
     /// Frames that drew something.
     frames: u64,
+    /// Scenes built, whether they drew something or not.
+    scenes: u64,
     /// What those frames drew over, together, since a test last asked
     /// (pixels of the output).
     damaged: Option<Rectangle<i32, Physical>>,
@@ -394,6 +396,7 @@ where
             global,
             target,
             frames: 0,
+            scenes: 0,
             damaged: None,
             damaged_area: 0,
             damaged_rects: 0,
@@ -475,12 +478,15 @@ where
         Ok(())
     }
 
-    /// Draws every output where something changed, and tells the clients.
-    fn render(&mut self, state: &mut State) {
+    /// Draws the outputs `asked` takes, and tells their clients.
+    fn render(&mut self, state: &mut State, asked: impl Fn(&Output) -> bool) {
         let Self {
             renderer, outputs, ..
         } = self;
         for out in outputs {
+            if !asked(&out.output) {
+                continue;
+            }
             // Turned off by the file (6.9): nothing drawn.
             if state.display_off(&out.output) {
                 continue;
@@ -528,6 +534,7 @@ where
                 state.presented(&out.output, state.clock.now().into(), out.frames);
             }
             state.send_frames(&out.output, Some(shown.states.as_ref().unwrap_or(&states)));
+            out.scenes += 1;
             state.perf_scene(&out.output, started.elapsed());
             state.desktops_drawn(&out.output);
             state.read_under_grips(renderer);
@@ -634,6 +641,14 @@ impl HeadlessBackend {
         }
     }
 
+    /// Scenes built for output `index`, drawn or found unchanged.
+    pub fn scenes_on(&self, index: usize) -> u64 {
+        match &self.canvas {
+            Canvas::Gles(c) => c.outputs.get(index).map_or(0, |o| o.scenes),
+            Canvas::Pixman(c) => c.outputs.get(index).map_or(0, |o| o.scenes),
+        }
+    }
+
     /// Frames drawn, all outputs together.
     pub fn frames(&self) -> u64 {
         match &self.canvas {
@@ -643,10 +658,13 @@ impl HeadlessBackend {
     }
 
     fn frame(&mut self, state: &mut State) {
-        state.redraw = false;
+        // Every output, or those clients' commits show on (#826).
+        let all = std::mem::take(&mut state.redraw);
+        let some = state.commits.take();
+        let asked = |output: &Output| all || some.contains(output);
         match &mut self.canvas {
-            Canvas::Gles(c) => c.render(state),
-            Canvas::Pixman(c) => c.render(state),
+            Canvas::Gles(c) => c.render(state, asked),
+            Canvas::Pixman(c) => c.render(state, asked),
         }
     }
 
@@ -752,7 +770,7 @@ impl HeadlessBackend {
                 }
             }
         }
-        if !state.redraw || self.frame_timer.is_some() {
+        if !(state.redraw || state.commits.pending()) || self.frame_timer.is_some() {
             return;
         }
         let timer = state
