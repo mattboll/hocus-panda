@@ -2444,8 +2444,9 @@ the heads) are display options for later (#491).
     `rgba(242,148,91,0.10)`;
   - finished, not seen yet: "à voir" / "to see", `#7EE0A0`, on
     `rgba(108,194,135,0.10)`;
-  - resting (idle, or finished and seen): "repos" / "resting", `#6A7384`,
-    its panda asleep at 55 %.
+  - resting (idle, or finished and seen): "repos" / "resting", `#737373`
+    (a neutral grey: a bluish one read as « en fond »'s blue on the
+    glass), its panda asleep at 55 %.
   Since #831 the calm rows trade their word for a dot (below, "In the
   background").
   Under the pointer a row is lit `rgba(255,255,255,0.06)` and the pointer
@@ -2481,13 +2482,15 @@ the heads) are display options for later (#491).
   pane, whose getting the keyboard sees only the pane herdr shows (4.3c).
 - **In the background** (#831, approved 2026-11-16; mockup
   `s21-background`): seen, an agent whose turn ended and that left
-  something running (a command in the background, a sub-agent, a wake-up
-  armed: docs/agents.md, "In the background") is told to the shell as
+  something running (a command in the background, a sub-agent: as
+  Claude Code's `Stop` lists them; docs/agents.md, "In the background")
+  is told to the shell as
   `background`, « en fond », and `seen` once nothing runs; « à voir »
   wins until it is seen. The calm rows trade their word for a 9 px dot,
   its right edge 6 px in (in a room of 14 px, which the name gains): to
-  see `#7EE0A0` (the row tinted as before), in the background `#8FB8F0`
-  (still: an agent can stay in the background for hours), resting `#7C8597`. On hover (600 ms, the bar's tooltip) a row
+  see `#7EE0A0` (the row tinted as before), in the background `#4C9AFF`
+  (still: an agent can stay in the background for hours), resting `#5E5E5E`
+  (neutral, never bluish). On hover (600 ms, the bar's tooltip) a row
   says its word: "à voir" ("au vert"), "en fond : il reviendra tout
   seul", "repos : tu peux le fermer", "au travail depuis 12 min"; screen
   readers say the same. Its panda is awake (the finished one's pose,

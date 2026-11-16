@@ -496,7 +496,7 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
     }
     let running = hooks::running(tool, &value);
     let said = hooks::said(tool, &value);
-    if running.is_none() && said.is_none() {
+    if running.is_empty() && said.is_none() {
         return;
     }
     let agent = the_agent();
@@ -507,22 +507,27 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
             said.to_owned()
         }
     };
-    // What runs on after its turns (#831): a line of its own, after the
-    // report of the same event, if any (a wake-up's `PostToolUse` is still
-    // its turn's).
-    let ran = running.map(|running| hocus_agents::background::Ran {
-        source: tool.source(),
-        key: key(value
-            .get("session_id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()),
-        pid: Some(agent),
-        running,
-    });
+    // What runs on after its turns (#831): a line each, after the report
+    // of the same event, if any (`Stop`'s tasks in flight follow its turn's
+    // end).
+    let session = key(value
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default());
+    let ran: Vec<String> = running
+        .into_iter()
+        .map(|running| {
+            hocus_agents::background::Ran {
+                source: tool.source(),
+                key: session.clone(),
+                pid: Some(agent),
+                running,
+            }
+            .to_string()
+        })
+        .collect();
     let Some(said) = said else {
-        if let Some(ran) = ran {
-            let _ = send_line(socket, &ran.to_string());
-        }
+        let _ = send_line(socket, &ran.join("\n"));
         return;
     };
     let report = Report {
@@ -545,10 +550,10 @@ fn hook(tool: &str, payload: Option<String>, socket: Option<PathBuf>) {
         conversation: said.conversation,
     };
     // Not in a Hocuspanda session, or it is not listening: nothing to do.
-    let mut line = report.to_string();
-    if let Some(ran) = ran {
-        line = format!("{line}\n{ran}");
-    }
+    let line = std::iter::once(report.to_string())
+        .chain(ran)
+        .collect::<Vec<_>>()
+        .join("\n");
     let _ = send_line(socket, &line);
 }
 

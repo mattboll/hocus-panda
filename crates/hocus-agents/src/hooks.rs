@@ -19,11 +19,11 @@
 //!   `Interrupt`: idle.
 //! - `SessionEnd`: the agent is forgotten.
 //!
-//! What runs on after a turn (#831, [`running`]): Claude Code's
-//! `SubagentStart` and `SubagentStop` (a sub-agent started, ended: a
-//! background one outlives its parent's turn), and a `PostToolUse` of
-//! `ScheduleWakeup` or `CronCreate` (a wake-up armed). They change no
-//! state.
+//! What runs on after a turn (#831, [`running`]): Claude Code's `Stop`
+//! and `SubagentStop` list the session's tasks still in flight
+//! (`background_tasks`), and `SubagentStart` and `SubagentStop` say a
+//! sub-agent started, ended (a background one outlives its parent's
+//! turn). The sub-agents' events change no state.
 //!
 //! What the agent asks for, or why it failed, goes with its state as its
 //! [`Note`] (the secretary's briefing, bar.md §7 B): a permission's tool
@@ -180,9 +180,12 @@ pub fn said(_tool: Tool, payload: &Value) -> Option<Said> {
 }
 
 /// What `payload`, from a tool's hook, says runs on beside its agent's
-/// turns (#831): a sub-agent started or ended (its `agent_id`), a wake-up
-/// armed. Nothing for any other event.
-pub fn running(_tool: Tool, payload: &Value) -> Option<crate::background::Running> {
+/// turns (#831): a sub-agent started or ended (its `agent_id`), and the
+/// session's tasks still in flight that `Stop` and `SubagentStop` list
+/// (`background_tasks`, when the event carries it). Its scheduled
+/// wake-ups (`session_crons`) are not counted: nothing runs until they
+/// fire. Nothing for any other event.
+pub fn running(_tool: Tool, payload: &Value) -> Vec<crate::background::Running> {
     use crate::background::Running;
     let text = |key: &str| payload.get(key).and_then(Value::as_str);
     let agent = || {
@@ -190,13 +193,21 @@ pub fn running(_tool: Tool, payload: &Value) -> Option<crate::background::Runnin
             .filter(|id| !id.is_empty())
             .map(crate::key_word)
     };
-    match text("hook_event_name")? {
-        "SubagentStart" => agent().map(Running::SubagentStarted),
-        "SubagentStop" => agent().map(Running::SubagentStopped),
-        "PostToolUse" => {
-            matches!(text("tool_name")?, "ScheduleWakeup" | "CronCreate").then_some(Running::WakeUp)
-        }
-        _ => None,
+    let tasks = || {
+        payload
+            .get("background_tasks")
+            .and_then(Value::as_array)
+            .map(|tasks| Running::Tasks(u32::try_from(tasks.len()).unwrap_or(u32::MAX)))
+    };
+    match text("hook_event_name") {
+        Some("SubagentStart") => agent().map(Running::SubagentStarted).into_iter().collect(),
+        Some("SubagentStop") => agent()
+            .map(Running::SubagentStopped)
+            .into_iter()
+            .chain(tasks())
+            .collect(),
+        Some("Stop") => tasks().into_iter().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -560,41 +571,59 @@ mod tests {
     }
 
     #[test]
-    fn sub_agents_and_wake_ups_say_what_runs_on_and_no_state() {
+    fn sub_agents_and_the_tasks_in_flight_say_what_runs_on_and_no_state() {
         use crate::background::Running;
         let start = json!({ "session_id": "abc123", "transcript_path": "/x.jsonl",
             "cwd": "/w", "hook_event_name": "SubagentStart",
             "agent_id": "agent-abc123", "agent_type": "Explore" });
         assert_eq!(
             running(Tool::ClaudeCode, &start),
-            Some(Running::SubagentStarted("agent-abc123".into()))
+            [Running::SubagentStarted("agent-abc123".into())]
         );
         assert_eq!(said(Tool::ClaudeCode, &start), None);
+        // Its list of the tasks in flight follows (scoped to the parent).
         let stop = json!({ "session_id": "abc123", "hook_event_name": "SubagentStop",
             "stop_hook_active": false, "agent_id": "def456", "agent_type": "Explore",
             "agent_transcript_path": "/x/subagents/agent-def456.jsonl",
-            "last_assistant_message": "Analysis complete." });
+            "last_assistant_message": "Analysis complete.",
+            "background_tasks": [], "session_crons": [] });
         assert_eq!(
             running(Tool::ClaudeCode, &stop),
-            Some(Running::SubagentStopped("def456".into()))
+            [Running::SubagentStopped("def456".into()), Running::Tasks(0)]
         );
         assert_eq!(said(Tool::ClaudeCode, &stop), None);
         // No id: nothing to count.
         let bare = json!({ "session_id": "abc123", "hook_event_name": "SubagentStart" });
-        assert_eq!(running(Tool::ClaudeCode, &bare), None);
-        // A wake-up armed: still working, and armed.
+        assert_eq!(running(Tool::ClaudeCode, &bare), []);
+        // The documentation's `Stop` with a shell task in flight and a
+        // recurring cron: one task; the cron does not count.
+        let busy = json!({ "session_id": "abc123", "hook_event_name": "Stop",
+            "stop_hook_active": true,
+            "last_assistant_message": "I've completed the refactoring.",
+            "background_tasks": [ { "id": "task-001", "type": "shell", "status": "running",
+                "description": "tail logs", "command": "tail -f /var/log/syslog" },
+                { "id": "task-002", "type": "subagent", "status": "running",
+                "description": "review", "agent_type": "Explore" } ],
+            "session_crons": [ { "id": "cron-001", "schedule": "0 9 * * 1-5",
+                "recurring": true, "prompt": "check the build" } ] });
+        assert_eq!(running(Tool::ClaudeCode, &busy), [Running::Tasks(2)]);
+        assert_eq!(state(Tool::ClaudeCode, busy), Some(Some(State::Done)));
+        let crons_only = json!({ "session_id": "abc123", "hook_event_name": "Stop",
+            "background_tasks": [],
+            "session_crons": [ { "id": "c", "schedule": "*/5 * * * *", "recurring": true,
+                "prompt": "/loop check" } ] });
+        assert_eq!(running(Tool::ClaudeCode, &crons_only), [Running::Tasks(0)]);
+        // A Claude Code whose `Stop` carries no list says nothing of it.
+        let stopped = json!({ "session_id": "abc123", "hook_event_name": "Stop" });
+        assert_eq!(running(Tool::ClaudeCode, &stopped), []);
+        // A wake-up armed is its turn's tool, nothing left running.
         for tool in ["ScheduleWakeup", "CronCreate"] {
             let armed = json!({ "session_id": "abc123", "hook_event_name": "PostToolUse",
                 "tool_name": tool, "tool_input": { "prompt": "check the build" },
                 "tool_response": {} });
-            assert_eq!(running(Tool::ClaudeCode, &armed), Some(Running::WakeUp));
+            assert_eq!(running(Tool::ClaudeCode, &armed), []);
             assert_eq!(state(Tool::ClaudeCode, armed), Some(Some(State::Working)));
         }
-        let other = json!({ "session_id": "abc123", "hook_event_name": "PostToolUse",
-            "tool_name": "Bash", "tool_input": { "command": "ls" } });
-        assert_eq!(running(Tool::ClaudeCode, &other), None);
-        let stopped = json!({ "session_id": "abc123", "hook_event_name": "Stop" });
-        assert_eq!(running(Tool::ClaudeCode, &stopped), None);
     }
 
     #[test]

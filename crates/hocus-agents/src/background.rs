@@ -3,29 +3,26 @@
 //! it will come back by itself. The bar then says « en fond » rather than
 //! « repos » once the user looked.
 //!
-//! Two sources tell it:
+//! Claude Code says it; the other tools' agents are looked at:
 //!
-//! - **Its processes**: the agent's process's children still running that
-//!   are not its MCP servers nor its hooks ([`count`]), read in `/proc`
-//!   off the compositor's loop. An MCP server is a child started before
-//!   the agent's first turn, or one whose command line is one of the
-//!   agent's configured MCP servers' ([`mcp_servers`]). A child younger
-//!   than [`YOUNG`] is not counted yet, only noted: a hook of the user's
-//!   running at `Stop`, the status line, are gone a moment later.
-//! - **Its hooks** (Claude Code): `SubagentStart` and `SubagentStop`
-//!   count the sub-agents still running (a background one runs in the
-//!   agent's own process: no child), and a `PostToolUse` of
-//!   `ScheduleWakeup` or `CronCreate` arms a wake-up until its next turn
-//!   ([`Running`], a [`Ran`] line on the control socket).
+//! - **Claude Code's hooks**: its `Stop` and `SubagentStop` list the
+//!   session's tasks still in flight (`background_tasks`: a command, a
+//!   background sub-agent, a monitor, a workflow…), which [`Running::Tasks`]
+//!   counts; `SubagentStart` and `SubagentStop` count the sub-agents still
+//!   running, for a Claude Code whose events carry no list. Its scheduled
+//!   wake-ups (`session_crons`) do not count: nothing of them runs until
+//!   they fire, which may be days away. Its processes are never read: a
+//!   language server, an MCP server's relay, a shell left over are not
+//!   work it waits for.
+//! - **Its processes** (Codex): the agent's process's children still
+//!   running that are not its MCP servers nor its hooks ([`count`]), read
+//!   in `/proc` off the compositor's loop. An MCP server is a child
+//!   started before the agent's first turn, or one whose command line is
+//!   one of the agent's configured MCP servers' ([`mcp_servers`]). A child
+//!   younger than [`YOUNG`] is not counted yet, only noted: a hook of the
+//!   user's running at `Stop` is gone a moment later.
 
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::Duration,
-};
-
-use serde_json::Value;
+use std::{fmt, path::Path, str::FromStr, time::Duration};
 
 use crate::{BadLine, Source};
 
@@ -39,13 +36,13 @@ pub enum Running {
     SubagentStarted(String),
     /// A sub-agent ended: its id.
     SubagentStopped(String),
-    /// A wake-up armed (`ScheduleWakeup`, `CronCreate`): until the agent's
-    /// next turn.
-    WakeUp,
+    /// The session's tasks still in flight, as its turn or a sub-agent
+    /// ended: all there are, sub-agents among them.
+    Tasks(u32),
 }
 
 /// The line a hook writes for it: `ran SOURCE KEY PID WHAT`, `WHAT` being
-/// `subagent-start ID`, `subagent-stop ID` or `wake-up`; `-` for an
+/// `subagent-start ID`, `subagent-stop ID` or `tasks N`; `-` for an
 /// unknown process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ran {
@@ -68,7 +65,7 @@ impl fmt::Display for Ran {
         match &self.running {
             Running::SubagentStarted(id) => write!(f, "subagent-start {}", crate::key_word(id)),
             Running::SubagentStopped(id) => write!(f, "subagent-stop {}", crate::key_word(id)),
-            Running::WakeUp => f.write_str("wake-up"),
+            Running::Tasks(n) => write!(f, "tasks {n}"),
         }
     }
 }
@@ -94,7 +91,10 @@ impl FromStr for Ran {
         let running = match what {
             ["subagent-start", id] if !id.is_empty() => Running::SubagentStarted((*id).to_owned()),
             ["subagent-stop", id] if !id.is_empty() => Running::SubagentStopped((*id).to_owned()),
-            ["wake-up"] => Running::WakeUp,
+            ["tasks", n] => Running::Tasks(
+                n.parse()
+                    .map_err(|e| BadLine(format!("a number of tasks: {e}")))?,
+            ),
             _ => return Err(bad()),
         };
         Ok(Self {
@@ -242,95 +242,32 @@ pub fn matches(argv: &[String], server: &[String]) -> bool {
     })
 }
 
-/// Where an agent's MCP servers are configured.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Configured {
-    pub source: Source,
-    /// The user's home (Claude Code's `~/.claude.json`).
-    pub home: PathBuf,
-    /// Codex's home (its `config.toml`).
-    pub codex_home: PathBuf,
-    /// The agent's project, where Claude Code's `.mcp.json` is.
-    pub cwd: Option<PathBuf>,
-}
-
-/// The files `configured` names, which [`mcp_servers`] reads.
-pub fn mcp_files(configured: &Configured) -> Vec<PathBuf> {
-    match configured.source {
-        Source::ClaudeCode => {
-            let mut files = vec![configured.home.join(".claude.json")];
-            files.extend(configured.cwd.as_ref().map(|cwd| cwd.join(".mcp.json")));
-            files
-        }
-        Source::Codex => vec![configured.codex_home.join("config.toml")],
-        Source::Herdr | Source::Command => Vec::new(),
-    }
-}
-
-/// The MCP servers' command lines a file of [`mcp_files`] (`text`, read
-/// from `file`) configures for an agent working in `cwd`: Claude Code's
-/// `mcpServers`, the user's and its project's (`~/.claude.json`'s
-/// `projects`), or `.mcp.json`'s; Codex's `[mcp_servers.NAME]`.
-pub fn mcp_servers(file: &Path, text: &str, cwd: Option<&Path>) -> Vec<Vec<String>> {
-    let line = |command: Option<&str>, args: Vec<String>| {
-        command
-            .filter(|c| !c.is_empty())
-            .map(|c| std::iter::once(c.to_owned()).chain(args).collect())
-    };
-    if file.extension().is_some_and(|e| e == "toml") {
-        let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else {
-            return Vec::new();
-        };
-        let Some(servers) = doc.get("mcp_servers").and_then(|s| s.as_table_like()) else {
-            return Vec::new();
-        };
-        return servers
-            .iter()
-            .filter_map(|(_, server)| {
-                let server = server.as_table_like()?;
-                let args = server
-                    .get("args")
-                    .and_then(|a| a.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_owned))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                line(server.get("command").and_then(|c| c.as_str()), args)
-            })
-            .collect();
-    }
-    let Ok(value) = serde_json::from_str::<Value>(text) else {
+/// The MCP servers' command lines Codex's `config.toml` (`text`)
+/// configures: its `[mcp_servers.NAME]` run by a `command`.
+pub fn mcp_servers(text: &str) -> Vec<Vec<String>> {
+    let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else {
         return Vec::new();
     };
-    let of = |servers: Option<&Value>| -> Vec<Vec<String>> {
-        servers
-            .and_then(Value::as_object)
-            .into_iter()
-            .flat_map(|s| s.values())
-            .filter_map(|server| {
-                let args = server
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_owned))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                line(server.get("command").and_then(Value::as_str), args)
-            })
-            .collect()
+    let Some(servers) = doc.get("mcp_servers").and_then(|s| s.as_table_like()) else {
+        return Vec::new();
     };
-    let mut out = of(value.get("mcpServers"));
-    if let Some(cwd) = cwd.and_then(Path::to_str) {
-        out.extend(of(value
-            .get("projects")
-            .and_then(|p| p.get(cwd))
-            .and_then(|p| p.get("mcpServers"))));
-    }
-    out
+    servers
+        .iter()
+        .filter_map(|(_, server)| {
+            let server = server.as_table_like()?;
+            let command = server
+                .get("command")
+                .and_then(|c| c.as_str())
+                .filter(|c| !c.is_empty())?;
+            let args = server
+                .get("args")
+                .and_then(|a| a.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().map(str::to_owned));
+            Some(std::iter::once(command.to_owned()).chain(args).collect())
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -357,10 +294,10 @@ mod tests {
                 running: Running::SubagentStopped("def456".into()),
             },
             Ran {
-                source: Source::Codex,
+                source: Source::ClaudeCode,
                 key: "thr_1".into(),
                 pid: Some(7),
-                running: Running::WakeUp,
+                running: Running::Tasks(2),
             },
         ];
         for ran in lines {
@@ -368,17 +305,20 @@ mod tests {
             assert!(ran.to_string().parse::<crate::Report>().is_err());
         }
         assert_eq!(
-            "ran claude-code s 1 wake-up\n"
+            "ran claude-code s 1 tasks 0\n"
                 .parse::<Ran>()
                 .map(|r| r.running),
-            Ok(Running::WakeUp)
+            Ok(Running::Tasks(0))
         );
         for bad in [
             "ran",
             "ran claude-code s 1",
             "ran claude-code s 1 subagent-start",
-            "ran claude-code s x wake-up",
-            "ran nobody s 1 wake-up",
+            "ran claude-code s x tasks 1",
+            "ran nobody s 1 tasks 1",
+            "ran claude-code s 1 tasks",
+            "ran claude-code s 1 tasks -1",
+            "ran claude-code s 1 wake-up",
             "ran claude-code s 1 sleeping",
             "agent claude-code s done 1 x",
         ] {
@@ -498,47 +438,17 @@ mod tests {
     }
 
     #[test]
-    fn the_servers_claude_code_and_codex_configure() {
-        let claude = r#"{
-            "mcpServers": { "github": { "type": "stdio", "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-github"] },
-                "web": { "type": "http", "url": "https://example.com/mcp" } },
-            "projects": { "/home/alex/site": { "mcpServers": {
-                "docs": { "command": "/opt/docs-mcp" } } } }
-        }"#;
-        let file = Path::new("/home/alex/.claude.json");
-        assert_eq!(
-            mcp_servers(file, claude, Some(Path::new("/home/alex/site"))),
-            vec![
-                argv("npx -y @modelcontextprotocol/server-github"),
-                argv("/opt/docs-mcp")
-            ]
-        );
-        assert_eq!(
-            mcp_servers(file, claude, Some(Path::new("/elsewhere"))).len(),
-            1
-        );
+    fn the_servers_codex_configures() {
         let codex = "model = \"gpt-5\"\n\n[mcp_servers.context7]\ncommand = \"npx\"\n\
                      args = [\"-y\", \"@upstash/context7-mcp\"]\n\n\
+                     [mcp_servers.docs]\ncommand = \"/opt/docs-mcp\"\n\n\
                      [mcp_servers.figma]\nurl = \"https://mcp.figma.com/mcp\"\n";
         assert_eq!(
-            mcp_servers(Path::new("/home/alex/.codex/config.toml"), codex, None),
-            vec![argv("npx -y @upstash/context7-mcp")]
+            mcp_servers(codex),
+            vec![argv("npx -y @upstash/context7-mcp"), argv("/opt/docs-mcp")]
         );
-        assert!(mcp_servers(file, "not json", None).is_empty());
-        let configured = Configured {
-            source: Source::ClaudeCode,
-            home: "/home/alex".into(),
-            codex_home: "/home/alex/.codex".into(),
-            cwd: Some("/home/alex/site".into()),
-        };
-        assert_eq!(
-            mcp_files(&configured),
-            vec![
-                PathBuf::from("/home/alex/.claude.json"),
-                PathBuf::from("/home/alex/site/.mcp.json")
-            ]
-        );
+        assert!(mcp_servers("not = [toml").is_empty());
+        assert!(mcp_servers("model = \"gpt-5\"").is_empty());
     }
 
     #[test]

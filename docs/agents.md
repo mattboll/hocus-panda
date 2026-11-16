@@ -141,12 +141,11 @@ an answer, and always succeeds.
 | `PreToolUse` of `AskUserQuestion`, `ExitPlanMode` | yes | | waiting |
 | `Notification`: `permission_prompt`, `elicitation_dialog`, `elicitation_url_dialog` | yes | | waiting |
 | `Notification`: `idle_prompt` | yes | | done |
-| `Stop`; Codex's `notify` (`agent-turn-complete`) | yes | yes | done |
+| `Stop`; Codex's `notify` (`agent-turn-complete`) | yes | yes | done; Claude Code's: and its tasks in flight ([In the background](#in-the-background)) |
 | `StopFailure` | yes | | failed |
 | `Interrupt` | | yes | idle |
 | `SessionEnd` | yes | yes | forgotten |
-| `SubagentStart`, `SubagentStop` | yes | | none: a sub-agent running, ended ([In the background](#in-the-background)) |
-| `PostToolUse` of `ScheduleWakeup`, `CronCreate` | yes | | working, and a wake-up armed |
+| `SubagentStart`, `SubagentStop` | yes | | none: a sub-agent running, ended, and `SubagentStop`'s tasks in flight ([In the background](#in-the-background)) |
 
 The hooks also say what a waiting agent asks and why a failed one
 stopped: a `PermissionRequest`'s tool and its input in one line (the
@@ -154,9 +153,10 @@ command it runs, the file it writes, by its name), the question of
 `AskUserQuestion`, a waiting `Notification`'s `message`, a
 `StopFailure`'s error message.
 
-A sub-agent's and a wake-up's line is `ran SOURCE KEY PID WHAT`, `WHAT`
-being `subagent-start ID`, `subagent-stop ID` or `wake-up`, after the
-event's report when it has one.
+What runs on is said in lines `ran SOURCE KEY PID WHAT`, `WHAT` being
+`subagent-start ID`, `subagent-stop ID` or `tasks N` (how many
+`background_tasks` the event lists), after the event's report when it
+has one.
 
 Plugging in writes these hooks into `~/.claude/settings.json` (or
 `~/.codex/config.toml`, with `notify` when there is none), after the
@@ -171,7 +171,7 @@ again, from Sources, adds them.
 
 An agent whose turn ended may have left something running that will
 bring it back by itself: a command in the background, a sub-agent, a
-wake-up armed, a watch. Once the user looked, its row then says "en
+monitor, a workflow. Once the user looked, its row then says "en
 fond" (a blue dot) rather than "repos"; not looked at
 yet, "à voir" wins (docs/design/bar.md §4 group 3). It is quiet: no halo,
 no panda peeking out, no notification, nothing in the mini form's
@@ -179,24 +179,29 @@ badge. When what ran ends and the agent takes a turn by itself, it works
 again; when it does not come back, it rests (or stays "à voir").
 
 For the agents of Claude Code's and Codex's hooks the desktop tells it by
-itself, from two sources; anything from either is "en fond":
+itself:
 
-- **Its processes**: the agent's process (the one above its hooks) has
+- **Claude Code** says it. Its `Stop` lists the session's tasks still in
+  flight (`background_tasks`: commands, background sub-agents, monitors,
+  workflows…); any there is "en fond". `SubagentStop` lists them again
+  as a sub-agent ends, and `SubagentStart` and `SubagentStop` count the
+  sub-agents still running, for a Claude Code whose events carry no list.
+  What it listed holds until its next turn starts (a task that ends
+  brings it back: its next `Stop` lists what still runs), a
+  `SubagentStop` lists them again, or its session ends. Its scheduled
+  wake-ups (`session_crons`: `CronCreate`, `ScheduleWakeup`, `/loop`) do
+  not count: nothing of them runs until they fire, which may be days
+  away. Its processes are never read: a language server, an MCP
+  server's relay, a shell left over are not work it waits for.
+- **Codex**: the agent's process (the one above its hooks) has
   children still running. They are read in `/proc` off the desktop's
-  loop, only for agents whose turn ended (`Stop`, Codex's
-  `agent-turn-complete`): once then, again when one of its sub-agents
-  stops, and every 2 s while one runs. Left out: its MCP servers (the
-  children started before its first turn, and those whose command line
-  is one of its configured servers': `mcpServers` in `~/.claude.json`,
-  for the user and for the project, and in the project's `.mcp.json`;
-  `[mcp_servers]` in Codex's `config.toml`), its hooks' own `hocus`, the
+  loop, only for agents whose turn ended (`Stop`,
+  `agent-turn-complete`): once then, and every 2 s while one runs. Left
+  out: its MCP servers (the children started before its first turn, and
+  those whose command line is one of its configured servers':
+  `[mcp_servers]` in its `config.toml`), its hooks' own `hocus`, the
   zombies, and a child younger than a second (counted at the next
   reading, if it still runs).
-- **Its hooks** (Claude Code): `SubagentStart` and `SubagentStop` count
-  the sub-agents still running (a background sub-agent runs in the
-  agent's own process: no child); a `PostToolUse` of `ScheduleWakeup` or
-  `CronCreate` arms a wake-up until its next turn starts or its session
-  ends.
 
 Any other tool says it with `hocus agent NAME background`.
 

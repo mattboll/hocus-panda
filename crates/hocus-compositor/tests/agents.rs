@@ -1275,6 +1275,18 @@ impl Drop for Child {
     }
 }
 
+/// Claude Code's `Stop` with a command in flight, as its documentation
+/// shows it, and a recurring wake-up.
+const ONE_TASK: &str = ",\"stop_hook_active\":false,\"background_tasks\":[{\"id\":\"task-001\",\
+    \"type\":\"shell\",\"status\":\"running\",\"description\":\"tests\",\
+    \"command\":\"cargo nextest run\"}],\"session_crons\":[{\"id\":\"cron-001\",\
+    \"schedule\":\"0 9 * * 1-5\",\"recurring\":true,\"prompt\":\"check the build\"}]";
+
+/// Its `Stop` with nothing in flight, a wake-up scheduled all the same.
+const NO_TASK: &str = ",\"stop_hook_active\":false,\"background_tasks\":[],\
+    \"session_crons\":[{\"id\":\"cron-001\",\"schedule\":\"*/5 * * * *\",\
+    \"recurring\":true,\"prompt\":\"/loop check the build\"}]";
+
 impl Bed {
     /// Claude Code's session `session` in `project` starts, and its first
     /// turn.
@@ -1284,9 +1296,18 @@ impl Bed {
         self.agent_becomes(project, Some("working"))
     }
 
-    /// Its turn ends.
+    /// Its turn ends, with an older Claude Code's `Stop`: no tasks listed.
     fn claude_stops(&self, session: &str, project: &str) -> anyhow::Result<()> {
         self.claude(session, project, "Stop", ",\"stop_hook_active\":false")
+    }
+
+    /// Codex's hook for `event` of thread `session` in `project`.
+    fn codex(&self, session: &str, project: &str, event: &str) -> anyhow::Result<()> {
+        let payload = format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":\"/home/alex/{project}\",\
+             \"hook_event_name\":\"{event}\",\"turn_id\":\"t1\"}}"
+        );
+        self.hocus(&["agent-hook", "codex"], Some(&payload))
     }
 
     /// Agent `name`'s states as the shell is told them for `time`.
@@ -1305,11 +1326,12 @@ impl Bed {
     }
 }
 
-/// An agent of Claude Code's stops with a command of its still running:
-/// « à voir » while nobody looked (it wins), « en fond » once its window
-/// has the keyboard, « repos » once the command ends.
+/// An agent of Claude Code's stops with a task in flight, as its `Stop`
+/// lists it: « à voir » while nobody looked (it wins), « en fond » once
+/// its window has the keyboard; the task brings it back, and its next
+/// `Stop` lists none: « repos ».
 #[test]
-fn an_agent_stopping_with_a_child_running_is_to_see_then_in_the_background_then_rests()
+fn a_claude_agent_stopping_with_a_task_in_flight_is_to_see_then_in_the_background_then_rests()
 -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
@@ -1322,33 +1344,53 @@ fn an_agent_stopping_with_a_child_running_is_to_see_then_in_the_background_then_
     let away = bed.hp.dispatch_until(WAIT, |hp| hp.desktop() == (1, 1.0))?;
     anyhow::ensure!(away, "{:?}", bed.hp.desktop());
     bed.claude_starts("s1", "site-web")?;
-    // A command in the background, started in its turn, running for more
-    // than a second as its turn ends.
-    wait(&mut bed.hp, Duration::from_millis(50))?;
-    let command = Child::sleep("120")?;
-    wait(&mut bed.hp, Duration::from_millis(1200))?;
     let from = bed.mark();
-    bed.claude_stops("s1", "site-web")?;
+    bed.claude("s1", "site-web", "Stop", ONE_TASK)?;
     bed.agent_becomes("site-web", Some("done"))?;
     bed.logged_after(from, &["shows=AGENTS 1 · site-web à voir"])?;
-    // Read, and read again: still to see while nobody looked.
-    let states = bed.states_for("site-web", Duration::from_millis(2500))?;
+    let states = bed.states_for("site-web", Duration::from_millis(500))?;
     assert_eq!(states, ["done"]);
     // Its window has the keyboard: in the background.
     let from = bed.mark();
     common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, common::KEY_1]);
     bed.agent_becomes("site-web", Some("background"))?;
     bed.logged_after(from, &["shows=AGENTS 1 · site-web en fond"])?;
-    // Its command ends: it rests.
+    // The task ended and brought it back: a turn, and nothing in flight.
+    bed.claude("s1", "site-web", "UserPromptSubmit", ",\"prompt\":\"done\"")?;
+    bed.agent_becomes("site-web", Some("working"))?;
     let from = bed.mark();
-    drop(command);
+    bed.claude("s1", "site-web", "Stop", NO_TASK)?;
     bed.agent_becomes("site-web", Some("seen"))?;
     bed.logged_after(from, &["shows=AGENTS 1 · site-web repos"])?;
     Ok(())
 }
 
-/// A sub-agent started and not stopped as its parent's turn ends: « en
-/// fond » (its window has the keyboard: seen at once); stopped: « repos ».
+/// Claude Code's processes are never read: a child of its agent still
+/// running (a language server, a relay, a shell left over) as its `Stop`
+/// lists nothing in flight, a wake-up scheduled: it rests.
+#[test]
+fn a_claude_agents_child_without_a_task_in_flight_does_not_put_it_in_the_background()
+-> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
+    bed.claude_starts("s3", "infra")?;
+    // Started in its turn, older than a second as it ends.
+    wait(&mut bed.hp, Duration::from_millis(50))?;
+    let _child = Child::sleep("120")?;
+    wait(&mut bed.hp, Duration::from_millis(1200))?;
+    bed.claude("s3", "infra", "Stop", NO_TASK)?;
+    bed.agent_becomes("infra", Some("seen"))?;
+    let states = bed.states_for("infra", Duration::from_millis(2500))?;
+    assert_eq!(states, ["seen"]);
+    Ok(())
+}
+
+/// A sub-agent started and not stopped as its parent's turn ends (a
+/// Claude Code whose `Stop` lists no tasks): « en fond » (its window has
+/// the keyboard: seen at once); stopped: « repos ».
 #[test]
 fn a_sub_agent_still_running_keeps_its_agent_in_the_background() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
@@ -1361,7 +1403,7 @@ fn a_sub_agent_still_running_keeps_its_agent_in_the_background() -> anyhow::Resu
     bed.claude("s2", "docs", "SubagentStart", subagent)?;
     bed.claude_stops("s2", "docs")?;
     bed.agent_becomes("docs", Some("background"))?;
-    let states = bed.states_for("docs", Duration::from_millis(2500))?;
+    let states = bed.states_for("docs", Duration::from_millis(1000))?;
     assert_eq!(states, ["background"]);
     bed.claude(
         "s2",
@@ -1373,33 +1415,46 @@ fn a_sub_agent_still_running_keeps_its_agent_in_the_background() -> anyhow::Resu
     Ok(())
 }
 
-/// An agent's MCP servers are no work left running: one started before
-/// its first turn, one started again later as `~/.claude.json` configures
-/// it. Its turn over, it rests.
+/// A Codex agent stops with a command of its still running, a child of
+/// its process: « en fond » (seen at once); not its MCP server, started
+/// again in its turn as its `config.toml` configures it. The command
+/// ends: « repos ».
 #[test]
-fn an_mcp_server_child_does_not_put_its_agent_in_the_background() -> anyhow::Result<()> {
+fn a_codex_agent_stopping_with_a_child_running_is_in_the_background_until_it_ends()
+-> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
         return Ok(());
     };
     let mut bed = start(&shell, &hocus, &Machine::default())?;
+    std::fs::create_dir_all(bed.home().join(".codex"))?;
     std::fs::write(
-        bed.home().join(".claude.json"),
-        r#"{ "mcpServers": { "docs": { "type": "stdio", "command": "sleep", "args": ["121"] } } }"#,
+        bed.home().join(".codex/config.toml"),
+        "[mcp_servers.docs]\ncommand = \"sleep\"\nargs = [\"121\"]\n",
     )?;
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
-    // Started with the session, before its first turn.
-    let _first = Child::sleep("122")?;
+    bed.codex("t1", "api", "SessionStart")?;
+    bed.codex("t1", "api", "UserPromptSubmit")?;
+    bed.agent_becomes("api", Some("working"))?;
     wait(&mut bed.hp, Duration::from_millis(50))?;
-    bed.claude_starts("s3", "infra")?;
-    // Started again in its turn, as configured.
-    wait(&mut bed.hp, Duration::from_millis(50))?;
-    let _again = Child::sleep("121")?;
+    let _server = Child::sleep("121")?;
+    let command = Child::sleep("120")?;
     wait(&mut bed.hp, Duration::from_millis(1200))?;
-    bed.claude_stops("s3", "infra")?;
-    bed.agent_becomes("infra", Some("seen"))?;
-    // Read, and read again: it rests.
-    let states = bed.states_for("infra", Duration::from_millis(2500))?;
-    assert_eq!(states, ["seen"]);
+    // Its turn's end, as its `notify` says it (its `Stop` answers `{}`).
+    bed.hocus(
+        &[
+            "agent-hook",
+            "codex",
+            "{\"type\":\"agent-turn-complete\",\"thread-id\":\"t1\",\"cwd\":\"/home/alex/api\"}",
+        ],
+        None,
+    )?;
+    bed.agent_becomes("api", Some("background"))?;
+    // Read, and read again: still in the background.
+    let states = bed.states_for("api", Duration::from_millis(2500))?;
+    assert_eq!(states, ["background"]);
+    // Its command ends; its server runs on: it rests.
+    drop(command);
+    bed.agent_becomes("api", Some("seen"))?;
     Ok(())
 }
 
@@ -1413,11 +1468,8 @@ fn in_the_background_lights_no_halo_and_no_peek() -> anyhow::Result<()> {
     let mut bed = start(&shell, &hocus, &Machine::default())?;
     let (_, _client) = common::open_with(&mut bed.hp, "test.terminal", (600, 400), false)?;
     bed.claude_starts("s4", "api")?;
-    wait(&mut bed.hp, Duration::from_millis(50))?;
-    let _command = Child::sleep("120")?;
-    wait(&mut bed.hp, Duration::from_millis(1200))?;
     bed.settle()?;
-    bed.claude_stops("s4", "api")?;
+    bed.claude("s4", "api", "Stop", ONE_TASK)?;
     bed.agent_becomes("api", Some("background"))?;
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(2500) {
