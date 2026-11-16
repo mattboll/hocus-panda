@@ -433,6 +433,11 @@ fn a_click_on_the_row_goes_to_the_next_layout_and_the_row_follows_round_and_roun
     };
     let mut bed = start(&shell, Setup::default())?;
     bed.logged(&shows("Français", "FR"))?;
+    // Placed and drawn where the levels put it: their top, which the row
+    // follows to a fraction of a pixel, comes after its first frames, and
+    // the surface is drawn again then (#841).
+    bed.logged("the connections follow the levels")?;
+    bed.settle()?;
     // One row, 14 px above the levels: the surface as tall as one row.
     let s = bed.connections();
     assert_eq!((s.width, s.height), (194, 40));

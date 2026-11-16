@@ -243,7 +243,8 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Option<Placed> {
 }
 
 /// Bar `bar`'s levels' group's tops are now `tops`: the surface follows,
-/// moved by layer-shell actions (nothing else is drawn).
+/// moved by layer-shell actions, and draws itself again (no other surface
+/// does).
 pub fn levels_moved(bar: &str, tops: (f32, f32)) {
     let moved = places(|places| {
         let place = places.get_mut(bar)?;
@@ -251,15 +252,25 @@ pub fn levels_moved(bar: &str, tops: (f32, f32)) {
             return None;
         }
         place.tops = tops;
-        refit(place)
+        Some(refit(place))
     });
-    if let Some((id, size, margin)) = moved {
-        tracing::debug!(bar, ?margin, "the connections follow the levels");
-        popover::send(vec![popover::Effect::Resize {
-            id,
-            size,
-            margin: Some(margin),
-        }]);
+    if let Some(placed) = moved {
+        let mut effects = Vec::new();
+        if let Some((id, size, margin)) = placed {
+            tracing::debug!(bar, ?margin, "the connections follow the levels");
+            effects.push(popover::Effect::Resize {
+                id,
+                size,
+                margin: Some(margin),
+            });
+        }
+        // Its rows sit on the levels' top, to the fraction of a pixel the
+        // surface's whole margins leave out: drawn again, moved or not.
+        // A surface moved at its size is not drawn again by itself, and
+        // showed its rows where they were drawn, a pixel off, until the
+        // next change (#841).
+        effects.push(popover::Effect::Wake(CONNECTIONS_NAMESPACE));
+        popover::send(effects);
     }
     crate::desktops::draw::follow(bar);
 }
