@@ -198,8 +198,9 @@ pub struct Creatures {
     /// Each creature drawn on a screen: its element's id, commit and last
     /// vertices; its tag's id.
     pub(crate) drawn: RefCell<HashMap<(WindowId, u64, String), Drawn>>,
-    /// The tags' pictures, by their words and the scale (thousandths).
-    pub(crate) tags: RefCell<HashMap<(String, u32), TagPicture>>,
+    /// The tags' pictures, by their words and the scale (thousandths), and
+    /// when last drawn: an agent's name goes with the agent (#827).
+    pub(crate) tags: RefCell<HashMap<(String, u32), (TagPicture, Duration)>>,
     pub(crate) fonts: std::cell::OnceCell<Option<crate::radial_draw::Fonts>>,
     /// Where each creature was drawn in the last frame (its time), for
     /// the tests: its window, its agent, its box (global, logical).
@@ -326,6 +327,10 @@ impl State {
             .drawn
             .borrow_mut()
             .retain(|_, drawn| now.saturating_sub(drawn.used) < KEPT);
+        creatures
+            .tags
+            .borrow_mut()
+            .retain(|_, (_, used)| now.saturating_sub(*used) < KEPT);
         if showing != Some(true) {
             return false;
         }

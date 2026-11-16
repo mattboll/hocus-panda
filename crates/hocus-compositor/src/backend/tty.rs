@@ -24,7 +24,8 @@ use smithay::{
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
         },
         drm::{
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, DrmSurface,
+            NodeType,
             compositor::FrameFlags,
             exporter::gbm::GbmFramebufferExporter,
             output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
@@ -47,7 +48,10 @@ use smithay::{
             LoopHandle, RegistrationToken,
             timer::{TimeoutAction, Timer},
         },
-        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc, property},
+        drm::control::{
+            AtomicCommitFlags, Device as ControlDevice, ModeTypeFlags, atomic::AtomicModeReq,
+            connector, crtc, property,
+        },
         input::{DeviceCapability, Libinput},
         pixman,
         rustix::fs::OFlags,
@@ -606,7 +610,13 @@ fn on_vblank(app: &mut App, crtc: crtc::Handle, metadata: &mut Option<DrmEventMe
         })
         .unwrap_or_else(|| state.clock.now().into());
     state.presented(&screen.output, time, screen.presented);
-    if screen.dirty && tty.active {
+    let dirty = screen.dirty;
+    if !tty.active {
+        return;
+    }
+    // A screen to turn off waited for this frame to be shown (7.2).
+    tty.power(state);
+    if dirty {
         tty.render(crtc, state);
     }
 }
@@ -994,6 +1004,13 @@ impl TtyBackend {
             if powered == screen.powered {
                 continue;
             }
+            // A frame out: off once it is shown, its vblank turning the
+            // loop again; the display engine would refuse the commit as
+            // busy until then. Nothing more is drawn meanwhile.
+            if !powered && screen.flip.is_queued() {
+                screen.dirty = false;
+                continue;
+            }
             screen.powered = powered;
             let output = screen.output.name();
             if powered {
@@ -1011,8 +1028,15 @@ impl TtyBackend {
             } else {
                 tracing::info!(output, "screen off");
                 with_surface!(&screen.surface, |s| s.with_compositor(|c| {
-                    if let Err(err) = c.clear() {
-                        tracing::warn!(%err, "could not turn a screen off");
+                    // Not waited for: a laptop's panel takes some 300 ms to
+                    // power down, the loop held up all that time (#828).
+                    // Its planes stay as they are; lit again, the CRTC is
+                    // read back inactive and committed whole (`reset_state`).
+                    if let Err(err) = dpms_off(c.surface()) {
+                        tracing::info!(%err, "a screen turned off waiting for it");
+                        if let Err(err) = c.clear() {
+                            tracing::warn!(%err, "could not turn a screen off");
+                        }
                     }
                 }));
                 screen.flip = Flip::Idle;
@@ -1227,6 +1251,34 @@ impl TtyBackend {
             pace(screen, crtc, state);
         }
     }
+}
+
+/// Turns the surface's CRTC off (DPMS off: `ACTIVE` false, its mode,
+/// connectors and planes kept) without waiting for the display engine,
+/// which powers the screen down on its own; smithay's `clear` waits.
+/// An error for a legacy (non-atomic) device, or one that refuses it.
+fn dpms_off(surface: &DrmSurface) -> std::io::Result<()> {
+    if surface.is_legacy() {
+        return Err(std::io::Error::other("a legacy device"));
+    }
+    let crtc = surface.crtc();
+    let properties = surface.get_properties(crtc)?;
+    let (handles, _) = properties.as_props_and_values();
+    let active = handles
+        .iter()
+        .copied()
+        .find(|handle| {
+            surface
+                .get_property(*handle)
+                .is_ok_and(|info| info.name().to_bytes() == b"ACTIVE")
+        })
+        .ok_or_else(|| std::io::Error::other("no ACTIVE property"))?;
+    let mut request = AtomicModeReq::new();
+    request.add_property(crtc, active, property::Value::Boolean(false));
+    surface.atomic_commit(
+        AtomicCommitFlags::ALLOW_MODESET | AtomicCommitFlags::NONBLOCK,
+        request,
+    )
 }
 
 /// `crtc`'s gamma ramp for `kelvin` (`None`: straight, its own white),

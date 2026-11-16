@@ -243,6 +243,42 @@ fn a_panda_moves_on_its_windows_screen_alone_30_times_a_second() -> anyhow::Resu
     Ok(())
 }
 
+/// Agents come and go in one window, each another tab's, tagged with its
+/// name: the pictures of the tags no longer drawn go, those drawn stay
+/// (#827: one kept per name ever seen, for the session).
+#[test]
+fn the_tags_of_agents_gone_are_let_go() -> anyhow::Result<()> {
+    let (mut hp, _, client) = bed(creatures(true, false))?;
+    // Its title names the first agent: the one its tab shows, the others
+    // tagged.
+    client.commands.send(common::Command::Title("build"))?;
+    let sitting = |hp: &mut Headless, n: usize| -> anyhow::Result<()> {
+        let came = hp.dispatch_until(WAIT, |hp| {
+            hp.creatures_sitting()
+                .first()
+                .is_some_and(|(_, on)| *on == n)
+        })?;
+        anyhow::ensure!(came, "not {n}: {:?}", hp.creatures_sitting());
+        run(hp, STEP * 2)
+    };
+    for i in 0..6 {
+        let name = format!("tab-{i}");
+        hocus(&hp, &["agent", &name, "working"])?;
+        sitting(&mut hp, 2)?;
+        hocus(&hp, &["agent", &name, "ended"])?;
+        sitting(&mut hp, 1)?;
+    }
+    hocus(&hp, &["agent", "last", "working"])?;
+    sitting(&mut hp, 2)?;
+    let grown = hp.creature_tags();
+    assert!(grown >= 7, "{grown} tags kept, one a name");
+    // Half a minute on, the tag drawn alone is kept.
+    hp.step(Duration::from_secs(31))?;
+    run(&mut hp, STEP * 2)?;
+    assert_eq!(hp.creature_tags(), 1, "{grown} tags kept before");
+    Ok(())
+}
+
 // --- The screenshots ------------------------------------------------------------
 
 /// A screenshot of output 0 saved as `name`.png in `out`.
