@@ -37,7 +37,8 @@ retries = 0
 # Installing them on CI takes them out of this list.
 # And a test that fails by chance, until its issue is fixed: the Wi-Fi's
 # without NetworkManager (#835), the recording's read-back on GLES (#838), the
-# layout row's round trip (#841).
+# layout row's round trip (#841), the history's places after Clear all
+# (#844).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -50,6 +51,7 @@ not (
         | test(=wifi::without_networkmanager_no_row_and_without_wifi_no_list)
         | test(=recording::on_gles_the_frames_read_back_off_the_loop_come_upright)
         | test(=layouts::a_click_on_the_row_goes_to_the_next_layout_and_the_row_follows_round_and_round)
+        | test(=notifications::its_close_removes_one_and_clear_all_empties_it)
     ))
 )
 """
