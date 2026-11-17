@@ -4,9 +4,8 @@
 # separates a meeting's voices with (docs/design/meetings.md). One exact
 # version, checked against its SHA-256 before it is unpacked into
 # prebuilt/sherpa-onnx/lib, where `.cargo/config.toml` points
-# sherpa-onnx-sys's build (`SHERPA_ONNX_LIB_DIR`). That build (vendored,
-# vendor/README.md) never downloads anything, and stops, saying to run
-# this, until it ran.
+# sherpa-onnx-sys's build (`SHERPA_ONNX_LIB_DIR`): given that folder, its
+# build links its libraries and downloads nothing (vendor/README.md).
 #
 #   scripts/prebuilt.sh            fetch and check it (once: kept)
 #   scripts/prebuilt.sh --check    check the archive there, fetch nothing

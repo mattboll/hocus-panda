@@ -12,7 +12,10 @@ and for anyone who builds on it.
 The code is MIT. Dependencies must be permissive: MIT, Apache-2.0,
 BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode, CC0-1.0; OFL-1.1 for fonts;
 the Unlicense (public-domain-like; added 2026-11-17 by the maintainer for
-`whisper-rs`, `hocus-transcribe`'s binding to whisper.cpp, which is MIT).
+`whisper-rs`, `hocus-transcribe`'s binding to whisper.cpp, which is MIT);
+CDLA-Permissive-2.0 and bzip2-1.0.6 (added the same day for the build
+dependencies of `sherpa-onnx-sys`: `webpki-roots` through `ureq`, and
+`libbz2-rs-sys` through `bzip2` and `zip`; none of them is in a program).
 Anything else (MPL, LGPL, GPL) needs a new decision record.
 
 No code is copied or translated from GPL projects, including smithay-based

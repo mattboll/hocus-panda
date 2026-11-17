@@ -15,7 +15,6 @@ set -euo pipefail
 crates=(
     "iced_tiny_skia 0.14.1 c267596d742714b1853cc10c3983a367762816fc4836bd3b79f76ce76787d6f8"
     "iced_layershell 0.19.1 51b59e8af02bf4c51db2ee5d130293e6e1e5ac4ae9f74a1e57990a19221aa0d5"
-    "sherpa-onnx-sys 2.0.1 5bc46e5fb3aab39141d48ad8763d0891e0b9e0fbc8e3bdefaa63704d1bf00054"
 )
 # What `cargo publish` adds to a tarball, and the changelog: not vendored.
 left_out=(Cargo.lock Cargo.toml.orig .cargo_vcs_info.json CHANGELOG.md)

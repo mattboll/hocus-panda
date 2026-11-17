@@ -1,6 +1,6 @@
 # Vendored crates
 
-Three crates of crates.io are built from here with a small change, through
+Two crates of crates.io are built from here with a small change, through
 `[patch.crates-io]` in the workspace's `Cargo.toml`. Each directory is the
 published crate plus one patch file, nothing else: `scripts/vendor.sh
 --check` rebuilds it from the crates.io tarball and the patch and fails on
@@ -10,7 +10,6 @@ any difference, in CI (`vendor` job).
 |---|---|---|---|---|
 | `iced_tiny_skia` | 0.14.1 | [`patches/iced_tiny_skia-0.14.1.patch`](patches/iced_tiny_skia-0.14.1.patch) | #662 | not proposed |
 | `iced_layershell` | 0.19.1 | [`patches/iced_layershell-0.19.1.patch`](patches/iced_layershell-0.19.1.patch) | #787, #821 | not proposed |
-| `sherpa-onnx-sys` | 2.0.1 | [`patches/sherpa-onnx-sys-2.0.1.patch`](patches/sherpa-onnx-sys-2.0.1.patch) | #618 | not proposed |
 
 ## Why
 
@@ -35,14 +34,6 @@ any difference, in CI (`vendor` job).
   configure (a busy shell), was dropped, and the launcher stayed. Those
   events now wait for the window, at most 256 of them. In
   `src/multi_window.rs`.
-
-- **`sherpa-onnx-sys`: no download, no build dependencies** (#618). Its
-  build downloads sherpa-onnx's prebuilt libraries from GitHub, unchecked,
-  with `ureq`, `zip` and `bzip2` (whose licences, CDLA-Permissive-2.0 and
-  bzip2's, deny.toml does not allow). Ours links those of
-  `SHERPA_ONNX_LIB_DIR` alone, which `.cargo/config.toml` points at
-  `prebuilt/sherpa-onnx/lib`, and stops, saying to run
-  `scripts/prebuilt.sh`, without them. `build.rs` and `Cargo.toml`.
 
 Each patch also replaces the header of the published `Cargo.toml` with a
 note of the change, and adds the crate's licence text (the tarball carries
@@ -89,10 +80,13 @@ When upstream offers the change, the directory, its patch, its line in
 
 One library is not built from its sources: sherpa-onnx's static libraries
 (Apache-2.0), with onnxruntime's inside (MIT), which `hocus-transcribe`
-tells a call's voices apart with (docs/design/meetings.md).
-`scripts/prebuilt.sh` fetches its release's archive for this machine
-(`sherpa-onnx-v2.0.1-linux-x64-static-lib.tar.bz2`, or aarch64's), checks
-it against the SHA-256 it holds, and unpacks it into `prebuilt/` (not in
-git). CI runs it before every Rust build, and so does whoever builds the
-package. Its version is the `sherpa-onnx` crate's, held exactly in the
-root `Cargo.toml`: both move together, with the checksums.
+tells a call's voices apart with (docs/design/meetings.md). The published
+`sherpa-onnx-sys` would download them itself, unchecked; given
+`SHERPA_ONNX_LIB_DIR`, its build links that folder's and downloads
+nothing. `scripts/prebuilt.sh` fetches the release's archive for this
+machine (`sherpa-onnx-v2.0.1-linux-x64-static-lib.tar.bz2`, or
+aarch64's), checks it against the SHA-256 it holds, and unpacks it into
+`prebuilt/sherpa-onnx/lib` (not in git), where `.cargo/config.toml`
+points that variable. CI runs it before every Rust build, and so does
+whoever builds the package. Its version is the `sherpa-onnx` crate's, held
+exactly in the root `Cargo.toml`: both move together, with the checksums.
