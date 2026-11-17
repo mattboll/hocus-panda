@@ -3484,6 +3484,9 @@ the machine).
   again, the time's size, the graph's
   links, the popover's layout, the `/proc` reading's bound and a holder
   found by its program.
+- **A meeting's transcription** (#618, 2026-11-17): a red tile of its own
+  after the camera's, its waveform and its time; its line and its stop in
+  the popover. [meetings.md](meetings.md).
 - **Not built**: the camera's light as a privacy indicator of its own
   (none is read: the device's use stands for it); a portal's camera
   sessions told apart from other streams (they are streams).
@@ -3753,6 +3756,10 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
 - **Not built**: the secretary's meeting line in her briefing (4.6);
   names for screen readers (§11).
+- **Transcribing it** (#618, 2026-11-17): in progress, its call using the
+  microphone, the card's button is Transcrire, then a stop with a red dot
+  before its time line; the mini popover's Transcrire under Rejoindre.
+  [meetings.md](meetings.md).
 
 ### Day.3, Today (2026-11-04)
 

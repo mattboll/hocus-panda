@@ -99,9 +99,13 @@ sharing).
 
 Building needs, besides Rust, the system's headers the CI installs
 (`.github/workflows/ci.yml`), `libpipewire-0.3-dev` among them (screen
-sharing's streams).
+sharing's streams), `cmake` and a C++ compiler (whisper.cpp, built from
+its sources for `hocus-transcribe`), and sherpa-onnx's prebuilt libraries,
+which `scripts/prebuilt.sh` fetches once and checks (vendor/README.md):
+run it before the first build.
 
 ```sh
+scripts/prebuilt.sh                           # once: sherpa-onnx's libraries, checked
 cargo build                                   # build everything
 cargo programs                                # the programs the tests run (an alias)
 cargo nextest run --workspace                 # tests, on the CPU
@@ -332,6 +336,26 @@ target/debug/hocus --socket <runtime dir>/hocus-0.control msg lock   # lock the 
 target/debug/hocus --socket <runtime dir>/hocus-0.control msg a11y   # what screen readers read
 ```
 
+A meeting's transcription (docs/design/meetings.md, crates
+`hocus-meetings` and `hocus-transcribe`): the card's Transcrire records
+the meeting's two tracks into `$XDG_STATE_HOME/hocuspanda/meetings`, from
+PipeWire's default socket (`PIPEWIRE_REMOTE`), then runs
+`hocus-transcribe` from beside the compositor (or `Config::transcriber`),
+which downloads its models (610 MB) on first use into
+`$XDG_DATA_HOME/hocuspanda/models` and writes the text in
+`$XDG_DOCUMENTS_DIR`'s "Réunions" (else `user-dirs.dirs`', else
+`~/Documents`); its notifications go to the bus given with
+`--session-bus`. Next to a live session, give the nested compositor a
+fresh `HOME` (or `XDG_STATE_HOME`, `XDG_DATA_HOME` and
+`XDG_DOCUMENTS_DIR`), a PipeWire of its own (else it records your real
+microphone and calls) and a bus of its own. Its tests
+(`tests/transcribe.rs`) run the fake engine (`HOCUS_TRANSCRIBE_FAKE=FILE`,
+fixed lines, no model); the real one's test is ignored:
+
+```sh
+HOCUS_TEST_MODELS=/tmp/models cargo nextest run -p hocus-transcribe --run-ignored only real::
+```
+
 Idle (docs/design/idle.md): the compositor serves
 `org.freedesktop.ScreenSaver` (applications' `Inhibit`) on the same bus as
 the notifications, so only on a bus of your own next to a live session;
@@ -390,7 +414,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex
