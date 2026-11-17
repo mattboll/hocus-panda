@@ -883,6 +883,19 @@ impl Compositor {
         }
         let fd = match hocus_agents::process::exit_of(pid) {
             Ok(fd) => fd,
+            // It ended before its report was read (a one-shot run's last
+            // hook): its end is heard now, or its agent would stay for
+            // the session (#827). Gone from the processes read too: the
+            // tests' are of their own.
+            Err(err)
+                if err.raw_os_error() == Some(rustix::io::Errno::SRCH.raw_os_error())
+                    && self.process_gone(pid) =>
+            {
+                tracing::debug!(pid, "an agent's process ended before it was watched");
+                self.loop_handle
+                    .insert_idle(move |app| app.state.agent_process_ended(pid));
+                return;
+            }
             Err(err) => {
                 tracing::debug!(pid, %err, "cannot watch an agent's process");
                 return;
@@ -901,6 +914,16 @@ impl Compositor {
             }
             Err(err) => tracing::warn!(%err.error, "cannot watch an agent's process"),
         }
+    }
+
+    /// Process `pid` is not among the processes the agents are read from
+    /// (`/proc`, the tests' own).
+    fn process_gone(&self, pid: u32) -> bool {
+        let processes = self.agents.places.as_ref().map_or_else(
+            || PathBuf::from(hocus_agents::process::PROC),
+            |places| places.processes.clone(),
+        );
+        !processes.join(pid.to_string()).exists()
     }
 
     fn agent_process_ended(&mut self, pid: u32) {
