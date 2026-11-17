@@ -1861,14 +1861,13 @@ What issue #465 changes under the five popovers, nothing on screen.
   the brightness's 8 px between its slot, its slider and its value).
 - **The wheel's notches** count each, a fast spin's several in one event
   too (#472): in the desktops' tiles, the brightness's slider and the
-  lists. iced_exwlshell hands them multiplied by the surface's scale, so
-  the compositor tells each bar's screen's scale with the bar (`bar OUTPUT
-  FORM SINCE SCALE`, in 120ths), which all of a bar's surfaces share, and
-  the shell divides by it.
-- **A touchpad's pixels** are multiplied by the scale too; the kit's
-  `Wheel` divides them as it does the notches, so a list scrolls by the
-  logical pixels the fingers moved, and the touchpad's notches are 15
-  logical px, at any scale (#488). Every list and level counts through it:
+  lists. iced_exwlshell hands them as they are at any scale
+  (iced_layershell multiplied them by the surface's scale, which the shell
+  divided by until #857).
+- **A touchpad's pixels** come in logical pixels: through the kit's
+  `Wheel`, a list scrolls by the logical pixels the fingers moved, and the
+  touchpad's notches are 15 logical px, at any scale (#488). Every list
+  and level counts through it:
   the bar's sound and brightness rows (#487, which counted a fast spin as
   one notch) and the calendar's list among them.
 - **Bluetooth's keys** lay the popover out from what it shows now, as the
@@ -1978,9 +1977,9 @@ bar's items", below).
    …), …])`, at the mockup's sizes (`popover::kit`'s constants). The
    shared parts: the header, dividers, notes, spaced labels
    (`parts::label`), the small button, a connected block, a list's row
-   (`parts::row_button`), a list that scrolls (`parts::list`; a notch of
-   the wheel two rows and a touchpad's logical pixels with
-   `parts::list_by`), spaced capitals cut to a room (`parts::spaced`;
+   (`parts::row_button`), a list that scrolls (`parts::list`, a notch of
+   the wheel two of the kit's rows, a touchpad its logical pixels; another
+   notch with `parts::list_by`), spaced capitals cut to a room (`parts::spaced`;
    any spacing, any font: `parts::spaced_by`), the Settings' link, the
    header's switch (`parts::Knob`), a spinner, a glyph
    (`parts::drawn(w, h, |frame, size| …)`, the canvas's own drawing;

@@ -410,7 +410,7 @@ impl Tray {
     }
 
     /// The wheel on icon `key`: its item scrolls, a notch at a time.
-    fn wheel(&self, state: &mut State, key: u32, bar: &str, delta: mouse::ScrollDelta) {
+    fn wheel(&self, state: &mut State, key: u32, delta: mouse::ScrollDelta) {
         let (x, y) = match delta {
             mouse::ScrollDelta::Lines { x, y } => (x, y),
             mouse::ScrollDelta::Pixels { x, y } => {
@@ -423,8 +423,7 @@ impl Tray {
                 whole
             }
         };
-        let scale = kit::scale(bar).max(1.0);
-        let notches = |v: f32| (v / scale).round() as i32;
+        let notches = |v: f32| v.round() as i32;
         if notches(y) != 0 {
             super::ask(Ask::Scroll {
                 key,
@@ -536,7 +535,7 @@ impl Items for Tray {
                     .cells(&shown, bounds.size())
                     .into_iter()
                     .find(|(_, r)| at.is_some_and(|at| r.contains(at)))?;
-                self.wheel(state, key, &self.bar, *delta);
+                self.wheel(state, key, *delta);
                 Some(canvas::Action::capture())
             }
             _ => None,

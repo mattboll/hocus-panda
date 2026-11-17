@@ -496,7 +496,7 @@ fn handle(message: Msg) {
             }
         }
         Msg::Wheel(delta) => {
-            let notches = ui.wheel.notches(&delta, kit::popover_scale());
+            let notches = ui.wheel.notches(&delta);
             if notches != 0 {
                 let light =
                     (ui.light(&levels) + notches as f32 * STEP).clamp(BRIGHTNESS_FLOOR, 100.0);

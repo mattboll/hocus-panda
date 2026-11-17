@@ -122,30 +122,23 @@ pub(crate) fn popover_scale() -> f32 {
     crate::popover::with(|c| c.open_on().map(|(bar, _)| scale(bar))).unwrap_or(1.0)
 }
 
-/// The notches of a wheel's lines `y`, on a surface at `scale`:
-/// iced_exwlshell hands them multiplied by it. At least one when it
-/// moved, should the scale be out of date.
-fn lines(y: f32, scale: f32) -> i32 {
+/// The notches of a wheel's lines `y`: at least one when it moved (a
+/// high-resolution wheel's part of a notch).
+fn lines(y: f32) -> i32 {
     if y == 0.0 {
         return 0;
     }
-    let notches = (y.abs() / scale.max(0.25)).round().max(1.0);
-    (notches * y.signum()) as i32
-}
-
-/// A touchpad's pixels `y` in logical pixels, on a surface at `scale`:
-/// iced_exwlshell hands them multiplied by it too (#488).
-fn logical(y: f32, scale: f32) -> f32 {
-    y / scale.max(0.25)
+    (y.abs().round().max(1.0) * y.signum()) as i32
 }
 
 /// The wheel, for every list and level that scrolls: a mouse's notches
-/// come as lines (a fast spin gives several at once), then as the same
-/// scrolling in pixels, which count for nothing; a touchpad sends pixels.
-/// Both come scaled by the surface's scale, which it takes away.
+/// come as lines (a fast spin gives several at once), a touchpad's
+/// scrolling as pixels. iced_exwlshell hands both as they are at any
+/// scale, notches and logical pixels, and a notch as lines alone
+/// (iced_layershell multiplied both by the surface's scale and followed a
+/// notch with its pixels, which counted for nothing: #488, #857).
 #[derive(Debug, Default)]
 pub(crate) struct Wheel {
-    after_notch: bool,
     /// A touchpad's logical pixels toward the next notch.
     pixels: f32,
 }
@@ -154,24 +147,17 @@ pub(crate) struct Wheel {
 const NOTCH: f32 = 15.0;
 
 impl Wheel {
-    /// A scroll on a surface at `scale` as notches, up positive: a
-    /// touchpad's pixels add up, afresh when it turns back.
-    pub(crate) fn notches(&mut self, delta: &mouse::ScrollDelta, scale: f32) -> i32 {
+    /// A scroll as notches, up positive: a touchpad's pixels add up,
+    /// afresh when it turns back.
+    pub(crate) fn notches(&mut self, delta: &mouse::ScrollDelta) -> i32 {
         match delta {
             mouse::ScrollDelta::Lines { y, .. } => {
-                self.after_notch = true;
                 self.pixels = 0.0;
-                lines(*y, scale)
+                lines(*y)
             }
-            // Sideways, or only where it comes from: nothing, and the
-            // notch's pixels still to come.
+            // Sideways, or only where it comes from: nothing.
             mouse::ScrollDelta::Pixels { y: 0.0, .. } => 0,
-            mouse::ScrollDelta::Pixels { .. } if self.after_notch => {
-                self.after_notch = false;
-                0
-            }
-            mouse::ScrollDelta::Pixels { y, .. } => {
-                let y = logical(*y, scale);
+            &mouse::ScrollDelta::Pixels { y, .. } => {
                 if self.pixels * y < 0.0 {
                     self.pixels = 0.0;
                 }
@@ -183,20 +169,12 @@ impl Wheel {
         }
     }
 
-    /// A scroll on a surface at `scale` as logical pixels down a list,
-    /// `notch` px a notch.
-    pub(crate) fn down(&mut self, delta: &mouse::ScrollDelta, notch: f32, scale: f32) -> f32 {
+    /// A scroll as logical pixels down a list, `notch` px a notch.
+    pub(crate) fn down(&mut self, delta: &mouse::ScrollDelta, notch: f32) -> f32 {
         match delta {
-            mouse::ScrollDelta::Lines { y, .. } => {
-                self.after_notch = true;
-                -(lines(*y, scale) as f32) * notch
-            }
+            mouse::ScrollDelta::Lines { y, .. } => -(lines(*y) as f32) * notch,
             mouse::ScrollDelta::Pixels { y: 0.0, .. } => 0.0,
-            mouse::ScrollDelta::Pixels { .. } if self.after_notch => {
-                self.after_notch = false;
-                0.0
-            }
-            mouse::ScrollDelta::Pixels { y, .. } => -logical(*y, scale),
+            mouse::ScrollDelta::Pixels { y, .. } => -y,
         }
     }
 }
@@ -207,21 +185,16 @@ mod tests {
 
     #[test]
     fn a_wheels_lines_count_each_notch_at_any_scale() {
-        let lines = |y: f32, scale: f32| {
-            Wheel::default().notches(&mouse::ScrollDelta::Lines { x: 0.0, y }, scale)
-        };
-        assert_eq!(lines(1.0, 1.0), 1);
+        let lines = |y: f32| Wheel::default().notches(&mouse::ScrollDelta::Lines { x: 0.0, y });
+        assert_eq!(lines(1.0), 1);
         // A fast spin: several notches in one event.
-        assert_eq!(lines(-2.0, 1.0), -2);
-        assert_eq!(lines(3.0, 1.0), 3);
-        // As iced_exwlshell hands them on a scaled screen.
-        assert_eq!(lines(2.0, 2.0), 1);
-        assert_eq!(lines(-3.0, 1.5), -2);
-        // A scale out of date: still a notch.
-        assert_eq!(lines(1.0, 2.0), 1);
-        assert_eq!(lines(0.0, 1.0), 0);
+        assert_eq!(lines(-2.0), -2);
+        assert_eq!(lines(3.0), 3);
+        // Part of a notch, from a high-resolution wheel: still a notch.
+        assert_eq!(lines(0.5), 1);
+        assert_eq!(lines(0.0), 0);
         let mut wheel = Wheel::default();
-        let down = wheel.down(&mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, 10.0, 1.0);
+        let down = wheel.down(&mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 }, 10.0);
         assert_eq!(down, 20.0);
     }
 
@@ -230,27 +203,21 @@ mod tests {
         let lines = |y| mouse::ScrollDelta::Lines { x: 0.0, y };
         let pixels = |y| mouse::ScrollDelta::Pixels { x: 0.0, y };
         let mut wheel = Wheel::default();
-        // A wheel: a notch each, its pixels counting for nothing, nor
-        // what says only where it comes from.
-        assert_eq!(wheel.notches(&pixels(0.0), 1.0), 0);
-        assert_eq!(wheel.notches(&lines(1.0), 1.0), 1);
-        assert_eq!(wheel.notches(&pixels(0.0), 1.0), 0);
-        assert_eq!(wheel.notches(&pixels(15.0), 1.0), 0);
+        // A wheel: a notch each, nothing for what says only where it
+        // comes from, and the touchpad's pixels after it count.
+        assert_eq!(wheel.notches(&pixels(0.0)), 0);
+        assert_eq!(wheel.notches(&lines(1.0)), 1);
+        assert_eq!(wheel.notches(&pixels(0.0)), 0);
+        assert_eq!(wheel.notches(&pixels(15.0)), 1);
         // A touchpad: 15 px a notch, the rest kept, a turn back starting
         // afresh.
-        assert_eq!(wheel.notches(&pixels(10.0), 1.0), 0);
-        assert_eq!(wheel.notches(&pixels(10.0), 1.0), 1);
-        assert_eq!(wheel.notches(&pixels(40.0), 1.0), 3);
-        assert_eq!(wheel.notches(&pixels(-4.0), 1.0), 0);
-        assert_eq!(wheel.notches(&pixels(-12.0), 1.0), -1);
-        // At ×2, iced hands 15 logical px as 30: still a notch.
+        assert_eq!(wheel.notches(&pixels(10.0)), 0);
+        assert_eq!(wheel.notches(&pixels(10.0)), 1);
+        assert_eq!(wheel.notches(&pixels(40.0)), 3);
+        assert_eq!(wheel.notches(&pixels(-4.0)), 0);
+        assert_eq!(wheel.notches(&pixels(-12.0)), -1);
+        // A list: its logical pixels.
         let mut wheel = Wheel::default();
-        assert_eq!(wheel.notches(&pixels(30.0), 2.0), 1);
-        assert_eq!(wheel.notches(&pixels(20.0), 2.0), 0);
-        assert_eq!(wheel.notches(&pixels(10.0), 2.0), 1);
-        // A list: its logical pixels, at any scale.
-        assert_eq!(wheel.down(&pixels(-34.0), 10.0, 1.0), 34.0);
-        assert_eq!(wheel.down(&pixels(-68.0), 10.0, 2.0), 34.0);
-        assert_eq!(wheel.down(&pixels(-51.0), 10.0, 1.5), 34.0);
+        assert_eq!(wheel.down(&pixels(-34.0), 10.0), 34.0);
     }
 }

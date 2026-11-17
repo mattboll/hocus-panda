@@ -302,8 +302,9 @@ struct Kept {
 /// release read together with a move away (a slow frame) found the
 /// pointer gone from the button pressed, and the click was lost. The
 /// widgets get, with each event, the pointer where that event has it.
-/// `CursorEntered` has no place: the move layer-shell's iced sends right
-/// after it does (#787).
+/// `CursorEntered` has no place: the pointer is where the batch leaves it
+/// until a move says otherwise (iced_exwlshell does not yet follow the
+/// enter with a move to its place, as winit does: #787, for upstream).
 fn pointer_of(kept: &mut Kept, event: &Event, cursor: mouse::Cursor) -> mouse::Cursor {
     match event {
         Event::Mouse(mouse::Event::CursorMoved { position }) => kept.pointer = Some(*position),
