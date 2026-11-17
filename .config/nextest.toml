@@ -44,6 +44,9 @@ not (
         | test(=desktop_drop::an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
+        # Not by chance: iced_exwlshell 0.21.4 lacks what our old patch gave (#860).
+        | test(=footer::a_press_as_the_pointer_comes_in_lands_where_it_came_in)
+        | test(=launcher::escape_read_with_its_first_configure_closes_it)
     ))
 )
 """
