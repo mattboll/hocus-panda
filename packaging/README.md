@@ -11,6 +11,7 @@ What the package of Hocuspanda holds, and how it is built.
 | `hocus-settings` | `/usr/bin` | The Settings (6.1, [docs/design/settings.md](../docs/design/settings.md)), an application window that writes `~/.config/hocuspanda/config.toml`; one window at a time |
 | [`hocus-settings.desktop`](hocus-settings.desktop) | `/usr/share/applications` | "Réglages" / "Settings" in the launcher (shown in the Hocuspanda session only) |
 | `panda-1.png` … `panda-8.png` | `/usr/share/hocuspanda/avatars` | The pandas the Settings' Account page offers as avatars |
+| `hocus-transcribe` | `/usr/bin` | Makes a meeting's text from its recorded sound, at a low priority, which the compositor starts from beside itself ([docs/design/meetings.md](../docs/design/meetings.md)); it downloads its models on first use into `~/.local/share/hocuspanda/models` |
 | `hocus` | `/usr/bin` | What agents' hooks and scripts run to tell the bar their state ([docs/agents.md](../docs/agents.md)) |
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
@@ -18,7 +19,7 @@ What the package of Hocuspanda holds, and how it is built.
 | [`hocuspanda-portals.conf`](hocuspanda-portals.conf) | `/usr/share/xdg-desktop-portal` | Makes xdg-desktop-portal use it in this session (`XDG_CURRENT_DESKTOP=Hocuspanda`), then GTK's for the other settings, GTK's backend for the other portals |
 | [`pam-hocuspanda`](pam-hocuspanda) | `/etc/pam.d/hocuspanda` | The lock screen's PAM service: the system's `common-auth` and `common-account` ([docs/design/lock.md](../docs/design/lock.md)); a conffile |
 | [`config.toml`](config.toml) | `/usr/share/doc/hocuspanda` | Every setting with its default, to copy to `~/.config/hocuspanda/` |
-| `LICENSE` | `/usr/share/doc/hocuspanda/copyright` | MIT, and the SIL Open Font License of the fonts the shell and the Settings carry in their binaries (Martian Mono, Manrope: `crates/hocus-shell/fonts`; the compositor carries Martian Mono too, for the capture's sizes and countdown) |
+| `LICENSE` | `/usr/share/doc/hocuspanda/copyright` | MIT, and the SIL Open Font License of the fonts the shell and the Settings carry in their binaries (Martian Mono, Manrope: `crates/hocus-shell/fonts`; the compositor carries Martian Mono too, for the capture's sizes and countdown); what `hocus-transcribe` links statically: whisper.cpp (MIT), sherpa-onnx (Apache-2.0) and onnxruntime (MIT) |
 
 The binary keeps its symbols, for backtraces.
 
@@ -27,7 +28,8 @@ The binary keeps its symbols, for backtraces.
 On Debian or Ubuntu, with `dpkg-dev` and the build dependencies of the CI:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
+scripts/prebuilt.sh                     # sherpa-onnx's libraries, checked (hocus-transcribe)
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
 packaging/deb/build.sh                  # target/packages/hocuspanda_<version>-1_<arch>.deb
 packaging/deb/check.sh target/packages/hocuspanda_<version>-1_<arch>.deb   # it holds the files above, no others
 sudo apt install ./target/packages/hocuspanda_<version>-1_<arch>.deb

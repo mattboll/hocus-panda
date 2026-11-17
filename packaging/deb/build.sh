@@ -3,7 +3,8 @@
 # library dependencies are the ones dpkg-shlibdeps finds on this system, so
 # the package installs on this release and later ones.
 #
-#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
+#   scripts/prebuilt.sh
+#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
 #   packaging/deb/build.sh [OUTDIR]     (default: CARGO_TARGET_DIR/packages)
 #
 # Needs dpkg-dev; the binaries are read from CARGO_TARGET_DIR/release. Prints
@@ -55,6 +56,19 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
     printf '\nLicense: OFL-1.1\n'
     sed -n -e 's/\r$//' -e '/^-----/,$p' "$fonts/MartianMono-OFL.txt" \
         | sed -e 's/^$/./' -e 's/^/ /'
+    # What hocus-transcribe links statically (docs/design/meetings.md):
+    # whisper.cpp built from its sources, sherpa-onnx and onnxruntime from
+    # the archive scripts/prebuilt.sh checked.
+    printf '\nFiles: usr/bin/hocus-transcribe\n'
+    printf 'Copyright: The ggml authors (whisper.cpp, ggml)\n'
+    printf ' Microsoft Corporation (onnxruntime)\n'
+    printf ' Xiaomi Corporation and the k2-fsa authors (sherpa-onnx)\n'
+    printf 'License: Expat and Apache-2.0\n'
+    printf 'Comment: whisper.cpp, ggml and onnxruntime are MIT (Expat);\n'
+    printf ' sherpa-onnx is Apache-2.0. All are linked statically.\n'
+    printf '\nLicense: Apache-2.0\n'
+    printf ' On Debian systems, the full text of the Apache License 2.0 is in\n'
+    printf ' /usr/share/common-licenses/Apache-2.0.\n'
 } > "$root/usr/share/doc/hocuspanda/copyright"
 
 # dpkg-shlibdeps runs in a source tree that names the package. EGL is
@@ -66,7 +80,7 @@ printf 'Source: hocuspanda\n\nPackage: hocuspanda\nArchitecture: any\n' \
     > "$work/src/debian/control"
 (cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda \
     debian/hocuspanda/usr/bin/hocuspanda-shell debian/hocuspanda/usr/bin/hocus \
-    debian/hocuspanda/usr/bin/hocus-settings) > "$work/shlibs"
+    debian/hocuspanda/usr/bin/hocus-settings debian/hocuspanda/usr/bin/hocus-transcribe) > "$work/shlibs"
 depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 
 # Recommends: Mesa's drivers (the shell draws with Vulkan, or on the CPU
