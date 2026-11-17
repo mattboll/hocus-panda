@@ -323,7 +323,8 @@ impl Bar {
         std::fs::write(
             &config_file,
             format!(
-                "[[day.calendars]]\nkind = \"fixture\"\nfile = \"day.toml\"\n\n[panel]\nform = \"{}\"\n",
+                "[[day.calendars]]\nkind = \"fixture\"\nfile = \"day.toml\"\n\n[panel]\nform = \"{}\"\n\n\
+                 [calendar]\nremind = 0\n",
                 form.name()
             ),
         )?;
@@ -617,6 +618,30 @@ fn asking_then_the_tile_the_red_dot_and_the_stop() -> anyhow::Result<()> {
 
 // --- Screenshots ------------------------------------------------------------------
 
+/// The screen's `(x, y, w, h)`, three times as large, saved as `name`.
+fn zoom(
+    bar: &mut Bar,
+    out: &std::path::Path,
+    name: &str,
+    (x, y, w, h): (u32, u32, u32, u32),
+) -> anyhow::Result<()> {
+    common::at_rest(&mut bar.hp)?;
+    let (sw, sh, px) = bar.hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(sw as u32, sh as u32, rgba).context("image")?;
+    let crop = image::imageops::crop_imm(&image, x, y, w, h).to_image();
+    let zoomed = image::imageops::resize(&crop, w * 3, h * 3, image::imageops::FilterType::Nearest);
+    let file = out.join(format!("{name}.png"));
+    zoomed.save(&file)?;
+    eprintln!("{}", file.display());
+    Ok(())
+}
+
 /// The mockup's six steps, for the pull request (`HOCUS_SHOTS=dir`): the
 /// bar's top right, and the screen's corner where the notifications show.
 #[test]
@@ -652,6 +677,12 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bar.card(mark, "Transcribe")?;
     bar.logged(mark, "the in-use sign is drawn at rest", &["Microphone"])?;
     shoot(&mut bar, "2-joined", corner)?;
+    zoom(
+        &mut bar,
+        &out,
+        "2-joined-zoom",
+        (SCREEN.0 as u32 - 200, 100, 200, 110),
+    )?;
     bar.ask()?;
     shoot(&mut bar, "3-asking", corner)?;
     let mark = bar.mark();
@@ -663,6 +694,13 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     wait(&mut bar.hp, Duration::from_secs(3))?;
     bar.hp.pointer_move(400.0, 600.0);
     shoot(&mut bar, "4-recording", corner)?;
+    // The card and the sign, three times as large.
+    zoom(
+        &mut bar,
+        &out,
+        "4-recording-zoom",
+        (SCREEN.0 as u32 - 200, 100, 200, 110),
+    )?;
     let mark = bar.mark();
     bar.click_button("Stop")?;
     bar.recording(false)?;
