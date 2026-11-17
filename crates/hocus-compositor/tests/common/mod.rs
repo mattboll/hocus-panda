@@ -533,6 +533,10 @@ pub enum Command {
     },
     /// Exports its window through xdg-foreign: [`Event::Exported`].
     Export,
+    /// Makes this many surfaces, each asking for a frame callback, and
+    /// destroys each at once, as a menu or a bubble gone before its next
+    /// frame.
+    Fleeting(u32),
     /// Opens a window made, before its first frame, the child of the one
     /// xdg-foreign's `handle` names, as the desktop portal's backend opens
     /// its dialogs; [`Event::ImportGone`] if the handle names nothing.
@@ -1092,6 +1096,14 @@ fn run_client(
                     }
                 }
                 (Command::Export, None) => {}
+                (Command::Fleeting(count), _) => {
+                    for _ in 0..count {
+                        let surface = client.compositor.create_surface(&qh);
+                        surface.frame(&qh, surface.clone());
+                        surface.commit();
+                        surface.destroy();
+                    }
+                }
                 (Command::Idle { again, done }, Some(window)) => {
                     let surface = window.wl_surface().clone();
                     client.idle = Some((again, done));

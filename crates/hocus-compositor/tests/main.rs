@@ -99,6 +99,7 @@ mod magnet;
 mod magnifier;
 mod mcp;
 mod meeting;
+mod memory;
 mod moving_wallpaper;
 mod music;
 mod night_light;

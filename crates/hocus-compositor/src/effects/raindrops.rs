@@ -202,12 +202,29 @@ impl Pane {
         row * self.cols + col
     }
 
+    /// `rect` changed. Past [`MOST_RECTS`] the whole pane is drawn again:
+    /// the list is not kept. A pane stepped while it is not drawn (the koi's
+    /// pond or the aurora in its place) would else grow it each step for
+    /// as long as the session runs (#827).
+    fn note_changed(&mut self, rect: [f32; 4]) {
+        if self.all.get() {
+            return;
+        }
+        let changed = self.changed.get_mut();
+        if changed.len() >= MOST_RECTS {
+            changed.clear();
+            self.all.set(true);
+        } else {
+            changed.push(rect);
+        }
+    }
+
     fn put(&mut self, drop: Still) {
         let at = self.cell_of(drop.x, drop.y);
         if let Some(cell) = self.cells.get_mut(at) {
             cell.push(drop);
             self.stills += 1;
-            self.changed.get_mut().push(drop.rect());
+            self.note_changed(drop.rect());
         }
     }
 
@@ -233,7 +250,7 @@ impl Pane {
             grow: rnd(0.4, 1.2),
             shift: 0.0,
         };
-        self.changed.get_mut().push(drop.rect());
+        self.note_changed(drop.rect());
         self.rolling.push(drop);
     }
 
@@ -258,7 +275,7 @@ impl Pane {
             let before = d.rect();
             if d.r < SLIDES_FROM {
                 d.r += d.grow * dt;
-                self.changed.get_mut().push(union(before, d.rect()));
+                self.note_changed(union(before, d.rect()));
                 if let Some(slot) = self.rolling.get_mut(i) {
                     *slot = d;
                 }
@@ -281,7 +298,7 @@ impl Pane {
                 d.r -= 0.12;
             }
             self.meet(&mut d);
-            self.changed.get_mut().push(union(before, d.rect()));
+            self.note_changed(union(before, d.rect()));
             if d.y - d.r > self.size.1 {
                 self.rolling.remove(i);
             } else if let Some(slot) = self.rolling.get_mut(i) {
@@ -324,7 +341,9 @@ impl Pane {
             }
         }
         self.stills -= gone.len();
-        self.changed.get_mut().extend(gone);
+        for rect in gone {
+            self.note_changed(rect);
+        }
     }
 
     /// The cell of the grid a point falls in: column, row.
@@ -608,5 +627,24 @@ mod tests {
         let other = pane.frame(&Id::new());
         assert!(other.since.is_none());
         assert_ne!(other.fog, next.fog);
+    }
+
+    /// Stepped ten minutes without being drawn (the koi's pond in its place):
+    /// what changed is not kept past its bound, and the next frame draws
+    /// it all (#827).
+    #[test]
+    fn a_pane_not_drawn_keeps_no_more_than_its_bound() {
+        let mut rng = Rng::new(5);
+        let mut pane = Pane::new((1920.0, 1080.0), &mut rng);
+        let blur = Id::new();
+        pane.frame(&blur);
+        for _ in 0..(600.0 / STEP) as usize {
+            pane.step(STEP, &mut rng);
+            assert!(pane.changed.borrow().len() <= MOST_RECTS);
+        }
+        assert!(pane.frame(&blur).since.is_none(), "all of it");
+        pane.step(STEP, &mut rng);
+        let (_, rects) = pane.frame(&blur).since.expect("what changed");
+        assert!(!rects.is_empty() && rects.len() <= MOST_RECTS);
     }
 }

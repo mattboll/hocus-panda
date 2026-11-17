@@ -90,9 +90,25 @@ impl CompositorHandler for State {
     }
 
     /// A popup or a subsurface leaves the screen at once, without a
-    /// commit to say where it was: every screen draws again.
-    fn destroyed(&mut self, _surface: &WlSurface) {
+    /// commit to say where it was: every screen draws again. Its frame
+    /// callbacks are answered.
+    fn destroyed(&mut self, surface: &WlSurface) {
         self.redraw = true;
+        // Its frame callbacks not yet answered are answered now: a
+        // callback is gone only once answered (it has no request to
+        // destroy it), and a surface that goes before its next frame (a
+        // bubble, a menu) would leave one behind for as long as its client
+        // runs, the shell's for the session (#827).
+        let now: std::time::Duration = self.clock.now().into();
+        let ms = u32::try_from(now.as_millis() % (u128::from(u32::MAX) + 1)).unwrap_or_default();
+        with_states(surface, |data| {
+            let mut attributes = data.cached_state.get::<SurfaceAttributes>();
+            let pending = std::mem::take(&mut attributes.pending().frame_callbacks);
+            let current = std::mem::take(&mut attributes.current().frame_callbacks);
+            for callback in current.into_iter().chain(pending) {
+                callback.done(ms);
+            }
+        });
     }
 }
 
