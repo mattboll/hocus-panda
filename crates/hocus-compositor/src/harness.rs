@@ -922,6 +922,12 @@ impl Headless {
         self.app.state.agents.socket.as_deref()
     }
 
+    /// How many connections subscribe to the desktop's events
+    /// (docs/api.md, "Events").
+    pub fn subscribers(&self) -> usize {
+        self.app.state.events.subscribers()
+    }
+
     /// The agents' group's surfaces: their output and where they are.
     pub fn agents_surfaces(&self) -> Vec<(String, Rect)> {
         self.layer_rects(hocus_link::AGENTS_NAMESPACE)

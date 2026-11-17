@@ -91,6 +91,10 @@ its tool ("claude", "Codex"):
 
 ## The line, for tools that write it themselves
 
+The control socket's lines, their answers, its version and the events a
+program can subscribe to (an agent's state among them) are documented in
+[api.md](api.md); this section details the agents' own.
+
 One line of text per report on the Unix socket, words separated by
 spaces:
 

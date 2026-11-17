@@ -66,7 +66,7 @@ pipewire.workspace = true
 # CLOCK_MONOTONIC's microseconds, systemd's timestamps' clock (#538); the
 # recording's sound pipe, a FIFO, and its ffmpeg stopped when it stalls
 # (5.10).
-rustix = { workspace = true, features = ["fs", "process", "rand", "time"] }
+rustix = { workspace = true, features = ["fs", "net", "process", "rand", "time"] }
 serde = { workspace = true, features = ["derive"] }
 # The screens as the Settings read them (6.9), one JSON line each time.
 serde_json.workspace = true

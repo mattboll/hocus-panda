@@ -38,6 +38,7 @@ mod actions;
 mod agents;
 mod agents_live;
 mod annotate;
+mod api;
 mod appearance;
 mod aurora;
 mod autostart;

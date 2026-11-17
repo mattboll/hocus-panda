@@ -13,6 +13,9 @@
 //! (#604), then the to-do list's lines, then the agents' rows, which fold
 //! into "+ N" ([`room`]).
 //!
+//! The column is the bar's items under its top, in the list's order
+//! ([`items`]).
+//!
 //! Which groups show and the order of Today, the to-do list and the
 //! agents are the configuration's (`[panel]`, 6.4, [`set_groups`]): a
 //! hidden group takes no room, as an empty one; the mini form follows the
@@ -28,7 +31,10 @@ use std::sync::{Mutex, PoisonError};
 
 use hocus_link::{BarGroup, BarGroups, Form};
 
-use crate::agents;
+use crate::{
+    agents,
+    items::{self, Kind, Side},
+};
 
 /// What the configuration says the column shows, as last told.
 static GROUPS: Mutex<Option<BarGroups>> = Mutex::new(None);
@@ -108,17 +114,30 @@ pub fn set_groups(groups: BarGroups) {
 }
 
 /// The column in `form`, top to bottom, the movable groups in `order`:
-/// the meeting's card (or mark), the sign of what is in use, then Today
-/// (in the full form only), the to-do list and the agents.
+/// the bar's items under its top ([`items`]), the meeting's card (or
+/// mark), the sign of what is in use, then Today (in the full form only),
+/// the to-do list and the agents.
 pub fn order_with(form: Form, order: [BarGroup; 3]) -> Vec<Part> {
-    let mut parts = vec![Part::Meeting, Part::InUse];
-    parts.extend(
-        order
-            .into_iter()
-            .filter(|g| form == Form::Full || *g != BarGroup::Today)
-            .map(Part::of),
-    );
-    parts
+    order_from(&items::on(Side::Top), form, order)
+}
+
+/// The column from `top`, the items under the bar's top in their order:
+/// the clock, over the column's start, left out; the places of Today,
+/// the to-do list and the agents taken by `order`'s groups in turn;
+/// Today left out of the mini form.
+fn order_from(top: &[Kind], form: Form, order: [BarGroup; 3]) -> Vec<Part> {
+    let mut movable = order.into_iter();
+    top.iter()
+        .filter_map(|kind| {
+            let part = match kind {
+                Kind::Meeting => Part::Meeting,
+                Kind::InUse => Part::InUse,
+                Kind::Today | Kind::Tasks | Kind::Agents => Part::of(movable.next()?),
+                _ => return None,
+            };
+            (form == Form::Full || part != Part::Today).then_some(part)
+        })
+        .collect()
 }
 
 /// The column in `form`, top to bottom, in the configuration's order.
@@ -325,6 +344,55 @@ mod tests {
     fn the_full_forms_order_puts_the_agents_under_to_do() {
         assert_eq!(order_with(Form::Full, BarGroup::DEFAULT), FULL);
         assert_eq!(order_with(Form::Mini, BarGroup::DEFAULT), MINI);
+    }
+
+    #[test]
+    fn the_column_is_the_lists_top_in_its_order() {
+        // An item moved up in the list moves up in the column: the sign
+        // over the meeting's card.
+        let top = [
+            Kind::Clock,
+            Kind::InUse,
+            Kind::Meeting,
+            Kind::Today,
+            Kind::Tasks,
+            Kind::Agents,
+        ];
+        assert_eq!(
+            order_from(&top, Form::Full, BarGroup::DEFAULT),
+            [
+                Part::InUse,
+                Part::Meeting,
+                Part::Today,
+                Part::Tasks,
+                Part::Agents
+            ]
+        );
+        // The configuration's order still moves the three groups, in the
+        // places the list gives them.
+        let top = [
+            Kind::Clock,
+            Kind::Today,
+            Kind::Meeting,
+            Kind::InUse,
+            Kind::Tasks,
+            Kind::Agents,
+        ];
+        let order = [BarGroup::Agents, BarGroup::Today, BarGroup::Tasks];
+        assert_eq!(
+            order_from(&top, Form::Full, order),
+            [
+                Part::Agents,
+                Part::Meeting,
+                Part::InUse,
+                Part::Today,
+                Part::Tasks
+            ]
+        );
+        assert_eq!(
+            order_from(&top, Form::Mini, order),
+            [Part::Agents, Part::Meeting, Part::InUse, Part::Tasks]
+        );
     }
 
     #[test]

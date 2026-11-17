@@ -16,14 +16,19 @@
 //!
 //! The compositor's control socket (`<socket>.control`, [`SOCKET_ENV`])
 //! takes the lines written and read here: a [`Report`], a [`Question`]
-//! (`hocus msg idle`, `lock`, `outputs`, `input-devices`, `a11y`), a
+//! (`hocus msg version`, `idle`, `lock`, `outputs`, `input-devices`,
+//! `a11y`), a subscription to the desktop's events ([`events`], `hocus msg
+//! subscribe`), a
 //! [`ProgramAsk`] (`hocus msg shell status|restart`); what a hook says its
 //! agent left running ([`background::Ran`], #831); an agent's MCP line
 //! ([`mcp`], `mcp NAME`); an agent's good news ([`Celebration`], `hocus
 //! celebrate`); and the Settings' own, `msg screens` (the compositor's
 //! `displays.rs`).
+//!
+//! Those lines are a public interface (docs/api.md), versioned by [`API`].
 
 pub mod background;
+pub mod events;
 pub mod herdr;
 pub mod hooks;
 pub mod mcp;
@@ -35,6 +40,21 @@ pub mod watch;
 use std::{fmt, str::FromStr};
 
 pub use hocus_link::{Note, Supervised};
+
+/// The control socket's interface's version (docs/api.md, "Versions"):
+/// raised by every change to a documented line, its answer or an event.
+pub const API: u32 = 1;
+/// The oldest version whose clients this one still serves: raised to
+/// [`API`] by a change a client written for an older one would notice
+/// (a line or an event gone, an answer reshaped); additions leave it.
+pub const API_OLDEST: u32 = 1;
+
+/// `msg version`'s answer: the interface's version, the oldest one still
+/// served, and the desktop's own (its package's), one line of JSON.
+pub fn version_line(package: &str) -> String {
+    let said = serde_json::json!({ "api": API, "oldest": API_OLDEST, "hocuspanda": package });
+    format!("{said}\n")
+}
 
 /// The environment variable naming the compositor's control socket, set
 /// for the programs it starts.
@@ -52,6 +72,8 @@ pub fn socket_path(wayland: &std::path::Path) -> std::path::PathBuf {
 /// closes the connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Question {
+    /// The interface's version and the desktop's ([`version_line`]).
+    Version,
     /// The session's idle state, its time left and what holds it off
     /// (docs/design/idle.md).
     Idle,
@@ -75,6 +97,7 @@ impl Question {
     /// Its line, without the line break.
     pub fn line(self) -> &'static str {
         match self {
+            Self::Version => "msg version",
             Self::Idle => "msg idle",
             Self::Lock => "msg lock",
             Self::Outputs => "msg outputs",
@@ -87,6 +110,7 @@ impl Question {
     /// The question a line asks, if it is one.
     pub fn of(line: &str) -> Option<Self> {
         match line.trim_end_matches(['\n', '\r']) {
+            "msg version" => Some(Self::Version),
             "msg idle" => Some(Self::Idle),
             "msg lock" => Some(Self::Lock),
             "msg outputs" => Some(Self::Outputs),
@@ -624,6 +648,10 @@ mod tests {
         assert_eq!(Question::of("msg"), None);
         assert_eq!(Question::of(Question::Lock.line()), Some(Question::Lock));
         assert_eq!(Question::of(Question::A11y.line()), Some(Question::A11y));
+        assert_eq!(
+            Question::of(Question::Version.line()),
+            Some(Question::Version)
+        );
         for follow in [false, true] {
             let question = Question::InputDevices { follow };
             assert_eq!(Question::of(question.line()), Some(question));

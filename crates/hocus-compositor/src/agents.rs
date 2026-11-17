@@ -6,7 +6,10 @@
 //!   (`hocus agent-hook`) write one line each. A thread of its own takes
 //!   the connections, reads the agent's process's ancestry in `/proc`, and
 //!   hands both to the loop. A question (`hocus msg idle`) is handed to
-//!   the loop too, and its answer written back on the same connection.
+//!   the loop too, and its answer written back on the same connection; a
+//!   subscriber's connection (`hocus msg subscribe`) is handed over and
+//!   kept by the loop ([`crate::events`]). Its lines are a public
+//!   interface, docs/api.md.
 //! - **The tools' watcher** ([`hocus_agents::watch`]): which tools are on
 //!   the computer and plugged in, as they change; plugging in, unplugging
 //!   and declining, which write files, are done there.
@@ -120,6 +123,12 @@ pub enum Heard {
     /// A connection that follows the mice and touchpads (`hocus msg
     /// input-devices follow`): the loop writes to it as they change.
     Follow(std::os::unix::net::UnixStream),
+    /// A subscriber to the desktop's events (`hocus msg subscribe`,
+    /// docs/api.md): the loop writes to it as they happen.
+    Subscribe(
+        std::os::unix::net::UnixStream,
+        hocus_agents::events::Subscription,
+    ),
     /// An MCP agent's line (`hocus mcp`, docs/design/mcp.md).
     Mcp(crate::mcp::FromAgent),
     /// What a hook says runs on beside its agent's turns (#831).
@@ -459,6 +468,25 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
                 }
                 break;
             }
+            if let Some(subscribing) = hocus_agents::events::Subscription::read(&line) {
+                // The loop keeps it, and writes without waiting; a kind
+                // that is not one is refused here.
+                match subscribing {
+                    Ok(wants) => {
+                        if let Ok(kept) = stream.try_clone()
+                            && sender.send(Heard::Subscribe(kept, wants)).is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(why) => {
+                        let _ = stream.set_write_timeout(Some(READ));
+                        let refusal = format!("{}{why}\n", hocus_agents::REFUSED);
+                        let _ = (&stream).write_all(refusal.as_bytes());
+                    }
+                }
+                break;
+            }
             if Question::of(&line) == Some(Question::InputDevices { follow: true }) {
                 // The loop keeps it, and writes without waiting.
                 if let Ok(kept) = stream.try_clone()
@@ -559,6 +587,10 @@ impl Compositor {
                 self.follow_input_devices(stream);
                 return;
             }
+            Heard::Subscribe(stream, wants) => {
+                self.subscribe(stream, wants);
+                return;
+            }
             Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
             Heard::Screens(heard) => self.displays_heard(heard),
             Heard::Mcp(from) => {
@@ -578,6 +610,7 @@ impl Compositor {
             Heard::Asked(question, reply) => {
                 let answer = match question {
                     Question::A11y => return,
+                    Question::Version => hocus_agents::version_line(env!("CARGO_PKG_VERSION")),
                     Question::Idle => {
                         // What changed this turn, judged first.
                         self.flush_idle();
@@ -1494,6 +1527,8 @@ impl Compositor {
         let listed = self.agents_listed();
         let seen = self.halo_seen(&listed);
         let agents: Vec<AgentShown> = listed.into_iter().map(|l| l.shown).collect();
+        // The control socket's subscribers (docs/api.md).
+        self.events_agents(&agents);
         self.halo_agents(&seen);
         // The overview's badges (8.5 A).
         self.overview_agents(&agents);

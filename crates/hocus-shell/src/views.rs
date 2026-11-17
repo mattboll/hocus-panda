@@ -6,7 +6,7 @@ use super::*;
 impl Shell {
     /// The clock of the bar whose clock's surface is `id`.
     pub(super) fn clock_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.clock == id)?;
+        let bar = self.bar_with(items::Kind::Clock, id)?;
         let at = self.now + AHEAD;
         let forms = bar.forms(at);
         let (width, height) = bar.clock_surface;
@@ -45,7 +45,7 @@ impl Shell {
 
     /// The levels of the bar whose levels' surface is `id`.
     pub(super) fn levels_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.levels == id)?;
+        let bar = self.bar_with(items::Kind::Levels, id)?;
         let at = self.now + AHEAD;
         let (_, height) = bar.levels_surface;
         let backdrop = (!self.look.glass).then(|| {
@@ -77,7 +77,7 @@ impl Shell {
 
     /// The connections of the bar whose connections' surface is `id`.
     pub(super) fn connections_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.connections == id)?;
+        let bar = self.bar_with(items::Kind::Connections, id)?;
         let at = self.now + AHEAD;
         let backdrop = (!self.look.glass).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
@@ -107,7 +107,7 @@ impl Shell {
 
     /// The desktops of the bar whose desktops' surface is `id`.
     pub(super) fn desktops_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.desktops == id)?;
+        let bar = self.bar_with(items::Kind::Desktops, id)?;
         let at = self.now + AHEAD;
         let backdrop = (!self.look.glass).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
@@ -139,7 +139,7 @@ impl Shell {
 
     /// The agents' group of the bar whose agents' surface is `id`.
     pub(super) fn agents_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.agents == id)?;
+        let bar = self.bar_with(items::Kind::Agents, id)?;
         let at = self.now + AHEAD;
         // The bar's colour where the column puts the group, read as it draws.
         let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
@@ -166,7 +166,7 @@ impl Shell {
 
     /// The to-do list of the bar whose to-do list's surface is `id`.
     pub(super) fn tasks_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.tasks == id)?;
+        let bar = self.bar_with(items::Kind::Tasks, id)?;
         let at = self.now + AHEAD;
         // The bar's colour where the column puts the list, read as it draws.
         let backdrop = (!self.look.glass).then_some(agents::draw::Backdrop {
@@ -192,7 +192,7 @@ impl Shell {
 
     /// The footer of the bar whose footer's surface is `id`.
     pub(super) fn footer_view(&self, id: window::Id) -> Option<Element<'_, Message>> {
-        let bar = self.bars.values().find(|b| b.footer == id)?;
+        let bar = self.bar_with(items::Kind::Footer, id)?;
         let at = self.now + AHEAD;
         let backdrop = (!self.look.glass).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
@@ -622,6 +622,31 @@ impl Shell {
         Some(panel)
     }
 
+    /// The bar whose item `kind`'s surface is `id`.
+    fn bar_with(&self, kind: items::Kind, id: window::Id) -> Option<&Bar> {
+        self.bars.values().find(|b| b.surface(kind) == Some(id))
+    }
+
+    /// Item `kind`'s view of surface `id`, if the surface is one of its.
+    fn item_view(&self, kind: items::Kind, id: window::Id) -> Option<Element<'_, Message>> {
+        use items::Kind;
+        match kind {
+            Kind::Clock => self.clock_view(id),
+            Kind::Levels => self.levels_view(id),
+            Kind::Connections => self.connections_view(id),
+            Kind::Desktops => self.desktops_view(id),
+            Kind::Agents => self.agents_view(id),
+            Kind::Tasks => self.tasks_view(id),
+            Kind::Footer => self.footer_view(id),
+            Kind::Tray => self.tray_view(id),
+            Kind::InUse => self.in_use_view(id),
+            Kind::Meeting => self.meeting_view(id),
+            Kind::Today => self.today_view(id),
+            Kind::Windows => self.windows_view(id),
+            Kind::Music => self.music_view(id),
+        }
+    }
+
     /// A surface's widgets, whose pointer's shape is set again each time
     /// the pointer enters it ([`pointer`](mod@crate::pointer)), which get the keys the
     /// compositor gives their surface ([`keys`]), and an input method while
@@ -648,15 +673,10 @@ impl Shell {
     pub(super) fn surface_view(&self, id: window::Id) -> Element<'_, Message> {
         let Some(bar) = self.bars.get(&id) else {
             let context = self.context();
-            return self
-                .clock_view(id)
-                .or_else(|| self.levels_view(id))
-                .or_else(|| self.connections_view(id))
-                .or_else(|| self.desktops_view(id))
-                .or_else(|| self.agents_view(id))
-                .or_else(|| self.tasks_view(id))
-                .or_else(|| self.footer_view(id))
-                .or_else(|| self.tray_view(id))
+            // The bar's items, from the list; then the other surfaces.
+            return items::ITEMS
+                .iter()
+                .find_map(|item| self.item_view(item.kind, id))
                 .or_else(|| tray::tip::view(id))
                 .or_else(|| self.peek_view(id))
                 .or_else(|| self.launcher_view(id))
@@ -668,11 +688,6 @@ impl Shell {
                 .or_else(|| self.share.view(id, &context))
                 .or_else(|| self.lock.view(id, &context))
                 .or_else(|| self.curtain.view(id, &context))
-                .or_else(|| self.in_use_view(id))
-                .or_else(|| self.meeting_view(id))
-                .or_else(|| self.today_view(id))
-                .or_else(|| self.windows_view(id))
-                .or_else(|| self.music_view(id))
                 .or_else(|| self.popover_view(id))
                 .or_else(|| crate::mcp::view(id, self.look.glass))
                 .or_else(|| notifications::view(id, self.look.glass))

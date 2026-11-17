@@ -170,6 +170,9 @@ pub struct State {
     pub(crate) screen_sets: crate::screen_sets::Sets,
     /// The mice and touchpads, and what they were given (6.12).
     pub input_devices: crate::input_devices::InputDevices,
+    /// The control socket's subscribers to the desktop's events
+    /// (docs/api.md, "Events").
+    pub(crate) events: crate::events::Events,
     /// When the session is idle, and what holds it off (7.3).
     pub idle: crate::idle::Idleness,
     /// The seat's session on a virtual terminal, which switches terminals.
@@ -347,6 +350,7 @@ impl State {
             displays: crate::displays::Displays::default(),
             screen_sets,
             input_devices: crate::input_devices::InputDevices::default(),
+            events: crate::events::Events::default(),
             idle,
             session: None,
             lock: crate::lock::Lock::new(dh),
