@@ -13,6 +13,14 @@
 //! The loop only reads the share's texture through its own context, the
 //! one that drew it (GL orders the two); the thread only touches the pixel
 //! buffer, once the fence says the GPU wrote it.
+//!
+//! The reader goes before the renderer (#838): the thread is told, lets
+//! the frames still asked go unread, releases its context and destroys it,
+//! and the loop waits for it to end. A thread left running with its
+//! context current kept the EGL display (and llvmpipe's threads) alive
+//! until the process's exit, and could end along with it: libglvnd frees
+//! a thread's state both as that thread ends and in libEGL's own
+//! destructor at exit, a double free when the two meet.
 
 use std::{
     collections::HashMap,
@@ -22,6 +30,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
+    thread::JoinHandle,
     time::Duration,
 };
 
@@ -64,9 +73,29 @@ struct Job {
 pub struct Reader {
     pbos: HashMap<u64, Vec<Pbo>>,
     thread: Option<mpsc::Sender<Job>>,
+    /// The thread, waited for as the reader goes.
+    running: Option<JoinHandle<()>>,
+    /// Set as the reader goes: the frames still asked go unread.
+    ending: Arc<AtomicBool>,
     /// The thread could not start (no shared context): none is tried
     /// again.
     failed: bool,
+}
+
+impl Drop for Reader {
+    /// The thread ends before the renderer goes (the backend keeps the
+    /// reader first): its context released and destroyed on it, while the
+    /// renderer's display is still there, and nothing of EGL's left to a
+    /// thread still running as the process exits.
+    fn drop(&mut self) {
+        self.ending.store(true, Ordering::Release);
+        self.thread = None;
+        if let Some(running) = self.running.take()
+            && running.join().is_err()
+        {
+            tracing::warn!("the read-back's thread panicked");
+        }
+    }
 }
 
 impl std::fmt::Debug for Job {
@@ -260,18 +289,25 @@ impl Reader {
             }
         };
         let (sender, jobs) = mpsc::channel::<Job>();
-        std::thread::Builder::new()
+        let ending = self.ending.clone();
+        let running = std::thread::Builder::new()
             .name("screen cast read-back".to_owned())
             .spawn(move || {
-                read_back(&context, &jobs);
-                // The thread ends as the backend goes, its renderer and
-                // its EGL display with it: destroying the context here,
-                // while the display is terminated on the loop's thread,
-                // corrupted Mesa's heap (llvmpipe, 5.10's tests). The
-                // display's end frees it.
-                std::mem::forget(context);
+                read_back(&context, &jobs, &ending);
+                // The frames still asked go first (their fences), then the
+                // context, released (libglvnd frees this thread's state
+                // now, not as the process exits) and destroyed, all while
+                // the loop waits for this thread (`Reader`'s drop): never
+                // at the same time as the renderer's display ends, which
+                // corrupted Mesa's heap once (llvmpipe, 5.10's tests).
+                drop(jobs);
+                if let Err(err) = context.unbind() {
+                    tracing::warn!(%err, "the read-back's context not released");
+                }
+                drop(context);
             })?;
         self.thread = Some(sender.clone());
+        self.running = Some(running);
         Ok(sender)
     }
 }
@@ -295,8 +331,9 @@ fn delete(renderer: &mut GlesRenderer, names: &[ffi::types::GLuint]) {
     }
 }
 
-/// The thread: each frame waited for, mapped, lent, then unmapped.
-fn read_back(context: &EGLContext, jobs: &mpsc::Receiver<Job>) {
+/// The thread: each frame waited for, mapped, lent, then unmapped; once
+/// `ending`, the frames left go unread.
+fn read_back(context: &EGLContext, jobs: &mpsc::Receiver<Job>, ending: &AtomicBool) {
     // SAFETY: the context is this thread's alone, made current here once
     // for good (surfaceless, as Mesa offers).
     #[allow(unsafe_code)]
@@ -312,6 +349,9 @@ fn read_back(context: &EGLContext, jobs: &mpsc::Receiver<Job>) {
         }
     });
     while let Ok(job) = jobs.recv() {
+        if ending.load(Ordering::Acquire) {
+            continue;
+        }
         // The GPU wrote the buffer, or it is never mapped.
         match job.fence.client_wait(Some(WAIT), false) {
             Ok(true) => {}
