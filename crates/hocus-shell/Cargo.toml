@@ -63,6 +63,8 @@ rustls.workspace = true
 iced_layershell.workspace = true
 # The clock's time zone and its rules, read from the system's database.
 jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+# glibc's malloc held to two arenas (`mallopt`, #855).
+libc.workspace = true
 # CLOCK_MONOTONIC, the compositor's clock, to start a form switch when it
 # does; inotify, to see the time zone change; the user's id, for their name.
 rustix = { workspace = true, features = ["time", "fs", "event", "process"] }

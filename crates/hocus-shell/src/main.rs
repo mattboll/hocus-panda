@@ -50,6 +50,7 @@ mod ending;
 mod field;
 mod footer;
 mod foreign;
+mod heap;
 mod in_use;
 mod items;
 mod keys;
@@ -156,6 +157,8 @@ fn main() -> ExitCode {
         .with_writer(std::io::stderr)
         .with_env_filter(filter)
         .init();
+    // Before any thread allocates (#855).
+    heap::bound();
     // A panic is in the log the compositor keeps of the shell (#778).
     hocus_panic::install();
     // On a CPU, the CPU renderer: this may start the program again.

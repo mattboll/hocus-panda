@@ -2103,6 +2103,7 @@ dependencies = [
  "iced_layershell",
  "image",
  "jiff",
+ "libc",
  "resvg",
  "rustix 1.1.6",
  "rustls",

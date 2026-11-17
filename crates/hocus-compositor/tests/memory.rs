@@ -2,7 +2,9 @@
 //! (#827): an agent whose process ended before its report was read is
 //! forgotten, as one whose end was heard; a surface gone before its next
 //! frame leaves no frame callback behind in its client, which the shell's
-//! bubbles and pandas did for the session.
+//! bubbles and pandas did for the session. The shell keeps to two of
+//! glibc's malloc arenas, not one a thread, each keeping what was freed in
+//! it (#855).
 
 use crate::common;
 
@@ -11,7 +13,7 @@ use std::{io::Write as _, os::unix::net::UnixStream};
 use anyhow::Context as _;
 use common::{Command, Event, WAIT};
 use hocus_agents::{Report, Source, State};
-use hocus_compositor::Headless;
+use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice};
 
 /// `report` on `hp`'s control socket, a connection of its own (read in
 /// the order they come).
@@ -81,5 +83,99 @@ fn a_surface_gone_before_its_frame_leaves_no_callback() -> anyhow::Result<()> {
     anyhow::ensure!(exported, "the client's export never came");
     let after = hp.objects("wl_callback");
     anyhow::ensure!(after <= before, "{before} frame callbacks, then {after}");
+    Ok(())
+}
+
+/// The heaps glibc's malloc mapped for its arenas besides the main one in
+/// process `pid`: each reserves 64 MiB, aligned, its unused end
+/// inaccessible.
+fn malloc_heaps(pid: i32) -> anyhow::Result<usize> {
+    const HEAP: u64 = 64 << 20;
+    let maps = std::fs::read_to_string(format!("/proc/{pid}/maps"))?;
+    // Start, end, permissions, and whether a file or a name backs it.
+    let regions: Vec<(u64, u64, &str, bool)> = maps
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let (start, end) = fields.next()?.split_once('-')?;
+            let perms = fields.next()?;
+            let named = fields.nth(3).is_some();
+            Some((
+                u64::from_str_radix(start, 16).ok()?,
+                u64::from_str_radix(end, 16).ok()?,
+                perms,
+                named,
+            ))
+        })
+        .collect();
+    let mut heaps = 0;
+    for (i, &(start, end, perms, named)) in regions.iter().enumerate() {
+        if named || perms != "rw-p" || start % HEAP != 0 {
+            continue;
+        }
+        let mut reach = end;
+        for &(next, next_end, next_perms, next_named) in &regions[i + 1..] {
+            if next != reach || next_named || next_perms != "---p" {
+                break;
+            }
+            reach = next_end;
+        }
+        if reach - start == HEAP {
+            heaps += 1;
+        }
+    }
+    Ok(heaps)
+}
+
+/// The shell's threads allocate (iced's runtime, its workers), its
+/// launcher opened and closed meanwhile: they share two arenas, the main
+/// one and one heap, however many they are.
+#[test]
+fn the_shell_keeps_to_two_malloc_arenas() -> anyhow::Result<()> {
+    let program = common::shell_program();
+    let dir = tempfile::tempdir()?;
+    let root = dir.path();
+    let at = |p: &str| root.join(p).display().to_string();
+    let script = common::shell_script(
+        root,
+        &program,
+        &[
+            ("HOME", at("home")),
+            ("XDG_CONFIG_HOME", at("config")),
+            ("XDG_STATE_HOME", at("state")),
+            ("XDG_CACHE_HOME", at("cache")),
+            ("ICED_BACKEND", "tiny-skia".to_owned()),
+        ],
+    )?;
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            outputs: vec!["1920x1080".parse()?],
+            renderer: RendererChoice::Pixman,
+            render_node: None,
+        },
+        Config::default(),
+        Some(script),
+    )?;
+    let up = hp.dispatch_until(WAIT, |hp| hp.bar_commits() > 0)?;
+    anyhow::ensure!(up, "no bar");
+    // `Super+Space` opens it, and again closes it.
+    let toggle = |hp: &mut Headless| {
+        hp.tell_shell(hocus_link::ToShell::Launcher {
+            output: "HEADLESS-1".to_owned(),
+            scale: 120,
+        });
+    };
+    for _ in 0..5 {
+        toggle(&mut hp);
+        let open = hp.dispatch_until(WAIT, |hp| !hp.launcher_surfaces().is_empty())?;
+        anyhow::ensure!(open, "the launcher never opened");
+        toggle(&mut hp);
+        let shut = hp.dispatch_until(WAIT, |hp| hp.launcher_surfaces().is_empty())?;
+        anyhow::ensure!(shut, "the launcher never closed");
+    }
+    common::wait(&mut hp, std::time::Duration::from_secs(1))?;
+    let pid = hp.shell_pid().context("no shell")?;
+    let heaps = malloc_heaps(pid)?;
+    anyhow::ensure!(heaps <= 1, "{heaps} malloc heaps besides the main arena");
     Ok(())
 }
