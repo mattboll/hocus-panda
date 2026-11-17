@@ -35,11 +35,6 @@ retries = 0
 # test fails without the programs it needs, so these are left out there,
 # by name, and run where the programs are (the default profile).
 # Installing them on CI takes them out of this list.
-# And a test that fails by chance, until its issue is fixed: the Wi-Fi's
-# without NetworkManager (#835), the layout row's round trip (#841), the
-# Settings' lit row going out (#845), a Bluetooth device read while
-# connecting (#846), Today's line clicked too soon (#847), the capture's
-# picture under an arrow (#848).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -49,12 +44,6 @@ not (
         | test(=desktop_drop::an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
-        | test(=wifi::without_networkmanager_no_row_and_without_wifi_no_list)
-        | test(=layouts::a_click_on_the_row_goes_to_the_next_layout_and_the_row_follows_round_and_round)
-        | test(=settings_bar::the_places_follow_a_light_going_out)
-        | test(=settings_bluetooth::a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect)
-        | test(=today::a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar)
-        | test(=annotate::the_picture_stays_while_an_arrow_is_drawn_on_the_cpu)
     ))
 )
 """

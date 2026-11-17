@@ -242,6 +242,70 @@ struct Herdr {
     layout: Option<herdr::Layout>,
 }
 
+impl Herdr {
+    /// What herdr said, at `now`.
+    fn heard(&mut self, news: News, now: u64) {
+        match news {
+            News::Agents {
+                agents,
+                terminals,
+                layout,
+            } => {
+                self.running = true;
+                self.layout = layout;
+                let before: HashMap<String, (Option<State>, u64)> = self
+                    .agents
+                    .drain(..)
+                    .map(|(a, since)| (a.pane.clone(), (a.state, since)))
+                    .collect();
+                self.agents = agents
+                    .into_iter()
+                    .map(|a| {
+                        let since = match before.get(&a.pane) {
+                            Some((state, since)) if *state == a.state => *since,
+                            _ => now,
+                        };
+                        (a, since)
+                    })
+                    .collect();
+                self.terminals = terminals;
+                // A pane gone keeps no id: panes come and go all day, and
+                // herdr may name a new one as an old one was.
+                self.ids
+                    .retain(|pane, _| self.agents.iter().any(|(a, _)| a.pane == *pane));
+            }
+            News::Names(names) => {
+                for (agent, _) in &mut self.agents {
+                    if let Some((_, name)) = names.iter().find(|(pane, _)| *pane == agent.pane) {
+                        agent.name.clone_from(name);
+                    }
+                }
+            }
+            News::State { pane, state } => {
+                if let Some((agent, since)) = self.agents.iter_mut().find(|(a, _)| a.pane == pane)
+                    && agent.state != state
+                {
+                    agent.state = state;
+                    *since = now;
+                }
+            }
+            News::Focused(pane) => {
+                for (agent, _) in &mut self.agents {
+                    agent.focused = agent.pane == pane;
+                }
+            }
+            News::Layout(layout) => self.layout = Some(layout),
+            News::Gone => {
+                self.running = false;
+                self.agents.clear();
+                self.terminals.clear();
+                self.layout = None;
+                self.ids.clear();
+            }
+        }
+    }
+}
+
 /// The agents' sources and model.
 #[derive(Debug, Default)]
 pub struct Agents {
@@ -819,6 +883,19 @@ impl Compositor {
         }
         let fd = match hocus_agents::process::exit_of(pid) {
             Ok(fd) => fd,
+            // It ended before its report was read (a one-shot run's last
+            // hook): its end is heard now, or its agent would stay for
+            // the session (#827). Gone from the processes read too: the
+            // tests' are of their own.
+            Err(err)
+                if err.raw_os_error() == Some(rustix::io::Errno::SRCH.raw_os_error())
+                    && self.process_gone(pid) =>
+            {
+                tracing::debug!(pid, "an agent's process ended before it was watched");
+                self.loop_handle
+                    .insert_idle(move |app| app.state.agent_process_ended(pid));
+                return;
+            }
             Err(err) => {
                 tracing::debug!(pid, %err, "cannot watch an agent's process");
                 return;
@@ -837,6 +914,16 @@ impl Compositor {
             }
             Err(err) => tracing::warn!(%err.error, "cannot watch an agent's process"),
         }
+    }
+
+    /// Process `pid` is not among the processes the agents are read from
+    /// (`/proc`, the tests' own).
+    fn process_gone(&self, pid: u32) -> bool {
+        let processes = self.agents.places.as_ref().map_or_else(
+            || PathBuf::from(hocus_agents::process::PROC),
+            |places| places.processes.clone(),
+        );
+        !processes.join(pid.to_string()).exists()
     }
 
     fn agent_process_ended(&mut self, pid: u32) {
@@ -868,60 +955,7 @@ impl Compositor {
 
     fn herdr_said(&mut self, news: News) {
         let now = self.now_us();
-        let herdr = &mut self.agents.herdr;
-        match news {
-            News::Agents {
-                agents,
-                terminals,
-                layout,
-            } => {
-                herdr.running = true;
-                herdr.layout = layout;
-                let before: HashMap<String, (Option<State>, u64)> = herdr
-                    .agents
-                    .drain(..)
-                    .map(|(a, since)| (a.pane.clone(), (a.state, since)))
-                    .collect();
-                herdr.agents = agents
-                    .into_iter()
-                    .map(|a| {
-                        let since = match before.get(&a.pane) {
-                            Some((state, since)) if *state == a.state => *since,
-                            _ => now,
-                        };
-                        (a, since)
-                    })
-                    .collect();
-                herdr.terminals = terminals;
-            }
-            News::Names(names) => {
-                for (agent, _) in &mut herdr.agents {
-                    if let Some((_, name)) = names.iter().find(|(pane, _)| *pane == agent.pane) {
-                        agent.name.clone_from(name);
-                    }
-                }
-            }
-            News::State { pane, state } => {
-                if let Some((agent, since)) = herdr.agents.iter_mut().find(|(a, _)| a.pane == pane)
-                    && agent.state != state
-                {
-                    agent.state = state;
-                    *since = now;
-                }
-            }
-            News::Focused(pane) => {
-                for (agent, _) in &mut herdr.agents {
-                    agent.focused = agent.pane == pane;
-                }
-            }
-            News::Layout(layout) => herdr.layout = Some(layout),
-            News::Gone => {
-                herdr.running = false;
-                herdr.agents.clear();
-                herdr.terminals.clear();
-                herdr.layout = None;
-            }
-        }
+        self.agents.herdr.heard(news, now);
     }
 
     /// Whether herdr's agents are followed: it runs, and was not declined.
@@ -1629,6 +1663,45 @@ mod tests {
         assert!(!names_herdr("herdr.rs"));
         assert!(!names_herdr("zsh"));
         assert!(!names_herdr(""));
+    }
+
+    /// herdr's panes come and go all day: their ids go with them (#827).
+    #[test]
+    fn herdrs_pane_ids_go_with_their_panes() {
+        let pane = |name: &str| herdr::Agent {
+            pane: name.to_owned(),
+            workspace: "w".to_owned(),
+            tab: "t".to_owned(),
+            name: None,
+            folder: None,
+            state: Some(State::Working),
+            pids: Vec::new(),
+            focused: false,
+        };
+        let listed = |panes: &[&str]| News::Agents {
+            agents: panes.iter().map(|p| pane(p)).collect(),
+            terminals: Vec::new(),
+            layout: None,
+        };
+        let mut herdr = Herdr::default();
+        for round in 0..100u64 {
+            let (old, new) = (format!("w1:p{round}"), format!("w1:p{}", round + 1));
+            herdr.heard(listed(&[&old, &new]), round);
+            // As the agents' list gives them ids.
+            for p in [old, new] {
+                herdr.ids.entry(p).or_insert(round);
+            }
+        }
+        assert_eq!(herdr.ids.len(), 2, "{:?}", herdr.ids.keys());
+        let kept = herdr.ids["w1:p100"];
+        herdr.heard(listed(&["w1:p100"]), 100);
+        assert_eq!(herdr.ids.len(), 1);
+        assert_eq!(
+            herdr.ids["w1:p100"], kept,
+            "a pane still listed keeps its id"
+        );
+        herdr.heard(News::Gone, 101);
+        assert!(herdr.ids.is_empty());
     }
 
     #[test]

@@ -898,6 +898,25 @@ impl Headless {
         self.app.state.agent_tools()
     }
 
+    /// How many objects of `interface` the clients hold, all together
+    /// (#827: what a client leaves behind stays as long as it runs).
+    pub fn objects(&self, interface: &str) -> usize {
+        let handle = self.app.state.display_handle.backend_handle();
+        let mut clients = Vec::new();
+        handle.with_all_clients(|client| clients.push(client));
+        let mut count = 0;
+        for client in clients {
+            let mut ids = Vec::new();
+            // A client gone since: none of its objects.
+            let _ = handle.with_all_objects_for(client, |id| ids.push(id));
+            count += ids
+                .into_iter()
+                .filter(|id| id.interface().name == interface)
+                .count();
+        }
+        count
+    }
+
     /// The control socket `hocus agent` writes to.
     pub fn control_socket(&self) -> Option<&Path> {
         self.app.state.agents.socket.as_deref()
@@ -1228,6 +1247,15 @@ impl Headless {
     /// Commits of the capture's editor's surface so far.
     pub fn capture_editor_commits(&self) -> u64 {
         self.app.state.capture.editor_commits()
+    }
+
+    /// Whether the capture's editor shows at rest in the last frame drawn:
+    /// its fade in over, which starts at the shell's first buffer, however
+    /// late that comes on a loaded machine.
+    pub fn capture_editor_at_rest(&self) -> bool {
+        let state = &self.app.state;
+        let drawn = state.frames.drawn_at.get();
+        drawn.is_some_and(|at| state.capture.editor_at_rest(at))
     }
 
     /// The cursor the compositor shows over a frame, a grip or the

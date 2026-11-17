@@ -324,6 +324,12 @@ impl Bed {
             hp.capture_editor_surfaces().len() == 1
         })?;
         anyhow::ensure!(open, "no editor");
+        // Its fade in over in the last frame drawn: until then its picture
+        // shows only half, and a shot of it is darker (#848).
+        let shown = self
+            .hp
+            .dispatch_until(WAIT, |hp| hp.capture_editor_at_rest())?;
+        anyhow::ensure!(shown, "the editor never stopped fading in");
         let places = Places::read(&line)?;
         self.over(places.at("copy"), hocus_link::CAPTURE_EDITOR_NAMESPACE)?;
         self.idle(Duration::from_millis(100))?;

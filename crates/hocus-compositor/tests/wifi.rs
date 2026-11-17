@@ -1262,7 +1262,18 @@ fn without_networkmanager_no_row_and_without_wifi_no_list() -> anyhow::Result<()
     hp.button(BTN_LEFT, true);
     hp.button(BTN_LEFT, false);
     wait(&mut hp, Duration::from_millis(500))?;
-    assert!(hp.popover_surfaces().is_empty());
+    // No Wi-Fi's popover. What is under may open its own: until the levels
+    // say where their top is, the surface sits over their items, and the
+    // click (or the pointer resting there) opens theirs (#835).
+    let opened: Vec<String> = plain(&log)
+        .lines()
+        .filter(|l| l.contains("a popover opens"))
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        !opened.iter().any(|l| l.contains("item=Wifi")),
+        "{opened:?}"
+    );
     Ok(())
 }
 
