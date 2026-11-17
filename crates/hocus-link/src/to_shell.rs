@@ -7,7 +7,8 @@ use crate::{
     ActionsShown, AgentShown, AgentTool, AuthAt, BadLine, BarGroups, CaptureBar, Captured, Clip,
     ClipRules, ClockLook, CurtainShown, DeskScreen, Desktops, Form, KeyLayout, LeaveCan,
     LeaveShown, LevelKey, LockShown, Recent, Recorded, RecordingShown, SHARE, ShareChoose,
-    ShareShown, Side, Titles, WindowMenu, WindowStates, locale, text::tidy, theme, wallpaper, wire,
+    ShareShown, Side, Titles, TranscribingShown, WindowMenu, WindowStates, locale, text::tidy,
+    theme, wallpaper, wire,
 };
 
 /// What the compositor tells the shell.
@@ -212,6 +213,12 @@ pub enum ToShell {
     RecordingEnd,
     /// A recording saved: its thumbnail ([`Recorded`]).
     Recorded(Recorded),
+    /// A meeting's transcription records (docs/design/meetings.md,
+    /// [`TranscribingShown`]): sent as it starts, and as the shell
+    /// connects.
+    Transcribing(TranscribingShown),
+    /// It stopped recording: its text is being made.
+    TranscribingEnd,
     /// The activation token for the tray's click `ask`
     /// ([`ToCompositor::TrayClick`](crate::ToCompositor::TrayClick), 5.14b): the shell gives it to the item
     /// before activating it.

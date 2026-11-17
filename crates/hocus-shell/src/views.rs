@@ -582,6 +582,10 @@ impl Shell {
                 glass: self.look.glass,
                 motion: self.look.motion && !self.software,
             }),
+            popover::Item::Transcribe => popover::transcribe::view(&popover::transcribe::Panel {
+                id,
+                glass: self.look.glass,
+            }),
             popover::Item::MeetingMark => popover::meeting::view(&popover::meeting::Panel {
                 id,
                 words: meeting::Words::new(clock::time::Lang::of_messages()),
@@ -609,6 +613,7 @@ impl Shell {
             | popover::Item::Menu
             | popover::Item::Meeting
             | popover::Item::Join
+            | popover::Item::TranscribeStop
             | popover::Item::TodayLine(_)
             | popover::Item::TodayMore
             | popover::Item::TaskAdd

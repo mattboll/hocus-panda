@@ -121,6 +121,11 @@ pub struct Card {
     /// The event after it today: its start and its title (the mini
     /// popover's "ENSUITE").
     pub then: Option<(String, String)>,
+    /// Its start and end as instants (RFC 3339), and who it invites: what
+    /// its transcription's file says (docs/design/meetings.md).
+    pub start_at: String,
+    pub end_at: String,
+    pub attendees: Vec<String>,
 }
 
 impl Card {
@@ -232,6 +237,9 @@ pub fn card_of(day: &Day, now: &Zoned) -> Option<Card> {
         video: event.video.clone().filter(|v| !v.is_empty()),
         page: event.page.clone().filter(|p| !p.is_empty()),
         place: event.place.clone().filter(|p| !p.is_empty()),
+        start_at: start.to_string(),
+        end_at: end.to_string(),
+        attendees: event.attendees.clone(),
         then: ahead.get(1).map(|next| {
             (
                 hhmm(next.event.when.start(zone), now),
@@ -386,6 +394,7 @@ pub fn refresh() {
     }
     popover::send(effects);
     popover::changed(Item::MeetingMark);
+    crate::transcribe::meeting_changed(card.as_ref());
 }
 
 /// The user opened or joined the card's meeting: its halo ends (§6).
@@ -678,6 +687,7 @@ mod tests {
             page: None,
             description: None,
             alarms: Vec::new(),
+            attendees: Vec::new(),
         }
     }
 

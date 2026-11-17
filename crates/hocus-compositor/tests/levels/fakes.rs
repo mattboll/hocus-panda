@@ -872,6 +872,15 @@ impl Fakes {
         ports
     }
 
+    /// The graph's links, as `pw-link --links` lists them.
+    pub fn links(&self) -> String {
+        self.pw("pw-link")
+            .arg("--links")
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap_or_default()
+    }
+
     /// Node `id`'s state (`running`, `idle`…).
     pub fn state(&self, id: u32) -> Option<String> {
         let out = self.pw("pw-dump").arg(id.to_string()).output().ok()?;

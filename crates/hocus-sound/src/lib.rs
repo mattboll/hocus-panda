@@ -22,7 +22,10 @@ pub mod meter;
 pub mod set;
 pub mod tester;
 
-pub use graph::{App, Card, Graph, Kind, Mixer, Profile, Recorder, Sink, Used, Using};
+pub use graph::{
+    App, Card, Graph, Kind, Mixer, Profile, Recorder, Sink, TRANSCRIPTION_NODES, Used, Using,
+    app_key,
+};
 pub use set::{Ask, Known, Set, Step};
 
 /// A volume and its mute.

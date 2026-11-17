@@ -17,6 +17,13 @@
 //! `#FFD9DB`). The dot beats from 1 to 0.35 of its opacity and back over
 //! 1.4 s; paused, it is amber `#F5B44A` and still, the time "pause".
 //!
+//! A meeting's transcription is a tile of its own (docs/design/meetings.md)
+//! after the camera's: the waveform in `#F2545B` on its tint
+//! (`rgba(242,84,91,0.16)`) and its time (Martian Mono 12 px, `#FFD9DB`),
+//! side by side in the full form's row (77 × 24, as the mockup draws it),
+//! the waveform over the time in the mini form's column (36 × 44, as the
+//! recording's). It draws again as its time's second changes.
+//!
 //! It pops in over 200 ms as it appears (`ease-out`, from 0.9 of its size
 //! and transparent), a fade alone with reduced motion; then it draws only
 //! when what it shows changes: while a recording runs, as its time's second
@@ -63,6 +70,18 @@ const REC_INK: Ink = Ink::Dark(rgb(0xFFD9DB));
 pub const REC_RED: Ink = Ink::Dark(rgb(0xF2545B));
 pub const REC_AMBER: Ink = Ink::Dark(rgb(0xF5B44A));
 const MONO: iced::Font = iced::Font::with_name("Martian Mono");
+/// A transcription's tile: in the full form's row, its waveform beside its
+/// time (8 px in at its sides, 5 between); in the mini form's column, over
+/// it (6 px in above and under, 4 between).
+pub const TX_FULL: Size = Size::new(TX_SIDE + TX_ICON + TX_GAP + TX_TIME_ROOM + TX_SIDE, 24.0);
+pub const TX_MINI: Size = Size::new(36.0, REC_PAD + TX_MINI_ICON + REC_GAP + REC_LINE + REC_PAD);
+const TX_SIDE: f32 = 8.0;
+const TX_ICON: f32 = 14.0;
+const TX_MINI_ICON: f32 = 12.0;
+const TX_GAP: f32 = 5.0;
+/// "18:42" in Martian Mono 12 px.
+const TX_TIME_ROOM: f32 = 5.0 * MONO_ADVANCE * REC_TIME;
+const TX_RADIUS: f32 = 7.0;
 /// Martian Mono's advance, of its size: 700 of its 1000 units.
 const MONO_ADVANCE: f32 = 0.7;
 /// The dot's beat: from 1 to 0.35 of its opacity and back.
@@ -106,15 +125,17 @@ pub fn colour(kind: Kind, muted: bool) -> Color {
         Kind::Microphone if muted => MUTED.get(),
         Kind::Microphone => MICROPHONE.get(),
         Kind::Camera => CAMERA.get(),
-        Kind::Recording => REC_RED.get(),
+        Kind::Recording | Kind::Transcription => REC_RED.get(),
         Kind::Screen => SCREEN.get(),
     }
 }
 
-/// Kind `kind`'s tile's size.
-fn tile(kind: Kind) -> Size {
-    match kind {
-        Kind::Recording => REC_TILE,
+/// Kind `kind`'s tile's size in `form`.
+fn tile(kind: Kind, form: Form) -> Size {
+    match (kind, form) {
+        (Kind::Recording, _) => REC_TILE,
+        (Kind::Transcription, Form::Full) => TX_FULL,
+        (Kind::Transcription, Form::Mini) => TX_MINI,
         _ => TILE,
     }
 }
@@ -126,7 +147,7 @@ pub fn size(form: Form, kinds: &[Kind]) -> Size {
     let sizes: Vec<Size> = if kinds.is_empty() {
         vec![TILE]
     } else {
-        kinds.iter().map(|k| tile(*k)).collect()
+        kinds.iter().map(|k| tile(*k, form)).collect()
     };
     let gaps = (sizes.len() - 1) as f32 * TILE_GAP;
     match form {
@@ -148,7 +169,7 @@ pub fn tiles(rect: Rectangle, form: Form, kinds: &[Kind]) -> Vec<Rectangle> {
     kinds
         .iter()
         .map(|kind| {
-            let tile = tile(*kind);
+            let tile = tile(*kind, form);
             let at = match form {
                 Form::Mini => {
                     Point::new(rect.center_x() - tile.width / 2.0, rect.y + PAD_Y + along)
@@ -408,10 +429,14 @@ impl Items for Sign {
             .live_recording()
             .filter(|rec| !rec.shown.paused)
             .map(|rec| next_draw(*now, rec.elapsed(*now), self.motion));
-        let next = match (popping, recording) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }?;
+        // Transcribing: as its time's second changes.
+        let transcribing = uses
+            .live_transcription()
+            .map(|tx| next_draw(*now, tx.elapsed(*now), false));
+        let next = [popping, recording, transcribing]
+            .into_iter()
+            .flatten()
+            .min()?;
         Some(canvas::Action::request_redraw_at(next))
     }
 
@@ -440,6 +465,11 @@ impl Items for Sign {
             .recording
             .as_ref()
             .map(|rec| RecShown::of(rec, now, self.words, self.motion));
+        // The transcription's time; once it ended, the time it ended at.
+        let tx = uses
+            .transcription
+            .as_ref()
+            .map(|tx| elapsed(tx.what.elapsed(tx.ended.unwrap_or(now))));
         let still = self.forms.len() == 1;
         let open = still && popover::with(|c| c.shows(&self.bar, Item::InUse));
         for &(form, alpha) in &self.forms {
@@ -454,6 +484,7 @@ impl Items for Sign {
                     kinds: &kinds,
                     muted: uses.muted,
                     rec: rec.as_ref(),
+                    tx: tx.as_deref(),
                 };
                 draw_sign(f, rect, form, &shown, lit, alpha * opacity);
             });
@@ -498,6 +529,8 @@ pub struct Shown<'a> {
     pub kinds: &'a [Kind],
     pub muted: bool,
     pub rec: Option<&'a RecShown>,
+    /// The transcription's time.
+    pub tx: Option<&'a str>,
 }
 
 /// The sign at `rect` in `form`: its tint, then a tile per kind.
@@ -509,7 +542,12 @@ pub fn draw_sign(
     lit: bool,
     alpha: f32,
 ) {
-    let Shown { kinds, muted, rec } = *shown;
+    let Shown {
+        kinds,
+        muted,
+        rec,
+        tx,
+    } = *shown;
     f.fill(
         &kit::rounded(rect, RADIUS),
         faded(if lit { LIT.get() } else { FILL.get() }, alpha),
@@ -519,6 +557,10 @@ pub fn draw_sign(
             if let Some(rec) = rec {
                 draw_rec(f, tile, rec, alpha);
             }
+            continue;
+        }
+        if *kind == Kind::Transcription {
+            draw_tx(f, tile, form, tx.unwrap_or_default(), alpha);
             continue;
         }
         let grey = *kind == Kind::Microphone && muted;
@@ -577,6 +619,71 @@ pub fn draw_rec(f: &mut Frame, rect: Rectangle, rec: &RecShown, alpha: f32) {
     ));
 }
 
+/// A transcription's tile at `rect` in `form`: its tint, its waveform
+/// beside its time (full) or over it (mini).
+pub fn draw_tx(f: &mut Frame, rect: Rectangle, form: Form, said: &str, alpha: f32) {
+    f.fill(&kit::rounded(rect, TX_RADIUS), faded(REC_FILL.get(), alpha));
+    let (icon, at, align, room) = match form {
+        Form::Full => (
+            Rectangle::new(
+                Point::new(rect.x + TX_SIDE, rect.center_y() - TX_ICON / 2.0),
+                Size::new(TX_ICON, TX_ICON),
+            ),
+            Point::new(rect.x + TX_SIDE + TX_ICON + TX_GAP, rect.center_y()),
+            Alignment::Left,
+            TX_TIME_ROOM + 2.0,
+        ),
+        Form::Mini => (
+            Rectangle::new(
+                Point::new(rect.center_x() - TX_MINI_ICON / 2.0, rect.y + REC_PAD),
+                Size::new(TX_MINI_ICON, TX_MINI_ICON),
+            ),
+            Point::new(
+                rect.center_x(),
+                rect.y + REC_PAD + TX_MINI_ICON + REC_GAP + REC_LINE / 2.0,
+            ),
+            Alignment::Center,
+            rect.width,
+        ),
+    };
+    waveform(f, icon, faded(REC_RED.get(), alpha));
+    f.fill_text(kit::text_in(
+        MONO,
+        kit::text(
+            said.to_owned(),
+            at,
+            time_size(said, room),
+            faded(REC_INK.get(), alpha),
+            align,
+        ),
+    ));
+}
+
+/// The mockup's waveform (five bars, 24 px grid, stroked 2.2) in `rect`.
+pub fn waveform(f: &mut Frame, rect: Rectangle, colour: Color) {
+    let k = rect.width / 24.0;
+    let p = |x: f32, y: f32| Point::new(rect.x + x * k, rect.y + y * k);
+    let path = Path::new(|b| {
+        for (x, top, bottom) in [
+            (4.0, 10.0, 14.0),
+            (8.0, 7.0, 17.0),
+            (12.0, 4.0, 20.0),
+            (16.0, 7.0, 17.0),
+            (20.0, 10.0, 14.0),
+        ] {
+            b.move_to(p(x, top));
+            b.line_to(p(x, bottom));
+        }
+    });
+    f.stroke(
+        &path,
+        Stroke::default()
+            .with_color(colour)
+            .with_width(2.2 * k)
+            .with_line_cap(LineCap::Round),
+    );
+}
+
 /// Kind `kind`'s icon (the mockup's 24 px drawings, stroked 2 px) in
 /// `rect`.
 pub fn draw_icon(f: &mut Frame, kind: Kind, rect: Rectangle, colour: Color) {
@@ -605,8 +712,8 @@ pub fn draw_icon(f: &mut Frame, kind: Kind, rect: Rectangle, colour: Color) {
             b.line_to(p(20.5, 16.5));
             b.line_to(p(15.0, 13.5));
         }
-        // Its tile has no icon: its dot and its time.
-        Kind::Recording => {}
+        // Their tiles draw their own: the dot, the waveform.
+        Kind::Recording | Kind::Transcription => {}
         Kind::Screen => {
             b.move_to(p(3.5, 5.0));
             b.line_to(p(20.5, 5.0));

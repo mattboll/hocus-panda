@@ -130,6 +130,11 @@ pub fn hocus_program() -> std::path::PathBuf {
     built("hocus", "hocus-cli")
 }
 
+/// `hocus-transcribe`, which makes a meeting's text, as [`shell_program`].
+pub fn transcribe_program() -> std::path::PathBuf {
+    built("hocus-transcribe", "hocus-transcribe")
+}
+
 /// The workspace's program `name` (of the package `package`), built next
 /// to the test's, and fresh; the test fails without it.
 fn built(name: &str, package: &str) -> std::path::PathBuf {
@@ -2821,12 +2826,17 @@ pub struct Notifications {
 }
 
 /// A notification as the server heard it: its summary, its body, and
-/// whether it came with an image (`image-data`).
+/// whether it came with an image (`image-data`); its id (the one it
+/// replaced, else a new one), its actions' keys and its progress
+/// (`value`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
     pub summary: String,
     pub body: String,
     pub image: bool,
+    pub id: u32,
+    pub actions: Vec<String>,
+    pub value: Option<i32>,
 }
 
 impl Drop for Notifications {
@@ -2844,11 +2854,11 @@ impl Server {
     fn notify(
         &self,
         _app: String,
-        _replaces: u32,
+        replaces: u32,
         _icon: String,
         summary: String,
         body: String,
-        _actions: Vec<String>,
+        actions: Vec<String>,
         hints: std::collections::HashMap<String, zbus::OwnedVariant>,
         _timeout: i32,
     ) -> u32 {
@@ -2856,12 +2866,23 @@ impl Server {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let id = if replaces > 0 {
+            replaces
+        } else {
+            said.len() as u32 + 1
+        };
         said.push(Note {
             summary,
             body,
             image: hints.contains_key("image-data"),
+            id,
+            // Key, label, key, label…: the keys.
+            actions: actions.iter().step_by(2).cloned().collect(),
+            value: hints
+                .get("value")
+                .and_then(|v| i32::try_from(v.clone()).ok()),
         });
-        said.len() as u32
+        id
     }
 }
 
@@ -2894,6 +2915,25 @@ impl Notifications {
             _connection: connection,
             _runtime: runtime,
         }))
+    }
+
+    /// The user chose action `key` of notification `id`, as the server
+    /// says it (`ActionInvoked`).
+    pub fn invoke(&self, id: u32, key: &str) -> anyhow::Result<()> {
+        let connection = self._connection.clone();
+        let key = key.to_owned();
+        self._runtime.block_on(async move {
+            connection
+                .emit_signal(
+                    None::<&str>,
+                    "/org/freedesktop/Notifications",
+                    "org.freedesktop.Notifications",
+                    "ActionInvoked",
+                    &(id, key),
+                )
+                .await
+        })?;
+        Ok(())
     }
 
     /// The summaries said, in order.

@@ -333,6 +333,12 @@
 # format = "mp4"
 # folder = ""
 
+# [meetings]
+# Where a meeting's transcription is written (docs/design/meetings.md):
+# empty, the documents' folder's "Meetings" ("Réunions" in French); else
+# absolute, or from the home ("~/"). Followed live, taken by the next one.
+# folder = ""
+
 # [clipboard]
 # The clipboard's history (Super+V), followed live. Off, nothing new is
 # read or kept, the history shows its pinned items only and erases the

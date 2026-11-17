@@ -496,6 +496,14 @@ fn to_shell() -> Vec<ToShell> {
             elapsed: 754_321,
         }),
         ToShell::RecordingEnd,
+        ToShell::Transcribing(TranscribingShown {
+            id: 3,
+            event: "evt-1".into(),
+            title: "Point produit".into(),
+            app: "Firefox".into(),
+            elapsed: 61_200,
+        }),
+        ToShell::TranscribingEnd,
         ToShell::Recorded(Recorded {
             id: 2,
             output: "eDP-1".into(),
@@ -1042,6 +1050,20 @@ fn to_compositor() -> Vec<ToCompositor> {
     );
     all.extend(
         [
+            TranscribeAsk::Start(TranscribeMeeting {
+                event: "evt-1_20261117T140000Z".into(),
+                title: "Point « produit »".into(),
+                start: "2026-11-17T14:00:00Z".into(),
+                end: "2026-11-17T14:30:00Z".into(),
+                attendees: vec!["Alex".into(), "Sam Durand".into()],
+                app: "org.mozilla.firefox".into(),
+            }),
+            TranscribeAsk::Stop,
+        ]
+        .map(ToCompositor::Transcribe),
+    );
+    all.extend(
+        [
             LeaveAsk::Open,
             LeaveAsk::Ask {
                 action: LeaveAction::LogOut,
@@ -1191,6 +1213,10 @@ fn every_kind_reads_back_as_written() {
     );
     assert_eq!(inner_of(&seen, "capture"), kinds::<CaptureAsk>(r#""?""#));
     assert_eq!(inner_of(&seen, "record"), kinds::<RecordAsk>(r#""?""#));
+    assert_eq!(
+        inner_of(&seen, "transcribe"),
+        kinds::<TranscribeAsk>(r#""?""#)
+    );
     assert_eq!(inner_of(&seen, "leave"), kinds::<LeaveAsk>(r#""?""#));
     assert_eq!(inner_of(&seen, "share"), kinds::<ShareAsk>(r#""?""#));
     assert_eq!(inner_of(&seen, "lock"), kinds::<LockAsk>(r#""?""#));

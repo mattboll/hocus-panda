@@ -1288,6 +1288,7 @@ mod tests {
                     page: None,
                     description: None,
                     alarms: Vec::new(),
+                    attendees: Vec::new(),
                 })
                 .filter(|e| e.overlaps(range.from, range.to, &zone))
                 .collect();

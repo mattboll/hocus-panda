@@ -326,6 +326,9 @@ impl Words {
                     Kind::Camera => txt::camera_used_by(self.lang, &apps),
                     Kind::Screen => txt::screen_shared_with(self.lang, &apps),
                     Kind::Recording => txt::RECORDING_THE_SCREEN.get(self.lang).to_owned(),
+                    Kind::Transcription => hocus_words::shell::transcribe::TRANSCRIPTION
+                        .get(self.lang)
+                        .to_owned(),
                 }
             })
             .collect();

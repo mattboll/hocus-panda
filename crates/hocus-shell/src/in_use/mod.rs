@@ -53,6 +53,9 @@ pub const LINGER: Duration = Duration::from_secs(3);
 pub enum Kind {
     Microphone,
     Camera,
+    /// A meeting's transcription, its red tile with its time
+    /// (docs/design/meetings.md).
+    Transcription,
     /// The recording, its red tile with its time (5.10's item).
     Recording,
     /// What is shared.
@@ -109,6 +112,21 @@ impl Rec {
     }
 }
 
+/// A meeting's transcription recording, as the compositor told it, and
+/// when.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tx {
+    pub shown: hocus_link::TranscribingShown,
+    pub at: Instant,
+}
+
+impl Tx {
+    /// How long it has recorded at `now`.
+    pub fn elapsed(&self, now: Instant) -> Duration {
+        crate::transcribe::elapsed(&self.shown, self.at, now)
+    }
+}
+
 /// What is in use, and what lingers.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Uses {
@@ -116,6 +134,7 @@ pub struct Uses {
     pub camera: Vec<Seen<Media>>,
     pub shares: Vec<Seen<ShareShown>>,
     pub recording: Option<Seen<Rec>>,
+    pub transcription: Option<Seen<Tx>>,
     /// The default source is muted: the microphone's tile is grey.
     pub muted: bool,
     /// When the sign last appeared: it pops in from then.
@@ -131,6 +150,9 @@ impl Uses {
         }
         if !self.camera.is_empty() {
             kinds.push(Kind::Camera);
+        }
+        if self.transcription.is_some() {
+            kinds.push(Kind::Transcription);
         }
         if self.recording.is_some() {
             kinds.push(Kind::Recording);
@@ -172,6 +194,9 @@ impl Uses {
                 used.push((kind, apps));
             }
         }
+        if self.transcription.as_ref().is_some_and(|t| t.live()) {
+            used.push((Kind::Transcription, Vec::new()));
+        }
         if self.recording.as_ref().is_some_and(|r| r.live()) {
             used.push((Kind::Recording, Vec::new()));
         }
@@ -181,6 +206,14 @@ impl Uses {
     /// The shares still on (not lingering).
     pub fn live_shares(&self) -> impl Iterator<Item = &ShareShown> {
         self.shares.iter().filter(|s| s.live()).map(|s| &s.what)
+    }
+
+    /// The transcription still recording.
+    pub fn live_transcription(&self) -> Option<&Tx> {
+        self.transcription
+            .as_ref()
+            .filter(|t| t.live())
+            .map(|t| &t.what)
     }
 
     /// The recording still on.
@@ -199,7 +232,8 @@ impl Uses {
             .chain(&self.camera)
             .filter_map(|s| s.ended)
             .chain(self.shares.iter().filter_map(|s| s.ended))
-            .chain(self.recording.iter().filter_map(|r| r.ended));
+            .chain(self.recording.iter().filter_map(|r| r.ended))
+            .chain(self.transcription.iter().filter_map(|t| t.ended));
         ends.min().map(|end| end + LINGER)
     }
 
@@ -219,6 +253,9 @@ impl Uses {
         self.shares.retain(|s| keep(s.ended));
         if self.recording.as_ref().is_some_and(|r| !keep(r.ended)) {
             self.recording = None;
+        }
+        if self.transcription.as_ref().is_some_and(|t| !keep(t.ended)) {
+            self.transcription = None;
         }
         last
     }
@@ -364,6 +401,10 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
     effects.push(Effect::Wake(IN_USE_NAMESPACE));
     popover::send(effects);
     popover::changed(Item::InUse);
+    // The meeting card's button follows who uses the microphone.
+    if before.microphone != after.microphone {
+        crate::transcribe::uses_changed();
+    }
 }
 
 /// The sound's graph: who uses the microphone (their streams linked to a
@@ -403,6 +444,21 @@ pub fn set_recording(shown: Option<RecordingShown>) {
         follow(&mut seen, live, |r| r.shown.id, now);
         // One at a time: the one on, else the newest.
         s.uses.recording = seen.into_iter().max_by_key(|r| (r.live(), r.since));
+    });
+}
+
+/// The compositor's `transcribing` (`Some`) and `transcribing-end`
+/// (`crate::transcribe`).
+pub fn set_transcribing(shown: Option<hocus_link::TranscribingShown>) {
+    let now = Instant::now();
+    update(now, |s| {
+        let live: Vec<Tx> = shown
+            .map(|shown| Tx { shown, at: now })
+            .into_iter()
+            .collect();
+        let mut seen: Vec<Seen<Tx>> = s.uses.transcription.take().into_iter().collect();
+        follow(&mut seen, live, |t| t.shown.id, now);
+        s.uses.transcription = seen.into_iter().max_by_key(|t| (t.live(), t.since));
     });
 }
 
@@ -630,6 +686,7 @@ impl Words {
             Kind::Microphone => self.pick(txt::MICROPHONE),
             Kind::Camera => self.pick(txt::CAMERA),
             Kind::Recording | Kind::Screen => self.pick(txt::SCREEN),
+            Kind::Transcription => hocus_words::shell::transcribe::TRANSCRIPTION.get(self.lang),
         }
     }
 

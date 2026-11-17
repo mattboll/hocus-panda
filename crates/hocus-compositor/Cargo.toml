@@ -25,6 +25,11 @@ hocus-link.workspace = true
 hocus-pandas.workspace = true
 # The desktop's languages and words.
 hocus-words.workspace = true
+# A meeting's transcription: its places, record, tracks and the lines
+# hocus-transcribe says; the call's streams found by their application's
+# key, as the bar's sound finds them.
+hocus-meetings.workspace = true
+hocus-sound.workspace = true
 # A panic said in the log before the program ends (#778).
 hocus-panic.workspace = true
 hocus-agents.workspace = true

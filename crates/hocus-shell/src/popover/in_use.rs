@@ -97,6 +97,8 @@ const TICK: Duration = Duration::from_secs(1);
 enum Line {
     Microphone(usize),
     Camera(usize),
+    /// A meeting's transcription (docs/design/meetings.md).
+    Transcription,
     Recording,
     Share(u64),
 }
@@ -106,6 +108,7 @@ impl Line {
         match self {
             Self::Microphone(_) => Kind::Microphone,
             Self::Camera(_) => Kind::Camera,
+            Self::Transcription => Kind::Transcription,
             Self::Recording | Self::Share(_) => Kind::Screen,
         }
     }
@@ -118,6 +121,7 @@ pub enum Target {
     Stop(u64),
     Pause,
     StopRecording,
+    StopTranscription,
 }
 
 impl Target {
@@ -153,6 +157,7 @@ fn layout(uses: &Uses) -> Layout {
     let all = (0..uses.microphone.len())
         .map(Line::Microphone)
         .chain((0..uses.camera.len()).map(Line::Camera))
+        .chain(uses.transcription.iter().map(|_| Line::Transcription))
         .chain(uses.recording.iter().map(|_| Line::Recording))
         .chain(uses.shares.iter().map(|s| Line::Share(s.what.id)));
     for line in all {
@@ -179,6 +184,9 @@ fn layout(uses: &Uses) -> Layout {
     };
     if !uses.microphone.is_empty() {
         row(&mut y, &[(Target::Mute, left, room)]);
+    }
+    if uses.live_transcription().is_some() {
+        row(&mut y, &[(Target::StopTranscription, left, room)]);
     }
     for share in uses.live_shares() {
         row(&mut y, &[(Target::Stop(share.id), left, room)]);
@@ -392,6 +400,15 @@ fn said_of(words: Words, uses: &Uses, line: Line, now: Instant) -> Option<Said> 
     match line {
         Line::Microphone(i) => uses.microphone.get(i).map(media),
         Line::Camera(i) => uses.camera.get(i).map(media),
+        Line::Transcription => {
+            let tx = uses.transcription.as_ref()?;
+            let time = crate::in_use::draw::elapsed(tx.what.elapsed(tx.ended.unwrap_or(now)));
+            Some(Said {
+                app: tx.what.shown.title.clone(),
+                what: hocus_words::shell::transcribe::line(words.lang, time),
+                colour,
+            })
+        }
         Line::Recording => {
             let rec = uses.recording.as_ref()?;
             Some(Said {
@@ -443,6 +460,18 @@ fn icon(words: Words, uses: &Uses, line: Line) -> Draw {
                 None => Box::new(|_, _| {}),
             }
         }
+        Line::Transcription => Box::new(move |f, rect| {
+            f.fill(&kit::rounded(rect, ICON_RADIUS), REC_FILL.get());
+            let k = 16.0;
+            crate::in_use::draw::waveform(
+                f,
+                Rectangle::new(
+                    Point::new(rect.center_x() - k / 2.0, rect.center_y() - k / 2.0),
+                    Size::new(k, k),
+                ),
+                REC_RED.get(),
+            );
+        }),
         Line::Recording => {
             // 5.10's item: its tint, its dot (amber while paused).
             let paused = uses.recording.as_ref().is_some_and(|r| r.what.shown.paused);
@@ -532,6 +561,15 @@ fn button_of<'a>(words: Words, uses: &Uses, target: Target, focus: Option<Target
             Role::Button,
             Length::Fill,
         ),
+        Target::StopTranscription => {
+            let stop = hocus_words::shell::transcribe::STOP.get(words.lang);
+            (
+                word(stop.to_owned(), Color::WHITE),
+                stop.to_owned(),
+                Role::Button,
+                Length::Fill,
+            )
+        }
     };
     let pressed = button(face)
         .padding(0)
@@ -551,7 +589,9 @@ fn button_of<'a>(words: Words, uses: &Uses, target: Target, focus: Option<Target
                     (Some(blue.get()), HOVER, None)
                 }
                 Target::Pause => (Some(REC_PAUSE.get()), REC_HOVER, None),
-                Target::StopRecording => (Some(REC_STOP.get()), REC_HOVER, None),
+                Target::StopRecording | Target::StopTranscription => {
+                    (Some(REC_STOP.get()), REC_HOVER, None)
+                }
             };
             let lit_fill = !matches!(target, Target::Stop(_)) && lit;
             let background = match (fill, lit_fill && !contrast) {
@@ -625,6 +665,9 @@ fn say(words: Words, uses: &Uses, layout: &Layout, now: Instant, ui: &mut Ui) {
             Target::Stop(id) => stop_word(words, uses, *id),
             Target::Pause => "⏸".to_owned(),
             Target::StopRecording => words.stop_recording().to_owned(),
+            Target::StopTranscription => hocus_words::shell::transcribe::STOP
+                .get(words.lang)
+                .to_owned(),
         });
     }
     let changed = ui.said.as_ref().is_none_or(|before| {
@@ -683,6 +726,9 @@ fn act(target: Target) {
         Target::StopRecording => {
             tracing::debug!(ask = ?RecordAsk::Stop, "the recording from the bar");
             super::tell(ToCompositor::Record(RecordAsk::Stop));
+        }
+        Target::StopTranscription => {
+            super::send(crate::transcribe::stop().into_iter().collect());
         }
     }
 }

@@ -76,6 +76,8 @@ pub struct Config {
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
     pub recording: Recording,
+    /// Where meetings' texts go (docs/design/meetings.md).
+    pub meetings: Meetings,
     /// What the clipboard's history keeps (6.17).
     pub clipboard: Clipboard,
     /// How the bar calls the user for the agents: the halo, its reminder,
@@ -154,6 +156,22 @@ pub struct Config {
     /// `PATH`. Not part of the file.
     #[serde(skip)]
     pub ffmpeg: PathBuf,
+    /// Where meetings' sound waits for its text and the models are kept
+    /// (`$XDG_STATE_HOME/hocuspanda`, `$XDG_DATA_HOME/hocuspanda`). Not
+    /// part of the file; `None` transcribes nothing (tests, unless they
+    /// give theirs).
+    #[serde(skip)]
+    pub meeting_places: Option<hocus_meetings::Places>,
+    /// The documents' folder, where meetings' texts go in a folder of
+    /// their own: `$XDG_DOCUMENTS_DIR`, else xdg-user-dirs', else
+    /// `~/Documents`. Not part of the file.
+    #[serde(skip)]
+    pub documents: Option<PathBuf>,
+    /// The program that makes a meeting's text; empty:
+    /// `hocus-transcribe`, on the `PATH` (the session's is the one beside
+    /// the compositor). Not part of the file.
+    #[serde(skip)]
+    pub transcriber: PathBuf,
     /// The home `~/` stands for in the file's paths (a wallpaper's): `HOME`.
     /// Not part of the file; `None`: a `~/` path is not found (tests,
     /// unless they give one).
@@ -204,6 +222,15 @@ impl Config {
         };
         path.is_absolute().then_some(path)
     }
+}
+
+/// Meetings' transcriptions, `[meetings]` (docs/design/meetings.md).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Meetings {
+    /// Where their texts go. Empty: the documents' folder's "Réunions"
+    /// ("Meetings"); else absolute, or from the home (`~/`).
+    pub folder: String,
 }
 
 /// The screen capture, `[capture]` (5.8, 6.17): where its images go, in

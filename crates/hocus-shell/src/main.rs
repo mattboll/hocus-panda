@@ -78,6 +78,7 @@ mod surfaces;
 mod tasks;
 mod theme;
 mod today;
+mod transcribe;
 mod tray;
 mod ui;
 mod user;
@@ -935,6 +936,14 @@ impl Shell {
             }
             ToShell::RecordingEnd => {
                 in_use::set_recording(None);
+                Task::none()
+            }
+            ToShell::Transcribing(shown) => {
+                transcribe::set(Some(shown));
+                Task::none()
+            }
+            ToShell::TranscribingEnd => {
+                transcribe::set(None);
                 Task::none()
             }
             ToShell::Recorded(recorded) => {
@@ -1935,6 +1944,15 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::RecordingEnd => {
                             in_use::set_recording(None);
+                            continue;
+                        }
+                        // A meeting's transcription (docs/design/meetings.md).
+                        ToShell::Transcribing(shown) => {
+                            transcribe::set(Some(shown));
+                            continue;
+                        }
+                        ToShell::TranscribingEnd => {
+                            transcribe::set(None);
                             continue;
                         }
                         ToShell::Recorded(recorded) => {

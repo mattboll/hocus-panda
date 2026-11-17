@@ -858,6 +858,9 @@ impl State {
         if self.record.recording() {
             self.tell_recording();
         }
+        if self.transcribe.recording() {
+            self.tell_transcribing();
+        }
         self.lock_shell_connected();
         self.away_shell_connected();
         self.leave_shell_connected();
@@ -1008,6 +1011,7 @@ impl State {
             ToCompositor::Share(ask) => self.share_asked(ask),
             ToCompositor::Auth(ask) => self.auth_asked(ask),
             ToCompositor::Record(ask) => self.record_asked(ask),
+            ToCompositor::Transcribe(ask) => self.transcribe_asked(ask),
             ToCompositor::Launch(launch) => self.launch(launch),
             ToCompositor::Raise { pid, app } => self.raise_app(pid, &app),
             ToCompositor::Converse {

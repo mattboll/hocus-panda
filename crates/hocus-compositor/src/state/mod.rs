@@ -122,6 +122,8 @@ pub struct State {
     pub auth: crate::auth::Auth,
     /// Screen recording (5.10).
     pub record: crate::record::Recording,
+    /// Meetings' transcriptions (docs/design/meetings.md).
+    pub transcribe: crate::transcribe::Transcription,
     /// The strokes, the arrows and the laser drawn on the screens
     /// (docs/design/ink.md).
     pub ink: crate::ink::Ink,
@@ -328,6 +330,7 @@ impl State {
             share: crate::share::Sharing::default(),
             auth: crate::auth::Auth::default(),
             record: crate::record::Recording::default(),
+            transcribe: crate::transcribe::Transcription::default(),
             ink: crate::ink::Ink::default(),
             actions: crate::actions::Palette::default(),
             overview: None,

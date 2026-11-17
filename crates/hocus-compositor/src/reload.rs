@@ -12,7 +12,7 @@
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
 //! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14),
 //! `[magnifier]` (#424), `[accessibility]` (#734), `[developer]` (#783),
-//! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[agents]`
+//! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[meetings]`, `[agents]`
 //! (6.16), and the idle chain's and power's keys (6.10). A keyboard whose
 //! layouts or options changed has its keymap compiled on the thread too
 //! (XKB reads its files), the loop only taking it in; its repeat is given
@@ -302,6 +302,11 @@ impl State {
         if new.recording != self.config.recording {
             self.config.recording = new.recording.clone();
             followed.push("[recording]");
+        }
+        // Where meetings' texts go: read as each recording starts.
+        if new.meetings != self.config.meetings {
+            self.config.meetings = new.meetings.clone();
+            followed.push("[meetings]");
         }
         // What the clipboard's history reads and keeps (6.17, clipboard.rs).
         if self.clipboard_config_changed(&new.clipboard) {
