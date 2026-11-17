@@ -1,7 +1,8 @@
 //! The real engine: the call's voices told apart by sherpa-onnx
 //! (pyannote's segmentation, 3D-Speaker's embeddings, clustered), then
 //! each track's speech heard by whisper.cpp (large-v3-turbo, its language
-//! found by itself), piece by piece.
+//! found by itself), packed in full windows; each of the call's lines is
+//! the voice's it overlaps most.
 
 use std::path::Path;
 
@@ -10,7 +11,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 
 use crate::{
     engine::{Engine, Heard},
-    speech::{self, Span},
+    speech::{self, Pack, Span},
     text::{Line, Speaker},
 };
 
@@ -23,6 +24,9 @@ pub struct Real {
     words: WhisperContext,
     voices: Option<sherpa_onnx::OfflineSpeakerDiarization>,
     threads: i32,
+    /// The track's language, once its first window found it: its next
+    /// windows are not heard twice to find it again.
+    lang: Option<&'static str>,
 }
 
 impl std::fmt::Debug for Real {
@@ -77,11 +81,12 @@ impl Real {
             words,
             voices,
             threads,
+            lang: None,
         })
     }
 
-    /// The call's turns: its voices told apart (by their first turn, 1,
-    /// 2…), else its speech as one speaker.
+    /// The call's voices, told apart (by their first turn: 1, 2…): their
+    /// turns; none when fewer than two are.
     fn turns(&self, call: &[f32]) -> Vec<(Span, Speaker)> {
         let told = self
             .voices
@@ -96,10 +101,7 @@ impl Real {
             }
         }
         if order.len() < 2 {
-            return speech::speech(call)
-                .into_iter()
-                .map(|s| (s, Speaker::Others))
-                .collect();
+            return Vec::new();
         }
         told.iter()
             .map(|s| {
@@ -115,16 +117,17 @@ impl Real {
             .collect()
     }
 
-    /// What `samples` say, as lines from `offset` (seconds).
-    fn hear_piece(
-        &self,
-        samples: &[f32],
-        offset: f64,
+    /// What `pack` of `track` says, as lines at the track's times.
+    fn hear_pack(
+        &mut self,
+        pack: &Pack,
+        track: &[f32],
         speaker: Speaker,
     ) -> anyhow::Result<Vec<Line>> {
+        let samples = pack.samples(track);
         let mut state = self.words.create_state()?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some("auto"));
+        params.set_language(Some(self.lang.unwrap_or("auto")));
         params.set_n_threads(self.threads);
         params.set_no_context(true);
         params.set_suppress_blank(true);
@@ -132,7 +135,10 @@ impl Real {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        state.full(params, samples)?;
+        state.full(params, &samples)?;
+        if self.lang.is_none() {
+            self.lang = whisper_rs::get_lang_str(state.full_lang_id_from_state());
+        }
         let mut lines = Vec::new();
         for segment in state.as_iter() {
             if segment.no_speech_probability() > NO_SPEECH {
@@ -141,18 +147,32 @@ impl Real {
             let text = segment.to_str_lossy()?.trim().to_owned();
             // Its marks for what is not speech: "[BLANK_AUDIO]", "(rires)".
             let marked = |open: char, close: char| text.starts_with(open) && text.ends_with(close);
-            if text.is_empty() || marked('[', ']') || marked('(', ')') {
+            let said = text.chars().any(char::is_alphanumeric);
+            if !said || marked('[', ']') || marked('(', ')') {
                 continue;
             }
             lines.push(Line {
-                start: offset + segment.start_timestamp() as f64 / 100.0,
-                end: offset + segment.end_timestamp() as f64 / 100.0,
+                start: pack.track_time(segment.start_timestamp() as f64 / 100.0),
+                end: pack.track_time(segment.end_timestamp() as f64 / 100.0),
                 speaker,
                 text,
             });
         }
         Ok(lines)
     }
+}
+
+/// The voice of `turns` a line from `start` to `end` overlaps most; "Les
+/// autres" without one.
+fn voice_of(turns: &[(Span, Speaker)], start: f64, end: f64) -> Speaker {
+    let mut best = (0.0, Speaker::Others);
+    for (span, speaker) in turns {
+        let overlap = end.min(span.end) - start.max(span.start);
+        if overlap > best.0 {
+            best = (overlap, *speaker);
+        }
+    }
+    best.1
 }
 
 impl Engine for Real {
@@ -163,49 +183,40 @@ impl Engine for Real {
         progress: &mut dyn FnMut(f32),
     ) -> anyhow::Result<Heard> {
         // The voices first: a tenth of the work, about.
-        let call_turns = self.turns(call);
+        let turns = self.turns(call);
         progress(0.1);
-        let mut pieces: Vec<(Span, Speaker, bool)> = speech::pieces(&speech::speech(me))
+        let packs: Vec<(Pack, bool)> = speech::pack(&speech::speech(me))
             .into_iter()
-            .map(|s| (s, Speaker::Me, true))
+            .map(|p| (p, true))
+            .chain(
+                speech::pack(&speech::speech(call))
+                    .into_iter()
+                    .map(|p| (p, false)),
+            )
             .collect();
-        // The call's turns, a voice's neighbouring ones together.
-        let mut by_voice: Vec<(Span, Speaker)> = Vec::new();
-        for (span, speaker) in call_turns {
-            match by_voice.last_mut() {
-                Some((last, who))
-                    if *who == speaker
-                        && span.end - last.start <= speech::LONGEST
-                        && span.start - last.end < 1.0 =>
-                {
-                    last.end = span.end;
-                }
-                _ => by_voice.push((span, speaker)),
-            }
-        }
-        for (span, speaker) in by_voice {
-            for piece in speech::pieces(&[span]) {
-                pieces.push((piece, speaker, false));
-            }
-        }
-        // Its progress said piece by piece: 28 s of sound at most each.
-        let total: f64 = pieces
-            .iter()
-            .map(|(s, _, _)| s.length())
-            .sum::<f64>()
-            .max(1.0);
+        // Its progress said pack by pack: 28 s of speech at most each.
+        let total: f64 = packs.iter().map(|(p, _)| p.length()).sum::<f64>().max(1.0);
         let mut gone = 0.0;
         let mut heard = Heard::default();
-        for (span, speaker, mine) in pieces {
-            let samples = span.of(if mine { me } else { call });
-            let lines = self.hear_piece(samples, span.start, speaker)?;
-            gone += span.length();
-            progress((0.1 + 0.9 * (gone / total)) as f32);
-            if mine {
-                heard.me.extend(lines);
-            } else {
-                heard.call.extend(lines);
+        let mut track = None;
+        for (pack, mine) in packs {
+            // Each track's language found on its own first window: the
+            // others may speak another.
+            if track != Some(mine) {
+                track = Some(mine);
+                self.lang = None;
             }
+            if mine {
+                heard.me.extend(self.hear_pack(&pack, me, Speaker::Me)?);
+            } else {
+                let lines = self.hear_pack(&pack, call, Speaker::Others)?;
+                heard.call.extend(lines.into_iter().map(|line| Line {
+                    speaker: voice_of(&turns, line.start, line.end),
+                    ..line
+                }));
+            }
+            gone += pack.length();
+            progress((0.1 + 0.9 * (gone / total)) as f32);
         }
         Ok(heard)
     }
@@ -219,6 +230,30 @@ mod tests {
 
     use super::*;
     use crate::fetch;
+
+    #[test]
+    fn a_calls_line_is_the_voice_it_overlaps_most() {
+        let turns = [
+            (
+                Span {
+                    start: 0.0,
+                    end: 5.0,
+                },
+                Speaker::Voice(1),
+            ),
+            (
+                Span {
+                    start: 5.0,
+                    end: 9.0,
+                },
+                Speaker::Voice(2),
+            ),
+        ];
+        assert_eq!(voice_of(&turns, 1.0, 4.0), Speaker::Voice(1));
+        assert_eq!(voice_of(&turns, 4.0, 8.0), Speaker::Voice(2));
+        assert_eq!(voice_of(&turns, 10.0, 12.0), Speaker::Others);
+        assert_eq!(voice_of(&[], 1.0, 2.0), Speaker::Others);
+    }
 
     /// whisper.cpp's own sample (MIT): eleven seconds of a voice.
     const SAMPLE: Model = Model {

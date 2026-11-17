@@ -71,12 +71,14 @@ are told apart when they can be.
   the lowest (nice 19) and says what it does on its output, a JSON line at
   a time (`hocus_meetings::Said`).
 - **The engine**, behind a trait (`engine::Engine`): whisper.cpp
-  (`whisper-rs`, large-v3-turbo quantised q5_0, its language found by
-  itself) hears each track's speech in pieces of 28 s at most (where a
-  track speaks, by its loudness); sherpa-onnx tells the call's voices
-  apart first (pyannote's segmentation 3.0 and 3D-Speaker's CAM++,
-  clustered), "Voix 1", "Voix 2"… by their first turn; with one voice or
-  none told apart, "Les autres". A fake engine
+  (`whisper-rs`, large-v3-turbo quantised q5_0, each track's language
+  found on its first window) hears each track's speech (where it speaks, by its loudness),
+  packed in windows of 28 s at most, the silences between left out (it
+  hears 30 s at once whatever they hold); sherpa-onnx tells the call's
+  voices apart first (pyannote's segmentation 3.0 and 3D-Speaker's CAM++,
+  clustered), "Voix 1", "Voix 2"… by their first turn, and each of the
+  call's lines is the voice it overlaps most; with one voice or none told
+  apart, "Les autres". A fake engine
   (`HOCUS_TRANSCRIBE_FAKE=FILE`, fixed lines) stands for it in tests.
 - **The models** (`hocus_meetings::models`), 610 MB together, downloaded
   on first use into `$XDG_DATA_HOME/hocuspanda/models`, each checked
