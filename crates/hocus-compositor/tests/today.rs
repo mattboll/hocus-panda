@@ -304,6 +304,79 @@ impl Bed {
         Ok(common::drawn(&mut self.hp, TODAY_NAMESPACE)?[0].1)
     }
 
+    /// A click on Today's row that `row` finds in its last line "today is
+    /// drawn at rest" since `mark` with `holds`, `x` across, once its
+    /// surface shows that line's rows at their height and takes the
+    /// pointer there: that line. The shell fits the rows to the room the
+    /// column leaves, and fits them again as the column changes (the
+    /// fixture read again, the groups around placed): a line read
+    /// earlier, or a surface drawn before, can put a row where it no
+    /// longer is (#847). Aimed again at each line until it holds.
+    fn click_row(
+        &mut self,
+        mark: usize,
+        holds: &[&str],
+        x: i32,
+        row: impl Fn(&str) -> i32,
+    ) -> anyhow::Result<String> {
+        let start = Instant::now();
+        loop {
+            let line = self.logged_since(mark, "today is drawn at rest", holds)?;
+            let drawn = self
+                .hp
+                .drawn_layers(TODAY_NAMESPACE)
+                .first()
+                .map(|(_, r)| *r);
+            if let Some(rect) = drawn
+                && rect.height == surface_height(rows_said(&line))
+            {
+                let at = (f64::from(x), f64::from(line_middle(rect.y + 5, row(&line))));
+                self.hp.pointer_move(at.0 - 1.0, at.1);
+                self.hp.pointer_move(at.0, at.1);
+                common::wait(&mut self.hp, Duration::from_millis(30))?;
+                if self.hp.pointer_layer().as_deref() == Some(TODAY_NAMESPACE)
+                    && self.hp.undrawn_at(at.0, at.1).is_empty()
+                {
+                    self.hp.button(common::BTN_LEFT, true);
+                    self.hp.button(common::BTN_LEFT, false);
+                    return Ok(line);
+                }
+            }
+            anyhow::ensure!(
+                start.elapsed() < common::WAIT,
+                "Today never took the pointer on its row: {drawn:?}, {:?}, for {line}",
+                self.hp.pointer_layer()
+            );
+            self.hp
+                .dispatch_until(Duration::from_millis(20), |_| false)?;
+        }
+    }
+
+    /// The calendar open, closed with `Esc` once it holds the keyboard.
+    /// Opened from a line while it was open already, it would close and
+    /// open again: the one closing holds the keyboard a moment, and an
+    /// `Esc` it takes is lost (#847). Open from nothing, it is the only
+    /// one.
+    fn close_calendar(&mut self) -> anyhow::Result<()> {
+        let held = self.hp.dispatch_until(common::WAIT, |hp| {
+            hp.keyboard_layer().as_deref() == Some(hocus_link::POPOVER_NAMESPACE)
+                && hp.popover_surfaces().len() == 1
+        })?;
+        anyhow::ensure!(
+            held,
+            "the calendar never held the keyboard: {:?}, {:?}",
+            self.hp.keyboard_layer(),
+            self.hp.popover_surfaces()
+        );
+        self.hp.key(common::KEY_ESC, true);
+        self.hp.key(common::KEY_ESC, false);
+        let closed = self
+            .hp
+            .dispatch_until(common::WAIT, |hp| hp.popover_surfaces().is_empty())?;
+        anyhow::ensure!(closed, "the calendar stayed open");
+        Ok(())
+    }
+
     /// Writes the fixture anew, as an editor saves it.
     fn rewrite(&self, fixture: &str) -> anyhow::Result<()> {
         let new = self.fixture.with_extension("new");
@@ -317,6 +390,20 @@ impl Bed {
 /// (the screen's), and where its dot is.
 fn line_middle(top: i32, i: i32) -> i32 {
     top + 18 + 20 * i + 10
+}
+
+/// Today's surface's height with `rows` rows: its header and its lines,
+/// 5 px of room above and under.
+fn surface_height(rows: i32) -> i32 {
+    5 + 18 + 20 * rows + 5
+}
+
+/// The rows a line "today is drawn at rest" says: its events and its
+/// "+ N".
+fn rows_said(line: &str) -> i32 {
+    let events = line.matches('«').count();
+    let more = usize::from(line.contains("autres aujourd'hui"));
+    (events + more) as i32
 }
 const LINE_X: i32 = 1920 - 8 - 196 + 12;
 const DOT_X: i32 = LINE_X + 38 + 7 + 3;
@@ -503,47 +590,37 @@ fn a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar() 
         &ordinary(),
         FormChoice::Full,
     )?;
-    bed.today_from(0, "AUJOURD'HUI 15:00")?;
-    let top = bed.surface()?.y + 5;
-    let at = |i| (f64::from(LINE_X + 80), f64::from(line_middle(top, i)));
+    let ordinary = ["shows=AUJOURD'HUI 15:00"];
     // With a video link: the call.
-    common::click_on(&mut bed.hp, at(0), TODAY_NAMESPACE)?;
+    bed.click_row(0, &ordinary, LINE_X + 80, |_| 0)?;
     assert_eq!(bed.opened(1)?, ["https://meet.example.org/entretien"]);
     // Without: the calendar (Day.5) on today, the event chosen, a page or
     // none.
     let mark = bed.mark();
-    common::click_on(&mut bed.hp, at(1), TODAY_NAMESPACE)?;
+    bed.click_row(0, &ordinary, LINE_X + 80, |_| 1)?;
     bed.logged_since(
         mark,
         "the calendar opens",
         &["day=2026-11-04", "focus=Some(Event(EventId(\"workshop\")))"],
     )?;
+    bed.close_calendar()?;
     let mark = bed.mark();
-    common::click_on(&mut bed.hp, at(2), TODAY_NAMESPACE)?;
+    bed.click_row(0, &ordinary, LINE_X + 80, |_| 2)?;
     bed.logged_since(
         mark,
         "the calendar opens",
         &["day=2026-11-04", "focus=Some(Event("],
     )?;
     // Closed (`Esc`) before the day changes under it.
-    bed.hp.key(common::KEY_ESC, true);
-    bed.hp.key(common::KEY_ESC, false);
-    let closed = bed
-        .hp
-        .dispatch_until(common::WAIT, |hp| hp.popover_surfaces().is_empty())?;
-    anyhow::ensure!(closed, "the calendar stayed open");
+    bed.close_calendar()?;
     // "+ N": the calendar on today.
-    let mark = bed.mark();
+    let rewritten = bed.mark();
     bed.rewrite(&busy(40))?;
-    let line = bed.logged_since(mark, "today is drawn at rest", &["autres aujourd'hui"])?;
-    let shown = line.matches("«Réunion").count() as i32;
-    let top = bed.surface()?.y + 5;
+    // Its "+ N", under the meetings shown.
     let mark = bed.mark();
-    common::click_on(
-        &mut bed.hp,
-        (f64::from(LINE_X + 40), f64::from(line_middle(top, shown))),
-        TODAY_NAMESPACE,
-    )?;
+    bed.click_row(rewritten, &["autres aujourd'hui"], LINE_X + 40, |line| {
+        line.matches("«Réunion").count() as i32
+    })?;
     bed.logged_since(
         mark,
         "the calendar opens",

@@ -470,12 +470,14 @@ fn a_paired_device_connects_one_that_does_not_answer_says_so_and_disconnect() ->
     bed.asked(&Call::Connect(K380.to_owned()))?;
     bed.shows(|s| device(s, "mine", K380)["line"] == "Connexion…")?;
     bed.bluez().release();
-    let shown = bed.shows(|s| device(s, "mine", K380)["connected"] == true)?;
+    // Connected and said so: BlueZ says the device is connected before
+    // its answer to the call comes, and the row says "Connexion…" until
+    // that answer (#846).
+    let connected = "Connecté · batterie\u{a0}64\u{a0}%";
+    let shown = bed.shows(|s| {
+        device(s, "mine", K380)["connected"] == true && device(s, "mine", K380)["line"] == connected
+    })?;
     assert_eq!(names(&shown, "mine")[0], K380);
-    assert_eq!(
-        device(&shown, "mine", K380)["line"],
-        "Connecté · batterie\u{a0}64\u{a0}%"
-    );
     // The phone does not answer: said under its row.
     bed.click(&format!("bt:act:{PIXEL}"))?;
     bed.asked(&Call::Connect(PIXEL.to_owned()))?;

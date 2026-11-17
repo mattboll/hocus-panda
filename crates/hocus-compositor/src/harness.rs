@@ -1230,6 +1230,15 @@ impl Headless {
         self.app.state.capture.editor_commits()
     }
 
+    /// Whether the capture's editor shows at rest in the last frame drawn:
+    /// its fade in over, which starts at the shell's first buffer, however
+    /// late that comes on a loaded machine.
+    pub fn capture_editor_at_rest(&self) -> bool {
+        let state = &self.app.state;
+        let drawn = state.frames.drawn_at.get();
+        drawn.is_some_and(|at| state.capture.editor_at_rest(at))
+    }
+
     /// The cursor the compositor shows over a frame, a grip or the
     /// capture, by its name (`crosshair`, `move`, `nwse-resize`…).
     pub fn frame_cursor(&self) -> Option<String> {

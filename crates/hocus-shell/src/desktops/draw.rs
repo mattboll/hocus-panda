@@ -510,17 +510,24 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Option<crate::network::dr
 }
 
 /// Bar `bar`'s connections moved or changed rows: the surface follows,
-/// moved by layer-shell actions (nothing else is drawn).
+/// moved by layer-shell actions, and draws itself again (no other surface
+/// does).
 pub fn follow(bar: &str) {
     let tops = crate::network::draw::group_tops(bar);
-    resize(places(|places| {
+    let moved = places(|places| {
         let place = places.get_mut(bar)?;
         if (place.tops.0 - tops.0).abs() < 0.01 && (place.tops.1 - tops.1).abs() < 0.01 {
             return None;
         }
         place.tops = tops;
-        refit(place)
-    }));
+        Some(refit(place))
+    });
+    if let Some(placed) = moved {
+        resize(placed);
+        // Drawn again, moved or not: its tiles sit on the connections' top
+        // to a fraction of a pixel (as the connections' rows, #841).
+        popover::send(vec![popover::Effect::Wake(DESKTOPS_NAMESPACE)]);
+    }
 }
 
 /// Every bar's connections changed rows.

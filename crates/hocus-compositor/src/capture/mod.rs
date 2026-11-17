@@ -346,6 +346,12 @@ impl Capture {
         self.after.editor_commits
     }
 
+    /// Whether the editor shows at `at` with its fade in over: for tests,
+    /// which see its picture only then.
+    pub fn editor_at_rest(&self, at: Duration) -> bool {
+        self.after.editor_at_rest(at)
+    }
+
     /// Whether the backend has a capture to take.
     pub fn has_pending(&self) -> bool {
         self.pending.is_some()
