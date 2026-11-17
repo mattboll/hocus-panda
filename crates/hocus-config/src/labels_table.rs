@@ -64,7 +64,7 @@ pub const ALL: &[Label] = &[
     },
     Label {
         key: "capture.folder",
-        name: hocus_words::settings::app_captures_page::FOLDER,
+        name: hocus_words::compositor::transcribe::FOLDER,
         said: Said::Other,
     },
     Label {
@@ -429,7 +429,7 @@ pub const ALL: &[Label] = &[
     },
     Label {
         key: "recording.folder",
-        name: hocus_words::settings::app_captures_page::FOLDER,
+        name: hocus_words::compositor::transcribe::FOLDER,
         said: Said::Other,
     },
     Label {
