@@ -51,6 +51,7 @@ mod field;
 mod footer;
 mod foreign;
 mod in_use;
+mod items;
 mod keys;
 mod launcher;
 mod layouts;
@@ -302,25 +303,27 @@ struct Bar {
     surface: u32,
     /// Its surface's height, once known.
     height: f32,
-    /// Its clock's surface, and its size as last asked for.
-    clock: window::Id,
+    /// Its clock's surface's size as last asked for.
     clock_surface: (u32, u32),
-    /// Its levels' surface, and its size as last asked for.
-    levels: window::Id,
+    /// Its levels' surface's size as last asked for.
     levels_surface: (u32, u32),
-    /// Its connections' surface (placed by [`network::draw`]).
-    connections: window::Id,
-    /// Its desktops' surface (placed by [`desktops::draw`]).
-    desktops: window::Id,
-    /// Its agents' group's surface (placed by [`agents::draw`]).
-    agents: window::Id,
-    /// Its to-do list's (placed by [`tasks::draw`]).
-    tasks: window::Id,
-    /// Its footer's (placed by [`footer`]).
-    footer: window::Id,
+    /// The surfaces of its own its items opened with it ([`items`]), in
+    /// the list's order: the clock's, the levels', the connections'
+    /// (placed by [`network::draw`]), the desktops' ([`desktops::draw`]),
+    /// the agents' group's ([`agents::draw`]), the to-do list's
+    /// ([`tasks::draw`]), the footer's ([`footer`]).
+    surfaces: Vec<(items::Kind, window::Id)>,
 }
 
 impl Bar {
+    /// Item `kind`'s surface of its own, if it opened one with the bar.
+    fn surface(&self, kind: items::Kind) -> Option<window::Id> {
+        self.surfaces
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, id)| *id)
+    }
+
     /// Its width as drawn at `at`.
     fn width(&self, at: Instant) -> f32 {
         match self.switch {
@@ -700,35 +703,19 @@ impl Shell {
                     popover::with(|c| c.forget(&bar.output));
                     notifications::bars_changed();
                     popover::kit::forget_scale(&bar.output);
-                    network::draw::forget(&bar.output);
-                    desktops::draw::forget(&bar.output);
-                    agents::draw::forget(&bar.output);
-                    agents::peek::forget(&bar.output);
-                    footer::forget(&bar.output);
-                    tasks::draw::forget(&bar.output);
-                    let sign = in_use::forget(&bar.output);
-                    let card = meeting::forget(&bar.output);
                     reminder::forget(&bar.output);
-                    let today = today::forget(&bar.output);
-                    let windows = windows::forget(&bar.output);
-                    let music = music::forget(&bar.output);
-                    let tray = tray::draw::forget(&bar.output);
-                    Some(Task::batch([
-                        sign.map_or_else(Task::none, |s| Task::done(Message::RemoveWindow(s))),
-                        card.map_or_else(Task::none, |c| Task::done(Message::RemoveWindow(c))),
-                        today.map_or_else(Task::none, |t| Task::done(Message::RemoveWindow(t))),
-                        windows.map_or_else(Task::none, |w| Task::done(Message::RemoveWindow(w))),
-                        music.map_or_else(Task::none, |m| Task::done(Message::RemoveWindow(m))),
-                        Task::batch(tray.map(|id| Task::done(Message::RemoveWindow(id)))),
-                        Task::done(Message::RemoveWindow(bar.footer)),
-                        Task::done(Message::RemoveWindow(bar.tasks)),
-                        Task::done(Message::RemoveWindow(bar.agents)),
-                        Task::done(Message::RemoveWindow(bar.desktops)),
-                        Task::done(Message::RemoveWindow(bar.connections)),
-                        Task::done(Message::RemoveWindow(bar.levels)),
-                        Task::done(Message::RemoveWindow(bar.clock)),
-                        Task::done(Message::RemoveWindow(id)),
-                    ]))
+                    // The items' surfaces that came and went, then the
+                    // bar's own, then the bar.
+                    let mut gone: Vec<window::Id> = items::ITEMS
+                        .iter()
+                        .filter_map(|item| forget_item(item.kind, &bar.output))
+                        .collect();
+                    gone.extend(bar.surfaces.iter().rev().map(|(_, surface)| *surface));
+                    gone.push(id);
+                    Some(Task::batch(
+                        gone.into_iter()
+                            .map(|surface| Task::done(Message::RemoveWindow(surface))),
+                    ))
                 }))
             }
             ToShell::Clock(look) => {
@@ -1091,15 +1078,9 @@ impl Shell {
             switch: None,
             surface: 0,
             height: 0.0,
-            clock: window::Id::unique(),
             clock_surface: (0, 0),
-            levels: window::Id::unique(),
             levels_surface: (0, 0),
-            connections: window::Id::unique(),
-            desktops: window::Id::unique(),
-            agents: window::Id::unique(),
-            tasks: window::Id::unique(),
-            footer: window::Id::unique(),
+            surfaces: Vec::new(),
         };
         bar.surface = bar.surface_width();
         bar.clock_surface = bar.clock_size();
@@ -1118,138 +1099,39 @@ impl Shell {
             namespace: Some(NAMESPACE.to_owned()),
         };
         let (id, open) = Message::layershell_open(settings);
-        // Inside the rim; pointer events go through to the bar, which hears
-        // them for the clock's group too (the calendar's item).
-        let clock = NewLayerShellSettings {
-            size: Some(bar.clock_surface),
-            layer: Layer::Top,
-            anchor: side::anchor(Anchor::Right | Anchor::Top),
-            exclusive_zone: Some(0),
-            margin: Some(side::margin((EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0))),
-            keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option.clone(),
-            events_transparent: true,
-            namespace: Some(CLOCK_NAMESPACE.to_owned()),
-        };
-        let (clock_id, open_clock) = Message::layershell_open(clock);
-        bar.clock = clock_id;
-        // Its items take the pointer: the sound's opens its popover.
-        let levels = NewLayerShellSettings {
-            size: Some(bar.levels_surface),
-            layer: Layer::Top,
-            anchor: side::anchor(Anchor::Right | Anchor::Bottom),
-            exclusive_zone: Some(0),
-            margin: Some(side::margin((0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0))),
-            keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option.clone(),
-            events_transparent: false,
-            namespace: Some(LEVELS_NAMESPACE.to_owned()),
-        };
-        let (levels_id, open_levels) = Message::layershell_open(levels);
-        bar.levels = levels_id;
-        // Above the levels, following their group's top; its row opens
-        // the Wi-Fi's popover.
-        let connections_id = window::Id::unique();
-        let (size, margin) = network::draw::opened(&bar.output, connections_id, form);
-        let connections = NewLayerShellSettings {
-            size: Some(size),
-            layer: Layer::Top,
-            anchor: side::anchor(Anchor::Right | Anchor::Bottom),
-            exclusive_zone: Some(0),
-            margin: Some(side::margin(margin)),
-            keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option.clone(),
-            events_transparent: false,
-            namespace: Some(CONNECTIONS_NAMESPACE.to_owned()),
-        };
-        let open_connections = Task::done(Message::NewLayerShell {
-            settings: connections,
-            id: connections_id,
-        });
-        bar.connections = connections_id;
-        // Above the connections, following their group's top; a tile goes
-        // to its desktop.
-        let desktops_id = window::Id::unique();
-        let (size, margin) = desktops::draw::opened(&bar.output, desktops_id, form);
-        let desktops = NewLayerShellSettings {
-            size: Some(size),
-            layer: Layer::Top,
-            anchor: side::anchor(Anchor::Right | Anchor::Bottom),
-            exclusive_zone: Some(0),
-            margin: Some(side::margin(margin)),
-            keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option.clone(),
-            events_transparent: false,
-            namespace: Some(DESKTOPS_NAMESPACE.to_owned()),
-        };
-        let open_desktops = Task::done(Message::NewLayerShell {
-            settings: desktops,
-            id: desktops_id,
-        });
-        bar.desktops = desktops_id;
-        // Under the clock: the agents' group.
-        let agents_id = window::Id::unique();
-        let (size, margin) = agents::draw::opened(&bar.output, agents_id, form);
-        let agents = NewLayerShellSettings {
-            size: Some(size),
-            layer: Layer::Top,
-            anchor: side::anchor(Anchor::Right | Anchor::Top),
-            exclusive_zone: Some(0),
-            margin: Some(side::margin(margin)),
-            keyboard_interactivity: KeyboardInteractivity::None,
-            output_option: option.clone(),
-            events_transparent: false,
-            namespace: Some(AGENTS_NAMESPACE.to_owned()),
-        };
-        let open_agents = Task::done(Message::NewLayerShell {
-            settings: agents,
-            id: agents_id,
-        });
-        bar.agents = agents_id;
-        for id in [
-            id,
-            clock_id,
-            levels_id,
-            connections_id,
-            desktops_id,
-            agents_id,
-        ] {
-            side::opened(id);
+        side::opened(id);
+        // The items' surfaces of their own, in the list's order: each
+        // opened after, so in front of, those before it.
+        let mut opening = vec![open];
+        for item in items::ITEMS {
+            if let Some((surface, open)) = open_item(&bar, item.kind, &option) {
+                bar.surfaces.push((item.kind, surface));
+                opening.push(open);
+            }
         }
-        // Under the agents: the to-do list.
-        let (tasks_id, open_tasks) = tasks::draw::open(&bar.output, form, option.clone());
-        bar.tasks = tasks_id;
-        // Last, above the others: the footer.
-        let (footer_id, open_footer) = footer::open(&bar.output, form, option.clone());
-        bar.footer = footer_id;
         self.bars.insert(id, bar);
         BARS.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(id);
         self.place_popovers(id);
-        // The sign of what is in use, if something is (5.11), and the next
-        // meeting's card, if one is left today (Day.2): opened after the
-        // bar's own, in front of it.
+        // The items that come and go (the sign of what is in use, the next
+        // meeting's card, …), if they are to show: opened after the bar's
+        // own, in front of it.
         let output = self.bars.get(&id).map(|b| (b.output.clone(), b.form));
         let mut after = Vec::new();
         if let Some((output, form)) = output {
-            after.extend(in_use::bar_opened(&output, form));
-            after.extend(meeting::bar_opened(&output, form));
-            after.extend(today::bar_opened(&output, form));
-            after.extend(windows::bar_opened(&output, form));
-            after.extend(music::bar_opened(&output, form));
+            for item in items::ITEMS {
+                after.extend(item_opened(item.kind, &output, form));
+            }
             reminder::bar_opened(&output, form);
         }
-        open.chain(open_clock)
-            .chain(open_levels)
-            .chain(open_connections)
-            .chain(open_desktops)
-            .chain(open_agents)
-            .chain(Task::batch(open_tasks.into_iter().map(Task::done)))
-            .chain(Task::batch(open_footer.into_iter().map(Task::done)))
-            .chain(Task::batch(
-                popover::messages(after).into_iter().map(Task::done),
-            ))
+        opening.push(Task::batch(
+            popover::messages(after).into_iter().map(Task::done),
+        ));
+        opening
+            .into_iter()
+            .reduce(Task::chain)
+            .unwrap_or_else(Task::none)
     }
 
     /// Where bar `id` is, for the popovers.
@@ -1257,15 +1139,27 @@ impl Shell {
         let Some(bar) = self.bars.get(&id) else {
             return;
         };
+        let of = |kind| bar.surface(kind);
         popover::with(|c| {
-            c.place(
-                &bar.output,
-                bar.form,
-                id,
-                (bar.levels, bar.connections, bar.desktops, bar.agents),
-            );
-            c.set_footer(&bar.output, bar.footer);
-            c.set_tasks(&bar.output, bar.tasks);
+            if let (Some(levels), Some(connections), Some(desktops), Some(agents)) = (
+                of(items::Kind::Levels),
+                of(items::Kind::Connections),
+                of(items::Kind::Desktops),
+                of(items::Kind::Agents),
+            ) {
+                c.place(
+                    &bar.output,
+                    bar.form,
+                    id,
+                    (levels, connections, desktops, agents),
+                );
+            }
+            if let Some(footer) = of(items::Kind::Footer) {
+                c.set_footer(&bar.output, footer);
+            }
+            if let Some(tasks) = of(items::Kind::Tasks) {
+                c.set_tasks(&bar.output, tasks);
+            }
         });
         notifications::bars_changed();
     }
@@ -1322,12 +1216,7 @@ impl Shell {
         let Some(bar) = self.bars.get_mut(&id) else {
             return Task::none();
         };
-        // The tray first: the groups over it go up by what it takes.
-        let mut tasks: Vec<Task<Message>> =
-            tray::draw::sync(&bar.output, bar.form, bar.switch.is_some())
-                .into_iter()
-                .map(Task::done)
-                .collect();
+        let mut tasks: Vec<Task<Message>> = Vec::new();
         let width = bar.surface_width();
         if bar.surface != width {
             bar.surface = width;
@@ -1336,59 +1225,249 @@ impl Shell {
                 size: (width, 0),
             }));
         }
-        let size = bar.clock_size();
-        if bar.clock_surface != size {
-            bar.clock_surface = size;
-            tasks.push(Task::done(Message::SizeChange {
-                id: bar.clock,
-                size,
-            }));
+        // Each item to its form, in the list's order (the tray first: the
+        // groups over it go up by what it takes).
+        for item in items::ITEMS {
+            tasks.extend(item_form(bar, item.kind));
         }
-        let size = bar.levels_size();
-        if bar.levels_surface != size {
-            bar.levels_surface = size;
-            tasks.push(Task::done(Message::SizeChange {
-                id: bar.levels,
-                size,
-            }));
-        }
-        let switching = bar.switch.is_some();
-        for (id, size, margin) in [
-            network::draw::form(&bar.output, bar.form, switching),
-            desktops::draw::form(&bar.output, bar.form, switching),
-            agents::draw::form(&bar.output, bar.form, switching),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            tasks.push(Task::done(Message::SizeChange { id, size }));
-            tasks.push(Task::done(Message::MarginChange {
-                id,
-                margin: side::moved(id, margin),
-            }));
-        }
-        tasks.extend(
-            footer::form(&bar.output, bar.form, switching)
-                .into_iter()
-                .map(Task::done),
-        );
-        tasks.extend(
-            self::tasks::draw::form(&bar.output, bar.form, switching)
-                .into_iter()
-                .map(Task::done),
-        );
-        popover::send(in_use::form(&bar.output, bar.form, switching));
-        popover::send(meeting::form(&bar.output, bar.form, switching));
         let output = bar.output.clone();
         let form = bar.form;
-        today::form(&output, form, switching);
-        windows::form(&output, form, switching);
-        music::form(&output, form, switching);
         // The column's groups to their places in the form: Today's rows,
         // the room the agents' rows have on a bar in the full form.
         column::moved();
         reminder::form(&output, form);
         Task::batch(tasks)
+    }
+}
+
+/// Item `kind`'s surface of its own, opened with bar `bar` (a layer
+/// surface on `option`'s screen) and placed where its kind says: its id
+/// and what opens it; none for an item that opens as it comes.
+fn open_item(
+    bar: &Bar,
+    kind: items::Kind,
+    option: &OutputOption,
+) -> Option<(window::Id, Task<Message>)> {
+    use items::Kind;
+    // A surface of the bar's, against its edge: `anchor` and `margin`
+    // said for a bar on the right.
+    let layer = |size, anchor, margin, events_transparent, namespace: &str| NewLayerShellSettings {
+        size: Some(size),
+        layer: Layer::Top,
+        anchor: side::anchor(anchor),
+        exclusive_zone: Some(0),
+        margin: Some(side::margin(margin)),
+        keyboard_interactivity: KeyboardInteractivity::None,
+        output_option: option.clone(),
+        events_transparent,
+        namespace: Some(namespace.to_owned()),
+    };
+    // One placed by its own module, which knows its id first.
+    let placed = |id, settings| Task::done(Message::NewLayerShell { settings, id });
+    let opened = match kind {
+        Kind::Clock => {
+            // Inside the rim; pointer events go through to the bar, which
+            // hears them for the clock's group too (the calendar's item).
+            Message::layershell_open(layer(
+                bar.clock_surface,
+                Anchor::Right | Anchor::Top,
+                (EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0),
+                true,
+                CLOCK_NAMESPACE,
+            ))
+        }
+        Kind::Levels => {
+            // Its items take the pointer: the sound's opens its popover.
+            Message::layershell_open(layer(
+                bar.levels_surface,
+                Anchor::Right | Anchor::Bottom,
+                (0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0),
+                false,
+                LEVELS_NAMESPACE,
+            ))
+        }
+        Kind::Connections => {
+            // Above the levels, following their group's top; its row
+            // opens the Wi-Fi's popover.
+            let id = window::Id::unique();
+            let (size, margin) = network::draw::opened(&bar.output, id, bar.form);
+            let settings = layer(
+                size,
+                Anchor::Right | Anchor::Bottom,
+                margin,
+                false,
+                CONNECTIONS_NAMESPACE,
+            );
+            (id, placed(id, settings))
+        }
+        Kind::Desktops => {
+            // Above the connections, following their group's top; a tile
+            // goes to its desktop.
+            let id = window::Id::unique();
+            let (size, margin) = desktops::draw::opened(&bar.output, id, bar.form);
+            let settings = layer(
+                size,
+                Anchor::Right | Anchor::Bottom,
+                margin,
+                false,
+                DESKTOPS_NAMESPACE,
+            );
+            (id, placed(id, settings))
+        }
+        Kind::Agents => {
+            // Under the clock, in the column.
+            let id = window::Id::unique();
+            let (size, margin) = agents::draw::opened(&bar.output, id, bar.form);
+            let settings = layer(
+                size,
+                Anchor::Right | Anchor::Top,
+                margin,
+                false,
+                AGENTS_NAMESPACE,
+            );
+            (id, placed(id, settings))
+        }
+        Kind::Tasks => {
+            let (id, open) = tasks::draw::open(&bar.output, bar.form, option.clone());
+            return Some((id, Task::batch(open.into_iter().map(Task::done))));
+        }
+        Kind::Footer => {
+            // Last of the bar's own, above the others.
+            let (id, open) = footer::open(&bar.output, bar.form, option.clone());
+            return Some((id, Task::batch(open.into_iter().map(Task::done))));
+        }
+        Kind::Tray | Kind::InUse | Kind::Meeting | Kind::Today | Kind::Windows | Kind::Music => {
+            return None;
+        }
+    };
+    // Mirrored on the left as they move ([`side`]).
+    side::opened(opened.0);
+    Some(opened)
+}
+
+/// What item `kind` opens on bar `bar`, in `form`, once the bar is: the
+/// items that come and go, if they are to show.
+fn item_opened(kind: items::Kind, bar: &str, form: Form) -> Vec<popover::Effect> {
+    use items::Kind;
+    match kind {
+        Kind::InUse => in_use::bar_opened(bar, form),
+        Kind::Meeting => meeting::bar_opened(bar, form),
+        Kind::Today => today::bar_opened(bar, form),
+        Kind::Windows => windows::bar_opened(bar, form),
+        Kind::Music => music::bar_opened(bar, form),
+        Kind::Clock
+        | Kind::Levels
+        | Kind::Connections
+        | Kind::Desktops
+        | Kind::Agents
+        | Kind::Tasks
+        | Kind::Footer
+        | Kind::Tray => Vec::new(),
+    }
+}
+
+/// Item `kind` of `bar` to the bar's form (both forms' room while it
+/// switches): what that asks of its surfaces.
+fn item_form(bar: &mut Bar, kind: items::Kind) -> Vec<Task<Message>> {
+    use items::Kind;
+    let switching = bar.switch.is_some();
+    let (output, form) = (bar.output.as_str(), bar.form);
+    let messages = |messages: Vec<Message>| messages.into_iter().map(Task::done).collect();
+    // A surface its module placed: its size and its margins.
+    let placed = |placed: Option<network::draw::Placed>| -> Vec<Task<Message>> {
+        placed.map_or_else(Vec::new, |(id, size, margin)| {
+            vec![
+                Task::done(Message::SizeChange { id, size }),
+                Task::done(Message::MarginChange {
+                    id,
+                    margin: side::moved(id, margin),
+                }),
+            ]
+        })
+    };
+    match kind {
+        Kind::Tray => messages(tray::draw::sync(output, form, switching)),
+        Kind::Clock => {
+            let size = bar.clock_size();
+            match bar.surface(kind).filter(|_| bar.clock_surface != size) {
+                Some(id) => {
+                    bar.clock_surface = size;
+                    vec![Task::done(Message::SizeChange { id, size })]
+                }
+                None => Vec::new(),
+            }
+        }
+        Kind::Levels => {
+            let size = bar.levels_size();
+            match bar.surface(kind).filter(|_| bar.levels_surface != size) {
+                Some(id) => {
+                    bar.levels_surface = size;
+                    vec![Task::done(Message::SizeChange { id, size })]
+                }
+                None => Vec::new(),
+            }
+        }
+        Kind::Connections => placed(network::draw::form(output, form, switching)),
+        Kind::Desktops => placed(desktops::draw::form(output, form, switching)),
+        Kind::Agents => placed(agents::draw::form(output, form, switching)),
+        Kind::Tasks => messages(tasks::draw::form(output, form, switching)),
+        Kind::Footer => messages(footer::form(output, form, switching)),
+        Kind::InUse => {
+            popover::send(in_use::form(output, form, switching));
+            Vec::new()
+        }
+        Kind::Meeting => {
+            popover::send(meeting::form(output, form, switching));
+            Vec::new()
+        }
+        Kind::Today => {
+            today::form(output, form, switching);
+            Vec::new()
+        }
+        Kind::Windows => {
+            windows::form(output, form, switching);
+            Vec::new()
+        }
+        Kind::Music => {
+            music::form(output, form, switching);
+            Vec::new()
+        }
+    }
+}
+
+/// Item `kind` forgets bar `bar`, gone: the surface it opened as it came,
+/// if any, to remove (the bar's own are its [`Bar::surfaces`]).
+fn forget_item(kind: items::Kind, bar: &str) -> Option<window::Id> {
+    use items::Kind;
+    match kind {
+        Kind::Clock | Kind::Levels => None,
+        Kind::Connections => {
+            network::draw::forget(bar);
+            None
+        }
+        Kind::Desktops => {
+            desktops::draw::forget(bar);
+            None
+        }
+        Kind::Agents => {
+            agents::draw::forget(bar);
+            agents::peek::forget(bar);
+            None
+        }
+        Kind::Tasks => {
+            tasks::draw::forget(bar);
+            None
+        }
+        Kind::Footer => {
+            footer::forget(bar);
+            None
+        }
+        Kind::Tray => tray::draw::forget(bar),
+        Kind::InUse => in_use::forget(bar),
+        Kind::Meeting => meeting::forget(bar),
+        Kind::Today => today::forget(bar),
+        Kind::Windows => windows::forget(bar),
+        Kind::Music => music::forget(bar),
     }
 }
 

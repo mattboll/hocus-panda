@@ -5100,3 +5100,17 @@ What the approved s8b mockup shows for 8.5 B (issue #490; the overview,
   Settings › Agents' five moods 72 px; avatars 40 px, still.
 - **Screen readers**: the pandas stay decoration, no node; the mini
   item's waiting panda is a button named as the agent's row is.
+
+### The bar's items, from a list (#833, 2026-11-17)
+
+Nothing changes on screen. The shell builds each bar from one list,
+`ITEMS` in `crates/hocus-shell/src/items.rs`: an entry an item (its
+kind, the end of the bar it stands from, top or bottom, and its order
+from that end), in the order the items are opened, back to front. Opening
+a bar, changing its form, showing a surface and forgetting a bar go
+through the list, each kind saying what it does once; the column's order
+(Day.4, #599) is the list's top, Today, To do and the agents taking
+their places in `[panel] order`'s. An add-on's item (#442) is a new
+entry. The bottom's order says how the items stand today (the footer,
+the tray, the levels, the connections, the desktops, the music's tile,
+the windows); each still places itself over the one under it.
