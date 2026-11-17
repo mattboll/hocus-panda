@@ -266,10 +266,10 @@ impl State {
             return;
         }
         let mut now = self.seen_now();
-        let Some(before) = self.events.seen.take() else {
+        let Some(mut before) = self.events.seen.take() else {
             return;
         };
-        now.agents = before.agents.clone();
+        now.agents = std::mem::take(&mut before.agents);
         let mut told: Vec<(Kind, Value)> = Vec::new();
         for (name, _) in now
             .screens
