@@ -31,7 +31,7 @@ use std::{
 
 use hocus_link::{EMOJI_NAMESPACE, EmojiAt, POPOVER_CLOSE, ToCompositor};
 use iced::{Element, keyboard, window};
-use iced_layershell::reexport::KeyboardInteractivity;
+use iced_exwlshell::reexport::KeyboardInteractivity;
 
 use self::data::Group;
 use crate::{
@@ -406,7 +406,7 @@ pub fn close() {
 }
 
 /// A key that reached another of the shell's surfaces while the picker
-/// holds the keyboard (layershellev hands keys to the surface last created
+/// holds the keyboard (exwlshellev hands keys to the surface last created
 /// or clicked): its, handed to the loop. Whether it was taken.
 pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>) -> bool {
     if !HOLDING.load(Ordering::Relaxed) {

@@ -271,7 +271,7 @@ impl<Message> canvas::Program<Message> for Back {
 /// The images the editor shows, in the renderer's memory before they are
 /// drawn (#594). iced's GPU renderer uploads an image of more than 2 MiB
 /// on a thread of its own and draws nothing for it until that is done; the
-/// redraw it then asks for is lost (iced_layershell does nothing with
+/// redraw it then asks for is lost (iced_exwlshell does nothing with
 /// `RedrawAll`), so the picture shown again with a new mark stayed away
 /// until something else drew the editor again. Loaded here, it is uploaded
 /// before this frame, in the frame that shows it; held, it stays until a

@@ -32,10 +32,10 @@ hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
 hocus-words = { version = "1.0.0", path = "crates/hocus-words" }
 hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }
 
-# The others. iced, iced_tiny_skia and iced_layershell are held at the
-# exact versions vendor/'s patches were made on (vendor/README.md); the
-# last builds with the first (its winit-core prerelease dependencies broke
-# it once).
+# The others. iced and iced_tiny_skia are held at the exact version
+# vendor/'s patch was made on (vendor/README.md), and iced_exwlshell with
+# them: it builds with that iced (its winit-core prerelease dependencies
+# broke its predecessor, iced_layershell, once).
 accesskit = "0.25.2"
 accesskit_unix = "0.24.1"
 anyhow = "1.0.104"
@@ -46,7 +46,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 fontdue = "0.9.3"
 futures-util = { version = "0.3.34", default-features = false }
 iced = { version = "=0.14.0", default-features = false }
-iced_layershell = { version = "=0.19.1", default-features = false }
+iced_exwlshell = { version = "=0.21.4", default-features = false }
 iced_tiny_skia = { version = "=0.14.1", default-features = false }
 image = { version = "0.25", default-features = false }
 jiff = { version = "0.2.38", default-features = false }
@@ -121,9 +121,7 @@ opt-level = 3
 debug-assertions = false
 
 # iced's CPU renderer draws every frame whole when a program asks it
-# (`iced_tiny_skia::draw_whole_frames`, #662): the Settings do. iced on
-# layer-shell gives the pointer's enter its place (#787) and keeps what
-# comes for a surface before its window is made (#821). vendor/README.md.
+# (`iced_tiny_skia::draw_whole_frames`, #662): the Settings do.
+# vendor/README.md.
 [patch.crates-io]
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
-iced_layershell = { path = "vendor/iced_layershell" }

@@ -83,7 +83,7 @@ type OnKey<'a, L> = Box<dyn Fn(&Pressed) -> Option<L> + 'a>;
 
 /// A popover's surface around its widgets, and their loop.
 ///
-/// iced hands a widget's message to the application, and iced_layershell
+/// iced hands a widget's message to the application, and iced_exwlshell
 /// then builds and draws again every surface of the shell (a bar's ten,
 /// on each screen), a turn of its loop later. So a popover's widgets speak
 /// a message type of their own (`L`), which this surface takes from them
@@ -302,8 +302,9 @@ struct Kept {
 /// release read together with a move away (a slow frame) found the
 /// pointer gone from the button pressed, and the click was lost. The
 /// widgets get, with each event, the pointer where that event has it.
-/// `CursorEntered` has no place: the move layer-shell's iced sends right
-/// after it does (vendor/iced_layershell, #787).
+/// `CursorEntered` has no place: the pointer is where the batch leaves it
+/// until a move says otherwise (iced_exwlshell does not yet follow the
+/// enter with a move to its place, as winit does: #787, for upstream).
 fn pointer_of(kept: &mut Kept, event: &Event, cursor: mouse::Cursor) -> mouse::Cursor {
     match event {
         Event::Mouse(mouse::Event::CursorMoved { position }) => kept.pointer = Some(*position),
@@ -741,7 +742,7 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
                 shell.invalidate_layout();
                 shell.request_redraw();
             } else {
-                // From a redraw, iced_layershell builds no view again
+                // From a redraw, iced_exwlshell builds no view again
                 // unless a message asks: every surface's then.
                 shell.publish(Message::Keys);
             }

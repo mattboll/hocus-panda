@@ -123,7 +123,8 @@ Decisions taken with the maintainer:
   build's compositor offers no linux-dmabuf, and the maintainer's session
   has no layer-shell, so every spike measurement ran in software; done
   since, see [the bar's renderer](#the-bars-renderer-30));
-  iced_layershell is pinned and watched (a winit-core beta broke it once);
+  iced_layershell (renamed iced_exwlshell, #857) is pinned and watched (a
+  winit-core beta broke it once);
   the accessibility work below is planned.
 - **Accessibility**: iced 0.14 has no AccessKit. Our own tree with
   `accesskit_unix` (about 3 to 5 days for the bar and its popovers) is a

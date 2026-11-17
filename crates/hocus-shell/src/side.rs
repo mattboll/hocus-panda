@@ -22,7 +22,7 @@ use std::{
 
 use hocus_link::Side;
 use iced::window;
-use iced_layershell::reexport::Anchor;
+use iced_exwlshell::reexport::Anchor;
 
 /// Whether the bars stand on the left.
 static LEFT: AtomicBool = AtomicBool::new(false);

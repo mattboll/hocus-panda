@@ -37,7 +37,7 @@ use iced::{
     widget::canvas::{self, Frame, Geometry},
     window,
 };
-use iced_layershell::reexport::{
+use iced_exwlshell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
 };
 
@@ -187,23 +187,21 @@ pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Mes
         )
     });
     let settings = NewLayerShellSettings {
-        size: Some(size),
+        size: crate::layer::size(size),
         layer: Layer::Top,
         anchor: crate::side::anchor(Anchor::Right | Anchor::Bottom),
         exclusive_zone: Some(0),
-        margin: Some(crate::side::margin(margin)),
+        margin: Some(crate::layer::margin(crate::side::margin(margin))),
         keyboard_interactivity: KeyboardInteractivity::None,
         output_option: output,
+        blur_option: iced_exwlshell::reexport::BlurOption::None,
         events_transparent: false,
         namespace: Some(FOOTER_NAMESPACE.to_owned()),
     };
     crate::side::opened(id);
     (
         id,
-        vec![
-            Message::NewLayerShell { settings, id },
-            region(id, form, false),
-        ],
+        vec![crate::layer::open(id, settings), region(id, form, false)],
     )
 }
 
@@ -223,12 +221,12 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
         let margin = margin(bottom);
         let mut messages = Vec::new();
         if place.asked.0 != size {
-            messages.push(Message::SizeChange { id: place.id, size });
+            messages.extend(crate::layer::resize(place.id, size));
         }
         if place.asked.1 != margin {
             messages.push(Message::MarginChange {
                 id: place.id,
-                margin: crate::side::moved(place.id, margin),
+                margin: crate::layer::margin(crate::side::moved(place.id, margin)),
             });
         }
         place.asked = (size, margin);
@@ -242,36 +240,19 @@ pub fn forget(bar: &str) {
     places(|places| places.remove(bar));
 }
 
-/// Wider than any surface: a region as large as can be.
-const EVERYWHERE: i32 = 1 << 20;
-
-type WlRegion = wayland_client::protocol::wl_region::WlRegion;
-
 /// Surface `id` takes the pointer on `form`'s buttons only; on none while
 /// the bar switches.
 fn region(id: window::Id, form: Form, switching: bool) -> Message {
-    let rects: Vec<(i32, i32, i32, i32)> = if switching {
+    let rects: Vec<Rectangle> = if switching {
         Vec::new()
     } else {
         let ((w, h), bottom) = placement(form, false);
         let size = Size::new(w as f32, h as f32);
         (0..buttons(form).len())
-            .map(|i| {
-                let r = rect(form, i, size, bottom, form.width() as f32);
-                let (x, y) = (r.x.floor() as i32, r.y.floor() as i32);
-                let right = (r.x + r.width).ceil() as i32;
-                let bottom = (r.y + r.height).ceil() as i32;
-                (x, y, right - x, bottom - y)
-            })
+            .map(|i| rect(form, i, size, bottom, form.width() as f32))
             .collect()
     };
-    let callback = iced_layershell::actions::ActionCallback::new(move |wl: &WlRegion| {
-        wl.subtract(-EVERYWHERE, -EVERYWHERE, 2 * EVERYWHERE, 2 * EVERYWHERE);
-        for &(x, y, w, h) in &rects {
-            wl.add(x, y, w, h);
-        }
-    });
-    Message::SetInputRegion { id, callback }
+    crate::layer::input(id, rects)
 }
 
 // --- Words ---------------------------------------------------------------------------

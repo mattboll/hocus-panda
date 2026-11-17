@@ -55,6 +55,7 @@ mod in_use;
 mod items;
 mod keys;
 mod launcher;
+mod layer;
 mod layouts;
 mod levels;
 mod locale;
@@ -104,9 +105,9 @@ use iced::{
     widget::{Space, canvas, container, pin, row, space, stack},
     window,
 };
-use iced_layershell::{
+use iced_exwlshell::{
     reexport::{Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption},
-    settings::{LayerShellSettings, Settings, StartMode},
+    settings::{ExWlSettings, LayerShellSettings, StartMode},
     to_layer_message,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -217,8 +218,8 @@ fn main() -> ExitCode {
             None
         }
     };
-    iced_layershell::disable_clipboard();
-    let started = iced_layershell::daemon(
+    iced_exwlshell::disable_clipboard();
+    let started = iced_exwlshell::daemon(
         move || Shell::new(link.clone(), software, clock_shift()),
         || NAMESPACE.to_owned(),
         Shell::update,
@@ -227,15 +228,18 @@ fn main() -> ExitCode {
     .style(style)
     .theme(theme)
     .subscription(Shell::subscription)
-    .settings(Settings {
+    .settings(iced::Settings {
         antialiasing: true,
         fonts: clock::FONTS.iter().map(|f| Cow::Borrowed(*f)).collect(),
+        ..iced::Settings::default()
+    })
+    .wl_settings(ExWlSettings {
         layer_settings: LayerShellSettings {
             start_mode: StartMode::Background,
             ..LayerShellSettings::default()
         },
         with_connection: connection.map(Into::into),
-        ..Settings::default()
+        ..ExWlSettings::default()
     })
     .run();
     levels::sound::stop();
@@ -404,7 +408,7 @@ struct Shell {
     look: Look,
     bars: HashMap<window::Id, Bar>,
     /// Bars asked for on screens whose names have not reached
-    /// iced_layershell yet ([`outputs`]): their forms, by screen.
+    /// iced_exwlshell yet ([`outputs`]): their forms, by screen.
     waiting: HashMap<String, Form>,
     now: Instant,
     clock: clock::Style,
@@ -587,7 +591,7 @@ impl Shell {
                 Task::batch(ids.into_iter().map(|id| self.fit(id)))
             }
             Message::Screens => self.screens_named(),
-            // Its update is the wake: iced_layershell redraws every surface
+            // Its update is the wake: iced_exwlshell redraws every surface
             // after one.
             Message::Keys => Task::none(),
             Message::Music => {
@@ -717,7 +721,7 @@ impl Shell {
                     gone.push(id);
                     Some(Task::batch(
                         gone.into_iter()
-                            .map(|surface| Task::done(Message::RemoveWindow(surface))),
+                            .map(|surface| Task::done(crate::layer::close(surface))),
                     ))
                 }))
             }
@@ -1028,7 +1032,7 @@ impl Shell {
         }
     }
 
-    /// A bar for `output` opens once iced_layershell knows that screen by
+    /// A bar for `output` opens once iced_exwlshell knows that screen by
     /// its name ([`outputs`]): asked for by a name it does not know, it
     /// would be on no screen, and the compositor would put it under the
     /// pointer (#540). Asked again while it waits, it takes the new form;
@@ -1089,19 +1093,21 @@ impl Shell {
         bar.clock_surface = bar.clock_size();
         bar.levels_surface = bar.levels_size();
         let settings = NewLayerShellSettings {
-            size: Some((bar.surface, 0)),
+            size: crate::layer::size((bar.surface, 0)),
             layer: Layer::Top,
             anchor: side::anchor(Anchor::Right | Anchor::Top | Anchor::Bottom),
             // The compositor keeps the bar's space itself, shell or not.
             exclusive_zone: Some(0),
             // Top, right, bottom, left.
-            margin: Some(side::margin((EDGE, EDGE, EDGE, 0))),
+            margin: Some(crate::layer::margin(side::margin((EDGE, EDGE, EDGE, 0)))),
             keyboard_interactivity: KeyboardInteractivity::None,
             output_option: option.clone(),
+            blur_option: iced_exwlshell::reexport::BlurOption::None,
             events_transparent: false,
             namespace: Some(NAMESPACE.to_owned()),
         };
-        let (id, open) = Message::layershell_open(settings);
+        let id = window::Id::unique();
+        let open = Task::done(layer::open(id, settings));
         side::opened(id);
         // The items' surfaces of their own, in the list's order: each
         // opened after, so in front of, those before it.
@@ -1223,10 +1229,7 @@ impl Shell {
         let width = bar.surface_width();
         if bar.surface != width {
             bar.surface = width;
-            tasks.push(Task::done(Message::SizeChange {
-                id,
-                size: (width, 0),
-            }));
+            tasks.extend(layer::resize(id, (width, 0)).map(Task::done));
         }
         // Each item to its form, in the list's order (the tray first: the
         // groups over it go up by what it takes).
@@ -1255,39 +1258,44 @@ fn open_item(
     // A surface of the bar's, against its edge: `anchor` and `margin`
     // said for a bar on the right.
     let layer = |size, anchor, margin, events_transparent, namespace: &str| NewLayerShellSettings {
-        size: Some(size),
+        size: crate::layer::size(size),
         layer: Layer::Top,
         anchor: side::anchor(anchor),
         exclusive_zone: Some(0),
-        margin: Some(side::margin(margin)),
+        margin: Some(crate::layer::margin(side::margin(margin))),
         keyboard_interactivity: KeyboardInteractivity::None,
         output_option: option.clone(),
+        blur_option: iced_exwlshell::reexport::BlurOption::None,
         events_transparent,
         namespace: Some(namespace.to_owned()),
     };
     // One placed by its own module, which knows its id first.
-    let placed = |id, settings| Task::done(Message::NewLayerShell { settings, id });
+    let placed = |id, settings| Task::done(crate::layer::open(id, settings));
     let opened = match kind {
         Kind::Clock => {
             // Inside the rim; pointer events go through to the bar, which
             // hears them for the clock's group too (the calendar's item).
-            Message::layershell_open(layer(
+            let id = window::Id::unique();
+            let settings = layer(
                 bar.clock_surface,
                 Anchor::Right | Anchor::Top,
                 (EDGE + clock::SURFACE_TOP, EDGE + 1, 0, 0),
                 true,
                 CLOCK_NAMESPACE,
-            ))
+            );
+            (id, placed(id, settings))
         }
         Kind::Levels => {
             // Its items take the pointer: the sound's opens its popover.
-            Message::layershell_open(layer(
+            let id = window::Id::unique();
+            let settings = layer(
                 bar.levels_surface,
                 Anchor::Right | Anchor::Bottom,
                 (0, EDGE + 1, EDGE + levels::draw::BOTTOM, 0),
                 false,
                 LEVELS_NAMESPACE,
-            ))
+            );
+            (id, placed(id, settings))
         }
         Kind::Connections => {
             // Above the levels, following their group's top; its row
@@ -1379,13 +1387,14 @@ fn item_form(bar: &mut Bar, kind: items::Kind) -> Vec<Task<Message>> {
     // A surface its module placed: its size and its margins.
     let placed = |placed: Option<network::draw::Placed>| -> Vec<Task<Message>> {
         placed.map_or_else(Vec::new, |(id, size, margin)| {
-            vec![
-                Task::done(Message::SizeChange { id, size }),
-                Task::done(Message::MarginChange {
+            layer::resize(id, size)
+                .into_iter()
+                .chain([Message::MarginChange {
                     id,
-                    margin: side::moved(id, margin),
-                }),
-            ]
+                    margin: layer::margin(side::moved(id, margin)),
+                }])
+                .map(Task::done)
+                .collect()
         })
     };
     match kind {
@@ -1395,7 +1404,10 @@ fn item_form(bar: &mut Bar, kind: items::Kind) -> Vec<Task<Message>> {
             match bar.surface(kind).filter(|_| bar.clock_surface != size) {
                 Some(id) => {
                     bar.clock_surface = size;
-                    vec![Task::done(Message::SizeChange { id, size })]
+                    layer::resize(id, size)
+                        .map(Task::done)
+                        .into_iter()
+                        .collect()
                 }
                 None => Vec::new(),
             }
@@ -1405,7 +1417,10 @@ fn item_form(bar: &mut Bar, kind: items::Kind) -> Vec<Task<Message>> {
             match bar.surface(kind).filter(|_| bar.levels_surface != size) {
                 Some(id) => {
                     bar.levels_surface = size;
-                    vec![Task::done(Message::SizeChange { id, size })]
+                    layer::resize(id, size)
+                        .map(Task::done)
+                        .into_iter()
+                        .collect()
                 }
                 None => Vec::new(),
             }
@@ -1574,6 +1589,12 @@ fn bar_sizes() -> Subscription<Message> {
         iced::Event::Window(window::Event::Resized(size)) if is_bar(id) => {
             popover::with(|c| c.height(id, size.height));
             Some(Message::Resized(id, size))
+        }
+        // Closed by the compositor too (its screen gone): its anchor
+        // forgotten.
+        iced::Event::Window(window::Event::Closed) => {
+            layer::closed(id);
+            None
         }
         _ => None,
     })

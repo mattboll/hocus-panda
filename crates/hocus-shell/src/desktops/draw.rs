@@ -1327,7 +1327,7 @@ impl Tiles {
                 .is_some_and(|group| group.contains(at))
         })?;
         let output = state.shown[row].screen.output.clone();
-        let notches = state.wheel.notches(&delta, kit::scale(&self.bar));
+        let notches = state.wheel.notches(&delta);
         let to = if notches > 0 {
             DesktopTo::Previous
         } else {

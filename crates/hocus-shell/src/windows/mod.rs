@@ -495,7 +495,7 @@ impl Place {
     /// Its surface for what it shows: resized and moved, drawing nothing
     /// and taking no pointer when nothing shows; drawn again (`redraw`) where it
     /// moves, its backdrop the bar's colour there on the CPU. The surface
-    /// stays as long as its bar: iced_layershell hands the keys to the
+    /// stays as long as its bar: iced_exwlshell hands the keys to the
     /// surface made last, and one made while the emoji picker or the
     /// launcher holds the keyboard would lose their typing (#617).
     fn fit(

@@ -50,7 +50,7 @@ use hocus_link::{
     Rect, ToCompositor, WindowPlace,
 };
 use iced::{Element, keyboard, window};
-use iced_layershell::reexport::KeyboardInteractivity;
+use iced_exwlshell::reexport::KeyboardInteractivity;
 
 use crate::{
     clock::time::Lang,

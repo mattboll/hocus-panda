@@ -1,7 +1,7 @@
 //! The pointer's shape, set again each time the pointer enters one of the
 //! shell's surfaces (#553).
 //!
-//! iced_layershell sets a surface's shape only when the shape its widgets
+//! iced_exwlshell sets a surface's shape only when the shape its widgets
 //! ask for changes, and asks them once for all the events it read
 //! together. When the pointer leaves a surface and comes back before the
 //! shell has handled the leave (both read at once, the shell busy
@@ -13,7 +13,7 @@
 //! compositor tells the same enters, with a cursor-shape device on it.
 //! Every surface's widgets are wrapped in [`Entered`], which sees each
 //! enter among their events and, as iced asks for the shape they make,
-//! sets that shape with the enter's serial. iced_layershell reads the
+//! sets that shape with the enter's serial. iced_exwlshell reads the
 //! socket for both pointers and hands the widgets their events after the
 //! read: the shell's own enter is there by then.
 //!
@@ -149,7 +149,7 @@ fn set(interaction: mouse::Interaction) {
     }
 }
 
-/// The shape iced_layershell gives `interaction`, so that the two never
+/// The shape iced_exwlshell gives `interaction`, so that the two never
 /// differ.
 fn shape(interaction: mouse::Interaction) -> Shape {
     use mouse::Interaction;

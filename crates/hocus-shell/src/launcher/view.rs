@@ -880,7 +880,7 @@ fn handle(id: window::Id, words: Words, message: Msg) {
         }),
         Msg::Wheel(delta) => super::with(|l| {
             if let Some(open) = l.open_mut(id) {
-                let notches = open.wheel.notches(&delta, open.scale);
+                let notches = open.wheel.notches(&delta);
                 if notches != 0 {
                     open.offset = scrolled(&open.grid, open.offset, -notches, open.size);
                 }

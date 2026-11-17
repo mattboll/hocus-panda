@@ -45,7 +45,7 @@ flowchart LR
 
 | Line | Path | Format | Crate |
 |---|---|---|---|
-| Wayland, shell | `WAYLAND_SOCKET`, a connection the compositor made | standard protocols (wlr-layer-shell for every shell surface) | smithay / iced_layershell |
+| Wayland, shell | `WAYLAND_SOCKET`, a connection the compositor made | standard protocols (wlr-layer-shell for every shell surface) | smithay / iced_exwlshell |
 | Shell's line | `<wayland socket>.shell` (`HOCUS_SHELL_SOCKET`) | one JSON object a line, `{"kind":…,"data":…}`, after a hello naming the protocol's version; facts and requests, never a question the loop waits on | `hocus-link` (`ToShell`, `ToCompositor`, `wire`) |
 | Control socket | `<wayland socket>.control` (`HOCUS_SOCKET`) | the public, versioned interface ([api.md](api.md)): one line of words, `agent …` reports, `msg version\|idle\|lock\|outputs\|input-devices [follow]\|a11y`, `msg shell status\|restart`, `msg subscribe` (events, one JSON object a line); the Settings' `msg screens` and `mcp NAME` (an agent's line of JSON objects, docs/design/mcp.md) are the desktop's own | `hocus-agents` (`Report`, `Question`, `ProgramAsk`, `events`, `mcp`), `hocus-compositor` (`events`) |
 | Configuration | `$XDG_CONFIG_HOME/hocuspanda/config.toml` (`HOCUS_CONFIG`) | TOML, edited in place; defaults in `packaging/config.toml` | `hocus-config` |
