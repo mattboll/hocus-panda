@@ -263,7 +263,7 @@ use Glyph as G;
 
 /// A page of the Settings: its slug, its names. The Settings check that
 /// this is their list of sections.
-pub const SETTINGS_PAGES: [(&str, &str, &str); 20] = [
+pub const SETTINGS_PAGES: [(&str, &str, &str); 21] = [
     (
         "appearance",
         "Apparence et langue",
@@ -275,6 +275,7 @@ pub const SETTINGS_PAGES: [(&str, &str, &str); 20] = [
     ("agenda", "Agenda et tâches", "Calendar and tasks"),
     ("screens", "Écrans", "Screens"),
     ("sound", "Son", "Sound"),
+    ("camera", "Caméra", "Camera"),
     (
         "keyboard",
         "Clavier et raccourcis",
@@ -315,7 +316,7 @@ macro_rules! settings_pages {
 }
 
 /// The Settings' pages as actions, in [`SETTINGS_PAGES`]' order.
-const PAGES: [Def; 20] = settings_pages! {
+const PAGES: [Def; 21] = settings_pages! {
     "appearance", "Apparence et langue", "Appearance and language";
     "wallpaper", "Fond d’écran", "Wallpaper";
     "bar", "La barre", "The bar";
@@ -323,6 +324,7 @@ const PAGES: [Def; 20] = settings_pages! {
     "agenda", "Agenda et tâches", "Calendar and tasks";
     "screens", "Écrans", "Screens";
     "sound", "Son", "Sound";
+    "camera", "Caméra", "Camera";
     "keyboard", "Clavier et raccourcis", "Keyboard and shortcuts";
     "mouse", "Souris et pavé tactile", "Mouse and touchpad";
     "network", "Réseau", "Network";

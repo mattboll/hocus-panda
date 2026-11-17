@@ -45,8 +45,9 @@ venir".
   `hocus settings [SECTION]` (`--join SSID` on `network`: that network's
   sheet, 6.6). Sections by their names on the command line:
   `appearance`, `wallpaper`, `bar`, `agenda`, `screens`, `sound`,
-  `keyboard`, `mouse`, `network`, `bluetooth`, `desktops`, `applications`,
-  `agents`, `captures`, `power`, `account`, `date-and-time`.
+  `camera`, `keyboard`, `mouse`, `network`, `bluetooth`, `desktops`,
+  `applications`, `agents`, `captures`, `power`, `account`,
+  `date-and-time`.
 - **One window at a time.** The first listens on
   `$XDG_RUNTIME_DIR/hocus-settings-<WAYLAND_DISPLAY>`. A second launch
   hands it its section and its activation token (`XDG_ACTIVATION_TOKEN`,
@@ -67,9 +68,10 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 20 sections fit 760 px
+it, 720 wide at most, padded 6 40 72 32. All 21 sections fit 760 px
 without scrolling (the sidebar's rows 28 px tall since Accessibilité
-came, 27 px since Performances came, 26 px since Agir sur le bureau came).
+came, 27 px since Performances came, 26 px since Agir sur le bureau came,
+24 px since Caméra came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -1145,6 +1147,29 @@ Appearance keeps a link here.
   written at once, the bar drawing it; reduced transparency then on and
   inert, the file without it. The model's groups and keys:
   `accessibility::tests`.
+
+## Caméra (#619)
+
+What the desktop does while an application uses the camera
+(`hocus-settings camera`), in APPAREILS after Son. Its first rows are the
+screen light's ([camera.md](camera.md)); the Hocuspanda camera's effects
+(#619's later lots) will join them.
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| LUMIÈRE D'ÉCRAN | Lumière d'écran ("Pendant un appel, le bord de l'écran de l'appel s'allume et éclaire ton visage. Jamais dans les captures, les partages ni les enregistrements.") | switch | `[camera] screen-light` (on) |
+| | Chaleur ("La couleur de la lumière.") | segmented "Froide", "Neutre", "Chaude" | `[camera] screen-light-warmth` (`"neutral"`) |
+| | Intensité ("Jusqu'où elle entre, et sa clarté.") | segmented "Douce", "Moyenne", "Forte" | `[camera] screen-light-strength` (`"soft"`) |
+
+- The page is generic (rows from `crates/hocus-settings/src/camera.rs`);
+  off, the warmth and the strength are inert. The compositor follows
+  them live. The words are the mockup's ("Lumière d'écran", "Chaleur",
+  "Intensité" and their choices); its icon a video camera.
+- **Measured headless** (`crates/hocus-compositor/tests/
+  settings_appearance.rs`, `the_camera_page_writes_the_screen_light_s_keys`):
+  the rows in order and their defaults; "Chaude" and "Forte" written; the
+  switch off written, the two others inert, and a call's light on the
+  screen gone. The model's keys: `camera::tests`.
 
 ## Fond d'écran (6.3)
 

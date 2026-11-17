@@ -921,6 +921,11 @@ fn to_compositor() -> Vec<ToCompositor> {
         ToCompositor::Meeting(None),
         ToCompositor::Music { playing: true },
         ToCompositor::Music { playing: false },
+        ToCompositor::Camera(vec![CameraUser {
+            app: "Visio".into(),
+            ids: vec!["org.example.visio".into(), "visio".into()],
+        }]),
+        ToCompositor::Camera(Vec::new()),
         ToCompositor::Copy("hocus agent my-agent waiting".into()),
         ToCompositor::Clip {
             paste: true,

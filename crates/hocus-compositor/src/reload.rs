@@ -274,6 +274,13 @@ impl State {
         if self.night_light_config_changed(&new.night_light) {
             followed.push("[night-light]");
         }
+        // The screen light (#619): read at each turn of the loop.
+        if new.camera != self.config.camera {
+            self.config.camera = new.camera;
+            // Its warmth or strength drawn at once.
+            self.redraw = true;
+            followed.push("[camera]");
+        }
         // The screen reader (#734): started or stopped.
         if self.accessibility_changed(&new.accessibility) {
             followed.push("[accessibility]");

@@ -831,6 +831,52 @@ fn the_shared_screen_has_its_ring_never_in_its_stream() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The screen light while the camera is in use (#619) lights the shared
+/// screen's edges, never its stream's frames.
+#[test]
+fn the_screen_light_is_never_in_a_share() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell)?;
+    // As the shell says it: an application uses the camera, no window of
+    // its own here, the focused screen lights.
+    bed.hp.camera_users(vec![hocus_link::CameraUser {
+        app: "Visio".to_owned(),
+        ids: vec!["visio".to_owned()],
+    }]);
+    let lit = bed.hp.dispatch_until(common::WAIT, |hp| {
+        hp.screen_light()
+            .first()
+            .is_some_and(|(_, level)| *level >= 1.0)
+    })?;
+    anyhow::ensure!(lit, "no light: {:?}", bed.hp.screen_light());
+    let (_, started) = bed.share_screen()?;
+    bed.idle(Duration::from_millis(300))?;
+    // 10 px in from the right edge, past the share's ring.
+    let (x, y) = (SCREEN.0 as usize - 10, 540);
+    let [_, r, ..] = bed.pixel(x, y)?.to_be_bytes();
+    let node = started.streams[0].0;
+    let consumer = consume(&bed.pipewire.socket, node)?;
+    let start = Instant::now();
+    let ((w, _), pixels) = loop {
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(15),
+            "no frame came (frames sent: {})",
+            bed.hp.share_frames()
+        );
+        bed.idle(Duration::from_millis(50))?;
+        if let Ok(frame) = consumer.frames.try_recv() {
+            break frame;
+        }
+    };
+    let at = (y * w as usize + x) * 4;
+    let shared = pixels[at + 2];
+    // The screen lit there, the frame the desktop's dark background.
+    assert!(r > 60 && shared < 40, "the screen {r}, the frame {shared}");
+    Ok(())
+}
+
 /// A share's frame: its size and its BGRx pixels.
 type Frame = ((u32, u32), Vec<u8>);
 

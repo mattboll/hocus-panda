@@ -88,6 +88,7 @@ mod render;
 mod resume;
 mod rules;
 mod scales;
+mod screen_light;
 mod screen_reader;
 mod screen_sets;
 mod screens;
@@ -118,7 +119,7 @@ pub use backend::headless::{FrameCost, HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
 pub use clipboard::application_dirs;
 pub use config::{
-    Agents as AgentsSettings, AltTab, Animation as WindowAnimation, Appearance,
+    Agents as AgentsSettings, AltTab, Animation as WindowAnimation, Appearance, Camera,
     Capture as CaptureSettings, CaptureFormat, Clipboard as ClipboardSettings, Config,
     Delay as PowerDelay, Desktops, Developer, DragKey, FollowPointer, FormChoice, HaloRule,
     Idle as IdleSettings, Ink, Lid, Magnifier as MagnifierSettings, McpAccess, McpAgent,
@@ -126,7 +127,8 @@ pub use config::{
     Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
     Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, Remind,
     Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
-    SystemKeyboard, Wallpaper as WallpaperSettings, Windows,
+    Strength as LightStrength, SystemKeyboard, Wallpaper as WallpaperSettings,
+    Warmth as LightWarmth, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.

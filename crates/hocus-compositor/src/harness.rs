@@ -450,6 +450,17 @@ impl Headless {
         self.app.state.music_plays(playing);
     }
 
+    /// Who uses the camera, as if the shell said so (#619).
+    pub fn camera_users(&mut self, users: Vec<hocus_link::CameraUser>) {
+        self.app.state.camera_users(users);
+    }
+
+    /// The screen light (#619): each screen it shows on or leaves, and how
+    /// far it is on (0 to 1).
+    pub fn screen_light(&self) -> Vec<(String, f64)> {
+        self.app.state.screen_light()
+    }
+
     /// The garlands across the top (#813), while they show: each one's
     /// screen and its bulbs' points (global, logical), by screen.
     pub fn garland_tops(&self) -> Vec<(String, Vec<(f64, f64)>)> {

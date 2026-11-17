@@ -119,6 +119,12 @@ pub enum ToCompositor {
     /// ripples while it does, and calms when it stops (#801). No level: the
     /// shell reads no sound.
     Music { playing: bool },
+    /// The applications using a camera now (bar.md 5.12, as the in-use
+    /// sign follows them, without its linger), sent as the shell connects
+    /// and when they change; none: the camera is not in use. The
+    /// compositor lights the screen of their window (#619,
+    /// docs/design/camera.md).
+    Camera(Vec<CameraUser>),
     /// The clipboard takes `text` (the command the Sources popover shows),
     /// which the compositor offers: the shell's surfaces take no serial to set
     /// it themselves.
@@ -270,6 +276,15 @@ impl ToCompositor {
             _ => Ok(message),
         }
     }
+}
+
+/// An application using a camera: its name, for the log, and the names
+/// its windows' application ids may go by, lower case (its sandbox's app
+/// id, its own id, its program, its name), whole or by their last part.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameraUser {
+    pub app: String,
+    pub ids: Vec<String>,
 }
 
 /// Where something the user clicked is on a bar: its screen's name and

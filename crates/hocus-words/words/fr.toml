@@ -1315,6 +1315,21 @@ reconnects_m = " · se connecte seul quand il s’allume"
 reconnects_f = " · se connecte seule quand elle s’allume"
 paired_count = { one = "{n} associé", other = "{n} associés" }
 
+[settings.camera]
+screen_light = "LUMIÈRE D’ÉCRAN"
+screen_light_2 = "Lumière d’écran"
+during_a_call_the_edges_of = "Pendant un appel, le bord de l’écran de l’appel s’allume et éclaire ton visage. Jamais dans les captures, les partages ni les enregistrements."
+warmth = "Chaleur"
+the_light_s_colour = "La couleur de la lumière."
+cool = "Froide"
+neutral = "Neutre"
+warm = "Chaude"
+strength = "Intensité"
+how_far_in_it_reaches_and = "Jusqu’où elle entre, et sa clarté."
+soft = "Douce"
+medium = "Moyenne"
+strong = "Forte"
+
 [settings.captures]
 screenshots = "CAPTURES D’ÉCRAN"
 screen_recording = "ENREGISTREMENT DE L’ÉCRAN"
@@ -1544,6 +1559,8 @@ send_to_desktop_n = "Envoyer au bureau"
 take_to_desktop_n = "Emmener au bureau"
 
 [settings.model]
+camera = "Caméra"
+what_the_desktop_does_while_the_camera = "Ce que fait le bureau pendant qu’une application utilise la caméra : la lumière d’écran sur ton visage."
 personalisation = "PERSONNALISATION"
 devices = "APPAREILS"
 connections = "CONNEXIONS"

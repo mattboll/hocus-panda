@@ -3398,7 +3398,11 @@ the machine).
   watch is read each second while a node exists. PipeWire's and
   WirePlumber's own processes are left out (their opens are a stream's,
   which the graph shows with its application); a program is named by its
-  desktop entry (by its program's name), else by its program.
+  desktop entry (by its program's name), else by its program. A video
+  source whose `media.role` is `Screen` (the desktop's own screen cast,
+  5.11) is no camera: what reads it shares the screen (#619). Who uses a
+  camera now, without the linger, is told the compositor as it changes,
+  for the screen light (`ToCompositor::Camera`, [camera.md](camera.md)).
 - **The screen**: the compositor's `shares` (5.11), the screen's tile;
   and its `recording` (5.10), the recording's tile. No longer items of
   their own: their lines and buttons are in the popover.

@@ -1437,6 +1437,8 @@ impl State {
             }
             (now, _) => (now, false),
         };
+        // The screen light (#619), over the lock too: its screens alone.
+        self.tick_screen_light(now);
         // Locked (7.1): the lock's own motion alone; nothing else is drawn
         // but the wallpaper's effects behind the desktop's own lock (#807).
         if let Some(moving) = self.lock_tick(now) {

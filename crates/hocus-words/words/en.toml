@@ -1324,6 +1324,21 @@ reconnects_m = " · connects by itself when switched on"
 reconnects_f = " · connects by itself when switched on"
 paired_count = { other = "{n} paired" }
 
+[settings.camera]
+screen_light = "SCREEN LIGHT"
+screen_light_2 = "Screen light"
+during_a_call_the_edges_of = "During a call, the edges of the call’s screen light up and light your face. Never in captures, shares or recordings."
+warmth = "Warmth"
+the_light_s_colour = "The light’s colour."
+cool = "Cool"
+neutral = "Neutral"
+warm = "Warm"
+strength = "Strength"
+how_far_in_it_reaches_and = "How far in it reaches, and how bright it is."
+soft = "Soft"
+medium = "Medium"
+strong = "Strong"
+
 [settings.captures]
 screenshots = "SCREENSHOTS"
 screen_recording = "SCREEN RECORDING"
@@ -1553,6 +1568,8 @@ send_to_desktop_n = "Send to desktop"
 take_to_desktop_n = "Take to desktop"
 
 [settings.model]
+camera = "Camera"
+what_the_desktop_does_while_the_camera = "What the desktop does while an application uses the camera: the screen light on your face."
 personalisation = "PERSONALISATION"
 devices = "DEVICES"
 connections = "CONNECTIONS"

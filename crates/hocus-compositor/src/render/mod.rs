@@ -1858,6 +1858,11 @@ impl State {
                     .map(OutputElements::Cursor),
             );
         }
+        // The screen light over everything else, the lock too (#619): on
+        // the screen only, never in a capture, a share or a recording.
+        if purpose.screen() {
+            self.screen_light_elements(renderer, output, elements);
+        }
         // Locked (7.1): the lock alone, whatever the purpose but its own
         // last look at the desktop.
         if purpose != Purpose::Freeze

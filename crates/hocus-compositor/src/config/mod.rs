@@ -17,6 +17,7 @@ use crate::shortcuts::Shortcuts;
 
 mod accessibility;
 mod appearance;
+mod camera;
 mod devices;
 mod effects;
 mod keyboard;
@@ -27,6 +28,7 @@ mod windows;
 
 pub use accessibility::*;
 pub use appearance::*;
+pub use camera::*;
 pub use devices::*;
 pub use effects::*;
 pub use keyboard::*;
@@ -72,6 +74,9 @@ pub struct Config {
     pub night_light: NightLight,
     /// The screen reader (docs/design/screen-reader.md, #734).
     pub accessibility: Accessibility,
+    /// The screen light while the camera is in use (#619,
+    /// docs/design/camera.md).
+    pub camera: Camera,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,

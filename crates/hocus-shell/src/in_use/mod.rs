@@ -37,7 +37,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown, SharedThing};
+use hocus_link::{
+    CameraUser, EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown, SharedThing, ToCompositor,
+};
 use iced::window;
 
 use crate::{
@@ -312,6 +314,7 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
         (before, s.uses.clone(), lingered)
     });
     linger::wake_at(after.deadline());
+    tell_cameras(&after);
     if before == after {
         return;
     }
@@ -364,6 +367,42 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
     effects.push(Effect::Wake(IN_USE_NAMESPACE));
     popover::send(effects);
     popover::changed(Item::InUse);
+}
+
+/// The cameras' users as the compositor was last told; `None`: not told
+/// since the shell linked.
+static TOLD: Mutex<Option<Vec<CameraUser>>> = Mutex::new(None);
+
+/// Tells the compositor who uses a camera now, when that changed since it
+/// was last told: it lights the screen of their window (#619). Those that
+/// linger are no longer using it.
+fn tell_cameras(uses: &Uses) {
+    let users: Vec<CameraUser> = uses
+        .camera
+        .iter()
+        .filter(|s| s.live())
+        .map(|s| CameraUser {
+            app: s.what.app.clone(),
+            ids: s.what.ids.clone(),
+        })
+        .collect();
+    let mut told = TOLD.lock().unwrap_or_else(PoisonError::into_inner);
+    if told.as_ref() == Some(&users) {
+        return;
+    }
+    if popover::tell(ToCompositor::Camera(users.clone())) {
+        tracing::debug!(
+            apps = ?users.iter().map(|u| u.app.as_str()).collect::<Vec<_>>(),
+            "the compositor is told who uses the camera"
+        );
+        *told = Some(users);
+    }
+}
+
+/// The shell is linked again: who uses the camera, told again.
+pub fn linked() {
+    *TOLD.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    tell_cameras(&snapshot());
 }
 
 /// The sound's graph: who uses the microphone (their streams linked to a

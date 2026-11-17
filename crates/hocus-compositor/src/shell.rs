@@ -879,8 +879,10 @@ impl State {
         // The meeting's halo is the shell's to say: its next one says it
         // again.
         self.meeting_near(None);
-        // And whether the music plays (#801).
+        // And whether the music plays (#801), and who uses the camera
+        // (#619): its next one says them again.
         self.music_plays(false);
+        self.camera_users(Vec::new());
         if self.shell.software {
             self.shell.software = false;
             self.redraw = true;
@@ -998,6 +1000,7 @@ impl State {
                 }));
             }
             ToCompositor::Music { playing } => self.music_plays(playing),
+            ToCompositor::Camera(users) => self.camera_users(users),
             ToCompositor::Copy(text) => self.copy_text(text),
             ToCompositor::Clip { paste, clip } => self.clip_asked(paste, clip),
             ToCompositor::ClipboardCount { items, pinned } => {

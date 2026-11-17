@@ -131,6 +131,8 @@ pub struct State {
     pub magnifier: crate::magnifier::Magnifier,
     /// The windows' opacity's wheel and its pill (#735).
     pub opacity: crate::opacity::Opacity,
+    /// The screen light while the camera is in use (#619).
+    pub light: crate::screen_light::ScreenLight,
     /// The night light (#436).
     pub night: crate::night_light::Night,
     /// The garlands proposed in December (#813).
@@ -335,6 +337,7 @@ impl State {
             projects: crate::projects::Projects::default(),
             magnifier: crate::magnifier::Magnifier::default(),
             opacity: crate::opacity::Opacity::default(),
+            light: crate::screen_light::ScreenLight::default(),
             night: crate::night_light::Night::default(),
             holidays: crate::holidays::Holidays::default(),
             screen_reader: crate::screen_reader::ScreenReader::default(),

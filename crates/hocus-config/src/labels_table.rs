@@ -63,6 +63,21 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("dark", hocus_words::settings::appearance::DARK), ("light", hocus_words::settings::appearance::LIGHT), ("frost", hocus_words::settings::appearance::FROST), ("matrix", hocus_words::settings::appearance::MATRIX)]),
     },
     Label {
+        key: "camera.screen-light",
+        name: hocus_words::settings::camera::SCREEN_LIGHT_2,
+        said: Said::Switch,
+    },
+    Label {
+        key: "camera.screen-light-strength",
+        name: hocus_words::settings::camera::STRENGTH,
+        said: Said::Choices(&[("soft", hocus_words::settings::camera::SOFT), ("medium", hocus_words::settings::camera::MEDIUM), ("strong", hocus_words::settings::camera::STRONG)]),
+    },
+    Label {
+        key: "camera.screen-light-warmth",
+        name: hocus_words::settings::camera::WARMTH,
+        said: Said::Choices(&[("cool", hocus_words::settings::camera::COOL), ("neutral", hocus_words::settings::camera::NEUTRAL), ("warm", hocus_words::settings::camera::WARM)]),
+    },
+    Label {
         key: "capture.folder",
         name: hocus_words::settings::app_captures_page::FOLDER,
         said: Said::Other,
