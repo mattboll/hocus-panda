@@ -79,6 +79,9 @@ ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-pro
 # Speech to text (hocus-transcribe): whisper.cpp (MIT), its sources in the
 # crate, built with cmake; the binding is under the Unlicense (deny.toml).
 whisper-rs = "0.16.0"
+# The GPUs hocus-transcribe may hear on, by their kind and memory, through
+# the system's Vulkan loader.
+ash = { version = "0.38.0", default-features = false, features = ["loaded", "std"] }
 wayland-backend = { version = "0.3.17", features = ["client_system"] }
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
@@ -135,6 +138,3 @@ debug-assertions = false
 [patch.crates-io]
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
 iced_layershell = { path = "vendor/iced_layershell" }
-# sherpa-onnx-sys links the libraries scripts/prebuilt.sh fetched and
-# checked, and downloads nothing itself (vendor/README.md).
-sherpa-onnx-sys = { path = "vendor/sherpa-onnx-sys" }

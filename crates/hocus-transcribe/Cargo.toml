@@ -33,7 +33,10 @@ rustls.workspace = true
 # The words (whisper.cpp, MIT; its binding is under the Unlicense) and the
 # call's voices (sherpa-onnx, Apache-2.0, with onnxruntime, MIT: linked
 # from the archive scripts/prebuilt.sh fetches and checks).
-whisper-rs.workspace = true
+# On the GPU through Vulkan (any vendor's), else on the CPU.
+whisper-rs = { workspace = true, features = ["vulkan"] }
+# The Vulkan devices, their kind and memory, to choose one.
+ash.workspace = true
 sherpa-onnx.workspace = true
 
 [dev-dependencies]

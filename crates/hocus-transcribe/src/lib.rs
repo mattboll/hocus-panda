@@ -4,6 +4,7 @@
 //! microphone is "Moi", the call's voices "Voix 1", "Voix 2"… when they
 //! can be told apart, else "Les autres".
 //!
+//! - [`device`]: where it hears: a GPU through Vulkan, else the CPU;
 //! - [`engine`]: what hears, behind a trait; [`real`] (whisper.cpp and
 //!   sherpa-onnx), or a fake one with fixed lines for tests;
 //! - [`speech`]: where a track speaks;
@@ -11,6 +12,7 @@
 //! - [`fetch`]: the models, downloaded on first use and checked;
 //! - [`run`]: a meeting's folder, from its sound to its file.
 
+pub mod device;
 pub mod engine;
 pub mod fetch;
 pub mod real;

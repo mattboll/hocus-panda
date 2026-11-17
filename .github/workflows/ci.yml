@@ -69,7 +69,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
             -o Dir::Cache::Archives="$HOME/apt-archives" \
-            clang mold pkg-config cmake fonts-dejavu-core \
+            clang mold pkg-config cmake libclang-dev libvulkan-dev glslc fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
@@ -114,7 +114,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            clang mold pkg-config cmake \
+            clang mold pkg-config cmake libclang-dev libvulkan-dev glslc \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             libpipewire-0.3-dev
@@ -159,7 +159,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            clang mold pkg-config cmake \
+            clang mold pkg-config cmake libclang-dev libvulkan-dev glslc \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             libpipewire-0.3-dev
@@ -266,7 +266,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            clang mold pkg-config cmake dpkg-dev \
+            clang mold pkg-config cmake libclang-dev libvulkan-dev glslc dpkg-dev \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             libpipewire-0.3-dev

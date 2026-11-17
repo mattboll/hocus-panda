@@ -36,19 +36,26 @@ impl std::fmt::Debug for Real {
 }
 
 impl Real {
-    /// The models in `dir`, loaded. The voices' are optional: without
-    /// them, the call is "Les autres".
-    pub fn load(dir: &Path) -> anyhow::Result<Self> {
+    /// The models in `dir`, loaded, the words' on the GPU whisper.cpp's
+    /// Vulkan backend is shown (`gpu`), else on the CPU (its smaller
+    /// model, every core). The voices' are optional: without them, the
+    /// call is "Les autres".
+    pub fn load(dir: &Path, gpu: bool) -> anyhow::Result<Self> {
+        let [words, _, _] = models::for_device(gpu);
+        Self::load_with(dir, &dir.join(words.file), gpu)
+    }
+
+    /// The same, the words' model at `path`.
+    fn load_with(dir: &Path, path: &Path, gpu: bool) -> anyhow::Result<Self> {
         whisper_rs::install_logging_hooks();
-        let threads = std::thread::available_parallelism()
-            .map_or(2, |n| n.get())
-            .clamp(1, 8);
+        let threads = std::thread::available_parallelism().map_or(2, |n| n.get());
         let threads = i32::try_from(threads).unwrap_or(4);
-        let path = dir.join(models::WORDS.file);
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(gpu);
         let words = WhisperContext::new_with_params(
             path.to_str()
                 .ok_or_else(|| anyhow::anyhow!("{}: not UTF-8", path.display()))?,
-            WhisperContextParameters::default(),
+            params,
         )
         .map_err(|err| anyhow::anyhow!("{}: {err}", path.display()))?;
         let name = |m: models::Model| Some(dir.join(m.file).to_string_lossy().into_owned());
@@ -224,7 +231,7 @@ impl Engine for Real {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use hocus_meetings::{models::Model, wav};
 
@@ -275,12 +282,22 @@ mod tests {
         let models = std::env::var_os("HOCUS_TEST_MODELS")
             .map(PathBuf::from)
             .ok_or_else(|| anyhow::anyhow!("HOCUS_TEST_MODELS names the models' folder"))?;
-        fetch::missing(&models, &mut |_, _| {})?;
+        // On the CPU unless `HOCUS_TRANSCRIBE_TEST_GPU` is set: then on the
+        // Vulkan device the caller shows whisper.cpp alone
+        // (`GGML_VK_VISIBLE_DEVICES`), never a real GPU here but Mesa's
+        // CPU Vulkan (docs/design/meetings.md, "Measured").
+        let gpu = std::env::var_os("HOCUS_TRANSCRIBE_TEST_GPU").is_some();
+        fetch::missing(&models, &models::for_device(gpu), &mut |_, _| {})?;
         if !models.join(SAMPLE.file).exists() {
             fetch::one(&fetch::agent(), &models, SAMPLE, &mut |_| {})?;
         }
         let voice = wav::read(&models.join(SAMPLE.file))?;
-        let mut real = Real::load(&models)?;
+        // `HOCUS_TEST_WORDS`: another words' model (whisper.cpp's tiny one,
+        // to try the Vulkan path on lavapipe, which is slow).
+        let mut real = match std::env::var_os("HOCUS_TEST_WORDS") {
+            Some(words) => Real::load_with(&models, Path::new(&words), gpu)?,
+            None => Real::load(&models, gpu)?,
+        };
         let mut last = 0.0;
         let heard = real.hear(&vec![0.0; voice.len()], &voice, &mut |done| last = done)?;
         let text = heard

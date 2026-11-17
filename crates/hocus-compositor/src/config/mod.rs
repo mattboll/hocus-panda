@@ -225,12 +225,24 @@ impl Config {
 }
 
 /// Meetings' transcriptions, `[meetings]` (docs/design/meetings.md).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Meetings {
     /// Where their texts go. Empty: the documents' folder's "Réunions"
     /// ("Meetings"); else absolute, or from the home (`~/`).
     pub folder: String,
+    /// Where their words are heard: `auto` (a discrete GPU, else an
+    /// integrated one, else the CPU), `cpu`, or a part of a GPU's name.
+    pub device: String,
+}
+
+impl Default for Meetings {
+    fn default() -> Self {
+        Self {
+            folder: String::new(),
+            device: "auto".to_owned(),
+        }
+    }
 }
 
 /// The screen capture, `[capture]` (5.8, 6.17): where its images go, in

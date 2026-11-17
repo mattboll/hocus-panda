@@ -34,9 +34,10 @@ pub(crate) fn agent() -> ureq::Agent {
         .new_agent()
 }
 
-/// What `dir` lacks, downloaded into it; `said(done, total)` as it goes.
-pub fn missing(dir: &Path, said: &mut dyn FnMut(u64, u64)) -> anyhow::Result<()> {
-    let wanted = models::missing(dir);
+/// What `dir` lacks of `models`, downloaded into it; `said(done, total)`
+/// as it goes.
+pub fn missing(dir: &Path, models: &[Model], said: &mut dyn FnMut(u64, u64)) -> anyhow::Result<()> {
+    let wanted = models::missing_of(dir, models);
     if wanted.is_empty() {
         return Ok(());
     }

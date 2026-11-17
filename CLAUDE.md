@@ -99,8 +99,9 @@ sharing).
 
 Building needs, besides Rust, the system's headers the CI installs
 (`.github/workflows/ci.yml`), `libpipewire-0.3-dev` among them (screen
-sharing's streams), `cmake` and a C++ compiler (whisper.cpp, built from
-its sources for `hocus-transcribe`), and sherpa-onnx's prebuilt libraries,
+sharing's streams), `cmake`, a C++ compiler, `libclang`, the Vulkan
+headers (`libvulkan-dev`) and `glslc` (whisper.cpp and its Vulkan backend, built
+from their sources for `hocus-transcribe`), and sherpa-onnx's prebuilt libraries,
 which `scripts/prebuilt.sh` fetches once and checks (vendor/README.md):
 run it before the first build.
 
@@ -341,7 +342,8 @@ A meeting's transcription (docs/design/meetings.md, crates
 the meeting's two tracks into `$XDG_STATE_HOME/hocuspanda/meetings`, from
 PipeWire's default socket (`PIPEWIRE_REMOTE`), then runs
 `hocus-transcribe` from beside the compositor (or `Config::transcriber`),
-which downloads its models (610 MB) on first use into
+which hears on a GPU through Vulkan (a discrete one first; `[meetings]
+device`) else on the CPU, downloads its models (610 MB) on first use into
 `$XDG_DATA_HOME/hocuspanda/models` and writes the text in
 `$XDG_DOCUMENTS_DIR`'s "Réunions" (else `user-dirs.dirs`', else
 `~/Documents`); its notifications go to the bus given with
@@ -350,10 +352,18 @@ fresh `HOME` (or `XDG_STATE_HOME`, `XDG_DATA_HOME` and
 `XDG_DOCUMENTS_DIR`), a PipeWire of its own (else it records your real
 microphone and calls) and a bus of its own. Its tests
 (`tests/transcribe.rs`) run the fake engine (`HOCUS_TRANSCRIBE_FAKE=FILE`,
-fixed lines, no model); the real one's test is ignored:
+fixed lines, no model nor device); the real one's test is ignored, and
+runs on the CPU, or on Mesa's CPU Vulkan (lavapipe), never a real GPU next
+to a live session (a mount namespace with an empty /dev/dri keeps the GPUs
+out of reach):
 
 ```sh
 HOCUS_TEST_MODELS=/tmp/models cargo nextest run -p hocus-transcribe --run-ignored only real::
+# the Vulkan path, on lavapipe alone
+HOCUS_TRANSCRIBE_TEST_GPU=1 GGML_VK_VISIBLE_DEVICES=0 \
+    VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json HOCUS_TEST_MODELS=/tmp/models \
+    unshare -r -m sh -c 'mount -t tmpfs none /dev/dri && exec "$@"' sh \
+    cargo nextest run -p hocus-transcribe --run-ignored only real::
 ```
 
 Idle (docs/design/idle.md): the compositor serves

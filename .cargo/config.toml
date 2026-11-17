@@ -16,13 +16,12 @@ LP_NUM_THREADS = { value = "1", force = false }
 TZ = { value = "UTC", force = true }
 LANG = { value = "C.UTF-8", force = true }
 # hocus-transcribe's libraries (docs/design/meetings.md). sherpa-onnx's
-# build (vendored) links the static libraries scripts/prebuilt.sh fetched,
-# checked and unpacked in prebuilt/: it never downloads anything itself.
-# whisper.cpp's bindings are the crate's own (no libclang needed), and its
-# code is built for any x86-64 with AVX2, not for the building machine's
-# processor alone (the package runs elsewhere).
+# build links the static libraries scripts/prebuilt.sh fetched, checked and
+# unpacked in prebuilt/: given this folder, it downloads nothing.
+# whisper.cpp's code is built for any x86-64 with AVX2, not for the
+# building machine's processor alone (the package runs elsewhere); its
+# bindings are generated (libclang), its Vulkan backend's with them.
 SHERPA_ONNX_LIB_DIR = { value = "prebuilt/sherpa-onnx/lib", relative = true, force = false }
-WHISPER_DONT_GENERATE_BINDINGS = { value = "1", force = false }
 GGML_NATIVE = { value = "OFF", force = false }
 
 # The programs the compositor's tests run, from beside the test's own: a

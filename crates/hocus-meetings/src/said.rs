@@ -21,6 +21,8 @@ pub struct Heard {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Said {
+    /// Where it hears: a GPU's name, or none for the CPU.
+    Device { gpu: Option<String> },
     /// The models are being downloaded: so many bytes of so many.
     Fetching { done: u64, total: u64 },
     /// The text is being made: `done` of it (0 to 1), and about how many
@@ -56,6 +58,10 @@ mod tests {
     #[test]
     fn its_lines_read_back() {
         for said in [
+            Said::Device {
+                gpu: Some("NVIDIA GeForce RTX 4060".to_owned()),
+            },
+            Said::Device { gpu: None },
             Said::Fetching { done: 1, total: 2 },
             Said::Working {
                 done: 0.5,

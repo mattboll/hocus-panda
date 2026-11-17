@@ -2960,6 +2960,7 @@ folder = "Dossier"
 failed = "La transcription n’a pas pu se faire"
 failed_body = "« {title} » · le son est gardé"
 retry = "Réessayer"
+cpu = "processeur"
 
 [shell.transcribe]
 transcribe = "Transcrire"

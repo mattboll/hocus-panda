@@ -70,9 +70,20 @@ are told apart when they can be.
   own program; `Config::transcriber`), which lowers its own priority to
   the lowest (nice 19) and says what it does on its output, a JSON line at
   a time (`hocus_meetings::Said`).
+- **Where it hears** (`device.rs`): on a GPU through whisper.cpp's Vulkan
+  backend, whatever its vendor: a discrete GPU with memory enough for the
+  model (1.6 GB) first, the largest (a hybrid laptop's NVIDIA or AMD),
+  else an integrated one, else the CPU (whisper.cpp's own, every core at
+  nice 19, with the medium model, quantised q5_0, MIT, 539 MB, downloaded
+  only then). The devices are read from the Vulkan loader; the program
+  then starts again as itself (`exec`) with whisper.cpp shown that device
+  alone (`GGML_VK_VISIBLE_DEVICES`). One line of its log says which and
+  why; the progress notification's details end with its name ("·
+  processeur" on the CPU). A GPU that would not take the model: the CPU.
+  `[meetings] device`: `auto`, `cpu`, or a part of a device's name.
 - **The engine**, behind a trait (`engine::Engine`): whisper.cpp
-  (`whisper-rs`, large-v3-turbo quantised q5_0, each track's language
-  found on its first window) hears each track's speech (where it speaks, by its loudness),
+  (`whisper-rs`, large-v3-turbo quantised q5_0 on a GPU, each track's
+  language found on its first window) hears each track's speech (where it speaks, by its loudness),
   packed in windows of 28 s at most, the silences between left out (it
   hears 30 s at once whatever they hold); sherpa-onnx tells the call's
   voices apart first (pyannote's segmentation 3.0 and 3D-Speaker's CAM++,
@@ -80,7 +91,8 @@ are told apart when they can be.
   call's lines is the voice it overlaps most; with one voice or none told
   apart, "Les autres". A fake engine
   (`HOCUS_TRANSCRIBE_FAKE=FILE`, fixed lines) stands for it in tests.
-- **The models** (`hocus_meetings::models`), 610 MB together, downloaded
+- **The models** (`hocus_meetings::models`), 610 MB together (575 MB on
+  the CPU, its medium model instead of the large one), downloaded
   on first use into `$XDG_DATA_HOME/hocuspanda/models`, each checked
   against its SHA-256 (written beside its place, renamed once checked),
   the download's progress in the notification.
@@ -134,7 +146,17 @@ makes the text. Unit tests: the tracks' files, where speech is, the turns
 and the echo, the Markdown in French, the lengths and who was heard in both
 languages, the links wanted. The real engine on whisper.cpp's sample,
 ignored (it downloads the models): `HOCUS_TEST_MODELS=DIR cargo nextest run
--p hocus-transcribe --run-ignored only real::`.
+-p hocus-transcribe --run-ignored only real::`. The device's choice is
+unit-tested on lists of devices (a hybrid laptop's, lavapipe alone, none).
+
+Measured by hand on 4 cores of the development machine at nice 19, its
+GPUs out of reach (an empty `/dev/dri`, the NVIDIA devices `/dev/null`,
+Vulkan's drivers lavapipe's alone): the Vulkan path works on lavapipe
+(whisper.cpp's sample heard right with the tiny model, 177 s for 11 s:
+lavapipe is far slower than whisper.cpp's own CPU path, so `auto` never
+takes it); the CPU fallback, medium model, 88 s for a 34 s two-voice
+sample (the large one took 145 s). **A real GPU's speed is not
+measured.**
 
 ### Not built
 

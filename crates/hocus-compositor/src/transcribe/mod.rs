@@ -85,6 +85,9 @@ struct Job {
     told: Option<(i32, Duration)>,
     /// The user closed its progress: no more of it is said.
     quiet: bool,
+    /// Where it hears, as the progress says it: a GPU's name, or the
+    /// processor.
+    device: Option<String>,
 }
 
 /// What a test can know of the transcriptions.
@@ -240,6 +243,7 @@ impl State {
                 notes: None,
                 told: None,
                 quiet: false,
+                device: None,
             },
         );
         self.tell_transcribing();
@@ -330,12 +334,15 @@ impl State {
             self.config.transcriber.clone()
         };
         let dir = job.dir.clone();
-        tracing::info!(id, dir = %dir.display(), "a meeting's text is being made");
+        let device = self.config.meetings.device.clone();
+        tracing::info!(id, dir = %dir.display(), device, "a meeting's text is being made");
         programs::on_a_thread(format!("transcribe {id}"), move || {
             let mut command = Command::new(&program);
             command
                 .arg("run")
                 .arg(&dir)
+                .arg("--device")
+                .arg(&device)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit());
@@ -373,6 +380,9 @@ impl State {
             return;
         };
         match said {
+            Said::Device { gpu } => {
+                job.device = Some(gpu.unwrap_or_else(|| txt::CPU.get(lang).to_owned()));
+            }
             Said::Fetching { done, total } => {
                 let value = (done.saturating_mul(100) / total.max(1)) as i32;
                 let mb = |b: u64| txt::megabytes(lang, (b + 500_000) / 1_000_000);
@@ -394,7 +404,7 @@ impl State {
                 });
                 job.length = sound;
                 let of = length(lang, sound.unwrap_or(0));
-                let body = match left {
+                let mut body = match left {
                     Some(left) => txt::left(
                         lang,
                         txt::Left {
@@ -404,6 +414,10 @@ impl State {
                     ),
                     None => txt::of_sound(lang, of),
                 };
+                if let Some(device) = &job.device {
+                    body.push_str(" · ");
+                    body.push_str(device);
+                }
                 self.transcribe_progress(id, value, body);
             }
             Said::Written {

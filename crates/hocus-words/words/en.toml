@@ -2970,6 +2970,7 @@ folder = "Folder"
 failed = "The transcription could not be made"
 failed_body = "“{title}” · the sound is kept"
 retry = "Try again"
+cpu = "processor"
 
 # The bar's: the meeting card's button, its asking popover, the in-use tile.
 [shell.transcribe]

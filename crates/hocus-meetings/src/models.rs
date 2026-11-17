@@ -3,7 +3,9 @@
 //! says so), each checked against its SHA-256 before it is used.
 //!
 //! - whisper.cpp's large-v3-turbo, quantised (q5_0): OpenAI's Whisper
-//!   weights (MIT), converted by whisper.cpp's authors (MIT);
+//!   weights (MIT), converted by whisper.cpp's authors (MIT), heard on a
+//!   GPU; on the CPU, the medium one (q5_0, MIT too), downloaded only when
+//!   the CPU hears;
 //! - pyannote's segmentation 3.0 (MIT), as sherpa-onnx exported it: where
 //!   the call's voices speak;
 //! - 3D-Speaker's CAM++ (Apache-2.0), as sherpa-onnx exported it: who
@@ -41,6 +43,15 @@ pub const WORDS: Model = Model {
     used: Use::Words,
 };
 
+/// On the CPU: the large one would take hours for an hour's meeting.
+pub const CPU_WORDS: Model = Model {
+    file: "ggml-medium-q5_0.bin",
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
+    sha256: "19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f",
+    bytes: 539_212_467,
+    used: Use::Words,
+};
+
 pub const SEGMENTS: Model = Model {
     file: "pyannote-segmentation-3.0.onnx",
     url: "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx",
@@ -57,13 +68,29 @@ pub const VOICES: Model = Model {
     used: Use::Voices,
 };
 
-/// Every model, the largest first.
+/// The models heard with on a GPU, the largest first.
 pub const ALL: [Model; 3] = [WORDS, SEGMENTS, VOICES];
 
-/// Those not yet in `dir` (as a whole file: a download is written beside
-/// it, then renamed).
+/// The models heard with on a GPU (`gpu`), or on the CPU.
+pub const fn for_device(gpu: bool) -> [Model; 3] {
+    if gpu {
+        ALL
+    } else {
+        [CPU_WORDS, SEGMENTS, VOICES]
+    }
+}
+
+/// Those of the GPU's not yet in `dir`: what the asking popover says.
 pub fn missing(dir: &Path) -> Vec<Model> {
-    ALL.into_iter()
+    missing_of(dir, &ALL)
+}
+
+/// Those of `models` not yet in `dir` (as a whole file: a download is
+/// written beside it, then renamed).
+pub fn missing_of(dir: &Path, models: &[Model]) -> Vec<Model> {
+    models
+        .iter()
+        .copied()
         .filter(|m| std::fs::metadata(dir.join(m.file)).map_or(true, |meta| meta.len() != m.bytes))
         .collect()
 }
