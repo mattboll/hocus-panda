@@ -15,8 +15,18 @@ LP_NUM_THREADS = { value = "1", force = false }
 # of another language give it to the program they start.
 TZ = { value = "UTC", force = true }
 LANG = { value = "C.UTF-8", force = true }
+# hocus-transcribe's libraries (docs/design/meetings.md). sherpa-onnx's
+# build (vendored) links the static libraries scripts/prebuilt.sh fetched,
+# checked and unpacked in prebuilt/: it never downloads anything itself.
+# whisper.cpp's bindings are the crate's own (no libclang needed), and its
+# code is built for any x86-64 with AVX2, not for the building machine's
+# processor alone (the package runs elsewhere).
+SHERPA_ONNX_LIB_DIR = { value = "prebuilt/sherpa-onnx/lib", relative = true, force = false }
+WHISPER_DONT_GENERATE_BINDINGS = { value = "1", force = false }
+GGML_NATIVE = { value = "OFF", force = false }
 
 # The programs the compositor's tests run, from beside the test's own: a
 # test binary does not build them, and a test fails when one is missing.
 [alias]
-programs = "build -p hocus-shell -p hocus-cli -p hocus-settings"
+programs = "build -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe"
+

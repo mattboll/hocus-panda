@@ -69,7 +69,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
             -o Dir::Cache::Archives="$HOME/apt-archives" \
-            clang mold pkg-config fonts-dejavu-core \
+            clang mold pkg-config cmake fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
@@ -82,6 +82,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+      - name: Prebuilt libraries
+        # sherpa-onnx's static libraries (hocus-transcribe), one version,
+        # checked against its SHA-256: its build downloads nothing.
+        run: scripts/prebuilt.sh
       - name: Tests of what changed
         # A line `Tests: NAME, NAME` in the description adds test files.
         env:
@@ -110,7 +114,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            clang mold pkg-config \
+            clang mold pkg-config cmake \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             libpipewire-0.3-dev
@@ -127,9 +131,13 @@ jobs:
         run: |
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
+      - name: Prebuilt libraries
+        # sherpa-onnx's static libraries (hocus-transcribe), one version,
+        # checked against its SHA-256: its build downloads nothing.
+        run: scripts/prebuilt.sh
       - name: Programs
         # The compositor's tests start the real shell and Settings, and
-        # run `hocus`, from beside them: a test binary does not build
+        # run `hocus` and `hocus-transcribe`, from beside them: a test binary does not build
         # them, and a test fails without them. The archive takes them
         # along (.config/nextest.toml).
         run: cargo programs --locked
@@ -151,7 +159,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            clang mold pkg-config \
+            clang mold pkg-config cmake \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             libpipewire-0.3-dev
@@ -159,6 +167,10 @@ jobs:
         with:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/sprint/') }}
+      - name: Prebuilt libraries
+        # sherpa-onnx's static libraries (hocus-transcribe), one version,
+        # checked against its SHA-256: its build downloads nothing.
+        run: scripts/prebuilt.sh
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       # A third language is a file and nothing else (decision 0006): the
       # workspace builds with one more (xx, English's words), and
@@ -214,7 +226,7 @@ jobs:
         # here instead.
         run: |
           zstd -dc nextest.tar.zst | tar -t > archive.txt
-          for program in hocuspanda-shell hocus hocus-settings; do
+          for program in hocuspanda-shell hocus hocus-settings hocus-transcribe; do
             grep -qE "/debug/$program\$" archive.txt || { echo "::error::$program is not in the archive"; exit 1; }
           done
       - name: Sources older than the programs
@@ -224,6 +236,7 @@ jobs:
         # older: a test may read its other files' times.
         run: |
           zstd -dc nextest.tar.zst | tar -xO --wildcards '*/debug/hocuspanda-shell.d' '*/debug/hocus.d' '*/debug/hocus-settings.d' \
+            '*/debug/hocus-transcribe.d' \
             | sed 's/^[^:]*: //; s/\\ /\x00/g' | tr ' ' '\n' | tr '\000' ' ' \
             | grep -F "$PWD/" | sort -u > sources.txt
           wc -l sources.txt
@@ -253,7 +266,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            clang mold pkg-config dpkg-dev \
+            clang mold pkg-config cmake dpkg-dev \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             libpipewire-0.3-dev
@@ -265,8 +278,12 @@ jobs:
         run: |
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
+      - name: Prebuilt libraries
+        # sherpa-onnx's static libraries (hocus-transcribe), one version,
+        # checked against its SHA-256: its build downloads nothing.
+        run: scripts/prebuilt.sh
       - name: Release build
-        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings
+        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
       - name: The .deb
         run: packaging/deb/build.sh
       - name: What the .deb holds

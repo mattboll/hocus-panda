@@ -1,0 +1,48 @@
+# sherpa-onnx-sys 2.0.1 as published, but for its build (Hocuspanda,
+# vendor/README.md): it links the static libraries of the archive
+# scripts/prebuilt.sh fetched and checked (`SHERPA_ONNX_LIB_DIR`), and
+# never downloads nor unpacks anything itself, so it has no build
+# dependencies.
+
+[package]
+edition = "2021"
+name = "sherpa-onnx-sys"
+version = "2.0.1"
+build = "build.rs"
+links = "sherpa-onnx"
+include = [
+    "src/**",
+    "build.rs",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE*",
+]
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Raw FFI bindings to the sherpa-onnx C API"
+readme = "README.md"
+keywords = [
+    "ffi",
+    "speech",
+    "sherpa-onnx",
+    "bindings",
+]
+categories = ["external-ffi-bindings"]
+license = "Apache-2.0"
+repository = "https://github.com/k2-fsa/sherpa-onnx"
+
+[package.metadata.docs.rs]
+default-features = false
+features = []
+
+[features]
+default = ["static"]
+shared = []
+static = []
+
+[lib]
+name = "sherpa_onnx_sys"
+path = "src/lib.rs"

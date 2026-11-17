@@ -2937,3 +2937,51 @@ place_bottom_left = "bottom-left quarter"
 place_bottom_right = "bottom-right quarter"
 place_minimized = "minimised"
 desktop_project = "Desktop {number}, project {name}"
+
+# A meeting's text, as hocus-transcribe writes it (docs/design/meetings.md).
+[transcribe]
+me = "Me"
+voice = "Voice {n}"
+others = "The others"
+meetings = "Meetings"
+attendees = "Attendees (calendar): {names}"
+date_line = "{weekday} {day} {month} {year}, {start} – {end}"
+
+# Its notifications, which the compositor sends.
+[compositor.transcribe]
+working = "Transcribing “{title}”"
+of_sound = "{length} of sound"
+left = "{length} of sound · about {left} left"
+fetching = "Downloading the model · {done} of {total}"
+megabytes = "{mb} MB"
+minutes = "{n} min"
+hours = "{h} h {m:02}"
+under_a_minute = "less than a minute"
+ready = "Transcript ready"
+ready_body = "{title} · {length} · {heard}"
+me = "Me"
+me_and_others = "Me and the others"
+me_and_voices = { one = "Me and {n} voice", other = "Me and {n} voices" }
+others = "The others"
+voices = { one = "{n} voice", other = "{n} voices" }
+nobody = "Nothing heard"
+open = "Open"
+folder = "Folder"
+failed = "The transcription could not be made"
+failed_body = "“{title}” · the sound is kept"
+retry = "Try again"
+
+# The bar's: the meeting card's button, its asking popover, the in-use tile.
+[shell.transcribe]
+transcribe = "Transcribe"
+transcribe_the_meeting = "Transcribe the meeting"
+stop = "Stop the transcription"
+heading = "TRANSCRIBE"
+explain = "The sound stays on this laptop. The text is written at the end of the meeting, in Documents › Meetings."
+warn = "Tell the others they are being transcribed."
+download = "Download the model ({mb} MB)"
+cancel = "Cancel"
+never_ask = "Don't ask again"
+transcription = "Transcription"
+line = "transcription · {time}"
+transcribing = "Transcribing the meeting, {time}"
