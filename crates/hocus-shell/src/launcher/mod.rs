@@ -64,7 +64,7 @@ use std::{
 
 use hocus_link::{LAUNCHER_CLOSE, LAUNCHER_NAMESPACE, Launch, ToCompositor};
 use iced::{keyboard, window};
-use iced_layershell::reexport::KeyboardInteractivity;
+use iced_exwlshell::reexport::KeyboardInteractivity;
 
 use crate::{
     clock::time::Lang,
@@ -1231,7 +1231,7 @@ pub fn took(id: window::Id, took: Took, words: Words) {
 }
 
 /// A key that reached another of the shell's surfaces while the launcher
-/// is open (layershellev hands keys to the surface last created or
+/// is open (exwlshellev hands keys to the surface last created or
 /// clicked): its, and its surface draws again. Whether it was taken.
 pub fn key(key: &keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>) -> bool {
     let Some(id) = with(|l| match &l.phase {

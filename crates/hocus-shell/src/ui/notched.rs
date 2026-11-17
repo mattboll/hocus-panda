@@ -1,6 +1,6 @@
 //! A list's wheel, as the canvases had it: a mouse's notch scrolls a
 //! given height (two rows), not iced's 60 px a line, and a touchpad's
-//! pixels are taken back to logical ones (iced_layershell hands them
+//! pixels are taken back to logical ones (iced_exwlshell hands them
 //! multiplied by the surface's scale, #488). The scrollable inside sees
 //! the scrolling as pixels.
 

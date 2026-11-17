@@ -1161,7 +1161,7 @@ are later slices'.
 - **Who does what.** The compositor decides where the bars are and in
   which form, and keeps their space whether the shell runs or not, so that
   nothing moves while the shell restarts. The shell (`hocuspanda-shell`,
-  iced 0.14 and iced_layershell) draws one layer surface per bar, anchored
+  iced 0.14 and iced_exwlshell) draws one layer surface per bar, anchored
   right, top and bottom with 8 px layer-shell margins and an exclusive
   zone of 0: the bar itself, nothing transparent around it. It is as wide
   as the form, and as the full form while a switch is under way, so that
@@ -1360,7 +1360,7 @@ control panel is not part of the product.
 - **A layer surface, not an xdg_popup.** A popover is a layer surface of
   the shell's (`hocus-bar-popover`), anchored right and bottom, its
   margins putting it 8 px left of the bar and its bottom where §9 says.
-  iced_layershell's popups take their grab serial only in the dispatch of
+  iced_exwlshell's popups take their grab serial only in the dispatch of
   a press and cannot be moved by an offset; a hover must not grab; and
   the compositor's popup grabs serve windows' menus. The layer surface
   takes the keyboard when a click opened it (`exclusive`), and when
@@ -1861,7 +1861,7 @@ What issue #465 changes under the five popovers, nothing on screen.
   the brightness's 8 px between its slot, its slider and its value).
 - **The wheel's notches** count each, a fast spin's several in one event
   too (#472): in the desktops' tiles, the brightness's slider and the
-  lists. iced_layershell hands them multiplied by the surface's scale, so
+  lists. iced_exwlshell hands them multiplied by the surface's scale, so
   the compositor tells each bar's screen's scale with the bar (`bar OUTPUT
   FORM SINCE SCALE`, in 120ths), which all of a bar's surfaces share, and
   the shell divides by it.
@@ -4696,7 +4696,7 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   drawing nothing and taking no pointer while it lists nothing (10 px in
   the gap over the desktops: tiny-skia refuses a buffer of one pixel at a
   fractional scale), and placed from the bar's bottom only once the bar
-  knows its height (a place off a short screen ended the shell). iced_layershell hands
+  knows its height (a place off a short screen ended the shell). iced_layershell handed
   the keys to the surface made last: one made as a window opens, while
   the emoji picker or the launcher holds the keyboard, took their typing.
   Since #623 the shell hands every key to the surface the compositor

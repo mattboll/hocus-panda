@@ -31,7 +31,7 @@ use iced::{
     widget::canvas::{self, Frame, Geometry},
     window,
 };
-use iced_layershell::reexport::{
+use iced_exwlshell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
 };
 
@@ -249,7 +249,7 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
         match (place.id, n) {
             (Some(id), 0) => {
                 place.id = None;
-                messages.push(Message::RemoveWindow(id));
+                messages.push(crate::layer::close(id));
                 crate::popover::with(|c| c.ring.forget(bar, TRAY_NAMESPACE, false));
             }
             (None, 0) => {}
@@ -258,32 +258,33 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
                 place.id = Some(id);
                 place.asked = (size, margin);
                 let settings = NewLayerShellSettings {
-                    size: Some(size),
+                    size: crate::layer::size(size),
                     layer: Layer::Top,
                     anchor: crate::side::anchor(Anchor::Right | Anchor::Bottom),
                     exclusive_zone: Some(0),
-                    margin: Some(crate::side::margin(margin)),
+                    margin: Some(crate::layer::margin(crate::side::margin(margin))),
                     keyboard_interactivity: KeyboardInteractivity::None,
                     output_option: if bar == crate::ALONE {
                         OutputOption::Active
                     } else {
                         OutputOption::OutputName(bar.to_owned())
                     },
+                    blur_option: iced_exwlshell::reexport::BlurOption::None,
                     events_transparent: false,
                     namespace: Some(TRAY_NAMESPACE.to_owned()),
                 };
                 crate::side::opened(id);
-                messages.push(Message::NewLayerShell { settings, id });
+                messages.push(crate::layer::open(id, settings));
                 messages.push(region(id, form, switching, n));
             }
             (Some(id), _) => {
                 if place.asked.0 != size {
-                    messages.push(Message::SizeChange { id, size });
+                    messages.extend(crate::layer::resize(id, size));
                 }
                 if place.asked.1 != margin {
                     messages.push(Message::MarginChange {
                         id,
-                        margin: crate::side::moved(id, margin),
+                        margin: crate::layer::margin(crate::side::moved(id, margin)),
                     });
                 }
                 place.asked = (size, margin);
@@ -312,36 +313,19 @@ fn bar_of(id: window::Id) -> Option<(String, Place)> {
     })
 }
 
-/// Wider than any surface: a region as large as can be.
-const EVERYWHERE: i32 = 1 << 20;
-
-type WlRegion = wayland_client::protocol::wl_region::WlRegion;
-
 /// Surface `id` takes the pointer on its cells only; on none while the bar
 /// switches.
 fn region(id: window::Id, form: Form, switching: bool, n: usize) -> Message {
-    let rects: Vec<(i32, i32, i32, i32)> = if switching {
+    let rects: Vec<Rectangle> = if switching {
         Vec::new()
     } else {
         let ((w, h), bottom) = placement(form, false, n);
         let size = Size::new(w as f32, h as f32);
         (0..n)
-            .map(|i| {
-                let r = rect(form, i, n, size, bottom, form.width() as f32);
-                let (x, y) = (r.x.floor() as i32, r.y.floor() as i32);
-                let right = (r.x + r.width).ceil() as i32;
-                let bottom = (r.y + r.height).ceil() as i32;
-                (x, y, right - x, bottom - y)
-            })
+            .map(|i| rect(form, i, n, size, bottom, form.width() as f32))
             .collect()
     };
-    let callback = iced_layershell::actions::ActionCallback::new(move |wl: &WlRegion| {
-        wl.subtract(-EVERYWHERE, -EVERYWHERE, 2 * EVERYWHERE, 2 * EVERYWHERE);
-        for &(x, y, w, h) in &rects {
-            wl.add(x, y, w, h);
-        }
-    });
-    Message::SetInputRegion { id, callback }
+    crate::layer::input(id, rects)
 }
 
 // --- The surface ----------------------------------------------------------------------------

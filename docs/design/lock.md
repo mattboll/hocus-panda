@@ -152,7 +152,7 @@ Why not ext-session-lock-v1 for the shell's own lock:
 - a shell that crashes leaves the lock as it is (the protocol would leave
   the session locked with no locker), and the restarted shell draws it
   again as it connects;
-- iced_layershell draws layer surfaces; a session-lock surface is another
+- iced_exwlshell draws layer surfaces; a session-lock surface is another
   toolkit's event loop.
 
 **Another locker** (swaylock, gtklock) may lock through ext-session-lock-v1

@@ -123,7 +123,7 @@ pub(crate) fn popover_scale() -> f32 {
 }
 
 /// The notches of a wheel's lines `y`, on a surface at `scale`:
-/// iced_layershell hands them multiplied by it. At least one when it
+/// iced_exwlshell hands them multiplied by it. At least one when it
 /// moved, should the scale be out of date.
 fn lines(y: f32, scale: f32) -> i32 {
     if y == 0.0 {
@@ -134,7 +134,7 @@ fn lines(y: f32, scale: f32) -> i32 {
 }
 
 /// A touchpad's pixels `y` in logical pixels, on a surface at `scale`:
-/// iced_layershell hands them multiplied by it too (#488).
+/// iced_exwlshell hands them multiplied by it too (#488).
 fn logical(y: f32, scale: f32) -> f32 {
     y / scale.max(0.25)
 }
@@ -214,7 +214,7 @@ mod tests {
         // A fast spin: several notches in one event.
         assert_eq!(lines(-2.0, 1.0), -2);
         assert_eq!(lines(3.0, 1.0), 3);
-        // As iced_layershell hands them on a scaled screen.
+        // As iced_exwlshell hands them on a scaled screen.
         assert_eq!(lines(2.0, 2.0), 1);
         assert_eq!(lines(-3.0, 1.5), -2);
         // A scale out of date: still a notch.

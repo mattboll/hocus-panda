@@ -34,7 +34,7 @@ hocus-sound.workspace = true
 # Bluetooth, from BlueZ, shared with the Settings.
 hocus-bluetooth.workspace = true
 # No x11, no winit-side theme detection: the shell only talks Wayland
-# through iced_layershell (tech-choices, spike #315).
+# through iced_exwlshell (tech-choices, spike #315).
 iced = { workspace = true, features = [
     "wgpu",
     "tiny-skia",
@@ -60,7 +60,7 @@ ureq.workspace = true
 rustls.workspace = true
 # Without its default theme detection (mundy, over the session's D-Bus).
 # Pinned: its winit-core prerelease dependencies broke it once (spike).
-iced_layershell.workspace = true
+iced_exwlshell = { workspace = true, features = ["macros"] }
 # The clock's time zone and its rules, read from the system's database.
 jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 # glibc's malloc held to two arenas (`mallopt`, #855).
@@ -84,11 +84,11 @@ serde.workspace = true
 # NetworkManager followed, as the Settings' Réseau page does (6.6).
 hocus-network.workspace = true
 # The Wayland connection iced draws on, made here to read the clipboard
-# on it (paste); the same version as iced_layershell's.
+# on it (paste); the same version as iced_exwlshell's.
 wayland-client.workspace = true
-# Its screens' xdg-output names, which iced_layershell finds them by
+# Its screens' xdg-output names, which iced_exwlshell finds them by
 # (outputs), and the pointer's shapes (pointer); the same version as
-# iced_layershell's.
+# iced_exwlshell's.
 wayland-protocols.workspace = true
 # The clipboard's history sealed on disk (5.6): XChaCha20-Poly1305
 # (RustCrypto, MIT or Apache-2.0); its random keys and nonces.
