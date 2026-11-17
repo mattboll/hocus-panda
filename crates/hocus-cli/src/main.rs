@@ -15,6 +15,13 @@
 //!   prints nothing a tool would take as an answer: a hook must not get in
 //!   the agent's way, desktop or not.
 //!
+//! - `hocus msg version`: the control socket's interface's version, the
+//!   oldest one still served, and the desktop's (docs/api.md).
+//!
+//! - `hocus msg subscribe [KINDS]`: the desktop's events, one JSON line
+//!   each as they happen: windows, desktops, screens, agents (docs/api.md,
+//!   "Events").
+//!
 //! - `hocus msg lock`: locks the session now (docs/design/lock.md).
 //!
 //! - `hocus msg input-devices [--follow]`: the mice and touchpads plugged
@@ -195,6 +202,16 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum MsgCommand {
+    /// The control socket's interface's version, the oldest one still
+    /// served, and the desktop's own, as one line of JSON (docs/api.md).
+    Version,
+    /// Stays, and prints the desktop's events as they happen, one line of
+    /// JSON each (docs/api.md, "Events").
+    Subscribe {
+        /// The kinds wanted, comma-separated: window, desktop, screen,
+        /// agent (default: all).
+        kinds: Option<String>,
+    },
     /// The session's idle state, its time left, and what holds it off
     /// (docs/design/idle.md).
     Idle,
@@ -375,19 +392,34 @@ fn main() -> ExitCode {
             args.socket,
             &ProgramAsk::Restart(Supervised::Shell, restart.restart()),
         ),
+        Command::Msg {
+            question: MsgCommand::Subscribe { kinds },
+        } => {
+            let line = format!("msg subscribe {}", kinds.unwrap_or_default());
+            let wants = match hocus_agents::events::Subscription::read(line.trim_end()) {
+                Some(Ok(wants)) => wants,
+                Some(Err(why)) => {
+                    eprintln!("hocus: {why}");
+                    return ExitCode::from(2);
+                }
+                None => return ExitCode::from(2),
+            };
+            follow(args.socket, &wants.line())
+        }
         Command::Msg { question } => {
             let question = match question {
+                MsgCommand::Version => Question::Version,
                 MsgCommand::Idle => Question::Idle,
                 MsgCommand::Lock => Question::Lock,
                 MsgCommand::Outputs => Question::Outputs,
                 MsgCommand::A11y => Question::A11y,
                 MsgCommand::InputDevices { follow: true } => {
-                    return follow(args.socket, Question::InputDevices { follow: true });
+                    return follow(args.socket, Question::InputDevices { follow: true }.line());
                 }
                 MsgCommand::InputDevices { follow: false } => {
                     Question::InputDevices { follow: false }
                 }
-                MsgCommand::Shell { .. } => {
+                MsgCommand::Shell { .. } | MsgCommand::Subscribe { .. } => {
                     return ExitCode::FAILURE;
                 }
             };
@@ -591,9 +623,9 @@ fn send_line(socket: Option<PathBuf>, line: &str) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Asks `question`, and prints what the desktop says as it says it, until
-/// it closes the connection.
-fn follow(socket: Option<PathBuf>, question: Question) -> ExitCode {
+/// Asks `question` (its line), and prints what the desktop says as it says
+/// it, until it closes the connection; a refusal is a failure.
+fn follow(socket: Option<PathBuf>, question: &str) -> ExitCode {
     let followed = (|| -> Result<(), String> {
         let path = socket_path(socket)
             .ok_or("no desktop to ask: neither HOCUS_SOCKET nor WAYLAND_DISPLAY is set")?;
@@ -601,16 +633,22 @@ fn follow(socket: Option<PathBuf>, question: Question) -> ExitCode {
         let mut stream = UnixStream::connect(&path).map_err(place)?;
         stream.set_write_timeout(Some(WRITE)).map_err(place)?;
         stream
-            .write_all(format!("{}\n", question.line()).as_bytes())
+            .write_all(format!("{question}\n").as_bytes())
             .map_err(place)?;
         let mut out = std::io::stdout();
         let mut buffer = [0; 4096];
+        let mut first = true;
         loop {
             match stream.read(&mut buffer).map_err(place)? {
                 0 => return Ok(()),
                 n => {
-                    out.write_all(buffer.get(..n).unwrap_or(&buffer))
-                        .map_err(|e| e.to_string())?;
+                    let read = buffer.get(..n).unwrap_or(&buffer);
+                    if std::mem::take(&mut first)
+                        && let Some(why) = read.strip_prefix(hocus_agents::REFUSED.as_bytes())
+                    {
+                        return Err(String::from_utf8_lossy(why).trim_end().to_owned());
+                    }
+                    out.write_all(read).map_err(|e| e.to_string())?;
                     out.flush().map_err(|e| e.to_string())?;
                 }
             }

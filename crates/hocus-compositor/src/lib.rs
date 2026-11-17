@@ -31,6 +31,7 @@ pub mod desktops;
 mod displays;
 mod effects;
 mod emoji;
+mod events;
 mod focus;
 mod foreign;
 mod front;
@@ -131,6 +132,7 @@ pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
 #[doc(hidden)]
 pub use cursor::theme::{TestImage, encode as encode_xcursor};
+pub use events::MOST as EVENTS_KEPT;
 pub use harness::{Headless, Placed, WindowInfo};
 /// The bar's forms.
 pub use hocus_link::Form as BarForm;
@@ -423,6 +425,8 @@ impl App {
         state.tick();
         // The agents' changes of this turn, in one line.
         state.flush_agents();
+        // What the control socket's subscribers are told (docs/api.md).
+        state.flush_events();
         // What the MCP agents show (docs/design/mcp.md), when it changed.
         state.flush_mcp();
         // The screen the notifications' bubbles show on, when it changed.

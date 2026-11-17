@@ -321,7 +321,9 @@ docs/agents.md): `hocus agent NAME STATE`, and `hocus agent-hook TOOL`
 which Claude Code's and Codex's hooks run once plugged in from the bar;
 their good news with `hocus celebrate WHY` (the moments,
 docs/design/effects.md). It writes to the compositor's control socket, `<socket>.control`
-(`HOCUS_SOCKET` for the programs it starts); `--socket PATH` names one:
+(`HOCUS_SOCKET` for the programs it starts), a public interface whose
+lines, version and events are docs/api.md (its examples are tests:
+`api::`); `--socket PATH` names one:
 
 ```sh
 target/debug/hocus --socket <runtime dir>/hocus-0.control agent build working
