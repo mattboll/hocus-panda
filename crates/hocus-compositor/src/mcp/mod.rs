@@ -1638,6 +1638,9 @@ impl State {
                         .is_some_and(|(t, _)| t.request == id)
                     {
                         app.state.mcp.toast = None;
+                        // The shell told, or the toast stays until
+                        // something else of the agents changes.
+                        app.state.mcp.dirty = true;
                     }
                     TimeoutAction::Drop
                 });

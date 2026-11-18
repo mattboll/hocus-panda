@@ -154,7 +154,7 @@ impl Default for Keyboard {
         Self {
             layouts: Vec::new(),
             options: String::new(),
-            repeat_delay: 200,
+            repeat_delay: 400,
             repeat_rate: 25,
             numlock: false,
         }
