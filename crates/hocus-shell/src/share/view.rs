@@ -78,6 +78,8 @@ const LINE: f32 = 10.5 * Z;
 const CHECK: f32 = 13.0 * Z;
 const CHECK_TEXT: f32 = 12.5 * Z;
 const CHECK_GAP: f32 = 8.0 * Z;
+/// Between the pointer's box and Présentateur's, on their line.
+const PRESENTER_GAP: f32 = 24.0 * Z;
 /// The buttons: 34 px, radius 10, 8 px apart, 12.5 px; Annuler 14 px in,
 /// Partager 16.
 const BUTTON: f32 = 34.0 * Z;
@@ -141,6 +143,8 @@ pub struct Layout {
     pub rows: usize,
     pub rows_shown: usize,
     pub check: Rectangle,
+    /// Présentateur's box, on the pointer's line.
+    pub presenter: Rectangle,
     pub cancel: Rectangle,
     pub share: Rectangle,
 }
@@ -225,6 +229,12 @@ impl Layout {
             Point::new(left, y),
             Size::new(check_w, CHECK_TEXT * LINE_HEIGHT),
         );
+        let presenter_w =
+            CHECK + CHECK_GAP + kit::measure(words.presenter(), CHECK_TEXT, MANROPE);
+        let presenter = Rectangle::new(
+            Point::new(check.x + check.width + PRESENTER_GAP, y),
+            Size::new(presenter_w, CHECK_TEXT * LINE_HEIGHT),
+        );
         y += check.height + GAP;
         let share_w =
             (2.0 * SHARE_PAD + kit::measure(words.share(), BUTTON_TEXT, MANROPE_BOLD)).ceil();
@@ -250,6 +260,7 @@ impl Layout {
             rows,
             rows_shown,
             check,
+            presenter,
             cancel,
             share,
         }
@@ -275,6 +286,8 @@ pub enum Msg {
     Card(usize),
     /// "Montrer le pointeur".
     Pointer,
+    /// "Présentateur".
+    Presenter,
     Cancel,
     Share,
     /// The wheel, by rows (down positive).
@@ -318,6 +331,7 @@ fn said(id: window::Id, message: Msg) -> Option<Said> {
         Msg::Tab(tab) => act(Act::Tab(tab)),
         Msg::Card(index) => act(Act::Card(index)),
         Msg::Pointer => act(Act::Pointer),
+        Msg::Presenter => act(Act::Presenter),
         Msg::Cancel => act(Act::Cancel),
         Msg::Share => act(Act::Share),
         Msg::Wheel(delta) => {
@@ -554,6 +568,38 @@ pub(super) fn content<'a>(chooser: &Chooser, words: Words) -> (El<'a>, Vec<Strin
         "{} {}",
         if on { "[x]" } else { "[ ]" },
         words.pointer()
+    ));
+    // Présentateur (#619, lot 3), on the same line.
+    let on = chooser.presenter;
+    let presenter = button(
+        row![
+            drawn(CHECK, CHECK, move |f, size| {
+                checkbox(f, Rectangle::new(Point::ORIGIN, size), on);
+            }),
+            Space::new().width(CHECK_GAP),
+            said_in(words.presenter(), CHECK_TEXT, MANROPE, CHECK_INK.get()),
+        ]
+        .align_y(Vertical::Center),
+    )
+    .padding(0)
+    .width(layout.presenter.width)
+    .height(layout.presenter.height)
+    .style(|_, _| style::clear())
+    .on_press(Msg::Presenter);
+    all.push(at(
+        control(
+            presenter,
+            id_of("Presenter"),
+            Role::CheckBox,
+            words.presenter(),
+        )
+        .node(|n| n.checked(on)),
+        layout.presenter.position(),
+    ));
+    said.push(format!(
+        "{} {}",
+        if on { "[x]" } else { "[ ]" },
+        words.presenter()
     ));
     // The buttons.
     let cancel = button(

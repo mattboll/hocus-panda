@@ -36,7 +36,7 @@ use smithay::{
         },
     },
     reexports::pixman,
-    utils::{Buffer as BufferCoords, Physical, Size, Transform},
+    utils::{Buffer as BufferCoords, Logical, Physical, Point, Size, Transform},
 };
 
 use super::{glread, lease::Lease, sink::FrameTo, thumbs::Job};
@@ -355,8 +355,12 @@ where
                 .cloned()
                 .context("the screen went")?;
             let scale = output.current_scale().fractional_scale();
-            let elements =
+            let mut elements =
                 state.elements_for(renderer, &output, Purpose::Capture { cursor: pointer });
+            if let Some(area) = state.space.output_geometry(&output) {
+                let size = (f64::from(area.size.w), f64::from(area.size.h));
+                presenter_over(state, renderer, &mut elements, area.loc.to_f64(), size, scale);
+            }
             (elements, scale, BACKGROUND)
         }
         ShareSource::Window(w) => {
@@ -372,6 +376,14 @@ where
                 let cursor = state.cursor_elements_in(renderer, rect, scale);
                 elements.splice(0..0, cursor.into_iter().map(OutputElements::Cursor));
             }
+            presenter_over(
+                state,
+                renderer,
+                &mut elements,
+                rect.loc,
+                (rect.size.w, rect.size.h),
+                scale,
+            );
             // Its size now: the stream follows it.
             let now = (
                 (rect.size.w * scale).round().max(1.0) as u32,
@@ -389,6 +401,28 @@ where
         state.frame_handed(since);
     }
     Ok(drawn)
+}
+
+/// The presenter (#619, lot 3) over a share's frame, under the pointer
+/// alone: never on the screen.
+fn presenter_over<R>(
+    state: &State,
+    renderer: &mut R,
+    elements: &mut Vec<OutputElements<R>>,
+    origin: Point<f64, Logical>,
+    area: (f64, f64),
+    scale: f64,
+) where
+    R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    if let Some(presenter) = state.presenter_element(renderer, origin, area, scale) {
+        let under_cursor = elements
+            .iter()
+            .take_while(|e| matches!(e, OutputElements::Cursor(_)))
+            .count();
+        elements.insert(under_cursor, presenter);
+    }
 }
 
 /// The frame of `key` (a share's id, a recording's key): `elements` drawn

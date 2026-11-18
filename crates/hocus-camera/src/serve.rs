@@ -28,22 +28,28 @@ use std::{
     collections::{BTreeMap, VecDeque},
     path::PathBuf,
     rc::{Rc, Weak},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use hocus_link::camera::{
-    CAMERA_DESCRIPTION, CAMERA_INPUT_NODE, CAMERA_NODE, CAMERA_PREFIX, CameraLook, FromCamera,
+    AwayWhy, Backdrop, CAMERA_DESCRIPTION, CAMERA_INPUT_NODE, CAMERA_NODE, CAMERA_PREFIX,
+    CameraLook, FromCamera,
 };
 use pipewire as pw;
 use pw::{properties::properties, spa, stream::StreamState};
 use spa::pod::Pod;
 
 use crate::{
+    away::{self, Card, Watch},
+    backdrop::{self, Alpha},
     banner,
     convert::{self, Converter, Input, Output},
     gpu::{Gpu, Wanted},
     look::{self, BYTES, Correction, Cpu, FOLLOW, H, Making, Overlay, W},
     pods,
+    presenter::{self, Cutout},
+    scenes::Scenes,
+    segment::{Mask, Segmenter},
 };
 
 /// What the compositor asks.
@@ -73,6 +79,12 @@ const FACE_EVERY: u64 = 15;
 const FACE_STEP: f32 = 0.004;
 /// The dark frame's colour without a camera, the preview's own.
 const NO_CAMERA: [u8; 3] = [0x1A, 0x1F, 0x2C];
+/// The person looked for every this many frames when only « Je reviens »
+/// needs them (three times a second); every frame for Fond and the
+/// presenter, every other one while the model takes longer than
+/// [`SLOW`].
+const AWAY_EVERY: u64 = 10;
+const SLOW: Duration = Duration::from_millis(20);
 
 #[derive(Debug)]
 enum Ev {
@@ -165,6 +177,25 @@ struct State {
     look: CameraLook,
     overlay: Option<Overlay>,
     maker: Option<Maker>,
+    /// The person: the model, its mask kept smooth, the last it said, and
+    /// their alpha over the frame.
+    segmenter: Option<Segmenter>,
+    mask: Mask,
+    fresh: Mask,
+    alpha: Alpha,
+    /// Nobody: the wallpaper whole, under « Je reviens »'s card.
+    nobody: Option<Alpha>,
+    slow: bool,
+    /// The living wallpapers' thread.
+    scenes: Scenes,
+    /// « Je reviens »: whether the person is there, its card, what was
+    /// said of it.
+    watch: Watch,
+    card: Option<Card>,
+    away_told: Option<AwayWhy>,
+    /// The program's clock, for what moves.
+    started: Instant,
+    cutout: Box<dyn Fn(Cutout)>,
     correction: Option<Correction>,
     face: Option<f32>,
     face_told: Option<f32>,
@@ -203,6 +234,7 @@ pub fn run(
     options: Options,
     asks: pw::channel::Receiver<Ask>,
     tell: Box<dyn Fn(FromCamera)>,
+    cutout: Box<dyn Fn(Cutout)>,
 ) -> Result<(), pw::Error> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
@@ -229,6 +261,18 @@ pub fn run(
             look: CameraLook::default(),
             overlay: None,
             maker: None,
+            segmenter: None,
+            mask: Mask::default(),
+            fresh: Mask::default(),
+            alpha: Alpha::default(),
+            nobody: None,
+            slow: false,
+            scenes: Scenes::start(true),
+            watch: Watch::default(),
+            card: None,
+            away_told: None,
+            started: Instant::now(),
+            cutout,
             correction: None,
             face: None,
             face_told: None,
@@ -394,9 +438,14 @@ impl State {
                 tracing::info!(
                     lighting = look.lighting,
                     banner = look.banner.is_some(),
+                    backdrop = ?look.backdrop,
+                    away = look.away.is_some(),
+                    locked = look.locked,
+                    presenter = look.presenter,
                     "the camera's look"
                 );
                 self.look = look;
+                self.camera_wanted();
             }
             Ev::Ask(Ask::Quit) => {
                 if let Some(mainloop) = self.mainloop.upgrade() {
@@ -445,7 +494,7 @@ impl State {
             Ev::Node { id, node } => {
                 let camera = node.camera();
                 self.nodes.insert(id, node);
-                if camera && self.read && self.input.is_none() {
+                if camera && self.wanted() && self.input.is_none() {
                     self.start_reading();
                 }
             }
@@ -459,7 +508,7 @@ impl State {
                 if self.input.as_ref().is_some_and(|i| i.camera == id) {
                     tracing::info!(id, "the camera went");
                     self.stop_input();
-                    if self.read {
+                    if self.wanted() {
                         self.start_reading();
                     }
                 }
@@ -480,9 +529,22 @@ impl State {
         self.read = read;
         tracing::info!(read, "the source");
         self.tell(FromCamera::Read(read));
-        if read {
+        self.camera_wanted();
+    }
+
+    /// Whether the real camera is wanted: an application reads the
+    /// source, or the presenter is on (the shared screen's stream needs
+    /// the person, whether the call shows the camera or not).
+    fn wanted(&self) -> bool {
+        self.read || self.look.presenter
+    }
+
+    /// The real camera read while it is wanted, let go when it is not.
+    fn camera_wanted(&mut self) {
+        let reading = self.maker.is_some();
+        if self.wanted() && !reading {
             self.start_reading();
-        } else {
+        } else if !self.wanted() && reading {
             self.stop_reading();
         }
     }
@@ -648,6 +710,13 @@ impl State {
         self.correction = None;
         self.face = None;
         self.face_told = None;
+        self.scenes.want(None);
+        self.watch.reset();
+        self.mask = Mask::default();
+        self.card = None;
+        if self.away_told.take().is_some() {
+            self.tell(FromCamera::Away(None));
+        }
     }
 
     /// A frame from the camera's stream, made and handed to the source.
@@ -709,15 +778,153 @@ impl State {
             .correction
             .map_or(wanted, |c| c.towards(wanted, FOLLOW));
         self.correction = Some(correction);
+        let now = Instant::now();
+        let cover = self.look_for_the_person();
+        let away = match &self.look.away {
+            Some(_) => self.watch.update(cover, self.look.locked, now),
+            None => {
+                self.watch.reset();
+                None
+            }
+        };
+        self.tell_away(away.map(|(why, _)| why));
+        // The plain frame (the banner drawn with it) when nothing of this
+        // lot changes it.
+        let plain = away.is_none() && self.look.backdrop == Backdrop::Room;
         let making = Making {
             lighting: self.look.lighting,
             correction,
-            overlay: self.overlay.as_ref(),
+            overlay: if plain { self.overlay.as_ref() } else { None },
         };
         if let Some(maker) = &mut self.maker {
             maker.make(&self.rgba, &making, &mut self.made);
         }
+        let scene = match (&away, &self.look.away, self.look.backdrop) {
+            _ if !self.read => None,
+            (Some(_), Some(a), _) => Some(a.scene),
+            (None, _, Backdrop::Scene(scene)) => Some(scene),
+            _ => None,
+        };
+        self.scenes.want(scene);
+        if !self.read {
+            // Read for the presenter alone: its cut-out, nothing else.
+            if self.look.presenter
+                && let Some(cut) = presenter::cut(&self.made, &self.alpha)
+            {
+                (self.cutout)(cut);
+            }
+            return;
+        }
+        if let Some((_, since)) = away {
+            self.away_picture(now.duration_since(since), now);
+        } else {
+            if self.look.presenter
+                && let Some(cut) = presenter::cut(&self.made, &self.alpha)
+            {
+                (self.cutout)(cut);
+            }
+            match self.look.backdrop {
+                Backdrop::Room => {}
+                Backdrop::Blur => backdrop::blur(&mut self.made, &self.alpha),
+                Backdrop::Scene(scene) => match self.scenes.latest(scene) {
+                    Some(picture) => backdrop::scene(&mut self.made, &self.alpha, &picture),
+                    // Until its first picture comes, the room blurred.
+                    None => backdrop::blur(&mut self.made, &self.alpha),
+                },
+            }
+        }
+        if !plain && let Some(overlay) = &self.overlay {
+            look::blend(overlay, &mut self.made);
+        }
         self.send();
+    }
+
+    /// The person looked for in this frame, when something needs them and
+    /// it is time: their share of the picture. Their mask follows what the
+    /// model said, and their alpha over the frame with it.
+    fn look_for_the_person(&mut self) -> Option<f32> {
+        let shaped = self.look.backdrop != Backdrop::Room || self.look.presenter;
+        if !shaped && self.look.away.is_none() {
+            return None;
+        }
+        let every = match (shaped, self.slow) {
+            (false, _) => AWAY_EVERY,
+            (true, false) => 1,
+            (true, true) => 2,
+        };
+        if !self.frames.is_multiple_of(every) {
+            return None;
+        }
+        if self.segmenter.is_none() {
+            match Segmenter::new() {
+                Ok(model) => self.segmenter = Some(model),
+                Err(err) => {
+                    tracing::warn!(%err, "the person's model does not load");
+                    self.look.backdrop = Backdrop::Room;
+                    self.look.presenter = false;
+                    self.look.away = None;
+                    return None;
+                }
+            }
+        }
+        let segmenter = self.segmenter.as_mut()?;
+        let started = Instant::now();
+        if let Err(err) = segmenter.run(&self.rgba, W, H, [0, 1, 2], &mut self.fresh) {
+            tracing::warn!(%err, "the person's model failed");
+            return None;
+        }
+        let took = started.elapsed();
+        if (took > SLOW) != self.slow {
+            self.slow = took > SLOW;
+            tracing::info!(?took, "the person's model");
+        }
+        self.mask.follow(&self.fresh);
+        if shaped {
+            self.alpha.from_mask(&self.mask);
+        }
+        Some(self.fresh.cover())
+    }
+
+    fn tell_away(&mut self, why: Option<AwayWhy>) {
+        if why != self.away_told {
+            tracing::info!(?why, "« Je reviens »");
+            self.away_told = why;
+            self.tell(FromCamera::Away(why));
+            if why.is_none() {
+                self.card = None;
+            }
+        }
+    }
+
+    /// « Je reviens »: the living wallpaper (or the board's night until
+    /// it comes), its card over it, the person away for `away`.
+    fn away_picture(&mut self, away: Duration, now: Instant) {
+        let t = now.duration_since(self.started).as_secs_f32();
+        let scene = self.look.away.as_ref().map(|a| a.scene);
+        let picture = scene.and_then(|s| self.scenes.latest(s));
+        match picture {
+            Some(picture) => {
+                let nobody = self.nobody.get_or_insert_with(Alpha::default);
+                backdrop::scene(&mut self.made, nobody, &picture);
+            }
+            None => away::night(&mut self.made, t),
+        }
+        let lang = self
+            .look
+            .away
+            .as_ref()
+            .and_then(|a| hocus_words::Lang::of_code(&a.lang))
+            .unwrap_or(hocus_words::Lang::English);
+        let said = (
+            hocus_words::camera::BACK_IN_A_MOMENT.get(lang).to_owned(),
+            away::since_words(lang, away),
+        );
+        if self.card.as_ref().is_none_or(|c| c.said != said) {
+            self.card = Some(Card::draw(&said.0, &said.1));
+        }
+        if let Some(card) = &self.card {
+            card.over(&mut self.made, t);
+        }
     }
 
     /// Without a camera, a dark frame, with the banner.

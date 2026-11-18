@@ -33,13 +33,14 @@ use std::{
 };
 
 use common::wait;
-use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice};
+use hocus_compositor::{Authenticator, Config, Headless, HeadlessConfig, LockState, RendererChoice};
+use hocus_link::camera::AwayWhy;
 
 const SIZE: (u32, u32) = (1280, 720);
 
 /// The fake camera: its picture (B, G, R, x, the frame's size), changed as
 /// the test goes, and whether a reader streams from it.
-struct FakeCamera {
+pub(crate) struct FakeCamera {
     picture: Arc<Mutex<Vec<u8>>>,
     streaming: Arc<AtomicBool>,
     quit: pipewire::channel::Sender<()>,
@@ -61,7 +62,7 @@ impl FakeCamera {
         *self.picture.lock().unwrap_or_else(PoisonError::into_inner) = flat(colour);
     }
 
-    fn show(&self, picture: Vec<u8>) {
+    pub(crate) fn show(&self, picture: Vec<u8>) {
         *self.picture.lock().unwrap_or_else(PoisonError::into_inner) = picture;
     }
 
@@ -72,7 +73,7 @@ impl FakeCamera {
 
 /// A camera's node on `remote`, as PipeWire's would be: a driver sending a
 /// frame of its picture 30 times a second while a reader streams from it.
-fn fake_camera(remote: &std::path::Path, colour: [u8; 3]) -> FakeCamera {
+pub(crate) fn fake_camera(remote: &std::path::Path, colour: [u8; 3]) -> FakeCamera {
     use pipewire as pw;
     use pw::spa::{
         self,
@@ -503,9 +504,14 @@ struct WindowBed {
     call: Call,
     log: std::path::PathBuf,
     file: std::path::PathBuf,
-    _fakes: crate::fakes::Fakes,
+    fakes: crate::fakes::Fakes,
     root: tempfile::TempDir,
 }
+
+/// The tests' password for the lock.
+const PASSWORD: &str = "panda";
+/// The default source, when the bed has one.
+const MIC: &str = "hocus-test-mic";
 
 impl WindowBed {
     fn start(file: &str) -> anyhow::Result<Self> {
@@ -513,6 +519,16 @@ impl WindowBed {
     }
 
     fn start_on(file: &str, screen: &str) -> anyhow::Result<Self> {
+        Self::start_full(file, screen, false)
+    }
+
+    /// The bed with a microphone, the default source ([`MIC`]), and the
+    /// lock opening for [`PASSWORD`].
+    fn start_with_mic(file: &str) -> anyhow::Result<Self> {
+        Self::start_full(file, "1600x1000", true)
+    }
+
+    fn start_full(file: &str, screen: &str, mic: bool) -> anyhow::Result<Self> {
         let shell = common::shell_program();
         let program = common::camera_program();
         if !crate::fakes::available() {
@@ -532,7 +548,14 @@ impl WindowBed {
         }
         let config_file = dir.join("config/hocuspanda/config.toml");
         std::fs::write(&config_file, file)?;
-        let fakes = crate::fakes::Fakes::start()?;
+        let fakes = if mic {
+            crate::fakes::Fakes::start_with_sources(
+                &crate::fakes::TWO_SINKS,
+                &[crate::fakes::FakeSink::new(MIC, "Micro de test")],
+            )?
+        } else {
+            crate::fakes::Fakes::start()?
+        };
         let log = dir.join("shell.log");
         let at = |sub: &str| dir.join(sub).display().to_string();
         let script = fakes.shell_with(
@@ -561,6 +584,7 @@ impl WindowBed {
         config.camera_device = "cpu".to_owned();
         config.state_dir = Some(dir.join("state/hocuspanda"));
         config.keyboard.layouts = vec!["us".to_owned()];
+        config.lock_auth = Authenticator::test(PASSWORD);
         let mut hp = Headless::start_on_bus(
             HeadlessConfig {
                 outputs: vec![screen.parse()?],
@@ -592,7 +616,7 @@ impl WindowBed {
             call,
             log,
             file: config_file,
-            _fakes: fakes,
+            fakes,
             root,
         };
         bed.band(Duration::from_secs(20))?;
@@ -889,5 +913,198 @@ fn screenshots_of_the_window() -> anyhow::Result<()> {
     bed.logged("the camera's window shows it", &["Dans l’appel"])?;
     let window = common::drawn_popovers(&bed.hp)[0];
     bed.shoot(&out, "camera-window-help.png", around(window), 2)?;
+    Ok(())
+}
+
+// --- Lot 3: the person, « Je reviens » --------------------------------------------
+
+/// The test picture of a person (`hocus-camera/data/person.jpg`, NASA's,
+/// public domain), B, G, R, x.
+pub(crate) fn person() -> Vec<u8> {
+    hocus_camera::segment::test_person()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|&[r, g, b, _]| [b, g, r, 255])
+        .collect()
+}
+
+impl Bed {
+    /// A frame made after now: what came before let go.
+    fn fresh(&mut self, reader: &Reader, settle: usize) -> anyhow::Result<[f64; 3]> {
+        while reader.frames.try_recv().is_ok() {}
+        self.settled(reader, settle)
+    }
+}
+
+/// Nobody in the picture for 10 s: the call sees « Je reviens »'s card on a
+/// living wallpaper (dark, where the room was bright), and someone coming
+/// back takes it away.
+#[test]
+fn je_reviens_shows_on_an_empty_picture_and_goes_as_someone_comes_back() -> anyhow::Result<()> {
+    let mut bed = start([205, 200, 192], |c| c.camera.lighting = false)?;
+    let reader = read(&bed.pipewire.socket)?;
+    let room = bed.settled(&reader, 3)?;
+    assert!(luma(room) > 150.0, "{room:?}");
+    let empty = Instant::now();
+    bed.until(Duration::from_secs(25), "no « Je reviens »", |bed| {
+        bed.hp.camera_lot3().0 == Some(AwayWhy::Gone)
+    })?;
+    assert!(
+        empty.elapsed() >= Duration::from_secs(9),
+        "it came after {:?}",
+        empty.elapsed()
+    );
+    let away = bed.fresh(&reader, 3)?;
+    assert!(luma(away) < 70.0, "the card's picture: {away:?}");
+    // Someone in the picture again: theirs.
+    bed.camera.show(person());
+    bed.until(Duration::from_secs(10), "still away", |bed| {
+        bed.hp.camera_lot3().0.is_none()
+    })?;
+    let back = bed.fresh(&reader, 3)?;
+    assert!(luma(back) > 90.0, "the person's picture: {back:?}");
+    Ok(())
+}
+
+impl WindowBed {
+    /// Whether the microphone is muted.
+    fn muted(&self) -> bool {
+        self.fakes.volume(MIC).is_ok_and(|(_, muted)| muted)
+    }
+
+    /// Runs until `done`, or fails saying `what`.
+    fn until(
+        &mut self,
+        within: Duration,
+        what: &str,
+        mut done: impl FnMut(&mut Self) -> bool,
+    ) -> anyhow::Result<()> {
+        let start = Instant::now();
+        while start.elapsed() < within {
+            if done(self) {
+                return Ok(());
+            }
+            wait(&mut self.hp, Duration::from_millis(50))?;
+        }
+        anyhow::bail!("{what}: {:?}", self.hp.camera_lot3())
+    }
+
+    /// The lock opened with its password.
+    fn unlock(&mut self) -> anyhow::Result<()> {
+        // A US keyboard's p, a, n, d, a, then Enter.
+        for key in [25, 30, 49, 32, 30, 28] {
+            common::chord(&mut self.hp, &[key]);
+        }
+        self.until(Duration::from_secs(15), "the lock did not open", |bed| {
+            bed.hp.lock_state() == LockState::Unlocked
+        })
+    }
+
+    /// The mean brightness of the call's next frames, the band left out.
+    fn call_seen(&mut self) -> anyhow::Result<f64> {
+        while self.call.frames.try_recv().is_ok() {}
+        let start = Instant::now();
+        let mut seen = Vec::new();
+        while seen.len() < 3 {
+            anyhow::ensure!(start.elapsed() < Duration::from_secs(15), "no frame");
+            if let Ok((_, rest)) = self.call.frames.try_recv() {
+                seen.push(rest);
+            }
+            wait(&mut self.hp, Duration::from_millis(20))?;
+        }
+        Ok(seen.last().copied().unwrap_or_default())
+    }
+}
+
+/// The screen locked during a call: the call sees « Je reviens » at once,
+/// and the default microphone is muted; unlocked, both go. A microphone
+/// muted before stays muted: only what it muted is unmuted.
+#[test]
+fn locked_during_a_call_je_reviens_shows_and_the_microphone_is_held() -> anyhow::Result<()> {
+    let mut bed = WindowBed::start_with_mic("")?;
+    bed.camera.show(person());
+    let present = bed.call_seen()?;
+    assert!(!bed.muted(), "muted before anything");
+    bed.hp.lock();
+    bed.until(Duration::from_secs(10), "no « Je reviens »", |bed| {
+        bed.hp.camera_lot3().0 == Some(AwayWhy::Locked)
+    })?;
+    bed.until(Duration::from_secs(15), "the microphone not muted", |bed| {
+        bed.muted()
+    })?;
+    let locked = bed.call_seen()?;
+    assert!(locked < present - 20.0, "{present} → {locked}");
+    bed.unlock()?;
+    bed.until(Duration::from_secs(10), "still « Je reviens »", |bed| {
+        bed.hp.camera_lot3().0.is_none()
+    })?;
+    bed.until(Duration::from_secs(15), "the microphone still muted", |bed| {
+        !bed.muted()
+    })?;
+    // Muted by its user before: locked and unlocked, still muted.
+    bed.fakes.wpctl(&["set-mute", &bed.fakes.sink(MIC)?.to_string(), "1"])?;
+    bed.until(Duration::from_secs(10), "not muted by hand", |bed| bed.muted())?;
+    bed.hp.lock();
+    bed.until(Duration::from_secs(10), "no « Je reviens »", |bed| {
+        bed.hp.camera_lot3().0 == Some(AwayWhy::Locked)
+    })?;
+    bed.unlock()?;
+    bed.until(Duration::from_secs(10), "still « Je reviens »", |bed| {
+        bed.hp.camera_lot3().0.is_none()
+    })?;
+    let after = Instant::now();
+    while after.elapsed() < Duration::from_secs(2) {
+        wait(&mut bed.hp, Duration::from_millis(100))?;
+        assert!(bed.muted(), "unmuted what its user muted");
+    }
+    Ok(())
+}
+
+/// The pull request's screenshots of lot 3 in the camera's window (its
+/// preview live, the test picture of a person): Fond with Aurore, then
+/// Koï, then Flou; Réactions with « Je reviens »; Image with the
+/// presenter. Written to `$HOCUS_SHOTS` when it names a folder. Run by
+/// hand (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshots"]
+fn screenshots_of_the_window_s_lot_3() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let mut bed = WindowBed::start_on("[camera]\nbackground = \"aurora\"\n", "2560x1600@2")?;
+    bed.camera.show(person());
+    let window = bed.open()?;
+    bed.logged("the camera's preview shows a frame", &[])?;
+    let around =
+        |r: hocus_compositor::model::Rect| (r.x - 16, r.y - 16, r.width + 32, r.height + 32);
+    let tab = |window: hocus_compositor::model::Rect, i: f64| {
+        (
+            f64::from(window.x) + IN + 2.0 + i * 61.6 + 29.8,
+            f64::from(window.y) + IN + 15.7 + 9.0 + 176.0 + 9.0 + 15.0,
+        )
+    };
+    common::click_on(&mut bed.hp, tab(window, 1.0), hocus_link::POPOVER_NAMESPACE)?;
+    bed.logged("the camera's window shows it", &["| Fond (dots"])?;
+    // The wallpaper's first pictures, and the mask settled.
+    wait(&mut bed.hp, Duration::from_secs(4))?;
+    let window = common::drawn_popovers(&bed.hp)[0];
+    bed.shoot(&out, "camera-window-fond-aurore.png", around(window), 2)?;
+    for (n, name, word) in [(3, "koi", "(Koï)"), (1, "flou", "(Flou)")] {
+        bed.tile(window, n)?;
+        bed.logged("the camera's window shows it", &[word])?;
+        wait(&mut bed.hp, Duration::from_secs(4))?;
+        let window = common::drawn_popovers(&bed.hp)[0];
+        bed.shoot(&out, &format!("camera-window-fond-{name}.png"), around(window), 2)?;
+    }
+    common::click_on(&mut bed.hp, tab(window, 4.0), hocus_link::POPOVER_NAMESPACE)?;
+    bed.logged("the camera's window shows it", &["| Réactions (dots"])?;
+    let window = common::drawn_popovers(&bed.hp)[0];
+    bed.shoot(&out, "camera-window-reactions.png", around(window), 2)?;
+    common::click_on(&mut bed.hp, tab(window, 0.0), hocus_link::POPOVER_NAMESPACE)?;
+    bed.logged("the camera's window shows it", &["| Image (dots"])?;
+    let window = common::drawn_popovers(&bed.hp)[0];
+    bed.shoot(&out, "camera-window-image-lot3.png", around(window), 2)?;
     Ok(())
 }

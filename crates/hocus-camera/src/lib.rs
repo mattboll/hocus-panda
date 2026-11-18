@@ -8,10 +8,16 @@
 //! the shell's camera window reads the source too, for its preview
 //! ([`preview`]).
 
+pub mod away;
+pub mod backdrop;
 pub mod banner;
 pub mod convert;
+pub mod glsl;
 pub mod gpu;
 pub mod look;
 pub mod pods;
+pub mod presenter;
 pub mod preview;
+pub mod scenes;
+pub mod segment;
 pub mod serve;

@@ -101,6 +101,10 @@ impl Words {
         self.pick(txt::SHOW_THE_POINTER)
     }
 
+    pub fn presenter(self) -> &'static str {
+        self.pick(hocus_words::shell::camera::PRESENTER)
+    }
+
     pub fn cancel(self) -> &'static str {
         self.pick(txt::CANCEL)
     }
@@ -158,6 +162,9 @@ pub struct Chooser {
     pub tab: Tab,
     pub selected: usize,
     pub pointer: bool,
+    /// Présentateur (#619, lot 3): the person cut out over the share,
+    /// `[camera] presenter`, written as it is shared.
+    pub presenter: bool,
     /// The first row in view.
     pub scroll: usize,
     last_click: Option<(usize, Instant)>,
@@ -347,6 +354,7 @@ impl Share {
                 let mut shown = Chooser {
                     id: window::Id::unique(),
                     pointer: choose.pointer,
+                    presenter: crate::camera::shown().presenter,
                     choose,
                     tab,
                     selected: 0,
@@ -431,6 +439,7 @@ impl Share {
                 }
             }
             Act::Pointer => chooser.pointer = !chooser.pointer,
+            Act::Presenter => chooser.presenter = !chooser.presenter,
             Act::Cancel => {
                 effects.extend(cancel(chooser));
                 done = true;
@@ -545,7 +554,16 @@ fn share(chooser: &Chooser) -> Vec<Effect> {
     let Some(source) = chooser.chosen() else {
         return Vec::new();
     };
-    tracing::info!(request = chooser.choose.request, %source, pointer = chooser.pointer, "shared");
+    tracing::info!(
+        request = chooser.choose.request,
+        %source,
+        pointer = chooser.pointer,
+        presenter = chooser.presenter,
+        "shared"
+    );
+    if chooser.presenter != crate::camera::shown().presenter {
+        crate::camera::choose("presenter", chooser.presenter);
+    }
     vec![
         Effect::Tell(ToCompositor::Share(ShareAsk::Chosen {
             request: chooser.choose.request,
@@ -573,6 +591,8 @@ pub enum Act {
     /// A card clicked: selected, shared on a second click.
     Card(usize),
     Pointer,
+    /// Présentateur's box.
+    Presenter,
     Cancel,
     Share,
     /// The wheel, by rows.
@@ -603,6 +623,7 @@ pub fn a11y(seen: &Seen) -> Option<hocus_a11y::Window> {
 pub fn a11y_click(key: &str) {
     let what = match key {
         "share:Pointer" => Act::Pointer,
+        "share:Presenter" => Act::Presenter,
         "share:Cancel" => Act::Cancel,
         "share:Share" => Act::Share,
         "share:Tab(Screens)" => Act::Tab(Tab::Screens),
@@ -628,6 +649,7 @@ mod tests {
         Chooser {
             id: window::Id::unique(),
             pointer: true,
+            presenter: false,
             choose: choose(types, windows),
             tab: Tab::Windows,
             selected: 0,

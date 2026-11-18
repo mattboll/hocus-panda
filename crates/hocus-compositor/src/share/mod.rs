@@ -139,7 +139,7 @@ pub struct Sharing {
     /// While a consumer streams, a frame at least every [`KEEP`].
     keep: Option<RegistrationToken>,
     /// A stream waited for its pace: a frame is owed.
-    streams_due: bool,
+    pub(crate) streams_due: bool,
     /// The longest a frame's hand-over took the loop (its pixels lent to
     /// the streams' thread), for tests.
     lend_most: Duration,

@@ -28,7 +28,10 @@ use std::{
     time::Duration,
 };
 
-use hocus_link::{CameraLook, CameraShown, FromCamera, ToShell, camera::Banner};
+use hocus_link::{
+    CameraLook, CameraShown, FromCamera, ToShell,
+    camera::{Away, AwayWhy, Banner, Scene},
+};
 use hocus_words::compositor::camera as words;
 use smithay::reexports::calloop::channel::{self, Event, Sender};
 
@@ -43,6 +46,8 @@ pub const DARK: f32 = 0.36;
 pub const BRIGHT: f32 = 0.50;
 /// The screen light's `auto` takes a step at most this often.
 pub const STEP: Duration = Duration::from_millis(600);
+/// A cut-out is the camera's frame at most, and room for its shadow.
+const MOST_CUTOUT: usize = 4 * 2048 * 2048;
 /// The program is started again after this, doubled each time.
 const AGAIN: Duration = Duration::from_secs(2);
 const AGAIN_MOST: Duration = Duration::from_secs(60);
@@ -52,7 +57,18 @@ const AGAIN_MOST: Duration = Duration::from_secs(60);
 pub enum FromProgram {
     Started { pid: u32 },
     Said(FromCamera),
+    /// The person cut out, for the presenter.
+    Cutout(Silhouette),
     Ended,
+}
+
+/// The person cut out (Présentateur): B, G, R, A premultiplied, `width`
+/// × `height`.
+#[derive(Debug, Clone)]
+pub struct Silhouette {
+    pub width: u32,
+    pub height: u32,
+    pub bgra: Vec<u8>,
 }
 
 /// The Hocuspanda camera, as the loop knows it.
@@ -78,6 +94,12 @@ pub struct HocusCamera {
     stepped: Duration,
     /// What the shell was told last.
     shown: Option<CameraShown>,
+    /// « Je reviens » shows in its pictures, and why.
+    pub away: Option<AwayWhy>,
+    /// The person cut out last, while the presenter is wanted, and how
+    /// many came (tests).
+    pub silhouette: Option<crate::presenter::Shown>,
+    pub silhouettes: u64,
 }
 
 impl State {
@@ -123,6 +145,36 @@ impl State {
             ready: self.camera.ready,
             read: self.camera.read,
             source: self.camera.source.clone(),
+            background: c.background.word().to_owned(),
+            away: c.away,
+            presenter: c.presenter,
+            hush: self.camera_hush(),
+        }
+    }
+
+    /// The microphone held muted: the screen locked during a call (the
+    /// Hocuspanda camera read), « Je reviens » on.
+    fn camera_hush(&self) -> bool {
+        self.config.camera.away && self.camera.read && self.locked()
+    }
+
+    /// Whether the presenter is wanted now: on, and the desktop sharing a
+    /// screen or a window.
+    pub(crate) fn presenter_wanted(&self) -> bool {
+        self.config.camera.presenter && self.share.shares.values().any(|s| s.node.is_some())
+    }
+
+    /// The living wallpaper under « Je reviens »'s card: Fond's when it
+    /// is one, else the desktop's own (its koi, then its aurora), else
+    /// the aurora.
+    fn away_scene(&self) -> Scene {
+        if let hocus_link::camera::Backdrop::Scene(scene) = self.config.camera.background.backdrop() {
+            return scene;
+        }
+        if self.config.effects.koi {
+            Scene::Koi
+        } else {
+            Scene::Aurora
         }
     }
 
@@ -141,6 +193,13 @@ impl State {
         CameraLook {
             lighting: c.lighting,
             banner,
+            backdrop: c.background.backdrop(),
+            away: c.away.then(|| Away {
+                scene: self.away_scene(),
+                lang: lang.code().to_owned(),
+            }),
+            locked: self.locked(),
+            presenter: self.presenter_wanted(),
         }
     }
 
@@ -236,6 +295,23 @@ impl State {
                     FromCamera::Device(device) => {
                         tracing::info!(?device, "the Hocuspanda camera's frames are made");
                     }
+                    FromCamera::Away(why) => {
+                        tracing::info!(?why, "the Hocuspanda camera's « Je reviens »");
+                        self.camera.away = why;
+                    }
+                    // Its pixels come as `Cutout`.
+                    FromCamera::Presenter { .. } => {}
+                }
+            }
+            FromProgram::Cutout(cut) => {
+                self.camera.silhouettes += 1;
+                if self.presenter_wanted() {
+                    let shown = crate::presenter::Shown::new(cut)
+                        .after(self.camera.silhouette.as_ref());
+                    self.camera.silhouette = Some(shown);
+                    self.share.streams_due = true;
+                } else {
+                    self.camera.silhouette = None;
                 }
             }
             FromProgram::Ended => {
@@ -245,6 +321,8 @@ impl State {
                 self.camera.read = false;
                 self.camera.face = None;
                 self.camera.source = None;
+                self.camera.away = None;
+                self.camera.silhouette = None;
             }
         }
     }
@@ -284,6 +362,12 @@ impl State {
         }
     }
 
+    /// Tests: « Je reviens » in the camera's pictures, and how many
+    /// cut-outs of the person came.
+    pub(crate) fn camera_lot3(&self) -> (Option<AwayWhy>, u64) {
+        (self.camera.away, self.camera.silhouettes)
+    }
+
     /// Tests: whether the Hocuspanda camera is read, the light on the face,
     /// and the screen light's `auto` step.
     pub(crate) fn camera_info(&self) -> (bool, Option<f32>, u8) {
@@ -309,6 +393,22 @@ fn run(
         .stderr(Stdio::inherit());
     if let Some(remote) = remote {
         command.arg("--remote").arg(remote);
+    }
+    // On the CPU, everything: its living wallpapers on the CPU's Vulkan
+    // alone (lavapipe), the loader shown no other, so that no GPU is
+    // opened.
+    if device == "cpu" {
+        match lavapipe() {
+            Some(lvp) => {
+                command
+                    .env("VK_DRIVER_FILES", &lvp)
+                    .env("VK_ICD_FILENAMES", &lvp)
+                    .env("WGPU_BACKEND", "vulkan");
+            }
+            None => {
+                command.env("WGPU_BACKEND", "none");
+            }
+        }
     }
     programs::default_signals(&mut command);
     let mut child = match command.spawn() {
@@ -337,18 +437,57 @@ fn run(
             });
         }
         if let Some(output) = output {
-            for line in std::io::BufReader::new(output).lines() {
-                let Ok(line) = line else {
-                    break;
-                };
-                if let Some(said) = FromCamera::read(&line) {
-                    let _ = back.send(FromProgram::Said(said));
+            let mut output = std::io::BufReader::new(output);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match output.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                match FromCamera::read(&line) {
+                    // The cut-out's pixels follow its line, raw.
+                    Some(FromCamera::Presenter { width, height }) => {
+                        let len = width as usize * height as usize * 4;
+                        if len > MOST_CUTOUT {
+                            tracing::warn!(width, height, "a cut-out too large: hocus-camera let go");
+                            break;
+                        }
+                        let mut bgra = vec![0u8; len];
+                        if std::io::Read::read_exact(&mut output, &mut bgra).is_err() {
+                            break;
+                        }
+                        let _ = back.send(FromProgram::Cutout(Silhouette {
+                            width,
+                            height,
+                            bgra,
+                        }));
+                    }
+                    Some(said) => {
+                        let _ = back.send(FromProgram::Said(said));
+                    }
+                    None => {}
                 }
             }
         }
         let _ = child.wait();
         let _ = back.send(FromProgram::Ended);
     });
+}
+
+/// lavapipe's description for Vulkan's loader, if it is installed.
+fn lavapipe() -> Option<PathBuf> {
+    ["/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d"]
+        .iter()
+        .flat_map(std::fs::read_dir)
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("lvp_icd"))
+        })
 }
 
 #[cfg(test)]

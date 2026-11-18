@@ -163,16 +163,7 @@ impl Matrix for PixmanRenderer {
     }
 }
 
-pub(crate) const VERTEX: &str = "#version 100
-uniform mat3 matrix;
-attribute vec2 position;
-attribute vec2 local;
-varying vec2 v_px;
-void main() {
-    gl_Position = vec4(matrix * vec3(position, 1.0), 1.0);
-    v_px = local;
-}
-";
+pub(crate) use hocus_scenes::shaders::VERTEX;
 
 /// What every glyph shader starts with: the hash (the same words as
 /// `hocus_link::moving::hash`), and a glyph's lit dots read from the

@@ -148,6 +148,16 @@ fn start(shell: &Path) -> anyhow::Result<Bed> {
 /// `renderer`: pixman, or GLES on Mesa's software device. Never a GPU:
 /// this machine's may be the live session's.
 fn start_on(shell: &Path, size: (u32, u32), renderer: RendererChoice) -> anyhow::Result<Bed> {
+    start_with(shell, size, renderer, |_| {})
+}
+
+/// The same, the configuration as `change` makes it.
+fn start_with(
+    shell: &Path,
+    size: (u32, u32),
+    renderer: RendererChoice,
+    change: impl FnOnce(&mut Config),
+) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let home = dir.path().join("home");
     let state = dir.path().join("state");
@@ -177,11 +187,12 @@ fn start_on(shell: &Path, size: (u32, u32), renderer: RendererChoice) -> anyhow:
         ),
     )?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
-    let config = Config {
+    let mut config = Config {
         pipewire_remote: Some(pipewire.socket.clone()),
         plain_background: true,
         ..Config::default()
     };
+    change(&mut config);
     let mut hp = Headless::start_on_bus(
         HeadlessConfig {
             outputs: vec![format!("{}x{}", size.0, size.1).parse()?],
@@ -1217,4 +1228,131 @@ fn kit_shot() -> anyhow::Result<()> {
         bed.key(KEY_ESC);
     })?;
     shot
+}
+
+/// The pull request's screenshot of the presenter on a shared screen (a
+/// window in it): the share's frame, written to `$HOCUS_SHOTS` when it
+/// names a folder. Run by hand (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshot"]
+fn screenshot_of_the_presenter_on_a_shared_screen() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let program = common::camera_program();
+    let mut bed = start_with(&shell, SCREEN, RendererChoice::Pixman, |c| {
+        c.camera_program = Some(program);
+        c.camera_device = "cpu".to_owned();
+        c.camera.presenter = true;
+        c.plain_background = false;
+    })?;
+    let camera = crate::camera::fake_camera(&bed.pipewire.socket, [0, 0, 0]);
+    camera.show(crate::camera::person());
+    bed.hp.pointer_move(100.0, 100.0);
+    let (_, started) = bed.share_screen()?;
+    let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
+    let start = Instant::now();
+    while bed.hp.camera_lot3().1 < 30 {
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(30), "no cut-outs");
+        bed.idle(Duration::from_millis(50))?;
+    }
+    bed.idle(Duration::from_millis(500))?;
+    while consumer.frames.try_recv().is_ok() {}
+    let ((w, h), pixels) = loop {
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(45), "no frame");
+        bed.idle(Duration::from_millis(50))?;
+        if let Ok(frame) = consumer.frames.try_recv() {
+            break frame;
+        }
+    };
+    let rgba: Vec<u8> = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|&[b, g, r, _]| [r, g, b, 255])
+        .collect();
+    image::save_buffer(
+        out.join("presenter-in-the-share.png"),
+        &rgba,
+        w,
+        h,
+        image::ColorType::Rgba8,
+    )?;
+    Ok(())
+}
+
+/// Présentateur (#619, lot 3): sharing the screen, the person cut out
+/// stands in the stream's lower right corner, never on the screen; the
+/// pointer under it, it moves to the other corner.
+#[test]
+fn the_presenter_stands_in_the_shared_stream_never_on_the_screen() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let program = common::camera_program();
+    let mut bed = start_with(&shell, SCREEN, RendererChoice::Pixman, |c| {
+        c.camera_program = Some(program);
+        c.camera_device = "cpu".to_owned();
+        c.camera.presenter = true;
+    })?;
+    let camera = crate::camera::fake_camera(&bed.pipewire.socket, [0, 0, 0]);
+    camera.show(crate::camera::person());
+    bed.hp.pointer_move(100.0, 100.0);
+    let (_, started) = bed.share_screen()?;
+    let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
+    // The person's suit, blue, at the foot of the presenter's middle: the
+    // board's medium one, 24 px of its 860 in from the right.
+    let (w, h) = (f64::from(SCREEN.0), f64::from(SCREEN.1));
+    let suit = |pixels: &[u8], fw: u32, x: f64| {
+        let at = (((h - 12.0) as usize) * fw as usize + x as usize) * 4;
+        let (b, r) = (pixels[at], pixels[at + 2]);
+        b > 110 && b > r + 50
+    };
+    let start = Instant::now();
+    let (frame, right) = loop {
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(30),
+            "no presenter in the stream (cut-outs: {})",
+            bed.hp.camera_lot3().1
+        );
+        bed.idle(Duration::from_millis(50))?;
+        let Some(((fw, _), pixels)) = std::iter::from_fn(|| consumer.frames.try_recv().ok()).last()
+        else {
+            continue;
+        };
+        // Its width follows the cut-out's: its middle is found along the
+        // foot of the right half.
+        let found = (0..40)
+            .map(|i| w - w * 24.0 / 860.0 - 20.0 - f64::from(i) * 20.0)
+            .find(|&x| suit(&pixels, fw, x));
+        if let Some(x) = found {
+            break ((fw, pixels), x);
+        }
+    };
+    // Not on the screen there.
+    let [_, r, _, b] = bed.pixel(right as usize, (h - 12.0) as usize)?.to_be_bytes();
+    assert!(!(b > 110 && b > r + 50), "on the screen: {r} {b}");
+    let _ = frame;
+    // The pointer under it: it stands at the left now.
+    bed.hp.pointer_move(right, h - 40.0);
+    let start = Instant::now();
+    loop {
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(15),
+            "the presenter did not move aside"
+        );
+        bed.idle(Duration::from_millis(50))?;
+        let Some(((fw, _), pixels)) = std::iter::from_fn(|| consumer.frames.try_recv().ok()).last()
+        else {
+            continue;
+        };
+        if suit(&pixels, fw, w - right) && !suit(&pixels, fw, right) {
+            break;
+        }
+    }
+    Ok(())
 }

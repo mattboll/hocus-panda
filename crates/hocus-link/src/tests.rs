@@ -504,6 +504,10 @@ fn to_shell() -> Vec<ToShell> {
             ready: true,
             read: true,
             source: Some("Caméra intégrée".into()),
+            background: "blur".into(),
+            away: true,
+            presenter: false,
+            hush: false,
         }),
         ToShell::Transcribing(TranscribingShown {
             id: 3,
@@ -1590,13 +1594,31 @@ fn the_camera_s_lines_read_back() {
             name: "Alex Martin".into(),
             project: Some("projet hocus-panda".into()),
         }),
+        backdrop: crate::camera::Backdrop::Scene(crate::camera::Scene::Koi),
+        away: Some(crate::camera::Away {
+            scene: crate::camera::Scene::Aurora,
+            lang: "fr".into(),
+        }),
+        locked: true,
+        presenter: true,
     };
     assert_eq!(CameraLook::read(&look.line()), Some(look));
+    // A look of lot 2 still reads: what is behind the room, nothing else.
+    let old = r#"{"lighting":true,"banner":null}"#;
+    assert_eq!(
+        CameraLook::read(old).map(|l| (l.backdrop, l.away, l.presenter)),
+        Some((crate::camera::Backdrop::Room, None, false))
+    );
     for said in [
         FromCamera::Ready { node: 42 },
         FromCamera::Read(true),
         FromCamera::Source(Some("Caméra intégrée".into())),
         FromCamera::Face(0.42),
+        FromCamera::Away(Some(crate::camera::AwayWhy::Locked)),
+        FromCamera::Presenter {
+            width: 600,
+            height: 650,
+        },
         FromCamera::Device(None),
     ] {
         assert_eq!(FromCamera::read(&said.line()), Some(said));

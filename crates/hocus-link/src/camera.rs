@@ -41,6 +41,78 @@ pub struct CameraLook {
     pub lighting: bool,
     /// Bandeau: the banner, when on.
     pub banner: Option<Banner>,
+    /// Fond: what is behind the person (lot 3).
+    #[serde(default)]
+    pub backdrop: Backdrop,
+    /// « Je reviens », when on: the person gone for 10 s, or the screen
+    /// locked, the picture is a card on a living wallpaper.
+    #[serde(default)]
+    pub away: Option<Away>,
+    /// The screen is locked.
+    #[serde(default)]
+    pub locked: bool,
+    /// Présentateur: the person cut out, for the shared screen's stream
+    /// (`FromCamera::Presenter`); the real camera is read for it.
+    #[serde(default)]
+    pub presenter: bool,
+}
+
+/// A living wallpaper of the desktop's (docs/design/effects.md) that the
+/// camera draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Scene {
+    /// Aurore en musique (#801).
+    Aurora,
+    /// Bassin de koïs (#803).
+    Koi,
+}
+
+impl Scene {
+    /// Its word in `[camera] background`.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Aurora => "aurora",
+            Self::Koi => "koi",
+        }
+    }
+
+    pub fn of(word: &str) -> Option<Self> {
+        [Self::Aurora, Self::Koi]
+            .into_iter()
+            .find(|s| s.word() == word)
+    }
+}
+
+/// What is behind the person.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Backdrop {
+    /// The room, as the camera sees it.
+    #[default]
+    Room,
+    /// The room blurred.
+    Blur,
+    /// A living wallpaper.
+    Scene(Scene),
+}
+
+/// « Je reviens »: the living wallpaper under its card, and the language
+/// its words are in (`hocus_words::Lang`'s code).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Away {
+    pub scene: Scene,
+    pub lang: String,
+}
+
+/// Why « Je reviens » shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AwayWhy {
+    /// Nobody in the picture for 10 s.
+    Gone,
+    /// The screen locked.
+    Locked,
 }
 
 /// The banner across the bottom of the picture.
@@ -70,6 +142,12 @@ pub enum FromCamera {
     Face(f32),
     /// Where its frames are made: a GPU's name, or none (the processor).
     Device(Option<String>),
+    /// « Je reviens » shows, and why; or no longer.
+    Away(Option<AwayWhy>),
+    /// The person cut out (Présentateur), `width` × `height` pixels: its
+    /// premultiplied RGBA, four bytes a pixel, follows this line on the
+    /// output, raw.
+    Presenter { width: u32, height: u32 },
 }
 
 impl FromCamera {
@@ -116,12 +194,27 @@ pub struct CameraShown {
     pub read: bool,
     /// The real camera it reads, if one was found.
     pub source: Option<String>,
+    /// `[camera] background`: `room`, `blur`, or a living wallpaper's
+    /// word.
+    #[serde(default)]
+    pub background: String,
+    /// `[camera] away`: « Je reviens ».
+    #[serde(default)]
+    pub away: bool,
+    /// `[camera] presenter`: Présentateur.
+    #[serde(default)]
+    pub presenter: bool,
+    /// The microphone held muted: the screen locked during a call, with
+    /// « Je reviens » on. The shell mutes the default source, and unmutes
+    /// it as this ends if it muted it.
+    #[serde(default)]
+    pub hush: bool,
 }
 
 impl CameraShown {
     /// Whether an effect is chosen.
     pub fn effects(&self) -> bool {
-        self.lighting || self.banner
+        self.lighting || self.banner || (!self.background.is_empty() && self.background != "room")
     }
 
     /// The violet dot on the camera's tile: an effect is on, in the

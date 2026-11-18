@@ -2,7 +2,7 @@
 //! 60 steps a second from the effect's start whatever the frames' pace,
 //! with a seeded generator, so that a moment of an effect is the same on
 //! every machine and in tests; drawn on the GPU as one batch of quads a
-//! blend ([`super::draw`]). Embers for the flames (#794); the snow,
+//! blend (the compositor's effects). Embers for the flames (#794); the snow,
 //! confetti and fireworks take the same.
 
 use std::time::Duration;

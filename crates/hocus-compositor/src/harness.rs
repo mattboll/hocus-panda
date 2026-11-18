@@ -463,6 +463,12 @@ impl Headless {
         self.app.state.camera_info()
     }
 
+    /// The Hocuspanda camera's « Je reviens » (whether it shows, and why)
+    /// and how many cut-outs of the person it sent (#619, lot 3).
+    pub fn camera_lot3(&self) -> (Option<hocus_link::camera::AwayWhy>, u64) {
+        self.app.state.camera_lot3()
+    }
+
     /// Whether the Hocuspanda camera's source is on the graph.
     pub fn camera_ready(&self) -> bool {
         self.app.state.camera.ready

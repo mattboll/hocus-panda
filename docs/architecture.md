@@ -48,9 +48,12 @@ flowchart LR
 - **The Hocuspanda camera** (`hocus-camera`, crate `hocus-camera`,
   [design/camera.md](design/camera.md)): a PipeWire video source,
   "Hocuspanda", with the user's effects, which reads the real camera only
-  while something reads it; its frames made on the GPU (wgpu), else the
-  CPU. Started by the compositor from beside its binary on a virtual
-  terminal, restarted when it ends; it ends with its input.
+  while something reads it (or the presenter needs the person); its
+  frames made on the GPU (wgpu), else the CPU; the person found on the
+  CPU (tract), the living wallpapers drawn with the compositor's own
+  shaders (`hocus-scenes`) on a thread of their own. Started by the
+  compositor from beside its binary on a virtual terminal, restarted when
+  it ends; it ends with its input.
 
 ### Sockets and protocols
 
@@ -61,18 +64,19 @@ flowchart LR
 | Control socket | `<wayland socket>.control` (`HOCUS_SOCKET`) | the public, versioned interface ([api.md](api.md)): one line of words, `agent …` reports, `msg version\|idle\|lock\|outputs\|input-devices [follow]\|a11y`, `msg shell status\|restart`, `msg subscribe` (events, one JSON object a line); the Settings' `msg screens` and `mcp NAME` (an agent's line of JSON objects, docs/design/mcp.md) are the desktop's own | `hocus-agents` (`Report`, `Question`, `ProgramAsk`, `events`, `mcp`), `hocus-compositor` (`events`) |
 | Configuration | `$XDG_CONFIG_HOME/hocuspanda/config.toml` (`HOCUS_CONFIG`) | TOML, edited in place; defaults in `packaging/config.toml` | `hocus-config` |
 | D-Bus | the bus `--session-bus` names (or the session's, on a virtual terminal), the system bus | freedesktop interfaces | zbus in each crate |
-| The camera's line | `hocus-camera`'s standard input and output | one JSON object a line: its look (`CameraLook`) in, what happens to it (`FromCamera`) out | `hocus-link` (`camera`) |
+| The camera's line | `hocus-camera`'s standard input and output | one JSON object a line: its look (`CameraLook`) in, what happens to it (`FromCamera`) out; the presenter's cut-out's pixels raw after its line | `hocus-link` (`camera`) |
 
 ## Crates
 
 | Crate | Owns | Depends on (ours) |
 |---|---|---|
-| `hocus-compositor` | the `hocuspanda` binary, its `State`, and the in-process test harness (`Headless`) | config, geometry, link, pandas, words, panic, agents, xdg, perf |
+| `hocus-compositor` | the `hocuspanda` binary, its `State`, and the in-process test harness (`Headless`) | config, geometry, link, pandas, words, panic, agents, xdg, perf, scenes |
 | `hocus-shell` | the `hocuspanda-shell` binary, its surfaces and the widget kit (`src/ui`) | words, link, pandas, panic, a11y, xdg, day, sound, bluetooth, network, camera |
 | `hocus-settings` | the `hocus-settings` binary: its model of every setting, its pages | words, config, agents, link, pandas, panic, perf, geometry, sound, bluetooth, network, xdg |
 | `hocus-cli` | the `hocus` binary (`hocus mcp` among its commands) | agents, panic, day, perf, xdg |
 | `hocus-link` | the shell's line: its messages, wire and version; the surfaces' namespaces and the measures both sides draw by; the theme's tokens; the camera's line | words |
-| `hocus-camera` | the `hocus-camera` binary: the Hocuspanda source on PipeWire, Lumière and the banner on the GPU or the CPU; its preview's reader, which the shell's window uses | link, panic |
+| `hocus-camera` | the `hocus-camera` binary: the Hocuspanda source on PipeWire, Lumière and the banner on the GPU or the CPU; the person found by a model (tract), what is behind them, « Je reviens », the presenter's cut-out; its preview's reader, which the shell's window uses | link, panic, scenes, words |
+| `hocus-scenes` | the living wallpapers' looks without a renderer: their shaders (GLSL ES), the aurora's drive, the koi pond and the shapes it is drawn of; the compositor's screens and the camera draw them alike | — |
 | `hocus-agents` | the control socket's lines; agents' states, the tools' hooks, plugging tools in, herdr, a process's ancestry | link |
 | `hocus-config` | the configuration file read and written in place; every default (`defaults`, from `packaging/config.toml`) | — |
 | `hocus-words` | `Lang` and the words catalogue (`words/*.toml`, generated) | — |
