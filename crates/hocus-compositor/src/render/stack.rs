@@ -22,6 +22,16 @@ use crate::{
 /// over the palette's dim.
 type Stack<R> = (Vec<OutputElement<R>>, Vec<OutputElement<R>>);
 
+/// How a window itself is drawn.
+enum Body {
+    /// Through the rain (#432), its frame and popups in its picture.
+    Rain(crate::matrix::RainElement),
+    /// Wobbling (#797), its frame and popups in its picture.
+    Bent(crate::wobble::BentElement),
+    /// With its frame, as it looks: its popups drawn apart, in front.
+    Framed(Look),
+}
+
 impl State {
     /// The windows on `frame`'s output, front first, where their desktop
     /// is on the strip, `cover` of them under the overview.
@@ -170,6 +180,34 @@ impl State {
                 )));
                 continue;
             }
+            // Raining (#432): through the rain, else fading over its time;
+            // or bent, wobbling (#797); else framed as it is.
+            let body = match look.rain {
+                Some(fade) => match self.rain_window(renderer, *id, look, origin, scale, now) {
+                    Some(rain) => Body::Rain(rain),
+                    None => {
+                        let mut faded = look.clone();
+                        faded.alpha *= fade;
+                        Body::Framed(faded)
+                    }
+                },
+                None => match self.bent_window(renderer, *id, look, frame) {
+                    Some(bent) => Body::Bent(bent),
+                    None => Body::Framed(look.clone()),
+                },
+            };
+            let is_target = palette_target == Some(*id);
+            // Its popups in front of everything drawn over and around it,
+            // its rims and rings among them: a menu reaching past its edge
+            // is not cut by them. In a picture (raining, bent) they are
+            // drawn into it, in front of its frame.
+            let popups_end = if let Body::Framed(look) = &body {
+                let out = if is_target { &mut target } else { &mut windows };
+                self.window_popups(renderer, *id, look, origin, scale, out);
+                out.len()
+            } else {
+                0
+            };
             // A shared window's ring, right over it (5.11).
             if purpose.screen() {
                 let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
@@ -178,11 +216,7 @@ impl State {
                 windows.extend(self.mcp_ring(renderer, *id, visual, scale));
             }
             // The palette's target over its dim, ringed.
-            let out = if palette_target == Some(*id) {
-                &mut target
-            } else {
-                &mut windows
-            };
+            let out = if is_target { &mut target } else { &mut windows };
             // Its creatures (#796), right in front of it.
             self.creature_elements(renderer, frame, *id, look, out);
             // Its snow (#795), right in front of it.
@@ -211,24 +245,10 @@ impl State {
             if let Some(garland) = self.garland_front(renderer, frame, *id, look, looks) {
                 out.push(OutputElements::Fire(garland));
             }
-            // Raining (#432): through the rain, else fading over its time.
-            let rain = look.rain.map(|fade| {
-                (
-                    fade,
-                    self.rain_window(renderer, *id, look, origin, scale, now),
-                )
-            });
-            match rain {
-                Some((_, Some(rain))) => out.push(OutputElements::Rain(rain)),
-                Some((fade, None)) => {
-                    let mut faded = look.clone();
-                    faded.alpha *= fade;
-                    self.framed_window(renderer, *id, &faded, origin, scale, out);
-                }
-                None => match self.bent_window(renderer, *id, look, frame) {
-                    Some(bent) => out.push(OutputElements::Bent(bent)),
-                    None => self.framed_window(renderer, *id, look, origin, scale, out),
-                },
+            match body {
+                Body::Rain(rain) => out.push(OutputElements::Rain(rain)),
+                Body::Bent(bent) => out.push(OutputElements::Bent(bent)),
+                Body::Framed(look) => self.framed_body(renderer, *id, &look, origin, scale, out),
             }
             if palette_target == Some(*id)
                 && let Some((_, _, alpha)) = palette
@@ -258,9 +278,10 @@ impl State {
                         .map(OutputElements::Frame),
                     );
                 }
-                // Front first: the ring, then the glow under it.
+                // Front first: the ring, then the glow under it, both
+                // under its popups.
                 ring.reverse();
-                target.splice(0..0, ring);
+                target.splice(popups_end..popups_end, ring);
             }
         }
         (windows, target)

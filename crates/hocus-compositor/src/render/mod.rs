@@ -266,6 +266,16 @@ impl Look {
     }
 }
 
+/// Which of a window's surfaces are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Parts {
+    /// Its popups, then its own surfaces.
+    All,
+    Popups,
+    /// Its own surfaces, its subsurfaces with them.
+    Surfaces,
+}
+
 impl State {
     pub(crate) fn look(&self, id: WindowId, now: Duration) -> Option<Look> {
         let managed = self.windows.get(&id)?;
@@ -357,6 +367,24 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        self.parts_of(renderer, id, look, origin, scale, Parts::All, out);
+    }
+
+    /// `parts` of the window, as [`State::window_parts`] draws them.
+    #[allow(clippy::too_many_arguments)]
+    fn parts_of<R>(
+        &self,
+        renderer: &mut R,
+        id: WindowId,
+        look: &Look,
+        origin: Point<f64, Logical>,
+        scale: f64,
+        parts: Parts,
+        out: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
         let Some(managed) = self.windows.get(&id) else {
             return;
         };
@@ -402,9 +430,15 @@ impl State {
             OutputElements::Window(Rounded::new(moved, clip, radius, outside, scale))
         };
         let sc = Scale::from(scale);
+        let (popups, surfaces) = (parts != Parts::Surfaces, parts != Parts::Popups);
         if let Some(toplevel) = window.toplevel() {
             let surface = toplevel.wl_surface();
-            for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+            let popups = if popups {
+                PopupManager::popups_for_surface(surface).collect()
+            } else {
+                Vec::new()
+            };
+            for (popup, popup_offset) in popups {
                 let at_popup = (geometry.loc + popup_offset - popup.geometry().loc)
                     .to_f64()
                     .to_physical_precise_round(scale);
@@ -419,6 +453,9 @@ impl State {
                 // Menus are not cut by the window's corners.
                 out.extend(popups.into_iter().map(|e| wrap(e, 0)));
             }
+            if !surfaces {
+                return;
+            }
             let surfaces: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
                 renderer,
                 surface,
@@ -428,7 +465,7 @@ impl State {
                 Kind::Unspecified,
             );
             out.extend(surfaces.into_iter().map(|e| wrap(e, radius)));
-        } else {
+        } else if surfaces {
             let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                 AsRenderElements::<R>::render_elements(
                     window,
@@ -441,9 +478,45 @@ impl State {
         }
     }
 
-    /// A window with its frame, front first: its grip, its rims, its
-    /// surfaces and its shadow.
+    /// A window with its frame, front first: its popups, its grip, its
+    /// rims, its surfaces and its shadow. A menu opened from a window is
+    /// over all of it: its frame does not cut across the menu where the
+    /// menu reaches past the window's edge.
     pub(crate) fn framed_window<R>(
+        &self,
+        renderer: &mut R,
+        id: WindowId,
+        look: &Look,
+        origin: Point<f64, Logical>,
+        scale: f64,
+        out: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        self.window_popups(renderer, id, look, origin, scale, out);
+        self.framed_body(renderer, id, look, origin, scale, out);
+    }
+
+    /// The window's popups alone, as [`State::window_parts`] draws them.
+    pub(crate) fn window_popups<R>(
+        &self,
+        renderer: &mut R,
+        id: WindowId,
+        look: &Look,
+        origin: Point<f64, Logical>,
+        scale: f64,
+        out: &mut Vec<OutputElement<R>>,
+    ) where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        self.parts_of(renderer, id, look, origin, scale, Parts::Popups, out);
+    }
+
+    /// [`State::framed_window`] without its popups, which the caller puts
+    /// in front of whatever else it draws over the window.
+    pub(crate) fn framed_body<R>(
         &self,
         renderer: &mut R,
         id: WindowId,
@@ -521,7 +594,7 @@ impl State {
                 );
             }
         }
-        self.window_parts(renderer, id, look, origin, scale, out);
+        self.parts_of(renderer, id, look, origin, scale, Parts::Surfaces, out);
         if look.decorated && !look.own_shadow {
             let off = look.shadow_off.map(|r| {
                 Rectangle::new(r.loc - origin, r.size).to_physical_precise_up::<f64, i32>(scale)
