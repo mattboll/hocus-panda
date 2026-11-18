@@ -3396,7 +3396,10 @@ the machine).
   without a node it sleeps, its watches dropped. A device it cannot
   watch is read each second while a node exists. PipeWire's and
   WirePlumber's own processes are left out (their opens are a stream's,
-  which the graph shows with its application); a program is named by its
+  which the graph shows with its application), and so is `hocus-camera`,
+  which holds the Hocuspanda camera's v4l2loopback device open to write
+  it (#619; what reads that device, Firefox or Slack, is the user shown);
+  a program is named by its
   desktop entry (by its program's name), else by its program. A video
   source whose `media.role` is `Screen` (the desktop's own screen cast,
   5.11) is no camera: what reads it shares the screen (#619). Who uses a

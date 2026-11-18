@@ -187,6 +187,13 @@ pub struct Config {
     /// `--device`; tests: `cpu`). Not part of the file.
     #[serde(skip)]
     pub camera_device: String,
+    /// The directory standing for `/sys/class/video4linux`, where
+    /// `hocus-camera` looks for its v4l2loopback device (its
+    /// `HOCUS_VIDEO4LINUX`). Not part of the file; `None`: the system's.
+    /// Tests give one of their own, so no device of the machine's is
+    /// ever opened.
+    #[serde(skip)]
+    pub camera_video4linux: Option<PathBuf>,
     /// The home `~/` stands for in the file's paths (a wallpaper's): `HOME`.
     /// Not part of the file; `None`: a `~/` path is not found (tests,
     /// unless they give one).

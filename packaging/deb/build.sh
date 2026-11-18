@@ -74,8 +74,10 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
 # dpkg-shlibdeps runs in a source tree that names the package. EGL is
 # opened at run time: no binary links it, it is added below.
 mkdir -p "$root/DEBIAN"
-# The lock's PAM service is the administrator's to change, kept on upgrade.
-printf '/etc/pam.d/hocuspanda\n' > "$root/DEBIAN/conffiles"
+# The lock's PAM service and the camera's module's configuration are the
+# administrator's to change, kept on upgrade.
+printf '%s\n' /etc/pam.d/hocuspanda /etc/modprobe.d/hocuspanda-camera.conf \
+    /etc/modules-load.d/hocuspanda-camera.conf > "$root/DEBIAN/conffiles"
 printf 'Source: hocuspanda\n\nPackage: hocuspanda\nArchitecture: any\n' \
     > "$work/src/debian/control"
 (cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda \
@@ -97,7 +99,10 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # and a VA-API driver for it to encode on the GPU (without one, on the
 # CPU); GNOME Online Accounts, whose Google accounts give "Your day" its
 # calendars; polkit's daemon, which asks the shell, the session's agent,
-# for an administrator's password (without it, nothing asks). Depends:
+# for an administrator's password (without it, nothing asks);
+# v4l2loopback's module, built by DKMS, which the Hocuspanda camera writes
+# to for the applications that read only /dev/video* (without it, the
+# camera is on PipeWire only). Depends:
 # xdg-desktop-portal, through which applications ask to share the screen.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
@@ -114,7 +119,8 @@ Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  pipewire, xdg-desktop-portal-gtk,
  ffmpeg, va-driver-all | va-driver,
  gnome-online-accounts,
- polkitd
+ polkitd,
+ v4l2loopback-dkms
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda

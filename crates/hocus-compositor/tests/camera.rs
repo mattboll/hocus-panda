@@ -248,6 +248,8 @@ fn start(colour: [u8; 3], change: impl FnOnce(&mut Config)) -> anyhow::Result<Be
         pipewire_remote: Some(pipewire.socket.clone()),
         camera_program: Some(program),
         camera_device: "cpu".to_owned(),
+        // No v4l2loopback device: never one of the machine's.
+        camera_video4linux: Some(pipewire.socket.with_file_name("video4linux")),
         ..Config::default()
     };
     config.keyboard.layouts = vec!["us".to_owned()];
@@ -546,6 +548,7 @@ impl WindowBed {
                 ("XDG_DATA_HOME", at("data")),
                 ("XDG_DATA_DIRS", at("data")),
                 ("HOCUS_VIDEO_DEVICES", at("devices")),
+                ("HOCUS_VIDEO4LINUX", at("video4linux")),
                 ("ICED_BACKEND", "tiny-skia".to_owned()),
                 ("TZ", "UTC".to_owned()),
                 ("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned()),
@@ -559,6 +562,7 @@ impl WindowBed {
         config.pipewire_remote = Some(fakes.pw_socket());
         config.camera_program = Some(program);
         config.camera_device = "cpu".to_owned();
+        config.camera_video4linux = Some(dir.join("video4linux"));
         config.state_dir = Some(dir.join("state/hocuspanda"));
         config.keyboard.layouts = vec!["us".to_owned()];
         let mut hp = Headless::start_on_bus(

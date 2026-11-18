@@ -270,6 +270,23 @@ mod tests {
         assert!(r.abs_diff(128) <= 1 && g.abs_diff(128) <= 1 && b.abs_diff(128) <= 1);
     }
 
+    /// The v4l2loopback device's frames (YUYV): BT.601's limited range,
+    /// two pixels' chroma averaged.
+    #[test]
+    fn a_bgrx_frame_written_as_yuyv() {
+        let mut frame = vec![0u8; BYTES];
+        // White, black, then two reds, as B, G, R, x.
+        frame[..16].copy_from_slice(&[255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 255, 0]);
+        let mut out = vec![0u8; Output::Yuy2.layout().1];
+        assert_eq!(write(&frame, Output::Yuy2, &mut out), W * H * 2);
+        assert_eq!(&out[..4], &[235, 128, 16, 128]);
+        assert_eq!(&out[4..8], &[82, 90, 82, 240]);
+        // The rest black.
+        assert_eq!(&out[out.len() - 4..], &[16, 128, 16, 128]);
+        // Too small a buffer: nothing written.
+        assert_eq!(write(&frame, Output::Yuy2, &mut out[..10]), 0);
+    }
+
     #[test]
     fn a_4_3_camera_covers_the_frame_its_middle_kept() {
         let (w, h) = (640u32, 480u32);
