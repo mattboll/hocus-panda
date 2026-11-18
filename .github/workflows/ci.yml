@@ -131,6 +131,7 @@ jobs:
         run: |
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
+          free -h; echo "overcommit: $(cat /proc/sys/vm/overcommit_memory)"
       - name: Prebuilt libraries
         # sherpa-onnx's static libraries (hocus-transcribe), one version,
         # checked against its SHA-256: its build downloads nothing.
@@ -280,6 +281,7 @@ jobs:
         run: |
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
+          free -h; echo "overcommit: $(cat /proc/sys/vm/overcommit_memory)"
       - name: Prebuilt libraries
         # sherpa-onnx's static libraries (hocus-transcribe), one version,
         # checked against its SHA-256: its build downloads nothing.
