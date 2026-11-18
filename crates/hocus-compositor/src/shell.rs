@@ -861,6 +861,7 @@ impl State {
         if self.transcribe.recording() {
             self.tell_transcribing();
         }
+        self.camera_shell_connected();
         self.lock_shell_connected();
         self.away_shell_connected();
         self.leave_shell_connected();

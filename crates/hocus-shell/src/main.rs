@@ -38,6 +38,7 @@ mod agents;
 mod auth;
 mod backdrop;
 mod bluetooth;
+mod camera;
 mod capture;
 mod clipboard;
 mod clock;
@@ -940,6 +941,10 @@ impl Shell {
             }
             ToShell::Recording(shown) => {
                 in_use::set_recording(Some(shown));
+                Task::none()
+            }
+            ToShell::Camera(shown) => {
+                camera::set(shown);
                 Task::none()
             }
             ToShell::RecordingEnd => {
@@ -1969,6 +1974,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::RecordingEnd => {
                             in_use::set_recording(None);
+                            continue;
+                        }
+                        // The Hocuspanda camera (#619): its window and the
+                        // camera tile's dot.
+                        ToShell::Camera(shown) => {
+                            camera::set(shown);
                             continue;
                         }
                         // A meeting's transcription (docs/design/meetings.md).

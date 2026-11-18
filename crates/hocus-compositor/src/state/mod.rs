@@ -135,6 +135,8 @@ pub struct State {
     pub opacity: crate::opacity::Opacity,
     /// The screen light while the camera is in use (#619).
     pub light: crate::screen_light::ScreenLight,
+    /// The Hocuspanda camera's program (#619, lot 2).
+    pub camera: crate::camera::HocusCamera,
     /// The night light (#436).
     pub night: crate::night_light::Night,
     /// The garlands proposed in December (#813).
@@ -341,6 +343,7 @@ impl State {
             magnifier: crate::magnifier::Magnifier::default(),
             opacity: crate::opacity::Opacity::default(),
             light: crate::screen_light::ScreenLight::default(),
+            camera: crate::camera::HocusCamera::default(),
             night: crate::night_light::Night::default(),
             holidays: crate::holidays::Holidays::default(),
             screen_reader: crate::screen_reader::ScreenReader::default(),

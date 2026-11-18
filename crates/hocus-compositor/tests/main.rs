@@ -54,6 +54,7 @@ mod bar_side;
 mod bar_windows;
 mod bluetooth;
 mod calendar;
+mod camera;
 mod captures_live;
 mod child_signals;
 mod clipboard;

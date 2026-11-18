@@ -135,6 +135,12 @@ pub fn transcribe_program() -> std::path::PathBuf {
     built("hocus-transcribe", "hocus-transcribe")
 }
 
+/// `hocus-camera`, the Hocuspanda camera's source (#619), as
+/// [`shell_program`].
+pub fn camera_program() -> std::path::PathBuf {
+    built("hocus-camera", "hocus-camera")
+}
+
 /// The workspace's program `name` (of the package `package`), built next
 /// to the test's, and fresh; the test fails without it.
 fn built(name: &str, package: &str) -> std::path::PathBuf {

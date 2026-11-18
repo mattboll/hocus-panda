@@ -1,0 +1,33 @@
+[package]
+name = "hocus-camera"
+description = "The Hocuspanda camera: a PipeWire video source with the user's effects, reading the real camera only while it is read"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hocus-camera"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Its lines with the compositor, and its nodes' names.
+hocus-link.workspace = true
+# A panic said in the log before the program ends (#778).
+hocus-panic.workspace = true
+# The source, the real camera and the preview: PipeWire's own bindings
+# (MIT); the library itself at run time.
+pipewire.workspace = true
+# The frames' effects on the GPU, as the shell draws (MIT or Apache-2.0);
+# Vulkan or GL, whatever the vendor.
+wgpu = { workspace = true, features = ["wgsl"] }
+# A camera's MJPEG frames (MIT or Apache-2.0).
+image = { workspace = true, features = ["jpeg"] }
+# The banner's words (MIT, Apache-2.0 or Zlib), in Manrope, the shell's.
+fontdue.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

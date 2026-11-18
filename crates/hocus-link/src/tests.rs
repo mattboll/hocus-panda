@@ -496,6 +496,15 @@ fn to_shell() -> Vec<ToShell> {
             elapsed: 754_321,
         }),
         ToShell::RecordingEnd,
+        ToShell::Camera(CameraShown {
+            lighting: true,
+            banner: false,
+            screen_light: true,
+            strength: "auto".into(),
+            ready: true,
+            read: true,
+            source: Some("Caméra intégrée".into()),
+        }),
         ToShell::Transcribing(TranscribingShown {
             id: 3,
             event: "evt-1".into(),
@@ -1568,4 +1577,29 @@ fn card_window(id: u64, terminal: Option<&str>) -> CardWindow {
             resume: Some("claude --resume 3f6c2a1e".into()),
         }),
     }
+}
+
+/// The Hocuspanda camera's lines (#619) read back as written, and a line
+/// of something else is none of them.
+#[test]
+fn the_camera_s_lines_read_back() {
+    use crate::camera::Banner;
+    let look = CameraLook {
+        lighting: true,
+        banner: Some(Banner {
+            name: "Alex Martin".into(),
+            project: Some("projet hocus-panda".into()),
+        }),
+    };
+    assert_eq!(CameraLook::read(&look.line()), Some(look));
+    for said in [
+        FromCamera::Ready { node: 42 },
+        FromCamera::Read(true),
+        FromCamera::Source(Some("Caméra intégrée".into())),
+        FromCamera::Face(0.42),
+        FromCamera::Device(None),
+    ] {
+        assert_eq!(FromCamera::read(&said.line()), Some(said));
+    }
+    assert_eq!(FromCamera::read("INFO the source read=true"), None);
 }

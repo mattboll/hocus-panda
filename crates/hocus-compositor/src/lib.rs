@@ -20,6 +20,7 @@ mod backend;
 mod bar_keys;
 mod browsers;
 mod bubbles;
+mod camera;
 mod capture;
 mod clipboard;
 mod config;

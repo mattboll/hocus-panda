@@ -269,6 +269,23 @@ streams appear on your real PipeWire. Its tests
 PipeWire of their own (`Config::pipewire_remote`), link their consumer
 themselves (no WirePlumber), and fail without them.
 
+The Hocuspanda camera (docs/design/camera.md, crate `hocus-camera`): the
+compositor starts `hocus-camera` from beside itself on a virtual terminal
+only (nested or headless with `--camera`, else none, or
+`Config::camera_program`); its "Hocuspanda" source appears on PipeWire's
+default socket (`PIPEWIRE_REMOTE`, or the compositor's `pipewire_remote`):
+next to a live session, give it a PipeWire of its own, or the source
+appears on your real PipeWire, and a reader of it reads your real camera.
+Its tests (`crates/hocus-compositor/tests/camera.rs`) start a PipeWire of
+their own with a fake camera node of the test's, its frames on the CPU
+(`Config::camera_device = "cpu"`); its GPU path is tested on lavapipe
+alone (`cargo nextest run -p hocus-camera gpu::`, the test showing
+Vulkan's loader that driver only). The window's screenshots:
+
+```sh
+HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor camera::screenshots --run-ignored only
+```
+
 The system's authentication dialog (docs/design/polkit.md): the shell is
 the session's polkit agent on the system bus only with `HOCUS_AUTH_AGENT`
 set, which the compositor sets on a virtual terminal, never nested. Its
@@ -424,7 +441,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex

@@ -32,7 +32,7 @@ use smithay::{
 
 use crate::{
     State,
-    config::{Strength, Warmth},
+    config::Warmth,
     decoration::{Keyed, Placed, buffer},
     model::WindowId,
     motion::{Bezier, Tween, lerp},
@@ -91,8 +91,9 @@ impl Glow {
 }
 
 /// What a screen's strips were made for: its size in pixels, its scale
-/// (thousandths), the warmth and the strength.
-type Key = ((i32, i32), u32, Warmth, Strength);
+/// (thousandths), the warmth, and the glow's width and alpha
+/// (thousandths).
+type Key = ((i32, i32), u32, Warmth, (u32, u32));
 
 /// A screen's four strips: their pixels, where they go, their ids (kept
 /// while they do not change, so that a steady light damages nothing).
@@ -250,12 +251,16 @@ impl State {
         };
         let size = output.current_transform().transform_size(mode.size);
         let scale = output.current_scale().fractional_scale();
-        let camera = self.config.camera;
+        let warmth = self.config.camera.screen_light_warmth;
+        let glow = self.screen_light_glow();
         let key: Key = (
             (size.w, size.h),
             (scale * 1000.0).round() as u32,
-            camera.screen_light_warmth,
-            camera.screen_light_strength,
+            warmth,
+            (
+                (glow.0 * 1000.0).round() as u32,
+                (glow.1 * 1000.0).round() as u32,
+            ),
         );
         let mut pictures = self.light.pictures.borrow_mut();
         if pictures.get(&name).is_none_or(|p| p.key != key) {
@@ -263,12 +268,7 @@ impl State {
                 name.clone(),
                 Picture {
                     key,
-                    strips: strips(
-                        size,
-                        scale,
-                        camera.screen_light_warmth,
-                        camera.screen_light_strength,
-                    ),
+                    strips: strips(size, scale, warmth, glow),
                 },
             );
         }
@@ -329,8 +329,7 @@ struct Shape {
 }
 
 impl Shape {
-    fn new(size: Size<i32, Physical>, scale: f64, strength: Strength) -> Self {
-        let (width, alpha) = strength.glow();
+    fn new(size: Size<i32, Physical>, scale: f64, (width, alpha): (f64, f64)) -> Self {
         let frame = (width / 4.0).round() * scale;
         let spread = (width / 2.0).round() * scale;
         // A blur radius is twice the Gaussian's deviation.
@@ -366,8 +365,7 @@ impl Shape {
 
 /// How deep the strips reach in: past it the light is below a level's
 /// half (three deviations past the spread), at most half the screen.
-fn depth(size: Size<i32, Physical>, scale: f64, strength: Strength) -> i32 {
-    let (width, _) = strength.glow();
+fn depth(size: Size<i32, Physical>, scale: f64, (width, _): (f64, f64)) -> i32 {
     let reach = ((width / 2.0).round() + 1.5 * width) * scale;
     (reach.ceil() as i32 + 1)
         .min(size.w / 2)
@@ -381,10 +379,10 @@ fn strips(
     size: Size<i32, Physical>,
     scale: f64,
     warmth: Warmth,
-    strength: Strength,
+    glow: (f64, f64),
 ) -> Vec<(MemoryRenderBuffer, Rectangle<i32, Physical>, Id)> {
-    let shape = Shape::new(size, scale, strength);
-    let t = depth(size, scale, strength);
+    let shape = Shape::new(size, scale, glow);
+    let t = depth(size, scale, glow);
     let (w, h) = (size.w, size.h);
     let [r, g, b] = warmth.rgb().map(f64::from);
     let places: [Rectangle<i32, Physical>; 4] = [
@@ -418,6 +416,7 @@ fn strips(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Strength;
 
     #[test]
     fn phi_is_the_normal_distribution() {
@@ -434,7 +433,7 @@ mod tests {
         let size = Size::from((1920, 1080));
         for strength in [Strength::Soft, Strength::Medium, Strength::Strong] {
             let (width, alpha) = strength.glow();
-            let shape = Shape::new(size, 1.0, strength);
+            let shape = Shape::new(size, 1.0, strength.glow());
             // The frame at the strength's alpha, the glow under it.
             let edge = shape.at(0, 540);
             assert!(edge >= alpha && edge <= 1.0, "{strength:?}: {edge}");
@@ -447,7 +446,7 @@ mod tests {
             assert!(shape.at(d(width, 2.0), 540) < 1.0 / 255.0, "{strength:?}");
             assert!(shape.at(960, 540) < 1e-6);
             // Past the strips' depth, nothing to draw.
-            let t = depth(size, 1.0, strength);
+            let t = depth(size, 1.0, strength.glow());
             assert!(shape.at(t, 540) * 255.0 < 0.5, "{strength:?}");
         }
     }
@@ -465,10 +464,10 @@ mod tests {
             ((1366, 768), 1.25),
         ] {
             let size = Size::from(size);
-            let strips = strips(size, scale, Warmth::Neutral, Strength::Strong);
+            let strips = strips(size, scale, Warmth::Neutral, Strength::Strong.glow());
             assert_eq!(strips.len(), 4);
             let area: i32 = strips.iter().map(|(_, r, _)| r.size.w * r.size.h).sum();
-            let t = depth(size, scale, Strength::Strong);
+            let t = depth(size, scale, Strength::Strong.glow());
             assert_eq!(area, 2 * size.w * t + 2 * t * (size.h - 2 * t));
             for (i, (_, a, _)) in strips.iter().enumerate() {
                 for (_, b, _) in strips.iter().skip(i + 1) {

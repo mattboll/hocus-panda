@@ -3402,7 +3402,14 @@ the machine).
   5.11) is no camera: what reads it shares the screen (#619). Who uses a
   camera now, without the linger, after 3 s of continuous use (a moment's
   open lights nothing), is told the compositor as it changes, for the
-  screen light (`ToCompositor::Camera`, [camera.md](camera.md)).
+  screen light (`ToCompositor::Camera`, [camera.md](camera.md)). The
+  Hocuspanda camera's own streams (its reading of the real camera, its
+  window's preview: `node.name` starting `hocuspanda-camera`) are no
+  application's use; what reads its source is (#619, lot 2).
+- **The camera's tile** (#619, lot 2): a click on it opens the camera and
+  microphone's window ([camera.md](camera.md)), not the popover, which
+  the rest of the sign opens; a violet dot (`#B69CFF`, 6 px, 2 px in from
+  its top right) while one of the Hocuspanda camera's effects is on.
 - **The screen**: the compositor's `shares` (5.11), the screen's tile;
   and its `recording` (5.10), the recording's tile. No longer items of
   their own: their lines and buttons are in the popover.

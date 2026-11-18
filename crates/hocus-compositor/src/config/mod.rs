@@ -177,6 +177,16 @@ pub struct Config {
     /// the compositor). Not part of the file.
     #[serde(skip)]
     pub transcriber: PathBuf,
+    /// The Hocuspanda camera's program (#619, `hocus-camera`): the
+    /// session's is the one beside the compositor. Not part of the file;
+    /// `None` starts none (nested and headless compositors, unless asked;
+    /// tests, unless they give one).
+    #[serde(skip)]
+    pub camera_program: Option<PathBuf>,
+    /// Where it makes its frames: `auto`, `cpu` or `any` (its
+    /// `--device`; tests: `cpu`). Not part of the file.
+    #[serde(skip)]
+    pub camera_device: String,
     /// The home `~/` stands for in the file's paths (a wallpaper's): `HOME`.
     /// Not part of the file; `None`: a `~/` path is not found (tests,
     /// unless they give one).

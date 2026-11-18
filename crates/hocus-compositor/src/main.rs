@@ -65,6 +65,13 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     shell: Option<PathBuf>,
 
+    /// Start the Hocuspanda camera (hocus-camera next to this program)
+    /// nested or headless too: its "Hocuspanda" source appears on the
+    /// PipeWire it is given (PIPEWIRE_REMOTE). On a virtual terminal it
+    /// always starts.
+    #[arg(long)]
+    camera: bool,
+
     /// Run as the user's session, as a display manager starts it
     /// (hocuspanda-session): on the virtual terminal unless --backend says
     /// otherwise, and once ready, the user's systemd and D-Bus are told
@@ -182,6 +189,11 @@ fn main() -> ExitCode {
     let shell = (!args.no_shell).then(|| args.shell.unwrap_or_else(|| beside(SHELL)));
     // A meeting's text is made by the program beside this one.
     config.transcriber = beside("hocus-transcribe");
+    // The Hocuspanda camera (#619): the session's; nested, only when asked,
+    // as its source would appear on the PipeWire of the session around.
+    if args.camera || matches!(backend, BackendArg::Tty) {
+        config.camera_program = Some(beside("hocus-camera"));
+    }
     let renderer = match args.renderer {
         RendererArg::Auto => RendererChoice::Auto,
         RendererArg::Gles => RendererChoice::Gles,

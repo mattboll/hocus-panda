@@ -520,6 +520,7 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Menu
                             | Item::User
                             | Item::InUse
+                            | Item::Camera
                             | Item::Music
                             | Item::Tray(_)
                             | Item::Meeting

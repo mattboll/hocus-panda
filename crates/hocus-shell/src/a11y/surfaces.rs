@@ -76,6 +76,7 @@ pub fn popover_title(bar: &str, item: Item, words: Words) -> String {
         Item::Menu => "Menu".to_owned(),
         Item::User => pick("Session", "Session"),
         Item::InUse => pick("En ce moment", "Right now"),
+        Item::Camera => pick("Caméra et micro", "Camera and microphone"),
         Item::Music => pick("Musique", "Music"),
         Item::Journal => crate::mcp::Words::new(lang).journal().to_owned(),
         Item::Tray(_) => pick("Menu de l'icône", "Icon's menu"),
