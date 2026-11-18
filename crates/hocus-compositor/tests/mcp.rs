@@ -780,6 +780,100 @@ fn a_launch_onto_another_desktop_opens_there_out_of_sight() -> anyhow::Result<()
     Ok(())
 }
 
+/// Where the agents' group's item `item` (`Journal`) is on the screen, as
+/// the shell's log last said it.
+fn agents_item_at(bed: &mut Bed, item: &str) -> anyhow::Result<(f64, f64)> {
+    let log = bed.log.clone();
+    let marker = format!(" {item}@");
+    let place = |log: &Path| -> Option<(f64, f64)> {
+        let text = common::logged(log);
+        let line = text
+            .lines()
+            .rev()
+            .find(|l| l.contains("the agents group's items"))?;
+        let at = line
+            .split(marker.as_str())
+            .nth(1)?
+            .split_whitespace()
+            .next()?;
+        let (x, y) = at.split_once(',')?;
+        Some((x.parse().ok()?, y.parse().ok()?))
+    };
+    let found = bed.hp.dispatch_until(WAIT, |_| place(&log).is_some())?;
+    anyhow::ensure!(found, "no {item} in the agents' group");
+    let (x, y) = place(&log).unwrap_or_default();
+    // The bar's frame: from its right edge, inside its 8 px rim.
+    let right = f64::from(bed.hp.outputs()[0].1.width) - 8.0;
+    Ok((right + x, 8.0 + y))
+}
+
+/// The toast of an agent's launch goes after its 8 s, its surface with
+/// it: the compositor ended it without telling the shell, and on the
+/// maintainer's screen it stayed. The agent's row then opens its journal,
+/// the launch in it.
+#[test]
+fn a_launchs_toast_goes_after_its_time_and_the_agents_row_opens_its_journal() -> anyhow::Result<()>
+{
+    let mut bed = bed_with(true, IN_APPS)?;
+    let data = bed._dir.path().join("data");
+    std::fs::create_dir_all(data.join("applications"))?;
+    std::fs::write(
+        data.join("applications/acted.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Acted\nExec=true\n",
+    )?;
+    let env = [
+        ("XDG_DATA_HOME", data.as_path()),
+        ("XDG_DATA_DIRS", data.as_path()),
+    ];
+    let mut agent = mcp_with(&bed.hp, "Claude", &env)?;
+    let result = agent.tool(
+        &mut bed.hp,
+        "launch",
+        json!({ "app": "Acted", "desktop": 2, "intent": "Ouvre Acted sur le bureau 2" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    let toasted = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.drawn_layers(hocus_link::MCP_TOAST_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(toasted, "no toast");
+    let shown = std::time::Instant::now();
+    let gone = bed.hp.dispatch_until(hocus_link::MCP_TOAST + WAIT, |hp| {
+        hp.drawn_layers(hocus_link::MCP_TOAST_NAMESPACE).is_empty()
+            && hp.layer_rects(hocus_link::MCP_TOAST_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(gone, "the toast's surface stayed");
+    let lasted = shown.elapsed();
+    assert!(
+        lasted + std::time::Duration::from_secs(1) >= hocus_link::MCP_TOAST,
+        "gone after {lasted:?}"
+    );
+    // The agent's row: its journal, the launch in it.
+    let at = agents_item_at(&mut bed, "Journal")?;
+    common::click_on(&mut bed.hp, at, hocus_link::AGENTS_NAMESPACE)?;
+    let open = bed
+        .hp
+        .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+    anyhow::ensure!(open, "no journal");
+    let log = bed.log.clone();
+    let listed = bed.hp.dispatch_until(WAIT, |_| {
+        let text = common::logged(&log);
+        text.contains("the agents' journal shows it lines=1")
+            && text
+                .lines()
+                .any(|l| l.contains("\"journal:line:") && l.contains("Acted"))
+    })?;
+    anyhow::ensure!(
+        listed,
+        "the journal lists it not:\n{}",
+        common::logged(&log)
+            .lines()
+            .filter(|l| l.contains("journal"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    Ok(())
+}
+
 /// The session ended each time an agent went: an application asking its
 /// seat's pointer's cursor shape after that panicked the compositor. The
 /// seat stays; the agent's next connection takes it again.
