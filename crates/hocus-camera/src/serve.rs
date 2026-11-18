@@ -191,6 +191,8 @@ struct State {
     face: Option<f32>,
     face_told: Option<f32>,
     frames: u64,
+    /// The last frame of the camera's could not be read (said once).
+    unread: bool,
     /// Read: the source streams, or the device has a reader.
     read: bool,
     source_read: bool,
@@ -266,6 +268,7 @@ pub fn run(
             face: None,
             face_told: None,
             frames: 0,
+            unread: false,
             read: false,
             source_read: false,
             loopback_read: false,
@@ -793,9 +796,16 @@ impl State {
             self.converter.to_rgba(&input, bytes, &mut self.rgba)
         };
         if !read {
-            tracing::debug!(?input, "a frame of the camera's not read");
+            if !self.unread {
+                tracing::warn!(
+                    ?input,
+                    "the camera's frames cannot be read: the still is sent"
+                );
+                self.unread = true;
+            }
             return;
         }
+        self.unread = false;
         let stats = look::stats(&self.rgba, W, H);
         self.frames += 1;
         if self.frames == 1 {
