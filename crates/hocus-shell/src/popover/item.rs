@@ -52,6 +52,9 @@ pub enum Item {
     /// the microphone, the camera or the screen; muting the microphone,
     /// stopping a share or the recording.
     InUse,
+    /// The camera's tile in that sign (#619): the camera and microphone's
+    /// window, by a click.
+    Camera,
     /// A tray icon (5.14), by its item's key: its menu, read before it
     /// opens (a right click, or `Enter` while it holds the keyboard).
     Tray(u32),
@@ -192,6 +195,7 @@ impl Item {
             Self::Clipboard => clipboard::WIDTH,
             Self::User => session::WIDTH,
             Self::InUse => in_use::WIDTH,
+            Self::Camera => camera::WIDTH,
             Self::Tray(_) => tray::WIDTH,
             Self::MeetingMark => meeting::WIDTH,
             Self::Transcribe => transcribe::WIDTH,
@@ -229,6 +233,7 @@ impl Item {
             Self::Clipboard => clipboard::height(),
             Self::User => session::height(),
             Self::InUse => in_use::height(),
+            Self::Camera => camera::height(),
             Self::Tray(key) => tray::height(key),
             Self::Calendar => calendar::height(),
             Self::MeetingMark => meeting::height(),
@@ -288,6 +293,7 @@ impl Item {
             Self::Clipboard => clipboard::opening(),
             Self::User => session::opening(),
             Self::InUse => in_use::opening(),
+            Self::Camera => camera::opening(),
             Self::Menu | Self::TaskAdd | Self::Task(_) => {}
             Self::MeetingMark => meeting::opening(),
             Self::Transcribe => transcribe::opening(),
@@ -350,6 +356,7 @@ impl Item {
             Self::Bluetooth => bluetooth::closing(),
             Self::Notifications => crate::notifications::history_open(false),
             Self::User => session::closing(),
+            Self::Camera => camera::closing(),
             Self::Calendar => {}
         }
     }
@@ -369,7 +376,7 @@ impl Item {
             (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
                 FOOTER_NAMESPACE
             }
-            (Self::InUse, _) => IN_USE_NAMESPACE,
+            (Self::InUse | Self::Camera, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
             (
                 Self::Meeting
@@ -427,6 +434,7 @@ impl Item {
                 | Self::Desktop { .. }
                 | Self::Secretary
                 | Self::InUse
+                | Self::Camera
                 | Self::Tray(_)
                 | Self::MeetingMark
                 | Self::Transcribe

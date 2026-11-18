@@ -63,6 +63,26 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("dark", hocus_words::settings::appearance::DARK), ("light", hocus_words::settings::appearance::LIGHT), ("frost", hocus_words::settings::appearance::FROST), ("matrix", hocus_words::settings::appearance::MATRIX)]),
     },
     Label {
+        key: "camera.banner",
+        name: hocus_words::settings::camera::BANNER,
+        said: Said::Switch,
+    },
+    Label {
+        key: "camera.banner-name",
+        name: hocus_words::settings::camera::BANNER_NAME,
+        said: Said::Other,
+    },
+    Label {
+        key: "camera.banner-project",
+        name: hocus_words::settings::camera::BANNER_PROJECT,
+        said: Said::Switch,
+    },
+    Label {
+        key: "camera.lighting",
+        name: hocus_words::settings::camera::LIGHTING,
+        said: Said::Switch,
+    },
+    Label {
         key: "camera.screen-light",
         name: hocus_words::settings::camera::SCREEN_LIGHT_2,
         said: Said::Switch,
@@ -70,7 +90,7 @@ pub const ALL: &[Label] = &[
     Label {
         key: "camera.screen-light-strength",
         name: hocus_words::settings::camera::STRENGTH,
-        said: Said::Choices(&[("soft", hocus_words::settings::camera::SOFT), ("medium", hocus_words::settings::camera::MEDIUM), ("strong", hocus_words::settings::camera::STRONG)]),
+        said: Said::Choices(&[("auto", hocus_words::settings::app_bar_page::AUTO), ("soft", hocus_words::settings::camera::SOFT), ("medium", hocus_words::settings::camera::MEDIUM), ("strong", hocus_words::settings::camera::STRONG)]),
     },
     Label {
         key: "camera.screen-light-warmth",

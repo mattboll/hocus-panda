@@ -31,6 +31,8 @@ hocus-xdg.workspace = true
 hocus-day.workspace = true
 # The sound, from PipeWire, shared with the Settings.
 hocus-sound.workspace = true
+# The Hocuspanda camera's window's preview, which reads its source (#619).
+hocus-camera.workspace = true
 # A meeting's transcription: "Ne plus demander", the models it lacks.
 hocus-meetings.workspace = true
 # Bluetooth, from BlueZ, shared with the Settings.

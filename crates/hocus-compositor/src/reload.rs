@@ -274,9 +274,10 @@ impl State {
         if self.night_light_config_changed(&new.night_light) {
             followed.push("[night-light]");
         }
-        // The screen light (#619): read at each turn of the loop.
+        // The screen light and the Hocuspanda camera (#619): read at each
+        // turn of the loop.
         if new.camera != self.config.camera {
-            self.config.camera = new.camera;
+            self.config.camera = new.camera.clone();
             // Its warmth or strength drawn at once.
             self.redraw = true;
             followed.push("[camera]");

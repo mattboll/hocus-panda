@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installs what a package of Hocuspanda holds, from a release build
 # already made (`cargo build --release --locked -p hocus-compositor -p
-# hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe`), into a staging directory
+# hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera`), into a
+# staging directory
 # for the .deb, or into the system.
 #
 #   packaging/install.sh DESTDIR
@@ -31,6 +32,9 @@ done
 # What makes a meeting's text (docs/design/meetings.md), which the
 # compositor starts from beside itself.
 install -D -m 755 "$release/hocus-transcribe" "$destdir$prefix/bin/hocus-transcribe"
+# The Hocuspanda camera (docs/design/camera.md), which the compositor
+# starts from beside itself.
+install -D -m 755 "$release/hocus-camera" "$destdir$prefix/bin/hocus-camera"
 # What agents' hooks and scripts run to tell the bar their state.
 install -D -m 755 "$release/hocus" "$destdir$prefix/bin/hocus"
 install -D -m 755 "$here/hocuspanda-session" "$destdir$prefix/bin/hocuspanda-session"
@@ -45,5 +49,12 @@ install -D -m 644 "$here/hocuspanda-portals.conf" \
     "$destdir$prefix/share/xdg-desktop-portal/hocuspanda-portals.conf"
 # The lock screen's PAM service (docs/design/lock.md), always under /etc.
 install -D -m 644 "$here/pam-hocuspanda" "$destdir/etc/pam.d/hocuspanda"
+# The Hocuspanda camera's v4l2loopback device (docs/design/camera.md): its
+# options, and the module loaded at boot, always under /etc. The module
+# itself is v4l2loopback-dkms's; nothing here loads or builds it.
+install -D -m 644 "$here/modprobe-hocuspanda-camera.conf" \
+    "$destdir/etc/modprobe.d/hocuspanda-camera.conf"
+install -D -m 644 "$here/modules-load-hocuspanda-camera.conf" \
+    "$destdir/etc/modules-load.d/hocuspanda-camera.conf"
 # Every setting with its default, to copy to ~/.config/hocuspanda/.
 install -D -m 644 "$here/config.toml" "$destdir$prefix/share/doc/hocuspanda/config.toml"

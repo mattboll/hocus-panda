@@ -32,6 +32,7 @@ mod agents;
 mod auth;
 pub mod backdrop;
 mod bar;
+pub mod camera;
 mod capture;
 mod clip;
 mod curtain;
@@ -59,6 +60,7 @@ pub mod wire;
 
 pub use agents::*;
 pub use bar::*;
+pub use camera::{CameraLook, CameraShown, FromCamera};
 pub use clip::*;
 pub use desktops::*;
 pub use surfaces::*;

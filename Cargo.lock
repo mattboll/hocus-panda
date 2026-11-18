@@ -2058,6 +2058,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-camera"
+version = "1.0.0"
+dependencies = [
+ "fontdue",
+ "hocus-link",
+ "hocus-panic",
+ "image",
+ "pipewire",
+ "rustix 1.1.6",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "wgpu",
+]
+
+[[package]]
 name = "hocus-cli"
 version = "1.0.0"
 dependencies = [
@@ -2084,6 +2100,7 @@ dependencies = [
  "fontdue",
  "futures-util",
  "hocus-agents",
+ "hocus-camera",
  "hocus-compositor",
  "hocus-config",
  "hocus-geometry",
@@ -2262,6 +2279,7 @@ dependencies = [
  "fontdue",
  "hocus-a11y",
  "hocus-bluetooth",
+ "hocus-camera",
  "hocus-config",
  "hocus-day",
  "hocus-link",

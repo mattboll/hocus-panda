@@ -343,6 +343,7 @@ fn screenshots_of_the_screen_light() -> anyhow::Result<()> {
                 screen_light: true,
                 screen_light_warmth: warmth,
                 screen_light_strength: strength,
+                ..Camera::default()
             }));
             lit_on(&mut hp, "HEADLESS-2")?;
             save(&mut hp, &format!("screen-light-{w}-{s}"))?;

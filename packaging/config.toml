@@ -589,10 +589,23 @@
 # a capture, a share or a recording; it fades in and out over 600 ms (at
 # once with reduced motion). Followed live. The light's warmth: "cool",
 # "neutral" or "warm"; its strength, the glow's width and brightness:
-# "soft", "medium" or "strong".
+# "soft", "medium" or "strong", or "auto": while the Hocuspanda camera is
+# read, it measures the light on your face and the glow follows it over
+# a few seconds (soft otherwise).
 # screen-light = true
 # screen-light-warmth = "neutral"
-# screen-light-strength = "soft"
+# screen-light-strength = "auto"
+# The Hocuspanda camera: a camera named "Hocuspanda" that calls choose,
+# which reads the real camera only while one reads it, with your effects
+# (the camera's window in the bar, docs/design/camera.md). Lumière
+# ("lighting"): exposure, white balance and warmth from the picture, a
+# light denoise. Bandeau ("banner"): your name across the bottom of the
+# picture (banner-name, empty: your account's) and, under it, the
+# current project desktop's name (banner-project).
+# lighting = true
+# banner = false
+# banner-name = ""
+# banner-project = true
 
 # [magnifier]
 # The magnifier (docs/design/accessibility.md): the screen under the

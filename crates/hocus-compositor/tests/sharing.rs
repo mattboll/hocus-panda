@@ -70,15 +70,15 @@ fn ready() -> Option<PathBuf> {
 }
 
 /// A PipeWire of the test's own, in a short runtime directory of its own
-/// (a socket's path is short).
-struct Pipewire {
+/// (a socket's path is short). The camera's tests start one too.
+pub(crate) struct Pipewire {
     daemon: Child,
-    socket: PathBuf,
+    pub(crate) socket: PathBuf,
     _dir: tempfile::TempDir,
 }
 
 impl Pipewire {
-    fn start(bus: &str) -> anyhow::Result<Self> {
+    pub(crate) fn start(bus: &str) -> anyhow::Result<Self> {
         let dir = tempfile::Builder::new().prefix("hpw-").tempdir_in("/tmp")?;
         let run = dir.path().join("run");
         let home = dir.path().join("home");

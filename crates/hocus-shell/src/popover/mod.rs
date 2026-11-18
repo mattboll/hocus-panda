@@ -43,6 +43,7 @@ pub mod bluetooth;
 pub mod briefing;
 pub mod brightness;
 pub mod calendar;
+pub mod camera;
 pub mod clipboard;
 pub mod desktop;
 pub mod history;
@@ -1236,6 +1237,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Clipboard
         | Item::User
         | Item::InUse
+        | Item::Camera
         | Item::MeetingMark
         | Item::Tasks
         | Item::TasksMore

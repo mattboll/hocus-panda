@@ -312,6 +312,13 @@ impl Words {
         }
     }
 
+    /// The camera's tile in the in-use sign, which opens its window
+    /// (#619): "Caméra et micro, avec effets".
+    pub fn camera_window(self) -> String {
+        self.pick(txt::CAMERA_AND_MICROPHONE_WITH_EFFECTS)
+            .to_owned()
+    }
+
     /// The in-use sign: "Micro utilisé par Firefox, caméra utilisée par
     /// Zoom".
     pub fn in_use(self, uses: &[(crate::in_use::Kind, Vec<String>)], muted: bool) -> String {

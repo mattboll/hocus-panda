@@ -209,6 +209,9 @@ pub enum ToShell {
     /// it is paused ([`RecordingShown`]); sent as it starts, pauses and
     /// goes on, and as the shell connects.
     Recording(RecordingShown),
+    /// What the camera's window shows (#619, docs/design/camera.md): sent
+    /// as the shell connects and as it changes.
+    Camera(crate::CameraShown),
     /// No recording any more: the bar's item goes.
     RecordingEnd,
     /// A recording saved: its thumbnail ([`Recorded`]).

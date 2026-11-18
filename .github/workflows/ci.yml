@@ -143,7 +143,7 @@ jobs:
         run: scripts/prebuilt.sh
       - name: Programs
         # The compositor's tests start the real shell and Settings, and
-        # run `hocus` and `hocus-transcribe`, from beside them: a test binary does not build
+        # run `hocus`, `hocus-transcribe` and `hocus-camera`, from beside them: a test binary does not build
         # them, and a test fails without them. The archive takes them
         # along (.config/nextest.toml).
         run: cargo programs --locked
@@ -232,7 +232,7 @@ jobs:
         # here instead.
         run: |
           zstd -dc nextest.tar.zst | tar -t > archive.txt
-          for program in hocuspanda-shell hocus hocus-settings hocus-transcribe; do
+          for program in hocuspanda-shell hocus hocus-settings hocus-transcribe hocus-camera; do
             grep -qE "/debug/$program\$" archive.txt || { echo "::error::$program is not in the archive"; exit 1; }
           done
       - name: Sources older than the programs
@@ -242,7 +242,7 @@ jobs:
         # older: a test may read its other files' times.
         run: |
           zstd -dc nextest.tar.zst | tar -xO --wildcards '*/debug/hocuspanda-shell.d' '*/debug/hocus.d' '*/debug/hocus-settings.d' \
-            '*/debug/hocus-transcribe.d' \
+            '*/debug/hocus-transcribe.d' '*/debug/hocus-camera.d' \
             | sed 's/^[^:]*: //; s/\\ /\x00/g' | tr ' ' '\n' | tr '\000' ' ' \
             | grep -F "$PWD/" | sort -u > sources.txt
           wc -l sources.txt
@@ -292,7 +292,7 @@ jobs:
         # checked against its SHA-256: its build downloads nothing.
         run: scripts/prebuilt.sh
       - name: Release build
-        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
+        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
       - name: What whisper.cpp's shader generator said
         # It leaves out, without failing, each shader its compiler did not
         # make, and the link fails far from the cause (`matmul_*_cm1_data`

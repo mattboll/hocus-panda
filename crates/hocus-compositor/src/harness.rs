@@ -457,6 +457,17 @@ impl Headless {
 
     /// The screen light (#619): each screen it shows on or leaves, and how
     /// far it is on (0 to 1).
+    /// Whether the Hocuspanda camera is read, the light on the face it
+    /// measures, and the screen light's `auto` step (#619, lot 2).
+    pub fn camera(&self) -> (bool, Option<f32>, u8) {
+        self.app.state.camera_info()
+    }
+
+    /// Whether the Hocuspanda camera's source is on the graph.
+    pub fn camera_ready(&self) -> bool {
+        self.app.state.camera.ready
+    }
+
     pub fn screen_light(&self) -> Vec<(String, f64)> {
         self.app.state.screen_light()
     }

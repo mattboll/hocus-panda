@@ -108,6 +108,10 @@ const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
 const LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 pub const MICROPHONE: Ink = Ink::Dark(rgb(0xF5A35B));
 pub const CAMERA: Ink = Ink::Dark(rgb(0x6CC287));
+/// The violet dot on the camera's tile while an effect is on (#619).
+const EFFECT: Ink = Ink::Dark(rgb(0xB69CFF));
+const EFFECT_DOT: f32 = 6.0;
+const EFFECT_IN: f32 = 2.0;
 pub const SCREEN: Ink = Ink::Dark(rgb(0x8FB3FF));
 pub const MUTED: Ink = Ink::Dark(rgb(0xA9B2C2));
 const MUTED_TILE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
@@ -375,7 +379,7 @@ impl Items for Sign {
         let uses = super::snapshot();
         let kinds = uses.kinds();
         let to_bar = Vector::new(-size.width - 1.0, self.surface_top(&kinds));
-        let controls = self
+        let mut controls: Vec<Control> = self
             .item(size, &kinds)
             .map(|rect| {
                 let name =
@@ -384,6 +388,22 @@ impl Items for Sign {
             })
             .into_iter()
             .collect();
+        // The camera's tile, inside it: the camera's window (#619).
+        if let (Some(rect), [(form, _)]) = (self.item(size, &kinds), self.forms.as_slice())
+            && let Some(tile) = kinds
+                .iter()
+                .zip(tiles(rect, *form, &kinds))
+                .find_map(|(kind, tile)| (*kind == Kind::Camera).then_some(tile))
+        {
+            let name = crate::a11y::Words::new(self.words.lang).camera_window();
+            controls.push(Control::new(
+                Item::Camera,
+                tile,
+                Role::Button,
+                name,
+                TILE_RADIUS,
+            ));
+        }
         Controls {
             to_bar,
             controls,
@@ -472,6 +492,7 @@ impl Items for Sign {
             .map(|tx| elapsed(tx.what.elapsed(tx.ended.unwrap_or(now))));
         let still = self.forms.len() == 1;
         let open = still && popover::with(|c| c.shows(&self.bar, Item::InUse));
+        let effects = crate::camera::shown().dot();
         for &(form, alpha) in &self.forms {
             let rect = self.rect_of(form, size, &kinds);
             let lit = still && (hover || open);
@@ -485,6 +506,7 @@ impl Items for Sign {
                     muted: uses.muted,
                     rec: rec.as_ref(),
                     tx: tx.as_deref(),
+                    effects,
                 };
                 draw_sign(f, rect, form, &shown, lit, alpha * opacity);
             });
@@ -531,6 +553,9 @@ pub struct Shown<'a> {
     pub rec: Option<&'a RecShown>,
     /// The transcription's time.
     pub tx: Option<&'a str>,
+    /// An effect of the Hocuspanda camera is on: a violet dot on the
+    /// camera's tile (#619).
+    pub effects: bool,
 }
 
 /// The sign at `rect` in `form`: its tint, then a tile per kind.
@@ -547,6 +572,7 @@ pub fn draw_sign(
         muted,
         rec,
         tx,
+        effects,
     } = *shown;
     f.fill(
         &kit::rounded(rect, RADIUS),
@@ -576,6 +602,17 @@ pub fn draw_sign(
             Size::new(ICON, ICON),
         );
         draw_icon(f, *kind, icon, faded(ink, alpha));
+        if *kind == Kind::Camera && effects {
+            // The mockup's 6 px dot, 2 px in from the tile's top right.
+            let dot = Point::new(
+                tile.x + tile.width - EFFECT_IN - EFFECT_DOT / 2.0,
+                tile.y + EFFECT_IN + EFFECT_DOT / 2.0,
+            );
+            f.fill(
+                &Path::circle(dot, EFFECT_DOT / 2.0),
+                faded(EFFECT.get(), alpha),
+            );
+        }
     }
 }
 

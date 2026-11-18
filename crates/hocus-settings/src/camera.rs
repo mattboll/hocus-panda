@@ -1,7 +1,9 @@
 //! Caméra / Camera (#619): what the desktop does while an application uses
-//! the camera. Its first rows, the screen light's (`[camera]`): on or off,
-//! its warmth, its strength; the Hocuspanda camera's effects come with
-//! their own lots.
+//! the camera. The screen light's rows (`[camera]`): on or off, its
+//! warmth, its strength (`auto` follows the light on the face while the
+//! Hocuspanda camera is read); then the Hocuspanda camera's effects, as
+//! the camera's window in the bar sets them: Lumière, the banner, its
+//! name and its project.
 
 use hocus_words::settings::camera as words;
 use std::sync::OnceLock;
@@ -14,13 +16,24 @@ pub const LIGHT: RowGroup = RowGroup {
     per_source: false,
 };
 
+/// The Hocuspanda camera's rows.
+pub const HOCUSPANDA: RowGroup = RowGroup {
+    label: words::HOCUSPANDA_CAMERA,
+    per_source: false,
+};
+
 /// The screen light's switch, which the other two need.
 pub const SCREEN_LIGHT: &str = "camera.screen-light";
 pub const WARMTH: &str = "camera.screen-light-warmth";
 pub const STRENGTH: &str = "camera.screen-light-strength";
+pub const LIGHTING: &str = "camera.lighting";
+/// The banner's switch, which its name and project need.
+pub const BANNER: &str = "camera.banner";
+pub const BANNER_NAME: &str = "camera.banner-name";
+pub const BANNER_PROJECT: &str = "camera.banner-project";
 
 const WARMTHS: &[&str] = &["cool", "neutral", "warm"];
-const STRENGTHS: &[&str] = &["soft", "medium", "strong"];
+const STRENGTHS: &[&str] = &["auto", "soft", "medium", "strong"];
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
@@ -73,16 +86,91 @@ pub fn settings() -> &'static [Setting] {
                 name: words::STRENGTH,
                 line: Some(words::HOW_FAR_IN_IT_REACHES_AND),
                 keywords: (
-                    &["caméra", "lumière", "intensité", "luminosité"],
-                    &["camera", "light", "strength", "brightness"],
+                    &["caméra", "lumière", "intensité", "luminosité", "auto"],
+                    &["camera", "light", "strength", "brightness", "auto"],
                 ),
                 kind: Kind::Segmented(vec![
+                    word(words::AUTO, "auto"),
                     word(words::SOFT, "soft"),
                     word(words::MEDIUM, "medium"),
                     word(words::STRONG, "strong"),
                 ]),
                 places: one(&["camera", "screen-light-strength"], Codec::Word(STRENGTHS)),
                 needs: Some(SCREEN_LIGHT),
+            },
+            Setting {
+                id: LIGHTING,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::LIGHTING,
+                line: Some(words::EXPOSURE_WHITES_AND_WARMTH),
+                keywords: (
+                    &[
+                        "caméra",
+                        "hocuspanda",
+                        "effet",
+                        "lumière",
+                        "exposition",
+                        "blancs",
+                    ],
+                    &[
+                        "camera",
+                        "hocuspanda",
+                        "effect",
+                        "light",
+                        "exposure",
+                        "white balance",
+                    ],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "lighting"], Codec::Bool),
+                needs: None,
+            },
+            Setting {
+                id: BANNER,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::BANNER,
+                line: Some(words::YOUR_NAME_ACROSS_THE_BOTTOM),
+                keywords: (
+                    &["caméra", "hocuspanda", "effet", "bandeau", "nom"],
+                    &[
+                        "camera",
+                        "hocuspanda",
+                        "effect",
+                        "banner",
+                        "name",
+                        "lower third",
+                    ],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "banner"], Codec::Bool),
+                needs: None,
+            },
+            Setting {
+                id: BANNER_NAME,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::BANNER_NAME,
+                line: Some(words::EMPTY_YOUR_ACCOUNT_S_NAME),
+                keywords: (&["caméra", "bandeau", "nom"], &["camera", "banner", "name"]),
+                kind: Kind::Text,
+                places: one(&["camera", "banner-name"], Codec::Text),
+                needs: Some(BANNER),
+            },
+            Setting {
+                id: BANNER_PROJECT,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::BANNER_PROJECT,
+                line: Some(words::UNDER_YOUR_NAME_THE_PROJECT),
+                keywords: (
+                    &["caméra", "bandeau", "projet"],
+                    &["camera", "banner", "project"],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "banner-project"], Codec::Bool),
+                needs: Some(BANNER),
             },
         ]
     })
@@ -93,8 +181,9 @@ mod tests {
     use super::*;
     use crate::model::Places;
 
-    /// Its keys and their defaults are the configuration's: on, neutral,
-    /// soft.
+    /// Its keys and their defaults are the configuration's: the light on,
+    /// neutral, auto; Lumière on, no banner, the account's name, the
+    /// project.
     #[test]
     fn the_rows_write_the_camera_s_keys_with_their_defaults() {
         let keys: Vec<(String, Value)> = settings()
@@ -114,8 +203,12 @@ mod tests {
                 ),
                 (
                     "camera.screen-light-strength".to_owned(),
-                    Value::Word("soft")
+                    Value::Word("auto")
                 ),
+                ("camera.lighting".to_owned(), Value::Bool(true)),
+                ("camera.banner".to_owned(), Value::Bool(false)),
+                ("camera.banner-name".to_owned(), Value::Text(String::new())),
+                ("camera.banner-project".to_owned(), Value::Bool(true)),
             ]
         );
     }

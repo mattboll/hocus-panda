@@ -13,7 +13,9 @@
 //!
 //! PipeWire's and WirePlumber's own processes are left out: what they
 //! open, they open for a stream, which the graph shows with its
-//! application.
+//! application. So is `hocus-camera`, which holds the Hocuspanda camera's
+//! v4l2loopback device open to write it (#619): what reads that device
+//! (Firefox, Slack…) is the camera's user, and holds it open too.
 
 use std::{
     collections::HashMap,
@@ -39,6 +41,14 @@ pub const EVERY: Duration = Duration::from_secs(1);
 
 /// The programs whose devices are a stream's.
 const PIPEWIRE: [&str; 3] = ["pipewire", "wireplumber", "pipewire-media-"];
+/// The Hocuspanda camera's program, writing its device.
+const HOCUS_CAMERA: &str = "hocus-camera";
+
+/// Whether `program` holding a camera's device open is no application's
+/// use: PipeWire's, or the Hocuspanda camera writing its own.
+fn left_out(program: &str) -> bool {
+    program == HOCUS_CAMERA || PIPEWIRE.iter().any(|p| program.starts_with(p))
+}
 
 /// When `/proc` may be read again: at most once each [`EVERY`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -276,7 +286,7 @@ fn holders(devices: &[PathBuf]) -> Vec<Media> {
         let Some(program) = program(&dir) else {
             continue;
         };
-        if PIPEWIRE.iter().any(|p| program.starts_with(p)) {
+        if left_out(&program) {
             continue;
         }
         found
@@ -353,6 +363,21 @@ mod tests {
             at += Duration::from_millis(50);
         }
         assert_eq!(readings, 9);
+    }
+
+    #[test]
+    fn pipewire_and_the_hocuspanda_camera_are_no_application_s_use() {
+        for program in [
+            "pipewire",
+            "wireplumber",
+            "pipewire-media-session",
+            "hocus-camera",
+        ] {
+            assert!(left_out(program), "{program}");
+        }
+        for program in ["firefox", "slack", "chrome", "hocus-camera-test", "zoom"] {
+            assert!(!left_out(program), "{program}");
+        }
     }
 
     #[test]

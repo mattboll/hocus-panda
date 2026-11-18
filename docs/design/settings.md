@@ -1152,24 +1152,30 @@ Appearance keeps a link here.
 
 What the desktop does while an application uses the camera
 (`hocus-settings camera`), in APPAREILS after Son. Its first rows are the
-screen light's ([camera.md](camera.md)); the Hocuspanda camera's effects
-(#619's later lots) will join them.
+screen light's ([camera.md](camera.md)), then the Hocuspanda camera's
+effects, as its window in the bar sets them (lot 2; the later lots' will
+join them).
 
 | Group | Row | Control | Key |
 |---|---|---|---|
 | LUMIÈRE D'ÉCRAN | Lumière d'écran ("Pendant un appel, le bord de l'écran de l'appel s'allume et éclaire ton visage. Jamais dans les captures, les partages ni les enregistrements.") | switch | `[camera] screen-light` (on) |
 | | Chaleur ("La couleur de la lumière.") | segmented "Froide", "Neutre", "Chaude" | `[camera] screen-light-warmth` (`"neutral"`) |
-| | Intensité ("Jusqu'où elle entre, et sa clarté.") | segmented "Douce", "Moyenne", "Forte" | `[camera] screen-light-strength` (`"soft"`) |
+| | Intensité ("Jusqu'où elle entre, et sa clarté. Auto suit la lumière sur ton visage pendant que la caméra Hocuspanda est lue.") | segmented "Auto", "Douce", "Moyenne", "Forte" | `[camera] screen-light-strength` (`"auto"`) |
+| CAMÉRA HOCUSPANDA | Lumière ("Exposition, blancs et chaleur d'après l'image, et un léger débruitage.") | switch | `[camera] lighting` (on) |
+| | Bandeau ("Ton nom en bas de l'image.") | switch | `[camera] banner` (off) |
+| | Nom du bandeau ("Vide : le nom de ton compte.") | text | `[camera] banner-name` (`""`) |
+| | Projet dans le bandeau ("Sous ton nom, le projet du bureau où tu es.") | switch | `[camera] banner-project` (on) |
 
 - The page is generic (rows from `crates/hocus-settings/src/camera.rs`);
-  off, the warmth and the strength are inert. The compositor follows
-  them live. The words are the mockup's ("Lumière d'écran", "Chaleur",
+  off, the warmth and the strength are inert; the banner off, its name
+  and project are. The compositor follows them live. The words are the mockup's ("Lumière d'écran", "Chaleur",
   "Intensité" and their choices); its icon a video camera.
 - **Measured headless** (`crates/hocus-compositor/tests/
   settings_appearance.rs`, `the_camera_page_writes_the_screen_light_s_keys`):
-  the rows in order and their defaults; "Chaude" and "Forte" written; the
-  switch off written, the two others inert, and a call's light on the
-  screen gone. The model's keys: `camera::tests`.
+  the rows in order and their defaults; Lumière off, the banner on (its
+  project's row no longer inert) and its project off written; "Chaude"
+  and "Forte" written; the switch off written, the two others inert, and
+  a call's light on the screen gone. The model's keys: `camera::tests`.
 
 ## Fond d'écran (6.3)
 

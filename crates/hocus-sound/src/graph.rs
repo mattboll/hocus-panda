@@ -602,6 +602,18 @@ impl Graph {
         {
             return;
         }
+        // The Hocuspanda camera's own streams (#619, lot 2: its reading of
+        // the real camera, the camera window's preview) are no
+        // application's use; what reads its source is
+        // (`hocus_link::camera::CAMERA_PREFIX`).
+        if class == Class::VideoCapture
+            && props
+                .and_then(|p| p.get("node.name"))
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.starts_with("hocuspanda-camera"))
+        {
+            return;
+        }
         let node = self.nodes.entry(id).or_default();
         node.class = class;
         if let Some(props) = props {
@@ -1204,6 +1216,27 @@ mod tests {
         graph.apply(link(72, 70, 71));
         let used = graph.in_use();
         assert_eq!(used.cameras, 1);
+        assert_eq!(used.camera.len(), 1, "{:?}", used.camera);
+        // The Hocuspanda camera reading the real one, and its window's
+        // preview reading it, are no application's use.
+        graph.apply(classed(
+            80,
+            "Video/Source",
+            json!({ "node.name": "hocuspanda-camera", "media.role": "Camera" }),
+        ));
+        for (id, name) in [
+            (81, "hocuspanda-camera-input"),
+            (82, "hocuspanda-camera-preview"),
+        ] {
+            graph.apply(classed(
+                id,
+                "Stream/Input/Video",
+                json!({ "node.name": name, "application.name": "Hocuspanda" }),
+            ));
+        }
+        graph.apply(link(83, 60, 81));
+        graph.apply(link(84, 80, 82));
+        let used = graph.in_use();
         assert_eq!(used.camera.len(), 1, "{:?}", used.camera);
     }
 

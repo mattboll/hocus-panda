@@ -499,6 +499,8 @@ fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on
 
 /// Caméra (#619): the screen light's three rows write `[camera]`; off,
 /// its warmth and strength are inert. The compositor follows the file.
+/// The Hocuspanda camera's rows (lot 2) write theirs, the banner's name
+/// and project inert without it.
 #[test]
 fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
@@ -517,17 +519,32 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
             "camera.screen-light",
             "camera.screen-light-warmth",
             "camera.screen-light-strength",
+            "camera.lighting",
+            "camera.banner",
+            "camera.banner-name",
+            "camera.banner-project",
         ]
     );
     assert_eq!(row(&shown, "camera.screen-light")["value"], "oui");
     assert_eq!(row(&shown, "camera.screen-light-warmth")["value"], "Neutre");
-    assert_eq!(
-        row(&shown, "camera.screen-light-strength")["value"],
-        "Douce"
-    );
+    assert_eq!(row(&shown, "camera.screen-light-strength")["value"], "Auto");
+    // The Hocuspanda camera's (#619, lot 2): Lumière on, no banner, whose
+    // name and project wait for it.
+    assert_eq!(row(&shown, "camera.lighting")["value"], "oui");
+    assert_eq!(row(&shown, "camera.banner")["value"], "non");
+    assert_eq!(row(&shown, "camera.banner-name")["inert"], true);
+    assert_eq!(row(&shown, "camera.banner-project")["inert"], true);
+    bed.click("control:camera.lighting")?;
+    bed.written(|t| t.contains("lighting = false"))?;
+    bed.click("control:camera.banner")?;
+    bed.written(|t| t.contains("banner = true"))?;
+    let shown = bed.shows(|s| row(s, "camera.banner")["value"] == "oui")?;
+    assert_eq!(row(&shown, "camera.banner-project")["inert"], false);
+    bed.click("control:camera.banner-project")?;
+    bed.written(|t| t.contains("banner-project = false"))?;
     bed.click("segment:camera.screen-light-warmth:2")?;
     bed.written(|t| t.contains("screen-light-warmth = \"warm\""))?;
-    bed.click("segment:camera.screen-light-strength:2")?;
+    bed.click("segment:camera.screen-light-strength:3")?;
     let text = bed.written(|t| t.contains("screen-light-strength = \"strong\""))?;
     assert!(text.contains("[camera]"), "{text}");
     // A call: the screen lights; turned off, the compositor follows the
