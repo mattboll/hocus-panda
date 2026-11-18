@@ -163,6 +163,7 @@ mod unplug;
 mod unplug_clients;
 mod wifi;
 mod window_effects;
+mod window_frame;
 mod window_opacity;
 mod window_rules;
 mod windows;
