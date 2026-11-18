@@ -1,10 +1,15 @@
 //! A window's frame and what it shows (docs/design/windows.md §3): a menu
 //! the window opens is in front of all of the window, its rims, rings and
-//! shadow included, where the menu reaches past the window's edge.
+//! shadow included, where the menu reaches past the window's edge; a
+//! snapped window's corners stay round whatever its client draws around
+//! it.
 
 use crate::common;
 
-use common::{Command, Event, WAIT, WINDOW_COLOUR, compositor, open_with, wait_for_rect};
+use common::{
+    Command, Event, KEY_LEFT, KEY_LEFTMETA, Shows, WAIT, WINDOW_COLOUR, chord, compositor,
+    open_showing, open_with, wait_for_rect,
+};
 use hocus_compositor::model::Rect;
 use std::time::{Duration, Instant};
 
@@ -75,5 +80,47 @@ fn a_menu_past_its_windows_edge_is_over_the_windows_rim() -> anyhow::Result<()> 
         across(rect.y + 50).any(|at| pixel(&px, w, at) != WINDOW_COLOUR),
         "the window's frame shows past its edge above the menu"
     );
+    Ok(())
+}
+
+/// A snapped window is told it is tiled: GTK then draws its edges square
+/// and a dark 1 px line around its geometry, square at the corners
+/// (Firefox's black top corners). What a tiled client draws outside its
+/// geometry is not shown: its corners are the frame's, round.
+#[test]
+fn a_snapped_window_shows_nothing_its_client_draws_around_it() -> anyhow::Result<()> {
+    let mut hp = compositor()?;
+    // The cursor away from where the window goes.
+    hp.pointer_move(1500.0, 900.0);
+    common::at_rest(&mut hp)?;
+    let (w, _, before) = hp.screenshot(0)?;
+    // A client drawing a dark band 30 px wide around its geometry.
+    let (_, _window) = open_showing(
+        &mut hp,
+        "test.square",
+        Shows::Shadowed {
+            app_id: "test.square",
+            size: (600, 400),
+            margin: 30,
+        },
+    )?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
+    let area = hp
+        .work_area()
+        .ok_or_else(|| anyhow::anyhow!("no work area"))?;
+    let half = Rect::new(area.x, area.y, (area.width - 8) / 2, area.height);
+    wait_for_rect(&mut hp, "test.square", half)?;
+    common::at_rest(&mut hp)?;
+    let (_, _, after) = hp.screenshot(0)?;
+    // Outside the window, past its rim: its top-left corner, diagonally,
+    // and beside its left edge. The wallpaper, as before it opened.
+    let (x, y) = (half.x, half.y);
+    for at in [(x - 3, y - 3), (x - 2, y - 2), (x - 4, y + half.height / 2)] {
+        assert_eq!(
+            format!("{:08x}", pixel(&after, w, at)),
+            format!("{:08x}", pixel(&before, w, at)),
+            "at {at:?}, outside the snapped window: what its client draws around it shows"
+        );
+    }
     Ok(())
 }

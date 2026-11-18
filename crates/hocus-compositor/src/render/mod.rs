@@ -418,13 +418,20 @@ impl State {
         } else {
             0
         };
-        // A thumbnail shows its window's geometry and nothing around it.
-        let outside = if look.corner.is_some() {
+        // A thumbnail shows its window's geometry and nothing around it,
+        // its menus neither.
+        let menus = if look.corner.is_some() {
             Outside::Cropped
         } else {
             Outside::Shown
         };
-        let wrap = |e: WaylandSurfaceRenderElement<R>, radius: i32| {
+        // Nor does a snapped window, told it is tiled: its client draws
+        // its edges square for windows side by side, GTK a dark 1 px line
+        // around its geometry, whose square corners would show past the
+        // rounded ones its frame draws (Firefox's black top corners).
+        let tiled = matches!(self.model.mode(id), Mode::Snapped(_));
+        let outside = if tiled { Outside::Cropped } else { menus };
+        let wrap = |e: WaylandSurfaceRenderElement<R>, radius: i32, outside: Outside| {
             let scaled = RescaleRenderElement::from_element(e, actual_loc, k);
             let moved = RelocateRenderElement::from_element(scaled, offset, Relocate::Relative);
             OutputElements::Window(Rounded::new(moved, clip, radius, outside, scale))
@@ -451,7 +458,7 @@ impl State {
                     Kind::Unspecified,
                 );
                 // Menus are not cut by the window's corners.
-                out.extend(popups.into_iter().map(|e| wrap(e, 0)));
+                out.extend(popups.into_iter().map(|e| wrap(e, 0, menus)));
             }
             if !surfaces {
                 return;
@@ -464,7 +471,7 @@ impl State {
                 look.alpha,
                 Kind::Unspecified,
             );
-            out.extend(surfaces.into_iter().map(|e| wrap(e, radius)));
+            out.extend(surfaces.into_iter().map(|e| wrap(e, radius, outside)));
         } else if surfaces {
             let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                 AsRenderElements::<R>::render_elements(
@@ -474,7 +481,7 @@ impl State {
                     sc,
                     look.alpha,
                 );
-            out.extend(surfaces.into_iter().map(|e| wrap(e, radius)));
+            out.extend(surfaces.into_iter().map(|e| wrap(e, radius, outside)));
         }
     }
 
