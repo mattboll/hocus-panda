@@ -292,7 +292,9 @@ jobs:
         # undefined); cargo keeps what it said in the build's output.
         if: failure()
         run: |
-          nproc; free -h; ulimit -a
+          nproc; free -h; ulimit -a; swapon --show || true
+          echo "overcommit: $(cat /proc/sys/vm/overcommit_memory) ratio $(cat /proc/sys/vm/overcommit_ratio)"
+          grep -i commit /proc/meminfo
           for f in target/release/build/whisper-rs-sys-*/output target/release/build/whisper-rs-sys-*/stderr; do
             echo "== $f"
             grep -E -A12 "cannot compile|Error executing|Failed to" "$f" | head -150 || true
