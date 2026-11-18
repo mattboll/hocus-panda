@@ -619,5 +619,7 @@ gone. They run one at a time (`.config/nextest.toml`'s `camera-models`
 group), so that their budgets do not share a core. The settings:
 `settings_appearance::the_camera_page_writes_the_screen_light_s_keys`; the
 window's tiles (`camera::effects::tests`). The look: the screenshots,
-`sight::tests::screenshots_of_the_camera_s_pictures_lot_4` (ignored,
-`HOCUS_SHOTS`).
+`sight::tests::screenshots_of_the_camera_s_pictures_lot_4` (the frames)
+and the compositor's `camera::screenshots_of_the_window_s_lot_4` (the
+window, the real program's frames in its preview), both ignored,
+`HOCUS_SHOTS`.

@@ -720,11 +720,12 @@ impl WindowBed {
         Ok(common::drawn_popovers(&self.hp)[0])
     }
 
-    /// A click on tile `n` (from 0) of the window at `window`.
+    /// A click on tile `n` (from 0, four a row) of the window at `window`.
     fn tile(&mut self, window: hocus_compositor::model::Rect, n: usize) -> anyhow::Result<()> {
+        let (row, column) = (n / 4, n % 4);
         let at = (
-            f64::from(window.x) + IN + TILE_STEP * n as f64 + TILE_HALF.0,
-            f64::from(window.y) + GRID_TOP + TILE_HALF.1,
+            f64::from(window.x) + IN + TILE_STEP * column as f64 + TILE_HALF.0,
+            f64::from(window.y) + GRID_TOP + (62.0 + 6.0) * row as f64 + TILE_HALF.1,
         );
         common::click_on(&mut self.hp, at, hocus_link::POPOVER_NAMESPACE)
     }
