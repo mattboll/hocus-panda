@@ -642,7 +642,7 @@ mod tests {
         )?;
         assert_eq!(config.keyboard.layouts, ["fr", "fr(bepo)"]);
         assert_eq!(config.keyboard.options, "caps:escape");
-        assert_eq!(config.keyboard.repeat_delay, 200);
+        assert_eq!(config.keyboard.repeat_delay, 400);
         assert!(toml::from_str::<Config>("[keyboard]\nlayout = \"fr\"\n").is_err());
         Ok(())
     }

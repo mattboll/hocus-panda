@@ -13,6 +13,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # whisper.cpp's CMake build (hocus-transcribe) through a `make` whose
+  # threads' stacks are small: its shader generator, with the default
+  # ones, left shaders out and main's release link failed
+  # (scripts/ci/make-small-stacks).
+  CMAKE_MAKE_PROGRAM: ${{ github.workspace }}/scripts/ci/make-small-stacks
   # Debug info: line tables only, set in Cargo.toml's profiles (full debug
   # info made target/ outgrow the runner's disk, run 41709913523).
 
@@ -131,6 +136,7 @@ jobs:
         run: |
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
+          free -h; echo "overcommit: $(cat /proc/sys/vm/overcommit_memory)"
       - name: Prebuilt libraries
         # sherpa-onnx's static libraries (hocus-transcribe), one version,
         # checked against its SHA-256: its build downloads nothing.
@@ -252,10 +258,12 @@ jobs:
 
   # The release build and its package, as the maintainer installs them: a
   # debug build and the tests say nothing of either. On main and the sprint
-  # branches; a pull request's is checked on the branch it comes from, or
-  # by hand (workflow_dispatch).
+  # branches, by hand (workflow_dispatch), and on a pull request that runs
+  # everything (the lock file, `full-tests`): #858 changed the lock file and
+  # main's release build was the first to link whisper.cpp's.
   package:
-    if: github.event_name != 'pull_request'
+    needs: plan
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.plan.outputs.full == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -278,12 +286,27 @@ jobs:
         run: |
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
+          free -h; echo "overcommit: $(cat /proc/sys/vm/overcommit_memory)"
       - name: Prebuilt libraries
         # sherpa-onnx's static libraries (hocus-transcribe), one version,
         # checked against its SHA-256: its build downloads nothing.
         run: scripts/prebuilt.sh
       - name: Release build
         run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
+      - name: What whisper.cpp's shader generator said
+        # It leaves out, without failing, each shader its compiler did not
+        # make, and the link fails far from the cause (`matmul_*_cm1_data`
+        # undefined); cargo keeps what it said in the build's output.
+        if: failure()
+        run: |
+          nproc; free -h; ulimit -a; swapon --show || true
+          echo "overcommit: $(cat /proc/sys/vm/overcommit_memory) ratio $(cat /proc/sys/vm/overcommit_ratio)"
+          grep -i commit /proc/meminfo
+          for f in target/release/build/whisper-rs-sys-*/output target/release/build/whisper-rs-sys-*/stderr; do
+            echo "== $f"
+            grep -E -A12 "cannot compile|Error executing|Failed to" "$f" | head -150 || true
+          done
+          sudo dmesg | grep -iE "oom|killed process|out of memory" | tail -20 || true
       - name: The .deb
         run: packaging/deb/build.sh
       - name: What the .deb holds
