@@ -292,13 +292,7 @@ fn readers(lang: Lang) -> String {
     if apps.is_empty() {
         return w::NOBODY_READS.get(lang).to_owned();
     }
-    w::read_by(
-        lang,
-        w::ReadBy {
-            n: apps.len() as u64,
-            apps: apps.join(", "),
-        },
-    )
+    w::read_by(lang, apps.join(", "))
 }
 
 /// The label, and who reads.
@@ -998,16 +992,7 @@ mod tests {
     fn its_words_are_the_mockup_s() {
         let fr = Lang::French;
         assert_eq!(w::HEADING.get(fr), "CAMÉRA ET MICRO");
-        assert_eq!(
-            w::read_by(
-                fr,
-                w::ReadBy {
-                    n: 1_u64,
-                    apps: "Firefox"
-                }
-            ),
-            "Utilisée par Firefox"
-        );
+        assert_eq!(w::read_by(fr, "Firefox"), "Utilisée par Firefox");
         assert_eq!(w::AUTO.get(fr), "auto, sur ton visage");
         assert_eq!(w::HELP.get(fr), "Choisir « Hocuspanda » dans l’appel…");
         let tabs: Vec<&str> = Tab::ALL.iter().map(|t| t.name().get(fr)).collect();

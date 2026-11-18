@@ -12,6 +12,7 @@ What the package of Hocuspanda holds, and how it is built.
 | [`hocus-settings.desktop`](hocus-settings.desktop) | `/usr/share/applications` | "Réglages" / "Settings" in the launcher (shown in the Hocuspanda session only) |
 | `panda-1.png` … `panda-8.png` | `/usr/share/hocuspanda/avatars` | The pandas the Settings' Account page offers as avatars |
 | `hocus-transcribe` | `/usr/bin` | Makes a meeting's text from its recorded sound, at a low priority, which the compositor starts from beside itself ([docs/design/meetings.md](../docs/design/meetings.md)); it downloads its models on first use into `~/.local/share/hocuspanda/models` |
+| `hocus-camera` | `/usr/bin` | The Hocuspanda camera: a PipeWire video source with the camera's effects, reading the real camera only while an application reads it, which the compositor starts from beside itself ([docs/design/camera.md](../docs/design/camera.md)) |
 | `hocus` | `/usr/bin` | What agents' hooks and scripts run to tell the bar their state ([docs/agents.md](../docs/agents.md)) |
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
@@ -29,7 +30,7 @@ On Debian or Ubuntu, with `dpkg-dev` and the build dependencies of the CI:
 
 ```sh
 scripts/prebuilt.sh                     # sherpa-onnx's libraries, checked (hocus-transcribe)
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
 packaging/deb/build.sh                  # target/packages/hocuspanda_<version>-1_<arch>.deb
 packaging/deb/check.sh target/packages/hocuspanda_<version>-1_<arch>.deb   # it holds the files above, no others
 sudo apt install ./target/packages/hocuspanda_<version>-1_<arch>.deb

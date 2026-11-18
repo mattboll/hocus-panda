@@ -713,7 +713,12 @@ fn the_window_s_tiles_write_the_effects_and_the_frames_follow() -> anyhow::Resul
     assert!(bed.camera.streams(), "the camera is not read");
     bed.logged(
         "the camera's window shows it",
-        &["Visio les lit", "[x] Lumière", "[~] Cadrage", "[ ] Bandeau"],
+        &[
+            "Utilisée par Visio",
+            "[x] Lumière",
+            "[~] Cadrage",
+            "[ ] Bandeau",
+        ],
     )?;
     let (plain, _) = bed.band(Duration::from_secs(5))?;
     bed.tile(window, 2)?;
