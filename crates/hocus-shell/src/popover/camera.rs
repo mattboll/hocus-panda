@@ -4,7 +4,7 @@
 //! 9 px apart, as the approved mockup draws it:
 //!
 //! - its label (11 px, 700, spaced 0.1 em, `text.faint`) and who reads the
-//!   camera and the microphone ("Firefox les lit", 11.5 px);
+//!   camera and the microphone ("Utilisée par Firefox", 11.5 px);
 //! - the preview, 312 × 176, radius 10, on `#1A1F2C`: what the others
 //!   see, read from the Hocuspanda source while the window shows
 //!   (`crate::camera::preview`);
@@ -279,8 +279,8 @@ fn build<'a>(motion: bool) -> El<'a> {
     })
 }
 
-/// "Firefox les lit": the applications using the camera or the
-/// microphone now; "personne ne les lit".
+/// "Utilisée par Firefox": the applications using the camera or the
+/// microphone now; "Pas utilisée".
 fn readers(lang: Lang) -> String {
     let uses = crate::in_use::snapshot();
     let mut apps: Vec<String> = Vec::new();
@@ -1006,7 +1006,7 @@ mod tests {
                     apps: "Firefox"
                 }
             ),
-            "Firefox les lit"
+            "Utilisée par Firefox"
         );
         assert_eq!(w::AUTO.get(fr), "auto, sur ton visage");
         assert_eq!(w::HELP.get(fr), "Choisir « Hocuspanda » dans l’appel…");

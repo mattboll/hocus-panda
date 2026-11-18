@@ -3022,8 +3022,8 @@ project = "project {name}"
 # The camera and microphone's window (#619, docs/design/camera.md).
 [shell.camera]
 heading = "CAMERA AND MICROPHONE"
-read_by = { one = "{apps} reads them", other = "{apps} read them" }
-nobody_reads = "nobody reads them"
+read_by = { one = "Used by {apps}", other = "Used by {apps}" }
+nobody_reads = "Not in use"
 image = "Image"
 background = "Background"
 face = "Face"

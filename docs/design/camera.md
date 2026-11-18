@@ -167,7 +167,7 @@ nothing measured: soft, as lot 1. Fixed strengths stay.
 A click on the camera's tile of the in-use sign (bar.md 5.12) opens it,
 as the bar's popovers (`crates/hocus-shell/src/popover/camera.rs`), 340
 wide, as the mockup draws it: the label and who reads the camera and the
-microphone ("Firefox les lit"); the preview, 312 × 176, what the others
+microphone ("Utilisée par Firefox"); the preview, 312 × 176, what the others
 see, read from the Hocuspanda source while the window shows (so the
 camera is on while it shows), 30 frames a second; the tabs Image · Fond ·
 Visage · Voix · Réactions, a violet dot on a tab with an effect on; the
