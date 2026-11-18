@@ -221,6 +221,28 @@ pub fn buffers(stride: usize, size: usize) -> Vec<u8> {
     })
 }
 
+/// The buffers asked of a camera once a format is agreed: in memory this
+/// process maps (its own or shared), never a GPU's (DMA-BUF), which
+/// PipeWire's V4L2 cameras otherwise export and which cannot be read here.
+pub fn camera_buffers() -> Vec<u8> {
+    let memory = (1 << spa::sys::SPA_DATA_MemFd) | (1 << spa::sys::SPA_DATA_MemPtr);
+    serialize(Object {
+        type_: spa::utils::SpaTypes::ObjectParamBuffers.as_raw(),
+        id: spa::param::ParamType::Buffers.as_raw(),
+        properties: vec![Property {
+            key: spa::sys::SPA_PARAM_BUFFERS_dataType,
+            flags: PropertyFlags::empty(),
+            value: Value::Choice(ChoiceValue::Int(Choice(
+                ChoiceFlags::empty(),
+                ChoiceEnum::Flags {
+                    default: memory,
+                    flags: vec![memory],
+                },
+            ))),
+        }],
+    })
+}
+
 /// The reader's format a camera agreed to, as [`Input`] (its rows' bytes
 /// come with each frame).
 pub fn input_of(param: &Pod) -> Option<Input> {
@@ -292,9 +314,14 @@ mod tests {
 
     #[test]
     fn the_pods_read_back() {
-        for bytes in [source_format(), preview_format(), buffers(5120, 5120 * 720)]
-            .into_iter()
-            .chain(camera_formats())
+        for bytes in [
+            source_format(),
+            preview_format(),
+            buffers(5120, 5120 * 720),
+            camera_buffers(),
+        ]
+        .into_iter()
+        .chain(camera_formats())
         {
             assert!(Pod::from_bytes(&bytes).is_some());
         }

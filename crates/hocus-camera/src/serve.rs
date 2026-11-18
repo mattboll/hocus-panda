@@ -667,11 +667,17 @@ impl State {
                 tracing::debug!(?old, ?new, "the camera's stream");
                 states(Ev::InState(new));
             })
-            .param_changed(move |_, _, id, param| {
+            .param_changed(move |stream, _, id, param| {
                 if id != spa::param::ParamType::Format.as_raw() {
                     return;
                 }
                 if let Some(input) = param.and_then(pods::input_of) {
+                    let pod = pods::camera_buffers();
+                    if let Some(pod) = Pod::from_bytes(&pod)
+                        && let Err(err) = stream.update_params(&mut [pod])
+                    {
+                        tracing::warn!(%err, "the camera's buffers not asked");
+                    }
                     formats(Ev::InFormat(input));
                 }
             })
@@ -766,12 +772,12 @@ impl State {
             let _ = stream.dequeue_buffer();
             return;
         };
-        let read = {
+        let read = 'read: {
             let Some(mut buffer) = stream.dequeue_buffer() else {
                 return;
             };
             let Some(data) = buffer.datas_mut().first_mut() else {
-                return;
+                break 'read Err("a buffer without data");
             };
             let (offset, size, stride) = {
                 let chunk = data.chunk();
@@ -781,8 +787,10 @@ impl State {
                     u32::try_from(chunk.stride()).unwrap_or(0),
                 )
             };
+            let kind = data.type_();
             let Some(bytes) = data.data() else {
-                return;
+                tracing::debug!(?kind, "a frame not mapped");
+                break 'read Err("a frame not in this process's memory");
             };
             let end = if size == 0 {
                 bytes.len()
@@ -790,15 +798,20 @@ impl State {
                 (offset + size).min(bytes.len())
             };
             let Some(bytes) = bytes.get(offset.min(end)..end) else {
-                return;
+                break 'read Err("a frame's chunk outside its buffer");
             };
             let input = Input { stride, ..input };
-            self.converter.to_rgba(&input, bytes, &mut self.rgba)
+            if self.converter.to_rgba(&input, bytes, &mut self.rgba) {
+                Ok(())
+            } else {
+                Err("a frame that cannot be decoded")
+            }
         };
-        if !read {
+        if let Err(why) = read {
             if !self.unread {
                 tracing::warn!(
                     ?input,
+                    why,
                     "the camera's frames cannot be read: the still is sent"
                 );
                 self.unread = true;
