@@ -306,6 +306,24 @@ impl Bed {
     /// The popover, opened by hovering the sign at `sign`: its surface.
     fn popover(&mut self, sign: Rect) -> anyhow::Result<Rect> {
         let (x, y) = (sign.x + sign.width / 2, sign.y + sign.height / 2);
+        self.popover_at(x, y)
+    }
+
+    /// The same, hovering its first tile (the microphone's): the camera's
+    /// opens its own window instead (#619, lot 2).
+    fn popover_on_first(&mut self, sign: Rect) -> anyhow::Result<Rect> {
+        // Three tiles (30 × 24, 4 apart, `in_use::draw::tiles`): in a row
+        // in the middle of the full form's surface, the first one tile and
+        // a gap left of the middle; down the mini form's, from 9, 6 in.
+        let (x, y) = if sign.width > sign.height {
+            (sign.x + sign.width / 2 - 34, sign.y + sign.height / 2)
+        } else {
+            (sign.x + 9 + 15, sign.y + 6 + 12)
+        };
+        self.popover_at(x, y)
+    }
+
+    fn popover_at(&mut self, x: i32, y: i32) -> anyhow::Result<Rect> {
         common::over(
             &mut self.hp,
             (f64::from(x), f64::from(y)),
@@ -1225,7 +1243,7 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         let sign = bed.sign("Microphone, Camera, Screen")?;
         bed.hp.pointer_move(900.0, 700.0);
         shoot(&mut bed, &format!("sign-three-{suffix}.png"), bar)?;
-        bed.popover(sign)?;
+        bed.popover_on_first(sign)?;
         shoot(
             &mut bed,
             &format!("popover-{suffix}.png"),

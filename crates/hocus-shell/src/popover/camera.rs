@@ -1003,10 +1003,16 @@ fn handle(message: Msg) {
             let Some(effect) = effects::EFFECTS.iter().find(|e| e.id == id && e.ready) else {
                 return;
             };
-            if let effects::Pick::Toggle(key) = effect.pick {
-                let on = effect.on(&camera::shown());
-                tracing::info!(effect = id, on = !on, "the camera's effect chosen");
-                camera::choose(key, !on);
+            match effect.pick {
+                effects::Pick::Toggle(key) => {
+                    let on = effect.on(&camera::shown());
+                    tracing::info!(effect = id, on = !on, "the camera's effect chosen");
+                    camera::choose(key, !on);
+                }
+                effects::Pick::One { key, value, .. } => {
+                    tracing::info!(effect = id, key, "the camera's effect chosen");
+                    camera::choose_word(key, value);
+                }
             }
             rebuild();
         }

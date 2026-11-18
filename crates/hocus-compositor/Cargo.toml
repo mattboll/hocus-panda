@@ -38,6 +38,8 @@ hocus-agents.workspace = true
 hocus-xdg.workspace = true
 # A day's CPU and memory, recorded off the loop (#655).
 hocus-perf.workspace = true
+# The living wallpapers' shaders, shared with the Hocuspanda camera.
+hocus-scenes.workspace = true
 anyhow.workspace = true
 # The same as smithay's, with signals: SIGTERM and SIGINT stop the loop.
 calloop.workspace = true
@@ -111,7 +113,7 @@ test-auth = []
 hocus-compositor = { path = ".", features = ["test-auth"] }
 # The Hocuspanda camera's tests (#619): its preview reads the source as
 # the camera window's does, and its pods make the fake camera's format.
-hocus-camera.workspace = true
+hocus-camera = { workspace = true, features = ["test-picture"] }
 smithay-client-toolkit.workspace = true
 wayland-client.workspace = true
 # text-input-v3 for a test window's text field (the emoji picker, 5.7);

@@ -1,12 +1,12 @@
 //! Triangles an effect draws in one call (#793), as the effects' shader
-//! reads them ([`super::draw`], `SHAPES`): each vertex its place (output-
+//! reads them (`SHAPES`, [`crate::shaders`]): each vertex its place (output-
 //! local, physical), its place across its shape, its colour (premultiplied)
 //! and its shape (what it is, and up to three numbers of it). Shapes made
 //! of quads (a flake, a clump, a soft box) shade each pixel; a fill takes
 //! its vertices' colours, a fringe of transparent vertices smoothing its
 //! edges.
 
-use super::particles::FLOATS;
+use crate::particles::FLOATS;
 
 /// What a vertex's shape is: its first number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

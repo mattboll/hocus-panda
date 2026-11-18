@@ -63,6 +63,16 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("dark", hocus_words::settings::appearance::DARK), ("light", hocus_words::settings::appearance::LIGHT), ("frost", hocus_words::settings::appearance::FROST), ("matrix", hocus_words::settings::appearance::MATRIX)]),
     },
     Label {
+        key: "camera.away",
+        name: hocus_words::settings::camera::AWAY,
+        said: Said::Switch,
+    },
+    Label {
+        key: "camera.background",
+        name: hocus_words::settings::camera::BACKGROUND,
+        said: Said::Choices(&[("room", hocus_words::settings::camera::ROOM), ("blur", hocus_words::settings::camera::BLUR), ("aurora", hocus_words::link::moving::AURORA), ("koi", hocus_words::settings::camera::KOI)]),
+    },
+    Label {
         key: "camera.banner",
         name: hocus_words::settings::camera::BANNER,
         said: Said::Switch,
@@ -81,6 +91,21 @@ pub const ALL: &[Label] = &[
         key: "camera.lighting",
         name: hocus_words::settings::camera::LIGHTING,
         said: Said::Switch,
+    },
+    Label {
+        key: "camera.presenter",
+        name: hocus_words::settings::camera::PRESENTER,
+        said: Said::Switch,
+    },
+    Label {
+        key: "camera.presenter-side",
+        name: hocus_words::settings::camera::PRESENTER_SIDE,
+        said: Said::Choices(&[("left", hocus_words::settings::camera::LEFT), ("right", hocus_words::settings::camera::RIGHT)]),
+    },
+    Label {
+        key: "camera.presenter-size",
+        name: hocus_words::settings::camera::PRESENTER_SIZE,
+        said: Said::Choices(&[("small", hocus_words::settings::camera::SMALL), ("medium", hocus_words::settings::camera::MIDDLE), ("large", hocus_words::settings::camera::LARGE)]),
     },
     Label {
         key: "camera.screen-light",

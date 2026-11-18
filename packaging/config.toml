@@ -606,6 +606,23 @@
 # banner = false
 # banner-name = ""
 # banner-project = true
+# What is behind you (Fond): "room" (as the camera sees it), "blur",
+# or one of the desktop's living wallpapers, moving: "aurora", "koi".
+# The person is found by a model on the processor (MediaPipe's selfie
+# segmentation), only while the camera is read.
+# background = "room"
+# « Je reviens » ("away"): nobody in the picture for 10 s, or the screen
+# locked during a call, and the picture is a card on a living wallpaper
+# instead of an empty chair; the default microphone muted while the
+# screen is locked (unmuted as you come back, if it muted it).
+# away = true
+# The presenter: while the desktop shares a screen or a window, you, cut
+# out, stand in a corner of the share's stream, never on your own screen;
+# it moves to the other corner while the pointer is under it. Its corner,
+# "left" or "right", and its size, "small", "medium" or "large".
+# presenter = false
+# presenter-side = "right"
+# presenter-size = "medium"
 
 # [magnifier]
 # The magnifier (docs/design/accessibility.md): the screen under the

@@ -1240,6 +1240,27 @@ mod tests {
         assert_eq!(used.camera.len(), 1, "{:?}", used.camera);
     }
 
+    /// The Hocuspanda camera reading the real one for the presenter alone
+    /// (#619, lot 3): the camera is on, and the in-use sign says what for.
+    #[test]
+    fn the_presenter_reading_the_camera_is_a_use_of_it() {
+        let mut graph = Graph::default();
+        graph.apply(classed(
+            60,
+            "Video/Source",
+            json!({ "node.name": "v4l2_input.pci-0000_00_14.0-usb-0_1_1.0", "media.role": "Camera" }),
+        ));
+        graph.apply(classed(
+            61,
+            "Stream/Input/Video",
+            json!({ "node.name": "hocuspanda-presenter", "application.name": "Présentateur" }),
+        ));
+        graph.apply(link(62, 60, 61));
+        let used = graph.in_use();
+        assert_eq!(used.camera.len(), 1, "{:?}", used.camera);
+        assert_eq!(used.camera[0].app, "Présentateur");
+    }
+
     #[test]
     fn the_default_sink_its_volume_and_its_changes() {
         let mut graph = Graph::default();

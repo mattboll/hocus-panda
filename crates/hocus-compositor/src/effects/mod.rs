@@ -48,10 +48,8 @@ pub mod garland;
 pub mod jelly;
 pub mod kept;
 pub mod koi;
-pub mod mesh;
 pub mod moments;
 pub mod motion;
-pub mod particles;
 pub mod raindrops;
 pub mod rig;
 pub mod shatter;
@@ -62,6 +60,9 @@ pub mod sun;
 pub mod timing;
 
 pub use draw::{Fire, FireElement};
+/// The shapes and the particles, the living wallpapers' with the
+/// camera's (`hocus_scenes`).
+pub use hocus_scenes::{mesh, particles};
 
 use std::time::Duration;
 
