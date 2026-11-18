@@ -5,7 +5,8 @@ plans five lots (its revised spec, 2026-11-17); this page says what is
 built. Mockup: the design canvas « #619 — effets webcam », its boards
 "Lumière d'écran" (lot 1), "Caméra et micro dans la barre", "La lumière
 qui s'ajuste" and "Dans l'appel" (lot 2), the window's Fond tab, « Je
-reviens » and "Présentateur" (lot 3) (sources in the maintainer's
+reviens » and "Présentateur" (lot 3), the window's Visage and Réactions
+tabs and its preview's reactions (lot 4) (sources in the maintainer's
 `hocus-panda-tools/mockups/s23-webcam`).
 
 ## The screen light (lot 1, as built)
@@ -462,3 +463,161 @@ the person's suit in the stream's lower right and not on the screen; the
 pointer under it, it moves to the left.
 `hocus-sound`'s `graph::tests::the_presenter_reading_the_camera_is_a_use_of_it`:
 the presenter's stream on a camera is a use of it, named so.
+
+## Your face and your hands (lot 4, as built)
+
+The face and the hands are found by models; an accessory follows the
+head, the picture can follow the face, a thumb up or a raised hand shows
+in the picture, and the agents' moments can rain confetti on it. The
+panda that takes the person's place (Visage's last tile) is to come, its
+own mockup first: its tile shows, dimmed, "Bientôt".
+
+### The models (`track.rs`, `face.rs`, `hands.rs`)
+
+- **Which**: MediaPipe's face landmarker (its face detector, BlazeFace
+  short range at 128 × 128; its mesh, 478 points at 256 × 256; its 52
+  expressions, the blendshapes, from 146 of the points) and hand
+  landmarker (its palm detector at 192 × 192; its 21 points at 224 ×
+  224), Apache-2.0, run with tract on the CPU as lot 3's.
+- **How they ship**: tract reads ONNX, MediaPipe publishes TensorFlow
+  Lite bundles (`.task`). `scripts/camera/landmarks-to-onnx.py` writes
+  each graph again as ONNX from the two bundles MediaPipe publishes (their
+  URLs and SHA-256 in the script), operator by operator, the weights the
+  same 16-bit floats (cast to 32 bits once, as tract loads them), every
+  output checked against TensorFlow Lite's own runtime within 10⁻³ of
+  their range. Two operators are written as what tract runs fastest:
+  PReLU as `max(x, 0) + slope · min(x, 0)`, the slope a 1 × 1 convolution
+  of a channel each (tract runs ONNX's `PRelu` as a comparison, a choice
+  and a broadcast product, the mesh three times slower). 12 MB in all
+  (`crates/hocus-camera/models/`, their licence beside them): in the
+  program, as lot 3's, no download (it works offline, from the first
+  call; the package's copyright names them).
+- **The face**: the detector only while no face is followed (the frame
+  letterboxed); then the mesh in a square round the face (its box 1.5
+  times, turned so that the eyes are level), the next frame's square from
+  this frame's points, as MediaPipe follows a face; lost when the mesh
+  says no face is there. The points are kept still between frames by a
+  One Euro filter each (still within a pixel or two at rest, a move
+  followed at once); the head's pose read from them: the eyes' middle,
+  their span (in depth too, so that it barely changes as the head turns),
+  their line's angle (roll), the forehead's top, the face's width
+  (temple to temple) and height. The expressions run only when asked
+  (the panda's blinks and mouth, to come).
+- **The hands**: the palm's detector three times a second while no hand
+  is followed, once a second while one is (a second one coming), at most
+  two hands; each hand's points in a square round its palm turned so that
+  its fingers point up, followed from frame to frame.
+- **When**: only while the camera is read, an effect needs them, and
+  « Je reviens » does not show. On threads of their own (`sight.rs`),
+  which take the latest frame when they are free (frames meanwhile are
+  not copied), so that the frames' loop never waits: the face every frame
+  for an accessory, every other one for Cadrage alone; the hands ten times
+  a second. Their threads end when no effect needs them.
+- **Their cost** (one core of a laptop's Core Ultra 7 165H, the thread's
+  own time): the face followed, some 16 to 20 ms a frame (the mesh), the
+  detector 4 ms when it runs; the hands followed, some 27 ms a look, the
+  palm's detector 35 to 40 ms when it runs. A face's accessory at 30
+  frames a second is about half a core; the gestures, while no hand is
+  in the picture, about an eighth of one.
+
+### Visage (one at a time; `wear.rs`)
+
+- **Oreilles, Bonnet, Couronne, Lunettes** (`[camera] face = "ears"`,
+  `"beanie"`, `"crown"`, `"glasses"`; `"none"`, the default): each the
+  mockup's own drawing of its preview's figure (the ears' grey discs with
+  their dark middle, the beanie's dome, brim and pompom, the crown's
+  path, the glasses' two rounded lenses), in the figure's pixels, laid on
+  the face by its pose and turned with its roll: the glasses from the
+  figure's eyes to the face's (their middle, their span); the others from
+  the figure's forehead's top, at its hair, to the face's, the figure's
+  face's width to the face's and 15 % more (a real head is wider than its
+  face with its hair). Drawn anti-aliased, apart in their box, over the
+  made frame: the same on the GPU's path and the CPU's, after what is
+  behind the person, before Cadrage's crop.
+- A face lost for half a second, the accessory goes; it comes back with
+  the face.
+
+### Cadrage (Image; `framing.rs`)
+
+- `[camera] framing` (off by default): the picture cropped round the
+  face, 16:9 kept: the face's middle at the middle across and at 45 % of
+  the height, zoomed 1.32 times (the mockup's `scale(1.32)`), less for a
+  face near the camera (the crop at least 2.2 times the face's height,
+  forehead to chin: its head and the shoulders' top stay in), never out
+  of the frame (a face at its edge stays nearer it).
+- **No jitter**: a face moving less than 4 % of the crop moves nothing;
+  further, the crop goes two thirds of the way in 450 ms (no jump).
+  Without a face for 1.5 s, the whole picture comes back, as slowly.
+- Over the accessory and what is behind the person, under the reactions
+  and the banner, which stay where they are in the picture (the mockup's
+  transform holds the room and the person only).
+
+### Réactions (`react.rs`)
+
+- **Gestes** (`[camera] gestures`, on: the mockup's state): a thumb up
+  (the thumb's tip above the rest of the hand, pointing up within 40°,
+  the four fingers folded) held 0.2 s sends one rising reaction: the
+  mockup's amber disc (`rgba(245,180,74,0.95)`, 42 px of its 176 tall
+  preview, its thumb `#1B1408`) 28 px from the right and 54 from the top,
+  popping in, rising 26 px and fading over 1.8 s (its `pop`, CSS's
+  `ease-out` between its keyframes); another, once the thumb was down a
+  second. A hand raised (its four fingers open, pointing up within 40°,
+  its middle finger's tip in the picture's top 60 %) for 0.3 s shows
+  « main levée » (« hand raised »; 11 px bold `#1B1408` on the same
+  amber, 8 round, 8 px from the top right corner) while it stays up; down
+  0.6 s, it goes.
+- **Fêtes** (`[camera] celebrations`, off by default): on each of the
+  agents' moments (an agent's tests green, `hocus celebrate`, the MCP's
+  `celebrate`: the moments of docs/design/effects.md, counted by the
+  compositor whatever its own effects may play, `CameraLook.moments`),
+  while the camera is read, 48 of the mockup's pieces (6 × 9 px of its
+  preview, its four colours) fall through the picture turning 260°, 2.2
+  to 3.1 s each, started over 1.5 s; another moment adds a shower.
+- None shows while « Je reviens » does.
+
+### The window and the settings
+
+Visage's tiles (Aucun, Oreilles, Bonnet, Couronne, Lunettes) are made, one
+of them ringed, a violet dot on the tab with an accessory; Panda shows,
+dimmed, "Bientôt" (its tile, to screen readers). Image's Cadrage and
+Réactions' Gestes and Fêtes are made, each its words under the grid.
+`[camera]`: `face`, `framing`, `gestures`, `celebrations`, with their
+rows in Settings › Caméra (Visage's row without the panda).
+
+**Choices made here** (to confirm on the machine):
+
+- Gestes is on by default (the mockup's state; the spec says only that
+  Fêtes is off): the hands' models then run in every call, some an eighth
+  of a core while no hand shows.
+- The ears are the mockup's: grey discs (`#3A3D46`) with a dark middle,
+  as its `box-shadow: inset` draws them, not black ones.
+- The hats sit by the face's own measures (its forehead's top and its
+  width, 15 % more for the hair), not by the hair found in the picture:
+  a big head of hair shows round a beanie.
+- Cadrage's zoom is the mockup's 1.32, less for a face near the camera
+  (no head cut), never more for a face far away.
+- Fêtes plays on the agents' moments whatever the desktop's own effects
+  do (reduced motion, the power saver, the screen shared), the picture
+  being the call's; a moment while the camera is not read rains nothing
+  later.
+
+**Measured headless**: `hocus-camera`'s unit tests: the face's points on
+the portrait (`data/person.jpg`) where its eyes, nose and chin are,
+level, smiling with its eyes open, followed within 30 ms of the thread's
+time a frame; no face in an empty picture; a thumb up on `data/thumb_up.jpg`
+(NASA's portrait of Koichi Wakata, public domain), its thumb's tip where
+it is, followed within 50 ms a look; a raised hand on
+`data/raised_hand.jpg` (NASA's photograph of Chris Cassidy, public
+domain); no gesture on the portrait; each accessory changing the pixels
+round the head (above the eyes, on them for the glasses) and none
+elsewhere; Cadrage bringing the face to the middle wherever it is in the
+picture (as far as the crop reaches), holding still for a few pixels'
+move, and zooming in on `data/far.jpg` (NASA's photograph of Jonny Kim,
+public domain); the gestures' timing (once, again after a second down;
+« main levée » after 0.3 s, gone 0.6 s down); the confetti falling and
+gone. They run one at a time (`.config/nextest.toml`'s `camera-models`
+group), so that their budgets do not share a core. The settings:
+`settings_appearance::the_camera_page_writes_the_screen_light_s_keys`; the
+window's tiles (`camera::effects::tests`). The look: the screenshots,
+`sight::tests::screenshots_of_the_camera_s_pictures_lot_4` (ignored,
+`HOCUS_SHOTS`).
