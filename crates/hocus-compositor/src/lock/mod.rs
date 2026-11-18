@@ -697,6 +697,7 @@ impl State {
                 | T::Lock(_)
                 | T::Meeting(_)
                 | T::Music { .. }
+                | T::Camera(_)
                 | T::Auth(_)
                 | T::Leave(hocus_link::LeaveAsk::Cancel)
                 | T::A11yLine(_)

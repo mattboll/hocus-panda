@@ -592,6 +592,16 @@ impl Graph {
         if class == Class::Source && props.is_some_and(is_monitor) {
             return;
         }
+        // A screen cast (the desktop's own, 5.11) is a video source, not a
+        // camera: what reads it shares the screen (#619).
+        if class == Class::Camera
+            && props
+                .and_then(|p| p.get("media.role"))
+                .and_then(Value::as_str)
+                == Some("Screen")
+        {
+            return;
+        }
         let node = self.nodes.entry(id).or_default();
         node.class = class;
         if let Some(props) = props {
@@ -1180,6 +1190,21 @@ mod tests {
         assert_eq!(used.camera.len(), 1);
         assert_eq!(used.camera[0].key, "us.zoom.Zoom");
         assert!(used.camera[0].ids.contains(&"us.zoom.zoom".to_owned()));
+        // A screen cast read by a stream is no camera (#619).
+        graph.apply(classed(
+            70,
+            "Video/Source",
+            json!({ "node.name": "hocuspanda-screen-cast", "media.role": "Screen" }),
+        ));
+        graph.apply(classed(
+            71,
+            "Stream/Input/Video",
+            json!({ "node.name": "meet", "application.name": "Firefox" }),
+        ));
+        graph.apply(link(72, 70, 71));
+        let used = graph.in_use();
+        assert_eq!(used.cameras, 1);
+        assert_eq!(used.camera.len(), 1, "{:?}", used.camera);
     }
 
     #[test]

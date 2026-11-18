@@ -1,4 +1,4 @@
-//! The settings' model: the 20 sections in their 5 groups, and every
+//! The settings' model: the 21 sections in their 5 groups, and every
 //! setting a section holds, with what the window needs to show it, find
 //! it and write it.
 //!
@@ -52,7 +52,7 @@ impl Group {
     }
 }
 
-/// The twenty sections, in the sidebar's order.
+/// The twenty-one sections, in the sidebar's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionId {
     Appearance,
@@ -62,6 +62,8 @@ pub enum SectionId {
     Agenda,
     Screens,
     Sound,
+    /// What the desktop does while the camera is in use (#619).
+    Camera,
     Keyboard,
     Mouse,
     Network,
@@ -95,7 +97,7 @@ pub struct Section {
 }
 
 impl SectionId {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Bar,
@@ -103,6 +105,7 @@ impl SectionId {
         Self::Agenda,
         Self::Screens,
         Self::Sound,
+        Self::Camera,
         Self::Keyboard,
         Self::Mouse,
         Self::Network,
@@ -186,6 +189,14 @@ impl SectionId {
                 words::OUTPUTS_INPUTS_AND_THEIR_PROFILES_EACH,
                 Icon::Sound,
                 "6.5",
+            ),
+            Self::Camera => s(
+                "camera",
+                Devices,
+                words::CAMERA,
+                words::WHAT_THE_DESKTOP_DOES_WHILE_THE_CAMERA,
+                Icon::Camera,
+                "#619",
             ),
             Self::Keyboard => s(
                 "keyboard",
@@ -314,6 +325,8 @@ pub enum Icon {
     Agenda,
     Screens,
     Sound,
+    /// A video camera (#619).
+    Camera,
     Keyboard,
     Mouse,
     Network,
@@ -363,6 +376,7 @@ impl Icon {
             Self::Sound => {
                 "M4 9.5 H7.5 L12 5.5 V18.5 L7.5 14.5 H4 Z M15.5 9 A4 4 0 0 1 15.5 15 M18 6.5 A7.5 7.5 0 0 1 18 17.5"
             }
+            Self::Camera => "M3.5 7 H15 V17 H3.5 Z M15 10.5 L20.5 7.5 V16.5 L15 13.5",
             Self::Keyboard => {
                 "M3 6.5 H21 V17.5 H3 Z M6.5 10 H7.5 M10 10 H11 M13 10 H14 M16.5 10 H17.5 M7.5 14 H16.5"
             }
@@ -938,6 +952,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Agents => crate::agents::settings(),
         SectionId::Apps => crate::applications::settings(),
         SectionId::Captures => crate::captures::settings(),
+        SectionId::Camera => crate::camera::settings(),
         SectionId::Performance => crate::perf::settings(),
         _ => &[],
     }
@@ -1003,8 +1018,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn twenty_sections_in_five_groups() {
-        assert_eq!(SectionId::ALL.len(), 20);
+    fn twenty_one_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 21);
         let count = |g| {
             SectionId::ALL
                 .iter()
@@ -1013,8 +1028,8 @@ mod tests {
         };
         assert_eq!(
             Group::ALL.map(count),
-            [5, 4, 2, 5, 4],
-            "the mockup's groups"
+            [5, 5, 2, 5, 4],
+            "the mockup's groups, and the camera's (#619)"
         );
         // Each group's sections come together, in the groups' order.
         let groups: Vec<Group> = SectionId::ALL.iter().map(|s| s.section().group).collect();

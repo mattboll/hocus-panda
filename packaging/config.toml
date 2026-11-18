@@ -582,6 +582,18 @@
 # a maximised window, they stay in the bar.
 # creatures = false
 
+# [camera]
+# While an application uses the camera (a call), the edges of the screen
+# its window is on (else the focused screen's) glow softly and light your
+# face (docs/design/camera.md). Over everything but the pointer, never in
+# a capture, a share or a recording; it fades in and out over 600 ms (at
+# once with reduced motion). Followed live. The light's warmth: "cool",
+# "neutral" or "warm"; its strength, the glow's width and brightness:
+# "soft", "medium" or "strong".
+# screen-light = true
+# screen-light-warmth = "neutral"
+# screen-light-strength = "soft"
+
 # [magnifier]
 # The magnifier (docs/design/accessibility.md): the screen under the
 # pointer drawn larger, from 1 to 16 times, by the desktop; screenshots,

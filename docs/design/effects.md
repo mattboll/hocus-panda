@@ -95,6 +95,12 @@ reduced motion it is drawn still (what lies stays, nothing falls), and
 in the power saver or while a screen is shared or recorded it is not
 drawn, and waits.
 
+The screen light while the camera is in use (#619) is no effect of these:
+it lights the user's face, so it shows on the CPU, with reduced motion
+(at once), while sharing and in the power saver; it follows their last
+rule only, never in a capture, a share or a recording, and costs nothing
+at rest. See [camera.md](camera.md).
+
 ## How a window effect is drawn
 
 `crates/hocus-compositor/src/effects/`:

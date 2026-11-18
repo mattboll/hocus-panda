@@ -294,8 +294,8 @@ impl App {
                     .align_y(Alignment::Center),
             )
             .width(Length::Fill)
-            // 26 px: the 20 sections fit the window's 760 px.
-            .height(26)
+            // 24 px: the 21 sections fit the window's 760 px.
+            .height(24)
             .padding([0, 10])
             .on_press(on)
             .style(flat(

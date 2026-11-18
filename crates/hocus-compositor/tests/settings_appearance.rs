@@ -497,6 +497,61 @@ fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on
     Ok(())
 }
 
+/// Caméra (#619): the screen light's three rows write `[camera]`; off,
+/// its warmth and strength are inert. The compositor follows the file.
+#[test]
+fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let shown = bed.open_on("camera")?;
+    let ids: Vec<&str> = shown["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "camera.screen-light",
+            "camera.screen-light-warmth",
+            "camera.screen-light-strength",
+        ]
+    );
+    assert_eq!(row(&shown, "camera.screen-light")["value"], "oui");
+    assert_eq!(row(&shown, "camera.screen-light-warmth")["value"], "Neutre");
+    assert_eq!(
+        row(&shown, "camera.screen-light-strength")["value"],
+        "Douce"
+    );
+    bed.click("segment:camera.screen-light-warmth:2")?;
+    bed.written(|t| t.contains("screen-light-warmth = \"warm\""))?;
+    bed.click("segment:camera.screen-light-strength:2")?;
+    let text = bed.written(|t| t.contains("screen-light-strength = \"strong\""))?;
+    assert!(text.contains("[camera]"), "{text}");
+    // A call: the screen lights; turned off, the compositor follows the
+    // file and it goes.
+    bed.hp.camera_users(vec![hocus_link::CameraUser {
+        app: "Visio".to_owned(),
+        ids: vec!["visio".to_owned()],
+    }]);
+    let lit = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.screen_light().iter().any(|(_, l)| *l >= 1.0))?;
+    anyhow::ensure!(lit, "no light: {:?}", bed.hp.screen_light());
+    bed.click("control:camera.screen-light")?;
+    bed.written(|t| t.contains("screen-light = false"))?;
+    let shown = bed.shows(|s| row(s, "camera.screen-light")["value"] == "non")?;
+    assert_eq!(row(&shown, "camera.screen-light-warmth")["inert"], true);
+    assert_eq!(row(&shown, "camera.screen-light-strength")["inert"], true);
+    let gone = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.screen_light().is_empty())?;
+    anyhow::ensure!(gone, "the light stays: {:?}", bed.hp.screen_light());
+    Ok(())
+}
+
 #[test]
 fn a_swatch_writes_the_accent_and_the_row_says_its_name() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
@@ -836,11 +891,31 @@ fn screenshots_of_the_garlands() -> anyhow::Result<()> {
 
 /// The Appearance page on `file`, each of `rows` revealed in turn and the
 /// window saved as its name, into `out`.
+/// The Camera page (#619), into `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_camera_page() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    shoot_the_page(
+        &out,
+        FILE,
+        "camera",
+        &[("row:camera.screen-light", "settings-camera")],
+    )
+}
+
 fn shoot_the_effects(out: &Path, file: &str, rows: &[(&str, &str)]) -> anyhow::Result<()> {
+    shoot_the_page(out, file, "appearance", rows)
+}
+
+fn shoot_the_page(out: &Path, file: &str, page: &str, rows: &[(&str, &str)]) -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(file)? else {
         return Ok(());
     };
-    bed.open()?;
+    bed.open_on(page)?;
     for &(row, name) in rows {
         bed.reveal(row)?;
         bed.hp.pointer_move(400.0, 1060.0);

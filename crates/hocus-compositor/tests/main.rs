@@ -121,6 +121,7 @@ mod rain_on_glass;
 mod recording;
 mod reminders;
 mod scales;
+mod screen_light;
 mod screen_reader;
 mod screens;
 mod screens_return;

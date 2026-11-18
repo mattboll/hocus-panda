@@ -20,6 +20,11 @@
 //! the end of the linger, and sleeps without one (`linger`). The times are
 //! the monotonic clock's.
 //!
+//! The compositor is told a camera's user, for the screen light (#619),
+//! only once it has used it [`SETTLED`] without a break: applications open
+//! a camera for a moment to list or probe it, which lights nothing. The
+//! same thread wakes when a use settles.
+//!
 //! The sign shows under the clock while something is in use, in both
 //! forms: a surface of its own on each bar, opened when the first use
 //! starts and removed when the last one has lingered; the column under it
@@ -37,7 +42,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown, SharedThing};
+use hocus_link::{
+    CameraUser, EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown, SharedThing, ToCompositor,
+};
 use iced::window;
 
 use crate::{
@@ -47,6 +54,10 @@ use crate::{
 
 /// A use stays shown this long after it ends.
 pub const LINGER: Duration = Duration::from_secs(3);
+
+/// A camera's use lights the screen once it has lasted this long without
+/// a break.
+pub const SETTLED: Duration = Duration::from_secs(3);
 
 /// What the sign shows a tile for, in its order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -78,18 +89,35 @@ pub struct Media {
     pub media: Option<String>,
 }
 
-/// A use as the sign follows it: since when, and when it ended (it then
-/// lingers).
+/// A use as the sign follows it: since when, since when without a break,
+/// and when it ended (it then lingers).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Seen<T> {
     pub what: T,
     pub since: Instant,
+    /// Since when it has been on without a break: `since`, unless it ended
+    /// and came back while it lingered.
+    pub again: Instant,
     pub ended: Option<Instant>,
 }
 
 impl<T> Seen<T> {
+    pub fn new(what: T, since: Instant) -> Self {
+        Self {
+            what,
+            since,
+            again: since,
+            ended: None,
+        }
+    }
+
     pub fn live(&self) -> bool {
         self.ended.is_none()
+    }
+
+    /// When it has been on [`SETTLED`] without a break, if it is on.
+    fn settles(&self) -> Option<Instant> {
+        self.live().then(|| self.again + SETTLED)
     }
 }
 
@@ -237,6 +265,29 @@ impl Uses {
         ends.min().map(|end| end + LINGER)
     }
 
+    /// When the next camera's use still too short at `now` has lasted
+    /// [`SETTLED`], and the compositor is told it.
+    fn settles(&self, now: Instant) -> Option<Instant> {
+        self.camera
+            .iter()
+            .filter_map(Seen::settles)
+            .filter(|at| *at > now)
+            .min()
+    }
+
+    /// Who uses a camera at `now`, as the compositor is told: those on for
+    /// [`SETTLED`] without a break; not those that linger.
+    fn camera_users(&self, now: Instant) -> Vec<CameraUser> {
+        self.camera
+            .iter()
+            .filter(|s| s.settles().is_some_and(|at| at <= now))
+            .map(|s| CameraUser {
+                app: s.what.app.clone(),
+                ids: s.what.ids.clone(),
+            })
+            .collect()
+    }
+
     /// The uses that have lingered long enough at `now` go; when the last
     /// of them had ended, if any went.
     fn prune(&mut self, now: Instant) -> Option<Instant> {
@@ -263,7 +314,8 @@ impl Uses {
 
 /// `seen` follows what is `now` in use (`live`, each with its key): a new
 /// one is seen from `at`, one gone ends at `at` (and lingers), one back
-/// before it went is on again, as it was since.
+/// before it went is on again, as it was since (without a break from
+/// `at`).
 fn follow<T, K: PartialEq>(
     seen: &mut Vec<Seen<T>>,
     live: Vec<T>,
@@ -279,13 +331,11 @@ fn follow<T, K: PartialEq>(
         match seen.iter_mut().find(|s| key(&s.what) == key(&what)) {
             Some(kept) => {
                 kept.what = what;
-                kept.ended = None;
+                if kept.ended.take().is_some() {
+                    kept.again = at;
+                }
             }
-            None => seen.push(Seen {
-                what,
-                since: at,
-                ended: None,
-            }),
+            None => seen.push(Seen::new(what, at)),
         }
     }
 }
@@ -337,7 +387,9 @@ pub fn room(form: Form) -> f32 {
 
 /// The uses change with `change` at `now` (the monotonic clock's), those
 /// that lingered enough go: the sign comes, changes or goes on every bar,
-/// its popover follows, and the linger's thread is told when to wake.
+/// its popover follows, the compositor is told who uses a camera, and the
+/// linger's thread is told when to wake: a use lingered or a camera's use
+/// settled.
 fn update(now: Instant, change: impl FnOnce(&mut State)) {
     let (before, after, lingered) = state(|s| {
         let before = s.uses.clone();
@@ -348,7 +400,12 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
         }
         (before, s.uses.clone(), lingered)
     });
-    linger::wake_at(after.deadline());
+    let wake = match (after.deadline(), after.settles(now)) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    linger::wake_at(wake);
+    tell_cameras(&after, now);
     if before == after {
         return;
     }
@@ -405,6 +462,34 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
     if before.microphone != after.microphone {
         crate::transcribe::uses_changed();
     }
+}
+
+/// The cameras' users as the compositor was last told; `None`: not told
+/// since the shell linked.
+static TOLD: Mutex<Option<Vec<CameraUser>>> = Mutex::new(None);
+
+/// Tells the compositor who uses a camera at `now` ([`Uses::camera_users`]),
+/// when that changed since it was last told: it lights the screen of their
+/// window (#619).
+fn tell_cameras(uses: &Uses, now: Instant) {
+    let users = uses.camera_users(now);
+    let mut told = TOLD.lock().unwrap_or_else(PoisonError::into_inner);
+    if told.as_ref() == Some(&users) {
+        return;
+    }
+    if popover::tell(ToCompositor::Camera(users.clone())) {
+        tracing::info!(
+            apps = ?users.iter().map(|u| u.app.as_str()).collect::<Vec<_>>(),
+            "the compositor is told who uses the camera"
+        );
+        *told = Some(users);
+    }
+}
+
+/// The shell is linked again: who uses the camera, told again.
+pub fn linked() {
+    *TOLD.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    tell_cameras(&snapshot(), Instant::now());
 }
 
 /// The sound's graph: who uses the microphone (their streams linked to a
@@ -472,14 +557,16 @@ pub fn set_shares(shares: Vec<ShareShown>) {
     update(now, |s| follow(&mut s.uses.shares, shares, |s| s.id, now));
 }
 
-/// The thread that wakes when a use has lingered enough: told each
-/// deadline, it sleeps until it, or without one until told one.
+/// The thread that wakes when a use has lingered enough, or a camera's use
+/// settled: told each deadline, it sleeps until it, or without one until
+/// told one.
 mod linger {
     use super::{Instant, Mutex, PoisonError, mpsc};
 
     static WAKE: Mutex<Option<mpsc::Sender<Option<Instant>>>> = Mutex::new(None);
 
-    /// The next use to go goes at `at` (none: nothing lingers).
+    /// The next use to go goes, or to settle settles, at `at` (none:
+    /// nothing lingers nor settles).
     pub fn wake_at(at: Option<Instant>) {
         let mut sender = WAKE.lock().unwrap_or_else(PoisonError::into_inner);
         if sender.is_none() {
@@ -511,7 +598,8 @@ mod linger {
                 Some(at) => match told.recv_timeout(at.saturating_duration_since(Instant::now())) {
                     Ok(next) => Some(next),
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        // What lingered goes; the next deadline comes back.
+                        // What lingered goes, what settled is told; the
+                        // next deadline comes back.
                         deadline = None;
                         super::update(Instant::now(), |_| {});
                         continue;
@@ -855,6 +943,38 @@ mod tests {
         assert_eq!(uses.deadline(), None);
     }
 
+    /// A camera's use lights the screen once it has lasted 3 s without a
+    /// break: one that ends before, or comes back while it lingers, does
+    /// not; the sign shows them all the same.
+    #[test]
+    fn a_camera_s_use_is_told_after_three_seconds_on() {
+        let t0 = Instant::now();
+        let s = |ms: u64| t0 + Duration::from_millis(ms);
+        let told = |uses: &Uses, at| -> Vec<String> {
+            uses.camera_users(at).into_iter().map(|u| u.app).collect()
+        };
+        let mut uses = Uses::default();
+        // Slack lists its cameras: open for 100 ms, shown, never told.
+        follow(&mut uses.camera, vec![media("Slack")], key, t0);
+        assert_eq!(uses.kinds(), [Kind::Camera]);
+        assert!(told(&uses, t0).is_empty());
+        assert_eq!(uses.settles(t0), Some(s(3000)));
+        follow(&mut uses.camera, Vec::new(), key, s(100));
+        assert_eq!(uses.settles(s(100)), None);
+        assert!(told(&uses, s(3000)).is_empty());
+        // Again 2 s later, while it lingers: its 3 s start again.
+        follow(&mut uses.camera, vec![media("Slack")], key, s(2100));
+        assert_eq!(uses.camera[0].since, t0);
+        assert!(told(&uses, s(3100)).is_empty());
+        assert_eq!(uses.settles(s(3100)), Some(s(5100)));
+        // A call: told at 3 s, no longer once it ends.
+        assert!(told(&uses, s(5099)).is_empty());
+        assert_eq!(told(&uses, s(5100)), ["Slack"]);
+        assert_eq!(uses.settles(s(5100)), None);
+        follow(&mut uses.camera, Vec::new(), key, s(9000));
+        assert!(told(&uses, s(9000)).is_empty());
+    }
+
     #[test]
     fn the_kinds_side_by_side_in_their_order() {
         let t0 = Instant::now();
@@ -883,6 +1003,7 @@ mod tests {
                     at: t0,
                 },
                 since: t0,
+                again: t0,
                 ended: None,
             }),
             ..Uses::default()

@@ -209,7 +209,10 @@ impl App {
         let alpha = if inert { INERT } else { 1.0 };
         let current = self.value(slot);
         // Words in Manrope, numbers and times in Martian Mono.
-        let mono = !matches!(setting.id, "appearance.theme" | crate::bar::SIDE);
+        let mono = !matches!(
+            setting.id,
+            "appearance.theme" | crate::bar::SIDE | crate::camera::WARMTH | crate::camera::STRENGTH
+        );
         let mut segments = row![];
         let mut shown: Vec<(String, Value)> = choices
             .iter()

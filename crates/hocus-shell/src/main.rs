@@ -551,6 +551,7 @@ impl Shell {
                 meeting::linked();
                 music::linked();
                 clipboard::linked();
+                in_use::linked();
                 Task::none()
             }
             Message::FromCompositor(message) => self.compositor_says(*message),

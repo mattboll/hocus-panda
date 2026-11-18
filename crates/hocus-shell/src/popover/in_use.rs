@@ -813,11 +813,7 @@ mod tests {
     use hocus_link::{RecordingShown, ShareShown, SharedThing};
 
     fn seen<T>(what: T) -> Seen<T> {
-        Seen {
-            what,
-            since: Instant::now(),
-            ended: None,
-        }
+        Seen::new(what, Instant::now())
     }
 
     fn media(app: &str) -> Media {
