@@ -252,10 +252,12 @@ jobs:
 
   # The release build and its package, as the maintainer installs them: a
   # debug build and the tests say nothing of either. On main and the sprint
-  # branches; a pull request's is checked on the branch it comes from, or
-  # by hand (workflow_dispatch).
+  # branches, by hand (workflow_dispatch), and on a pull request that runs
+  # everything (the lock file, `full-tests`): #858 changed the lock file and
+  # main's release build was the first to link whisper.cpp's.
   package:
-    if: github.event_name != 'pull_request'
+    needs: plan
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.plan.outputs.full == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -284,6 +286,18 @@ jobs:
         run: scripts/prebuilt.sh
       - name: Release build
         run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe
+      - name: What whisper.cpp's shader generator said
+        # It leaves out, without failing, each shader its compiler did not
+        # make, and the link fails far from the cause (`matmul_*_cm1_data`
+        # undefined); cargo keeps what it said in the build's output.
+        if: failure()
+        run: |
+          nproc; free -h; ulimit -a
+          for f in target/release/build/whisper-rs-sys-*/output target/release/build/whisper-rs-sys-*/stderr; do
+            echo "== $f"
+            grep -E -A12 "cannot compile|Error executing|Failed to" "$f" | head -150 || true
+          done
+          sudo dmesg | grep -iE "oom|killed process|out of memory" | tail -20 || true
       - name: The .deb
         run: packaging/deb/build.sh
       - name: What the .deb holds
