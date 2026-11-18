@@ -13,6 +13,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # whisper.cpp's CMake build (hocus-transcribe) through a `make` whose
+  # threads' stacks are small: its shader generator, with the default
+  # ones, left shaders out and main's release link failed
+  # (scripts/ci/make-small-stacks).
+  CMAKE_MAKE_PROGRAM: ${{ github.workspace }}/scripts/ci/make-small-stacks
   # Debug info: line tables only, set in Cargo.toml's profiles (full debug
   # info made target/ outgrow the runner's disk, run 41709913523).
 

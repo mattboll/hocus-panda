@@ -1,0 +1,15 @@
+#!/bin/sh
+# `make` for whisper.cpp's CMake build in CI (`CMAKE_MAKE_PROGRAM`,
+# .github/workflows/ci.yml, which whisper-rs-sys's build hands CMake),
+# its programs' threads' stacks 1 MiB instead of 8.
+#
+# whisper.cpp's Vulkan shader generator starts a thread for each shader it
+# compiles and joins none before it ends: for mul_mm.comp's 1170 shaders,
+# 10.8 GB of stacks reserved with the default 8 MiB, 2.4 GB with 1 MiB
+# (measured). Each compile it cannot start (a thread, then a process) is
+# left out without failing the build, and the link fails far from it: on
+# main's runner at 0c14ecb7, the last ones, `matmul_id_subgroup_*_cm1`,
+# were undefined. GCC raises its own stack's limit; glslc and the
+# generator make every shader with 1 MiB.
+ulimit -s 1024 || exit 1
+exec make "$@"
