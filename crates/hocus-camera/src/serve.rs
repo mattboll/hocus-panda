@@ -39,7 +39,7 @@ use std::{
 
 use hocus_link::camera::{
     AwayWhy, Backdrop, CAMERA_DESCRIPTION, CAMERA_INPUT_NODE, CAMERA_NODE, CAMERA_PREFIX,
-    CameraLook, FromCamera,
+    CameraLook, FromCamera, PRESENTER_NODE,
 };
 use pipewire as pw;
 use pw::{properties::properties, spa, stream::StreamState};
@@ -160,6 +160,8 @@ struct In {
     stream: pw::stream::StreamRc,
     _listener: pw::stream::StreamListener<()>,
     camera: u32,
+    /// Read for the presenter alone (its stream named so).
+    presenter: bool,
     node: Option<u32>,
     input: Option<Input>,
     link: Option<pw::link::Link>,
@@ -611,10 +613,18 @@ impl State {
         self.read || self.look.presenter
     }
 
-    /// The real camera read while it is wanted, let go when it is not.
+    /// The real camera read while it is wanted, let go when it is not;
+    /// its stream made again when what it reads for changed (an
+    /// application, or the presenter alone).
     fn camera_wanted(&mut self) {
+        if self.wanted()
+            && let Some(input) = &self.input
+            && input.presenter == self.read
+        {
+            self.stop_input();
+        }
         let reading = self.maker.is_some();
-        if self.wanted() && !reading {
+        if self.wanted() && (!reading || self.input.is_none()) {
             self.start_reading();
         } else if !self.wanted() && reading {
             self.stop_reading();
@@ -708,15 +718,28 @@ impl State {
     }
 
     fn read_camera(&self, camera: u32) -> Result<In, pw::Error> {
+        // For the presenter alone, its stream says so: the in-use sign
+        // shows the camera on, for the presenter.
+        let presenter = !self.read;
+        let (node, app) = if presenter {
+            let lang =
+                hocus_words::Lang::of_code(&self.look.lang).unwrap_or(hocus_words::Lang::English);
+            (
+                PRESENTER_NODE,
+                hocus_words::shell::camera::PRESENTER.get(lang),
+            )
+        } else {
+            (CAMERA_INPUT_NODE, "Hocuspanda")
+        };
         let stream = pw::stream::StreamRc::new(
             self.core.clone(),
-            CAMERA_INPUT_NODE,
+            node,
             properties! {
                 *pw::keys::MEDIA_TYPE => "Video",
                 *pw::keys::MEDIA_CATEGORY => "Capture",
                 *pw::keys::MEDIA_ROLE => "Camera",
-                *pw::keys::NODE_NAME => CAMERA_INPUT_NODE,
-                *pw::keys::APP_NAME => "Hocuspanda",
+                *pw::keys::NODE_NAME => node,
+                *pw::keys::APP_NAME => app,
                 "node.autoconnect" => "false",
             },
         )?;
@@ -767,6 +790,7 @@ impl State {
             stream,
             _listener: listener,
             camera,
+            presenter,
             node: None,
             input: None,
             link: None,

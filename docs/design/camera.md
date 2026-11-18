@@ -338,9 +338,14 @@ shares a screen, they can stand on it like a weather presenter.
   processor, the frame scaled to 256 × 144 included.
 - **The mask**: each pixel follows the model a part of the way (most of
   it where it changed much, a third where it hesitates), so that an edge
-  does not flicker and a move is followed; its edge tightened
-  (`smoothstep` 0.3 to 0.7) and scaled to the frame between its pixels,
-  some five pixels soft.
+  does not flicker and a move is followed. At the frame's size: its
+  probabilities smoothed a little (a 3 × 3 binomial), scaled up by a
+  cubic (Catmull-Rom) each way, then a soft ramp at each of the frame's
+  pixels (`smoothstep` from 0.5 to 0.82): a smooth contour some three
+  pixels soft, no steps of the model's pixels, and what the model is
+  unsure of (a shape of the room it half takes for the person) left to
+  the room. On the CPU, the GPU's path and the CPU's alike (the frames'
+  effects are drawn over the made frame).
 
 ### Fond (one at a time; `backdrop.rs`, `scenes.rs`)
 
@@ -395,7 +400,10 @@ shares a screen, they can stand on it like a weather presenter.
 - **When** (`[camera] presenter`, off by default): on, while the desktop
   shares a screen or a window (5.11). The camera is read for it then
   even when no call reads the Hocuspanda source (the board: "ta vignette
-  de caméra, elle, peut se couper").
+  de caméra, elle, peut se couper"); its stream is then named
+  `hocuspanda-presenter`, its application "Présentateur", so that the
+  bar's in-use sign shows the camera on, for the presenter (its stream is
+  made again when a call starts or stops reading the source).
 - **The cut-out** (`hocus-camera`): the person's box in the frame, the
   person premultiplied by their alpha, the board's `drop-shadow(0 6px
   18px rgba(0,0,0,0.35))` under them (its lengths the board's for its
@@ -452,3 +460,5 @@ card and the microphone muted, unlocked both gone, and a microphone muted
 by hand staying muted. `sharing::the_presenter_stands_in_the_shared_stream_never_on_the_screen`:
 the person's suit in the stream's lower right and not on the screen; the
 pointer under it, it moves to the left.
+`hocus-sound`'s `graph::tests::the_presenter_reading_the_camera_is_a_use_of_it`:
+the presenter's stream on a camera is a use of it, named so.

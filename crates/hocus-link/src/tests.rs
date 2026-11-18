@@ -1601,6 +1601,7 @@ fn the_camera_s_lines_read_back() {
         }),
         locked: true,
         presenter: true,
+        lang: "fr".into(),
     };
     assert_eq!(CameraLook::read(&look.line()), Some(look));
     // A look of lot 2 still reads: what is behind the room, nothing else.

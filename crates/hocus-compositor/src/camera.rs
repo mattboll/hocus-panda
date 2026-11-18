@@ -203,6 +203,7 @@ impl State {
             }),
             locked: self.locked(),
             presenter: self.presenter_wanted(),
+            lang: lang.code().to_owned(),
         }
     }
 

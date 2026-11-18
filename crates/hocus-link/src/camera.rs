@@ -25,6 +25,10 @@ pub const CAMERA_DESCRIPTION: &str = "Hocuspanda";
 pub const CAMERA_INPUT_NODE: &str = "hocuspanda-camera-input";
 /// The camera's window's preview, reading the source.
 pub const CAMERA_PREVIEW_NODE: &str = "hocuspanda-camera-preview";
+/// Its own stream reading the real camera for the presenter alone (no
+/// application reads the source): not of [`CAMERA_PREFIX`], so that the
+/// shell's in-use sign counts it, the camera being on for it.
+pub const PRESENTER_NODE: &str = "hocuspanda-presenter";
 /// What every node of the Hocuspanda camera's name starts with.
 pub const CAMERA_PREFIX: &str = "hocuspanda-camera";
 /// Its frames: 1280 × 720.
@@ -55,6 +59,10 @@ pub struct CameraLook {
     /// (`FromCamera::Presenter`); the real camera is read for it.
     #[serde(default)]
     pub presenter: bool,
+    /// The desktop's language (`hocus_words::Lang`'s code): the presenter's
+    /// name in the in-use sign.
+    #[serde(default)]
+    pub lang: String,
 }
 
 /// A living wallpaper of the desktop's (docs/design/effects.md) that the

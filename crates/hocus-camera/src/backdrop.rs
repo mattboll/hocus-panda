@@ -1,10 +1,11 @@
 //! Fond (lot 3): what is behind the person, in the made frame (B, G, R,
 //! x, [`W`] × [`H`]), from the person's mask.
 //!
-//! - **The person's alpha** ([`Alpha::from_mask`]): the model's mask,
-//!   its edge tightened (`smoothstep` from 0.3 to 0.7), scaled to the
-//!   frame between its pixels: an edge some five pixels soft, as a lens
-//!   would draw it.
+//! - **The person's alpha** ([`Alpha::from_mask`]): the model's
+//!   probabilities smoothed a little and scaled up to the frame by a
+//!   cubic, then a soft ramp at each of the frame's pixels: a smooth
+//!   contour some three pixels soft, no steps of the model's pixels, and
+//!   what the model is unsure of left to the room.
 //! - **Flou** ([`blur`]): the room blurred at a quarter of its size (a
 //!   Gaussian of some 26 pixels of the frame, the mockup's `blur(7px)` on
 //!   its 312 px preview), the person left out of what is blurred (each
@@ -60,28 +61,96 @@ fn spans(from: usize, to: usize) -> Vec<(usize, usize, f32)> {
         .collect()
 }
 
+/// The person's probability where their edge is drawn: under
+/// [`EDGE`]`.0` nothing of them, over [`EDGE`]`.1` all of them, a smooth
+/// ramp between, taken at the frame's size (some three pixels wide). Its
+/// foot is over a half: what the model is unsure of (a shape of the room
+/// it half takes for the person) stays the room.
+const EDGE: (f32, f32) = (0.5, 0.82);
+/// The ramp, looked up by the probability in this many steps.
+const RAMP: usize = 1024;
+
+/// Catmull-Rom's four weights at `t` between the middle two of four.
+fn cubic(t: f32) -> [f32; 4] {
+    let (t2, t3) = (t * t, t * t * t);
+    [
+        0.5 * (-t3 + 2.0 * t2 - t),
+        0.5 * (3.0 * t3 - 5.0 * t2 + 2.0),
+        0.5 * (-3.0 * t3 + 4.0 * t2 + t),
+        0.5 * (t3 - t2),
+    ]
+}
+
+/// For each of `to` places, the four of `from` around it and their
+/// weights: pixel centres on pixel centres, the ends held.
+fn taps(from: usize, to: usize) -> Vec<([usize; 4], [f32; 4])> {
+    (0..to)
+        .map(|i| {
+            let f = (i as f32 + 0.5) * from as f32 / to as f32 - 0.5;
+            let base = f.floor();
+            let at = |k: isize| (base as isize + k).clamp(0, from as isize - 1) as usize;
+            ([at(-1), at(0), at(1), at(2)], cubic(f - base))
+        })
+        .collect()
+}
+
 impl Alpha {
-    /// The mask's person, its edge tightened, at the frame's size.
+    /// The person from the model's mask, at the frame's size: its
+    /// probabilities smoothed a little (a 3 × 3 binomial: the model's
+    /// pixels leave no steps), scaled up by Catmull-Rom's cubic each way,
+    /// then the edge's ramp ([`EDGE`]) at each of the frame's pixels: a
+    /// smooth contour, a few pixels soft, as a lens would draw it.
     pub fn from_mask(&mut self, mask: &Mask) {
-        let tight: Vec<f32> = mask
-            .values
-            .iter()
-            .map(|&m| smoothstep(0.3, 0.7, m) * 255.0)
-            .collect();
-        let xs = spans(MASK_W, W);
-        let ys = spans(MASK_H, H);
-        let mut row = vec![0f32; W];
-        let at = |x: usize, y: usize| tight.get(y * MASK_W + x).copied().unwrap_or(0.0);
-        for (y, &(y0, y1, ty)) in ys.iter().enumerate() {
-            for (v, &(x0, x1, tx)) in row.iter_mut().zip(&xs) {
-                let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
-                let bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
-                *v = top + (bottom - top) * ty;
-            }
-            if let Some(out) = self.values.get_mut(y * W..(y + 1) * W) {
-                for (o, v) in out.iter_mut().zip(&row) {
-                    *o = v.round().clamp(0.0, 255.0) as u8;
+        let at = |x: isize, y: isize| {
+            let x = x.clamp(0, MASK_W as isize - 1) as usize;
+            let y = y.clamp(0, MASK_H as isize - 1) as usize;
+            mask.values.get(y * MASK_W + x).copied().unwrap_or(0.0)
+        };
+        let mut soft = vec![0f32; MASK_W * MASK_H];
+        for (i, v) in soft.iter_mut().enumerate() {
+            let (x, y) = ((i % MASK_W) as isize, (i / MASK_W) as isize);
+            let mut sum = 0.0;
+            for (dy, wy) in [(-1, 1.0), (0, 2.0), (1, 1.0)] {
+                for (dx, wx) in [(-1, 1.0), (0, 2.0), (1, 1.0)] {
+                    sum += at(x + dx, y + dy) * wx * wy;
                 }
+            }
+            *v = sum / 16.0;
+        }
+        let ramp: Vec<u8> = (0..RAMP)
+            .map(|i| {
+                let p = i as f32 / (RAMP - 1) as f32;
+                (smoothstep(EDGE.0, EDGE.1, p) * 255.0).round() as u8
+            })
+            .collect();
+        // Across first, each of the mask's rows to the frame's width.
+        let xs = taps(MASK_W, W);
+        let mut wide = vec![0f32; W * MASK_H];
+        for (y, row) in wide.chunks_mut(W).enumerate() {
+            let source = soft.get(y * MASK_W..(y + 1) * MASK_W).unwrap_or(&[]);
+            for (v, (idx, w)) in row.iter_mut().zip(&xs) {
+                *v = idx
+                    .iter()
+                    .zip(w)
+                    .map(|(&i, &w)| source.get(i).copied().unwrap_or(0.0) * w)
+                    .sum();
+            }
+        }
+        // Then down, and the ramp.
+        let ys = taps(MASK_H, H);
+        for (y, (idx, w)) in ys.iter().enumerate() {
+            let rows: [&[f32]; 4] = idx.map(|i| wide.get(i * W..(i + 1) * W).unwrap_or(&[]));
+            let Some(out) = self.values.get_mut(y * W..(y + 1) * W) else {
+                continue;
+            };
+            for (x, o) in out.iter_mut().enumerate() {
+                let p: f32 = rows
+                    .iter()
+                    .zip(w)
+                    .map(|(r, &w)| r.get(x).copied().unwrap_or(0.0) * w)
+                    .sum();
+                let i = (p.clamp(0.0, 1.0) * (RAMP - 1) as f32).round() as usize;
+                *o = ramp.get(i).copied().unwrap_or(0);
             }
         }
     }
