@@ -403,7 +403,8 @@ shares a screen, they can stand on it like a weather presenter.
   after a line of its own on the camera's output, raw (B, G, R, A), every
   frame (a cut-out not yet taken when the next comes is dropped).
 - **Where** (the compositor): drawn into the share's frames alone, never
-  on the screen, under the pointer: on the bottom edge, 24 px of the
+  on the screen, under the pointer: on the bottom edge, across where
+  windows stand (beside the bar: the bar stays readable), 24 px of the
   board's 860 in from the right (`presenter-side = "right"`) or the left,
   as tall as the board's 196, 262 or 340 px of its 520
   (`presenter-size`: `small`, `medium`, `large`), as wide as the cut-out
