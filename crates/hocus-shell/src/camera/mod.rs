@@ -56,7 +56,10 @@ fn hush(on: bool) {
         if mic.sound.is_some_and(|s| s.muted) || hushed.is_some() {
             return;
         }
-        tracing::info!(id = mic.id, "the screen locked during a call: the microphone muted");
+        tracing::info!(
+            id = mic.id,
+            "the screen locked during a call: the microphone muted"
+        );
         *hushed = Some(mic.id);
         levels::ask(Ask::Node(mic.id, Set::Mute(true)));
     } else if let Some(id) = hushed.take() {

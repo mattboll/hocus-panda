@@ -99,10 +99,7 @@ impl Watch {
             .gone_since
             .filter(|since| now.duration_since(*since) >= AFTER);
         self.shown = match (self.locked_since, gone) {
-            (Some(lock), gone) => Some((
-                AwayWhy::Locked,
-                gone.map_or(lock, |g| g.min(lock)),
-            )),
+            (Some(lock), gone) => Some((AwayWhy::Locked, gone.map_or(lock, |g| g.min(lock)))),
             (None, Some(since)) => Some((AwayWhy::Gone, since)),
             (None, None) => None,
         };
@@ -153,7 +150,8 @@ impl Card {
     pub fn draw(title: &str, since: &str) -> Self {
         let k = k();
         let mut pixmap = tiny_skia::Pixmap::new(W as u32, H as u32);
-        let (cw, ch) = (CARD_W * k, (2.0 * PAD_Y + PANDA) * k);
+        // The board's width is its content's, its padding around it.
+        let (cw, ch) = ((CARD_W + 2.0 * PAD_X) * k, (2.0 * PAD_Y + PANDA) * k);
         let (x0, y0) = ((W as f32 - cw) / 2.0, (H as f32 - ch) / 2.0);
         if let Some(pixmap) = pixmap.as_mut() {
             let rect = tiny_skia::Rect::from_xywh(x0, y0, cw, ch);
@@ -212,10 +210,7 @@ impl Card {
         // The "z": its box's right 4 px past the panda's, its top 6 px
         // above it.
         let z_w = Z_SIZE * k * 0.6;
-        let z_at = (
-            x0 + (PAD_X + PANDA + 4.0) * k - z_w,
-            y0 + (PAD_Y - 6.0) * k,
-        );
+        let z_at = (x0 + (PAD_X + PANDA + 4.0) * k - z_w, y0 + (PAD_Y - 6.0) * k);
         Self {
             said: (title.to_owned(), since.to_owned()),
             pixels,
@@ -237,7 +232,9 @@ impl Card {
                 continue;
             }
             let keep = 255 - u32::from(a);
-            let mix = |o: u8, under: u8| (u32::from(o) + (u32::from(under) * keep + 127) / 255).min(255) as u8;
+            let mix = |o: u8, under: u8| {
+                (u32::from(o) + (u32::from(under) * keep + 127) / 255).min(255) as u8
+            };
             to[0] = mix(b, to[0]);
             to[1] = mix(g, to[1]);
             to[2] = mix(r, to[2]);
@@ -256,7 +253,14 @@ impl Card {
         if let Some(z) = banner::line("z", Z_SIZE * k, false, W as f32) {
             let x = self.z_at.0 + 8.0 * k * moved;
             let y = self.z_at.1 - 14.0 * k * moved;
-            draw_bgrx(frame, &z, x.max(0.0) as usize, y.max(0.0) as usize, DIM, opacity);
+            draw_bgrx(
+                frame,
+                &z,
+                x.max(0.0) as usize,
+                y.max(0.0) as usize,
+                DIM,
+                opacity,
+            );
         }
     }
 }
@@ -267,11 +271,32 @@ fn rounded(r: tiny_skia::Rect, radius: f32) -> Option<tiny_skia::Path> {
     let k = 0.552_284_8 * radius;
     pb.move_to(x + radius, y);
     pb.line_to(x + w - radius, y);
-    pb.cubic_to(x + w - radius + k, y, x + w, y + radius - k, x + w, y + radius);
+    pb.cubic_to(
+        x + w - radius + k,
+        y,
+        x + w,
+        y + radius - k,
+        x + w,
+        y + radius,
+    );
     pb.line_to(x + w, y + h - radius);
-    pb.cubic_to(x + w, y + h - radius + k, x + w - radius + k, y + h, x + w - radius, y + h);
+    pb.cubic_to(
+        x + w,
+        y + h - radius + k,
+        x + w - radius + k,
+        y + h,
+        x + w - radius,
+        y + h,
+    );
     pb.line_to(x + radius, y + h);
-    pb.cubic_to(x + radius - k, y + h, x, y + h - radius + k, x, y + h - radius);
+    pb.cubic_to(
+        x + radius - k,
+        y + h,
+        x,
+        y + h - radius + k,
+        x,
+        y + h - radius,
+    );
     pb.line_to(x, y + radius);
     pb.cubic_to(x, y + radius - k, x + radius - k, y, x + radius, y);
     pb.close();
@@ -389,13 +414,23 @@ mod tests {
         let mut watch = Watch::default();
         let t0 = Instant::now();
         assert_eq!(watch.update(Some(0.4), false, t0), None);
-        assert_eq!(watch.update(Some(0.0), false, t0 + Duration::from_secs(1)), None);
+        assert_eq!(
+            watch.update(Some(0.0), false, t0 + Duration::from_secs(1)),
+            None
+        );
         assert_eq!(watch.update(None, false, t0 + Duration::from_secs(9)), None);
         let gone = watch.update(Some(0.01), false, t0 + Duration::from_secs(11));
         assert_eq!(gone, Some((AwayWhy::Gone, t0 + Duration::from_secs(1))));
         // A hand in the picture is not someone back.
-        assert!(watch.update(Some(0.03), false, t0 + Duration::from_secs(12)).is_some());
-        assert_eq!(watch.update(Some(0.3), false, t0 + Duration::from_secs(13)), None);
+        assert!(
+            watch
+                .update(Some(0.03), false, t0 + Duration::from_secs(12))
+                .is_some()
+        );
+        assert_eq!(
+            watch.update(Some(0.3), false, t0 + Duration::from_secs(13)),
+            None
+        );
     }
 
     #[test]
@@ -406,7 +441,10 @@ mod tests {
             watch.update(Some(0.4), true, t0),
             Some((AwayWhy::Locked, t0))
         );
-        assert_eq!(watch.update(Some(0.4), false, t0 + Duration::from_secs(5)), None);
+        assert_eq!(
+            watch.update(Some(0.4), false, t0 + Duration::from_secs(5)),
+            None
+        );
     }
 
     #[test]

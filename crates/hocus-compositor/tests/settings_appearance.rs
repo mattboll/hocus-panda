@@ -499,8 +499,9 @@ fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on
 
 /// Caméra (#619): the screen light's three rows write `[camera]`; off,
 /// its warmth and strength are inert. The compositor follows the file.
-/// The Hocuspanda camera's rows (lot 2) write theirs, the banner's name
-/// and project inert without it.
+/// The Hocuspanda camera's rows (lots 2 and 3) write theirs, the banner's
+/// name and project inert without it, the presenter's corner and size
+/// without it.
 #[test]
 fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
@@ -523,6 +524,11 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
             "camera.banner",
             "camera.banner-name",
             "camera.banner-project",
+            "camera.background",
+            "camera.away",
+            "camera.presenter",
+            "camera.presenter-side",
+            "camera.presenter-size",
         ]
     );
     assert_eq!(row(&shown, "camera.screen-light")["value"], "oui");
@@ -542,6 +548,19 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
     assert_eq!(row(&shown, "camera.banner-project")["inert"], false);
     bed.click("control:camera.banner-project")?;
     bed.written(|t| t.contains("banner-project = false"))?;
+    // Lot 3's: the room behind, « Je reviens » on, no presenter, whose
+    // corner and size wait for it.
+    assert_eq!(row(&shown, "camera.background")["value"], "Ta pièce");
+    assert_eq!(row(&shown, "camera.away")["value"], "oui");
+    assert_eq!(row(&shown, "camera.presenter-side")["inert"], true);
+    bed.click("segment:camera.background:1")?;
+    bed.written(|t| t.contains("background = \"blur\""))?;
+    bed.click("control:camera.presenter")?;
+    bed.written(|t| t.contains("presenter = true"))?;
+    let shown = bed.shows(|s| row(s, "camera.presenter")["value"] == "oui")?;
+    assert_eq!(row(&shown, "camera.presenter-size")["inert"], false);
+    bed.click("segment:camera.presenter-size:2")?;
+    bed.written(|t| t.contains("presenter-size = \"large\""))?;
     bed.click("segment:camera.screen-light-warmth:2")?;
     bed.written(|t| t.contains("screen-light-warmth = \"warm\""))?;
     bed.click("segment:camera.screen-light-strength:3")?;

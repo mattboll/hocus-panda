@@ -55,7 +55,9 @@ const AGAIN_MOST: Duration = Duration::from_secs(60);
 /// What the program's thread tells the loop.
 #[derive(Debug)]
 pub enum FromProgram {
-    Started { pid: u32 },
+    Started {
+        pid: u32,
+    },
     Said(FromCamera),
     /// The person cut out, for the presenter.
     Cutout(Silhouette),
@@ -168,7 +170,8 @@ impl State {
     /// is one, else the desktop's own (its koi, then its aurora), else
     /// the aurora.
     fn away_scene(&self) -> Scene {
-        if let hocus_link::camera::Backdrop::Scene(scene) = self.config.camera.background.backdrop() {
+        if let hocus_link::camera::Backdrop::Scene(scene) = self.config.camera.background.backdrop()
+        {
             return scene;
         }
         if self.config.effects.koi {
@@ -307,8 +310,8 @@ impl State {
             FromProgram::Cutout(cut) => {
                 self.camera.silhouettes += 1;
                 if self.presenter_wanted() {
-                    let shown = crate::presenter::Shown::new(cut)
-                        .after(self.camera.silhouette.as_ref());
+                    let shown =
+                        crate::presenter::Shown::new(cut).after(self.camera.silhouette.as_ref());
                     self.camera.silhouette = Some(shown);
                     self.share.streams_due = true;
                 } else {
@@ -455,7 +458,11 @@ fn run(
                     Some(FromCamera::Presenter { width, height }) => {
                         let len = width as usize * height as usize * 4;
                         if len > MOST_CUTOUT {
-                            tracing::warn!(width, height, "a cut-out too large: hocus-camera let go");
+                            tracing::warn!(
+                                width,
+                                height,
+                                "a cut-out too large: hocus-camera let go"
+                            );
                             break;
                         }
                         let mut bgra = vec![0u8; len];

@@ -124,7 +124,6 @@ impl Default for Aurora {
     }
 }
 
-
 impl Aurora {
     /// How it looks now over a screen of `size` (logical).
     pub fn look(&self, size: [f32; 2]) -> AuroraLook {

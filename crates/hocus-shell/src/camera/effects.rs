@@ -469,7 +469,10 @@ mod tests {
     #[test]
     fn each_tab_has_its_effects_and_lots_2_and_3_make_theirs() {
         let ids = |tab: Tab| tab.effects().map(|e| e.id).collect::<Vec<_>>();
-        assert_eq!(ids(Tab::Image), ["lighting", "framing", "banner", "presenter"]);
+        assert_eq!(
+            ids(Tab::Image),
+            ["lighting", "framing", "banner", "presenter"]
+        );
         assert_eq!(ids(Tab::Background), ["room", "blur", "aurora", "koi"]);
         assert_eq!(ids(Tab::Face).len(), 6);
         assert_eq!(ids(Tab::Voice).len(), 6);
@@ -477,7 +480,16 @@ mod tests {
         let ready: Vec<&str> = EFFECTS.iter().filter(|e| e.ready).map(|e| e.id).collect();
         assert_eq!(
             ready,
-            ["lighting", "banner", "presenter", "room", "blur", "aurora", "koi", "away"]
+            [
+                "lighting",
+                "banner",
+                "presenter",
+                "room",
+                "blur",
+                "aurora",
+                "koi",
+                "away"
+            ]
         );
         assert!(!Tab::Image.soon() && Tab::Face.soon() && !Tab::Background.soon());
     }

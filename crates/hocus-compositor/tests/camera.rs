@@ -33,7 +33,9 @@ use std::{
 };
 
 use common::wait;
-use hocus_compositor::{Authenticator, Config, Headless, HeadlessConfig, LockState, RendererChoice};
+use hocus_compositor::{
+    Authenticator, Config, Headless, HeadlessConfig, LockState, RendererChoice,
+};
 use hocus_link::camera::AwayWhy;
 
 const SIZE: (u32, u32) = (1280, 720);
@@ -753,7 +755,7 @@ fn the_window_s_tiles_write_the_effects_and_the_frames_follow() -> anyhow::Resul
     bed.written(|t| t.contains("banner = true"))?;
     bed.logged(
         "the camera's window shows it",
-        &["[x] Bandeau", "(dots: Image)"],
+        &["[x] Bandeau", "(dots: Image, Réactions)"],
     )?;
     // The compositor follows the file and tells the camera: the band
     // darkens in the call's frames.
@@ -1043,12 +1045,17 @@ fn locked_during_a_call_je_reviens_shows_and_the_microphone_is_held() -> anyhow:
     bed.until(Duration::from_secs(10), "still « Je reviens »", |bed| {
         bed.hp.camera_lot3().0.is_none()
     })?;
-    bed.until(Duration::from_secs(15), "the microphone still muted", |bed| {
-        !bed.muted()
-    })?;
+    bed.until(
+        Duration::from_secs(15),
+        "the microphone still muted",
+        |bed| !bed.muted(),
+    )?;
     // Muted by its user before: locked and unlocked, still muted.
-    bed.fakes.wpctl(&["set-mute", &bed.fakes.sink(MIC)?.to_string(), "1"])?;
-    bed.until(Duration::from_secs(10), "not muted by hand", |bed| bed.muted())?;
+    bed.fakes
+        .wpctl(&["set-mute", &bed.fakes.sink(MIC)?.to_string(), "1"])?;
+    bed.until(Duration::from_secs(10), "not muted by hand", |bed| {
+        bed.muted()
+    })?;
     bed.hp.lock();
     bed.until(Duration::from_secs(10), "no « Je reviens »", |bed| {
         bed.hp.camera_lot3().0 == Some(AwayWhy::Locked)
@@ -1095,12 +1102,17 @@ fn screenshots_of_the_window_s_lot_3() -> anyhow::Result<()> {
     wait(&mut bed.hp, Duration::from_secs(4))?;
     let window = common::drawn_popovers(&bed.hp)[0];
     bed.shoot(&out, "camera-window-fond-aurore.png", around(window), 2)?;
-    for (n, name, word) in [(3, "koi", "(Koï)"), (1, "flou", "(Flou)")] {
+    for (n, name, word) in [(3, "koi", "[x] Koï"), (1, "flou", "[x] Flou")] {
         bed.tile(window, n)?;
         bed.logged("the camera's window shows it", &[word])?;
         wait(&mut bed.hp, Duration::from_secs(4))?;
         let window = common::drawn_popovers(&bed.hp)[0];
-        bed.shoot(&out, &format!("camera-window-fond-{name}.png"), around(window), 2)?;
+        bed.shoot(
+            &out,
+            &format!("camera-window-fond-{name}.png"),
+            around(window),
+            2,
+        )?;
     }
     common::click_on(&mut bed.hp, tab(window, 4.0), hocus_link::POPOVER_NAMESPACE)?;
     bed.logged("the camera's window shows it", &["| Réactions (dots"])?;

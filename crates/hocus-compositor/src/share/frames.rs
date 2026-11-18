@@ -36,7 +36,7 @@ use smithay::{
         },
     },
     reexports::pixman,
-    utils::{Buffer as BufferCoords, Logical, Physical, Point, Size, Transform},
+    utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Size, Transform},
 };
 
 use super::{glread, lease::Lease, sink::FrameTo, thumbs::Job};
@@ -357,9 +357,24 @@ where
             let scale = output.current_scale().fractional_scale();
             let mut elements =
                 state.elements_for(renderer, &output, Purpose::Capture { cursor: pointer });
-            if let Some(area) = state.space.output_geometry(&output) {
-                let size = (f64::from(area.size.w), f64::from(area.size.h));
-                presenter_over(state, renderer, &mut elements, area.loc.to_f64(), size, scale);
+            if let (Some(area), Some(work)) = (
+                state.space.output_geometry(&output),
+                state.work_area(&output),
+            ) {
+                // Across where windows stand (beside the bar), on the
+                // screen's foot.
+                let zone = Rectangle::<f64, Logical>::new(
+                    (f64::from(work.x - area.loc.x), 0.0).into(),
+                    (f64::from(work.width), f64::from(area.size.h)).into(),
+                );
+                presenter_over(
+                    state,
+                    renderer,
+                    &mut elements,
+                    area.loc.to_f64(),
+                    zone,
+                    scale,
+                );
             }
             (elements, scale, BACKGROUND)
         }
@@ -381,7 +396,7 @@ where
                 renderer,
                 &mut elements,
                 rect.loc,
-                (rect.size.w, rect.size.h),
+                Rectangle::from_size(rect.size),
                 scale,
             );
             // Its size now: the stream follows it.
@@ -410,13 +425,13 @@ fn presenter_over<R>(
     renderer: &mut R,
     elements: &mut Vec<OutputElements<R>>,
     origin: Point<f64, Logical>,
-    area: (f64, f64),
+    zone: Rectangle<f64, Logical>,
     scale: f64,
 ) where
     R: Renderer + ImportAll + ImportMem + Bend + Shaders,
     R::TextureId: Send + Clone + Texture + 'static,
 {
-    if let Some(presenter) = state.presenter_element(renderer, origin, area, scale) {
+    if let Some(presenter) = state.presenter_element(renderer, origin, zone, scale) {
         let under_cursor = elements
             .iter()
             .take_while(|e| matches!(e, OutputElements::Cursor(_)))

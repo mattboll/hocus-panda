@@ -26,8 +26,8 @@ use std::{
     time::Duration,
 };
 
-pub use hocus_scenes::koi::{CELL, Pointer, floor};
 use hocus_scenes::koi as sim;
+pub use hocus_scenes::koi::{CELL, Pointer, floor};
 use smithay::{
     backend::renderer::{element::Id, utils::CommitCounter},
     utils::{Physical, Rectangle},
@@ -182,7 +182,6 @@ impl Pond {
         self.floor_commit.set(c);
     }
 
-
     /// it was last drawn, with the one before then.
     pub fn commit(&self) -> (CommitCounter, Option<CommitCounter>) {
         let mut c = self.commit.get();
@@ -196,7 +195,6 @@ impl Pond {
         (c, None)
     }
 }
-
 
 /// The pond on every screen it shows on.
 #[derive(Debug)]

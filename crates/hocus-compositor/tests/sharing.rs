@@ -1247,6 +1247,7 @@ fn screenshot_of_the_presenter_on_a_shared_screen() -> anyhow::Result<()> {
     let mut bed = start_with(&shell, SCREEN, RendererChoice::Pixman, |c| {
         c.camera_program = Some(program);
         c.camera_device = "cpu".to_owned();
+        c.camera_video4linux = Some(PathBuf::from("/nonexistent"));
         c.camera.presenter = true;
         c.plain_background = false;
     })?;
@@ -1297,6 +1298,7 @@ fn the_presenter_stands_in_the_shared_stream_never_on_the_screen() -> anyhow::Re
     let mut bed = start_with(&shell, SCREEN, RendererChoice::Pixman, |c| {
         c.camera_program = Some(program);
         c.camera_device = "cpu".to_owned();
+        c.camera_video4linux = Some(PathBuf::from("/nonexistent"));
         c.camera.presenter = true;
     })?;
     let camera = crate::camera::fake_camera(&bed.pipewire.socket, [0, 0, 0]);
@@ -1304,13 +1306,15 @@ fn the_presenter_stands_in_the_shared_stream_never_on_the_screen() -> anyhow::Re
     bed.hp.pointer_move(100.0, 100.0);
     let (_, started) = bed.share_screen()?;
     let consumer = consume(&bed.pipewire.socket, started.streams[0].0)?;
-    // The person's suit, blue, at the foot of the presenter's middle: the
-    // board's medium one, 24 px of its 860 in from the right.
+    // The person's suit, blue, at the foot of the presenter: the board's
+    // medium one, in the lower right beside the bar.
     let (w, h) = (f64::from(SCREEN.0), f64::from(SCREEN.1));
     let suit = |pixels: &[u8], fw: u32, x: f64| {
-        let at = (((h - 12.0) as usize) * fw as usize + x as usize) * 4;
-        let (b, r) = (pixels[at], pixels[at + 2]);
-        b > 110 && b > r + 50
+        let at = (((h - 12.0) as usize) * fw as usize + x.max(0.0) as usize) * 4;
+        match (pixels.get(at), pixels.get(at + 2)) {
+            (Some(&b), Some(&r)) => b > 110 && u16::from(b) > u16::from(r) + 50,
+            _ => false,
+        }
     };
     let start = Instant::now();
     let (frame, right) = loop {
@@ -1324,18 +1328,23 @@ fn the_presenter_stands_in_the_shared_stream_never_on_the_screen() -> anyhow::Re
         else {
             continue;
         };
-        // Its width follows the cut-out's: its middle is found along the
+        // Its width follows the cut-out's: it is looked for along the
         // foot of the right half.
         let found = (0..40)
-            .map(|i| w - w * 24.0 / 860.0 - 20.0 - f64::from(i) * 20.0)
+            .map(|i| w - 250.0 - f64::from(i) * 20.0)
             .find(|&x| suit(&pixels, fw, x));
         if let Some(x) = found {
             break ((fw, pixels), x);
         }
     };
     // Not on the screen there.
-    let [_, r, _, b] = bed.pixel(right as usize, (h - 12.0) as usize)?.to_be_bytes();
-    assert!(!(b > 110 && b > r + 50), "on the screen: {r} {b}");
+    let [_, r, _, b] = bed
+        .pixel(right as usize, (h - 12.0) as usize)?
+        .to_be_bytes();
+    assert!(
+        !(b > 110 && u16::from(b) > u16::from(r) + 50),
+        "on the screen: {r} {b}"
+    );
     let _ = frame;
     // The pointer under it: it stands at the left now.
     bed.hp.pointer_move(right, h - 40.0);
@@ -1350,7 +1359,8 @@ fn the_presenter_stands_in_the_shared_stream_never_on_the_screen() -> anyhow::Re
         else {
             continue;
         };
-        if suit(&pixels, fw, w - right) && !suit(&pixels, fw, right) {
+        let left = (0..40).any(|i| suit(&pixels, fw, 40.0 + f64::from(i) * 20.0));
+        if left && !suit(&pixels, fw, right) {
             break;
         }
     }

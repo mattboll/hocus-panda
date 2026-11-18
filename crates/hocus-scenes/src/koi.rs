@@ -416,9 +416,7 @@ impl Pond {
         self.click = Some([x, y]);
     }
 
-    /// The commit of this frame's drawing: a new one when it moved since
-
-
+    /// A new one each step: what moved since a picture was drawn.
     pub fn generation(&self) -> u64 {
         self.generation
     }

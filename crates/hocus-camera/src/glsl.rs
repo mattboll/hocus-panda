@@ -226,7 +226,13 @@ mod tests {
     #[test]
     fn the_wallpapers_shaders_read() {
         use hocus_scenes::shaders as s;
-        let clip = |source: &str| source.replacen("varying vec2 v_at;\n", &format!("varying vec2 v_at;\n{}", s::CLIP), 1);
+        let clip = |source: &str| {
+            source.replacen(
+                "varying vec2 v_at;\n",
+                &format!("varying vec2 v_at;\n{}", s::CLIP),
+                1,
+            )
+        };
         let cases = [
             (s::VERTEX.to_owned(), Stage::Vertex),
             (s::SPARKS_VERTEX.to_owned(), Stage::Vertex),
@@ -242,14 +248,11 @@ mod tests {
                 Stage::Vertex => naga::ShaderStage::Vertex,
                 Stage::Fragment => naga::ShaderStage::Fragment,
             };
-            let parsed = naga::front::glsl::Frontend::default()
-                .parse(&naga::front::glsl::Options::from(naga_stage), &adapted.source);
-            assert!(
-                parsed.is_ok(),
-                "{:?}\n{}",
-                parsed.err(),
-                adapted.source
+            let parsed = naga::front::glsl::Frontend::default().parse(
+                &naga::front::glsl::Options::from(naga_stage),
+                &adapted.source,
             );
+            assert!(parsed.is_ok(), "{:?}\n{}", parsed.err(), adapted.source);
         }
     }
 }

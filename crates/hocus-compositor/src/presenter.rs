@@ -55,8 +55,7 @@ pub struct Shown {
 
 impl Shown {
     pub fn new(cut: Silhouette) -> Self {
-        let buffer =
-            crate::decoration::buffer(&cut.bgra, cut.width as i32, cut.height as i32);
+        let buffer = crate::decoration::buffer(&cut.bgra, cut.width as i32, cut.height as i32);
         Self {
             buffer,
             size: (cut.width, cut.height),
@@ -75,7 +74,12 @@ impl Shown {
 
 /// The presenter's box in an area of `area` (logical), its corner `side`
 /// (0 left to 1 right), for a cut-out `w` × `h`.
-pub fn place(area: (f64, f64), size: Size, side: f64, (w, h): (u32, u32)) -> Rectangle<f64, Logical> {
+pub fn place(
+    area: (f64, f64),
+    size: Size,
+    side: f64,
+    (w, h): (u32, u32),
+) -> Rectangle<f64, Logical> {
     let height = area.1 * size.height();
     let width = height * f64::from(w) / f64::from(h.max(1));
     let margin = area.0 * MARGIN / BOARD_W;
@@ -86,14 +90,15 @@ pub fn place(area: (f64, f64), size: Size, side: f64, (w, h): (u32, u32)) -> Rec
 }
 
 impl State {
-    /// The presenter over a share's frame of an area `area` (logical,
-    /// its corner at `origin` on the desktop) drawn at `scale`, if it
-    /// shows: moved to the other corner while the pointer is under it.
+    /// The presenter over a share's frame whose corner is at `origin` on
+    /// the desktop, standing in `zone` of it (logical, from that corner:
+    /// a screen's beside the bar, a window's whole), drawn at `scale`, if
+    /// it shows: moved to the other corner while the pointer is under it.
     pub(crate) fn presenter_element<R>(
         &self,
         renderer: &mut R,
         origin: Point<f64, Logical>,
-        area: (f64, f64),
+        zone: Rectangle<f64, Logical>,
         scale: f64,
     ) -> Option<OutputElements<R>>
     where
@@ -109,13 +114,13 @@ impl State {
             Side::Left => 0.0,
             Side::Right => 1.0,
         };
+        let area = (zone.size.w, zone.size.h);
         let pointer = self
             .seat
             .get_pointer()
-            .map(|p| p.current_location() - origin);
-        let under = pointer.is_some_and(|p| {
-            place(area, c.presenter_size, preferred, shown.size).contains(p)
-        });
+            .map(|p| p.current_location() - origin - zone.loc);
+        let under = pointer
+            .is_some_and(|p| place(area, c.presenter_size, preferred, shown.size).contains(p));
         let target = if under { 1.0 - preferred } else { preferred };
         let now = self.now();
         let side = match shown.at.get() {
@@ -133,13 +138,16 @@ impl State {
         shown.at.set(Some((side, now)));
         let eased = side * side * (3.0 - 2.0 * side);
         let rect = place(area, c.presenter_size, eased, shown.size);
-        let at = rect.loc.to_physical_precise_round::<_, i32>(scale);
+        let at = (rect.loc + zone.loc).to_physical_precise_round::<_, i32>(scale);
         MemoryRenderBufferRenderElement::from_buffer(
             renderer,
             at.to_f64(),
             &shown.buffer,
             None,
-            None,
+            // The whole cut-out, scaled to its box.
+            Some(Rectangle::from_size(
+                (f64::from(shown.size.0), f64::from(shown.size.1)).into(),
+            )),
             Some((rect.size.w.round() as i32, rect.size.h.round() as i32).into()),
             Kind::Unspecified,
         )

@@ -23,6 +23,10 @@ impl Rng {
     }
 
     /// From 0 to 1, 1 excluded.
+    #[expect(
+        clippy::should_implement_trait,
+        reason = "an endless generator of floats, not an iterator"
+    )]
     pub fn next(&mut self) -> f32 {
         let mut x = self.0;
         x ^= x >> 12;

@@ -257,7 +257,12 @@ impl Painter {
             tracing::warn!(%err, "the GPU said, of the scenes");
         }));
         let (width, height) = if cpu { (W / 2, H / 2) } else { (W, H) };
-        tracing::info!(adapter = info.name, width, height, "the living wallpapers' GPU");
+        tracing::info!(
+            adapter = info.name,
+            width,
+            height,
+            "the living wallpapers' GPU"
+        );
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene"),
             size: extent(width, height),
@@ -331,7 +336,9 @@ impl Painter {
             &[],
         );
         let quad = self.quad(w, h);
-        let target = self.target.create_view(&wgpu::TextureViewDescriptor::default());
+        let target = self
+            .target
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.encoder();
         draw(&mut encoder, &target, true, pass, &bind, &quad, None, 6);
         Some(encoder)
@@ -388,7 +395,9 @@ impl Painter {
             koi.under.as_image_copy(),
             extent(POND.0 as usize, POND.1 as usize),
         );
-        let under_view = koi.under.create_view(&wgpu::TextureViewDescriptor::default());
+        let under_view = koi
+            .under
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let clip: [(&str, &[f32]); 3] = [
             ("keep", &[-1.0e7, -1.0e7, 1.0e7, 1.0e7]),
             ("count", &[0.0]),
@@ -396,19 +405,41 @@ impl Painter {
         ];
         let fish = koi.pond.under_mesh();
         if let Some((vertices, indices, n)) = self.mesh(&fish) {
-            let bind = self.bind(&koi.shapes, &[("matrix", &matrix(POND.0, POND.1))], &clip, &[]);
-            draw(&mut encoder, &under_view, false, &koi.shapes, &bind, &vertices, Some(&indices), n);
+            let bind = self.bind(
+                &koi.shapes,
+                &[("matrix", &matrix(POND.0, POND.1))],
+                &clip,
+                &[],
+            );
+            draw(
+                &mut encoder,
+                &under_view,
+                false,
+                &koi.shapes,
+                &bind,
+                &vertices,
+                Some(&indices),
+                n,
+            );
         }
         // The water, over the frame.
         let look: [(&str, &[f32]); 6] = [
             ("screen", &[w, h]),
-            ("grid", &[POND.0 / (gw as f32 * hocus_scenes::koi::CELL), POND.1 / (gh as f32 * hocus_scenes::koi::CELL)]),
+            (
+                "grid",
+                &[
+                    POND.0 / (gw as f32 * hocus_scenes::koi::CELL),
+                    POND.1 / (gh as f32 * hocus_scenes::koi::CELL),
+                ],
+            ),
             ("texel", &[1.0 / gw as f32, 1.0 / gh as f32]),
             ("bend", &[1200.0 / POND.0, 720.0 / POND.1]),
             ("zero", &[0.0]),
             ("still", &[0.0]),
         ];
-        let heights_view = koi.heights.create_view(&wgpu::TextureViewDescriptor::default());
+        let heights_view = koi
+            .heights
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let bind = self.bind(
             &koi.water,
             &[("matrix", &matrix(w, h))],
@@ -416,13 +447,33 @@ impl Painter {
             &[&under_view, &heights_view],
         );
         let quad = self.quad(w, h);
-        let target = self.target.create_view(&wgpu::TextureViewDescriptor::default());
-        draw(&mut encoder, &target, true, &koi.water, &bind, &quad, None, 6);
+        let target = self
+            .target
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        draw(
+            &mut encoder,
+            &target,
+            true,
+            &koi.water,
+            &bind,
+            &quad,
+            None,
+            6,
+        );
         // The pads, bobbing on it.
         let pads = koi.pond.pads_mesh(scale);
         if let Some((vertices, indices, n)) = self.mesh(&pads) {
             let bind = self.bind(&koi.shapes, &[("matrix", &matrix(w, h))], &clip, &[]);
-            draw(&mut encoder, &target, false, &koi.shapes, &bind, &vertices, Some(&indices), n);
+            draw(
+                &mut encoder,
+                &target,
+                false,
+                &koi.shapes,
+                &bind,
+                &vertices,
+                Some(&indices),
+                n,
+            );
         }
         Some(encoder)
     }
@@ -446,7 +497,12 @@ impl Painter {
             })
         };
         use wgpu::{TextureFormat as F, TextureUsages as U};
-        let floor = texture("koi floor", (pw, ph), F::Rgba8Unorm, U::COPY_SRC | U::COPY_DST);
+        let floor = texture(
+            "koi floor",
+            (pw, ph),
+            F::Rgba8Unorm,
+            U::COPY_SRC | U::COPY_DST,
+        );
         self.queue.write_texture(
             floor.as_image_copy(),
             &floor_pixels,
@@ -564,7 +620,13 @@ impl Painter {
             .iter()
             .flat_map(|&(x, y)| [x, y, x, y])
             .collect();
-        self.buffer(&quad.iter().flat_map(|v| v.to_ne_bytes()).collect::<Vec<u8>>(), wgpu::BufferUsages::VERTEX)
+        self.buffer(
+            &quad
+                .iter()
+                .flat_map(|v| v.to_ne_bytes())
+                .collect::<Vec<u8>>(),
+            wgpu::BufferUsages::VERTEX,
+        )
     }
 
     /// A mesh's vertices and indices, and how many; none when empty.
@@ -838,7 +900,7 @@ pub(crate) mod tests {
             })
             .expect("lavapipe (mesa-vulkan-drivers) is needed");
         let status = std::process::Command::new(std::env::current_exe().expect("the test"))
-            .args(["--exact", test])
+            .args(["--exact", "--include-ignored", test])
             .env(CHILD, "1")
             .env("VK_DRIVER_FILES", &lvp)
             .env("VK_ICD_FILENAMES", &lvp)
@@ -873,7 +935,13 @@ pub(crate) mod tests {
         assert!(g > r && b_ > r && g > 20.0, "{r} {g} {b_}");
         // Some bright koi in it.
         assert!(
-            a.rgba.as_chunks::<4>().0.iter().filter(|p| p[0] > 180).count() > 500,
+            a.rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|p| p[0] > 180)
+                .count()
+                > 500,
             "no koi"
         );
         assert_ne!(a.rgba, b.rgba, "they stand still");

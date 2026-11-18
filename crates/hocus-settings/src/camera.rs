@@ -239,10 +239,7 @@ pub fn settings() -> &'static [Setting] {
                     &["caméra", "présentateur", "coin"],
                     &["camera", "presenter", "corner"],
                 ),
-                kind: Kind::Segmented(vec![
-                    word(words::LEFT, "left"),
-                    word(words::RIGHT, "right"),
-                ]),
+                kind: Kind::Segmented(vec![word(words::LEFT, "left"), word(words::RIGHT, "right")]),
                 places: one(&["camera", "presenter-side"], Codec::Word(SIDES)),
                 needs: Some(PRESENTER),
             },

@@ -97,7 +97,9 @@ pub fn cut(frame: &[u8], alpha: &Alpha) -> Option<Cutout> {
             *s += v / 16.0;
         }
     }
-    let r = ((sigma / 4.0) * (12.0f32 / 9.0).sqrt() / 2.0).round().max(1.0) as usize;
+    let r = ((sigma / 4.0) * (12.0f32 / 9.0).sqrt() / 2.0)
+        .round()
+        .max(1.0) as usize;
     blur_plane(&mut q, qw, qh, r);
     for cy in 0..ch {
         let sy = (cy as f32 - dy).max(0.0) / 4.0;
@@ -160,7 +162,13 @@ fn box_line(v: &mut [f32], step: usize, line: &mut Vec<f32>, r: usize) {
         return;
     }
     // Nothing past the ends: the shadow fades out there.
-    let get = |i: isize| if (0..n).contains(&i) { line.get(i as usize).copied().unwrap_or(0.0) } else { 0.0 };
+    let get = |i: isize| {
+        if (0..n).contains(&i) {
+            line.get(i as usize).copied().unwrap_or(0.0)
+        } else {
+            0.0
+        }
+    };
     let r = r as isize;
     let k = 1.0 / (2 * r + 1) as f32;
     let mut sum: f32 = (-r..=r).map(get).sum();

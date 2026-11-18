@@ -52,7 +52,8 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 fn spans(from: usize, to: usize) -> Vec<(usize, usize, f32)> {
     (0..to)
         .map(|i| {
-            let f = ((i as f32 + 0.5) * from as f32 / to as f32 - 0.5).clamp(0.0, (from - 1) as f32);
+            let f =
+                ((i as f32 + 0.5) * from as f32 / to as f32 - 0.5).clamp(0.0, (from - 1) as f32);
             let a = f as usize;
             (a, (a + 1).min(from - 1), f - a as f32)
         })
@@ -84,7 +85,6 @@ impl Alpha {
             }
         }
     }
-
 }
 
 /// `under` (B, G, R, x at `uw` × `uh`, scaled to the frame between its
@@ -155,7 +155,11 @@ fn box_line(v: &mut [[f32; 4]], step: usize, line: &mut Vec<[f32; 4]>, radius: u
     if n == 0 {
         return;
     }
-    let get = |i: isize| line.get(i.clamp(0, n as isize - 1) as usize).copied().unwrap_or([0.0; 4]);
+    let get = |i: isize| {
+        line.get(i.clamp(0, n as isize - 1) as usize)
+            .copied()
+            .unwrap_or([0.0; 4])
+    };
     let r = radius as isize;
     let k = 1.0 / (2 * radius + 1) as f32;
     let mut sum = [0f32; 4];
@@ -314,7 +318,11 @@ mod tests {
         scene(&mut made, &alpha, &picture);
         assert!(apart(&frame, &made, &alpha, |a| a == 255) < 0.01);
         // The room is the wallpaper's green (B, G, R).
-        let i = alpha.values.iter().position(|&a| a == 0).expect("some room");
+        let i = alpha
+            .values
+            .iter()
+            .position(|&a| a == 0)
+            .expect("some room");
         assert_eq!(&made[i * 4..i * 4 + 3], &[120, 200, 10]);
     }
 
@@ -343,8 +351,14 @@ mod tests {
                 .iter()
                 .flat_map(|&[b, g, r, _]| [r, g, b, 255])
                 .collect();
-            image::save_buffer(dir.join(name), &rgba, W as u32, H as u32, image::ColorType::Rgba8)
-                .expect("saved");
+            image::save_buffer(
+                dir.join(name),
+                &rgba,
+                W as u32,
+                H as u32,
+                image::ColorType::Rgba8,
+            )
+            .expect("saved");
         };
         let (frame, alpha) = person();
         save("camera-as-it-is.png", &frame);
@@ -363,7 +377,10 @@ mod tests {
         }
         let card = crate::away::Card::draw(
             hocus_words::camera::BACK_IN_A_MOMENT.get(hocus_words::Lang::French),
-            &crate::away::since_words(hocus_words::Lang::French, std::time::Duration::from_secs(130)),
+            &crate::away::since_words(
+                hocus_words::Lang::French,
+                std::time::Duration::from_secs(130),
+            ),
         );
         let aurora = painter
             .draw(hocus_link::camera::Scene::Aurora, 8.0)
@@ -377,5 +394,4 @@ mod tests {
         card.over(&mut night, 1.0);
         save("camera-je-reviens-sans-gpu.png", &night);
     }
-
 }

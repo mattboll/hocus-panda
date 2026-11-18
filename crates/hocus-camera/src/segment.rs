@@ -244,7 +244,11 @@ mod tests {
         fresh.values[1] = 0.2;
         mask.follow(&fresh);
         assert!(mask.values[0] > 0.9, "a move: {}", mask.values[0]);
-        assert!(mask.values[1] < 0.2 * 0.7, "a hesitation: {}", mask.values[1]);
+        assert!(
+            mask.values[1] < 0.2 * 0.7,
+            "a hesitation: {}",
+            mask.values[1]
+        );
         assert!((mask.at(0.0, 0.0) - mask.values[0]).abs() < 1e-6);
     }
 }

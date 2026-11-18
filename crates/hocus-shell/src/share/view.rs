@@ -229,8 +229,7 @@ impl Layout {
             Point::new(left, y),
             Size::new(check_w, CHECK_TEXT * LINE_HEIGHT),
         );
-        let presenter_w =
-            CHECK + CHECK_GAP + kit::measure(words.presenter(), CHECK_TEXT, MANROPE);
+        let presenter_w = CHECK + CHECK_GAP + kit::measure(words.presenter(), CHECK_TEXT, MANROPE);
         let presenter = Rectangle::new(
             Point::new(check.x + check.width + PRESENTER_GAP, y),
             Size::new(presenter_w, CHECK_TEXT * LINE_HEIGHT),
