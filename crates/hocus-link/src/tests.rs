@@ -508,6 +508,10 @@ fn to_shell() -> Vec<ToShell> {
             away: true,
             presenter: false,
             hush: false,
+            framing: true,
+            face: "ears".into(),
+            gestures: true,
+            celebrations: false,
         }),
         ToShell::Transcribing(TranscribingShown {
             id: 3,
@@ -1602,6 +1606,11 @@ fn the_camera_s_lines_read_back() {
         locked: true,
         presenter: true,
         lang: "fr".into(),
+        face: Some(crate::camera::Wear::Crown),
+        framing: true,
+        gestures: true,
+        celebrations: true,
+        moments: 3,
     };
     assert_eq!(CameraLook::read(&look.line()), Some(look));
     // A look of lot 2 still reads: what is behind the room, nothing else.

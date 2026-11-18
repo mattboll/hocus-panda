@@ -4,7 +4,8 @@
 //! Hocuspanda camera is read); then the Hocuspanda camera's effects, as
 //! the camera's window in the bar sets them: Lumière, the banner, its
 //! name and its project (lot 2); what is behind you, « Je reviens », the
-//! presenter, its corner and its size (lot 3).
+//! presenter, its corner and its size (lot 3); Cadrage, Visage's
+//! accessory, Gestes and Fêtes (lot 4).
 
 use hocus_words::settings::camera as words;
 use std::sync::OnceLock;
@@ -38,12 +39,18 @@ pub const AWAY: &str = "camera.away";
 pub const PRESENTER: &str = "camera.presenter";
 pub const PRESENTER_SIDE: &str = "camera.presenter-side";
 pub const PRESENTER_SIZE: &str = "camera.presenter-size";
+pub const FRAMING: &str = "camera.framing";
+pub const FACE: &str = "camera.face";
+pub const GESTURES: &str = "camera.gestures";
+pub const CELEBRATIONS: &str = "camera.celebrations";
 
 const WARMTHS: &[&str] = &["cool", "neutral", "warm"];
 const STRENGTHS: &[&str] = &["auto", "soft", "medium", "strong"];
 const BACKGROUNDS: &[&str] = &["room", "blur", "aurora", "koi"];
 const SIDES: &[&str] = &["left", "right"];
 const SIZES: &[&str] = &["small", "medium", "large"];
+/// Visage's: the panda that takes the person's place is to come.
+const FACES: &[&str] = &["none", "ears", "beanie", "crown", "glasses"];
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
@@ -261,6 +268,92 @@ pub fn settings() -> &'static [Setting] {
                 places: one(&["camera", "presenter-size"], Codec::Word(SIZES)),
                 needs: Some(PRESENTER),
             },
+            Setting {
+                id: FRAMING,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::FRAMING,
+                line: Some(words::KEEPS_YOUR_FACE_IN_THE_MIDDLE),
+                keywords: (
+                    &["caméra", "cadrage", "recadrer", "suivi", "visage", "centre"],
+                    &["camera", "framing", "crop", "follow", "face", "centre"],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "framing"], Codec::Bool),
+                needs: None,
+            },
+            Setting {
+                id: FACE,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::FACE,
+                line: Some(words::AN_ACCESSORY_ON_YOUR_HEAD),
+                keywords: (
+                    &[
+                        "caméra",
+                        "visage",
+                        "accessoire",
+                        "oreilles",
+                        "bonnet",
+                        "couronne",
+                        "lunettes",
+                    ],
+                    &[
+                        "camera",
+                        "face",
+                        "accessory",
+                        "ears",
+                        "beanie",
+                        "hat",
+                        "crown",
+                        "glasses",
+                    ],
+                ),
+                kind: Kind::Segmented(vec![
+                    word(words::NO_FACE, "none"),
+                    word(words::EARS, "ears"),
+                    word(words::BEANIE, "beanie"),
+                    word(words::CROWN, "crown"),
+                    word(words::GLASSES, "glasses"),
+                ]),
+                places: one(&["camera", "face"], Codec::Word(FACES)),
+                needs: None,
+            },
+            Setting {
+                id: GESTURES,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::GESTURES,
+                line: Some(words::A_THUMB_UP_SENDS_A_REACTION),
+                keywords: (
+                    &["caméra", "gestes", "pouce", "main levée", "réaction"],
+                    &["camera", "gestures", "thumbs up", "raise hand", "reaction"],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "gestures"], Codec::Bool),
+                needs: None,
+            },
+            Setting {
+                id: CELEBRATIONS,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::CELEBRATIONS,
+                line: Some(words::CONFETTI_WHEN_AN_AGENT_CELEBRATES),
+                keywords: (
+                    &["caméra", "fêtes", "confettis", "agent", "bonne nouvelle"],
+                    &[
+                        "camera",
+                        "celebrations",
+                        "parties",
+                        "confetti",
+                        "agent",
+                        "good news",
+                    ],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "celebrations"], Codec::Bool),
+                needs: None,
+            },
         ]
     })
 }
@@ -303,6 +396,10 @@ mod tests {
                 ("camera.presenter".to_owned(), Value::Bool(false)),
                 ("camera.presenter-side".to_owned(), Value::Word("right")),
                 ("camera.presenter-size".to_owned(), Value::Word("medium")),
+                ("camera.framing".to_owned(), Value::Bool(false)),
+                ("camera.face".to_owned(), Value::Word("none")),
+                ("camera.gestures".to_owned(), Value::Bool(true)),
+                ("camera.celebrations".to_owned(), Value::Bool(false)),
             ]
         );
     }

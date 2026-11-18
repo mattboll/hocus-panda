@@ -746,7 +746,7 @@ fn the_window_s_tiles_write_the_effects_and_the_frames_follow() -> anyhow::Resul
         &[
             "Utilisée par Visio",
             "[x] Lumière",
-            "[~] Cadrage",
+            "[ ] Cadrage",
             "[ ] Bandeau",
         ],
     )?;
@@ -1122,5 +1122,103 @@ fn screenshots_of_the_window_s_lot_3() -> anyhow::Result<()> {
     bed.logged("the camera's window shows it", &["| Image (dots"])?;
     let window = common::drawn_popovers(&bed.hp)[0];
     bed.shoot(&out, "camera-window-image-lot3.png", around(window), 2)?;
+    Ok(())
+}
+
+// --- Lot 4: the face and the hands ------------------------------------------------
+
+/// A test picture of `hocus-camera` (RGBA) as the fake camera sends it,
+/// B, G, R, x.
+fn bgrx(rgba: Vec<u8>) -> Vec<u8> {
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|&[r, g, b, _]| [b, g, r, 255])
+        .collect()
+}
+
+/// The pull request's screenshots of the window's lot 4 (#619), as lot
+/// 3's: Visage with each accessory on the portrait; Image with Cadrage on
+/// a person further away; Réactions with a thumb's reaction (three shots
+/// over its rise) and « main levée ». Written to `$HOCUS_SHOTS` when it
+/// names a folder. Run by hand (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshots"]
+fn screenshots_of_the_window_s_lot_4() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let mut bed = WindowBed::start_on("[camera]\nface = \"ears\"\n", "2560x1600@2")?;
+    bed.camera.show(person());
+    let window = bed.open()?;
+    bed.logged("the camera's preview shows a frame", &[])?;
+    let around =
+        |r: hocus_compositor::model::Rect| (r.x - 16, r.y - 16, r.width + 32, r.height + 32);
+    let tab = |window: hocus_compositor::model::Rect, i: f64| {
+        (
+            f64::from(window.x) + IN + 2.0 + i * 61.6 + 29.8,
+            f64::from(window.y) + IN + 15.7 + 9.0 + 176.0 + 9.0 + 15.0,
+        )
+    };
+    common::click_on(&mut bed.hp, tab(window, 2.0), hocus_link::POPOVER_NAMESPACE)?;
+    bed.logged("the camera's window shows it", &["| Visage (dots"])?;
+    // The face's models load, and the face is found.
+    wait(&mut bed.hp, Duration::from_secs(3))?;
+    let window = common::drawn_popovers(&bed.hp)[0];
+    bed.shoot(&out, "camera-window-visage-oreilles.png", around(window), 2)?;
+    for (n, name, word) in [
+        (2, "bonnet", "[x] Bonnet"),
+        (3, "couronne", "[x] Couronne"),
+        (4, "lunettes", "[x] Lunettes"),
+    ] {
+        bed.tile(window, n)?;
+        bed.logged("the camera's window shows it", &[word])?;
+        wait(&mut bed.hp, Duration::from_secs(2))?;
+        let window = common::drawn_popovers(&bed.hp)[0];
+        bed.shoot(
+            &out,
+            &format!("camera-window-visage-{name}.png"),
+            around(window),
+            2,
+        )?;
+    }
+    bed.tile(window, 0)?;
+    bed.logged("the camera's window shows it", &["[x] Aucun"])?;
+    // Cadrage, on a person further away.
+    bed.camera
+        .show(bgrx(hocus_camera::track::test_picture(include_bytes!(
+            "../../hocus-camera/data/far.jpg"
+        ))));
+    common::click_on(&mut bed.hp, tab(window, 0.0), hocus_link::POPOVER_NAMESPACE)?;
+    bed.logged("the camera's window shows it", &["| Image (dots"])?;
+    let window = common::drawn_popovers(&bed.hp)[0];
+    bed.tile(window, 1)?;
+    bed.logged("the camera's window shows it", &["[x] Cadrage"])?;
+    wait(&mut bed.hp, Duration::from_secs(4))?;
+    let window = common::drawn_popovers(&bed.hp)[0];
+    bed.shoot(&out, "camera-window-cadrage.png", around(window), 2)?;
+    bed.tile(window, 1)?;
+    bed.logged("the camera's window shows it", &["[ ] Cadrage"])?;
+    // Réactions: « main levée » while the hand stays up, then a thumb up.
+    common::click_on(&mut bed.hp, tab(window, 4.0), hocus_link::POPOVER_NAMESPACE)?;
+    bed.logged("the camera's window shows it", &["| Réactions (dots"])?;
+    bed.camera
+        .show(bgrx(hocus_camera::hands::test_raised_hand()));
+    wait(&mut bed.hp, Duration::from_secs(3))?;
+    let window = common::drawn_popovers(&bed.hp)[0];
+    bed.shoot(&out, "camera-window-main-levee.png", around(window), 2)?;
+    bed.camera.show(person());
+    wait(&mut bed.hp, Duration::from_secs(2))?;
+    bed.camera.show(bgrx(hocus_camera::hands::test_thumb_up()));
+    for i in 1..=4 {
+        wait(&mut bed.hp, Duration::from_millis(350))?;
+        bed.shoot(
+            &out,
+            &format!("camera-window-pouce-{i}.png"),
+            around(window),
+            2,
+        )?;
+    }
     Ok(())
 }

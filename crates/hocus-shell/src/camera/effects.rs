@@ -5,7 +5,9 @@
 //!
 //! Lot 2 makes Lumière and Bandeau (Image); lot 3 Fond (the room, Flou,
 //! the desktop's living wallpapers), Présentateur (Image) and « Je
-//! reviens » (Réactions). The others show, dimmed, where they will be:
+//! reviens » (Réactions); lot 4 Cadrage (Image), Visage's accessories
+//! (Oreilles, Bonnet, Couronne, Lunettes), Gestes and Fêtes (Réactions).
+//! The others (Visage's panda, Voix) show, dimmed, where they will be:
 //! their tab is the mockup's, their tile says "Bientôt".
 
 use hocus_link::CameraShown;
@@ -129,6 +131,9 @@ fn toggle(shown: &CameraShown, key: &str) -> bool {
         "banner" => shown.banner,
         "presenter" => shown.presenter,
         "away" => shown.away,
+        "framing" => shown.framing,
+        "gestures" => shown.gestures,
+        "celebrations" => shown.celebrations,
         _ => false,
     }
 }
@@ -139,6 +144,7 @@ fn one<'a>(shown: &'a CameraShown, key: &str) -> &'a str {
     match key {
         "background" if !shown.background.is_empty() => &shown.background,
         "background" => "room",
+        "face" if !shown.face.is_empty() => &shown.face,
         _ => "none",
     }
 }
@@ -171,8 +177,10 @@ const fn one_of(
     hint: Option<Text>,
 ) -> Effect {
     let plain = matches!(value.as_bytes(), b"room" | b"none");
-    // Fond is made (lot 3); the others wait for theirs.
-    let ready = matches!(key.as_bytes(), b"background");
+    // Fond is made (lot 3), Visage's accessories (lot 4); its panda and
+    // Voix wait for theirs.
+    let ready = matches!(key.as_bytes(), b"background")
+        || (matches!(key.as_bytes(), b"face") && !matches!(value.as_bytes(), b"panda"));
     Effect {
         id: value,
         tab,
@@ -212,7 +220,7 @@ pub const EFFECTS: &[Effect] = &[
         },
         w::FRAMING,
         Some(w::FRAMING_HINT),
-        false,
+        true,
     ),
     toggle_of(
         "banner",
@@ -399,7 +407,7 @@ pub const EFFECTS: &[Effect] = &[
         Thumb::Linear(135.0, &[(0.0, 0xF5B4_4AFF), (1.0, 0xF294_5BFF)]),
         w::GESTURES,
         Some(w::GESTURES_HINT),
-        false,
+        true,
     ),
     toggle_of(
         "celebrations",
@@ -410,7 +418,7 @@ pub const EFFECTS: &[Effect] = &[
         ),
         w::PARTIES,
         Some(w::PARTIES_HINT),
-        false,
+        true,
     ),
     // « Je reviens » (lot 3): the board's panda asleep.
     toggle_of(
@@ -463,11 +471,15 @@ mod tests {
             away: true,
             presenter: false,
             hush: false,
+            framing: false,
+            face: "none".to_owned(),
+            gestures: false,
+            celebrations: false,
         }
     }
 
     #[test]
-    fn each_tab_has_its_effects_and_lots_2_and_3_make_theirs() {
+    fn each_tab_has_its_effects_and_lots_2_to_4_make_theirs() {
         let ids = |tab: Tab| tab.effects().map(|e| e.id).collect::<Vec<_>>();
         assert_eq!(
             ids(Tab::Image),
@@ -482,16 +494,24 @@ mod tests {
             ready,
             [
                 "lighting",
+                "framing",
                 "banner",
                 "presenter",
                 "room",
                 "blur",
                 "aurora",
                 "koi",
+                "none",
+                "ears",
+                "beanie",
+                "crown",
+                "glasses",
+                "gestures",
+                "celebrations",
                 "away"
             ]
         );
-        assert!(!Tab::Image.soon() && Tab::Face.soon() && !Tab::Background.soon());
+        assert!(!Tab::Image.soon() && !Tab::Face.soon() && Tab::Voice.soon());
     }
 
     #[test]
@@ -533,6 +553,38 @@ mod tests {
         // A tab of plain choices only has no dot.
         assert!(!Tab::Background.on(&on));
         assert!(Tab::Reactions.on(&on), "« Je reviens » is on");
-        assert_eq!(hint(Tab::Face, &on, lang), "Bientôt dans Hocuspanda");
+        assert_eq!(hint(Tab::Voice, &on, lang), "Bientôt dans Hocuspanda");
+    }
+
+    /// Visage is one of its tiles, its panda to come; Cadrage, Gestes and
+    /// Fêtes are on or off.
+    #[test]
+    fn visage_is_one_of_its_tiles_and_its_panda_is_to_come() {
+        let lang = hocus_words::Lang::French;
+        let mut s = shown(false, false);
+        assert!(!Tab::Face.on(&s));
+        assert_eq!(hint(Tab::Face, &s, lang), "");
+        s.face = "ears".to_owned();
+        assert!(Tab::Face.on(&s));
+        assert_eq!(hint(Tab::Face, &s, lang), "Oreilles : oreilles de panda");
+        let on: Vec<&str> = Tab::Face
+            .effects()
+            .filter(|e| e.on(&s))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(on, ["ears"]);
+        let panda = Tab::Face
+            .effects()
+            .find(|e| e.id == "panda")
+            .expect("its tile");
+        assert!(!panda.ready);
+        s.framing = true;
+        assert_eq!(hint(Tab::Image, &s, lang), "Cadrage : te garde au centre");
+        s.celebrations = true;
+        assert!(
+            Tab::Reactions
+                .effects()
+                .any(|e| e.id == "celebrations" && e.on(&s))
+        );
     }
 }

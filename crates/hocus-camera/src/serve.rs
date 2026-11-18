@@ -56,6 +56,7 @@ use crate::{
     presenter::{self, Cutout},
     scenes::Scenes,
     segment::{Mask, Segmenter},
+    sight::Sight,
 };
 
 /// What the compositor asks.
@@ -217,6 +218,9 @@ struct State {
     watch: Watch,
     card: Option<Card>,
     away_told: Option<AwayWhy>,
+    /// The face and the hands (lot 4): their models' threads, Visage,
+    /// Cadrage, the gestures and the confetti.
+    sight: Sight,
     /// The program's clock, for what moves.
     started: Instant,
     cutout: Box<dyn Fn(Cutout)>,
@@ -308,6 +312,7 @@ pub fn run(
             watch: Watch::default(),
             card: None,
             away_told: None,
+            sight: Sight::default(),
             started: Instant::now(),
             cutout,
             correction: None,
@@ -495,8 +500,13 @@ impl State {
                     away = look.away.is_some(),
                     locked = look.locked,
                     presenter = look.presenter,
+                    face = ?look.face,
+                    framing = look.framing,
+                    gestures = look.gestures,
+                    celebrations = look.celebrations,
                     "the camera's look"
                 );
+                self.sight.told(&look, self.read, Instant::now());
                 let changed = look.banner != self.look.banner;
                 self.look = look;
                 if changed && !self.read {
@@ -854,6 +864,7 @@ impl State {
         self.watch.reset();
         self.mask = Mask::default();
         self.card = None;
+        self.sight.reset();
         if self.away_told.take().is_some() {
             self.tell(FromCamera::Away(None));
         }
@@ -942,9 +953,19 @@ impl State {
             }
         };
         self.tell_away(away.map(|(why, _)| why));
-        // The plain frame (the banner drawn with it) when nothing of this
-        // lot changes it.
-        let plain = away.is_none() && self.look.backdrop == Backdrop::Room;
+        // The face and the hands looked at while an effect needs them, in
+        // a call's picture that shows the person.
+        let seen = self.read && away.is_none();
+        if seen {
+            self.sight.see(&self.look, &self.rgba, now);
+        } else {
+            self.sight.reset();
+        }
+        // The plain frame (the banner drawn with it) when nothing of lots
+        // 3 and 4 changes it.
+        let plain = away.is_none()
+            && self.look.backdrop == Backdrop::Room
+            && !(seen && self.sight.draws(&self.look));
         let making = Making {
             lighting: self.look.lighting,
             correction,
@@ -986,6 +1007,8 @@ impl State {
                     None => backdrop::blur(&mut self.made, &self.alpha),
                 },
             }
+            self.sight.on_person(&mut self.made, &self.look, now);
+            self.sight.over(&mut self.made, &self.look, now);
         }
         if !plain && let Some(overlay) = &self.overlay {
             look::blend(overlay, &mut self.made);

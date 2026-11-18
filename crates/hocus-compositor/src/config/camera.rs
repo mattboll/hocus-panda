@@ -1,7 +1,8 @@
 //! The camera, `[camera]` (#619, docs/design/camera.md): the screen light
 //! while an application uses the camera, and the Hocuspanda camera's
 //! effects: Lumière and the banner (lot 2), what is behind the person,
-//! « Je reviens » and the presenter (lot 3). Followed live.
+//! « Je reviens » and the presenter (lot 3), an accessory on the head,
+//! Cadrage, the gestures and the confetti (lot 4). Followed live.
 
 use serde::Deserialize;
 
@@ -33,6 +34,14 @@ pub struct Camera {
     pub presenter: bool,
     pub presenter_side: Side,
     pub presenter_size: Size,
+    /// Visage: an accessory following the head (lot 4).
+    pub face: Face,
+    /// Cadrage: the picture cropped to follow the face.
+    pub framing: bool,
+    /// Gestes: a thumb up's reaction, « main levée ».
+    pub gestures: bool,
+    /// Fêtes: confetti in the picture on the agents' moments.
+    pub celebrations: bool,
 }
 
 impl Default for Camera {
@@ -50,6 +59,48 @@ impl Default for Camera {
             presenter: false,
             presenter_side: Side::Right,
             presenter_size: Size::Medium,
+            face: Face::None,
+            framing: false,
+            gestures: true,
+            celebrations: false,
+        }
+    }
+}
+
+/// Visage's accessory on the head (lot 4), or none. The panda that takes
+/// the person's place is to come.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Face {
+    #[default]
+    None,
+    Ears,
+    Beanie,
+    Crown,
+    Glasses,
+}
+
+impl Face {
+    /// Its word in the file.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Ears => "ears",
+            Self::Beanie => "beanie",
+            Self::Crown => "crown",
+            Self::Glasses => "glasses",
+        }
+    }
+
+    /// What the camera is told.
+    pub const fn wear(self) -> Option<hocus_link::camera::Wear> {
+        use hocus_link::camera::Wear;
+        match self {
+            Self::None => None,
+            Self::Ears => Some(Wear::Ears),
+            Self::Beanie => Some(Wear::Beanie),
+            Self::Crown => Some(Wear::Crown),
+            Self::Glasses => Some(Wear::Glasses),
         }
     }
 }
@@ -233,6 +284,20 @@ mod tests {
             (camera.presenter_side, camera.presenter_size),
             (Side::Left, Size::Large)
         );
+        let camera: Camera = toml::from_str(
+            "face = \"crown\"\nframing = true\ngestures = false\ncelebrations = true\n",
+        )?;
+        assert_eq!(
+            (
+                camera.face,
+                camera.framing,
+                camera.gestures,
+                camera.celebrations
+            ),
+            (Face::Crown, true, false, true)
+        );
+        assert_eq!(camera.face.wear(), Some(hocus_link::camera::Wear::Crown));
+        assert!(toml::from_str::<Camera>("face = \"panda\"\n").is_err());
         assert!(toml::from_str::<Camera>("screen-light-warmth = \"hot\"\n").is_err());
         assert!(toml::from_str::<Camera>("screen-light-strength = 3\n").is_err());
         Ok(())

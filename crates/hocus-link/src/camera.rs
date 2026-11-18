@@ -60,9 +60,58 @@ pub struct CameraLook {
     #[serde(default)]
     pub presenter: bool,
     /// The desktop's language (`hocus_words::Lang`'s code): the presenter's
-    /// name in the in-use sign.
+    /// name in the in-use sign, « main levée ».
     #[serde(default)]
     pub lang: String,
+    /// Visage: an accessory following the head (lot 4).
+    #[serde(default)]
+    pub face: Option<Wear>,
+    /// Cadrage: the picture cropped to follow the face, 16:9 kept.
+    #[serde(default)]
+    pub framing: bool,
+    /// Gestes: a thumb up sends a rising reaction; a raised hand shows
+    /// « main levée » while it stays up.
+    #[serde(default)]
+    pub gestures: bool,
+    /// Fêtes: confetti in the picture on the agents' moments.
+    #[serde(default)]
+    pub celebrations: bool,
+    /// How many moments the agents have had since the compositor started:
+    /// each new one, confetti (with `celebrations`).
+    #[serde(default)]
+    pub moments: u64,
+}
+
+/// An accessory of Visage's, on the head (lot 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Wear {
+    /// Oreilles: a panda's ears.
+    Ears,
+    /// Bonnet.
+    Beanie,
+    /// Couronne.
+    Crown,
+    /// Lunettes.
+    Glasses,
+}
+
+impl Wear {
+    pub const ALL: [Self; 4] = [Self::Ears, Self::Beanie, Self::Crown, Self::Glasses];
+
+    /// Its word in `[camera] face`.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Ears => "ears",
+            Self::Beanie => "beanie",
+            Self::Crown => "crown",
+            Self::Glasses => "glasses",
+        }
+    }
+
+    pub fn of(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|w| w.word() == word)
+    }
 }
 
 /// A living wallpaper of the desktop's (docs/design/effects.md) that the
@@ -217,12 +266,28 @@ pub struct CameraShown {
     /// it as this ends if it muted it.
     #[serde(default)]
     pub hush: bool,
+    /// `[camera] framing`: Cadrage.
+    #[serde(default)]
+    pub framing: bool,
+    /// `[camera] face`: `none`, or an accessory's word.
+    #[serde(default)]
+    pub face: String,
+    /// `[camera] gestures`: Gestes.
+    #[serde(default)]
+    pub gestures: bool,
+    /// `[camera] celebrations`: Fêtes.
+    #[serde(default)]
+    pub celebrations: bool,
 }
 
 impl CameraShown {
     /// Whether an effect is chosen.
     pub fn effects(&self) -> bool {
-        self.lighting || self.banner || (!self.background.is_empty() && self.background != "room")
+        self.lighting
+            || self.banner
+            || self.framing
+            || (!self.background.is_empty() && self.background != "room")
+            || (!self.face.is_empty() && self.face != "none")
     }
 
     /// The violet dot on the camera's tile: an effect is on, in the

@@ -66,14 +66,18 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
     printf 'License: Expat and Apache-2.0\n'
     printf 'Comment: whisper.cpp, ggml and onnxruntime are MIT (Expat);\n'
     printf ' sherpa-onnx is Apache-2.0. All are linked statically.\n'
-    # The person segmentation model hocus-camera carries in its binary
-    # (docs/design/camera.md, crates/hocus-camera/models/LICENSE-MEDIAPIPE).
+    # The models hocus-camera carries in its binary (docs/design/camera.md,
+    # crates/hocus-camera/models/LICENSE-MEDIAPIPE).
     printf '\nFiles: usr/bin/hocus-camera\n'
-    printf 'Copyright: 2021 The MediaPipe Authors (selfie segmentation model)\n'
+    printf 'Copyright: 2021-2023 The MediaPipe Authors (selfie segmentation,\n'
+    printf ' face landmarker and hand landmarker models)\n'
     printf 'License: Expat and Apache-2.0\n'
-    printf 'Comment: MediaPipe'"'"'s selfie segmentation (landscape), its graph\n'
-    printf ' written as ONNX by scripts/camera/selfie-to-onnx.py, its weights\n'
-    printf ' unchanged; the rest of the program is Expat.\n'
+    printf 'Comment: MediaPipe'"'"'s selfie segmentation (landscape), face\n'
+    printf ' landmarker (face detector, face mesh, blendshapes) and hand\n'
+    printf ' landmarker (palm detector, hand landmarks), their graphs written\n'
+    printf ' as ONNX by scripts/camera/selfie-to-onnx.py and\n'
+    printf ' scripts/camera/landmarks-to-onnx.py, their weights unchanged; the\n'
+    printf ' rest of the program is Expat.\n'
     printf '\nLicense: Apache-2.0\n'
     printf ' On Debian systems, the full text of the Apache License 2.0 is in\n'
     printf ' /usr/share/common-licenses/Apache-2.0.\n'

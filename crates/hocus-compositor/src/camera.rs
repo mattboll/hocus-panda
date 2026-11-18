@@ -9,7 +9,9 @@
 //!   It ends when its input does: when the compositor ends, or lets it go.
 //! - **What it is told** ([`CameraLook`]): Lumière on or not, and the
 //!   banner (`[camera] banner`, its name, the current project desktop's
-//!   name in the desktop's language): at once as it starts, then as that
+//!   name in the desktop's language), the effects of lots 3 and 4, and
+//!   how many moments the agents have had (Fêtes' confetti on each new
+//!   one, [`State::camera_moment`]): at once as it starts, then as that
 //!   changes, looked at once a turn of the loop.
 //! - **What it says** ([`FromCamera`]): read or not, the camera it reads,
 //!   and the light on the face while it is read, which the screen light's
@@ -102,6 +104,9 @@ pub struct HocusCamera {
     /// many came (tests).
     pub silhouette: Option<crate::presenter::Shown>,
     pub silhouettes: u64,
+    /// The agents' moments since the compositor started: Fêtes' confetti
+    /// in the camera's pictures on each new one (lot 4).
+    pub moments: u64,
 }
 
 impl State {
@@ -151,7 +156,18 @@ impl State {
             away: c.away,
             presenter: c.presenter,
             hush: self.camera_hush(),
+            framing: c.framing,
+            face: c.face.word().to_owned(),
+            gestures: c.gestures,
+            celebrations: c.celebrations,
         }
+    }
+
+    /// An agent's moment (its tests green, its celebration): Fêtes'
+    /// confetti in the camera's pictures, whatever the desktop's own
+    /// effects do (the picture is the call's).
+    pub(crate) fn camera_moment(&mut self) {
+        self.camera.moments += 1;
     }
 
     /// The microphone held muted: the screen locked during a call (the
@@ -204,6 +220,11 @@ impl State {
             locked: self.locked(),
             presenter: self.presenter_wanted(),
             lang: lang.code().to_owned(),
+            face: c.face.wear(),
+            framing: c.framing,
+            gestures: c.gestures,
+            celebrations: c.celebrations,
+            moments: self.camera.moments,
         }
     }
 

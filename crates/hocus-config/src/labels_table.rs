@@ -88,6 +88,26 @@ pub const ALL: &[Label] = &[
         said: Said::Switch,
     },
     Label {
+        key: "camera.celebrations",
+        name: hocus_words::settings::camera::CELEBRATIONS,
+        said: Said::Switch,
+    },
+    Label {
+        key: "camera.face",
+        name: hocus_words::settings::camera::FACE,
+        said: Said::Choices(&[("none", hocus_words::settings::app_keyboard_page::NONE_2), ("ears", hocus_words::settings::camera::EARS), ("beanie", hocus_words::settings::camera::BEANIE), ("crown", hocus_words::settings::camera::CROWN), ("glasses", hocus_words::settings::camera::GLASSES)]),
+    },
+    Label {
+        key: "camera.framing",
+        name: hocus_words::settings::camera::FRAMING,
+        said: Said::Switch,
+    },
+    Label {
+        key: "camera.gestures",
+        name: hocus_words::settings::camera::GESTURES,
+        said: Said::Switch,
+    },
+    Label {
         key: "camera.lighting",
         name: hocus_words::settings::camera::LIGHTING,
         said: Said::Switch,

@@ -293,6 +293,7 @@ mod tests {
         assert_eq!(
             ids,
             [
+                "camera.gestures",
                 "touchpad.swipe-desktops",
                 "touchpad.swipe-launcher",
                 "touchpad.left-to-applications",
@@ -300,7 +301,7 @@ mod tests {
                 "shortcuts.desktop-right",
             ]
         );
-        assert_eq!(names("gesture", Lang::English)[3], "Desktop on the left");
+        assert_eq!(names("gesture", Lang::English)[4], "Desktop on the left");
     }
 
     #[test]

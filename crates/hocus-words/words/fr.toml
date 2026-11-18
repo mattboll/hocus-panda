@@ -1356,6 +1356,19 @@ presenter_size = "Taille du présentateur"
 small = "Petit"
 middle = "Moyen"
 large = "Grand"
+framing = "Cadrage"
+keeps_your_face_in_the_middle = "L’image suit ton visage et le garde au centre, en 16:9."
+face = "Visage"
+an_accessory_on_your_head = "Un accessoire qui suit ta tête."
+no_face = "Aucun"
+ears = "Oreilles"
+beanie = "Bonnet"
+crown = "Couronne"
+glasses = "Lunettes"
+gestures = "Gestes"
+a_thumb_up_sends_a_reaction = "Un pouce levé envoie une réaction dans l’image ; une main levée y montre « main levée » tant qu’elle reste levée."
+celebrations = "Fêtes"
+confetti_when_an_agent_celebrates = "Des confettis dans l’image quand un agent fête une bonne nouvelle."
 
 [settings.captures]
 screenshots = "CAPTURES D’ÉCRAN"
@@ -3021,13 +3034,14 @@ transcription = "Transcription"
 line = "transcription · {time}"
 transcribing = "Transcription de la réunion, {time}"
 
-# What the Hocuspanda camera draws in its pictures (#619, lot 3):
-# « Je reviens »'s card.
+# What the Hocuspanda camera draws in its pictures (#619): « Je reviens »'s
+# card (lot 3), the raised hand's label (lot 4).
 [camera]
 back_in_a_moment = "De retour dans un instant"
 away_a_moment = "absent depuis moins d’une minute"
 away_minutes = "absent depuis {n} min"
 away_hours = "absent depuis {h} h {mm}"
+hand_raised = "main levée"
 
 # The Hocuspanda camera's banner, under the name (#619).
 [compositor.camera]

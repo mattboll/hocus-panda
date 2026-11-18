@@ -86,6 +86,10 @@ pub fn shown() -> CameraShown {
             away: true,
             presenter: false,
             hush: false,
+            framing: false,
+            face: "none".to_owned(),
+            gestures: true,
+            celebrations: false,
         })
 }
 
@@ -111,6 +115,9 @@ pub fn choose(key: &'static str, value: bool) {
             "screen-light" => now.screen_light = value,
             "away" => now.away = value,
             "presenter" => now.presenter = value,
+            "framing" => now.framing = value,
+            "gestures" => now.gestures = value,
+            "celebrations" => now.celebrations = value,
             _ => {}
         }
         let dot = before != now.dot();
@@ -122,14 +129,16 @@ pub fn choose(key: &'static str, value: bool) {
 }
 
 /// `[camera] key` set to the word `value` (one of a tab's: Fond's
-/// `background`), as [`choose`].
+/// `background`, Visage's `face`), as [`choose`].
 pub fn choose_word(key: &'static str, value: &'static str) {
     let dot = {
         let mut shown = SHOWN.lock().unwrap_or_else(PoisonError::into_inner);
         let mut now = shown.clone().unwrap_or_else(self::shown);
         let before = now.dot();
-        if key == "background" {
-            value.clone_into(&mut now.background);
+        match key {
+            "background" => value.clone_into(&mut now.background),
+            "face" => value.clone_into(&mut now.face),
+            _ => {}
         }
         let dot = before != now.dot();
         *shown = Some(now);
