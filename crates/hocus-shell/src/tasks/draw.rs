@@ -47,7 +47,7 @@ use iced::{
     },
     window,
 };
-use iced_layershell::reexport::{
+use iced_exwlshell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
 };
 
@@ -522,18 +522,19 @@ pub fn open(bar: &str, form: Form, output: OutputOption) -> (window::Id, Vec<Mes
         )
     });
     let settings = NewLayerShellSettings {
-        size: Some(size),
+        size: crate::layer::size(size),
         layer: Layer::Top,
         anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
         exclusive_zone: Some(0),
-        margin: Some(crate::side::margin(margin)),
+        margin: Some(crate::layer::margin(crate::side::margin(margin))),
         keyboard_interactivity: KeyboardInteractivity::None,
         output_option: output,
+        blur_option: iced_exwlshell::reexport::BlurOption::None,
         events_transparent: false,
         namespace: Some(TASKS_NAMESPACE.to_owned()),
     };
     crate::side::opened(id);
-    (id, vec![Message::NewLayerShell { settings, id }])
+    (id, vec![crate::layer::open(id, settings)])
 }
 
 /// Its surface on bar `bar`.
@@ -585,12 +586,15 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
     fitted
         .map(|(size, margin)| {
             vec![
-                Message::SizeChange { id, size },
-                Message::MarginChange {
+                crate::layer::resize(id, size),
+                Some(Message::MarginChange {
                     id,
-                    margin: crate::side::moved(id, margin),
-                },
+                    margin: crate::layer::margin(crate::side::moved(id, margin)),
+                }),
             ]
+            .into_iter()
+            .flatten()
+            .collect()
         })
         .unwrap_or_default()
 }

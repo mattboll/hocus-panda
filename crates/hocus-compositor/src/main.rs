@@ -164,6 +164,8 @@ fn main() -> ExitCode {
     config.pictures = hocus_compositor::pictures_dir();
     config.home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     config.videos = hocus_compositor::record::save::videos_dir();
+    config.meeting_places = hocus_meetings::Places::from_env();
+    config.documents = hocus_meetings::documents_dir();
     // The shutter is heard in a session, not from a headless compositor
     // next to one (6.17).
     if !matches!(backend, BackendArg::Headless) {
@@ -178,6 +180,8 @@ fn main() -> ExitCode {
             .unwrap_or_else(|| PathBuf::from(name))
     };
     let shell = (!args.no_shell).then(|| args.shell.unwrap_or_else(|| beside(SHELL)));
+    // A meeting's text is made by the program beside this one.
+    config.transcriber = beside("hocus-transcribe");
     let renderer = match args.renderer {
         RendererArg::Auto => RendererChoice::Auto,
         RendererArg::Gles => RendererChoice::Gles,

@@ -1,0 +1,18 @@
+[package]
+name = "hocus-meetings"
+description = "What the compositor, the shell and hocus-transcribe share of a meeting's transcription: where its sound and its text go, its record, the models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

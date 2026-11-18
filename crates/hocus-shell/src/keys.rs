@@ -1,7 +1,7 @@
 //! The keys go to the shell's surface the compositor gave the keyboard to
 //! (#623), never to one because the shell made it last.
 //!
-//! iced_layershell hands every key to the surface layershellev calls
+//! iced_exwlshell hands every key to the surface exwlshellev calls
 //! current: the one the keyboard last entered, but also the one last
 //! pressed, and the one last made (`push_window`). Nothing in either lets
 //! the shell set it or correct it. So a surface the shell made while the
@@ -12,14 +12,14 @@
 //! So the shell follows the compositor's `wl_keyboard.enter` itself, with
 //! a keyboard of its own on iced's connection, which the compositor tells
 //! the same enters and leaves. An enter names a Wayland surface, and
-//! iced_layershell shows the shell no surface of its windows: which window
+//! iced_exwlshell shows the shell no surface of its windows: which window
 //! it is for, the shell learns from what follows. The enter makes the
-//! entered surface layershellev's current one, so:
+//! entered surface exwlshellev's current one, so:
 //!
 //! - the modifiers the compositor sends right after each enter are handed
-//!   to that window, if iced_layershell has it already;
+//!   to that window, if iced_exwlshell has it already;
 //! - else (the compositor gives the keyboard to a surface that asks for it
-//!   as soon as it knows it, before iced_layershell has it) that window
+//!   as soon as it knows it, before iced_exwlshell has it) that window
 //!   opens in iced just after, and its first key is handed to it.
 //!
 //! A window made after the enter is none of these: the compositor could
@@ -35,25 +35,25 @@
 //! that one, and the shell woken: its widgets get the event before their
 //! next one, the redraw that follows. Until the shell knows which window
 //! holds the keyboard (none of its own does, or which one is not known
-//! yet), the keys go where iced_layershell hands them.
+//! yet), the keys go where iced_exwlshell hands them.
 //!
-//! iced_layershell reads the socket for both keyboards and hands the
+//! iced_exwlshell reads the socket for both keyboards and hands the
 //! widgets their events after the read: the shell's own enter is there by
-//! then. A leave, layershellev tells its current window as modifiers
+//! then. A leave, exwlshellev tells its current window as modifiers
 //! emptied then an unfocus: a window those modifiers would have taken for
 //! an enter's is let go at that unfocus.
 //!
 //! A key typed while a surface just made has not yet opened in iced is
-//! lost (iced_layershell hands it to that surface, which it does not have
+//! lost (iced_exwlshell hands it to that surface, which it does not have
 //! yet): that lasts one round trip to the compositor.
 //!
 //! A window the shell closed may still be sent keys: those typed before
 //! the compositor heard of it (`Esc` closing a popover, `Tab` at once).
-//! layershellev, whose current surface it was, hands them to iced's first
+//! exwlshellev, whose current surface it was, hands them to iced's first
 //! window, whichever that is, and the compositor's next enter may be read
-//! with them already (#677). So the shell follows layershellev's current
+//! with them already (#677). So the shell follows exwlshellev's current
 //! window too, from the windows' events: the one last focused (an enter, a
-//! press or its making makes a surface current, and layershellev tells it
+//! press or its making makes a surface current, and exwlshellev tells it
 //! `Focused`) or opened. A keyboard event handed to another window is one
 //! of those: it says nothing of which window holds the keyboard, and the
 //! closed window, if it held it, holds it no more.
@@ -96,7 +96,7 @@ pub fn start(connection: &Connection) {
             *KEYBOARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(keyboard);
         }
         Err(err) => {
-            tracing::warn!(%err, "the keys go where iced_layershell hands them");
+            tracing::warn!(%err, "the keys go where iced_exwlshell hands them");
         }
     }
 }
@@ -149,7 +149,7 @@ impl Keyboard {
     /// Handles what iced's loop has read for the keyboard.
     fn handle(&mut self) -> bool {
         if let Err(err) = self.queue.dispatch_pending(&mut self.seat) {
-            tracing::warn!(%err, "the keyboard's events: the keys go where iced_layershell hands them");
+            tracing::warn!(%err, "the keyboard's events: the keys go where iced_exwlshell hands them");
             return false;
         }
         for told in self.seat.told.drain(..) {
@@ -164,7 +164,7 @@ impl Keyboard {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Holder {
     /// None of the shell's surfaces has the keyboard, or which one is not
-    /// known: the keys go where iced_layershell hands them.
+    /// known: the keys go where iced_exwlshell hands them.
     Unknown,
     /// The compositor entered one of the shell's surfaces, made before
     /// window `before` (see the module's comment).
@@ -195,7 +195,7 @@ struct Keys {
     /// The keyboard events handed to other windows than the one holding
     /// the keyboard, for that one, in order.
     kept: Vec<(window::Id, Event)>,
-    /// The window layershellev hands the keyboard's events to, as far as
+    /// The window exwlshellev hands the keyboard's events to, as far as
     /// the windows' events say (see the module's comment).
     current: Option<window::Id>,
 }
@@ -276,7 +276,7 @@ impl Keys {
 
     /// Where keyboard event `key`, handed to window `here`, goes.
     fn route_key(&mut self, here: window::Id, key: &keyboard::Event, entered_maybe: bool) -> Route {
-        // Handed to iced's first window, layershellev's current one closed.
+        // Handed to iced's first window, exwlshellev's current one closed.
         let gone = self.current.filter(|current| *current != here);
         if let Some(gone) = gone
             && matches!(self.holder, Holder::Window(id) | Holder::Opened { id, .. } if id == gone)
@@ -363,7 +363,7 @@ fn arrived(here: window::Id, event: &Event) -> (Vec<Event>, bool) {
 }
 
 /// A window's widgets, which get the keys the compositor gives that
-/// window, whichever window iced_layershell hands them to.
+/// window, whichever window iced_exwlshell hands them to.
 pub struct Held<'a, Message, Theme, Renderer> {
     id: window::Id,
     content: Element<'a, Message, Theme, Renderer>,
@@ -596,7 +596,7 @@ impl Dispatch<WlSeat, ()> for Seat {
 }
 
 /// Only the enters and leaves count: the keymap's descriptor is closed as
-/// it is dropped, and the keys come to iced_layershell's keyboard too.
+/// it is dropped, and the keys come to iced_exwlshell's keyboard too.
 impl Dispatch<WlKeyboard, ()> for Seat {
     fn event(
         seat: &mut Self,
@@ -655,17 +655,17 @@ mod tests {
     fn the_window_given_the_enters_modifiers_takes_the_keys_handed_elsewhere() {
         let launcher = window::Id::unique();
         let mut keys = Keys::default();
-        // Before any enter: where iced_layershell hands them.
+        // Before any enter: where iced_exwlshell hands them.
         assert_eq!(keys.route(launcher, &key()), Route::Here);
         keys.told(Told::Enter);
         assert_eq!(keys.route(launcher, &modifiers()), Route::Here);
         assert_eq!(keys.route(launcher, &key()), Route::Here);
-        // A surface made since: iced_layershell hands it the keys.
+        // A surface made since: iced_exwlshell hands it the keys.
         let bubble = window::Id::unique();
         assert_eq!(keys.route(bubble, &opened()), Route::Here);
         assert_eq!(keys.route(bubble, &key()), Route::To(launcher));
         assert_eq!(keys.route(bubble, &modifiers()), Route::To(launcher));
-        // A leave: back to iced_layershell's choice.
+        // A leave: back to iced_exwlshell's choice.
         keys.told(Told::Leave);
         assert_eq!(keys.route(bubble, &key()), Route::Here);
     }

@@ -35,7 +35,7 @@ use std::{
 
 use hocus_link::{AUTH_NAMESPACE, AUTH_NEXT, AUTH_OUT, AUTH_TOP, AuthAsk, AuthAt, ToCompositor};
 use iced::{Element, window};
-use iced_layershell::reexport::KeyboardInteractivity;
+use iced_exwlshell::reexport::KeyboardInteractivity;
 use tokio::sync::oneshot;
 
 pub use accounts::Account;

@@ -104,6 +104,7 @@ mod terminals;
 pub mod test_gpu;
 mod text_input;
 pub mod tile_drop;
+pub mod transcribe;
 mod tray;
 mod wallpaper;
 mod windows;
@@ -145,6 +146,7 @@ pub use screen_sets::Identity as ScreenIdentity;
 pub use share::ShareInfo;
 pub use shortcuts::{Action, CaptureNow, Chord, Ending, Shortcuts};
 pub use state::State;
+pub use transcribe::{Step as TranscribeStep, TranscribeInfo};
 
 use backend::Backend;
 

@@ -40,7 +40,7 @@ use std::{
 
 use hocus_link::{Form, ToCompositor};
 use iced::{Element, Length, Rectangle, widget::canvas, window};
-use iced_layershell::reexport::{
+use iced_exwlshell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
 };
 pub use stack::Input;
@@ -572,26 +572,9 @@ fn start_dnd_timer() -> Option<DndTimer> {
     })
 }
 
-/// Wider than any surface: a region as large as can be.
-const EVERYWHERE: i32 = 1 << 20;
-
-type WlRegion = wayland_client::protocol::wl_region::WlRegion;
-
 /// Surface `id` takes the pointer in `region` only, or nowhere.
 pub fn region(id: window::Id, region: Option<Rectangle>) -> Message {
-    let rect = region.map(|r| {
-        let (x, y) = (r.x.floor() as i32, r.y.floor() as i32);
-        let right = (r.x + r.width).ceil() as i32;
-        let bottom = (r.y + r.height).ceil() as i32;
-        (x, y, right - x, bottom - y)
-    });
-    let callback = iced_layershell::actions::ActionCallback::new(move |wl: &WlRegion| {
-        wl.subtract(-EVERYWHERE, -EVERYWHERE, 2 * EVERYWHERE, 2 * EVERYWHERE);
-        if let Some((x, y, w, h)) = rect {
-            wl.add(x, y, w, h);
-        }
-    });
-    Message::SetInputRegion { id, callback }
+    crate::layer::input(id, region)
 }
 
 /// Tells the compositor; else (a shell alone) wakes every surface.
@@ -616,24 +599,25 @@ fn carry_out(effect: Effect) -> Vec<Message> {
         } => {
             let pointer = taken.is_some();
             vec![
-                Message::NewLayerShell {
-                    settings: NewLayerShellSettings {
-                        size: Some(size),
+                crate::layer::open(
+                    id,
+                    NewLayerShellSettings {
+                        size: crate::layer::size(size),
                         layer: Layer::Top,
                         anchor: Anchor::Right | Anchor::Top,
                         exclusive_zone: Some(0),
-                        margin: Some(margin),
+                        margin: Some(crate::layer::margin(margin)),
                         keyboard_interactivity: KeyboardInteractivity::None,
                         output_option: if screen == crate::ALONE {
                             OutputOption::Active
                         } else {
                             OutputOption::OutputName(screen)
                         },
+                        blur_option: iced_exwlshell::reexport::BlurOption::None,
                         events_transparent: !pointer,
                         namespace: Some(namespace),
                     },
-                    id,
-                },
+                ),
                 region(id, taken),
             ]
         }
@@ -643,10 +627,11 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             margin,
             region: taken,
         } => {
-            let mut messages = vec![
-                Message::SizeChange { id, size },
-                Message::MarginChange { id, margin },
-            ];
+            let mut messages: Vec<Message> = crate::layer::resize(id, size).into_iter().collect();
+            messages.push(Message::MarginChange {
+                id,
+                margin: crate::layer::margin(margin),
+            });
             if taken.is_some() {
                 messages.push(region(id, taken));
             }
@@ -657,7 +642,7 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             crate::popover::tell(ToCompositor::Closing(namespace));
             Vec::new()
         }
-        Effect::Remove(id) => vec![Message::RemoveWindow(id)],
+        Effect::Remove(id) => vec![crate::layer::close(id)],
         // A capture's (5.9) is the shell's own: its actions here, nothing
         // to say on the bus.
         Effect::Signal(server::Signal::Action { id, key }) if capture_of(id).is_some() => {

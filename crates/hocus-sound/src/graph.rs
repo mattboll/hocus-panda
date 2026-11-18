@@ -306,6 +306,29 @@ struct Node {
     pid: Option<u32>,
 }
 
+/// What groups the streams of one application, from a stream's node's
+/// props: its sandbox's app id (`pipewire.access.portal.app_id`), else
+/// `application.name`, else `application.process.binary`, else its node's
+/// name. The compositor finds a call's output streams by it (a meeting's
+/// transcription, docs/design/meetings.md).
+pub fn app_key(
+    sandboxed: Option<&str>,
+    name: Option<&str>,
+    binary: Option<&str>,
+    node: &str,
+) -> String {
+    [sandboxed, name, binary]
+        .into_iter()
+        .flatten()
+        .find(|t| !t.is_empty())
+        .unwrap_or(node)
+        .to_owned()
+}
+
+/// The prefix of the node names of a meeting's transcription's own
+/// streams (the compositor's): not an application using the microphone.
+pub const TRANSCRIPTION_NODES: &str = "hocuspanda-transcribe-";
+
 /// Who plays a stream, from its node's props.
 #[derive(Debug, Default, Clone)]
 struct Who {
@@ -338,11 +361,12 @@ impl Who {
 
     /// What groups the streams of one application.
     fn key(&self, node: &str) -> String {
-        self.sandboxed
-            .clone()
-            .or_else(|| self.name.clone())
-            .or_else(|| self.binary.clone())
-            .unwrap_or_else(|| node.to_owned())
+        app_key(
+            self.sandboxed.as_deref(),
+            self.name.as_deref(),
+            self.binary.as_deref(),
+            node,
+        )
     }
 
     /// The names its icon may go by, the likeliest first: its icon's name,
@@ -836,6 +860,8 @@ impl Graph {
             .nodes
             .iter()
             .filter(|(id, node)| node.class == class && fed(**id))
+            // A transcription's microphone is its own tile (5.12).
+            .filter(|(_, node)| !node.name.starts_with(TRANSCRIPTION_NODES))
             .collect();
         streams.sort_by_key(|(id, _)| **id);
         let mut used: Vec<Using> = Vec::new();

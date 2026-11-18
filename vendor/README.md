@@ -1,7 +1,7 @@
 # Vendored crates
 
-Two crates of crates.io are built from here with a small change, through
-`[patch.crates-io]` in the workspace's `Cargo.toml`. Each directory is the
+One crate of crates.io is built from here with a small change, through
+`[patch.crates-io]` in the workspace's `Cargo.toml`. Its directory is the
 published crate plus one patch file, nothing else: `scripts/vendor.sh
 --check` rebuilds it from the crates.io tarball and the patch and fails on
 any difference, in CI (`vendor` job).
@@ -9,7 +9,6 @@ any difference, in CI (`vendor` job).
 | Crate | Version | Patch | Issue | Upstream |
 |---|---|---|---|---|
 | `iced_tiny_skia` | 0.14.1 | [`patches/iced_tiny_skia-0.14.1.patch`](patches/iced_tiny_skia-0.14.1.patch) | #662 | not proposed |
-| `iced_layershell` | 0.19.1 | [`patches/iced_layershell-0.19.1.patch`](patches/iced_layershell-0.19.1.patch) | #787, #821 | not proposed |
 
 ## Why
 
@@ -21,23 +20,15 @@ any difference, in CI (`vendor` job).
   for whole frames; they draw only when something changes
   ([docs/design/settings.md](../docs/design/settings.md)). 18 lines in
   `src/window/compositor.rs` and `src/lib.rs`.
-- **`iced_layershell`: the pointer's enter gives its place** (#787). iced
-  hands every event of a batch the cursor as it is after the batch, and
-  its `CursorEntered` has no place, so a press read in one batch with the
-  enter and a move after it (a busy shell) landed where the pointer went,
-  not where it came in. The enter is followed by a move to its place, as
-  winit does. In `src/multi_window.rs`.
-- **`iced_layershell`: what comes for a surface before its window is made
-  is kept for it** (#821). The window is made at the refresh of the
-  surface's first configure, which comes after the other events read in
-  the same batch: a key pressed as the launcher opened, read with that
-  configure (a busy shell), was dropped, and the launcher stayed. Those
-  events now wait for the window, at most 256 of them. In
-  `src/multi_window.rs`.
 
-Each patch also replaces the header of the published `Cargo.toml` with a
+The patch also replaces the header of the published `Cargo.toml` with a
 note of the change, and adds the crate's licence text (the tarball carries
 none; MIT asks that it goes with copies).
+
+`iced_layershell` 0.19.1 was vendored too, for the pointer's enter's place
+(#787) and what comes for a surface before its window is made (#821); it
+went with the move to its successor, `iced_exwlshell` (#857), which
+has neither change yet: both are for upstream, not for a copy here.
 
 `accesskit_unix` was vendored too, to name the shell "Hocuspanda" on AT-SPI
 (#734); that patch is gone, and the shell is named after its executable as
@@ -75,3 +66,18 @@ scripts/vendor.sh --check    # what CI runs
 
 When upstream offers the change, the directory, its patch, its line in
 `[patch.crates-io]` and in `scripts/vendor.sh` all go.
+
+## What is linked prebuilt
+
+One library is not built from its sources: sherpa-onnx's static libraries
+(Apache-2.0), with onnxruntime's inside (MIT), which `hocus-transcribe`
+tells a call's voices apart with (docs/design/meetings.md). The published
+`sherpa-onnx-sys` would download them itself, unchecked; given
+`SHERPA_ONNX_LIB_DIR`, its build links that folder's and downloads
+nothing. `scripts/prebuilt.sh` fetches the release's archive for this
+machine (`sherpa-onnx-v2.0.1-linux-x64-static-lib.tar.bz2`, or
+aarch64's), checks it against the SHA-256 it holds, and unpacks it into
+`prebuilt/sherpa-onnx/lib` (not in git), where `.cargo/config.toml`
+points that variable. CI runs it before every Rust build, and so does
+whoever builds the package. Its version is the `sherpa-onnx` crate's, held
+exactly in the root `Cargo.toml`: both move together, with the checksums.

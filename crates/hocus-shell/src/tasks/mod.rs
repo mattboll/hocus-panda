@@ -752,7 +752,7 @@ pub fn open_field(at: At) {
             if let Some(id) = draw::surface(bar) {
                 effects.push(Effect::Keyboard(
                     id,
-                    iced_layershell::reexport::KeyboardInteractivity::Exclusive,
+                    iced_exwlshell::reexport::KeyboardInteractivity::Exclusive,
                 ));
             }
         }
@@ -773,7 +773,7 @@ fn let_keyboard_go(at: &At) -> Vec<Effect> {
         return Vec::new();
     }
     draw::surface(bar)
-        .map(|id| Effect::Keyboard(id, iced_layershell::reexport::KeyboardInteractivity::None))
+        .map(|id| Effect::Keyboard(id, iced_exwlshell::reexport::KeyboardInteractivity::None))
         .into_iter()
         .collect()
 }

@@ -4,7 +4,8 @@
 //! frame leaves no frame callback behind in its client, which the shell's
 //! bubbles and pandas did for the session. The shell keeps to two of
 //! glibc's malloc arenas, not one a thread, each keeping what was freed in
-//! it (#855).
+//! it (#855), and its surfaces opened and closed all day leave no Wayland
+//! object behind (#857).
 
 use crate::common;
 
@@ -177,5 +178,88 @@ fn the_shell_keeps_to_two_malloc_arenas() -> anyhow::Result<()> {
     let pid = hp.shell_pid().context("no shell")?;
     let heaps = malloc_heaps(pid)?;
     anyhow::ensure!(heaps <= 1, "{heaps} malloc heaps besides the main arena");
+    Ok(())
+}
+
+/// What each of the shell's layer surfaces asks of the compositor besides
+/// its own: the layer shell bound for it (iced_layershell bound one a
+/// surface), its viewport and its fractional scale (never destroyed with
+/// it). #857.
+const PER_SURFACE: [&str; 3] = [
+    "zwlr_layer_shell_v1",
+    "wp_viewport",
+    "wp_fractional_scale_v1",
+];
+
+/// The launcher and the clipboard's popover opened and closed again and
+/// again: the shell holds as many layer shells, viewports and fractional
+/// scales as before.
+#[test]
+fn surfaces_opened_and_closed_leave_no_object_behind() -> anyhow::Result<()> {
+    const KEY_ESC: u32 = 1;
+    let program = common::shell_program();
+    let dir = tempfile::tempdir()?;
+    let root = dir.path();
+    let at = |p: &str| root.join(p).display().to_string();
+    let script = common::shell_script(
+        root,
+        &program,
+        &[
+            ("HOME", at("home")),
+            ("XDG_CONFIG_HOME", at("config")),
+            ("XDG_STATE_HOME", at("state")),
+            ("XDG_CACHE_HOME", at("cache")),
+            ("ICED_BACKEND", "tiny-skia".to_owned()),
+        ],
+    )?;
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            outputs: vec!["1920x1080".parse()?],
+            renderer: RendererChoice::Pixman,
+            render_node: None,
+        },
+        Config::default(),
+        Some(script),
+    )?;
+    let up = hp.dispatch_until(WAIT, |hp| hp.bar_commits() > 0)?;
+    anyhow::ensure!(up, "no bar");
+    // The bar's surfaces all made.
+    common::wait(&mut hp, std::time::Duration::from_secs(1))?;
+    let count = |hp: &Headless| PER_SURFACE.map(|interface| hp.objects(interface));
+    let before = count(&hp);
+    let launcher = |hp: &mut Headless| {
+        hp.tell_shell(hocus_link::ToShell::Launcher {
+            output: "HEADLESS-1".to_owned(),
+            scale: 120,
+        });
+    };
+    for _ in 0..10 {
+        launcher(&mut hp);
+        let open = hp.dispatch_until(WAIT, |hp| !hp.launcher_surfaces().is_empty())?;
+        anyhow::ensure!(open, "the launcher never opened");
+        launcher(&mut hp);
+        let shut = hp.dispatch_until(WAIT, |hp| hp.launcher_surfaces().is_empty())?;
+        anyhow::ensure!(shut, "the launcher never closed");
+        hp.tell_shell(hocus_link::ToShell::Clipboard {
+            output: "HEADLESS-1".to_owned(),
+        });
+        // Drawn, so that iced has its window for the key (#821).
+        let open = hp.dispatch_until(WAIT, |hp| {
+            common::drawn_popovers(hp).len() == 1
+                && hp.keyboard_layer().as_deref() == Some(hocus_link::POPOVER_NAMESPACE)
+        })?;
+        anyhow::ensure!(open, "the clipboard's history never opened");
+        hp.key(KEY_ESC, true);
+        hp.key(KEY_ESC, false);
+        let shut = hp.dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+        anyhow::ensure!(shut, "the clipboard's history never closed");
+    }
+    common::wait(&mut hp, std::time::Duration::from_secs(1))?;
+    let after = count(&hp);
+    eprintln!("{PER_SURFACE:?}: {before:?} before, {after:?} after");
+    anyhow::ensure!(
+        after == before,
+        "{PER_SURFACE:?}: {before:?} before 20 surfaces, {after:?} after"
+    );
     Ok(())
 }

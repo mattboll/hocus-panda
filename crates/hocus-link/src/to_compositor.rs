@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AuthAsk, BadLine, CaptureAsk, Clip, DeskTile, DesktopTo, LeaveAsk, LockAsk, RecordAsk,
-    RunAction, ShareAsk, WindowAction, emoji_text, text::tidy, wire,
+    RunAction, ShareAsk, TranscribeAsk, WindowAction, emoji_text, text::tidy, wire,
 };
 
 /// An application the launcher starts (5.1), as its desktop entry says: its id
@@ -173,6 +173,9 @@ pub enum ToCompositor {
     /// The bar's item pauses, goes on with or stops the recording; a
     /// recording's thumbnail deletes or drags it (5.10, [`RecordAsk`]).
     Record(RecordAsk),
+    /// The meeting card's transcription starts, or stops
+    /// (docs/design/meetings.md, [`TranscribeAsk`]).
+    Transcribe(TranscribeAsk),
     /// The user clicked a tray icon (5.14b): the shell is about to call the
     /// item's `Activate` or `SecondaryActivate`. `pid` is the process of the
     /// item's D-Bus connection (0: not known). The compositor answers at once

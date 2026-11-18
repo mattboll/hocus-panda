@@ -15,6 +15,7 @@ cat > "$work/expected" <<LIST
 -rw-r--r-- ./etc/pam.d/hocuspanda
 -rwxr-xr-x ./usr/bin/hocus
 -rwxr-xr-x ./usr/bin/hocus-settings
+-rwxr-xr-x ./usr/bin/hocus-transcribe
 -rwxr-xr-x ./usr/bin/hocuspanda
 -rwxr-xr-x ./usr/bin/hocuspanda-session
 -rwxr-xr-x ./usr/bin/hocuspanda-shell

@@ -1,0 +1,43 @@
+[package]
+name = "hocus-transcribe"
+description = "Writes a meeting's text from its recorded sound, on the laptop: whisper.cpp for the words, sherpa-onnx for the call's voices"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hocus-transcribe"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+hocus-meetings.workspace = true
+# A panic said in the log before the program ends (#778).
+hocus-panic.workspace = true
+hocus-words.workspace = true
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+# Its own priority, lowered as it starts.
+rustix = { workspace = true, features = ["process"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# The models' downloads, checked; TLS by rustls on ring, against the
+# system's certificates, as hocus-day's.
+sha2.workspace = true
+ureq.workspace = true
+rustls.workspace = true
+# The words (whisper.cpp, MIT; its binding is under the Unlicense) and the
+# call's voices (sherpa-onnx, Apache-2.0, with onnxruntime, MIT: linked
+# from the archive scripts/prebuilt.sh fetches and checks).
+# On the GPU through Vulkan (any vendor's), else on the CPU.
+whisper-rs = { workspace = true, features = ["vulkan"] }
+# The Vulkan devices, their kind and memory, to choose one.
+ash.workspace = true
+sherpa-onnx.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

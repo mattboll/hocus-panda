@@ -1,8 +1,7 @@
 //! A list's wheel, as the canvases had it: a mouse's notch scrolls a
-//! given height (two rows), not iced's 60 px a line, and a touchpad's
-//! pixels are taken back to logical ones (iced_layershell hands them
-//! multiplied by the surface's scale, #488). The scrollable inside sees
-//! the scrolling as pixels.
+//! given height (two rows), not iced's 60 px a line, and a touchpad by
+//! its logical pixels (#488). The scrollable inside sees the scrolling as
+//! pixels.
 
 use iced::{
     Element, Event, Length, Rectangle, Size, Vector,
@@ -12,7 +11,7 @@ use iced::{
     },
 };
 
-use crate::popover::kit::{self, Wheel};
+use crate::popover::kit::Wheel;
 
 /// `content` (a scrollable), a notch of the wheel scrolling `notch` px.
 pub struct Notched<'a, M> {
@@ -128,7 +127,7 @@ impl<M> Widget<M, iced::Theme, iced::Renderer> for Notched<'_, M> {
             && cursor.is_over(layout.bounds())
         {
             let wheel = tree.state.downcast_mut::<Wheel>();
-            let by = wheel.down(delta, self.notch, kit::popover_scale());
+            let by = wheel.down(delta, self.notch);
             if by == 0.0 {
                 shell.capture_event();
                 return;

@@ -1161,7 +1161,7 @@ are later slices'.
 - **Who does what.** The compositor decides where the bars are and in
   which form, and keeps their space whether the shell runs or not, so that
   nothing moves while the shell restarts. The shell (`hocuspanda-shell`,
-  iced 0.14 and iced_layershell) draws one layer surface per bar, anchored
+  iced 0.14 and iced_exwlshell) draws one layer surface per bar, anchored
   right, top and bottom with 8 px layer-shell margins and an exclusive
   zone of 0: the bar itself, nothing transparent around it. It is as wide
   as the form, and as the full form while a switch is under way, so that
@@ -1360,7 +1360,7 @@ control panel is not part of the product.
 - **A layer surface, not an xdg_popup.** A popover is a layer surface of
   the shell's (`hocus-bar-popover`), anchored right and bottom, its
   margins putting it 8 px left of the bar and its bottom where §9 says.
-  iced_layershell's popups take their grab serial only in the dispatch of
+  iced_exwlshell's popups take their grab serial only in the dispatch of
   a press and cannot be moved by an offset; a hover must not grab; and
   the compositor's popup grabs serve windows' menus. The layer surface
   takes the keyboard when a click opened it (`exclusive`), and when
@@ -1861,14 +1861,13 @@ What issue #465 changes under the five popovers, nothing on screen.
   the brightness's 8 px between its slot, its slider and its value).
 - **The wheel's notches** count each, a fast spin's several in one event
   too (#472): in the desktops' tiles, the brightness's slider and the
-  lists. iced_layershell hands them multiplied by the surface's scale, so
-  the compositor tells each bar's screen's scale with the bar (`bar OUTPUT
-  FORM SINCE SCALE`, in 120ths), which all of a bar's surfaces share, and
-  the shell divides by it.
-- **A touchpad's pixels** are multiplied by the scale too; the kit's
-  `Wheel` divides them as it does the notches, so a list scrolls by the
-  logical pixels the fingers moved, and the touchpad's notches are 15
-  logical px, at any scale (#488). Every list and level counts through it:
+  lists. iced_exwlshell hands them as they are at any scale
+  (iced_layershell multiplied them by the surface's scale, which the shell
+  divided by until #857).
+- **A touchpad's pixels** come in logical pixels: through the kit's
+  `Wheel`, a list scrolls by the logical pixels the fingers moved, and the
+  touchpad's notches are 15 logical px, at any scale (#488). Every list
+  and level counts through it:
   the bar's sound and brightness rows (#487, which counted a fast spin as
   one notch) and the calendar's list among them.
 - **Bluetooth's keys** lay the popover out from what it shows now, as the
@@ -1978,9 +1977,9 @@ bar's items", below).
    …), …])`, at the mockup's sizes (`popover::kit`'s constants). The
    shared parts: the header, dividers, notes, spaced labels
    (`parts::label`), the small button, a connected block, a list's row
-   (`parts::row_button`), a list that scrolls (`parts::list`; a notch of
-   the wheel two rows and a touchpad's logical pixels with
-   `parts::list_by`), spaced capitals cut to a room (`parts::spaced`;
+   (`parts::row_button`), a list that scrolls (`parts::list`, a notch of
+   the wheel two of the kit's rows, a touchpad its logical pixels; another
+   notch with `parts::list_by`), spaced capitals cut to a room (`parts::spaced`;
    any spacing, any font: `parts::spaced_by`), the Settings' link, the
    header's switch (`parts::Knob`), a spinner, a glyph
    (`parts::drawn(w, h, |frame, size| …)`, the canvas's own drawing;
@@ -3489,6 +3488,9 @@ the machine).
   again, the time's size, the graph's
   links, the popover's layout, the `/proc` reading's bound and a holder
   found by its program.
+- **A meeting's transcription** (#618, 2026-11-17): a red tile of its own
+  after the camera's, its waveform and its time; its line and its stop in
+  the popover. [meetings.md](meetings.md).
 - **Not built**: the camera's light as a privacy indicator of its own
   (none is read: the device's use stands for it); a portal's camera
   sessions told apart from other streams (they are streams).
@@ -3758,6 +3760,10 @@ meeting, a button joins it), with the maintainer's spec (§4 group 2, §5,
   (`screenshots_for_the_pull_request`, `HOCUS_SHOTS=dir`).
 - **Not built**: the secretary's meeting line in her briefing (4.6);
   names for screen readers (§11).
+- **Transcribing it** (#618, 2026-11-17): in progress, its call using the
+  microphone, the card's button is Transcrire, then a stop with a red dot
+  before its time line; the mini popover's Transcrire under Rejoindre.
+  [meetings.md](meetings.md).
 
 ### Day.3, Today (2026-11-04)
 
@@ -4701,7 +4707,7 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   drawing nothing and taking no pointer while it lists nothing (10 px in
   the gap over the desktops: tiny-skia refuses a buffer of one pixel at a
   fractional scale), and placed from the bar's bottom only once the bar
-  knows its height (a place off a short screen ended the shell). iced_layershell hands
+  knows its height (a place off a short screen ended the shell). iced_layershell handed
   the keys to the surface made last: one made as a window opens, while
   the emoji picker or the launcher holds the keyboard, took their typing.
   Since #623 the shell hands every key to the surface the compositor

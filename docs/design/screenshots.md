@@ -374,7 +374,7 @@ All encoding and writing happen off the loop.
   drawn, and held there while they show (#594): iced's GPU renderer
   uploads an image of more than 2 MiB on a thread of its own and draws
   nothing for it meanwhile, and the redraw it asks for once done never
-  comes (iced_layershell drops it), so each new mark took the picture
+  comes (iced_layershell dropped it), so each new mark took the picture
   away until something else drew the editor again.
 - **Keys**: while typing, `Enter` keeps the text, `Escape` drops it,
   `Backspace` takes a character back; a click elsewhere on the image, a

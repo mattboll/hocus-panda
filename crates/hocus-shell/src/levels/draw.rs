@@ -609,7 +609,7 @@ impl Levels {
                     Some(Item::Brightness) => (LevelKey::BrightnessUp, LevelKey::BrightnessDown),
                     _ => return None,
                 };
-                let notches = state.wheel.notches(delta, popover::kit::scale(&self.bar));
+                let notches = state.wheel.notches(delta);
                 for _ in 0..notches.unsigned_abs() {
                     super::key(if notches > 0 { up } else { down });
                 }

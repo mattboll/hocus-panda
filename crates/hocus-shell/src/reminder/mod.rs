@@ -50,7 +50,7 @@ use hocus_day::{
 };
 use hocus_link::{BUBBLE_OUT, EDGE, Form, ToCompositor};
 use iced::{Element, Rectangle, window};
-use iced_layershell::reexport::{
+use iced_exwlshell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings, OutputOption,
 };
 use jiff::{SignedDuration, Zoned};
@@ -1001,7 +1001,7 @@ impl Shown {
                         .push((opened.id, now + BUBBLE_OUT + LEAVE_MARGIN));
                 } else {
                     draw::forget(opened.id);
-                    messages.push(Message::RemoveWindow(opened.id));
+                    messages.push(crate::layer::close(opened.id));
                 }
             }
         }
@@ -1009,25 +1009,26 @@ impl Shown {
             match self.opened.get_mut(&key) {
                 None => {
                     let namespace = hocus_link::reminder_namespace(key.1);
-                    messages.push(Message::NewLayerShell {
-                        settings: NewLayerShellSettings {
-                            size: Some(want.size),
+                    messages.push(crate::layer::open(
+                        want.id,
+                        NewLayerShellSettings {
+                            size: crate::layer::size(want.size),
                             // Over a fullscreen window too.
                             layer: Layer::Overlay,
                             anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
                             exclusive_zone: Some(0),
-                            margin: Some(crate::side::margin(want.margin)),
+                            margin: Some(crate::layer::margin(crate::side::margin(want.margin))),
                             keyboard_interactivity: KeyboardInteractivity::None,
                             output_option: if key.0 == crate::ALONE {
                                 OutputOption::Active
                             } else {
                                 OutputOption::OutputName(key.0.clone())
                             },
+                            blur_option: iced_exwlshell::reexport::BlurOption::None,
                             events_transparent: false,
                             namespace: Some(namespace),
                         },
-                        id: want.id,
-                    });
+                    ));
                     messages.push(crate::notifications::region(want.id, Some(want.tab)));
                     crate::side::opened(want.id);
                     self.opened.insert(key, want);
@@ -1036,13 +1037,13 @@ impl Shown {
                     if (opened.size, opened.margin, opened.tab)
                         != (want.size, want.margin, want.tab)
                     {
-                        messages.push(Message::SizeChange {
-                            id: opened.id,
-                            size: want.size,
-                        });
+                        messages.extend(crate::layer::resize(opened.id, want.size));
                         messages.push(Message::MarginChange {
                             id: opened.id,
-                            margin: crate::side::moved(opened.id, want.margin),
+                            margin: crate::layer::margin(crate::side::moved(
+                                opened.id,
+                                want.margin,
+                            )),
                         });
                         messages.push(crate::notifications::region(opened.id, Some(want.tab)));
                         opened.size = want.size;
@@ -1067,7 +1068,7 @@ fn remove_left(now: Instant) {
         gone.into_iter()
             .map(|(id, _)| {
                 draw::forget(id);
-                Message::RemoveWindow(id)
+                crate::layer::close(id)
             })
             .collect()
     });

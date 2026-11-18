@@ -70,6 +70,10 @@ const CALENDAR_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 const CALENDAR_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const JOIN_HOVER: Ink = Ink::Dark(Color::from_rgb8(0x6E, 0x9B, 0xF2));
 const RULE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+const TRANSCRIBE_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const TRANSCRIBE_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.18));
+const STOP_FILL: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.22));
+const STOP_HOVER: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.32));
 const THEN_GAP: f32 = 7.0;
 const THEN_TIME: f32 = 11.0;
 
@@ -77,6 +81,11 @@ const THEN_TIME: f32 = 11.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Join,
+    /// Transcrire (docs/design/meetings.md): its asking popover takes this
+    /// one's place, or it starts at once after "Ne plus demander".
+    Transcribe,
+    /// Its transcription stops.
+    Stop,
     Calendar,
 }
 
@@ -127,6 +136,19 @@ fn layout(card: &Card) -> Layout {
         y += GAP;
         buttons.push((
             Target::Join,
+            Rectangle::new(Point::new(left, y), Size::new(room, JOIN)),
+        ));
+        y += JOIN;
+    }
+    let transcribe = match crate::transcribe::button(card) {
+        crate::transcribe::Button::Transcribe => Some(Target::Transcribe),
+        crate::transcribe::Button::Stop => Some(Target::Stop),
+        _ => None,
+    };
+    if let Some(target) = transcribe {
+        y += GAP;
+        buttons.push((
+            target,
             Rectangle::new(Point::new(left, y), Size::new(room, JOIN)),
         ));
         y += JOIN;
@@ -357,6 +379,35 @@ fn button_of<'a>(words: Words, target: Target, focus: Option<Target>) -> El<'a> 
                 words.join_call(),
             )
         }
+        Target::Transcribe | Target::Stop => {
+            let (word, name) = if target == Target::Transcribe {
+                (
+                    hocus_words::shell::transcribe::TRANSCRIBE.get(words.lang()),
+                    hocus_words::shell::transcribe::TRANSCRIBE_THE_MEETING.get(words.lang()),
+                )
+            } else {
+                let stop = hocus_words::shell::transcribe::STOP.get(words.lang());
+                (stop, stop)
+            };
+            let wave = drawn(JOIN_ICON, JOIN_ICON, |f, s| {
+                crate::in_use::draw::waveform(f, Rectangle::new(Point::ORIGIN, s), TEXT.get());
+            });
+            (
+                container(
+                    row![
+                        wave,
+                        gap(JOIN_ICON_GAP),
+                        said(word, JOIN_TEXT, MANROPE_BOLD, TEXT.get())
+                    ]
+                    .align_y(Vertical::Center),
+                )
+                .center(Length::Fill)
+                .into(),
+                JOIN,
+                JOIN_RADIUS,
+                name,
+            )
+        }
         Target::Calendar => (
             container(said(
                 words.show_in_calendar(),
@@ -380,6 +431,10 @@ fn button_of<'a>(words: Words, target: Target, focus: Option<Target>) -> El<'a> 
             let fill = match (target, lit) {
                 (Target::Join, false) => JOIN_BLUE,
                 (Target::Join, true) => JOIN_HOVER,
+                (Target::Transcribe, false) => TRANSCRIBE_FILL,
+                (Target::Transcribe, true) => TRANSCRIBE_HOVER,
+                (Target::Stop, false) => STOP_FILL,
+                (Target::Stop, true) => STOP_HOVER,
                 (Target::Calendar, false) => CALENDAR_FILL,
                 (Target::Calendar, true) => CALENDAR_HOVER,
             };
@@ -415,6 +470,12 @@ fn say(words: Words, card: &Card, layout: &Layout, ui: &mut Ui) {
     for (target, _) in &layout.buttons {
         said.push(match target {
             Target::Join => words.join().to_owned(),
+            Target::Transcribe => hocus_words::shell::transcribe::TRANSCRIBE
+                .get(words.lang())
+                .to_owned(),
+            Target::Stop => hocus_words::shell::transcribe::STOP
+                .get(words.lang())
+                .to_owned(),
             Target::Calendar => words.show_in_calendar().to_owned(),
         });
     }
@@ -445,6 +506,25 @@ fn act(target: Target) {
             super::send(crate::meeting::join().into_iter().collect());
             event(Seen::Chosen);
         }
+        // The asking popover takes this one's place, beside the mark.
+        Target::Transcribe if !crate::transcribe::never_ask() => {
+            let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
+            if let Some(bar) = bar {
+                super::open_asked(
+                    &bar,
+                    super::Item::Transcribe,
+                    Some(super::Item::MeetingMark),
+                );
+            }
+        }
+        Target::Transcribe => {
+            super::send(crate::transcribe::start().into_iter().collect());
+            event(Seen::Chosen);
+        }
+        Target::Stop => {
+            super::send(crate::transcribe::stop().into_iter().collect());
+            event(Seen::Chosen);
+        }
         // The calendar takes this popover's place (it closes it).
         Target::Calendar => {
             let bar = super::with(|c| c.open_on().map(|(bar, _)| bar.to_owned()));
@@ -472,6 +552,9 @@ mod tests {
             page: page.then(|| "https://calendar.example.org/event/1".into()),
             place: Some("Salle Jupiter".into()),
             then: then.then(|| ("15:00".into(), "Entretien".into())),
+            start_at: "2026-11-04T14:00:00Z".into(),
+            end_at: "2026-11-04T14:30:00Z".into(),
+            attendees: Vec::new(),
         }
     }
 

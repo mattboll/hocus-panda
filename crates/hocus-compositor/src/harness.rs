@@ -1229,6 +1229,16 @@ impl Headless {
     }
 
     /// What the shell's capture toolbar says when clicked, as if it was.
+    /// The shell's `transcribe` line, as if it had sent it.
+    pub fn transcribe_ask(&mut self, ask: hocus_link::TranscribeAsk) {
+        self.app.state.transcribe_asked(ask);
+    }
+
+    /// The meetings' recording and the jobs making their texts.
+    pub fn transcriptions(&self) -> crate::TranscribeInfo {
+        self.app.state.transcribe.info()
+    }
+
     pub fn capture_ask(&mut self, ask: hocus_link::CaptureAsk) {
         self.app.state.capture_asked(ask);
     }

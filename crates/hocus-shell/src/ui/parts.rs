@@ -279,16 +279,26 @@ pub fn row_button<'a, M: Clone + 'a>(
         .on_press_maybe(press)
 }
 
-/// A list's rows, scrolling past `most` px, its scrollbar 6 px; whether
-/// the pointer is over it told (`over`), for its rows hold their order
-/// then. Named `id`, which a row is revealed in.
+/// A list's rows, scrolling past `most` px, its scrollbar 6 px, two of
+/// the kit's rows a notch of the wheel; whether the pointer is over it
+/// told (`over`), for its rows hold their order then. Named `id`, which a
+/// row is revealed in.
 pub fn list<'a, M: Clone + 'a>(
     rows: El<'a, M>,
     id: &'static str,
     most: f32,
     over: fn(bool) -> M,
 ) -> El<'a, M> {
-    list_by(rows, id, most, Some(over), None)
+    // iced's 60 px a line came with the notch's pixels after it under
+    // iced_layershell, 75 px a notch at ×1 (more at ×2): two rows, 76 px,
+    // at any scale (#857).
+    list_by(
+        rows,
+        id,
+        most,
+        Some(over),
+        Some(2.0 * (kit::ROW + kit::ROW_GAP)),
+    )
 }
 
 /// A list as [`list`], the pointer over it told if asked, a notch of the

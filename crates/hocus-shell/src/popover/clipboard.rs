@@ -42,7 +42,7 @@ use iced::{
     },
     window,
 };
-use iced_layershell::reexport::KeyboardInteractivity;
+use iced_exwlshell::reexport::KeyboardInteractivity;
 use jiff::Zoned;
 
 use super::{Effect, Event as Seen, Pressed, event, kit};

@@ -55,6 +55,7 @@ pub mod session;
 pub mod setup;
 pub mod sound;
 pub mod tasks;
+pub mod transcribe;
 pub mod tray;
 pub mod wifi;
 pub mod window_menu;
@@ -86,7 +87,7 @@ use crate::ui::{
     cone::Cone,
     ring::{Declared, Ring},
 };
-use iced_layershell::reexport::KeyboardInteractivity;
+use iced_exwlshell::reexport::KeyboardInteractivity;
 
 /// Hovering a mini form's item this long opens its popover.
 pub const HOVER_OPEN: Duration = Duration::from_millis(150);
@@ -1199,6 +1200,9 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Calendar => None,
         Item::Meeting => crate::meeting::open_in_calendar(&bar),
         Item::Join => crate::meeting::join(),
+        // Transcrire after "Ne plus demander": at once.
+        Item::Transcribe => crate::transcribe::start(),
+        Item::TranscribeStop => crate::transcribe::stop(),
         Item::TodayLine(row) => crate::today::open(&bar, usize::from(row)),
         Item::TodayMore => crate::today::open_more(&bar),
         Item::TaskAdd => Some(Effect::Tasks(crate::tasks::Act::Add { bar })),
@@ -1346,7 +1350,7 @@ static KEYS: Mutex<Vec<Pressed>> = Mutex::new(Vec::new());
 
 /// A key pressed on one of the shell's surfaces other than the popover,
 /// with the `modifiers` held and the `text` it typed, for what holds the
-/// keyboard. layershellev hands keys to the surface last clicked, not to
+/// keyboard. exwlshellev hands keys to the surface last clicked, not to
 /// the one the keyboard entered: a click on an item whose release comes
 /// after its popover took the keyboard sends the keys to the item's
 /// surface. So the popover's keys go to it (woken to take them), and the

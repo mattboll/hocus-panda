@@ -91,6 +91,7 @@ mod tests {
             page: None,
             description: None,
             alarms: Vec::new(),
+            attendees: Vec::new(),
         }
     }
 
@@ -100,6 +101,7 @@ mod tests {
         assert_eq!(lead(&event(), defaults), Some(5));
         let alarmed = Event {
             alarms: vec![15, 2],
+            attendees: Vec::new(),
             ..event()
         };
         assert_eq!(lead(&alarmed, defaults), Some(15));
@@ -120,6 +122,7 @@ mod tests {
         let cancelled = Event {
             status: Status::Cancelled,
             alarms: vec![10],
+            attendees: Vec::new(),
             ..event()
         };
         let all_day = Event {

@@ -2,45 +2,45 @@
 //! bar opens on the screen the compositor names and never on the one
 //! under the pointer (#540, #552, #559).
 //!
-//! iced_layershell finds the screen of a surface by its xdg-output name,
+//! iced_exwlshell finds the screen of a surface by its xdg-output name,
 //! in a cache it does not show. When it does not know the name yet, as
 //! for a screen just plugged in, it asks for the surface on no screen, and
 //! the compositor puts it under the pointer. So the shell opens a bar only
-//! once it knows the name itself, having learnt it the way iced_layershell
+//! once it knows the name itself, having learnt it the way iced_exwlshell
 //! does, one step behind it at each step:
 //!
-//! 1. the screen's global: iced_layershell binds its `wl_output` as it
+//! 1. the screen's global: iced_exwlshell binds its `wl_output` as it
 //!    reads it, with an xdg-output of its toolkit's (sctk);
-//! 2. that output's `done`, after the xdg-output's events: iced_layershell
+//! 2. that output's `done`, after the xdg-output's events: iced_exwlshell
 //!    asks for the xdg-output of its cache;
 //! 3. that xdg-output's name, which fills its cache.
 //!
 //! The shell's queue, on iced's connection, takes the same steps, each
-//! request made only from the shell's update ([`step`]). iced_layershell
+//! request made only from the shell's update ([`step`]). iced_exwlshell
 //! reads the connection, handles every event read, makes the requests
 //! they call for, and only then runs the update (its `NormalDispatch`;
 //! it reads again only after, as it draws). So when the shell's update
-//! sees an event, iced_layershell has handled it, and every event that
+//! sees an event, iced_exwlshell has handled it, and every event that
 //! came before it on the connection.
 //!
 //! Steps 2 and 3 are answers to the shell's own requests, made after
-//! iced_layershell's for the same step: they come after iced_layershell's
-//! answers, so when the shell sees its name, iced_layershell has its own.
+//! iced_exwlshell's for the same step: they come after iced_exwlshell's
+//! answers, so when the shell sees its name, iced_exwlshell has its own.
 //! Step 1 is not an answer: the compositor announces a global to every
 //! registry at once, and the shell's registry, older, comes first. It
 //! writes at most 4 KiB at a time, so the two can reach the shell apart,
 //! the rest at its next flush (#559): an update between them binds the
-//! screen before iced_layershell has seen it, and each step after is one
-//! ahead of iced_layershell's instead of one behind. So the shell first
+//! screen before iced_exwlshell has seen it, and each step after is one
+//! ahead of iced_exwlshell's instead of one behind. So the shell first
 //! asks for a `wl_display.sync`, its fence: the compositor answers it
 //! after the announcements it made before, so when the shell sees the
-//! answer, iced_layershell has seen the global and bound the screen. One
+//! answer, iced_exwlshell has seen the global and bound the screen. One
 //! request per screen, no round trip counted, no timer: the order is the
 //! protocol's.
 //!
-//! The one update iced_layershell runs elsewhere is a held key's repeat,
+//! The one update iced_exwlshell runs elsewhere is a held key's repeat,
 //! from a timer of its loop: an update then can see an event that
-//! iced_layershell reads in the same turn but handles just after. The
+//! iced_exwlshell reads in the same turn but handles just after. The
 //! compositor's own defence (one of the bar's surfaces asked for on no
 //! screen goes to the screen lacking it) covers that.
 //!
@@ -68,13 +68,13 @@ use wayland_protocols::xdg::xdg_output::zv1::client::{
     zxdg_output_v1::{self, ZxdgOutputV1},
 };
 
-/// The screens' names the shell knows, which iced_layershell knows too.
+/// The screens' names the shell knows, which iced_exwlshell knows too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Known {
     /// The names of the screens the compositor has given.
     Names(Vec<String>),
     /// The names cannot be known (no connection, no xdg-output):
-    /// iced_layershell is left to find the screen as it can.
+    /// iced_exwlshell is left to find the screen as it can.
     Unknowable,
 }
 
@@ -117,7 +117,7 @@ pub fn changes() -> impl iced::futures::Stream<Item = ()> {
 
 /// Makes the screens' queue on `connection`, the one iced draws on. The
 /// screens there are bound later, by the shell's first update, after
-/// iced_layershell's own.
+/// iced_exwlshell's own.
 pub fn start(connection: &Connection) {
     match Outputs::new(connection) {
         Ok(outputs) => {
@@ -152,7 +152,7 @@ enum Screen {
     /// The fence asked for (see the module's comment); its answer has not
     /// come.
     Fencing { version: u32, fence: WlCallback },
-    /// The fence answered: iced_layershell has bound the screen, the
+    /// The fence answered: iced_exwlshell has bound the screen, the
     /// shell's own binding is due.
     Fenced { version: u32 },
     /// Bound; its first `done` has not come.
@@ -165,7 +165,7 @@ enum Screen {
     Named(WlOutput, ZxdgOutputV1, String),
     /// Its name, and none of the shell's objects left on it. The
     /// compositor tells a surface its screens on every `wl_output` its
-    /// client has; iced_layershell keeps the last one, and closes the
+    /// client has; iced_exwlshell keeps the last one, and closes the
     /// surface when any screen goes if that one is not its own.
     Known(String),
 }

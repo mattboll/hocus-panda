@@ -12,8 +12,15 @@
 //!   along its bottom shows the share gone.
 //! - **The mark** (mini form): 30 × 4, radius 2, in a 48 × 16 button.
 //!
+//! While its meeting is in progress and an application uses the
+//! microphone, its button is **Transcrire** (`rgba(255,255,255,0.10)`,
+//! lit `0.18`, the mockup's waveform); while that meeting is transcribed,
+//! a stop (a red square on `rgba(242,84,91,0.22)`), and a red dot
+//! (`#F2545B`, 6 px) pulses before its time line (docs/design/meetings.md).
+//!
 //! It draws when what it shows changes (the minute's change, the day's),
-//! under the pointer, and while its colours change; never at rest.
+//! under the pointer, while its colours change, and while its red dot
+//! pulses; never at rest.
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -32,6 +39,7 @@ use iced::{
 
 use super::{Card, Look, Phase, Words};
 use crate::theme::Ink;
+use crate::transcribe::Button;
 use crate::{
     Message,
     levels::draw::{DIM, MANROPE, MANROPE_BOLD, TEXT, faded, rgb},
@@ -78,6 +86,21 @@ const JOIN_BLUE_HOVER: Ink = Ink::Dark(rgb(0x6E9BF2));
 const JOIN_GREY: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.09));
 const JOIN_GREY_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.14));
 const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+/// The transcription's button, and its stop (docs/design/meetings.md).
+const TRANSCRIBE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+const TRANSCRIBE_LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.18));
+const STOP: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.22));
+const STOP_LIT: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.32));
+const RED: Ink = Ink::Dark(rgb(0xF2545B));
+const WAVE: f32 = 16.0;
+const STOP_SQUARE: f32 = 14.0;
+/// The red dot before the time line, and its pulse: from 0.45 of its
+/// opacity to 1 and back over 1.6 s.
+const DOT: f32 = 6.0;
+const DOT_GAP: f32 = 4.0;
+const PULSE: Duration = Duration::from_millis(1600);
+const PULSE_LOW: f32 = 0.45;
+const PULSE_STEP: Duration = Duration::from_millis(50);
 const OPEN: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 
 /// The card's fill and border in `look`.
@@ -162,6 +185,8 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
 enum Part {
     Card,
     Join,
+    Transcribe,
+    Stop,
     Mark,
 }
 
@@ -170,6 +195,8 @@ impl Part {
         match self {
             Self::Card => Item::Meeting,
             Self::Join => Item::Join,
+            Self::Transcribe => Item::Transcribe,
+            Self::Stop => Item::TranscribeStop,
             Self::Mark => Item::MeetingMark,
         }
     }
@@ -178,10 +205,29 @@ impl Part {
         match item {
             Item::Meeting => Some(Self::Card),
             Item::Join => Some(Self::Join),
+            Item::Transcribe => Some(Self::Transcribe),
+            Item::TranscribeStop => Some(Self::Stop),
             Item::MeetingMark => Some(Self::Mark),
             _ => None,
         }
     }
+
+    /// The button's part for `button`.
+    fn of_button(button: Button) -> Option<Self> {
+        match button {
+            Button::None => None,
+            Button::Join => Some(Self::Join),
+            Button::Transcribe => Some(Self::Transcribe),
+            Button::Stop => Some(Self::Stop),
+        }
+    }
+}
+
+/// The red dot's opacity `t` into its pulse (ease-in-out).
+pub fn pulse(t: Duration) -> f32 {
+    let phase = (t.as_secs_f32() / PULSE.as_secs_f32()).fract();
+    let k = 0.5 - 0.5 * (phase * std::f32::consts::TAU).cos();
+    PULSE_LOW + (1.0 - PULSE_LOW) * k
 }
 
 /// The next meeting of bar `bar` on its surface.
@@ -245,8 +291,8 @@ impl View {
             [(Form::Full, _)] => {
                 let rect = self.card_rect(size);
                 let mut parts = Vec::new();
-                if card.video.is_some() {
-                    parts.push((Part::Join, join_rect(rect)));
+                if let Some(part) = Part::of_button(crate::transcribe::button(card)) {
+                    parts.push((part, join_rect(rect)));
                 }
                 parts.push((Part::Card, rect));
                 parts
@@ -291,8 +337,17 @@ impl Items for View {
             .parts(size, &card)
             .into_iter()
             .map(|(part, rect)| {
+                let transcribe = |text: hocus_words::Text| text.get(self.words.lang()).to_owned();
                 let (name, radius) = match part {
                     Part::Join => (self.words.join_call().to_owned(), JOIN_RADIUS),
+                    Part::Transcribe => (
+                        transcribe(hocus_words::shell::transcribe::TRANSCRIBE_THE_MEETING),
+                        JOIN_RADIUS,
+                    ),
+                    Part::Stop => (
+                        transcribe(hocus_words::shell::transcribe::STOP),
+                        JOIN_RADIUS,
+                    ),
                     Part::Card => (self.words.name(&card), RADIUS),
                     Part::Mark => (self.words.name(&card), MARK_RADIUS),
                 };
@@ -331,7 +386,17 @@ impl Items for View {
         if fading.is_none() {
             state.fade = None;
         }
-        fading.map(|_| canvas::Action::request_redraw_at(*now + FADE_STEP))
+        // Its red dot pulses while its meeting is transcribed.
+        let pulsing = self.motion
+            && super::snapshot().is_some_and(|c| crate::transcribe::button(&c) == Button::Stop);
+        (fading.is_some() || pulsing).then(|| {
+            let step = if fading.is_some() {
+                FADE_STEP
+            } else {
+                PULSE_STEP
+            };
+            canvas::Action::request_redraw_at(*now + step)
+        })
     }
 
     fn draw(
@@ -365,12 +430,34 @@ impl Items for View {
             match form {
                 Form::Full => {
                     let rect = self.card_rect(size);
+                    let button = crate::transcribe::button(&card);
+                    let asking = still && popover::with(|c| c.shows(&self.bar, Item::Transcribe));
+                    let lit = |part| {
+                        still && (hover == Some(part) || (asking && part == Part::Transcribe))
+                    };
+                    let dot = crate::transcribe::recording()
+                        .filter(|_| button == Button::Stop)
+                        .map(|(shown, at)| {
+                            if self.motion {
+                                pulse(crate::transcribe::elapsed(&shown, at, now))
+                            } else {
+                                1.0
+                            }
+                        });
                     let shown = Shown {
                         card: &card,
                         fill: colour(&|l| card_colours(l).0),
                         border: colour(&|l| card_colours(l).1),
-                        join: colour(&|l| join_colours(l, hover == Some(Part::Join)).0),
+                        join: match button {
+                            Button::Transcribe if lit(Part::Transcribe) => TRANSCRIBE_LIT.get(),
+                            Button::Transcribe => TRANSCRIBE.get(),
+                            Button::Stop if lit(Part::Stop) => STOP_LIT.get(),
+                            Button::Stop => STOP.get(),
+                            _ => colour(&|l| join_colours(l, hover == Some(Part::Join)).0),
+                        },
                         lit: still && hover == Some(Part::Card),
+                        button,
+                        dot,
                     };
                     draw_card(&mut frame, rect, &shown, self.words, alpha);
                 }
@@ -391,10 +478,11 @@ impl Items for View {
         }
         if still && fade.is_none() {
             let said = format!(
-                "{} form={:?} lit={:?}",
+                "{} form={:?} lit={:?} button={:?}",
                 self.words.said(&card),
                 self.forms.first().map(|f| f.0),
-                hover
+                hover,
+                crate::transcribe::button(&card)
             );
             let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
             if kept.as_deref() != Some(said.as_str()) {
@@ -403,6 +491,7 @@ impl Items for View {
                     said = %said,
                     name = %self.words.name(&card),
                     join = card.video.as_ref().map(|_| self.words.join_call()),
+                    button = ?crate::transcribe::button(&card),
                     "the meeting card is drawn at rest"
                 );
                 *kept = Some(said);
@@ -417,8 +506,12 @@ struct Shown<'a> {
     card: &'a Card,
     fill: Color,
     border: Color,
+    /// Its button's fill.
     join: Color,
     lit: bool,
+    button: Button,
+    /// The red dot's opacity, while its meeting is transcribed.
+    dot: Option<f32>,
 }
 
 /// `text`'s width in `font` at `size`.
@@ -456,9 +549,11 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
         faded(Color::from_rgb8(r, g, b), alpha),
     );
     let x = stripe.x + STRIPE.width + STRIPE_GAP;
-    let right = match card.video {
-        Some(_) => join_rect(rect).x - PAD,
-        None => rect.x + rect.width - BORDER - PAD,
+    let has_button = shown.button != Button::None;
+    let right = if has_button {
+        join_rect(rect).x - PAD
+    } else {
+        rect.x + rect.width - BORDER - PAD
     };
     let room = (right - x).max(0.0);
     // The title over the time line, 1 px apart, centred in the card.
@@ -480,6 +575,13 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
     let (rel_colour, rel_font) = relative_style(look);
     let relative = words.relative(card.phase);
     let mut at = x;
+    if let Some(dot) = shown.dot {
+        f.fill(
+            &Path::circle(Point::new(at + DOT / 2.0, line_middle), DOT / 2.0),
+            faded(RED.get(), alpha * dot),
+        );
+        at += DOT + DOT_GAP;
+    }
     if let Phase::Ahead { .. } = card.phase {
         f.fill_text(kit::text_in(
             MONO,
@@ -504,9 +606,10 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
     }
     // The time line runs to 2 px from the button: "14:25 · dans 25 min"
     // is 112 px in these fonts, the title's 108 (the spec's "about 110").
-    let line_right = match card.video {
-        Some(_) => join_rect(rect).x - LINE_TO_JOIN,
-        None => right,
+    let line_right = if has_button {
+        join_rect(rect).x - LINE_TO_JOIN
+    } else {
+        right
     };
     let relative = kit::elide(&relative, (line_right - at).max(0.0), |t| {
         width(t, LINE_TEXT, rel_font)
@@ -521,21 +624,36 @@ fn draw_card(f: &mut Frame, rect: Rectangle, shown: &Shown<'_>, words: Words, al
             Alignment::Left,
         ),
     ));
-    if card.video.is_some() {
+    if has_button {
         let join = join_rect(rect);
         f.fill(&kit::rounded(join, JOIN_RADIUS), faded(shown.join, alpha));
-        let (_, ink) = join_colours(look, false);
-        camera(
-            f,
+        let centred = |side: f32| {
             Rectangle::new(
-                Point::new(
-                    join.center_x() - CAMERA / 2.0,
-                    join.center_y() - CAMERA / 2.0,
-                ),
-                Size::new(CAMERA, CAMERA),
-            ),
-            faded(ink, alpha),
-        );
+                Point::new(join.center_x() - side / 2.0, join.center_y() - side / 2.0),
+                Size::new(side, side),
+            )
+        };
+        match shown.button {
+            Button::Join => {
+                let (_, ink) = join_colours(look, false);
+                camera(f, centred(CAMERA), faded(ink, alpha));
+            }
+            Button::Transcribe => {
+                crate::in_use::draw::waveform(f, centred(WAVE), faded(TEXT.get(), alpha));
+            }
+            Button::Stop => {
+                // The mockup's 14 px square of a 24 px drawing (5 to 19,
+                // its corners 3).
+                let square = centred(STOP_SQUARE);
+                let k = STOP_SQUARE / 24.0;
+                let inner = Rectangle::new(
+                    Point::new(square.x + 5.0 * k, square.y + 5.0 * k),
+                    Size::new(14.0 * k, 14.0 * k),
+                );
+                f.fill(&kit::rounded(inner, 3.0 * k), faded(RED.get(), alpha));
+            }
+            Button::None => {}
+        }
     }
     if let Phase::Under { share, .. } = card.phase
         && share > 0.0

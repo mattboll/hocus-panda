@@ -52,6 +52,7 @@ mod text;
 pub mod theme;
 mod to_compositor;
 mod to_shell;
+mod transcribe;
 pub mod wallpaper;
 mod window_menu;
 pub mod wire;
@@ -114,4 +115,5 @@ pub use share::{
     SHARE_CHOOSER_RADIUS, SHARE_MONITOR, SHARE_THUMB_RADIUS, SHARE_THUMBS_EVERY, SHARE_WINDOW,
     ShareAsk, ShareChoose, ShareScreen, ShareShown, ShareSource, ShareWindow, SharedThing,
 };
+pub use transcribe::{TranscribeAsk, TranscribeMeeting, TranscribingShown};
 pub use window_menu::{MenuScreen, WindowAction, WindowMenu, WindowStates};

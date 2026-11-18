@@ -155,6 +155,7 @@ mod tasks;
 mod theme_shots;
 mod themed_bar;
 mod today;
+mod transcribe;
 mod tray;
 mod typing;
 mod unplug;
