@@ -1327,7 +1327,11 @@ paired_count = { other = "{n} paired" }
 [settings.camera]
 screen_light = "SCREEN LIGHT"
 screen_light_2 = "Screen light"
-during_a_call_the_edges_of = "During a call, the edges of the call’s screen light up and light your face. Never in captures, shares or recordings."
+during_a_call_the_edges_of = "During a call, the call’s screen lights up and lights your face. Never in captures, shares or recordings."
+shape = "Shape"
+a_wide_frame_along_the_edges = "A wide frame along the screen’s edges, or all of the screen around the call’s window."
+frame = "Frame"
+all_around_the_call = "All around the call"
 warmth = "Warmth"
 the_light_s_colour = "The light’s colour."
 cool = "Cool"

@@ -1318,7 +1318,11 @@ paired_count = { one = "{n} associé", other = "{n} associés" }
 [settings.camera]
 screen_light = "LUMIÈRE D’ÉCRAN"
 screen_light_2 = "Lumière d’écran"
-during_a_call_the_edges_of = "Pendant un appel, le bord de l’écran de l’appel s’allume et éclaire ton visage. Jamais dans les captures, les partages ni les enregistrements."
+during_a_call_the_edges_of = "Pendant un appel, l’écran de l’appel s’allume et éclaire ton visage. Jamais dans les captures, les partages ni les enregistrements."
+shape = "Forme"
+a_wide_frame_along_the_edges = "Un large cadre le long des bords de l’écran, ou tout l’écran autour de la fenêtre de l’appel."
+frame = "Cadre"
+all_around_the_call = "Tout autour de l’appel"
 warmth = "Chaleur"
 the_light_s_colour = "La couleur de la lumière."
 cool = "Froide"
