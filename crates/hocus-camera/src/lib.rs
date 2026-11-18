@@ -10,11 +10,17 @@
 //! "Hocuspanda" too, when there is one ([`loopback`]), for the
 //! applications that read only `/dev/video*`.
 
+pub mod away;
+pub mod backdrop;
 pub mod banner;
 pub mod convert;
+pub mod glsl;
 pub mod gpu;
 pub mod look;
 pub mod loopback;
 pub mod pods;
+pub mod presenter;
 pub mod preview;
+pub mod scenes;
+pub mod segment;
 pub mod serve;

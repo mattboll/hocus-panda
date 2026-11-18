@@ -4,7 +4,8 @@ What the desktop does while an application uses the camera. The issue
 plans five lots (its revised spec, 2026-11-17); this page says what is
 built. Mockup: the design canvas « #619 — effets webcam », its boards
 "Lumière d'écran" (lot 1), "Caméra et micro dans la barre", "La lumière
-qui s'ajuste" and "Dans l'appel" (lot 2) (sources in the maintainer's
+qui s'ajuste" and "Dans l'appel" (lot 2), the window's Fond tab, « Je
+reviens » and "Présentateur" (lot 3) (sources in the maintainer's
 `hocus-panda-tools/mockups/s23-webcam`).
 
 ## The screen light (lot 1, as built)
@@ -369,3 +370,153 @@ shell leaving `hocus-camera` out (`in_use::cameras::tests`) and the
 help's words with the device and without (`popover::camera::tests`).
 Not measured headless: a real v4l2loopback (the module is the
 machine's): on the maintainer's.
+
+## What is behind you (lot 3, as built)
+
+The person is found in the picture by a model; what is behind them can
+be blurred or be one of the desktop's living wallpapers; when they are
+away, the call sees a card instead of an empty chair; while the desktop
+shares a screen, they can stand on it like a weather presenter.
+
+### The person (`crates/hocus-camera/src/segment.rs`)
+
+- **The model**: MediaPipe's selfie segmentation, landscape (256 ×
+  144), Apache-2.0, run with tract (pure Rust) on the CPU. tract reads no
+  TensorFlow Lite holding MediaPipe's own operator
+  (`Convolution2DTransposeBias`), so its graph is written again as ONNX
+  by `scripts/camera/selfie-to-onnx.py` from the file MediaPipe publishes
+  (its URL and SHA-256 in the script), operator by operator, its weights
+  unchanged: `crates/hocus-camera/models/`, with its licence
+  (`LICENSE-MEDIAPIPE`). 432 KB, in the program itself (no download; the
+  package's copyright names it).
+- **When**: only while the camera is read. Every frame while Fond or the
+  presenter needs the person (every other one while the model takes over
+  20 ms), three times a second while only « Je reviens » does, never
+  otherwise. Measured: some 9 ms a frame on one core of a laptop's
+  processor, the frame scaled to 256 × 144 included.
+- **The mask**: each pixel follows the model a part of the way (most of
+  it where it changed much, a third where it hesitates), so that an edge
+  does not flicker and a move is followed. At the frame's size: its
+  probabilities smoothed a little (a 3 × 3 binomial), scaled up by a
+  cubic (Catmull-Rom) each way, then a soft ramp at each of the frame's
+  pixels (`smoothstep` from 0.5 to 0.82): a smooth contour some three
+  pixels soft, no steps of the model's pixels, and what the model is
+  unsure of (a shape of the room it half takes for the person) left to
+  the room. On the CPU, the GPU's path and the CPU's alike (the frames'
+  effects are drawn over the made frame).
+
+### Fond (one at a time; `backdrop.rs`, `scenes.rs`)
+
+- **Ta pièce** (`[camera] background = "room"`, the default): the room
+  as it is; nothing is looked for.
+- **Flou** (`"blur"`): the room blurred at a quarter of its size (a
+  Gaussian of some 26 pixels of the frame: the mockup's `blur(7px)` on its
+  312 px preview), the person left out of what is blurred so that no
+  halo of them stays around them.
+- **Aurore** and **Koï** (`"aurora"`, `"koi"`): the desktop's own living
+  wallpapers, drawn by the compositor's own code: their shaders
+  (`hocus_scenes::shaders`, GLSL ES as the compositor compiles them with
+  GLES) adapted for wgpu at load (`hocus-camera`'s `glsl`: the uniforms
+  into a block, textures and samplers apart, the stages' locations), the
+  koi pond's simulation and its shapes (`hocus_scenes::koi`, `mesh`, the
+  compositor's own, moved out of it); on a thread of their own, about 30
+  times a second while one is wanted, on a GPU (else lavapipe, at a
+  quarter of the pixels; else none, and the room blurred stands in). The
+  aurora moves as it does with the music, its swell without the beat's
+  ripple (no music plays in a call); the pond is a screen of the frame's
+  size (seven koi, six pads), its koi swimming, its drops falling. Until
+  a wallpaper's first picture comes, the room blurred.
+- The banner is drawn over what is behind; Lumière corrects the room,
+  not the wallpaper.
+
+### « Je reviens » (`away.rs`; the board « Je reviens »)
+
+- **When** (`[camera] away`, on by default): nobody in the picture (the
+  person under 2 % of it) for 10 s, or the screen locked while the
+  Hocuspanda camera is read (the compositor tells it, `CameraLook.locked`).
+  Someone over 5 % of the picture again, and the screen unlocked, it
+  goes (the gap between the two: a hand in the picture does not bring
+  it back).
+- **The picture**: the living wallpaper (Fond's when it is one, else the
+  desktop's own pond when `[effects] koi` is on, else the aurora), its
+  card over it as the board draws it, scaled from its 560 × 315 picture:
+  320 wide, 16 round, `rgba(14,18,30,0.72)`, a 1 px border; the board's
+  panda asleep (64 px) and its "z" rising every 2.6 s; "De retour dans
+  un instant" (Manrope bold 17 px) and how long (12.5 px): "absent depuis
+  moins d'une minute", "absent depuis 2 min", "absent depuis 1 h 05",
+  from when the person left (or the screen locked). Without a GPU nor
+  lavapipe, the board's own night (its gradient and its two glows) under
+  the card.
+- **The microphone**: while the screen is locked during a call (the
+  Hocuspanda camera read, « Je reviens » on), the compositor tells the
+  shell to hush (`CameraShown.hush`): the shell mutes the session's
+  default source if it was not muted, and unmutes it as that ends if it
+  muted it; a microphone muted by its user stays muted.
+
+### Présentateur (`presenter.rs` in both; the board "Présentateur")
+
+- **When** (`[camera] presenter`, off by default): on, while the desktop
+  shares a screen or a window (5.11). The camera is read for it then
+  even when no call reads the Hocuspanda source (the board: "ta vignette
+  de caméra, elle, peut se couper"); its stream is then named
+  `hocuspanda-presenter`, its application "Présentateur", so that the
+  bar's in-use sign shows the camera on, for the presenter (its stream is
+  made again when a call starts or stops reading the source).
+- **The cut-out** (`hocus-camera`): the person's box in the frame, the
+  person premultiplied by their alpha, the board's `drop-shadow(0 6px
+  18px rgba(0,0,0,0.35))` under them (its lengths the board's for its
+  262 px tall silhouette, scaled to the person); sent to the compositor
+  after a line of its own on the camera's output, raw (B, G, R, A), every
+  frame (a cut-out not yet taken when the next comes is dropped).
+- **Where** (the compositor): drawn into the share's frames alone, never
+  on the screen, under the pointer: on the bottom edge, across where
+  windows stand (beside the bar: the bar stays readable), 24 px of the
+  board's 860 in from the right (`presenter-side = "right"`) or the left,
+  as tall as the board's 196, 262 or 340 px of its 520
+  (`presenter-size`: `small`, `medium`, `large`), as wide as the cut-out
+  for that height. While the pointer is under it, it stands in the other
+  corner, sliding there over 300 ms (at once with reduced motion).
+- **Switched on** from the share's chooser (a "Présentateur" box beside
+  "Montrer le pointeur", written as the share starts) or the camera's
+  window (Image's "Présentateur" tile); its corner and size in
+  Settings › Caméra.
+
+### The window and the settings
+
+Fond's tiles (Ta pièce, Flou, Aurore, Koï, the mockup's) are made, one
+of them ringed, a violet dot on the tab with any but the room; Image
+holds "Présentateur" and Réactions "Je reviens" (the board's sleeping
+panda), each its words under the grid. `[camera]`: `background`, `away`,
+`presenter`, `presenter-side`, `presenter-size`, with their rows in
+Settings › Caméra.
+
+**Choices made here** (to confirm on the machine):
+
+- The desktop's other wallpapers (the daylight's sky, the landscape in
+  depth; the fireflies, the rain and the snow are drawn over a
+  wallpaper, not one) are not in Fond: the mockup's four tiles fill its
+  row; the daylight's and the depth's shaders are in `hocus-scenes`
+  already, a tile each would bring them.
+- « Je reviens » is a tile of Réactions, on by default (the spec says
+  nothing of turning it off); the presenter a tile of Image.
+- The presenter's corner and size are Settings rows only (the board's
+  "Où" and "Taille" were its trial panel).
+- The person's colours are the camera's; the cut-out is the frame's own
+  pixels, unscaled (a "large" presenter on a large screen is scaled up).
+
+**Measured headless**: `hocus-camera`'s unit tests: the model on the test
+picture (`crates/hocus-camera/data/person.jpg`, NASA's portrait of
+Jeffrey Hoffman, public domain) finds the face and the collar, not the
+wall, within 16 ms of its thread's processor time a frame; Flou and a
+wallpaper change the room's pixels and not the person's; the aurora and
+the koi pond drawn on lavapipe, moving (`scenes::tests`); « Je reviens »'s
+timing and words; the cut-out and its shadow. The compositor's tests
+(`tests/camera.rs`): an empty picture for 10 s, the card (a dark picture
+where the room was bright), someone back, the room again; the screen
+locked during a call (the real shell, a microphone of the fakes'), the
+card and the microphone muted, unlocked both gone, and a microphone muted
+by hand staying muted. `sharing::the_presenter_stands_in_the_shared_stream_never_on_the_screen`:
+the person's suit in the stream's lower right and not on the screen; the
+pointer under it, it moves to the left.
+`hocus-sound`'s `graph::tests::the_presenter_reading_the_camera_is_a_use_of_it`:
+the presenter's stream on a camera is a use of it, named so.

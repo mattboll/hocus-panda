@@ -16,8 +16,15 @@ use std::{
 
 use hocus_camera::{
     gpu::Wanted,
+    presenter::Cutout,
     serve::{self, Ask, Options},
 };
+
+/// What the program writes to the compositor.
+enum Out {
+    Line(String),
+    Cut(Cutout),
+}
 use hocus_link::{CameraLook, FromCamera};
 
 fn usage() -> ! {
@@ -71,12 +78,43 @@ fn main() {
         tracing::error!(%err, "cannot read the compositor's lines");
         std::process::exit(1);
     }
-    let tell = Box::new(|said: FromCamera| {
-        let mut out = std::io::stdout().lock();
-        let _ = writeln!(out, "{}", said.line());
-        let _ = out.flush();
+    // Its output written by a thread of its own: its lines, and the
+    // presenter's cut-outs after theirs, raw. A cut-out the compositor has
+    // not taken yet when the next comes is dropped; a line never is.
+    let (out, outs) = std::sync::mpsc::sync_channel::<Out>(2);
+    let writer = std::thread::Builder::new()
+        .name("compositor's output".to_owned())
+        .spawn(move || {
+            let mut stdout = std::io::stdout().lock();
+            for o in outs {
+                let written = match o {
+                    Out::Line(line) => writeln!(stdout, "{line}"),
+                    Out::Cut(cut) => {
+                        let said = FromCamera::Presenter {
+                            width: cut.width,
+                            height: cut.height,
+                        };
+                        writeln!(stdout, "{}", said.line())
+                            .and_then(|()| stdout.write_all(&cut.bgra))
+                    }
+                };
+                if written.and_then(|()| stdout.flush()).is_err() {
+                    break;
+                }
+            }
+        });
+    if let Err(err) = writer {
+        tracing::error!(%err, "cannot write to the compositor");
+        std::process::exit(1);
+    }
+    let lines = out.clone();
+    let tell = Box::new(move |said: FromCamera| {
+        let _ = lines.send(Out::Line(said.line()));
     });
-    if let Err(err) = serve::run(options, asked, tell) {
+    let cutout = Box::new(move |cut: Cutout| {
+        let _ = out.try_send(Out::Cut(cut));
+    });
+    if let Err(err) = serve::run(options, asked, tell, cutout) {
         tracing::error!(%err, "PipeWire is not there: no Hocuspanda camera");
         std::process::exit(1);
     }

@@ -1,6 +1,7 @@
 //! The camera, `[camera]` (#619, docs/design/camera.md): the screen light
 //! while an application uses the camera, and the Hocuspanda camera's
-//! effects. Followed live.
+//! effects: Lumière and the banner (lot 2), what is behind the person,
+//! « Je reviens » and the presenter (lot 3). Followed live.
 
 use serde::Deserialize;
 
@@ -24,6 +25,16 @@ pub struct Camera {
     pub banner_name: String,
     /// Under it, the current project desktop's name, when it is one.
     pub banner_project: bool,
+    /// Fond: what is behind the person (lot 3).
+    pub background: Background,
+    /// « Je reviens »: nobody in the picture for 10 s, or the screen
+    /// locked during a call, a card on a living wallpaper; the microphone
+    /// muted while locked.
+    pub away: bool,
+    /// Présentateur: the person cut out over a shared screen's stream.
+    pub presenter: bool,
+    pub presenter_side: Side,
+    pub presenter_size: Size,
 }
 
 impl Default for Camera {
@@ -37,6 +48,79 @@ impl Default for Camera {
             banner: false,
             banner_name: String::new(),
             banner_project: true,
+            background: Background::Room,
+            away: true,
+            presenter: false,
+            presenter_side: Side::Right,
+            presenter_size: Size::Medium,
+        }
+    }
+}
+
+/// What is behind the person in the Hocuspanda camera's picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Background {
+    /// Their room, as it is.
+    #[default]
+    Room,
+    /// Their room blurred.
+    Blur,
+    /// The desktop's living wallpapers.
+    Aurora,
+    Koi,
+}
+
+impl Background {
+    /// Its word in the file.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Room => "room",
+            Self::Blur => "blur",
+            Self::Aurora => "aurora",
+            Self::Koi => "koi",
+        }
+    }
+
+    /// What the camera is told.
+    pub fn backdrop(self) -> hocus_link::camera::Backdrop {
+        use hocus_link::camera::{Backdrop, Scene};
+        match self {
+            Self::Room => Backdrop::Room,
+            Self::Blur => Backdrop::Blur,
+            Self::Aurora => Backdrop::Scene(Scene::Aurora),
+            Self::Koi => Backdrop::Scene(Scene::Koi),
+        }
+    }
+}
+
+/// The presenter's corner of the shared screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Left,
+    #[default]
+    Right,
+}
+
+/// The presenter's size: the board's 196, 262 and 340 px tall on its
+/// 520 px tall screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Size {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl Size {
+    /// Its height, a share of the shared screen's.
+    pub const fn height(self) -> f64 {
+        match self {
+            Self::Small => 196.0 / 520.0,
+            Self::Medium => 262.0 / 520.0,
+            Self::Large => 340.0 / 520.0,
         }
     }
 }
@@ -162,7 +246,22 @@ mod tests {
                 banner: true,
                 banner_name: "Alex".to_owned(),
                 banner_project: true,
+                background: Background::Blur,
+                ..Camera::default()
             }
+        );
+        assert!(toml::from_str::<Camera>("background = \"beach\"\n").is_err());
+        let camera: Camera = toml::from_str(
+            "background = \"koi\"\naway = false\npresenter = true\n\
+             presenter-side = \"left\"\npresenter-size = \"large\"\n",
+        )?;
+        assert_eq!(
+            (camera.background, camera.away, camera.presenter),
+            (Background::Koi, false, true)
+        );
+        assert_eq!(
+            (camera.presenter_side, camera.presenter_size),
+            (Side::Left, Size::Large)
         );
         assert!(toml::from_str::<Camera>("screen-light-warmth = \"hot\"\n").is_err());
         assert!(toml::from_str::<Camera>("screen-light-strength = 3\n").is_err());

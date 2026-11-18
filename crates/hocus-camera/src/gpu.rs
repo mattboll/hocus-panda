@@ -40,7 +40,7 @@ impl Wanted {
 }
 
 /// wgpu's native futures are ready at once.
-fn ready<F: Future>(future: F) -> Option<F::Output> {
+pub(crate) fn ready<F: Future>(future: F) -> Option<F::Output> {
     let mut future = pin!(future);
     let mut context = Context::from_waker(Waker::noop());
     match future.as_mut().poll(&mut context) {

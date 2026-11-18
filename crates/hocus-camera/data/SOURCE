@@ -1,0 +1,9 @@
+person.jpg: a test picture of a person, for the camera's tests and
+screenshots (docs/design/camera.md). Cropped to 16:9 and scaled to
+1280 × 720 from "Astronaut Jeffrey Hoffman - Portrait.jpg", a photograph
+by NASA, in the public domain (a work of the United States government):
+
+    https://commons.wikimedia.org/wiki/File:Astronaut_Jeffrey_Hoffman_-_Portrait.jpg
+
+NASA's photographs are not copyrighted; their use must not suggest that
+NASA endorses anything.

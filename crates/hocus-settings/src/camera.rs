@@ -3,7 +3,8 @@
 //! shape (a wide frame, or all around the call), its warmth, its strength (`auto` follows the light on the face while the
 //! Hocuspanda camera is read); then the Hocuspanda camera's effects, as
 //! the camera's window in the bar sets them: Lumière, the banner, its
-//! name and its project.
+//! name and its project (lot 2); what is behind you, « Je reviens », the
+//! presenter, its corner and its size (lot 3).
 
 use hocus_words::settings::camera as words;
 use std::sync::OnceLock;
@@ -32,10 +33,19 @@ pub const LIGHTING: &str = "camera.lighting";
 pub const BANNER: &str = "camera.banner";
 pub const BANNER_NAME: &str = "camera.banner-name";
 pub const BANNER_PROJECT: &str = "camera.banner-project";
+pub const BACKGROUND: &str = "camera.background";
+pub const AWAY: &str = "camera.away";
+/// The presenter's switch, which its corner and size need.
+pub const PRESENTER: &str = "camera.presenter";
+pub const PRESENTER_SIDE: &str = "camera.presenter-side";
+pub const PRESENTER_SIZE: &str = "camera.presenter-size";
 
 const SHAPES: &[&str] = &["frame", "around-call"];
 const WARMTHS: &[&str] = &["cool", "neutral", "warm"];
 const STRENGTHS: &[&str] = &["auto", "soft", "medium", "strong"];
+const BACKGROUNDS: &[&str] = &["room", "blur", "aurora", "koi"];
+const SIDES: &[&str] = &["left", "right"];
+const SIZES: &[&str] = &["small", "medium", "large"];
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
@@ -191,6 +201,85 @@ pub fn settings() -> &'static [Setting] {
                 places: one(&["camera", "banner-project"], Codec::Bool),
                 needs: Some(BANNER),
             },
+            Setting {
+                id: BACKGROUND,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::BACKGROUND,
+                line: Some(words::WHAT_IS_BEHIND_YOU),
+                keywords: (
+                    &["caméra", "fond", "flou", "arrière-plan", "aurore", "koï"],
+                    &["camera", "background", "blur", "backdrop", "aurora", "koi"],
+                ),
+                kind: Kind::Segmented(vec![
+                    word(words::ROOM, "room"),
+                    word(words::BLUR, "blur"),
+                    word(words::AURORA, "aurora"),
+                    word(words::KOI, "koi"),
+                ]),
+                places: one(&["camera", "background"], Codec::Word(BACKGROUNDS)),
+                needs: None,
+            },
+            Setting {
+                id: AWAY,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::AWAY,
+                line: Some(words::NOBODY_IN_THE_PICTURE),
+                keywords: (
+                    &["caméra", "absent", "pause", "verrouillage", "micro"],
+                    &["camera", "away", "break", "lock", "microphone"],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "away"], Codec::Bool),
+                needs: None,
+            },
+            Setting {
+                id: PRESENTER,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::PRESENTER,
+                line: Some(words::WHILE_YOU_SHARE),
+                keywords: (
+                    &["caméra", "présentateur", "partage", "silhouette"],
+                    &["camera", "presenter", "share", "screen sharing"],
+                ),
+                kind: Kind::Switch,
+                places: one(&["camera", "presenter"], Codec::Bool),
+                needs: None,
+            },
+            Setting {
+                id: PRESENTER_SIDE,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::PRESENTER_SIDE,
+                line: None,
+                keywords: (
+                    &["caméra", "présentateur", "coin"],
+                    &["camera", "presenter", "corner"],
+                ),
+                kind: Kind::Segmented(vec![word(words::LEFT, "left"), word(words::RIGHT, "right")]),
+                places: one(&["camera", "presenter-side"], Codec::Word(SIDES)),
+                needs: Some(PRESENTER),
+            },
+            Setting {
+                id: PRESENTER_SIZE,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::PRESENTER_SIZE,
+                line: None,
+                keywords: (
+                    &["caméra", "présentateur", "taille"],
+                    &["camera", "presenter", "size"],
+                ),
+                kind: Kind::Segmented(vec![
+                    word(words::SMALL, "small"),
+                    word(words::MIDDLE, "medium"),
+                    word(words::LARGE, "large"),
+                ]),
+                places: one(&["camera", "presenter-size"], Codec::Word(SIZES)),
+                needs: Some(PRESENTER),
+            },
         ]
     })
 }
@@ -229,6 +318,11 @@ mod tests {
                 ("camera.banner".to_owned(), Value::Bool(false)),
                 ("camera.banner-name".to_owned(), Value::Text(String::new())),
                 ("camera.banner-project".to_owned(), Value::Bool(true)),
+                ("camera.background".to_owned(), Value::Word("room")),
+                ("camera.away".to_owned(), Value::Bool(true)),
+                ("camera.presenter".to_owned(), Value::Bool(false)),
+                ("camera.presenter-side".to_owned(), Value::Word("right")),
+                ("camera.presenter-size".to_owned(), Value::Word("medium")),
             ]
         );
     }

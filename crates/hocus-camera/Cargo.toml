@@ -24,11 +24,22 @@ hocus-panic.workspace = true
 pipewire.workspace = true
 # The frames' effects on the GPU, as the shell draws (MIT or Apache-2.0);
 # Vulkan or GL, whatever the vendor.
-wgpu = { workspace = true, features = ["wgsl"] }
+wgpu = { workspace = true, features = ["wgsl", "glsl"] }
 # A camera's MJPEG frames (MIT or Apache-2.0).
 image = { workspace = true, features = ["jpeg"] }
+# « Je reviens »'s words, in the desktop's language.
+hocus-words.workspace = true
+# « Je reviens »'s card and its panda (MIT or Apache-2.0).
+resvg.workspace = true
 # The banner's words (MIT, Apache-2.0 or Zlib), in Manrope, the shell's.
 fontdue.workspace = true
+# The person in the picture (lot 3): MediaPipe's segmentation as ONNX,
+# run on the CPU in pure Rust (MIT or Apache-2.0).
+tract-onnx.workspace = true
+anyhow.workspace = true
+# The living wallpapers' shaders, the compositor's own, drawn behind the
+# person (lot 3).
+hocus-scenes.workspace = true
 # The v4l2loopback device's ioctls and writes (Apache-2.0, MIT or
 # Apache-2.0 WITH LLVM-exception).
 rustix = { workspace = true, features = ["fs"] }
@@ -36,4 +47,14 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+naga.workspace = true
+# The model's time on the processor, its thread's own.
+rustix = { workspace = true, features = ["time"] }
+# The screenshots' pictures.
+image = { workspace = true, features = ["png"] }
 tempfile.workspace = true
+
+[features]
+# The test picture of a person (data/person.jpg), for the compositor's
+# tests and screenshots: never in the package.
+test-picture = []

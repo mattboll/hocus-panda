@@ -3,8 +3,10 @@
 //! words, and whether this version makes it. A later lot adds an effect by
 //! adding its entry; an add-on's (#442) will come the same way.
 //!
-//! Lot 2 makes Lumière and Bandeau (Image). The others show, dimmed, where
-//! they will be: their tab is the mockup's, their tile says "Bientôt".
+//! Lot 2 makes Lumière and Bandeau (Image); lot 3 Fond (the room, Flou,
+//! the desktop's living wallpapers), Présentateur (Image) and « Je
+//! reviens » (Réactions). The others show, dimmed, where they will be:
+//! their tab is the mockup's, their tile says "Bientôt".
 
 use hocus_link::CameraShown;
 use hocus_words::{Text, shell::camera as w};
@@ -109,7 +111,7 @@ impl Effect {
     pub fn on(&self, shown: &CameraShown) -> bool {
         match self.pick {
             Pick::Toggle(key) => toggle(shown, key),
-            Pick::One { key, value, .. } => one(key) == value,
+            Pick::One { key, value, .. } => one(shown, key) == value,
         }
     }
 
@@ -119,19 +121,23 @@ impl Effect {
     }
 }
 
-/// An on-or-off key's value, as the compositor says it: the ones lot 2
-/// makes; the others off.
+/// An on-or-off key's value, as the compositor says it: the ones made;
+/// the others off.
 fn toggle(shown: &CameraShown, key: &str) -> bool {
     match key {
         "lighting" => shown.lighting,
         "banner" => shown.banner,
+        "presenter" => shown.presenter,
+        "away" => shown.away,
         _ => false,
     }
 }
 
-/// A one-of key's value: until their lots, the plain choice.
-fn one(key: &str) -> &'static str {
+/// A one-of key's value, as the compositor says it; until their lots, the
+/// plain choice.
+fn one<'a>(shown: &'a CameraShown, key: &str) -> &'a str {
     match key {
+        "background" if !shown.background.is_empty() => &shown.background,
         "background" => "room",
         _ => "none",
     }
@@ -165,6 +171,8 @@ const fn one_of(
     hint: Option<Text>,
 ) -> Effect {
     let plain = matches!(value.as_bytes(), b"room" | b"none");
+    // Fond is made (lot 3); the others wait for theirs.
+    let ready = matches!(key.as_bytes(), b"background");
     Effect {
         id: value,
         tab,
@@ -172,7 +180,7 @@ const fn one_of(
         thumb,
         name,
         hint,
-        ready: false,
+        ready,
     }
 }
 
@@ -220,6 +228,20 @@ pub const EFFECTS: &[Effect] = &[
         ),
         w::BANNER,
         Some(w::BANNER_HINT),
+        true,
+    ),
+    // Présentateur (lot 3): a bust over the board's shared screen.
+    toggle_of(
+        "presenter",
+        Tab::Image,
+        Thumb::Disc {
+            at: (0.5, 1.0),
+            r: 0.42,
+            inner: 0x3B5B_8CFF,
+            outer: 0xF6F4_EEFF,
+        },
+        w::PRESENTER,
+        Some(w::PRESENTER_HINT),
         true,
     ),
     one_of(
@@ -390,6 +412,15 @@ pub const EFFECTS: &[Effect] = &[
         Some(w::PARTIES_HINT),
         false,
     ),
+    // « Je reviens » (lot 3): the board's panda asleep.
+    toggle_of(
+        "away",
+        Tab::Reactions,
+        PANDA,
+        w::AWAY,
+        Some(w::AWAY_HINT),
+        true,
+    ),
 ];
 
 /// The hint under `tab`'s grid: its first chosen effect's with a hint
@@ -428,20 +459,59 @@ mod tests {
             ready: true,
             read: true,
             source: None,
+            background: "room".to_owned(),
+            away: true,
+            presenter: false,
+            hush: false,
         }
     }
 
     #[test]
-    fn each_tab_has_its_effects_and_lot_2_makes_image_s() {
+    fn each_tab_has_its_effects_and_lots_2_and_3_make_theirs() {
         let ids = |tab: Tab| tab.effects().map(|e| e.id).collect::<Vec<_>>();
-        assert_eq!(ids(Tab::Image), ["lighting", "framing", "banner"]);
-        assert_eq!(ids(Tab::Background).len(), 4);
+        assert_eq!(
+            ids(Tab::Image),
+            ["lighting", "framing", "banner", "presenter"]
+        );
+        assert_eq!(ids(Tab::Background), ["room", "blur", "aurora", "koi"]);
         assert_eq!(ids(Tab::Face).len(), 6);
         assert_eq!(ids(Tab::Voice).len(), 6);
-        assert_eq!(ids(Tab::Reactions).len(), 2);
+        assert_eq!(ids(Tab::Reactions), ["gestures", "celebrations", "away"]);
         let ready: Vec<&str> = EFFECTS.iter().filter(|e| e.ready).map(|e| e.id).collect();
-        assert_eq!(ready, ["lighting", "banner"]);
-        assert!(!Tab::Image.soon() && Tab::Face.soon());
+        assert_eq!(
+            ready,
+            [
+                "lighting",
+                "banner",
+                "presenter",
+                "room",
+                "blur",
+                "aurora",
+                "koi",
+                "away"
+            ]
+        );
+        assert!(!Tab::Image.soon() && Tab::Face.soon() && !Tab::Background.soon());
+    }
+
+    #[test]
+    fn fond_is_one_of_its_tiles_with_its_dot() {
+        let lang = hocus_words::Lang::French;
+        let mut s = shown(false, false);
+        assert!(!Tab::Background.on(&s));
+        assert_eq!(hint(Tab::Background, &s, lang), "Ta pièce : sans effet");
+        s.background = "aurora".to_owned();
+        assert!(Tab::Background.on(&s));
+        assert_eq!(
+            hint(Tab::Background, &s, lang),
+            "Aurore : le fond vivant du bureau"
+        );
+        let on: Vec<&str> = Tab::Background
+            .effects()
+            .filter(|e| e.on(&s))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(on, ["aurora"]);
     }
 
     #[test]
@@ -462,6 +532,7 @@ mod tests {
         );
         // A tab of plain choices only has no dot.
         assert!(!Tab::Background.on(&on));
+        assert!(Tab::Reactions.on(&on), "« Je reviens » is on");
         assert_eq!(hint(Tab::Face, &on, lang), "Bientôt dans Hocuspanda");
     }
 }

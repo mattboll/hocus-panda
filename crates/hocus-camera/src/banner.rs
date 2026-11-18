@@ -30,7 +30,7 @@ const SHADE_RIGHT: f32 = 0.35;
 const NAME_INK: [u8; 3] = [0xEE, 0xF1, 0xF6];
 const PROJECT_INK: [u8; 3] = [0xA9, 0xB2, 0xC2];
 
-fn font(bold: bool) -> Option<&'static fontdue::Font> {
+pub(crate) fn font(bold: bool) -> Option<&'static fontdue::Font> {
     static FONTS: OnceLock<[Option<fontdue::Font>; 2]> = OnceLock::new();
     let fonts = FONTS.get_or_init(|| {
         [MANROPE, MANROPE_BOLD].map(|bytes| {
@@ -44,14 +44,14 @@ fn font(bold: bool) -> Option<&'static fontdue::Font> {
 
 /// A line of text's coverage: its width, its height (the font's line), and
 /// each pixel's from 0 to 1.
-struct Coverage {
-    width: usize,
-    height: usize,
-    cover: Vec<f32>,
+pub(crate) struct Coverage {
+    pub width: usize,
+    pub height: usize,
+    pub cover: Vec<f32>,
 }
 
 /// `text` at `size`, cut with "…" to fit in `room` pixels.
-fn line(text: &str, size: f32, bold: bool, room: f32) -> Option<Coverage> {
+pub(crate) fn line(text: &str, size: f32, bold: bool, room: f32) -> Option<Coverage> {
     let font = font(bold)?;
     let advance = |s: &str| -> f32 {
         let mut last = None;

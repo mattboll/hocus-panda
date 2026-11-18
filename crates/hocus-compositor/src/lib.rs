@@ -75,6 +75,7 @@ pub mod peek;
 mod perf;
 mod popover;
 mod popups;
+mod presenter;
 mod programs;
 mod project_life;
 mod projects;

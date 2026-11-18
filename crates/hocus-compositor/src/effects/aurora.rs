@@ -30,6 +30,8 @@ use smithay::{
     output::Output,
 };
 
+use hocus_scenes::aurora::drive;
+
 use super::Plays;
 use crate::{effects::draw::AuroraLook, wobble::Kept};
 
@@ -37,8 +39,6 @@ use crate::{effects::draw::AuroraLook, wobble::Kept};
 pub const RESOLUTION: f64 = 0.6;
 /// Its picture's longest side at most (pixels), on the largest screens.
 pub const LONGEST: f64 = 1600.0;
-/// The board's tempo.
-const BPM: f64 = 96.0;
 /// The board's moment, where it starts (its still frame with reduced
 /// motion).
 const START: f64 = 12.0;
@@ -122,14 +122,6 @@ impl Default for Aurora {
             panes: HashMap::new(),
         }
     }
-}
-
-/// The board's drive at `t`: its swell, and its kick on the beat.
-fn drive(t: f64) -> (f64, f64) {
-    let beat = (t * BPM / 60.0).fract();
-    let kick = (-beat * 5.5).exp();
-    let energy = 0.35 + 0.65 * ((t * 0.11).sin() * 0.5 + 0.5).powf(1.5);
-    (energy, kick)
 }
 
 impl Aurora {
