@@ -60,6 +60,11 @@ pub enum Item {
     Meeting,
     /// The card's join button: a click, or `Enter`, joins its video call.
     Join,
+    /// The card's Transcrire (docs/design/meetings.md): its asking popover,
+    /// by a click; its transcription at once after "Ne plus demander".
+    Transcribe,
+    /// The card's stop, while its meeting is transcribed: a click stops it.
+    TranscribeStop,
     /// The mini form's meeting mark: its popover, by a hover or a click.
     MeetingMark,
     /// A line of Today (Day.3), by its row from the top: a click, or
@@ -111,6 +116,9 @@ pub enum Item {
 impl Item {
     /// Whether a click (or `Enter`) opens its popover; else it acts.
     pub(super) fn clicks(self) -> bool {
+        if self == Self::Transcribe {
+            return !crate::transcribe::never_ask();
+        }
         !matches!(
             self,
             Self::Keyboard
@@ -121,6 +129,7 @@ impl Item {
                 | Self::Tray(_)
                 | Self::Meeting
                 | Self::Join
+                | Self::TranscribeStop
                 | Self::TodayLine(_)
                 | Self::TodayMore
                 | Self::TaskAdd
@@ -158,6 +167,8 @@ impl Item {
             | Self::Tray(_)
             | Self::Meeting
             | Self::Join
+            | Self::Transcribe
+            | Self::TranscribeStop
             | Self::TodayLine(_)
             | Self::TodayMore => false,
             Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
@@ -183,6 +194,7 @@ impl Item {
             Self::InUse => in_use::WIDTH,
             Self::Tray(_) => tray::WIDTH,
             Self::MeetingMark => meeting::WIDTH,
+            Self::Transcribe => transcribe::WIDTH,
             Self::Tasks | Self::TasksMore => tasks::WIDTH,
             Self::DayChoose => setup::WIDTH,
             Self::Calendar => calendar::WIDTH,
@@ -220,6 +232,7 @@ impl Item {
             Self::Tray(key) => tray::height(key),
             Self::Calendar => calendar::height(),
             Self::MeetingMark => meeting::height(),
+            Self::Transcribe => transcribe::height(),
             Self::Tasks | Self::TasksMore => tasks::height(),
             Self::DayChoose => setup::height(),
             Self::Windows => windows::height(bar),
@@ -237,6 +250,7 @@ impl Item {
             | Self::Menu
             | Self::Meeting
             | Self::Join
+            | Self::TranscribeStop
             | Self::TodayLine(_)
             | Self::TodayMore
             | Self::TaskAdd
@@ -276,7 +290,8 @@ impl Item {
             Self::InUse => in_use::opening(),
             Self::Menu | Self::TaskAdd | Self::Task(_) => {}
             Self::MeetingMark => meeting::opening(),
-            Self::Meeting | Self::Join => {}
+            Self::Transcribe => transcribe::opening(),
+            Self::Meeting | Self::Join | Self::TranscribeStop => {}
             Self::TodayLine(_) | Self::TodayMore => {}
             Self::Tray(_) => tray::opening(),
             Self::Tasks | Self::TasksMore => tasks::opening(),
@@ -313,6 +328,8 @@ impl Item {
             | Self::Tray(_)
             | Self::Meeting
             | Self::Join
+            | Self::Transcribe
+            | Self::TranscribeStop
             | Self::MeetingMark
             | Self::TodayLine(_)
             | Self::TodayMore
@@ -354,7 +371,14 @@ impl Item {
             }
             (Self::InUse, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
-            (Self::Meeting | Self::Join | Self::MeetingMark, _) => MEETING_NAMESPACE,
+            (
+                Self::Meeting
+                | Self::Join
+                | Self::Transcribe
+                | Self::TranscribeStop
+                | Self::MeetingMark,
+                _,
+            ) => MEETING_NAMESPACE,
             (Self::TodayLine(_) | Self::TodayMore, _) => TODAY_NAMESPACE,
             (
                 Self::Tasks
@@ -405,6 +429,7 @@ impl Item {
                 | Self::InUse
                 | Self::Tray(_)
                 | Self::MeetingMark
+                | Self::Transcribe
                 | Self::Tasks
                 | Self::TasksMore
                 | Self::DayChoose

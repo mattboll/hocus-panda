@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs what a package of Hocuspanda holds, from a release build
 # already made (`cargo build --release --locked -p hocus-compositor -p
-# hocus-shell -p hocus-cli -p hocus-settings`), into a staging directory
+# hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe`), into a staging directory
 # for the .deb, or into the system.
 #
 #   packaging/install.sh DESTDIR
@@ -28,6 +28,9 @@ for panda in "$here"/../crates/hocus-settings/data/avatars/panda-[1-8].png; do
     install -D -m 644 "$panda" \
         "$destdir$prefix/share/hocuspanda/avatars/$(basename "$panda")"
 done
+# What makes a meeting's text (docs/design/meetings.md), which the
+# compositor starts from beside itself.
+install -D -m 755 "$release/hocus-transcribe" "$destdir$prefix/bin/hocus-transcribe"
 # What agents' hooks and scripts run to tell the bar their state.
 install -D -m 755 "$release/hocus" "$destdir$prefix/bin/hocus"
 install -D -m 755 "$here/hocuspanda-session" "$destdir$prefix/bin/hocuspanda-session"

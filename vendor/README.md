@@ -66,3 +66,18 @@ scripts/vendor.sh --check    # what CI runs
 
 When upstream offers the change, the directory, its patch, its line in
 `[patch.crates-io]` and in `scripts/vendor.sh` all go.
+
+## What is linked prebuilt
+
+One library is not built from its sources: sherpa-onnx's static libraries
+(Apache-2.0), with onnxruntime's inside (MIT), which `hocus-transcribe`
+tells a call's voices apart with (docs/design/meetings.md). The published
+`sherpa-onnx-sys` would download them itself, unchecked; given
+`SHERPA_ONNX_LIB_DIR`, its build links that folder's and downloads
+nothing. `scripts/prebuilt.sh` fetches the release's archive for this
+machine (`sherpa-onnx-v2.0.1-linux-x64-static-lib.tar.bz2`, or
+aarch64's), checks it against the SHA-256 it holds, and unpacks it into
+`prebuilt/sherpa-onnx/lib` (not in git), where `.cargo/config.toml`
+points that variable. CI runs it before every Rust build, and so does
+whoever builds the package. Its version is the `sherpa-onnx` crate's, held
+exactly in the root `Cargo.toml`: both move together, with the checksums.

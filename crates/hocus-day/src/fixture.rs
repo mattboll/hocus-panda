@@ -31,6 +31,7 @@
 //! page = "https://calendar.example.org/event/1"
 //! description = "…"
 //! alarms = [10]             # minutes before its start
+//! attendees = ["Alex", "Sam"]
 //!
 //! [tasks]
 //! board = "Sprint"
@@ -220,6 +221,8 @@ struct FileEvent {
     description: Option<String>,
     #[serde(default)]
     alarms: Vec<u32>,
+    #[serde(default)]
+    attendees: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -330,6 +333,7 @@ pub fn read(text: &str, account: &AccountId, now: &Zoned) -> std::result::Result
             page: e.page.clone(),
             description: e.description.clone(),
             alarms,
+            attendees: e.attendees.clone(),
         });
     }
     let board = match file.tasks {

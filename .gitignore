@@ -1,1 +1,3 @@
 /target
+# scripts/prebuilt.sh: what a build links prebuilt, fetched and checked.
+/prebuilt

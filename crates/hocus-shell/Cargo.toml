@@ -31,6 +31,8 @@ hocus-xdg.workspace = true
 hocus-day.workspace = true
 # The sound, from PipeWire, shared with the Settings.
 hocus-sound.workspace = true
+# A meeting's transcription: "Ne plus demander", the models it lacks.
+hocus-meetings.workspace = true
 # Bluetooth, from BlueZ, shared with the Settings.
 hocus-bluetooth.workspace = true
 # No x11, no winit-side theme detection: the shell only talks Wayland

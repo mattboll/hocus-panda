@@ -238,6 +238,10 @@ pub struct Event {
     pub description: Option<String>,
     /// Its own alarms, in minutes before its start, earliest first.
     pub alarms: Vec<u32>,
+    /// Who it invites, as its calendar names them (a meeting's
+    /// transcription writes them at its head).
+    #[serde(default)]
+    pub attendees: Vec<String>,
 }
 
 impl Event {
@@ -425,6 +429,7 @@ mod tests {
             page: None,
             description: None,
             alarms: Vec::new(),
+            attendees: Vec::new(),
         }
     }
 

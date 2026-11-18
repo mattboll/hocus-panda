@@ -358,6 +358,18 @@ impl GEvent {
                 })
             })
             .or_else(|| meeting_address(place.as_deref(), description.as_deref()));
+        // Who it invites, by name, else address; rooms left out.
+        let attendees = self
+            .attendees
+            .iter()
+            .filter(|a| !a.resource)
+            .filter_map(|a| {
+                a.display_name
+                    .clone()
+                    .or_else(|| a.email.clone())
+                    .filter(|n| !n.trim().is_empty())
+            })
+            .collect();
         let alarms = match self.reminders {
             Some(Reminders {
                 use_default: false,
@@ -378,6 +390,7 @@ impl GEvent {
             page: self.html_link.filter(|l| !l.is_empty()),
             description,
             alarms,
+            attendees,
         }
     }
 }
@@ -479,6 +492,10 @@ struct Attendee {
     #[serde(default, rename = "self")]
     me: bool,
     response_status: Option<String>,
+    display_name: Option<String>,
+    email: Option<String>,
+    #[serde(default)]
+    resource: bool,
 }
 
 #[derive(Deserialize)]

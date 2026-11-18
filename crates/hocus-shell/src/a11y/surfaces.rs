@@ -79,7 +79,11 @@ pub fn popover_title(bar: &str, item: Item, words: Words) -> String {
         Item::Music => pick("Musique", "Music"),
         Item::Journal => crate::mcp::Words::new(lang).journal().to_owned(),
         Item::Tray(_) => pick("Menu de l'icône", "Icon's menu"),
-        Item::Meeting | Item::MeetingMark | Item::Join => pick("Réunion", "Meeting"),
+        Item::Meeting
+        | Item::MeetingMark
+        | Item::Join
+        | Item::Transcribe
+        | Item::TranscribeStop => pick("Réunion", "Meeting"),
         Item::TodayLine(_) | Item::TodayMore | Item::Calendar => words.calendar().to_owned(),
         Item::Tasks | Item::TasksMore | Item::TaskAdd | Item::Task(_) => pick("À faire", "To do"),
         Item::DayChoose | Item::DayLater => pick("Ta journée", "Your day"),

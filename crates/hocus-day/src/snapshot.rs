@@ -561,6 +561,7 @@ mod tests {
             page: None,
             description: None,
             alarms: Vec::new(),
+            attendees: Vec::new(),
         };
         let snapshot = Snapshot {
             calendars: calendars

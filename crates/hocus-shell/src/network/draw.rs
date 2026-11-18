@@ -524,6 +524,8 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::Tray(_)
                             | Item::Meeting
                             | Item::Join
+                            | Item::Transcribe
+                            | Item::TranscribeStop
                             | Item::MeetingMark
                             | Item::TodayLine(_)
                             | Item::TodayMore

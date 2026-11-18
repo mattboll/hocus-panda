@@ -55,6 +55,7 @@ pub mod session;
 pub mod setup;
 pub mod sound;
 pub mod tasks;
+pub mod transcribe;
 pub mod tray;
 pub mod wifi;
 pub mod window_menu;
@@ -1199,6 +1200,9 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         Item::Calendar => None,
         Item::Meeting => crate::meeting::open_in_calendar(&bar),
         Item::Join => crate::meeting::join(),
+        // Transcrire after "Ne plus demander": at once.
+        Item::Transcribe => crate::transcribe::start(),
+        Item::TranscribeStop => crate::transcribe::stop(),
         Item::TodayLine(row) => crate::today::open(&bar, usize::from(row)),
         Item::TodayMore => crate::today::open_more(&bar),
         Item::TaskAdd => Some(Effect::Tasks(crate::tasks::Act::Add { bar })),

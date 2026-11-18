@@ -24,6 +24,7 @@ hocus-config = { version = "1.0.0", path = "crates/hocus-config" }
 hocus-day = { version = "1.0.0", path = "crates/hocus-day" }
 hocus-geometry = { version = "1.0.0", path = "crates/hocus-geometry" }
 hocus-link = { version = "1.0.0", path = "crates/hocus-link" }
+hocus-meetings = { version = "1.0.0", path = "crates/hocus-meetings" }
 hocus-network = { version = "1.0.0", path = "crates/hocus-network" }
 hocus-pandas = { version = "1.0.0", path = "crates/hocus-pandas" }
 hocus-panic = { version = "1.0.0", path = "crates/hocus-panic" }
@@ -58,6 +59,10 @@ rustix = "1.1.6"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 serde = "1.0.229"
 serde_json = "1.0.154"
+# The voices of a meeting's call (hocus-transcribe): exactly the version
+# of the prebuilt archive scripts/prebuilt.sh fetches and checks.
+sherpa-onnx = { version = "=2.0.1", default-features = false, features = ["static"] }
+sha2 = "0.10.9"
 smithay = { version = "0.7.0", default-features = false }
 smithay-client-toolkit = { version = "0.19.2", default-features = false }
 tempfile = "3.27.0"
@@ -71,6 +76,12 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 udev = "0.9.3"
 unicode-normalization = "0.1.26"
 ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+# Speech to text (hocus-transcribe): whisper.cpp (MIT), its sources in the
+# crate, built with cmake; the binding is under the Unlicense (deny.toml).
+whisper-rs = "0.16.0"
+# The GPUs hocus-transcribe may hear on, by their kind and memory, through
+# the system's Vulkan loader.
+ash = { version = "0.38.0", default-features = false, features = ["loaded", "std"] }
 wayland-backend = { version = "0.3.17", features = ["client_system"] }
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
