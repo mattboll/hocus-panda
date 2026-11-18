@@ -3401,8 +3401,9 @@ the machine).
   desktop entry (by its program's name), else by its program. A video
   source whose `media.role` is `Screen` (the desktop's own screen cast,
   5.11) is no camera: what reads it shares the screen (#619). Who uses a
-  camera now, without the linger, is told the compositor as it changes,
-  for the screen light (`ToCompositor::Camera`, [camera.md](camera.md)).
+  camera now, without the linger, after 3 s of continuous use (a moment's
+  open lights nothing), is told the compositor as it changes, for the
+  screen light (`ToCompositor::Camera`, [camera.md](camera.md)).
 - **The screen**: the compositor's `shares` (5.11), the screen's tile;
   and its `recording` (5.10), the recording's tile. No longer items of
   their own: their lines and buttons are in the popover.

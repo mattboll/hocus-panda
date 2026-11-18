@@ -120,7 +120,8 @@ pub enum ToCompositor {
     /// shell reads no sound.
     Music { playing: bool },
     /// The applications using a camera now (bar.md 5.12, as the in-use
-    /// sign follows them, without its linger), sent as the shell connects
+    /// sign follows them, without its linger, once on for 3 s without a
+    /// break), sent as the shell connects
     /// and when they change; none: the camera is not in use. The
     /// compositor lights the screen of their window (#619,
     /// docs/design/camera.md).

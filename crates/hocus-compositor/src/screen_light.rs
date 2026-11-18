@@ -170,6 +170,9 @@ impl State {
         } else {
             FADE
         };
+        // Said in the journal, with who lit it: the light is seen, a
+        // surprise is to be explained.
+        let apps: Vec<&str> = self.light.users.iter().map(|u| u.app.as_str()).collect();
         for (name, glow) in &mut self.light.glows {
             let to = if wanted.as_ref() == Some(name) {
                 1.0
@@ -177,14 +180,14 @@ impl State {
                 0.0
             };
             if glow.to != to {
-                tracing::debug!(screen = name, on = to > 0.0, "the screen light");
+                tracing::info!(screen = name, on = to > 0.0, ?apps, "the screen light");
                 glow.towards(to, at, fade);
             }
         }
         if let Some(name) = wanted
             && !self.light.glows.contains_key(&name)
         {
-            tracing::debug!(screen = name, on = true, "the screen light");
+            tracing::info!(screen = name, on = true, ?apps, "the screen light");
             let mut glow = Glow {
                 from: 0.0,
                 to: 0.0,

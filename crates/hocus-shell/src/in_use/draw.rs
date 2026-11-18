@@ -686,6 +686,7 @@ mod tests {
                 at: t0,
             },
             since: t0,
+            again: t0,
             ended: None,
         };
         let at = |s: u64| t0 + Duration::from_millis(s);

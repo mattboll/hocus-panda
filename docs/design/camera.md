@@ -13,10 +13,15 @@ glow softly and light the user's face. It works with every application:
 the light is the screen's, the video is not touched.
 
 - **When**: as long as the in-use sign of the bar (bar.md 5.12) counts a
-  camera's user, without its 3 s linger: a `Stream/Input/Video` node
-  linked from a `Video/Source` in PipeWire's graph, or a process holding a
-  camera's device open. The shell tells the compositor who they are as
-  that changes, and again as it connects (`ToCompositor::Camera`: each
+  camera's user, without its 3 s linger, after 3 s of continuous use: a
+  `Stream/Input/Video` node linked from a `Video/Source` in PipeWire's
+  graph, or a process holding a camera's device open. A use that ends
+  before, as applications open a camera for a moment to list or probe it,
+  lights nothing (one back while its tile lingers starts its 3 s again);
+  the sign shows it all the same. The shell tells the compositor who they
+  are as that changes (in the journal: "the compositor is told who uses
+  the camera", and the compositor's "the screen light", with their
+  names), and again as it connects (`ToCompositor::Camera`: each
   application's name and the names its windows' ids may go by); the
   compositor forgets them when the shell goes.
 - **Where**: on the screen of the window of an application using the
