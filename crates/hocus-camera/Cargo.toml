@@ -40,6 +40,9 @@ anyhow.workspace = true
 # The living wallpapers' shaders, the compositor's own, drawn behind the
 # person (lot 3).
 hocus-scenes.workspace = true
+# The v4l2loopback device's ioctls and writes (Apache-2.0, MIT or
+# Apache-2.0 WITH LLVM-exception).
+rustix = { workspace = true, features = ["fs"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
@@ -49,6 +52,7 @@ naga.workspace = true
 rustix = { workspace = true, features = ["time"] }
 # The screenshots' pictures.
 image = { workspace = true, features = ["png"] }
+tempfile.workspace = true
 
 [features]
 # The test picture of a person (data/person.jpg), for the compositor's

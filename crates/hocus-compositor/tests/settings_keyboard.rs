@@ -578,7 +578,7 @@ fn the_keyboards_layouts_and_repeat_follow_the_file() -> anyhow::Result<()> {
         },
         config,
     )?;
-    assert_eq!(hp.keyboard_repeat(), (25, 200));
+    assert_eq!(hp.keyboard_repeat(), (25, 400));
     std::fs::write(
         &file,
         "[keyboard]\nlayouts = [\"us\", \"fr(bepo)\"]\nrepeat_delay = 300\nrepeat_rate = 40\n",

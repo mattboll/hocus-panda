@@ -238,8 +238,9 @@ impl State {
         self.camera.told = None;
         let remote = self.config.pipewire_remote.clone();
         let device = self.config.camera_device.clone();
+        let video4linux = self.config.camera_video4linux.clone();
         programs::on_a_thread("hocus-camera".to_owned(), move || {
-            run(&program, remote, &device, lines, &back);
+            run(&program, remote, &device, video4linux, lines, &back);
         });
     }
 
@@ -381,6 +382,7 @@ fn run(
     program: &std::path::Path,
     remote: Option<PathBuf>,
     device: &str,
+    video4linux: Option<PathBuf>,
     lines: mpsc::Receiver<String>,
     back: &Sender<FromProgram>,
 ) {
@@ -409,6 +411,9 @@ fn run(
                 command.env("WGPU_BACKEND", "none");
             }
         }
+    }
+    if let Some(dir) = video4linux {
+        command.env("HOCUS_VIDEO4LINUX", dir);
     }
     programs::default_signals(&mut command);
     let mut child = match command.spawn() {

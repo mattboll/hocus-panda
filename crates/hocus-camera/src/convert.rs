@@ -6,6 +6,8 @@
 //! nearest of the camera's. YUV is BT.601's, limited range, as webcams
 //! send it.
 
+use std::{borrow::Cow, sync::LazyLock};
+
 use crate::look::{BYTES, H, W};
 
 /// The pixels a camera sends.
@@ -73,6 +75,113 @@ fn yuv(y: u8, u: u8, v: u8) -> [u8; 3] {
     ]
 }
 
+/// The Huffman tables a JPEG without any means (ITU-T T.81, Annex K.3):
+/// UVC cameras' MJPEG frames often leave them out, as Motion JPEG allows,
+/// and the decoder does not assume them. Luminance DC and AC, then
+/// chrominance's: each class and number, its 16 code lengths' counts, its
+/// values.
+const TABLES: [(u8, [u8; 16], &[u8]); 4] = [
+    (
+        0x00,
+        [0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    ),
+    (
+        0x10,
+        [0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7d],
+        &[
+            0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51,
+            0x61, 0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08, 0x23, 0x42, 0xb1, 0xc1,
+            0x15, 0x52, 0xd1, 0xf0, 0x24, 0x33, 0x62, 0x72, 0x82, 0x09, 0x0a, 0x16, 0x17, 0x18,
+            0x19, 0x1a, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+            0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57,
+            0x58, 0x59, 0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x73, 0x74, 0x75,
+            0x76, 0x77, 0x78, 0x79, 0x7a, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x92,
+            0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
+            0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3,
+            0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8,
+            0xd9, 0xda, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf1, 0xf2,
+            0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa,
+        ],
+    ),
+    (
+        0x01,
+        [0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    ),
+    (
+        0x11,
+        [0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77],
+        &[
+            0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21, 0x31, 0x06, 0x12, 0x41, 0x51, 0x07,
+            0x61, 0x71, 0x13, 0x22, 0x32, 0x81, 0x08, 0x14, 0x42, 0x91, 0xa1, 0xb1, 0xc1, 0x09,
+            0x23, 0x33, 0x52, 0xf0, 0x15, 0x62, 0x72, 0xd1, 0x0a, 0x16, 0x24, 0x34, 0xe1, 0x25,
+            0xf1, 0x17, 0x18, 0x19, 0x1a, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x35, 0x36, 0x37, 0x38,
+            0x39, 0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x53, 0x54, 0x55, 0x56,
+            0x57, 0x58, 0x59, 0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x73, 0x74,
+            0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+            0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5,
+            0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba,
+            0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6,
+            0xd7, 0xd8, 0xd9, 0xda, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf2,
+            0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa,
+        ],
+    ),
+];
+
+/// [`TABLES`] as one DHT segment, marker and length first.
+static DHT: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    let body: Vec<u8> = TABLES
+        .iter()
+        .flat_map(|(class, counts, values)| {
+            std::iter::once(*class)
+                .chain(counts.iter().copied())
+                .chain(values.iter().copied())
+        })
+        .collect();
+    let length = u16::try_from(body.len() + 2).unwrap_or(u16::MAX);
+    [0xFF, 0xC4]
+        .into_iter()
+        .chain(length.to_be_bytes())
+        .chain(body)
+        .collect()
+});
+
+/// `jpeg` with [`TABLES`] before its scan when it has no tables of its
+/// own; as it is otherwise, or when it is not one.
+fn with_tables(jpeg: &[u8]) -> Cow<'_, [u8]> {
+    if jpeg.get(..2) != Some(&[0xFF, 0xD8]) {
+        return Cow::Borrowed(jpeg);
+    }
+    let mut at = 2;
+    loop {
+        let (Some(0xFF), Some(&marker)) = (jpeg.get(at), jpeg.get(at + 1)) else {
+            return Cow::Borrowed(jpeg);
+        };
+        match marker {
+            // DHT: its own tables.
+            0xC4 => return Cow::Borrowed(jpeg),
+            // SOS: the scan, and no tables before it.
+            0xDA => {
+                let (head, scan) = jpeg.split_at(at);
+                let mut with = Vec::with_capacity(jpeg.len() + DHT.len());
+                with.extend_from_slice(head);
+                with.extend_from_slice(&DHT);
+                with.extend_from_slice(scan);
+                return Cow::Owned(with);
+            }
+            // A fill byte before a marker.
+            0xFF => at += 1,
+            _ => {
+                let (Some(&hi), Some(&lo)) = (jpeg.get(at + 2), jpeg.get(at + 3)) else {
+                    return Cow::Borrowed(jpeg);
+                };
+                at += 2 + usize::from(u16::from_be_bytes([hi, lo]));
+            }
+        }
+    }
+}
+
 /// The converter: what it keeps between frames.
 #[derive(Debug, Default)]
 pub struct Converter {
@@ -102,7 +211,8 @@ impl Converter {
             input.stride as usize
         };
         if input.pixels == Pixels::Mjpg {
-            let Ok(picture) = image::load_from_memory_with_format(data, image::ImageFormat::Jpeg)
+            let Ok(picture) =
+                image::load_from_memory_with_format(&with_tables(data), image::ImageFormat::Jpeg)
             else {
                 return false;
             };
@@ -262,12 +372,70 @@ pub fn write(frame: &[u8], output: Output, out: &mut [u8]) -> usize {
 mod tests {
     use super::*;
 
+    /// A UVC camera's MJPEG frame, its Huffman tables left out: read as
+    /// the same frame with them.
+    #[test]
+    fn a_jpeg_without_its_tables_reads_with_the_standard_ones() {
+        let mut rgb = Vec::with_capacity(64 * 48 * 3);
+        for y in 0..48u32 {
+            for x in 0..64u32 {
+                rgb.extend_from_slice(&[(x * 4) as u8, (y * 5) as u8, ((x + y) * 2) as u8]);
+            }
+        }
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85)
+            .encode(&rgb, 64, 48, image::ExtendedColorType::Rgb8)
+            .expect("encoded");
+        let mut without = jpeg[..2].to_vec();
+        let mut at = 2;
+        while jpeg[at + 1] != 0xDA {
+            let end = at + 2 + usize::from(u16::from_be_bytes([jpeg[at + 2], jpeg[at + 3]]));
+            if jpeg[at + 1] != 0xC4 {
+                without.extend_from_slice(&jpeg[at..end]);
+            }
+            at = end;
+        }
+        without.extend_from_slice(&jpeg[at..]);
+        assert!(
+            image::load_from_memory_with_format(&without, image::ImageFormat::Jpeg).is_err(),
+            "the decoder needs the tables: else this test proves nothing"
+        );
+        let input = Input {
+            pixels: Pixels::Mjpg,
+            size: (64, 48),
+            stride: 0,
+        };
+        let (mut with_out, mut without_out) = (vec![0u8; BYTES], vec![0u8; BYTES]);
+        let mut converter = Converter::default();
+        assert!(converter.to_rgba(&input, &jpeg, &mut with_out));
+        assert!(converter.to_rgba(&input, &without, &mut without_out));
+        assert!(with_out == without_out, "the same picture");
+        assert!(matches!(with_tables(&jpeg), Cow::Borrowed(_)));
+    }
+
     #[test]
     fn yuv_grey_is_grey_and_back() {
         let (y, u, v) = to_yuv(128, 128, 128);
         assert_eq!((u, v), (128, 128));
         let [r, g, b] = yuv(y, u, v);
         assert!(r.abs_diff(128) <= 1 && g.abs_diff(128) <= 1 && b.abs_diff(128) <= 1);
+    }
+
+    /// The v4l2loopback device's frames (YUYV): BT.601's limited range,
+    /// two pixels' chroma averaged.
+    #[test]
+    fn a_bgrx_frame_written_as_yuyv() {
+        let mut frame = vec![0u8; BYTES];
+        // White, black, then two reds, as B, G, R, x.
+        frame[..16].copy_from_slice(&[255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0, 0, 255, 0]);
+        let mut out = vec![0u8; Output::Yuy2.layout().1];
+        assert_eq!(write(&frame, Output::Yuy2, &mut out), W * H * 2);
+        assert_eq!(&out[..4], &[235, 128, 16, 128]);
+        assert_eq!(&out[4..8], &[82, 90, 82, 240]);
+        // The rest black.
+        assert_eq!(&out[out.len() - 4..], &[16, 128, 16, 128]);
+        // Too small a buffer: nothing written.
+        assert_eq!(write(&frame, Output::Yuy2, &mut out[..10]), 0);
     }
 
     #[test]

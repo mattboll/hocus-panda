@@ -12,6 +12,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 cat > "$work/expected" <<LIST
+-rw-r--r-- ./etc/modprobe.d/hocuspanda-camera.conf
+-rw-r--r-- ./etc/modules-load.d/hocuspanda-camera.conf
 -rw-r--r-- ./etc/pam.d/hocuspanda
 -rwxr-xr-x ./usr/bin/hocus
 -rwxr-xr-x ./usr/bin/hocus-camera
@@ -49,12 +51,15 @@ if ! diff -u "$work/expected" "$work/found"; then
     exit 1
 fi
 
-# The lock's PAM service is a conffile, and the package says what it needs.
+# Its files in /etc are conffiles, and the package says what it needs.
 dpkg-deb --control "$deb" "$work/control"
-grep -qx '/etc/pam.d/hocuspanda' "$work/control/conffiles" || {
-    echo "$deb: /etc/pam.d/hocuspanda is not a conffile" >&2
-    exit 1
-}
+for conffile in /etc/pam.d/hocuspanda /etc/modprobe.d/hocuspanda-camera.conf \
+    /etc/modules-load.d/hocuspanda-camera.conf; do
+    grep -qx "$conffile" "$work/control/conffiles" || {
+        echo "$deb: $conffile is not a conffile" >&2
+        exit 1
+    }
+done
 for field in Package Version Architecture Depends; do
     [ -n "$(dpkg-deb --field "$deb" "$field")" ] || {
         echo "$deb: no $field" >&2

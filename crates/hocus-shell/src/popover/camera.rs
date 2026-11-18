@@ -21,7 +21,9 @@
 //! - a rule, the screen light's switch ("Lumière d'écran", "auto, sur ton
 //!   visage" or its strength), and the help's link (`#8FB3FF`), which
 //!   shows how to choose « Hocuspanda » in a call (the InCall board),
-//!   with its way back.
+//!   with its way back, and where it works: everywhere with the
+//!   v4l2loopback device labelled "Hocuspanda" (looked for in sysfs as the
+//!   page opens), else what is needed.
 //!
 //! Built with the shell's widget kit ([`crate::ui`]): stock widgets on the
 //! kit's surface; canvases only where the look draws (the thumbnails, the
@@ -37,7 +39,7 @@ use std::{
 
 use hocus_a11y::Role;
 use hocus_link::CameraShown;
-use hocus_words::shell::camera as w;
+use hocus_words::{Text, shell::camera as w};
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Size, Theme,
     alignment::{Horizontal, Vertical},
@@ -171,6 +173,8 @@ struct Ui {
     focus: Option<Target>,
     switch: kit::Switch,
     said: Option<String>,
+    /// The v4l2loopback device is there, as the help page last opened.
+    loopback: bool,
 }
 
 impl Default for Ui {
@@ -181,6 +185,7 @@ impl Default for Ui {
             focus: None,
             switch: kit::Switch::default(),
             said: None,
+            loopback: false,
         }
     }
 }
@@ -270,7 +275,7 @@ fn build<'a>(motion: bool) -> El<'a> {
         say(lang, &shown, &readers, ui);
         let page = match ui.page {
             Page::Effects => effects_page(lang, &shown, &readers, ui, motion),
-            Page::Help => help_page(lang, ui.focus),
+            Page::Help => help_page(lang, ui.focus, ui.loopback),
         };
         container(page)
             .padding(BORDER + PAD)
@@ -767,20 +772,54 @@ fn link<'a>(word: &str, target: Target, focus: Option<Target>) -> El<'a> {
         .into()
 }
 
-/// How to choose « Hocuspanda » in a call: the InCall board, at the
-/// window's width.
-fn help_page<'a>(lang: Lang, focus: Option<Target>) -> El<'a> {
+/// Where choosing « Hocuspanda » works: each kind of application, what
+/// it takes, and whether that is a plain yes. Everywhere with the
+/// v4l2loopback device; without it, Firefox behind its setting, Chrome
+/// behind its experimental one, the applications not at all.
+fn where_it_works(loopback: bool) -> [(Text, Text, bool); 3] {
+    if loopback {
+        [
+            (w::WORKS_WEB, w::YES, true),
+            (w::WORKS_CHROME, w::YES, true),
+            (w::WORKS_APPS, w::YES, true),
+        ]
+    } else {
+        [
+            (w::WORKS_WEB, w::SETTING_TO_TURN_ON, false),
+            (w::WORKS_CHROME, w::EXPERIMENTAL, false),
+            (w::WORKS_APPS, w::NOT_WITHOUT_PACKAGE, false),
+        ]
+    }
+}
+
+/// What the help says is needed, under the table: nothing with the
+/// device; else the package, and Firefox's setting.
+fn what_it_needs(loopback: bool) -> Vec<Text> {
+    if loopback {
+        Vec::new()
+    } else {
+        vec![w::PACKAGE_NEEDED, w::FIREFOX_SETTING]
+    }
+}
+
+/// `text` wrapped at the window's width, each line `size` tall times
+/// `line`.
+fn wrapped<'a>(text: &str, size: f32, line: f32, color: Color) -> El<'a> {
     let room = WIDTH as f32 - 2.0 * (BORDER + PAD);
-    let mut body = column![];
-    for line in kit::wrap(w::HELP_BODY.get(lang), room, |t| {
-        kit::measure(t, BODY, MANROPE)
-    }) {
-        body = body.push(
-            container(said(line, BODY, MANROPE, SOFT_TEXT.get()))
-                .height(BODY * BODY_LINE)
+    let mut lines = column![];
+    for one in kit::wrap(text, room, |t| kit::measure(t, size, MANROPE)) {
+        lines = lines.push(
+            container(said(one, size, MANROPE, color))
+                .height(size * line)
                 .align_y(Vertical::Center),
         );
     }
+    crate::ui::line(lines, text).into()
+}
+
+/// How to choose « Hocuspanda » in a call: the InCall board, at the
+/// window's width.
+fn help_page<'a>(lang: Lang, focus: Option<Target>, loopback: bool) -> El<'a> {
     let list_row = |left: El<'a>, right: Option<El<'a>>, chosen: bool| -> El<'a> {
         let mut line = row![left].align_y(Vertical::Center);
         if let Some(right) = right {
@@ -848,7 +887,7 @@ fn help_page<'a>(lang: Lang, focus: Option<Target>) -> El<'a> {
         },
         ..container::Style::default()
     });
-    let works = |app: hocus_words::Text, answer: hocus_words::Text, yes: bool| -> El<'a> {
+    let works = |(app, answer, yes): (Text, Text, bool)| -> El<'a> {
         row![
             said(app.get(lang), SMALL, MANROPE, TEXT.get()),
             Space::new().width(Length::Fill),
@@ -864,10 +903,14 @@ fn help_page<'a>(lang: Lang, focus: Option<Target>) -> El<'a> {
         .into()
     };
     let back = link(&format!("‹ {}", w::BACK.get(lang)), Target::Back, focus);
-    column![
+    let mut table = column![];
+    for answer in where_it_works(loopback) {
+        table = table.push(works(answer));
+    }
+    let mut page = column![
         head(lang, back),
         said(w::IN_THE_CALL.get(lang), TITLE, MANROPE_BOLD, TEXT.get()),
-        crate::ui::line(body, w::HELP_BODY.get(lang)),
+        wrapped(w::HELP_BODY.get(lang), BODY, BODY_LINE, SOFT_TEXT.get()),
         settings,
         spaced_by(
             w::WHERE_IT_WORKS.get(lang),
@@ -876,18 +919,17 @@ fn help_page<'a>(lang: Lang, focus: Option<Target>) -> El<'a> {
             FAINT.get(),
             0.1
         ),
-        column![
-            works(w::WORKS_WEB, w::YES, true),
-            works(w::WORKS_CHROME, w::EXPERIMENTAL, false),
-            works(w::WORKS_APPS, w::NOT_YET, false),
-        ],
-        said(
-            w::SCREEN_LIGHT_EVERYWHERE.get(lang),
-            SMALL,
-            MANROPE,
-            FAINT.get()
-        ),
-    ]
+        table,
+    ];
+    for need in what_it_needs(loopback) {
+        page = page.push(wrapped(need.get(lang), SMALL, LINE, SOFT_TEXT.get()));
+    }
+    page.push(said(
+        w::SCREEN_LIGHT_EVERYWHERE.get(lang),
+        SMALL,
+        MANROPE,
+        FAINT.get(),
+    ))
     .spacing(GAP)
     .into()
 }
@@ -924,7 +966,18 @@ fn say(lang: Lang, shown: &CameraShown, readers: &str, ui: &mut Ui) {
                 if shown.screen_light { "on" } else { "off" },
             )
         }
-        Page::Help => format!("{} | {}", w::HEADING.get(lang), w::IN_THE_CALL.get(lang)),
+        Page::Help => {
+            let answers: Vec<String> = where_it_works(ui.loopback)
+                .iter()
+                .map(|(app, answer, _)| format!("{}: {}", app.get(lang), answer.get(lang)))
+                .collect();
+            format!(
+                "{} | {} | {}",
+                w::HEADING.get(lang),
+                w::IN_THE_CALL.get(lang),
+                answers.join(", ")
+            )
+        }
     };
     if ui.said.as_deref() != Some(said.as_str()) {
         tracing::debug!(%said, "the camera's window shows it");
@@ -970,9 +1023,13 @@ fn handle(message: Msg) {
             rebuild();
         }
         Msg::Act(Target::Help) => {
+            // From sysfs alone: no device is opened.
+            let loopback = hocus_camera::loopback::present();
+            tracing::debug!(loopback, "the camera's help: the v4l2loopback device");
             ui(|ui| {
                 ui.page = Page::Help;
                 ui.focus = None;
+                ui.loopback = loopback;
             });
             rebuild();
         }
@@ -1003,5 +1060,59 @@ mod tests {
         assert_eq!(w::HELP.get(fr), "Choisir « Hocuspanda » dans l’appel…");
         let tabs: Vec<&str> = Tab::ALL.iter().map(|t| t.name().get(fr)).collect();
         assert_eq!(tabs, ["Image", "Fond", "Visage", "Voix", "Réactions"]);
+    }
+
+    /// « OÙ ÇA MARCHE »: everywhere with the v4l2loopback device; without
+    /// it, what each kind of application takes, and the package named.
+    #[test]
+    fn the_help_says_where_it_works_with_the_device_or_without() {
+        let fr = Lang::French;
+        let said = |loopback| -> Vec<(&str, &str, bool)> {
+            where_it_works(loopback)
+                .iter()
+                .map(|(app, answer, yes)| (app.get(fr), answer.get(fr), *yes))
+                .collect()
+        };
+        assert_eq!(
+            said(true),
+            [
+                ("Firefox (visio web)", "oui", true),
+                ("Chrome, Chromium", "oui", true),
+                ("Slack, Teams, Discord (applis)", "oui", true),
+            ]
+        );
+        assert!(what_it_needs(true).is_empty());
+        assert_eq!(
+            said(false),
+            [
+                ("Firefox (visio web)", "réglage à activer", false),
+                ("Chrome, Chromium", "réglage expérimental", false),
+                (
+                    "Slack, Teams, Discord (applis)",
+                    "pas sans ce paquet",
+                    false
+                ),
+            ]
+        );
+        let needs: Vec<&str> = what_it_needs(false).iter().map(|t| t.get(fr)).collect();
+        assert_eq!(needs.len(), 2);
+        assert!(needs[0].contains("v4l2loopback-dkms"), "{}", needs[0]);
+        assert!(needs[0].contains("redémarre"), "{}", needs[0]);
+        assert!(
+            needs[0].contains("sudo modprobe v4l2loopback"),
+            "{}",
+            needs[0]
+        );
+        assert!(
+            needs[1].contains("about:config")
+                && needs[1].contains("media.webrtc.camera.allow-pipewire"),
+            "{}",
+            needs[1]
+        );
+        let en: Vec<&str> = what_it_needs(false)
+            .iter()
+            .map(|t| t.get(Lang::English))
+            .collect();
+        assert!(en[0].contains("v4l2loopback-dkms"), "{}", en[0]);
     }
 }

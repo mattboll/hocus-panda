@@ -113,7 +113,8 @@ while something reads it, so the camera's light is never on for nothing.
   Hocuspanda`; a driver, 1280 × 720 at 30 frames a second, in B, G, R, x,
   or I420 or YUY2 for readers that take only YUV (the browsers' WebRTC).
 - **Read only while read**: its stream streams while a reader is linked
-  to it. Then, and only then, it reads the real camera: a stream of its
+  to it; the v4l2loopback device (below) has readers of its own. While
+  either is read, and only then, it reads the real camera: a stream of its
   own (`hocuspanda-camera-input`, not autoconnected), which it links
   itself to the camera's node (a session manager must never link it to
   its own source). The camera: PipeWire's video sources but its own and
@@ -122,11 +123,66 @@ while something reads it, so the camera's light is never on for nothing.
   NV12, I420 or RGB, any size, scaled to cover 1280 × 720 (its middle
   kept). The last reader gone, the camera's stream and the GPU's work
   go. Without a camera, a dark frame twice a second (with the banner).
+  PipeWire's node of the v4l2loopback device (WirePlumber makes one once
+  it is written) is never the camera it reads: its label
+  (`api.v4l2.cap.card`) or its description is "Hocuspanda".
 - **On the GPU** (wgpu, Vulkan or GL, an integrated GPU first): each
   frame written into a texture, Lumière, its denoise and the banner in
   one fragment shader's pass, read back; a CPU's adapter (lavapipe) is
   no faster than the CPU's own path, which is taken then, and without an
   adapter, and for a frame the GPU fails (`--device auto|cpu|any`).
+
+### On V4L2 too: the v4l2loopback device
+
+Firefox and Chrome read cameras from `/dev/video*` unless a setting says
+PipeWire (`media.webrtc.camera.allow-pipewire`, Chrome's "PipeWire Camera
+support"); Slack, Teams and Discord (Electron) only from `/dev/video*`.
+So `hocus-camera` writes the same frames to a v4l2loopback device too
+(`crates/hocus-camera/src/loopback.rs`), and every application lists
+"Hocuspanda" with no setting.
+
+- **The package** recommends `v4l2loopback-dkms` and ships the module's
+  options, `/etc/modprobe.d/hocuspanda-camera.conf` (`devices=1
+  video_nr=42 card_label="Hocuspanda" exclusive_caps=1`), and its loading
+  at boot, `/etc/modules-load.d/hocuspanda-camera.conf`; it never loads or
+  builds the module itself. After installing the module: a restart, or
+  `sudo modprobe v4l2loopback`.
+- **Found by its label**, never by its number: the `name` of each entry of
+  `/sys/class/video4linux` (`HOCUS_VIDEO4LINUX` stands for it, which
+  tests point at a tree of their own: `Config::camera_video4linux`), its
+  node by its `uevent`'s `DEVNAME` in `/dev` (`HOCUS_VIDEO_DEVICES`).
+  Only that node is opened, and kept only if `VIDIOC_QUERYCAP` says its
+  driver is `v4l2 loopback` and its card "Hocuspanda": no other
+  `/dev/video*` is ever opened. Without it, PipeWire only, said once in
+  the log at info; it is looked for again every ten seconds (sysfs
+  alone), so a `modprobe` needs no new session.
+- **Its format**: YUYV 4:2:2 (BT.601, limited range), 1280 × 720, 30 a
+  second: what every UVC webcam sends, so what every reader takes
+  (libwebrtc's V4L2 capture in Firefox and Chrome, Electron's), and the
+  source's YUY2 already; NV12 is not taken by every one. Set with
+  `VIDIOC_S_FMT` and `VIDIOC_S_PARM` on the output, then each frame
+  written with `write()`, the V4L2 output interface.
+- **Written on a thread of its own**, converted there from the frame the
+  PipeWire source gets; one frame waits at most, the next dropped while
+  it does. With nothing new for half a second, the last frame again:
+  while nothing reads, the still (the dark frame with the banner, made
+  again when the banner changes), so that a reader starting gets a
+  picture at once, and with `exclusive_caps` the device shows as a camera
+  only once written.
+- **Its readers**: v4l2loopback's client-usage event
+  (`V4L2_EVENT_PRI_CLIENT_USAGE`, from 0.12.5: the readers streaming from
+  the device), dequeued after each frame written, so within half a second
+  while idle; on an older v4l2loopback, the processes holding the device
+  open (`/proc/*/fd`, at most once a second), but `hocus-camera` itself
+  and PipeWire's (whose node of the device reads it for a stream the
+  graph shows). The device read is the camera read: the real camera
+  comes on, the screen light's `auto` measures, the violet dot shows; the
+  last reader gone, it goes, as with PipeWire.
+- **Who uses the camera**: the shell's in-use sign (bar.md 5.12) leaves
+  `hocus-camera`'s holding of the device out, as PipeWire's; the
+  application reading it holds it too, and is the one shown ("Utilisée
+  par Firefox"), whose window the screen light lights. Its reading of the
+  real camera is a PipeWire stream of its own, left out already.
 
 ### Lumière and Bandeau (the Image tab)
 
@@ -197,9 +253,14 @@ tile while an effect is on and the Hocuspanda camera is read.
   38 × 22.
 - Lumière is on by default (the mockup's state); `auto` is the strength's
   default, soft while nothing measures, so lot 1 alone looks as it did.
-- The help's table says "pas encore" for Slack, Teams and Discord (no
-  v4l2loopback in this lot) and drops the screen light's column for a
-  line ("La lumière d'écran marche avec toutes les applis."), the window
+- The help's table « OÙ ÇA MARCHE » follows the v4l2loopback device,
+  looked for in sysfs as the page opens: with it, "oui" for Firefox,
+  Chrome and Slack, Teams, Discord; without it, "réglage à activer" for
+  Firefox, "réglage expérimental" for Chrome, "pas sans ce paquet" for
+  the applications, then two lines: install `v4l2loopback-dkms` and
+  restart (or `sudo modprobe v4l2loopback`), and Firefox's
+  `about:config` setting. It drops the screen light's column for a line
+  ("La lumière d'écran marche avec toutes les applis."), the window
   being 340 wide.
 - The banner shows the project's line only with `banner-project` (on by
   default), a Settings row.
@@ -225,8 +286,8 @@ real camera. The mockup's « Firefox veut utiliser la caméra » card means
 serving `org.freedesktop.impl.portal.Access` (`AccessDialog`) on the
 compositor's bus with a card of the shell's, and keeping the answers (the
 permission store) for Settings › Caméra to take back: left to the
-maintainer. v4l2loopback (for applications that read only V4L2) is not
-in this lot.
+maintainer. For the applications that read only V4L2, the v4l2loopback
+device above.
 
 **Measured headless** (`crates/hocus-compositor/tests/camera.rs`, a
 PipeWire of the test's own, a fake camera's node of the test's, frames on
@@ -242,6 +303,15 @@ alone shown to Vulkan): `hocus-camera`'s `gpu::tests` make what the CPU
 makes within two levels. The Settings' rows:
 `settings_appearance::the_camera_page_writes_the_screen_light_s_keys`.
 The look: `camera::screenshots_of_the_window` (ignored, `HOCUS_SHOTS`).
+The v4l2loopback device, with no module (`hocus-camera`'s
+`loopback::tests`, `convert::tests`): found by its label in a sysfs tree
+of the test's own, never another; a B, G, R, x frame written as YUYV, its
+values checked; the client-usage event's count, and `/proc`'s holders
+but `hocus-camera` and PipeWire's; the ioctls' numbers on x86-64. The
+shell leaving `hocus-camera` out (`in_use::cameras::tests`) and the
+help's words with the device and without (`popover::camera::tests`).
+Not measured headless: a real v4l2loopback (the module is the
+machine's): on the maintainer's.
 
 ## What is behind you (lot 3, as built)
 

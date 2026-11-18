@@ -49,5 +49,12 @@ install -D -m 644 "$here/hocuspanda-portals.conf" \
     "$destdir$prefix/share/xdg-desktop-portal/hocuspanda-portals.conf"
 # The lock screen's PAM service (docs/design/lock.md), always under /etc.
 install -D -m 644 "$here/pam-hocuspanda" "$destdir/etc/pam.d/hocuspanda"
+# The Hocuspanda camera's v4l2loopback device (docs/design/camera.md): its
+# options, and the module loaded at boot, always under /etc. The module
+# itself is v4l2loopback-dkms's; nothing here loads or builds it.
+install -D -m 644 "$here/modprobe-hocuspanda-camera.conf" \
+    "$destdir/etc/modprobe.d/hocuspanda-camera.conf"
+install -D -m 644 "$here/modules-load-hocuspanda-camera.conf" \
+    "$destdir/etc/modules-load.d/hocuspanda-camera.conf"
 # Every setting with its default, to copy to ~/.config/hocuspanda/.
 install -D -m 644 "$here/config.toml" "$destdir$prefix/share/doc/hocuspanda/config.toml"

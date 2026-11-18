@@ -16,7 +16,13 @@
 //! - **Each frame** the camera sends: read into RGBA, its statistics (the
 //!   face's light, Lumière's correction), made ([`crate::look`], on the
 //!   GPU or the CPU), and handed to the source's free buffer, in the format
-//!   its readers agreed to.
+//!   its readers agreed to, and to the v4l2loopback device labelled
+//!   "Hocuspanda" when there is one ([`crate::loopback`]).
+//! - **Read** means the source streams or the device has a reader: the
+//!   real camera is read while either is. While neither is, the device
+//!   gets the still (the dark frame, with the banner). Without the device
+//!   (looked for again every ten seconds, from sysfs alone), PipeWire
+//!   only.
 //!
 //! What the streams and the registry say is handled one thing at a time
 //! ([`Shared::dispatch`]): a call into PipeWire that says something at
@@ -46,7 +52,7 @@ use crate::{
     convert::{self, Converter, Input, Output},
     gpu::{Gpu, Wanted},
     look::{self, BYTES, Correction, Cpu, FOLLOW, H, Making, Overlay, W},
-    pods,
+    loopback, pods,
     presenter::{self, Cutout},
     scenes::Scenes,
     segment::{Mask, Segmenter},
@@ -85,6 +91,9 @@ const NO_CAMERA: [u8; 3] = [0x1A, 0x1F, 0x2C];
 /// [`SLOW`].
 const AWAY_EVERY: u64 = 10;
 const SLOW: Duration = Duration::from_millis(20);
+/// Without the v4l2loopback device, it is looked for again every this
+/// many ticks (ten seconds).
+const LOOPBACK_AGAIN: u32 = 20;
 
 #[derive(Debug)]
 enum Ev {
@@ -93,9 +102,17 @@ enum Ev {
     OutFormat(Output),
     InState(StreamState),
     InFormat(Input),
-    Node { id: u32, node: Node },
-    Port { id: u32, port: Port },
+    Node {
+        id: u32,
+        node: Node,
+    },
+    Port {
+        id: u32,
+        port: Port,
+    },
     Removed(u32),
+    /// Whether the v4l2loopback device has a reader.
+    LoopbackRead(bool),
     Tick,
 }
 
@@ -105,14 +122,19 @@ struct Node {
     class: String,
     role: String,
     description: String,
+    /// A V4L2 device's label, as PipeWire's node of it says it.
+    card: String,
 }
 
 impl Node {
-    /// A real camera: a video source that is not ours nor a screen cast.
+    /// A real camera: a video source that is not ours nor a screen cast,
+    /// nor PipeWire's node of the v4l2loopback device it writes.
     fn camera(&self) -> bool {
         self.class == "Video/Source"
             && !self.name.starts_with(CAMERA_PREFIX)
             && self.role != "Screen"
+            && self.card != loopback::LABEL
+            && self.description != CAMERA_DESCRIPTION
     }
 
     /// An infrared one, last.
@@ -200,7 +222,19 @@ struct State {
     face: Option<f32>,
     face_told: Option<f32>,
     frames: u64,
+    /// The last frame of the camera's could not be read (said once).
+    unread: bool,
+    /// Read: the source streams, or the device has a reader.
     read: bool,
+    source_read: bool,
+    loopback_read: bool,
+    /// The v4l2loopback device written, when there is one.
+    loopback: Option<loopback::Writer>,
+    /// What its thread tells the loop.
+    loopback_tell: pw::channel::Sender<bool>,
+    /// Its absence (or why it cannot be written) said once.
+    loopback_said: bool,
+    ticks: u32,
     rgba: Vec<u8>,
     made: Vec<u8>,
     converter: Converter,
@@ -246,6 +280,7 @@ pub fn run(
     });
     let core = context.connect_rc(props)?;
     let registry = core.get_registry_rc()?;
+    let (loopback_tell, loopback_heard) = pw::channel::channel::<bool>();
     let shared = Rc::new_cyclic(|weak: &Weak<Shared>| Shared {
         state: RefCell::new(State {
             core: core.clone(),
@@ -277,7 +312,14 @@ pub fn run(
             face: None,
             face_told: None,
             frames: 0,
+            unread: false,
             read: false,
+            source_read: false,
+            loopback_read: false,
+            loopback: None,
+            loopback_tell,
+            loopback_said: false,
+            ticks: 0,
             rgba: vec![0; BYTES],
             made: vec![0; BYTES],
             converter: Converter::default(),
@@ -304,6 +346,7 @@ pub fn run(
                         class: get("media.class"),
                         role: get("media.role"),
                         description: get("node.description"),
+                        card: get("api.v4l2.cap.card"),
                     },
                 }),
                 pw::types::ObjectType::Port => {
@@ -333,6 +376,12 @@ pub fn run(
             shared.dispatch(Ev::Ask(ask));
         }
     });
+    let on_loopback = Rc::downgrade(&shared);
+    let _loopback = loopback_heard.attach(mainloop.loop_(), move |read| {
+        if let Some(shared) = on_loopback.upgrade() {
+            shared.dispatch(Ev::LoopbackRead(read));
+        }
+    });
     let on_tick = Rc::downgrade(&shared);
     let timer = mainloop.loop_().add_timer(move |_| {
         if let Some(shared) = on_tick.upgrade() {
@@ -342,11 +391,13 @@ pub fn run(
     let half = Duration::from_millis(500);
     let _ = timer.update_timer(Some(half), Some(half));
     shared.state.borrow_mut().publish()?;
+    shared.state.borrow_mut().open_loopback();
     mainloop.run();
     // The streams end before the loop and the core they were made on.
     if let Ok(mut state) = shared.state.try_borrow_mut() {
         state.stop_reading();
         state.out = None;
+        state.loopback = None;
     }
     Ok(())
 }
@@ -444,7 +495,11 @@ impl State {
                     presenter = look.presenter,
                     "the camera's look"
                 );
+                let changed = look.banner != self.look.banner;
                 self.look = look;
+                if changed && !self.read {
+                    self.still();
+                }
                 self.camera_wanted();
             }
             Ev::Ask(Ask::Quit) => {
@@ -452,22 +507,29 @@ impl State {
                     mainloop.quit();
                 }
             }
-            Ev::OutState(new) => match new {
-                StreamState::Paused => {
-                    if let Some(out) = &self.out {
-                        self.tell(FromCamera::Ready {
-                            node: out.stream.node_id(),
-                        });
+            Ev::OutState(new) => {
+                self.source_read = match new {
+                    StreamState::Paused => {
+                        if let Some(out) = &self.out {
+                            self.tell(FromCamera::Ready {
+                                node: out.stream.node_id(),
+                            });
+                        }
+                        false
                     }
-                    self.reading(false);
-                }
-                StreamState::Streaming => self.reading(true),
-                StreamState::Error(why) => {
-                    tracing::warn!(why, "the source failed");
-                    self.reading(false);
-                }
-                _ => self.reading(false),
-            },
+                    StreamState::Streaming => true,
+                    StreamState::Error(why) => {
+                        tracing::warn!(why, "the source failed");
+                        false
+                    }
+                    _ => false,
+                };
+                self.reading();
+            }
+            Ev::LoopbackRead(read) => {
+                self.loopback_read = read;
+                self.reading();
+            }
             Ev::OutFormat(output) => {
                 if let Some(out) = &mut self.out {
                     out.format = Some(output);
@@ -517,17 +579,27 @@ impl State {
                 if self.read && self.input.is_none() {
                     self.no_camera_frame();
                 }
+                self.ticks = self.ticks.wrapping_add(1);
+                if self.loopback.is_none() && self.ticks.is_multiple_of(LOOPBACK_AGAIN) {
+                    self.open_loopback();
+                }
             }
         }
     }
 
-    /// Read or not, as the source streams.
-    fn reading(&mut self, read: bool) {
+    /// Read or not, as the source streams or the device has a reader.
+    fn reading(&mut self) {
+        let read = self.source_read || self.loopback_read;
         if read == self.read {
             return;
         }
         self.read = read;
-        tracing::info!(read, "the source");
+        tracing::info!(
+            read,
+            source = self.source_read,
+            v4l2 = self.loopback_read,
+            "the source"
+        );
         self.tell(FromCamera::Read(read));
         self.camera_wanted();
     }
@@ -546,6 +618,44 @@ impl State {
             self.start_reading();
         } else if !self.wanted() && reading {
             self.stop_reading();
+            self.still();
+        }
+    }
+
+    /// The v4l2loopback device, if there is one now: written from now on.
+    fn open_loopback(&mut self) {
+        let tell = self.loopback_tell.clone();
+        match loopback::start(move |read| {
+            let _ = tell.send(read);
+        }) {
+            Ok(Some(writer)) => {
+                self.loopback = Some(writer);
+                self.loopback_said = false;
+                if !self.read {
+                    self.still();
+                }
+            }
+            Ok(None) => {
+                if !self.loopback_said {
+                    tracing::info!(
+                        "no v4l2loopback device labelled Hocuspanda: the camera is on PipeWire only"
+                    );
+                    self.loopback_said = true;
+                }
+            }
+            Err(err) => {
+                if !self.loopback_said {
+                    tracing::warn!(%err, "the v4l2loopback device cannot be written: the camera is on PipeWire only");
+                    self.loopback_said = true;
+                }
+            }
+        }
+    }
+
+    /// Nothing reads: the device's still, the dark frame with the banner.
+    fn still(&mut self) {
+        if self.loopback.is_some() {
+            self.no_camera_frame();
         }
     }
 
@@ -619,11 +729,17 @@ impl State {
                 tracing::debug!(?old, ?new, "the camera's stream");
                 states(Ev::InState(new));
             })
-            .param_changed(move |_, _, id, param| {
+            .param_changed(move |stream, _, id, param| {
                 if id != spa::param::ParamType::Format.as_raw() {
                     return;
                 }
                 if let Some(input) = param.and_then(pods::input_of) {
+                    let pod = pods::camera_buffers();
+                    if let Some(pod) = Pod::from_bytes(&pod)
+                        && let Err(err) = stream.update_params(&mut [pod])
+                    {
+                        tracing::warn!(%err, "the camera's buffers not asked");
+                    }
                     formats(Ev::InFormat(input));
                 }
             })
@@ -725,12 +841,12 @@ impl State {
             let _ = stream.dequeue_buffer();
             return;
         };
-        let read = {
+        let read = 'read: {
             let Some(mut buffer) = stream.dequeue_buffer() else {
                 return;
             };
             let Some(data) = buffer.datas_mut().first_mut() else {
-                return;
+                break 'read Err("a buffer without data");
             };
             let (offset, size, stride) = {
                 let chunk = data.chunk();
@@ -740,8 +856,10 @@ impl State {
                     u32::try_from(chunk.stride()).unwrap_or(0),
                 )
             };
+            let kind = data.type_();
             let Some(bytes) = data.data() else {
-                return;
+                tracing::debug!(?kind, "a frame not mapped");
+                break 'read Err("a frame not in this process's memory");
             };
             let end = if size == 0 {
                 bytes.len()
@@ -749,15 +867,27 @@ impl State {
                 (offset + size).min(bytes.len())
             };
             let Some(bytes) = bytes.get(offset.min(end)..end) else {
-                return;
+                break 'read Err("a frame's chunk outside its buffer");
             };
             let input = Input { stride, ..input };
-            self.converter.to_rgba(&input, bytes, &mut self.rgba)
+            if self.converter.to_rgba(&input, bytes, &mut self.rgba) {
+                Ok(())
+            } else {
+                Err("a frame that cannot be decoded")
+            }
         };
-        if !read {
-            tracing::debug!(?input, "a frame of the camera's not read");
+        if let Err(why) = read {
+            if !self.unread {
+                tracing::warn!(
+                    ?input,
+                    why,
+                    "the camera's frames cannot be read: the still is sent"
+                );
+                self.unread = true;
+            }
             return;
         }
+        self.unread = false;
         let stats = look::stats(&self.rgba, W, H);
         self.frames += 1;
         if self.frames == 1 {
@@ -942,8 +1072,12 @@ impl State {
         self.send();
     }
 
-    /// The made frame into the source's free buffer, if a reader is ready.
+    /// The made frame to the v4l2loopback device, and into the source's
+    /// free buffer, if a reader is ready.
     fn send(&mut self) {
+        if let Some(loopback) = &self.loopback {
+            loopback.send(&self.made);
+        }
         let Some(out) = &self.out else {
             return;
         };

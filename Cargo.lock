@@ -2158,6 +2158,7 @@ dependencies = [
  "pipewire",
  "resvg",
  "rustix 1.1.6",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "tract-onnx",
