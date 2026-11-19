@@ -555,7 +555,7 @@ fn searching_geste_lists_the_three_gestures_rows_then_the_desktop_keys() -> anyh
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
     bed.type_text("geste")?;
     let shown = bed.shows(|s| {
-        s["query"] == "geste" && s["results"].as_array().is_some_and(|r| r.len() >= 5)
+        s["query"] == "geste" && s["results"].as_array().is_some_and(|r| r.len() >= 6)
     })?;
     let targets: Vec<&str> = shown["results"]
         .as_array()
@@ -564,6 +564,7 @@ fn searching_geste_lists_the_three_gestures_rows_then_the_desktop_keys() -> anyh
     assert_eq!(
         targets,
         [
+            "camera.gestures",
             "touchpad.swipe-desktops",
             "touchpad.swipe-launcher",
             "touchpad.left-to-applications",
