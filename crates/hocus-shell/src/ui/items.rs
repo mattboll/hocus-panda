@@ -431,7 +431,8 @@ impl<P: Items> canvas::Program<Message> for Surface<P> {
 /// Where `event` puts the pointer on the surface at `bounds`, or where it
 /// was at `before`: iced hands every event of a batch the cursor as it is
 /// after the batch, which may have left already when a press and a move
-/// away came together.
+/// away came together. An enter's place is the shell's own pointer's
+/// ([`crate::pointer::on_enter`]).
 pub fn pointer(
     event: &mouse::Event,
     bounds: Rectangle,
@@ -442,7 +443,7 @@ pub fn pointer(
         mouse::Event::CursorMoved { position } => {
             Some(Point::new(position.x - bounds.x, position.y - bounds.y))
         }
-        mouse::Event::CursorEntered => cursor.position_in(bounds),
+        mouse::Event::CursorEntered => crate::pointer::on_enter(cursor).position_in(bounds),
         mouse::Event::CursorLeft => None,
         _ => before,
     }
