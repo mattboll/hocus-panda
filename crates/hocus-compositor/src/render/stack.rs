@@ -139,6 +139,12 @@ impl State {
             ..
         } = *frame;
         let palette_target = palette.and_then(|(_, window, _)| window);
+        // The screen light around the call's window (#619): right behind
+        // it, on the screen only.
+        let around = purpose
+            .screen()
+            .then(|| self.light_around(output))
+            .flatten();
         let mut target = Vec::new();
         // The handle of a pair's seam, where the pair is now: right above
         // the front one of the two, so that a window over the seam covers
@@ -282,6 +288,10 @@ impl State {
                 // under its popups.
                 ring.reverse();
                 target.splice(popups_end..popups_end, ring);
+            }
+            if around == Some(*id) {
+                let visual = Rectangle::new(look.visual.loc - origin, look.visual.size);
+                self.screen_light_around(renderer, output, visual, &mut windows);
             }
         }
         (windows, target)

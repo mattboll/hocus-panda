@@ -864,8 +864,9 @@ fn the_screen_light_is_never_in_a_share() -> anyhow::Result<()> {
     anyhow::ensure!(lit, "no light: {:?}", bed.hp.screen_light());
     let (_, started) = bed.share_screen()?;
     bed.idle(Duration::from_millis(300))?;
-    // 10 px in from the right edge, past the share's ring.
-    let (x, y) = (SCREEN.0 as usize - 10, 540);
+    // 10 px in from the left edge, past the share's ring (the light
+    // leaves the bar's column, on the right, as it is).
+    let (x, y) = (10, 540);
     let [_, r, ..] = bed.pixel(x, y)?.to_be_bytes();
     let node = started.streams[0].0;
     let consumer = consume(&bed.pipewire.socket, node)?;

@@ -14,6 +14,8 @@ pub struct Camera {
     pub screen_light: bool,
     pub screen_light_warmth: Warmth,
     pub screen_light_strength: Strength,
+    /// A frame along the edges, or the whole screen around the call.
+    pub screen_light_shape: LightShape,
     /// Lumière: the Hocuspanda camera's exposure, white balance, warmth
     /// and denoise.
     pub lighting: bool,
@@ -41,6 +43,7 @@ impl Default for Camera {
             screen_light: true,
             screen_light_warmth: Warmth::Neutral,
             screen_light_strength: Strength::Auto,
+            screen_light_shape: LightShape::Frame,
             lighting: true,
             banner: false,
             banner_name: String::new(),
@@ -143,6 +146,28 @@ impl Warmth {
     }
 }
 
+/// Where the screen light is: a wide frame along the screen's edges, or
+/// all of the call's screen but the call's window (the maintainer's
+/// choice of 2026-11-18: a laptop's screen is a weak light, it takes far
+/// more of it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LightShape {
+    #[default]
+    Frame,
+    AroundCall,
+}
+
+impl LightShape {
+    /// Its word in the file.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Frame => "frame",
+            Self::AroundCall => "around-call",
+        }
+    }
+}
+
 /// How far the screen light reaches in, and how bright it is: fixed, or
 /// following the light on the face while the Hocuspanda camera is read
 /// (`auto`; soft otherwise).
@@ -156,21 +181,24 @@ pub enum Strength {
     Strong,
 }
 
-/// The glow's width (logical pixels) and alpha, soft and strong: `auto`
-/// goes between them.
-const SOFT: (f64, f64) = (28.0, 0.55);
-const STRONG: (f64, f64) = (70.0, 0.92);
+/// The frame's width, a part of the screen's shorter side, and its alpha
+/// at the edge, soft and strong: `auto` goes between them. Strong is an
+/// eighth of the side (135 px on a 1080 p screen), its light fading out
+/// by half as much again inward.
+const SOFT: (f64, f64) = (1.0 / 16.0, 0.85);
+const MEDIUM: (f64, f64) = (1.0 / 11.0, 0.92);
+const STRONG: (f64, f64) = (1.0 / 8.0, 0.97);
 
 /// The steps `auto` goes through from soft to strong.
 pub const AUTO_STEPS: u8 = 8;
 
 impl Strength {
-    /// The glow's width (logical pixels) and its alpha, as the mockup's
-    /// `box-shadow`s take them; `auto` as soft.
+    /// The frame's width, a part of the screen's shorter side, and its
+    /// alpha at the edge (around the call, everywhere); `auto` as soft.
     pub const fn glow(self) -> (f64, f64) {
         match self {
             Self::Auto | Self::Soft => SOFT,
-            Self::Medium => (46.0, 0.75),
+            Self::Medium => MEDIUM,
             Self::Strong => STRONG,
         }
     }
@@ -203,7 +231,8 @@ mod tests {
     fn the_words_read_and_others_are_refused() -> anyhow::Result<()> {
         let camera: Camera = toml::from_str(
             "screen-light = false\nscreen-light-warmth = \"warm\"\n\
-             screen-light-strength = \"strong\"\nbackground = \"blur\"\n\
+             screen-light-strength = \"strong\"\nscreen-light-shape = \"around-call\"\n\
+             background = \"blur\"\n\
              lighting = false\nbanner = true\nbanner-name = \"Alex\"\n",
         )?;
         assert_eq!(
@@ -212,6 +241,7 @@ mod tests {
                 screen_light: false,
                 screen_light_warmth: Warmth::Warm,
                 screen_light_strength: Strength::Strong,
+                screen_light_shape: LightShape::AroundCall,
                 lighting: false,
                 banner: true,
                 banner_name: "Alex".to_owned(),
@@ -235,6 +265,7 @@ mod tests {
         );
         assert!(toml::from_str::<Camera>("screen-light-warmth = \"hot\"\n").is_err());
         assert!(toml::from_str::<Camera>("screen-light-strength = 3\n").is_err());
+        assert!(toml::from_str::<Camera>("screen-light-shape = \"ring\"\n").is_err());
         Ok(())
     }
 
@@ -243,6 +274,6 @@ mod tests {
         assert_eq!(Strength::auto_glow(0), Strength::Soft.glow());
         assert_eq!(Strength::auto_glow(AUTO_STEPS), Strength::Strong.glow());
         let (w, a) = Strength::auto_glow(AUTO_STEPS / 2);
-        assert!((w - 49.0).abs() < 1e-9 && (a - 0.735).abs() < 1e-9);
+        assert!((w - 0.093_75).abs() < 1e-9 && (a - 0.91).abs() < 1e-9);
     }
 }

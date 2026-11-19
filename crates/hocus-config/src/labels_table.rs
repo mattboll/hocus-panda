@@ -113,6 +113,11 @@ pub const ALL: &[Label] = &[
         said: Said::Switch,
     },
     Label {
+        key: "camera.screen-light-shape",
+        name: hocus_words::settings::camera::SHAPE,
+        said: Said::Choices(&[("frame", hocus_words::settings::camera::FRAME), ("around-call", hocus_words::settings::camera::ALL_AROUND_THE_CALL)]),
+    },
+    Label {
         key: "camera.screen-light-strength",
         name: hocus_words::settings::camera::STRENGTH,
         said: Said::Choices(&[("auto", hocus_words::settings::app_bar_page::AUTO), ("soft", hocus_words::settings::camera::SOFT), ("medium", hocus_words::settings::camera::MEDIUM), ("strong", hocus_words::settings::camera::STRONG)]),
