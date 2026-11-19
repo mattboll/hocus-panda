@@ -141,6 +141,12 @@ pub fn camera_program() -> std::path::PathBuf {
     built("hocus-camera", "hocus-camera")
 }
 
+/// `hocus-voice`, the Hocuspanda microphone's source (#619, lot 5), as
+/// [`shell_program`].
+pub fn voice_program() -> std::path::PathBuf {
+    built("hocus-voice", "hocus-voice")
+}
+
 /// The workspace's program `name` (of the package `package`), built next
 /// to the test's, and fresh; the test fails without it.
 fn built(name: &str, package: &str) -> std::path::PathBuf {

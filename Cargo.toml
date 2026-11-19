@@ -32,6 +32,7 @@ hocus-panic = { version = "1.0.0", path = "crates/hocus-panic" }
 hocus-perf = { version = "1.0.0", path = "crates/hocus-perf" }
 hocus-scenes = { version = "1.0.0", path = "crates/hocus-scenes" }
 hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
+hocus-voice = { version = "1.0.0", path = "crates/hocus-voice" }
 hocus-words = { version = "1.0.0", path = "crates/hocus-words" }
 hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }
 
@@ -79,6 +80,11 @@ naga = { version = "27.0.3", default-features = false, features = ["glsl-in"] }
 # The camera's person segmentation (hocus-camera): MediaPipe's model as
 # ONNX, run on the CPU in pure Rust (MIT or Apache-2.0).
 tract-onnx = { version = "0.23.10", default-features = false }
+# The voice's noise reduction (hocus-voice): DeepFilterNet's models run
+# frame by frame, their state kept between (MIT or Apache-2.0).
+tract-pulse = { version = "0.23.10", default-features = false }
+# The voice's spectra (hocus-voice): MIT or Apache-2.0.
+rustfft = "6.4.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 udev = "0.9.3"

@@ -15,6 +15,7 @@ flowchart LR
     T["hocus-settings"]
     H["hocus<br/>(agents' hooks, scripts)"]
     K["hocus-camera<br/>(the Hocuspanda camera)"]
+    V["hocus-voice<br/>(the Hocuspanda microphone)"]
     P[("PipeWire")]
     F[("config.toml")]
     C -- "starts, restarts;<br/>WAYLAND_SOCKET, hocus-N.shell" --> S
@@ -25,7 +26,9 @@ flowchart LR
     F -. "inotify, followed live" .-> C
     C -- "starts, restarts;<br/>its look on stdin, what it says on stdout" --> K
     K -- "Hocuspanda source;<br/>reads the camera while read" --> P
-    S -- "the window's preview" --> P
+    C -- "starts, restarts;<br/>its voice on stdin, what it says on stdout" --> V
+    V -- "Hocuspanda source;<br/>reads the microphone while read" --> P
+    S -- "the window's preview and meter" --> P
 ```
 
 - **The compositor** (`hocuspanda`, crate `hocus-compositor`): the
@@ -54,6 +57,15 @@ flowchart LR
   shaders (`hocus-scenes`) on a thread of their own. Started by the
   compositor from beside its binary on a virtual terminal, restarted when
   it ends; it ends with its input.
+- **The Hocuspanda microphone** (`hocus-voice`, crate `hocus-voice`,
+  [design/voice.md](design/voice.md)): a PipeWire audio source,
+  "Hocuspanda", which reads the real microphone only while something
+  reads it, and makes the voice through the effect chosen (DeepFilterNet's
+  noise reduction with tract, a studio chain, a phase vocoder for Panda,
+  Robot and Grave) on PipeWire's real-time thread. A program apart from
+  the camera's, so that a fault in the camera's GPU work never cuts the
+  voice of a call. Started and restarted by the compositor as the
+  camera's is; it ends with its input.
 
 ### Sockets and protocols
 
@@ -65,17 +77,19 @@ flowchart LR
 | Configuration | `$XDG_CONFIG_HOME/hocuspanda/config.toml` (`HOCUS_CONFIG`) | TOML, edited in place; defaults in `packaging/config.toml` | `hocus-config` |
 | D-Bus | the bus `--session-bus` names (or the session's, on a virtual terminal), the system bus | freedesktop interfaces | zbus in each crate |
 | The camera's line | `hocus-camera`'s standard input and output | one JSON object a line: its look (`CameraLook`) in, what happens to it (`FromCamera`) out; the presenter's cut-out's pixels raw after its line | `hocus-link` (`camera`) |
+| The voice's line | `hocus-voice`'s standard input and output | one JSON object a line: the voice (`VoiceLook`) in, what happens to it (`FromVoice`: on the graph, read, the real microphone) out | `hocus-link` (`voice`) |
 
 ## Crates
 
 | Crate | Owns | Depends on (ours) |
 |---|---|---|
 | `hocus-compositor` | the `hocuspanda` binary, its `State`, and the in-process test harness (`Headless`) | config, geometry, link, pandas, words, panic, agents, xdg, perf, scenes |
-| `hocus-shell` | the `hocuspanda-shell` binary, its surfaces and the widget kit (`src/ui`) | words, link, pandas, panic, a11y, xdg, day, sound, bluetooth, network, camera |
+| `hocus-shell` | the `hocuspanda-shell` binary, its surfaces and the widget kit (`src/ui`) | words, link, pandas, panic, a11y, xdg, day, sound, bluetooth, network, camera, voice |
 | `hocus-settings` | the `hocus-settings` binary: its model of every setting, its pages | words, config, agents, link, pandas, panic, perf, geometry, sound, bluetooth, network, xdg |
 | `hocus-cli` | the `hocus` binary (`hocus mcp` among its commands) | agents, panic, day, perf, xdg |
-| `hocus-link` | the shell's line: its messages, wire and version; the surfaces' namespaces and the measures both sides draw by; the theme's tokens; the camera's line | words |
+| `hocus-link` | the shell's line: its messages, wire and version; the surfaces' namespaces and the measures both sides draw by; the theme's tokens; the camera's and the voice's lines | words |
 | `hocus-camera` | the `hocus-camera` binary: the Hocuspanda source on PipeWire, Lumière and the banner on the GPU or the CPU; the person found by a model (tract), what is behind them, « Je reviens », the presenter's cut-out; the face and the hands found by models (tract), an accessory on the head, Cadrage, the gestures' reactions, the confetti; its preview's reader, which the shell's window uses | link, panic, scenes, words |
+| `hocus-voice` | the `hocus-voice` binary: the Hocuspanda microphone's source on PipeWire, the voices (DeepFilterNet3 with tract, the studio chain, the phase vocoder); its reader, which the shell's meter uses | link, panic |
 | `hocus-scenes` | the living wallpapers' looks without a renderer: their shaders (GLSL ES), the aurora's drive, the koi pond and the shapes it is drawn of; the compositor's screens and the camera draw them alike | — |
 | `hocus-agents` | the control socket's lines; agents' states, the tools' hooks, plugging tools in, herdr, a process's ancestry | link |
 | `hocus-config` | the configuration file read and written in place; every default (`defaults`, from `packaging/config.toml`) | — |

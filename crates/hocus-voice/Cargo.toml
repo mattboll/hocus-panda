@@ -1,0 +1,42 @@
+[package]
+name = "hocus-voice"
+description = "The Hocuspanda microphone: a PipeWire audio source with the user's voice effects, reading the real microphone only while it is read"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hocus-voice"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Its lines with the compositor, and its nodes' names.
+hocus-link.workspace = true
+# A panic said in the log before the program ends (#778).
+hocus-panic.workspace = true
+# The source, the real microphone and the meter: PipeWire's own bindings
+# (MIT); the library itself at run time.
+pipewire.workspace = true
+# Sans bruit: DeepFilterNet's models run on the CPU in pure Rust, frame
+# by frame (MIT or Apache-2.0).
+tract-onnx.workspace = true
+tract-pulse.workspace = true
+# The spectra of Sans bruit, Panda, Robot and Grave (MIT or Apache-2.0).
+rustfft.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# The effects' time on the processor, their thread's own.
+rustix = { workspace = true, features = ["time"] }
+
+[features]
+# The tests' voice (data/speech.wav), for the compositor's tests: never in
+# the package.
+test-speech = []

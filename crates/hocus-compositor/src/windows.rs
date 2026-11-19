@@ -1443,6 +1443,8 @@ impl State {
         // taken as of a frame long gone was followed by the next as soon as
         // a frame came, two at once on a loaded machine (#872).
         self.tick_camera(self.now());
+        // The Hocuspanda microphone (#619, lot 5): its program, its voice.
+        self.tick_voice(now);
         self.tick_screen_light(now);
         // Locked (7.1): the lock's own motion alone; nothing else is drawn
         // but the wallpaper's effects behind the desktop's own lock (#807).

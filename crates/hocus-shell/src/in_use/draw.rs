@@ -388,21 +388,18 @@ impl Items for Sign {
             })
             .into_iter()
             .collect();
-        // The camera's tile, inside it: the camera's window (#619).
-        if let (Some(rect), [(form, _)]) = (self.item(size, &kinds), self.forms.as_slice())
-            && let Some(tile) = kinds
-                .iter()
-                .zip(tiles(rect, *form, &kinds))
-                .find_map(|(kind, tile)| (*kind == Kind::Camera).then_some(tile))
-        {
-            let name = crate::a11y::Words::new(self.words.lang).camera_window();
-            controls.push(Control::new(
-                Item::Camera,
-                tile,
-                Role::Button,
-                name,
-                TILE_RADIUS,
-            ));
+        // The camera's and the microphone's tiles, inside it: the camera
+        // and microphone's window (#619), on its Image or Voix tab.
+        if let (Some(rect), [(form, _)]) = (self.item(size, &kinds), self.forms.as_slice()) {
+            for (kind, tile) in kinds.iter().zip(tiles(rect, *form, &kinds)) {
+                let item = match kind {
+                    Kind::Camera => Item::Camera,
+                    Kind::Microphone => Item::Microphone,
+                    _ => continue,
+                };
+                let name = crate::a11y::Words::new(self.words.lang).camera_window();
+                controls.push(Control::new(item, tile, Role::Button, name, TILE_RADIUS));
+            }
         }
         Controls {
             to_bar,
@@ -493,6 +490,7 @@ impl Items for Sign {
         let still = self.forms.len() == 1;
         let open = still && popover::with(|c| c.shows(&self.bar, Item::InUse));
         let effects = crate::camera::shown().dot();
+        let voice = crate::camera::shown().voice_dot();
         for &(form, alpha) in &self.forms {
             let rect = self.rect_of(form, size, &kinds);
             let lit = still && (hover || open);
@@ -507,6 +505,7 @@ impl Items for Sign {
                     rec: rec.as_ref(),
                     tx: tx.as_deref(),
                     effects,
+                    voice,
                 };
                 draw_sign(f, rect, form, &shown, lit, alpha * opacity);
             });
@@ -556,6 +555,9 @@ pub struct Shown<'a> {
     /// An effect of the Hocuspanda camera is on: a violet dot on the
     /// camera's tile (#619).
     pub effects: bool,
+    /// A voice of the Hocuspanda microphone is on: the same dot on the
+    /// microphone's tile (lot 5).
+    pub voice: bool,
 }
 
 /// The sign at `rect` in `form`: its tint, then a tile per kind.
@@ -573,6 +575,7 @@ pub fn draw_sign(
         rec,
         tx,
         effects,
+        voice,
     } = *shown;
     f.fill(
         &kit::rounded(rect, RADIUS),
@@ -602,7 +605,12 @@ pub fn draw_sign(
             Size::new(ICON, ICON),
         );
         draw_icon(f, *kind, icon, faded(ink, alpha));
-        if *kind == Kind::Camera && effects {
+        let dotted = match kind {
+            Kind::Camera => effects,
+            Kind::Microphone => voice,
+            _ => false,
+        };
+        if dotted {
             // The mockup's 6 px dot, 2 px in from the tile's top right.
             let dot = Point::new(
                 tile.x + tile.width - EFFECT_IN - EFFECT_DOT / 2.0,

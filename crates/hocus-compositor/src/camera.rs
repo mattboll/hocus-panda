@@ -156,6 +156,14 @@ impl State {
             away: c.away,
             presenter: c.presenter,
             hush: self.camera_hush(),
+            voice: self.config.voice.effect.word().to_owned(),
+            voice_ready: self.voice.ready,
+            voice_read: self.voice.read,
+            microphone: self
+                .voice
+                .microphone
+                .as_ref()
+                .map(|m| m.description.clone()),
             framing: c.framing,
             face: c.face.word().to_owned(),
             gestures: c.gestures,

@@ -564,11 +564,13 @@ impl Shell {
                 words: popover::clipboard::Words::new(clock::time::Lang::of_messages()),
                 glass: self.look.glass,
             }),
-            popover::Item::Camera => popover::camera::view(&popover::camera::Panel {
-                id,
-                glass: self.look.glass,
-                motion: self.look.motion && !self.software,
-            }),
+            popover::Item::Camera | popover::Item::Microphone => {
+                popover::camera::view(&popover::camera::Panel {
+                    id,
+                    glass: self.look.glass,
+                    motion: self.look.motion && !self.software,
+                })
+            }
             popover::Item::InUse => popover::in_use::view(&popover::in_use::Panel {
                 id,
                 words: in_use::Words::new(clock::time::Lang::of_messages()),

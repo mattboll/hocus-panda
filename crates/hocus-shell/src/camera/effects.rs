@@ -7,9 +7,10 @@
 //! the desktop's living wallpapers), Présentateur (Image) and « Je
 //! reviens » (Réactions); lot 4 Cadrage (Image), Visage's accessories
 //! (Oreilles, Bonnet, Couronne, Lunettes, the panda in the person's
-//! place), Gestes and Fêtes (Réactions). Voix shows, dimmed, where it
-//! will be:
-//! their tab is the mockup's, their tile says "Bientôt".
+//! place), Gestes and Fêtes (Réactions); lot 5 Voix (the Hocuspanda
+//! microphone's voices, written into `[voice] effect`). Any other shows,
+//! dimmed, where it will be: its tab is the mockup's, its tile says
+//! "Bientôt".
 
 use hocus_link::CameraShown;
 use hocus_words::{Text, shell::camera as w};
@@ -64,8 +65,9 @@ impl Tab {
 pub enum Pick {
     /// On or off, by itself: its `[camera]` key.
     Toggle(&'static str),
-    /// One of its tab's, as a key's value; `plain` is the choice that is
-    /// no effect ("Ta pièce", "Aucun", "Telle quelle").
+    /// One of its tab's, as a key's value (`voice`: `[voice] effect`);
+    /// `plain` is the choice that is no effect ("Ta pièce", "Aucun",
+    /// "Telle quelle").
     One {
         key: &'static str,
         value: &'static str,
@@ -146,6 +148,8 @@ fn one<'a>(shown: &'a CameraShown, key: &str) -> &'a str {
         "background" if !shown.background.is_empty() => &shown.background,
         "background" => "room",
         "face" if !shown.face.is_empty() => &shown.face,
+        "voice" if !shown.voice.is_empty() => &shown.voice,
+        "voice" => "quiet",
         _ => "none",
     }
 }
@@ -178,8 +182,8 @@ const fn one_of(
     hint: Option<Text>,
 ) -> Effect {
     let plain = matches!(value.as_bytes(), b"room" | b"none");
-    // Fond is made (lot 3), Visage (lot 4); Voix waits for its lot.
-    let ready = matches!(key.as_bytes(), b"background" | b"face");
+    // Fond (lot 3), Visage (lot 4) and Voix (lot 5) are made.
+    let ready = matches!(key.as_bytes(), b"background" | b"face" | b"voice");
     Effect {
         id: value,
         tab,
@@ -189,6 +193,20 @@ const fn one_of(
         hint,
         ready,
     }
+}
+
+/// A voice (lot 5): one of Voix's, `[voice] effect`; its id apart from
+/// its word, Visage's Panda being `panda` too.
+const fn voice_of(
+    id: &'static str,
+    value: &'static str,
+    thumb: Thumb,
+    name: Text,
+    hint: Option<Text>,
+) -> Effect {
+    let mut effect = one_of("voice", value, Tab::Voice, thumb, name, hint);
+    effect.id = id;
+    effect
 }
 
 const PANDA: Thumb = Thumb::Disc {
@@ -352,50 +370,44 @@ pub const EFFECTS: &[Effect] = &[
         w::PANDA,
         Some(w::PANDA_HINT),
     ),
-    one_of(
-        "voice",
+    voice_of(
+        "voice-none",
         "none",
-        Tab::Voice,
         Thumb::Flat(0xFFFF_FF14),
         w::AS_IT_IS,
         None,
     ),
-    one_of(
-        "voice",
+    voice_of(
+        "voice-quiet",
         "quiet",
-        Tab::Voice,
         Thumb::Linear(90.0, &[(0.0, 0x6CC2_87FF), (1.0, 0x2B34_48FF)]),
         w::NO_NOISE,
         Some(w::NO_NOISE_HINT),
     ),
-    one_of(
-        "voice",
+    voice_of(
+        "voice-studio",
         "studio",
-        Tab::Voice,
         Thumb::Linear(90.0, &[(0.0, 0xF5B4_4AFF), (1.0, 0xF294_5BFF)]),
         w::STUDIO,
         Some(w::STUDIO_HINT),
     ),
-    one_of(
-        "voice",
+    voice_of(
+        "voice-panda",
         "panda",
-        Tab::Voice,
         PANDA,
         w::PANDA,
         Some(w::PANDA_VOICE_HINT),
     ),
-    one_of(
-        "voice",
+    voice_of(
+        "voice-robot",
         "robot",
-        Tab::Voice,
         Thumb::Linear(90.0, &[(0.0, 0x8FB3_FFFF), (1.0, 0x5B6F_A8FF)]),
         w::ROBOT,
         Some(w::ROBOT_HINT),
     ),
-    one_of(
-        "voice",
+    voice_of(
+        "voice-deep",
         "deep",
-        Tab::Voice,
         Thumb::Linear(90.0, &[(0.0, 0x5B3E_8CFF), (1.0, 0x2B1F_45FF)]),
         w::DEEP,
         Some(w::DEEP_HINT),
@@ -470,6 +482,10 @@ mod tests {
             away: true,
             presenter: false,
             hush: false,
+            voice: "none".to_owned(),
+            voice_ready: false,
+            voice_read: false,
+            microphone: None,
             framing: false,
             face: "none".to_owned(),
             gestures: false,
@@ -479,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn each_tab_has_its_effects_and_lots_2_to_4_make_theirs() {
+    fn each_tab_has_its_effects_and_lots_2_to_5_make_theirs() {
         let ids = |tab: Tab| tab.effects().map(|e| e.id).collect::<Vec<_>>();
         assert_eq!(
             ids(Tab::Image),
@@ -507,12 +523,19 @@ mod tests {
                 "crown",
                 "glasses",
                 "panda",
+                "voice-none",
+                "voice-quiet",
+                "voice-studio",
+                "voice-panda",
+                "voice-robot",
+                "voice-deep",
                 "gestures",
                 "celebrations",
                 "away"
             ]
         );
-        assert!(!Tab::Image.soon() && !Tab::Face.soon() && Tab::Voice.soon());
+        assert!(!Tab::Image.soon() && !Tab::Face.soon() && !Tab::Background.soon());
+        assert!(!Tab::Voice.soon());
     }
 
     #[test]
@@ -535,6 +558,38 @@ mod tests {
         assert_eq!(on, ["aurora"]);
     }
 
+    /// Voix: one voice at a time, the dot while it is not the microphone
+    /// as it is, its words under the grid.
+    #[test]
+    fn voix_is_one_of_its_tiles_with_its_dot() {
+        let lang = hocus_words::Lang::French;
+        let mut s = shown(false, false);
+        s.voice = "none".to_owned();
+        assert!(!Tab::Voice.on(&s));
+        assert_eq!(hint(Tab::Voice, &s, lang), "");
+        s.voice = "quiet".to_owned();
+        assert!(Tab::Voice.on(&s));
+        assert_eq!(
+            hint(Tab::Voice, &s, lang),
+            "Sans bruit : clavier, ventilateur, rue : retirés"
+        );
+        s.voice = "deep".to_owned();
+        assert_eq!(hint(Tab::Voice, &s, lang), "Grave : une octave plus bas");
+        let on: Vec<&str> = Tab::Voice
+            .effects()
+            .filter(|e| e.on(&s))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(on, ["voice-deep"]);
+        // The microphone's tile's dot: only while the Hocuspanda
+        // microphone is read.
+        assert!(!s.voice_dot());
+        s.voice_read = true;
+        assert!(s.voice_dot());
+        s.voice = "none".to_owned();
+        assert!(!s.voice_dot());
+    }
+
     #[test]
     fn the_dot_and_the_hint_follow_what_is_on() {
         let lang = hocus_words::Lang::French;
@@ -554,7 +609,10 @@ mod tests {
         // A tab of plain choices only has no dot.
         assert!(!Tab::Background.on(&on));
         assert!(Tab::Reactions.on(&on), "« Je reviens » is on");
-        assert_eq!(hint(Tab::Voice, &on, lang), "Bientôt dans Hocuspanda");
+        // Every tab is made (lot 5): no "Bientôt dans Hocuspanda"; Telle
+        // quelle has no words.
+        assert!(Tab::ALL.iter().all(|t| !t.soon()));
+        assert_eq!(hint(Tab::Voice, &on, lang), "");
     }
 
     /// Visage is one of its tiles, the panda among them; Cadrage, Gestes

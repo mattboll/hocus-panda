@@ -13,6 +13,7 @@ What the package of Hocuspanda holds, and how it is built.
 | `panda-1.png` … `panda-8.png` | `/usr/share/hocuspanda/avatars` | The pandas the Settings' Account page offers as avatars |
 | `hocus-transcribe` | `/usr/bin` | Makes a meeting's text from its recorded sound, at a low priority, which the compositor starts from beside itself ([docs/design/meetings.md](../docs/design/meetings.md)); it downloads its models on first use into `~/.local/share/hocuspanda/models` |
 | `hocus-camera` | `/usr/bin` | The Hocuspanda camera: a PipeWire video source with the camera's effects, reading the real camera only while an application reads it, which the compositor starts from beside itself ([docs/design/camera.md](../docs/design/camera.md)) |
+| `hocus-voice` | `/usr/bin` | The Hocuspanda microphone: a PipeWire audio source with the voice's effects (DeepFilterNet's noise reduction models in it), reading the real microphone only while an application reads it, which the compositor starts from beside itself ([docs/design/voice.md](../docs/design/voice.md)) |
 | `hocus` | `/usr/bin` | What agents' hooks and scripts run to tell the bar their state ([docs/agents.md](../docs/agents.md)) |
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
@@ -22,7 +23,7 @@ What the package of Hocuspanda holds, and how it is built.
 | [`modules-load-hocuspanda-camera.conf`](modules-load-hocuspanda-camera.conf) | `/etc/modules-load.d/hocuspanda-camera.conf` | Loads `v4l2loopback` at boot, for the Hocuspanda camera's device ([docs/design/camera.md](../docs/design/camera.md)); a conffile |
 | [`pam-hocuspanda`](pam-hocuspanda) | `/etc/pam.d/hocuspanda` | The lock screen's PAM service: the system's `common-auth` and `common-account` ([docs/design/lock.md](../docs/design/lock.md)); a conffile |
 | [`config.toml`](config.toml) | `/usr/share/doc/hocuspanda` | Every setting with its default, to copy to `~/.config/hocuspanda/` |
-| `LICENSE` | `/usr/share/doc/hocuspanda/copyright` | MIT, and the SIL Open Font License of the fonts the shell and the Settings carry in their binaries (Martian Mono, Manrope: `crates/hocus-shell/fonts`; the compositor carries Martian Mono too, for the capture's sizes and countdown); what `hocus-transcribe` links statically: whisper.cpp (MIT), sherpa-onnx (Apache-2.0) and onnxruntime (MIT) |
+| `LICENSE` | `/usr/share/doc/hocuspanda/copyright` | MIT, and the SIL Open Font License of the fonts the shell and the Settings carry in their binaries (Martian Mono, Manrope: `crates/hocus-shell/fonts`; the compositor carries Martian Mono too, for the capture's sizes and countdown); what `hocus-transcribe` links statically: whisper.cpp (MIT), sherpa-onnx (Apache-2.0) and onnxruntime (MIT); the models `hocus-camera` (MediaPipe's, Apache-2.0) and `hocus-voice` (DeepFilterNet3's, MIT) carry |
 
 The binary keeps its symbols, for backtraces.
 
@@ -32,7 +33,7 @@ On Debian or Ubuntu, with `dpkg-dev` and the build dependencies of the CI:
 
 ```sh
 scripts/prebuilt.sh                     # sherpa-onnx's libraries, checked (hocus-transcribe)
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice
 packaging/deb/build.sh                  # target/packages/hocuspanda_<version>-1_<arch>.deb
 packaging/deb/check.sh target/packages/hocuspanda_<version>-1_<arch>.deb   # it holds the files above, no others
 sudo apt install ./target/packages/hocuspanda_<version>-1_<arch>.deb

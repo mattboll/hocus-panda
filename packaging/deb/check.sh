@@ -19,6 +19,7 @@ cat > "$work/expected" <<LIST
 -rwxr-xr-x ./usr/bin/hocus-camera
 -rwxr-xr-x ./usr/bin/hocus-settings
 -rwxr-xr-x ./usr/bin/hocus-transcribe
+-rwxr-xr-x ./usr/bin/hocus-voice
 -rwxr-xr-x ./usr/bin/hocuspanda
 -rwxr-xr-x ./usr/bin/hocuspanda-session
 -rwxr-xr-x ./usr/bin/hocuspanda-shell

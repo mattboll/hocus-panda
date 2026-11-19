@@ -5,7 +5,8 @@
 //! the camera's window in the bar sets them: Lumière, the banner, its
 //! name and its project (lot 2); what is behind you, « Je reviens », the
 //! presenter, its corner and its size (lot 3); Cadrage, Visage's
-//! accessory, Gestes and Fêtes (lot 4).
+//! accessory, Gestes and Fêtes (lot 4); the Hocuspanda microphone's
+//! voice (lot 5, `[voice] effect`).
 
 use hocus_words::settings::camera as words;
 use std::sync::OnceLock;
@@ -21,6 +22,12 @@ pub const LIGHT: RowGroup = RowGroup {
 /// The Hocuspanda camera's rows.
 pub const HOCUSPANDA: RowGroup = RowGroup {
     label: words::HOCUSPANDA_CAMERA,
+    per_source: false,
+};
+
+/// The Hocuspanda microphone's rows (lot 5).
+pub const MICROPHONE: RowGroup = RowGroup {
+    label: words::HOCUSPANDA_MICROPHONE,
     per_source: false,
 };
 
@@ -40,6 +47,7 @@ pub const AWAY: &str = "camera.away";
 pub const PRESENTER: &str = "camera.presenter";
 pub const PRESENTER_SIDE: &str = "camera.presenter-side";
 pub const PRESENTER_SIZE: &str = "camera.presenter-size";
+pub const VOICE: &str = "voice.effect";
 pub const FRAMING: &str = "camera.framing";
 pub const FACE: &str = "camera.face";
 pub const GESTURES: &str = "camera.gestures";
@@ -52,6 +60,7 @@ const STRENGTHS: &[&str] = &["auto", "soft", "medium", "strong"];
 const BACKGROUNDS: &[&str] = &["room", "blur", "aurora", "koi"];
 const SIDES: &[&str] = &["left", "right"];
 const SIZES: &[&str] = &["small", "medium", "large"];
+const VOICES: &[&str] = &["none", "quiet", "studio", "panda", "robot", "deep"];
 /// Visage's, the panda among them.
 const FACES: &[&str] = &["none", "ears", "beanie", "crown", "glasses", "panda"];
 const PANDA_LOOKS: &[&str] = &["classic", "magician", "secretary"];
@@ -394,6 +403,45 @@ pub fn settings() -> &'static [Setting] {
                 places: one(&["camera", "celebrations"], Codec::Bool),
                 needs: None,
             },
+            Setting {
+                id: VOICE,
+                section: SectionId::Camera,
+                group: MICROPHONE,
+                name: words::VOICE,
+                line: Some(words::A_MICROPHONE_NAMED_HOCUSPANDA),
+                keywords: (
+                    &[
+                        "micro",
+                        "voix",
+                        "bruit",
+                        "débruitage",
+                        "studio",
+                        "robot",
+                        "grave",
+                        "appel",
+                    ],
+                    &[
+                        "microphone",
+                        "voice",
+                        "noise",
+                        "noise reduction",
+                        "studio",
+                        "robot",
+                        "deep",
+                        "call",
+                    ],
+                ),
+                kind: Kind::Menu(vec![
+                    word(words::AS_IT_IS, "none"),
+                    word(words::NO_NOISE, "quiet"),
+                    word(words::STUDIO, "studio"),
+                    word(words::PANDA, "panda"),
+                    word(words::ROBOT, "robot"),
+                    word(words::DEEP, "deep"),
+                ]),
+                places: one(&["voice", "effect"], Codec::Word(VOICES)),
+                needs: None,
+            },
         ]
     })
 }
@@ -405,7 +453,7 @@ mod tests {
 
     /// Its keys and their defaults are the configuration's: the light on,
     /// a frame, neutral, auto; Lumière on, no banner, the account's name, the
-    /// project.
+    /// project; Sans bruit.
     #[test]
     fn the_rows_write_the_camera_s_keys_with_their_defaults() {
         let keys: Vec<(String, Value)> = settings()
@@ -442,6 +490,7 @@ mod tests {
                 ("camera.panda-look".to_owned(), Value::Word("magician")),
                 ("camera.gestures".to_owned(), Value::Bool(true)),
                 ("camera.celebrations".to_owned(), Value::Bool(false)),
+                ("voice.effect".to_owned(), Value::Word("quiet")),
             ]
         );
     }

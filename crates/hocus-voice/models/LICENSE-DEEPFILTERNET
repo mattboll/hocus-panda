@@ -1,0 +1,35 @@
+The noise reduction models in this directory, enc.onnx, erb_dec.onnx and
+df_dec.onnx, are DeepFilterNet3's (48 kHz, fft 960, hop 480, 32 ERB bands,
+96 deep-filtered bins, order 5, look-ahead 2), by Hendrik Schröter,
+under the MIT license (DeepFilterNet is dual-licensed MIT or Apache-2.0;
+taken under the MIT license), unchanged, as the DeepFilterNet project
+publishes them:
+
+    https://github.com/Rikorose/DeepFilterNet/raw/main/models/DeepFilterNet3_onnx.tar.gz
+    SHA-256 c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616
+
+The archive's tmp/export/ holds them, with their config.ini. SHA-256:
+
+    7c5399d3da8a50ebef1c1a0ae421b33376aa5e45d0e92df16da7e83c9c131916  enc.onnx
+    ab669a1d10afe20911728b33053a452071042317a90581092b325da7b2f9d895  erb_dec.onnx
+    23114ce3b0f6464b763ee62f7bb8aab6b2a129a21eabd5bcfe59413db05f278a  df_dec.onnx
+
+The MIT License (MIT)
+Copyright (c) 2021 Hendrik Schröter
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

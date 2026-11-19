@@ -108,6 +108,7 @@ mod text_input;
 pub mod tile_drop;
 pub mod transcribe;
 mod tray;
+mod voice;
 mod wallpaper;
 mod windows;
 mod wobble;

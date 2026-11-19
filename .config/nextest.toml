@@ -1,6 +1,6 @@
 # CI builds once and runs the tests from an archive on other machines
 # (.github/workflows/ci.yml, #633). The compositor's tests start the shell,
-# the Settings, `hocus` and `hocus-transcribe` and `hocus-camera` from beside their own binary, and check against
+# the Settings, `hocus`, `hocus-transcribe`, `hocus-camera` and `hocus-voice` from beside their own binary, and check against
 # each one's list of sources (NAME.d) that it is fresh: the archive takes
 # them along.
 [profile.default]
@@ -15,6 +15,8 @@ archive.include = [
     { path = "debug/hocus-transcribe.d", relative-to = "target", on-missing = "error" },
     { path = "debug/hocus-camera", relative-to = "target", on-missing = "error" },
     { path = "debug/hocus-camera.d", relative-to = "target", on-missing = "error" },
+    { path = "debug/hocus-voice", relative-to = "target", on-missing = "error" },
+    { path = "debug/hocus-voice.d", relative-to = "target", on-missing = "error" },
 ]
 
 # CI's runs. A test that fails by chance is quarantined here, in
@@ -39,10 +41,9 @@ retries = 0
 # test fails without the programs it needs, so these are left out there,
 # by name, and run where the programs are (the default profile).
 # Installing them on CI takes them out of this list.
-# And two that fail not by chance: iced_exwlshell 0.21.4 lacks what our
-# old patch of iced_layershell gave (#860): `footer::a_press_as_the_pointer_
-# comes_in_lands_where_it_came_in`, `launcher::escape_read_with_its_first_
-# configure_closes_it`. #860's fix takes them out.
+# And one that fails not by chance: iced_exwlshell 0.21.4 lacks what our
+# old patch of iced_layershell gave (#860, #821): `launcher::escape_read_
+# with_its_first_configure_closes_it`. #860's fix takes it out.
 # And three that fail by chance on CI's runners, each until its issue's
 # fix: `actions::an_impossible_action_is_inert_and_nothing_found_searches_
 # the_launcher` (#871), `camera::the_screen_light_follows_the_light_on_the_
@@ -56,7 +57,6 @@ not (
         | test(=desktop_drop::an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
-        | test(=footer::a_press_as_the_pointer_comes_in_lands_where_it_came_in)
         | test(=launcher::escape_read_with_its_first_configure_closes_it)
         | test(=actions::an_impossible_action_is_inert_and_nothing_found_searches_the_launcher)
         | test(=camera::the_screen_light_follows_the_light_on_the_face)
