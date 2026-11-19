@@ -297,6 +297,98 @@ pub fn blur(frame: &mut [u8], alpha: &Alpha) {
     behind(frame, alpha, &under, SW, SH);
 }
 
+/// The room of `frame` (B, G, R, x) without the person, blurred, over
+/// the whole frame (the panda takes their place): where they were, the
+/// room round them, pulled in from ever coarser pictures of it until
+/// none is missing.
+pub fn emptied(frame: &mut [u8], alpha: &Alpha) {
+    if frame.len() < BYTES {
+        return;
+    }
+    // The room at a quarter of its size, weighed by how much of it is the
+    // room.
+    let mut level: Vec<[f32; 4]> = (0..SW * SH)
+        .map(|i| {
+            let (sx, sy) = (i % SW * 4, i / SW * 4);
+            let mut acc = [0f32; 4];
+            for y in sy..sy + 4 {
+                for x in sx..sx + 4 {
+                    let a = alpha.values.get(y * W + x).copied().unwrap_or(0);
+                    let k = (1.0 - f32::from(a) / 255.0).powi(2);
+                    let at = (y * W + x) * 4;
+                    if let Some(&[b, g, r, _]) = frame.get(at..at + 4) {
+                        for (s, c) in acc.iter_mut().zip([b, g, r]) {
+                            *s += f32::from(c) * k;
+                        }
+                        acc[3] += k;
+                    }
+                }
+            }
+            acc.map(|v| v / 16.0)
+        })
+        .collect();
+    let filled = push_pull(&mut level, SW, SH);
+    let mut room: Vec<[f32; 4]> = filled.iter().map(|&[b, g, r]| [b, g, r, 1.0]).collect();
+    gaussian(&mut room, SW, SH, RADIUS * 2);
+    let under: Vec<[f32; 3]> = room
+        .iter()
+        .map(|v| {
+            let w = v[3].max(1e-3);
+            [v[0] / w, v[1] / w, v[2] / w]
+        })
+        .collect();
+    behind(frame, &Alpha::default(), &under, SW, SH);
+}
+
+/// The colours of `level` (weighed, the weight last, from 0 to 1 a
+/// pixel), the missing filled from coarser levels.
+fn push_pull(level: &mut [[f32; 4]], w: usize, h: usize) -> Vec<[f32; 3]> {
+    let colour = |v: &[f32; 4]| {
+        let k = v[3].max(1e-6);
+        [v[0] / k, v[1] / k, v[2] / k]
+    };
+    if w <= 1 || h <= 1 {
+        let mut total = [0f32; 4];
+        for v in level.iter() {
+            for (t, x) in total.iter_mut().zip(v) {
+                *t += x;
+            }
+        }
+        let c = if total[3] > 1e-6 {
+            colour(&total)
+        } else {
+            [0.0; 3]
+        };
+        return vec![c; level.len()];
+    }
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let mut coarse = vec![[0f32; 4]; cw * ch];
+    for (i, v) in level.iter().enumerate() {
+        let (x, y) = (i % w / 2, i / w / 2);
+        if let Some(c) = coarse.get_mut(y * cw + x) {
+            for (t, s) in c.iter_mut().zip(v) {
+                *t += s / 4.0;
+            }
+        }
+    }
+    let up = push_pull(&mut coarse, cw, ch);
+    level
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let (x, y) = (i % w / 2, i / w / 2);
+            let parent = up.get(y * cw + x).copied().unwrap_or([0.0; 3]);
+            let own = colour(v);
+            let k = v[3].clamp(0.0, 1.0);
+            let mut out = [0f32; 3];
+            for ((o, a), b) in out.iter_mut().zip(own).zip(parent) {
+                *o = a * k + b * (1.0 - k);
+            }
+            out
+        })
+        .collect()
+}
+
 /// A living wallpaper's picture (RGBA) behind the person of `frame`.
 pub fn scene(frame: &mut [u8], alpha: &Alpha, picture: &Picture) {
     let under: Vec<[f32; 3]> = picture

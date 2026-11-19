@@ -769,6 +769,7 @@ impl Compositor {
         if let Some(name) = green {
             tracing::info!(name, "an agent finished, its tests passing");
             self.fireworks_go_off();
+            self.camera_moment();
         }
         if let Some(id) = ended {
             self.agent_turn_ended(id);
@@ -863,6 +864,7 @@ impl Compositor {
         self.agents.dirty = true;
         self.news_timer();
         self.confetti_go_off();
+        self.camera_moment();
     }
 
     /// The timer that takes the good news said long enough off the rows.
