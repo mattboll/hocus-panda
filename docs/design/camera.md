@@ -467,10 +467,11 @@ the presenter's stream on a camera is a use of it, named so.
 ## Your face and your hands (lot 4, as built)
 
 The face and the hands are found by models; an accessory follows the
-head, the picture can follow the face, a thumb up or a raised hand shows
-in the picture, and the agents' moments can rain confetti on it. The
-panda that takes the person's place (Visage's last tile) is to come, its
-own mockup first: its tile shows, dimmed, "Bientôt".
+head, or a panda takes the person's place; the picture can follow the
+face, a thumb up or a raised hand shows in the picture, and the agents'
+moments can rain confetti on it. Mockups: the window's Visage and
+Réactions tabs, and the panda's live mockup (`hocus-panda-tools/mockups/
+s23-webcam/panda-avatar`, approved with its three looks).
 
 ### The models (`track.rs`, `face.rs`, `hands.rs`)
 
@@ -520,22 +521,75 @@ own mockup first: its tile shows, dimmed, "Bientôt".
   frames a second is about half a core; the gestures, while no hand is
   in the picture, about an eighth of one.
 
-### Visage (one at a time; `wear.rs`)
+### Visage (one at a time; `wear.rs`, `rig.rs`)
 
 - **Oreilles, Bonnet, Couronne, Lunettes** (`[camera] face = "ears"`,
-  `"beanie"`, `"crown"`, `"glasses"`; `"none"`, the default): each the
-  mockup's own drawing of its preview's figure (the ears' grey discs with
-  their dark middle, the beanie's dome, brim and pompom, the crown's
-  path, the glasses' two rounded lenses), in the figure's pixels, laid on
-  the face by its pose and turned with its roll: the glasses from the
-  figure's eyes to the face's (their middle, their span); the others from
-  the figure's forehead's top, at its hair, to the face's, the figure's
-  face's width to the face's and 15 % more (a real head is wider than its
-  face with its hair). Drawn anti-aliased, apart in their box, over the
-  made frame: the same on the GPU's path and the CPU's, after what is
-  behind the person, before Cadrage's crop.
-- A face lost for half a second, the accessory goes; it comes back with
-  the face.
+  `"beanie"`, `"crown"`, `"glasses"`; `"none"`, the default): shapes in
+  three dimensions on the head (`rig.rs`, the panda mockup's rig: the
+  head's half width 30 units, its middle between the temples), turned by
+  the head's yaw, pitch and roll and seen in perspective. The pose comes
+  from the mesh: its axes across (temple to temple) and down (forehead to
+  chin), the roll from the eyes' line, the pitch at rest measured on the
+  test pictures; each point the accessory sits on (the eyes, the
+  forehead's top) is placed exactly on the face's.
+- **On the hair**: the top of the head is where the person's mask (lot
+  3's segmentation, five times a second while a hat or the ears are on)
+  ends above the forehead along the face's axis, else a typical head's.
+  The beanie's ribbed fold sits on the forehead's top, its dome (an
+  ellipsoid's cap, its outline the hull of its points seen) covers the
+  hair to its top, its pompom on it; the crown, five points round a ring,
+  its inner side seen between them, three jewels and gold balls on its
+  front, sits a little into the hair; the ears, the panda's ink
+  (`#23262E`, a soft highlight, a darker inner ear), stand on it, tilted
+  outwards, the far one first.
+- **On the face**: the glasses' lenses in front of the eyes, curving
+  with the face (the mockup's proportions: of the eyes' half span), thick
+  frames, a light edge on their top, a reflection across the lenses;
+  their arms go back towards the ears, fading into the hair, the one on
+  the side turned away hidden behind the head.
+- **Their light**: a soft gradient (lit from above on the left), a light
+  rim on the edge, a soft contact shadow on the head under each (the
+  beanie's fold, the crown's ring, the ears' base, the glasses' frames).
+- Drawn anti-aliased (tiny-skia), apart in the head's box, over the made
+  frame: the same on the GPU's path and the CPU's, after what is behind
+  the person, before Cadrage's crop. A face lost for half a second, the
+  accessory goes; it comes back with the face.
+
+### Panda (Visage; `panda.rs`)
+
+- **The approved mockup, ported** (`[camera] face = "panda"`): the bar's
+  panda on its rig, each feature of the face on a sphere (the cheeks and
+  the muzzle a bump on it) turned with yaw, pitch and roll in
+  perspective; the ears and the magician's hat on springs of their own
+  (driven by their anchors' accelerations, the hat kicked by a start);
+  blinks, the wink drawing's happy arch, wide eyes, brows lifting the
+  patches, the mouth from the jaw, its round and the smile (its tongue
+  showing), blush, the breath and its bob, the paws up when laughing.
+- **What drives it**: the face landmarker's pose and its expressions
+  (the blendshapes, asked only for the panda): `eyeBlink`, `jawOpen`,
+  `mouthFunnel`/`mouthPucker`, `mouthSmile`/`mouthFrown`, `eyeSquint`
+  (happy eyes when laughing), `browInnerUp`/`browOuterUp`/`browDown`,
+  `eyeWide`, `eyeLook*` (where the eyes look); the picture is not
+  mirrored (its left is the person's right). Followed through the
+  mockup's springs at fixed steps of 1/120 s; the lids a little smoothed.
+  Without a face for 2 s it idles: the mockup's sway, glances, breath,
+  and a slow blink every 4.3 s.
+- **Its look** (« Allure », `[camera] panda-look`, `"magician"` by
+  default, the mockup's): `"classic"` (both ears ink), `"magician"` (the
+  green magic ear and its glow, the top hat with its band, patch and
+  star, the bow tie), `"secretary"` (gold glasses, the pencil behind the
+  ear, the clipboard, the bow tie); its shapes, colours and frames (where
+  it stands, its size) the mockup's.
+- **In the person's place**: behind it, Fond's wallpaper (moving), else
+  the room without the person (the mask's room pulled in where they were
+  from ever coarser pictures of it, then blurred, `backdrop::emptied`);
+  the background's glow behind the panda, its soft shadow, the scene's
+  tints on it (the aurora's or the room's, the mockup's `SCENES`).
+  Cadrage does not apply; the reactions and the banner do.
+- **Its cost**: drawn with tiny-skia at 0.8 of the frame's size and laid
+  over it between its pixels in one pass (its glow, shadow, tints):
+  measured 22 to 28 ms a frame on one core (the secretary the most), on
+  the camera's loop: 30 frames a second hold.
 
 ### Cadrage (Image; `framing.rs`)
 
@@ -569,7 +623,8 @@ own mockup first: its tile shows, dimmed, "Bientôt".
 - **Fêtes** (`[camera] celebrations`, off by default): on each of the
   agents' moments (an agent's tests green, `hocus celebrate`, the MCP's
   `celebrate`: the moments of docs/design/effects.md, counted by the
-  compositor whatever its own effects may play, `CameraLook.moments`),
+  compositor, `CameraLook.moments`, under the desktop's rules that are
+  the user's: none with reduced motion, nor in the power saver),
   while the camera is read, 48 of the mockup's pieces (6 × 9 px of its
   preview, its four colours) fall through the picture turning 260°, 2.2
   to 3.1 s each, started over 1.5 s; another moment adds a shower.
@@ -577,29 +632,31 @@ own mockup first: its tile shows, dimmed, "Bientôt".
 
 ### The window and the settings
 
-Visage's tiles (Aucun, Oreilles, Bonnet, Couronne, Lunettes) are made, one
-of them ringed, a violet dot on the tab with an accessory; Panda shows,
-dimmed, "Bientôt" (its tile, to screen readers). Image's Cadrage and
-Réactions' Gestes and Fêtes are made, each its words under the grid.
-`[camera]`: `face`, `framing`, `gestures`, `celebrations`, with their
-rows in Settings › Caméra (Visage's row without the panda).
+Visage's tiles (Aucun, Oreilles, Bonnet, Couronne, Lunettes, Panda) are
+made, one of them ringed, a violet dot on the tab with one; with the
+panda, « Allure » under the hint: its three looks, each drawn (96 px
+square, the mockup's still), its name under it, the chosen ringed.
+Image's Cadrage and Réactions' Gestes and Fêtes are made, each its words
+under the grid. `[camera]`: `face`, `panda-look`, `framing`, `gestures`,
+`celebrations`, with their rows in Settings › Caméra.
 
 **Choices made here** (to confirm on the machine):
 
 - Gestes is on by default (the mockup's state; the spec says only that
   Fêtes is off): the hands' models then run in every call, some an eighth
   of a core while no hand shows.
-- The ears are the mockup's: grey discs (`#3A3D46`) with a dark middle,
-  as its `box-shadow: inset` draws them, not black ones.
-- The hats sit by the face's own measures (its forehead's top and its
-  width, 15 % more for the hair), not by the hair found in the picture:
-  a big head of hair shows round a beanie.
+- The hats' width is a head's with its hair (the beanie's 37 units of
+  the head's 30): a big head of hair still shows round a beanie.
+- The panda stands where the mockup puts it, in the middle, whatever
+  where the person sits; « Allure »'s tiles are drawn on the aurora's
+  still colours (the mockup's), whatever Fond is; the mockup's own
+  « Arrière-plan » choice is Fond's tab.
 - Cadrage's zoom is the mockup's 1.32, less for a face near the camera
   (no head cut), never more for a face far away.
-- Fêtes plays on the agents' moments whatever the desktop's own effects
-  do (reduced motion, the power saver, the screen shared), the picture
-  being the call's; a moment while the camera is not read rains nothing
-  later.
+- Fêtes follows reduced motion and the power saver; a share or the
+  CPU's drawing (which hold the desktop's own effects) do not stop it,
+  the picture being the call's; a moment while the camera is not read
+  rains nothing later.
 
 **Measured headless**: `hocus-camera`'s unit tests: the face's points on
 the portrait (`data/person.jpg`) where its eyes, nose and chin are,
@@ -610,7 +667,9 @@ it is, followed within 50 ms a look; a raised hand on
 `data/raised_hand.jpg` (NASA's photograph of Chris Cassidy, public
 domain); no gesture on the portrait; each accessory changing the pixels
 round the head (above the eyes, on them for the glasses) and none
-elsewhere; Cadrage bringing the face to the middle wherever it is in the
+elsewhere; the panda: a blink closing its eyes, `jawOpen` opening its
+mouth, idle and blinking without a face, each look drawn within 33 ms
+a frame; Cadrage bringing the face to the middle wherever it is in the
 picture (as far as the crop reaches), holding still for a few pixels'
 move, and zooming in on `data/far.jpg` (NASA's photograph of Jonny Kim,
 public domain); the gestures' timing (once, again after a second down;
@@ -619,7 +678,8 @@ gone. They run one at a time (`.config/nextest.toml`'s `camera-models`
 group), so that their budgets do not share a core. The settings:
 `settings_appearance::the_camera_page_writes_the_screen_light_s_keys`; the
 window's tiles (`camera::effects::tests`). The look: the screenshots,
-`sight::tests::screenshots_of_the_camera_s_pictures_lot_4` (the frames)
+`sight::tests::screenshots_of_the_camera_s_pictures_lot_4` and
+`panda::shots::screenshots_of_the_panda` (the frames)
 and the compositor's `camera::screenshots_of_the_window_s_lot_4` (the
 window, the real program's frames in its preview), both ignored,
 `HOCUS_SHOTS`.
