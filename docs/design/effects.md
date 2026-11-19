@@ -699,8 +699,9 @@ logical pixels.
   Nothing follows the pointer (the board's camera moved on its switches
   alone).
 - **The switch**: with depth on, a switch of desktops (the keys, the bar's
-  tiles, the overview's thumbnails) takes the board's 1.5 s, in-out cubic,
-  in place of the strip's 320 ms; the camera pulls back on the way
+  tiles, the overview's thumbnails) takes 500 ms, in-out cubic (the
+  board's 1.5 s was much too long on the maintainer's machine,
+  2026-11-19), in place of the strip's 320 ms; the camera pulls back on the way
   (`1 - 0.1 sin(πk)` halfway), the windows sliding with the strip drawn
   smaller about the screen's middle by as much, each layer by its share
   of it. A swipe of three fingers follows the fingers as without it.
