@@ -4,6 +4,12 @@
 //! what each is doing. Ported from the first build's client
 //! (`v0-first-build`, `hocus-platform/src/herdr.rs`), without its polling.
 //!
+//! Each named session (`herdr --session NAME`) has a server and a socket
+//! of its own, `sessions/NAME/herdr.sock` beside the default one's: every
+//! session is followed, each by a thread of its own, the sessions made
+//! later seen with inotify ([`start_sessions`], #887). A client's session
+//! is read off its command line ([`Client`]).
+//!
 //! One thread: it waits for the socket with inotify, lists the agents
 //! (`agent.list`), the workspaces' and tabs' labels (`workspace.list`,
 //! `tab.list`) and each pane's foreground processes
@@ -122,7 +128,7 @@ pub enum News {
     /// first ([`terminal_processes`]); the panes it shows.
     Agents {
         agents: Vec<Agent>,
-        terminals: Vec<Vec<u32>>,
+        terminals: Vec<Client>,
         layout: Option<Layout>,
     },
     /// The panes of the tab herdr shows moved or were resized.
@@ -147,6 +153,115 @@ pub fn state(status: &str) -> Option<State> {
         "done" => Some(State::Done),
         _ => None,
     }
+}
+
+/// The default session's name: `herdr` alone shows it, its socket is
+/// herdr's own (`herdr.sock`).
+pub const DEFAULT: &str = "default";
+
+/// Whether `name` is a session's name as herdr takes it: ASCII letters,
+/// digits, `.`, `_` and `-`, not `.` nor `..`.
+pub fn session_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// What the followers tell: a session's name and what was heard of it.
+pub type Sink = std::sync::Arc<dyn Fn(&str, News) -> bool + Send + Sync>;
+
+/// Follows every herdr session (#887): the default one behind `socket`,
+/// and each named one (`sessions/NAME/herdr.sock`, its directory watched
+/// with inotify for the sessions made later), each on a thread of its
+/// own, their clients among the processes `proc` shows (`/proc`), telling
+/// `sink` with the session's name. They end when `sink` says `false`.
+pub fn start_sessions(
+    socket: PathBuf,
+    sessions: PathBuf,
+    proc: PathBuf,
+    sink: Sink,
+) -> std::io::Result<()> {
+    let first = sink.clone();
+    start(socket, proc.clone(), move |news| first(DEFAULT, news))?;
+    std::thread::Builder::new()
+        .name("herdr's sessions".to_owned())
+        .spawn(move || watch_sessions(&sessions, &proc, &sink))
+        .map(drop)
+}
+
+/// The named sessions in `dir` as they are made, each followed once.
+fn watch_sessions(dir: &Path, proc: &Path, sink: &Sink) {
+    use rustix::fs::inotify::{self, CreateFlags, WatchFlags};
+    let mut followed: Vec<String> = Vec::new();
+    loop {
+        if !dir.is_dir() {
+            if !wait_for(dir, Path::is_dir) {
+                return;
+            }
+            continue;
+        }
+        let Ok(fd) = inotify::init(CreateFlags::CLOEXEC) else {
+            return;
+        };
+        let flags = WatchFlags::CREATE
+            | WatchFlags::MOVED_TO
+            | WatchFlags::DELETE_SELF
+            | WatchFlags::MOVE_SELF;
+        if inotify::add_watch(&fd, dir, flags).is_err() {
+            tracing::warn!(dir = %dir.display(), "cannot watch for herdr's sessions");
+            return;
+        }
+        let mut buffer = [std::mem::MaybeUninit::uninit(); 1024];
+        let mut events = inotify::Reader::new(&fd, &mut buffer);
+        loop {
+            // Those made before the watch, then each made since.
+            for name in session_names(dir) {
+                if followed.contains(&name) {
+                    continue;
+                }
+                tracing::info!("a herdr session followed");
+                let socket = dir.join(&name).join("herdr.sock");
+                let tell = sink.clone();
+                let of = name.clone();
+                if let Err(err) = start(socket, proc.to_path_buf(), move |news| tell(&of, news)) {
+                    tracing::warn!(%err, "cannot follow a herdr session");
+                }
+                followed.push(name);
+            }
+            match events.next() {
+                Ok(event) => {
+                    let mask = event.events();
+                    if mask.intersects(
+                        inotify::ReadFlags::DELETE_SELF
+                            | inotify::ReadFlags::MOVE_SELF
+                            | inotify::ReadFlags::IGNORED,
+                    ) {
+                        break;
+                    }
+                }
+                Err(rustix::io::Errno::INTR) => {}
+                Err(_) => return,
+            }
+        }
+    }
+}
+
+/// The named sessions' directories in `dir`.
+fn session_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| session_name_ok(n))
+        .collect();
+    names.sort();
+    names
 }
 
 /// Follows herdr behind `socket` on a thread of its own, its clients
@@ -199,7 +314,7 @@ fn follow(socket: &Path, proc: &Path, calm: Calm, sink: &dyn Fn(News) -> bool) {
                         return;
                     }
                 }
-                if !wait_for(socket) {
+                if !wait_for(socket, |s| UnixStream::connect(s).is_ok()) {
                     return;
                 }
             }
@@ -208,10 +323,11 @@ fn follow(socket: &Path, proc: &Path, calm: Calm, sink: &dyn Fn(News) -> bool) {
 }
 
 /// Waits until something happens to `socket`'s name (made again as herdr
-/// starts), with inotify on its nearest directory: whether to go on.
-fn wait_for(socket: &Path) -> bool {
+/// starts), with inotify on its nearest directory, unless it is `there`
+/// already: whether to go on.
+fn wait_for(socket: &Path, there: impl Fn(&Path) -> bool) -> bool {
     use rustix::fs::inotify::{self, CreateFlags, WatchFlags};
-    if UnixStream::connect(socket).is_ok() {
+    if there(socket) {
         return true;
     }
     let mut at = socket;
@@ -233,7 +349,7 @@ fn wait_for(socket: &Path) -> bool {
         return false;
     }
     // Made between the look and the watch.
-    if UnixStream::connect(socket).is_ok() {
+    if there(socket) {
         return true;
     }
     let mut buffer = [std::mem::MaybeUninit::uninit(); 1024];
@@ -432,7 +548,7 @@ impl Burst {
 #[derive(Debug)]
 struct Listing {
     agents: Vec<Agent>,
-    terminals: Vec<Vec<u32>>,
+    terminals: Vec<Client>,
     labels: Labels,
     layout: Option<Layout>,
 }
@@ -847,33 +963,93 @@ fn call(socket: &Path, method: &str, params: Value) -> Result<Value, String> {
     }
 }
 
-/// For each of herdr's clients, the processes it runs under, nearest
-/// first: a terminal's window among them shows herdr. Its server, started
-/// apart, is left out, and a client run by another (`herdr` commands in a
-/// pane, under the server) leads to no terminal.
-fn ancestors_of_clients(table: &HashMap<u32, (crate::process::Process, bool)>) -> Vec<Vec<u32>> {
-    let mut clients: Vec<u32> = table
+/// What a `herdr` process is, by its command line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Role {
+    /// A session's server (`herdr server`), a daemon.
+    Server,
+    /// A client showing session `.0` in a terminal: `herdr` (the default
+    /// session), `herdr --session NAME`, `herdr session attach NAME`.
+    Client(String),
+    /// A command over the socket (`herdr pane list`), a remote client
+    /// (`--remote`): no local session shown.
+    Command,
+}
+
+/// `herdr`'s role from its arguments (its command line past its program).
+fn role(args: &[&[u8]]) -> Role {
+    let mut session: Option<String> = None;
+    let mut words: Vec<&[u8]> = Vec::new();
+    let mut at = args.iter();
+    while let Some(arg) = at.next() {
+        match *arg {
+            b"--session" => session = at.next().map(|n| String::from_utf8_lossy(n).into_owned()),
+            b"--remote" | b"--no-session" => return Role::Command,
+            b"--remote-keybindings" => {
+                at.next();
+            }
+            arg if let Some(name) = arg.strip_prefix(b"--session=") => {
+                session = Some(String::from_utf8_lossy(name).into_owned());
+            }
+            arg if arg.starts_with(b"-") => {}
+            word => words.push(word),
+        }
+    }
+    let named = |name: String| {
+        if session_name_ok(&name) {
+            Role::Client(name)
+        } else {
+            Role::Command
+        }
+    };
+    match words.as_slice() {
+        [b"server", ..] => Role::Server,
+        [] => named(session.unwrap_or_else(|| DEFAULT.to_owned())),
+        [b"session", b"attach", name] => named(String::from_utf8_lossy(name).into_owned()),
+        _ => Role::Command,
+    }
+}
+
+/// One of herdr's clients: the session it shows, and the processes it
+/// runs under, nearest first (a terminal's window among them shows it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Client {
+    pub session: String,
+    pub above: Vec<u32>,
+}
+
+/// For each of herdr's clients, its session and the processes it runs
+/// under, nearest first: a terminal's window among them shows herdr. Its
+/// servers, started apart, are left out, and a client run by another
+/// (`herdr` commands in a pane, under the server) leads to no terminal.
+fn ancestors_of_clients(table: &HashMap<u32, (crate::process::Process, Role)>) -> Vec<Client> {
+    let mut clients: Vec<(u32, &str)> = table
         .iter()
-        .filter(|(_, (p, server))| p.name == "herdr" && !server)
-        .map(|(pid, _)| *pid)
+        .filter_map(|(pid, (p, role))| match role {
+            Role::Client(session) if p.name == "herdr" => Some((*pid, session.as_str())),
+            _ => None,
+        })
         .collect();
     clients.sort_unstable();
     clients
         .into_iter()
-        .map(|client| {
-            crate::process::ancestry_in(client, |pid| table.get(&pid).map(|(p, _)| p.clone()))
-                .into_iter()
-                .skip(1)
-                .collect::<Vec<u32>>()
+        .map(|(client, session)| Client {
+            session: session.to_owned(),
+            above: crate::process::ancestry_in(client, |pid| {
+                table.get(&pid).map(|(p, _)| p.clone())
+            })
+            .into_iter()
+            .skip(1)
+            .collect(),
         })
-        .filter(|above| !above.is_empty())
+        .filter(|c| !c.above.is_empty())
         .collect()
 }
 
 /// herdr's clients among the processes `proc` shows (`/proc`), each with
-/// the processes above it ([`News::Agents`]'s `terminals`). It reads every
-/// process: for a thread, not an event loop.
-pub fn terminal_processes(proc: &Path) -> Vec<Vec<u32>> {
+/// its session and the processes above it ([`News::Agents`]'s
+/// `terminals`). It reads every process: for a thread, not an event loop.
+pub fn terminal_processes(proc: &Path) -> Vec<Client> {
     let Ok(dir) = std::fs::read_dir(proc) else {
         return Vec::new();
     };
@@ -889,10 +1065,19 @@ pub fn terminal_processes(proc: &Path) -> Vec<Vec<u32>> {
         let Some(process) = crate::process::read_in(proc, pid) else {
             continue;
         };
-        let server = process.name == "herdr"
-            && std::fs::read(entry.path().join("cmdline"))
-                .is_ok_and(|raw| raw.split(|b| *b == 0).nth(1) == Some(b"server".as_slice()));
-        table.insert(pid, (process, server));
+        let role = if process.name == "herdr" {
+            std::fs::read(entry.path().join("cmdline")).map_or(Role::Command, |raw| {
+                let args: Vec<&[u8]> = raw
+                    .split(|b| *b == 0)
+                    .skip(1)
+                    .filter(|a| !a.is_empty())
+                    .collect();
+                role(&args)
+            })
+        } else {
+            Role::Command
+        };
+        table.insert(pid, (process, role));
     }
     ancestors_of_clients(&table)
 }
@@ -1123,28 +1308,63 @@ mod tests {
             name: name.into(),
             parent,
         };
+        let client = |s: &str| Role::Client(s.to_owned());
         let mut table = HashMap::from([
-            (100, (p("kitty", 1), false)),
-            (200, (p("zsh", 100), false)),
-            (300, (p("herdr", 200), false)),
-            (400, (p("herdr", 1), true)),
-            (410, (p("zsh", 400), false)),
-            (500, (p("claude", 410), false)),
-            // A `herdr` command an agent runs in its pane: under the
+            (100, (p("kitty", 1), Role::Command)),
+            (200, (p("zsh", 100), Role::Command)),
+            (300, (p("herdr", 200), client(DEFAULT))),
+            (400, (p("herdr", 1), Role::Server)),
+            (410, (p("zsh", 400), Role::Command)),
+            (500, (p("claude", 410), Role::Command)),
+            // A `herdr` client an agent runs in its pane: under the
             // server, no terminal.
-            (510, (p("herdr", 500), false)),
+            (510, (p("herdr", 500), client(DEFAULT))),
         ]);
+        let above = |table: &HashMap<u32, (Process, Role)>| -> Vec<(String, Vec<u32>)> {
+            ancestors_of_clients(table)
+                .into_iter()
+                .map(|c| (c.session, c.above))
+                .collect()
+        };
         assert_eq!(
-            ancestors_of_clients(&table),
-            vec![vec![200, 100], vec![500, 410, 400]]
+            above(&table),
+            vec![
+                (DEFAULT.to_owned(), vec![200, 100]),
+                (DEFAULT.to_owned(), vec![500, 410, 400])
+            ]
         );
-        // A second client, in another terminal: each its own.
-        table.insert(700, (p("foot", 1), false));
-        table.insert(800, (p("herdr", 700), false));
-        assert_eq!(ancestors_of_clients(&table)[2], vec![700]);
+        // A second client, in another terminal, of another session: each
+        // its own.
+        table.insert(700, (p("foot", 1), Role::Command));
+        table.insert(800, (p("herdr", 700), client("work")));
+        assert_eq!(above(&table)[2], ("work".to_owned(), vec![700]));
         // Its server alone, before any client attached: none.
-        let server = HashMap::from([(400, (p("herdr", 1), true))]);
+        let server = HashMap::from([(400, (p("herdr", 1), Role::Server))]);
         assert!(ancestors_of_clients(&server).is_empty());
+    }
+
+    /// A client's session from its command line (#887).
+    #[test]
+    fn a_clients_session_is_read_off_its_command_line() {
+        let of = |line: &str| {
+            let args: Vec<&[u8]> = line.split_whitespace().map(str::as_bytes).collect();
+            role(&args)
+        };
+        let client = |s: &str| Role::Client(s.to_owned());
+        assert_eq!(of(""), client(DEFAULT));
+        assert_eq!(of("--handoff"), client(DEFAULT));
+        assert_eq!(of("--session work"), client("work"));
+        assert_eq!(of("--session=site.v2"), client("site.v2"));
+        assert_eq!(of("session attach hocus-panda"), client("hocus-panda"));
+        assert_eq!(of("server"), Role::Server);
+        assert_eq!(of("--session work server"), Role::Server);
+        assert_eq!(of("pane list"), Role::Command);
+        assert_eq!(of("session list"), Role::Command);
+        assert_eq!(of("--remote box --session work"), Role::Command);
+        assert_eq!(of("--session ../x"), Role::Command);
+        assert!(session_name_ok("hocus_panda-2.0"));
+        assert!(!session_name_ok(".."));
+        assert!(!session_name_ok("a b"));
     }
 
     /// The table read from a `/proc` of the test's own: its server known
@@ -1167,7 +1387,24 @@ mod tests {
             b"/home/alex/.local/bin/herdr\0server\0",
         )?;
         process(500, "500 (claude) S 400 500 400 0", b"claude\0")?;
-        assert_eq!(terminal_processes(proc.path()), vec![vec![200, 100]]);
+        process(
+            600,
+            "600 (herdr) S 200 600 200 0",
+            b"herdr\0session\0attach\0work\0",
+        )?;
+        assert_eq!(
+            terminal_processes(proc.path()),
+            vec![
+                Client {
+                    session: DEFAULT.to_owned(),
+                    above: vec![200, 100]
+                },
+                Client {
+                    session: "work".to_owned(),
+                    above: vec![200, 100]
+                }
+            ]
+        );
         assert!(terminal_processes(&proc.path().join("none")).is_empty());
         Ok(())
     }
@@ -1463,10 +1700,14 @@ mod tests {
             Listing::read(&fake.socket, proc.path(), before).map_err(std::io::Error::other)
         };
         let first = read(None)?;
-        assert_eq!(first.terminals, vec![vec![100]]);
+        let default = vec![Client {
+            session: DEFAULT.to_owned(),
+            above: vec![100],
+        }];
+        assert_eq!(first.terminals, default);
         std::fs::remove_dir_all(proc.path().join("300"))?;
         let same = read(Some(&first))?;
-        assert_eq!(same.terminals, vec![vec![100]]);
+        assert_eq!(same.terminals, default);
         assert_eq!(same.agents, first.agents);
         if let Some(agents) = lock(&fake.agents)["agents"].as_array_mut() {
             agents.remove(0);

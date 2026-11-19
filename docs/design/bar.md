@@ -2306,7 +2306,10 @@ nothing to propose, the group is its header alone.
     polled. Plugging in, unplugging and declining, which write files, run
     there too;
   - **herdr** (`hocus-agents::herdr`, ported from the first build without
-    its polling): its socket waited for with inotify, `agent.list`, the
+    its polling): every running session (#887), the default one and each
+    named one (`$XDG_CONFIG_HOME/herdr/sessions/NAME/herdr.sock`, their
+    directory watched with inotify), each on a thread of its own and its
+    agents tied to it; its socket waited for with inotify, `agent.list`, the
     workspaces' and tabs' labels (`workspace.list`, `tab.list`), each
     pane's `pane.process_info`, then `events.subscribe` on a blocking
     read, the renames with it (`workspace.renamed`, `workspace.updated`,
@@ -2648,6 +2651,17 @@ terminal not in front, a herdr agent's row did not bring it.
   and `.clear`, which change it, and its panes' `terminal_title` is what
   each pane's program sets (Claude Code's "✳ Claude Code", in a terminal
   of its own as well), not the window's.
+- **Several herdr sessions** (#887, 2026-11-19): each session's window is
+  found from its own clients, told apart by their command line (`herdr`
+  for the default session, `herdr --session NAME`, `herdr session attach
+  NAME`; a command over the socket or a `--remote` client shows none). Of
+  a terminal process with several windows: the only one; else the window
+  in which one of that session's agents last had a prompt typed (the rule
+  below, the session's); else one titled after that session ("herdr
+  session attach work"); else as above. The go-to selects the agent's
+  pane on its own session's socket. A project whose desktop holds a
+  session's window keeps that session (projects.md, "One herdr session
+  per project").
 - **Several agents in one terminal process** (2026-11-19, kitty, foot's
   server, gnome-terminal-server, wezterm's mux; no terminal's own option):
   an agent's own window is first the window that had the keyboard as its

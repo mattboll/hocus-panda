@@ -300,7 +300,9 @@ the tabs and agents only at log out), and when a card opens.
   the first window above the agent's process; of a terminal process with
   several windows, the one its last prompt was typed in, bar.md "Several
   agents in one terminal process") is on its desktop. An
-  agent in one of herdr's panes is herdr's (§13, E).
+  agent in one of herdr's panes is its herdr session's: the project whose
+  desktop holds that session's terminal owns the session and its agents
+  (§13 E, "One herdr session per project" below).
 - **Saved**: tool, session id, folder, transcript's path; and the
   terminal it ran in (that window's desktop entry), at that window's
   place. Its terminal window is saved as the agent's, not as a plain
@@ -581,7 +583,12 @@ With the canvas's approval, the maintainer took these defaults:
 
 - A. The mini bar shows the monogram only; the full name shows as
   desktops switch.
-- E. herdr: only its agents come back, not its session.
+- E. herdr: only its agents come back, not its session. Replaced on
+  2026-11-19 by the maintainer's choice (#887): one herdr session per
+  project, in one window on the project's desktop, attached to again as
+  the project reopens (or at the next log in) while herdr's server still
+  runs it; its agents resumed each in a terminal of their own only when
+  the session is gone ("One herdr session per project", as built).
 - G. Projects in the Settings (rename, change the folder, forget): not
   in this sprint.
 - H. A tenth project when nine desktops are taken: a message says the
@@ -855,8 +862,9 @@ A comes first; B needs A; C and D need B and not each other.
 - **Which agents**: Claude Code's and Codex's whose window, found as the
   bar finds it (above their process, else herdr's terminal's for an agent
   in one of its panes), is on the project's desktop. herdr's own session
-  never comes back; each of its hook agents comes back in a terminal of
-  its own at its window's place (§13 E).
+  never came back; each of its hook agents came back in a terminal of
+  its own at its window's place (§13 E, replaced on 2026-11-19: "One
+  herdr session per project" below).
 - **Saved** as `[window.agent]` (`tool`, `session`, `folder`, `transcript`,
   `first-prompt`) with the terminal's entry and place, no
   `[window.terminal]`: as the project closes, and at log out for the
@@ -913,3 +921,54 @@ A comes first; B needs A; C and D need B and not each other.
   through `hocus agent-hook`; a project whose transcript is gone); unit
   tests for the id check, Codex's id, the command per terminal, the line's
   conversation, the folders' file.
+
+### One herdr session per project (#887, 2026-11-19)
+
+The maintainer runs several Claude Code sessions per project in herdr and
+does not want one terminal window each. herdr's named sessions (`herdr
+--session NAME`, `herdr session attach NAME`) outlive their clients and a
+log out. The maintainer's choice replaces §13 E for this case.
+
+- **Followed**: every running herdr session, not only the default one
+  (`hocus-agents::herdr::start_sessions`): the default one behind its
+  socket (`$XDG_CONFIG_HOME/herdr/herdr.sock`, or `HERDR_SOCKET_PATH`),
+  each named one behind `$XDG_CONFIG_HOME/herdr/sessions/NAME/herdr.sock`
+  (herdr's "Socket API"), their directory watched with inotify for the
+  sessions made later. Each agent is tied to its session; a pane's id is
+  its session's own.
+- **Its window**: herdr's clients are told apart by their command line
+  (`herdr`, the default session; `herdr --session NAME`, `herdr session
+  attach NAME`; a `herdr` command over the socket or a `--remote` client
+  shows no local session). A session's window is that of the nearest
+  process above its clients that has windows: the only one; of a terminal
+  process with several, the one in which an agent of that session last
+  had a prompt typed (#881's rule, the session's), else one titled after
+  that session ("herdr session attach NAME"), else one titled herdr, else
+  the most recently focused (bar.md 4.3c). The bar's go-to brings it and
+  selects the agent's pane on that session's socket.
+- **Belongs to a project** when that window is on its desktop, and so do
+  its agents. Saved (as the project closes, and at log out) as the
+  window's `[window.herdr]`: `session`, and `[[window.herdr.agents]]`, the
+  conversations of its agents that hooks told (each as `[window.agent]`
+  says it), for the fallback. No `[window.agent]` for them: one terminal,
+  not one per agent. Closing the project closes the terminal, which only
+  detaches herdr's client: the agents go on in herdr's server.
+- **Brought back** (as the project reopens, at log in): the terminal at
+  the window's place, in its folder, running `$SHELL -c 'herdr session
+  attach NAME; exec $SHELL'` (`herdr` alone for the default session),
+  `herdr` looked for as an agent's program is (§8.1, 2026-11-19), when the
+  session's socket answers. **The session gone** (its server stopped, a
+  reboot) or herdr nowhere: the window's place is taken once for each of
+  its agents, each resumed in a terminal of its own as before (§8.1);
+  without any, a terminal in its folder. Making the session again and
+  resuming the agents in its panes was not cheap (herdr's API would have
+  to start each in a pane of a new session): terminals.
+- **Tests** (`tests/projects.rs`, fake herdrs on sockets of the test's,
+  their clients in a `/proc` of its own):
+  `projects::each_herdr_sessions_agents_are_in_its_own_terminals_window`,
+  `projects::a_project_keeps_its_herdr_session_and_attaches_to_it_again`,
+  `projects::a_herdr_session_gone_resumes_its_agents_each_in_a_terminal`;
+  unit tests `herdr::tests::a_clients_session_is_read_off_its_command_line`,
+  `restore::tests::a_herdr_sessions_terminal_reads_back_and_starts_once`.
+- **Not built**: the confirmation and the card name herdr's agents as
+  before ("Claude Code, qui reprendra sa conversation"), not the session.
