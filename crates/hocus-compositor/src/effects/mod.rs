@@ -312,7 +312,7 @@ impl State {
         let seen = |s: &Self, o: &Output| !s.wall_unseen(o);
         if timed(Fx::Rain, || self.tick_raindrops(now)) {
             moving = true;
-            self.moved_on_screens(self.walls_seen(seen));
+            self.moved_on_screens(self.walls_seen(Self::rain_seen_on));
         }
         if timed(Fx::Koi, || self.tick_koi(now)) {
             moving = true;

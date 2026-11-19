@@ -713,6 +713,20 @@ impl<L: Clone + Send + 'static> Widget<Message, Theme, Renderer> for Around<'_, 
             }
             _ => {}
         }
+        // A key that came to a popover no longer open (the next one opened
+        // from the bar before this one went, and before the next holds
+        // the keyboard) is the open one's, as a key on the bar is (#883).
+        if !open
+            && popover
+            && let Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                text,
+                ..
+            }) = event
+        {
+            crate::popover::key(key, *modifiers, text.as_deref());
+        }
         // Fading out, it only draws.
         if open || drawing {
             handled |= self.dispatch(

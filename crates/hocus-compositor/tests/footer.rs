@@ -7,7 +7,8 @@
 //! (the clipboard's history, the notifications' history, the launcher, the
 //! user's name and the session menu, tests/session_menu.rs);
 //! the menu opens the launcher on a click, not on a hover; a press as the
-//! pointer comes in lands where it came in (#787); the mini form's
+//! pointer comes in lands where it came in (#787); a key typed as one
+//! popover gives way to the next reaches the next (#883); the mini form's
 //! bell sits over the user's avatar, last of all. The badge still counting is the notifications' tests' (they
 //! click the footer's bell), and its colour is checked there.
 //!
@@ -455,6 +456,38 @@ fn a_press_as_the_pointer_comes_in_lands_where_it_came_in() -> anyhow::Result<()
         after.contains(clipboards) && !after.contains(users),
         "the press went to the user's button"
     );
+    Ok(())
+}
+
+/// One popover to the next, quickly (#883): the bell clicked while the
+/// clipboard's history is open, and `Esc` typed at once, before the
+/// shell has read the click: the key, which went to the clipboard's
+/// popover (it held the keyboard), reaches the notifications' that opens,
+/// and closes it.
+#[test]
+fn a_key_typed_as_the_next_popover_opens_reaches_it() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start((1920, 1080))? else {
+        return Ok(());
+    };
+    bed.click(bed.button(0))?;
+    bed.popover()?;
+    let held = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some("hocus-bar-popover")
+    })?;
+    anyhow::ensure!(held, "the keyboard is on {:?}", bed.hp.keyboard_layer());
+    let bell = bed.button(1);
+    common::point(&mut bed.hp, bell)?;
+    let mark = bed.mark();
+    bed.hp.hold_shell(true)?;
+    bed.hp.button(BTN_LEFT, true);
+    bed.hp.button(BTN_LEFT, false);
+    bed.press(KEY_ESC);
+    let waited = wait(&mut bed.hp, Duration::from_millis(100));
+    bed.hp.hold_shell(false)?;
+    waited?;
+    bed.logged_after(mark, "a popover opens item=Notifications")?;
+    bed.logged_after(mark, "a popover closes item=Notifications")?;
+    bed.closed()?;
     Ok(())
 }
 

@@ -139,11 +139,11 @@ pub enum FromAgent {
 
 /// Serves an agent's line, from the control socket's thread: one thread
 /// reads the calls and hands them to the loop, another writes the answers.
-pub fn serve(stream: UnixStream, loop_: channel::Sender<Heard>, agent: String) {
+pub fn serve(reader: BufReader<UnixStream>, loop_: channel::Sender<Heard>, agent: String) {
     let session = SESSIONS.fetch_add(1, Ordering::Relaxed);
     let (to, answers) = mpsc::channel::<String>();
-    let _ = stream.set_read_timeout(None);
-    let Ok(mut writer) = stream.try_clone() else {
+    let _ = reader.get_ref().set_read_timeout(None);
+    let Ok(mut writer) = reader.get_ref().try_clone() else {
         return;
     };
     let started = std::thread::Builder::new()
@@ -160,14 +160,13 @@ pub fn serve(stream: UnixStream, loop_: channel::Sender<Heard>, agent: String) {
     if started.is_err() {
         return;
     }
-    // Its hello: `hocus mcp` sends no call before it, so that none is
-    // read by the control socket's thread, which read the first line.
+    // Its hello, which `hocus mcp` waits for before its first call.
     let _ = to.send(Answer::ok(0, json!("hocuspanda")).line());
     let heard = |from| loop_.send(Heard::Mcp(from)).is_ok();
     if !heard(FromAgent::Opened { session, agent, to }) {
         return;
     }
-    for line in BufReader::new(stream).lines() {
+    for line in reader.lines() {
         let Ok(line) = line else {
             break;
         };

@@ -1270,11 +1270,11 @@ pub(crate) fn wall_now() -> i64 {
 /// A Settings' line (`msg screens`), on threads of its own: one writes
 /// what the loop sends, this one reads what the Settings ask until the
 /// connection closes.
-pub fn serve(stream: UnixStream, loop_: channel::Sender<crate::agents::Heard>) {
+pub fn serve(reader: BufReader<UnixStream>, loop_: channel::Sender<crate::agents::Heard>) {
     let session = SESSIONS.fetch_add(1, Ordering::Relaxed);
     let (to, lines) = mpsc::channel::<String>();
-    let _ = stream.set_read_timeout(None);
-    let Ok(writer) = stream.try_clone() else {
+    let _ = reader.get_ref().set_read_timeout(None);
+    let Ok(writer) = reader.get_ref().try_clone() else {
         return;
     };
     let started = std::thread::Builder::new()
@@ -1301,7 +1301,7 @@ pub fn serve(stream: UnixStream, loop_: channel::Sender<crate::agents::Heard>) {
     {
         return;
     }
-    let reader = BufReader::new(stream);
+    // What came with `msg screens` is in `reader` already (#884).
     for line in reader.lines() {
         let Ok(line) = line else {
             break;
