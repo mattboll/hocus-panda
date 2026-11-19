@@ -43,14 +43,16 @@ pub const FRAMING: &str = "camera.framing";
 pub const FACE: &str = "camera.face";
 pub const GESTURES: &str = "camera.gestures";
 pub const CELEBRATIONS: &str = "camera.celebrations";
+pub const PANDA_LOOK: &str = "camera.panda-look";
 
 const WARMTHS: &[&str] = &["cool", "neutral", "warm"];
 const STRENGTHS: &[&str] = &["auto", "soft", "medium", "strong"];
 const BACKGROUNDS: &[&str] = &["room", "blur", "aurora", "koi"];
 const SIDES: &[&str] = &["left", "right"];
 const SIZES: &[&str] = &["small", "medium", "large"];
-/// Visage's: the panda that takes the person's place is to come.
-const FACES: &[&str] = &["none", "ears", "beanie", "crown", "glasses"];
+/// Visage's, the panda among them.
+const FACES: &[&str] = &["none", "ears", "beanie", "crown", "glasses", "panda"];
+const PANDA_LOOKS: &[&str] = &["classic", "magician", "secretary"];
 
 fn word(text: hocus_words::Text, word: &'static str) -> Choice {
     Choice {
@@ -309,14 +311,33 @@ pub fn settings() -> &'static [Setting] {
                         "glasses",
                     ],
                 ),
-                kind: Kind::Segmented(vec![
+                kind: Kind::Menu(vec![
                     word(words::NO_FACE, "none"),
                     word(words::EARS, "ears"),
                     word(words::BEANIE, "beanie"),
                     word(words::CROWN, "crown"),
                     word(words::GLASSES, "glasses"),
+                    word(words::PANDA, "panda"),
                 ]),
                 places: one(&["camera", "face"], Codec::Word(FACES)),
+                needs: None,
+            },
+            Setting {
+                id: PANDA_LOOK,
+                section: SectionId::Camera,
+                group: HOCUSPANDA,
+                name: words::PANDA_LOOK,
+                line: Some(words::THE_PANDA_S_LOOK),
+                keywords: (
+                    &["caméra", "allure", "magicien", "secrétaire"],
+                    &["camera", "look", "magician", "secretary"],
+                ),
+                kind: Kind::Segmented(vec![
+                    word(words::CLASSIC, "classic"),
+                    word(words::MAGICIAN, "magician"),
+                    word(words::SECRETARY, "secretary"),
+                ]),
+                places: one(&["camera", "panda-look"], Codec::Word(PANDA_LOOKS)),
                 needs: None,
             },
             Setting {
@@ -398,6 +419,7 @@ mod tests {
                 ("camera.presenter-size".to_owned(), Value::Word("medium")),
                 ("camera.framing".to_owned(), Value::Bool(false)),
                 ("camera.face".to_owned(), Value::Word("none")),
+                ("camera.panda-look".to_owned(), Value::Word("magician")),
                 ("camera.gestures".to_owned(), Value::Bool(true)),
                 ("camera.celebrations".to_owned(), Value::Bool(false)),
             ]

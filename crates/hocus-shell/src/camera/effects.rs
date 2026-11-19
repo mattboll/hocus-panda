@@ -6,8 +6,9 @@
 //! Lot 2 makes Lumière and Bandeau (Image); lot 3 Fond (the room, Flou,
 //! the desktop's living wallpapers), Présentateur (Image) and « Je
 //! reviens » (Réactions); lot 4 Cadrage (Image), Visage's accessories
-//! (Oreilles, Bonnet, Couronne, Lunettes), Gestes and Fêtes (Réactions).
-//! The others (Visage's panda, Voix) show, dimmed, where they will be:
+//! (Oreilles, Bonnet, Couronne, Lunettes, the panda in the person's
+//! place), Gestes and Fêtes (Réactions). Voix shows, dimmed, where it
+//! will be:
 //! their tab is the mockup's, their tile says "Bientôt".
 
 use hocus_link::CameraShown;
@@ -177,10 +178,8 @@ const fn one_of(
     hint: Option<Text>,
 ) -> Effect {
     let plain = matches!(value.as_bytes(), b"room" | b"none");
-    // Fond is made (lot 3), Visage's accessories (lot 4); its panda and
-    // Voix wait for theirs.
-    let ready = matches!(key.as_bytes(), b"background")
-        || (matches!(key.as_bytes(), b"face") && !matches!(value.as_bytes(), b"panda"));
+    // Fond is made (lot 3), Visage (lot 4); Voix waits for its lot.
+    let ready = matches!(key.as_bytes(), b"background" | b"face");
     Effect {
         id: value,
         tab,
@@ -475,6 +474,7 @@ mod tests {
             face: "none".to_owned(),
             gestures: false,
             celebrations: false,
+            panda_look: "magician".to_owned(),
         }
     }
 
@@ -506,6 +506,7 @@ mod tests {
                 "beanie",
                 "crown",
                 "glasses",
+                "panda",
                 "gestures",
                 "celebrations",
                 "away"
@@ -556,10 +557,10 @@ mod tests {
         assert_eq!(hint(Tab::Voice, &on, lang), "Bientôt dans Hocuspanda");
     }
 
-    /// Visage is one of its tiles, its panda to come; Cadrage, Gestes and
-    /// Fêtes are on or off.
+    /// Visage is one of its tiles, the panda among them; Cadrage, Gestes
+    /// and Fêtes are on or off.
     #[test]
-    fn visage_is_one_of_its_tiles_and_its_panda_is_to_come() {
+    fn visage_is_one_of_its_tiles_the_panda_among_them() {
         let lang = hocus_words::Lang::French;
         let mut s = shown(false, false);
         assert!(!Tab::Face.on(&s));
@@ -577,7 +578,7 @@ mod tests {
             .effects()
             .find(|e| e.id == "panda")
             .expect("its tile");
-        assert!(!panda.ready);
+        assert!(panda.ready);
         s.framing = true;
         assert_eq!(hint(Tab::Image, &s, lang), "Cadrage : te garde au centre");
         s.celebrations = true;

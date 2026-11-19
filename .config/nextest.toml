@@ -65,5 +65,5 @@ not (
 camera-models = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = "package(hocus-camera) & (test(/^segment::/) | test(/^face::/) | test(/^hands::/) | test(/^wear::/) | test(/^framing::/))"
+filter = "package(hocus-camera) & (test(/^segment::/) | test(/^face::/) | test(/^hands::/) | test(/^wear::/) | test(/^framing::/) | test(/^panda::/))"
 test-group = "camera-models"

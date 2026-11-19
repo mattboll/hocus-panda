@@ -80,6 +80,39 @@ pub struct CameraLook {
     /// each new one, confetti (with `celebrations`).
     #[serde(default)]
     pub moments: u64,
+    /// The panda's look, when Visage is the panda.
+    #[serde(default)]
+    pub panda_look: PandaLook,
+}
+
+/// The panda's look (« Allure »).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PandaLook {
+    /// Classique: the bar's panda, its ears both ink.
+    Classic,
+    /// Magicien: the magic ear, the top hat, the bow tie.
+    #[default]
+    Magician,
+    /// Secrétaire: the glasses, the pencil, the clipboard, the bow tie.
+    Secretary,
+}
+
+impl PandaLook {
+    pub const ALL: [Self; 3] = [Self::Classic, Self::Magician, Self::Secretary];
+
+    /// Its word in `[camera] panda-look`.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Classic => "classic",
+            Self::Magician => "magician",
+            Self::Secretary => "secretary",
+        }
+    }
+
+    pub fn of(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|w| w.word() == word)
+    }
 }
 
 /// An accessory of Visage's, on the head (lot 4).
@@ -94,10 +127,19 @@ pub enum Wear {
     Crown,
     /// Lunettes.
     Glasses,
+    /// Panda: a panda drawn in the person's place, following their head,
+    /// blinks and mouth.
+    Panda,
 }
 
 impl Wear {
-    pub const ALL: [Self; 4] = [Self::Ears, Self::Beanie, Self::Crown, Self::Glasses];
+    pub const ALL: [Self; 5] = [
+        Self::Ears,
+        Self::Beanie,
+        Self::Crown,
+        Self::Glasses,
+        Self::Panda,
+    ];
 
     /// Its word in `[camera] face`.
     pub const fn word(self) -> &'static str {
@@ -106,6 +148,7 @@ impl Wear {
             Self::Beanie => "beanie",
             Self::Crown => "crown",
             Self::Glasses => "glasses",
+            Self::Panda => "panda",
         }
     }
 
@@ -278,6 +321,9 @@ pub struct CameraShown {
     /// `[camera] celebrations`: Fêtes.
     #[serde(default)]
     pub celebrations: bool,
+    /// `[camera] panda-look`: the panda's look's word.
+    #[serde(default)]
+    pub panda_look: String,
 }
 
 impl CameraShown {

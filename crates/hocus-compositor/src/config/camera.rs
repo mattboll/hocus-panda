@@ -42,6 +42,8 @@ pub struct Camera {
     pub gestures: bool,
     /// Fêtes: confetti in the picture on the agents' moments.
     pub celebrations: bool,
+    /// The panda's look, when Visage is the panda.
+    pub panda_look: PandaLook,
 }
 
 impl Default for Camera {
@@ -63,12 +65,13 @@ impl Default for Camera {
             framing: false,
             gestures: true,
             celebrations: false,
+            panda_look: PandaLook::Magician,
         }
     }
 }
 
-/// Visage's accessory on the head (lot 4), or none. The panda that takes
-/// the person's place is to come.
+/// Visage's accessory on the head (lot 4), the panda in the person's
+/// place, or none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Face {
@@ -78,6 +81,33 @@ pub enum Face {
     Beanie,
     Crown,
     Glasses,
+    Panda,
+}
+
+/// The panda's look (« Allure »).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PandaLook {
+    Classic,
+    #[default]
+    Magician,
+    Secretary,
+}
+
+impl PandaLook {
+    pub const fn word(self) -> &'static str {
+        self.link().word()
+    }
+
+    /// What the camera is told.
+    pub const fn link(self) -> hocus_link::camera::PandaLook {
+        use hocus_link::camera::PandaLook as L;
+        match self {
+            Self::Classic => L::Classic,
+            Self::Magician => L::Magician,
+            Self::Secretary => L::Secretary,
+        }
+    }
 }
 
 impl Face {
@@ -89,6 +119,7 @@ impl Face {
             Self::Beanie => "beanie",
             Self::Crown => "crown",
             Self::Glasses => "glasses",
+            Self::Panda => "panda",
         }
     }
 
@@ -101,6 +132,7 @@ impl Face {
             Self::Beanie => Some(Wear::Beanie),
             Self::Crown => Some(Wear::Crown),
             Self::Glasses => Some(Wear::Glasses),
+            Self::Panda => Some(Wear::Panda),
         }
     }
 }
@@ -297,7 +329,12 @@ mod tests {
             (Face::Crown, true, false, true)
         );
         assert_eq!(camera.face.wear(), Some(hocus_link::camera::Wear::Crown));
-        assert!(toml::from_str::<Camera>("face = \"panda\"\n").is_err());
+        let camera: Camera = toml::from_str("face = \"panda\"\npanda-look = \"secretary\"\n")?;
+        assert_eq!(
+            (camera.face, camera.panda_look),
+            (Face::Panda, PandaLook::Secretary)
+        );
+        assert!(toml::from_str::<Camera>("face = \"tiger\"\n").is_err());
         assert!(toml::from_str::<Camera>("screen-light-warmth = \"hot\"\n").is_err());
         assert!(toml::from_str::<Camera>("screen-light-strength = 3\n").is_err());
         Ok(())

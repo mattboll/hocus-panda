@@ -531,6 +531,7 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
             "camera.presenter-size",
             "camera.framing",
             "camera.face",
+            "camera.panda-look",
             "camera.gestures",
             "camera.celebrations",
         ]
@@ -570,7 +571,9 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
     assert_eq!(row(&shown, "camera.framing")["value"], "non");
     assert_eq!(row(&shown, "camera.gestures")["value"], "oui");
     assert_eq!(row(&shown, "camera.celebrations")["value"], "non");
-    bed.click("segment:camera.face:3")?;
+    bed.click("control:camera.face")?;
+    bed.shows(|s| s["menu"] == "camera.face")?;
+    bed.click("option:3")?;
     bed.written(|t| t.contains("face = \"crown\""))?;
     bed.click("control:camera.framing")?;
     bed.written(|t| t.contains("framing = true"))?;

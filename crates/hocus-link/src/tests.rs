@@ -512,6 +512,7 @@ fn to_shell() -> Vec<ToShell> {
             face: "ears".into(),
             gestures: true,
             celebrations: false,
+            panda_look: "magician".into(),
         }),
         ToShell::Transcribing(TranscribingShown {
             id: 3,
@@ -1611,6 +1612,7 @@ fn the_camera_s_lines_read_back() {
         gestures: true,
         celebrations: true,
         moments: 3,
+        panda_look: crate::camera::PandaLook::Secretary,
     };
     assert_eq!(CameraLook::read(&look.line()), Some(look));
     // A look of lot 2 still reads: what is behind the room, nothing else.

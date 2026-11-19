@@ -1139,7 +1139,8 @@ fn bgrx(rgba: Vec<u8>) -> Vec<u8> {
 }
 
 /// The pull request's screenshots of the window's lot 4 (#619), as lot
-/// 3's: Visage with each accessory on the portrait; Image with Cadrage on
+/// 3's: Visage with each accessory on the portrait, then the panda in his
+/// place; Image with Cadrage on
 /// a person further away; Réactions with a thumb's reaction (three shots
 /// over its rise) and « main levée ». Written to `$HOCUS_SHOTS` when it
 /// names a folder. Run by hand (`--run-ignored only`).
@@ -1184,6 +1185,12 @@ fn screenshots_of_the_window_s_lot_4() -> anyhow::Result<()> {
             2,
         )?;
     }
+    // The panda in the person's place, its looks under the grid.
+    bed.tile(window, 5)?;
+    bed.logged("the camera's window shows it", &["[x] Panda"])?;
+    wait(&mut bed.hp, Duration::from_secs(3))?;
+    let shown = common::drawn_popovers(&bed.hp)[0];
+    bed.shoot(&out, "camera-window-visage-panda.png", around(shown), 2)?;
     bed.tile(window, 0)?;
     bed.logged("the camera's window shows it", &["[x] Aucun"])?;
     // Cadrage, on a person further away.

@@ -62,9 +62,30 @@ const SUBSET: [usize; 146] = [
 
 /// Some of the 52 expressions (MediaPipe's order).
 pub mod shape {
+    pub const BROW_DOWN_LEFT: usize = 1;
+    pub const BROW_DOWN_RIGHT: usize = 2;
+    pub const BROW_INNER_UP: usize = 3;
+    pub const BROW_OUTER_UP_LEFT: usize = 4;
+    pub const BROW_OUTER_UP_RIGHT: usize = 5;
     pub const EYE_BLINK_LEFT: usize = 9;
     pub const EYE_BLINK_RIGHT: usize = 10;
+    pub const EYE_LOOK_DOWN_LEFT: usize = 11;
+    pub const EYE_LOOK_DOWN_RIGHT: usize = 12;
+    pub const EYE_LOOK_IN_LEFT: usize = 13;
+    pub const EYE_LOOK_IN_RIGHT: usize = 14;
+    pub const EYE_LOOK_OUT_LEFT: usize = 15;
+    pub const EYE_LOOK_OUT_RIGHT: usize = 16;
+    pub const EYE_LOOK_UP_LEFT: usize = 17;
+    pub const EYE_LOOK_UP_RIGHT: usize = 18;
+    pub const EYE_SQUINT_LEFT: usize = 19;
+    pub const EYE_SQUINT_RIGHT: usize = 20;
+    pub const EYE_WIDE_LEFT: usize = 21;
+    pub const EYE_WIDE_RIGHT: usize = 22;
     pub const JAW_OPEN: usize = 25;
+    pub const MOUTH_FROWN_LEFT: usize = 30;
+    pub const MOUTH_FROWN_RIGHT: usize = 31;
+    pub const MOUTH_FUNNEL: usize = 32;
+    pub const MOUTH_PUCKER: usize = 38;
     pub const MOUTH_SMILE_LEFT: usize = 44;
     pub const MOUTH_SMILE_RIGHT: usize = 45;
 }
@@ -97,6 +118,47 @@ pub struct Pose {
     /// From one side of the face to the other (its temples), frame
     /// pixels, in depth too.
     pub width: f32,
+    /// The head turned aside (radians, the nose going right as it grows)
+    /// and up (the nose going up as it grows), as the panda's rig turns.
+    pub yaw: f32,
+    pub pitch: f32,
+    /// The head's middle, between its temples (frame pixels), and frame
+    /// pixels a head-local unit ([`crate::rig`]: the head's half width
+    /// is 30).
+    pub head: (f32, f32),
+    pub unit: f32,
+    /// Head-local: the forehead's top (y, z), and the eyes' half span,
+    /// height and depth (x, y, z).
+    pub forehead_at: (f32, f32),
+    pub eyes_at: (f32, f32, f32),
+}
+
+/// The pitch the mesh reads on a face looking straight at the camera
+/// (its forehead's top leans a little forward of its chin): measured on
+/// the test pictures.
+pub const PITCH_REST: f32 = -0.07;
+
+type V3 = [f32; 3];
+
+fn sub(a: V3, b: V3) -> V3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn dot(a: V3, b: V3) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn unit(a: V3) -> V3 {
+    let n = dot(a, a).sqrt().max(1e-6);
+    [a[0] / n, a[1] / n, a[2] / n]
+}
+
+fn cross(a: V3, b: V3) -> V3 {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 impl Face {
@@ -119,14 +181,59 @@ impl Face {
         let [cx, cy, _] = self.point(at::CHIN);
         let [ax, ay, az] = self.point(at::RIGHT_CHEEK);
         let [bx, by, bz] = self.point(at::LEFT_CHEEK);
+        // The head's axes, the depth towards the camera (the mesh's z is
+        // smaller nearer): across, down, out.
+        let f = |i: usize| {
+            let [x, y, z] = self.point(i);
+            [x, y, -z]
+        };
+        let roll = (ly - ry).atan2(lx - rx);
+        let x_axis = unit(sub(f(at::LEFT_CHEEK), f(at::RIGHT_CHEEK)));
+        let down = unit(sub(f(at::CHIN), f(at::FOREHEAD)));
+        let down = unit(sub(down, x_axis.map(|v| v * dot(down, x_axis))));
+        let out = cross(x_axis, down);
+        // The roll taken off, the rig's turns read back.
+        let (sr, cr) = (-roll).sin_cos();
+        let unroll = |v: V3| [v[0] * cr - v[1] * sr, v[0] * sr + v[1] * cr, v[2]];
+        let (xr, yr) = (unroll(x_axis), unroll(down));
+        let pitch = yr[2].atan2(yr[1]);
+        let yaw = (-xr[2] / pitch.cos().max(0.2)).atan2(xr[0]);
+        let head = [(ax + bx) / 2.0, (ay + by) / 2.0, -(az + bz) / 2.0];
+        let width = ((bx - ax).powi(2) + (by - ay).powi(2) + (bz - az).powi(2)).sqrt();
+        let u = (width / 60.0).max(1e-3);
+        let local = |i: usize| {
+            let v = sub(f(i), head);
+            [dot(v, x_axis) / u, dot(v, down) / u, dot(v, out) / u]
+        };
+        let [_, fy_l, fz_l] = local(at::FOREHEAD);
+        let (r, l) = (
+            local(at::RIGHT_EYE_OUT).map(|v| v / 2.0),
+            local(at::RIGHT_EYE_IN).map(|v| v / 2.0),
+        );
+        let (li, lo) = (
+            local(at::LEFT_EYE_IN).map(|v| v / 2.0),
+            local(at::LEFT_EYE_OUT).map(|v| v / 2.0),
+        );
+        let right_eye = [r[0] + l[0], r[1] + l[1], r[2] + l[2]];
+        let left_eye = [li[0] + lo[0], li[1] + lo[1], li[2] + lo[2]];
         Pose {
             eyes: ((rx + lx) / 2.0, (ry + ly) / 2.0),
             span: ((lx - rx).powi(2) + (ly - ry).powi(2) + (lz - rz).powi(2)).sqrt(),
-            roll: (ly - ry).atan2(lx - rx),
+            roll,
             centre: ((ax + bx) / 2.0, (fy + cy) / 2.0),
             height: ((cx - fx).powi(2) + (cy - fy).powi(2)).sqrt(),
             forehead: (fx, fy),
-            width: ((bx - ax).powi(2) + (by - ay).powi(2) + (bz - az).powi(2)).sqrt(),
+            width,
+            yaw,
+            pitch: pitch - PITCH_REST,
+            head: (head[0], head[1]),
+            unit: u,
+            forehead_at: (fy_l, fz_l),
+            eyes_at: (
+                (left_eye[0] - right_eye[0]) / 2.0,
+                (left_eye[1] + right_eye[1]) / 2.0,
+                (left_eye[2] + right_eye[2]) / 2.0,
+            ),
         }
     }
 

@@ -160,14 +160,24 @@ impl State {
             face: c.face.word().to_owned(),
             gestures: c.gestures,
             celebrations: c.celebrations,
+            panda_look: c.panda_look.word().to_owned(),
         }
     }
 
     /// An agent's moment (its tests green, its celebration): Fêtes'
-    /// confetti in the camera's pictures, whatever the desktop's own
-    /// effects do (the picture is the call's).
+    /// confetti in the camera's pictures, under the desktop's rules for
+    /// its effects that are the user's (none with reduced motion, nor in
+    /// the power saver); what holds the screen's own (a share, the CPU)
+    /// is no matter for the call's picture.
     pub(crate) fn camera_moment(&mut self) {
-        self.camera.moments += 1;
+        match self.effects_still() {
+            Some(
+                still @ (crate::effects::Still::ReducedMotion | crate::effects::Still::PowerSaver),
+            ) => {
+                tracing::debug!(?still, "no confetti in the camera's pictures");
+            }
+            _ => self.camera.moments += 1,
+        }
     }
 
     /// The microphone held muted: the screen locked during a call (the
@@ -225,6 +235,7 @@ impl State {
             gestures: c.gestures,
             celebrations: c.celebrations,
             moments: self.camera.moments,
+            panda_look: c.panda_look.link(),
         }
     }
 

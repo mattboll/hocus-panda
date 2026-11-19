@@ -52,7 +52,9 @@ use crate::{
     convert::{self, Converter, Input, Output},
     gpu::{Gpu, Wanted},
     look::{self, BYTES, Correction, Cpu, FOLLOW, H, Making, Overlay, W},
-    loopback, pods,
+    loopback,
+    panda::Light,
+    pods,
     presenter::{self, Cutout},
     scenes::Scenes,
     segment::{Mask, Segmenter},
@@ -91,6 +93,8 @@ const NO_CAMERA: [u8; 3] = [0x1A, 0x1F, 0x2C];
 /// presenter, every other one while the model takes longer than
 /// [`SLOW`].
 const AWAY_EVERY: u64 = 10;
+/// Every this many frames for the hair's top alone (an accessory on it).
+const HAIR_EVERY: u64 = 5;
 const SLOW: Duration = Duration::from_millis(20);
 /// Without the v4l2loopback device, it is looked for again every this
 /// many ticks (ten seconds).
@@ -998,14 +1002,37 @@ impl State {
             {
                 (self.cutout)(cut);
             }
-            match self.look.backdrop {
-                Backdrop::Room => {}
-                Backdrop::Blur => backdrop::blur(&mut self.made, &self.alpha),
-                Backdrop::Scene(scene) => match self.scenes.latest(scene) {
-                    Some(picture) => backdrop::scene(&mut self.made, &self.alpha, &picture),
-                    // Until its first picture comes, the room blurred.
-                    None => backdrop::blur(&mut self.made, &self.alpha),
-                },
+            if self.panda() {
+                // The panda in the person's place: Fond's wallpaper, else
+                // the room without them, blurred; lit as it is.
+                let nobody = self.nobody.get_or_insert_with(Alpha::default);
+                let light = match self.look.backdrop {
+                    Backdrop::Scene(scene) => match self.scenes.latest(scene) {
+                        Some(picture) => {
+                            backdrop::scene(&mut self.made, nobody, &picture);
+                            Light::aurora()
+                        }
+                        None => {
+                            backdrop::emptied(&mut self.made, &self.alpha);
+                            Light::room()
+                        }
+                    },
+                    Backdrop::Room | Backdrop::Blur => {
+                        backdrop::emptied(&mut self.made, &self.alpha);
+                        Light::room()
+                    }
+                };
+                self.sight.panda(&mut self.made, &self.look, &light, now);
+            } else {
+                match self.look.backdrop {
+                    Backdrop::Room => {}
+                    Backdrop::Blur => backdrop::blur(&mut self.made, &self.alpha),
+                    Backdrop::Scene(scene) => match self.scenes.latest(scene) {
+                        Some(picture) => backdrop::scene(&mut self.made, &self.alpha, &picture),
+                        // Until its first picture comes, the room blurred.
+                        None => backdrop::blur(&mut self.made, &self.alpha),
+                    },
+                }
             }
             self.sight.on_person(&mut self.made, &self.look, now);
             self.sight.over(&mut self.made, &self.look, now);
@@ -1016,15 +1043,24 @@ impl State {
         self.send();
     }
 
+    /// Whether the panda takes the person's place.
+    fn panda(&self) -> bool {
+        self.look.face == Some(hocus_link::camera::Wear::Panda)
+    }
+
     /// The person looked for in this frame, when something needs them and
     /// it is time: their share of the picture. Their mask follows what the
     /// model said, and their alpha over the frame with it.
     fn look_for_the_person(&mut self) -> Option<f32> {
-        let shaped = self.look.backdrop != Backdrop::Room || self.look.presenter;
-        if !shaped && self.look.away.is_none() {
+        // The panda takes the person's place: what is behind them, without
+        // them.
+        let shaped = self.look.backdrop != Backdrop::Room || self.look.presenter || self.panda();
+        let hair = self.read && Sight::wants_hair(&self.look);
+        if !shaped && !hair && self.look.away.is_none() {
             return None;
         }
         let every = match (shaped, self.slow) {
+            (false, _) if hair => HAIR_EVERY,
             (false, _) => AWAY_EVERY,
             (true, false) => 1,
             (true, true) => 2,
@@ -1058,6 +1094,9 @@ impl State {
         self.mask.follow(&self.fresh);
         if shaped {
             self.alpha.from_mask(&self.mask);
+        }
+        if hair {
+            self.sight.hair(&self.mask);
         }
         Some(self.fresh.cover())
     }

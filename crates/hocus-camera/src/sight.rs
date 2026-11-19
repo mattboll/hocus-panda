@@ -15,14 +15,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::CameraLook;
+use hocus_link::{CameraLook, camera::Wear};
 
 use crate::{
     face::{Face, FaceTracker, Pose},
     framing::Framing,
     hands::{self, Gesture, Hand, HandTracker},
     look::{BYTES, H, W},
+    panda::{self, Drive, Light, Sim},
     react::{self, Confetti, Gestures, Label, POP},
+    segment::Mask,
     track::Frame,
     wear,
 };
@@ -38,6 +40,8 @@ pub type SeenHands = Vec<(Hand, Option<Gesture>)>;
 struct Job {
     pixels: Vec<u8>,
     at: Instant,
+    /// The face's expressions asked too (the panda).
+    more: bool,
 }
 
 /// What a thread saw, and the frame's buffer back.
@@ -60,7 +64,7 @@ impl<T: Send + 'static> Worker<T> {
     fn start<S: 'static>(
         name: &str,
         state: impl FnOnce() -> Option<S> + Send + 'static,
-        run: fn(&mut S, &[u8], Instant) -> T,
+        run: fn(&mut S, &[u8], Instant, bool) -> T,
     ) -> Option<Self> {
         let (jobs, jobs_in) = mpsc::sync_channel::<Job>(1);
         let (seen_out, seen) = mpsc::channel::<Seen<T>>();
@@ -71,7 +75,7 @@ impl<T: Send + 'static> Worker<T> {
                     return;
                 };
                 for job in jobs_in {
-                    let what = run(&mut state, &job.pixels, job.at);
+                    let what = run(&mut state, &job.pixels, job.at, job.more);
                     if seen_out
                         .send(Seen {
                             what,
@@ -95,7 +99,7 @@ impl<T: Send + 'static> Worker<T> {
     }
 
     /// `frame` (RGBA) given to the thread if it is free.
-    fn offer(&mut self, frame: &[u8], at: Instant) -> bool {
+    fn offer(&mut self, frame: &[u8], at: Instant, more: bool) -> bool {
         if self.busy {
             return false;
         }
@@ -104,7 +108,7 @@ impl<T: Send + 'static> Worker<T> {
         };
         pixels.clear();
         pixels.extend_from_slice(frame);
-        match self.jobs.try_send(Job { pixels, at }) {
+        match self.jobs.try_send(Job { pixels, at, more }) {
             Ok(()) => {
                 self.busy = true;
                 true
@@ -179,12 +183,12 @@ impl Faces {
                     None
                 }
             },
-            |state: &mut FaceState, pixels, at| {
+            |state: &mut FaceState, pixels, at, expressions| {
                 let dt = state
                     .last
                     .map_or(1.0 / 30.0, |l| at.duration_since(l).as_secs_f32());
                 state.last = Some(at);
-                match state.tracker.track(&frame(pixels), dt, false) {
+                match state.tracker.track(&frame(pixels), dt, expressions) {
                     Ok(face) => face,
                     Err(err) => {
                         tracing::warn!(%err, "the face's models failed");
@@ -196,9 +200,10 @@ impl Faces {
         Some(Self { worker })
     }
 
-    /// The frame (RGBA) looked at, if the thread is free.
-    pub fn offer(&mut self, frame: &[u8], at: Instant) -> bool {
-        self.worker.offer(frame, at)
+    /// The frame (RGBA) looked at, if the thread is free; its
+    /// expressions too when `expressions`.
+    pub fn offer(&mut self, frame: &[u8], at: Instant, expressions: bool) -> bool {
+        self.worker.offer(frame, at, expressions)
     }
 
     /// The face it saw last (`Some(None)`: none in that frame), if new;
@@ -245,7 +250,7 @@ impl Hands {
                     None
                 }
             },
-            |state: &mut HandState, pixels, at| {
+            |state: &mut HandState, pixels, at, _| {
                 let every = if state.tracker.following() {
                     DETECT_MORE
                 } else {
@@ -284,7 +289,7 @@ impl Hands {
         {
             return false;
         }
-        let offered = self.worker.offer(frame, at);
+        let offered = self.worker.offer(frame, at, false);
         if offered {
             self.offered = Some(at);
         }
@@ -296,6 +301,26 @@ impl Hands {
     pub fn take(&mut self) -> Result<Option<(SeenHands, Instant)>, Ended> {
         self.worker.take()
     }
+}
+
+/// The hair's top above the face at `pose` (head-local y), from the
+/// person's `mask`: up from the forehead's top along the face's axis to
+/// where the person ends.
+pub fn hair_top(pose: &Pose, mask: &Mask) -> f32 {
+    let (sr, cr) = pose.roll.sin_cos();
+    let (ux, uy) = (sr, -cr);
+    let (fx, fy) = pose.forehead;
+    let mut d = 0.0;
+    while d < 3.0 * pose.width {
+        let (x, y) = (fx + ux * d, fy + uy * d);
+        if y < 0.0 || mask.at(x / W as f32, y / H as f32) < 0.5 {
+            break;
+        }
+        d += 2.0;
+    }
+    // A head's at least; above the frame's top, the hair goes on.
+    let above = (d / pose.unit.max(1e-3)).max(10.0);
+    pose.forehead_at.0 - above
 }
 
 /// A face last seen this long ago is no longer drawn on.
@@ -310,8 +335,14 @@ pub struct Sight {
     /// The face's or the hands' models did not load: not tried again.
     faces_failed: bool,
     hands_failed: bool,
-    /// The face's pose last seen, and when.
+    /// The face's pose last seen, and when; its expressions, when asked.
     pose: Option<(Pose, Instant)>,
+    shapes: Option<[f32; 52]>,
+    /// The hair's top (head-local y), from the person's mask, kept
+    /// smooth.
+    hair: Option<f32>,
+    /// The panda, while it takes the person's place.
+    panda: Option<Sim>,
     framing: Framing,
     gestures: Gestures,
     /// When the last thumb's reaction was sent.
@@ -322,6 +353,7 @@ pub struct Sight {
     moments: Option<u64>,
     frames: u64,
     last: Option<Instant>,
+    panda_last: Option<Instant>,
 }
 
 impl Sight {
@@ -374,7 +406,10 @@ impl Sight {
         if let Some(faces) = &mut self.faces {
             match faces.take() {
                 Ok(Some((seen, at))) => match seen {
-                    Some(face) => self.pose = Some((face.pose(), at)),
+                    Some(face) => {
+                        self.pose = Some((face.pose(), at));
+                        self.shapes = face.expressions.as_deref().and_then(|e| e.try_into().ok());
+                    }
                     None => {
                         if self
                             .pose
@@ -393,10 +428,11 @@ impl Sight {
             }
             // An accessory follows the head every frame; Cadrage alone,
             // which moves slowly, every other one.
+            let panda = look.face == Some(Wear::Panda);
             if let Some(faces) = &mut self.faces
                 && (look.face.is_some() || self.frames.is_multiple_of(2))
             {
-                faces.offer(rgba, now);
+                faces.offer(rgba, now, panda);
             }
         }
         if let Some(h) = &mut self.hands {
@@ -428,6 +464,41 @@ impl Sight {
             .map(|(p, _)| p)
     }
 
+    /// The hair's top above the face's forehead, from the person's
+    /// `mask` (lot 3's): along the face's axis, up from the forehead's
+    /// top to where the person ends; kept smooth.
+    pub fn hair(&mut self, mask: &Mask) {
+        let Some((pose, _)) = self.pose else {
+            return;
+        };
+        let top = hair_top(&pose, mask);
+        self.hair = Some(match self.hair {
+            Some(h) => h + (top - h) * 0.25,
+            None => top,
+        });
+    }
+
+    /// Whether the hair's top is wanted (an accessory on it).
+    pub fn wants_hair(look: &CameraLook) -> bool {
+        matches!(look.face, Some(Wear::Ears | Wear::Beanie | Wear::Crown))
+    }
+
+    /// The panda in the person's place, over `made` (what is behind them
+    /// drawn already), lit as `light`: its springs moved on to `now`.
+    pub fn panda(&mut self, made: &mut [u8], look: &CameraLook, light: &Light, now: Instant) {
+        let dt = self
+            .panda_last
+            .map_or(1.0 / 30.0, |l| now.duration_since(l).as_secs_f32());
+        self.panda_last = Some(now);
+        let drive = match (self.pose(now), self.shapes) {
+            (Some(pose), Some(shapes)) => Some(Drive { pose, shapes }),
+            _ => None,
+        };
+        let sim = self.panda.get_or_insert_with(Sim::default);
+        sim.advance(dt, drive.as_ref());
+        panda::draw(made, sim, look.panda_look, light);
+    }
+
     /// Whether lot 4 draws in this frame (the banner then goes on last).
     pub fn draws(&self, look: &CameraLook) -> bool {
         look.face.is_some()
@@ -438,10 +509,13 @@ impl Sight {
             || self.confetti.falling()
     }
 
-    /// On the person (after what is behind them): Visage's accessory.
+    /// On the person (after what is behind them): Visage's accessory
+    /// (the panda is drawn apart, [`Self::panda`]).
     pub fn on_person(&self, made: &mut [u8], look: &CameraLook, now: Instant) {
-        if let (Some(wear), Some(pose)) = (look.face, self.pose(now)) {
-            wear::draw(made, wear, &pose, 1.0);
+        if let (Some(wear), Some(pose)) = (look.face, self.pose(now))
+            && wear != Wear::Panda
+        {
+            wear::draw(made, wear, &pose, self.hair, 1.0);
         }
     }
 
@@ -452,7 +526,7 @@ impl Sight {
             .last
             .map_or(Duration::from_millis(33), |l| now.duration_since(l));
         self.last = Some(now);
-        if look.framing {
+        if look.framing && look.face != Some(Wear::Panda) {
             let pose = self.pose(now);
             self.framing.update(pose.as_ref(), dt);
         } else {
@@ -538,6 +612,9 @@ mod tests {
             .track(&frame(&person), 1.0 / 30.0, false)?
             .expect("a face")
             .pose();
+        let mut mask = Mask::default();
+        crate::segment::Segmenter::new()?.run(&person, W, H, [0, 1, 2], &mut mask)?;
+        let top = hair_top(&pose, &mask);
         for (wear, name) in [
             (Wear::Ears, "camera-oreilles.png"),
             (Wear::Beanie, "camera-bonnet.png"),
@@ -545,7 +622,41 @@ mod tests {
             (Wear::Glasses, "camera-lunettes.png"),
         ] {
             let mut made = bgrx(&person);
-            wear::draw(&mut made, wear, &pose, 1.0);
+            wear::draw(&mut made, wear, &pose, Some(top), 1.0);
+            save(name, &made)?;
+        }
+        // Heads turned: the accessories turn with them.
+        for (picture, wear, name) in [
+            (
+                crate::hands::test_raised_hand(),
+                Wear::Beanie,
+                "camera-bonnet-tourne.png",
+            ),
+            (
+                crate::hands::test_raised_hand(),
+                Wear::Glasses,
+                "camera-lunettes-tourne.png",
+            ),
+            (
+                crate::hands::test_thumb_up(),
+                Wear::Crown,
+                "camera-couronne-wakata.png",
+            ),
+            (
+                crate::hands::test_thumb_up(),
+                Wear::Ears,
+                "camera-oreilles-wakata.png",
+            ),
+        ] {
+            let mut tracker = FaceTracker::new()?;
+            let pose = tracker
+                .track(&frame(&picture), 1.0 / 30.0, false)?
+                .expect("a face")
+                .pose();
+            let mut mask = Mask::default();
+            crate::segment::Segmenter::new()?.run(&picture, W, H, [0, 1, 2], &mut mask)?;
+            let mut made = bgrx(&picture);
+            wear::draw(&mut made, wear, &pose, Some(hair_top(&pose, &mask)), 1.0);
             save(name, &made)?;
         }
         // Cadrage: a person further away, off the middle, before and

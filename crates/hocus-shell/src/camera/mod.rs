@@ -90,6 +90,7 @@ pub fn shown() -> CameraShown {
             face: "none".to_owned(),
             gestures: true,
             celebrations: false,
+            panda_look: "magician".to_owned(),
         })
 }
 
@@ -129,7 +130,8 @@ pub fn choose(key: &'static str, value: bool) {
 }
 
 /// `[camera] key` set to the word `value` (one of a tab's: Fond's
-/// `background`, Visage's `face`), as [`choose`].
+/// `background`, Visage's `face`, the panda's `panda-look`), as
+/// [`choose`].
 pub fn choose_word(key: &'static str, value: &'static str) {
     let dot = {
         let mut shown = SHOWN.lock().unwrap_or_else(PoisonError::into_inner);
@@ -138,6 +140,7 @@ pub fn choose_word(key: &'static str, value: &'static str) {
         match key {
             "background" => value.clone_into(&mut now.background),
             "face" => value.clone_into(&mut now.face),
+            "panda-look" => value.clone_into(&mut now.panda_look),
             _ => {}
         }
         let dot = before != now.dot();
