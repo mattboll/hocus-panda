@@ -152,6 +152,7 @@ mod settings_time;
 mod settings_wallpaper;
 mod sharing;
 mod snow;
+mod soak;
 mod tasks;
 mod theme_shots;
 mod themed_bar;

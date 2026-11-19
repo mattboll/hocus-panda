@@ -5,6 +5,10 @@
 //! - **Kept**: each capture's file, and the bytes the clipboard was given
 //!   for it (held weakly: the clipboard owns them), so that its deletion
 //!   empties the clipboard only if the clipboard still holds this image.
+//!   A weak hold on an `Arc<[u8]>` keeps its allocation, bytes and all:
+//!   the holds the clipboard let go are dropped as the next capture is
+//!   kept, so that one PNG at most stays (#827: each capture's stayed,
+//!   up to the [`KEPT`] last, megabytes each).
 //! - **Asked** (`capture forget|annotated|drag ID`): the file deleted on a
 //!   thread and the clipboard emptied; the annotated file read back on a
 //!   thread and offered on the clipboard; the file dragged into an
@@ -111,8 +115,8 @@ enum Dragged {
 #[derive(Debug, Clone)]
 struct Taken {
     file: Option<PathBuf>,
-    /// What the clipboard was given for it.
-    offered: Weak<[u8]>,
+    /// What the clipboard was given for it, while it holds it.
+    offered: Option<Weak<[u8]>>,
 }
 
 /// What comes after the captures: what is kept of them, and their
@@ -142,11 +146,21 @@ impl std::fmt::Debug for After {
 impl After {
     /// Capture `id` taken: its file, and the bytes the clipboard holds.
     pub fn keep(&mut self, id: u64, file: Option<PathBuf>, offered: &Arc<[u8]>) {
+        // The bytes the clipboard no longer holds: their memory goes.
+        for taken in self.taken.values_mut() {
+            if taken
+                .offered
+                .as_ref()
+                .is_some_and(|o| o.strong_count() == 0)
+            {
+                taken.offered = None;
+            }
+        }
         self.taken.insert(
             id,
             Taken {
                 file,
-                offered: Arc::downgrade(offered),
+                offered: Some(Arc::downgrade(offered)),
             },
         );
         if self.taken.len() > KEPT
@@ -187,7 +201,7 @@ impl State {
             tracing::debug!(id, "no such capture to forget");
             return;
         };
-        if self.clipboard_holds(&taken.offered) {
+        if self.clipboard_holds(taken.offered.as_ref()) {
             tracing::info!(id, "the clipboard lets the capture go");
             data_device::clear_data_device_selection(&self.display_handle, &self.seat);
             if let Some(xwm) = self.xwayland.wm.as_mut()
@@ -211,8 +225,8 @@ impl State {
 
     /// Whether the clipboard holds what was `offered` (the compositor's own
     /// selection, those very bytes).
-    fn clipboard_holds(&self, offered: &Weak<[u8]>) -> bool {
-        let Some(offered) = offered.upgrade() else {
+    fn clipboard_holds(&self, offered: Option<&Weak<[u8]>>) -> bool {
+        let Some(offered) = offered.and_then(Weak::upgrade) else {
             return false;
         };
         data_device::current_data_device_selection_userdata(&self.seat)
@@ -577,5 +591,30 @@ mod tests {
         assert_eq!(after.taken.len(), KEPT);
         assert!(!after.taken.contains_key(&3));
         assert!(after.taken.contains_key(&4));
+    }
+
+    /// A capture's PNG the clipboard let go is not kept alive by its weak
+    /// hold once the next capture is taken (#827).
+    #[test]
+    fn the_bytes_the_clipboard_let_go_are_freed() {
+        let mut after = After::default();
+        let first: Arc<[u8]> = Arc::from(vec![0; 1 << 20]);
+        after.keep(1, None, &first);
+        // Its allocation, still pointed at, or let go.
+        let pointed = |after: &After, id| after.taken.get(&id).is_some_and(|t| t.offered.is_some());
+        // The clipboard takes the next one: the first's bytes are dropped.
+        drop(first);
+        assert!(pointed(&after, 1));
+        let second: Arc<[u8]> = Arc::from(vec![0; 1 << 20]);
+        after.keep(2, None, &second);
+        assert!(!pointed(&after, 1), "the first capture's bytes are kept");
+        // The one the clipboard holds is still known as held.
+        assert!(
+            after
+                .taken
+                .get(&2)
+                .and_then(|t| t.offered.as_ref())
+                .is_some_and(|o| o.upgrade().is_some())
+        );
     }
 }
