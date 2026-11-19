@@ -29,12 +29,14 @@ wgpu = { workspace = true, features = ["wgsl", "glsl"] }
 image = { workspace = true, features = ["jpeg"] }
 # « Je reviens »'s words, in the desktop's language.
 hocus-words.workspace = true
-# « Je reviens »'s card and its panda (MIT or Apache-2.0).
+# « Je reviens »'s card and its panda, Visage's accessories, the
+# reactions and the confetti (MIT or Apache-2.0).
 resvg.workspace = true
 # The banner's words (MIT, Apache-2.0 or Zlib), in Manrope, the shell's.
 fontdue.workspace = true
-# The person in the picture (lot 3): MediaPipe's segmentation as ONNX,
-# run on the CPU in pure Rust (MIT or Apache-2.0).
+# The person in the picture (lot 3), their face and hands (lot 4):
+# MediaPipe's models as ONNX, run on the CPU in pure Rust (MIT or
+# Apache-2.0).
 tract-onnx.workspace = true
 anyhow.workspace = true
 # The living wallpapers' shaders, the compositor's own, drawn behind the
@@ -55,6 +57,7 @@ image = { workspace = true, features = ["png"] }
 tempfile.workspace = true
 
 [features]
-# The test picture of a person (data/person.jpg), for the compositor's
-# tests and screenshots: never in the package.
+# The test pictures (data/: a person, a thumb up, a hand raised, a person
+# further away), for the compositor's tests and screenshots: never in the
+# package.
 test-picture = []

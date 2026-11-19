@@ -207,7 +207,9 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         use crate::lang::Lang;
-        assert!(found("panda", Lang::French).contains(&AVATAR.to_owned()));
+        // "panda" alone finds more than eight (the agents', the camera's);
+        // with a word of the avatar's, the avatar.
+        assert!(found("panda photo", Lang::French).contains(&AVATAR.to_owned()));
         assert!(found("mot de passe", Lang::French).contains(&PASSWORD.to_owned()));
         assert!(found("passwd", Lang::English).contains(&PASSWORD.to_owned()));
         assert!(found("sudo", Lang::French).contains(&KIND.to_owned()));

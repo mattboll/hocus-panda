@@ -499,7 +499,7 @@ fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on
 
 /// Caméra (#619): the screen light's four rows write `[camera]`; off,
 /// its shape, warmth and strength are inert. The compositor follows the file.
-/// The Hocuspanda camera's rows (lots 2 and 3) write theirs, the banner's
+/// The Hocuspanda camera's rows (lots 2 to 4) write theirs, the banner's
 /// name and project inert without it, the presenter's corner and size
 /// without it.
 #[test]
@@ -530,6 +530,11 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
             "camera.presenter",
             "camera.presenter-side",
             "camera.presenter-size",
+            "camera.framing",
+            "camera.face",
+            "camera.panda-look",
+            "camera.gestures",
+            "camera.celebrations",
         ]
     );
     assert_eq!(row(&shown, "camera.screen-light")["value"], "oui");
@@ -563,6 +568,19 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
     assert_eq!(row(&shown, "camera.presenter-size")["inert"], false);
     bed.click("segment:camera.presenter-size:2")?;
     bed.written(|t| t.contains("presenter-size = \"large\""))?;
+    // Lot 4's: no accessory, no Cadrage, the gestures on, no confetti.
+    assert_eq!(row(&shown, "camera.face")["value"], "Aucun");
+    assert_eq!(row(&shown, "camera.framing")["value"], "non");
+    assert_eq!(row(&shown, "camera.gestures")["value"], "oui");
+    assert_eq!(row(&shown, "camera.celebrations")["value"], "non");
+    bed.click("control:camera.face")?;
+    bed.shows(|s| s["menu"] == "camera.face")?;
+    bed.click("option:3")?;
+    bed.written(|t| t.contains("face = \"crown\""))?;
+    bed.click("control:camera.framing")?;
+    bed.written(|t| t.contains("framing = true"))?;
+    bed.click("control:camera.celebrations")?;
+    bed.written(|t| t.contains("celebrations = true"))?;
     bed.click("segment:camera.screen-light-shape:1")?;
     bed.written(|t| t.contains("screen-light-shape = \"around-call\""))?;
     bed.click("segment:camera.screen-light-warmth:2")?;
