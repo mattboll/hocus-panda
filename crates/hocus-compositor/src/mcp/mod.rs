@@ -769,6 +769,7 @@ impl State {
                 self.mcp_doing(agent, McpDoing::Good { why });
                 tracing::info!(agent, "an MCP agent has good news");
                 let confetti = self.confetti_go_off();
+                self.camera_moment();
                 json!({ "celebrated": true, "confetti": confetti })
             }
             _ => return Some(Err("not a reading tool".to_owned())),

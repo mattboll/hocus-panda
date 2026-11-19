@@ -64,3 +64,13 @@ not (
     ))
 )
 """
+
+# The Hocuspanda camera's models (#619, lots 3 and 4) measured within a
+# budget of the processor's time: one at a time, so that they do not
+# share a core with each other (their tests of how they run beside them).
+[test-groups]
+camera-models = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "package(hocus-camera) & (test(/^segment::/) | test(/^face::/) | test(/^hands::/) | test(/^wear::/) | test(/^framing::/) | test(/^panda::/))"
+test-group = "camera-models"

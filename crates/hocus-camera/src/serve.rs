@@ -52,10 +52,13 @@ use crate::{
     convert::{self, Converter, Input, Output},
     gpu::{Gpu, Wanted},
     look::{self, BYTES, Correction, Cpu, FOLLOW, H, Making, Overlay, W},
-    loopback, pods,
+    loopback,
+    panda::Light,
+    pods,
     presenter::{self, Cutout},
     scenes::Scenes,
     segment::{Mask, Segmenter},
+    sight::Sight,
 };
 
 /// What the compositor asks.
@@ -90,6 +93,8 @@ const NO_CAMERA: [u8; 3] = [0x1A, 0x1F, 0x2C];
 /// presenter, every other one while the model takes longer than
 /// [`SLOW`].
 const AWAY_EVERY: u64 = 10;
+/// Every this many frames for the hair's top alone (an accessory on it).
+const HAIR_EVERY: u64 = 5;
 const SLOW: Duration = Duration::from_millis(20);
 /// Without the v4l2loopback device, it is looked for again every this
 /// many ticks (ten seconds).
@@ -217,6 +222,9 @@ struct State {
     watch: Watch,
     card: Option<Card>,
     away_told: Option<AwayWhy>,
+    /// The face and the hands (lot 4): their models' threads, Visage,
+    /// Cadrage, the gestures and the confetti.
+    sight: Sight,
     /// The program's clock, for what moves.
     started: Instant,
     cutout: Box<dyn Fn(Cutout)>,
@@ -308,6 +316,7 @@ pub fn run(
             watch: Watch::default(),
             card: None,
             away_told: None,
+            sight: Sight::default(),
             started: Instant::now(),
             cutout,
             correction: None,
@@ -495,8 +504,13 @@ impl State {
                     away = look.away.is_some(),
                     locked = look.locked,
                     presenter = look.presenter,
+                    face = ?look.face,
+                    framing = look.framing,
+                    gestures = look.gestures,
+                    celebrations = look.celebrations,
                     "the camera's look"
                 );
+                self.sight.told(&look, self.read, Instant::now());
                 let changed = look.banner != self.look.banner;
                 self.look = look;
                 if changed && !self.read {
@@ -854,6 +868,7 @@ impl State {
         self.watch.reset();
         self.mask = Mask::default();
         self.card = None;
+        self.sight.reset();
         if self.away_told.take().is_some() {
             self.tell(FromCamera::Away(None));
         }
@@ -942,9 +957,19 @@ impl State {
             }
         };
         self.tell_away(away.map(|(why, _)| why));
-        // The plain frame (the banner drawn with it) when nothing of this
-        // lot changes it.
-        let plain = away.is_none() && self.look.backdrop == Backdrop::Room;
+        // The face and the hands looked at while an effect needs them, in
+        // a call's picture that shows the person.
+        let seen = self.read && away.is_none();
+        if seen {
+            self.sight.see(&self.look, &self.rgba, now);
+        } else {
+            self.sight.reset();
+        }
+        // The plain frame (the banner drawn with it) when nothing of lots
+        // 3 and 4 changes it.
+        let plain = away.is_none()
+            && self.look.backdrop == Backdrop::Room
+            && !(seen && self.sight.draws(&self.look));
         let making = Making {
             lighting: self.look.lighting,
             correction,
@@ -977,15 +1002,40 @@ impl State {
             {
                 (self.cutout)(cut);
             }
-            match self.look.backdrop {
-                Backdrop::Room => {}
-                Backdrop::Blur => backdrop::blur(&mut self.made, &self.alpha),
-                Backdrop::Scene(scene) => match self.scenes.latest(scene) {
-                    Some(picture) => backdrop::scene(&mut self.made, &self.alpha, &picture),
-                    // Until its first picture comes, the room blurred.
-                    None => backdrop::blur(&mut self.made, &self.alpha),
-                },
+            if self.panda() {
+                // The panda in the person's place: Fond's wallpaper, else
+                // the room without them, blurred; lit as it is.
+                let nobody = self.nobody.get_or_insert_with(Alpha::default);
+                let light = match self.look.backdrop {
+                    Backdrop::Scene(scene) => match self.scenes.latest(scene) {
+                        Some(picture) => {
+                            backdrop::scene(&mut self.made, nobody, &picture);
+                            Light::aurora()
+                        }
+                        None => {
+                            backdrop::emptied(&mut self.made, &self.alpha);
+                            Light::room()
+                        }
+                    },
+                    Backdrop::Room | Backdrop::Blur => {
+                        backdrop::emptied(&mut self.made, &self.alpha);
+                        Light::room()
+                    }
+                };
+                self.sight.panda(&mut self.made, &self.look, &light, now);
+            } else {
+                match self.look.backdrop {
+                    Backdrop::Room => {}
+                    Backdrop::Blur => backdrop::blur(&mut self.made, &self.alpha),
+                    Backdrop::Scene(scene) => match self.scenes.latest(scene) {
+                        Some(picture) => backdrop::scene(&mut self.made, &self.alpha, &picture),
+                        // Until its first picture comes, the room blurred.
+                        None => backdrop::blur(&mut self.made, &self.alpha),
+                    },
+                }
             }
+            self.sight.on_person(&mut self.made, &self.look, now);
+            self.sight.over(&mut self.made, &self.look, now);
         }
         if !plain && let Some(overlay) = &self.overlay {
             look::blend(overlay, &mut self.made);
@@ -993,15 +1043,24 @@ impl State {
         self.send();
     }
 
+    /// Whether the panda takes the person's place.
+    fn panda(&self) -> bool {
+        self.look.face == Some(hocus_link::camera::Wear::Panda)
+    }
+
     /// The person looked for in this frame, when something needs them and
     /// it is time: their share of the picture. Their mask follows what the
     /// model said, and their alpha over the frame with it.
     fn look_for_the_person(&mut self) -> Option<f32> {
-        let shaped = self.look.backdrop != Backdrop::Room || self.look.presenter;
-        if !shaped && self.look.away.is_none() {
+        // The panda takes the person's place: what is behind them, without
+        // them.
+        let shaped = self.look.backdrop != Backdrop::Room || self.look.presenter || self.panda();
+        let hair = self.read && Sight::wants_hair(&self.look);
+        if !shaped && !hair && self.look.away.is_none() {
             return None;
         }
         let every = match (shaped, self.slow) {
+            (false, _) if hair => HAIR_EVERY,
             (false, _) => AWAY_EVERY,
             (true, false) => 1,
             (true, true) => 2,
@@ -1035,6 +1094,9 @@ impl State {
         self.mask.follow(&self.fresh);
         if shaped {
             self.alpha.from_mask(&self.mask);
+        }
+        if hair {
+            self.sight.hair(&self.mask);
         }
         Some(self.fresh.cover())
     }

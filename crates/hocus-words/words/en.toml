@@ -1369,6 +1369,25 @@ presenter_size = "Presenter’s size"
 small = "Small"
 middle = "Medium"
 large = "Large"
+framing = "Framing"
+keeps_your_face_in_the_middle = "The picture follows your face and keeps it in the middle, in 16:9."
+face = "Face"
+an_accessory_on_your_head = "An accessory that follows your head."
+no_face = "None"
+ears = "Ears"
+beanie = "Beanie"
+crown = "Crown"
+glasses = "Glasses"
+gestures = "Gestures"
+a_thumb_up_sends_a_reaction = "A thumb up sends a reaction into the picture; a raised hand shows “hand raised” there while it stays up."
+celebrations = "Parties"
+confetti_when_an_agent_celebrates = "Confetti in the picture when an agent celebrates good news."
+panda = "Panda"
+panda_look = "Look"
+the_panda_s_look = "The panda’s, when it takes your place: classic, magician or secretary."
+classic = "Classic"
+magician = "Magician"
+secretary = "Secretary"
 
 [settings.captures]
 screenshots = "SCREENSHOTS"
@@ -3036,13 +3055,14 @@ transcription = "Transcription"
 line = "transcription · {time}"
 transcribing = "Transcribing the meeting, {time}"
 
-# What the Hocuspanda camera draws in its pictures (#619, lot 3):
-# « Je reviens »'s card.
+# What the Hocuspanda camera draws in its pictures (#619): « Je reviens »'s
+# card (lot 3), the raised hand's label (lot 4).
 [camera]
 back_in_a_moment = "Back in a moment"
 away_a_moment = "away for less than a minute"
 away_minutes = "away for {n} min"
 away_hours = "away for {h} h {mm}"
+hand_raised = "hand raised"
 
 # The Hocuspanda camera's banner, under the name (#619).
 [compositor.camera]
@@ -3130,3 +3150,7 @@ package_needed = "For every application to see Hocuspanda, install the v4l2loopb
 firefox_setting = "Firefox, without it: in about:config, set media.webrtc.camera.allow-pipewire to true."
 screen_light_everywhere = "The screen light works with every application."
 back = "Back"
+allure = "Look"
+classic = "Classic"
+magician = "Magician"
+secretary = "Secretary"
