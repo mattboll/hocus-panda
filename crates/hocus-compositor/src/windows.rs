@@ -1042,6 +1042,13 @@ impl State {
         let before = self.model.focused();
         self.model.focus_raising(id, raise);
         let focused = self.model.focused();
+        if let Some(id) = focused
+            && self.model.is_shown(id)
+            && let Some(output) = self.output_of(id)
+        {
+            let desktop = self.model.desktop(id);
+            self.desktop_focus.insert((output.name(), desktop), id);
+        }
         if focused != before {
             self.agents_focus_changed();
         }

@@ -193,18 +193,22 @@ fn depth(hp: &Headless, id: WindowId) -> usize {
 }
 
 /// A window on all desktops keeps its place in each desktop's stack
-/// (#888): behind desktop 2's window and in front of desktop 1's, switch
-/// after switch and as the strip slides; the focus goes to what was
-/// focused on the desktop shown.
+/// (#888): in front of desktop 1's window, behind desktop 2's, switch
+/// after switch and as the strip slides; the keyboard goes back to the
+/// window focused last on the desktop shown, where it is, the window on
+/// all desktops included.
 #[test]
 fn a_window_on_all_desktops_keeps_its_place_in_each_desktops_stack() -> anyhow::Result<()> {
     let mut hp = compositor()?;
     let size = (1400, 700);
     let first = open(&mut hp, "test.one", size)?;
-    // Black and white squares: told apart from the others' blue.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    settle_on(&mut hp, 1)?;
+    // Black and white squares, told apart from the others' blue; wider
+    // than them, to be clicked beside them.
     let shows = Shows::Checkered {
         app_id: "test.every",
-        size: (1400, 500),
+        size: (1600, 500),
     };
     let (every, handle) = open_showing(&mut hp, "test.every", shows)?;
     std::mem::forget(handle);
@@ -212,9 +216,17 @@ fn a_window_on_all_desktops_keeps_its_place_in_each_desktops_stack() -> anyhow::
     let all = id_of(&hp, "test.every").context("no test.every")?;
     hp.window_action(all, hocus_link::WindowAction::AllDesktops);
     assert_eq!(hp.everywhere(), vec![all]);
+    // On desktop 1 for the first time with the keyboard: in front of its
+    // window, which gets the keyboard back.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_1]);
+    settle_on(&mut hp, 0)?;
+    assert!(depth(&hp, all) > depth(&hp, one), "{:?}", hp.stack());
+    assert_eq!(focused(&hp).as_deref(), Some("test.one"));
+    // Back on desktop 2, focused there last; its own window opens in
+    // front of it.
     chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
     settle_on(&mut hp, 1)?;
-    // Desktop 2's window opens in front of it.
+    assert_eq!(focused(&hp).as_deref(), Some("test.every"));
     let second = open(&mut hp, "test.two", size)?;
     let two = id_of(&hp, "test.two").context("no test.two")?;
     assert!(depth(&hp, two) > depth(&hp, all));
@@ -226,7 +238,7 @@ fn a_window_on_all_desktops_keeps_its_place_in_each_desktops_stack() -> anyhow::
             "round {round}: behind desktop 1's window: {:?}",
             hp.stack()
         );
-        assert_eq!(focused(&hp).as_deref(), Some("test.every"), "round {round}");
+        assert_eq!(focused(&hp).as_deref(), Some("test.one"), "round {round}");
         // Halfway: desktop 2's window slides in in front of it, desktop
         // 1's slides out behind it.
         common::at_rest(&mut hp)?;
@@ -266,6 +278,24 @@ fn a_window_on_all_desktops_keeps_its_place_in_each_desktops_stack() -> anyhow::
         );
         assert_eq!(focused(&hp).as_deref(), Some("test.two"), "round {round}");
     }
+    // Clicked on desktop 2, beside its window: desktop 2 gives it the
+    // keyboard back, desktop 1 its own window, behind it.
+    let x = every.x + 20;
+    anyhow::ensure!(x < second.x, "{every:?} under {second:?}");
+    common::click(
+        &mut hp,
+        (f64::from(x), f64::from(every.y + every.height / 2)),
+    )?;
+    let clicked = hp.dispatch_until(WAIT, |hp| focused(hp).as_deref() == Some("test.every"))?;
+    anyhow::ensure!(clicked, "focused: {:?}", focused(&hp));
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_1]);
+    settle_on(&mut hp, 0)?;
+    assert!(depth(&hp, all) > depth(&hp, one), "{:?}", hp.stack());
+    assert_eq!(focused(&hp).as_deref(), Some("test.one"));
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    settle_on(&mut hp, 1)?;
+    assert!(depth(&hp, all) > depth(&hp, two), "{:?}", hp.stack());
+    assert_eq!(focused(&hp).as_deref(), Some("test.every"));
     Ok(())
 }
 

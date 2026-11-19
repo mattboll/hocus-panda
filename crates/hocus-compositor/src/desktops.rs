@@ -1036,15 +1036,21 @@ impl crate::State {
                 self.hide(id);
             }
         }
-        // The focus goes to the window carried along, else to the
-        // desktop's window on top: it was focused there last, a window on
-        // all desktops included (#888). That one keeps its place among
-        // the windows leaving, which slide in front of it as they were.
+        // The focus goes to the window carried along, else to the one
+        // focused last on this desktop, a window on all desktops included,
+        // where it is (#888): a window on all desktops in front of it
+        // stays in front. Else to the desktop's window on top.
         let carried = carried.filter(|id| self.model.is_shown(*id));
         if carried.is_some() {
             self.focus(carried);
             return;
         }
+        if let Some(last) = self.focused_last_on(output, to) {
+            self.focus_raising(Some(last), false);
+            return;
+        }
+        // A window on all desktops keeps its place among the windows
+        // leaving, which slide in front of it as they were.
         let top =
             self.model.stack().iter().rev().copied().find(|id| {
                 self.model.is_shown(*id) && self.output_of(*id).as_ref() == Some(output)
@@ -1060,6 +1066,16 @@ impl crate::State {
     /// it leaves and takes the one it had in `to`'s, before the strip
     /// slides, so that `to`'s windows slide in front of it or behind it as
     /// they were.
+    /// The window focused last on `output`'s desktop `to`, if it still
+    /// shows there.
+    fn focused_last_on(&self, output: &Output, to: usize) -> Option<WindowId> {
+        let id = *self.desktop_focus.get(&(output.name(), to))?;
+        (self.model.is_shown(id)
+            && self.model.desktop(id) == to
+            && self.output_of(id).as_ref() == Some(output))
+        .then_some(id)
+    }
+
     fn take_places(&mut self, output: &Output, to: usize) {
         let on = self.windows_on(output);
         let everywhere: Vec<WindowId> = on
@@ -1080,8 +1096,13 @@ impl crate::State {
                 .collect()
         };
         let (leaving, arriving) = (of(from), of(to));
+        let focus = self
+            .desktop_focus
+            .get(&(output.name(), to))
+            .copied()
+            .filter(|w| arriving.contains(w));
         self.model
-            .take_places(&everywhere, from, &leaving, to, &arriving);
+            .take_places(&everywhere, from, &leaving, to, &arriving, focus);
         self.restack();
     }
 
@@ -1203,8 +1224,10 @@ impl crate::State {
             self.focus(next);
         }
         // It stays in front as it leaves, over the window focused in its
-        // stead, and lands on top of its new desktop's (#728).
+        // stead, and lands on top of its new desktop's (#728), which
+        // focuses it when shown (#888).
         self.model.raise(id);
+        self.desktop_focus.insert((output.name(), to), id);
         self.restack();
         self.redraw = true;
     }
@@ -1334,6 +1357,8 @@ impl crate::State {
             managed.came_from = None;
         }
         if !self.model.is_shown(id) {
+            // On top of its new desktop, which focuses it when shown.
+            self.desktop_focus.insert((to.name(), desktop), id);
             let next = self.model.stack().iter().rev().copied().find(|w| {
                 self.model.is_shown(*w) && self.output_of(*w).as_ref() == Some(&start.output)
             });

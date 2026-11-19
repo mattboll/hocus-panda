@@ -709,10 +709,12 @@ impl Model {
     /// A screen goes from desktop `from` to `to` (#888): its windows on
     /// all desktops `everywhere` remember their place among `leaving`,
     /// `from`'s windows, and take the one they had among `arriving`,
-    /// `to`'s; the first time there, under its window on top. Only the
-    /// arriving windows move in the stack: as the strip slides, the
-    /// leaving ones stay in front of or behind them as they were, the
-    /// arriving ones as they were last time. All three lists bottom first.
+    /// `to`'s. The first time there, one goes right under `focus`, the
+    /// window focused last on `to` (else its window on top), unless it
+    /// has the focus itself: then in front. Only the arriving windows
+    /// move in the stack: as the strip slides, the leaving ones stay in
+    /// front of or behind them as they were, the arriving ones as they
+    /// were last time. All three lists bottom first.
     pub fn take_places(
         &mut self,
         everywhere: &[WindowId],
@@ -720,6 +722,7 @@ impl Model {
         leaving: &[WindowId],
         to: usize,
         arriving: &[WindowId],
+        focus: Option<WindowId>,
     ) {
         if everywhere.is_empty() {
             return;
@@ -746,14 +749,21 @@ impl Model {
                     .iter()
                     .rposition(|w| below.contains(w))
                     .map_or(0, |i| i + 1),
-                // The first time: right under the desktop's window on top
-                // that shows, which keeps the focus, and under its dialogs.
-                None => arriving
-                    .iter()
-                    .rev()
-                    .find(|w| !self.is_minimized(**w))
+                // The first time, with the focus: in front.
+                None if self.focused == Some(*id) => arriving.len(),
+                // Else right under the window focused there last, or on
+                // top, which gets the focus, and under its dialogs.
+                None => focus
+                    .filter(|w| !self.is_minimized(*w))
+                    .or_else(|| {
+                        arriving
+                            .iter()
+                            .rev()
+                            .copied()
+                            .find(|w| !self.is_minimized(*w))
+                    })
                     .map_or(arriving.len(), |top| {
-                        let mut root = *top;
+                        let mut root = top;
                         for _ in 0..arriving.len() {
                             match self.parents.get(&root) {
                                 Some(p) if arriving.contains(p) => root = *p,

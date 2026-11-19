@@ -454,14 +454,20 @@ Keyboard:
   arriving windows that were in front of it slide in in front of it and
   those behind it behind, the leaving ones as they were; with reduced
   motion they cross-fade in the same order. The first time it comes to a
-  desktop it goes right behind that desktop's window on top, unless it
-  is itself carried there (dragged as the desktop changes). The focus
-  goes to what was focused on the desktop shown: its window on top,
-  this one only when it was in front there. Several windows on all
-  desktops keep one order among themselves on every desktop. As built
-  (`Model::take_places`; `tests/desktops.rs`): behind desktop 2's
-  window and in front of desktop 1's, switch after switch, and halfway
-  through a slide.
+  desktop it goes right behind the window focused there last (else its
+  window on top), unless it has the keyboard as the desktop changes:
+  then in front. The keyboard goes to the window focused last on the
+  desktop shown, where it is, without raising it: a window on all
+  desktops in front of it stays in front; this one gets the keyboard
+  only where it was focused last (clicked there). A window sent to a
+  desktop counts as focused last there, as it lands on top; a window
+  focused last that is gone or minimised leaves the keyboard to the
+  desktop's window on top. Several windows on all desktops keep one
+  order among themselves on every desktop. As built
+  (`Model::take_places`, `State::desktop_focus`; `tests/desktops.rs`):
+  in front of desktop 1's window, which keeps the keyboard, and behind
+  desktop 2's, switch after switch and halfway through a slide; clicked
+  on desktop 2, it has the keyboard there again, not on desktop 1.
 
 ## 10b. A window's radial menu (#723)
 
