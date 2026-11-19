@@ -17,6 +17,12 @@
 //! socket for both pointers and hands the widgets their events after the
 //! read: the shell's own enter is there by then.
 //!
+//! The same enter gives the place the pointer comes in at, which
+//! iced_exwlshell's `CursorEntered` does not: [`on_enter`] gives it to the
+//! widgets that follow the pointer event by event (`ui::surface`, the
+//! kit's bar items), so that a press read in one batch with the enter
+//! lands there, not where the batch leaves the pointer (#787, #860).
+//!
 //! Nothing here reads the connection, nor wakes: the pointer's events
 //! are handled as the widgets get theirs.
 
@@ -68,9 +74,18 @@ struct Seat {
     manager: WpCursorShapeManagerV1,
     /// The pointer and its shape's device, once the seat has a pointer.
     device: Option<(WlPointer, WpCursorShapeDeviceV1)>,
-    /// The serial of the enter the pointer is on a surface since; `None`
-    /// when it is on none of the shell's.
-    entered: Option<u32>,
+    /// The enter the pointer is on a surface since; `None` when it is on
+    /// none of the shell's.
+    entered: Option<Enter>,
+}
+
+/// An enter on one of the shell's surfaces.
+#[derive(Debug, Clone, Copy)]
+struct Enter {
+    serial: u32,
+    /// Where it came in, in the surface's coordinates (iced's: the shell
+    /// sets no scale of its own).
+    at: iced::Point,
 }
 
 impl Pointer {
@@ -112,10 +127,10 @@ impl Pointer {
     }
 
     fn set(&mut self, interaction: mouse::Interaction) {
-        let (Some(serial), Some((_, device))) = (self.seat.entered, &self.seat.device) else {
+        let (Some(enter), Some((_, device))) = (self.seat.entered, &self.seat.device) else {
             return;
         };
-        device.set_shape(serial, shape(interaction));
+        device.set_shape(enter.serial, shape(interaction));
         // iced's loop flushes what is left when the socket is full.
         match self.connection.flush() {
             Ok(()) => {}
@@ -133,6 +148,39 @@ fn handle() {
     if pointer.as_mut().is_some_and(|p| !p.handle()) {
         *pointer = None;
     }
+}
+
+/// The cursor as a surface's `CursorEntered` has it: where the pointer
+/// came in rather than where the batch leaves it (`cursor`, as iced hands
+/// it), so that a press read in one batch with the enter and a move away
+/// lands where it came in.
+pub fn on_enter(cursor: mouse::Cursor) -> mouse::Cursor {
+    at_enter(cursor, entered_at)
+}
+
+/// The enter's place only while the batch leaves the pointer on the
+/// surface: the last enter is then that surface's (the pointer is on one
+/// surface at a time). Left within the batch, the last enter may be
+/// another's: `cursor` as it is.
+fn at_enter(cursor: mouse::Cursor, entered: impl FnOnce() -> Option<iced::Point>) -> mouse::Cursor {
+    match cursor {
+        mouse::Cursor::Available(_) => entered().map_or(cursor, mouse::Cursor::Available),
+        mouse::Cursor::Levitating(_) => entered().map_or(cursor, mouse::Cursor::Levitating),
+        mouse::Cursor::Unavailable => cursor,
+    }
+}
+
+/// Where the pointer came in at the enter it is on one of the shell's
+/// surfaces since, once what iced's loop has read is handled; `None` when
+/// it is on none of them (or the shell has no pointer of its own).
+fn entered_at() -> Option<iced::Point> {
+    let mut pointer = POINTER.lock().unwrap_or_else(PoisonError::into_inner);
+    let p = pointer.as_mut()?;
+    if !p.handle() {
+        *pointer = None;
+        return None;
+    }
+    p.seat.entered.map(|enter| enter.at)
 }
 
 /// Sets the shape for `interaction` if the pointer is on one of the
@@ -413,7 +461,17 @@ impl Dispatch<WlPointer, ()> for Seat {
         _: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { serial, .. } => seat.entered = Some(serial),
+            wl_pointer::Event::Enter {
+                serial,
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                seat.entered = Some(Enter {
+                    serial,
+                    at: iced::Point::new(surface_x as f32, surface_y as f32),
+                });
+            }
             wl_pointer::Event::Leave { .. } => seat.entered = None,
             _ => {}
         }
@@ -441,5 +499,37 @@ impl Dispatch<WpCursorShapeDeviceV1, ()> for Seat {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::{Point, mouse::Cursor};
+
+    use super::at_enter;
+
+    /// An enter, a press and a move away read in one batch: the enter is
+    /// where the pointer came in, not where the batch leaves it (#787,
+    /// #860).
+    #[test]
+    fn an_enter_is_where_the_pointer_came_in_while_it_stays() {
+        let (came_in, left) = (Point::new(20.0, 10.0), Point::new(200.0, 10.0));
+        let entered = || Some(came_in);
+        assert_eq!(
+            at_enter(Cursor::Available(left), entered),
+            Cursor::Available(came_in)
+        );
+        assert_eq!(
+            at_enter(Cursor::Levitating(left), entered),
+            Cursor::Levitating(came_in)
+        );
+        // Gone from the surface by the batch's end: the last enter may be
+        // another surface's.
+        assert_eq!(at_enter(Cursor::Unavailable, entered), Cursor::Unavailable);
+        // No pointer of the shell's own: as iced has it.
+        assert_eq!(
+            at_enter(Cursor::Available(left), || None),
+            Cursor::Available(left)
+        );
     }
 }

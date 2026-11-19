@@ -634,7 +634,7 @@ pub(crate) fn pointer(
         mouse::Event::CursorMoved { position } => {
             Some(Point::new(position.x - bounds.x, position.y - bounds.y))
         }
-        mouse::Event::CursorEntered => cursor.position_in(bounds),
+        mouse::Event::CursorEntered => crate::pointer::on_enter(cursor).position_in(bounds),
         mouse::Event::CursorLeft => None,
         _ => before,
     }
