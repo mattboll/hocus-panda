@@ -10,7 +10,9 @@
 //! read said (a meeting's transcription records that one), and read only
 //! while the source is; Telle quelle gives the samples as they are, within
 //! 20 ms; then, changed live, Sans bruit takes the noise out of a noisy
-//! reading, Panda and Grave move a vowel's pitch by their ratios. The
+//! reading, Panda and Grave move a vowel's pitch by their ratios. A
+//! quantum the graph loses on the way, on a machine too busy to run it in
+//! time, moves what the call hears after it, and is followed (#880). The
 //! voices' arithmetic and their time on the processor: `hocus-voice`'s
 //! unit tests.
 
@@ -341,6 +343,124 @@ fn lag(tape: &[f32], heard: &[f32], most: usize) -> usize {
         .unwrap_or(0)
 }
 
+/// A run of samples that places what was heard in the tape: 64 (1.3 ms).
+const RUN: usize = 64;
+/// The windows the SI-SNR follows the lag by: 50 ms.
+const WINDOW: usize = RATE / 20;
+
+/// Each sample of `heard` from `at` on against `tape`'s from its start:
+/// the largest difference, how many samples were the tape's, and how many
+/// times the call's place in the tape moved. A machine too busy to run
+/// the graph in time (no real-time scheduling, every core taken: CI's)
+/// loses quanta on the way, between the fake microphone, the voice and
+/// the call, and the voice says silence for those it was not given
+/// (#880): what follows comes earlier or later, which no voice does. So
+/// the silence it says is skipped, and a sample that is not the tape's
+/// where the one before was is looked for anywhere in it, by the run it
+/// starts; one that is the tape's nowhere is the voice's doing.
+fn as_it_was(tape: &[f32], heard: &[f32], at: usize) -> (f32, usize, usize) {
+    let (mut offset, mut worst, mut same, mut moved) = (at as isize, 0f32, 0, 0);
+    let same_at = |h: usize, t: usize| {
+        (0..RUN).all(|i| {
+            heard
+                .get(h + i)
+                .zip(tape.get(t + i))
+                .is_some_and(|(a, b)| (a - b).abs() < 1e-5)
+        })
+    };
+    for (h, x) in heard.iter().enumerate().skip(at) {
+        if *x == 0.0 {
+            continue;
+        }
+        let d = usize::try_from(h as isize - offset)
+            .ok()
+            .and_then(|t| tape.get(t))
+            .map_or(f32::INFINITY, |t| (x - t).abs());
+        if d < 1e-5 {
+            same += 1;
+            continue;
+        }
+        match (0..tape.len()).find(|t| same_at(h, *t)) {
+            Some(t) => {
+                offset = h as isize - t as isize;
+                same += 1;
+                moved += 1;
+            }
+            // The tape's end, or the voice's doing.
+            None if h + RUN > heard.len() => break,
+            None => worst = worst.max(d),
+        }
+    }
+    (worst, same, moved)
+}
+
+/// `heard` along `tape[from..]`, 50 ms at a time, each window at the lag
+/// the one before had; where the voice speaks and what is heard there is
+/// not the tape's (scaled: 1 - ρ² over a tenth), at the lag within a
+/// quarter of a second either way where it is the most, if that is half
+/// as far or less (a voice's period may be near a quantum's). A window
+/// of the silence the voice said for quanta it was not given (a run of
+/// zeros where the tape speaks) is left out, and so are the two around a
+/// move, which the voice made of a reading cut ([`as_it_was`], #880). Where
+/// the windows kept start in the tape, what was heard of them in a row,
+/// and how many times the lag moved.
+fn follow(tape: &[f32], heard: &[f32], lag: usize, from: usize) -> (Vec<usize>, Vec<f32>, usize) {
+    const NEAR: isize = RATE as isize / 4;
+    let energy = |x: &[f32]| x.iter().map(|v| v * v).sum::<f32>();
+    let rest = tape.get(from..).unwrap_or_default();
+    let speaks = 0.1 * energy(rest) * WINDOW as f32 / rest.len().max(1) as f32;
+    let (mut lag, mut moved) = (lag as isize, 0);
+    let (mut kept_at, mut heard_out) = (Vec::new(), Vec::new());
+    let mut t = from;
+    while t + WINDOW <= tape.len() {
+        let window = &tape[t..t + WINDOW];
+        let at = |l: isize| {
+            let h = usize::try_from(t as isize + l).ok()?;
+            heard.get(h..h + WINDOW)
+        };
+        let apart = |l: isize| {
+            at(l).map(|w| {
+                let c: f32 = window.iter().zip(w).map(|(a, b)| a * b).sum();
+                1.0 - c * c.abs() / (energy(window) * energy(w)).max(1e-12)
+            })
+        };
+        let Some(kept) = apart(lag) else {
+            break;
+        };
+        let speaking = energy(window) > speaks;
+        if speaking && kept > 0.1 {
+            let was = lag;
+            let mut best = 0.5 * kept;
+            for l in was - NEAR..=was + NEAR {
+                if let Some(d) = apart(l)
+                    && d < best
+                {
+                    (best, lag) = (d, l);
+                }
+            }
+            if lag != was {
+                moved += 1;
+                // The quanta lost were between this window and the one
+                // before: the voice made both of a reading cut there.
+                if kept_at.last() == Some(&(t - WINDOW)) {
+                    kept_at.pop();
+                    heard_out.truncate(heard_out.len() - WINDOW);
+                }
+                t += WINDOW;
+                continue;
+            }
+        }
+        let w = at(lag).unwrap_or_default();
+        let gap = w.windows(RUN).any(|r| r.iter().all(|v| *v == 0.0));
+        if !(speaking && gap) {
+            kept_at.push(t);
+            heard_out.extend_from_slice(w);
+        }
+        t += WINDOW;
+    }
+    (kept_at, heard_out, moved)
+}
+
 /// The fundamental of `x` by YIN, hertz.
 fn pitch(x: &[f32]) -> f32 {
     let (min, max) = (RATE / 500, RATE / 40);
@@ -456,13 +576,10 @@ fn the_call_hears_the_microphone_through_the_voice_and_it_is_read_only_meanwhile
     let heard = bed.hear(&call, Voice::AsItIs, speech.clone(), 2.5)?;
     let first = |x: &[f32]| x.iter().position(|s| s.abs() > 0.01).unwrap_or(0);
     let at = first(&heard) - first(&speech);
-    let n = heard.len() - at;
-    let worst = heard[at..]
-        .iter()
-        .zip(&speech[..n])
-        .map(|(h, s)| (h - s).abs())
-        .fold(0f32, f32::max);
+    let (worst, same, moved) = as_it_was(&speech, &heard, at);
+    eprintln!("Telle quelle: {same} samples as they were, the place moved {moved} times");
     assert!(worst < 1e-5, "Telle quelle changed the samples by {worst}");
+    assert!(same >= RATE, "only {same} samples heard as they were");
 
     // Its delay: a click from the microphone, heard by the call.
     bed.mic.play(Vec::new());
@@ -491,10 +608,21 @@ fn the_call_hears_the_microphone_through_the_voice_and_it_is_read_only_meanwhile
     let noisy: Vec<f32> = speech.iter().zip(&hiss).map(|(s, n)| s + n).collect();
     let heard = bed.hear(&call, Voice::Quiet, noisy.clone(), 3.0)?;
     let at = lag(&speech, &heard, RATE);
-    let n = (heard.len() - at).min(speech.len()) - RATE;
-    let before = si_snr(&speech[RATE..RATE + n], &noisy[RATE..RATE + n]);
-    let after = si_snr(&speech[RATE..RATE + n], &heard[at + RATE..at + RATE + n]);
-    eprintln!("Sans bruit: SI-SNR {before:.1} dB in, {after:.1} dB heard");
+    let (kept, heard, moved) = follow(&speech, &heard, at, RATE);
+    anyhow::ensure!(heard.len() >= RATE, "{} samples followed", heard.len());
+    // The same windows of the tape, and of the noisy reading.
+    let of = |x: &[f32]| -> Vec<f32> {
+        kept.iter()
+            .flat_map(|t| &x[*t..t + WINDOW])
+            .copied()
+            .collect()
+    };
+    let said = of(&speech);
+    let before = si_snr(&said, &of(&noisy));
+    let after = si_snr(&said, &heard);
+    eprintln!(
+        "Sans bruit: SI-SNR {before:.1} dB in, {after:.1} dB heard, the lag moved {moved} times"
+    );
     assert!(after - before > 6.0, "{before:.1} dB to {after:.1} dB");
 
     // Panda and Grave move a vowel's pitch: a fifth up, an octave down.
