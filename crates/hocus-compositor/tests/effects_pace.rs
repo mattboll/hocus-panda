@@ -4,7 +4,8 @@
 //! most 60 times a second whatever the screen's refresh, and the snow
 //! falling tells the screen a few places, not one for each flake; the
 //! koi's pond and the rain on the glass move on at 60 too. Under a maximised
-//! window, the pond waits.
+//! window, the pond waits; where the aurora takes its place, the rain on
+//! the glass waits too, and moves on again once it shows (#885).
 
 use crate::common;
 
@@ -201,6 +202,26 @@ fn under_a_maximised_window_the_pond_waits() -> anyhow::Result<()> {
     // Uncovered, they swim on.
     let _ = client.commands.send(common::Command::Close);
     hp.dispatch_until(common::WAIT, |hp| hp.windows().is_empty())?;
+    let moved = at_165_hz(&mut hp)?;
+    assert!((57..=61).contains(&moved), "{moved} effect frames");
+    Ok(())
+}
+
+/// The aurora in the wallpaper's place, still without music: the rain on
+/// the glass, which it hides, waits, no frame drawn for it; the aurora
+/// off, the rain shows and moves on (#885).
+#[test]
+fn where_the_aurora_takes_its_place_the_rain_on_the_glass_waits() -> anyhow::Result<()> {
+    let mut config = Config::default();
+    config.effects.rain_on_glass = true;
+    config.effects.aurora = true;
+    let (mut hp, _client) = bed(config.clone())?;
+    anyhow::ensure!(hp.raindrops("HEADLESS-1").is_some(), "no rain");
+    anyhow::ensure!(hp.aurora(0).is_some(), "no aurora");
+    let moved = at_165_hz(&mut hp)?;
+    assert_eq!(moved, 0, "the rain moves on under the aurora");
+    config.effects.aurora = false;
+    hp.reconfigure(config);
     let moved = at_165_hz(&mut hp)?;
     assert!((57..=61).contains(&moved), "{moved} effect frames");
     Ok(())

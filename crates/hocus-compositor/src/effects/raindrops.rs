@@ -505,10 +505,18 @@ impl crate::State {
             && !self.wall_hidden(output)
     }
 
+    /// Whether the rain on the glass is seen on `output` now: it shows
+    /// there ([`Self::rain_shows_on`]: not where the koi's pond or the
+    /// aurora takes its place), the screen is on, and the wallpaper is not
+    /// as good as unseen. Only there does it step and draw (#885).
+    pub(crate) fn rain_seen_on(&self, output: &smithay::output::Output) -> bool {
+        self.rain_shows_on(output) && self.output_powered(output) && !self.wall_unseen(output)
+    }
+
     /// The rain on the glass moves on to `now` (#802): started as it is
     /// turned on, a pane warmed up on each screen; stepped on the screens
-    /// that are on and show no fullscreen window. Whether it moves (a
-    /// frame is wanted).
+    /// it is seen on ([`Self::rain_seen_on`]). Whether it moves (a frame is
+    /// wanted).
     pub(crate) fn tick_raindrops(&mut self, now: Duration) -> bool {
         let Some(plays) = self.raining_glass() else {
             if self.config.effects.rain_on_glass && self.fx.raindrops.is_some() {
@@ -528,16 +536,11 @@ impl crate::State {
             self.redraw = true;
         }
         let mut screens = Vec::new();
-        let mut on = Vec::new();
         for output in self.space.outputs() {
             let Some(area) = self.space.output_geometry(output) else {
                 continue;
             };
-            let name = output.name();
-            if self.output_powered(output) && !self.wall_unseen(output) {
-                on.push(name.clone());
-            }
-            screens.push((name, (area.size.w as f32, area.size.h as f32)));
+            screens.push((output.name(), (area.size.w as f32, area.size.h as f32)));
         }
         let Some(rain) = self.fx.raindrops.as_mut() else {
             return false;
@@ -548,6 +551,16 @@ impl crate::State {
         }
         let names: Vec<&str> = screens.iter().map(|(n, _)| n.as_str()).collect();
         rain.retain_panes(&names);
+        // Its panes made: where it is seen, which asks for them.
+        let on: Vec<String> = self
+            .space
+            .outputs()
+            .filter(|o| self.rain_seen_on(o))
+            .map(smithay::output::Output::name)
+            .collect();
+        let Some(rain) = self.fx.raindrops.as_mut() else {
+            return false;
+        };
         let moving = plays == super::Plays::Moving && !on.is_empty();
         // Waiting, its clock goes on all the same: back, it does not
         // catch up on what nobody saw, all at once (#815).
