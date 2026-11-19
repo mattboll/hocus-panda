@@ -327,17 +327,17 @@ mod tests {
     }
 
     #[test]
-    fn a_switch_in_depth_takes_the_board_s_time_and_pulls_back_halfway() {
+    fn a_switch_in_depth_takes_its_time_and_pulls_back_halfway() {
         let ms = Duration::from_millis;
         let mut strip = Strip::new(4);
         strip.switch_by(1, ms(0), Slide::Depth);
         assert_eq!(strip.moves_until(), Some(DEPTH_SLIDE));
         // In-out: slow away, halfway at half time, pulled back the most.
-        assert!(strip.position(ms(150)) < 0.02);
-        assert!((strip.position(ms(750)) - 0.5).abs() < 0.01);
-        assert!((strip.pull(ms(750)) - 0.9).abs() < 1e-6);
-        assert_eq!(strip.pull(ms(1500)), 1.0);
-        assert_eq!(strip.position(ms(1500)), 1.0);
+        assert!(strip.position(ms(50)) < 0.02);
+        assert!((strip.position(ms(250)) - 0.5).abs() < 0.01);
+        assert!((strip.pull(ms(250)) - 0.9).abs() < 1e-6);
+        assert_eq!(strip.pull(ms(500)), 1.0);
+        assert_eq!(strip.position(ms(500)), 1.0);
         // A standard slide does not pull back.
         let mut strip = Strip::new(4);
         strip.switch_by(1, ms(0), Slide::Standard);

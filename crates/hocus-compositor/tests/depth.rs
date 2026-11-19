@@ -1,7 +1,7 @@
 //! Desktops in depth (#806, docs/design/effects.md), on the held clock and
 //! on GLES (Mesa's software device, or the GPU `HOCUS_TEST_GPU` names):
 //! the wallpaper is the board's landscape; a switch of desktops moves the
-//! camera through it in 1.5 s, pulling back halfway, each layer by its
+//! camera through it in 500 ms, pulling back halfway, each layer by its
 //! share of the travel, the landscape drawn again at most 60 times a
 //! second; the window's pixels stay as they were; at rest nothing is
 //! drawn frame after frame.
@@ -153,21 +153,21 @@ fn a_switch_moves_each_layer_by_its_share_and_the_window_stays_as_it_was() -> an
     run(&mut hp, Duration::from_millis(300))?;
     assert_eq!(hp.frames_on(0), frames, "nothing drawn per frame");
 
-    // Super+2: the camera's move, 1.5 s, a frame each 165th of a second.
+    // Super+2: the camera's move, 500 ms, a frame each 165th of a second.
     let (_, _, drawn) = hp.depth(0).ok_or_else(|| anyhow::anyhow!("no depth"))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
-    run(&mut hp, Duration::from_millis(750))?;
+    run(&mut hp, Duration::from_millis(250))?;
     let (x, zoom, _) = hp.depth(0).ok_or_else(|| anyhow::anyhow!("no depth"))?;
     // Halfway, as drawn: at the last 60th of a second.
     assert!((x - STRIDE / 2.0).abs() < 40.0, "halfway: {x}");
     assert!((zoom - 0.9).abs() < 0.01, "pulled back: {zoom}");
-    run(&mut hp, Duration::from_millis(800))?;
+    run(&mut hp, Duration::from_millis(300))?;
     let (x, zoom, now) = hp.depth(0).ok_or_else(|| anyhow::anyhow!("no depth"))?;
     assert_eq!((x, zoom), (STRIDE, 1.0), "there");
     let draws = now - drawn;
     assert!(
-        (40..=95).contains(&draws),
-        "drawn {draws} times in 1.55 s: at most 60 a second"
+        (12..=35).contains(&draws),
+        "drawn {draws} times in 0.55 s: at most 60 a second"
     );
     let second = hp.screenshot(0)?;
     // The hills (0.38) in front of the far mountains, then the forest

@@ -117,14 +117,16 @@ pub enum Slide {
     Fade,
     /// The strip slides (§12).
     Standard,
-    /// Desktops in depth (#806): a camera move through the landscape, as
-    /// its board's (1.5 s, in-out cubic), pulling back on the way.
+    /// Desktops in depth (#806): a camera move through the landscape
+    /// (500 ms, in-out cubic), pulling back on the way.
     Depth,
 }
 
-/// The board "Bureaux en profondeur"'s camera move: its time, its curve
-/// (in-out cubic) and how far it pulls back halfway (`1 - 0.1 sin(πk)`).
-pub const DEPTH_SLIDE: Duration = Duration::from_millis(1500);
+/// The camera move of desktops in depth: its time, its curve (in-out
+/// cubic, the board's) and how far it pulls back halfway (`1 - 0.1
+/// sin(πk)`). The board's 1.5 s was much too long on the maintainer's
+/// machine (2026-11-19): 500 ms.
+pub const DEPTH_SLIDE: Duration = Duration::from_millis(500);
 const IN_OUT_CUBIC: Bezier = Bezier(0.65, 0.0, 0.35, 1.0);
 pub const PULL: f64 = 0.1;
 
