@@ -573,9 +573,9 @@
 # snow = false
 # aurora = false
 # rain-on-glass = false
-# When the rain falls: "always", or "raining", only while the weather of
-# [weather] place says it rains (its rain, showers or thunder); without a
-# place it then never falls.
+# When the rain falls: "always", or "raining", only while the weather
+# says it rains at the place of [weather] (its rain, showers or thunder);
+# without a place it then never falls.
 # rain-when = "always"
 # koi = false
 # fireflies = false

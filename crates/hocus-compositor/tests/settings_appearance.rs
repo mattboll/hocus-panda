@@ -372,6 +372,7 @@ fn the_page_shows_its_groups_and_choosing_light_turns_the_desktop_light() -> any
             "effects.snow",
             "effects.aurora",
             "effects.rain-on-glass",
+            "effects.rain-when",
             "effects.koi",
             "effects.fireflies",
             "effects.daylight",

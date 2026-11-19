@@ -3,12 +3,18 @@
 //! board "Les quatorze effets" groups them (the wallpaper, the windows,
 //! the moments, the agents); the second garland (#813) beside the first. Each writes its key of `[effects]`; an
 //! effect not built yet would show "Bientôt", its switch inert (all are
-//! built since the moments, #810 and #811).
+//! built since the moments, #810 and #811). The rain on the glass has its
+//! "Quand" under it (#814): always, or only when the weather says it
+//! rains, which needs a place (Settings › Weather).
 
 use hocus_words::settings::effects as words;
 use std::sync::OnceLock;
 
-use crate::model::{Codec, Kind, RowGroup, SectionId, Setting, one};
+use crate::model::{Choice, Codec, Kind, RowGroup, SectionId, Setting, Value, one};
+
+/// The rain on the glass's switch, and when it falls (#814).
+pub const RAIN: &str = "effects.rain-on-glass";
+pub const RAIN_WHEN: &str = "effects.rain-when";
 
 const WALLPAPER: RowGroup = RowGroup {
     label: words::WALLPAPER,
@@ -32,6 +38,7 @@ pub const BUILT: &[&str] = &[
     "effects.snow",
     "effects.aurora",
     "effects.rain-on-glass",
+    "effects.rain-when",
     "effects.koi",
     "effects.fireflies",
     "effects.daylight",
@@ -104,6 +111,32 @@ pub fn settings() -> &'static [Setting] {
                     &["rain", "drops", "glass", "effect"],
                 ),
             ),
+            Setting {
+                id: RAIN_WHEN,
+                section: SectionId::Appearance,
+                group: WALLPAPER,
+                name: words::RAIN_WHEN,
+                line: Some(words::RAIN_WHEN_LINE),
+                keywords: (
+                    &["pluie", "météo", "quand", "effet"],
+                    &["rain", "weather", "when", "effect"],
+                ),
+                kind: Kind::Segmented(vec![
+                    Choice {
+                        label: words::RAIN_ALWAYS,
+                        value: Value::Word("always"),
+                    },
+                    Choice {
+                        label: words::RAIN_WHEN_RAINING,
+                        value: Value::Word("raining"),
+                    },
+                ]),
+                places: one(
+                    &["effects", "rain-when"],
+                    Codec::Word(&["always", "raining"]),
+                ),
+                needs: Some(RAIN),
+            },
             effect(
                 "effects.koi",
                 &["effects", "koi"],
@@ -250,10 +283,21 @@ mod tests {
 
     /// Fifteen (the board's fourteen, and the second garland), each with
     /// its key of `[effects]`, off by default; all built but the moments.
+    /// The rain's "Quand" under its switch, always by default (#814).
     #[test]
     fn fifteen_effects_off_by_default_all_built() {
-        let all = settings();
+        let all: Vec<&Setting> = settings().iter().filter(|s| s.kind == Kind::Switch).collect();
         assert_eq!(all.len(), 15);
+        let when = settings().iter().position(|s| s.id == RAIN_WHEN);
+        let rain = settings().iter().position(|s| s.id == RAIN);
+        assert_eq!(when, rain.map(|r| r + 1));
+        let when = &settings()[when.unwrap()];
+        assert_eq!(when.needs, Some(RAIN));
+        assert_eq!(
+            when.places.of(crate::model::Source::Ac).default,
+            Value::Word("always")
+        );
+        assert!(!soon(RAIN_WHEN));
         for s in all {
             let key = s.places.of(crate::model::Source::Ac).key;
             assert_eq!(key[0], "effects", "{}", s.id);

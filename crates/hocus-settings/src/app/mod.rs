@@ -34,6 +34,7 @@ mod style;
 mod time;
 mod view;
 mod wallpaper_page;
+mod weather_page;
 mod wheels;
 
 use hocus_words::settings::app as words;
@@ -356,6 +357,8 @@ pub enum Message {
     Desktops(desktops_page::Msg),
     /// The screenshots and clipboard's page (6.17).
     Captures(captures_page::Msg),
+    /// The weather's page (#814).
+    Weather(weather_page::Msg),
     /// The network's page (6.6).
     Network(network::Msg),
     /// The Énergie page's (6.10).
@@ -451,6 +454,8 @@ pub struct App {
     /// The screenshots and clipboard's page: the history's count, a
     /// recording under way, "Effacer…" asking (6.17).
     captures: captures_page::State,
+    /// The weather's page: the place typed, what it found (#814).
+    weather: weather_page::State,
     /// The network's page: NetworkManager and the radios as last said
     /// (6.6).
     network: network::State,
@@ -581,6 +586,7 @@ impl App {
             account,
             desktops: desktops_page::State::default(),
             captures: captures_page::State::default(),
+            weather: weather_page::State::default(),
             network,
             power,
             agents,
@@ -983,6 +989,7 @@ impl App {
             Message::Account(msg) => self.account_update(msg),
             Message::Desktops(msg) => self.desktops_update(msg),
             Message::Captures(msg) => self.captures_update(msg),
+            Message::Weather(msg) => self.weather_update(msg),
             Message::Keys(msg) => {
                 // The trial area's move key, held for real (6.14).
                 if let keyboard_page::Msg::Mods(mods) = &msg {
@@ -2261,6 +2268,7 @@ impl App {
             || self.desktops_inert(setting)
             || self.power_inert(setting)
             || self.agents_inert(setting)
+            || self.weather_inert(setting)
             || crate::effects::soon(setting.id)
         {
             return true;

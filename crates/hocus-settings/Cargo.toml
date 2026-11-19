@@ -41,6 +41,9 @@ hocus-network.workspace = true
 # The applications, their icons, the defaults (mimeapps.list) and the
 # start-up entries, read as the launcher and the session read them (6.15).
 hocus-xdg.workspace = true
+# Settings › Weather finds a town by its name with Open-Meteo's geocoding
+# (#814), on a blocking task.
+hocus-weather.workspace = true
 # The applications' PNG icons, decoded on the page's thread (6.15); the
 # avatars (6.11), a picture cut square and written as PNG (the codecs to
 # read one are hocus-link's).

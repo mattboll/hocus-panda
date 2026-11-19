@@ -294,7 +294,7 @@ impl App {
                     .align_y(Alignment::Center),
             )
             .width(Length::Fill)
-            // 24 px: the 21 sections fit the window's 760 px.
+            // 24 px: the 22 sections fit the window's 760 px.
             .height(24)
             .padding([0, 10])
             .on_press(on)
@@ -852,6 +852,9 @@ impl App {
         if id == SectionId::Bar {
             return self.bar_page(page);
         }
+        if id == SectionId::Weather {
+            return self.weather_page(page);
+        }
         if id == SectionId::Bluetooth {
             return self.bluetooth_page(page);
         }
@@ -984,6 +987,7 @@ impl App {
             || self.desktops_inert(setting)
             || self.agents_inert(setting)
             || self.captures_inert(setting)
+            || self.weather_inert(setting)
             || crate::effects::soon(setting.id)
         {
             INERT
@@ -1038,6 +1042,9 @@ impl App {
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
             words = words.push(t(why, 12.5, PEACH.get()));
+        } else if let Some(line) = self.weather_line(setting.id) {
+            // The rain's "Quand" waits for a place (#814).
+            words = words.push(t(line, 12.5, fade(DIM.get(), ink)));
         } else if let Some(line) = setting.line {
             words = words.push(t(line.get(lang), 12.5, fade(DIM.get(), ink)));
         }
@@ -1836,6 +1843,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "agents": if app.page == Page::Section(SectionId::Agents) { app.agents_shown() } else { serde_json::Value::Null },
         "acting": if app.page == Page::Section(SectionId::Acting) { app.acting_shown() } else { serde_json::Value::Null },
         "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
+        "weather": if app.page == Page::Section(SectionId::Weather) { app.weather_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

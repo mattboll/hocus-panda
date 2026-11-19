@@ -64,11 +64,24 @@ pub fn places(json: &str) -> Result<Vec<Place>, String> {
         .map_err(|err| format!("geocoding: {err}"))
 }
 
+/// `HOCUS_WEATHER_PLACES=FILE`: the places are found in this saved
+/// geocoding answer instead of the network, those whose name starts with
+/// what is typed (tests, screenshots).
+pub const FIXTURE_ENV: &str = "HOCUS_WEATHER_PLACES";
+
 /// The places named `name`, blocking: on a thread of its own. Two letters
 /// at least (geocoding answers nothing shorter).
 pub fn search(name: &str, language: &str) -> Result<Vec<Place>, String> {
     if name.trim().chars().count() < 2 {
         return Ok(Vec::new());
+    }
+    if let Some(file) = std::env::var_os(FIXTURE_ENV) {
+        let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
+        let typed = name.trim().to_lowercase();
+        return Ok(places(&text)?
+            .into_iter()
+            .filter(|p| p.name.to_lowercase().starts_with(&typed))
+            .collect());
     }
     places(&crate::fetch::get(&search_url(name, language))?)
 }
