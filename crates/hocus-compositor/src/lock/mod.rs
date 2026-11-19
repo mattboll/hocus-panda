@@ -453,6 +453,12 @@ impl State {
         if self.ink.shows() {
             self.ink_clear();
         }
+        // The agents' shapes go at once, and nothing is drawn while
+        // locked (#825).
+        if !self.ink.agent.groups.is_empty() {
+            self.ink.agent.clear();
+            self.mcp.dirty = true;
+        }
         if let Some(pointer) = self.seat.get_pointer()
             && pointer.is_grabbed()
         {

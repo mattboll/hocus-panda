@@ -27,6 +27,7 @@ mod apps;
 pub mod atspi;
 pub mod capture;
 mod draw;
+mod hand;
 pub mod seat;
 
 use std::{
@@ -43,8 +44,8 @@ use std::{
 use hocus_agents::mcp::{Answer, Asked, Call, Right};
 use hocus_config::toml_edit;
 use hocus_link::{
-    MCP_JOURNAL_SHOWN, MCP_TOAST, McpAt, McpDoing, McpKind, McpLine, McpRefusal, McpRow, McpSaid,
-    McpShow, McpShown, McpSummary, McpToast, ToShell,
+    MCP_JOURNAL_SHOWN, MCP_TOAST, McpAt, McpDoing, McpKind, McpLine, McpRefusal, McpRefusedToast,
+    McpRow, McpSaid, McpShow, McpShown, McpSummary, McpToast, ToShell,
 };
 use serde_json::{Value, json};
 use smithay::{
@@ -315,7 +316,7 @@ pub struct Mcp {
     toast: Option<(McpToast, RegistrationToken)>,
     /// What the shell was told last, and whether something changed since.
     pub told: Option<McpShown>,
-    dirty: bool,
+    pub(crate) dirty: bool,
     ring_ids: RingIds,
     halo_ids: RingIds,
     /// Each connection's own seat.
@@ -348,6 +349,13 @@ pub struct Mcp {
     /// window to draw first.
     pub shots: Vec<capture::Shot>,
     pub(crate) shot_waits: Vec<capture::Wait>,
+    /// A shape being drawn by hand (#825).
+    drawing: Option<hand::Drawing>,
+    /// A drag under way (#825).
+    dragging: Option<hand::Dragging>,
+    /// A refusal's toast, and its timer.
+    refused: Option<(McpRefusedToast, RegistrationToken)>,
+    next_refused: u64,
 }
 
 #[derive(Debug)]
@@ -390,7 +398,12 @@ fn refusal_text(refusal: &McpRefusal, agent: &str) -> String {
              ([[agents.mcp]] desktops)"
         ),
         McpRefusal::NoInput => format!(
-            "refused: agent {agent:?} may not click nor type in applications ([[agents.mcp]] input)"
+            "refused: agent {agent:?} may not click, drag nor type in applications \
+             ([[agents.mcp]] input)"
+        ),
+        McpRefusal::NoDraw => format!(
+            "refused: agent {agent:?} may not draw on the screen; the user allows it in \
+             Settings › Act on the desktop ([[agents.mcp]] draw)"
         ),
         McpRefusal::Locked => "refused: the session is locked".to_owned(),
         McpRefusal::Asking => "refused: a password is being asked for".to_owned(),
@@ -557,7 +570,8 @@ impl State {
         // Into an application's window, or reading its tree: only those
         // its `apps` name.
         let reads_tree = matches!(call, Call::AccessibilityTree(_))
-            || matches!(call, Call::WaitFor(w) if w.label.is_some());
+            || matches!(call, Call::WaitFor(w) if w.label.is_some())
+            || matches!(call, Call::Draw(d) if d.element.is_some());
         if (reads_tree || call.inputs())
             && let Some(id) = call.window().map(WindowId)
             && let Some(managed) = self.windows.get(&id)
@@ -596,6 +610,7 @@ impl State {
                 Right::Desktops => McpRefusal::NoDesktops,
                 Right::Settings => McpRefusal::NoSettings,
                 Right::Input => McpRefusal::NoInput,
+                Right::Draw => McpRefusal::NoDraw,
             })
     }
 
@@ -610,6 +625,17 @@ impl State {
             intent: call.intent().map(str::to_owned),
             refused: Some(text.clone()),
         });
+        if why == McpRefusal::NoDraw {
+            // Nothing drawn: its row says so, and one toast with
+            // « Permettre… » (#825).
+            self.mcp_doing(
+                agent,
+                McpDoing::Refused {
+                    tool: call.tool().to_owned(),
+                },
+            );
+            self.mcp_refused_toast(agent, call.tool(), why.clone());
+        }
         if call.acts() || why == McpRefusal::Stopped {
             self.mcp_line_shown(
                 agent,
@@ -911,6 +937,20 @@ impl State {
                     .map_err(|e| format!("press_keys: {e}"))
             }
             Call::CloseWindow(c) => self.mcp_window(c.window).map(|_| ()),
+            Call::Drag(c) => {
+                let id = self.mcp_window(c.window)?;
+                if c.label.is_none() {
+                    self.mcp_point(id, c.x, c.y)?;
+                }
+                if c.to_label.is_none() {
+                    if c.to_x.is_none() && c.to_y.is_none() {
+                        return Err("drag: say where it lets go: to_x and to_y, or to_label".into());
+                    }
+                    self.mcp_point(id, c.to_x, c.to_y)?;
+                }
+                Ok(())
+            }
+            Call::Draw(c) => self.mcp_draw_check(c),
             _ => Ok(()),
         }
     }
@@ -978,6 +1018,14 @@ impl State {
             self.mcp_answer(waiting.session, waiting.id, Err(why));
             return self.mcp_next();
         }
+        // Its shapes stay until its next action: a drawing of the same
+        // request adds to them (#825).
+        let adds =
+            matches!(waiting.call, Call::Draw(_)) && self.mcp.open.contains_key(&waiting.agent);
+        if !adds && self.ink.agent.fade(Some(&waiting.agent), self.now()) {
+            self.mcp.dirty = true;
+            self.redraw = true;
+        }
         let kind = kind_of(&waiting.call);
         self.mcp_doing(&waiting.agent, McpDoing::Acting(kind));
         let mut wait = Duration::from_millis(u64::from(self.config.agents.show_before_ms));
@@ -993,10 +1041,15 @@ impl State {
             wait = wait.max(apps::SETTLE);
         }
         let (show, window, point) = shown.unwrap_or((None, None, None));
-        if let Some(point) = point
-            && let Some(id) = waiting.call.window().map(WindowId)
-        {
-            self.mcp_pointer_shown(&waiting, id, point);
+        if let Some(point) = point {
+            match waiting.call {
+                Call::Draw(_) => self.mcp_pointer_on_screen(waiting.session, point),
+                _ => {
+                    if let Some(id) = waiting.call.window().map(WindowId) {
+                        self.mcp_pointer_shown(&waiting, id, point);
+                    }
+                }
+            }
         }
         if wait.is_zero() {
             return self.mcp_go(waiting);
@@ -1115,6 +1168,16 @@ impl State {
                 let (x, y) = top(&output)?;
                 Some((Some(show(&output, McpAt::Screen { x, y })), None, None))
             }
+            // Its pointer where its hand starts.
+            Call::Draw(_) => {
+                let (output, start) = self.mcp_draw_start(waiting)?;
+                let origin = self.space.output_geometry(&output)?.loc;
+                let at = McpAt::Pointer {
+                    x: (start.x - f64::from(origin.x)).round() as i32,
+                    y: (start.y - f64::from(origin.y)).round() as i32,
+                };
+                Some((Some(show(&output, at)), None, Some(start)))
+            }
             call => {
                 let id = WindowId(call.window()?);
                 self.mcp_window_show(waiting, id, &show)
@@ -1170,6 +1233,7 @@ impl State {
             Call::SwitchDesktop(c) => self.mcp_switch(&agent, &waiting.intent, c),
             Call::Launch(c) => self.mcp_launch(&agent, &waiting.intent, c),
             Call::SetSetting(_) => return self.mcp_write(waiting),
+            Call::Draw(_) => return self.mcp_draw_go(waiting),
             _ => Err("not an acting tool".to_owned()),
         };
         self.mcp_done(&waiting, result);
@@ -1616,6 +1680,9 @@ impl State {
         if let Some((_, timer)) = self.mcp.toast.take() {
             self.loop_handle.remove(timer);
         }
+        if let Some((_, timer)) = self.mcp.refused.take() {
+            self.loop_handle.remove(timer);
+        }
         let toast = McpToast {
             request: request.id,
             agent: request.agent.clone(),
@@ -1808,6 +1875,8 @@ impl State {
             pointers: self.mcp_pointers_told(),
             card: self.mcp.card.as_ref().map(|c| c.shown.clone()),
             taken: self.mcp.taken.iter().cloned().collect(),
+            inked: self.ink.agent.inked(),
+            refused: self.mcp.refused.as_ref().map(|(t, _)| t.clone()),
         }
     }
 
@@ -1851,7 +1920,8 @@ impl State {
             .showing
             .as_ref()
             .and_then(|s| s.window)
-            .or_else(|| self.mcp_card_window());
+            .or_else(|| self.mcp_card_window())
+            .or_else(|| self.mcp_drag_window());
         if ringed != Some(window) {
             return Vec::new();
         }
@@ -1909,6 +1979,8 @@ impl State {
 /// What an action is about, for its row.
 fn kind_of(call: &Call) -> McpKind {
     match call {
+        Call::Draw(_) => McpKind::Draw,
+        Call::Drag(_) => McpKind::Drag,
         Call::SwitchDesktop(_) => McpKind::Desktop,
         Call::Launch(_) => McpKind::Launch,
         Call::SetSetting(_) => McpKind::Setting,

@@ -47,6 +47,30 @@ pub struct McpShown {
     pub card: Option<McpCard>,
     /// The agents the user took over from, until "Rendre la main".
     pub taken: Vec<String>,
+    /// The agents whose ink shows on the screen (#825): their drawing
+    /// toast's "Effacer".
+    #[serde(default)]
+    pub inked: Vec<String>,
+    /// The toast of a call refused for want of a right (#825, `draw`
+    /// without « Dessiner à l'écran »), with « Permettre… ».
+    #[serde(default)]
+    pub refused: Option<McpRefusedToast>,
+}
+
+/// A refusal's toast: who could not do what, at the bottom left of a
+/// screen as [`McpToast`] is, for [`MCP_TOAST`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpRefusedToast {
+    /// Its own, never given twice.
+    pub id: u64,
+    #[serde(serialize_with = "tidy::name")]
+    pub agent: String,
+    /// The tool refused (`draw`).
+    pub tool: String,
+    pub why: McpRefusal,
+    pub output: String,
+    pub left: i32,
+    pub bottom: i32,
 }
 
 /// An agent's pointer, where a screen shows it: its tip at `x`, `y` (its
@@ -95,6 +119,11 @@ pub enum McpAsk {
         keys: String,
     },
     Close {
+        #[serde(serialize_with = "tidy::title")]
+        title: String,
+    },
+    /// A drag in it (#825).
+    Drag {
         #[serde(serialize_with = "tidy::title")]
         title: String,
     },
@@ -151,6 +180,8 @@ pub enum McpDoing {
         #[serde(serialize_with = "tidy::name")]
         why: String,
     },
+    /// Its last call was refused for want of a right (#825): the tool.
+    Refused { tool: String },
 }
 
 /// What an action is about.
@@ -161,8 +192,12 @@ pub enum McpKind {
     Desktop,
     Launch,
     Setting,
-    /// Clicks, scrolls, typing or keys in an application.
+    /// Clicks, drags, scrolls, typing or keys in an application.
     Input,
+    /// Drawing on the screen (#825).
+    Draw,
+    /// A drag in an application (#825).
+    Drag,
 }
 
 /// What a request did, counted, for one sentence.
@@ -191,6 +226,12 @@ pub struct McpSummary {
     pub pressed: u32,
     #[serde(default)]
     pub closed: u32,
+    /// Drags in applications (#825).
+    #[serde(default)]
+    pub dragged: u32,
+    /// Shapes drawn on the screen (#825).
+    #[serde(default)]
+    pub drawn: u32,
 }
 
 /// A setting an agent changed: its key (`appearance.theme`) and its new
@@ -301,6 +342,8 @@ pub enum McpRefusal {
     NoDesktops,
     /// It may not click nor type in applications.
     NoInput,
+    /// It may not draw on the screen (#825).
+    NoDraw,
     /// The session is locked.
     Locked,
     /// A password is asked for.

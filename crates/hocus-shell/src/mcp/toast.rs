@@ -9,9 +9,14 @@
 //! The mockup's `.toast`: 10 × 12 px in, 10 px between its parts, radius
 //! 12, `#262C3C` (the theme's `toast`); its mark 22 px, its text 13 px over
 //! 11.5 px; its buttons `.btn`, 12.5 px bold, 6 × 10 px, radius 8.
+//!
+//! A drawing's toast (#825) says « Effacer » while the agent's shapes show,
+//! in « Annuler »'s place; a refusal's toast (a `draw` without its right)
+//! has its mark in red, « Permettre… », which opens Settings › Agir sur le
+//! bureau, and « Voir ».
 
 use hocus_a11y::Role;
-use hocus_link::{McpToast, ToCompositor};
+use hocus_link::{McpRefusedToast, McpToast, ToCompositor};
 use iced::{
     Background, Border, Color, Element, Length, Padding, Point,
     alignment::Vertical,
@@ -57,12 +62,63 @@ const EDGE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 const BUTTON_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.09));
 const BUTTON_LIT: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.15));
 const BUTTON_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.07));
+/// The Settings' page where an agent's rights are (« Permettre… »).
+const ACTING_PAGE: &str = "act-on-desktop";
+/// A refusal's mark: the mockup's `.who.bad`.
+const REFUSED: Ink = Ink::Dark(Color::from_rgb8(0xF0, 0x7C, 0x7C));
 
 /// Its buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Undo,
     See,
+    /// The agent's shapes fade (#825).
+    Erase,
+    /// Settings › Agir sur le bureau.
+    Allow,
+}
+
+/// What a toast shows.
+#[derive(Debug, Clone)]
+struct Said {
+    agent: String,
+    said: String,
+    under: String,
+    refused: bool,
+    buttons: Vec<(&'static str, Target)>,
+}
+
+impl Said {
+    fn of(words: Words, toast: &McpToast, inked: &[String]) -> Self {
+        let mut buttons = Vec::new();
+        if toast.summary.drawn > 0 && inked.contains(&toast.agent) {
+            buttons.push((words.erase(), Target::Erase));
+        }
+        if toast.undo {
+            buttons.push((words.undo(), Target::Undo));
+        }
+        buttons.push((words.see(), Target::See));
+        Self {
+            agent: toast.agent.clone(),
+            said: words.toast(toast),
+            under: words.toast_under(toast),
+            refused: false,
+            buttons,
+        }
+    }
+
+    fn refused(words: Words, toast: &McpRefusedToast) -> Self {
+        Self {
+            agent: toast.agent.clone(),
+            said: words.refused_toast(toast),
+            under: words.refused_under().to_owned(),
+            refused: true,
+            buttons: vec![
+                (words.allow_it(), Target::Allow),
+                (words.see(), Target::See),
+            ],
+        }
+    }
 }
 
 impl Target {
@@ -92,9 +148,8 @@ fn button_width(word: &str) -> f32 {
 }
 
 /// What its text says, cut to its room.
-fn texts(words: Words, toast: &McpToast) -> (String, String, f32) {
-    let said = words.toast(toast);
-    let under = words.toast_under(toast);
+fn texts(said: &Said) -> (String, String, f32) {
+    let (said, under) = (said.said.clone(), said.under.clone());
     let room = TEXT_MOST;
     let said = kit::elide(&said, room, |t| kit::measure(t, SAID, MANROPE));
     let under = kit::elide(&under, room, |t| kit::measure(t, UNDER, MANROPE));
@@ -103,20 +158,66 @@ fn texts(words: Words, toast: &McpToast) -> (String, String, f32) {
 }
 
 /// Its size and its top left corner on its screen.
-pub fn place(words: Words, toast: &McpToast) -> ((u32, u32), (i32, i32)) {
-    let (_, _, text) = texts(words, toast);
-    let mut width = PAD.left + MARK + GAP + text + GAP + button_width(words.see()) + PAD.right;
-    if toast.undo {
-        width += button_width(words.undo()) + BUTTON_GAP;
-    }
-    let height = PAD.top + (SAID + UNDER) * LINE + PAD.bottom;
-    let (w, h) = (width.ceil() as u32 + 2, height.ceil() as u32 + 2);
-    ((w, h), (toast.left, toast.bottom - h as i32))
+pub fn place(words: Words, toast: &McpToast, inked: &[String]) -> ((u32, u32), (i32, i32)) {
+    size_at(&Said::of(words, toast, inked), toast.left, toast.bottom)
 }
 
-pub fn view<'a>(id: window::Id, toast: McpToast, _glass: bool) -> Element<'a, Message> {
+/// A refusal's toast's size and top left corner.
+pub fn place_refused(words: Words, toast: &McpRefusedToast) -> ((u32, u32), (i32, i32)) {
+    size_at(&Said::refused(words, toast), toast.left, toast.bottom)
+}
+
+fn size_at(said: &Said, left: i32, bottom: i32) -> ((u32, u32), (i32, i32)) {
+    let (_, _, text) = texts(said);
+    let buttons: f32 = said
+        .buttons
+        .iter()
+        .map(|(word, _)| button_width(word))
+        .sum::<f32>()
+        + BUTTON_GAP * said.buttons.len().saturating_sub(1) as f32;
+    let width = PAD.left + MARK + GAP + text + GAP + buttons + PAD.right;
+    let height = PAD.top + (SAID + UNDER) * LINE + PAD.bottom;
+    let (w, h) = (width.ceil() as u32 + 2, height.ceil() as u32 + 2);
+    ((w, h), (left, bottom - h as i32))
+}
+
+pub fn view<'a>(
+    id: window::Id,
+    toast: McpToast,
+    inked: Vec<String>,
+    _glass: bool,
+) -> Element<'a, Message> {
     let words = Words::new(hocus_words::Lang::of_messages());
     let request = toast.request;
+    let said = Said::of(words, &toast, &inked);
+    let agent = toast.agent.clone();
+    surface(
+        id,
+        said,
+        move |m| handle(request, &agent, m),
+        move || super::toast_shows(request),
+    )
+}
+
+/// A refusal's toast.
+pub fn view_refused<'a>(id: window::Id, toast: McpRefusedToast) -> Element<'a, Message> {
+    let words = Words::new(hocus_words::Lang::of_messages());
+    let said = Said::refused(words, &toast);
+    let (shown, agent) = (toast.id, toast.agent.clone());
+    surface(
+        id,
+        said,
+        move |m| handle(0, &agent, m),
+        move || super::refused_shows(shown),
+    )
+}
+
+fn surface<'a>(
+    id: window::Id,
+    said: Said,
+    handle: impl Fn(Msg) + 'static,
+    shows: impl Fn() -> bool + 'static,
+) -> Element<'a, Message> {
     let back = container(Space::new().width(Length::Fill).height(Length::Fill)).style(|_| {
         container::Style {
             background: Some(Background::Color(FILL.get())),
@@ -128,30 +229,24 @@ pub fn view<'a>(id: window::Id, toast: McpToast, _glass: bool) -> Element<'a, Me
             ..container::Style::default()
         }
     });
-    let built = toast.clone();
-    Around::new(
-        id,
-        build(words, &toast, focus()),
-        move |m| handle(request, m),
-        Msg::Stale,
-    )
-    .own(hocus_link::MCP_TOAST_NAMESPACE, move || {
-        super::toast_shows(request)
-    })
-    .rebuild(move || build(words, &built, focus()))
-    .on(back)
+    let built = said.clone();
+    Around::new(id, build(&said, focus()), handle, Msg::Stale)
+        .own(hocus_link::MCP_TOAST_NAMESPACE, shows)
+        .rebuild(move || build(&built, focus()))
+        .on(back)
 }
 
-fn build<'a>(words: Words, toast: &McpToast, focus: Option<Target>) -> El<'a> {
-    let (said, under, text) = texts(words, toast);
-    let letter = toast
+fn build<'a>(shown: &Said, focus: Option<Target>) -> El<'a> {
+    let (said, under, text) = texts(shown);
+    let letter = shown
         .agent
         .chars()
         .next()
         .map(String::from)
         .unwrap_or_default();
+    let refused = shown.refused;
     let mark = drawn(MARK, MARK, move |f, size| {
-        let agent = AGENT.get();
+        let agent = if refused { REFUSED.get() } else { AGENT.get() };
         let centre = Point::new(size.width / 2.0, size.height / 2.0);
         let circle = iced::widget::canvas::Path::circle(centre, MARK / 2.0 - 0.5);
         f.fill(&circle, Color { a: 0.16, ..agent });
@@ -179,10 +274,9 @@ fn build<'a>(words: Words, toast: &McpToast, focus: Option<Target>) -> El<'a> {
     .width(text);
     let mut line = row![mark, lines].spacing(GAP).align_y(Vertical::Center);
     let mut buttons = row![].spacing(BUTTON_GAP).align_y(Vertical::Center);
-    if toast.undo {
-        buttons = buttons.push(press(words.undo(), Target::Undo, focus));
+    for (word, target) in &shown.buttons {
+        buttons = buttons.push(press(word, *target, focus));
     }
-    buttons = buttons.push(press(words.see(), Target::See, focus));
     line = line.push(buttons);
     container(control(line, "mcp-toast", Role::Status, said))
         .padding(Padding {
@@ -223,15 +317,28 @@ fn press<'a>(word: &str, target: Target, focus: Option<Target>) -> El<'a> {
         .into()
 }
 
-fn handle(request: u64, message: Msg) {
+fn handle(request: u64, agent: &str, message: Msg) {
     match message {
         Msg::Act(Target::Undo) => {
             tracing::info!(request, "the MCP toast's Annuler");
             popover::send(vec![Effect::Tell(ToCompositor::McpUndo(request))]);
         }
+        Msg::Act(Target::Erase) => {
+            tracing::info!(agent, "the MCP toast's Effacer");
+            popover::send(vec![Effect::Tell(ToCompositor::McpErase(agent.to_owned()))]);
+        }
+        Msg::Act(Target::Allow) => {
+            tracing::info!(agent, "the MCP refusal's Permettre");
+            crate::popover::open_settings_page(ACTING_PAGE);
+        }
         Msg::Act(Target::See) => {
             tracing::info!(request, "the MCP toast's Voir");
-            let output = super::shown().toast.map(|t| t.output).unwrap_or_default();
+            let shown = super::shown();
+            let output = shown
+                .toast
+                .map(|t| t.output)
+                .or_else(|| shown.refused.map(|t| t.output))
+                .unwrap_or_default();
             popover::open_asked(&output, Item::Journal, Some(Item::Secretary));
         }
         Msg::Focus(target) => {

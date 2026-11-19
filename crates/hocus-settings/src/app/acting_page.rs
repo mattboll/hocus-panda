@@ -835,9 +835,11 @@ impl App {
                 .id(format!("act:{name}:{}", right.key()))
                 .into()
         };
+        // Drawing on the screen on a line of its own, as the mockup has it.
         let checks = column![
             row![check(Right::Windows), check(Right::Desktops)].spacing(6),
             row![check(Right::Settings), check(Right::Input)].spacing(6),
+            row![check(Right::Draw)],
         ]
         .spacing(6);
         let apps = column![

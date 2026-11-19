@@ -768,6 +768,16 @@ fn to_shell() -> Vec<ToShell> {
                 y: 41,
             }),
             taken: vec!["Claude".into()],
+            inked: vec!["Claude".into()],
+            refused: Some(McpRefusedToast {
+                id: 1,
+                agent: "Claude".into(),
+                tool: "draw".into(),
+                why: McpRefusal::NoDraw,
+                output: "HEADLESS-1".into(),
+                left: 16,
+                bottom: 1064,
+            }),
         })),
         ToShell::Mcp(Box::new(McpShown {
             show: Some(McpShow {
@@ -916,6 +926,7 @@ fn to_compositor() -> Vec<ToCompositor> {
             reply: McpReply::TakeOver,
         },
         ToCompositor::McpHandBack("Claude".into()),
+        ToCompositor::McpErase("Claude".into()),
         ToCompositor::Close(42),
         ToCompositor::Overview,
         ToCompositor::A11yLine("  button \"14 h 32\" <click>".into()),

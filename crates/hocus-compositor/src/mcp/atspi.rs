@@ -507,6 +507,39 @@ pub fn pick<'a>(nodes: &'a [Node], role: Option<&str>, label: &str) -> Pick<'a> 
 /// Where element `label` (and `role`) of `tree` is: its centre from the
 /// window's top left; or why it cannot be aimed at.
 pub fn centre_of(tree: &Tree, role: Option<&str>, label: &str) -> Result<(f64, f64), String> {
+    let node = picked(tree, role, label)?;
+    if !node.states.enabled() {
+        return Err(format!("{} is disabled", node.said()));
+    }
+    let rect = node
+        .rect
+        .ok_or_else(|| format!("{} has no place its application says", node.said()))?;
+    Ok((
+        f64::from(rect.x) + f64::from(rect.width) / 2.0,
+        f64::from(rect.y) + f64::from(rect.height) / 2.0,
+    ))
+}
+
+/// Element `label`'s box from the window's top left: x, y, width, height.
+pub fn rect_of(
+    tree: &Tree,
+    role: Option<&str>,
+    label: &str,
+) -> Result<(f64, f64, f64, f64), String> {
+    let node = picked(tree, role, label)?;
+    let rect = node
+        .rect
+        .ok_or_else(|| format!("{} has no place its application says", node.said()))?;
+    Ok((
+        f64::from(rect.x),
+        f64::from(rect.y),
+        f64::from(rect.width),
+        f64::from(rect.height),
+    ))
+}
+
+/// The one element `label` (and `role`) names.
+fn picked<'a>(tree: &'a Tree, role: Option<&str>, label: &str) -> Result<&'a Node, String> {
     let node = match pick(&tree.nodes, role, label) {
         Pick::One(node) => node,
         Pick::Nothing => {
@@ -523,16 +556,7 @@ pub fn centre_of(tree: &Tree, role: Option<&str>, label: &str) -> Result<(f64, f
             ));
         }
     };
-    if !node.states.enabled() {
-        return Err(format!("{} is disabled", node.said()));
-    }
-    let rect = node
-        .rect
-        .ok_or_else(|| format!("{} has no place its application says", node.said()))?;
-    Ok((
-        f64::from(rect.x) + f64::from(rect.width) / 2.0,
-        f64::from(rect.y) + f64::from(rect.height) / 2.0,
-    ))
+    Ok(node)
 }
 
 /// Reads windows' trees on a thread of its own, one at a time, and hands

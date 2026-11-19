@@ -56,7 +56,8 @@ access = "act"         # "read" (default): only the reading tools
 windows = true         # arrange, move, bring forward, close (default true)
 desktops = true        # switch desktops, send a window, launch (default true)
 settings = true        # may change settings (default false)
-input = true           # click and type in its apps (default true)
+input = true           # click, drag and type in its apps (default true)
+draw = true            # draw on the screen (default false, #825)
 client = "claude-code" # what the Settings plugged it into, and the day
 since = "2026-11-12"
 ```
@@ -233,6 +234,57 @@ fois", "tapé 12 caractères", "fermé 1 fenêtre"): the toast says « Ne
 s'annule pas » for them. What is typed is never kept, its characters
 counted; keys are kept (`Ctrl+S`).
 
+## Dragging and drawing (#825)
+
+Mockup approved 2026-11-19 (tools' `mockups/s14-mcp/agent-ink`, variant
+B, "until its next action"); the maintainer's choices are #825's last
+comment.
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `drag` | `window`; where it presses: `x`, `y` (from its top left) or `label` (and `role`); where it lets go: `to_x`, `to_y` or `to_label` (and `to_role`); `button`, `intent` | the window, `from` and `to` |
+| `draw` | `shape` (`rectangle`, `ellipse`, `arrow`, `path`); `points` (global logical: a box's two corners, an arrow's tail then tip, a path's points), or `window` and its `element` (a label of its tree, and `role`) to draw around; `label`, a short word written beside it; `intent` | `drawn` (the shape) and its `output` |
+
+**`drag`** presses the agent's own pointer, moves it in steps of 16 ms
+(at 900 px/s, between 0.35 and 1 s, eased in and out) and lets go, in a
+window of its `apps`: a slider, a file onto a folder, a selection. It
+needs what `click` needs (`input`, an application of `apps`; the card for
+`confirm-apps`), shows the same way (its pointer and ring on where it
+presses, the window ringed), and while its button is held a smaller ring
+(13 px) goes with its pointer. The toast says « a fait glisser 1 fois · Ne
+s'annule pas »; the row "fait glisser…". The click right reads « Cliquer,
+faire glisser et taper dans les applications ».
+
+**`draw`** draws the agent's ink: a marker of the agents' violet (9 px of
+`#B69CFF` at 0.62 with its glow, a 2.4 px light core, a dark stroke under
+it), never the red of the user's ink. Before each shape, as for a click,
+its pointer, ring and intent where its hand starts, for `show-before-ms`;
+then it draws by hand, the stroke growing along the shape (0.35 s and a
+second per 1000 px, 0.4 to 1.3 s, an arrow's head 0.2 s after its shaft;
+the hand's minimum-jerk easing) with a slight wobble, its pointer
+following the tip; the user's pointer never moves. The first shape has the
+agent's name on a pill at its top left, the next ones its initial where
+they start. `label` is written beside the shape in the agent's hand
+(Caveat, 40 px), after it.
+
+- **Where**: above the windows and the shell's surfaces, as the user's ink
+  is, below the lock; in screenshots, shares and recordings of the screen,
+  its pointer, ring and tag never.
+- **How long**: until the agent's next action (any acting call other than
+  a `draw` of the same request), `Esc` (which takes the user's ink too),
+  or the toast's « Effacer »; then it fades in 0.6 s. A `draw` that starts
+  a new request fades the shapes of the last first. Locking takes it at
+  once; nothing is drawn while locked.
+- **The right**: « Dessiner à l'écran » (`[[agents.mcp]] draw`), off by
+  default, a row of its own on the agent's card. Without it nothing is
+  drawn: the call is refused before it shows, the agent's row says
+  « refusé : dessiner à l'écran » in red, the journal keeps it, and one
+  toast says « Claude n'a pas pu dessiner à l'écran / Pas permis ·
+  Réglages › Agir sur le bureau » with « Permettre… » (Settings › Agir sur
+  le bureau) and « Voir » (the journal).
+- **The toast** after drawing: « Claude a dessiné 4 formes à l'écran »,
+  its first intent quoted, « Effacer » while its shapes show, « Voir ».
+
 ## The journal
 
 In the compositor's memory only, never on disk nor in its log above
@@ -363,3 +415,41 @@ not list an agent's.
   `a_request_is_one_sentence` (a key lot A's table did not have, named by
   its row). Scene 5: `HOCUS_SHOTS=DIR cargo nextest run -p
   hocus-compositor settings_acting::shots --run-ignored only`.
+
+## As built (2026-11-19, #825)
+
+- **Where**: `hocus-agents`' `Drag` and `Draw` (and `Right::Draw`), the
+  compositor's `src/mcp/hand.rs` (the drag's steps, the drawing's queue,
+  the refusal's toast), `src/ink/agent.rs` (the shapes' points, their
+  timing, the name's, initial's and word's pictures) painted by
+  `src/ink.rs`' canvas with the agent's `Look`, in the same element as the
+  user's ink; the shell's `src/mcp/toast.rs` (« Effacer », the refusal's
+  toast), the Settings' `acting.rs` (`Right::Draw`).
+- **The shapes** are the mockup's functions ported (its seeded wobbles,
+  Chaikin's smoothing, its rectangle overshooting its start, its arrow bent
+  by a fifth of its length): the same call draws the same shape. Around a
+  window or an element: a rectangle 8 px and 6 px outside its box, an
+  ellipse 1.2 × its half sides and 12 px (a hand encircles, its corners
+  may be just outside), an arrow from 150 px left and 90 px below to its
+  left edge's middle (its right when the screen ends there), a path a
+  wavy underline 5 px under it. The word goes past an arrow's tip, below
+  it; else right of the shape, left when the screen ends first.
+- **The pictures** (the name's pill, the initial, the word) are drawn on
+  the CPU once per scale with fontdue (Manrope Bold; Caveat Bold, SIL Open
+  Font License, beside the shell's fonts) and a Gaussian blur for their
+  shadow and glow; the strokes' glow is the canvas' distance field, as the
+  user's ink.
+- **Its pointer** moves with the hand on the compositor's frames; its name
+  beside it is not told the shell while it draws or drags (only when it
+  rests), so nothing is sent at each frame.
+- **`label`** is the word (the approved comment's name); the element to
+  draw around is `element`, as `click` names it `label`.
+- **Settings**: « Permettre… » opens Agir sur le bureau (the page; its
+  agents' cards, not one card alone). The mockup's « Nouveau » badge is
+  left out.
+- **Tests**: `tests/mcp.rs` `a_drag_moves_a_slider_from_one_end_to_the_other`,
+  `a_rectangle_drawn_around_a_window_shows_there_and_in_a_capture`,
+  `drawing_and_dragging_are_refused_without_their_rights`; the shell's
+  `a_drawing_and_its_refusal_say_so`; `ink::agent`'s unit tests. Shots:
+  `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor mcp::shots_drawn
+  --run-ignored only`.

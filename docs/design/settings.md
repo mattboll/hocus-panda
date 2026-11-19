@@ -1746,9 +1746,11 @@ command), `app/acting_page.rs`.
   (its initial in violet), its name (its client's, "Claude Code", when the
   page plugged it in), "Branché le 12 novembre · dans tous tes projets"
   (`since`, `client`; "Nommé dans ta configuration" for one named by
-  hand), « Regarder | Agir » (`access`), the four rights as check boxes,
-  two a line (`windows`, `desktops`, `settings`, `input`; inert at 45 %
-  while it only looks), "APPLICATIONS OÙ IL PEUT CLIQUER ET TAPER" (`apps`
+  hand), « Regarder | Agir » (`access`), the rights as check boxes, two
+  a line (`windows`, `desktops`, `settings`, `input`; inert at 45 % while
+  it only looks), then « Dessiner à l'écran » on a line of its own (`draw`,
+  off by default, #825), "APPLICATIONS OÙ IL PEUT CLIQUER, FAIRE GLISSER
+  ET TAPER" (`apps`
   as chips with their ✕, « + Ajouter » listing the applications installed
   that are not there yet), « Voir son journal » (the compositor's line
   `mcp-journal`: the bar's journal opens on the focused screen) and

@@ -1486,7 +1486,11 @@ impl Group {
         for (row, moving) in leaving.chain(rows) {
             let mcp = crate::mcp::is_row(row.id);
             let acting = mcp && crate::mcp::row_acting(row.id);
-            let (word, tint) = if mcp {
+            let refused = mcp && crate::mcp::row_refused(row.id);
+            let (word, tint) = if refused {
+                // A refusal in red (#825), the mockup's `span.bad`.
+                (Color::from_rgb8(0xF0, 0x7C, 0x7C), Color::TRANSPARENT)
+            } else if mcp {
                 mcp_colours(acting)
             } else {
                 colours(row.look)
@@ -1549,6 +1553,16 @@ impl Group {
                     &row.name,
                     shown,
                 );
+                if refused {
+                    // The mockup's `.dot.bad`: 9 px of red at its top
+                    // right, ringed in the bar's dark.
+                    let dot = Point::new(x + MARK - 2.5, middle - MARK / 2.0 + 2.5);
+                    f.fill(
+                        &Path::circle(dot, 6.5),
+                        faded(Color::from_rgb8(0x15, 0x1A, 0x28), shown),
+                    );
+                    f.fill(&Path::circle(dot, 4.5), faded(word, shown));
+                }
                 let text = x + MARK + GAP;
                 let (name, said) = (NAME * LINE, WORD * LINE);
                 let top = middle - (name + said) / 2.0;

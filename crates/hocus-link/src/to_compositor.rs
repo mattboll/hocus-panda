@@ -224,6 +224,8 @@ pub enum ToCompositor {
     McpReply { card: u64, reply: crate::McpReply },
     /// "Rendre la main": agent `0`'s actions go on.
     McpHandBack(String),
+    /// The drawing toast's "Effacer": agent `0`'s ink fades (#825).
+    McpErase(String),
     /// The form's "Créer le projet" (docs/design/projects.md §2.1): desktop
     /// `desktop` (from 0) of `output` becomes project `name`, of folder
     /// `folder`. Answered by [`ToShell::ProjectMade`](crate::ToShell::ProjectMade) or

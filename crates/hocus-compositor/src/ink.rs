@@ -14,6 +14,8 @@
 //! each frame. Tiles and dots are drawn by one element per screen, whose
 //! damage is what changed ([`Scene`]).
 
+pub mod agent;
+
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -68,6 +70,35 @@ const GLOW_SIGMA: f64 = 2.5;
 const SHADOW: f64 = 0.6;
 const SHADOW_DOWN: f64 = 1.0;
 const SHADOW_SIGMA: f64 = 0.5;
+/// An agent's marker (#825, the mockup's variant B): 9 px of the agents'
+/// violet at 0.62 with its glow (canvas' `shadowBlur` 22, a deviation of
+/// 11, at 0.85 of it), a 2.4 px light core at 0.95, and under them a dark
+/// stroke 11.5 px wide at 0.30 with its own shadow (6: a deviation of 3,
+/// at 0.45 of it).
+const VIOLET: [f64; 3] = [182.0, 156.0, 255.0];
+const AGENT_WIDTH: f64 = 9.0;
+const AGENT_ALPHA: f64 = 0.62;
+const AGENT_GLOW: f64 = 0.85;
+const AGENT_GLOW_SIGMA: f64 = 11.0;
+const AGENT_CORE: [f64; 3] = [244.0, 239.0, 255.0];
+const AGENT_CORE_WIDTH: f64 = 2.4;
+const AGENT_CORE_ALPHA: f64 = 0.95;
+const AGENT_UNDER: [f64; 3] = [16.0, 10.0, 36.0];
+const AGENT_UNDER_WIDTH: f64 = 11.5;
+const AGENT_UNDER_ALPHA: f64 = 0.30;
+const AGENT_UNDER_SHADOW: [f64; 3] = [8.0, 5.0, 20.0];
+const AGENT_UNDER_SHADOW_ALPHA: f64 = 0.45;
+const AGENT_UNDER_SIGMA: f64 = 3.0;
+
+/// Whose ink a canvas paints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    /// The user's red stroke.
+    User,
+    /// An agent's violet marker.
+    Agent,
+}
+
 /// The arrow's head: two strokes of 22 px back from the tip, at about
 /// 31° (a slope of 0.6) each side; 40 % of a shorter arrow's length.
 const HEAD: f64 = 22.0;
@@ -191,6 +222,10 @@ pub struct Ink {
     scenes: RefCell<HashMap<String, Scene>>,
     /// The laser's dot and the trail's, by scale (in thousandths).
     sprites: RefCell<HashMap<u32, Sprites>>,
+    /// The MCP agents' shapes (#825).
+    pub agent: agent::AgentInk,
+    /// The agents' lines' ids, for the canvases.
+    pub agent_ids: u64,
 }
 
 impl Default for Ink {
@@ -203,6 +238,8 @@ impl Default for Ink {
             canvases: RefCell::default(),
             scenes: RefCell::default(),
             sprites: RefCell::default(),
+            agent: agent::AgentInk::default(),
+            agent_ids: 0,
         }
     }
 }
@@ -300,6 +337,7 @@ impl Ink {
 
     /// Screen `output` went: its strokes with it.
     pub fn output_gone(&mut self, output: &str) {
+        self.agent.output_gone(output);
         self.marks.retain(|m| m.output != output);
         self.canvases.borrow_mut().remove(output);
         self.scenes.borrow_mut().remove(output);
@@ -540,6 +578,7 @@ struct Tile {
 /// A screen's strokes, drawn at its scale.
 #[derive(Debug)]
 struct Canvas {
+    look: Look,
     scale: f64,
     /// A tile's side, in pixels.
     side: i32,
@@ -548,8 +587,9 @@ struct Canvas {
 }
 
 impl Canvas {
-    fn new(scale: f64) -> Self {
+    fn new(scale: f64, look: Look) -> Self {
         Self {
+            look,
             scale,
             side: (f64::from(TILE) * scale).round().max(1.0) as i32,
             tiles: HashMap::new(),
@@ -593,7 +633,7 @@ impl Canvas {
         if dirty.is_empty() {
             return painted;
         }
-        let pen = Pen::new(scale);
+        let pen = Pen::new(scale, self.look);
         let side = self.side;
         // The part of each tile the dirty segments' ink reaches.
         let mut areas: HashMap<(i32, i32), (i32, i32, i32, i32)> = HashMap::new();
@@ -691,33 +731,61 @@ impl Canvas {
 /// The stroke's look at a scale, in pixels.
 #[derive(Debug, Clone, Copy)]
 struct Pen {
+    look: Look,
     radius: f64,
     glow: f64,
     shadow: f64,
     down: f64,
+    /// An agent's: its core's and its dark stroke's half widths.
+    core: f64,
+    under: f64,
     /// Past this distance from the ink (and from it 1 px up), nothing
     /// shows.
     reach: f64,
 }
 
 impl Pen {
-    fn new(scale: f64) -> Self {
-        let radius = WIDTH / 2.0 * scale;
-        let glow = GLOW_SIGMA * scale;
-        let shadow = SHADOW_SIGMA * scale;
-        let down = SHADOW_DOWN * scale;
-        Self {
-            radius,
-            glow,
-            shadow,
-            down,
-            reach: radius + 3.5 * glow + down,
+    fn new(scale: f64, look: Look) -> Self {
+        match look {
+            Look::User => {
+                let radius = WIDTH / 2.0 * scale;
+                let glow = GLOW_SIGMA * scale;
+                let shadow = SHADOW_SIGMA * scale;
+                let down = SHADOW_DOWN * scale;
+                Self {
+                    look,
+                    radius,
+                    glow,
+                    shadow,
+                    down,
+                    core: 0.0,
+                    under: 0.0,
+                    reach: radius + 3.5 * glow + down,
+                }
+            }
+            Look::Agent => {
+                let radius = AGENT_WIDTH / 2.0 * scale;
+                let glow = AGENT_GLOW_SIGMA * scale;
+                Self {
+                    look,
+                    radius,
+                    glow,
+                    shadow: AGENT_UNDER_SIGMA * scale,
+                    down: 0.0,
+                    core: AGENT_CORE_WIDTH / 2.0 * scale,
+                    under: AGENT_UNDER_WIDTH / 2.0 * scale,
+                    reach: radius + 3.5 * glow,
+                }
+            }
         }
     }
 
     /// A pixel at `d` from the ink and `up` from the ink 1 px over it, as
     /// premultiplied B, G, R, A.
     fn pixel(&self, d: f64, up: f64) -> [u8; 4] {
+        if self.look == Look::Agent {
+            return self.agent_pixel(d);
+        }
         let lit = self.lit(d, (self.radius + 0.5 - d).clamp(0.0, 1.0));
         let under = SHADOW * self.lit(up, band(self.radius, up, self.shadow));
         let alpha = lit + under * (1.0 - lit);
@@ -730,12 +798,54 @@ impl Pen {
         ]
     }
 
+    /// An agent's marker at `d` from its line: its layers from the back,
+    /// each over the last.
+    fn agent_pixel(&self, d: f64) -> [u8; 4] {
+        let cover = |half: f64| (half + 0.5 - d).clamp(0.0, 1.0);
+        let layers = [
+            (
+                AGENT_UNDER_SHADOW,
+                AGENT_UNDER_ALPHA * AGENT_UNDER_SHADOW_ALPHA * band(self.under, d, self.shadow),
+            ),
+            (AGENT_UNDER, AGENT_UNDER_ALPHA * cover(self.under)),
+            (
+                VIOLET,
+                AGENT_ALPHA * AGENT_GLOW * band(self.radius, d, self.glow),
+            ),
+            (VIOLET, AGENT_ALPHA * cover(self.radius)),
+            (AGENT_CORE, AGENT_CORE_ALPHA * cover(self.core)),
+        ];
+        let mut c = [0.0f64; 4];
+        for (rgb, a) in layers {
+            over(&mut c, rgb, a);
+        }
+        bgra(c)
+    }
+
     /// The stroke over its glow, at `d` from the ink: how opaque, given
     /// the stroke's own `core` there.
     fn lit(&self, d: f64, core: f64) -> f64 {
         let glow = GLOW * band(self.radius, d, self.glow);
         core + glow * (1.0 - core)
     }
+}
+
+/// Colour `rgb` (0 to 255) at `alpha` laid over `c`, premultiplied red,
+/// green, blue and alpha (0 to 1).
+fn over(c: &mut [f64; 4], rgb: [f64; 3], alpha: f64) {
+    let [r, g, b, a] = c;
+    let alpha = alpha.clamp(0.0, 1.0);
+    let keep = 1.0 - alpha;
+    *r = rgb[0] / 255.0 * alpha + *r * keep;
+    *g = rgb[1] / 255.0 * alpha + *g * keep;
+    *b = rgb[2] / 255.0 * alpha + *b * keep;
+    *a = alpha + *a * keep;
+}
+
+/// Premultiplied red, green, blue and alpha as bytes, blue first.
+fn bgra([r, g, b, a]: [f64; 4]) -> [u8; 4] {
+    let byte = |v: f64| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+    [byte(b), byte(g), byte(r), byte(a)]
 }
 
 /// A band `radius` either side of a line, blurred by `sigma`, at `d` from
@@ -976,10 +1086,108 @@ impl State {
         self.redraw = true;
     }
 
-    /// `Esc` while strokes show: they all go.
+    /// `Esc` while strokes show: they all go, and the agents' ink fades.
     pub(crate) fn ink_clear(&mut self) {
         self.ink.clear();
+        let now = self.now();
+        if self.ink.agent.fade(None, now) {
+            self.mcp.dirty = true;
+        }
         self.redraw = true;
+    }
+
+    /// The agents' shapes on screen `name`, front first: their pictures
+    /// over their strokes, the newest over the oldest; the areas painted
+    /// again.
+    fn agent_ink_pieces<R>(
+        &self,
+        renderer: &mut R,
+        name: &str,
+        scale: f64,
+        size: Size<i32, Physical>,
+        now: Duration,
+        pieces: &mut Vec<(Piece, MemoryRenderBufferRenderElement<R>)>,
+    ) -> Vec<Rectangle<i32, Physical>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        let mut painted = Vec::new();
+        let shown = self.ink.agent.shown_on(name, now, self.reduced_motion());
+        for (group, alpha, lines, placed) in shown.into_iter().rev() {
+            for place in &placed {
+                let Some(sprite) = self.ink.agent.picture(&place.picture, scale) else {
+                    continue;
+                };
+                let width = place.width.map_or(sprite.size.0, |w| {
+                    (sprite.pad + w).clamp(0.0, sprite.size.0)
+                });
+                let logical = (width.round() as i32, sprite.size.1.round() as i32);
+                if logical.0 <= 0 {
+                    continue;
+                }
+                let corner = (
+                    (place.at.0 - sprite.anchor.0) * scale,
+                    (place.at.1 - sprite.anchor.1) * scale,
+                );
+                let src = Rectangle::<f64, Logical>::from_size(
+                    (
+                        f64::from(logical.0) / sprite.size.0 * f64::from(sprite.px.0),
+                        f64::from(sprite.px.1),
+                    )
+                        .into(),
+                );
+                match MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    corner,
+                    &sprite.buffer,
+                    Some(place.alpha as f32),
+                    Some(src),
+                    Some(logical.into()),
+                    Kind::Unspecified,
+                ) {
+                    Ok(element) => pieces.push((Piece::Picture(place.key.0, place.key.1), element)),
+                    Err(err) => tracing::debug!(?err, "an agent's picture could not be drawn"),
+                }
+            }
+            let marks: Vec<Mark> = lines
+                .into_iter()
+                .map(|(id, points)| Mark {
+                    id,
+                    output: name.to_owned(),
+                    shape: Shape::Stroke,
+                    points,
+                })
+                .collect();
+            let marks: Vec<&Mark> = marks.iter().collect();
+            let mut canvases = self.ink.agent.canvases.borrow_mut();
+            let canvas = canvases
+                .entry((group, name.to_owned()))
+                .or_insert_with(|| Canvas::new(scale, Look::Agent));
+            if canvas.scale != scale {
+                *canvas = Canvas::new(scale, Look::Agent);
+            }
+            painted.extend(canvas.catch_up(&marks, (size.w, size.h)));
+            let side = canvas.side;
+            let src =
+                Rectangle::<f64, Logical>::from_size((f64::from(side), f64::from(side)).into());
+            for (&(tx, ty), tile) in &canvas.tiles {
+                let at = (f64::from(tx * side), f64::from(ty * side));
+                match MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    at,
+                    &tile.buffer,
+                    Some(alpha as f32),
+                    Some(src),
+                    Some((TILE, TILE).into()),
+                    Kind::Unspecified,
+                ) {
+                    Ok(element) => pieces.push((Piece::Tile(tile.serial), element)),
+                    Err(err) => tracing::debug!(?err, "a tile of an agent's ink"),
+                }
+            }
+        }
+        painted
     }
 
     /// The laser's keys after a key's press or release.
@@ -1011,6 +1219,9 @@ impl State {
             Showing::Full(None) | Showing::Nothing => {}
         }
         moving |= self.ink.laser_tick(now);
+        moving |= self.ink.agent.tick(now, self.reduced_motion());
+        // An agent's pointer follows its hand.
+        self.mcp_draw_follow(now);
         moving
     }
 
@@ -1055,9 +1266,9 @@ impl State {
             let mut canvases = self.ink.canvases.borrow_mut();
             let canvas = canvases
                 .entry(name.clone())
-                .or_insert_with(|| Canvas::new(scale));
+                .or_insert_with(|| Canvas::new(scale, Look::User));
             if canvas.scale != scale {
-                *canvas = Canvas::new(scale);
+                *canvas = Canvas::new(scale, Look::User);
             }
             painted = canvas.catch_up(&marks, (size.w, size.h));
             let side = canvas.side;
@@ -1079,6 +1290,7 @@ impl State {
                 }
             }
         }
+        painted.extend(self.agent_ink_pieces(renderer, &name, scale, size, now, &mut pieces));
         let mut scenes = self.ink.scenes.borrow_mut();
         if pieces.is_empty() && scenes.get(&name).is_none_or(|s| s.shown.is_empty()) {
             // Nothing shows, nor did.
@@ -1203,6 +1415,8 @@ enum Piece {
     Dot(u64),
     /// A tile, by its serial.
     Tile(u64),
+    /// An agent's name, initial or word, by its mark and kind.
+    Picture(u64, u8),
 }
 
 /// The next tile's serial.
@@ -1388,7 +1602,7 @@ mod tests {
 
     #[test]
     fn the_pen_is_red_on_the_line_and_clear_past_its_reach() {
-        let pen = Pen::new(1.0);
+        let pen = Pen::new(1.0, Look::User);
         let [b, g, r, a] = pen.pixel(0.0, 1.0);
         assert_eq!((r, g, b, a), (242, 84, 91, 255));
         assert_eq!(pen.pixel(pen.reach, pen.reach)[3], 0);

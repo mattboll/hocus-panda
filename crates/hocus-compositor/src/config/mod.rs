@@ -488,10 +488,13 @@ pub struct McpAgent {
     /// Whether it may change settings.
     #[serde(default)]
     pub settings: bool,
-    /// Whether it may click, scroll, type and press keys in the
+    /// Whether it may click, drag, scroll, type and press keys in the
     /// applications of `apps`.
     #[serde(default = "yes")]
     pub input: bool,
+    /// Whether it may draw on the screen, in its colour (#825).
+    #[serde(default)]
+    pub draw: bool,
     /// The applications (app ids, globs) whose windows it may click and
     /// type in and whose trees it reads; none by default.
     #[serde(default)]
@@ -519,6 +522,7 @@ impl McpAgent {
             Right::Desktops => self.desktops,
             Right::Settings => self.settings,
             Right::Input => self.input,
+            Right::Draw => self.draw,
         }
     }
 
@@ -1215,6 +1219,7 @@ mod tests {
                     desktops: true,
                     settings: true,
                     input: true,
+                    draw: false,
                     apps: Vec::new(),
                     client: None,
                     since: None,
@@ -1226,6 +1231,7 @@ mod tests {
                     desktops: true,
                     settings: false,
                     input: true,
+                    draw: false,
                     apps: Vec::new(),
                     client: None,
                     since: None,
@@ -1240,6 +1246,7 @@ mod tests {
         use hocus_agents::mcp::Right;
         assert!(!c.holds(Right::Windows) && c.holds(Right::Desktops));
         assert!(!c.holds(Right::Settings) && !c.holds(Right::Input));
+        assert!(!c.holds(Right::Draw), "drawing is off by default");
         assert_eq!(c.client.as_deref(), Some("claude-code"));
         assert!(super::app_glob("org.mozilla.*", "org.mozilla.firefox"));
         assert!(super::app_glob("KITTY", "kitty"));

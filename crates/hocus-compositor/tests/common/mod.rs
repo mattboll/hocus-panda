@@ -652,7 +652,7 @@ pub enum Pointed {
 }
 
 /// What an acted client gets from a seat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Seated {
     /// Its pointer came in.
     Enter,
@@ -660,6 +660,8 @@ pub enum Seated {
     Press(u32),
     Release,
     Axis,
+    /// Its pointer moved there (the surface's logical pixels).
+    Motion(f64, f64),
     /// Its keyboard came in (`true`) or left.
     Focus(bool),
     /// A key (its evdev code), pressed or released.
@@ -2338,6 +2340,11 @@ impl Dispatch<wl_pointer::WlPointer, OfSeat> for Client {
                 }
             }
             wl_pointer::Event::Axis { .. } => Seated::Axis,
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => Seated::Motion(surface_x, surface_y),
             _ => return,
         };
         let _ = client.events.send(Event::OnSeat(of.name.clone(), seated));
