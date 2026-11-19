@@ -199,6 +199,7 @@ impl State {
             record,
             app: meeting.app.clone(),
             remote: self.config.pipewire_remote.clone(),
+            microphone: self.real_microphone(),
         };
         let dir = plan.dir.clone();
         let capture = match Capture::start(plan, back) {

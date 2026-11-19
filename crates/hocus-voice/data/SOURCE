@@ -1,0 +1,10 @@
+speech.wav: three seconds of a voice reading, for the voice's tests
+(docs/design/voice.md), 48 kHz, mono, 16-bit. Cut (from 0:28 to 0:31)
+and resampled from chapter 1 of the LibriVox recording of « Aventures
+d'Alice au Pays des Merveilles » (Lewis Carroll, translated by Henri Bué),
+read in French by a LibriVox volunteer, in the public domain (LibriVox
+recordings are dedicated to it; the item is marked Public Domain Mark
+1.0):
+
+    https://archive.org/details/alice_au_pays_des_merveilles_1811_librivox
+    https://archive.org/download/alice_au_pays_des_merveilles_1811_librivox/aliceaupays_01_carroll.mp3

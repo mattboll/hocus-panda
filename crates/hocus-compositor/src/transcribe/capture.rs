@@ -4,7 +4,10 @@
 //! nothing came).
 //!
 //! - **Moi**: the default source, as the recording's microphone is (the
-//!   session manager links it).
+//!   session manager links it); with the Hocuspanda microphone there
+//!   (#619, lot 5), the real one it reads, named as the stream's target:
+//!   the voice as it is, never through its effect, even when Hocuspanda
+//!   was made the default microphone.
 //! - **The call**: the output streams of the application in the call (by
 //!   its streams' key, `hocus_sound::app_key`), linked to this stream here,
 //!   as they come and go: not the whole desktop's sound, so music and
@@ -62,6 +65,9 @@ pub struct Plan {
     /// The call's application's key.
     pub app: String,
     pub remote: Option<PathBuf>,
+    /// The real microphone's node name, from the Hocuspanda microphone's
+    /// program, if it runs: Moi's target.
+    pub microphone: Option<String>,
 }
 
 impl Capture {
@@ -72,11 +78,12 @@ impl Capture {
         let (me, call) = (Queue::default(), Queue::default());
         let (quit, quit_rx) = pw::channel::channel::<()>();
         let (remote, app) = (plan.remote.clone(), plan.app.clone());
+        let microphone = plan.microphone.clone();
         let (me_in, call_in) = (me.clone(), call.clone());
         std::thread::Builder::new()
             .name("meeting's sound".to_owned())
             .spawn(move || {
-                if let Err(err) = streams(remote, &app, &me_in, &call_in, quit_rx) {
+                if let Err(err) = streams(remote, &app, microphone, &me_in, &call_in, quit_rx) {
                     tracing::warn!(%err, "no sound from PipeWire: the meeting's tracks are silent");
                 }
             })?;
@@ -216,6 +223,7 @@ impl Graph {
 fn streams(
     remote: Option<PathBuf>,
     app: &str,
+    microphone: Option<String>,
     me: &Queue,
     call: &Queue,
     quit: pw::channel::Receiver<()>,
@@ -229,8 +237,8 @@ fn streams(
         }
     });
     let core = context.connect_rc(props)?;
-    let me_stream = stream(&core, ME_NODE, me.clone())?;
-    let call_stream = stream(&core, CALL_NODE, call.clone())?;
+    let me_stream = stream(&core, ME_NODE, me.clone(), microphone.as_deref())?;
+    let call_stream = stream(&core, CALL_NODE, call.clone(), None)?;
     let registry = core.get_registry_rc()?;
     let graph = Rc::new(RefCell::new(Graph::default()));
     let app = app.to_owned();
@@ -333,13 +341,23 @@ fn link(core: &pw::core::CoreRc, graph: &mut Graph) {
     }
 }
 
+/// What Moi's stream is linked to: the real microphone the Hocuspanda
+/// one reads, when it runs (`target.object`); else the default source.
+fn me_target(microphone: Option<&str>) -> Option<(&'static str, String)> {
+    microphone
+        .filter(|m| !m.is_empty() && !m.starts_with(hocus_link::voice::VOICE_PREFIX))
+        .map(|m| ("target.object", m.to_owned()))
+}
+
 /// A capture stream `node`, its samples into `queue`: the microphone's
-/// connected by the session manager to the default source; the call's
-/// left to [`link`], its ports made by itself.
+/// connected by the session manager to the default source, or to the real
+/// microphone `microphone`; the call's left to [`link`], its ports made by
+/// itself.
 fn stream(
     core: &pw::core::CoreRc,
     node: &str,
     queue: Queue,
+    microphone: Option<&str>,
 ) -> Result<(pw::stream::StreamRc, pw::stream::StreamListener<()>), pw::Error> {
     let mut props = properties! {
         *pw::keys::MEDIA_TYPE => "Audio",
@@ -354,6 +372,9 @@ fn stream(
         },
     };
     let call = node == CALL_NODE;
+    if let Some((key, target)) = me_target(microphone).filter(|_| !call) {
+        props.insert(key, target);
+    }
     if call {
         props.insert("node.autoconnect", "false");
         props.insert(
@@ -426,6 +447,21 @@ fn format_pod() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Moi records the real microphone the Hocuspanda one reads, never
+    /// the Hocuspanda one, its voice transformed (#619, lot 5).
+    #[test]
+    fn moi_records_the_real_microphone() {
+        assert_eq!(
+            me_target(Some("alsa_input.pci-0000_00_1f.3.analog-stereo")),
+            Some((
+                "target.object",
+                "alsa_input.pci-0000_00_1f.3.analog-stereo".to_owned()
+            ))
+        );
+        assert_eq!(me_target(Some(hocus_link::voice::VOICE_NODE)), None);
+        assert_eq!(me_target(None), None);
+    }
 
     #[test]
     fn the_calls_own_ports_are_linked_its_monitors_only_without_them() {

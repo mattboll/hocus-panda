@@ -161,6 +161,7 @@ mod tray;
 mod typing;
 mod unplug;
 mod unplug_clients;
+mod voice;
 mod wifi;
 mod window_effects;
 mod window_frame;

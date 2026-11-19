@@ -457,6 +457,21 @@ impl Controller {
         tracing::trace!(?event, phase = ?self.phase, "popover event");
         let mut effects = Vec::new();
         match event {
+            // The microphone's tile (#619, lot 5): a click opens the camera
+            // and microphone's window, a hover the sign's popover, as the
+            // rest of the sign: its mute stays at hand.
+            Event::ItemEnter {
+                bar,
+                item: Item::Microphone,
+                rect,
+            } => effects.extend(self.handle(
+                Event::ItemEnter {
+                    bar,
+                    item: Item::InUse,
+                    rect,
+                },
+                now,
+            )),
             Event::ItemEnter { bar, item, rect } => match &mut self.phase {
                 Phase::Closed if self.bars.get(&bar).is_some_and(|p| item.hovers(p.form)) => {
                     self.phase = Phase::Hovering {
@@ -1238,6 +1253,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::User
         | Item::InUse
         | Item::Camera
+        | Item::Microphone
         | Item::MeetingMark
         | Item::Tasks
         | Item::TasksMore

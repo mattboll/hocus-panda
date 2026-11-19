@@ -286,6 +286,19 @@ Vulkan's loader that driver only). The window's screenshots:
 HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor camera::screenshots --run-ignored only
 ```
 
+The Hocuspanda microphone (docs/design/voice.md, crate `hocus-voice`):
+the compositor starts `hocus-voice` as it starts the camera (a virtual
+terminal, else `--voice`, or `Config::voice_program`); its "Hocuspanda"
+source appears on PipeWire's default socket, and a reader of it reads the
+default microphone of that PipeWire: next to a live session, give it a
+PipeWire of its own. Its tests (`crates/hocus-compositor/tests/voice.rs`)
+start a PipeWire of their own with a fake microphone of the test's; the
+voices' own tests are `hocus-voice`'s. The listening samples:
+
+```sh
+HOCUS_VOICE_SAMPLES=/tmp/voices cargo nextest run -p hocus-voice --run-ignored only listening_samples
+```
+
 The system's authentication dialog (docs/design/polkit.md): the shell is
 the session's polkit agent on the system bus only with `HOCUS_AUTH_AGENT`
 set, which the compositor sets on a virtual terminal, never nested. Its
@@ -441,7 +454,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex

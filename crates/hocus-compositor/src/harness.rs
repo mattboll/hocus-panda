@@ -469,6 +469,17 @@ impl Headless {
         self.app.state.camera_lot3()
     }
 
+    /// Whether the Hocuspanda microphone's source is on the graph, whether
+    /// it is read, and the real microphone it reads or would read.
+    pub fn voice(&self) -> (bool, bool, Option<String>) {
+        self.app.state.voice_info()
+    }
+
+    /// The voice the Hocuspanda microphone makes, once made.
+    pub fn voice_made(&self) -> Option<hocus_link::Voice> {
+        self.app.state.voice_made()
+    }
+
     /// Whether the Hocuspanda camera's source is on the graph.
     pub fn camera_ready(&self) -> bool {
         self.app.state.camera.ready

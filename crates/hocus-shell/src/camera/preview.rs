@@ -39,6 +39,7 @@ pub fn start() {
         if first {
             tracing::debug!("the camera's preview shows a frame");
             crate::popover::changed(crate::popover::Item::Camera);
+            crate::popover::changed(crate::popover::Item::Microphone);
         }
     });
     tracing::debug!(started = preview.is_some(), "the camera's preview");

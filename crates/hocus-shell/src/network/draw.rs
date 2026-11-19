@@ -521,6 +521,7 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::User
                             | Item::InUse
                             | Item::Camera
+                            | Item::Microphone
                             | Item::Music
                             | Item::Tray(_)
                             | Item::Meeting
