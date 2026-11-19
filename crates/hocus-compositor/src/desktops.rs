@@ -1003,6 +1003,7 @@ impl crate::State {
         self.end_popup_grab();
         // A window being dragged goes along.
         let carried = carried.or(self.moving);
+        self.take_places(output, to);
         for id in self.windows_on(output) {
             // On all desktops (#723): on the one shown now, where it is.
             if self.model.is_everywhere(id) {
@@ -1035,15 +1036,53 @@ impl crate::State {
                 self.hide(id);
             }
         }
-        // The focus goes to the desktop's window on top.
+        // The focus goes to the window carried along, else to the
+        // desktop's window on top: it was focused there last, a window on
+        // all desktops included (#888). That one keeps its place among
+        // the windows leaving, which slide in front of it as they were.
+        let carried = carried.filter(|id| self.model.is_shown(*id));
+        if carried.is_some() {
+            self.focus(carried);
+            return;
+        }
         let top =
-            carried.filter(|id| self.model.is_shown(*id)).or_else(|| {
-                self.model.stack().iter().rev().copied().find(|id| {
-                    self.model.is_shown(*id) && self.output_of(*id).as_ref() == Some(output)
-                })
+            self.model.stack().iter().rev().copied().find(|id| {
+                self.model.is_shown(*id) && self.output_of(*id).as_ref() == Some(output)
             });
-        let focus = top.or_else(|| self.model.focused().filter(|id| self.model.is_shown(*id)));
-        self.focus(focus);
+        match top {
+            Some(top) => self.focus_raising(Some(top), !self.model.is_everywhere(top)),
+            None => self.focus(self.model.focused().filter(|id| self.model.is_shown(*id))),
+        }
+    }
+
+    /// `output`'s windows on all desktops leave the desktop they are on
+    /// for `to` (#888): each remembers its place in the stack of the one
+    /// it leaves and takes the one it had in `to`'s, before the strip
+    /// slides, so that `to`'s windows slide in front of it or behind it as
+    /// they were.
+    fn take_places(&mut self, output: &Output, to: usize) {
+        let on = self.windows_on(output);
+        let everywhere: Vec<WindowId> = on
+            .iter()
+            .copied()
+            .filter(|w| self.model.is_everywhere(*w))
+            .collect();
+        let Some(from) = everywhere.first().map(|w| self.model.desktop(*w)) else {
+            return;
+        };
+        if from == to {
+            return;
+        }
+        let of = |desktop: usize| -> Vec<WindowId> {
+            on.iter()
+                .copied()
+                .filter(|w| !self.model.is_everywhere(*w) && self.model.desktop(*w) == desktop)
+                .collect()
+        };
+        let (leaving, arriving) = (of(from), of(to));
+        self.model
+            .take_places(&everywhere, from, &leaving, to, &arriving);
+        self.restack();
     }
 
     /// The desktop on that side of the current one, on the screen under
