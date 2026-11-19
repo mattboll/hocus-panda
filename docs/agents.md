@@ -78,15 +78,18 @@ a tab: `tests passed [N]` or `tests failed`.
 The bar names each agent by the best of what its sources know, never by
 its tool ("claude", "Codex"):
 
-1. **herdr's name**, for an agent herdr sees (its own, or a Claude Code or
+1. **Its Claude Code session's own name**, given with `/rename`: the last
+   `custom-title` line of the transcript its hooks name, read as each hook
+   is heard, so a rename shows at the session's next hook (#886).
+2. **herdr's name**, for an agent herdr sees (its own, or a Claude Code or
    Codex running in one of its panes): its tab's own name when the tab
    was given one ("refacto"), else its workspace's label ("hocus-panda";
    a tab herdr labels with its place, "1", "2", has no name of its own).
    Renaming the workspace or the tab in herdr renames the row at once.
-2. **Its project's folder**: the last part of the hook's `cwd` (the first
+3. **Its project's folder**: the last part of the hook's `cwd` (the first
    event's, kept when later events have none or a directory the agent went
    down into), or the command's `NAME`.
-3. **Its process's working directory**, when no event of its session
+4. **Its process's working directory**, when no event of its session
    carries a `cwd`: the last part of `/proc/PID/cwd`.
 
 ## The line, for tools that write it themselves

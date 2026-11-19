@@ -34,6 +34,7 @@ pub mod hooks;
 pub mod mcp;
 pub mod process;
 pub mod runs;
+pub mod titles;
 pub mod tools;
 pub mod watch;
 
@@ -606,16 +607,19 @@ pub fn folder(path: &str) -> Option<String> {
 }
 
 /// The name an agent shows under (docs/agents.md), from the best of what
-/// its sources know: herdr's (its tab's own name, else its workspace's
-/// label); else its project's folder (a hook's `cwd`, or the command's
-/// name); else its process's working directory's. Never its tool's name: herdr's agent kind
-/// ("claude") named every agent alike (#497).
+/// its sources know: its session's own name, given with `/rename`
+/// ([`titles`], #886); else herdr's (its tab's own name, else its
+/// workspace's label); else its project's folder (a hook's `cwd`, or the
+/// command's name); else its process's working directory's. Never its
+/// tool's name: herdr's agent kind ("claude") named every agent alike
+/// (#497).
 pub fn agent_name(
+    custom: Option<&str>,
     herdr: Option<&str>,
     project: Option<&str>,
     process: Option<&str>,
 ) -> Option<String> {
-    [herdr, project, process]
+    [custom, herdr, project, process]
         .into_iter()
         .flatten()
         .map(name_text)
@@ -884,20 +888,29 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_is_named_by_herdr_else_its_folder_else_its_process_never_its_tool() {
+    fn an_agent_is_named_by_its_rename_else_herdr_else_its_folder_else_its_process() {
         assert_eq!(
-            agent_name(Some("refacto"), Some("hocus-panda"), Some("x")),
+            agent_name(
+                Some("revue"),
+                Some("refacto"),
+                Some("hocus-panda"),
+                Some("x")
+            ),
+            Some("revue".into())
+        );
+        assert_eq!(
+            agent_name(None, Some("refacto"), Some("hocus-panda"), Some("x")),
             Some("refacto".into())
         );
         assert_eq!(
-            agent_name(None, Some("infra"), Some("home")),
+            agent_name(None, None, Some("infra"), Some("home")),
             Some("infra".into())
         );
         assert_eq!(
-            agent_name(Some(" "), Some(""), Some("site")),
+            agent_name(Some(""), Some(" "), Some(""), Some("site")),
             Some("site".into())
         );
-        assert_eq!(agent_name(None, None, None), None);
+        assert_eq!(agent_name(None, None, None, None), None);
         assert_eq!(folder("/home/alex/hocus-panda"), Some("hocus-panda".into()));
         assert_eq!(folder("/home/alex/infra/"), Some("infra".into()));
         assert_eq!(folder("/"), None);

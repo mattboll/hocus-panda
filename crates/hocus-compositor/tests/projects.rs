@@ -2273,3 +2273,404 @@ fn each_agent_of_a_terminal_with_two_windows_is_in_the_window_its_prompt_was_typ
     let _ = terminal.wait();
     Ok(())
 }
+
+// --- One herdr session per project (#887) ----------------------------------------------
+//
+// herdr's named sessions, each a fake herdr on its own socket
+// (`sessions/NAME/herdr.sock` in the test's home), their servers, panes
+// and clients in the test's own `/proc`; each session's terminal a
+// stand-in of its own process, its client's command line naming the
+// session.
+
+/// The processes of the test's own `/proc`, above the kernel's largest pid
+/// (`PID_MAX_LIMIT`, 2^22): none is the machine's.
+const ALPHA_SERVER: u32 = 4_300_001;
+const ALPHA_PANE: u32 = 4_300_002;
+const ALPHA_SHELL: u32 = 4_300_003;
+const ALPHA_CLIENT: u32 = 4_300_004;
+const BETA_SERVER: u32 = 4_300_011;
+const BETA_PANE: u32 = 4_300_012;
+const BETA_SHELL: u32 = 4_300_013;
+const BETA_CLIENT: u32 = 4_300_014;
+
+/// Process `pid` in `home`'s own `/proc`: its `stat` and its `cmdline`.
+fn fake_process(
+    home: &Path,
+    pid: u32,
+    name: &str,
+    parent: u32,
+    argv: &[&str],
+) -> anyhow::Result<()> {
+    let dir = home.join("proc").join(pid.to_string());
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join("stat"),
+        format!("{pid} ({name}) S {parent} {pid} {pid} 0 -1"),
+    )?;
+    let mut cmdline = Vec::new();
+    for arg in argv {
+        cmdline.extend_from_slice(arg.as_bytes());
+        cmdline.push(0);
+    }
+    std::fs::write(dir.join("cmdline"), cmdline)?;
+    Ok(())
+}
+
+/// The agents' places of a test whose home is `home`, its programs in
+/// `bin`: herdr's sockets and its clients there, never the user's.
+fn herdr_places(home: &Path, bin: &Path) -> hocus_agents::tools::Places {
+    hocus_agents::tools::Places {
+        home: home.to_path_buf(),
+        config_home: home.join(".config"),
+        codex_home: home.join(".codex"),
+        path: vec![bin.to_path_buf()],
+        herdr_socket: home.join(".config/herdr/herdr.sock"),
+        processes: home.join("proc"),
+        hocus: common::hocus_program(),
+        state_dir: None,
+    }
+}
+
+/// A herdr session, `name`, faked: its server and its pane's Claude Code
+/// (`pane`) in the test's `/proc`, one agent in workspace `label`.
+fn herdr_session(
+    home: &Path,
+    name: &str,
+    label: &str,
+    (server, pane): (u32, u32),
+) -> anyhow::Result<common::herdr::Heard> {
+    fake_process(home, server, "herdr", 1, &["herdr", "server"])?;
+    fake_process(home, pane, "claude", server, &["claude"])?;
+    let heard = common::herdr::Heard::default();
+    let held: common::herdr::Herdr = std::sync::Arc::new(std::sync::Mutex::new(
+        common::herdr::FakeHerdr::with(label, &["1"], None),
+    ));
+    // Its thread waits on its socket for the test's life.
+    let _thread = common::herdr::fake_herdr(
+        &home
+            .join(".config/herdr/sessions")
+            .join(name)
+            .join("herdr.sock"),
+        pane,
+        held,
+        heard.clone(),
+    )?;
+    Ok(heard)
+}
+
+/// A terminal stand-in of its own process, a window of `foot` titled
+/// `title`, its herdr client (`client`, its command line `argv`) under a
+/// shell of its (`shell`) in the test's `/proc`; its window's id.
+fn herdr_terminal(
+    hp: &mut Headless,
+    home: &Path,
+    title: &str,
+    (shell, client): (u32, u32),
+    argv: &[&str],
+) -> anyhow::Result<(std::process::Child, WindowId)> {
+    let before: Vec<WindowId> = hp.all_windows().iter().map(|w| w.0).collect();
+    let terminal = std::process::Command::new(std::env::current_exe()?)
+        .args(["--exact", "projects::browser_program", "--nocapture"])
+        .env("WAYLAND_DISPLAY", hp.socket())
+        .env(APP_ID, "foot")
+        .env(BROWSER_WINDOWS, title)
+        .spawn()?;
+    fake_process(home, shell, "zsh", terminal.id(), &["/usr/bin/zsh"])?;
+    fake_process(home, client, "herdr", shell, argv)?;
+    let shown = hp.dispatch_until(WAIT, |hp| {
+        hp.all_windows().iter().any(|w| !before.contains(&w.0))
+    })?;
+    anyhow::ensure!(shown, "no terminal: {:?}", hp.all_windows());
+    let id = hp
+        .all_windows()
+        .iter()
+        .map(|w| w.0)
+        .find(|w| !before.contains(w))
+        .context("its window")?;
+    Ok((terminal, id))
+}
+
+/// Runs until agent `name`'s window is `window`; its id.
+fn agent_in(hp: &mut Headless, name: &str, window: WindowId) -> anyhow::Result<u64> {
+    for _ in 0..100 {
+        if let Some(agent) = hp
+            .agents()
+            .iter()
+            .find(|a| a.name == name && a.window == window.0)
+        {
+            return Ok(agent.id);
+        }
+        wait(hp, Duration::from_millis(100))?;
+    }
+    anyhow::bail!("{name} not in window {}: {:?}", window.0, hp.agents())
+}
+
+/// Two named herdr sessions, each in a terminal of its own: each
+/// session's agents are in its own terminal's window, told apart by its
+/// client's command line (`herdr --session alpha`, `herdr session attach
+/// beta`), and going to one selects its pane in its own session only.
+#[test]
+fn each_herdr_sessions_agents_are_in_its_own_terminals_window() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin)?;
+    let alpha = herdr_session(&home, "alpha", "site", (ALPHA_SERVER, ALPHA_PANE))?;
+    let beta = herdr_session(&home, "beta", "blog", (BETA_SERVER, BETA_PANE))?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        agent_places: Some(herdr_places(&home, &bin)),
+        ..config_with_apps(&places)
+    })?;
+    let (mut one, a) = herdr_terminal(
+        &mut hp,
+        &home,
+        "herdr --session alpha",
+        (ALPHA_SHELL, ALPHA_CLIENT),
+        &["herdr", "--session", "alpha"],
+    )?;
+    let (mut two, b) = herdr_terminal(
+        &mut hp,
+        &home,
+        "herdr session attach beta",
+        (BETA_SHELL, BETA_CLIENT),
+        &["/home/alex/.local/bin/herdr", "session", "attach", "beta"],
+    )?;
+    hp.place_window(a, hocus_compositor::model::Rect::new(100, 100, 500, 400));
+    hp.place_window(b, hocus_compositor::model::Rect::new(900, 100, 500, 400));
+    // The keyboard moving looks for herdr's clients again.
+    hp.focus_window(a);
+    hp.focus_window(b);
+    agent_in(&mut hp, "site", a)?;
+    let blog = agent_in(&mut hp, "blog", b)?;
+    // From the other window, its row: its own window, its own session's
+    // pane.
+    hp.focus_window(a);
+    hp.go_to_agent(blog);
+    let wanted = r#"pane.focus {"pane_id":"w1:p1"}"#;
+    let asked = hp.dispatch_until(WAIT, |_| {
+        beta.lock().is_ok_and(|h| h.iter().any(|l| l == wanted))
+    })?;
+    anyhow::ensure!(asked, "beta was asked {:?}", beta.lock().map(|h| h.clone()));
+    let focused = hp.dispatch_until(WAIT, |hp| hp.focused_window() == Some(b))?;
+    anyhow::ensure!(focused, "the keyboard on {:?}", hp.focused_window());
+    assert!(
+        alpha
+            .lock()
+            .is_ok_and(|h| !h.iter().any(|l| l.starts_with("pane.focus"))),
+        "alpha was asked {:?}",
+        alpha.lock().map(|h| h.clone())
+    );
+    drop(hp);
+    let _ = one.wait();
+    let _ = two.wait();
+    Ok(())
+}
+
+/// A project whose desktop holds herdr session alpha's terminal owns that
+/// session and its agents, not session beta's on another desktop; it
+/// closes keeping one herdr session, not a terminal per agent, and
+/// reopens one terminal running `herdr session attach alpha` at its
+/// place, its agents still running in herdr's server.
+#[test]
+fn a_project_keeps_its_herdr_session_and_attaches_to_it_again() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    let bin = home.join("bin");
+    let folder = places.folder.canonicalize()?;
+    agent_terminal(&places, &bin, &home)?;
+    std::fs::create_dir_all(&bin)?;
+    // A fake herdr program: it writes its arguments.
+    let program = bin.join("herdr");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
+            places.root.join("marks/herdr").display()
+        ),
+    )?;
+    std::fs::set_permissions(
+        &program,
+        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+    )?;
+    let transcript = home.join("t.jsonl");
+    std::fs::write(&transcript, "{}\n")?;
+    herdr_session(&home, "alpha", "site", (ALPHA_SERVER, ALPHA_PANE))?;
+    herdr_session(&home, "beta", "blog", (BETA_SERVER, BETA_PANE))?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        agent_places: Some(herdr_places(&home, &bin)),
+        ..config_with_apps(&places)
+    })?;
+    let socket = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-site", &folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let (mut one, a) = herdr_terminal(
+        &mut hp,
+        &home,
+        "herdr --session alpha",
+        (ALPHA_SHELL, ALPHA_CLIENT),
+        &["herdr", "--session", "alpha"],
+    )?;
+    let (mut two, b) = herdr_terminal(
+        &mut hp,
+        &home,
+        "herdr session attach beta",
+        (BETA_SHELL, BETA_CLIENT),
+        &["herdr", "session", "attach", "beta"],
+    )?;
+    hp.place_window(a, hocus_compositor::model::Rect::new(100, 100, 500, 400));
+    // Beta's terminal to the second desktop.
+    hp.focus_window(b);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_2]);
+    let away = hp.dispatch_until(WAIT, |hp| {
+        hp.all_windows().iter().any(|w| w.0 == b && w.2 == 1)
+    })?;
+    anyhow::ensure!(away, "{:?}", hp.all_windows());
+    hp.focus_window(a);
+    // Each session's Claude Code, as its hooks say it: its process is its
+    // pane's.
+    for (session, pid, name) in [
+        ("aaaa-1111", ALPHA_PANE, "site"),
+        ("bbbb-2222", BETA_PANE, "blog"),
+    ] {
+        let said = format!(
+            "agent claude-code {session} working {pid} {name}\tcwd {}\ttranscript {}\n",
+            folder.display(),
+            transcript.display()
+        );
+        UnixStream::connect(&socket)?.write_all(said.as_bytes())?;
+    }
+    agent_in(&mut hp, "site", a)?;
+    agent_in(&mut hp, "blog", b)?;
+    // Each one agent, its hooks' and its pane's.
+    let mut merged = 0;
+    for _ in 0..100 {
+        merged = hp
+            .agents()
+            .iter()
+            .filter(|a| a.source == "claude-code+herdr")
+            .count();
+        if merged == 2 {
+            break;
+        }
+        wait(&mut hp, Duration::from_millis(100))?;
+    }
+    assert_eq!(merged, 2, "{:?}", hp.agents());
+
+    hp.project_close("hocus-site")
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    closed(&mut hp, "hocus-site")?;
+    let _ = one.wait();
+    assert_eq!(
+        hp.project_herdr("hocus-site"),
+        [("alpha".to_owned(), vec!["aaaa-1111".to_owned()])]
+    );
+    assert!(
+        hp.project_agents("hocus-site").is_empty(),
+        "{:?}",
+        hp.project_agents("hocus-site")
+    );
+    let file = places
+        .root
+        .join("state/hocuspanda/projects.d/hocus-site.toml");
+    let written = hp.dispatch_until(WAIT, |_| file.exists())?;
+    anyhow::ensure!(written, "no contents' file");
+    let text = std::fs::read_to_string(&file)?;
+    assert!(text.contains("[window.herdr]"), "{text}");
+    assert!(text.contains("session = \"alpha\""), "{text}");
+    assert!(!text.contains("bbbb-2222"), "{text}");
+    assert!(!text.contains("[window.agent]"), "{text}");
+
+    // Reopened: one terminal, attaching to alpha again.
+    let before = marks_of(&places, "foot").len();
+    hp.project_open("hocus-site", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let back = hp.dispatch_until(WAIT, |hp| !hp.project_coming_back("hocus-site"))?;
+    anyhow::ensure!(back, "not back: {:?}", hp.all_windows());
+    let marks = marks_of(&places, "foot");
+    assert_eq!(marks.len(), before + 1, "{marks:?}");
+    let (args, _) = marks.last().context("no terminal")?;
+    assert!(
+        args.ends_with("-c herdr session attach alpha; exec $SHELL"),
+        "{args}"
+    );
+    let attached = hp.dispatch_until(WAIT, |_| places.root.join("marks/herdr").exists())?;
+    anyhow::ensure!(attached, "herdr never ran");
+    assert_eq!(
+        std::fs::read_to_string(places.root.join("marks/herdr"))?,
+        "session attach alpha\n"
+    );
+    assert!(
+        hp.project_not_back().is_none(),
+        "{:?}",
+        hp.project_not_back()
+    );
+    drop(hp);
+    let _ = two.wait();
+    Ok(())
+}
+
+/// A project's herdr session gone as it reopens (its server stopped): its
+/// agents' conversations resume each in a terminal of its own, as before
+/// herdr's sessions were kept.
+#[test]
+fn a_herdr_session_gone_resumes_its_agents_each_in_a_terminal() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    let bin = home.join("bin");
+    let folder = places.folder.canonicalize()?;
+    let transcript = home.join(format!(".claude/projects/x/{SESSION}.jsonl"));
+    std::fs::create_dir_all(transcript.parent().context("its folder")?)?;
+    std::fs::write(&transcript, "{}\n")?;
+    agent_terminal(&places, &bin, &home)?;
+    closed_project(
+        &places,
+        "hocus-site",
+        &folder,
+        &format!(
+            "{}[window.herdr]\nsession = \"alpha\"\n\n[[window.herdr.agents]]\n\
+             tool = \"claude-code\"\nsession = \"{SESSION}\"\nfolder = \"{}\"\n\
+             transcript = \"{}\"\n",
+            saved("foot"),
+            folder.display(),
+            transcript.display()
+        ),
+    )?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        agent_places: Some(herdr_places(&home, &bin)),
+        ..config_with_apps(&places)
+    })?;
+    let socket = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    fake_claude(&places, &bin, &socket)?;
+    hp.project_open("hocus-site", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let back = hp.dispatch_until(WAIT, |hp| !hp.project_coming_back("hocus-site"))?;
+    anyhow::ensure!(back, "not back: {:?}", hp.agents());
+    let marks = marks_of(&places, "foot");
+    let (args, dir) = marks.last().context("no terminal")?;
+    assert_eq!(marks.len(), 1, "{marks:?}");
+    assert!(
+        args.ends_with(&format!("-c claude --resume {SESSION}; exec $SHELL")),
+        "{args}"
+    );
+    assert_eq!(dir, &folder);
+    assert_eq!(
+        marks_of(&places, "claude"),
+        [(format!("--resume {SESSION}"), folder.clone())]
+    );
+    assert!(
+        hp.project_not_back().is_none(),
+        "{:?}",
+        hp.project_not_back()
+    );
+    Ok(())
+}

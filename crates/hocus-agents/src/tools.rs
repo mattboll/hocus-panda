@@ -121,6 +121,22 @@ impl Places {
         self.config_home.join("herdr")
     }
 
+    /// Where herdr's named sessions are, each a directory with its socket
+    /// (`sessions/NAME/herdr.sock`, herdr's "Socket API").
+    pub fn herdr_sessions(&self) -> PathBuf {
+        self.herdr_dir().join("sessions")
+    }
+
+    /// herdr session `session`'s socket: the default one's is
+    /// [`Self::herdr_socket`].
+    pub fn herdr_socket_of(&self, session: &str) -> PathBuf {
+        if session == crate::herdr::DEFAULT {
+            self.herdr_socket.clone()
+        } else {
+            self.herdr_sessions().join(session).join("herdr.sock")
+        }
+    }
+
     /// Whether a program `name` is in `PATH`.
     pub fn has_program(&self, name: &str) -> bool {
         self.path.iter().any(|dir| is_program(&dir.join(name)))

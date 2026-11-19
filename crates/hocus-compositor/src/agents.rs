@@ -16,7 +16,10 @@
 //! - **herdr** ([`hocus_agents::herdr`]), when it runs and is not declined.
 //!
 //! The same agent seen by two sources (a Claude Code in a herdr pane) is
-//! one: its process is among the pane's. An agent is named by herdr (its
+//! one: its process is among the pane's. An agent is named by its Claude
+//! Code session's own name, given with `/rename` (its transcript's last
+//! `custom-title`, read off the loop by the control socket's thread,
+//! #886), else by herdr (its
 //! tab's own name, else its workspace's label), else by its project's
 //! folder, else by its process's working directory
 //! ([`hocus_agents::agent_name`]); never by its tool. An agent is
@@ -103,17 +106,25 @@ pub const GOOD_NEWS: Duration = Duration::from_secs(60);
 /// What the sources hand the loop.
 #[derive(Debug)]
 pub enum Heard {
-    /// A report, its process's ancestry, nearest first, and the program of
-    /// an agent whose conversation resumes, as its process finds it
-    /// (docs/design/projects.md §8.1).
-    Report(Report, Vec<u32>, Option<std::path::PathBuf>),
+    /// A report, its process's ancestry, nearest first, the program of an
+    /// agent whose conversation resumes, as its process finds it
+    /// (docs/design/projects.md §8.1), and its session's own name as its
+    /// transcript says it now, when the report gives a Claude Code
+    /// transcript (#886).
+    Report(
+        Report,
+        Vec<u32>,
+        Option<std::path::PathBuf>,
+        Option<Option<hocus_agents::titles::CustomTitle>>,
+    ),
     /// Good news (`hocus celebrate`), and its process's ancestry.
     Celebrate(hocus_agents::Celebration, Vec<u32>),
     Tools(Snapshot),
-    Herdr(News),
+    /// What a herdr session, by its name, said.
+    Herdr(String, News),
     /// herdr's clients looked for again ([`herdr::terminal_processes`]),
     /// and the go-to that waited for them.
-    Terminals(Vec<Vec<u32>>, Option<GoingTo>),
+    Terminals(Vec<herdr::Client>, Option<GoingTo>),
     /// A question (`hocus msg`), and where its answer goes: the socket's
     /// thread writes it back.
     Asked(Question, std::sync::mpsc::Sender<String>),
@@ -168,6 +179,8 @@ enum Pick {
     Titled,
     /// None named herdr: the most recently focused.
     Recent,
+    /// The one its agent's prompt was last typed in.
+    Prompted,
 }
 
 impl How {
@@ -177,6 +190,9 @@ impl How {
             Self::Herdr(Pick::Only) => "herdr's terminal, its only window",
             Self::Herdr(Pick::Titled) => "herdr's terminal, its window titled herdr",
             Self::Herdr(Pick::Recent) => "herdr's terminal, its most recently focused window",
+            Self::Herdr(Pick::Prompted) => {
+                "herdr's terminal, the window its agent's prompt was typed in"
+            }
             Self::None(why) => why,
         }
     }
@@ -233,6 +249,21 @@ struct Agent {
     /// process with several windows (kitty's, foot's server, …), the one
     /// it runs in (bar.md, "A terminal process with several windows").
     prompted: Option<WindowId>,
+    /// Its session's own name, given with `/rename` (#886): it names it
+    /// first. Never logged.
+    title: Option<hocus_agents::titles::CustomTitle>,
+}
+
+/// An agent's conversation as a project keeps it (docs/design/projects.md
+/// §8.1): its window, as the bar finds it; the conversation; its state;
+/// the herdr session whose pane it runs in, when its window is that
+/// session's terminal's (#887).
+#[derive(Debug, Clone)]
+pub(crate) struct Conversation {
+    pub window: WindowId,
+    pub agent: crate::resume::SavedAgent,
+    pub state: String,
+    pub herdr: Option<String>,
 }
 
 /// Good news of a process no agent is known for: a row of its own, for
@@ -245,7 +276,8 @@ struct NewsAlone {
     until: Duration,
 }
 
-/// herdr, as last heard.
+/// A herdr session, as last heard (#887: every running session is
+/// followed, the default one and each named one).
 #[derive(Debug, Default)]
 struct Herdr {
     running: bool,
@@ -258,11 +290,16 @@ struct Herdr {
     ids: HashMap<String, u64>,
     /// The panes of the tab it shows, where each is across its terminal.
     layout: Option<herdr::Layout>,
+    /// The window that had the keyboard as the user last sent a prompt to
+    /// one of its agents, when that window is one of its terminal's: of a
+    /// terminal process with several windows, the one it shows (bar.md,
+    /// "A terminal process with several windows").
+    prompted: Option<WindowId>,
 }
 
 impl Herdr {
-    /// What herdr said, at `now`.
-    fn heard(&mut self, news: News, now: u64) {
+    /// What session `name` said, at `now`.
+    fn heard(&mut self, name: &str, news: News, now: u64) {
         match news {
             News::Agents {
                 agents,
@@ -286,7 +323,7 @@ impl Herdr {
                         (a, since)
                     })
                     .collect();
-                self.terminals = terminals;
+                self.terminals = clients_of(name, terminals);
                 // A pane gone keeps no id: panes come and go all day, and
                 // herdr may name a new one as an old one was.
                 self.ids
@@ -319,9 +356,29 @@ impl Herdr {
                 self.terminals.clear();
                 self.layout = None;
                 self.ids.clear();
+                self.prompted = None;
             }
         }
     }
+
+    /// Its pane `pane`'s agent's id, given one the first time.
+    fn id_of(&mut self, pane: &str, next_id: &mut u64) -> u64 {
+        if let Some(id) = self.ids.get(pane) {
+            return *id;
+        }
+        *next_id += 1;
+        self.ids.insert(pane.to_owned(), *next_id);
+        *next_id
+    }
+}
+
+/// The clients of session `name` among `all`: the processes each runs
+/// under.
+fn clients_of(name: &str, all: Vec<herdr::Client>) -> Vec<Vec<u32>> {
+    all.into_iter()
+        .filter(|c| c.session == name)
+        .map(|c| c.above)
+        .collect()
 }
 
 /// The agents' sources and model.
@@ -330,7 +387,8 @@ pub struct Agents {
     list: Vec<Agent>,
     next_id: u64,
     tools: Option<Snapshot>,
-    herdr: Herdr,
+    /// herdr's sessions, by name.
+    herdr: BTreeMap<String, Herdr>,
     watcher: Option<Watcher>,
     places: Option<Places>,
     /// Each agent process's exit, watched on the loop.
@@ -412,11 +470,16 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
             Ok(watcher) => state.agents.watcher = Some(watcher),
             Err(err) => tracing::warn!(%err, "cannot watch for the agents' tools"),
         }
-        let herdr = sender;
-        if let Err(err) = herdr::start(
+        let herdr = std::sync::Mutex::new(sender);
+        if let Err(err) = herdr::start_sessions(
             places.herdr_socket.clone(),
+            places.herdr_sessions(),
             places.processes.clone(),
-            move |news| herdr.send(Heard::Herdr(news)).is_ok(),
+            Arc::new(move |session: &str, news| {
+                herdr
+                    .lock()
+                    .is_ok_and(|s| s.send(Heard::Herdr(session.to_owned(), news)).is_ok())
+            }),
         ) {
             tracing::warn!(%err, "cannot follow herdr");
         }
@@ -434,6 +497,9 @@ fn listen(
     perf: &hocus_perf::Counters,
     processes: Option<&std::path::Path>,
 ) {
+    // The sessions' own names, each transcript read on from where it was
+    // left (#886).
+    let mut titles = hocus_agents::titles::Titles::default();
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(stream) => stream,
@@ -584,8 +650,14 @@ fn listen(
                         .and_then(|((processes, pid), program)| {
                             crate::resume::program_of_process(processes, pid, program)
                         });
+                    let title = report
+                        .conversation
+                        .transcript
+                        .as_deref()
+                        .filter(|_| report.source == Source::ClaudeCode)
+                        .map(|t| titles.of(std::path::Path::new(t)));
                     if sender
-                        .send(Heard::Report(report, ancestry, program))
+                        .send(Heard::Report(report, ancestry, program, title))
                         .is_err()
                     {
                         // The loop is gone.
@@ -611,15 +683,15 @@ impl Compositor {
                 let _ = reply.send(self.program_asked(ask));
                 return;
             }
-            Heard::Report(report, ancestry, program) => {
-                self.agent_reported(report, ancestry, program);
+            Heard::Report(report, ancestry, program, title) => {
+                self.agent_reported(report, ancestry, program, title);
             }
             Heard::Celebrate(news, ancestry) => self.agent_celebrates(news, &ancestry),
             Heard::Tools(seen) => {
                 tracing::debug!(?seen, "the agents' tools");
                 self.agents.tools = Some(seen);
             }
-            Heard::Herdr(news) => self.herdr_said(news),
+            Heard::Herdr(session, news) => self.herdr_said(&session, news),
             Heard::Follow(stream) => {
                 self.follow_input_devices(stream);
                 return;
@@ -628,7 +700,7 @@ impl Compositor {
                 self.subscribe(stream, wants);
                 return;
             }
-            Heard::Terminals(terminals, going) => self.herdr_terminals(terminals, going),
+            Heard::Terminals(terminals, going) => self.herdr_terminals(Some(terminals), going),
             Heard::Screens(heard) => self.displays_heard(heard),
             Heard::Mcp(from) => {
                 self.mcp_heard(from);
@@ -688,6 +760,7 @@ impl Compositor {
         report: Report,
         ancestry: Vec<u32>,
         program: Option<std::path::PathBuf>,
+        title: Option<Option<hocus_agents::titles::CustomTitle>>,
     ) {
         let now = self.now_us();
         let key = (report.source, report.key.clone());
@@ -701,6 +774,28 @@ impl Compositor {
             .then(|| self.model.focused())
             .flatten()
             .map(|id| (id, self.windows_by_pid()));
+        // An agent in one of a herdr session's panes, prompted in one of
+        // that session's terminal's windows: the session's window then.
+        let herdr_prompted = prompted.as_ref().and_then(|(window, windows)| {
+            let pid = report.pid?;
+            self.agents
+                .herdr
+                .iter()
+                .find(|(_, h)| h.agents.iter().any(|(a, _)| a.pids.contains(&pid)))
+                .filter(|(_, h)| Self::herdr_candidates(h, windows).contains(window))
+                .map(|(name, _)| (name.clone(), *window))
+        });
+        if let Some((name, window)) = herdr_prompted
+            && let Some(herdr) = self.agents.herdr.get_mut(&name)
+        {
+            if herdr.prompted != Some(window) {
+                tracing::debug!(
+                    window = window.0,
+                    "a herdr session's window: the one its agent's prompt was typed in"
+                );
+            }
+            herdr.prompted = Some(window);
+        }
         let agents = &mut self.agents;
         let Some(state) = report.state else {
             // Its session ended.
@@ -750,6 +845,7 @@ impl Compositor {
                     running: running::Running::new(),
                     program: None,
                     prompted: None,
+                    title: None,
                 });
                 agents.list.len() - 1
             }
@@ -834,6 +930,10 @@ impl Compositor {
         if program.is_some() {
             agent.program = program;
         }
+        // Its transcript as it is now: a `/rename` since names it (#886).
+        if let Some(title) = title {
+            agent.title = title;
+        }
         let folder = folder_new.then(|| agent.conversation.cwd.clone()).flatten();
         let new_pid = report.pid.filter(|p| !agent.pids.contains(p));
         if let Some(pid) = new_pid {
@@ -861,34 +961,42 @@ impl Compositor {
 
     /// The conversations of the agents of Claude Code and Codex whose
     /// window is known (docs/design/projects.md §8.1): each window's id, the
-    /// conversation as a project keeps it, and its agent's state.
-    pub(crate) fn agent_conversations(&self) -> Vec<(WindowId, crate::resume::SavedAgent, String)> {
+    /// conversation as a project keeps it, its agent's state, and the herdr
+    /// session whose pane it runs in (#887).
+    pub(crate) fn agent_conversations(&self) -> Vec<Conversation> {
         // Their windows as the bar finds them: above their processes, else
-        // herdr's terminal's for an agent in one of its panes.
+        // their herdr session's terminal's for an agent in one of its panes.
         let windows = self.windows_by_pid();
-        let (herdr_window, _) = self.herdr_window(&windows);
         let followed = self.herdr_followed();
         self.agents
             .list
             .iter()
             .filter_map(|agent| {
                 let own = Self::agent_own_window(agent, &windows);
-                let in_herdr = followed
-                    && self
-                        .agents
-                        .herdr
-                        .agents
-                        .iter()
-                        .any(|(pane, _)| pane.pids.iter().any(|p| agent.pids.contains(p)));
-                let window = own.or(herdr_window.filter(|_| in_herdr))?;
+                let session = self
+                    .agents
+                    .herdr
+                    .iter()
+                    .filter(|_| followed)
+                    .find(|(_, h)| {
+                        h.agents
+                            .iter()
+                            .any(|(pane, _)| pane.pids.iter().any(|p| agent.pids.contains(p)))
+                    })
+                    .map(|(name, _)| name.clone());
+                let window = own.or_else(|| {
+                    session
+                        .as_deref()
+                        .and_then(|name| self.herdr_window(name, &windows).0)
+                })?;
                 let (source, key) = agent
                     .keys
                     .iter()
                     .find(|(s, _)| matches!(s, Source::ClaudeCode | Source::Codex))?;
                 let c = &agent.conversation;
-                Some((
+                Some(Conversation {
                     window,
-                    crate::resume::SavedAgent {
+                    agent: crate::resume::SavedAgent {
                         tool: source.name().to_owned(),
                         session: key.clone(),
                         folder: c.cwd.clone()?.into(),
@@ -896,9 +1004,25 @@ impl Compositor {
                         first_prompt: c.prompt.clone().unwrap_or_default(),
                         program: agent.program.clone(),
                     },
-                    agent.state.name().to_owned(),
-                ))
+                    state: agent.state.name().to_owned(),
+                    herdr: session.filter(|_| own.is_none()),
+                })
             })
+            .collect()
+    }
+
+    /// The window of each herdr session followed that has one, and its
+    /// name (#887): a project whose desktop holds it keeps the session.
+    pub(crate) fn herdr_session_windows(&self) -> Vec<(WindowId, String)> {
+        if !self.herdr_followed() {
+            return Vec::new();
+        }
+        let windows = self.windows_by_pid();
+        self.agents
+            .herdr
+            .iter()
+            .filter(|(_, h)| h.running)
+            .filter_map(|(name, _)| Some((self.herdr_window(name, &windows).0?, name.clone())))
             .collect()
     }
 
@@ -1060,14 +1184,23 @@ impl Compositor {
         }
     }
 
-    fn herdr_said(&mut self, news: News) {
+    fn herdr_said(&mut self, session: &str, news: News) {
         let now = self.now_us();
-        self.agents.herdr.heard(news, now);
+        self.agents
+            .herdr
+            .entry(session.to_owned())
+            .or_default()
+            .heard(session, news, now);
+    }
+
+    /// Whether herdr runs: one of its sessions does.
+    fn herdr_running(&self) -> bool {
+        self.agents.herdr.values().any(|h| h.running)
     }
 
     /// Whether herdr's agents are followed: it runs, and was not declined.
     fn herdr_followed(&self) -> bool {
-        self.agents.herdr.running && !self.agents.tools.is_some_and(|t| t.herdr_declined)
+        self.herdr_running() && !self.agents.tools.is_some_and(|t| t.herdr_declined)
     }
 
     /// The tools as the shell shows them.
@@ -1095,7 +1228,7 @@ impl Compositor {
             })
             .collect();
         let herdr = match (
-            self.agents.herdr.running,
+            self.herdr_running(),
             tools.is_some_and(|t| t.herdr_declined),
         ) {
             (true, false) => ToolState::Running,
@@ -1121,17 +1254,28 @@ impl Compositor {
     fn agents_listed(&mut self) -> Vec<Listed> {
         let windows = self.windows_by_pid();
         let own = |agent: &Agent| Self::agent_own_window(agent, &windows);
-        let (herdr_window, herdr_how) = self.herdr_window(&windows);
-        // An agent in one of herdr's panes whose own processes reach no
-        // window: herdr's terminal's, which shows it when its pane is
-        // the one focused.
-        let in_herdr = |focused: bool| match herdr_window {
-            Some(w) => (w.0, herdr_how, focused),
-            None => (0, herdr_how, false),
-        };
         let followed = self.herdr_followed();
+        // Each running herdr session's window, and how it was found.
+        let sessions: BTreeMap<String, (Option<WindowId>, How)> = if followed {
+            self.agents
+                .herdr
+                .iter()
+                .filter(|(_, h)| h.running)
+                .map(|(name, _)| (name.clone(), self.herdr_window(name, &windows)))
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
+        // An agent in one of a herdr session's panes whose own processes
+        // reach no window: that session's terminal's, which shows it when
+        // its pane is the one focused.
+        let in_herdr = |session: &str, focused: bool| match sessions.get(session) {
+            Some((Some(w), how)) => (w.0, *how, focused),
+            Some((None, how)) => (0, *how, false),
+            None => (0, How::None("no herdr client found"), false),
+        };
         let mut shown: Vec<Listed> = Vec::new();
-        let mut merged: Vec<String> = Vec::new();
+        let mut merged: Vec<(String, String)> = Vec::new();
         for agent in &self.agents.list {
             let mut sources: Vec<Source> = agent.keys.iter().map(|(s, _)| *s).collect();
             let (mut state, mut since) = (agent.state, agent.since);
@@ -1139,14 +1283,15 @@ impl Compositor {
             let mut note = agent.note.clone();
             let (mut herdr_name, mut herdr_folder) = (None, None);
             let mut pane_focused = None;
-            if followed {
-                for (pane, herdr_since) in &self.agents.herdr.agents {
+            let running = self.agents.herdr.iter().filter(|(_, h)| h.running);
+            for (session, herdr) in running.filter(|_| followed) {
+                for (pane, herdr_since) in &herdr.agents {
                     if pane.pids.iter().any(|p| agent.pids.contains(p)) {
-                        merged.push(pane.pane.clone());
+                        merged.push((session.clone(), pane.pane.clone()));
                         sources.push(Source::Herdr);
                         herdr_name = pane.name.as_deref();
                         herdr_folder = pane.folder.as_deref();
-                        pane_focused = Some(pane.focused);
+                        pane_focused = Some((session.as_str(), pane.focused));
                         if let Some(herdr_state) = pane.state
                             && *herdr_since > since
                         {
@@ -1170,12 +1315,17 @@ impl Compositor {
                 state => state.name(),
             };
             let source: Vec<&str> = sources.iter().map(|s| s.name()).collect();
-            let name = hocus_agents::agent_name(herdr_name, Some(&agent.name), herdr_folder)
-                .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
-                .unwrap_or_default();
+            let name = hocus_agents::agent_name(
+                agent.title.as_ref().map(|t| t.0.as_str()),
+                herdr_name,
+                Some(&agent.name),
+                herdr_folder,
+            )
+            .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
+            .unwrap_or_default();
             let (window, how, looks) = match (own(agent), pane_focused) {
                 (Some(w), _) => (w.0, How::Own, true),
-                (None, Some(focused)) => in_herdr(focused),
+                (None, Some((session, focused))) => in_herdr(session, focused),
                 (None, None) => (0, How::None("no window above its process"), false),
             };
             // Its good news while said; else its tests passing, while the
@@ -1223,17 +1373,26 @@ impl Compositor {
             });
         }
         if followed {
-            let pending: Vec<(String, String, State, u64, bool)> = self
+            type Pending = (String, String, String, State, u64, bool);
+            let pending: Vec<Pending> = self
                 .agents
                 .herdr
-                .agents
                 .iter()
-                .filter(|(a, _)| !merged.contains(&a.pane))
-                .map(|(a, since)| {
-                    let name =
-                        hocus_agents::agent_name(a.name.as_deref(), a.folder.as_deref(), None)
-                            .unwrap_or_else(|| a.pane.clone());
+                .filter(|(_, h)| h.running)
+                .flat_map(|(session, h)| h.agents.iter().map(move |a| (session, a)))
+                .filter(|(session, (a, _))| {
+                    !merged.iter().any(|(s, p)| s == *session && *p == a.pane)
+                })
+                .map(|(session, (a, since))| {
+                    let name = hocus_agents::agent_name(
+                        None,
+                        a.name.as_deref(),
+                        a.folder.as_deref(),
+                        None,
+                    )
+                    .unwrap_or_else(|| a.pane.clone());
                     (
+                        session.clone(),
                         a.pane.clone(),
                         name,
                         a.state.unwrap_or(State::Idle),
@@ -1242,16 +1401,12 @@ impl Compositor {
                     )
                 })
                 .collect();
-            for (pane, name, state, since, focused) in pending {
-                let id = match self.agents.herdr.ids.get(&pane) {
-                    Some(id) => *id,
-                    None => {
-                        self.agents.next_id += 1;
-                        self.agents.herdr.ids.insert(pane, self.agents.next_id);
-                        self.agents.next_id
-                    }
+            for (session, pane, name, state, since, focused) in pending {
+                let Agents { herdr, next_id, .. } = &mut self.agents;
+                let Some(id) = herdr.get_mut(&session).map(|h| h.id_of(&pane, next_id)) else {
+                    continue;
                 };
-                let (window, how, looks) = in_herdr(focused);
+                let (window, how, looks) = in_herdr(&session, focused);
                 shown.push(Listed {
                     shown: AgentShown {
                         id,
@@ -1283,27 +1438,66 @@ impl Compositor {
         shown
     }
 
-    /// herdr's terminal's window, and how it was found: of the windows of
-    /// the nearest process above each of herdr's clients that has some,
-    /// the one whose title names herdr, else the most recently focused.
-    fn herdr_window(&self, windows: &BTreeMap<u32, Vec<WindowId>>) -> (Option<WindowId>, How) {
-        let terminals = &self.agents.herdr.terminals;
-        if terminals.is_empty() {
-            return (None, How::None("no herdr client found"));
-        }
-        let theirs: Vec<WindowId> = terminals
+    /// The windows of herdr session `herdr`'s terminals: of the nearest
+    /// process above each of its clients that has some, all of them.
+    fn herdr_candidates(herdr: &Herdr, windows: &BTreeMap<u32, Vec<WindowId>>) -> Vec<WindowId> {
+        herdr
+            .terminals
             .iter()
             .filter_map(|above| above.iter().find_map(|pid| windows.get(pid)))
             .flatten()
             .copied()
-            .collect();
-        let candidates: Vec<(WindowId, bool)> = self
+            .collect()
+    }
+
+    /// herdr session `session`'s terminal's window, and how it was found
+    /// (#887): of the windows of the nearest process above each of its
+    /// clients (told apart from other sessions' by their command lines)
+    /// that has some, the only one; else the one its agent's prompt was
+    /// last typed in; else, of those whose title names this session if
+    /// any, else of those whose title names herdr, the most recently
+    /// focused.
+    fn herdr_window(
+        &self,
+        session: &str,
+        windows: &BTreeMap<u32, Vec<WindowId>>,
+    ) -> (Option<WindowId>, How) {
+        let Some(herdr) = self
+            .agents
+            .herdr
+            .get(session)
+            .filter(|h| !h.terminals.is_empty())
+        else {
+            return (None, How::None("no herdr client found"));
+        };
+        let theirs = Self::herdr_candidates(herdr, windows);
+        let candidates: Vec<(WindowId, String)> = self
             .model
             .stack()
             .iter()
             .filter(|w| theirs.contains(w))
-            .map(|w| (*w, names_herdr(&crate::windows::title_of(self, *w))))
+            .map(|w| (*w, crate::windows::title_of(self, *w)))
             .collect();
+        if candidates.len() > 1
+            && let Some(window) = herdr
+                .prompted
+                .filter(|w| candidates.iter().any(|(c, _)| c == w))
+        {
+            return (Some(window), How::Herdr(Pick::Prompted));
+        }
+        let named: Vec<(WindowId, bool)> = candidates
+            .iter()
+            .filter(|(_, title)| names_session(title, session))
+            .map(|(w, _)| (*w, true))
+            .collect();
+        let candidates: Vec<(WindowId, bool)> = if named.is_empty() {
+            candidates
+                .iter()
+                .map(|(w, title)| (*w, names_herdr(title)))
+                .collect()
+        } else {
+            named
+        };
         match pick(&candidates, self.model.recent()) {
             Some((window, how)) => (Some(window), How::Herdr(how)),
             None => (None, How::None("no window above herdr's clients")),
@@ -1386,16 +1580,16 @@ impl Compositor {
             colour: crate::going::colour(&agent.state),
         };
         match self.herdr_pane(id) {
-            Some(pane) if listed.how != How::Own => {
-                self.select_herdr_pane(pane);
+            Some((session, pane)) if listed.how != How::Own => {
+                self.select_herdr_pane(&session, pane);
                 // Its window is herdr's terminal's: its clients are looked
                 // for again, as one may have attached since its agents
                 // were listed (herdr's server outlives them).
                 self.look_for_herdr_terminals(Some(going));
             }
             pane => {
-                if let Some(pane) = pane {
-                    self.select_herdr_pane(pane);
+                if let Some((session, pane)) = pane {
+                    self.select_herdr_pane(&session, pane);
                 }
                 self.go_to_agent_window(&listed, going);
             }
@@ -1437,7 +1631,7 @@ impl Compositor {
             self.agents.places.as_ref().map(|p| p.processes.clone()),
         ) else {
             if let Some(going) = going {
-                self.herdr_terminals(self.agents.herdr.terminals.clone(), Some(going));
+                self.herdr_terminals(None, Some(going));
             }
             return;
         };
@@ -1449,9 +1643,11 @@ impl Compositor {
 
     /// herdr's clients as just found; the go-to that waited for them goes
     /// to their terminal's window.
-    fn herdr_terminals(&mut self, terminals: Vec<Vec<u32>>, going: Option<GoingTo>) {
-        if self.agents.herdr.running {
-            self.agents.herdr.terminals = terminals;
+    fn herdr_terminals(&mut self, terminals: Option<Vec<herdr::Client>>, going: Option<GoingTo>) {
+        if let Some(terminals) = terminals {
+            for (name, herdr) in self.agents.herdr.iter_mut().filter(|(_, h)| h.running) {
+                herdr.terminals = clients_of(name, terminals.clone());
+            }
         }
         let Some(going) = going else {
             return;
@@ -1488,31 +1684,32 @@ impl Compositor {
         ))
     }
 
-    /// Agent `id`'s pane in herdr, when it is herdr's (its own, or a hook's
-    /// agent in one of its panes) and herdr is followed.
-    fn herdr_pane(&self, id: u64) -> Option<String> {
+    /// Agent `id`'s herdr session and pane, when it is herdr's (its own, or
+    /// a hook's agent in one of its panes) and herdr is followed.
+    fn herdr_pane(&self, id: u64) -> Option<(String, String)> {
         if !self.herdr_followed() {
             return None;
         }
-        let herdr = &self.agents.herdr;
-        let listed = |pane: &String| herdr.agents.iter().any(|(a, _)| a.pane == *pane);
-        if let Some((pane, _)) = herdr.ids.iter().find(|(p, i)| **i == id && listed(p)) {
-            return Some(pane.clone());
+        let sessions = self.agents.herdr.iter().filter(|(_, h)| h.running);
+        for (name, herdr) in sessions.clone() {
+            let listed = |pane: &String| herdr.agents.iter().any(|(a, _)| a.pane == *pane);
+            if let Some((pane, _)) = herdr.ids.iter().find(|(p, i)| **i == id && listed(p)) {
+                return Some((name.clone(), pane.clone()));
+            }
         }
         let agent = self.agents.list.iter().find(|a| a.id == id)?;
-        herdr
-            .agents
-            .iter()
-            .find(|(pane, _)| pane.pids.iter().any(|p| agent.pids.contains(p)))
-            .map(|(pane, _)| pane.pane.clone())
+        sessions
+            .flat_map(|(name, h)| h.agents.iter().map(move |(pane, _)| (name, pane)))
+            .find(|(_, pane)| pane.pids.iter().any(|p| agent.pids.contains(p)))
+            .map(|(name, pane)| (name.clone(), pane.pane.clone()))
     }
 
     /// Where agent `id`'s pane is across herdr's terminal when herdr shows
     /// it (it is in the tab herdr shows, #796): its first column's share
     /// of the terminal's width, and its width's.
     pub(crate) fn herdr_pane_shown(&self, id: u64) -> Option<(f64, f64)> {
-        let pane = self.herdr_pane(id)?;
-        let layout = self.agents.herdr.layout.as_ref()?;
+        let (session, pane) = self.herdr_pane(id)?;
+        let layout = self.agents.herdr.get(&session)?.layout.as_ref()?;
         let columns = f64::from(layout.columns.max(1));
         layout
             .panes
@@ -1526,10 +1723,15 @@ impl Compositor {
         self.herdr_pane(id).is_some()
     }
 
-    /// herdr selects `pane` (§8 step 3), on a thread: its socket is no
-    /// work for the loop.
-    fn select_herdr_pane(&self, pane: String) {
-        let Some(socket) = self.agents.places.as_ref().map(|p| p.herdr_socket.clone()) else {
+    /// herdr session `session` selects `pane` (§8 step 3), on its own
+    /// socket (#887), on a thread: its socket is no work for the loop.
+    fn select_herdr_pane(&self, session: &str, pane: String) {
+        let Some(socket) = self
+            .agents
+            .places
+            .as_ref()
+            .map(|p| p.herdr_socket_of(session))
+        else {
             return;
         };
         tracing::debug!(pane, "herdr selects the agent's pane");
@@ -1544,10 +1746,11 @@ impl Compositor {
     /// seen now. herdr's clients are looked for again (off the loop): the
     /// window may be a terminal herdr attached to since.
     pub fn agents_focus_changed(&mut self) {
-        if !self.agents.list.is_empty() || !self.agents.herdr.agents.is_empty() {
+        let herdr_agents = self.agents.herdr.values().any(|h| !h.agents.is_empty());
+        if !self.agents.list.is_empty() || herdr_agents {
             self.agents.dirty = true;
         }
-        if self.herdr_followed() && !self.agents.herdr.agents.is_empty() {
+        if self.herdr_followed() && herdr_agents {
             self.look_for_herdr_terminals(None);
         }
     }
@@ -1558,7 +1761,12 @@ impl Compositor {
         for agent in &mut self.agents.list {
             agent.since = agent.since.saturating_sub(by);
         }
-        for (_, since) in &mut self.agents.herdr.agents {
+        for (_, since) in self
+            .agents
+            .herdr
+            .values_mut()
+            .flat_map(|h| h.agents.iter_mut())
+        {
             *since = since.saturating_sub(by);
         }
         self.agents.dirty = true;
@@ -1701,7 +1909,8 @@ impl Compositor {
 
     /// Windows came or went: the agents' windows may have.
     pub fn agents_windows_changed(&mut self) {
-        if !self.agents.list.is_empty() || !self.agents.herdr.agents.is_empty() {
+        if !self.agents.list.is_empty() || self.agents.herdr.values().any(|h| !h.agents.is_empty())
+        {
             self.agents.dirty = true;
         }
     }
@@ -1749,6 +1958,26 @@ fn names_herdr(title: &str) -> bool {
         .split_whitespace()
         .next()
         .is_some_and(|word| word.eq_ignore_ascii_case("herdr"))
+}
+
+/// Whether a window's title names herdr session `session`, as the shell
+/// titles a terminal with the command it runs: "herdr --session work",
+/// "herdr session attach work"; the default session's, "herdr" without
+/// one.
+fn names_session(title: &str, session: &str) -> bool {
+    if !names_herdr(title) {
+        return false;
+    }
+    let words: Vec<&str> = title.split_whitespace().skip(1).collect();
+    let named = words.windows(2).find_map(|pair| match pair {
+        ["--session" | "attach", name] => Some(*name),
+        _ => None,
+    });
+    let named = named.or_else(|| words.iter().find_map(|w| w.strip_prefix("--session=")));
+    match named {
+        Some(name) => name == session,
+        None => session == herdr::DEFAULT,
+    }
 }
 
 /// Among herdr's terminal's windows (`candidates`, bottom first, with
@@ -1812,7 +2041,7 @@ mod tests {
         let mut herdr = Herdr::default();
         for round in 0..100u64 {
             let (old, new) = (format!("w1:p{round}"), format!("w1:p{}", round + 1));
-            herdr.heard(listed(&[&old, &new]), round);
+            herdr.heard("default", listed(&[&old, &new]), round);
             // As the agents' list gives them ids.
             for p in [old, new] {
                 herdr.ids.entry(p).or_insert(round);
@@ -1820,13 +2049,13 @@ mod tests {
         }
         assert_eq!(herdr.ids.len(), 2, "{:?}", herdr.ids.keys());
         let kept = herdr.ids["w1:p100"];
-        herdr.heard(listed(&["w1:p100"]), 100);
+        herdr.heard("default", listed(&["w1:p100"]), 100);
         assert_eq!(herdr.ids.len(), 1);
         assert_eq!(
             herdr.ids["w1:p100"], kept,
             "a pane still listed keeps its id"
         );
-        herdr.heard(News::Gone, 101);
+        herdr.heard("default", News::Gone, 101);
         assert!(herdr.ids.is_empty());
     }
 

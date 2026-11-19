@@ -142,6 +142,11 @@ pub struct SavedWindow {
     /// agent's then, not saved as a plain terminal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<crate::resume::SavedAgent>,
+    /// The herdr session this terminal showed (#887), on a project's
+    /// desktop only: it attaches to it again, or, the session gone, its
+    /// agents' conversations resume each in a terminal of its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub herdr: Option<crate::resume::SavedHerdr>,
     /// Its client's process, for its thread to read a terminal's folder;
     /// never written.
     #[serde(skip)]
@@ -246,7 +251,21 @@ pub fn starts_of(windows: &[SavedWindow]) -> Vec<Start> {
             tabs,
             unread: 0,
             agent: None,
+            herdr: None,
         };
+        if let Some(herdr) = &w.herdr {
+            // Its terminal on its own, attaching to its session again.
+            let folder = w
+                .terminal
+                .as_ref()
+                .map(|t| t.folder.clone())
+                .or_else(|| herdr.agents.first().map(|a| a.folder.clone()));
+            out.push(Start {
+                herdr: Some(herdr.clone()),
+                ..start(folder, None)
+            });
+            continue;
+        }
         if let Some(agent) = &w.agent {
             // An agent's terminal on its own, in its folder, resuming it.
             out.push(Start {
@@ -295,6 +314,8 @@ pub struct Start {
     pub unread: u32,
     /// The agent whose conversation its terminal resumes (§8.1).
     pub agent: Option<crate::resume::SavedAgent>,
+    /// The herdr session its terminal attaches to again (#887).
+    pub herdr: Option<crate::resume::SavedHerdr>,
 }
 
 /// What did not come back, as the notification says it (projects.md §7).
@@ -418,6 +439,24 @@ struct Resume {
     state: Resuming,
 }
 
+impl Resume {
+    /// `a`'s conversation, its hook waited for.
+    fn of(a: &crate::resume::SavedAgent) -> Self {
+        Self {
+            session: a.session.clone(),
+            tool: a.title().to_owned(),
+            program: a.program().unwrap_or_default().to_owned(),
+            command: a.command_line().unwrap_or_default(),
+            folder: a
+                .folder
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| a.folder.display().to_string()),
+            state: Resuming::Waiting,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Resuming {
     /// Its agent's hook is waited for, [`PATIENCE`] at most.
@@ -492,6 +531,9 @@ pub enum Heard {
     NotResumed(String, crate::resume::NotResumed),
     /// Start `.0` is a window its browser reopens itself (§13 D).
     ByItself(usize),
+    /// Herdr session `.0` is gone (#887): its window's agents resume each
+    /// in a terminal of its own.
+    HerdrGone(String),
 }
 
 impl State {
@@ -589,18 +631,7 @@ impl State {
         let resumes = windows
             .iter()
             .filter_map(|w| w.agent.as_ref())
-            .map(|a| Resume {
-                session: a.session.clone(),
-                tool: a.title().to_owned(),
-                program: a.program().unwrap_or_default().to_owned(),
-                command: a.command_line().unwrap_or_default(),
-                folder: a
-                    .folder
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| a.folder.display().to_string()),
-                state: Resuming::Waiting,
-            })
+            .map(Resume::of)
             .collect();
         Comeback {
             whose,
@@ -665,6 +696,7 @@ impl State {
                 .ok()
                 .filter(|s| s.starts_with('/'))
                 .unwrap_or_else(|| "/bin/sh".to_owned()),
+            herdr: self.config.agent_places.clone(),
         }
     }
 
@@ -805,6 +837,47 @@ impl State {
                 tracing::info!(?why, "an agent's conversation cannot resume");
                 for r in c.resumes.iter_mut().filter(|r| r.session == session) {
                     r.state = Resuming::Failed(why);
+                }
+            }
+            Heard::HerdrGone(session) => {
+                // Its window's place, once for each of its agents, each
+                // with its conversation; without any, a plain terminal.
+                let at = c
+                    .pending
+                    .iter()
+                    .position(|w| w.herdr.as_ref().is_some_and(|h| h.session == session));
+                if let Some(window) = at.and_then(|at| c.pending.remove(at)) {
+                    let agents = window
+                        .herdr
+                        .as_ref()
+                        .map(|h| h.agents.clone())
+                        .unwrap_or_default();
+                    tracing::info!(
+                        agents = agents.len(),
+                        "a herdr session is gone: its agents resume each in a terminal"
+                    );
+                    let at = at.unwrap_or(0);
+                    if agents.is_empty() {
+                        c.pending.insert(
+                            at,
+                            SavedWindow {
+                                herdr: None,
+                                ..window.clone()
+                            },
+                        );
+                    }
+                    for (k, agent) in agents.iter().enumerate() {
+                        c.resumes.push(Resume::of(agent));
+                        c.pending.insert(
+                            at + k,
+                            SavedWindow {
+                                herdr: None,
+                                terminal: None,
+                                agent: Some(agent.clone()),
+                                ..window.clone()
+                            },
+                        );
+                    }
                 }
             }
             Heard::ByItself(at) => {
@@ -1351,15 +1424,15 @@ impl State {
     /// is now.
     fn session_snapshot(&self, agents: bool) -> Vec<SavedWindow> {
         let mut out = Vec::new();
-        let conversations = if agents {
-            self.agent_conversations()
+        let (conversations, herdr) = if agents {
+            (self.agent_conversations(), self.herdr_session_windows())
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
         for id in self.windows.keys() {
             if let Some(saved) = self.session_window(*id) {
                 if self.project_of(*id).is_some() {
-                    out.extend(with_agents(*id, saved, &conversations));
+                    out.extend(with_agents(*id, saved, &conversations, &herdr));
                 } else {
                     out.push(saved);
                 }
@@ -1422,6 +1495,7 @@ impl State {
                 terminal: None,
                 browser: None,
                 agent: None,
+                herdr: None,
                 pid: self.pid_of(&managed.window),
                 title: crate::windows::title_of(self, id),
                 size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
@@ -1453,6 +1527,7 @@ impl State {
             terminal: None,
             browser: None,
             agent: None,
+            herdr: None,
             pid: self.pid_of(&managed.window),
             title: crate::windows::title_of(self, id),
             size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
@@ -1460,19 +1535,36 @@ impl State {
     }
 }
 
-/// Window `id` as saved, `saved`, as many times as agents ran in it
-/// (`conversations`: herdr's terminal holds several, each coming back in a
-/// terminal of its own, §13 E), each with its conversation: the agent's
-/// terminal, not a plain one.
+/// Window `id` as saved, `saved`: a herdr session's terminal (`herdr`, the
+/// sessions' windows) once, with that session and the conversations of
+/// its panes' agents (#887); else as many times as agents ran in it
+/// (`conversations`), each with its conversation: the agent's terminal,
+/// not a plain one.
 pub(crate) fn with_agents(
     id: WindowId,
     saved: SavedWindow,
-    conversations: &[(WindowId, crate::resume::SavedAgent, String)],
+    conversations: &[crate::agents::Conversation],
+    herdr: &[(WindowId, String)],
 ) -> Vec<SavedWindow> {
+    if let Some((_, session)) = herdr.iter().find(|(w, _)| *w == id) {
+        let agents = conversations
+            .iter()
+            .filter(|c| c.window == id && c.herdr.as_ref() == Some(session))
+            .map(|c| c.agent.clone())
+            .collect();
+        return vec![SavedWindow {
+            herdr: Some(crate::resume::SavedHerdr {
+                session: session.clone(),
+                agents,
+            }),
+            agent: None,
+            ..saved
+        }];
+    }
     let theirs: Vec<&crate::resume::SavedAgent> = conversations
         .iter()
-        .filter(|(w, ..)| *w == id)
-        .map(|(_, a, _)| a)
+        .filter(|c| c.window == id)
+        .map(|c| &c.agent)
         .collect();
     if theirs.is_empty() {
         return vec![saved];
@@ -1887,6 +1979,9 @@ struct Relaunch {
     /// the user's shell its command runs through (§8.1).
     path: Vec<PathBuf>,
     shell: String,
+    /// Where herdr's sessions' sockets are (#887): a session whose server
+    /// answers is attached to again.
+    herdr: Option<hocus_agents::tools::Places>,
 }
 
 /// Starts each of `starts` (desktop entries of `applications`) again, on
@@ -1945,34 +2040,86 @@ fn relaunch(asked: Relaunch, heard: channel::Sender<Heard>) {
                 dir: entry.dir.clone().unwrap_or_default(),
                 argv: entry.argv.clone(),
             };
+            let term = launch.terminal.then(|| asked.terminal.clone());
+            let watched = |launch: hocus_link::Launch| {
+                let to = heard.clone();
+                programs::launch_watched(launch, term.clone(), asked.env.clone(), move |outcome| {
+                    let _ = to.send(Heard::Outcome(at, outcome));
+                });
+            };
+            let app = if crate::terminals::is_terminal_app(&start.app_id) {
+                start.app_id.as_str()
+            } else {
+                entry.id.as_str()
+            };
+            if let Some(herdr) = &start.herdr {
+                // A herdr session's terminal (#887): attached to it again
+                // while its server runs, else its agents each in a
+                // terminal of its own resuming its conversation.
+                let in_folder = |folder: &Path| {
+                    let folder = if folder.is_dir() { folder } else { &home };
+                    hocus_link::Launch {
+                        argv: crate::terminals::in_folder(app, &entry.argv, folder),
+                        dir: folder.display().to_string(),
+                        ..launch.clone()
+                    }
+                };
+                let folder = start.folder.clone().unwrap_or_else(|| home.clone());
+                let attach = asked
+                    .herdr
+                    .as_ref()
+                    .filter(|places| {
+                        std::os::unix::net::UnixStream::connect(
+                            places.herdr_socket_of(&herdr.session),
+                        )
+                        .is_ok()
+                    })
+                    .and_then(|_| crate::resume::program_found("herdr", &asked.path, Some(&home)))
+                    .and_then(|found| herdr.command(&asked.shell, &found))
+                    .and_then(|command| crate::terminals::with_command(app, &command));
+                if let Some(command) = attach {
+                    tracing::info!(app = id, "a herdr session's terminal attaches to it again");
+                    let mut launch = in_folder(&folder);
+                    launch.argv.extend(command);
+                    watched(launch);
+                    continue;
+                }
+                let _ = heard.send(Heard::HerdrGone(herdr.session.clone()));
+                if herdr.agents.is_empty() {
+                    watched(in_folder(&folder));
+                }
+                for agent in &herdr.agents {
+                    let mut launch = in_folder(&agent.folder);
+                    match agent_command(
+                        agent,
+                        &agent.folder,
+                        app,
+                        (&asked.path, &asked.shell),
+                        &home,
+                    ) {
+                        Ok(command) => {
+                            tracing::info!(
+                                app = id,
+                                "an agent's terminal resumes its conversation"
+                            );
+                            launch.argv.extend(command);
+                        }
+                        Err(why) => {
+                            let _ = heard.send(Heard::NotResumed(agent.session.clone(), why));
+                        }
+                    }
+                    watched(launch);
+                }
+                continue;
+            }
             if let Some(folder) = &start.folder {
                 // A folder that went (the project's, or one under it):
                 // the home.
                 let folder = if folder.is_dir() { folder } else { &home };
-                let app = if crate::terminals::is_terminal_app(&start.app_id) {
-                    &start.app_id
-                } else {
-                    &entry.id
-                };
                 launch.argv = crate::terminals::in_folder(app, &entry.argv, folder);
                 launch.dir = folder.display().to_string();
                 if let Some(agent) = &start.agent {
-                    // Its conversation resumes there, unless its folder,
-                    // its transcript or its program is gone, or its
-                    // terminal cannot be given a command.
-                    // Its program looked for where the user's shell finds
-                    // it too: a display manager's `PATH` may lack it.
-                    let command = if folder == &agent.folder {
-                        agent.resumable(&asked.path, Some(&home)).and_then(|found| {
-                            agent
-                                .command(&asked.shell, &found)
-                                .and_then(|c| crate::terminals::with_command(app, &c))
-                                .ok_or(crate::resume::NotResumed::Other)
-                        })
-                    } else {
-                        Err(crate::resume::NotResumed::Other)
-                    };
-                    match command {
+                    match agent_command(agent, folder, app, (&asked.path, &asked.shell), &home) {
                         Ok(command) => {
                             tracing::info!(
                                 app = id,
@@ -2010,18 +2157,86 @@ fn relaunch(asked: Relaunch, heard: channel::Sender<Heard>) {
                         .extend(crate::browsers::new_window_args(browser.kind, addresses));
                 }
             }
-            let term = launch.terminal.then(|| asked.terminal.clone());
-            let to = heard.clone();
-            programs::launch_watched(launch, term, asked.env.clone(), move |outcome| {
-                let _ = to.send(Heard::Outcome(at, outcome));
-            });
+            watched(launch);
         }
     });
+}
+
+/// What `agent`'s terminal in `folder` (a terminal of `app`) runs after its
+/// own arguments to resume its conversation, or why it cannot: its folder,
+/// its transcript or its program gone, or its terminal not one that can be
+/// given a command. Its program is looked for where the user's shell finds
+/// it too: a display manager's `PATH` may lack it.
+fn agent_command(
+    agent: &crate::resume::SavedAgent,
+    folder: &Path,
+    app: &str,
+    (path, shell): (&[PathBuf], &str),
+    home: &Path,
+) -> Result<Vec<String>, crate::resume::NotResumed> {
+    if folder != agent.folder {
+        return Err(crate::resume::NotResumed::Other);
+    }
+    agent.resumable(path, Some(home)).and_then(|found| {
+        agent
+            .command(shell, &found)
+            .and_then(|c| crate::terminals::with_command(app, &c))
+            .ok_or(crate::resume::NotResumed::Other)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A herdr session's terminal (#887) reads back with its session and
+    /// its agents, and starts once, in its folder, attaching to it.
+    #[test]
+    fn a_herdr_sessions_terminal_reads_back_and_starts_once() -> Result<(), String> {
+        let agent = |id: &str| crate::resume::SavedAgent {
+            tool: "claude-code".into(),
+            session: id.into(),
+            folder: "/home/alex/site".into(),
+            transcript: format!("/home/alex/.claude/projects/x/{id}.jsonl").into(),
+            ..crate::resume::SavedAgent::default()
+        };
+        let saved = Saved {
+            windows: vec![SavedWindow {
+                entry: "foot".into(),
+                app_id: "foot".into(),
+                desktop: 1,
+                terminal: Some(SavedTerminal {
+                    folder: "/home/alex/site".into(),
+                }),
+                herdr: Some(crate::resume::SavedHerdr {
+                    session: "site".into(),
+                    agents: vec![agent("a-1"), agent("b-2")],
+                }),
+                ..SavedWindow::default()
+            }],
+            projects: Vec::new(),
+        };
+        let text = saved.text();
+        assert!(text.contains("[window.herdr]"), "{text}");
+        assert!(text.contains("[[window.herdr.agents]]"), "{text}");
+        let read = Saved::parse(&text)?;
+        assert_eq!(read.windows, saved.windows);
+        let starts = starts_of(&read.windows);
+        assert_eq!(starts.len(), 1, "{starts:?}");
+        assert_eq!(starts[0].folder, Some("/home/alex/site".into()));
+        assert_eq!(
+            starts[0].herdr.as_ref().map(|h| h.session.as_str()),
+            Some("site")
+        );
+        assert_eq!(
+            starts[0]
+                .herdr
+                .as_ref()
+                .and_then(crate::resume::SavedHerdr::attach_line),
+            Some("herdr session attach site".to_owned())
+        );
+        Ok(())
+    }
 
     #[test]
     fn a_session_reads_back_and_starts_each_application_once() -> Result<(), String> {
@@ -2040,6 +2255,7 @@ mod tests {
             terminal: None,
             browser: None,
             agent: None,
+            herdr: None,
             pid: None,
             title: String::new(),
             size: (0, 0),

@@ -3,6 +3,7 @@
 
 pub mod atspi;
 pub mod counting;
+pub mod herdr;
 
 use std::{os::unix::net::UnixStream, path::Path, sync::mpsc, time::Duration};
 

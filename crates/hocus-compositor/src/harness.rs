@@ -833,6 +833,11 @@ impl Headless {
         self.app.state.agents_shown()
     }
 
+    /// The user goes to agent `id`, as from its row in the bar (4.3).
+    pub fn go_to_agent(&mut self, id: u64) {
+        self.app.state.go_to_agent(id, None);
+    }
+
     /// As if every agent had been in its state `by` longer (its "12 min"
     /// without waiting for them): the shell is told.
     pub fn backdate_agents(&mut self, by: Duration) {
@@ -1207,6 +1212,11 @@ impl Headless {
     /// tabs now (windows.md §14, projects.md §8.3).
     pub fn session_browsers_waited(&mut self) {
         self.app.state.comeback_browser_graces_over();
+    }
+
+    /// The window that has the keyboard, as the model says it.
+    pub fn focused_window(&self) -> Option<WindowId> {
+        self.app.state.model.focused()
     }
 
     /// Window `id` brought and given the keyboard, as a click on its row
@@ -2418,6 +2428,31 @@ impl Headless {
                             a.folder.display().to_string(),
                             a.transcript.display().to_string(),
                         ]
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// A closed project's herdr sessions (#887), as kept in memory: each
+    /// one's name and its agents' sessions.
+    pub fn project_herdr(&self, name: &str) -> Vec<(String, Vec<String>)> {
+        let key = hocus_link::projects::name_key(name);
+        self.app
+            .state
+            .projects
+            .list
+            .iter()
+            .find(|p| hocus_link::projects::name_key(&p.name) == key)
+            .map(|p| {
+                p.contents
+                    .iter()
+                    .filter_map(|w| w.herdr.as_ref())
+                    .map(|h| {
+                        (
+                            h.session.clone(),
+                            h.agents.iter().map(|a| a.session.clone()).collect(),
+                        )
                     })
                     .collect()
             })

@@ -412,11 +412,12 @@ impl State {
         let seen = self.project_seen(at);
         // Each agent's terminal saved as its agent's (§6, §8.1).
         let conversations = self.agent_conversations();
+        let herdr = self.herdr_session_windows();
         let windows: Vec<(WindowId, SavedWindow)> = seen
             .iter()
             .filter_map(|s| Some((s.id, self.session_window(s.id)?)))
             .flat_map(|(id, saved)| {
-                crate::session::restore::with_agents(id, saved, &conversations)
+                crate::session::restore::with_agents(id, saved, &conversations, &herdr)
                     .into_iter()
                     .map(move |w| (id, w))
             })
@@ -555,8 +556,8 @@ impl State {
             // An agent's terminal: its agent resumes there (§5).
             let agents: Vec<&crate::resume::SavedAgent> = conversations
                 .iter()
-                .filter(|(w, ..)| *w == f.id)
-                .map(|(_, a, _)| a)
+                .filter(|c| c.window == f.id)
+                .map(|c| &c.agent)
                 .collect();
             if f.entry.is_some() && !agents.is_empty() {
                 for agent in agents {
@@ -683,8 +684,8 @@ impl State {
                     tabs: f.browser.as_ref().and_then(card_tabs),
                     agent: conversations
                         .iter()
-                        .find(|(w, ..)| *w == f.id)
-                        .map(|(_, a, state)| card_agent(a, state, false)),
+                        .find(|c| c.window == f.id)
+                        .map(|c| card_agent(&c.agent, &c.state, false)),
                 }
             })
             .collect();

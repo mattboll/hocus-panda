@@ -152,7 +152,7 @@ group where it is.
 | — | In use | The sign of what uses the microphone, the camera or the screen, under the card (5.12, as built): a tile a kind in use; none when nothing is | 36 px |
 | 4 | Today | The events after the meeting card (Day.3, variant A): time, colour dot, title, as many as fit, then "+ N autres aujourd'hui" (as built, Day.3) | 18 px header + 20 px a line |
 | 5 | To do | Approved 2026-11-04 (issue #428, variant C; as built, Day.4): the open tasks of the board's tasks' column chosen in Day.1 (else the local list), in the column's order; an 18 px header, "À FAIRE" / "TO DO" (Manrope 700, 11.5 px, spaced 0.1 em, `text.dim`) and on its right the `+` (22 × 18, radius 6, a 14 px plus) that opens the field to add a task as the first line; up to 3 tasks on 22 px lines (fewer on a short bar once Today gave way, #599), each a 14 px box (radius 4, a 1.5 px `rgba(255,255,255,0.38)` border) in a 22 × 22 button and its title (13 px, wrapped onto 3 rows at most, 18 px apart, the line growing 18 px a row; past 3 rows the third ends with an ellipsis, the title whole in a tooltip after 600 ms; #792); a click ticks it (`#6CC287`, a dark check, the title struck through and `text.faint`), the line goes 1.5 s later, a second click within them unticks; a change refused says "Pas enregistré" for 3 s; past 3, "+ N autres" opens the tasks' popover (§9). No board and no local task: hidden; a board with nothing open: "Rien à faire." | 18 px + 22 px a line, 18 more a title's row past the first (+ 20 px for "+ N", + 30 px for the field, 19 more a row as its text wraps, 5 rows at most) |
-| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 56 px head (#649), `AGENTS` and the total over her line; "Sources" in her briefing. One 46 px row per agent (4.1, track 4 "the lines"; #649): its panda (42 px, §7 A), its name (as herdr names it, else its project's folder), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", or, for the calm rows, a 9 px dot whose word shows on hover (#831): "à voir" (finished, not seen yet, green), "en fond" (seen, something it started still runs, blue) or "repos" (grey); waiting, stuck and to-see rows tinted; a waiting or stuck agent's row is a 68 px card with what it asks or why it failed (§7 A). Waiting first (the longest first), then stuck, to see, working, in the background, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 66 px + 46 px a row, 68 px a card (+ 20 px for the rest) |
+| 3 | Agents | Header: the secretary (§7 B, 4.6, variant B), her 56 px head (#649), `AGENTS` and the total over her line; "Sources" in her briefing. One 46 px row per agent (4.1, track 4 "the lines"; #649): its panda (42 px, §7 A), its name (its Claude Code session's own, given with `/rename`, else as herdr names it, else its project's folder; #886), and on its right what it does: how long it has worked ("12 min"), "t'attend", "bloqué", or, for the calm rows, a 9 px dot whose word shows on hover (#831): "à voir" (finished, not seen yet, green), "en fond" (seen, something it started still runs, blue) or "repos" (grey); waiting, stuck and to-see rows tinted; a waiting or stuck agent's row is a 68 px card with what it asks or why it failed (§7 A). Waiting first (the longest first), then stuck, to see, working, in the background, resting; at most 5 rows (fewer on a short bar, as many as fit: they give way last, #599), then "+ N au repos" (or "+ N autres"). A click on a row goes to the agent (§8). Before any tool is plugged in, a card proposes those found (4.0); with none followed and none to propose, the group does not show (variant B) | 66 px + 46 px a row, 68 px a card (+ 20 px for the rest) |
 | 6 | Spacer | Takes what is left | flexible |
 | — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the overview (windows.md §12b); none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
@@ -2306,7 +2306,10 @@ nothing to propose, the group is its header alone.
     polled. Plugging in, unplugging and declining, which write files, run
     there too;
   - **herdr** (`hocus-agents::herdr`, ported from the first build without
-    its polling): its socket waited for with inotify, `agent.list`, the
+    its polling): every running session (#887), the default one and each
+    named one (`$XDG_CONFIG_HOME/herdr/sessions/NAME/herdr.sock`, their
+    directory watched with inotify), each on a thread of its own and its
+    agents tied to it; its socket waited for with inotify, `agent.list`, the
     workspaces' and tabs' labels (`workspace.list`, `tab.list`), each
     pane's `pane.process_info`, then `events.subscribe` on a blocking
     read, the renames with it (`workspace.renamed`, `workspace.updated`,
@@ -2318,9 +2321,19 @@ nothing to propose, the group is its header alone.
 - **One agent for two sources**: a report joins the agent that has its
   key, else one of another source that has its process (a Claude Code in
   a herdr pane is the pane's foreground process); one source's keys stay
-  its own agents. The state that changed last wins; herdr's name wins (the
-  user names things there, #497).
-- **Its name** (#497, #503): herdr's, its tab's own name when the user
+  its own agents. The state that changed last wins; herdr's name wins over
+  the folder (the user names things there, #497), a `/rename` over both
+  ("Its name").
+- **Its name** (#497, #503, #886): first its Claude Code session's own
+  name, given with `/rename` (2026-11-19, the maintainer's choice):
+  Claude Code writes it into the session's transcript as lines
+  `{"type":"custom-title","customTitle":…}`, the last one winning (an
+  empty one takes it back). The control socket's thread reads the
+  transcript whose path the hook gives, off the loop and on from where it
+  read last (a transcript only grows; a line being written is read whole
+  at the next hook; 64 transcripts remembered), so a rename shows at the
+  agent's next hook; the title is never logged. Else herdr's, its tab's
+  own name when the user
   gave it one ("refacto"), else its workspace's label (a tab herdr labels
   with its place has none), a rename in herdr showing at once; else its
   project's folder, the last part of its
@@ -2450,7 +2463,8 @@ the heads) are display options for later (#491).
   background").
   Under the pointer a row is lit `rgba(255,255,255,0.06)` and the pointer
   is a hand, as the bar's other rows (the mockup's tints, inline, hide its
-  own `:hover`). The name is herdr's for an agent herdr sees (its tab's
+  own `:hover`). The name is its Claude Code session's own when it was
+  given one with `/rename` (#886), else herdr's for an agent herdr sees (its tab's
   own name, else its workspace's label: #503), else the project's
   folder (a hook's `cwd`) or the command's `NAME`, else the agent's
   process's directory (4.0 as built, "Its name").
@@ -2637,6 +2651,17 @@ terminal not in front, a herdr agent's row did not bring it.
   and `.clear`, which change it, and its panes' `terminal_title` is what
   each pane's program sets (Claude Code's "✳ Claude Code", in a terminal
   of its own as well), not the window's.
+- **Several herdr sessions** (#887, 2026-11-19): each session's window is
+  found from its own clients, told apart by their command line (`herdr`
+  for the default session, `herdr --session NAME`, `herdr session attach
+  NAME`; a command over the socket or a `--remote` client shows none). Of
+  a terminal process with several windows: the only one; else the window
+  in which one of that session's agents last had a prompt typed (the rule
+  below, the session's); else one titled after that session ("herdr
+  session attach work"); else as above. The go-to selects the agent's
+  pane on its own session's socket. A project whose desktop holds a
+  session's window keeps that session (projects.md, "One herdr session
+  per project").
 - **Several agents in one terminal process** (2026-11-19, kitty, foot's
   server, gnome-terminal-server, wezterm's mux; no terminal's own option):
   an agent's own window is first the window that had the keyboard as its

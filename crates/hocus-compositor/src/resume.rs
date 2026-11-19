@@ -47,6 +47,74 @@ pub struct SavedAgent {
     pub program: Option<PathBuf>,
 }
 
+/// A herdr session whose terminal was on a project's desktop (#887,
+/// docs/design/projects.md §8.1): its name, and the conversations of the
+/// agents in its panes, resumed each in a terminal of its own when the
+/// session is gone as it comes back. Its `Debug` says how many agents.
+#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct SavedHerdr {
+    pub session: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<SavedAgent>,
+}
+
+impl std::fmt::Debug for SavedHerdr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SavedHerdr")
+            .field("agents", &self.agents.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl SavedHerdr {
+    /// What attaches to it again: `herdr` for the default session, `herdr
+    /// session attach NAME` for a named one; none for a name herdr would
+    /// not take.
+    pub fn attach_line(&self) -> Option<String> {
+        if self.session == hocus_agents::herdr::DEFAULT {
+            Some("herdr".to_owned())
+        } else {
+            hocus_agents::herdr::session_name_ok(&self.session)
+                .then(|| format!("herdr session attach {}", self.session))
+        }
+    }
+
+    /// What its terminal runs, through `shell`, herdr `found` there: the
+    /// attach, then a shell, so that detaching leaves one.
+    pub fn command(&self, shell: &str, found: &Found) -> Option<Vec<String>> {
+        let line = self.attach_line()?;
+        Some(through_shell(shell, found, &line))
+    }
+}
+
+/// `line` run through `shell`, its program `found`, then a shell.
+fn through_shell(shell: &str, found: &Found, line: &str) -> Vec<String> {
+    let line = match found {
+        Found::OnPath => line.to_owned(),
+        Found::In(dir) => {
+            format!("PATH={}:\"$PATH\" {line}", quoted(&dir.to_string_lossy()))
+        }
+    };
+    vec![
+        shell.to_owned(),
+        "-c".to_owned(),
+        format!("{line}; exec $SHELL"),
+    ]
+}
+
+/// Where `program` is: on the session's `path`, else in `home`'s usual
+/// folders. Looked at off the loop.
+pub fn program_found(program: &str, path: &[PathBuf], home: Option<&Path>) -> Option<Found> {
+    if on_path(program, path) {
+        return Some(Found::OnPath);
+    }
+    home.into_iter()
+        .flat_map(home_folders)
+        .find(|d| runnable(&d.join(program)))
+        .map(Found::In)
+}
+
 /// Where an agent's program was found to resume it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Found {
@@ -168,17 +236,7 @@ impl SavedAgent {
     /// command, then a shell in its folder.
     pub fn command(&self, shell: &str, found: &Found) -> Option<Vec<String>> {
         let line = self.command_line()?;
-        let line = match found {
-            Found::OnPath => line,
-            Found::In(dir) => {
-                format!("PATH={}:\"$PATH\" {line}", quoted(&dir.to_string_lossy()))
-            }
-        };
-        Some(vec![
-            shell.to_owned(),
-            "-c".to_owned(),
-            format!("{line}; exec $SHELL"),
-        ])
+        Some(through_shell(shell, found, &line))
     }
 
     /// Where its program is: where its process found it, else in `path`
@@ -199,13 +257,7 @@ impl SavedAgent {
                 Found::In(dir.to_path_buf())
             });
         }
-        if on_path(program, path) {
-            return Some(Found::OnPath);
-        }
-        home.into_iter()
-            .flat_map(home_folders)
-            .find(|d| runnable(&d.join(program)))
-            .map(Found::In)
+        program_found(program, path, home)
     }
 
     /// Whether it can resume, and its program's place: its id reads, its
