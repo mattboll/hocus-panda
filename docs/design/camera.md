@@ -11,9 +11,16 @@ tabs and its preview's reactions (lot 4) (sources in the maintainer's
 
 ## The screen light (lot 1, as built)
 
-While an application uses the camera, the edges of the screen of the call
-glow softly and light the user's face. It works with every application:
-the light is the screen's, the video is not touched.
+While an application uses the camera, the screen of the call lights the
+user's face. It works with every application: the light is the screen's,
+the video is not touched.
+
+**Wider, and a second shape (2026-11-18).** Tried on the maintainer's
+laptop (its backlight at its maximum), lot 1's frame (28 to 70 px at
+0.55 to 0.92) made no visible difference on the face: a laptop's screen
+is a weak light, it takes far more white surface. The maintainer chose
+both of these, as a choice (`screen-light-shape`): a wide frame (the
+default), and the whole screen around the call's window.
 
 - **When**: as long as the in-use sign of the bar (bar.md 5.12) counts a
   camera's user, without its 3 s linger, after 3 s of continuous use: a
@@ -34,29 +41,65 @@ the light is the screen's, the video is not touched.
   minimised ones left out; with none, the focused screen (the focused
   window's, else the pointer's). It follows the window to another screen,
   fading out on one as it fades in on the other.
-- **The look**: the mockup's two inset `box-shadow`s in the warmth's
-  colour, at the strength's alpha: a frame a quarter of the glow's width
-  wide, and the glow blurred over its width, spread over half of it.
-  Warmth: cool `rgb(230,240,255)`, neutral `rgb(255,236,214)`, warm
-  `rgb(255,214,170)`; strength: soft, medium, strong, the glow 28, 46 or
-  70 px wide at scale 1, at 0.55, 0.75 or 0.92.
-- **Over everything but the pointer**, the lock screen too; on the screen
-  only: never in a capture, a share's frames or a recording (drawn for
-  `Purpose::Screen` alone, as the share's ring is).
+- **The look, a wide frame** (`screen-light-shape = "frame"`, the
+  default): along the edges of the screen, in the warmth's colour, nearly
+  opaque at the edge and glowing inward: an inset `box-shadow` spread
+  over the frame's width and blurred over two thirds of it (a Gaussian
+  of a third of the width), so the light is the strength's alpha at the
+  edge, over 90 % of it half way in, half of it at the width, and gone at
+  twice the width. The width is a part of the screen's shorter side:
+  soft a sixteenth, medium an eleventh, strong an eighth (on a 1080 p
+  screen, 68, 98 and 135 px, the light reaching about 200 px in at
+  strong); the alpha 0.85, 0.92 and 0.97. Warmth: cool
+  `rgb(230,240,255)`, neutral `rgb(255,236,214)`, warm `rgb(255,214,170)`.
+- **The look, all around the call** (`"around-call"`): everything on the
+  call's screen but the call's window is the light, the warmth's colour
+  at the strength's alpha (0.97 at strong): the wallpaper and the other
+  windows. It is drawn right behind the call's window, which stays as it
+  is with its shadow, over it (a window brought in front of the call
+  stays in front of the light too). Around the window, the light rises
+  from a little over half of itself (0.55) at its edge to full 48 px out
+  (a smoothstep, round at the corners), so that it does not look cut out:
+  the window's own shadow and a soft dimming around it, not a dark ring
+  of the wallpaper (from nothing, what is behind showed as one, another
+  window's edge with it); under the window, the light at that half, which
+  its round corners show. It follows the window as
+  it moves or is resized. When the call has no window on that screen (the
+  light then on the focused screen), while locked and in the overview,
+  it is the wide frame.
+- **The bar stays as it is**: neither shape covers the bar's column (the
+  bar, the gap beside it, to the screen's edge, as its form settles); the
+  frame glows along that column's inner edge as along the screen's.
+- **Over the windows, under the shell's surfaces**: the bar's popovers,
+  the notifications, the launcher and the compositor's own overlays stay
+  over the light (lot 1's light was over everything but the pointer; a
+  light this wide would hide them); a fullscreen window on top has the
+  frame over it; locked, the frame shows over the lock screen. On the
+  screen only: never in a capture, a share's frames or a recording (drawn
+  for `Purpose::Screen` alone, as the share's ring is).
 - **Its motion**: it fades in and out over 600 ms (CSS's `ease`, the
   mockup's transition), at once with reduced motion; turned back midway,
   it goes from where it is in the part of the fade left.
-- **Its cost** (`crates/hocus-compositor/src/screen_light.rs`): four
-  strips along the edges, computed on the CPU once for the screen's size,
-  scale, warmth and strength into textures of their own (the inset
-  shadow's blur is a Gaussian's, separable: the opacity is a product of
-  two error functions); drawn as textures, so on the CPU (pixman) as on
-  the GPU. While it fades, only its screen draws again, and only the
-  strips' alpha changes: the damage is the edges alone. Steady, it asks
-  for no frame and damages nothing; gone, its strips are let go.
+- **Its cost** (`crates/hocus-compositor/src/screen_light.rs`): the
+  frame is four strips along the edges of the part lit, computed on the
+  CPU once for its size, the frame's width, the warmth and the alpha into
+  textures of their own (the inset shadow's blur is a Gaussian's,
+  separable: the opacity is a product of two error functions); drawn as
+  textures, so on the CPU (pixman) as on the GPU. Around the call: flat
+  fills (solid colour elements) on a fixed grid of 256-pixel cells, each
+  cell the window does not touch kept as the same element, and the soft
+  edge's nine pieces cut from one small picture (its corners as they
+  are, its sides stretched along the window's), made once for the
+  scale, warmth and alpha: as the window moves or is resized, only the
+  cells along its edge and the soft edge change, and only they are
+  damaged. While it fades, only its screen draws again, and only the
+  pieces' alpha changes. Steady, it asks for no frame and damages
+  nothing; gone, its pictures are let go.
 - **Its settings** (`[camera]`, followed live; Settings › Caméra):
   `screen-light` (on by default, the maintainer's choice of 2026-11-17),
-  `screen-light-warmth` (`"neutral"`), `screen-light-strength`
+  `screen-light-shape` (`"frame"`, « Cadre »; `"around-call"`, « Tout
+  autour de l’appel »; the row « Forme »), `screen-light-warmth`
+  (`"neutral"`), `screen-light-strength`
   (`"auto"` since lot 2, below; `"soft"`, `"medium"`, `"strong"`). The
   camera's window in the bar holds its switch.
 
@@ -67,10 +110,14 @@ minimised call window does not hold the light (the focused screen takes
 it); the desktop's own screen cast (a `Video/Source` whose `media.role`
 is `Screen`) is no camera, so that sharing a screen lights nothing (the
 in-use sign counted what read it as a camera's user until then); the
-strips reach in twice the glow's width (past it the light is
-under half a level), at most half the screen; the `[camera]` section lets
-keys it does not know through, for the Hocuspanda camera's own (lots
-2 to 5).
+strips reach in twice the frame's width (past it the light is under
+half a level), at most half the part lit; around the call, the light
+rises over 48 px from half of itself at the window's edge, and a window
+in front of the call stays in front of the light; neither shape covers
+the bar's column, and both go under the shell's surfaces (the light was
+over everything but the pointer until 2026-11-18); the `[camera]`
+section lets keys it does not know through, for the Hocuspanda camera's
+own (lots 2 to 5).
 
 **Measured headless** (`crates/hocus-compositor/tests/screen_light.rs`):
 the real shell against a PipeWire of the test's own, a camera's node and
@@ -78,12 +125,21 @@ an application's stream linked to it as a session manager would: the
 light on the second screen, where the application's window is, its edge
 lit and the other screen's not, and gone once the stream is; a `Print`
 capture of the lit screen without it; `screen-light = false`, none, and
-turned back on live, the light comes; with reduced motion at once. The
+turned back on live, the light comes; with reduced motion at once;
+around the call, at strong, another window and the wallpaper of the
+call's screen are the light while the call's window and the bar's column
+are untouched, the light rises from the call's edge, a `Print` capture
+has none of it, and it follows the window moved over the other one. The
 share's frames without it: `sharing::the_screen_light_is_never_in_a_share`.
 The rows writing their keys, and the compositor following them:
 `settings_appearance::the_camera_page_writes_the_screen_light_s_keys`. Unit tests: the
-glow's fall-off, the strips edge to edge, a fade turned back
-(`screen_light::tests`), the keys' words (`config::camera::tests`).
+frame's width and fall-off, the strips edge to edge with the bar's
+column left out, the light around the call tiling the screen but the
+window (a cell away from it the same as it moves), the soft edge, a fade
+turned back (`screen_light::tests`), the keys' words
+(`config::camera::tests`). The maintainer's screenshots:
+`HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor --run-ignored only
+screen_light::screenshots_of_the_wide_light`.
 
 ## The Hocuspanda camera (lot 2, as built)
 
@@ -213,11 +269,13 @@ the mean brightness of the picture's centre (35 % to 65 % of its width,
 20 % to 60 % of its height; no face is looked for), averaged over about a
 second, said every half second when it moved. With
 `screen-light-strength = "auto"` (the default), the screen light's glow
-goes between soft (28 px, 0.55) and strong (70 px, 0.92) in 8 steps: a
+goes between soft (a sixteenth of the shorter side, 0.85) and strong (an
+eighth, 0.97) in 8 steps: a
 step stronger while the face is under 0.36, softer while over 0.50, a
 step at most every 600 ms (soft to strong in about 5 s); between the two
 it holds, the light it adds being in what is measured. Each step draws
-the strips again (`screen_light.rs`), the edges alone. Nothing read,
+the strips again (`screen_light.rs`), the edges alone (around the call,
+the fills' colour and the soft edge). Nothing read,
 nothing measured: soft, as lot 1. Fixed strengths stay.
 
 ### The window « CAMÉRA ET MICRO »

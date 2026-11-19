@@ -583,16 +583,23 @@
 # creatures = false
 
 # [camera]
-# While an application uses the camera (a call), the edges of the screen
-# its window is on (else the focused screen's) glow softly and light your
-# face (docs/design/camera.md). Over everything but the pointer, never in
-# a capture, a share or a recording; it fades in and out over 600 ms (at
-# once with reduced motion). Followed live. The light's warmth: "cool",
-# "neutral" or "warm"; its strength, the glow's width and brightness:
+# While an application uses the camera (a call), the screen its window is
+# on (else the focused screen) lights your face (docs/design/camera.md):
+# a laptop's screen is a weak light, so it takes a wide part of it. Over
+# the windows, under the bar, its popovers and the notifications; never
+# in a capture, a share or a recording; it fades in and out over 600 ms
+# (at once with reduced motion). Followed live. Its shape: "frame", a
+# wide frame along the screen's edges, nearly opaque at the edge and
+# glowing inward; or "around-call", all of the screen but the call's
+# window (and the bar), with a soft edge around the window (the frame
+# when the call has no window there). The light's warmth: "cool",
+# "neutral" or "warm"; its strength, the frame's width (a sixteenth, an
+# eleventh or an eighth of the screen's shorter side) and brightness:
 # "soft", "medium" or "strong", or "auto": while the Hocuspanda camera is
-# read, it measures the light on your face and the glow follows it over
+# read, it measures the light on your face and the light follows it over
 # a few seconds (soft otherwise).
 # screen-light = true
+# screen-light-shape = "frame"
 # screen-light-warmth = "neutral"
 # screen-light-strength = "auto"
 # The Hocuspanda camera: a camera named "Hocuspanda" that calls choose,

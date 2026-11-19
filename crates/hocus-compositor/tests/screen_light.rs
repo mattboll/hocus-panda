@@ -6,7 +6,10 @@
 //! application's stream linked to it as a session manager would: the
 //! light on the screen of that application's window, and gone with the
 //! stream; never in a capture (`Print`); off in the configuration, none,
-//! turned on live, it comes; with reduced motion, at once. A share's
+//! turned on live, it comes; with reduced motion, at once. Around the
+//! call (2026-11-18): the other window and the wallpaper lit, not the
+//! call's window nor the bar's column, the light following the window,
+//! never in a capture. A share's
 //! frames: `sharing::the_screen_light_is_never_in_a_share`; the Settings'
 //! rows: `settings_appearance::the_camera_page_writes_the_screen_light_s_keys`.
 //! The cameras' devices are files of the test's own, never `/dev/video*`.
@@ -25,7 +28,10 @@ use std::{
 use anyhow::Context;
 use common::{WAIT, chord, wait};
 use fakes::Fakes;
-use hocus_compositor::{Config, Headless, HeadlessConfig, OutputSpec, RendererChoice, model::Rect};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, LightShape, LightStrength, OutputSpec, RendererChoice,
+    model::Rect,
+};
 use hocus_link::{CameraUser, CaptureAsk, CaptureMode};
 
 const KEY_PRINT: u32 = 99;
@@ -46,9 +52,17 @@ fn red(hp: &mut Headless, index: usize, (x, y): (i32, i32)) -> anyhow::Result<u8
     px.get(at + 2).copied().context("off the screen")
 }
 
-/// 10 px in from the right edge, half way down: in the soft light, off
-/// the bar.
-const EDGE: (i32, i32) = (SCREEN.0 - 10, SCREEN.1 / 2);
+/// The colour of pixel (`x`, `y`) of screen `index` as it shows.
+fn rgb(hp: &mut Headless, index: usize, (x, y): (i32, i32)) -> anyhow::Result<[u8; 3]> {
+    let (w, _, px) = hp.screenshot(index)?;
+    let at = usize::try_from(y * w + x)? * 4;
+    let p = px.get(at..at + 4).context("off the screen")?;
+    Ok([p[2], p[1], p[0]])
+}
+
+/// 10 px in from the left edge (the bar is on the right), half way down:
+/// in the soft light.
+const EDGE: (i32, i32) = (10, SCREEN.1 / 2);
 
 /// Runs until the light is full on screen `name` alone.
 fn lit_on(hp: &mut Headless, name: &str) -> anyhow::Result<()> {
@@ -216,6 +230,134 @@ fn a_capture_of_the_lit_screen_has_no_light() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Window `app` opened and placed at `rect`; its id.
+fn placed(hp: &mut Headless, app: &'static str, rect: Rect) -> anyhow::Result<()> {
+    common::open(hp, app, (rect.width as u32, rect.height as u32))?;
+    let id = hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some(app))
+        .context("no window")?
+        .id;
+    hp.place_window(id, rect);
+    common::wait_for_rect(hp, app, rect)
+}
+
+/// Whether `lit` is `under` seen through the neutral light at strong's
+/// alpha, within a few levels.
+fn is_light(lit: [u8; 3], under: [u8; 3]) -> bool {
+    let light = hocus_compositor::LightWarmth::Neutral.rgb();
+    (0..3).all(|i| {
+        let want = 0.97 * f64::from(light[i]) + 0.03 * f64::from(under[i]);
+        (f64::from(lit[i]) - want).abs() <= 3.0
+    })
+}
+
+fn same(a: [u8; 3], b: [u8; 3]) -> bool {
+    (0..3).all(|i| a[i].abs_diff(b[i]) <= 2)
+}
+
+/// Around the call, strong: the other window and the wallpaper of the
+/// call's screen are the light, the call's window is untouched, and so
+/// is the bar's column; the light rises from the call's edge; it follows
+/// the window as it moves; a `Print` capture has none of it.
+#[test]
+fn around_the_call_the_light_covers_all_but_the_call_s_window() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut hp = alone(&["1920x1080"], dir.path(), |c| {
+        c.camera.screen_light_shape = LightShape::AroundCall;
+        c.camera.screen_light_strength = LightStrength::Strong;
+    })?;
+    placed(
+        &mut hp,
+        "org.example.notes",
+        Rect {
+            x: 1100,
+            y: 300,
+            width: 600,
+            height: 400,
+        },
+    )?;
+    let call = Rect {
+        x: 200,
+        y: 200,
+        width: 700,
+        height: 600,
+    };
+    placed(&mut hp, CALL, call)?;
+    common::at_rest(&mut hp)?;
+    let bar = hp.work_area().context("no work area")?;
+    anyhow::ensure!(bar.right() < SCREEN.0 - 40, "no bar's room: {bar:?}");
+    let notes = (1400, 500);
+    let in_call = (550, 500);
+    let wall = (100, 950);
+    let column = (SCREEN.0 - 6, 540);
+    let by_the_call = (call.x - 4, 500);
+    let points = [notes, in_call, wall, column, by_the_call];
+    let mut before = Vec::new();
+    for p in points {
+        before.push(rgb(&mut hp, 0, p)?);
+    }
+    hp.camera_users(visio());
+    lit_on(&mut hp, "HEADLESS-1")?;
+    let mut after = Vec::new();
+    for p in points {
+        after.push(rgb(&mut hp, 0, p)?);
+    }
+    assert!(
+        is_light(after[0], before[0]),
+        "the other window {after:?} {before:?}"
+    );
+    assert!(same(after[1], before[1]), "the call {after:?} {before:?}");
+    assert!(
+        is_light(after[2], before[2]),
+        "the wallpaper {after:?} {before:?}"
+    );
+    assert!(
+        same(after[3], before[3]),
+        "the bar's column {after:?} {before:?}"
+    );
+    assert!(
+        after[4][0] + 60 < after[2][0],
+        "right by the call, the light rises: {after:?}"
+    );
+    // A capture: the screen as it is under the light.
+    chord(&mut hp, &[KEY_PRINT]);
+    hp.capture_ask(CaptureAsk::Mode(CaptureMode::Screen));
+    hp.capture_ask(CaptureAsk::Shoot);
+    let done = hp.dispatch_until(WAIT, |hp| hp.captures().0 >= 1)?;
+    anyhow::ensure!(done, "no capture made");
+    let file = hp.captures().1.context("no file written")?;
+    let image = image::open(&file)?.to_rgba8();
+    for (i, p) in [notes, wall].into_iter().enumerate() {
+        let [r, g, b, _] = image.get_pixel(p.0 as u32, p.1 as u32).0;
+        let want = before[if i == 0 { 0 } else { 2 }];
+        assert!(
+            same([r, g, b], want),
+            "captured {p:?}: {:?} {want:?}",
+            [r, g, b]
+        );
+    }
+    common::at_rest(&mut hp)?;
+    // The call moves over the other window: the light follows it.
+    let moved = Rect { x: 700, ..call };
+    let id = hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some(CALL))
+        .context("no call")?
+        .id;
+    hp.place_window(id, moved);
+    common::wait_for_rect(&mut hp, CALL, moved)?;
+    common::at_rest(&mut hp)?;
+    wait(&mut hp, Duration::from_millis(50))?;
+    let left = rgb(&mut hp, 0, (300, 500))?;
+    assert!(is_light(left, before[2]), "where the call was: {left:?}");
+    let now_call = rgb(&mut hp, 0, (1200, 500))?;
+    assert!(same(now_call, before[1]), "where it is: {now_call:?}");
+    Ok(())
+}
+
 #[test]
 fn off_there_is_none_turned_on_it_comes_and_reduced_motion_is_at_once() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
@@ -249,19 +391,10 @@ fn off_there_is_none_turned_on_it_comes_and_reduced_motion_is_at_once() -> anyho
     Ok(())
 }
 
-/// The maintainer's screenshots, into `HOCUS_SHOTS`: two screens, the
-/// real shell's bar, a call's window on the second; the light at each
-/// warmth and strength, and off.
-#[test]
-#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
-fn screenshots_of_the_screen_light() -> anyhow::Result<()> {
-    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
-        return Ok(());
-    };
-    std::fs::create_dir_all(&out)?;
+/// The real shell for the maintainer's screenshots, in folders of
+/// `root`'s, at a fixed time, without the session's buses or PipeWire.
+fn shots_shell(root: &Path) -> anyhow::Result<PathBuf> {
     let shell = common::shell_program();
-    let dir = tempfile::tempdir()?;
-    let root = dir.path();
     for sub in ["home", "config", "cache", "state", "data"] {
         std::fs::create_dir_all(root.join(sub))?;
     }
@@ -286,6 +419,111 @@ fn screenshots_of_the_screen_light() -> anyhow::Result<()> {
         ),
     )?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+    Ok(script)
+}
+
+/// The maintainer's screenshots of the wide light (2026-11-18), into
+/// `HOCUS_SHOTS`: one 1920×1080 screen, the real shell's bar, a call's
+/// window and another one; the wide frame strong, around the call
+/// strong, the wide frame soft, around the call soft.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_wide_light() -> anyhow::Result<()> {
+    use hocus_compositor::Camera;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let dir = tempfile::tempdir()?;
+    let script = shots_shell(dir.path())?;
+    let base = |camera: Camera| {
+        let mut config = Config::default();
+        config.keyboard.layouts = vec!["us".to_owned()];
+        config.camera = camera;
+        config
+    };
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            outputs: vec!["1920x1080".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        base(Camera::default()),
+        Some(script),
+    )?;
+    let up = hp.dispatch_until(Duration::from_secs(20), |hp| hp.bar_commits() > 0)?;
+    anyhow::ensure!(up, "no bar");
+    placed(
+        &mut hp,
+        "org.example.notes",
+        Rect {
+            x: 1000,
+            y: 140,
+            width: 600,
+            height: 520,
+        },
+    )?;
+    placed(
+        &mut hp,
+        CALL,
+        Rect {
+            x: 360,
+            y: 240,
+            width: 880,
+            height: 620,
+        },
+    )?;
+    hp.pointer_move(1000.0, 1000.0);
+    hp.camera_users(visio());
+    for (shape, strength, name) in [
+        (LightShape::Frame, LightStrength::Strong, "a-frame-strong"),
+        (
+            LightShape::AroundCall,
+            LightStrength::Strong,
+            "b-around-call-strong",
+        ),
+        (LightShape::Frame, LightStrength::Soft, "c-frame-soft"),
+        (
+            LightShape::AroundCall,
+            LightStrength::Soft,
+            "d-around-call-soft",
+        ),
+    ] {
+        hp.reconfigure(base(Camera {
+            screen_light_shape: shape,
+            screen_light_strength: strength,
+            ..Camera::default()
+        }));
+        lit_on(&mut hp, "HEADLESS-1")?;
+        common::at_rest(&mut hp)?;
+        wait(&mut hp, Duration::from_millis(300))?;
+        let (w, h, px) = hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("no image")?;
+        let path = out.join(format!("screen-light-{name}.png"));
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+    }
+    Ok(())
+}
+
+/// The maintainer's screenshots, into `HOCUS_SHOTS`: two screens, the
+/// real shell's bar, a call's window on the second; the light at each
+/// warmth and strength, and off.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_screen_light() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let dir = tempfile::tempdir()?;
+    let script = shots_shell(dir.path())?;
     let base = |camera: hocus_compositor::Camera| {
         let mut config = Config::default();
         config.keyboard.layouts = vec!["us".to_owned()];

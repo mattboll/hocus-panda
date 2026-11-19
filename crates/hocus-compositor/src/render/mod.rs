@@ -903,11 +903,20 @@ impl State {
                 .first()
                 .is_some_and(|(id, _)| self.model.mode(*id) == Mode::Fullscreen);
         let (mut windows, target) = self.window_elements(renderer, &frame, &looks, palette);
+        // The screen light's frame (#619) right over the windows, under
+        // the bar, its popovers, the notifications and the compositor's
+        // own surfaces: a wide light does not hide them. Around the call,
+        // it is among the windows, behind the call's.
+        let mut light = Vec::new();
+        if purpose.screen() && !self.locked() {
+            self.screen_light_frame(renderer, output, &mut light);
+        }
         if let Some((at, _, alpha)) = palette {
             let dim = self.actions_dim(output, alpha).map(OutputElements::Solid);
             elements.splice(at..at, target.into_iter().chain(dim));
         }
         if fullscreen_on_top {
+            elements.append(&mut light);
             elements.append(&mut windows);
         }
         // The halo over the bar's surfaces and around them, under the
@@ -962,6 +971,7 @@ impl State {
         // windows, over everything after them; the bar's too when it is in
         // front.
         let glass_at = elements.len();
+        elements.append(&mut light);
         self.snap_elements(renderer, &frame, &mut elements);
         self.leaving_elements(renderer, &frame, &mut elements);
         // The overview over the windows, under the bar.
@@ -1938,10 +1948,11 @@ impl State {
                     .map(OutputElements::Cursor),
             );
         }
-        // The screen light over everything else, the lock too (#619): on
-        // the screen only, never in a capture, a share or a recording.
-        if purpose.screen() {
-            self.screen_light_elements(renderer, output, elements);
+        // Locked, the screen light's frame over the lock (#619); else it
+        // goes over the windows, under the shell's surfaces. On the screen
+        // only, never in a capture, a share or a recording.
+        if purpose.screen() && self.locked() {
+            self.screen_light_frame(renderer, output, elements);
         }
         // Locked (7.1): the lock alone, whatever the purpose but its own
         // last look at the desktop.

@@ -1,6 +1,6 @@
 //! Caméra / Camera (#619): what the desktop does while an application uses
 //! the camera. The screen light's rows (`[camera]`): on or off, its
-//! warmth, its strength (`auto` follows the light on the face while the
+//! shape (a wide frame, or all around the call), its warmth, its strength (`auto` follows the light on the face while the
 //! Hocuspanda camera is read); then the Hocuspanda camera's effects, as
 //! the camera's window in the bar sets them: Lumière, the banner, its
 //! name and its project (lot 2); what is behind you, « Je reviens », the
@@ -26,6 +26,7 @@ pub const HOCUSPANDA: RowGroup = RowGroup {
 
 /// The screen light's switch, which the other two need.
 pub const SCREEN_LIGHT: &str = "camera.screen-light";
+pub const SHAPE: &str = "camera.screen-light-shape";
 pub const WARMTH: &str = "camera.screen-light-warmth";
 pub const STRENGTH: &str = "camera.screen-light-strength";
 pub const LIGHTING: &str = "camera.lighting";
@@ -45,6 +46,7 @@ pub const GESTURES: &str = "camera.gestures";
 pub const CELEBRATIONS: &str = "camera.celebrations";
 pub const PANDA_LOOK: &str = "camera.panda-look";
 
+const SHAPES: &[&str] = &["frame", "around-call"];
 const WARMTHS: &[&str] = &["cool", "neutral", "warm"];
 const STRENGTHS: &[&str] = &["auto", "soft", "medium", "strong"];
 const BACKGROUNDS: &[&str] = &["room", "blur", "aurora", "koi"];
@@ -79,6 +81,23 @@ pub fn settings() -> &'static [Setting] {
                 kind: Kind::Switch,
                 places: one(&["camera", "screen-light"], Codec::Bool),
                 needs: None,
+            },
+            Setting {
+                id: SHAPE,
+                section: SectionId::Camera,
+                group: LIGHT,
+                name: words::SHAPE,
+                line: Some(words::A_WIDE_FRAME_ALONG_THE_EDGES),
+                keywords: (
+                    &["caméra", "lumière", "forme", "cadre", "bords", "appel"],
+                    &["camera", "light", "shape", "frame", "edges", "call"],
+                ),
+                kind: Kind::Segmented(vec![
+                    word(words::FRAME, "frame"),
+                    word(words::ALL_AROUND_THE_CALL, "around-call"),
+                ]),
+                places: one(&["camera", "screen-light-shape"], Codec::Word(SHAPES)),
+                needs: Some(SCREEN_LIGHT),
             },
             Setting {
                 id: WARMTH,
@@ -385,7 +404,7 @@ mod tests {
     use crate::model::Places;
 
     /// Its keys and their defaults are the configuration's: the light on,
-    /// neutral, auto; Lumière on, no banner, the account's name, the
+    /// a frame, neutral, auto; Lumière on, no banner, the account's name, the
     /// project.
     #[test]
     fn the_rows_write_the_camera_s_keys_with_their_defaults() {
@@ -400,6 +419,7 @@ mod tests {
             keys,
             [
                 ("camera.screen-light".to_owned(), Value::Bool(true)),
+                ("camera.screen-light-shape".to_owned(), Value::Word("frame")),
                 (
                     "camera.screen-light-warmth".to_owned(),
                     Value::Word("neutral")

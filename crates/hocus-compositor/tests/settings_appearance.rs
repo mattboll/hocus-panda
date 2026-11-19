@@ -497,8 +497,8 @@ fn the_accessibility_page_holds_the_view_and_high_contrast_holds_transparency_on
     Ok(())
 }
 
-/// Caméra (#619): the screen light's three rows write `[camera]`; off,
-/// its warmth and strength are inert. The compositor follows the file.
+/// Caméra (#619): the screen light's four rows write `[camera]`; off,
+/// its shape, warmth and strength are inert. The compositor follows the file.
 /// The Hocuspanda camera's rows (lots 2 to 4) write theirs, the banner's
 /// name and project inert without it, the presenter's corner and size
 /// without it.
@@ -518,6 +518,7 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
         ids,
         [
             "camera.screen-light",
+            "camera.screen-light-shape",
             "camera.screen-light-warmth",
             "camera.screen-light-strength",
             "camera.lighting",
@@ -537,6 +538,7 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
         ]
     );
     assert_eq!(row(&shown, "camera.screen-light")["value"], "oui");
+    assert_eq!(row(&shown, "camera.screen-light-shape")["value"], "Cadre");
     assert_eq!(row(&shown, "camera.screen-light-warmth")["value"], "Neutre");
     assert_eq!(row(&shown, "camera.screen-light-strength")["value"], "Auto");
     // The Hocuspanda camera's (#619, lot 2): Lumière on, no banner, whose
@@ -579,6 +581,8 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
     bed.written(|t| t.contains("framing = true"))?;
     bed.click("control:camera.celebrations")?;
     bed.written(|t| t.contains("celebrations = true"))?;
+    bed.click("segment:camera.screen-light-shape:1")?;
+    bed.written(|t| t.contains("screen-light-shape = \"around-call\""))?;
     bed.click("segment:camera.screen-light-warmth:2")?;
     bed.written(|t| t.contains("screen-light-warmth = \"warm\""))?;
     bed.click("segment:camera.screen-light-strength:3")?;
@@ -597,6 +601,7 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
     bed.click("control:camera.screen-light")?;
     bed.written(|t| t.contains("screen-light = false"))?;
     let shown = bed.shows(|s| row(s, "camera.screen-light")["value"] == "non")?;
+    assert_eq!(row(&shown, "camera.screen-light-shape")["inert"], true);
     assert_eq!(row(&shown, "camera.screen-light-warmth")["inert"], true);
     assert_eq!(row(&shown, "camera.screen-light-strength")["inert"], true);
     let gone = bed
