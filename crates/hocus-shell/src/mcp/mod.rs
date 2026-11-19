@@ -15,6 +15,8 @@
 //!   compositor draws (its arrow and ring have no surface of the shell's:
 //!   on the CPU the shell's surfaces have no alpha).
 //! - **The card** ([`card`], scene 3) of an action waiting for the user.
+//! - **A refusal's toast** ([`toast`] too, #825): a `draw` without its
+//!   right, with « Permettre… ».
 
 pub mod card;
 pub mod tag;
@@ -84,6 +86,8 @@ struct Kept {
     pointers: Vec<(window::Id, hocus_link::McpShow)>,
     /// The card's surface and what it asks.
     card: Option<(window::Id, hocus_link::McpCard)>,
+    /// A refusal's toast's surface.
+    refused: Option<(window::Id, hocus_link::McpRefusedToast)>,
 }
 
 static KEPT: Mutex<Option<Kept>> = Mutex::new(None);
@@ -188,10 +192,11 @@ pub fn set(shown: McpShown) -> Vec<Effect> {
             }
             if let Some(toast) = &shown.toast {
                 let id = window::Id::unique();
-                let (size, at) = toast::place(words, toast);
+                let (size, at) = toast::place(words, toast, &shown.inked);
                 tracing::debug!(
                     request = toast.request,
                     said = words.toast(toast),
+                    under = words.toast_under(toast),
                     undo = toast.undo,
                     "an MCP agent's toast shows"
                 );
@@ -204,6 +209,45 @@ pub fn set(shown: McpShown) -> Vec<Effect> {
                 });
                 k.toast = Some((id, toast.clone()));
             }
+        }
+        // A refusal's toast: one surface each.
+        if k.refused.as_ref().map(|(_, t)| t) != shown.refused.as_ref() {
+            if let Some((id, _)) = k.refused.take() {
+                effects.push(Effect::Remove(id));
+            }
+            if let Some(refused) = &shown.refused {
+                let id = window::Id::unique();
+                let (size, at) = toast::place_refused(words, refused);
+                tracing::debug!(
+                    agent = refused.agent,
+                    said = words.refused_toast(refused),
+                    under = words.refused_under(),
+                    "an MCP agent's refusal toast shows"
+                );
+                effects.push(Effect::Agent {
+                    id,
+                    output: refused.output.clone(),
+                    size,
+                    at,
+                    kind: Surface::Toast,
+                });
+                k.refused = Some((id, refused.clone()));
+            }
+        }
+        // The drawing toast's « Effacer » comes and goes with the ink.
+        let erase_changed = k.shown.inked != shown.inked;
+        if erase_changed && let Some((id, toast)) = k.toast.take() {
+            effects.push(Effect::Remove(id));
+            let id = window::Id::unique();
+            let (size, at) = toast::place(words, &toast, &shown.inked);
+            effects.push(Effect::Agent {
+                id,
+                output: toast.output.clone(),
+                size,
+                at,
+                kind: Surface::Toast,
+            });
+            k.toast = Some((id, toast));
         }
         let changed = tile_before != tile_of(&shown);
         k.shown = shown;
@@ -257,6 +301,16 @@ pub fn row_word(id: u64) -> String {
     })
 }
 
+/// Whether row `id`'s last call was refused (its word in red, #825).
+pub fn row_refused(id: u64) -> bool {
+    kept(|k| {
+        k.shown
+            .agents
+            .iter()
+            .any(|r| ROW_BASE + r.id == id && matches!(r.doing, McpDoing::Refused { .. }))
+    })
+}
+
 /// Whether row `id` is acting now (its row lit violet).
 pub fn row_acting(id: u64) -> bool {
     kept(|k| {
@@ -286,14 +340,21 @@ pub fn tile(output: &str) -> Option<u8> {
 
 /// The tag's or the toast's view, if surface `id` is theirs.
 pub fn view(id: window::Id, glass: bool) -> Option<Element<'static, Message>> {
-    let (tag, toast, pointer, asked) = kept(|k| {
+    let (tag, toast, pointer, asked, refused, inked) = kept(|k| {
         (
             k.tag.clone(),
             k.toast.clone(),
             k.pointers.iter().find(|(p, _)| *p == id).cloned(),
             k.card.clone(),
+            k.refused.clone(),
+            k.shown.inked.clone(),
         )
     });
+    if let Some((refused_id, refused)) = refused
+        && refused_id == id
+    {
+        return Some(toast::view_refused(id, refused));
+    }
     if let Some((tag_id, show)) = tag
         && tag_id == id
     {
@@ -310,7 +371,7 @@ pub fn view(id: window::Id, glass: bool) -> Option<Element<'static, Message>> {
     if let Some((toast_id, toast)) = toast
         && toast_id == id
     {
-        return Some(toast::view(id, toast, glass));
+        return Some(toast::view(id, toast, inked, glass));
     }
     None
 }
@@ -318,6 +379,11 @@ pub fn view(id: window::Id, glass: bool) -> Option<Element<'static, Message>> {
 /// Whether card `card` still waits.
 pub fn card_shows(card: u64) -> bool {
     kept(|k| k.card.as_ref().is_some_and(|(_, c)| c.id == card))
+}
+
+/// Whether refusal toast `id` still shows.
+pub fn refused_shows(id: u64) -> bool {
+    kept(|k| k.refused.as_ref().is_some_and(|(_, t)| t.id == id))
 }
 
 /// Whether the toast of request `request` still shows.
@@ -369,6 +435,12 @@ impl Words {
         }
         if s.closed > 0 {
             parts.push(txt::closed(lang, s.closed));
+        }
+        if s.dragged > 0 {
+            parts.push(txt::dragged(lang, s.dragged));
+        }
+        if s.drawn > 0 {
+            parts.push(txt::drawn(lang, s.drawn));
         }
         match s.settings.as_slice() {
             [] => {}
@@ -422,14 +494,44 @@ impl Words {
     }
 
     /// The toast's second line: the request's first intent, and whether
-    /// it can be undone.
+    /// it can be undone (a drawing alone is erased, not undone: nothing is
+    /// said of it).
     pub fn toast_under(self, toast: &hocus_link::McpToast) -> String {
         let quoted = txt::quoted(self.lang, &toast.intent);
-        if toast.undo {
+        let drawing_alone = toast.summary
+            == McpSummary {
+                drawn: toast.summary.drawn,
+                ..McpSummary::default()
+            };
+        if toast.undo || drawing_alone {
             quoted
         } else {
             format!("{quoted} · {}", txt::CANNOT_UNDO.get(self.lang))
         }
+    }
+
+    /// A refusal's toast: "Claude n’a pas pu dessiner à l’écran".
+    pub fn refused_toast(self, toast: &hocus_link::McpRefusedToast) -> String {
+        txt::refused_toast(
+            self.lang,
+            txt::RefusedToast {
+                agent: &toast.agent,
+                tool: self.tool(&toast.tool),
+            },
+        )
+    }
+
+    /// Its second line: why, and where to allow it.
+    pub fn refused_under(self) -> &'static str {
+        txt::REFUSED_UNDER.get(self.lang)
+    }
+
+    pub fn allow_it(self) -> &'static str {
+        txt::ALLOW_IT.get(self.lang)
+    }
+
+    pub fn erase(self) -> &'static str {
+        txt::ERASE.get(self.lang)
     }
 
     /// What an agent's row says on its right.
@@ -448,6 +550,8 @@ impl Words {
                 McpKind::Launch => txt::ACTING_LAUNCH,
                 McpKind::Setting => txt::ACTING_SETTING,
                 McpKind::Input => txt::ACTING_INPUT,
+                McpKind::Draw => txt::ACTING_DRAW,
+                McpKind::Drag => txt::ACTING_DRAG,
             }
             .get(lang)
             .to_owned(),
@@ -459,6 +563,7 @@ impl Words {
             }
             // Its good news, as it said it (#809).
             McpDoing::Good { why } => why.clone(),
+            McpDoing::Refused { tool } => txt::row_refused(lang, self.tool(tool)),
         }
     }
 
@@ -512,6 +617,8 @@ impl Words {
             "type" => txt::TOOL_TYPE,
             "press_keys" => txt::TOOL_PRESS_KEYS,
             "close_window" => txt::TOOL_CLOSE_WINDOW,
+            "drag" => txt::TOOL_DRAG,
+            "draw" => txt::TOOL_DRAW,
             "accessibility_tree" | "wait_for" => txt::TOOL_READ_TREE,
             _ => txt::TOOL_OTHER,
         }
@@ -526,6 +633,7 @@ impl Words {
             McpRefusal::NoWindows => txt::WHY_NO_WINDOWS,
             McpRefusal::NoDesktops => txt::WHY_NO_DESKTOPS,
             McpRefusal::NoInput => txt::WHY_NO_INPUT,
+            McpRefusal::NoDraw => txt::WHY_NO_DRAW,
             McpRefusal::Locked => txt::WHY_LOCKED,
             McpRefusal::Asking => txt::WHY_ASKING,
             McpRefusal::Stopped => txt::WHY_STOPPED,
@@ -582,6 +690,7 @@ impl Words {
                 txt::wants_keys(lang, txt::WantsKeys { agent, keys, title })
             }
             McpAsk::Close { title } => txt::wants_close(lang, txt::WantsClose { agent, title }),
+            McpAsk::Drag { title } => txt::wants_drag(lang, txt::WantsDrag { agent, title }),
         }
     }
 
@@ -698,5 +807,74 @@ mod tests {
         };
         assert_eq!(fr.doing(&row, false), "a rangé 3 fenêtres · 10:43");
         assert_eq!(fr.doing(&row, true), "arrêté");
+    }
+
+    #[test]
+    fn a_drawing_and_its_refusal_say_so() {
+        let fr = Words::new(Lang::French);
+        let toast = hocus_link::McpToast {
+            request: 1,
+            agent: "Claude".into(),
+            summary: McpSummary {
+                drawn: 4,
+                ..McpSummary::default()
+            },
+            intent: "Entoure le job qui échoue".into(),
+            undo: false,
+            output: "A".into(),
+            left: 0,
+            bottom: 0,
+            since: 0,
+        };
+        assert_eq!(fr.toast(&toast), "Claude a dessiné 4 formes à l’écran");
+        // Erased, not undone: nothing said of it.
+        assert_eq!(fr.toast_under(&toast), "« Entoure le job qui échoue »");
+        let dragged = McpSummary {
+            dragged: 1,
+            ..McpSummary::default()
+        };
+        assert_eq!(fr.summary(&dragged), "fait glisser 1 fois");
+        let refused = hocus_link::McpRefusedToast {
+            id: 1,
+            agent: "Claude".into(),
+            tool: "draw".into(),
+            why: McpRefusal::NoDraw,
+            output: "A".into(),
+            left: 0,
+            bottom: 0,
+        };
+        assert_eq!(
+            fr.refused_toast(&refused),
+            "Claude n’a pas pu dessiner à l’écran"
+        );
+        assert_eq!(
+            fr.refused_under(),
+            "Pas permis · Réglages › Agir sur le bureau"
+        );
+        assert_eq!(fr.allow_it(), "Permettre…");
+        let row = McpRow {
+            id: 1,
+            name: "Claude".into(),
+            doing: McpDoing::Refused {
+                tool: "draw".into(),
+            },
+        };
+        assert_eq!(fr.doing(&row, false), "refusé : dessiner à l’écran");
+        let line = hocus_link::McpLine {
+            agent: "Claude".into(),
+            at: "10:45".into(),
+            said: McpSaid::Refused {
+                tool: "draw".into(),
+                why: McpRefusal::NoDraw,
+            },
+        };
+        assert_eq!(
+            fr.line(&line),
+            (
+                "Claude · dessiner à l’écran".to_owned(),
+                "Refusé : pas permis".to_owned(),
+                true
+            )
+        );
     }
 }

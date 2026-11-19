@@ -952,6 +952,7 @@ impl State {
             ToCompositor::McpStop(stop) => self.mcp_stop(stop),
             ToCompositor::McpReply { card, reply } => self.mcp_reply(card, reply),
             ToCompositor::McpHandBack(agent) => self.mcp_hand_back(&agent),
+            ToCompositor::McpErase(agent) => self.mcp_erase(&agent),
             ToCompositor::ProjectMake {
                 output,
                 desktop,

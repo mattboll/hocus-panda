@@ -397,10 +397,11 @@
 # at the windows, desktops, screens and settings; "act": act on them too),
 # and, acting, its rights: windows (arrange, move, close them; true by
 # default), desktops (switch them, launch applications; true), settings
-# (change them; false), input (click and type, through a pointer and a
-# keyboard of its own, in the applications of apps; true). apps: the
-# applications (app ids, globs) whose windows it may click and type in and
-# whose accessible trees it reads (none by default). client and since:
+# (change them; false), input (click, drag and type, through a pointer and
+# a keyboard of its own, in the applications of apps; true), draw (draw on
+# the screen in its colour, over the windows, until its next action or Esc;
+# false). apps: the applications (app ids, globs) whose windows it may
+# click and type in and whose accessible trees it reads (none by default). client and since:
 # the program the Settings plugged it into ("claude-code") and the day.
 # An agent the file does not name is refused. Before each action, its
 # intent shows on what it will touch for show-before-ms milliseconds (0:
@@ -411,6 +412,7 @@
 #   name = "Claude"
 #   access = "act"
 #   settings = true
+#   draw = true
 #   apps = ["kitty", "org.mozilla.*"]
 # show-before-ms = 600
 # confirm-apps = ["hocus-settings", "org.keepassxc.KeePassXC", "com.bitwarden.desktop", "1password", "org.gnome.seahorse.Application", "org.gnome.World.Secrets", "org.kde.kwalletmanager5"]

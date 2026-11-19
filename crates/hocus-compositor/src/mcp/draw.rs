@@ -34,6 +34,21 @@ const RING: f64 = 34.0;
 const HALO: f64 = 6.0;
 const RING_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46" viewBox="0 0 46 46"><circle cx="23" cy="23" r="20" fill="none" stroke="#B69CFF" stroke-opacity="0.30" stroke-width="6"/><circle cx="23" cy="23" r="16" fill="none" stroke="#B69CFF" stroke-width="2"/></svg>"##;
 
+/// The smaller ring while its button is held (the mockup's drag: 13 px
+/// round, at 0.9).
+const PRESSED: f64 = 26.0;
+const PRESSED_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="0 0 38 38"><g opacity="0.9"><circle cx="19" cy="19" r="17" fill="none" stroke="#B69CFF" stroke-opacity="0.16" stroke-width="8"/><circle cx="19" cy="19" r="13" fill="none" stroke="#B69CFF" stroke-width="2"/></g></svg>"##;
+
+/// The ring round an agent's pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ring {
+    None,
+    /// Its action shows before it is done.
+    Shown,
+    /// Its button is held: it drags.
+    Pressed,
+}
+
 /// A picture drawn for one scale.
 type Picture = RefCell<Option<(u64, MemoryRenderBuffer, i32, i32, Id)>>;
 
@@ -42,6 +57,7 @@ type Picture = RefCell<Option<(u64, MemoryRenderBuffer, i32, i32, Id)>>;
 pub struct Pictures {
     arrow: Picture,
     ring: Picture,
+    pressed: Picture,
 }
 
 /// `svg` drawn `side` logical pixels wide at `scale`: its pixels, ARGB.
@@ -117,16 +133,18 @@ impl State {
                 local - Point::from(TIP),
                 out,
             );
-            if ring {
-                let side = RING + 2.0 * HALO;
-                place(
-                    &pictures.ring,
-                    RING_SVG,
-                    (side, side),
-                    local - Point::from((side / 2.0, side / 2.0)),
-                    out,
-                );
-            }
+            let (picture, svg, side) = match ring {
+                Ring::None => continue,
+                Ring::Shown => (&pictures.ring, RING_SVG, RING + 2.0 * HALO),
+                Ring::Pressed => (&pictures.pressed, PRESSED_SVG, PRESSED + 12.0),
+            };
+            place(
+                picture,
+                svg,
+                (side, side),
+                local - Point::from((side / 2.0, side / 2.0)),
+                out,
+            );
         }
     }
 }

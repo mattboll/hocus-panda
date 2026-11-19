@@ -96,6 +96,13 @@ pub fn aims_at_label(call: &Call) -> Option<WindowId> {
         Call::Scroll(c) if c.label.is_some() && c.x.is_none() && c.y.is_none() => {
             Some(WindowId(c.window))
         }
+        Call::Drag(c)
+            if (c.label.is_some() && c.x.is_none() && c.y.is_none())
+                || (c.to_label.is_some() && c.to_x.is_none() && c.to_y.is_none()) =>
+        {
+            Some(WindowId(c.window))
+        }
+        Call::Draw(c) if c.element.is_some() && c.around.is_none() => c.window.map(WindowId),
         _ => None,
     }
 }
@@ -111,7 +118,7 @@ pub fn types_into(call: &Call) -> Option<WindowId> {
 
 impl State {
     /// Runs `then` in `after`, on the loop; its token.
-    fn mcp_timer(
+    pub(super) fn mcp_timer(
         &mut self,
         after: Duration,
         then: impl FnOnce(&mut State) + 'static,
@@ -160,6 +167,7 @@ impl State {
             self.mcp.closing = None;
             self.mcp.busy = false;
         }
+        self.mcp_hand_gone(session);
         self.mcp.waits.retain(|w| w.session != session);
         self.mcp.trees.retain(|_, t| match t {
             TreeFor::Tool { session: s, .. } => *s != session,
@@ -183,7 +191,8 @@ impl State {
         if let Some(retry) = self.mcp.retry.take() {
             held.push(retry);
         }
-        self.mcp.busy = self.mcp.closing.is_some();
+        held.extend(self.mcp_drag_let_go());
+        self.mcp.busy = self.mcp.closing.is_some() || self.mcp_drawing();
         held
     }
 
@@ -198,6 +207,7 @@ impl State {
         match &waiting.call {
             Call::Click(c) => self.mcp_point(id, c.x, c.y).ok(),
             Call::Scroll(c) => self.mcp_point(id, c.x, c.y).ok(),
+            Call::Drag(c) => self.mcp_point(id, c.x, c.y).ok(),
             call => {
                 let kept = types_into(call).and_then(|_| {
                     self.mcp_seat(waiting.session)
@@ -225,7 +235,10 @@ impl State {
         id: WindowId,
         point: Point<f64, Logical>,
     ) {
-        if matches!(waiting.call, Call::Click(_) | Call::Scroll(_)) {
+        if matches!(
+            waiting.call,
+            Call::Click(_) | Call::Scroll(_) | Call::Drag(_)
+        ) {
             self.mcp_pointer_to(waiting.session, id, point);
         } else if let Some(seat) = self
             .mcp
@@ -249,7 +262,7 @@ impl State {
     }
 
     /// The pointers hide [`DRIVEN_FOR`] after their agent last acted.
-    fn mcp_pointer_timer(&mut self) {
+    pub(super) fn mcp_pointer_timer(&mut self) {
         if let Some(old) = self.mcp.pointer_timer.take() {
             self.loop_handle.remove(old);
         }
@@ -262,11 +275,12 @@ impl State {
         self.redraw = true;
     }
 
-    /// Each agent's pointer that shows now (global), and whether it is
-    /// ringed: the one of the action shown, those that acted in the last
-    /// [`DRIVEN_FOR`], the one whose card waits; where a screen shows the
-    /// window it points at.
-    fn mcp_pointers(&self) -> Vec<(String, u64, Point<f64, Logical>, bool)> {
+    /// Each agent's pointer that shows now (global), and its ring: the one
+    /// of the action shown, those that acted in the last [`DRIVEN_FOR`],
+    /// the one whose card waits; where a screen shows the window it points
+    /// at, or on the screen where it draws.
+    fn mcp_pointers(&self) -> Vec<(String, u64, Point<f64, Logical>, super::draw::Ring)> {
+        use super::draw::Ring;
         let showing = self
             .mcp
             .showing
@@ -279,12 +293,25 @@ impl State {
             .list
             .iter()
             .filter_map(|s| {
-                let (at, on) = s.at?;
                 let session = s.session?;
+                let (at, seen) = match (s.ink_at, s.at) {
+                    (Some(at), _) => (at, self.space.output_under(at).next().is_some()),
+                    (None, Some((at, on))) => (
+                        at,
+                        self.model.is_shown(on) && self.windows.contains_key(&on),
+                    ),
+                    (None, None) => return None,
+                };
                 let recent = s.last.is_some_and(|l| l.elapsed() < DRIVEN_FOR);
                 let now = showing == Some(session) || asking == Some(session);
-                (self.model.is_shown(on) && self.windows.contains_key(&on) && (recent || now))
-                    .then(|| (s.agent.clone(), session, at, now))
+                let ring = if now {
+                    Ring::Shown
+                } else if s.pressed {
+                    Ring::Pressed
+                } else {
+                    Ring::None
+                };
+                (seen && (recent || now)).then(|| (s.agent.clone(), session, at, ring))
             })
             .collect()
     }
@@ -300,7 +327,10 @@ impl State {
     }
 
     /// The pointers on `output`, for its drawing.
-    pub(crate) fn mcp_pointers_on(&self, output: &Output) -> Vec<(Point<f64, Logical>, bool)> {
+    pub(crate) fn mcp_pointers_on(
+        &self,
+        output: &Output,
+    ) -> Vec<(Point<f64, Logical>, super::draw::Ring)> {
         let Some(area) = self.space.output_geometry(output) else {
             return Vec::new();
         };
@@ -313,11 +343,16 @@ impl State {
     }
 
     /// The resting pointers the shell names (not the one of the action
-    /// shown, whose tag says its intent).
+    /// shown, whose tag says its intent, nor one moving as it draws or
+    /// drags: its name is on its shapes, and the shell is not told at
+    /// each frame).
     pub(super) fn mcp_pointers_told(&self) -> Vec<McpPointer> {
+        let moving = self.mcp_moving_session();
         self.mcp_pointers()
             .into_iter()
-            .filter(|(.., ring)| !ring)
+            .filter(|(_, session, _, ring)| {
+                *ring == super::draw::Ring::None && Some(*session) != moving
+            })
             .filter_map(|(agent, _, at, _)| {
                 let output = self.space.output_under(at).next()?;
                 let origin = self.space.output_geometry(output)?.loc;
@@ -353,6 +388,7 @@ impl State {
                 keys: c.keys.clone(),
             },
             Call::CloseWindow(_) => McpAsk::Close { title },
+            Call::Drag(_) => McpAsk::Drag { title },
             _ => return None,
         };
         let app = self
@@ -546,6 +582,10 @@ impl State {
             );
         }
         let agent = waiting.agent.clone();
+        if let Call::Drag(_) = waiting.call {
+            self.mcp_request(&agent, &waiting.intent, McpKind::Drag);
+            return self.mcp_drag_start(waiting, id);
+        }
         self.mcp_request(&agent, &waiting.intent, McpKind::Input);
         let said = self.mcp_window_said(id);
         let session = waiting.session;
@@ -764,22 +804,18 @@ impl State {
                 self.mcp_answer(session, id, result);
             }
             TreeFor::Aim(mut waiting) => {
-                let (role, label) = match &waiting.call {
-                    Call::Click(c) => (c.role.clone(), c.label.clone()),
-                    Call::Scroll(c) => (c.role.clone(), c.label.clone()),
-                    _ => (None, None),
+                let tree = match outcome {
+                    Ok(tree) => tree,
+                    Err(missing) => {
+                        return self.mcp_answer(
+                            waiting.session,
+                            waiting.id,
+                            Err(missing.to_string()),
+                        );
+                    }
                 };
-                let at = outcome.map_err(|m| m.to_string()).and_then(|tree| {
-                    atspi::centre_of(&tree, role.as_deref(), &label.unwrap_or_default())
-                });
-                let (x, y) = match at {
-                    Ok(at) => at,
-                    Err(why) => return self.mcp_answer(waiting.session, waiting.id, Err(why)),
-                };
-                match &mut waiting.call {
-                    Call::Click(c) => (c.x, c.y) = (Some(x), Some(y)),
-                    Call::Scroll(c) => (c.x, c.y) = (Some(x), Some(y)),
-                    _ => {}
+                if let Err(why) = self.mcp_aimed(&mut waiting, &tree) {
+                    return self.mcp_answer(waiting.session, waiting.id, Err(why));
                 }
                 if let Err(why) = self.mcp_check(&waiting.call) {
                     return self.mcp_answer(waiting.session, waiting.id, Err(why));
@@ -806,6 +842,44 @@ impl State {
                 }
             }
         }
+    }
+
+    /// Call `waiting`'s labels found in `tree`: its points filled in.
+    fn mcp_aimed(&self, waiting: &mut Waiting, tree: &atspi::Tree) -> Result<(), String> {
+        let centre = |role: &Option<String>, label: &Option<String>| {
+            atspi::centre_of(tree, role.as_deref(), label.as_deref().unwrap_or_default())
+        };
+        match &mut waiting.call {
+            Call::Click(c) => {
+                let (x, y) = centre(&c.role, &c.label)?;
+                (c.x, c.y) = (Some(x), Some(y));
+            }
+            Call::Scroll(c) => {
+                let (x, y) = centre(&c.role, &c.label)?;
+                (c.x, c.y) = (Some(x), Some(y));
+            }
+            Call::Drag(c) => {
+                if c.label.is_some() && c.x.is_none() && c.y.is_none() {
+                    let (x, y) = centre(&c.role, &c.label)?;
+                    (c.x, c.y) = (Some(x), Some(y));
+                }
+                if c.to_label.is_some() && c.to_x.is_none() && c.to_y.is_none() {
+                    let (x, y) = centre(&c.to_role, &c.to_label)?;
+                    (c.to_x, c.to_y) = (Some(x), Some(y));
+                }
+            }
+            Call::Draw(c) => {
+                let label = c.element.clone().unwrap_or_default();
+                let (x, y, w, h) = atspi::rect_of(tree, c.role.as_deref(), &label)?;
+                let rect = c
+                    .window
+                    .and_then(|id| self.home_rect(WindowId(id)))
+                    .ok_or("draw: the window went")?;
+                c.around = Some([f64::from(rect.x) + x, f64::from(rect.y) + y, w, h]);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// `wait_for`: checked now, then every [`POLL`] until it comes (or

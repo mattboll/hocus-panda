@@ -231,6 +231,27 @@ screenshots.
 - Reading a day (the page, the command): on the Settings' own thread as
   the page shows, nothing at rest.
 
+### The heap over a day of use (#827)
+
+`tests/soak.rs` runs hours of use compressed into cycles, the compositor
+in the test's process with the shell: windows opened and closed by
+clients that come and go, a browser's window drawn again and again with
+its tab's previews, a screen unplugged and plugged again, desktops
+switched, the moving wallpapers on and off, the overview, the launcher, a
+popover, a capture, a call lit by the screen light. It samples the heap
+in use (`mallinfo2`) and the resident memory after each cycle, says what
+each activity added, and fails if the heap in use grows by 4 MiB or
+more over the second half of the run. It is long, and ignored:
+
+```sh
+cargo programs
+HOCUS_SOAK_CYCLES=120 cargo nextest run -p hocus-compositor --run-ignored only soak::a_day
+# GLES on Mesa's software device: textures live in the process's memory
+HOCUS_SOAK_RENDERER=gles HOCUS_SOAK_CYCLES=60 cargo nextest run -p hocus-compositor --run-ignored only soak::a_day
+```
+
+`soak::captures_leave_the_heap_flat`, a few seconds, runs with the rest.
+
 ## What moves for show: the window rain and the moving wallpapers (#432, #433)
 
 Counts gate, times are reported. Each motion is counted on the held

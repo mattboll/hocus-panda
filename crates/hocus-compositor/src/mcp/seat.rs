@@ -77,6 +77,11 @@ pub struct AgentSeat {
     /// it leaves and comes in again, so that the application hears it
     /// come.
     pub unheard: bool,
+    /// Where its pointer is on the screen while it draws there, on no
+    /// window (global, logical; #825).
+    pub ink_at: Option<Point<f64, Logical>>,
+    /// Its button held, dragging (#825).
+    pub pressed: bool,
 }
 
 /// The agents' seats.
@@ -181,6 +186,8 @@ impl State {
             at: None,
             last: None,
             unheard: false,
+            ink_at: None,
+            pressed: false,
         });
     }
 
@@ -201,6 +208,8 @@ impl State {
         rested.at = None;
         rested.last = None;
         rested.unheard = false;
+        rested.ink_at = None;
+        rested.pressed = false;
         let (seat, agent) = (rested.seat.clone(), rested.agent.clone());
         let serial = SERIAL_COUNTER.next_serial();
         if let Some(keyboard) = seat.get_keyboard() {
@@ -223,7 +232,7 @@ impl State {
         self.redraw = true;
     }
 
-    fn mcp_time(&self) -> u32 {
+    pub(super) fn mcp_time(&self) -> u32 {
         let now: Duration = self.clock.now().into();
         now.as_millis() as u32
     }
@@ -236,7 +245,7 @@ impl State {
             .find(|s| s.session == Some(session))
     }
 
-    fn mcp_seat_mut(&mut self, session: u64) -> Option<&mut AgentSeat> {
+    pub(super) fn mcp_seat_mut(&mut self, session: u64) -> Option<&mut AgentSeat> {
         self.mcp
             .seats
             .list
@@ -330,6 +339,7 @@ impl State {
         pointer.frame(self);
         if let Some(seat) = self.mcp_seat_mut(session) {
             seat.at = Some((at, id));
+            seat.ink_at = None;
             seat.unheard = !taken;
         }
     }

@@ -531,6 +531,9 @@ pub enum Command {
     },
     /// Closes its window, as an application quitting.
     Close,
+    /// Ends the client: its thread returns and its connection closes, as
+    /// an application's process ending.
+    Quit,
     /// Destroys its layer surface.
     CloseLayer,
     /// Titles its window, without drawing (a terminal's prompt does so).
@@ -650,7 +653,7 @@ pub enum Pointed {
 }
 
 /// What an acted client gets from a seat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Seated {
     /// Its pointer came in.
     Enter,
@@ -658,6 +661,8 @@ pub enum Seated {
     Press(u32),
     Release,
     Axis,
+    /// Its pointer moved there (the surface's logical pixels).
+    Motion(f64, f64),
     /// Its keyboard came in (`true`) or left.
     Focus(bool),
     /// A key (its evdev code), pressed or released.
@@ -1051,6 +1056,7 @@ fn run_client(
                 }
                 (Command::Popup { anchor, size }, _) => client.open_tip(&qh, anchor, size),
                 (Command::Close, _) => client.window = None,
+                (Command::Quit, _) => return Ok(()),
                 (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}
@@ -2335,6 +2341,11 @@ impl Dispatch<wl_pointer::WlPointer, OfSeat> for Client {
                 }
             }
             wl_pointer::Event::Axis { .. } => Seated::Axis,
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => Seated::Motion(surface_x, surface_y),
             _ => return,
         };
         let _ = client.events.send(Event::OnSeat(of.name.clone(), seated));

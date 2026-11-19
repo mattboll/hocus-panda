@@ -48,11 +48,13 @@ const INSTRUCTIONS: &str = "The windows, desktops, screens and settings of a Hoc
     desktop. Read them with list_windows, list_desktops, list_outputs and get_settings, a \
     window's pixels with capture and its elements with accessibility_tree; when this agent may \
     act, focus, move and close windows, send them to another desktop, switch desktops, launch \
-    an application, change a setting, and click, scroll, type and press keys in the windows of \
-    the applications the user allowed, through a pointer and a keyboard of your own (the \
-    user's stay theirs). Aim at an element by its label rather than at pixels when the tree \
-    has it. Say what each action is for with `intent`, in one short line: the user sees it on \
-    what you touch before it happens, and then a summary. Some actions wait for the user's \
+    an application, change a setting, and click, drag, scroll, type and press keys in the \
+    windows of the applications the user allowed, through a pointer and a keyboard of your own \
+    (the user's stay theirs). Aim at an element by its label rather than at pixels when the \
+    tree has it. When the user asks you to show them something on the screen, draw it (circle, \
+    point at, underline), if they allowed it. Say what each action is for with `intent`, in one \
+    short line: the user sees it on what you touch before it happens, and then a summary. Some \
+    actions wait for the user's \
     answer (a password field, an application they marked); the user may take over or stop \
     every agent at once; a refusal says why. Good news for the user (a pull request merged, a \
     deployment, a bug finally fixed): celebrate, with why.";
@@ -624,6 +626,66 @@ fn tools() -> Vec<Value> {
             "annotations": input,
         }),
         json!({
+            "name": "drag",
+            "title": "Drag in a window",
+            "description": "Drags in a window of an application the user allowed, through this \
+                agent's own pointer: presses at a point (x, y from the window's top left, logical \
+                pixels, or the label of an element of accessibility_tree), moves in steps, and \
+                lets go at another (to_x, to_y, or to_label): a slider, a file onto a folder, a \
+                selection. Shown to the user first. Cannot be undone.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": window,
+                    "x": { "type": "number", "minimum": 0 },
+                    "y": { "type": "number", "minimum": 0 },
+                    "label": label,
+                    "role": role,
+                    "to_x": { "type": "number", "minimum": 0 },
+                    "to_y": { "type": "number", "minimum": 0 },
+                    "to_label": { "type": "string", "description": "Where it lets go: an element's label, as label aims." },
+                    "to_role": role,
+                    "button": { "type": "string", "enum": ["left", "right", "middle"], "default": "left" },
+                    "intent": intent,
+                },
+                "required": ["window", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": input,
+        }),
+        json!({
+            "name": "draw",
+            "title": "Draw on the screen",
+            "description": "Draws a shape on the screen, over the windows, in this agent's colour \
+                and under its name, to show the user something there when they ask: a rectangle \
+                or an ellipse (two opposite corners), an arrow (its tail, then its tip), a path \
+                (its points); in global logical pixels, or around a window or an element of its \
+                tree (window, element) instead of points. An optional short label word is \
+                written beside it. It stays until this agent's next other action, or until the \
+                user presses Esc. Only when the user allowed drawing; shown first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "shape": { "type": "string", "enum": ["rectangle", "ellipse", "arrow", "path"] },
+                    "points": {
+                        "type": "array",
+                        "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+                        "minItems": 2,
+                        "maxItems": hocus_agents::mcp::MAX_POINTS,
+                        "description": "[[x, y], …] in the global logical space (list_outputs).",
+                    },
+                    "window": { "type": "integer", "minimum": 0, "description": "Around this window (from list_windows), instead of points." },
+                    "element": { "type": "string", "description": "Around this element of the window's tree, by its label (accessibility_tree)." },
+                    "role": role,
+                    "label": { "type": "string", "maxLength": hocus_agents::mcp::MAX_WORD, "description": "One short word written beside the shape: \"ici\"." },
+                    "intent": intent,
+                },
+                "required": ["shape", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": act,
+        }),
+        json!({
             "name": "scroll",
             "title": "Scroll in a window",
             "description": "Scrolls at a point of a window (aimed as click aims), dy logical pixels, \
@@ -843,7 +905,7 @@ mod tests {
         assert_eq!(
             ask(
                 &mut b,
-                r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"drag"}}"#
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"nope"}}"#
             )["error"]["code"],
             INVALID_PARAMS
         );

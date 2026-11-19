@@ -1031,12 +1031,24 @@ impl State {
     /// Focuses and raises a window (none: no window has the keyboard), and
     /// tells every window whether it is the active one.
     pub fn focus(&mut self, id: Option<WindowId>) {
+        self.focus_raising(id, true);
+    }
+
+    /// The same, the window keeping its place in the stack unless `raise`.
+    pub(crate) fn focus_raising(&mut self, id: Option<WindowId>, raise: bool) {
         if id != self.model.focused() {
             self.end_popup_grab();
         }
         let before = self.model.focused();
-        self.model.focus(id);
+        self.model.focus_raising(id, raise);
         let focused = self.model.focused();
+        if let Some(id) = focused
+            && self.model.is_shown(id)
+            && let Some(output) = self.output_of(id)
+        {
+            let desktop = self.model.desktop(id);
+            self.desktop_focus.insert((output.name(), desktop), id);
+        }
         if focused != before {
             self.agents_focus_changed();
         }

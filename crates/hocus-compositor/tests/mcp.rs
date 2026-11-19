@@ -57,6 +57,7 @@ fn bed_on(shell: bool, text: &str, a11y: Option<String>) -> anyhow::Result<Bed> 
         agents: read.agents,
         keyboard: read.keyboard,
         a11y_bus: a11y,
+        pictures: Some(root.join("Pictures")),
         plain_background: true,
         lang: hocus_words::Lang::French,
         ..Config::default()
@@ -501,6 +502,11 @@ fn the_stop_key_refuses_every_call_until_pressed_again() -> anyhow::Result<()> {
 /// The screen as it shows now, saved as `name.png` in `out`.
 fn shoot(hp: &mut Headless, out: &Path, name: &str) -> anyhow::Result<()> {
     common::at_rest(hp)?;
+    shoot_now(hp, out, name)
+}
+
+/// The same, while something moves.
+fn shoot_now(hp: &mut Headless, out: &Path, name: &str) -> anyhow::Result<()> {
     let (w, h, px) = hp.screenshot(0)?;
     let rgba: Vec<u8> = px
         .as_chunks::<4>()
@@ -1239,5 +1245,391 @@ fn shots_in_apps() -> anyhow::Result<()> {
     common::click_on(&mut bed.hp, at, hocus_link::MCP_CARD_NAMESPACE)?;
     let answer = claude.answer(&mut bed.hp, asked)?;
     anyhow::ensure!(answer["result"]["isError"] == true, "{answer}");
+    Ok(())
+}
+
+// --- Dragging and drawing (#825) --------------------------------------------
+
+/// Claude drags in `acted` windows and draws; Plain may do neither.
+const BY_HAND: &str = "[keyboard]\nlayouts = [\"us\"]\n\n[agents]\nshow-before-ms = 0\n\n\
+                       [[agents.mcp]]\nname = \"Claude\"\naccess = \"act\"\ndraw = true\n\
+                       apps = [\"acted*\"]\n\n\
+                       [[agents.mcp]]\nname = \"Plain\"\naccess = \"act\"\ninput = false\n\
+                       apps = [\"acted*\"]\n";
+
+const KEY_PRINT: u32 = 99;
+
+#[test]
+fn a_drag_moves_a_slider_from_one_end_to_the_other() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, BY_HAND)?;
+    let (id, handle) = acted(&mut bed.hp, "acted", false)?;
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    // A slider across the window, its knob at its left end (40, 150), its
+    // track running to 360: the knob is where the pointer is while its
+    // button is held.
+    let result = agent.tool(
+        &mut bed.hp,
+        "drag",
+        json!({ "window": id, "x": 40, "y": 150, "to_x": 360, "to_y": 150,
+                "intent": "Pousse le curseur au bout" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["to"]["x"], 360.0, "{result}");
+    let mut got = Vec::new();
+    let released = bed.hp.dispatch_until(WAIT, |_| {
+        seated(&handle, AGENT_SEAT, &mut got);
+        got.contains(&common::Seated::Release)
+    })?;
+    anyhow::ensure!(released, "never released: {got:?}");
+    let press = got
+        .iter()
+        .position(|e| *e == common::Seated::Press(0x110))
+        .ok_or_else(|| anyhow::anyhow!("no press: {got:?}"))?;
+    let release = got
+        .iter()
+        .position(|e| *e == common::Seated::Release)
+        .unwrap_or_default();
+    let x_of = |e: &common::Seated| match e {
+        common::Seated::Motion(x, _) => Some(*x),
+        _ => None,
+    };
+    // Pressed where it came in, at the knob: it moves from there.
+    assert!(got[..press].contains(&common::Seated::Enter), "{got:?}");
+    let knob: Vec<f64> = got[press..release].iter().filter_map(x_of).collect();
+    let start = knob.first().copied().unwrap_or_default();
+    assert!((start - 40.0).abs() < 2.0, "it went from {start}");
+    // Moved in steps, never back, to the other end, then let go.
+    assert!(knob.len() >= 5, "{knob:?}");
+    assert!(knob.windows(2).all(|w| w[1] >= w[0]), "{knob:?}");
+    let end = knob.last().copied().unwrap_or_default();
+    assert!((end - 360.0).abs() < 1.0, "let go at {end}: {knob:?}");
+    // The toast sums it up: it cannot be undone.
+    let toast = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().toast.is_some())?;
+    anyhow::ensure!(toast, "no toast");
+    let toast = bed
+        .hp
+        .mcp_shown()
+        .toast
+        .ok_or_else(|| anyhow::anyhow!("gone"))?;
+    assert_eq!(toast.summary.dragged, 1);
+    assert!(!toast.undo);
+    Ok(())
+}
+
+/// Whether a pixel is the agents' violet ink.
+fn violet([r, g, b]: [u8; 3]) -> bool {
+    b > 150 && b > g.saturating_add(25) && r > g.saturating_add(10)
+}
+
+/// The screen's pixels, as red, green, blue, by point.
+struct Screen {
+    width: i32,
+    height: i32,
+    bytes: Vec<u8>,
+}
+
+impl Screen {
+    fn of(hp: &mut Headless) -> anyhow::Result<Self> {
+        common::at_rest(hp)?;
+        let (width, height, bytes) = hp.screenshot(0)?;
+        Ok(Self {
+            width,
+            height,
+            bytes,
+        })
+    }
+
+    fn at(&self, x: i32, y: i32) -> [u8; 3] {
+        let at = ((y * self.width + x) * 4) as usize;
+        self.bytes
+            .get(at..at + 4)
+            .map_or([0; 3], |p| [p[2], p[1], p[0]])
+    }
+
+    /// Whether some pixel within `r` of (`x`, `y`) along `(dx, dy)` is
+    /// violet.
+    fn violet_near(&self, (x, y): (i32, i32), (dx, dy): (i32, i32), r: i32) -> bool {
+        (-r..=r).any(|d| violet(self.at(x + d * dx, y + d * dy)))
+    }
+
+    fn violet_anywhere(&self) -> usize {
+        (0..self.height)
+            .flat_map(|y| (0..self.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| violet(self.at(x, y)))
+            .count()
+    }
+
+    /// The violet pixels farther than `room` from `rect`'s edges.
+    fn violet_away(&self, rect: hocus_compositor::model::Rect, room: i32) -> usize {
+        let mut n = 0;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let dx = (rect.x - x).max(x - (rect.x + rect.width)).max(0);
+                let dy = (rect.y - y).max(y - (rect.y + rect.height)).max(0);
+                let outside = dx.max(dy);
+                let inside = (x - rect.x)
+                    .min(rect.x + rect.width - x)
+                    .min(y - rect.y)
+                    .min(rect.y + rect.height - y);
+                let far = if outside > 0 { outside } else { inside };
+                if far > room && violet(self.at(x, y)) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+}
+
+/// Waits for the screen to have no violet pixel near (`x`, `y`).
+fn violet_gone(hp: &mut Headless, at: (i32, i32)) -> anyhow::Result<()> {
+    let until = std::time::Instant::now() + WAIT;
+    while std::time::Instant::now() < until {
+        if !Screen::of(hp)?.violet_near(at, (0, 1), 10) {
+            return Ok(());
+        }
+        common::wait(hp, std::time::Duration::from_millis(100))?;
+    }
+    anyhow::bail!("the agent's ink stayed at {at:?}")
+}
+
+#[test]
+fn a_rectangle_drawn_around_a_window_shows_there_and_in_a_capture() -> anyhow::Result<()> {
+    use hocus_compositor::model::{Rect, WindowId};
+    let mut bed = bed_with(false, BY_HAND)?;
+    common::open(&mut bed.hp, "foot", (640, 400))?;
+    let id = bed.hp.windows()[0].id.0;
+    let rect = Rect::new(500, 300, 640, 400);
+    bed.hp.place_window(WindowId(id), rect);
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let draw = |agent: &mut Mcp, hp: &mut Headless| -> anyhow::Result<()> {
+        let result = agent.tool(
+            hp,
+            "draw",
+            json!({ "shape": "rectangle", "window": id, "intent": "Encadre le terminal" }),
+        )?;
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(
+            result["structuredContent"]["drawn"], "rectangle",
+            "{result}"
+        );
+        Ok(())
+    };
+    draw(&mut agent, &mut bed.hp)?;
+    // Its sides run 8 px left and right of the window, 6 px over and
+    // under it: the violet there, and nowhere far from them.
+    let screen = Screen::of(&mut bed.hp)?;
+    let (cx, cy) = (rect.x + rect.width / 2, rect.y + rect.height / 2);
+    let top = (cx, rect.y - 6);
+    for (at, along) in [
+        (top, (0, 1)),
+        ((cx, rect.y + rect.height + 6), (0, 1)),
+        ((rect.x - 8, cy), (1, 0)),
+        ((rect.x + rect.width + 8, cy), (1, 0)),
+    ] {
+        assert!(
+            screen.violet_near(at, along, 6),
+            "no ink at {at:?}: {:?}",
+            screen.at(at.0, at.1)
+        );
+    }
+    assert_eq!(screen.violet_away(rect, 40), 0, "ink away from the window");
+    assert_eq!(bed.hp.mcp_shown().inked, ["Claude"]);
+    // In the screen's capture, as on the screen (5.8).
+    common::chord(&mut bed.hp, &[common::KEY_LEFTSHIFT, KEY_PRINT]);
+    let taken = bed.hp.dispatch_until(WAIT, |hp| hp.captures().0 >= 1)?;
+    anyhow::ensure!(taken, "no capture");
+    let file = bed
+        .hp
+        .captures()
+        .1
+        .ok_or_else(|| anyhow::anyhow!("no file"))?;
+    let image = image::open(&file)?.to_rgba8();
+    let captured = (-6..=6).any(|d| {
+        let [r, g, b, _] = image.get_pixel(top.0 as u32, (top.1 + d) as u32).0;
+        violet([r, g, b])
+    });
+    assert!(captured, "not in the capture");
+    // Its next action: it fades, and goes.
+    let focused = agent.tool(
+        &mut bed.hp,
+        "focus_window",
+        json!({ "window": id, "intent": "Au premier plan" }),
+    )?;
+    assert_eq!(focused["isError"], false, "{focused}");
+    violet_gone(&mut bed.hp, top)?;
+    assert!(bed.hp.mcp_shown().inked.is_empty());
+    // Drawn again, then `Esc`.
+    draw(&mut agent, &mut bed.hp)?;
+    assert!(Screen::of(&mut bed.hp)?.violet_near(top, (0, 1), 6));
+    common::chord(&mut bed.hp, &[KEY_ESC]);
+    violet_gone(&mut bed.hp, top)?;
+    // Locking takes it at once, and nothing is drawn while locked.
+    draw(&mut agent, &mut bed.hp)?;
+    bed.hp.lock();
+    assert!(bed.hp.mcp_shown().inked.is_empty());
+    let locked = agent.tool(
+        &mut bed.hp,
+        "draw",
+        json!({ "shape": "rectangle", "window": id, "intent": "Encadre le terminal" }),
+    )?;
+    assert_eq!(locked["isError"], true, "{locked}");
+    assert!(text(&locked).contains("locked"), "{locked}");
+    Ok(())
+}
+
+#[test]
+fn drawing_and_dragging_are_refused_without_their_rights() -> anyhow::Result<()> {
+    let mut bed = bed_with(false, BY_HAND)?;
+    let (id, handle) = acted(&mut bed.hp, "acted", false)?;
+    let mut agent = mcp(&bed.hp, "Plain")?;
+    let drawn = agent.tool(
+        &mut bed.hp,
+        "draw",
+        json!({ "shape": "ellipse", "window": id, "intent": "Entoure la fenêtre" }),
+    )?;
+    assert_eq!(drawn["isError"], true, "{drawn}");
+    assert!(text(&drawn).contains("may not draw"), "{drawn}");
+    // Nothing drawn; its row, its journal and one toast say so.
+    let screen = Screen::of(&mut bed.hp)?;
+    assert_eq!(screen.violet_anywhere(), 0, "drawn all the same");
+    let shown = bed.hp.mcp_shown();
+    let refused = shown
+        .refused
+        .ok_or_else(|| anyhow::anyhow!("no refusal toast"))?;
+    assert_eq!(
+        (refused.agent.as_str(), refused.tool.as_str()),
+        ("Plain", "draw")
+    );
+    assert!(shown.agents.iter().any(|r| r.name == "Plain"
+        && r.doing
+            == hocus_link::McpDoing::Refused {
+                tool: "draw".into()
+            }));
+    assert!(shown.journal.iter().any(|l| matches!(
+        &l.said,
+        hocus_link::McpSaid::Refused { tool, why: hocus_link::McpRefusal::NoDraw } if tool == "draw"
+    )));
+    // A drag without the click right: refused, nothing pressed.
+    let dragged = agent.tool(
+        &mut bed.hp,
+        "drag",
+        json!({ "window": id, "x": 40, "y": 150, "to_x": 360, "to_y": 150, "intent": "Glisse" }),
+    )?;
+    assert_eq!(dragged["isError"], true, "{dragged}");
+    assert!(text(&dragged).contains("drag"), "{dragged}");
+    let mut got = Vec::new();
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(300))?;
+    seated(&handle, "agent-Plain", &mut got);
+    assert!(
+        !got.iter().any(|e| matches!(e, common::Seated::Press(_))),
+        "{got:?}"
+    );
+    Ok(())
+}
+
+/// The drawing, its toast, the refusal's and a drag under way (#825),
+/// dark, ×1, French, for the maintainer's eyes: `HOCUS_SHOTS=DIR cargo
+/// nextest run -p hocus-compositor mcp::shots_drawn --run-ignored only`.
+#[test]
+#[ignore = "screenshots, on demand"]
+fn shots_drawn() -> anyhow::Result<()> {
+    use hocus_compositor::model::{Rect, WindowId};
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        eprintln!("HOCUS_SHOTS is not set: no shots");
+        return Ok(());
+    };
+    let config = "[keyboard]\nlayouts = [\"us\"]\n\n[agents]\nshow-before-ms = 900\n\n\
+                  [[agents.mcp]]\nname = \"Claude\"\naccess = \"act\"\ndraw = true\n\
+                  apps = [\"acted*\"]\n\n[[agents.mcp]]\nname = \"Codex\"\naccess = \"act\"\n";
+    let mut bed = bed_with(true, config)?;
+    let browser = common::open(&mut bed.hp, "firefox", (760, 520)).map(|_| {
+        bed.hp
+            .windows()
+            .iter()
+            .find(|w| w.app_id.as_deref() == Some("firefox"))
+            .map(|w| w.id.0)
+            .unwrap_or_default()
+    })?;
+    let (files, _files_client) = acted(&mut bed.hp, "acted", false)?;
+    bed.hp
+        .place_window(WindowId(browser), Rect::new(120, 90, 760, 520));
+    bed.hp
+        .place_window(WindowId(files), Rect::new(1080, 420, 400, 300));
+    common::at_rest(&mut bed.hp)?;
+    let mut claude = mcp(&bed.hp, "Claude")?;
+    // An ellipse round a part of the browser, then an arrow with « ici » to
+    // the other window.
+    let drawn = claude.tool(
+        &mut bed.hp,
+        "draw",
+        json!({ "shape": "ellipse", "points": [[200, 240], [520, 290]],
+                "intent": "Entoure le job qui échoue" }),
+    )?;
+    anyhow::ensure!(drawn["isError"] == false, "{drawn}");
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "draw", "arguments": {
+            "shape": "arrow", "window": files, "label": "ici",
+            "intent": "Montre où relancer"
+        } }),
+    )?;
+    // Its hand half way.
+    let shown = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().show.is_some())?;
+    anyhow::ensure!(shown, "the arrow never showed first");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+    shoot_now(&mut bed.hp, &out, "draw-shown-before")?;
+    let gone = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().show.is_none())?;
+    anyhow::ensure!(gone, "never drawn");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(250))?;
+    shoot_now(&mut bed.hp, &out, "draw-half-way")?;
+    claude.answer(&mut bed.hp, asked)?;
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(700))?;
+    shoot(&mut bed.hp, &out, "draw-ellipse-arrow-ici")?;
+    // The toast once the request settled.
+    let toasted = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.drawn_layers(hocus_link::MCP_TOAST_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(toasted, "no toast");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+    shoot(&mut bed.hp, &out, "draw-toast")?;
+    // Codex may not draw: refused, its toast.
+    let mut codex = mcp(&bed.hp, "Codex")?;
+    codex.tool(
+        &mut bed.hp,
+        "draw",
+        json!({ "shape": "ellipse", "window": browser, "intent": "Entoure le navigateur" }),
+    )?;
+    let refused = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().refused.is_some())?;
+    anyhow::ensure!(refused, "no refusal toast");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(900))?;
+    shoot(&mut bed.hp, &out, "draw-refused-toast")?;
+    // A drag under way, its button held.
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "drag", "arguments": {
+            "window": files, "x": 30, "y": 40, "to_x": 370, "to_y": 260,
+            "intent": "Range le log dans bugs"
+        } }),
+    )?;
+    let shown = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().show.is_some())?;
+    anyhow::ensure!(shown, "the drag never showed first");
+    let pressed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().show.is_none())?;
+    anyhow::ensure!(pressed, "never pressed");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(220))?;
+    shoot_now(&mut bed.hp, &out, "drag-midway")?;
+    claude.answer(&mut bed.hp, asked)?;
     Ok(())
 }

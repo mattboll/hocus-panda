@@ -44,10 +44,18 @@ pub enum Right {
     Desktops,
     Settings,
     Input,
+    /// Draw on the screen (#825).
+    Draw,
 }
 
 impl Right {
-    pub const ALL: [Self; 4] = [Self::Windows, Self::Desktops, Self::Settings, Self::Input];
+    pub const ALL: [Self; 5] = [
+        Self::Windows,
+        Self::Desktops,
+        Self::Settings,
+        Self::Input,
+        Self::Draw,
+    ];
 
     /// Its key in the agent's table.
     pub const fn key(self) -> &'static str {
@@ -56,6 +64,7 @@ impl Right {
             Self::Desktops => "desktops",
             Self::Settings => "settings",
             Self::Input => "input",
+            Self::Draw => "draw",
         }
     }
 
@@ -65,6 +74,7 @@ impl Right {
             Self::Desktops => words::DESKTOPS,
             Self::Settings => words::SETTINGS,
             Self::Input => words::INPUT,
+            Self::Draw => words::DRAW,
         }
     }
 
@@ -74,12 +84,13 @@ impl Right {
             Self::Desktops => None,
             Self::Settings => Some(words::SETTINGS_LINE),
             Self::Input => Some(words::INPUT_LINE),
+            Self::Draw => Some(words::DRAW_LINE),
         }
     }
 
     /// What it is when the table does not say (the compositor's).
     pub const fn default(self) -> bool {
-        !matches!(self, Self::Settings)
+        !matches!(self, Self::Settings | Self::Draw)
     }
 }
 
@@ -93,6 +104,7 @@ pub struct Agent {
     pub desktops: bool,
     pub settings: bool,
     pub input: bool,
+    pub draw: bool,
     pub apps: Vec<String>,
     pub client: Option<String>,
     /// `"2026-11-12"`.
@@ -106,6 +118,7 @@ impl Agent {
             Right::Desktops => self.desktops,
             Right::Settings => self.settings,
             Right::Input => self.input,
+            Right::Draw => self.draw,
         }
     }
 
@@ -147,6 +160,7 @@ impl Agent {
             desktops: flag("desktops", Right::Desktops),
             settings: flag("settings", Right::Settings),
             input: flag("input", Right::Input),
+            draw: flag("draw", Right::Draw),
             apps: texts(table.get("apps")).unwrap_or_default(),
             client: text("client"),
             since: text("since"),

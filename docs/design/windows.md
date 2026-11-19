@@ -447,6 +447,27 @@ Keyboard:
   is on the desktop shown, whichever that is); the bar's tiles sketch it
   in each. Sent to a desktop (`Super+Shift+N`, a menu), it is on that
   one only again.
+  It keeps its place in each desktop's stack (#888): in front of a
+  desktop's windows or behind them as it was when that desktop was last
+  shown. A switch puts it there before the strip slides (a swipe, as
+  the fingers lift: the desktop is known then), so the
+  arriving windows that were in front of it slide in in front of it and
+  those behind it behind, the leaving ones as they were; with reduced
+  motion they cross-fade in the same order. The first time it comes to a
+  desktop it goes right behind the window focused there last (else its
+  window on top), unless it has the keyboard as the desktop changes:
+  then in front. The keyboard goes to the window focused last on the
+  desktop shown, where it is, without raising it: a window on all
+  desktops in front of it stays in front; this one gets the keyboard
+  only where it was focused last (clicked there). A window sent to a
+  desktop counts as focused last there, as it lands on top; a window
+  focused last that is gone or minimised leaves the keyboard to the
+  desktop's window on top. Several windows on all desktops keep one
+  order among themselves on every desktop. As built
+  (`Model::take_places`, `State::desktop_focus`; `tests/desktops.rs`):
+  in front of desktop 1's window, which keeps the keyboard, and behind
+  desktop 2's, switch after switch and halfway through a slide; clicked
+  on desktop 2, it has the keyboard there again, not on desktop 1.
 
 ## 10b. A window's radial menu (#723)
 

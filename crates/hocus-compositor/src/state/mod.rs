@@ -98,6 +98,10 @@ pub struct State {
     pub commits: crate::redraw::Commits,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
+    /// The window focused last on each screen's desktop, by output name
+    /// and desktop (#888): it has the keyboard again when its desktop
+    /// comes back.
+    pub desktop_focus: HashMap<(String, usize), WindowId>,
     /// The bar's tiles, and a window moved over them (8.5 B).
     pub tile_drop: crate::tile_drop::TileDrop,
     /// Going to an agent, its streak under way (bar.md §8, 4.3).
@@ -324,6 +328,7 @@ impl State {
             redraw: true,
             commits: crate::redraw::Commits::default(),
             strips: HashMap::new(),
+            desktop_focus: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),
             going: None,
             halo,
