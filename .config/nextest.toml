@@ -43,10 +43,6 @@ retries = 0
 # old patch of iced_layershell gave (#860): `footer::a_press_as_the_pointer_
 # comes_in_lands_where_it_came_in`, `launcher::escape_read_with_its_first_
 # configure_closes_it`. #860's fix takes them out.
-# And three that fail by chance on CI's runners, each until its issue's
-# fix: `actions::an_impossible_action_is_inert_and_nothing_found_searches_
-# the_launcher` (#871), `camera::the_screen_light_follows_the_light_on_the_
-# face` (#872), `agents::the_halo_moves_on_the_bars_screen_alone` (#873).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -58,9 +54,6 @@ not (
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
         | test(=footer::a_press_as_the_pointer_comes_in_lands_where_it_came_in)
         | test(=launcher::escape_read_with_its_first_configure_closes_it)
-        | test(=actions::an_impossible_action_is_inert_and_nothing_found_searches_the_launcher)
-        | test(=camera::the_screen_light_follows_the_light_on_the_face)
-        | test(=agents::the_halo_moves_on_the_bars_screen_alone)
     ))
 )
 """

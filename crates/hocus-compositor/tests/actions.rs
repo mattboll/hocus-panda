@@ -677,10 +677,17 @@ fn an_impossible_action_is_inert_and_nothing_found_searches_the_launcher() -> an
     bed.closed()?;
     let line = bed.logged_after(from, "the launcher opens searching")?;
     assert!(line.contains("pizza"), "{line}");
-    let opened = bed
-        .hp
-        .dispatch_until(WAIT, |hp| hp.launcher_surfaces().len() == 1)?;
+    // Escape once the launcher shows, as the user sees it: a key read
+    // before the shell has made its surface's window is lost (#860), and on
+    // a loaded machine the surface comes well before that window (#871).
+    let opened = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.launcher_surfaces().len() == 1
+            && hp.keyboard_layer().as_deref() == Some(hocus_link::LAUNCHER_NAMESPACE)
+    })?;
     anyhow::ensure!(opened, "no launcher");
+    bed.logged_after(from, "the launcher shows it")?;
+    let still = bed.hp.dispatch_until(WAIT, Headless::launcher_at_rest)?;
+    anyhow::ensure!(still, "the launcher still moves");
     bed.press(KEY_ESC);
     let gone = bed
         .hp

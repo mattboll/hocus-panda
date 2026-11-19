@@ -22,8 +22,6 @@ use crate::common;
 use crate::sharing::Pipewire;
 
 use std::{
-    cell::RefCell,
-    rc::Rc,
     sync::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -373,18 +371,18 @@ fn the_screen_light_follows_the_light_on_the_face() -> anyhow::Result<()> {
     let reader = read(&bed.pipewire.socket)?;
     bed.frame(&reader, Duration::from_secs(20))?;
     // A dark face: the light grows, step by step, to its strongest.
-    let steps = Rc::new(RefCell::new(Vec::new()));
-    let seen = steps.clone();
-    bed.until(Duration::from_secs(15), "not at its strongest", |bed| {
-        let level = bed.hp.camera().2;
-        seen.borrow_mut().push(level);
+    // Looked at after each turn of the loop, not every 20 ms: a step comes
+    // 600 ms after the last at the soonest, and a slow machine's turns
+    // are still shorter than that (#872).
+    let mut climbed: Vec<u8> = Vec::new();
+    let strongest = bed.hp.dispatch_until(Duration::from_secs(15), |hp| {
+        let level = hp.camera().2;
+        if climbed.last() != Some(&level) {
+            climbed.push(level);
+        }
         level == 8
     })?;
-    let climbed: Vec<u8> = {
-        let mut v = steps.borrow().clone();
-        v.dedup();
-        v
-    };
+    anyhow::ensure!(strongest, "not at its strongest: {:?}", bed.hp.camera());
     assert!(
         climbed.windows(2).all(|w| w[1] == w[0] + 1),
         "one step at a time: {climbed:?}"

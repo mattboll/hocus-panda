@@ -348,7 +348,10 @@ impl State {
             out.stays = Some(now + out.what.stays());
             self.arm_peek();
         }
-        self.redraw = true;
+        // Its screen alone draws again, as for any layer surface's commit
+        // (#826), and its motion asks for the bar's screens at each step
+        // (`moved_by_the_bar`): asking every screen here had the others
+        // build a scene for each of the shell's frames of the panda (#873).
     }
 
     /// A layer surface went: if it was a peek's, it is no longer drawn.
