@@ -69,8 +69,7 @@ pub enum Msg {
 impl App {
     /// The place the file names (empty: none).
     pub(super) fn weather_place(&self) -> String {
-        match crate::model::setting(model::PLACE)
-            .and_then(|s| self.value(Slot::of(s, self.source)))
+        match crate::model::setting(model::PLACE).and_then(|s| self.value(Slot::of(s, self.source)))
         {
             Some(Value::Text(place)) => place.trim().to_owned(),
             _ => String::new(),
@@ -167,7 +166,10 @@ impl App {
         }
     }
 
-    pub(super) fn weather_page<'a>(&'a self, mut page: iced::widget::Column<'a, Message>) -> El<'a> {
+    pub(super) fn weather_page<'a>(
+        &'a self,
+        mut page: iced::widget::Column<'a, Message>,
+    ) -> El<'a> {
         let lang = self.lang;
         let controls = self.controls();
         let model_row = |id: &str| -> El<'_> {

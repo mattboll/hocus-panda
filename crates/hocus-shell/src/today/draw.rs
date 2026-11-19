@@ -394,7 +394,10 @@ impl Items for View {
                     (false, false) => None,
                 };
                 draw_mini(&mut frame, mini, self.mini_rect(size, mini), lit, alpha);
-                said_once(format!("mini {} {:?} drops={}", mini.said, mini.tomorrow, mini.drops));
+                said_once(format!(
+                    "mini {} {:?} drops={}",
+                    mini.said, mini.tomorrow, mini.drops
+                ));
             }
             return crate::backdrop::over(under, frame);
         }
@@ -494,11 +497,7 @@ impl Items for View {
                 })
                 .collect();
             let head = shown.head.as_ref().map(|h| h.said.as_str());
-            let said = format!(
-                "{} head={head:?} lit={:?}",
-                self.words.said(&rows),
-                hover
-            );
+            let said = format!("{} lit={:?} head={head:?}", self.words.said(&rows), hover);
             let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
             if kept.as_deref() != Some(said.as_str()) {
                 tracing::debug!(
@@ -650,7 +649,8 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
                 colour,
                 Alignment::Left,
             ));
-            let ix = (x + kit::measure(name, MORE, MANROPE) + LINE_GAP).max(dot + DOT / 2.0 - LINE_ICON / 2.0);
+            let ix = (x + kit::measure(name, MORE, MANROPE) + LINE_GAP)
+                .max(dot + DOT / 2.0 - LINE_ICON / 2.0);
             icon::draw(
                 f,
                 tomorrow.icon,

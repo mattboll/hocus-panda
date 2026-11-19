@@ -139,11 +139,7 @@ fn start(clock: &str, form: FormChoice) -> anyhow::Result<Bed> {
     let drawn = hp.dispatch_until(Duration::from_secs(20), |hp| hp.bar_commits() > 0)?;
     anyhow::ensure!(drawn, "no bar");
     hp.pointer_move(400.0, 600.0);
-    Ok(Bed {
-        _dir: dir,
-        hp,
-        log,
-    })
+    Ok(Bed { _dir: dir, hp, log })
 }
 
 impl Bed {
@@ -177,7 +173,10 @@ fn today_holds_the_weather_and_the_compositor_hears_it_rain() -> anyhow::Result<
     let mut bed = start("13:47:00", FormChoice::Full)?;
     let line = bed.logged(
         "today is drawn at rest",
-        &["head=Some(\"9°\")", "14:15 Pluie → 15 h 45; 16:30 «Revue sprint 24»"],
+        &[
+            "head=Some(\"9°\")",
+            "14:15 Pluie → 15 h 45; 16:30 «Revue sprint 24»",
+        ],
     )?;
     assert!(
         line.contains("18:00 «Sport» #3FB8AF; Demain 3° / 11°"),
@@ -187,7 +186,10 @@ fn today_holds_the_weather_and_the_compositor_hears_it_rain() -> anyhow::Result<
     drop(bed);
     // While it rains: no time, "Il pleut"; the compositor told.
     let mut bed = start("14:32:00", FormChoice::Full)?;
-    bed.logged("today is drawn at rest", &["AUJOURD'HUI Il pleut → 15 h 45;"])?;
+    bed.logged(
+        "today is drawn at rest",
+        &["AUJOURD'HUI Il pleut → 15 h 45;"],
+    )?;
     bed.logged("whether it rains", &["raining=true"])?;
     Ok(())
 }

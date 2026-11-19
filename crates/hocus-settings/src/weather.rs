@@ -125,7 +125,13 @@ mod tests {
         );
         // Each value reads as TOML.
         for k in &keys {
-            assert!(k.value.as_deref().unwrap().parse::<toml_edit::Value>().is_ok());
+            assert!(
+                k.value
+                    .as_deref()
+                    .unwrap()
+                    .parse::<toml_edit::Value>()
+                    .is_ok()
+            );
         }
     }
 
@@ -134,8 +140,7 @@ mod tests {
         let all = settings();
         assert_eq!(all.len(), 3);
         let default = |id| {
-            crate::model::setting(id)
-                .map(|s| s.places.of(crate::model::Source::Ac).default.clone())
+            crate::model::setting(id).map(|s| s.places.of(crate::model::Source::Ac).default.clone())
         };
         assert_eq!(default(ENABLED), Some(Value::Bool(true)));
         assert_eq!(default(PLACE), Some(Value::Text(String::new())));

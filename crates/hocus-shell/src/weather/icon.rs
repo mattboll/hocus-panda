@@ -10,11 +10,7 @@ use std::{
 };
 
 use hocus_weather::Icon;
-use iced::{
-    Color, Element, Rectangle,
-    advanced::svg,
-    widget::canvas::Frame,
-};
+use iced::{Color, Element, Rectangle, advanced::svg, widget::canvas::Frame};
 
 use crate::theme::Ink;
 
@@ -198,7 +194,10 @@ mod tests {
             Icon::Moon,
         ] {
             let svg = svg_of(icon);
-            assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"), "{icon:?}");
+            assert!(
+                svg.starts_with("<svg") && svg.ends_with("</svg>"),
+                "{icon:?}"
+            );
             assert!(svg.contains("viewBox=\"0 0 24 24\""), "{icon:?}");
             assert!(svg.matches('<').count() > 2, "{icon:?}");
         }

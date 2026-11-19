@@ -124,7 +124,8 @@ impl Forecast {
         let h = &answer.hourly;
         let mut hours = Vec::new();
         for (i, time) in h.time.iter().enumerate() {
-            let (Some(temperature), Some(code)) = (at(&h.temperature_2m, i), at(&h.weather_code, i))
+            let (Some(temperature), Some(code)) =
+                (at(&h.temperature_2m, i), at(&h.weather_code, i))
             else {
                 continue;
             };

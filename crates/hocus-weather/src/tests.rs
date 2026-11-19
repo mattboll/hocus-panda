@@ -118,7 +118,10 @@ fn the_weather_now_is_the_current_block_then_the_nearest_hour() {
 fn the_next_quarter_hours_hours_and_days() {
     let f = forecast();
     let q = f.next_quarters(at(13, 47).timestamp(), 12);
-    assert_eq!(q, [0.0, 0.0, 0.3, 1.4, 2.6, 2.2, 1.6, 0.9, 0.0, 0.0, 0.0, 0.0]);
+    assert_eq!(
+        q,
+        [0.0, 0.0, 0.3, 1.4, 2.6, 2.2, 1.6, 0.9, 0.0, 0.0, 0.0, 0.0]
+    );
     assert!(f.rain_soon(at(13, 47).timestamp()));
     assert!(!f.rain_soon(at(16, 0).timestamp()));
     let hours = f.next_hours(at(13, 47).timestamp(), 12);
@@ -169,7 +172,11 @@ fn geocoding_reads_its_places_and_its_address_says_the_name_only() {
     assert_eq!(places.len(), 2);
     assert_eq!(places[0].region(), "Auvergne-Rhône-Alpes, France");
     assert_eq!(places[1].region(), "");
-    assert!(geocode::places(r#"{"generationtime_ms":0.2}"#).unwrap().is_empty());
+    assert!(
+        geocode::places(r#"{"generationtime_ms":0.2}"#)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -185,7 +192,9 @@ fn the_forecast_is_kept_and_read_back() {
 #[test]
 fn the_forecasts_address_asks_what_the_bar_shows() {
     let url = fetch::forecast_url(45.4339, 4.39);
-    assert!(url.starts_with("https://api.open-meteo.com/v1/forecast?latitude=45.4339&longitude=4.3900"));
+    assert!(
+        url.starts_with("https://api.open-meteo.com/v1/forecast?latitude=45.4339&longitude=4.3900")
+    );
     for part in [
         "minutely_15=precipitation",
         "precipitation_probability",

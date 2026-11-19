@@ -8,8 +8,7 @@ use crate::{
     ClipRules, ClockLook, CurtainShown, DeskScreen, Desktops, Form, KeyLayout, LeaveCan,
     LeaveShown, LevelKey, LockShown, Recent, Recorded, RecordingShown, SHARE, ShareChoose,
     ShareShown, Side, Titles, TranscribingShown, WeatherPlace, WindowMenu, WindowStates, locale,
-    text::tidy,
-    theme, wallpaper, wire,
+    text::tidy, theme, wallpaper, wire,
 };
 
 /// What the compositor tells the shell.

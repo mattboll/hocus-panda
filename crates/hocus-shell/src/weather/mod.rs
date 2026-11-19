@@ -114,7 +114,9 @@ fn run(asks: &mpsc::Receiver<Ask>) {
     loop {
         let asked = match next {
             Some(at) => asks.recv_timeout(at.saturating_duration_since(Instant::now())),
-            None => asks.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+            None => asks
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
         };
         let fetch = match asked {
             Ok(Ask::Place(now)) => {

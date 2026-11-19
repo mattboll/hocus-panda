@@ -31,10 +31,7 @@ use hocus_weather::{Day, Hour, Units};
 use iced::{
     Color, Element, Length, Padding, Point, Rectangle, Size,
     alignment::{Horizontal, Vertical},
-    widget::{
-        Space, canvas, column, container, row, space,
-        text::Alignment,
-    },
+    widget::{Space, canvas, column, container, row, space, text::Alignment},
     window,
 };
 
@@ -77,7 +74,7 @@ const LABEL: f32 = 18.0;
 const LABEL_GAP: f32 = 4.0;
 const BARS: f32 = 34.0;
 const AXIS: f32 = 14.0;
-const CURVE: f32 = 92.0;
+const CURVE: f32 = 100.0;
 const DAY: f32 = 32.0;
 /// A day's range bar: what its row's cells and gaps leave of it.
 const RANGE: f32 = INNER - 8.0 - (62.0 + 22.0 + 40.0 + 26.0 + 26.0) - 5.0 * 6.0;
@@ -219,26 +216,24 @@ fn build<'a>(lang: Lang) -> El<'a> {
         }
         let wind = hocus_words::shell::weather::wind(lang, units.wind(m.wind));
         let temp = weather::degrees(m.temperature, units);
-        parts.push(inset(
-            control(
-                row![
-                    icon::widget(m.icon(), NOW_ICON),
-                    said(temp.clone(), BIG, MANROPE, TEXT.get()),
-                    column![
-                        said(condition.to_owned(), 14.0, MANROPE_BOLD, TEXT.get()),
-                        said(feels.clone(), 12.5, MANROPE, DIM.get()),
-                        said(wind.clone(), 12.5, MANROPE, DIM.get()),
-                    ]
-                    .spacing(0),
+        parts.push(inset(control(
+            row![
+                icon::widget(m.icon(), NOW_ICON),
+                said(temp.clone(), BIG, MANROPE, TEXT.get()),
+                column![
+                    said(condition.to_owned(), 14.0, MANROPE_BOLD, TEXT.get()),
+                    said(feels.clone(), 12.5, MANROPE, DIM.get()),
+                    said(wind.clone(), 12.5, MANROPE, DIM.get()),
                 ]
-                .spacing(12)
-                .align_y(Vertical::Center)
-                .height(NOW),
-                "weather:now",
-                Role::Label,
-                format!("{}, {feels}, {wind}", words.said_now(&temp, condition)),
-            ),
-        ));
+                .spacing(0),
+            ]
+            .spacing(12)
+            .align_y(Vertical::Center)
+            .height(NOW),
+            "weather:now",
+            Role::Label,
+            format!("{}, {feels}, {wind}", words.said_now(&temp, condition)),
+        )));
     }
     // The rain of the next 3 hours.
     let quarters = forecast.next_quarters(at, 12);
@@ -286,9 +281,11 @@ fn build<'a>(lang: Lang) -> El<'a> {
         label(hocus_words::shell::weather::SEVEN_DAYS.get(lang), None),
         Space::new().height(LABEL_GAP),
     ];
-    let (low, high) = week.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(l, h), d| {
-        (l.min(d.min), h.max(d.max))
-    });
+    let (low, high) = week
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(l, h), d| {
+            (l.min(d.min), h.max(d.max))
+        });
     for (i, day) in week.iter().enumerate() {
         days = days.push(inset(day_row(words, i, day, units, (low, high))));
     }
@@ -352,7 +349,10 @@ fn rain_bars<'a>(quarters: Vec<f32>) -> El<'a> {
                 .add_stop(1.0, RAIN_DEEP);
                 (h, canvas::Fill::from(gradient))
             } else {
-                (0.10 * (size.height - 1.0), canvas::Fill::from(RAIN_DRY.get()))
+                (
+                    0.10 * (size.height - 1.0),
+                    canvas::Fill::from(RAIN_DRY.get()),
+                )
             };
             f.fill(
                 &kit::rounded(
@@ -486,7 +486,7 @@ fn curve<'a>(hours: Vec<Hour>, units: Units, zone: jiff::tz::TimeZone) -> El<'a>
             let hour = h.moment.at.to_zoned(zone.clone()).hour();
             f.fill_text(kit::text(
                 format!("{hour} h"),
-                Point::new(p.x, size.height - 6.0),
+                Point::new(p.x, size.height - 5.0),
                 10.5,
                 FAINT.get(),
                 Alignment::Center,
@@ -497,13 +497,7 @@ fn curve<'a>(hours: Vec<Hour>, units: Units, zone: jiff::tz::TimeZone) -> El<'a>
 
 /// A day of the week: its name, its icon, its rain, its low, the range
 /// bar on the week's (`low`, `high`), its high; tomorrow lit.
-fn day_row<'a>(
-    words: Words,
-    i: usize,
-    day: &Day,
-    units: Units,
-    (low, high): (f32, f32),
-) -> El<'a> {
+fn day_row<'a>(words: Words, i: usize, day: &Day, units: Units, (low, high): (f32, f32)) -> El<'a> {
     let name = match i {
         0 => words.today_short().to_owned(),
         1 => words.tomorrow().to_owned(),
@@ -517,7 +511,10 @@ fn day_row<'a>(
             format!("{short} {}", day.date.day())
         }
     };
-    let (lo, hi) = (weather::degrees(day.min, units), weather::degrees(day.max, units));
+    let (lo, hi) = (
+        weather::degrees(day.min, units),
+        weather::degrees(day.max, units),
+    );
     let amount = units.amount(day.mm).unwrap_or_default();
     let (from, to) = (day.min, day.max);
     let span = (high - low).max(1.0);
@@ -532,7 +529,10 @@ fn day_row<'a>(
             .add_stop(0.0, COLD)
             .add_stop(1.0, CURVE_LINE);
         f.fill(
-            &kit::rounded(Rectangle::new(Point::new(x, 0.0), Size::new(w, size.height)), 2.5),
+            &kit::rounded(
+                Rectangle::new(Point::new(x, 0.0), Size::new(w, size.height)),
+                2.5,
+            ),
             canvas::Fill::from(gradient),
         );
     });
@@ -540,16 +540,28 @@ fn day_row<'a>(
         container(content).width(width).align_x(align).into()
     };
     let line = row![
-        cell(said(name.clone(), 13.0, kit::MANROPE_SEMIBOLD, TEXT.get()), 62.0, Horizontal::Left),
+        cell(
+            said(name.clone(), 13.0, kit::MANROPE_SEMIBOLD, TEXT.get()),
+            62.0,
+            Horizontal::Left
+        ),
         cell(icon::widget(day.icon(), 18.0), 22.0, Horizontal::Center),
         cell(
             said(amount.clone(), 11.5, MANROPE, icon::RAIN.get()),
             40.0,
             Horizontal::Left
         ),
-        cell(said(lo.clone(), 13.0, MANROPE, DIM.get()), 26.0, Horizontal::Right),
+        cell(
+            said(lo.clone(), 13.0, MANROPE, DIM.get()),
+            26.0,
+            Horizontal::Right
+        ),
         container(range).width(RANGE).center_y(DAY),
-        cell(said(hi.clone(), 13.0, MANROPE, TEXT.get()), 26.0, Horizontal::Right),
+        cell(
+            said(hi.clone(), 13.0, MANROPE, TEXT.get()),
+            26.0,
+            Horizontal::Right
+        ),
     ]
     .spacing(6)
     .align_y(Vertical::Center)
@@ -569,7 +581,14 @@ fn day_row<'a>(
         boxed,
         format!("weather:day:{i}"),
         Role::ListItem,
-        format!("{name}, {lo} – {hi}{}", if amount.is_empty() { String::new() } else { format!(", {amount}") }),
+        format!(
+            "{name}, {lo} – {hi}{}",
+            if amount.is_empty() {
+                String::new()
+            } else {
+                format!(", {amount}")
+            }
+        ),
     )
     .into()
 }

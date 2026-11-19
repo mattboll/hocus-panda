@@ -703,7 +703,10 @@ mod tests {
             ["e0", "weather:rain", "e1", "e2", "weather:tomorrow"]
         );
         // While it rains: first.
-        let now = weather::RainLine { at: None, ..rain.clone() };
+        let now = weather::RainLine {
+            at: None,
+            ..rain.clone()
+        };
         assert_eq!(
             keys(&fit(&events, Some(&now), Some(&tomorrow), room(8)))[0],
             "weather:rain"

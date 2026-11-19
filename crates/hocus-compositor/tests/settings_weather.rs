@@ -123,7 +123,7 @@ impl Bed {
             "the window never opened: {}",
             common::logged(&self.log)
         );
-        self.shows(|s| s["page"] == section)
+        self.shows(|s| s["page"] == section && s["file"] == "saved")
     }
 
     /// What the window shows, once `done` holds of it.
@@ -208,7 +208,11 @@ impl Bed {
     fn search(&mut self) -> anyhow::Result<Value> {
         self.click("weather:field")?;
         self.keys(&[KEY_S, KEY_A])?;
-        self.shows(|s| s["weather"]["found"].as_array().is_some_and(|f| f.len() == 3))
+        self.shows(|s| {
+            s["weather"]["found"]
+                .as_array()
+                .is_some_and(|f| f.len() == 3)
+        })
     }
 }
 
@@ -320,7 +324,10 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     shoot(&mut bed, &out, "settings-weather")?;
     drop(bed);
     for (file, name) in [
-        ("# Mine.\n[effects]\nrain-on-glass = true\n", "settings-effects-no-place"),
+        (
+            "# Mine.\n[effects]\nrain-on-glass = true\n",
+            "settings-effects-no-place",
+        ),
         (PLACED, "settings-effects-rain-when"),
     ] {
         let mut bed = Bed::start(file, "fr_FR.UTF-8")?;

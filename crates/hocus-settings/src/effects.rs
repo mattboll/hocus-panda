@@ -286,7 +286,10 @@ mod tests {
     /// The rain's "Quand" under its switch, always by default (#814).
     #[test]
     fn fifteen_effects_off_by_default_all_built() {
-        let all: Vec<&Setting> = settings().iter().filter(|s| s.kind == Kind::Switch).collect();
+        let all: Vec<&Setting> = settings()
+            .iter()
+            .filter(|s| s.kind == Kind::Switch)
+            .collect();
         assert_eq!(all.len(), 15);
         let when = settings().iter().position(|s| s.id == RAIN_WHEN);
         let rain = settings().iter().position(|s| s.id == RAIN);
