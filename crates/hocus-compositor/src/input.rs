@@ -350,7 +350,7 @@ impl State {
             self.keyboard.kept_keys.insert(code);
             return FilterResult::Intercept(Kept::CancelMove);
         }
-        if sym == Keysym::Escape.raw() && self.ink.shows() && !auth {
+        if sym == Keysym::Escape.raw() && (self.ink.shows() || self.ink.agent.shows()) && !auth {
             self.keyboard.kept_keys.insert(code);
             return FilterResult::Intercept(Kept::InkClear);
         }

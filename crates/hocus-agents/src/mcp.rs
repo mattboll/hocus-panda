@@ -294,6 +294,82 @@ pub struct Celebrate {
     pub why: String,
 }
 
+/// A press, moves and a release of the agent's own pointer in a window
+/// (`drag`): from a point of it (from its top left) or an element of its
+/// tree, to another.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Drag {
+    pub window: u64,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    /// Where it presses: an element's label, as `click` aims.
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub to_x: Option<f64>,
+    #[serde(default)]
+    pub to_y: Option<f64>,
+    /// Where it lets go: an element's label.
+    #[serde(default)]
+    pub to_label: Option<String>,
+    #[serde(default)]
+    pub to_role: Option<String>,
+    #[serde(default)]
+    pub button: Option<Button>,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+/// What `draw` draws.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Shape {
+    #[default]
+    Rectangle,
+    Ellipse,
+    Arrow,
+    Path,
+}
+
+/// The longest word `draw` writes beside its shape.
+pub const MAX_WORD: usize = 24;
+/// The most points a path takes.
+pub const MAX_POINTS: usize = 512;
+
+/// A shape drawn on the screen in the agent's ink (`draw`): by its points
+/// (global logical pixels), or around a window or an element of its tree.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Draw {
+    pub shape: Shape,
+    /// Global logical pixels: a rectangle's or an ellipse's two corners,
+    /// an arrow's tail then its tip, a path's points.
+    #[serde(default)]
+    pub points: Option<Vec<[f64; 2]>>,
+    /// Around this window, or an element of it.
+    #[serde(default)]
+    pub window: Option<u64>,
+    /// That element's label, as `click` aims.
+    #[serde(default)]
+    pub element: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    /// A short word written beside the shape (« ici »).
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub intent: Option<String>,
+    /// The element's box once its tree was read (global logical: x, y,
+    /// width, height): the compositor's own, never the agent's.
+    #[serde(skip)]
+    pub around: Option<[f64; 4]>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OfWindow {
@@ -310,9 +386,11 @@ pub enum Right {
     Desktops,
     /// Change settings.
     Settings,
-    /// Click, scroll, type and press keys in the applications of its
-    /// `apps`.
+    /// Click, drag, scroll, type and press keys in the applications of
+    /// its `apps`.
     Input,
+    /// Draw on the screen (`draw`).
+    Draw,
 }
 
 /// What a tool asks, read from its name and arguments.
@@ -330,6 +408,7 @@ pub enum Call {
     Launch(Launch),
     SetSetting(SetSetting),
     Click(Click),
+    Drag(Drag),
     Scroll(Scroll),
     Type(Type),
     PressKeys(PressKeys),
@@ -338,6 +417,7 @@ pub enum Call {
     Capture(OfWindow),
     AccessibilityTree(OfWindow),
     Celebrate(Celebrate),
+    Draw(Draw),
 }
 
 impl Call {
@@ -363,10 +443,12 @@ impl Call {
                 | Self::Launch(_)
                 | Self::SetSetting(_)
                 | Self::Click(_)
+                | Self::Drag(_)
                 | Self::Scroll(_)
                 | Self::Type(_)
                 | Self::PressKeys(_)
                 | Self::CloseWindow(_)
+                | Self::Draw(_)
         )
     }
 
@@ -375,7 +457,7 @@ impl Call {
     pub fn inputs(&self) -> bool {
         matches!(
             self,
-            Self::Click(_) | Self::Scroll(_) | Self::Type(_) | Self::PressKeys(_)
+            Self::Click(_) | Self::Drag(_) | Self::Scroll(_) | Self::Type(_) | Self::PressKeys(_)
         )
     }
 
@@ -394,9 +476,12 @@ impl Call {
             }
             Self::SwitchDesktop(_) | Self::Launch(_) => vec![Right::Desktops],
             Self::SetSetting(_) => vec![Right::Settings],
-            Self::Click(_) | Self::Scroll(_) | Self::Type(_) | Self::PressKeys(_) => {
-                vec![Right::Input]
-            }
+            Self::Click(_)
+            | Self::Drag(_)
+            | Self::Scroll(_)
+            | Self::Type(_)
+            | Self::PressKeys(_) => vec![Right::Input],
+            Self::Draw(_) => vec![Right::Draw],
             _ => Vec::new(),
         }
     }
@@ -407,12 +492,14 @@ impl Call {
             Self::FocusWindow(c) => Some(c.window),
             Self::MoveWindow(c) => Some(c.window),
             Self::Click(c) => Some(c.window),
+            Self::Drag(c) => Some(c.window),
             Self::Scroll(c) => Some(c.window),
             Self::Type(c) => Some(c.window),
             Self::PressKeys(c) => Some(c.window),
             Self::CloseWindow(c) => Some(c.window),
             Self::Capture(c) | Self::AccessibilityTree(c) => Some(c.window),
             Self::WaitFor(c) => c.window,
+            Self::Draw(c) => c.window,
             _ => None,
         }
     }
@@ -426,10 +513,12 @@ impl Call {
             Self::Launch(c) => c.intent.as_deref(),
             Self::SetSetting(c) => c.intent.as_deref(),
             Self::Click(c) => c.intent.as_deref(),
+            Self::Drag(c) => c.intent.as_deref(),
             Self::Scroll(c) => c.intent.as_deref(),
             Self::Type(c) => c.intent.as_deref(),
             Self::PressKeys(c) => c.intent.as_deref(),
             Self::CloseWindow(c) => c.intent.as_deref(),
+            Self::Draw(c) => c.intent.as_deref(),
             _ => None,
         }
     }
@@ -448,6 +537,7 @@ impl Call {
             Self::Launch(_) => "launch",
             Self::SetSetting(_) => "set_setting",
             Self::Click(_) => "click",
+            Self::Drag(_) => "drag",
             Self::Scroll(_) => "scroll",
             Self::Type(_) => "type",
             Self::PressKeys(_) => "press_keys",
@@ -456,6 +546,7 @@ impl Call {
             Self::Capture(_) => "capture",
             Self::AccessibilityTree(_) => "accessibility_tree",
             Self::Celebrate(_) => "celebrate",
+            Self::Draw(_) => "draw",
         }
     }
 }
@@ -510,7 +601,14 @@ mod tests {
         assert!(!Call::ListWindows(Nothing {}).acts());
         let odd = Call::of("move_window", &json!({ "window": 3, "colour": 1 }));
         assert!(odd.is_err_and(|e| e.contains("colour")));
-        assert!(Call::of("drag", &json!({ "window": 3 })).is_err());
+        assert!(Call::of("drag", &json!({ "window": 3 })).is_ok());
+        assert!(Call::of("nope", &json!({ "window": 3 })).is_err());
+        let drawn = Call::of(
+            "draw",
+            &json!({ "shape": "ellipse", "window": 3, "label": "ici", "intent": "x" }),
+        );
+        assert!(drawn.is_ok_and(|d| d.acts() && !d.inputs() && d.window() == Some(3)));
+        assert!(Call::of("draw", &json!({ "shape": "star", "intent": "x" })).is_err());
         let typed = Call::of("type", &json!({ "window": 3, "text": "ab", "intent": "x" }));
         assert!(typed.as_ref().is_ok_and(|t| t.acts() && t.inputs()));
         let closed = Call::of("close_window", &json!({ "window": 3, "intent": "x" }));
@@ -559,6 +657,17 @@ mod tests {
         assert_eq!(
             call("type", json!({ "window": 1, "text": "a" })),
             Ok(vec![Right::Input])
+        );
+        assert_eq!(
+            call("drag", json!({ "window": 1, "to_x": 3 })),
+            Ok(vec![Right::Input])
+        );
+        assert_eq!(
+            call(
+                "draw",
+                json!({ "shape": "path", "points": [[0, 0], [9, 9]] })
+            ),
+            Ok(vec![Right::Draw])
         );
     }
 
