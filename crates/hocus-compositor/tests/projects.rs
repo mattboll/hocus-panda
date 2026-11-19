@@ -293,6 +293,13 @@ fn a_desktop_made_a_project_is_named_everywhere_and_a_name_taken_is_refused() ->
     open_on(&mut hp, "test.here", None)?;
     open_on(&mut hp, "test.site", Some(KEY_2))?;
     let mut line = Line::open(&mut hp)?;
+    // The desktops' surface before the project: its name will take a line
+    // above the tiles.
+    let plain = hp
+        .drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+        .first()
+        .map(|(_, r)| r.height)
+        .context("no desktops' tiles")?;
 
     let made = line
         .make(&mut hp, 2, "hocus-site", &places.folder)?
@@ -344,8 +351,29 @@ fn a_desktop_made_a_project_is_named_everywhere_and_a_name_taken_is_refused() ->
         said.contains("Bureau 2, projet hocus-site"),
         "screen readers read:\n{said}"
     );
-    let told = hp.dispatch_until(WAIT, |hp| hp.desk_tile_middles().len() == 4)?;
-    anyhow::ensure!(told, "tiles: {:?}", hp.desk_tile_middles());
+    // The tiles where the user sees them: the surface drawn at its new
+    // size, the project's line above the tiles it said. The shell says the
+    // project as soon as it knows it, and on a loaded machine draws it a
+    // while later: hovered from the tiles it said before, the pointer
+    // lands on the project's line once drawn, not on a tile (#876).
+    let told = hp.dispatch_until(WAIT, |hp| {
+        let Some((_, surface)) = hp
+            .drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+            .into_iter()
+            .next()
+        else {
+            return false;
+        };
+        let below = f64::from(surface.y + surface.height - plain);
+        let tiles = hp.desk_tile_middles();
+        surface.height > plain && tiles.len() == 4 && tiles.iter().all(|(.., (_, y))| *y > below)
+    })?;
+    anyhow::ensure!(
+        told,
+        "tiles: {:?} on {:?}",
+        hp.desk_tile_middles(),
+        hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE)
+    );
     let (x, y) = hp
         .desk_tile_middles()
         .into_iter()
