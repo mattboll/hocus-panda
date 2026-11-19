@@ -2750,6 +2750,8 @@ and = " and "
 not_reopened = { other = "{listed} could not be reopened." }
 tabs_unread = "The tabs of a {browser} window could not be read."
 conversation_not_resumed = "{tool}’s conversation could not resume. Its terminal is open in {folder}."
+conversation_gone = "{tool}’s conversation could not resume: it is no longer on the disk. Its terminal is open in {folder}."
+conversation_no_program = "{tool}’s conversation could not resume: {program} was not found. Its terminal is open in {folder}; type {command} to resume it."
 
 
 [compositor.projects]

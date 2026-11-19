@@ -801,6 +801,33 @@ A comes first; B needs A; C and D need B and not each other.
 - **The setting** `[desktops] remember-tabs` (Settings › Desktops,
   « Retenir les onglets des projets », on): off, nothing is read and
   browsers come back as plain applications.
+- **Log out keeps every window** (2026-11-19). Log out asked each window
+  to close, so a browser closed its windows one by one: Firefox keeps all
+  but the last in its `_closedWindows`, as windows the user closed, and
+  its own restore at log in brought one back. Now log out never asks a
+  browser's windows (§8.3's app ids) to close: its process is sent
+  `SIGTERM` once, as systemd ends a session's processes, and its windows
+  go with it (`leave/mod.rs`). Chromium quits as asked, every window
+  saved. Firefox's handler of `SIGTERM` is not installed (Mozilla's bug
+  2086801): it ends abruptly, its recovery file (written every 15 s)
+  holding every window, which it reopens itself at the next start unless
+  `browser.sessionstore.resume_from_crash` is off; so a Firefox whose last
+  session ended so (`sessionCheckpoints.json` without
+  `sessionstore-final-state-write-complete`; without it, a recovery file
+  and no `sessionstore.jsonlz4`) counts as reopening its own windows, as
+  its start page 3 does, and is given no addresses. The compositor's own
+  process (a test's windows) is never signalled.
+- **Every browser window's tabs at log out**: the session's thread reads
+  them for every browser window as the session ends, not only those on a
+  project's desktop (with `remember-tabs`, whose label says "des projets"
+  but which covers these too), and the session's file is the user's
+  alone (`0600`). At log in, 10 s after a browser reopening its own
+  windows showed its first, its saved windows not back come back from
+  these tabs, each a new window, in their places (`session/restore.rs`,
+  `comeback_browser_grace_over`); the browser counts as back once all its
+  windows are. A Firefox that asks whether to restore
+  (`about:sessionrestore`, after abrupt ends too close together) may then
+  open them twice if the user also accepts.
 - **The card** lists "ONGLETS · FIREFOX · 7" per browser window, each
   tab's title and host (the shell never gets an address), four, then "3
   de plus" / "Moins"; the confirmation says "Firefox, avec ses 4
@@ -848,11 +875,36 @@ A comes first; B needs A; C and D need B and not each other.
   sauf une conversation"). **Came back**: any hook of that session within
   30 s (the first a resumed Claude Code sends is `SessionStart`, `source`
   `resume`); else counted as not resumed, its terminal left as it is.
+- **Its program off the session's `PATH`** (2026-11-19): a session a
+  display manager starts has a `PATH` of its own, without the folders the
+  user's shell adds; Claude Code's installer puts `claude` in
+  `~/.local/bin`, which such a `PATH` lacks, so no conversation resumed.
+  The program is now looked for where the agent's own process found it
+  (its `PATH` in `/proc/PID/environ`, read off the loop as its hooks are
+  heard, kept as `[window.agent]`'s `program`), then on the session's
+  `PATH`, then in the home's usual folders (`~/.local/bin`, `~/bin`,
+  `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`, `~/.cargo/bin`, nvm's
+  Node versions'). Found off the session's `PATH`, its folder goes first
+  on the command's: `$SHELL -c 'PATH='DIR':"$PATH" claude --resume ID;
+  exec $SHELL'`. The user's login shell is not asked: its `PATH` often
+  lacks what an interactive shell's rc file adds. The notification says
+  why: "… n’a pas pu reprendre : elle n’est plus sur le disque." (its
+  transcript gone), "… : claude est introuvable. Son terminal est ouvert
+  dans hocus-site ; tape claude --resume ID pour la reprendre." (its
+  program nowhere).
 - **The confirmation** says "Claude Code, qui reprendra sa conversation",
   its panda as its icon, instead of the terminal's row; **the card**'s
   "AGENTS" shows each agent's panda in its state, "**Claude Code** · «
   first prompt »", its session and folder (open) or "reprendra : claude
   --resume …" (closed), and its state ("au travail", "en pause").
+- **Tests** of 2026-11-19: `projects::an_agent_whose_program_is_only_in_the_homes_bin_resumes_at_log_in`,
+  `projects::logging_out_asks_a_browser_to_quit_never_its_windows_one_by_one`
+  (a stand-in with two windows in one process ends on `SIGTERM`, none
+  closed alone; the session saved has its tabs off a project's desktop),
+  `projects::a_window_its_browser_does_not_reopen_comes_back_with_its_tabs`;
+  unit tests `resume::tests::its_program_is_found_off_the_sessions_path`,
+  `a_process_finds_its_program_in_its_own_path`,
+  `browsers::tests::a_firefox_that_ended_abruptly_reopens_its_windows_itself`.
 - **Tests**: test 7 (`projects::an_agents_conversation_resumes_in_its_terminal`:
   the terminal stand-in runs what follows `--`, a fake `claude` on the
   agents' `PATH` writes its arguments and folder and says `SessionStart`

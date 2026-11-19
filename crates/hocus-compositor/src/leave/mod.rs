@@ -13,7 +13,11 @@
 //!   says `challenge`, and are held back while logind lists `block`
 //!   inhibitors of `shutdown`; the countdown starts again from 10 s when
 //!   the last goes. At 0 (or "… maintenant") every window is asked to
-//!   close and given 5 s; those still open are listed as holding it back,
+//!   close and given 5 s, a browser's all at once: its process is asked
+//!   to quit (`SIGTERM`), never its windows one by one, which a browser
+//!   keeps as windows the user closed and does not reopen with its
+//!   session (docs/design/projects.md §8.3); those still open are listed
+//!   as holding it back,
 //!   with "Revenir à …" and "Fermer quand même"; once none is left, or on
 //!   "… quand même", it happens: the compositor ends (log out), or logind
 //!   restarts or powers the machine off and then the compositor ends.
@@ -302,8 +306,19 @@ impl State {
         self.session_leaving();
         let windows: Vec<WindowId> = self.windows.keys().copied().collect();
         tracing::info!(count = windows.len(), "every window is asked to close");
+        let mut browsers: Vec<u32> = Vec::new();
         for id in &windows {
-            self.leave_close_one(*id);
+            match self.leave_browser_process(*id) {
+                Some(pid) => {
+                    if !browsers.contains(&pid) {
+                        browsers.push(pid);
+                    }
+                }
+                None => self.leave_close_one(*id),
+            }
+        }
+        for pid in browsers {
+            self.leave_quit_browser(pid, &windows);
         }
         self.leave.phase = Phase::Closing {
             action,
@@ -313,6 +328,42 @@ impl State {
         };
         self.leave_after_turn();
         self.leave_tick();
+    }
+
+    /// The process of window `id` when it is a browser's, which is asked
+    /// to quit rather than to close its windows one by one: never this
+    /// compositor's own (a test's windows), nor init.
+    fn leave_browser_process(&self, id: WindowId) -> Option<u32> {
+        let managed = self.windows.get(&id)?;
+        let app = crate::windows::app_id(&managed.window)?;
+        crate::browsers::of_app(&app)?;
+        self.pid_of(&managed.window)
+            .filter(|pid| *pid > 1 && *pid != std::process::id())
+    }
+
+    /// Browser process `pid` is asked to quit as a whole (`SIGTERM`, as
+    /// systemd ends a session's processes): every window stays in its
+    /// session (Chromium saves it; Firefox, whose handler of it is not
+    /// installed, keeps the last it wrote, which it reopens itself). It
+    /// cannot be: its windows of `windows` are asked to close.
+    fn leave_quit_browser(&self, pid: u32, windows: &[WindowId]) {
+        use rustix::process::{Pid, Signal, kill_process};
+        let sent = i32::try_from(pid)
+            .ok()
+            .and_then(Pid::from_raw)
+            .ok_or(rustix::io::Errno::INVAL)
+            .and_then(|p| kill_process(p, Signal::TERM));
+        match sent {
+            Ok(()) => tracing::info!(pid, "a browser is asked to quit, its windows with it"),
+            Err(err) => {
+                tracing::warn!(%err, pid, "a browser could not be asked to quit: its windows are");
+                for id in windows {
+                    if self.leave_browser_process(*id) == Some(pid) {
+                        self.leave_close_one(*id);
+                    }
+                }
+            }
+        }
     }
 
     fn leave_close_one(&self, id: WindowId) {

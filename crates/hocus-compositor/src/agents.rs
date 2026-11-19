@@ -103,8 +103,10 @@ pub const GOOD_NEWS: Duration = Duration::from_secs(60);
 /// What the sources hand the loop.
 #[derive(Debug)]
 pub enum Heard {
-    /// A report, and its process's ancestry, nearest first.
-    Report(Report, Vec<u32>),
+    /// A report, its process's ancestry, nearest first, and the program of
+    /// an agent whose conversation resumes, as its process finds it
+    /// (docs/design/projects.md §8.1).
+    Report(Report, Vec<u32>, Option<std::path::PathBuf>),
     /// Good news (`hocus celebrate`), and its process's ancestry.
     Celebrate(hocus_agents::Celebration, Vec<u32>),
     Tools(Snapshot),
@@ -224,6 +226,8 @@ struct Agent {
     conversation: hocus_agents::Conversation,
     /// What it left running after its turn (#831).
     running: running::Running,
+    /// Its tool's program, as its process found it (§8.1).
+    program: Option<std::path::PathBuf>,
 }
 
 /// Good news of a process no agent is known for: a row of its own, for
@@ -383,7 +387,14 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
         .name("agents' reports".to_owned())
         .spawn({
             let perf = state.perf.counters.clone();
-            move || listen(&listener, &reports, &perf)
+            // Where an agent's process's environment is read (`/proc`, a
+            // test's table of its own); without the agents' places, never.
+            let processes = state
+                .config
+                .agent_places
+                .as_ref()
+                .map(|p| p.processes.clone());
+            move || listen(&listener, &reports, &perf, processes.as_deref())
         })
         .context("could not start the agents' reports' thread")?;
     tracing::info!(control = %path.display(), "agents' control socket");
@@ -412,7 +423,12 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut Compositor) -> anyho
 
 /// Takes the reporting connections, one at a time: each is a few lines,
 /// read for a second at most.
-fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus_perf::Counters) {
+fn listen(
+    listener: &UnixListener,
+    sender: &channel::Sender<Heard>,
+    perf: &hocus_perf::Counters,
+    processes: Option<&std::path::Path>,
+) {
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(stream) => stream,
@@ -552,7 +568,19 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
                         .pid
                         .map(hocus_agents::process::ancestry)
                         .unwrap_or_default();
-                    if sender.send(Heard::Report(report, ancestry)).is_err() {
+                    // Where its program is, for its conversation to resume
+                    // in a session whose `PATH` lacks it.
+                    let program = processes
+                        .zip(report.pid)
+                        .filter(|_| report.conversation.cwd.is_some())
+                        .zip(crate::resume::SavedAgent::program_for(report.source.name()))
+                        .and_then(|((processes, pid), program)| {
+                            crate::resume::program_of_process(processes, pid, program)
+                        });
+                    if sender
+                        .send(Heard::Report(report, ancestry, program))
+                        .is_err()
+                    {
                         // The loop is gone.
                         return;
                     }
@@ -576,7 +604,9 @@ impl Compositor {
                 let _ = reply.send(self.program_asked(ask));
                 return;
             }
-            Heard::Report(report, ancestry) => self.agent_reported(report, ancestry),
+            Heard::Report(report, ancestry, program) => {
+                self.agent_reported(report, ancestry, program);
+            }
             Heard::Celebrate(news, ancestry) => self.agent_celebrates(news, &ancestry),
             Heard::Tools(seen) => {
                 tracing::debug!(?seen, "the agents' tools");
@@ -646,7 +676,12 @@ impl Compositor {
         crate::panel::micros(Duration::from(self.clock.now()))
     }
 
-    fn agent_reported(&mut self, report: Report, ancestry: Vec<u32>) {
+    fn agent_reported(
+        &mut self,
+        report: Report,
+        ancestry: Vec<u32>,
+        program: Option<std::path::PathBuf>,
+    ) {
         let now = self.now_us();
         let key = (report.source, report.key.clone());
         let agents = &mut self.agents;
@@ -696,6 +731,7 @@ impl Compositor {
                     good: None,
                     conversation: hocus_agents::Conversation::default(),
                     running: running::Running::new(),
+                    program: None,
                 });
                 agents.list.len() - 1
             }
@@ -760,6 +796,9 @@ impl Compositor {
         if agent.conversation.prompt.is_none() {
             agent.conversation.prompt = said.prompt;
         }
+        if program.is_some() {
+            agent.program = program;
+        }
         let folder = folder_new.then(|| agent.conversation.cwd.clone()).flatten();
         let new_pid = report.pid.filter(|p| !agent.pids.contains(p));
         if let Some(pid) = new_pid {
@@ -823,6 +862,7 @@ impl Compositor {
                         folder: c.cwd.clone()?.into(),
                         transcript: c.transcript.clone().unwrap_or_default().into(),
                         first_prompt: c.prompt.clone().unwrap_or_default(),
+                        program: agent.program.clone(),
                     },
                     agent.state.name().to_owned(),
                 ))
