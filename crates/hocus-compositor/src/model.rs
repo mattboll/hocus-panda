@@ -473,6 +473,9 @@ pub struct Model {
     /// Windows on every desktop of their screen (#723): each switch takes
     /// them along to the desktop it shows.
     everywhere: std::collections::BTreeSet<WindowId>,
+    /// Where each window on all desktops was in the stack of each desktop
+    /// it left (#888): that desktop's windows under it, by desktop.
+    places: HashMap<(WindowId, usize), Vec<WindowId>>,
     /// The fullscreen window raised last: it covers those kept above
     /// while it stays in front.
     covering: Option<WindowId>,
@@ -557,6 +560,7 @@ impl Model {
         self.parents.retain(|w, p| *w != id && *p != id);
         self.above.remove(&id);
         self.everywhere.remove(&id);
+        self.places.retain(|(w, _), _| *w != id);
         if self.covering == Some(id) {
             self.covering = None;
         }
@@ -626,11 +630,19 @@ impl Model {
 
     /// Focuses and raises `id`; `None` takes the focus from every window.
     pub fn focus(&mut self, id: Option<WindowId>) {
+        self.focus_raising(id, true);
+    }
+
+    /// Focuses `id`, raising it when `raise`: else it keeps its place in
+    /// the stack.
+    pub fn focus_raising(&mut self, id: Option<WindowId>, raise: bool) {
         if let Some(id) = id {
             if !self.stack.contains(&id) {
                 return;
             }
-            self.raise(id);
+            if raise {
+                self.raise(id);
+            }
             self.recent.retain(|w| *w != id);
             self.recent.insert(0, id);
         }
@@ -690,7 +702,99 @@ impl Model {
             self.everywhere.insert(id);
         } else {
             self.everywhere.remove(&id);
+            self.places.retain(|(w, _), _| *w != id);
         }
+    }
+
+    /// A screen goes from desktop `from` to `to` (#888): its windows on
+    /// all desktops `everywhere` remember their place among `leaving`,
+    /// `from`'s windows, and take the one they had among `arriving`,
+    /// `to`'s. The first time there, one goes right under `focus`, the
+    /// window focused last on `to` (else its window on top), unless it
+    /// has the focus itself: then in front. Only the arriving windows
+    /// move in the stack: as the strip slides, the leaving ones stay in
+    /// front of or behind them as they were, the arriving ones as they
+    /// were last time. All three lists bottom first.
+    pub fn take_places(
+        &mut self,
+        everywhere: &[WindowId],
+        from: usize,
+        leaving: &[WindowId],
+        to: usize,
+        arriving: &[WindowId],
+        focus: Option<WindowId>,
+    ) {
+        if everywhere.is_empty() {
+            return;
+        }
+        let index = |w: WindowId| self.stack.iter().position(|s| *s == w);
+        for id in everywhere {
+            let Some(at) = index(*id) else {
+                continue;
+            };
+            let below = leaving
+                .iter()
+                .copied()
+                .filter(|w| index(*w).is_some_and(|i| i < at))
+                .collect();
+            self.places.insert((*id, from), below);
+        }
+        // How many of the arriving windows go under each, kept in their
+        // order among themselves: a single stack cannot hold two orders.
+        let mut under = Vec::with_capacity(everywhere.len());
+        let mut least = 0;
+        for id in everywhere {
+            let n = match self.places.get(&(*id, to)) {
+                Some(below) => arriving
+                    .iter()
+                    .rposition(|w| below.contains(w))
+                    .map_or(0, |i| i + 1),
+                // The first time, with the focus: in front.
+                None if self.focused == Some(*id) => arriving.len(),
+                // Else right under the window focused there last, or on
+                // top, which gets the focus, and under its dialogs.
+                None => focus
+                    .filter(|w| !self.is_minimized(*w))
+                    .or_else(|| {
+                        arriving
+                            .iter()
+                            .rev()
+                            .copied()
+                            .find(|w| !self.is_minimized(*w))
+                    })
+                    .map_or(arriving.len(), |top| {
+                        let mut root = top;
+                        for _ in 0..arriving.len() {
+                            match self.parents.get(&root) {
+                                Some(p) if arriving.contains(p) => root = *p,
+                                _ => break,
+                            }
+                        }
+                        arriving.iter().position(|w| *w == root).unwrap_or(0)
+                    }),
+            };
+            least = least.max(n);
+            under.push(least);
+        }
+        // Each arriving window goes right under the first window on all
+        // desktops it is under, those above all of them on top.
+        let mut stack: Vec<WindowId> = self
+            .stack
+            .iter()
+            .copied()
+            .filter(|w| !arriving.contains(w))
+            .collect();
+        let mut placed = 0;
+        for (id, n) in everywhere.iter().zip(&under) {
+            if let Some(at) = stack.iter().position(|w| w == id) {
+                let segment = arriving.get(placed..*n).unwrap_or_default();
+                stack.splice(at..at, segment.iter().copied());
+                placed = *n;
+            }
+        }
+        stack.extend(arriving.get(placed..).unwrap_or_default().iter().copied());
+        self.stack = stack;
+        self.settle_above();
     }
 
     /// Whether `id` is on every desktop of its screen.
