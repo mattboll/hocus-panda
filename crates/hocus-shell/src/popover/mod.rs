@@ -58,6 +58,7 @@ pub mod sound;
 pub mod tasks;
 pub mod transcribe;
 pub mod tray;
+pub mod weather;
 pub mod wifi;
 pub mod window_menu;
 pub mod windows;
@@ -1261,7 +1262,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::Windows
         | Item::WindowMenu(_)
         | Item::Music
-        | Item::Journal => None,
+        | Item::Journal
+        | Item::Weather(_) => None,
     }
 }
 

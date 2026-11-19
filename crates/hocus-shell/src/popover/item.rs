@@ -117,6 +117,10 @@ pub enum Item {
     /// An MCP agent's row in the agents' group (docs/design/mcp.md): the
     /// agents' journal, by a click (or the toast's "Voir").
     Journal,
+    /// The weather (#814): Today's header's, its rain's line, tomorrow's,
+    /// by a click; the mini form's item, by a hover or a click. Its
+    /// popover.
+    Weather(weather::Spot),
 }
 
 impl Item {
@@ -214,6 +218,7 @@ impl Item {
             ),
             Self::Music => music::WIDTH,
             Self::Journal => journal::WIDTH,
+            Self::Weather(_) => weather::WIDTH,
             item if item.agents() => agents::WIDTH,
             _ => POPOVER_WIDTH.unsigned_abs(),
         }
@@ -247,6 +252,7 @@ impl Item {
             Self::WindowMenu(id) => window_menu::height(id),
             Self::Music => music::height(),
             Self::Journal => journal::height(),
+            Self::Weather(_) => weather::height(),
             Self::WindowsMore => desktop::height(
                 bar,
                 0,
@@ -313,6 +319,7 @@ impl Item {
             Self::Calendar => calendar::opening(),
             Self::Music => music::opening(),
             Self::Journal => journal::opening(),
+            Self::Weather(_) => weather::opening(),
             Self::Windows => windows::opening(),
             Self::WindowMenu(_) => window_menu::opening(),
             Self::Window(_) | Self::WindowClose(_) => {}
@@ -353,7 +360,8 @@ impl Item {
             | Self::Windows
             | Self::WindowMenu(_)
             | Self::Music
-            | Self::Journal => {}
+            | Self::Journal
+            | Self::Weather(_) => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -390,7 +398,7 @@ impl Item {
                 | Self::MeetingMark,
                 _,
             ) => MEETING_NAMESPACE,
-            (Self::TodayLine(_) | Self::TodayMore, _) => TODAY_NAMESPACE,
+            (Self::TodayLine(_) | Self::TodayMore | Self::Weather(_), _) => TODAY_NAMESPACE,
             (
                 Self::Tasks
                 | Self::TasksMore
@@ -450,6 +458,7 @@ impl Item {
                 | Self::WindowsMore
                 | Self::WindowMenu(_)
                 | Self::Journal
+                | Self::Weather(_)
         ) && !self.agents()
     }
 

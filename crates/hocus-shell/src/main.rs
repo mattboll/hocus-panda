@@ -87,6 +87,7 @@ mod ui;
 mod user;
 mod views;
 mod wayland;
+mod weather;
 mod windows;
 
 use std::{
@@ -184,6 +185,8 @@ fn main() -> ExitCode {
     // After the day's start, which it follows.
     reminder::start(software);
     today::start();
+    // The weather's thread, which waits for its place (#814).
+    weather::start();
     tasks::start();
     // After the day: whether the first-run card shows.
     setup::start();
@@ -550,6 +553,7 @@ impl Shell {
                 popover::linked(sender.clone());
                 self.to_compositor = Some(sender);
                 meeting::linked();
+                weather::linked();
                 music::linked();
                 clipboard::linked();
                 in_use::linked();
@@ -825,6 +829,10 @@ impl Shell {
             }
             ToShell::DesktopNames(names) => {
                 desktops::set_names(names);
+                Task::none()
+            }
+            ToShell::Weather(place) => {
+                weather::set_place(place);
                 Task::none()
             }
             ToShell::BarGroups(groups) => {
@@ -1882,6 +1890,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // What the column shows (6.4): only its parts draw.
                         ToShell::BarGroups(groups) => {
                             column::set_groups(groups);
+                            continue;
+                        }
+                        // The weather's place (#814): its thread asks the
+                        // forecast; Today draws when it comes.
+                        ToShell::Weather(place) => {
+                            weather::set_place(place);
                             continue;
                         }
                         // The agents' tools and the agents: only their

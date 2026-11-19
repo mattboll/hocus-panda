@@ -129,10 +129,10 @@ pub use config::{
     Idle as IdleSettings, Ink, Lid, LightShape, Magnifier as MagnifierSettings, McpAccess,
     McpAgent, NightLight, OldKeys as OldPowerKeys, OnBattery as WallpaperOnBattery, OpenSize,
     OutputSettings, Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
-    Power as PowerSettings, PowerAc, PowerBattery, PowerButton, Recording, Remind,
+    Power as PowerSettings, PowerAc, PowerBattery, PowerButton, RainWhen, Recording, Remind,
     Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings, SetScreen, SoundPrograms,
     Strength as LightStrength, SystemKeyboard, Wallpaper as WallpaperSettings,
-    Warmth as LightWarmth, Windows,
+    Warmth as LightWarmth, Weather as WeatherSettings, WeatherUnits, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.

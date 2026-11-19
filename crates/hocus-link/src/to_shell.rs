@@ -7,8 +7,8 @@ use crate::{
     ActionsShown, AgentShown, AgentTool, AuthAt, BadLine, BarGroups, CaptureBar, Captured, Clip,
     ClipRules, ClockLook, CurtainShown, DeskScreen, Desktops, Form, KeyLayout, LeaveCan,
     LeaveShown, LevelKey, LockShown, Recent, Recorded, RecordingShown, SHARE, ShareChoose,
-    ShareShown, Side, Titles, TranscribingShown, WindowMenu, WindowStates, locale, text::tidy,
-    theme, wallpaper, wire,
+    ShareShown, Side, Titles, TranscribingShown, WeatherPlace, WindowMenu, WindowStates, locale,
+    text::tidy, theme, wallpaper, wire,
 };
 
 /// What the compositor tells the shell.
@@ -115,6 +115,9 @@ pub enum ToShell {
     /// move (`[panel] meeting`, `today`, `tasks`, `agents`, `order`, 6.4): sent
     /// as the shell connects and when the configuration changes them.
     BarGroups(BarGroups),
+    /// The weather's place and units (`[weather]`, #814): sent as the shell
+    /// connects and when the configuration changes them.
+    Weather(WeatherPlace),
     /// The side the bars stand on (`[panel] side`, 6.4): sent as the shell
     /// connects, before the bars, and when the configuration changes it, each
     /// bar then made again on that side (`no-bar`, then `bar`).

@@ -322,6 +322,13 @@ fn to_shell() -> Vec<ToShell> {
         ToShell::BarSide(Side::Left),
         ToShell::BarSide(Side::Right),
         ToShell::BarGroups(BarGroups::default()),
+        ToShell::Weather(crate::WeatherPlace {
+            enabled: true,
+            place: "Saint-Étienne".into(),
+            latitude: 45.4339,
+            longitude: 4.39,
+            imperial: false,
+        }),
         ToShell::BarGroups(BarGroups {
             order: [BarGroup::Tasks, BarGroup::Today, BarGroup::Agents],
             meeting: false,
@@ -1059,6 +1066,7 @@ fn to_compositor() -> Vec<ToCompositor> {
         }),
         ToCompositor::McpUndo(4),
         ToCompositor::McpStop(true),
+        ToCompositor::Raining(true),
     ];
     all.extend(CaptureMode::ALL.map(|mode| ToCompositor::Capture(CaptureAsk::Mode(mode))));
     all.extend(

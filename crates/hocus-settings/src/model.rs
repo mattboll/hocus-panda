@@ -1,4 +1,4 @@
-//! The settings' model: the 21 sections in their 5 groups, and every
+//! The settings' model: the 22 sections in their 5 groups, and every
 //! setting a section holds, with what the window needs to show it, find
 //! it and write it.
 //!
@@ -52,12 +52,14 @@ impl Group {
     }
 }
 
-/// The twenty-one sections, in the sidebar's order.
+/// The twenty-two sections, in the sidebar's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionId {
     Appearance,
     Wallpaper,
     Bar,
+    /// The weather in the bar (#814).
+    Weather,
     Accessibility,
     Agenda,
     Screens,
@@ -97,10 +99,11 @@ pub struct Section {
 }
 
 impl SectionId {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Bar,
+        Self::Weather,
         Self::Accessibility,
         Self::Agenda,
         Self::Screens,
@@ -157,6 +160,14 @@ impl SectionId {
                 words::THE_SIDE_IT_STANDS_ON_ITS,
                 Icon::Bar,
                 "6.4",
+            ),
+            Self::Weather => s(
+                "weather",
+                Personalisation,
+                words::WEATHER,
+                words::THE_WEATHER_IN_THE_BAR,
+                Icon::Weather,
+                "#814",
             ),
             Self::Accessibility => s(
                 "accessibility",
@@ -321,6 +332,8 @@ pub enum Icon {
     Appearance,
     Wallpaper,
     Bar,
+    /// A cloud before the sun (#814).
+    Weather,
     Accessibility,
     Agenda,
     Screens,
@@ -345,6 +358,8 @@ pub enum Icon {
     Search,
     Sliders,
     Warning,
+    /// An "i" in a circle: a note (#814).
+    Info,
     Close,
     Chevron,
     /// The chevron pointing up: a group moved up (6.4).
@@ -366,6 +381,9 @@ impl Icon {
                 "M3.5 5 H20.5 V19 H3.5 Z M3.5 15.5 L8.5 10.5 L13 15 L15.5 12.5 L20.5 17.5"
             }
             Self::Bar => "M3.5 4.5 H20.5 V19.5 H3.5 Z M15 4.5 V19.5 M17 8 H18.5 M17 11 H18.5",
+            Self::Weather => {
+                "M7.5 19.5 H17 A3.5 3.5 0 0 0 17.4 12.5 A5 5 0 0 0 8.2 11.2 A4.2 4.2 0 0 0 7.5 19.5 Z M9.5 3.5 V5 M4.5 8.5 H6 M5.9 4.9 L6.9 5.9 M13.1 4.9 L12.1 5.9"
+            }
             Self::Accessibility => {
                 "M12 6.5 A1.8 1.8 0 1 0 12 2.9 A1.8 1.8 0 1 0 12 6.5 Z M5 8.5 L12 10 L19 8.5 M12 10 V14.5 M12 14.5 L8.5 21 M12 14.5 L15.5 21"
             }
@@ -412,6 +430,7 @@ impl Icon {
             }
             Self::Sliders => "M4 7 H13 M17 7 H20 M15 4.5 V9.5 M4 17 H7 M11 17 H20 M9 14.5 V19.5",
             Self::Warning => "M12 4 L21 19.5 H3 Z M12 10 V14 M12 16.8 V17",
+            Self::Info => "M12 21 A9 9 0 1 0 12 3 A9 9 0 1 0 12 21 Z M12 11 V16.5 M12 7.6 V8",
             Self::Close => "M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5",
             Self::Chevron => "M7 10 L12 15 L17 10",
             Self::ChevronUp => "M7 14 L12 9 L17 14",
@@ -948,6 +967,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Accessibility => crate::accessibility::settings(),
         SectionId::Wallpaper => crate::wallpaper::settings(),
         SectionId::Bar => crate::bar::settings(),
+        SectionId::Weather => crate::weather::settings(),
         SectionId::Desktops => crate::desktops::settings(),
         SectionId::Agents => crate::agents::settings(),
         SectionId::Apps => crate::applications::settings(),
@@ -1018,8 +1038,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn twenty_one_sections_in_five_groups() {
-        assert_eq!(SectionId::ALL.len(), 21);
+    fn twenty_two_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 22);
         let count = |g| {
             SectionId::ALL
                 .iter()
@@ -1028,8 +1048,8 @@ mod tests {
         };
         assert_eq!(
             Group::ALL.map(count),
-            [5, 5, 2, 5, 4],
-            "the mockup's groups, and the camera's (#619)"
+            [6, 5, 2, 5, 4],
+            "the mockup's groups, the camera's (#619) and the weather's (#814)"
         );
         // Each group's sections come together, in the groups' order.
         let groups: Vec<Group> = SectionId::ALL.iter().map(|s| s.section().group).collect();

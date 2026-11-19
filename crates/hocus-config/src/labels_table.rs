@@ -268,6 +268,11 @@ pub const ALL: &[Label] = &[
         said: Said::Switch,
     },
     Label {
+        key: "effects.rain-when",
+        name: hocus_words::settings::app_perf_page::WHEN,
+        said: Said::Choices(&[("always", hocus_words::settings::app_agents_page::ALWAYS), ("raining", hocus_words::settings::effects::RAIN_WHEN_RAINING)]),
+    },
+    Label {
         key: "effects.shatter",
         name: hocus_words::settings::effects::SHATTER,
         said: Said::Switch,
@@ -831,6 +836,21 @@ pub const ALL: &[Label] = &[
         key: "wallpaper.on-battery",
         name: hocus_words::settings::model::ON_BATTERY,
         said: Said::Choices(&[("half", hocus_words::settings::wallpaper::SLOWED_HALF), ("still", hocus_words::settings::wallpaper::STOPPED), ("full", hocus_words::settings::wallpaper::AS_ON_MAINS_POWER)]),
+    },
+    Label {
+        key: "weather.enabled",
+        name: hocus_words::settings::weather::SHOW,
+        said: Said::Switch,
+    },
+    Label {
+        key: "weather.place",
+        name: hocus_words::settings::weather::PLACE,
+        said: Said::Other,
+    },
+    Label {
+        key: "weather.units",
+        name: hocus_words::settings::weather::UNITS,
+        said: Said::Choices(&[("metric", hocus_words::settings::weather::METRIC), ("imperial", hocus_words::settings::weather::IMPERIAL)]),
     },
     Label {
         key: "windows.alt-tab",

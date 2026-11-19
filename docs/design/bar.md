@@ -5168,6 +5168,69 @@ What the approved s8b mockup shows for 8.5 B (issue #490; the overview,
 - **Screen readers**: the pandas stay decoration, no node; the mini
   item's waiting panda is a button named as the agent's row is.
 
+### Weather (#814, 2026-11-19)
+
+What the approved #814 mockup shows, variant C ("Dans la journée") and
+its evening, with the issue's decisions. The forecast is Open-Meteo's for
+the town of `[weather]` (Settings › Weather finds it by name), asked by
+the shell on a thread of its own every 30 minutes, at once when the
+place changes and as the machine resumes (`crates/hocus-weather`,
+`crates/hocus-shell/src/weather/`), kept in
+`$XDG_CACHE_HOME/hocuspanda/weather.json`: a restart and a machine
+offline show the last one, the popover saying its time. Metric is asked;
+°F, in and mph are shown from it.
+
+- **In Today** (`today/`): the header's right holds the weather now, its
+  15 px icon and "9°" (Manrope 700, 11.5 px); the rain coming later today
+  is a line among the events at its start, in the rain's `#8FB3FF` with a
+  12 px rain icon in the dot's place: "14:15 Pluie → 15 h 45" (the first
+  quarter hour, else hour, from now to midnight holding 0.1 mm or more,
+  to the first dry one), "Il pleut → 15 h 45" without a time while it
+  rains (first); "Neige", "Il neige" when it snows. Tomorrow closes the
+  list: "Demain", its icon, "3° / 11°". With the weather on, the group
+  shows even with no event left. Short of room, the events go into
+  "+ N" first, then the rain's line, then "+ N", tomorrow last.
+- **The evening**: from 18:00 the header says tomorrow's high, "demain
+  11°", and the mini form's item tomorrow's icon and high over "dem.".
+- **The mini form**: the weather's item first under the clock (Today's
+  place in the mini column; the meeting's mark and the others under it):
+  48 px wide, its 22 px icon, the temperature (Manrope 700, 13 px), three
+  drops when rain comes within 3 h; lit `0.06` under the pointer, `0.08`
+  while its popover is open.
+- **The icons**: the mockup's, as SVG (`weather/icon.rs`): sun, partly
+  cloudy, cloudy, rain, showers, snow, fog, thunder (a cloud and a bolt,
+  not in the mockup), and the moon for a clear night; WMO codes mapped in
+  `hocus_weather::Icon::of`.
+- **The popover** (`popover/weather.rs`, §9's mechanics): a click on the
+  header's weather, the rain's or tomorrow's line, a hover or a click on
+  the mini item. 320 px: the place and the date; now (46 px icon, the
+  temperature, the condition, feels-like with today's low and high, the
+  wind); "PLUIE, 3 PROCHAINES HEURES" with when it comes, 12 bars by
+  quarter hour; "12 PROCHAINES HEURES", the temperature's curve with the
+  chance of rain at its foot; "7 JOURS", tomorrow lit; "Open-Meteo · à
+  13 h 45" and "Réglages de la météo…" (Settings › Weather). About 660 px
+  tall.
+- **The rain on the glass** (`[effects] rain-when = "raining"`): the shell
+  tells the compositor whether it rains now (`raining`, on the link: the
+  quarter hour holds rain, or the weather now has some or says rain,
+  showers or thunder) as it changes and at each minute; the compositor's
+  rain falls only then, never without a place. The compositor fetches
+  nothing itself.
+- **Measured headless** (`tests/weather.rs`): the real shell, a saved
+  forecast (`HOCUS_WEATHER_FIXTURE`), at 13:47 Today's header "9°", the
+  rain's line among the events and tomorrow's last, the compositor told
+  it does not rain; at 14:32 "Il pleut → 15 h 45" and the compositor told
+  it rains. Unit tests: the WMO mapping, the rain later today (before,
+  during, after, by the hour past the quarter hours, tomorrow's not
+  counted), the weather now from a stale forecast, the evening, the
+  units, the rows' fit, the column's mini order, the decision to rain.
+- **Choices made here** (to confirm on the machine): quarter hours (not
+  the mockup's 14:20) give the rain's start; the popover's footer is the
+  kit's Settings link under the source's line rather than one line; the
+  Settings' place suggestions show under the field, in the row, rather
+  than over the rows below; the mini item sits first under the clock, the
+  meeting's mark under it.
+
 ### The bar's items, from a list (#833, 2026-11-17)
 
 Nothing changes on screen. The shell builds each bar from one list,

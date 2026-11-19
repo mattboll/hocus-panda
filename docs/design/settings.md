@@ -1017,6 +1017,7 @@ window is the preview.
 | | Heure | segmented "14:05 \| 2:05 PM" | `[locale] time = "24h" \| "12h"` (none: the session's locale decides, 12 hours in the English of the countries that write it so) |
 | | L'horloge de la barre | link "La barre ›" | (6.4's `[panel.clock]`) |
 | EFFETS · LE FOND D’ÉCRAN | Neige qui tient ("Elle tombe, se pose sur les fenêtres et la barre, et glisse quand on secoue une fenêtre."), Aurore en musique, Pluie sur la vitre, Bassin de koïs, Lucioles du soir, La lumière du jour, Bureaux en profondeur (each with its line) | switch | `[effects] snow`, `aurora`, `rain-on-glass`, `koi`, `fireflies`, `daylight`, `depth` |
+| | Quand (under Pluie sur la vitre, #814; inert while the rain is off, and without a place, its line then "Choisis un lieu dans Météo") | segmented "Toujours \| Seulement quand il pleut" | `[effects] rain-when = "always" \| "raining"` |
 | EFFETS · LES FENÊTRES | Fermer en flammes ("La fenêtre qu’on ferme brûle de bas en haut, à la place de l’animation de fermeture."), Éclats de verre, Fenêtres en gelée, Guirlande sous la fenêtre active, Guirlande en haut de l’écran (#813) | switch | `[effects] flames`, `shatter`, `jelly`, `garland`, `garland-top` |
 | EFFETS · LES MOMENTS | Tests au vert : feu d’artifice, Bonne nouvelle d’un agent : confettis | switch | `[effects] fireworks`, `confetti` |
 | EFFETS · LES AGENTS | Les agents en créatures | switch | `[effects] creatures` |
@@ -1177,6 +1178,33 @@ join them).
   project's row no longer inert) and its project off written; "Chaude"
   and "Forte" written; the switch off written, the two others inert, and
   a call's light on the screen gone. The model's keys: `camera::tests`.
+
+## Météo (#814)
+
+The weather in the bar (`hocus-settings weather`), in PERSONNALISATION
+after La barre; approved with the bar's weather (issue #814, bar.md
+"Weather").
+
+| Group | Row | Control | Key |
+|---|---|---|---|
+| LA MÉTÉO | Montrer la météo ("Dans « Aujourd’hui » de la barre, et sous l’horloge en forme mini") | switch | `[weather] enabled` (on: shown once a place is set) |
+| | Lieu ("Une ville, un village") | a field that finds a town by its name, what it found listed under it (name over region and country), a click (or `Enter`, the first) choosing one | `[weather] place`, `latitude`, `longitude`, written together (`""`, `0.0`) |
+| | Unités | segmented "°C · mm \| °F · in" | `[weather] units = "metric" \| "imperial"` |
+
+Under the rows, the plain note: "D’où vient la météo. Hocuspanda demande
+la prévision à Open-Meteo toutes les 30 minutes, avec les coordonnées de
+la ville choisie, rien d’autre. Pas de compte. Sans réseau, la barre
+garde la dernière prévision et dit son heure."
+
+- **The field** (`app/weather_page.rs`) asks Open-Meteo's geocoding 300
+  ms after the last key, on a blocking task, the typed name alone leaving
+  the machine (`HOCUS_WEATHER_PLACES=FILE` reads a saved answer instead,
+  for tests); a place chosen is one change, with its toast and its undo.
+- **Measured headless** (`tests/settings_weather.rs`): "sa" typed lists
+  the three Saint-Étienne and the first chosen writes its name and where
+  it is, the file's other lines kept; the rain's "Quand" inert without a
+  place, then "Seulement quand il pleut" written. Unit tests for the keys
+  a place writes and the rows' defaults.
 
 ## Fond d'écran (6.3)
 

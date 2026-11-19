@@ -1,0 +1,27 @@
+[package]
+name = "hocus-weather"
+description = "The weather for the Hocuspanda bar and Settings: Open-Meteo's forecast and its geocoding, read and kept, and what the bar says of them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Times: the forecast's instants and days, and the desktop's zone; serde
+# for the cache.
+jiff = { workspace = true, features = ["std", "tz-system", "tzdb-zoneinfo", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+# Open-Meteo's answers, and the cache on disk.
+serde_json.workspace = true
+tracing.workspace = true
+# Open-Meteo's forecast and geocoding APIs, blocking, on a worker. TLS by
+# rustls on ring, against the system's certificates (as hocus-day's).
+ureq.workspace = true
+rustls.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

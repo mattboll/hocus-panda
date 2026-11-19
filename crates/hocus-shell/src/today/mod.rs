@@ -23,6 +23,17 @@
 //!   today. Resting
 //!   600 ms on a line shows its times and its whole title in a tooltip.
 //!
+//! - **The weather** (#814, variant C): with `[weather]` on and a place
+//!   set, the header carries the weather now on its right ("☁ 9°"; from
+//!   18:00 tomorrow's, "demain 11°"), the rain coming later today is a line
+//!   among the events at its start ("14:15 Pluie → 15 h 45", "Il pleut →
+//!   15 h 45" while it rains), and tomorrow closes the list ("Demain ⛅
+//!   3° / 11°"). The group then shows even with no event left. A click on
+//!   the weather opens its popover ([`crate::popover::weather`]). In the
+//!   mini form, the same surface holds the weather's item under the clock
+//!   (its icon, its temperature, three drops when rain comes within 3 h),
+//!   first of the mini column.
+//!
 //! Each bar has a surface of its own for it, opened while it shows and
 //! removed after ([`draw`]).
 
@@ -42,11 +53,17 @@ use jiff::Zoned;
 use crate::{
     clock::time::Lang,
     popover::{self, Effect},
+    weather,
 };
 
 /// The header's height, a line's.
 pub const HEADER: f32 = 18.0;
 pub const LINE: f32 = 20.0;
+/// The mini form's weather item: 5 px in, the icon (22 px), 1 px, the
+/// temperature's line, 5 px; "dem." and the drops below when they show.
+pub const MINI_BASE: f32 = 51.0;
+pub const MINI_TOMORROW: f32 = 13.0;
+pub const MINI_DROPS: f32 = 10.0;
 
 /// An event of Today's.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +76,9 @@ pub struct Line {
     pub title: String,
     pub video: Option<String>,
     pub page: Option<String>,
+    /// Its start, seconds since 1970: the rain's line goes among the
+    /// events by it.
+    pub at: i64,
 }
 
 /// A row of the group, under its header.
@@ -67,6 +87,10 @@ pub enum Row {
     Event(Line),
     /// "+ N autres aujourd'hui": what did not fit.
     More(usize),
+    /// The rain coming later today (#814).
+    Rain(weather::RainLine),
+    /// Tomorrow's weather, last.
+    Tomorrow(weather::TomorrowLine),
 }
 
 impl Row {
@@ -75,6 +99,8 @@ impl Row {
         match self {
             Self::Event(line) => &line.id,
             Self::More(_) => "+",
+            Self::Rain(_) => "weather:rain",
+            Self::Tomorrow(_) => "weather:tomorrow",
         }
     }
 }
@@ -102,25 +128,68 @@ pub fn lines_of(day: &Day, now: &Zoned) -> Vec<Line> {
                 title: event.title.clone(),
                 video: event.video.clone().filter(|v| !v.is_empty()),
                 page: event.page.clone().filter(|p| !p.is_empty()),
+                at: event.when.start(zone).as_second(),
             }
         })
         .collect()
 }
 
-/// The rows `lines` take in `room` px (its header's included): all of them
-/// when they fit, else as many as fit less one, then "+ N"; none without
+/// The rows `lines` and the weather's (`rain`, `tomorrow`) take in `room`
+/// px (its header's included): all of them when they fit, the rain among
+/// the events by its start and tomorrow last; else the weather's and as
+/// many events as fit less one, then "+ N" counting the others; with less
+/// room still, the weather's lines go too (the rain first). None without
 /// a line, or without room for one.
-pub fn fit(lines: &[Line], room: f32) -> Vec<Row> {
+pub fn fit(
+    lines: &[Line],
+    rain: Option<&weather::RainLine>,
+    tomorrow: Option<&weather::TomorrowLine>,
+    room: f32,
+) -> Vec<Row> {
     let most = ((room - HEADER) / LINE).floor().max(0.0) as usize;
-    if lines.is_empty() || most == 0 {
+    let weather = usize::from(rain.is_some()) + usize::from(tomorrow.is_some());
+    if (lines.is_empty() && weather == 0) || most == 0 {
         return Vec::new();
     }
-    if lines.len() <= most {
-        return lines.iter().cloned().map(Row::Event).collect();
+    let (shown, more) = if lines.len() + weather <= most {
+        (lines.len(), 0)
+    } else {
+        let shown = most.saturating_sub(weather + 1);
+        (shown, lines.len() - shown)
+    };
+    let mut rows: Vec<Row> = lines
+        .get(..shown)
+        .unwrap_or_default()
+        .iter()
+        .cloned()
+        .map(Row::Event)
+        .collect();
+    if let Some(rain) = rain {
+        // Before the first event that starts after it; while it rains,
+        // first.
+        let at = rain.at.map_or(0, |at| {
+            rows.iter()
+                .position(|r| matches!(r, Row::Event(l) if l.at > at))
+                .unwrap_or(rows.len())
+        });
+        rows.insert(at, Row::Rain(rain.clone()));
     }
-    let shown = most - 1;
-    let mut rows: Vec<Row> = lines[..shown].iter().cloned().map(Row::Event).collect();
-    rows.push(Row::More(lines.len() - shown));
+    if more > 0 {
+        rows.push(Row::More(more));
+    }
+    if let Some(tomorrow) = tomorrow {
+        rows.push(Row::Tomorrow(tomorrow.clone()));
+    }
+    // Too little room even for the weather's: the rain goes, then "+ N",
+    // then tomorrow.
+    while rows.len() > most {
+        let gone = rows
+            .iter()
+            .position(|r| matches!(r, Row::Rain(_)))
+            .or_else(|| rows.iter().position(|r| matches!(r, Row::More(_))))
+            .unwrap_or(0);
+        rows.remove(gone);
+    }
     rows
 }
 
@@ -146,13 +215,52 @@ struct Place {
     switching: bool,
     rows: Vec<Row>,
     top: f32,
+    /// The mini form's weather item's top.
+    mini_top: f32,
     asked: Option<Asked>,
 }
 
 #[derive(Debug, Default)]
 struct State {
     lines: Vec<Line>,
+    /// What Today and the mini form show of the weather (#814).
+    weather: Option<weather::Today>,
+    mini: Option<weather::Mini>,
     places: HashMap<String, Place>,
+}
+
+/// What bar `bar`'s Today shows now.
+#[derive(Debug, Clone, Default)]
+pub struct Shown {
+    pub rows: Vec<Row>,
+    /// The group's top under the bar's, and the mini item's.
+    pub top: f32,
+    pub mini_top: f32,
+    /// The form it shows in.
+    pub form: Option<Form>,
+    /// The header's weather, while the group shows.
+    pub head: Option<weather::Head>,
+    /// The mini form's weather item.
+    pub mini: Option<weather::Mini>,
+}
+
+/// The mini form's weather item's height (none: it does not show).
+pub fn mini_height_of(mini: Option<&weather::Mini>) -> f32 {
+    mini.map_or(0.0, |m| {
+        MINI_BASE
+            + if m.tomorrow.is_some() {
+                MINI_TOMORROW
+            } else {
+                0.0
+            }
+            + if m.drops { MINI_DROPS } else { 0.0 }
+    })
+}
+
+/// What the mini form's weather item takes of the mini column, the same
+/// on every bar (0 when it does not show).
+pub fn mini_height() -> f32 {
+    state(|s| mini_height_of(s.mini.as_ref()))
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -162,19 +270,35 @@ fn state<T>(with: impl FnOnce(&mut State) -> T) -> T {
     with(state.get_or_insert_with(State::default))
 }
 
-/// The rows bar `bar` shows now, and its group's top under the bar's.
-pub fn shown(bar: &str) -> (Vec<Row>, f32) {
+/// What bar `bar` shows now.
+pub fn shown(bar: &str) -> Shown {
     state(|s| {
-        s.places
-            .get(bar)
-            .map(|p| (p.rows.clone(), p.top))
-            .unwrap_or_default()
+        let Some(p) = s.places.get(bar) else {
+            return Shown::default();
+        };
+        Shown {
+            rows: p.rows.clone(),
+            top: p.top,
+            mini_top: p.mini_top,
+            form: p.form,
+            head: s
+                .weather
+                .as_ref()
+                .filter(|_| !p.rows.is_empty())
+                .map(|w| w.head.clone()),
+            mini: s.mini.clone().filter(|_| p.form == Some(Form::Mini)),
+        }
     })
 }
 
 /// Bar `bar`'s group's top under the bar's, in its column.
 fn top(bar: &str) -> f32 {
     crate::column::top(bar, Form::Full, crate::column::Part::Today)
+}
+
+/// Bar `bar`'s mini weather item's top under the bar's.
+fn mini_top(bar: &str) -> f32 {
+    crate::column::top(bar, Form::Mini, crate::column::Part::Today)
 }
 
 /// Bar `bar`'s room for Today: what the to-do list and the agents' group
@@ -192,7 +316,7 @@ pub fn start() {
 }
 
 /// The clock's minute changed: the events again (a meeting may have
-/// ended).
+/// ended), the weather's lines (the rain started, the evening came).
 pub fn minute() {
     refresh();
 }
@@ -214,13 +338,25 @@ pub fn refresh() {
     } else {
         Vec::new()
     };
-    let changed = state(|s| {
-        if s.lines == lines {
-            return false;
+    let lang = Lang::of_messages();
+    let today = weather::today(&now, lang);
+    let mini = weather::mini(&now, lang);
+    let (changed, mini_moved) = state(|s| {
+        if s.lines == lines && s.weather == today && s.mini == mini {
+            return (false, false);
         }
+        let moved = mini_height_of(s.mini.as_ref()) != mini_height_of(mini.as_ref());
         s.lines = lines;
-        true
+        s.weather = today;
+        s.mini = mini;
+        (true, moved)
     });
+    if mini_moved {
+        // The mini column's items under it, the meeting's mark and the
+        // sign of what is in use among them.
+        crate::meeting::moved();
+        crate::in_use::moved();
+    }
     if changed {
         crate::column::moved();
         popover::send(vec![Effect::Wake(TODAY_NAMESPACE)]);
@@ -233,11 +369,11 @@ fn place_all() {
     let bars: Vec<String> = state(|s| s.places.keys().cloned().collect());
     // Measured outside the lock: the agents', the desktops' and the
     // popovers' own locks.
-    let tops: Vec<(String, f32, f32)> = bars
+    let tops: Vec<(String, f32, f32, f32)> = bars
         .into_iter()
         .map(|bar| {
-            let (top, room) = (top(&bar), room(&bar));
-            (bar, top, room)
+            let (top, mini, room) = (top(&bar), mini_top(&bar), room(&bar));
+            (bar, top, mini, room)
         })
         .collect();
     let mut effects = Vec::new();
@@ -245,13 +381,14 @@ fn place_all() {
     let mut redraw = false;
     let words = Words::new(Lang::of_messages());
     state(|s| {
-        for (bar, top, room) in tops {
+        let mini = mini_height_of(s.mini.as_ref());
+        for (bar, top, mini_top, room) in tops {
             let Some(place) = s.places.get_mut(&bar) else {
                 continue;
             };
             let full = place.form == Some(Form::Full) || place.switching;
             let rows = if full {
-                fit(&s.lines, room)
+                rows_of(&s.lines, s.weather.as_ref(), room)
             } else {
                 Vec::new()
             };
@@ -261,7 +398,8 @@ fn place_all() {
             }
             place.rows = rows;
             place.top = top;
-            effects.extend(place.fit(&bar, &mut placed));
+            place.mini_top = mini_top;
+            effects.extend(place.fit(&bar, mini, &mut placed));
         }
     });
     if !placed.is_empty() {
@@ -279,11 +417,34 @@ fn place_all() {
     }
 }
 
+/// The rows of `lines` and of the weather's lines in `room`.
+fn rows_of(lines: &[Line], weather: Option<&weather::Today>, room: f32) -> Vec<Row> {
+    fit(
+        lines,
+        weather.and_then(|w| w.rain.as_ref()),
+        weather.and_then(|w| w.tomorrow.as_ref()),
+        room,
+    )
+}
+
 impl Place {
-    /// Its surface for its rows: opened, resized, moved or removed.
-    fn fit(&mut self, bar: &str, placed: &mut Vec<(String, Option<window::Id>)>) -> Vec<Effect> {
-        let shows = !self.rows.is_empty();
-        let asked = draw::placement(self.top, height(&self.rows));
+    /// Its surface for its rows (the mini form's weather item `mini` px
+    /// tall): opened, resized, moved or removed.
+    fn fit(
+        &mut self,
+        bar: &str,
+        mini: f32,
+        placed: &mut Vec<(String, Option<window::Id>)>,
+    ) -> Vec<Effect> {
+        let in_mini = self.form == Some(Form::Mini) && !self.switching;
+        let (shows, asked) = if in_mini {
+            (mini > 0.0, draw::mini_placement(self.mini_top, mini))
+        } else {
+            (
+                !self.rows.is_empty(),
+                draw::placement(self.top, height(&self.rows)),
+            )
+        };
         let margin = (EDGE + asked.1.round() as i32, EDGE + 1, 0, 0);
         let asked = (asked.0, margin);
         match (self.id, shows) {
@@ -322,19 +483,21 @@ impl Place {
 /// Bar `bar` opened in `form`: its rows, its surface if they show (to
 /// open after the bar's own).
 pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
-    let (top, room) = (top(bar), room(bar));
+    let (top, mini_top, room) = (top(bar), mini_top(bar), room(bar));
     let mut placed = Vec::new();
     let effects = state(|s| {
         let rows = if form == Form::Full {
-            fit(&s.lines, room)
+            rows_of(&s.lines, s.weather.as_ref(), room)
         } else {
             Vec::new()
         };
+        let mini = mini_height_of(s.mini.as_ref());
         let place = s.places.entry(bar.to_owned()).or_default();
         place.form = Some(form);
         place.rows = rows;
         place.top = top;
-        place.fit(bar, &mut placed)
+        place.mini_top = mini_top;
+        place.fit(bar, mini, &mut placed)
     });
     if !placed.is_empty() {
         popover::with(|c| {
@@ -393,6 +556,8 @@ pub fn open(bar: &str, index: usize) -> Option<Effect> {
             }
         },
         Row::More(_) => open_more(bar),
+        // Their items open the weather's popover.
+        Row::Rain(_) | Row::Tomorrow(_) => None,
     }
 }
 
@@ -459,6 +624,10 @@ impl Words {
                     line.start, line.title, line.colour[0], line.colour[1], line.colour[2]
                 ),
                 Row::More(n) => self.more(*n),
+                Row::Rain(rain) => format!("{} {}", rain.start, rain.said).trim().to_owned(),
+                Row::Tomorrow(t) => {
+                    format!("{} {}", weather::Words::new(self.lang).tomorrow(), t.said)
+                }
             })
             .collect();
         format!("{} {}", self.header(), rows.join("; "))
@@ -478,6 +647,7 @@ mod tests {
             title: format!("Événement {id}"),
             video: None,
             page: None,
+            at: 15 * 3600,
         }
     }
 
@@ -488,6 +658,7 @@ mod tests {
     #[test]
     fn what_fits_and_the_last_line_counts_the_rest() {
         let room = |rows: usize| HEADER + LINE * rows as f32;
+        let fit = |lines: &[Line], room: f32| super::fit(lines, None, None, room);
         // Nine events, room for five lines: four, and "+ 5".
         let rows = fit(&lines(9), room(5) + 7.0);
         assert_eq!(rows.len(), 5);
@@ -505,6 +676,56 @@ mod tests {
         // The group's height: 18 px and 20 a line.
         assert_eq!(height(&fit(&lines(3), room(5))), 78.0);
         assert_eq!(height(&[]), 0.0);
+    }
+
+    #[test]
+    fn the_rain_goes_among_the_events_and_tomorrow_last() {
+        use hocus_weather::Icon;
+        let room = |rows: usize| HEADER + LINE * rows as f32;
+        let mut events = lines(3);
+        for (event, hour) in events.iter_mut().zip([13, 16, 18]) {
+            event.at = hour * 3600;
+        }
+        let rain = weather::RainLine {
+            at: Some(14 * 3600 + 15 * 60),
+            start: "14:15".to_owned(),
+            said: "Pluie → 15 h 45".to_owned(),
+            icon: Icon::Rain,
+        };
+        let tomorrow = weather::TomorrowLine {
+            icon: Icon::PartlyCloudy,
+            said: "3° / 11°".to_owned(),
+        };
+        let keys = |rows: &[Row]| rows.iter().map(|r| r.key().to_owned()).collect::<Vec<_>>();
+        let rows = fit(&events, Some(&rain), Some(&tomorrow), room(8));
+        assert_eq!(
+            keys(&rows),
+            ["e0", "weather:rain", "e1", "e2", "weather:tomorrow"]
+        );
+        // While it rains: first.
+        let now = weather::RainLine {
+            at: None,
+            ..rain.clone()
+        };
+        assert_eq!(
+            keys(&fit(&events, Some(&now), Some(&tomorrow), room(8)))[0],
+            "weather:rain"
+        );
+        // No event left: the weather alone, the group still shows.
+        assert_eq!(
+            keys(&fit(&[], Some(&rain), Some(&tomorrow), room(8))),
+            ["weather:rain", "weather:tomorrow"]
+        );
+        // Short of room: the weather's lines stay, the events go into
+        // "+ N" before them.
+        let rows = fit(&events, Some(&rain), Some(&tomorrow), room(4));
+        assert_eq!(keys(&rows), ["e0", "weather:rain", "+", "weather:tomorrow"]);
+        assert!(rows.contains(&Row::More(2)));
+        // Shorter still: the rain goes, then "+ N".
+        let rows = fit(&events, Some(&rain), Some(&tomorrow), room(2));
+        assert_eq!(keys(&rows), ["+", "weather:tomorrow"]);
+        let rows = fit(&events, Some(&rain), Some(&tomorrow), room(1));
+        assert_eq!(keys(&rows), ["weather:tomorrow"]);
     }
 
     #[test]

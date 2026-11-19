@@ -104,6 +104,9 @@ pub struct Live {
     pub aurora: Option<aurora::Aurora>,
     /// Whether the bar's player plays, as the shell says (#801).
     pub music: bool,
+    /// Whether it rains where the weather is for, as the shell says
+    /// (#814): the rain on the glass "only when it rains" follows it.
+    pub raining: bool,
     /// The koi's pond, while it is on (#803).
     pub koi: Option<koi::Ponds>,
     /// The ponds dug so far, for their seeds.

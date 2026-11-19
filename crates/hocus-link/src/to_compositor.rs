@@ -222,6 +222,10 @@ pub enum ToCompositor {
     McpStop(bool),
     /// The user answered card `card` (docs/design/mcp.md, scene 3).
     McpReply { card: u64, reply: crate::McpReply },
+    /// Whether it rains now where the weather is for (#814): the rain on the
+    /// glass with `[effects] rain-when = "raining"` falls only while it does.
+    /// Sent as the shell connects and when it changes.
+    Raining(bool),
     /// "Rendre la main": agent `0`'s actions go on.
     McpHandBack(String),
     /// The drawing toast's "Effacer": agent `0`'s ink fades (#825).

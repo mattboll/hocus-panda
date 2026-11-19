@@ -485,7 +485,27 @@ impl Rain {
 impl crate::State {
     /// How the rain on the glass shows now (#802).
     pub(crate) fn raining_glass(&self) -> Option<super::Plays> {
-        self.wallpaper_effect(self.config.effects.rain_on_glass)
+        self.wallpaper_effect(self.rain_falls())
+    }
+
+    /// Whether the rain on the glass is on and falls now: always, or only
+    /// while the shell says it rains where the weather is for (#814),
+    /// never without a place.
+    pub(crate) fn rain_falls(&self) -> bool {
+        let effects = &self.config.effects;
+        effects.rain_on_glass
+            && effects
+                .rain_when
+                .falls(self.config.weather.has_place(), self.fx.raining)
+    }
+
+    /// The shell says whether it rains where the weather is for (#814).
+    pub(crate) fn weather_raining(&mut self, raining: bool) {
+        if self.fx.raining != raining {
+            tracing::info!(raining, "the weather says whether it rains");
+            self.fx.raining = raining;
+            self.redraw = true;
+        }
     }
 
     /// Whether the rain on the glass shows on `output` now: the wallpaper
@@ -519,7 +539,7 @@ impl crate::State {
     /// wanted).
     pub(crate) fn tick_raindrops(&mut self, now: Duration) -> bool {
         let Some(plays) = self.raining_glass() else {
-            if self.config.effects.rain_on_glass && self.fx.raindrops.is_some() {
+            if self.rain_falls() && self.fx.raindrops.is_some() {
                 // Waiting (the power saver, a share): kept, not drawn.
                 return false;
             }

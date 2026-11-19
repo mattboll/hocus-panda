@@ -79,6 +79,7 @@ pub fn popover_title(bar: &str, item: Item, words: Words) -> String {
         Item::Camera | Item::Microphone => pick("Caméra et micro", "Camera and microphone"),
         Item::Music => pick("Musique", "Music"),
         Item::Journal => crate::mcp::Words::new(lang).journal().to_owned(),
+        Item::Weather(_) => crate::weather::Words::new(lang).weather().to_owned(),
         Item::Tray(_) => pick("Menu de l'icône", "Icon's menu"),
         Item::Meeting
         | Item::MeetingMark

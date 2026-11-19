@@ -312,6 +312,7 @@ pub fn ask(ask: DayAsk) {
 pub fn resumed() {
     crate::reminder::resumed();
     crate::notifications::clock_moved();
+    crate::weather::resumed();
     refresh();
 }
 
