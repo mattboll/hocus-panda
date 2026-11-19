@@ -803,18 +803,22 @@ fn chromium_file(profile: &Path) -> Option<PathBuf> {
 }
 
 /// Whether a browser reopens its own windows as it starts (§8.3, §13 D):
-/// Firefox's `browser.startup.page` 3, Chromium's
-/// `session.restore_on_startup` 1.
+/// Firefox's `browser.startup.page` 3, or its last session ended abruptly
+/// (it resumes it), Chromium's `session.restore_on_startup` 1.
 pub fn restores_itself(browser: Browser, places: &Places) -> bool {
     match browser.kind {
-        Kind::Firefox => firefox_profile(places)
-            .and_then(|p| std::fs::read_to_string(p.join("prefs.js")).ok())
-            .is_some_and(|prefs| {
+        Kind::Firefox => firefox_profile(places).is_some_and(|profile| {
+            let prefs = std::fs::read_to_string(profile.join("prefs.js")).unwrap_or_default();
+            let set = |pref: &str| {
                 prefs.lines().any(|l| {
                     let l: String = l.chars().filter(|c| !c.is_whitespace()).collect();
-                    l == "user_pref(\"browser.startup.page\",3);"
+                    l == pref
                 })
-            }),
+            };
+            set("user_pref(\"browser.startup.page\",3);")
+                || (!set("user_pref(\"browser.sessionstore.resume_from_crash\",false);")
+                    && firefox_ended_abruptly(&profile))
+        }),
         Kind::Chromium => {
             std::fs::read(chromium_profile(places, browser.folder).join("Preferences"))
                 .ok()
@@ -824,6 +828,27 @@ pub fn restores_itself(browser: Browser, places: &Places) -> bool {
                         .and_then(Value::as_i64)
                 })
                 == Some(1)
+        }
+    }
+}
+
+/// Whether Firefox's last session in profile `dir` ended without its
+/// final write, which it then reopens itself, every window (its
+/// `resume_from_crash`): as a log out's `SIGTERM` ends it while its handler
+/// of it is not installed (Mozilla's bug 2086801). Its checkpoints
+/// (`sessionCheckpoints.json`) lack `sessionstore-final-state-write-complete`;
+/// without them, there is a recovery file and no clean one.
+fn firefox_ended_abruptly(dir: &Path) -> bool {
+    match std::fs::read(dir.join("sessionCheckpoints.json")) {
+        Ok(bytes) => {
+            serde_json::from_slice::<Value>(&bytes).ok().and_then(|v| {
+                v.get("sessionstore-final-state-write-complete")
+                    .and_then(Value::as_bool)
+            }) != Some(true)
+        }
+        Err(_) => {
+            !dir.join("sessionstore.jsonlz4").exists()
+                && dir.join("sessionstore-backups/recovery.jsonlz4").exists()
         }
     }
 }
@@ -1278,6 +1303,47 @@ pub(crate) mod tests {
         assert!(restores_itself(firefox, &places));
         let chromium = of_app("chromium").expect("chromium");
         assert!(!restores_itself(chromium, &places));
+        Ok(())
+    }
+
+    /// A Firefox ended by a signal (a log out's) resumes its session
+    /// itself whatever its start page, unless told not to after a crash.
+    #[test]
+    fn a_firefox_that_ended_abruptly_reopens_its_windows_itself() -> std::io::Result<()> {
+        let home = tempfile::tempdir()?;
+        let profile = home.path().join(".mozilla/firefox/a.default");
+        std::fs::create_dir_all(profile.join("sessionstore-backups"))?;
+        std::fs::write(
+            home.path().join(".mozilla/firefox/profiles.ini"),
+            "[Profile0]\nName=a\nIsRelative=1\nPath=a.default\n",
+        )?;
+        let places = Places {
+            home: home.path().to_path_buf(),
+            config: home.path().join(".config"),
+        };
+        let firefox = of_app("firefox").expect("firefox");
+        std::fs::write(profile.join("sessionstore-backups/recovery.jsonlz4"), b"x")?;
+        // No checkpoints: a recovery file and no clean one.
+        assert!(restores_itself(firefox, &places));
+        std::fs::write(profile.join("sessionstore.jsonlz4"), b"x")?;
+        assert!(!restores_itself(firefox, &places), "it quit cleanly");
+        let checkpoints = profile.join("sessionCheckpoints.json");
+        std::fs::write(
+            &checkpoints,
+            r#"{"profile-after-change":true,"final-ui-startup":true}"#,
+        )?;
+        assert!(restores_itself(firefox, &places), "no final write");
+        std::fs::write(
+            profile.join("prefs.js"),
+            "user_pref(\"browser.sessionstore.resume_from_crash\", false);\n",
+        )?;
+        assert!(!restores_itself(firefox, &places), "told not to");
+        std::fs::write(profile.join("prefs.js"), "")?;
+        std::fs::write(
+            &checkpoints,
+            r#"{"quit-application":true,"sessionstore-final-state-write-complete":true}"#,
+        )?;
+        assert!(!restores_itself(firefox, &places), "its final write done");
         Ok(())
     }
 }

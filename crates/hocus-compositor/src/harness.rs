@@ -1202,6 +1202,25 @@ impl Headless {
         self.app.state.session_end();
     }
 
+    /// The browsers reopening their own windows at log in waited long
+    /// enough: those of their windows not back open from their saved
+    /// tabs now (windows.md §14, projects.md §8.3).
+    pub fn session_browsers_waited(&mut self) {
+        self.app.state.comeback_browser_graces_over();
+    }
+
+    /// Window `id` brought and given the keyboard, as a click on its row
+    /// in the bar's list does.
+    pub fn focus_window(&mut self, id: WindowId) {
+        self.app.state.window_asked(id.0);
+    }
+
+    /// What the shell asks of the session menu, as if it had (7.4):
+    /// `LeaveAsk::Ask` then `LeaveAsk::Now` logs out at once.
+    pub fn leave(&mut self, ask: hocus_link::LeaveAsk) {
+        self.app.state.leave_asked(ask);
+    }
+
     /// Whether the last session is still coming back.
     pub fn session_restoring(&self) -> bool {
         self.app.state.session_restoring()

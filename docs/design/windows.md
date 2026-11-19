@@ -1307,6 +1307,12 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   "Slack and Signal could not be reopened."
 - Until they come back, the saved windows waiting stay in what is saved:
   a log out meanwhile loses none.
+- **Browsers** (2026-11-19, projects.md "Log out keeps every window"):
+  log out asks a browser to quit as a whole (`SIGTERM` to its process),
+  never its windows to close one by one, which it would keep as closed
+  by the user; every browser window's tabs are saved as the session ends;
+  at log in, a browser that reopens its own windows and leaves some out
+  gets those back from their saved tabs.
 - Headless and nested, nothing is saved or restored; tests ask for it
   (`Headless::restore_session`).
 - **Ported from the first build** (`v0-first-build`, #31): the file of

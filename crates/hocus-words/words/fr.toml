@@ -2741,6 +2741,8 @@ and = " et "
 not_reopened = { one = "{listed} n’a pas pu être rouverte.", other = "{listed} n’ont pas pu être rouvertes." }
 tabs_unread = "Les onglets d’une fenêtre de {browser} n’ont pas pu être lus."
 conversation_not_resumed = "La conversation de {tool} n’a pas pu reprendre. Son terminal est ouvert dans {folder}."
+conversation_gone = "La conversation de {tool} n’a pas pu reprendre : elle n’est plus sur le disque. Son terminal est ouvert dans {folder}."
+conversation_no_program = "La conversation de {tool} n’a pas pu reprendre : {program} est introuvable. Son terminal est ouvert dans {folder} ; tape {command} pour la reprendre."
 
 
 [compositor.projects]
