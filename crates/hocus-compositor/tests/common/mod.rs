@@ -530,6 +530,9 @@ pub enum Command {
     },
     /// Closes its window, as an application quitting.
     Close,
+    /// Ends the client: its thread returns and its connection closes, as
+    /// an application's process ending.
+    Quit,
     /// Destroys its layer surface.
     CloseLayer,
     /// Titles its window, without drawing (a terminal's prompt does so).
@@ -1050,6 +1053,7 @@ fn run_client(
                 }
                 (Command::Popup { anchor, size }, _) => client.open_tip(&qh, anchor, size),
                 (Command::Close, _) => client.window = None,
+                (Command::Quit, _) => return Ok(()),
                 (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}
