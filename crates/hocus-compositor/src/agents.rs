@@ -427,10 +427,18 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
         let Ok(reader) = stream.try_clone() else {
             continue;
         };
-        for line in BufReader::new(reader).lines().take(MOST_LINES) {
-            let Ok(line) = line else {
+        // Kept whole: a line that stays open (the Settings', an agent's)
+        // is handed what it read past its first line, which a client may
+        // send at once (#884).
+        let mut reader = BufReader::new(reader);
+        let mut read = String::new();
+        for _ in 0..MOST_LINES {
+            read.clear();
+            if !matches!(reader.read_line(&mut read), Ok(n) if n > 0) {
                 break;
-            };
+            }
+            let line = read.strip_suffix('\n').unwrap_or(&read);
+            let line = line.strip_suffix('\r').unwrap_or(line).to_owned();
             // The Settings' page, for the day's performance (#655): noted
             // here, the loop never told.
             if let Some((pid, page)) = hocus_perf::record::settings_said(&line) {
@@ -443,12 +451,9 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
             if line.trim_end() == "msg screens" {
                 // The Settings' line stays open, on threads of its own.
                 let sender = sender.clone();
-                let Ok(line_stream) = stream.try_clone() else {
-                    break;
-                };
                 let started = std::thread::Builder::new()
                     .name("settings' line".to_owned())
-                    .spawn(move || crate::displays::serve(line_stream, sender));
+                    .spawn(move || crate::displays::serve(reader, sender));
                 if let Err(err) = started {
                     tracing::warn!(%err, "the Settings' line is not served");
                 }
@@ -457,12 +462,9 @@ fn listen(listener: &UnixListener, sender: &channel::Sender<Heard>, perf: &hocus
             if let Some(agent) = hocus_agents::mcp::agent_of(&line) {
                 // An agent's line stays open, on threads of its own.
                 let sender = sender.clone();
-                let Ok(line_stream) = stream.try_clone() else {
-                    break;
-                };
                 let started = std::thread::Builder::new()
                     .name("mcp line".to_owned())
-                    .spawn(move || crate::mcp::serve(line_stream, sender, agent));
+                    .spawn(move || crate::mcp::serve(reader, sender, agent));
                 if let Err(err) = started {
                     tracing::warn!(%err, "an MCP agent's line is not served");
                 }

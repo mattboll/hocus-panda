@@ -434,3 +434,43 @@ fn a_subscriber_that_does_not_read_is_told_how_many_it_lost() -> anyhow::Result<
     }
     Ok(())
 }
+
+/// The Settings' line to the screens (`msg screens`, which the page says is
+/// theirs) is read whole: two lines written with it, back to back, are
+/// each answered on it, not lost with what the first read took (#884).
+#[test]
+fn the_lines_written_with_msg_screens_are_each_answered() -> anyhow::Result<()> {
+    let mut hp = common::compositor()?;
+    let mut stream = UnixStream::connect(socket(&hp)?)?;
+    stream.set_read_timeout(Some(WAIT))?;
+    // One write: the desktop reads them together.
+    stream.write_all(b"msg screens\nproject-make one\nproject-make two\n")?;
+    let (told, read) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stream).lines() {
+            let Ok(line) = line else { break };
+            if told.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut said = Vec::new();
+    let refused = |said: &[String], what: &str| {
+        said.iter().any(|l| {
+            serde_json::from_str::<Value>(l)
+                .is_ok_and(|v| v["refused"] == format!("cannot read project-make {what}"))
+        })
+    };
+    let until = std::time::Instant::now() + WAIT;
+    while std::time::Instant::now() < until && !(refused(&said, "one") && refused(&said, "two")) {
+        hp.dispatch(Duration::from_millis(5))?;
+        said.extend(read.try_iter());
+    }
+    assert!(
+        said.first().is_some_and(|l| l.contains("\"outputs\"")),
+        "the screens first: {said:?}"
+    );
+    assert!(refused(&said, "one"), "the first line lost: {said:?}");
+    assert!(refused(&said, "two"), "the second line lost: {said:?}");
+    Ok(())
+}
