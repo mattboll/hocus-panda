@@ -45,7 +45,7 @@ use std::{
 };
 
 use hocus_a11y::Role;
-use hocus_link::CameraShown;
+use hocus_link::{CameraShown, camera::PandaLook};
 use hocus_words::{Text, shell::camera as w};
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Renderer, Size, Theme,
@@ -167,6 +167,8 @@ const MAYBE: Ink = Ink::Dark(rgb(0xF5B44A));
 pub enum Target {
     Tab(Tab),
     Tile(&'static str),
+    /// One of the panda's looks (« Allure »).
+    Look(PandaLook),
     Light,
     Help,
     Back,
@@ -177,6 +179,7 @@ impl Target {
     fn id(self) -> String {
         match self {
             Self::Tile(id) => format!("camera:tile:{id}"),
+            Self::Look(look) => format!("camera:look:{}", look.word()),
             other => format!("camera:{other:?}"),
         }
     }
@@ -375,6 +378,7 @@ fn effects_page<'a>(
         ))
         .height(HINT_HEIGHT)
         .align_y(Vertical::Center),
+        allure(lang, shown, ui),
         rule(),
         light(lang, shown, ui, motion),
         help_link(lang, ui.focus),
@@ -605,6 +609,109 @@ fn tabs<'a>(lang: Lang, shown: &CameraShown, ui: &Ui) -> El<'a> {
         .width(Length::Fill)
         .style(|_| style::boxed(TRACK.get(), TRACK_RADIUS))
         .into()
+}
+
+/// The panda's looks (« Allure », the mockup's): under Visage's grid
+/// while the panda is chosen, three square tiles, each the look drawn,
+/// its name under it; the chosen ringed blue.
+fn allure<'a>(lang: Lang, shown: &CameraShown, ui: &Ui) -> El<'a> {
+    if ui.tab != Tab::Face || shown.face != "panda" {
+        return Space::new().height(0.0).into();
+    }
+    let chosen = PandaLook::of(&shown.panda_look).unwrap_or_default();
+    let mut looks = row![].spacing(TILE_GAP);
+    for look in PandaLook::ALL {
+        let on = look == chosen;
+        let name = match look {
+            PandaLook::Classic => w::CLASSIC,
+            PandaLook::Magician => w::MAGICIAN,
+            PandaLook::Secretary => w::SECRETARY,
+        }
+        .get(lang);
+        let picture = portrait(look);
+        let face = column![
+            drawn(LOOK, LOOK, move |f, size| {
+                f.draw_image(
+                    Rectangle::new(Point::ORIGIN, size),
+                    canvas::Image::new(picture.clone())
+                        .filter_method(iced::advanced::image::FilterMethod::Linear),
+                );
+            }),
+            said(
+                name,
+                LOOK_TEXT,
+                MANROPE_SEMIBOLD,
+                if on { TEXT.get() } else { DIM.get() }
+            ),
+        ]
+        .spacing(4.0)
+        .align_x(Horizontal::Center);
+        let target = Target::Look(look);
+        let pressed = button(face)
+            .padding(iced::Padding {
+                bottom: 7.0,
+                ..iced::Padding::ZERO
+            })
+            .width(Length::Fill)
+            .clip(true)
+            .on_press(Msg::Act(target))
+            .style(move |_, status| {
+                let (fill, rim) = match (on, style::lit(status)) {
+                    (true, _) => (CHOSEN, CHOSEN_RIM),
+                    (false, true) => (TILE_HOVER, TILE_RIM),
+                    (false, false) => (TILE_FILL, TILE_RIM),
+                };
+                button::Style {
+                    background: Some(Background::Color(fill.get())),
+                    border: Border {
+                        radius: LOOK_RADIUS.into(),
+                        width: 1.0,
+                        color: rim.get(),
+                    },
+                    ..button::Style::default()
+                }
+            });
+        looks = looks.push(
+            control(pressed, target.id(), Role::ToggleButton, name.to_owned())
+                .node(move |n| n.checked(on))
+                .focus(ui.focus == Some(target), Msg::Focus(target), LOOK_RADIUS)
+                .activate(Msg::Act(target)),
+        );
+    }
+    column![
+        said(
+            w::ALLURE.get(lang),
+            LIGHT,
+            MANROPE_SEMIBOLD,
+            SOFT_TEXT.get()
+        ),
+        looks,
+    ]
+    .spacing(7.0)
+    .into()
+}
+
+/// The size of a look's picture, and of its name; its tile's radius.
+const LOOK: f32 = 96.0;
+const LOOK_TEXT: f32 = 11.0;
+const LOOK_RADIUS: f32 = 10.0;
+
+/// A look's picture, drawn once (`hocus_camera::panda`).
+fn portrait(look: PandaLook) -> iced::advanced::image::Handle {
+    use iced::advanced::image::Handle;
+    static DRAWN: std::sync::OnceLock<Vec<Handle>> = std::sync::OnceLock::new();
+    const SIZE: u32 = 192;
+    let drawn = DRAWN.get_or_init(|| {
+        PandaLook::ALL
+            .iter()
+            .map(|&l| Handle::from_rgba(SIZE, SIZE, hocus_camera::panda::portrait(l, SIZE)))
+            .collect()
+    });
+    let i = PandaLook::ALL.iter().position(|&l| l == look).unwrap_or(0);
+    drawn
+        .get(i)
+        .cloned()
+        .unwrap_or_else(|| Handle::from_rgba(1, 1, vec![0; 4]))
 }
 
 /// The tab's tiles, 4 a row, then the add-ons' tile.
@@ -1148,6 +1255,11 @@ fn handle(message: Msg) {
                     camera::choose_word(key, value);
                 }
             }
+            rebuild();
+        }
+        Msg::Act(Target::Look(look)) => {
+            tracing::info!(look = look.word(), "the panda's look chosen");
+            camera::choose_word("panda-look", look.word());
             rebuild();
         }
         Msg::Act(Target::Light) => {

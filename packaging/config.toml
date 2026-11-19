@@ -630,6 +630,24 @@
 # presenter = false
 # presenter-side = "right"
 # presenter-size = "medium"
+# Visage ("face"): an accessory that follows your head, "ears" (a
+# panda's), "beanie", "crown" or "glasses"; "panda", a panda in your
+# place, following your head, blinks and mouth, in front of Fond's
+# wallpaper or your room blurred, its look (« Allure », "panda-look")
+# "classic", "magician" or "secretary"; or "none". Cadrage
+# ("framing"): the picture cropped round your face and following it
+# smoothly, 16:9 kept. Gestes ("gestures"): a thumb up sends a rising
+# reaction into the picture, a raised hand shows « main levée » while it
+# stays up. Fêtes ("celebrations"): confetti in the picture when an agent
+# celebrates (the desktop's moments, under their rules: none with reduced
+# motion). Your face and hands are found by
+# models on the processor (MediaPipe's face and hand landmarkers), only
+# while the camera is read and an effect needs them.
+# face = "none"
+# framing = false
+# gestures = true
+# celebrations = false
+# panda-look = "magician"
 
 # [voice]
 # The Hocuspanda microphone: a microphone named "Hocuspanda" that every

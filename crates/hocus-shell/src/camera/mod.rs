@@ -95,6 +95,11 @@ pub fn shown() -> CameraShown {
             voice_ready: false,
             voice_read: false,
             microphone: None,
+            framing: false,
+            face: "none".to_owned(),
+            gestures: true,
+            celebrations: false,
+            panda_look: "magician".to_owned(),
         })
 }
 
@@ -121,6 +126,9 @@ pub fn choose(key: &'static str, value: bool) {
             "screen-light" => now.screen_light = value,
             "away" => now.away = value,
             "presenter" => now.presenter = value,
+            "framing" => now.framing = value,
+            "gestures" => now.gestures = value,
+            "celebrations" => now.celebrations = value,
             _ => {}
         }
         let dot = before != now.dot();
@@ -132,7 +140,8 @@ pub fn choose(key: &'static str, value: bool) {
 }
 
 /// `[camera] key` set to the word `value` (one of a tab's: Fond's
-/// `background`; Voix's `voice` is `[voice] effect`), as [`choose`].
+/// `background`, Visage's `face`, the panda's `panda-look`; Voix's
+/// `voice` is `[voice] effect`), as [`choose`].
 pub fn choose_word(key: &'static str, value: &'static str) {
     let dot = {
         let mut shown = SHOWN.lock().unwrap_or_else(PoisonError::into_inner);
@@ -141,6 +150,8 @@ pub fn choose_word(key: &'static str, value: &'static str) {
         match key {
             "background" => value.clone_into(&mut now.background),
             "voice" => value.clone_into(&mut now.voice),
+            "face" => value.clone_into(&mut now.face),
+            "panda-look" => value.clone_into(&mut now.panda_look),
             _ => {}
         }
         let dot = before != (now.dot(), now.voice_dot());

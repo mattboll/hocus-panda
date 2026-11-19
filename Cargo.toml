@@ -137,6 +137,12 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 3
 
+# The Hocuspanda camera's frame loops (its effects drawn over each frame,
+# 30 times a second) are measured against a frame's budget in its tests:
+# built as a release builds them.
+[profile.dev.package.hocus-camera]
+opt-level = 3
+
 # smithay checks some of what clients send with `debug_assert!`, such as a
 # `wl_region.add` of negative height that foot sends: in a debug build, any
 # client could end the session (first build, #260). Built without them,
