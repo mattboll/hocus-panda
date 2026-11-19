@@ -54,6 +54,7 @@ pub mod theme;
 mod to_compositor;
 mod to_shell;
 mod transcribe;
+pub mod voice;
 pub mod wallpaper;
 mod window_menu;
 pub mod wire;
@@ -67,6 +68,7 @@ pub use surfaces::*;
 pub use text::*;
 pub use to_compositor::*;
 pub use to_shell::*;
+pub use voice::{FromVoice, Voice, VoiceLook};
 pub use wire::VERSION;
 
 pub use actions::{
