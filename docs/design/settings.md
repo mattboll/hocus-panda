@@ -1165,6 +1165,7 @@ join them).
 | | Bandeau ("Ton nom en bas de l'image.") | switch | `[camera] banner` (off) |
 | | Nom du bandeau ("Vide : le nom de ton compte.") | text | `[camera] banner-name` (`""`) |
 | | Projet dans le bandeau ("Sous ton nom, le projet du bureau où tu es.") | switch | `[camera] banner-project` (on) |
+| MICRO HOCUSPANDA | Voix ("Un micro « Hocuspanda » que toutes les applis voient : choisis-le dans l'appel. Le vrai micro n'est lu que pendant qu'une appli le lit.") | menu "Telle quelle", "Sans bruit", "Studio", "Panda", "Robot", "Grave" | `[voice] effect` (`"quiet"`; lot 5, [voice.md](voice.md)) |
 
 - The page is generic (rows from `crates/hocus-settings/src/camera.rs`);
   off, the warmth and the strength are inert; the banner off, its name

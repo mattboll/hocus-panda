@@ -303,8 +303,8 @@ tile while an effect is on and the Hocuspanda camera is read.
   click, say "Bientôt" to screen readers, and a tab with none made says
   "Bientôt dans Hocuspanda" under its grid; Fond's "Ta pièce", Visage's
   "Aucun" and Voix's "Telle quelle", what is true today, are ringed.
-- The voice's level meter on the preview is left for lot 5 (no
-  Hocuspanda microphone yet); the microphone's tile opens nothing new.
+- The voice's level meter on the preview, and the microphone's tile
+  opening the window on Voix: lot 5 ([voice.md](voice.md)).
 - Hovering the camera's tile no longer opens the in-use popover (its
   click is the window's); the rest of the sign does.
 - The switch is the kit's (40 × 22, the accent), not the mockup's amber
