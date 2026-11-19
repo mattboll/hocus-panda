@@ -25,6 +25,7 @@ mod outputs;
 mod panel;
 mod power;
 mod voice;
+mod weather;
 mod windows;
 
 pub use accessibility::*;
@@ -37,6 +38,7 @@ pub use outputs::*;
 pub use panel::*;
 pub use power::*;
 pub use voice::Voice;
+pub use weather::*;
 pub use windows::*;
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
@@ -83,6 +85,8 @@ pub struct Config {
     /// docs/design/voice.md).
     pub voice: Voice,
     pub panel: Panel,
+    /// The weather's place and units (#814): passed on to the shell.
+    pub weather: Weather,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
     pub recording: Recording,

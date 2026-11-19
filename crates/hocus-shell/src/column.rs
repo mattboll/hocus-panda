@@ -19,7 +19,8 @@
 //! Which groups show and the order of Today, the to-do list and the
 //! agents are the configuration's (`[panel]`, 6.4, [`set_groups`]): a
 //! hidden group takes no room, as an empty one; the mini form follows the
-//! same order, Today not in it.
+//! same order, Today's place there being the weather's item (#814),
+//! first, under the clock.
 //!
 //! The windows' group is not in the column's order: it sits on the
 //! desktops, from the bottom, in the room the column leaves free (the
@@ -115,29 +116,34 @@ pub fn set_groups(groups: BarGroups) {
 
 /// The column in `form`, top to bottom, the movable groups in `order`:
 /// the bar's items under its top ([`items`]), the meeting's card (or
-/// mark), the sign of what is in use, then Today (in the full form only),
-/// the to-do list and the agents.
+/// mark), the sign of what is in use, then Today, the to-do list and the
+/// agents; in the mini form, Today's surface (the weather's item) first.
 pub fn order_with(form: Form, order: [BarGroup; 3]) -> Vec<Part> {
     order_from(&items::on(Side::Top), form, order)
 }
 
 /// The column from `top`, the items under the bar's top in their order:
 /// the clock, over the column's start, left out; the places of Today,
-/// the to-do list and the agents taken by `order`'s groups in turn;
-/// Today left out of the mini form.
+/// the to-do list and the agents taken by `order`'s groups in turn; in
+/// the mini form, Today (the weather's item) first, under the clock.
 fn order_from(top: &[Kind], form: Form, order: [BarGroup; 3]) -> Vec<Part> {
     let mut movable = order.into_iter();
-    top.iter()
-        .filter_map(|kind| {
-            let part = match kind {
-                Kind::Meeting => Part::Meeting,
-                Kind::InUse => Part::InUse,
-                Kind::Today | Kind::Tasks | Kind::Agents => Part::of(movable.next()?),
-                _ => return None,
-            };
-            (form == Form::Full || part != Part::Today).then_some(part)
+    let mut parts: Vec<Part> = top
+        .iter()
+        .filter_map(|kind| match kind {
+            Kind::Meeting => Some(Part::Meeting),
+            Kind::InUse => Some(Part::InUse),
+            Kind::Today | Kind::Tasks | Kind::Agents => movable.next().map(Part::of),
+            _ => None,
         })
-        .collect()
+        .collect();
+    if form == Form::Mini
+        && let Some(at) = parts.iter().position(|p| *p == Part::Today)
+    {
+        parts.remove(at);
+        parts.insert(0, Part::Today);
+    }
+    parts
 }
 
 /// The column in `form`, top to bottom, in the configuration's order.
@@ -163,8 +169,8 @@ pub fn taken(bar: &str, form: Form, part: Part) -> f32 {
         Part::Meeting => return crate::meeting::room(form),
         Part::InUse => return crate::in_use::room(form),
         Part::Today => match form {
-            Form::Full => crate::today::height(&crate::today::shown(bar).0),
-            Form::Mini => 0.0,
+            Form::Full => crate::today::height(&crate::today::shown(bar).rows),
+            Form::Mini => crate::today::mini_height(),
         },
         Part::Tasks => crate::tasks::draw::height(bar, form),
         Part::Agents => agents::draw::height(form),
@@ -338,7 +344,13 @@ mod tests {
         Part::Tasks,
         Part::Agents,
     ];
-    const MINI: [Part; 4] = [Part::Meeting, Part::InUse, Part::Tasks, Part::Agents];
+    const MINI: [Part; 5] = [
+        Part::Today,
+        Part::Meeting,
+        Part::InUse,
+        Part::Tasks,
+        Part::Agents,
+    ];
 
     #[test]
     fn the_full_forms_order_puts_the_agents_under_to_do() {
@@ -391,7 +403,13 @@ mod tests {
         );
         assert_eq!(
             order_from(&top, Form::Mini, order),
-            [Part::Agents, Part::Meeting, Part::InUse, Part::Tasks]
+            [
+                Part::Today,
+                Part::Agents,
+                Part::Meeting,
+                Part::InUse,
+                Part::Tasks
+            ]
         );
     }
 
@@ -408,10 +426,16 @@ mod tests {
                 Part::Tasks
             ]
         );
-        // The mini form the same, without Today.
+        // The mini form the same, Today (the weather's item) first.
         assert_eq!(
             order_with(Form::Mini, order),
-            [Part::Meeting, Part::InUse, Part::Agents, Part::Tasks]
+            [
+                Part::Today,
+                Part::Meeting,
+                Part::InUse,
+                Part::Agents,
+                Part::Tasks
+            ]
         );
         // The card (44 + 14), the agents (200 + 14), Today (92), To do.
         let t = takes(58.0, 0.0, 92.0, 118.0, 200.0);
@@ -446,10 +470,15 @@ mod tests {
         let t = takes(0.0, 0.0, 0.0, 0.0, 200.0);
         assert_eq!(top_with(Form::Full, &FULL, Part::Agents, &t), 100.0);
         // The mini form: the mark's 16 + 14, the to-do item's 34 + 14;
-        // Today is not in it.
-        let t = takes(30.0, 0.0, 92.0, 48.0, 76.0);
+        // Today there is the weather's item, none without the weather.
+        let t = takes(30.0, 0.0, 0.0, 48.0, 76.0);
         assert_eq!(top_with(Form::Mini, &MINI, Part::Tasks, &t), 98.0);
         assert_eq!(top_with(Form::Mini, &MINI, Part::Agents, &t), 146.0);
+        // With it (51 + 14), under the clock: the others go down by it.
+        let t = takes(30.0, 0.0, 65.0, 48.0, 76.0);
+        assert_eq!(top_with(Form::Mini, &MINI, Part::Today, &t), 68.0);
+        assert_eq!(top_with(Form::Mini, &MINI, Part::Meeting, &t), 133.0);
+        assert_eq!(top_with(Form::Mini, &MINI, Part::Tasks, &t), 163.0);
     }
 
     #[test]

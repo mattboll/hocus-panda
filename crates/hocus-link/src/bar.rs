@@ -289,6 +289,30 @@ impl BarGroups {
     }
 }
 
+/// The weather's place and units (`[weather]`, #814): the shell asks
+/// Open-Meteo for its forecast and shows it in Today.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WeatherPlace {
+    /// `[weather] enabled`: shown once a place is set.
+    pub enabled: bool,
+    /// The place's name as the bar says it; empty, none set.
+    pub place: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    /// °F, in and mph (else °C, mm and km/h).
+    pub imperial: bool,
+}
+
+// Its coordinates are the file's numbers, never NaN.
+impl Eq for WeatherPlace {}
+
+impl WeatherPlace {
+    /// Whether the bar shows the weather: on, and a place set.
+    pub fn shown(&self) -> bool {
+        self.enabled && !self.place.trim().is_empty()
+    }
+}
+
 /// How the clock looks (`[panel.clock]`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClockLook {

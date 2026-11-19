@@ -514,6 +514,28 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Effect> {
     })
 }
 
+/// What is above it in the column changed height (the mini form's weather
+/// item, #814): its surfaces go to their places.
+pub fn moved() {
+    let effects: Vec<Effect> = state(|s| {
+        s.places
+            .values()
+            .filter_map(|place| {
+                let id = place.id?;
+                let (size, margin) = placement(place.form, place.switching);
+                Some(Effect::Resize {
+                    id,
+                    size,
+                    margin: Some(margin),
+                })
+            })
+            .collect()
+    });
+    if !effects.is_empty() {
+        popover::send(effects);
+    }
+}
+
 /// Bar `bar` went: its card's surface, to remove.
 pub fn forget(bar: &str) -> Option<window::Id> {
     state(|s| s.places.remove(bar)).and_then(|p| p.id)

@@ -260,6 +260,12 @@ impl State {
             }
             followed.push("[overview]");
         }
+        // The weather's place (#814): the shell fetches its forecast.
+        if new.weather != self.config.weather {
+            self.config.weather = new.weather.clone();
+            self.tell_shell(hocus_link::ToShell::Weather(self.config.weather.place()));
+            followed.push("[weather]");
+        }
         // The desktop's effects (#434): read as each starts.
         if new.effects != self.config.effects {
             self.config.effects = new.effects.clone();

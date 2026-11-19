@@ -114,6 +114,22 @@
 # The seconds beside the minutes, in the full form.
 # seconds = true
 
+# [weather]
+# The weather in the bar's Today (its icon and temperature, the rain
+# coming later today, tomorrow) and under the mini form's clock, its
+# popover a click away. The forecast is asked of Open-Meteo every 30
+# minutes with the place's coordinates only, no account; it is kept in
+# $XDG_CACHE_HOME/hocuspanda/weather.json, and offline the bar shows the
+# last one with its time. Shown once a place is set (the Settings' Météo
+# page finds one by its name).
+# enabled = true
+# The place's name, as the bar says it, and where it is (degrees).
+# place = ""
+# latitude = 0.0
+# longitude = 0.0
+# "metric" (°C, mm, km/h) or "imperial" (°F, in, mph).
+# units = "metric"
+
 # Screens, by connector name. Without a scale, a screen takes 1, or 2
 # when it is denser than 192 dpi and stays at least 1280x800 at 2 (a
 # 15.6-inch 4K panel); never a fraction by itself. The journal names
@@ -557,6 +573,10 @@
 # snow = false
 # aurora = false
 # rain-on-glass = false
+# When the rain falls: "always", or "raining", only while the weather of
+# [weather] place says it rains (its rain, showers or thunder); without a
+# place it then never falls.
+# rain-when = "always"
 # koi = false
 # fireflies = false
 # daylight = false

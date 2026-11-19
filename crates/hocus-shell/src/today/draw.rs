@@ -15,6 +15,15 @@
 //!   `cubic-bezier(0.2, 0.9, 0.25, 1)`); a line coming (from "+ N") fades
 //!   in. At once with reduced motion or on the CPU. Nothing draws between
 //!   two changes.
+//! - **The weather** (#814): on the header's right, its icon (15 px) and
+//!   the temperature (Manrope 700, 11.5 px, `text`), 4 px apart; the rain's
+//!   line in the rain's colour `#8FB3FF`, a 12 px rain icon in the dot's
+//!   place; tomorrow's line "Demain", its 12 px icon and "3° / 11°". Each
+//!   is lit under the pointer and opens the weather's popover. The mini
+//!   form's item: 48 px wide, radius 10, its 22 px icon, the temperature
+//!   (Manrope 700, 13 px), "dem." (9.5 px, `text.dim`) in the evening and
+//!   three drops (4 px wide, 4, 8 and 6 px tall) when rain comes within
+//!   3 h; lit `0.06` under the pointer, `0.08` while its popover is open.
 
 use std::{
     collections::HashMap,
@@ -37,14 +46,28 @@ use crate::theme::Ink;
 use crate::{
     Message,
     clock::motion::bezier,
-    levels::draw::{DIM, FAINT, MANROPE, MANROPE_BOLD, TEXT, faded},
+    levels::draw::{DIM, FAINT, HOVER as MINI_HOVER, MANROPE, MANROPE_BOLD, OPEN, TEXT, faded},
     meeting::draw::MONO,
-    popover::{Item, kit},
+    popover::{Item, kit, weather::Spot},
     ui::items::{Control, Controls, Items, Press},
+    weather::{self, icon},
 };
 
 /// The surface's width: the bar inside its rim.
 const FULL_WIDTH: u32 = 194;
+/// In the mini form: the bar inside its rim, and the weather's item.
+const MINI_WIDTH: u32 = 54;
+const MINI_ITEM: f32 = 48.0;
+const MINI_RADIUS: f32 = 10.0;
+const MINI_ICON: f32 = 22.0;
+const MINI_TEMP: f32 = 13.0;
+const MINI_SUB: f32 = 9.5;
+/// The header's weather: its icon, the gap after it, its words' size.
+const HEAD_ICON: f32 = 15.0;
+const HEAD_GAP: f32 = 4.0;
+/// A weather line's icon.
+const LINE_ICON: f32 = 12.0;
+const LINE_GAP: f32 = 6.0;
 /// Around the group on its surface: the keyboard's ring.
 const ROOM: f32 = 5.0;
 /// The bar's sides' padding, the group's width, and how far a line goes
@@ -79,6 +102,15 @@ pub fn placement(top: f32, height: f32) -> ((u32, u32), f32) {
     )
 }
 
+/// The mini form's weather item's surface: its size and its top under the
+/// bar's, for an item `height` tall whose top is `top`.
+pub fn mini_placement(top: f32, height: f32) -> ((u32, u32), f32) {
+    (
+        (MINI_WIDTH, (height.max(1.0) + 2.0 * ROOM).ceil() as u32),
+        top - ROOM,
+    )
+}
+
 /// Row `index`'s place in the group, from its top.
 fn row_top(index: usize) -> f32 {
     HEADER + LINE * index as f32
@@ -89,6 +121,8 @@ fn row_top(index: usize) -> f32 {
 pub struct View {
     pub bar: String,
     pub forms: Vec<(Form, f32)>,
+    /// The bar's width as drawn now (the mini item is centred in it).
+    pub bar_width: f32,
     /// On the CPU, the bar's colour under it.
     pub backdrop: Option<Color>,
     /// Its lines move (no reduced motion, not on the CPU).
@@ -171,10 +205,35 @@ impl View {
 
     /// The full form's opacity now (it fades with the bar's switch).
     fn alpha(&self) -> f32 {
+        self.alpha_of(Form::Full)
+    }
+
+    fn alpha_of(&self, form: Form) -> f32 {
         self.forms
             .iter()
-            .find(|(f, _)| *f == Form::Full)
+            .find(|(f, _)| *f == form)
             .map_or(0.0, |(_, a)| *a)
+    }
+
+    /// The mini form's weather item on a surface `size` large.
+    fn mini_rect(&self, size: Size, mini: &weather::Mini) -> Rectangle {
+        let centre = size.width + 1.0 - self.bar_width / 2.0;
+        Rectangle::new(
+            Point::new(centre - MINI_ITEM / 2.0, ROOM),
+            Size::new(MINI_ITEM, super::mini_height_of(Some(mini))),
+        )
+    }
+
+    /// The header's weather on a surface `size` large: where it is lit and
+    /// heard, 6 px past it.
+    fn head_rect(&self, size: Size, head: &weather::Head) -> Rectangle {
+        let o = self.origin(size);
+        let width = HEAD_ICON + HEAD_GAP + kit::measure(&head.said, LABEL, MANROPE_BOLD);
+        let right = o.x + GROUP_WIDTH;
+        Rectangle::new(
+            Point::new(right - width - OUT, o.y),
+            Size::new(width + 2.0 * OUT, HEADER),
+        )
     }
 }
 
@@ -190,8 +249,31 @@ impl Items for View {
     }
 
     fn controls(&self, _state: &State, size: Size) -> Controls {
-        let (rows, top) = super::shown(&self.bar);
+        let shown = super::shown(&self.bar);
+        let rows = shown.rows;
+        let mini = shown.form == Some(Form::Mini);
+        let top = if mini { shown.mini_top } else { shown.top };
         let to_bar = Vector::new(-size.width - 1.0, top - ROOM);
+        let words = weather::Words::new(self.words.lang);
+        if mini {
+            let controls = match (&shown.mini, self.forms.as_slice()) {
+                (Some(item), [(Form::Mini, alpha)]) if *alpha > 0.0 => {
+                    vec![Control::new(
+                        Item::Weather(Spot::Mini),
+                        self.mini_rect(size, item),
+                        Role::Button,
+                        format!("{}, {}", words.weather(), item.said),
+                        MINI_RADIUS,
+                    )]
+                }
+                _ => Vec::new(),
+            };
+            return Controls {
+                to_bar,
+                controls,
+                ..Controls::default()
+            };
+        }
         if self.forms.len() != 1 || self.alpha() <= 0.0 {
             return Controls {
                 to_bar,
@@ -199,13 +281,15 @@ impl Items for View {
             };
         }
         let said = crate::a11y::Words::new(self.words.lang);
-        let controls: Vec<Control> = rows
+        let mut controls: Vec<Control> = rows
             .iter()
             .enumerate()
             .filter_map(|(i, row)| {
                 let name = match row {
                     Row::Event(line) => self.words.name(line),
                     Row::More(n) => said.more_today(*n),
+                    Row::Rain(rain) => format!("{} {}", rain.start, rain.said).trim().to_owned(),
+                    Row::Tomorrow(t) => format!("{} {}", words.tomorrow(), t.said),
                 };
                 let item = item_of(&rows, i)?;
                 Some(Control::new(
@@ -217,11 +301,24 @@ impl Items for View {
                 ))
             })
             .collect();
+        if let Some(head) = &shown.head {
+            controls.insert(
+                0,
+                Control::new(
+                    Item::Weather(Spot::Head),
+                    self.head_rect(size, head),
+                    Role::Button,
+                    format!("{}, {}", words.weather(), head.said),
+                    RADIUS,
+                ),
+            );
+        }
         let events = rows
             .iter()
             .map(|r| match r {
                 Row::Event(_) => 1,
                 Row::More(n) => *n,
+                Row::Rain(_) | Row::Tomorrow(_) => 0,
             })
             .sum();
         Controls {
@@ -242,19 +339,19 @@ impl Items for View {
             return None;
         };
         state.drawn = Some(*now);
-        let (rows, _) = super::shown(&self.bar);
+        let rows = super::shown(&self.bar).rows;
         state.follow(&rows, *now, self.motion);
         (!state.still(*now)).then(|| canvas::Action::request_redraw_at(*now + STEP))
     }
 
     /// A line under the pointer shows its times and its title whole.
     fn hovered(&self, _state: &mut State, on: Option<(Item, Rectangle)>) {
-        let (rows, _) = super::shown(&self.bar);
+        let rows = super::shown(&self.bar).rows;
         let line = on.and_then(|(item, rect)| {
             let i = (0..rows.len()).find(|i| item_of(&rows, *i) == Some(item))?;
             match rows.get(i)? {
                 Row::Event(line) => Some((line, rect)),
-                Row::More(_) => None,
+                Row::More(_) | Row::Rain(_) | Row::Tomorrow(_) => None,
             }
         });
         match line {
@@ -286,7 +383,22 @@ impl Items for View {
         let mut frame = Frame::new(renderer, bounds.size());
         let size = bounds.size();
         let under = crate::backdrop::under(renderer, size, self.backdrop);
-        let (rows, top) = super::shown(&self.bar);
+        let shown = super::shown(&self.bar);
+        if shown.form == Some(Form::Mini) {
+            if let Some(mini) = &shown.mini {
+                let alpha = self.alpha_of(Form::Mini);
+                let open = crate::popover::with(|c| c.shows(&self.bar, Item::Weather(Spot::Mini)));
+                let lit = match (open, lit == Some(Item::Weather(Spot::Mini))) {
+                    (true, _) => Some(OPEN),
+                    (false, true) => Some(MINI_HOVER),
+                    (false, false) => None,
+                };
+                draw_mini(&mut frame, mini, self.mini_rect(size, mini), lit, alpha);
+                said_once(format!("mini {} {:?} drops={}", mini.said, mini.tomorrow, mini.drops));
+            }
+            return crate::backdrop::over(under, frame);
+        }
+        let (rows, top) = (shown.rows, shown.top);
         let alpha = self.alpha();
         if rows.is_empty() || alpha <= 0.0 {
             return crate::backdrop::over(under, frame);
@@ -309,6 +421,33 @@ impl Items for View {
                 ),
             ));
             x += kit::measure(&ch, LABEL, MANROPE_BOLD) + SPACING;
+        }
+        if let Some(head) = &shown.head {
+            let rect = self.head_rect(size, head);
+            if still && lit == Some(Item::Weather(Spot::Head)) {
+                crate::theme::hover(f, &kit::rounded(rect, RADIUS), faded(HOVER.get(), alpha));
+            }
+            let x = rect.x + OUT;
+            let middle = o.y + HEADER / 2.0;
+            icon::draw(
+                f,
+                head.icon,
+                Rectangle::new(
+                    Point::new(x, middle - HEAD_ICON / 2.0),
+                    Size::new(HEAD_ICON, HEAD_ICON),
+                ),
+                alpha,
+            );
+            f.fill_text(kit::text_in(
+                MANROPE_BOLD,
+                kit::text(
+                    head.said.clone(),
+                    Point::new(x + HEAD_ICON + HEAD_GAP, middle),
+                    LABEL,
+                    faded(TEXT.get(), alpha),
+                    Alignment::Left,
+                ),
+            ));
         }
         let now = state.drawn.unwrap_or_else(Instant::now);
         for (row, from, since) in &state.going {
@@ -350,9 +489,16 @@ impl Items for View {
                 .map(|r| match r {
                     Row::Event(line) => self.words.name(line),
                     Row::More(n) => self.words.more(*n),
+                    Row::Rain(rain) => rain.said.clone(),
+                    Row::Tomorrow(t) => t.said.clone(),
                 })
                 .collect();
-            let said = format!("{} lit={:?}", self.words.said(&rows), hover);
+            let head = shown.head.as_ref().map(|h| h.said.as_str());
+            let said = format!(
+                "{} head={head:?} lit={:?}",
+                self.words.said(&rows),
+                hover
+            );
             let mut kept = SAID.lock().unwrap_or_else(PoisonError::into_inner);
             if kept.as_deref() != Some(said.as_str()) {
                 tracing::debug!(
@@ -368,12 +514,82 @@ impl Items for View {
     }
 }
 
-/// Row `i`'s item: an event's line, or the "+ N".
+/// Row `i`'s item: an event's line, the "+ N", the weather's.
 fn item_of(rows: &[Row], i: usize) -> Option<Item> {
     Some(match rows.get(i)? {
         Row::Event(_) => Item::TodayLine(u8::try_from(i).ok()?),
         Row::More(_) => Item::TodayMore,
+        Row::Rain(_) => Item::Weather(Spot::Rain),
+        Row::Tomorrow(_) => Item::Weather(Spot::Tomorrow),
     })
+}
+
+/// What the mini item last said it shows, for the log.
+static MINI_SAID: Mutex<Option<String>> = Mutex::new(None);
+
+fn said_once(said: String) {
+    let mut kept = MINI_SAID.lock().unwrap_or_else(PoisonError::into_inner);
+    if kept.as_deref() != Some(said.as_str()) {
+        tracing::debug!(shows = %said, "today's weather is drawn in the mini form");
+        *kept = Some(said);
+    }
+}
+
+/// The mini form's weather item at `rect`.
+fn draw_mini(f: &mut Frame, mini: &weather::Mini, rect: Rectangle, lit: Option<Ink>, alpha: f32) {
+    if alpha <= 0.0 {
+        return;
+    }
+    if let Some(lit) = lit {
+        f.fill(&kit::rounded(rect, MINI_RADIUS), faded(lit.get(), alpha));
+    }
+    let cx = rect.center_x();
+    let mut y = rect.y + 5.0;
+    icon::draw(
+        f,
+        mini.icon,
+        Rectangle::new(
+            Point::new(cx - MINI_ICON / 2.0, y),
+            Size::new(MINI_ICON, MINI_ICON),
+        ),
+        alpha,
+    );
+    y += MINI_ICON + 1.0 + 9.0;
+    f.fill_text(kit::text_in(
+        MANROPE_BOLD,
+        kit::text(
+            mini.said.clone(),
+            Point::new(cx, y),
+            MINI_TEMP,
+            faded(TEXT.get(), alpha),
+            Alignment::Center,
+        ),
+    ));
+    y += 9.0;
+    if let Some(tomorrow) = &mini.tomorrow {
+        f.fill_text(kit::text(
+            tomorrow.clone(),
+            Point::new(cx, y + super::MINI_TOMORROW / 2.0),
+            MINI_SUB,
+            faded(DIM.get(), alpha),
+            Alignment::Center,
+        ));
+        y += super::MINI_TOMORROW;
+    }
+    if mini.drops {
+        // Three drops, 4 px wide, 2 px apart, their feet on a line.
+        let feet = y + 2.0 + 8.0;
+        for (i, tall) in [4.0f32, 8.0, 6.0].into_iter().enumerate() {
+            let x = cx + 6.0 * (i as f32 - 1.0);
+            f.fill(
+                &kit::rounded(
+                    Rectangle::new(Point::new(x - 2.0, feet - tall), Size::new(4.0, tall)),
+                    1.0,
+                ),
+                faded(icon::RAIN.get(), alpha),
+            );
+        }
+    }
 }
 
 /// Row `row` at `rect` (its line, 6 px past the group's sides).
@@ -387,6 +603,74 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
     let x = rect.x + OUT;
     let middle = rect.center_y();
     let right = rect.x + rect.width - OUT;
+    let dot = x + TIME_CELL + DOT_GAP;
+    match row {
+        Row::Rain(rain) => {
+            let colour = faded(icon::RAIN.get(), alpha);
+            f.fill_text(kit::text_in(
+                MONO,
+                kit::text(
+                    rain.start.clone(),
+                    Point::new(x, middle),
+                    TIME,
+                    colour,
+                    Alignment::Left,
+                ),
+            ));
+            let centre = dot + DOT / 2.0;
+            icon::draw(
+                f,
+                rain.icon,
+                Rectangle::new(
+                    Point::new(centre - LINE_ICON / 2.0, middle - LINE_ICON / 2.0),
+                    Size::new(LINE_ICON, LINE_ICON),
+                ),
+                alpha,
+            );
+            let tx = dot + DOT + DOT_GAP;
+            let said = kit::elide(&rain.said, (right - tx).max(0.0), |t| {
+                kit::measure(t, TITLE, MANROPE)
+            });
+            f.fill_text(kit::text(
+                said,
+                Point::new(tx, middle),
+                TITLE,
+                colour,
+                Alignment::Left,
+            ));
+            return;
+        }
+        Row::Tomorrow(tomorrow) => {
+            let colour = faded(TEXT.get(), alpha);
+            let name = words_tomorrow(words);
+            f.fill_text(kit::text(
+                name.to_owned(),
+                Point::new(x, middle),
+                MORE,
+                colour,
+                Alignment::Left,
+            ));
+            let ix = (x + kit::measure(name, MORE, MANROPE) + LINE_GAP).max(dot + DOT / 2.0 - LINE_ICON / 2.0);
+            icon::draw(
+                f,
+                tomorrow.icon,
+                Rectangle::new(
+                    Point::new(ix, middle - LINE_ICON / 2.0),
+                    Size::new(LINE_ICON, LINE_ICON),
+                ),
+                alpha,
+            );
+            f.fill_text(kit::text(
+                tomorrow.said.clone(),
+                Point::new(ix + LINE_ICON + LINE_GAP, middle),
+                TITLE,
+                colour,
+                Alignment::Left,
+            ));
+            return;
+        }
+        Row::Event(_) | Row::More(_) => {}
+    }
     match row {
         Row::Event(line) => {
             f.fill_text(kit::text_in(
@@ -399,7 +683,6 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
                     Alignment::Left,
                 ),
             ));
-            let dot = x + TIME_CELL + DOT_GAP;
             let [r, g, b] = line.colour;
             f.fill(
                 &Path::circle(Point::new(dot + DOT / 2.0, middle), DOT / 2.0),
@@ -426,7 +709,13 @@ fn draw_row(f: &mut Frame, row: &Row, rect: Rectangle, words: Words, alpha: f32,
                 Alignment::Left,
             ));
         }
+        Row::Rain(_) | Row::Tomorrow(_) => {}
     }
+}
+
+/// "Demain" / "Tomorrow", in Today's language.
+fn words_tomorrow(words: Words) -> &'static str {
+    weather::Words::new(words.lang).tomorrow()
 }
 
 #[cfg(test)]
@@ -442,6 +731,7 @@ mod tests {
             title: id.to_owned(),
             video: None,
             page: None,
+            at: 0,
         })
     }
 

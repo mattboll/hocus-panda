@@ -333,7 +333,12 @@ impl Shell {
         let at = self.now + AHEAD;
         let backdrop = (!self.look.glass).then(|| {
             let bar_height = if bar.height > 0.0 { bar.height } else { 1064.0 };
-            let middle = today::shown(&output).1 + 40.0;
+            let shown = today::shown(&output);
+            let middle = if shown.form == Some(hocus_link::Form::Mini) {
+                shown.mini_top + 30.0
+            } else {
+                shown.top + 40.0
+            };
             mix(
                 OPAQUE_TOP.get(),
                 OPAQUE_BOTTOM.get(),
@@ -343,6 +348,7 @@ impl Shell {
         let program = today::draw::View {
             bar: bar.output.clone(),
             forms: bar.forms(at),
+            bar_width: bar.width(at),
             backdrop,
             motion: self.look.motion,
             words: today::Words::new(clock::time::Lang::of_messages()),
@@ -511,6 +517,10 @@ impl Shell {
             }),
             popover::Item::Music => popover::music::view(id, self.look.glass),
             popover::Item::Journal => popover::journal::view(&popover::journal::Panel {
+                id,
+                glass: self.look.glass,
+            }),
+            popover::Item::Weather(_) => popover::weather::view(&popover::weather::Panel {
                 id,
                 glass: self.look.glass,
             }),

@@ -33,6 +33,7 @@ hocus-perf = { version = "1.0.0", path = "crates/hocus-perf" }
 hocus-scenes = { version = "1.0.0", path = "crates/hocus-scenes" }
 hocus-sound = { version = "1.0.0", path = "crates/hocus-sound" }
 hocus-voice = { version = "1.0.0", path = "crates/hocus-voice" }
+hocus-weather = { version = "1.0.0", path = "crates/hocus-weather" }
 hocus-words = { version = "1.0.0", path = "crates/hocus-words" }
 hocus-xdg = { version = "1.0.0", path = "crates/hocus-xdg" }
 

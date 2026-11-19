@@ -2415,6 +2415,7 @@ dependencies = [
  "hocus-panic",
  "hocus-sound",
  "hocus-voice",
+ "hocus-weather",
  "hocus-words",
  "hocus-xdg",
  "iced",
@@ -2483,6 +2484,19 @@ dependencies = [
  "tracing-subscriber",
  "tract-onnx",
  "tract-pulse",
+]
+
+[[package]]
+name = "hocus-weather"
+version = "1.0.0"
+dependencies = [
+ "jiff",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "ureq 3.5.1",
 ]
 
 [[package]]

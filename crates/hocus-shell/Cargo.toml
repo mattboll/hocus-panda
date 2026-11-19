@@ -29,6 +29,9 @@ hocus-a11y.workspace = true
 hocus-xdg.workspace = true
 # "Your day"'s data: calendars, events and tasks, read off the loop.
 hocus-day.workspace = true
+# The weather in Today and its popover (#814): Open-Meteo's forecast,
+# read off the loop.
+hocus-weather.workspace = true
 # The sound, from PipeWire, shared with the Settings.
 hocus-sound.workspace = true
 # The Hocuspanda camera's window's preview, which reads its source (#619).
