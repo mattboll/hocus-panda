@@ -2628,7 +2628,7 @@ terminal not in front, a herdr agent's row did not bring it.
   found; and as the keyboard goes to another window while herdr has
   agents. An agent herdr sees whose own processes reach no window (a
   hook's or a command's agent in one of its panes) has the same window.
-- **A terminal process with several windows** (kitty's): the one whose
+- **A terminal process with several windows** (kitty's), herdr's terminal: the one whose
   title's first word is `herdr`, as the shell titles a terminal with the
   command it runs ("herdr", "herdr session attach work"; not "vim
   herdr.rs"); else the most recently focused of them; never focused, the
@@ -2637,6 +2637,19 @@ terminal not in front, a herdr agent's row did not bring it.
   and `.clear`, which change it, and its panes' `terminal_title` is what
   each pane's program sets (Claude Code's "✳ Claude Code", in a terminal
   of its own as well), not the window's.
+- **Several agents in one terminal process** (2026-11-19, kitty, foot's
+  server, gnome-terminal-server, wezterm's mux; no terminal's own option):
+  an agent's own window is first the window that had the keyboard as its
+  user last sent it a prompt (Claude Code's and Codex's
+  `UserPromptSubmit`, the hook line's `prompt` part), when that window's
+  process is the nearest above the agent's that has windows (its
+  terminal's); a prompt sent while another application's window has the
+  keyboard associates nothing, and the next prompt from another window of
+  the same terminal moves it. Without one yet (or its window gone), the
+  topmost of that process's windows, as before. The bar's go-to, a
+  project's agents, the creatures and the session's and a project's
+  `[window.agent]` all take it (`agents.rs`, `agent_own_window`). Test:
+  `projects::each_agent_of_a_terminal_with_two_windows_is_in_the_window_its_prompt_was_typed_in`.
 - **Seen**: herdr's terminal getting the keyboard shows only the pane
   herdr shows: an agent's pane focused in its tab, its tab and its
   workspace the focused ones (`agent.list`, `tab.list`,

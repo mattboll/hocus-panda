@@ -1955,12 +1955,15 @@ fn an_agent_whose_program_is_only_in_the_homes_bin_resumes_at_log_in() -> anyhow
 
 const BROWSER_WINDOWS: &str = "HOCUS_TEST_BROWSER_WINDOWS";
 const BROWSER_CLOSED: &str = "HOCUS_TEST_BROWSER_CLOSED";
+const BROWSER_CHILDREN: &str = "HOCUS_TEST_BROWSER_CHILDREN";
 
-/// A browser with several windows in one process, as Firefox: a window of
-/// [`APP_ID`] for each title of [`BROWSER_WINDOWS`] (`|` between them); a
-/// window asked to close closes alone, written into [`BROWSER_CLOSED`];
-/// it ends with its last window, or on a signal. Run alone, it does
-/// nothing.
+/// An application with several windows in one process, as Firefox or
+/// kitty: a window of [`APP_ID`] for each title of [`BROWSER_WINDOWS`]
+/// (`|` between them); a window asked to close closes alone, written into
+/// [`BROWSER_CLOSED`]; with [`BROWSER_CHILDREN`], a child process for each
+/// window (a terminal's shells), their ids written there a line each. It
+/// ends with its last window, its connections gone, or on a signal, its
+/// children with it. Run alone, it does nothing.
 #[test]
 fn browser_program() -> anyhow::Result<()> {
     let (Ok(app), Ok(titles)) = (std::env::var(APP_ID), std::env::var(BROWSER_WINDOWS)) else {
@@ -1968,6 +1971,16 @@ fn browser_program() -> anyhow::Result<()> {
     };
     let app: &'static str = app.leak();
     let closed = std::env::var_os(BROWSER_CLOSED).map(PathBuf::from);
+    let mut children = Vec::new();
+    if let Some(file) = std::env::var_os(BROWSER_CHILDREN) {
+        let mut ids = String::new();
+        for _ in titles.split('|') {
+            let child = std::process::Command::new("sleep").arg("600").spawn()?;
+            ids.push_str(&format!("{}\n", child.id()));
+            children.push(child);
+        }
+        std::fs::write(file, ids)?;
+    }
     let mut windows = Vec::new();
     for title in titles.split('|') {
         let client = common::client(
@@ -1986,10 +1999,15 @@ fn browser_program() -> anyhow::Result<()> {
     while !windows.is_empty() {
         std::thread::sleep(Duration::from_millis(20));
         windows.retain(|client| {
-            let asked = client
-                .events
-                .try_iter()
-                .any(|e| e == common::Event::CloseRequested);
+            let mut asked = false;
+            loop {
+                match client.events.try_recv() {
+                    Ok(e) => asked |= e == common::Event::CloseRequested,
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    // The compositor went.
+                    Err(mpsc::TryRecvError::Disconnected) => return false,
+                }
+            }
             if asked && let Some(file) = &closed {
                 let _ = std::fs::OpenOptions::new()
                     .create(true)
@@ -1999,6 +2017,11 @@ fn browser_program() -> anyhow::Result<()> {
             }
             !asked
         });
+    }
+    // Its own children, by their handles.
+    for mut child in children {
+        let _ = child.kill();
+        let _ = child.wait();
     }
     Ok(())
 }
@@ -2143,5 +2166,110 @@ fn a_window_its_browser_does_not_reopen_comes_back_with_its_tabs() -> anyhow::Re
         "{:?}",
         hp.session_not_back()
     );
+    Ok(())
+}
+
+/// One terminal process serving two windows (kitty's, foot's server), an
+/// agent in each: each agent's window is the one that had the keyboard
+/// as its prompt was sent, the session saves each conversation with its
+/// own window, and a prompt sent while another application's window has
+/// the keyboard changes nothing.
+#[test]
+fn each_agent_of_a_terminal_with_two_windows_is_in_the_window_its_prompt_was_typed_in()
+-> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    terminal_wrapper(&places, None, None)?;
+    let folder = places.folder.canonicalize()?;
+    let transcript = home.join("t.jsonl");
+    std::fs::create_dir_all(&home)?;
+    std::fs::write(&transcript, "{}\n")?;
+    let mut hp = alone_with(Config {
+        home: Some(home.clone()),
+        ..config_with_apps(&places)
+    })?;
+    hp.restore_session();
+    let socket = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-site", &folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let shells = places.root.join("shells");
+    let mut terminal = std::process::Command::new(std::env::current_exe()?)
+        .args(["--exact", "projects::browser_program", "--nocapture"])
+        .env("WAYLAND_DISPLAY", hp.socket())
+        .env(APP_ID, "foot")
+        .env(BROWSER_WINDOWS, "one|two")
+        .env(BROWSER_CHILDREN, &shells)
+        .spawn()?;
+    let shown = hp.dispatch_until(WAIT, |hp| hp.all_windows().len() == 2 && shells.exists())?;
+    anyhow::ensure!(shown, "the terminal's windows: {:?}", hp.all_windows());
+    let mut ids: Vec<WindowId> = hp.all_windows().iter().map(|w| w.0).collect();
+    ids.sort();
+    let (a, b) = (ids[0], ids[1]);
+    hp.place_window(a, hocus_compositor::model::Rect::new(100, 100, 500, 400));
+    hp.place_window(b, hocus_compositor::model::Rect::new(900, 100, 500, 400));
+    let pids: Vec<u32> = std::fs::read_to_string(&shells)?
+        .lines()
+        .filter_map(|l| l.parse().ok())
+        .collect();
+    anyhow::ensure!(pids.len() == 2, "its shells: {pids:?}");
+    let say = |hp: &mut Headless, session: &str, pid: u32, name: &str| -> anyhow::Result<()> {
+        let said = format!(
+            "agent claude-code {session} working {pid} {name}\tcwd {}\ttranscript {}\t\
+             prompt une question\n",
+            folder.display(),
+            transcript.display()
+        );
+        UnixStream::connect(&socket)?.write_all(said.as_bytes())?;
+        wait(hp, Duration::from_millis(400))
+    };
+    let window_of = |hp: &mut Headless, name: &str| {
+        hp.agents()
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.window)
+    };
+    let (one, two) = ("aaaa-1111", "bbbb-2222");
+    hp.focus_window(a);
+    say(&mut hp, one, pids[0], "un")?;
+    hp.focus_window(b);
+    say(&mut hp, two, pids[1], "deux")?;
+    assert_eq!(window_of(&mut hp, "un"), Some(a.0));
+    assert_eq!(window_of(&mut hp, "deux"), Some(b.0));
+
+    // A prompt sent while another application's window has the keyboard:
+    // its window stays.
+    let (_, other) = open_with(&mut hp, "test.other", (300, 200), false)?;
+    let other_id = id(&hp, "test.other")?;
+    hp.focus_window(other_id);
+    say(&mut hp, one, pids[0], "un")?;
+    assert_eq!(window_of(&mut hp, "un"), Some(a.0));
+    drop(other);
+    wait(&mut hp, Duration::from_millis(200))?;
+
+    // Saved as the session ends: each conversation with its own window.
+    hp.end_session();
+    let text = std::fs::read_to_string(places.root.join("state/hocuspanda/session"))?;
+    let placed = |session: &str| {
+        text.split("[[window]]")
+            .find(|w| w.contains(&format!("session = \"{session}\"")))
+            .and_then(|w| w.lines().find(|l| l.starts_with("place = ")))
+            .map(str::to_owned)
+    };
+    assert_eq!(
+        placed(one).as_deref(),
+        Some("place = [100, 100, 500, 400]"),
+        "{text}"
+    );
+    assert_eq!(
+        placed(two).as_deref(),
+        Some("place = [900, 100, 500, 400]"),
+        "{text}"
+    );
+    drop(hp);
+    let _ = terminal.wait();
     Ok(())
 }

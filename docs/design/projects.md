@@ -297,7 +297,9 @@ the tabs and agents only at log out), and when a card opens.
   compositor keeps them with the agent (the first `cwd`, as for its
   name), never logs them.
 - **Which agents belong to a project**: those whose window (docs/agents.md:
-  the first window above the agent's process) is on its desktop. An
+  the first window above the agent's process; of a terminal process with
+  several windows, the one its last prompt was typed in, bar.md "Several
+  agents in one terminal process") is on its desktop. An
   agent in one of herdr's panes is herdr's (§13, E).
 - **Saved**: tool, session id, folder, transcript's path; and the
   terminal it ran in (that window's desktop entry), at that window's

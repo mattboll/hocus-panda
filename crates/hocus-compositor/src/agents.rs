@@ -228,6 +228,11 @@ struct Agent {
     running: running::Running,
     /// Its tool's program, as its process found it (§8.1).
     program: Option<std::path::PathBuf>,
+    /// The window that had the keyboard as its user last sent it a prompt,
+    /// when that window's process is one above the agent's: of a terminal
+    /// process with several windows (kitty's, foot's server, …), the one
+    /// it runs in (bar.md, "A terminal process with several windows").
+    prompted: Option<WindowId>,
 }
 
 /// Good news of a process no agent is known for: a row of its own, for
@@ -684,6 +689,16 @@ impl Compositor {
     ) {
         let now = self.now_us();
         let key = (report.source, report.key.clone());
+        // Its user sent it a prompt: the window with the keyboard then, its
+        // own when its process is the nearest above the agent's that has
+        // windows (its terminal's). Read only as a prompt comes.
+        let prompted = report
+            .conversation
+            .prompt
+            .is_some()
+            .then(|| self.model.focused())
+            .flatten()
+            .map(|id| (id, self.windows_by_pid()));
         let agents = &mut self.agents;
         let Some(state) = report.state else {
             // Its session ended.
@@ -732,6 +747,7 @@ impl Compositor {
                     conversation: hocus_agents::Conversation::default(),
                     running: running::Running::new(),
                     program: None,
+                    prompted: None,
                 });
                 agents.list.len() - 1
             }
@@ -782,6 +798,23 @@ impl Compositor {
         }
         if !ancestry.is_empty() {
             agent.ancestry = ancestry;
+        }
+        if let Some((window, windows)) = prompted {
+            if Self::terminal_windows(agent, &windows).is_some_and(|ws| ws.contains(&window)) {
+                if agent.prompted != Some(window) {
+                    tracing::debug!(
+                        agent = agent.id,
+                        window = window.0,
+                        "an agent's window: the one its prompt was typed in"
+                    );
+                }
+                agent.prompted = Some(window);
+            } else {
+                tracing::debug!(
+                    agent = agent.id,
+                    "a prompt with another application's window focused: its window stays"
+                );
+            }
         }
         // Its conversation (§8.1): the folder it started in, as its name;
         // its transcript as last said; the first prompt of its session.
@@ -837,10 +870,7 @@ impl Compositor {
             .list
             .iter()
             .filter_map(|agent| {
-                let own = agent
-                    .ancestry
-                    .iter()
-                    .find_map(|pid| windows.get(pid).and_then(|w| w.last()).copied());
+                let own = Self::agent_own_window(agent, &windows);
                 let in_herdr = followed
                     && self
                         .agents
@@ -1088,11 +1118,7 @@ impl Compositor {
     /// The same, with how each one's window was found.
     fn agents_listed(&mut self) -> Vec<Listed> {
         let windows = self.windows_by_pid();
-        let own = |ancestry: &[u32]| {
-            ancestry
-                .iter()
-                .find_map(|pid| windows.get(pid).and_then(|w| w.last()).copied())
-        };
+        let own = |agent: &Agent| Self::agent_own_window(agent, &windows);
         let (herdr_window, herdr_how) = self.herdr_window(&windows);
         // An agent in one of herdr's panes whose own processes reach no
         // window: herdr's terminal's, which shows it when its pane is
@@ -1145,7 +1171,7 @@ impl Compositor {
             let name = hocus_agents::agent_name(herdr_name, Some(&agent.name), herdr_folder)
                 .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
                 .unwrap_or_default();
-            let (window, how, looks) = match (own(&agent.ancestry), pane_focused) {
+            let (window, how, looks) = match (own(agent), pane_focused) {
                 (Some(w), _) => (w.0, How::Own, true),
                 (None, Some(focused)) => in_herdr(focused),
                 (None, None) => (0, How::None("no window above its process"), false),
@@ -1538,6 +1564,27 @@ impl Compositor {
 
     /// The mapped windows by their client's process, bottom first: the
     /// last one of each process is its topmost.
+    /// Agent `agent`'s own window, `windows` by their processes: the one
+    /// its last prompt was typed in while that window is still its
+    /// process's, else the topmost of the first process above it that has
+    /// windows.
+    fn agent_own_window(agent: &Agent, windows: &BTreeMap<u32, Vec<WindowId>>) -> Option<WindowId> {
+        let theirs = Self::terminal_windows(agent, windows)?;
+        agent
+            .prompted
+            .filter(|w| theirs.contains(w))
+            .or_else(|| theirs.last().copied())
+    }
+
+    /// The windows of the nearest process above `agent`'s that has some
+    /// (its terminal's), `windows` by their processes.
+    fn terminal_windows<'a>(
+        agent: &Agent,
+        windows: &'a BTreeMap<u32, Vec<WindowId>>,
+    ) -> Option<&'a Vec<WindowId>> {
+        agent.ancestry.iter().find_map(|pid| windows.get(pid))
+    }
+
     fn windows_by_pid(&self) -> BTreeMap<u32, Vec<WindowId>> {
         let mut out: BTreeMap<u32, Vec<WindowId>> = BTreeMap::new();
         for id in self.model.stack() {
