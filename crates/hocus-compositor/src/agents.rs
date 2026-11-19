@@ -16,7 +16,10 @@
 //! - **herdr** ([`hocus_agents::herdr`]), when it runs and is not declined.
 //!
 //! The same agent seen by two sources (a Claude Code in a herdr pane) is
-//! one: its process is among the pane's. An agent is named by herdr (its
+//! one: its process is among the pane's. An agent is named by its Claude
+//! Code session's own name, given with `/rename` (its transcript's last
+//! `custom-title`, read off the loop by the control socket's thread,
+//! #886), else by herdr (its
 //! tab's own name, else its workspace's label), else by its project's
 //! folder, else by its process's working directory
 //! ([`hocus_agents::agent_name`]); never by its tool. An agent is
@@ -103,10 +106,17 @@ pub const GOOD_NEWS: Duration = Duration::from_secs(60);
 /// What the sources hand the loop.
 #[derive(Debug)]
 pub enum Heard {
-    /// A report, its process's ancestry, nearest first, and the program of
-    /// an agent whose conversation resumes, as its process finds it
-    /// (docs/design/projects.md §8.1).
-    Report(Report, Vec<u32>, Option<std::path::PathBuf>),
+    /// A report, its process's ancestry, nearest first, the program of an
+    /// agent whose conversation resumes, as its process finds it
+    /// (docs/design/projects.md §8.1), and its session's own name as its
+    /// transcript says it now, when the report gives a Claude Code
+    /// transcript (#886).
+    Report(
+        Report,
+        Vec<u32>,
+        Option<std::path::PathBuf>,
+        Option<Option<hocus_agents::titles::CustomTitle>>,
+    ),
     /// Good news (`hocus celebrate`), and its process's ancestry.
     Celebrate(hocus_agents::Celebration, Vec<u32>),
     Tools(Snapshot),
@@ -233,6 +243,9 @@ struct Agent {
     /// process with several windows (kitty's, foot's server, …), the one
     /// it runs in (bar.md, "A terminal process with several windows").
     prompted: Option<WindowId>,
+    /// Its session's own name, given with `/rename` (#886): it names it
+    /// first. Never logged.
+    title: Option<hocus_agents::titles::CustomTitle>,
 }
 
 /// Good news of a process no agent is known for: a row of its own, for
@@ -434,6 +447,9 @@ fn listen(
     perf: &hocus_perf::Counters,
     processes: Option<&std::path::Path>,
 ) {
+    // The sessions' own names, each transcript read on from where it was
+    // left (#886).
+    let mut titles = hocus_agents::titles::Titles::default();
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(stream) => stream,
@@ -582,8 +598,14 @@ fn listen(
                         .and_then(|((processes, pid), program)| {
                             crate::resume::program_of_process(processes, pid, program)
                         });
+                    let title = report
+                        .conversation
+                        .transcript
+                        .as_deref()
+                        .filter(|_| report.source == Source::ClaudeCode)
+                        .map(|t| titles.of(std::path::Path::new(t)));
                     if sender
-                        .send(Heard::Report(report, ancestry, program))
+                        .send(Heard::Report(report, ancestry, program, title))
                         .is_err()
                     {
                         // The loop is gone.
@@ -609,8 +631,8 @@ impl Compositor {
                 let _ = reply.send(self.program_asked(ask));
                 return;
             }
-            Heard::Report(report, ancestry, program) => {
-                self.agent_reported(report, ancestry, program);
+            Heard::Report(report, ancestry, program, title) => {
+                self.agent_reported(report, ancestry, program, title);
             }
             Heard::Celebrate(news, ancestry) => self.agent_celebrates(news, &ancestry),
             Heard::Tools(seen) => {
@@ -686,6 +708,7 @@ impl Compositor {
         report: Report,
         ancestry: Vec<u32>,
         program: Option<std::path::PathBuf>,
+        title: Option<Option<hocus_agents::titles::CustomTitle>>,
     ) {
         let now = self.now_us();
         let key = (report.source, report.key.clone());
@@ -748,6 +771,7 @@ impl Compositor {
                     running: running::Running::new(),
                     program: None,
                     prompted: None,
+                    title: None,
                 });
                 agents.list.len() - 1
             }
@@ -831,6 +855,10 @@ impl Compositor {
         }
         if program.is_some() {
             agent.program = program;
+        }
+        // Its transcript as it is now: a `/rename` since names it (#886).
+        if let Some(title) = title {
+            agent.title = title;
         }
         let folder = folder_new.then(|| agent.conversation.cwd.clone()).flatten();
         let new_pid = report.pid.filter(|p| !agent.pids.contains(p));
@@ -1168,9 +1196,14 @@ impl Compositor {
                 state => state.name(),
             };
             let source: Vec<&str> = sources.iter().map(|s| s.name()).collect();
-            let name = hocus_agents::agent_name(herdr_name, Some(&agent.name), herdr_folder)
-                .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
-                .unwrap_or_default();
+            let name = hocus_agents::agent_name(
+                agent.title.as_ref().map(|t| t.0.as_str()),
+                herdr_name,
+                Some(&agent.name),
+                herdr_folder,
+            )
+            .or_else(|| agent.keys.first().map(|(_, key)| key.clone()))
+            .unwrap_or_default();
             let (window, how, looks) = match (own(agent), pane_focused) {
                 (Some(w), _) => (w.0, How::Own, true),
                 (None, Some(focused)) => in_herdr(focused),
@@ -1228,9 +1261,13 @@ impl Compositor {
                 .iter()
                 .filter(|(a, _)| !merged.contains(&a.pane))
                 .map(|(a, since)| {
-                    let name =
-                        hocus_agents::agent_name(a.name.as_deref(), a.folder.as_deref(), None)
-                            .unwrap_or_else(|| a.pane.clone());
+                    let name = hocus_agents::agent_name(
+                        None,
+                        a.name.as_deref(),
+                        a.folder.as_deref(),
+                        None,
+                    )
+                    .unwrap_or_else(|| a.pane.clone());
                     (
                         a.pane.clone(),
                         name,

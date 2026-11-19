@@ -1002,6 +1002,57 @@ fn claude_codes_hooks_reach_the_model() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A Claude Code session renamed with `/rename` (#886): its transcript
+/// gaining a `custom-title` line renames its agent at its next hook, the
+/// last one winning; before one, its folder names it.
+#[test]
+fn a_rename_in_claude_code_names_its_agent_at_the_next_hook() -> anyhow::Result<()> {
+    let Some((shell, hocus)) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, &hocus, &Machine::default())?;
+    let transcript = bed.home().join("abc123.jsonl");
+    std::fs::write(&transcript, "{\"type\":\"user\",\"message\":\"bonjour\"}\n")?;
+    let hook = |event: &str, extra: &str| {
+        format!(
+            "{{\"session_id\":\"abc123\",\"transcript_path\":\"{}\",\
+             \"cwd\":\"/home/alex/hocus-panda\",\"hook_event_name\":\"{event}\"{extra}}}",
+            transcript.display()
+        )
+    };
+    let renamed = |title: &str| -> anyhow::Result<()> {
+        let mut file = std::fs::OpenOptions::new().append(true).open(&transcript)?;
+        file.write_all(
+            format!(
+                "{{\"type\":\"custom-title\",\"customTitle\":\"{title}\",\
+                 \"sessionId\":\"abc123\"}}\n"
+            )
+            .as_bytes(),
+        )?;
+        Ok(())
+    };
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook("SessionStart", ",\"source\":\"startup\"")),
+    )?;
+    bed.agent_becomes("hocus-panda", Some("idle"))?;
+    renamed("refonte du site")?;
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook("UserPromptSubmit", ",\"prompt\":\"go\"")),
+    )?;
+    bed.agent_becomes("refonte du site", Some("working"))?;
+    renamed("revue")?;
+    bed.hocus(
+        &["agent-hook", "claude-code"],
+        Some(&hook("Stop", ",\"stop_hook_active\":false")),
+    )?;
+    bed.agent_becomes("revue", Some("done"))?;
+    let agents = bed.hp.agents();
+    assert_eq!(agents.len(), 1, "{agents:?}");
+    Ok(())
+}
+
 #[test]
 fn the_agents_window_is_found_above_its_process() -> anyhow::Result<()> {
     let Some((shell, hocus)) = ready() else {
