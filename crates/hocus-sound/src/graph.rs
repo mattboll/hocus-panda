@@ -614,6 +614,18 @@ impl Graph {
         {
             return;
         }
+        // The Hocuspanda microphone's own streams (#619, lot 5: its
+        // reading of the real microphone, the window's meter reading it)
+        // are no application's use either; what reads its source is, of
+        // the microphone (`hocus_link::voice::VOICE_PREFIX`).
+        if class == Class::Capture
+            && props
+                .and_then(|p| p.get("node.name"))
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.starts_with("hocuspanda-voice"))
+        {
+            return;
+        }
         let node = self.nodes.entry(id).or_default();
         node.class = class;
         if let Some(props) = props {
@@ -1238,6 +1250,44 @@ mod tests {
         graph.apply(link(84, 80, 82));
         let used = graph.in_use();
         assert_eq!(used.camera.len(), 1, "{:?}", used.camera);
+    }
+
+    /// The Hocuspanda microphone (#619, lot 5): its reading of the real
+    /// microphone and the window's meter are no use of it; a call reading
+    /// the Hocuspanda source uses the microphone.
+    #[test]
+    fn a_call_reading_the_hocuspanda_microphone_uses_the_microphone() {
+        let mut graph = Graph::default();
+        let mut mic = sink(30, "alsa_input.analog-stereo", &[0.5, 0.5], false);
+        mic["info"]["props"]["media.class"] = json!("Audio/Source");
+        graph.apply(mic);
+        graph.apply(classed(
+            31,
+            "Audio/Source",
+            json!({ "node.name": "hocuspanda-voice", "node.description": "Hocuspanda" }),
+        ));
+        for (id, name) in [
+            (32, "hocuspanda-voice-input"),
+            (33, "hocuspanda-voice-meter"),
+        ] {
+            graph.apply(classed(
+                id,
+                "Stream/Input/Audio",
+                json!({ "node.name": name, "application.name": "Hocuspanda" }),
+            ));
+        }
+        graph.apply(link(40, 30, 32));
+        graph.apply(link(41, 31, 33));
+        assert!(graph.in_use().microphone.is_empty());
+        graph.apply(classed(
+            34,
+            "Stream/Input/Audio",
+            json!({ "node.name": "Firefox", "application.name": "Firefox" }),
+        ));
+        graph.apply(link(42, 31, 34));
+        let used = graph.in_use();
+        assert_eq!(used.microphone.len(), 1, "{:?}", used.microphone);
+        assert_eq!(used.microphone[0].app, "Firefox");
     }
 
     /// The Hocuspanda camera reading the real one for the presenter alone

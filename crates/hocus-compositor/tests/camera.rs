@@ -422,7 +422,7 @@ const TILE_HALF: (f64, f64) = (36.5, 31.0);
 
 /// A dim room with someone in it, a little blue, B, G, R, x: what a
 /// laptop's camera sees in the evening.
-fn someone() -> Vec<u8> {
+pub(crate) fn someone() -> Vec<u8> {
     let (w, h) = (SIZE.0 as f64, SIZE.1 as f64);
     let mut frame = Vec::with_capacity((SIZE.0 * SIZE.1 * 4) as usize);
     let inside = |x: f64, y: f64, (cx, cy): (f64, f64), (rx, ry): (f64, f64)| {
@@ -501,15 +501,17 @@ fn call(remote: &std::path::Path) -> anyhow::Result<Call> {
 /// The real shell (on the CPU, in French) with the fakes of its services
 /// (`levels/fakes.rs`: their PipeWire, the test camera on it), the
 /// configuration a file of the test's own, a call reading the Hocuspanda
-/// source.
-struct WindowBed {
-    hp: Headless,
+/// source; with the Hocuspanda microphone (lot 5), a fake microphone
+/// reading the tests' voice and the call reading that source too.
+pub(crate) struct WindowBed {
+    pub(crate) hp: Headless,
     camera: FakeCamera,
     call: Call,
     log: std::path::PathBuf,
     file: std::path::PathBuf,
     fakes: crate::fakes::Fakes,
     root: tempfile::TempDir,
+    _voice: Option<(crate::voice::FakeMic, crate::voice::Call)>,
 }
 
 /// The tests' password for the lock.
@@ -532,9 +534,20 @@ impl WindowBed {
         Self::start_full(file, "1600x1000", true)
     }
 
+    /// The bed with the Hocuspanda microphone too, its microphone the
+    /// fake one of `voice.rs` reading the tests' voice.
+    pub(crate) fn start_with_voice(file: &str, screen: &str) -> anyhow::Result<Self> {
+        Self::start_all(file, screen, false, true)
+    }
+
     fn start_full(file: &str, screen: &str, mic: bool) -> anyhow::Result<Self> {
+        Self::start_all(file, screen, mic, false)
+    }
+
+    fn start_all(file: &str, screen: &str, mic: bool, voice: bool) -> anyhow::Result<Self> {
         let shell = common::shell_program();
         let program = common::camera_program();
+        let voice_program = voice.then(common::voice_program);
         if !crate::fakes::available() {
             common::missing("dbus-daemon, pipewire, pw-dump, wpctl and pw-metadata");
         }
@@ -588,6 +601,7 @@ impl WindowBed {
         config.camera_program = Some(program);
         config.camera_device = "cpu".to_owned();
         config.camera_video4linux = Some(dir.join("video4linux"));
+        config.voice_program = voice_program;
         config.state_dir = Some(dir.join("state/hocuspanda"));
         config.keyboard.layouts = vec!["us".to_owned()];
         config.lock_auth = Authenticator::test(PASSWORD);
@@ -616,6 +630,23 @@ impl WindowBed {
             wait(&mut hp, Duration::from_millis(50))?;
         }
         let call = call(&fakes.pw_socket())?;
+        // The Hocuspanda microphone on the graph, its microphone the
+        // test's, then the call reading it.
+        let voice = if voice {
+            let mic = crate::voice::fake_mic(&fakes.pw_socket());
+            mic.play(hocus_voice::wav::test_speech());
+            let ready = Instant::now();
+            while !hp.voice().0 {
+                anyhow::ensure!(
+                    ready.elapsed() < Duration::from_secs(20),
+                    "no Hocuspanda microphone"
+                );
+                wait(&mut hp, Duration::from_millis(50))?;
+            }
+            Some((mic, crate::voice::Call::start(&fakes.pw_socket())?))
+        } else {
+            None
+        };
         let mut bed = Self {
             hp,
             camera,
@@ -624,6 +655,7 @@ impl WindowBed {
             file: config_file,
             fakes,
             root,
+            _voice: voice,
         };
         bed.band(Duration::from_secs(20))?;
         Ok(bed)
@@ -650,7 +682,7 @@ impl WindowBed {
     }
 
     /// Waits until the shell logs `what` on a line holding all of `with`.
-    fn logged(&mut self, what: &str, with: &[&str]) -> anyhow::Result<String> {
+    pub(crate) fn logged(&mut self, what: &str, with: &[&str]) -> anyhow::Result<String> {
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(15) {
             if let Some(line) = self
@@ -686,7 +718,7 @@ impl WindowBed {
     }
 
     /// The file once `pass` takes it.
-    fn written(&mut self, pass: impl Fn(&str) -> bool) -> anyhow::Result<String> {
+    pub(crate) fn written(&mut self, pass: impl Fn(&str) -> bool) -> anyhow::Result<String> {
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(10) {
             let text = std::fs::read_to_string(&self.file).unwrap_or_default();
@@ -720,13 +752,50 @@ impl WindowBed {
         Ok(common::drawn_popovers(&self.hp)[0])
     }
 
-    /// A click on tile `n` (from 0) of the window at `window`.
-    fn tile(&mut self, window: hocus_compositor::model::Rect, n: usize) -> anyhow::Result<()> {
+    /// A click on tile `n` (from 0, four a row) of the window at `window`.
+    pub(crate) fn tile(
+        &mut self,
+        window: hocus_compositor::model::Rect,
+        n: usize,
+    ) -> anyhow::Result<()> {
         let at = (
-            f64::from(window.x) + IN + TILE_STEP * n as f64 + TILE_HALF.0,
-            f64::from(window.y) + GRID_TOP + TILE_HALF.1,
+            f64::from(window.x) + IN + TILE_STEP * (n % 4) as f64 + TILE_HALF.0,
+            f64::from(window.y) + GRID_TOP + (62.0 + 6.0) * (n / 4) as f64 + TILE_HALF.1,
         );
         common::click_on(&mut self.hp, at, hocus_link::POPOVER_NAMESPACE)
+    }
+
+    /// The window, opened by a click on the microphone's tile of the
+    /// in-use sign (the first of the microphone's and the camera's): where
+    /// it is.
+    pub(crate) fn open_on_microphone(&mut self) -> anyhow::Result<hocus_compositor::model::Rect> {
+        let line = self.logged(
+            "the in-use sign is drawn at rest",
+            &["kinds=[Microphone, Camera]"],
+        )?;
+        let sign = common::drawn(&mut self.hp, hocus_link::IN_USE_NAMESPACE)?[0].1;
+        // Two tiles of 30 × 24 px, 4 px apart, in the sign's middle: side
+        // by side in the full form, one over the other in the mini one.
+        let (cx, cy) = (
+            f64::from(sign.x) + f64::from(sign.width) / 2.0,
+            f64::from(sign.y) + f64::from(sign.height) / 2.0,
+        );
+        let at = if line.contains("form=Some(Mini)") {
+            (cx, cy - 14.0)
+        } else {
+            (cx - 17.0, cy)
+        };
+        common::click_on(&mut self.hp, at, hocus_link::IN_USE_NAMESPACE)?;
+        let open = self
+            .hp
+            .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+        anyhow::ensure!(open, "no window:\n{}", self.log());
+        self.logged(
+            "the camera's window shows it",
+            &["CAMÉRA ET MICRO", "| Voix"],
+        )?;
+        common::at_rest(&mut self.hp)?;
+        Ok(common::drawn_popovers(&self.hp)[0])
     }
 }
 
@@ -755,7 +824,7 @@ fn the_window_s_tiles_write_the_effects_and_the_frames_follow() -> anyhow::Resul
     bed.written(|t| t.contains("banner = true"))?;
     bed.logged(
         "the camera's window shows it",
-        &["[x] Bandeau", "(dots: Image, Réactions)"],
+        &["[x] Bandeau", "(dots: Image, Voix, Réactions)"],
     )?;
     // The compositor follows the file and tells the camera: the band
     // darkens in the call's frames.
@@ -828,7 +897,7 @@ impl WindowBed {
 
     /// What the first screen shows around `rect` (logical pixels, `more`
     /// around it), at its `scale`, saved in `out` as `name`.
-    fn shoot(
+    pub(crate) fn shoot(
         &mut self,
         out: &std::path::Path,
         name: &str,

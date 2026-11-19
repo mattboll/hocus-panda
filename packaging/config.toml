@@ -631,6 +631,19 @@
 # presenter-side = "right"
 # presenter-size = "medium"
 
+# [voice]
+# The Hocuspanda microphone: a microphone named "Hocuspanda" that every
+# application lists (PipeWire's and PulseAudio's), which reads the real
+# microphone (the default one) only while one reads it, and makes your
+# voice through one effect (the camera and microphone's window in the bar,
+# docs/design/voice.md): "none" (as it is), "quiet" (the noise around
+# you taken out, DeepFilterNet on the processor), "studio" (fuller and
+# more even: an equaliser, a compressor, a gentle de-esser), "panda"
+# (higher, rounder), "robot" (metallic, on one note), "deep" (an octave
+# lower). A meeting's transcription records the real microphone, never
+# this one.
+# effect = "quiet"
+
 # [magnifier]
 # The magnifier (docs/design/accessibility.md): the screen under the
 # pointer drawn larger, from 1 to 16 times, by the desktop; screenshots,

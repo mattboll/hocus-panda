@@ -778,6 +778,11 @@ pub const ALL: &[Label] = &[
         said: Said::Switch,
     },
     Label {
+        key: "voice.effect",
+        name: hocus_words::settings::camera::VOICE,
+        said: Said::Choices(&[("none", hocus_words::settings::camera::AS_IT_IS), ("quiet", hocus_words::settings::camera::NO_NOISE), ("studio", hocus_words::settings::camera::STUDIO), ("panda", hocus_words::settings::camera::PANDA), ("robot", hocus_words::settings::camera::ROBOT), ("deep", hocus_words::settings::camera::DEEP)]),
+    },
+    Label {
         key: "wallpaper.animate",
         name: hocus_words::settings::wallpaper::ANIMATE_THE_BACKGROUND,
         said: Said::Switch,

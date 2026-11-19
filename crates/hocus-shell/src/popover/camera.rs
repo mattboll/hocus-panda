@@ -1,13 +1,20 @@
 //! The camera and microphone's window, « CAMÉRA ET MICRO » (#619,
-//! docs/design/camera.md), opened by a click on the camera's tile of the
-//! in-use sign, as the bar's popovers (§9), 340 wide, 14 px in, its parts
-//! 9 px apart, as the approved mockup draws it:
+//! docs/design/camera.md, docs/design/voice.md), opened by a click on the
+//! camera's tile of the in-use sign (on its Image tab) or the
+//! microphone's (on Voix), as the bar's popovers (§9), 340 wide, 14 px
+//! in, its parts 9 px apart, as the approved mockup draws it:
 //!
 //! - its label (11 px, 700, spaced 0.1 em, `text.faint`) and who reads the
 //!   camera and the microphone ("Utilisée par Firefox", 11.5 px);
 //! - the preview, 312 × 176, radius 10, on `#1A1F2C`: what the others
 //!   see, read from the Hocuspanda source while the window shows
-//!   (`crate::camera::preview`);
+//!   (`crate::camera::preview`): opened from the microphone's tile, only
+//!   while an application uses the camera ("Caméra éteinte" otherwise, so
+//!   that looking at the voices never turns the camera on); in its lower
+//!   right the voice's meter (18 px, radius 6, `rgba(10,14,24,0.6)`): five
+//!   bars 2 px wide in the voice's colour, its name (9.5 px), the
+//!   Hocuspanda microphone read while an application uses the microphone
+//!   (`crate::camera::meter`), the bars at rest otherwise;
 //! - the tabs, Image · Fond · Visage · Voix · Réactions (26 px, radius 7,
 //!   in a 2 px track, radius 9), a violet dot (`#B69CFF`, 5 px) on a tab
 //!   with an effect on;
@@ -59,7 +66,7 @@ use super::{
 use crate::{
     camera::{
         self,
-        effects::{self, Effect, Tab, Thumb},
+        effects::{self, Effect, Thumb},
     },
     clock::time::Lang,
     levels::draw::{FAINT, LINE, MANROPE, MANROPE_BOLD, TEXT, rgb},
@@ -70,6 +77,8 @@ use crate::{
         style::{self, said},
     },
 };
+
+pub use crate::camera::effects::Tab;
 
 type El<'a> = Element<'a, Msg>;
 
@@ -114,6 +123,22 @@ const FRAME: Duration = Duration::from_millis(33);
 const WAITING: Duration = Duration::from_millis(250);
 /// Dimmed: what this version does not make.
 const SOON: f32 = 0.4;
+/// The voice's meter: its height, radius, padding, how far in from the
+/// preview's corner; its bars' width, gap and heights, the name's size.
+const METER: f32 = 18.0;
+const METER_RADIUS: f32 = 6.0;
+const METER_PAD: f32 = 6.0;
+const METER_IN: f32 = 8.0;
+const BAR: f32 = 2.0;
+const BAR_GAP: f32 = 2.0;
+const BARS: [f32; 5] = [10.0, 12.0, 8.0, 12.0, 9.0];
+const METER_TEXT: f32 = 9.5;
+/// A bar at rest is this much of its height (the mockup's wave's low).
+const BAR_REST: f32 = 0.35;
+/// Each bar shows the level this long after the one on its left.
+const BAR_LAG: Duration = Duration::from_millis(70);
+const METER_FILL: Ink = Ink::Dark(Color::from_rgba8(10, 14, 24, 0.6));
+const METER_TEXT_INK: Ink = Ink::Dark(rgb(0xEEF1F6));
 
 const SURFACE: Ink = Ink::Dark(rgb(0x1A1F2C));
 const TRACK: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.05));
@@ -175,6 +200,8 @@ struct Ui {
     said: Option<String>,
     /// The v4l2loopback device is there, as the help page last opened.
     loopback: bool,
+    /// The preview reads the camera (else "Caméra éteinte").
+    camera: bool,
 }
 
 impl Default for Ui {
@@ -186,6 +213,7 @@ impl Default for Ui {
             switch: kit::Switch::default(),
             said: None,
             loopback: false,
+            camera: true,
         }
     }
 }
@@ -200,16 +228,30 @@ fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
 /// The height it took when last laid out.
 static NATURAL: AtomicU32 = AtomicU32::new(0);
 
-/// The window opens: its first tab, nothing holds the ring, the preview
-/// reads.
-pub fn opening() {
-    ui(|ui| *ui = Ui::default());
-    camera::preview::start();
+/// The window opens on `tab`, nothing holding the ring: the preview
+/// reads, but from the microphone's tile only while an application uses
+/// the camera; the meter reads while one uses the microphone.
+pub fn opening(tab: Tab) {
+    let uses = crate::in_use::snapshot();
+    let camera = tab != Tab::Voice || uses.camera.iter().any(|s| s.live());
+    let microphone = uses.microphone.iter().any(|s| s.live());
+    ui(|ui| {
+        *ui = Ui {
+            tab,
+            camera,
+            ..Ui::default()
+        }
+    });
+    if camera {
+        camera::preview::start();
+    }
+    camera::meter::want(microphone);
 }
 
-/// It closes: the preview no longer reads.
+/// It closes: the preview and the meter no longer read.
 pub fn closing() {
     camera::preview::stop();
+    camera::meter::want(false);
 }
 
 /// Its height, logical pixels: as the widgets took it, else as counted.
@@ -261,6 +303,7 @@ pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
             let was = NATURAL.swap(height.to_bits(), Ordering::Relaxed);
             if (f32::from_bits(was) - height).abs() > 0.5 {
                 crate::popover::refit(Item::Camera);
+                crate::popover::refit(Item::Microphone);
             }
         })
         .on_glass(panel.glass)
@@ -321,7 +364,7 @@ fn effects_page<'a>(
     let reading = said(readers.to_owned(), READERS, MANROPE, FAINT.get());
     column![
         head(lang, reading.into()),
-        preview(lang, shown),
+        preview(lang, shown, ui.camera),
         tabs(lang, shown, ui),
         grid(lang, shown, ui),
         container(said(
@@ -340,9 +383,11 @@ fn effects_page<'a>(
     .into()
 }
 
-/// The preview: the last frame, else what keeps it.
-fn preview<'a>(lang: Lang, shown: &CameraShown) -> El<'a> {
-    let waiting = if !shown.ready {
+/// The preview: the last frame, else what keeps it; the voice's meter.
+fn preview<'a>(lang: Lang, shown: &CameraShown, reads: bool) -> El<'a> {
+    let waiting = if !reads {
+        Some(w::CAMERA_OFF)
+    } else if !shown.ready {
         Some(w::NOT_THERE)
     } else if shown.source.is_none() && camera::preview::frame().is_some() {
         Some(w::NO_CAMERA)
@@ -368,7 +413,96 @@ fn preview<'a>(lang: Lang, shown: &CameraShown) -> El<'a> {
                 .center(Length::Fill),
         );
     }
+    layers = layers.push(
+        container(meter(lang, shown))
+            .width(PREVIEW.width)
+            .height(PREVIEW.height)
+            .padding(METER_IN)
+            .align_x(Horizontal::Right)
+            .align_y(Vertical::Bottom),
+    );
     crate::ui::line(layers, w::PREVIEW.get(lang)).into()
+}
+
+/// The voice's name on the meter, and its colour (the mockup's).
+fn voice_look(word: &str) -> (Text, Color) {
+    match word {
+        "none" => (w::METER_AS_IT_IS, rgb(0xC9D0DC)),
+        "studio" => (w::METER_STUDIO, rgb(0xF5B44A)),
+        "panda" => (w::METER_PANDA, rgb(0xF4F1EA)),
+        "robot" => (w::METER_ROBOT, rgb(0x8FB3FF)),
+        "deep" => (w::METER_DEEP, rgb(0xB69CFF)),
+        _ => (w::METER_QUIET, rgb(0x6CC287)),
+    }
+}
+
+/// The voice's meter: its bars and its name.
+fn meter<'a>(lang: Lang, shown: &CameraShown) -> El<'a> {
+    let (name, colour) = voice_look(&shown.voice);
+    let width = BARS.len() as f32 * (BAR + BAR_GAP) - BAR_GAP;
+    let bars = iced::widget::canvas(Bars { colour })
+        .width(width)
+        .height(METER);
+    container(
+        row![
+            bars,
+            said(name.get(lang), METER_TEXT, MANROPE, METER_TEXT_INK.get())
+        ]
+        .spacing(4.0)
+        .align_y(Vertical::Center),
+    )
+    .padding([0.0, METER_PAD])
+    .height(METER)
+    .align_y(Vertical::Center)
+    .style(|_| style::boxed(METER_FILL.get(), METER_RADIUS))
+    .into()
+}
+
+/// The meter's bars: each the level a little after its left one's, from
+/// its rest to its height.
+struct Bars {
+    colour: Color,
+}
+
+impl<M> canvas::Program<M> for Bars {
+    type State = ();
+
+    fn update(
+        &self,
+        _state: &mut (),
+        event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<M>> {
+        let iced::Event::Window(iced::window::Event::RedrawRequested(now)) = event else {
+            return None;
+        };
+        camera::meter::live().then(|| canvas::Action::request_redraw_at(*now + FRAME))
+    }
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut f = Frame::new(renderer, bounds.size());
+        let now = Instant::now();
+        let mut x = 0.0;
+        for (i, tall) in BARS.iter().enumerate() {
+            let level = camera::meter::level(now, BAR_LAG * i as u32);
+            let h = tall * (BAR_REST + (1.0 - BAR_REST) * level);
+            let y = (bounds.height - h) / 2.0;
+            f.fill(
+                &Path::rounded_rectangle(Point::new(x, y), Size::new(BAR, h), (BAR / 2.0).into()),
+                self.colour,
+            );
+            x += BAR + BAR_GAP;
+        }
+        vec![f.into_geometry()]
+    }
 }
 
 /// The preview's frames, drawn as they come.

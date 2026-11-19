@@ -7,11 +7,16 @@
 //! The window is the popover of the camera's tile in the in-use sign
 //! (`popover::camera`); the violet dot on that tile says an effect is on.
 //!
+//! Voix (lot 5): the Hocuspanda microphone's voice, written into `[voice]
+//! effect`; the window's meter ([`meter`]) reads that microphone while an
+//! application uses the microphone.
+//!
 //! « Je reviens » (lot 3): while the compositor says to hush (the screen
 //! locked during a call), the session's default source is muted, if it
 //! was not; and unmuted when that ends, if this muted it ([`hush`]).
 
 pub mod effects;
+pub mod meter;
 pub mod preview;
 
 use std::sync::{Mutex, PoisonError};
@@ -40,7 +45,7 @@ pub fn set(shown: CameraShown) {
     if was.as_ref().is_none_or(|w| w.hush != shown.hush) {
         hush(shown.hush);
     }
-    changed(was.is_none_or(|w| w.dot() != shown.dot()));
+    changed(was.is_none_or(|w| w.dot() != shown.dot() || w.voice_dot() != shown.voice_dot()));
 }
 
 /// The session's default source muted (`true`) if it was not, or
@@ -86,12 +91,17 @@ pub fn shown() -> CameraShown {
             away: true,
             presenter: false,
             hush: false,
+            voice: "quiet".to_owned(),
+            voice_ready: false,
+            voice_read: false,
+            microphone: None,
         })
 }
 
 /// The window draws again; the in-use sign too when its dot changed.
 fn changed(dot: bool) {
     crate::popover::changed(crate::popover::Item::Camera);
+    crate::popover::changed(crate::popover::Item::Microphone);
     if dot {
         crate::popover::tell(ToCompositor::Wake(IN_USE_NAMESPACE.to_owned()));
     }
@@ -122,16 +132,18 @@ pub fn choose(key: &'static str, value: bool) {
 }
 
 /// `[camera] key` set to the word `value` (one of a tab's: Fond's
-/// `background`), as [`choose`].
+/// `background`; Voix's `voice` is `[voice] effect`), as [`choose`].
 pub fn choose_word(key: &'static str, value: &'static str) {
     let dot = {
         let mut shown = SHOWN.lock().unwrap_or_else(PoisonError::into_inner);
         let mut now = shown.clone().unwrap_or_else(self::shown);
-        let before = now.dot();
-        if key == "background" {
-            value.clone_into(&mut now.background);
+        let before = (now.dot(), now.voice_dot());
+        match key {
+            "background" => value.clone_into(&mut now.background),
+            "voice" => value.clone_into(&mut now.voice),
+            _ => {}
         }
-        let dot = before != now.dot();
+        let dot = before != (now.dot(), now.voice_dot());
         *shown = Some(now);
         dot
     };
@@ -139,7 +151,17 @@ pub fn choose_word(key: &'static str, value: &'static str) {
     write(key, hocus_config::toml_edit::value(value));
 }
 
+/// Where a choice of the window is kept: `[camera] KEY`, but the voice's,
+/// `[voice] effect`.
+fn place(key: &'static str) -> (&'static str, &'static str) {
+    match key {
+        "voice" => ("voice", "effect"),
+        key => ("camera", key),
+    }
+}
+
 fn write(key: &'static str, value: hocus_config::toml_edit::Item) {
+    let (section, key) = place(key);
     let Some(file) = hocus_config::file() else {
         tracing::warn!(
             key,
@@ -154,18 +176,20 @@ fn write(key: &'static str, value: hocus_config::toml_edit::Item) {
                 &file,
                 |doc| {
                     let table = doc
-                        .entry("camera")
+                        .entry(section)
                         .or_insert_with(hocus_config::toml_edit::table)
                         .as_table_mut()
-                        .ok_or_else(|| "[camera] is not a table".to_owned())?;
+                        .ok_or_else(|| format!("[{section}] is not a table"))?;
                     table.insert(key, value.clone());
                     Ok(())
                 },
                 |_| Ok(()),
             );
             match edited {
-                Ok(_) => tracing::info!(key, "the camera's choice written"),
-                Err(err) => tracing::warn!(%err, key, "the camera's choice is not written"),
+                Ok(_) => tracing::info!(section, key, "the camera's choice written"),
+                Err(err) => {
+                    tracing::warn!(%err, section, key, "the camera's choice is not written")
+                }
             }
         });
     if let Err(err) = wrote {

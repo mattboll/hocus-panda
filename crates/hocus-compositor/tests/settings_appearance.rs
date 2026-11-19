@@ -530,9 +530,12 @@ fn the_camera_page_writes_the_screen_light_s_keys() -> anyhow::Result<()> {
             "camera.presenter",
             "camera.presenter-side",
             "camera.presenter-size",
+            "voice.effect",
         ]
     );
     assert_eq!(row(&shown, "camera.screen-light")["value"], "oui");
+    // The Hocuspanda microphone's voice (lot 5): Sans bruit.
+    assert_eq!(row(&shown, "voice.effect")["value"], "Sans bruit");
     assert_eq!(row(&shown, "camera.screen-light-shape")["value"], "Cadre");
     assert_eq!(row(&shown, "camera.screen-light-warmth")["value"], "Neutre");
     assert_eq!(row(&shown, "camera.screen-light-strength")["value"], "Auto");

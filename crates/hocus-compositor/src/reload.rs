@@ -282,6 +282,12 @@ impl State {
             self.redraw = true;
             followed.push("[camera]");
         }
+        // The Hocuspanda microphone's voice (#619, lot 5): told at the
+        // loop's next turn.
+        if new.voice != self.config.voice {
+            self.config.voice = new.voice;
+            followed.push("[voice]");
+        }
         // The screen reader (#734): started or stopped.
         if self.accessibility_changed(&new.accessibility) {
             followed.push("[accessibility]");

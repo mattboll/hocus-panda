@@ -114,6 +114,10 @@ hocus-compositor = { path = ".", features = ["test-auth"] }
 # The Hocuspanda camera's tests (#619): its preview reads the source as
 # the camera window's does, and its pods make the fake camera's format.
 hocus-camera = { workspace = true, features = ["test-picture"] }
+# The Hocuspanda microphone's tests (#619, lot 5): the call reads the
+# source as the window's meter does, the fake microphone plays the tests'
+# reading.
+hocus-voice = { workspace = true, features = ["test-speech"] }
 smithay-client-toolkit.workspace = true
 wayland-client.workspace = true
 # text-input-v3 for a test window's text field (the emoji picker, 5.7);

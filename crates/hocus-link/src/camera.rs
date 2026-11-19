@@ -217,6 +217,21 @@ pub struct CameraShown {
     /// it as this ends if it muted it.
     #[serde(default)]
     pub hush: bool,
+    /// `[voice] effect` (lot 5): the Hocuspanda microphone's voice,
+    /// `none`, `quiet`, `studio`, `panda`, `robot` or `deep`.
+    #[serde(default)]
+    pub voice: String,
+    /// The Hocuspanda microphone is there (its program runs, its source is
+    /// on the graph).
+    #[serde(default)]
+    pub voice_ready: bool,
+    /// An application reads it (the window's meter too).
+    #[serde(default)]
+    pub voice_read: bool,
+    /// The real microphone it reads or would read (its description), if
+    /// one was found.
+    #[serde(default)]
+    pub microphone: Option<String>,
 }
 
 impl CameraShown {
@@ -230,5 +245,12 @@ impl CameraShown {
     /// application reading the camera itself gets none).
     pub fn dot(&self) -> bool {
         self.read && self.effects()
+    }
+
+    /// The violet dot on the microphone's tile: a voice other than the
+    /// microphone as it is, in the Hocuspanda microphone, which something
+    /// reads.
+    pub fn voice_dot(&self) -> bool {
+        self.voice_read && !self.voice.is_empty() && self.voice != "none"
     }
 }

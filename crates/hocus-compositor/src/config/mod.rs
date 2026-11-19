@@ -24,6 +24,7 @@ mod keyboard;
 mod outputs;
 mod panel;
 mod power;
+mod voice;
 mod windows;
 
 pub use accessibility::*;
@@ -35,6 +36,7 @@ pub use keyboard::*;
 pub use outputs::*;
 pub use panel::*;
 pub use power::*;
+pub use voice::Voice;
 pub use windows::*;
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize)]
@@ -77,6 +79,9 @@ pub struct Config {
     /// The screen light while the camera is in use (#619,
     /// docs/design/camera.md).
     pub camera: Camera,
+    /// The Hocuspanda microphone's voice (#619, lot 5,
+    /// docs/design/voice.md).
+    pub voice: Voice,
     pub panel: Panel,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
@@ -194,6 +199,12 @@ pub struct Config {
     /// ever opened.
     #[serde(skip)]
     pub camera_video4linux: Option<PathBuf>,
+    /// The Hocuspanda microphone's program (#619, lot 5, `hocus-voice`):
+    /// the session's is the one beside the compositor. Not part of the
+    /// file; `None` starts none (nested and headless compositors, unless
+    /// asked; tests, unless they give one).
+    #[serde(skip)]
+    pub voice_program: Option<PathBuf>,
     /// The home `~/` stands for in the file's paths (a wallpaper's): `HOME`.
     /// Not part of the file; `None`: a `~/` path is not found (tests,
     /// unless they give one).

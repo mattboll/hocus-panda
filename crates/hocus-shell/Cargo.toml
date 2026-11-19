@@ -33,6 +33,9 @@ hocus-day.workspace = true
 hocus-sound.workspace = true
 # The Hocuspanda camera's window's preview, which reads its source (#619).
 hocus-camera.workspace = true
+# The Hocuspanda microphone's level meter in that window, which reads its
+# source (#619, lot 5).
+hocus-voice.workspace = true
 # A meeting's transcription: "Ne plus demander", the models it lacks.
 hocus-meetings.workspace = true
 # Bluetooth, from BlueZ, shared with the Settings.

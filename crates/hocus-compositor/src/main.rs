@@ -72,6 +72,14 @@ struct Args {
     #[arg(long)]
     camera: bool,
 
+    /// Start the Hocuspanda microphone (hocus-voice next to this program)
+    /// nested or headless too: its "Hocuspanda" source appears on the
+    /// PipeWire it is given (PIPEWIRE_REMOTE), and reads that PipeWire's
+    /// default microphone while it is read. On a virtual terminal it
+    /// always starts.
+    #[arg(long)]
+    voice: bool,
+
     /// Run as the user's session, as a display manager starts it
     /// (hocuspanda-session): on the virtual terminal unless --backend says
     /// otherwise, and once ready, the user's systemd and D-Bus are told
@@ -193,6 +201,10 @@ fn main() -> ExitCode {
     // as its source would appear on the PipeWire of the session around.
     if args.camera || matches!(backend, BackendArg::Tty) {
         config.camera_program = Some(beside("hocus-camera"));
+    }
+    // The Hocuspanda microphone (#619, lot 5): the same.
+    if args.voice || matches!(backend, BackendArg::Tty) {
+        config.voice_program = Some(beside("hocus-voice"));
     }
     let renderer = match args.renderer {
         RendererArg::Auto => RendererChoice::Auto,

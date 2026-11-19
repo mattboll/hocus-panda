@@ -508,6 +508,10 @@ fn to_shell() -> Vec<ToShell> {
             away: true,
             presenter: false,
             hush: false,
+            voice: "quiet".to_owned(),
+            voice_ready: false,
+            voice_read: false,
+            microphone: None,
         }),
         ToShell::Transcribing(TranscribingShown {
             id: 3,
@@ -1625,4 +1629,33 @@ fn the_camera_s_lines_read_back() {
         assert_eq!(FromCamera::read(&said.line()), Some(said));
     }
     assert_eq!(FromCamera::read("INFO the source read=true"), None);
+}
+
+/// The Hocuspanda microphone's lines (#619, lot 5) read back as written;
+/// each voice's word is its own.
+#[test]
+fn the_voice_s_lines_read_back() {
+    use crate::voice::{FromVoice, Microphone, Voice, VoiceLook};
+    for voice in Voice::ALL {
+        let look = VoiceLook { voice };
+        assert_eq!(VoiceLook::read(&look.line()), Some(look));
+        assert_eq!(Voice::of(voice.word()), Some(voice));
+    }
+    assert_eq!(
+        VoiceLook::read(r#"{"voice":"none"}"#).map(|l| l.voice),
+        Some(Voice::AsItIs)
+    );
+    for said in [
+        FromVoice::Ready { node: 42 },
+        FromVoice::Read(true),
+        FromVoice::Microphone(Some(Microphone {
+            name: "alsa_input.pci-0000_00_1f.3.analog-stereo".into(),
+            description: "Micro intégré".into(),
+        })),
+        FromVoice::Microphone(None),
+        FromVoice::Voice(Voice::Deep),
+    ] {
+        assert_eq!(FromVoice::read(&said.line()), Some(said));
+    }
+    assert_eq!(FromVoice::read("INFO the source read=true"), None);
 }

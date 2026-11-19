@@ -4,7 +4,7 @@
 # the package installs on this release and later ones.
 #
 #   scripts/prebuilt.sh
-#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
+#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice
 #   packaging/deb/build.sh [OUTDIR]     (default: CARGO_TARGET_DIR/packages)
 #
 # Needs dpkg-dev; the binaries are read from CARGO_TARGET_DIR/release. Prints
@@ -74,6 +74,13 @@ PREFIX=/usr CARGO_TARGET_DIR="$target" "$top/packaging/install.sh" "$root"
     printf 'Comment: MediaPipe'"'"'s selfie segmentation (landscape), its graph\n'
     printf ' written as ONNX by scripts/camera/selfie-to-onnx.py, its weights\n'
     printf ' unchanged; the rest of the program is Expat.\n'
+    # The noise reduction models hocus-voice carries in its binary
+    # (docs/design/voice.md, crates/hocus-voice/models/LICENSE-DEEPFILTERNET).
+    printf '\nFiles: usr/bin/hocus-voice\n'
+    printf 'Copyright: 2021 Hendrik Schröter (DeepFilterNet3 models)\n'
+    printf 'License: Expat\n'
+    printf 'Comment: DeepFilterNet3'"'"'s ONNX models, unchanged (DeepFilterNet is\n'
+    printf ' MIT or Apache-2.0, taken under MIT); the rest of the program is Expat.\n'
     printf '\nLicense: Apache-2.0\n'
     printf ' On Debian systems, the full text of the Apache License 2.0 is in\n'
     printf ' /usr/share/common-licenses/Apache-2.0.\n'

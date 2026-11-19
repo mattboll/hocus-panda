@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installs what a package of Hocuspanda holds, from a release build
 # already made (`cargo build --release --locked -p hocus-compositor -p
-# hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera`), into a
+# hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera
+# -p hocus-voice`), into a
 # staging directory
 # for the .deb, or into the system.
 #
@@ -35,6 +36,9 @@ install -D -m 755 "$release/hocus-transcribe" "$destdir$prefix/bin/hocus-transcr
 # The Hocuspanda camera (docs/design/camera.md), which the compositor
 # starts from beside itself.
 install -D -m 755 "$release/hocus-camera" "$destdir$prefix/bin/hocus-camera"
+# The Hocuspanda microphone (docs/design/voice.md), which the compositor
+# starts from beside itself.
+install -D -m 755 "$release/hocus-voice" "$destdir$prefix/bin/hocus-voice"
 # What agents' hooks and scripts run to tell the bar their state.
 install -D -m 755 "$release/hocus" "$destdir$prefix/bin/hocus"
 install -D -m 755 "$here/hocuspanda-session" "$destdir$prefix/bin/hocuspanda-session"
