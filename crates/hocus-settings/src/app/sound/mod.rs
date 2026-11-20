@@ -925,6 +925,38 @@ impl App {
     }
 
     /// The page's controls, in `Tab`'s order.
+    /// The page's controls in `Tab`'s order: its own, and the switch for
+    /// the volume above 100 % after the output's (#897).
+    pub(super) fn sound_controls(&self) -> Vec<super::Control> {
+        let stops = self.sound_stops();
+        if self.sound.graph.is_none() {
+            return Vec::new();
+        }
+        let outputs = stops
+            .iter()
+            .take_while(|s| {
+                matches!(
+                    s,
+                    Stop::Outputs
+                        | Stop::OutMute
+                        | Stop::OutVolume
+                        | Stop::Profile
+                        | Stop::Balance
+                        | Stop::Test
+                )
+            })
+            .count();
+        let boost = crate::model::setting(model::BOOST)
+            .map(|s| super::Control::Setting(crate::store::Slot::of(s, self.source)));
+        let mut controls: Vec<_> = stops[..outputs]
+            .iter()
+            .map(|s| super::Control::Sound(*s))
+            .collect();
+        controls.extend(boost);
+        controls.extend(stops[outputs..].iter().map(|s| super::Control::Sound(*s)));
+        controls
+    }
+
     pub(super) fn sound_stops(&self) -> Vec<Stop> {
         let Some(graph) = self.sound.graph.as_deref() else {
             return Vec::new();

@@ -327,6 +327,7 @@ fn content<'a>(words: Words, levels: &Snapshot, screens: Vec<String>, ui: &mut U
         fill: Some(LIGHT_GAUGE),
         track: TRACK,
         knob: KNOB,
+        mark: None,
         on_change: Box::new(|share| Msg::Slide(Target::Light, share)),
         on_release: Msg::Release,
     }
@@ -405,6 +406,7 @@ fn keyboard_row<'a>(words: Words, levels: &Snapshot, keyboard: Keyboard, ui: &Ui
             fill: Some(LIGHT_GAUGE),
             track: TRACK,
             knob: KNOB,
+            mark: None,
             on_change: Box::new(move |share| Msg::Slide(Target::Keys, share * max as f32)),
             on_release: Msg::Release,
         }

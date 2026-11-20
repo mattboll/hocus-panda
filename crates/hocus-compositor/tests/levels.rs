@@ -304,6 +304,58 @@ fn the_keys_change_the_sound_and_the_brightness() -> anyhow::Result<()> {
 }
 
 #[test]
+fn with_boost_the_keys_stop_once_at_100_and_off_brings_it_back() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let fakes = Fakes::start()?;
+    let mut hp = start(&fakes, &shell, "en_US.UTF-8")?;
+    until(&mut hp, (GAUGE_X, SOUND_Y), blue)?;
+    let volume = |hp: &mut Headless, want: f32| -> anyhow::Result<()> {
+        let mut seen = None;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            let now = fakes.volume("hocus-test-sink")?;
+            if (now.0 - want).abs() < 0.005 {
+                return Ok(());
+            }
+            seen = Some(now);
+            wait(hp, Duration::from_millis(30))?;
+        }
+        anyhow::bail!("volume {seen:?}, not {want}")
+    };
+    let press = |hp: &mut Headless| {
+        hp.key(KEY_VOLUMEUP, true);
+        hp.key(KEY_VOLUMEUP, false);
+    };
+    let mut config = Config::default();
+    config.panel.form = FormChoice::Full;
+    config.sound.boost = true;
+    hp.reconfigure(config.clone());
+    let sink = fakes.sink("hocus-test-sink")?.to_string();
+    fakes.wpctl(&["set-volume", &sink, "0.95"])?;
+    volume(&mut hp, 0.95)?;
+    // The shell hears it.
+    wait(&mut hp, Duration::from_millis(500))?;
+    // Up from 95 %: it stops at 100 %; pressed again at once, beyond.
+    press(&mut hp);
+    volume(&mut hp, 1.0)?;
+    press(&mut hp);
+    volume(&mut hp, 1.05)?;
+    press(&mut hp);
+    volume(&mut hp, 1.10)?;
+    // On the gauge, 150 % its whole length: 110 % past the notch at two
+    // thirds (62 px of 93, #900; 110 % reaches 68), in amber.
+    until(&mut hp, (FULL.x + 37 + 65, SOUND_Y), amber)?;
+    // Boost off: back to 100 %.
+    config.sound.boost = false;
+    hp.reconfigure(config);
+    volume(&mut hp, 1.0)?;
+    until(&mut hp, (FULL.x + 37 + 89, SOUND_Y), blue)?;
+    Ok(())
+}
+
+#[test]
 fn a_fast_spin_over_the_sound_row_moves_it_a_step_a_notch() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());

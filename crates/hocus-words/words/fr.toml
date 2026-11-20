@@ -2021,6 +2021,8 @@ the_best_sound_the_headset_s = "Le meilleur son ; le micro du casque ne sert pas
 phone_quality_to_talk_into_the = "Qualité téléphone, pour parler dans le micro du casque."
 l = "G {balance}"
 r = "D {balance}"
+boost = "Autoriser plus de 100 %"
+boost_line = "Jusqu’à 150 %, pour une vidéo ou un appel trop faible. Le son peut grésiller."
 
 [settings.time]
 time = "HEURE"

@@ -25,6 +25,9 @@ pub struct Snapshot {
     /// The battery's charge limit that holds, in percent (the compositor's,
     /// #896): the gauge's mark, the popover's "Branché, limité à 80 %".
     pub charge_limit: Option<u8>,
+    /// The outputs may go above 100 %, up to 150 % (`[sound] boost`, #897):
+    /// the sound's gauge and slider go that far.
+    pub boost: bool,
 }
 
 /// The keyboard's backlight: its level, from 0 (off) to `max`.

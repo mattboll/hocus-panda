@@ -1,6 +1,7 @@
 //! What the Son page draws (the approved mockup, variant A): SORTIE and
 //! ENTRÉE, each its devices' card (one row each, the one in use ticked)
-//! and the chosen device's card; then APPLICATIONS.
+//! and the chosen device's card, SORTIE then the file's switch for the
+//! volume above 100 % (#897) in a card of its own; then APPLICATIONS.
 
 use crate::theme::Ink;
 use hocus_words::settings::app_sound_view as words;
@@ -193,6 +194,9 @@ impl App {
         output = output.push(self.output_devices(focused(Stop::Outputs)));
         if let Some(sink) = self.sound.output() {
             output = output.push(self.output_card(sink, &focused));
+        }
+        if let Some(boost) = crate::model::setting(model::BOOST) {
+            output = output.push(card_box(self.row(boost, &controls)));
         }
         page = page.push(container(output).id("group:sound.output".to_owned()));
         // ENTRÉE.
