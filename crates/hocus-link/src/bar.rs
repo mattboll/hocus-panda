@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{BadLine, text::tidy};
 
-/// The bar's distance from the output's top, right and bottom edges, and
-/// the windows' from the bar (logical pixels).
+/// The bar's distance from the output's top, right and bottom edges
+/// (logical pixels); the windows' from the bar is `[windows] gap`.
 pub const EDGE: i32 = 8;
 /// The bar's corner radius.
 pub const RADIUS: f64 = 14.0;

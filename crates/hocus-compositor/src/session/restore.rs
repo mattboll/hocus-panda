@@ -1036,7 +1036,7 @@ impl State {
         };
         let placed = match mode {
             Mode::Floating => floating,
-            Mode::Snapped(zone) => zone.rect(area),
+            Mode::Snapped(zone) => zone.rect(area, self.gap()),
             Mode::Fullscreen => geometry,
         };
         let restore = (mode != Mode::Floating).then_some(floating);

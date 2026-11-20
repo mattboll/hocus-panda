@@ -2,11 +2,14 @@
 //! the keys and by dragging, resizing from the frame, a snapped pair's
 //! shared edge resizing one and its handle both, fullscreen and back, minimising, menus that grab
 //! the keyboard, a window opened in the background pulsing once, and no
-//! frame drawn once nothing moves.
+//! frame drawn once nothing moves; the gap between windows changed in the
+//! file placing the snapped ones again.
 
 use crate::common;
 
 use std::time::Duration;
+
+use anyhow::Context;
 
 use common::{
     BTN_LEFT, ClientHandle, Command, Event, KEY_DOWN, KEY_F4, KEY_LEFT, KEY_LEFTALT, KEY_LEFTMETA,
@@ -14,8 +17,8 @@ use common::{
     open_showing, open_with, rect_of, wait, wait_for_rect,
 };
 use hocus_compositor::{
-    Headless, HeadlessConfig, RendererChoice,
-    model::{GAP, Mode, Rect, WindowId, Zone},
+    Config, Headless, HeadlessConfig, RendererChoice,
+    model::{DEFAULT_GAP as GAP, Mode, Rect, WindowId, Zone},
 };
 use smithay::input::pointer::CursorIcon;
 
@@ -28,15 +31,15 @@ fn the_keys_snap_to_halves_quarters_maximise_restore_and_minimise() -> anyhow::R
     let mut hp = compositor()?;
     let floating = open(&mut hp, "test.keys", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.keys", Zone::Left.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.keys", Zone::Left.rect(AREA, GAP))?;
     // Again: the other side.
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.keys", Zone::Right.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.keys", Zone::Right.rect(AREA, GAP))?;
     // A quarter keeps the side it is on.
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_UP]);
-    wait_for_rect(&mut hp, "test.keys", Zone::TopRight.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.keys", Zone::TopRight.rect(AREA, GAP))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.keys", Zone::TopLeft.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.keys", Zone::TopLeft.rect(AREA, GAP))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
     wait_for_rect(&mut hp, "test.keys", AREA)?;
     // Restored where it floated, then minimised.
@@ -68,7 +71,7 @@ fn dragging_to_an_edge_snaps_once_the_preview_shows() -> anyhow::Result<()> {
     wait(&mut hp, Duration::from_millis(120))?;
     hp.button(BTN_LEFT, false);
     hp.key(KEY_LEFTALT, false);
-    wait_for_rect(&mut hp, "test.drag", Zone::Left.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.drag", Zone::Left.rect(AREA, GAP))?;
     let id = hp.windows()[0].id;
     assert_eq!(hp.mode(id), Mode::Snapped(Zone::Left));
     // A top corner: a quarter.
@@ -83,7 +86,7 @@ fn dragging_to_an_edge_snaps_once_the_preview_shows() -> anyhow::Result<()> {
     wait(&mut hp, Duration::from_millis(120))?;
     hp.button(BTN_LEFT, false);
     hp.key(KEY_LEFTALT, false);
-    wait_for_rect(&mut hp, "test.drag", Zone::TopRight.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.drag", Zone::TopRight.rect(AREA, GAP))?;
     Ok(())
 }
 
@@ -117,10 +120,10 @@ fn the_frame_resizes_from_a_corner_and_an_edge() -> anyhow::Result<()> {
 fn snapped_pair(hp: &mut hocus_compositor::Headless) -> anyhow::Result<(WindowId, WindowId)> {
     open(hp, "test.left", (400, 300))?;
     chord(hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(hp, "test.left", Zone::Left.rect(AREA))?;
+    wait_for_rect(hp, "test.left", Zone::Left.rect(AREA, GAP))?;
     open(hp, "test.right", (400, 300))?;
     chord(hp, &[KEY_LEFTMETA, KEY_RIGHT]);
-    wait_for_rect(hp, "test.right", Zone::Right.rect(AREA))?;
+    wait_for_rect(hp, "test.right", Zone::Right.rect(AREA, GAP))?;
     let id = |app: &str| {
         hp.windows()
             .into_iter()
@@ -135,7 +138,7 @@ fn snapped_pair(hp: &mut hocus_compositor::Headless) -> anyhow::Result<(WindowId
 
 /// The middle of the gap between the left and right halves.
 fn seam_centre() -> (f64, f64) {
-    let left = Zone::Left.rect(AREA);
+    let left = Zone::Left.rect(AREA, GAP);
     (
         f64::from(left.right() + GAP / 2),
         f64::from(left.y) + f64::from(left.height) / 2.0,
@@ -154,14 +157,17 @@ fn the_shared_edge_resizes_only_the_window_grabbed_which_floats() -> anyhow::Res
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x + 100.0, y);
     hp.button(BTN_LEFT, false);
-    let left = Zone::Left.rect(AREA);
+    let left = Zone::Left.rect(AREA, GAP);
     wait_for_rect(
         &mut hp,
         "test.left",
         Rect::new(left.x, left.y, left.width + 100, left.height),
     )?;
     assert_eq!(hp.mode(left_id), Mode::Floating, "it left its zone");
-    assert_eq!(rect_of(&hp, "test.right"), Some(Zone::Right.rect(AREA)));
+    assert_eq!(
+        rect_of(&hp, "test.right"),
+        Some(Zone::Right.rect(AREA, GAP))
+    );
     assert_eq!(
         hp.mode(right_id),
         Mode::Snapped(Zone::Right),
@@ -176,7 +182,7 @@ fn a_half_alone_resized_by_its_edge_floats() -> anyhow::Result<()> {
     // Its inner edge, with no window across it: no seam there.
     open(&mut hp, "test.half", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    let left = Zone::Left.rect(AREA);
+    let left = Zone::Left.rect(AREA, GAP);
     wait_for_rect(&mut hp, "test.half", left)?;
     let id = hp.windows()[0].id;
     let (x, y) = (f64::from(left.right() + 3), 300.0);
@@ -198,7 +204,7 @@ fn a_snapped_window_resized_by_an_outer_edge_floats_and_its_pair_stays() -> anyh
     let mut hp = compositor()?;
     let (left_id, right_id) = snapped_pair(&mut hp)?;
     // The left half's bottom edge.
-    let left = Zone::Left.rect(AREA);
+    let left = Zone::Left.rect(AREA, GAP);
     let (x, y) = (300.0, f64::from(left.bottom() + 3));
     hp.pointer_move(x, y);
     assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::NsResize));
@@ -211,7 +217,10 @@ fn a_snapped_window_resized_by_an_outer_edge_floats_and_its_pair_stays() -> anyh
         Rect::new(left.x, left.y, left.width, left.height - 100),
     )?;
     assert_eq!(hp.mode(left_id), Mode::Floating, "it left its zone");
-    assert_eq!(rect_of(&hp, "test.right"), Some(Zone::Right.rect(AREA)));
+    assert_eq!(
+        rect_of(&hp, "test.right"),
+        Some(Zone::Right.rect(AREA, GAP))
+    );
     assert_eq!(hp.mode(right_id), Mode::Snapped(Zone::Right));
 
     // A quarter, by its outer corner.
@@ -219,7 +228,7 @@ fn a_snapped_window_resized_by_an_outer_edge_floats_and_its_pair_stays() -> anyh
     hp.button(BTN_LEFT, true);
     hp.button(BTN_LEFT, false);
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_UP]);
-    let quarter = Zone::TopRight.rect(AREA);
+    let quarter = Zone::TopRight.rect(AREA, GAP);
     wait_for_rect(&mut hp, "test.right", quarter)?;
     let (x, y) = (f64::from(quarter.right() + 3), f64::from(quarter.y - 3));
     hp.pointer_move(x, y);
@@ -252,10 +261,10 @@ fn the_seams_handle_resizes_both_windows() -> anyhow::Result<()> {
     hp.button(BTN_LEFT, true);
     hp.pointer_move(x + 100.0, y);
     hp.button(BTN_LEFT, false);
-    let left = Zone::Left.rect(AREA);
+    let left = Zone::Left.rect(AREA, GAP);
     let wider = Rect::new(left.x, left.y, left.width + 100, left.height);
     wait_for_rect(&mut hp, "test.left", wider)?;
-    let right = Zone::Right.rect(AREA);
+    let right = Zone::Right.rect(AREA, GAP);
     wait_for_rect(
         &mut hp,
         "test.right",
@@ -277,14 +286,14 @@ fn the_handle_shows_near_a_snapped_pairs_seam_only_and_then_rests() -> anyhow::R
     // One snapped window alone: no seam, no handle, its own edge.
     open(&mut hp, "test.left", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(AREA, GAP))?;
     let (x, y) = seam_centre();
     hp.pointer_move(x, y);
     assert!(hp.state().snap.seam_handle.is_none(), "no pair, no handle");
     // With its pair: near the seam, anywhere along it, the handle shows.
     open(&mut hp, "test.right", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
-    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(AREA))?;
+    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(AREA, GAP))?;
     hp.pointer_move(x + 10.0, 200.0);
     let (seam, _) = hp.state().snap.seam_handle.expect("the handle shows");
     assert!(seam.vertical);
@@ -300,6 +309,117 @@ fn the_handle_shows_near_a_snapped_pairs_seam_only_and_then_rests() -> anyhow::R
     let frames = hp.frames();
     wait(&mut hp, Duration::from_millis(300))?;
     assert_eq!(hp.frames(), frames, "no frame at rest");
+    Ok(())
+}
+
+/// `[windows] gap` followed live (#895): a snapped pair at 8 px takes
+/// 24 px at once, then 0, touching each other, the screen's edges and the
+/// bar's place.
+#[test]
+fn a_new_gap_in_the_file_places_the_snapped_windows_again() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "")?;
+    let config = Config {
+        file: Some(file.clone()),
+        ..Config::default()
+    };
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+    )?;
+    snapped_pair(&mut hp)?;
+    // The bar's place: 8 px from the screen's right edge, as AREA keeps.
+    let bar_left = AREA.right() + GAP;
+    for gap in [24, 0] {
+        // As the Settings write it: a new file renamed over the old.
+        let new = file.with_extension("new");
+        std::fs::write(&new, format!("[windows]\ngap = {gap}\n"))?;
+        std::fs::rename(&new, &file)?;
+        let area = Rect::new(gap, gap, bar_left - 2 * gap, 1080 - 2 * gap);
+        wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area, gap))?;
+        wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area, gap))?;
+        assert_eq!(hp.work_area(), Some(area), "gap {gap}");
+    }
+    let left = rect_of(&hp, "test.left").context("the left half")?;
+    let right = rect_of(&hp, "test.right").context("the right half")?;
+    assert_eq!((left.x, left.y, right.x), (0, 0, left.right()));
+    assert_eq!((right.right(), right.bottom()), (bar_left, 1080));
+    Ok(())
+}
+
+/// The pull request's screenshots of the gap (#895), into `HOCUS_SHOTS`:
+/// a snapped pair, with the bar, at 24 px and at 0.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn gap_screenshots() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let dir = tempfile::tempdir()?;
+    let root = dir.path();
+    for sub in ["home", "config", "cache", "state", "data"] {
+        std::fs::create_dir_all(root.join(sub))?;
+    }
+    let file = root.join("config.toml");
+    std::fs::write(&file, "")?;
+    let at = |sub: &str| root.join(sub).display().to_string();
+    let script = common::shell_script(
+        root,
+        &common::shell_program(),
+        &[
+            ("HOME", at("home")),
+            ("XDG_CONFIG_HOME", at("config")),
+            ("XDG_CACHE_HOME", at("cache")),
+            ("XDG_STATE_HOME", at("state")),
+            ("XDG_DATA_HOME", at("data")),
+            ("ICED_BACKEND", "tiny-skia".to_owned()),
+        ],
+    )?;
+    let mut config = Config {
+        file: Some(file.clone()),
+        lang: hocus_words::Lang::French,
+        ..Config::default()
+    };
+    config.keyboard.layouts = vec!["us".to_owned()];
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+        Some(script),
+    )?;
+    let up = hp.dispatch_until(Duration::from_secs(20), |hp| hp.bar_commits() > 0)?;
+    anyhow::ensure!(up, "no bar");
+    snapped_pair(&mut hp)?;
+    let bar_left = AREA.right() + GAP;
+    for gap in [24, 0] {
+        let new = file.with_extension("new");
+        std::fs::write(&new, format!("[windows]\ngap = {gap}\n"))?;
+        std::fs::rename(&new, &file)?;
+        let area = Rect::new(gap, gap, bar_left - 2 * gap, 1080 - 2 * gap);
+        wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area, gap))?;
+        wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area, gap))?;
+        hp.pointer_move(960.0, 1079.0);
+        wait(&mut hp, Duration::from_millis(800))?;
+        let (w, h, bytes) = hp.screenshot(0)?;
+        let rgba: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(u32::try_from(w)?, u32::try_from(h)?, rgba)
+            .context("no image")?;
+        let path = out.join(format!("gap-{gap}.png"));
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+    }
     Ok(())
 }
 
