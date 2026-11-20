@@ -490,6 +490,87 @@ fn a_picture_chosen_in_the_file_chooser_is_copied_and_drawn() -> anyhow::Result<
     Ok(())
 }
 
+/// What the test's portal was asked, as it says it.
+type Asked = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+/// The test's own desktop portal on its bus, choosing `chosen`: its
+/// runtime and connection, kept for the test, and what it was asked.
+fn portal(
+    bed: &Bed,
+    chosen: PathBuf,
+) -> anyhow::Result<(tokio::runtime::Runtime, zbus::Connection, Asked)> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()?;
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let address = format!("unix:path={}", bed.dir.path().join("bus").display());
+    let connection = runtime.block_on(
+        zbus::connection::Builder::address(address.as_str())
+            .name("org.freedesktop.portal.Desktop")
+            .serve_at(
+                "/org/freedesktop/portal/desktop",
+                Chooser {
+                    chosen,
+                    asked: asked.clone(),
+                },
+            )
+            .build(),
+    )?;
+    Ok((runtime, connection, asked))
+}
+
+/// A folder of pictures, a colour each, in the test's home.
+fn folder_of(bed: &Bed, colours: &[(&str, [u8; 3])]) -> anyhow::Result<PathBuf> {
+    let folder = bed.dir.path().join("home/Images/Fonds");
+    std::fs::create_dir_all(&folder)?;
+    for (name, [r, g, b]) in colours {
+        image::RgbaImage::from_pixel(48, 30, image::Rgba([*r, *g, *b, 255]))
+            .save(folder.join(name))?;
+    }
+    Ok(folder)
+}
+
+#[test]
+fn a_folder_chosen_in_the_file_chooser_is_written_and_shown() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start_with_bus(FILE, true)? else {
+        return Ok(());
+    };
+    let folder = folder_of(&bed, &[("a.png", [220, 40, 40]), ("b.png", [220, 40, 40])])?;
+    let (_runtime, _portal, asked) = portal(&bed, folder)?;
+    bed.open()?;
+    bed.click("tile:folder")?;
+    let text = bed.written(|t| {
+        t.contains("folder = \"~/Images/Fonds\"") && t.contains("picture = \"folder\"")
+    })?;
+    assert!(text.starts_with(FILE), "{text}");
+    let asked = asked
+        .lock()
+        .map_err(|_| anyhow::anyhow!("poisoned"))?
+        .clone();
+    assert_eq!(asked, ["Choisir un dossier d’images filters=false"]);
+    // LE DOSSIER: its pictures counted, the tile chosen.
+    let shown = bed.shows(|s| {
+        s["wallpaper"]["changing"]["group"] == "folder"
+            && s["wallpaper"]["changing"]["count"] == 2
+            && tile(s, "tile:folder")["chosen"] == true
+    })?;
+    assert_eq!(shown["wallpaper"]["changing"]["folder"], "~/Images/Fonds");
+    // The compositor shows the folder's pictures, and says which: the
+    // lock shows the one of the moment.
+    bed.until(1, [220, 40, 40])?;
+    bed.shell_said("the wallpapers", &["/Images/Fonds/"])?;
+    bed.shows(|s| {
+        s["wallpaper"]["screens"][0]["shows"]
+            .as_str()
+            .is_some_and(|p| p.contains("/Images/Fonds/"))
+    })?;
+    // Par nom, written as the row's.
+    bed.click("segment:wallpaper.order:1")?;
+    bed.written(|t| t.contains("order = \"name\""))?;
+    Ok(())
+}
+
 #[test]
 fn each_screen_takes_its_own_background() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
@@ -793,4 +874,105 @@ fn sunset(path: &Path) -> anyhow::Result<()> {
 fn sunset_at_bare() -> [u8; 3] {
     // The bottom-left corner is a hill.
     [35, 31, 56]
+}
+
+/// The pull request's screenshots of #894, into `HOCUS_SHOTS`: the page
+/// with a folder, then with day and night.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_a_folder_and_of_day_and_night() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let save = |bed: &mut Bed, name: &str| -> anyhow::Result<()> {
+        bed.hp.pointer_move(400.0, 1070.0);
+        wait(&mut bed.hp, Duration::from_millis(600))?;
+        let (w, h, bytes) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+            .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+        Ok(())
+    };
+    // A folder of landscapes, gradients of the mockup's colours.
+    let folder = bed.dir.path().join("home/Images/Fonds");
+    std::fs::create_dir_all(&folder)?;
+    let gradient = |path: &Path, top: [f32; 3], bottom: [f32; 3]| -> anyhow::Result<()> {
+        image::RgbaImage::from_fn(640, 400, |x, y| {
+            let t = y as f32 / 400.0;
+            let hill = 280.0 + 30.0 * ((x as f32) / 70.0).sin();
+            if (y as f32) > hill {
+                image::Rgba([22, 30, 26, 255])
+            } else {
+                let c = |i: usize| (top[i] + (bottom[i] - top[i]) * t) as u8;
+                image::Rgba([c(0), c(1), c(2), 255])
+            }
+        })
+        .save(path)?;
+        Ok(())
+    };
+    gradient(
+        &folder.join("Forêt.png"),
+        [58.0, 107.0, 79.0],
+        [22.0, 38.0, 29.0],
+    )?;
+    gradient(
+        &folder.join("Soir.png"),
+        [201.0, 138.0, 75.0],
+        [59.0, 42.0, 58.0],
+    )?;
+    gradient(
+        &folder.join("Lac.png"),
+        [120.0, 160.0, 200.0],
+        [30.0, 50.0, 80.0],
+    )?;
+    let mine = bed
+        .dir
+        .path()
+        .join("home/.local/share/hocuspanda/wallpapers");
+    std::fs::create_dir_all(&mine)?;
+    sunset(&mine.join("plage.png"))?;
+    bed.write(&format!(
+        "{FILE}\n[wallpaper]\npicture = \"folder\"\nfolder = \"~/Images/Fonds\"\n"
+    ))?;
+    bed.open()?;
+    bed.shows(|s| s["wallpaper"]["changing"]["count"] == 3)?;
+    bed.reveal("row:wallpaper.next")?;
+    bed.shows(|s| {
+        s["wallpaper"]["tiles"].as_array().is_some_and(|t| {
+            t.iter()
+                .all(|t| t["drawn"] == true || t["id"] == "tile:choose")
+        })
+    })?;
+    save(&mut bed, "page-folder.png")?;
+    bed.write(&format!(
+        "{FILE}\n[wallpaper]\npicture = \"day-night\"\nfolder = \"~/Images/Fonds\"\n\
+         day = \"~/.local/share/hocuspanda/wallpapers/plage.png\"\nnight = \"night\"\n\
+         [weather]\nplace = \"Saint-Étienne\"\nlatitude = 45.43\nlongitude = 4.39\n"
+    ))?;
+    bed.shows(|s| {
+        s["wallpaper"]["changing"]["group"] == "day-night"
+            && s["wallpaper"]["changing"]["switch"].is_string()
+    })?;
+    bed.shows(|s| s["toast"].is_null())?;
+    bed.reveal("row:wallpaper.switch")?;
+    bed.shows(|s| {
+        s["wallpaper"]["tiles"].as_array().is_some_and(|t| {
+            t.iter()
+                .all(|t| t["drawn"] == true || t["id"] == "tile:choose")
+        })
+    })?;
+    save(&mut bed, "page-day-night.png")?;
+    Ok(())
 }

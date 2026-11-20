@@ -547,6 +547,8 @@ impl State {
                 let _ = to.send(self.charge_line());
                 // The agents' tools (6.16).
                 let _ = to.send(self.agents_settings_opened());
+                // Each screen's wallpaper now (#894).
+                let _ = to.send(self.wallpaper_now_line());
                 self.displays.sessions.push(Session { id: session, to });
             }
             FromSettings::Closed { session } => {
@@ -566,6 +568,16 @@ impl State {
     }
 
     fn displays_line(&mut self, session: u64, line: &str) {
+        // "Image suivante" (#894): `wallpaper-next [SCREEN]`, every
+        // screen's folder without one.
+        if let Some(rest) = line.strip_prefix("wallpaper-next") {
+            let screen = rest.trim();
+            if !self.wallpaper_next((!screen.is_empty()).then_some(screen)) {
+                let refused = serde_json::json!({ "refused": "the wallpaper is no folder's" });
+                self.displays_send(Some(session), &refused.to_string());
+            }
+            return;
+        }
         // "Charger à 100 % une fois" (6.10, #896): the limit lifted until
         // the next unplug; the Settings told by `charge` lines.
         if line.trim() == "charge-full-once" {

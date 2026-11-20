@@ -131,6 +131,11 @@ pub struct Config {
     /// look through translucent pixels. Not part of the file.
     #[serde(skip)]
     pub plain_background: bool,
+    /// How often a folder's wallpaper changes instead of `[wallpaper]
+    /// every`, for tests that cannot wait an hour (#894). Not part of the
+    /// file.
+    #[serde(skip)]
+    pub wallpaper_every: Option<std::time::Duration>,
     /// The directories of the applications' desktop entries (the XDG data
     /// directories' `applications`), where a window's tells whether it is
     /// a terminal (the clipboard's paste, 5.6). Not part of the file: the

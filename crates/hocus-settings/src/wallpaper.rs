@@ -1,9 +1,12 @@
 //! Fond d'écran / Wallpaper (6.3, issue #403, variant A, the gallery): each
 //! screen's background and the lock screen's. The keys are `[wallpaper]`
 //! (`picture`, `per-screen`, `fit`, `color`, `lock`, `lock-picture`, and
-//! for the wallpapers that move, #433, `animate` and `on-battery`) and
-//! `[outputs.NAME] wallpaper`; the compositor follows them live, the shell
-//! draws the lock from them.
+//! for the wallpapers that move, #433, `animate` and `on-battery`; for
+//! those that change by themselves, #894, `folder`, `every`, `order`,
+//! `day`, `night`, `day-starts` and `night-starts`) and `[outputs.NAME]
+//! wallpaper` (and `wallpaper-folder`, `wallpaper-day`,
+//! `wallpaper-night`); the compositor follows them live, the shell draws
+//! the lock from them.
 //!
 //! The page's own pieces (`src/app/wallpaper_page.rs`): the preview, the
 //! gallery and the lock's choices; `fit` and `color` are rows of the
@@ -51,6 +54,16 @@ pub const LOCK: RowGroup = RowGroup {
     label: words::LOCK_SCREEN,
     per_source: false,
 };
+/// A folder's pictures in turn (#894).
+pub const FOLDER_GROUP: RowGroup = RowGroup {
+    label: words::THE_FOLDER,
+    per_source: false,
+};
+/// A day's picture and a night's (#894).
+pub const DAY_NIGHT_GROUP: RowGroup = RowGroup {
+    label: words::DAY_AND_NIGHT,
+    per_source: false,
+};
 
 /// The ids of the page's rows.
 pub const PER_SCREEN: &str = "wallpaper.per-screen";
@@ -66,6 +79,37 @@ pub const MOVING: &str = "wallpaper.moving";
 pub const ANIMATE: &str = "wallpaper.animate";
 pub const ON_BATTERY: &str = "wallpaper.on-battery";
 const ON_BATTERY_WORDS: &[&str] = &["half", "still", "full"];
+/// A folder's pictures in turn, and a day's and a night's (#894).
+pub const FOLDER: &str = "wallpaper.folder";
+pub const EVERY: &str = "wallpaper.every";
+pub const ORDER: &str = "wallpaper.order";
+pub const NEXT: &str = "wallpaper.next";
+pub const DAY_NIGHT: &str = "wallpaper.day-night";
+pub const SWITCH: &str = "wallpaper.switch";
+pub const DAY_STARTS: &str = "wallpaper.day-starts";
+pub const NIGHT_STARTS: &str = "wallpaper.night-starts";
+const EVERY_WORDS: &[&str] = &["15m", "1h", "1d", "session"];
+const ORDER_WORDS: &[&str] = &["shuffle", "name"];
+/// When the day and the night can begin, every half hour.
+const MORNINGS: &[&str] = &[
+    "05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30",
+    "10:00",
+];
+const EVENINGS: &[&str] = &[
+    "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30",
+    "22:00", "22:30", "23:00",
+];
+
+fn hours(list: &'static [&'static str]) -> Kind {
+    Kind::Menu(
+        list.iter()
+            .map(|h| Choice {
+                label: hocus_words::Text::same(h),
+                value: Value::Word(h),
+            })
+            .collect(),
+    )
+}
 
 const FITS: &[&str] = &["cover", "contain", "center"];
 const LOCKS: &[&str] = &["dimmed", "blurred", "picture"];
@@ -261,6 +305,122 @@ pub fn settings() -> &'static [Setting] {
                 places: one(&["wallpaper", "on-battery"], Codec::Word(ON_BATTERY_WORDS)),
                 needs: None,
             },
+            own(
+                FOLDER,
+                FOLDER_GROUP,
+                words::WALLPAPER_FOLDER,
+                (
+                    &["dossier", "diaporama", "défiler", "images", "changer"],
+                    &["folder", "slideshow", "rotate", "pictures", "change"],
+                ),
+                &["wallpaper", "folder"],
+            ),
+            Setting {
+                id: EVERY,
+                section: SectionId::Wallpaper,
+                group: FOLDER_GROUP,
+                name: words::CHANGE_PICTURE,
+                line: None,
+                keywords: (
+                    &["dossier", "diaporama", "intervalle", "minutes", "heure"],
+                    &["folder", "slideshow", "interval", "minutes", "hour"],
+                ),
+                kind: Kind::Menu(vec![
+                    Choice {
+                        label: words::EVERY_15_MINUTES,
+                        value: Value::Word("15m"),
+                    },
+                    Choice {
+                        label: words::EVERY_HOUR,
+                        value: Value::Word("1h"),
+                    },
+                    Choice {
+                        label: words::EVERY_DAY,
+                        value: Value::Word("1d"),
+                    },
+                    Choice {
+                        label: words::EACH_TIME_A_SESSION_OPENS,
+                        value: Value::Word("session"),
+                    },
+                ]),
+                places: one(&["wallpaper", "every"], Codec::Word(EVERY_WORDS)),
+                needs: None,
+            },
+            Setting {
+                id: ORDER,
+                section: SectionId::Wallpaper,
+                group: FOLDER_GROUP,
+                name: words::ORDER,
+                line: None,
+                keywords: (
+                    &["dossier", "hasard", "aléatoire", "nom"],
+                    &["folder", "shuffle", "random", "name"],
+                ),
+                kind: Kind::Segmented(vec![
+                    Choice {
+                        label: words::SHUFFLED,
+                        value: Value::Word("shuffle"),
+                    },
+                    Choice {
+                        label: words::BY_NAME,
+                        value: Value::Word("name"),
+                    },
+                ]),
+                places: one(&["wallpaper", "order"], Codec::Word(ORDER_WORDS)),
+                needs: None,
+            },
+            own(
+                NEXT,
+                FOLDER_GROUP,
+                words::NEXT_PICTURE,
+                (
+                    &["suivante", "dossier", "passer"],
+                    &["next", "folder", "skip"],
+                ),
+                &["wallpaper", "folder"],
+            ),
+            own(
+                DAY_NIGHT,
+                DAY_NIGHT_GROUP,
+                words::DAY_AND_NIGHT_PICTURES,
+                (
+                    &["jour", "nuit", "soir", "matin"],
+                    &["day", "night", "evening", "morning"],
+                ),
+                &["wallpaper", "day"],
+            ),
+            own(
+                SWITCH,
+                DAY_NIGHT_GROUP,
+                words::DAY_AND_NIGHT_SWITCH,
+                (
+                    &["soleil", "lever", "coucher", "bascule"],
+                    &["sun", "sunrise", "sunset", "switch"],
+                ),
+                &["wallpaper", "night"],
+            ),
+            Setting {
+                id: DAY_STARTS,
+                section: SectionId::Wallpaper,
+                group: DAY_NIGHT_GROUP,
+                name: words::DAY_BEGINS_AT,
+                line: None,
+                keywords: (&["jour", "matin", "heure"], &["day", "morning", "time"]),
+                kind: hours(MORNINGS),
+                places: one(&["wallpaper", "day-starts"], Codec::Word(MORNINGS)),
+                needs: None,
+            },
+            Setting {
+                id: NIGHT_STARTS,
+                section: SectionId::Wallpaper,
+                group: DAY_NIGHT_GROUP,
+                name: words::NIGHT_BEGINS_AT,
+                line: None,
+                keywords: (&["nuit", "soir", "heure"], &["night", "evening", "time"]),
+                kind: hours(EVENINGS),
+                places: one(&["wallpaper", "night-starts"], Codec::Word(EVENINGS)),
+                needs: None,
+            },
             Setting {
                 id: LOCK_ID,
                 section: SectionId::Wallpaper,
@@ -314,6 +474,50 @@ pub struct File {
     pub color: Option<String>,
     /// `[outputs.NAME] wallpaper`, by name.
     pub outputs: Vec<(String, String)>,
+    /// A folder's pictures and a day's and a night's (#894): every
+    /// screen's, and the screens' own by name.
+    pub changing: Changing,
+    pub own: Vec<(String, Changing)>,
+    /// `[weather]`'s place: its name, latitude and longitude.
+    pub place: Option<WeatherPlace>,
+}
+
+/// A place's name, latitude and longitude (degrees).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeatherPlace(pub String, pub f64, pub f64);
+
+// The file's numbers: never NaN where a place is read.
+impl Eq for WeatherPlace {}
+
+/// The keys of a wallpaper that changes by itself, as written.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Changing {
+    pub folder: Option<String>,
+    pub day: Option<String>,
+    pub night: Option<String>,
+}
+
+impl Changing {
+    pub fn day(&self) -> Picture {
+        self.day
+            .as_deref()
+            .and_then(|p| Picture::of(p).ok())
+            .filter(|p| !p.changes())
+            .unwrap_or(Picture::Builtin(Backdrop::Dawn))
+    }
+
+    pub fn night(&self) -> Picture {
+        self.night
+            .as_deref()
+            .and_then(|p| Picture::of(p).ok())
+            .filter(|p| !p.changes())
+            .unwrap_or_default()
+    }
+
+    /// The folder, as written; none when empty.
+    pub fn folder(&self) -> Option<&str> {
+        self.folder.as_deref().filter(|f| !f.trim().is_empty())
+    }
 }
 
 impl File {
@@ -347,6 +551,59 @@ impl File {
                         .collect()
                 })
                 .unwrap_or_default(),
+            changing: Changing {
+                folder: word("folder"),
+                day: word("day"),
+                night: word("night"),
+            },
+            own: doc
+                .get("outputs")
+                .and_then(Item::as_table_like)
+                .map(|outputs| {
+                    outputs
+                        .iter()
+                        .map(|(name, o)| {
+                            let key =
+                                |k: &str| o.get(k).and_then(Item::as_str).map(ToOwned::to_owned);
+                            (
+                                name.to_owned(),
+                                Changing {
+                                    folder: key("wallpaper-folder"),
+                                    day: key("wallpaper-day"),
+                                    night: key("wallpaper-night"),
+                                },
+                            )
+                        })
+                        .filter(|(_, c)| *c != Changing::default())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            place: doc.get("weather").and_then(|w| {
+                let place = w.get("place")?.as_str()?.trim().to_owned();
+                let number = |k: &str| {
+                    let v = w.get(k)?;
+                    v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
+                };
+                let (lat, lon) = (number("latitude")?, number("longitude")?);
+                (!place.is_empty() && lat.is_finite() && lon.is_finite())
+                    .then_some(WeatherPlace(place, lat, lon))
+            }),
+        }
+    }
+
+    /// What changes by itself on `output` (every screen with `None`):
+    /// its own keys with per-screen, else every screen's, each key.
+    pub fn changing_of(&self, output: Option<&str>) -> Changing {
+        let own = output
+            .filter(|_| self.per_screen)
+            .filter(|o| self.outputs.iter().any(|(name, _)| name == o))
+            .and_then(|o| self.own.iter().find(|(name, _)| name == o))
+            .map(|(_, c)| c.clone())
+            .unwrap_or_default();
+        Changing {
+            folder: own.folder.or_else(|| self.changing.folder.clone()),
+            day: own.day.or_else(|| self.changing.day.clone()),
+            night: own.night.or_else(|| self.changing.night.clone()),
         }
     }
 
@@ -413,6 +670,12 @@ pub fn name_of(picture: &Picture, lang: Lang) -> String {
         Picture::Builtin(b) => b.name(lang).to_owned(),
         Picture::Moving(m) => m.name(lang).to_owned(),
         Picture::Plain => words::SOLID_COLOUR.get(lang).to_owned(),
+        Picture::Folder => hocus_words::settings::app_wallpaper_page::A_FOLDER
+            .get(lang)
+            .to_owned(),
+        Picture::DayNight => hocus_words::settings::app_wallpaper_page::DAY_AND_NIGHT
+            .get(lang)
+            .to_owned(),
         Picture::File(text) => Path::new(text)
             .file_name()
             .map_or_else(|| text.clone(), |n| n.to_string_lossy().into_owned()),
@@ -425,7 +688,7 @@ pub fn accent_of(look: &Look) -> Option<AccentColours> {
         Picture::Builtin(b) => Some(b.accent()),
         Picture::Moving(m) => Some(m.accent()),
         Picture::Plain => Some(AccentColours::lifted(look.color)),
-        Picture::File(_) => None,
+        Picture::File(_) | Picture::Folder | Picture::DayNight => None,
     }
 }
 
@@ -457,16 +720,32 @@ pub struct Thumb {
     pub soft: bool,
 }
 
+/// What a picture chosen in the file chooser is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum For {
+    Desktop,
+    Lock,
+    /// Day and night's (#894).
+    Day,
+    Night,
+}
+
 /// What the page asks its thread.
 #[derive(Debug)]
 pub enum Ask {
     Draw(Thumb),
     List,
-    /// The file chooser, for the desktop (`false`) or the lock.
+    /// The file chooser, for a picture.
     Pick {
-        lock: bool,
+        to: For,
         lang: Lang,
     },
+    /// The file chooser, for a folder of pictures (#894).
+    PickFolder {
+        lang: Lang,
+    },
+    /// A folder's pictures counted, its first two named (#894).
+    Count(PathBuf),
     Remove(PathBuf),
     PutBack {
         path: PathBuf,
@@ -485,8 +764,16 @@ pub enum Heard {
     },
     Listed(Vec<Mine>),
     Picked {
-        lock: bool,
+        to: For,
         picked: Picked,
+    },
+    /// A folder chosen, or not (#894).
+    PickedFolder(crate::portal::Chosen),
+    /// `folder` holds `count` pictures, `first` its first two.
+    Counted {
+        folder: PathBuf,
+        count: usize,
+        first: Vec<PathBuf>,
     },
     Removed {
         path: PathBuf,
@@ -563,10 +850,22 @@ fn run(taken: &mpsc::Receiver<Ask>, mut heard: impl FnMut(Heard) -> bool) {
                     }
                 }
                 Ask::List => Heard::Listed(list()),
-                Ask::Pick { lock, lang } => Heard::Picked {
-                    lock,
-                    picked: pick(lock, lang),
+                Ask::Pick { to, lang } => Heard::Picked {
+                    to,
+                    picked: pick(to, lang),
                 },
+                Ask::PickFolder { lang } => Heard::PickedFolder(crate::portal::open_folder(
+                    words::CHOOSE_A_FOLDER_OF_PICTURES.get(lang),
+                    &pictures_folder(),
+                )),
+                Ask::Count(folder) => {
+                    let listed = hocus_link::wallpaper::list(&folder);
+                    Heard::Counted {
+                        count: listed.pictures.len(),
+                        first: listed.pictures.into_iter().take(2).collect(),
+                        folder,
+                    }
+                }
                 Ask::Remove(path) => match std::fs::read(&path)
                     .and_then(|bytes| std::fs::remove_file(&path).map(|()| bytes))
                 {
@@ -633,10 +932,12 @@ fn list() -> Vec<Mine> {
 }
 
 /// The file chooser, then the chosen picture checked and copied.
-fn pick(lock: bool, lang: Lang) -> Picked {
-    let title = match lock {
-        false => words::CHOOSE_A_PICTURE_FOR_THE_BACKGROUND.get(lang),
-        true => words::CHOOSE_A_PICTURE_FOR_THE_LOCK.get(lang),
+fn pick(to: For, lang: Lang) -> Picked {
+    let title = match to {
+        For::Desktop | For::Day | For::Night => {
+            words::CHOOSE_A_PICTURE_FOR_THE_BACKGROUND.get(lang)
+        }
+        For::Lock => words::CHOOSE_A_PICTURE_FOR_THE_LOCK.get(lang),
     };
     let filter = words::PICTURES_JPEG_PNG_WEBP.get(lang);
     let chosen = match crate::portal::open_file(title, filter, &pictures_folder()) {
@@ -743,6 +1044,29 @@ mod tests {
             ..file
         };
         assert_eq!(off.picture_of("DP-2"), Picture::Builtin(Backdrop::Mist));
+    }
+
+    #[test]
+    fn the_file_says_each_screens_folder_and_day_and_night() {
+        let doc: DocumentMut = "[wallpaper]\npicture = \"folder\"\nfolder = \"~/Images/Fonds\"\n\
+                                per-screen = true\nnight = \"forest\"\n\
+                                [outputs.DP-2]\nwallpaper = \"day-night\"\nwallpaper-day = \"mist\"\n\
+                                [weather]\nplace = \"Lyon\"\nlatitude = 45.76\nlongitude = 4.84\n"
+            .parse()
+            .unwrap_or_default();
+        let file = File::of(&doc);
+        assert_eq!(file.picture(), Picture::Folder);
+        assert_eq!(file.picture_of("DP-2"), Picture::DayNight);
+        let every = file.changing_of(None);
+        assert_eq!(every.folder(), Some("~/Images/Fonds"));
+        assert_eq!(every.day(), Picture::Builtin(Backdrop::Dawn));
+        let own = file.changing_of(Some("DP-2"));
+        assert_eq!(own.day(), Picture::Builtin(Backdrop::Mist));
+        assert_eq!(own.night(), Picture::Builtin(Backdrop::Forest));
+        assert_eq!(
+            file.place,
+            Some(WeatherPlace("Lyon".to_owned(), 45.76, 4.84))
+        );
     }
 
     #[test]

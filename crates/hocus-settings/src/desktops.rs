@@ -54,7 +54,9 @@ pub const WOBBLE: &str = "windows.wobble";
 /// to.
 pub const ANIMATION: &str = "windows.animation";
 pub const ALT_TAB_ROW: &str = "windows.alt-tab";
-pub const HOT_CORNER: &str = "overview.hot-corner";
+/// The screen corners' summary: what each does, set in the shortcuts
+/// (#893).
+pub const CORNERS: &str = "overview.corners";
 pub const INK: &str = "ink.enabled";
 /// The rules per application, a row of the page's own (6.14).
 pub const RULES: &str = "desktops.rules";
@@ -290,23 +292,35 @@ pub fn rule_said(rule: &Rule, names: &[String], lang: Lang) -> String {
 
 /// The page's rows the model does not hold, for the search.
 pub fn outside() -> &'static [crate::model::Outside] {
-    const ALL: [crate::model::Outside; 1] = [crate::model::Outside {
-        id: RULES,
-        section: SectionId::Desktops,
-        group: RULES_GROUP.label,
-        name: words::RULES_PER_APPLICATION_2,
-        keywords: (
-            &[
-                "règle",
-                "application",
-                "au-dessus",
-                "toujours",
-                "ouvrir",
-                "app-id",
-            ],
-            &["rule", "application", "above", "always", "open", "app-id"],
-        ),
-    }];
+    const ALL: [crate::model::Outside; 2] = [
+        crate::model::Outside {
+            id: CORNERS,
+            section: SectionId::Desktops,
+            group: OVERVIEW.label,
+            name: hocus_words::settings::triggers::SCREEN_CORNERS,
+            keywords: (
+                &["coin actif", "coin", "vue d’ensemble", "aperçu", "bureaux"],
+                &["hot corner", "corner", "overview", "activities", "desktops"],
+            ),
+        },
+        crate::model::Outside {
+            id: RULES,
+            section: SectionId::Desktops,
+            group: RULES_GROUP.label,
+            name: words::RULES_PER_APPLICATION_2,
+            keywords: (
+                &[
+                    "règle",
+                    "application",
+                    "au-dessus",
+                    "toujours",
+                    "ouvrir",
+                    "app-id",
+                ],
+                &["rule", "application", "above", "always", "open", "app-id"],
+            ),
+        },
+    ];
     &ALL
 }
 
@@ -499,18 +513,6 @@ pub fn settings() -> &'static [Setting] {
                 one(&["windows", "alt-tab"], Codec::Word(ALT_TAB_WORDS)),
             ),
             setting(
-                HOT_CORNER,
-                OVERVIEW,
-                words::TOP_LEFT_CORNER_OVERVIEW,
-                words::THE_POINTER_PUSHED_FOR_A_MOMENT,
-                (
-                    &["coin actif", "coin", "vue d’ensemble", "aperçu", "bureaux"],
-                    &["hot corner", "corner", "overview", "activities", "desktops"],
-                ),
-                Kind::Switch,
-                switch(&["overview", "hot-corner"]),
-            ),
-            setting(
                 INK,
                 DRAW,
                 words::DRAW_ON_THE_SCREEN_2,
@@ -629,7 +631,6 @@ mod tests {
                 "windows.wobble",
                 "windows.animation",
                 "windows.alt-tab",
-                "overview.hot-corner",
                 "ink.enabled"
             ]
         );

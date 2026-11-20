@@ -1464,6 +1464,37 @@ impl State {
         R: Renderer + ImportAll + ImportMem + Bend + Shaders,
         R::TextureId: Send + Clone + Texture + 'static,
     {
+        self.backdrop_elements(renderer, output, false)
+            .into_iter()
+            .next()
+    }
+
+    /// The same, and with `fade` its previous one under it while it fades
+    /// in (#894): the new one first.
+    fn backdrop_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        fade: bool,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
+        self.backdrop_layers(renderer, output, fade)
+            .unwrap_or_default()
+    }
+
+    fn backdrop_layers<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        fade: bool,
+    ) -> Option<Vec<OutputElement<R>>>
+    where
+        R: Renderer + ImportAll + ImportMem + Bend + Shaders,
+        R::TextureId: Send + Clone + Texture + 'static,
+    {
         if self.config.plain_background {
             return None;
         }
@@ -1476,30 +1507,44 @@ impl State {
             size: (size.w, size.h),
             scale: (output.current_scale().fractional_scale() * 1000.0).round() as u32,
         };
-        let (buffer, (w, h)) = {
+        let now = self.now();
+        let (top, under) = {
             let mut backgrounds = self.graphics.backgrounds.borrow_mut();
-            backgrounds.want(&name, &key);
+            backgrounds.want(&name, &key, now);
             // Until the screen's new one is drawn, its previous stays.
             let shown = backgrounds.shown.get(&name)?;
-            (shown.buffer.clone(), shown.picture)
+            let top = (shown.buffer.clone(), shown.picture);
+            let under = backgrounds
+                .fading
+                .get(&name)
+                .filter(|_| fade)
+                .map(|f| (f.from.buffer.clone(), f.from.picture, f.alpha(now)))
+                .filter(|(_, _, alpha)| *alpha < 1.0);
+            (top, under)
         };
-        // Its whole picture, stretched over the screen.
-        let picture = Rectangle::<f64, Logical>::from_size((f64::from(w), f64::from(h)).into());
-        match MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            (0.0, 0.0),
-            &buffer,
-            None,
-            Some(picture),
-            Some(logical),
-            Kind::Unspecified,
-        ) {
-            Ok(element) => Some(OutputElements::Backdrop(element)),
-            Err(err) => {
-                tracing::warn!(output = output.name(), %err, "could not draw the background");
-                None
+        let mut out = Vec::with_capacity(2);
+        let alpha = under.as_ref().map(|(_, _, alpha)| *alpha);
+        for (buffer, (w, h), alpha) in
+            std::iter::once((top.0, top.1, alpha)).chain(under.map(|(b, p, _)| (b, p, None)))
+        {
+            // Its whole picture, stretched over the screen.
+            let picture = Rectangle::<f64, Logical>::from_size((f64::from(w), f64::from(h)).into());
+            match MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                (0.0, 0.0),
+                &buffer,
+                alpha,
+                Some(picture),
+                Some(logical),
+                Kind::Unspecified,
+            ) {
+                Ok(element) => out.push(OutputElements::Backdrop(element)),
+                Err(err) => {
+                    tracing::warn!(output = output.name(), %err, "could not draw the background");
+                }
             }
         }
+        Some(out)
     }
 
     /// The glass under the bar on `output` at `now`: what is `behind` it,
@@ -2038,7 +2083,7 @@ impl State {
             }
             out.extend(sky);
         }
-        out.extend(self.backdrop_element(renderer, output));
+        out.extend(self.backdrop_elements(renderer, output, true));
         out
     }
 
@@ -2065,11 +2110,7 @@ impl State {
         let wall = self.wall_elements(renderer, output);
         match &wall {
             Some((_, still)) => elements.push(OutputElements::Wall(still.clone())),
-            None => {
-                if let Some(backdrop) = self.backdrop_element(renderer, output) {
-                    elements.push(backdrop);
-                }
-            }
+            None => elements.extend(self.backdrop_elements(renderer, output, true)),
         }
         // What is behind a pane: the elements from its place on.
         fn behind<T>(elements: &[T], at: usize) -> &[T] {

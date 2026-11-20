@@ -355,10 +355,16 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
             "windows.wobble",
             "windows.animation",
             "windows.alt-tab",
-            "overview.hot-corner",
             "ink.enabled"
         ]
     );
+    // The screen corners: what each does, and the link to the shortcuts
+    // (#893).
+    assert_eq!(
+        strings(&shown["summaries"]["corners"]),
+        ["Coin ◤ : Vue d’ensemble"]
+    );
+    bed.places_with("link:overview.corners")?;
     let desktops = &shown["desktops"];
     assert_eq!(desktops["count"], 4);
     assert_eq!(
@@ -973,6 +979,23 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.shows(|s| s["desktops"]["ink_off"].is_string())?;
     bed.reveal("row:ink.enabled")?;
     save(&mut bed, &out, "desktops-super-ink-off.png", true)?;
+    Ok(())
+}
+
+/// The screen corners' summary (#893), into `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_corners() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.reveal("row:overview.corners")?;
+    save(&mut bed, &out, "desktops-corners.png", true)?;
     Ok(())
 }
 

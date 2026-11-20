@@ -373,11 +373,6 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("05:00", Text::same("05:00")), ("05:30", Text::same("05:30")), ("06:00", Text::same("06:00")), ("06:30", Text::same("06:30")), ("07:00", Text::same("07:00")), ("07:30", Text::same("07:30")), ("08:00", Text::same("08:00")), ("08:30", Text::same("08:30")), ("09:00", Text::same("09:00")), ("09:30", Text::same("09:30"))]),
     },
     Label {
-        key: "overview.hot-corner",
-        name: hocus_words::settings::desktops::TOP_LEFT_CORNER_OVERVIEW,
-        said: Said::Switch,
-    },
-    Label {
         key: "panel.agents",
         name: hocus_words::settings::bar::THE_AGENTS,
         said: Said::Switch,
@@ -798,11 +793,6 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
-        key: "touchpad.swipe-launcher",
-        name: hocus_words::settings::mouse::FOUR_FINGERS_UP_OR_DOWN,
-        said: Said::Switch,
-    },
-    Label {
         key: "touchpad.tap-and-drag",
         name: hocus_words::settings::mouse::TAP_AND_DRAG,
         said: Said::Switch,
@@ -828,6 +818,16 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("#0b1020", hocus_words::link::backdrop::NIGHT), ("#2a2a30", Text::same("Graphite"))]),
     },
     Label {
+        key: "wallpaper.day-starts",
+        name: hocus_words::settings::wallpaper::DAY_BEGINS_AT,
+        said: Said::Choices(&[("05:00", Text::same("05:00")), ("05:30", Text::same("05:30")), ("06:00", Text::same("06:00")), ("06:30", Text::same("06:30")), ("07:00", Text::same("07:00")), ("07:30", Text::same("07:30")), ("08:00", Text::same("08:00")), ("08:30", Text::same("08:30")), ("09:00", Text::same("09:00")), ("09:30", Text::same("09:30")), ("10:00", Text::same("10:00"))]),
+    },
+    Label {
+        key: "wallpaper.every",
+        name: hocus_words::settings::wallpaper::CHANGE_PICTURE,
+        said: Said::Choices(&[("15m", hocus_words::settings::wallpaper::EVERY_15_MINUTES), ("1h", hocus_words::settings::wallpaper::EVERY_HOUR), ("1d", hocus_words::settings::wallpaper::EVERY_DAY), ("session", hocus_words::settings::wallpaper::EACH_TIME_A_SESSION_OPENS)]),
+    },
+    Label {
         key: "wallpaper.fit",
         name: hocus_words::settings::wallpaper::FIT,
         said: Said::Choices(&[("cover", hocus_words::settings::wallpaper::COVER_THE_SCREEN), ("contain", hocus_words::settings::wallpaper::THE_WHOLE_PICTURE), ("center", hocus_words::settings::wallpaper::CENTRE_UNSCALED)]),
@@ -838,9 +838,19 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("dimmed", hocus_words::settings::app_wallpaper_page::THE_DESKTOP_S_BACKGROUND_DIMMED), ("blurred", hocus_words::settings::app_wallpaper_page::THE_DESKTOP_S_BACKGROUND_BLURRED), ("picture", hocus_words::settings::app_wallpaper_page::ANOTHER_PICTURE)]),
     },
     Label {
+        key: "wallpaper.night-starts",
+        name: hocus_words::settings::wallpaper::NIGHT_BEGINS_AT,
+        said: Said::Choices(&[("17:00", Text::same("17:00")), ("17:30", Text::same("17:30")), ("18:00", Text::same("18:00")), ("18:30", Text::same("18:30")), ("19:00", Text::same("19:00")), ("19:30", Text::same("19:30")), ("20:00", Text::same("20:00")), ("20:30", Text::same("20:30")), ("21:00", Text::same("21:00")), ("21:30", Text::same("21:30")), ("22:00", Text::same("22:00")), ("22:30", Text::same("22:30")), ("23:00", Text::same("23:00"))]),
+    },
+    Label {
         key: "wallpaper.on-battery",
         name: hocus_words::settings::model::ON_BATTERY,
         said: Said::Choices(&[("half", hocus_words::settings::wallpaper::SLOWED_HALF), ("still", hocus_words::settings::wallpaper::STOPPED), ("full", hocus_words::settings::wallpaper::AS_ON_MAINS_POWER)]),
+    },
+    Label {
+        key: "wallpaper.order",
+        name: hocus_words::settings::wallpaper::ORDER,
+        said: Said::Choices(&[("shuffle", hocus_words::settings::wallpaper::SHUFFLED), ("name", hocus_words::settings::wallpaper::BY_NAME)]),
     },
     Label {
         key: "weather.enabled",
