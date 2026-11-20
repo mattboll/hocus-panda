@@ -9,7 +9,9 @@
 //! combination another action holds shows inline, "Remplacer" writes both
 //! lines and the toast's "Annuler" takes both back; a rebinding takes
 //! effect live; "Rétablir" takes the line out of the file; Num Lock at
-//! login writes `[keyboard] numlock`; a layout added writes the list. And
+//! login writes `[keyboard] numlock`; a layout added writes the list; a
+//! gesture another action holds asks first in the picker, "Remplacer"
+//! writing both lines, which the compositor takes (#893). And
 //! the compositor's side: Num Lock on as the session opens, the keyboard's
 //! layouts and repeat followed live.
 //!
@@ -58,10 +60,13 @@ fn letter(c: char) -> Option<u32> {
         'b' => 48,
         'd' => 32,
         'e' => 18,
+        'g' => 34,
         'i' => 23,
         'm' => 50,
         'p' => 25,
         'r' => 19,
+        's' => 31,
+        't' => 20,
         'u' => 22,
         _ => return None,
     })
@@ -507,6 +512,74 @@ fn retablir_takes_the_line_out_of_the_file() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The picker of a row's "+" (#893): a free corner is this action's at
+/// once; a gesture another action holds asks first, "Remplacer" writing
+/// both lines, which the compositor takes; a chip's ✕ takes it away.
+#[test]
+fn a_gesture_taken_from_another_action_writes_both_lines() -> anyhow::Result<()> {
+    use hocus_config::triggers::{Toward, Trigger};
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shortcuts()?;
+    assert_eq!(
+        shown["keys"]["triggers"], 5,
+        "the defaults' gestures and corner"
+    );
+    assert_eq!(
+        shortcut(&shown, "shortcuts.overview")["triggers"],
+        serde_json::json!(["corner:top-left", "swipe:4:down"])
+    );
+    // A free corner: the lock's at once. The bar's is not offered.
+    bed.click("add:shortcuts.lock")?;
+    bed.shows(|s| s["keys"]["picker"]["tab"] == "gesture")?;
+    bed.click("tab:corner")?;
+    let shown = bed.shows(|s| s["keys"]["picker"]["tab"] == "corner")?;
+    let items = &shown["keys"]["picker"]["items"];
+    assert_eq!(items[0]["standing"], "taken");
+    assert_eq!(items[0]["owner"], "shortcuts.overview");
+    assert_eq!(items[1]["standing"], "bar");
+    bed.click("take:corner:bottom-right")?;
+    let text = bed.written(|t| t.contains("lock = "))?;
+    assert_eq!(
+        text,
+        format!("{FILE}\n[shortcuts]\nlock = [\"Super+L\", \"corner:bottom-right\"]\n")
+    );
+    // The launcher's gesture: asked first.
+    bed.click("add:shortcuts.lock")?;
+    bed.shows(|s| s["keys"]["picker"]["tab"] == "gesture")?;
+    bed.click("take:swipe:4:up")?;
+    let shown = bed.shows(|s| s["keys"]["picker"]["taking"].is_object())?;
+    assert_eq!(
+        shown["keys"]["picker"]["taking"]["from"],
+        "shortcuts.launcher"
+    );
+    bed.places_with("give:text")?;
+    bed.click("give:replace")?;
+    let text = bed.written(|t| t.contains("launcher = "))?;
+    assert!(
+        text.contains("lock = [\"Super+L\", \"corner:bottom-right\", \"swipe:4:up\"]"),
+        "{text}"
+    );
+    assert!(text.contains("launcher = \"Super+Space\""), "{text}");
+    bed.shows(|s| {
+        s["toast"] == "Verrouiller la session : 4 doigts ↑ · « Ouvrir le lanceur » n’en a plus"
+    })?;
+    let up = Trigger::Swipe {
+        fingers: 4,
+        toward: Toward::Up,
+    };
+    let taken = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.trigger_action(up) == Some(hocus_compositor::Action::Lock)
+    })?;
+    anyhow::ensure!(taken, "the compositor never took the gesture");
+    // The corner's chip ✕.
+    bed.click("unchip:shortcuts.lock:corner:bottom-right")?;
+    bed.written(|t| t.contains("lock = [\"Super+L\", \"swipe:4:up\"]"))?;
+    Ok(())
+}
+
 #[test]
 fn numlock_at_login_writes_keyboard_numlock() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
@@ -596,6 +669,66 @@ fn the_keyboards_layouts_and_repeat_follow_the_file() -> anyhow::Result<()> {
     std::fs::write(&file, "[keyboard]\nlayouts = [\"nowhere\"]\n")?;
     wait(&mut hp, Duration::from_millis(500))?;
     assert_eq!(hp.state().keyboard.layout_codes, ["us", "fr(bepo)"]);
+    Ok(())
+}
+
+/// The gestures' and corners' screenshots (#893), the window at scale 2
+/// on the CPU: written to `$HOCUS_SHOTS` when it names a folder. Run by
+/// hand (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshots"]
+fn screenshots_of_the_gestures_and_corners() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start_on(FILE, "2880x1800@2")? else {
+        return Ok(());
+    };
+    let shoot = |bed: &mut Bed, name: &str| -> anyhow::Result<()> {
+        bed.hp.pointer_move(5.0, 5.0);
+        wait(&mut bed.hp, Duration::from_secs(6))?;
+        let window = bed.window()?;
+        let (w, h, px) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let pad = 24;
+        let x = (window.x * 2 - pad).max(0) as u32;
+        let y = (window.y * 2 - pad).max(0) as u32;
+        let cw = ((window.width * 2 + 2 * pad) as u32).min(w as u32 - x);
+        let ch = ((window.height * 2 + 2 * pad) as u32).min(h as u32 - y);
+        let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+        Ok(())
+    };
+    bed.open()?;
+    bed.shortcuts()?;
+    // The rows with gestures and corners: searched « geste ».
+    bed.click("shortcuts:search")?;
+    bed.type_text("geste")?;
+    bed.shows(|s| s["keys"]["query"] == "geste")?;
+    shoot(&mut bed, "shortcuts-chips.png")?;
+    // The picker of « Vue d’ensemble », its gestures.
+    bed.click("add:shortcuts.overview")?;
+    bed.shows(|s| s["keys"]["picker"]["tab"] == "gesture")?;
+    shoot(&mut bed, "picker-gestures.png")?;
+    bed.click("tab:corner")?;
+    bed.shows(|s| s["keys"]["picker"]["tab"] == "corner")?;
+    shoot(&mut bed, "picker-corners.png")?;
+    // The launcher's gesture for the overview: asked first.
+    bed.click("tab:gesture")?;
+    bed.shows(|s| s["keys"]["picker"]["tab"] == "gesture")?;
+    bed.click("take:swipe:4:up")?;
+    bed.shows(|s| s["keys"]["picker"]["taking"].is_object())?;
+    shoot(&mut bed, "picker-replace.png")?;
     Ok(())
 }
 

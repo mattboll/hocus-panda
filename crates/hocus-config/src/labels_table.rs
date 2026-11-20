@@ -373,11 +373,6 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("05:00", Text::same("05:00")), ("05:30", Text::same("05:30")), ("06:00", Text::same("06:00")), ("06:30", Text::same("06:30")), ("07:00", Text::same("07:00")), ("07:30", Text::same("07:30")), ("08:00", Text::same("08:00")), ("08:30", Text::same("08:30")), ("09:00", Text::same("09:00")), ("09:30", Text::same("09:30"))]),
     },
     Label {
-        key: "overview.hot-corner",
-        name: hocus_words::settings::desktops::TOP_LEFT_CORNER_OVERVIEW,
-        said: Said::Switch,
-    },
-    Label {
         key: "panel.agents",
         name: hocus_words::settings::bar::THE_AGENTS,
         said: Said::Switch,
@@ -791,11 +786,6 @@ pub const ALL: &[Label] = &[
         key: "touchpad.speed",
         name: hocus_words::settings::mouse::POINTER_SPEED,
         said: Said::Other,
-    },
-    Label {
-        key: "touchpad.swipe-launcher",
-        name: hocus_words::settings::mouse::FOUR_FINGERS_UP_OR_DOWN,
-        said: Said::Switch,
     },
     Label {
         key: "touchpad.tap-and-drag",
