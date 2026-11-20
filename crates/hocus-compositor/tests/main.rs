@@ -33,6 +33,8 @@ mod nm;
 mod rfkill;
 #[path = "levels/timedate.rs"]
 mod timedate;
+#[path = "levels/udisks.rs"]
+mod udisks;
 
 mod actions;
 mod agents;
@@ -121,6 +123,7 @@ mod rain;
 mod rain_on_glass;
 mod recording;
 mod reminders;
+mod removable;
 mod scales;
 mod screen_light;
 mod screen_reader;

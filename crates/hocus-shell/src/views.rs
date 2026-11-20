@@ -637,7 +637,9 @@ impl Shell {
             | popover::Item::Task(_)
             | popover::Item::DayLater
             | popover::Item::Window(_)
-            | popover::Item::WindowClose(_) => {
+            | popover::Item::WindowClose(_)
+            | popover::Item::Drive(_)
+            | popover::Item::Eject(_) => {
                 return None;
             }
         };
