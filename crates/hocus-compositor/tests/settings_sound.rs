@@ -777,7 +777,6 @@ fn the_boost_switch_writes_its_key() -> anyhow::Result<()> {
         return Ok(());
     }
     let mut bed = Bed::start(false)?;
-    let shown = bed.open()?;
     let row = |shown: &Value| {
         shown["rows"]
             .as_array()
@@ -785,7 +784,9 @@ fn the_boost_switch_writes_its_key() -> anyhow::Result<()> {
             .cloned()
             .unwrap_or(Value::Null)
     };
-    assert_eq!(row(&shown)["value"], "non", "{shown}");
+    bed.open()?;
+    // Off, once the file is read (the row is inert and empty before).
+    bed.shows(|s| row(s)["value"] == "non")?;
     bed.scroll_to_show("control:sound.boost")?;
     bed.click("control:sound.boost")?;
     let file = bed.file();
