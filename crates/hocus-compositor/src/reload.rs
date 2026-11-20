@@ -266,6 +266,14 @@ impl State {
             self.tell_shell(hocus_link::ToShell::Weather(self.config.weather.place()));
             followed.push("[weather]");
         }
+        // Each application's notifications (#899): the shell applies them.
+        if new.notifications != self.config.notifications {
+            self.config.notifications = new.notifications.clone();
+            self.tell_shell(hocus_link::ToShell::NotifyLevels(
+                self.config.notifications.levels(),
+            ));
+            followed.push("[notifications]");
+        }
         // The desktop's effects (#434): read as each starts.
         if new.effects != self.config.effects {
             self.config.effects = new.effects.clone();

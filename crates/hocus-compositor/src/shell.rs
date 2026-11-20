@@ -828,6 +828,7 @@ impl State {
         self.tell_shell(ToShell::DesktopNames(self.config.desktops.shown_names()));
         self.tell_shell(ToShell::BarGroups(self.config.panel.groups()));
         self.tell_shell(ToShell::Weather(self.config.weather.place()));
+        self.tell_shell(ToShell::NotifyLevels(self.config.notifications.levels()));
         self.tell_shell(ToShell::BarSide(self.bar_side()));
         let bars: Vec<ToShell> = self
             .panel
@@ -952,6 +953,7 @@ impl State {
             ToCompositor::McpUndo(request) => self.mcp_undo(request),
             ToCompositor::McpStop(stop) => self.mcp_stop(stop),
             ToCompositor::Raining(raining) => self.weather_raining(raining),
+            ToCompositor::Dnd(on) => self.dnd_said(on),
             ToCompositor::McpReply { card, reply } => self.mcp_reply(card, reply),
             ToCompositor::McpHandBack(agent) => self.mcp_hand_back(&agent),
             ToCompositor::McpErase(agent) => self.mcp_erase(&agent),

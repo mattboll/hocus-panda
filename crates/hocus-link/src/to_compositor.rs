@@ -160,6 +160,9 @@ pub enum ToCompositor {
     /// pinned (6.17): sent as the shell connects and when they change, for the
     /// Settings' page.
     ClipboardCount { items: u32, pinned: u32 },
+    /// Whether the user is not to be disturbed (5.4), sent as the shell
+    /// connects and when it changes: the Settings' switch shows it (#899).
+    Dnd(bool),
     /// An emoji chosen in the picker or the launcher (5.7): it goes into the
     /// window that had the keyboard, through its text input when it has one,
     /// else pasted, the clipboard given back after. With `keep` the picker

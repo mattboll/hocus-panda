@@ -373,6 +373,16 @@
 # skip-secrets = true
 # ignore = []
 
+# [notifications.apps]
+# How each application's notifications show (Settings > Notifications, or
+# the "⋯" of a bubble or of a line of the bell's history), by its desktop
+# entry, else the name it gives: "all" (a bubble and its sound, for those
+# not named), "silent" (a bubble without its sound), "history" (no bubble:
+# kept in the bell's history and counted) or "none" (dropped). Urgent
+# ones always make a bubble, unless "none". Followed live. For example:
+#   Slack = "silent"
+#   "org.mozilla.firefox" = "none"
+
 # [perf]
 # The day's CPU and memory of the compositor and the shell, sampled every
 # 10 s on a thread of their own, kept 14 days in

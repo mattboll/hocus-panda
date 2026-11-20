@@ -322,6 +322,10 @@ fn to_shell() -> Vec<ToShell> {
         ToShell::BarSide(Side::Left),
         ToShell::BarSide(Side::Right),
         ToShell::BarGroups(BarGroups::default()),
+        ToShell::NotifyLevels(crate::NotifyLevels {
+            apps: [("Slack".to_owned(), crate::NotifyLevel::History)].into(),
+        }),
+        ToShell::Dnd(true),
         ToShell::Weather(crate::WeatherPlace {
             enabled: true,
             place: "Saint-Étienne".into(),
@@ -1067,6 +1071,7 @@ fn to_compositor() -> Vec<ToCompositor> {
         ToCompositor::McpUndo(4),
         ToCompositor::McpStop(true),
         ToCompositor::Raining(true),
+        ToCompositor::Dnd(false),
     ];
     all.extend(CaptureMode::ALL.map(|mode| ToCompositor::Capture(CaptureAsk::Mode(mode))));
     all.extend(

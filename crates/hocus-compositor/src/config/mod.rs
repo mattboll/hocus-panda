@@ -21,6 +21,7 @@ mod camera;
 mod devices;
 mod effects;
 mod keyboard;
+mod notifications;
 mod outputs;
 mod panel;
 mod power;
@@ -34,6 +35,7 @@ pub use camera::*;
 pub use devices::*;
 pub use effects::*;
 pub use keyboard::*;
+pub use notifications::*;
 pub use outputs::*;
 pub use panel::*;
 pub use power::*;
@@ -87,6 +89,9 @@ pub struct Config {
     pub panel: Panel,
     /// The weather's place and units (#814): passed on to the shell.
     pub weather: Weather,
+    /// How each application's notifications show (#899): passed on to
+    /// the shell.
+    pub notifications: Notifications,
     /// Where screenshots go, their format and the shutter (6.17).
     pub capture: Capture,
     pub recording: Recording,

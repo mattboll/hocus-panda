@@ -543,6 +543,10 @@ impl State {
                     let _ = to.send(crate::clipboard::clipboard_count_line(items, pinned));
                 }
                 let _ = to.send(self.recording_line());
+                // Do not disturb, as the shell said it (#899).
+                if let Some(on) = self.bubbles.dnd {
+                    let _ = to.send(crate::bubbles::dnd_line(on));
+                }
                 // The agents' tools (6.16).
                 let _ = to.send(self.agents_settings_opened());
                 self.displays.sessions.push(Session { id: session, to });
@@ -721,6 +725,11 @@ impl State {
                 if let Some(output) = output {
                     self.tell_shell(hocus_link::ToShell::Journal { output });
                 }
+                None
+            }
+            // Settings › Notifications' "Ne pas déranger" (#899).
+            (Some("dnd"), Some(word @ ("on" | "off")), None) => {
+                self.dnd_set(word == "on");
                 None
             }
             // "Effacer l'historique" (6.17).
