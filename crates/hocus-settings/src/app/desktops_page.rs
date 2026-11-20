@@ -681,6 +681,7 @@ impl App {
                 model::RESIZE_KEY,
                 model::MAGNET,
                 model::SNAP,
+                model::GAP,
                 model::WOBBLE,
             ]
             .into_iter()
@@ -702,9 +703,10 @@ impl App {
             head(model::ALT_TAB.label.get(lang), None),
             vec![model_row(model::ALT_TAB_ROW)],
         ));
+        // The screen corners: what each does, set in the shortcuts (#893).
         page = page.push(group(
             head(model::OVERVIEW.label.get(lang), None),
-            vec![model_row(model::HOT_CORNER)],
+            vec![self.corners_summary()],
         ));
         page = page.push(group(
             head(model::DRAW.label.get(lang), None),

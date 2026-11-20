@@ -3,9 +3,10 @@
 //!
 //! Full form: a row for the sound, the brightness and the battery (icon,
 //! 8 px gauge with its gradient, value in tabular figures; a bolt in the
-//! battery whenever the machine is on AC), then the status line,
-//! right-aligned; the group's bottom sits 61 px above the bar's, above the
-//! footer's place. Mini form: the sound's vertical gauge, then the
+//! battery whenever the machine is on AC, the power profile's mark on its
+//! corner; on battery, the time left in place of its percentage); no line
+//! under them (#900); the group's bottom sits 61 px above the bar's, above
+//! the footer's place. Mini form: the sound's vertical gauge, then the
 //! battery's sign (26 × 15, filled to its level, a bolt on AC) over its
 //! percentage, as the 3.7 mockup draws them, and under them the keyboard
 //! layout's code in its button (with two layouts or more; 3.8). A row
@@ -17,14 +18,17 @@
 //! to be drawn again only while one moves.
 //!
 //! Each row opens its popover (§9, [`crate::popover`]) with a click: the
-//! sound's, the brightness's, the battery's (its row and the status line
-//! under it; the status line alone, for the power modes, without a
-//! battery); in the mini form the sound's gauge and the battery's sign, a
-//! hover opening them too; the layout's button asks for the next layout.
-//! An item lights up under the pointer and while its popover is open, and
-//! wears a ring while it holds the keyboard; the wheel over the sound's
-//! changes the volume, over the brightness's the brightness, 5 % a notch.
-//! All of it draws this surface alone.
+//! sound's, the brightness's, the battery's; in the mini form the sound's
+//! gauge and the battery's sign, a hover opening them too; the layout's
+//! button asks for the next layout. An item lights up under the pointer
+//! and while its popover is open, and wears a ring while it holds the
+//! keyboard; the wheel over the sound's changes the volume, over the
+//! brightness's the brightness, 5 % a notch. All of it draws this surface
+//! alone.
+//!
+//! With boost (`[sound] boost`, #897), the sound's gauge goes to 150 %:
+//! a thin notch marks 100 % two thirds along, and the fill beyond it is
+//! amber.
 
 use std::time::{Duration, Instant};
 
@@ -39,7 +43,7 @@ use iced::{
     window,
 };
 
-use super::model::{Band, Snapshot, Words};
+use super::model::{Band, Mark, RowValue, Snapshot, Words};
 use crate::theme::Ink;
 use crate::{
     clock::{self, motion::bezier},
@@ -75,12 +79,13 @@ pub(crate) const MANROPE_BOLD: Font = Font {
 /// CSS's `normal` line height for Manrope.
 pub(crate) const LINE: f32 = 1.366;
 pub(crate) const VALUE: f32 = 14.5;
-const STATUS: f32 = 13.5;
 const MINI_VALUE: f32 = 14.0;
 const ROW: f32 = VALUE * LINE;
 const ROW_GAP: f32 = 10.0;
 const ICON: f32 = 18.0;
 const ICON_GAP: f32 = 8.0;
+/// The values' column, as wide as a percentage; wider, the three rows'
+/// alike, while the battery's shows its time left ([`value_box`]).
 const VALUE_BOX: f32 = 36.0;
 const GAUGE: f32 = 8.0;
 const MINI_GAUGE: f32 = 48.0;
@@ -97,8 +102,6 @@ const MINI_GAP: f32 = 14.0;
 /// open; the keyboard's ring 3 px wide, 2 px out, in the accent.
 pub(crate) const ITEM_HEIGHT: f32 = 30.0;
 pub(crate) const ITEM_OUT: f32 = 6.0;
-/// The battery's item reaches this far under the status line.
-const ITEM_PAD: f32 = 4.0;
 pub(crate) const ITEM_RADIUS: f32 = 8.0;
 const MINI_ITEM: Size = Size::new(44.0, 64.0);
 pub(crate) const MINI_ITEM_RADIUS: f32 = 10.0;
@@ -128,9 +131,24 @@ pub(crate) const LIGHT_GAUGE: (Color, Color) = LIGHT;
 const BATTERY: (Color, Color) = (rgb(0x3FA66B), rgb(0x7EE0A0));
 pub(crate) const LOW: (Color, Color) = (rgb(0xE8A13A), rgb(0xF5C46E));
 pub(crate) const CRITICAL: (Color, Color) = (rgb(0xE5793F), rgb(0xF7B98A));
+/// The sound's fill above 100 %, with boost (#897).
+pub(crate) const BOOSTED: Color = rgb(0xF5B44A);
+/// The notch at 100 %: 2 px, 3 px past the track on each side.
+pub(crate) const NOTCH: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.55));
+pub(crate) const NOTCH_WIDTH: f32 = 2.0;
+pub(crate) const NOTCH_OUT: f32 = 3.0;
 pub(crate) const BOLT: Ink = Ink::Dark(rgb(0x7EE0A0));
 /// The bolt's outline over a battery's fill.
 const BOLT_EDGE: Ink = Ink::Dark(rgb(0x0B1020));
+/// The power profile's marks on the battery (#900): the power saver's
+/// leaf, performance's flame.
+const LEAF: Ink = Ink::Dark(rgb(0x7EE0A0));
+const FLAME: Ink = Ink::Dark(rgb(0xF2945B));
+const FLAME_HEART: Ink = Ink::Dark(rgb(0xFFD6AE));
+/// A mark's box, and its centre from the battery icon's top left: on the
+/// icon's top right corner, clear of its outline, its tip and the gauge.
+const MARK: f32 = 8.0;
+const MARK_AT: (f32, f32) = (20.0, 2.5);
 
 /// A gauge's motion: 160 ms, `ease-out`.
 const MOVE: Duration = Duration::from_millis(160);
@@ -182,7 +200,7 @@ impl Tween {
     /// Toward `to` from where it is at `now`; at once without motion, or
     /// when it was not shown.
     fn toward(&mut self, to: Option<f32>, now: Instant, motion: bool, shown: bool) {
-        let Some(to) = to.map(|t| t.clamp(0.0, 100.0)) else {
+        let Some(to) = to.map(|t| t.clamp(0.0, hocus_sound::boost::BOOST_MOST)) else {
             return;
         };
         if to == self.to {
@@ -208,8 +226,9 @@ impl Tween {
 #[derive(Debug, Default)]
 pub struct State {
     levels: Snapshot,
-    /// The status line, and its lines as they fit in the bar.
-    status: Option<(String, Vec<String>)>,
+    /// The battery's time left as its row shows it, and the values'
+    /// column it asks for.
+    left: Option<(String, f32)>,
     /// Sound, brightness, battery.
     gauges: [Tween; 3],
     at: Option<Instant>,
@@ -270,7 +289,12 @@ impl<Message> canvas::Program<Message> for Levels {
         let levels = super::snapshot();
         let before = state.levels;
         if levels != before {
-            tracing::debug!("the levels' surface shows the change");
+            // The battery's value and mark, for the tests (#900).
+            tracing::debug!(
+                battery = ?levels.battery.map(|b| b.value()),
+                mark = ?levels.mark(),
+                "the levels' surface shows the change"
+            );
         }
         let targets = [
             (levels.sound.map(|s| s.volume), before.sound.is_some()),
@@ -286,22 +310,18 @@ impl<Message> canvas::Program<Message> for Levels {
         state
             .keyboard
             .refresh(&crate::layouts::snapshot(), FULL_SURFACE.0 as f32);
-        let status = self.words.status(&levels);
-        if state.status.as_ref().map(|(s, _)| s) != status.as_ref() {
-            state.status = status.map(|status| {
-                let lines = match iced::advanced::graphics::text::font_system().write() {
-                    Ok(mut system) => {
-                        let fits = FULL_SURFACE.0 as f32 - 2.0 * SIDE;
-                        lines(&status, fits, |text| width(system.raw(), text))
-                    }
-                    Err(_) => vec![status.clone()],
-                };
-                (status, lines)
+        let left = levels.battery.and_then(|b| match b.value() {
+            RowValue::Left(left) => Some(left),
+            RowValue::Percent(_) => None,
+        });
+        if state.left.as_ref().map(|(l, _)| l) != left.as_ref() {
+            state.left = left.map(|left| {
+                let column = value_box(|text| popover::kit::measure(text, VALUE, MANROPE), &left);
+                (left, column)
             });
         }
         // The connections sit above the group: they follow its top.
-        let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
-        let (full, mini) = group_tops(&levels, lines, state.keys());
+        let (full, mini) = group_tops(&levels, state.keys());
         crate::network::draw::levels_moved(
             &self.bar,
             (full + self.lift(Form::Full), mini + self.lift(Form::Mini)),
@@ -395,10 +415,8 @@ impl<Message> canvas::Program<Message> for Levels {
         let (zero, zero_bold) = state.zero.unwrap_or((VALUE * 0.6, MINI_VALUE * 0.65));
         let mut drawn = Drawn {
             levels: &state.levels,
-            status: state
-                .status
-                .as_ref()
-                .map_or(&[], |(_, lines)| lines.as_slice()),
+            time_left: state.left.as_ref().map(|(l, _)| l.as_str()),
+            value_box: state.left.as_ref().map_or(VALUE_BOX, |(_, w)| *w),
             gauges,
             words: self.words,
             left: left + SIDE,
@@ -453,38 +471,22 @@ impl Levels {
         let size = Size::new(size.width, size.height - self.lift(*form));
         match form {
             Form::Full => {
-                let lines = state.status.as_ref().map_or(0, |(_, l)| l.len());
-                let [battery, light, sound] = full_rows(levels, lines, size.height);
+                let [battery, light, sound] = full_rows(levels, size.height);
                 let (from, to) = (left + SIDE - ITEM_OUT, right - SIDE + ITEM_OUT);
                 let row = |top: f32, bottom: f32| {
                     Rectangle::new(Point::new(from, top), Size::new(to - from, bottom - top))
                 };
                 let half = ITEM_HEIGHT / 2.0;
-                for (item, middle) in [(Item::Sound, sound), (Item::Brightness, light)] {
+                // Without a battery, nothing here opens the power modes
+                // (#900), as in the mini form: Settings › Power has them.
+                for (item, middle) in [
+                    (Item::Sound, sound),
+                    (Item::Brightness, light),
+                    (Item::Battery, battery),
+                ] {
                     if let Some(middle) = middle {
                         items.push((item, row(middle - half, middle + half)));
                     }
-                }
-                // The status line's lines, under the rows.
-                let status_bottom = size.height - FULL_RAISE;
-                let status_top = status_bottom - lines as f32 * STATUS * LINE;
-                match battery {
-                    // Its row and the status line under it.
-                    Some(middle) => {
-                        let bottom = if lines > 0 {
-                            status_bottom + ITEM_PAD
-                        } else {
-                            middle + half
-                        };
-                        items.push((Item::Battery, row(middle - half, bottom)));
-                    }
-                    // The status line alone: the power modes.
-                    None if lines > 0 && levels.profiles.any() => {
-                        let pad =
-                            ((ITEM_HEIGHT - (status_bottom - status_top)) / 2.0).max(ITEM_PAD);
-                        items.push((Item::Battery, row(status_top - pad, status_bottom + pad)));
-                    }
-                    None => {}
                 }
             }
             Form::Mini => {
@@ -641,13 +643,9 @@ pub(crate) fn pointer(
 }
 
 /// The full form's rows' middles, from the surface's bottom: the
-/// battery's, the brightness's and the sound's, each if it shows, under a
-/// status line of `status` lines.
-fn full_rows(levels: &Snapshot, status: usize, bottom: f32) -> [Option<f32>; 3] {
+/// battery's, the brightness's and the sound's, each if it shows.
+fn full_rows(levels: &Snapshot, bottom: f32) -> [Option<f32>; 3] {
     let mut bottom = bottom - FULL_RAISE;
-    if status > 0 {
-        bottom -= status as f32 * STATUS * LINE + ROW_GAP;
-    }
     let mut middles = [None; 3];
     let shown = [
         levels.battery.is_some(),
@@ -667,12 +665,11 @@ fn full_rows(levels: &Snapshot, status: usize, bottom: f32) -> [Option<f32>; 3] 
 /// form and in the mini: its first row's item (30 px) in the full form, the
 /// gauge (or the battery's item, or the layout's button: `keys`) in the
 /// mini; nothing shown, the group's bottom.
-pub fn group_tops(levels: &Snapshot, status: usize, keys: bool) -> (f32, f32) {
+pub fn group_tops(levels: &Snapshot, keys: bool) -> (f32, f32) {
     let height = FULL_SURFACE.1 as f32;
-    let rows = full_rows(levels, status, height);
+    let rows = full_rows(levels, height);
     let full = match rows.iter().flatten().copied().reduce(f32::min) {
         Some(middle) => height - (middle - ITEM_HEIGHT / 2.0),
-        None if status > 0 => FULL_RAISE + status as f32 * STATUS * LINE,
         None => FULL_RAISE,
     };
     let height = mini_surface(keys).1 as f32;
@@ -729,8 +726,7 @@ fn mini_gauge_bottom(levels: &Snapshot, bottom: f32, keys: bool) -> f32 {
 }
 
 /// A level's item as screen readers read it, `levels` as it shows them:
-/// the volume and the brightness sliders, the battery's charge (the power
-/// modes alone without one).
+/// the volume and the brightness sliders, the battery's charge.
 pub fn node(words: crate::a11y::Words, item: Item, levels: &Snapshot) -> Option<hocus_a11y::Node> {
     use hocus_a11y::{Act, Node, Role};
     let key = crate::ui::items::key(item);
@@ -742,9 +738,10 @@ pub fn node(words: crate::a11y::Words, item: Item, levels: &Snapshot) -> Option<
             } else {
                 words.percent(sound.volume)
             };
+            let most = hocus_sound::boost::most(levels.boost);
             Node::new(key, Role::Slider, words.volume())
                 .value(value)
-                .range(f64::from(sound.volume), 0.0, 100.0, Some(5.0))
+                .range(f64::from(sound.volume), 0.0, f64::from(most), Some(5.0))
                 .act(Act::Click)
                 .act(Act::Increment)
                 .act(Act::Decrement)
@@ -758,13 +755,13 @@ pub fn node(words: crate::a11y::Words, item: Item, levels: &Snapshot) -> Option<
                 .act(Act::Increment)
                 .act(Act::Decrement)
         }
-        Item::Battery => match levels.battery {
-            Some(battery) => Node::new(key, Role::ProgressBar, words.battery())
+        Item::Battery => {
+            let battery = levels.battery?;
+            Node::new(key, Role::ProgressBar, words.battery())
                 .value(words.battery_value(&battery, levels))
                 .range(f64::from(battery.shown()), 0.0, 100.0, None)
-                .act(Act::Click),
-            None => Node::new(key, Role::Button, words.power(levels)).act(Act::Click),
-        },
+                .act(Act::Click)
+        }
         Item::Keyboard => {
             let layout = crate::layouts::snapshot().shown().map(|l| l.name.clone())?;
             crate::network::draw::node(words, item, None, None, Some(&layout))?
@@ -779,8 +776,10 @@ pub(crate) use crate::ui::ring::draw as ring;
 /// One draw of the levels.
 struct Drawn<'a> {
     levels: &'a Snapshot,
-    /// The status line's lines.
-    status: &'a [String],
+    /// The battery's time left, shown in place of its percentage.
+    time_left: Option<&'a str>,
+    /// The values' column.
+    value_box: f32,
     /// The gauges' lengths as drawn now, in percent.
     gauges: [f32; 3],
     words: Words,
@@ -796,38 +795,31 @@ struct Drawn<'a> {
 
 impl Drawn<'_> {
     fn full(&self, f: &mut Frame, alpha: f32) {
-        let mut bottom = self.bottom - FULL_RAISE;
         let levels = self.levels;
-        let middles = full_rows(levels, self.status.len(), self.bottom);
+        let middles = full_rows(levels, self.bottom);
         let band = levels.battery.map_or(Band::Ok, |b| b.band());
-        let colour = match band {
-            Band::Ok => FAINT.get(),
-            Band::Low => LOW.1,
-            Band::Critical => CRITICAL.1,
-        };
-        for line in self.status.iter().rev() {
-            f.fill_text(canvas::Text {
-                content: line.clone(),
-                position: Point::new(self.right, bottom - STATUS * LINE / 2.0),
-                max_width: f32::INFINITY,
-                color: faded(colour, alpha),
-                size: Pixels(STATUS),
-                line_height: LineHeight::Relative(LINE),
-                font: MANROPE,
-                align_x: Alignment::Right,
-                align_y: alignment::Vertical::Center,
-                shaping: Shaping::Advanced,
-            });
-            bottom -= STATUS * LINE;
-        }
-        let row = |f: &mut Frame, middle: f32, icon: Icon, gauge: f32, fill: Fill, value: Value| {
-            icon.draw(f, Point::new(self.left, middle - ICON / 2.0), alpha);
+        let track_at = |middle: f32| {
             let x = self.left + ICON + ICON_GAP;
-            let track = Rectangle::new(
+            Rectangle::new(
                 Point::new(x, middle - GAUGE / 2.0),
-                Size::new(self.right - VALUE_BOX - ICON_GAP - x, GAUGE),
+                Size::new(self.right - self.value_box - ICON_GAP - x, GAUGE),
+            )
+        };
+        let row = |f: &mut Frame,
+                   middle: f32,
+                   icon: Icon,
+                   (gauge, scale): (f32, Scale),
+                   fill: Fill,
+                   value: Value| {
+            icon.draw(f, Point::new(self.left, middle - ICON / 2.0), alpha);
+            bar(
+                f,
+                track_at(middle),
+                (gauge, scale),
+                fill,
+                Direction::Right,
+                alpha,
             );
-            bar(f, track, gauge, fill, Direction::Right, alpha);
             value.draw(f, Point::new(self.right, middle), self.zero, alpha);
         };
         if let (Some(battery), Some(middle)) = (levels.battery, middles[0]) {
@@ -836,17 +828,24 @@ impl Drawn<'_> {
                 Band::Low => (LOW, LOW.1),
                 Band::Critical => (CRITICAL, CRITICAL.1),
             };
-            let value = Value::Number(battery.shown(), colour);
+            let value = match self.time_left {
+                Some(left) => Value::Text(left, colour),
+                None => Value::Number(battery.shown(), colour),
+            };
             row(
                 f,
                 middle,
                 Icon::Battery {
                     bolt: battery.bolt(),
+                    mark: levels.mark(),
                 },
-                self.gauges[2],
+                (self.gauges[2], Scale::Plain),
                 Fill::Gradient(fill),
                 value,
             );
+            if let Some(limit) = levels.charge_limit {
+                limit_mark(f, track_at(middle), limit, alpha);
+            }
         }
         if let (Some(brightness), Some(middle)) = (levels.brightness, middles[1]) {
             let value = Value::Number(brightness.round() as u32, DIM.get());
@@ -854,7 +853,7 @@ impl Drawn<'_> {
                 f,
                 middle,
                 Icon::Sun,
-                self.gauges[1],
+                (self.gauges[1], Scale::Plain),
                 Fill::Gradient(LIGHT),
                 value,
             );
@@ -875,7 +874,7 @@ impl Drawn<'_> {
                 f,
                 middle,
                 Icon::Speaker { muted: sound.muted },
-                self.gauges[0],
+                (self.gauges[0], Scale::of(levels.boost)),
                 fill,
                 value,
             );
@@ -931,10 +930,32 @@ impl Drawn<'_> {
                 Point::new(centre - GAUGE / 2.0, bottom - MINI_GAUGE),
                 Size::new(GAUGE, MINI_GAUGE),
             );
-            bar(f, track, self.gauges[0], fill, Direction::Up, alpha);
+            let scale = Scale::of(levels.boost);
+            bar(
+                f,
+                track,
+                (self.gauges[0], scale),
+                fill,
+                Direction::Up,
+                alpha,
+            );
         }
     }
 }
+
+/// The charge limit's mark on the battery's gauge (#896): a 2 px line
+/// across the track at `limit` percent, `text` at 70 %.
+fn limit_mark(f: &mut Frame, track: Rectangle, limit: u8, alpha: f32) {
+    let x = track.x + track.width * f32::from(limit.min(100)) / 100.0;
+    f.fill_rectangle(
+        Point::new(x - LIMIT_MARK / 2.0, track.y),
+        Size::new(LIMIT_MARK, track.height),
+        faded(TEXT.get(), 0.7 * alpha),
+    );
+}
+
+/// The charge limit's mark's width.
+const LIMIT_MARK: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy)]
 enum Fill {
@@ -948,15 +969,123 @@ enum Direction {
     Up,
 }
 
-/// A gauge: its track, rounded, and its fill to `percent`, from the left
-/// or from the bottom.
-fn bar(f: &mut Frame, track: Rectangle, percent: f32, fill: Fill, way: Direction, alpha: f32) {
+/// A gauge's scale: to 100 %, or the sound's with boost, to 150 % (#897).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scale {
+    Plain,
+    Boost,
+}
+
+impl Scale {
+    fn of(boost: bool) -> Self {
+        if boost { Self::Boost } else { Self::Plain }
+    }
+}
+
+/// A gauge: its track, rounded, and its fill to `percent` on its `scale`,
+/// from the left or from the bottom; with boost, the notch at 100 % and
+/// the fill beyond it amber.
+fn bar(
+    f: &mut Frame,
+    track: Rectangle,
+    (percent, scale): (f32, Scale),
+    fill: Fill,
+    way: Direction,
+    alpha: f32,
+) {
     let radius = GAUGE / 2.0;
     f.fill(
         &Path::rounded_rectangle(track.position(), track.size(), radius.into()),
         faded(TRACK.get(), alpha),
     );
-    let share = (percent / 100.0).clamp(0.0, 1.0);
+    let boost = scale == Scale::Boost;
+    let share = hocus_sound::boost::share_of(percent, boost);
+    fill_to(f, track, share, fill, way, alpha, boost);
+    if boost {
+        notch(f, track, way, alpha);
+    }
+}
+
+/// The notch at 100 % across a boosted gauge's track.
+fn notch(f: &mut Frame, track: Rectangle, way: Direction, alpha: f32) {
+    let mark = hocus_sound::boost::MARK;
+    let rect = match way {
+        Direction::Right => Rectangle::new(
+            Point::new(
+                track.x + track.width * mark - NOTCH_WIDTH / 2.0,
+                track.y - NOTCH_OUT,
+            ),
+            Size::new(NOTCH_WIDTH, track.height + 2.0 * NOTCH_OUT),
+        ),
+        Direction::Up => Rectangle::new(
+            Point::new(
+                track.x - NOTCH_OUT,
+                track.y + track.height * (1.0 - mark) - NOTCH_WIDTH / 2.0,
+            ),
+            Size::new(track.width + 2.0 * NOTCH_OUT, NOTCH_WIDTH),
+        ),
+    };
+    f.fill(
+        &Path::rounded_rectangle(rect.position(), rect.size(), (NOTCH_WIDTH / 2.0).into()),
+        faded(NOTCH.get(), alpha),
+    );
+}
+
+/// A gauge's fill to `share` of its track; with `boost` and past 100 %,
+/// its gradient ends at 100 % and the rest is amber, drawn under it.
+fn fill_to(
+    f: &mut Frame,
+    track: Rectangle,
+    share: f32,
+    fill: Fill,
+    way: Direction,
+    alpha: f32,
+    boost: bool,
+) {
+    let radius = GAUGE / 2.0;
+    let mark = hocus_sound::boost::MARK;
+    if boost
+        && share > mark
+        && let Fill::Gradient(colours) = fill
+    {
+        fill_to(f, track, share, Fill::Flat(BOOSTED), way, alpha, false);
+        // The gradient to 100 %, its end square where the amber starts.
+        let path = match way {
+            Direction::Right => Path::rounded_rectangle(
+                track.position(),
+                Size::new(track.width * mark, track.height),
+                iced::border::Radius {
+                    top_left: radius,
+                    top_right: 0.0,
+                    bottom_right: 0.0,
+                    bottom_left: radius,
+                },
+            ),
+            Direction::Up => track_below(track, track.y + track.height * (1.0 - mark)),
+        };
+        let (start, end) = match way {
+            Direction::Right => {
+                let y = track.center_y();
+                (
+                    Point::new(track.x, y),
+                    Point::new(track.x + track.width * mark, y),
+                )
+            }
+            Direction::Up => {
+                let x = track.center_x();
+                let bottom = track.y + track.height;
+                (
+                    Point::new(x, bottom),
+                    Point::new(x, bottom - track.height * mark),
+                )
+            }
+        };
+        let gradient = gradient::Linear::new(start, end)
+            .add_stop(0.0, faded(colours.0, alpha))
+            .add_stop(1.0, faded(colours.1, alpha));
+        f.fill(&path, canvas::Fill::from(gradient));
+        return;
+    }
     let (rect, start, end) = match way {
         Direction::Right => {
             let w = track.width * share;
@@ -1038,13 +1167,13 @@ fn track_below(track: Rectangle, top: f32) -> Path {
 
 /// A value at the right of its row.
 #[derive(Debug, Clone, Copy)]
-enum Value {
+enum Value<'a> {
     /// Tabular figures: each in a cell as wide as a `0`.
     Number(u32, Color),
-    Text(&'static str, Color),
+    Text(&'a str, Color),
 }
 
-impl Value {
+impl Value<'_> {
     fn draw(self, f: &mut Frame, right_middle: Point, zero: f32, alpha: f32) {
         match self {
             Self::Number(n, colour) => {
@@ -1079,35 +1208,13 @@ impl Value {
     }
 }
 
-/// The status line in lines that fit in `fits` px as `width` measures
-/// them: broken between its parts (" · "), never inside one; a part too
-/// wide alone keeps its own line.
-pub fn lines(text: &str, fits: f32, mut width: impl FnMut(&str) -> f32) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    for part in text.split(" · ") {
-        match lines.last_mut() {
-            Some(line) if width(&format!("{line} · {part}")) <= fits => {
-                line.push_str(" · ");
-                line.push_str(part);
-            }
-            _ => lines.push(part.to_owned()),
-        }
-    }
-    lines
-}
-
-/// The width of `text` in the status line's font.
-fn width(system: &mut iced::advanced::graphics::text::cosmic_text::FontSystem, text: &str) -> f32 {
-    use iced::advanced::graphics::text::cosmic_text;
-    let mut buffer =
-        cosmic_text::Buffer::new(system, cosmic_text::Metrics::new(STATUS, STATUS * LINE));
-    let attrs = iced::advanced::graphics::text::to_attributes(MANROPE);
-    buffer.set_text(system, text, &attrs, cosmic_text::Shaping::Advanced, None);
-    buffer.shape_until_scroll(system, false);
-    buffer
-        .layout_runs()
-        .map(|run| run.line_w)
-        .fold(0.0, f32::max)
+/// The values' column while the battery's row shows `left` (#900), as
+/// `width` measures text in the values' font: as wide as the widest time
+/// under ten hours ("00 min"), or `left` when wider, never narrower than a
+/// percentage's; whole pixels. One width for the three rows, which keeps
+/// their gauges aligned, and still as the minutes go.
+fn value_box(mut width: impl FnMut(&str) -> f32, left: &str) -> f32 {
+    width("00 min").max(width(left)).ceil().max(VALUE_BOX)
 }
 
 /// `ch` centred on `x`, its line centred on `y`.
@@ -1131,7 +1238,7 @@ pub(crate) fn cell(f: &mut Frame, ch: char, x: f32, y: f32, size: f32, font: Fon
 enum Icon {
     Speaker { muted: bool },
     Sun,
-    Battery { bolt: bool },
+    Battery { bolt: bool, mark: Option<Mark> },
 }
 
 impl Icon {
@@ -1200,7 +1307,7 @@ impl Icon {
                     line(f, s, 2.2, TEXT.get(), &ray);
                 }
             }
-            Self::Battery { bolt } => {
+            Self::Battery { bolt, mark } => {
                 // A 28 × 16 box, as wide as the others: centred.
                 let s = ICON / 28.0;
                 let top = at.y + (ICON - 16.0 * s) / 2.0;
@@ -1230,7 +1337,58 @@ impl Icon {
                     ]);
                     f.fill(&path, faded(BOLT.get(), alpha));
                 }
+                if let Some(mark) = mark {
+                    let centre = Point::new(at.x + MARK_AT.0, at.y + MARK_AT.1);
+                    profile_mark(f, centre, mark, alpha);
+                }
             }
+        }
+    }
+}
+
+/// The power profile's mark (#900), `MARK` px, centred on `centre`: a
+/// leaf, its stem toward the battery's corner, with a dark vein; or a
+/// flame with a light heart.
+fn profile_mark(f: &mut Frame, centre: Point, mark: Mark, alpha: f32) {
+    // A 10-unit box.
+    let s = MARK / 10.0;
+    let p = |x: f32, y: f32| Point::new(centre.x + (x - 5.0) * s, centre.y + (y - 5.0) * s);
+    match mark {
+        Mark::Leaf => {
+            // The popover's leaf, filled: from its stem at the bottom left
+            // to its point at the top right.
+            let leaf = Path::new(|b| {
+                b.move_to(p(0.8, 9.2));
+                b.bezier_curve_to(p(0.8, 4.0), p(4.0, 1.0), p(9.6, 0.4));
+                b.bezier_curve_to(p(9.6, 6.0), p(6.4, 9.2), p(1.4, 9.2));
+                b.close();
+            });
+            f.fill(&leaf, faded(LEAF.get(), alpha));
+            f.stroke(
+                &Path::line(p(1.2, 8.8), p(6.2, 3.8)),
+                stroke(1.0 * s, faded(BOLT_EDGE.get(), alpha)),
+            );
+        }
+        Mark::Flame => {
+            // A flame, its tip leaning right, and a light heart low in it.
+            let flame = Path::new(|b| {
+                b.move_to(p(5.4, 0.0));
+                b.bezier_curve_to(p(8.6, 2.6), p(9.4, 5.0), p(9.0, 7.0));
+                b.bezier_curve_to(p(8.6, 9.0), p(7.0, 10.0), p(5.0, 10.0));
+                b.bezier_curve_to(p(2.8, 10.0), p(1.0, 8.6), p(1.0, 6.6));
+                b.bezier_curve_to(p(1.0, 5.0), p(2.0, 3.8), p(3.0, 3.0));
+                b.bezier_curve_to(p(3.0, 4.2), p(3.4, 5.0), p(4.2, 5.4));
+                b.bezier_curve_to(p(4.0, 3.4), p(4.4, 1.6), p(5.4, 0.0));
+                b.close();
+            });
+            f.fill(&flame, faded(FLAME.get(), alpha));
+            let heart = Path::new(|b| {
+                b.move_to(p(5.2, 5.6));
+                b.bezier_curve_to(p(6.8, 6.8), p(7.0, 8.8), p(5.2, 8.9));
+                b.bezier_curve_to(p(3.6, 8.9), p(3.6, 7.0), p(5.2, 5.6));
+                b.close();
+            });
+            f.fill(&heart, faded(FLAME_HEART.get(), alpha));
         }
     }
 }
@@ -1357,12 +1515,16 @@ mod tests {
         assert!(mid > 64.5 && mid < 67.0, "{mid}");
         assert_eq!(gauge.at(t0 + ms(160)), 67.0);
         assert!(!gauge.moving(t0 + ms(160)));
-        // Without motion, at once; past 100, the gauge is full.
+        // Without motion, at once; up to 150 % (the gauge full at 100 %
+        // without boost, its scale's).
         gauge.toward(Some(120.0), t0, false, true);
-        assert_eq!(gauge.at(t0), 100.0);
+        assert_eq!(gauge.at(t0), 120.0);
+        assert_eq!(hocus_sound::boost::share_of(gauge.at(t0), false), 1.0);
+        gauge.toward(Some(180.0), t0, false, true);
+        assert_eq!(gauge.at(t0), 150.0);
         // A service gone keeps the gauge where it was.
         gauge.toward(None, t0, true, true);
-        assert_eq!(gauge.at(t0), 100.0);
+        assert_eq!(gauge.at(t0), 150.0);
     }
 
     #[test]
@@ -1375,8 +1537,8 @@ mod tests {
             brightness: Some(70.0),
             ..Snapshot::default()
         };
-        // No battery, no status line: brightness at the bottom, sound over.
-        let [battery, light, sound] = full_rows(&levels, 0, 175.0);
+        // No battery: brightness at the bottom, sound over.
+        let [battery, light, sound] = full_rows(&levels, 175.0);
         assert_eq!(battery, None);
         let light = light.expect("brightness");
         let sound = sound.expect("sound");
@@ -1397,23 +1559,36 @@ mod tests {
     }
 
     #[test]
-    fn a_long_status_line_breaks_between_its_parts() {
-        // Five pixels a character.
-        let width = |t: &str| t.chars().count() as f32 * 5.0;
-        assert_eq!(
-            lines("3 h 40 restantes · équilibré", 172.0, width),
-            ["3 h 40 restantes · équilibré"]
-        );
-        assert_eq!(
-            lines(
-                "9 min restantes · branche le chargeur · équilibré",
-                172.0,
-                width
-            ),
-            ["9 min restantes", "branche le chargeur · équilibré"]
-        );
-        assert_eq!(lines("a · b", 1.0, width), ["a", "b"]);
-        assert_eq!(lines("économie", 172.0, width), ["économie"]);
+    fn the_values_column_widens_for_the_time_left_and_stays_as_it_goes() {
+        // Eight pixels a character: "00 min", 48 px.
+        let width = |t: &str| t.chars().count() as f32 * 8.0;
+        assert_eq!(value_box(width, "3 h 40"), 48.0);
+        assert_eq!(value_box(width, "45 min"), 48.0);
+        assert_eq!(value_box(width, "1 h"), 48.0);
+        // Ten hours and more: wider.
+        assert_eq!(value_box(width, "12 h 05"), 56.0);
+        // Never narrower than a percentage's; whole pixels.
+        assert_eq!(value_box(|t: &str| t.len() as f32 * 2.1, "1 h"), VALUE_BOX);
+        assert_eq!(value_box(|t: &str| t.len() as f32 * 6.1, "1 h"), 37.0);
+    }
+
+    #[test]
+    fn the_battery_icon_wears_its_mark_clear_of_its_outline_and_the_gauge() {
+        // In the icon's 18 px box: the battery's body is 22 × 12 of its
+        // 28 × 16 units, centred upright; its tip 2 × 4 at its right.
+        let s = ICON / 28.0;
+        let top = (ICON - 16.0 * s) / 2.0;
+        let body_right = 23.0 * s + 0.9 * s;
+        let tip_top = top + 6.0 * s;
+        let (x, y) = MARK_AT;
+        let half = MARK / 2.0;
+        // Right of the body's outline, above its tip, a pixel apart.
+        assert!(x - half >= body_right + 0.5, "{}", x - half);
+        assert!(y + half <= tip_top - 1.0, "{}", y + half);
+        // Before the gauge, and inside the row's item (30 px around the
+        // row's 18 px icon).
+        assert!(x + half <= ICON + ICON_GAP - 2.0);
+        assert!(y - half >= -(ITEM_HEIGHT - ICON) / 2.0);
     }
 
     #[test]
@@ -1453,10 +1628,9 @@ mod tests {
 
     #[test]
     fn the_groups_fit_their_surfaces() {
-        // Full: three rows and the status line on three lines (a line a
-        // part at most: the time, the charger's hint, the profile), above
-        // the footer's place, and the sound's row lit and ringed.
-        let full = 3.0 * ROW + 3.0 * STATUS * LINE + 3.0 * ROW_GAP + FULL_RAISE;
+        // Full: three rows, above the footer's place, and the sound's row
+        // lit and ringed.
+        let full = 3.0 * ROW + 2.0 * ROW_GAP + FULL_RAISE;
         let lit = (ITEM_HEIGHT - ROW) / 2.0 + RING_OUT + RING;
         assert!(full + lit <= FULL_SURFACE.1 as f32, "{full} + {lit}");
         // Mini: the gauge 14 px over the battery's item, the gauge lit and
@@ -1529,7 +1703,7 @@ mod tests {
         };
         let colour = Color::from_rgb8(0x1b, 0x1d, 0x22);
         for (form, (w, h)) in [(Form::Full, FULL_SURFACE), (Form::Mini, MINI_SURFACE)] {
-            let mut state = state(all, 0);
+            let mut state = state(all);
             let now = state.at.expect("drawn at");
             for (gauge, to) in state.gauges.iter_mut().zip([62.0, 70.0, 82.0]) {
                 gauge.toward(Some(to), now, false, false);
@@ -1561,7 +1735,7 @@ mod tests {
         };
         let (w, h) = FULL_SURFACE;
         let size = Size::new(w as f32, h as f32);
-        let mut unlit = state(sound, 0);
+        let mut unlit = state(sound);
         let now = unlit.at.expect("drawn at");
         unlit.gauges[0].toward(Some(62.0), now, false, false);
         let program = levels(Form::Full);
@@ -1572,7 +1746,7 @@ mod tests {
         let lit = State {
             hover: Some(Item::Sound),
             gauges: unlit.gauges,
-            ..state(sound, 0)
+            ..state(sound)
         };
         let surface = iced::Size::new(w, h);
         let before = crate::backdrop::tests::pixels_of(&program, &unlit, surface);
@@ -1597,17 +1771,16 @@ mod tests {
         assert!(opaque > 50, "the sign and the gauge are drawn: {opaque}");
     }
 
-    fn state(levels: Snapshot, lines: usize) -> State {
+    fn state(levels: Snapshot) -> State {
         State {
             levels,
-            status: (lines > 0).then(|| (String::new(), vec![String::new(); lines])),
             at: Some(Instant::now()),
             ..State::default()
         }
     }
 
     #[test]
-    fn each_row_is_an_item_the_batterys_with_its_status_line() {
+    fn each_row_is_an_item_and_nothing_under_them() {
         use super::super::model::{Battery, Charge, Profile, Profiles, Sound};
         let battery = Battery {
             percent: 82.0,
@@ -1627,47 +1800,45 @@ mod tests {
             ..Snapshot::default()
         };
         let size = Size::new(FULL_SURFACE.0 as f32, FULL_SURFACE.1 as f32);
-        for lines in [1, 3] {
-            let items = levels(Form::Full).items(&state(all, lines), size);
-            let kinds: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
-            assert_eq!(kinds, [Item::Sound, Item::Brightness, Item::Battery]);
-            for (i, (item, rect)) in items.iter().enumerate() {
-                // Inside the surface with their ring, apart.
-                assert!(rect.y >= RING_OUT + RING, "{item:?}");
-                assert!(
-                    rect.y + rect.height <= size.height - RING_OUT - RING,
-                    "{item:?}"
-                );
-                for (_, other) in &items[i + 1..] {
-                    assert!(rect.y + rect.height <= other.y + 0.5, "{item:?}");
-                }
-            }
-            // The battery's reaches 4 px under the status line.
-            let (_, battery) = items[2];
-            assert_eq!(
-                battery.y + battery.height,
-                size.height - FULL_RAISE + ITEM_PAD
+        let items = levels(Form::Full).items(&state(all), size);
+        let kinds: Vec<Item> = items.iter().map(|(i, _)| *i).collect();
+        assert_eq!(kinds, [Item::Sound, Item::Brightness, Item::Battery]);
+        for (i, (item, rect)) in items.iter().enumerate() {
+            // Inside the surface with their ring, apart, each its row's
+            // 30 px.
+            assert!(rect.y >= RING_OUT + RING, "{item:?}");
+            assert!(
+                rect.y + rect.height <= size.height - RING_OUT - RING,
+                "{item:?}"
             );
+            assert!((rect.height - ITEM_HEIGHT).abs() < 0.01, "{item:?}");
+            for (_, other) in &items[i + 1..] {
+                assert!(rect.y + rect.height <= other.y + 0.5, "{item:?}");
+            }
         }
-        // No battery: the status line (the profile) opens the modes; nor
-        // without profiles.
+        // The battery's row last, its middle a row's half over the
+        // group's bottom: no line under it (#900).
+        let (_, battery) = items[2];
+        assert!((battery.center_y() - (size.height - FULL_RAISE - ROW / 2.0)).abs() < 0.01);
+        let top = FULL_RAISE + 2.5 * ROW + 2.0 * ROW_GAP + ITEM_HEIGHT / 2.0;
+        assert!((group_tops(&all, false).0 - top).abs() < 0.01);
+        // No battery: nothing opens the power modes in the bar, profiles
+        // or not.
         let modes = Snapshot {
             battery: None,
             ..all
         };
-        let items = levels(Form::Full).items(&state(modes, 1), size);
-        let (item, line) = items.last().copied().expect("an item");
-        assert_eq!(item, Item::Battery);
-        assert_eq!(line.height, ITEM_HEIGHT);
+        let items = levels(Form::Full).items(&state(modes), size);
+        assert!(items.iter().all(|(i, _)| *i != Item::Battery));
         let none = Snapshot {
             profiles: Profiles::default(),
             ..modes
         };
-        let items = levels(Form::Full).items(&state(none, 1), size);
+        let items = levels(Form::Full).items(&state(none), size);
         assert!(items.iter().all(|(i, _)| *i != Item::Battery));
         // Mini: the gauge and the battery's 44 × 46, apart.
         let size = Size::new(MINI_SURFACE.0 as f32, MINI_SURFACE.1 as f32);
-        let items = levels(Form::Mini).items(&state(all, 1), size);
+        let items = levels(Form::Mini).items(&state(all), size);
         let [(Item::Sound, gauge), (Item::Battery, sign)] = items.as_slice() else {
             panic!("{items:?}");
         };
@@ -1678,7 +1849,7 @@ mod tests {
         // everything within its taller surface.
         let (w, h) = mini_surface(true);
         let size = Size::new(w as f32, h as f32);
-        let mut with_keys = state(all, 1);
+        let mut with_keys = state(all);
         with_keys.keyboard.refresh(
             &crate::layouts::Layouts {
                 list: vec![

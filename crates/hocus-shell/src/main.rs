@@ -882,6 +882,10 @@ impl Shell {
                 agents::set_pandas(pandas);
                 Task::none()
             }
+            ToShell::SoundBoost(on) => {
+                levels::set_boost(on);
+                Task::none()
+            }
             ToShell::Focus(screen) => {
                 notifications::focus(screen);
                 Task::none()
@@ -1031,6 +1035,10 @@ impl Shell {
             // Taken by the link itself, without a message.
             ToShell::LeaveCan(can) => {
                 popover::session::set_can(can);
+                Task::none()
+            }
+            ToShell::ChargeLimit(limit) => {
+                levels::publish(|levels| levels.charge_limit = limit);
                 Task::none()
             }
             ToShell::Leave(shown) => {
@@ -1953,6 +1961,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             agents::set_pandas(pandas);
                             continue;
                         }
+                        // The volume above 100 % (#897): the levels and
+                        // an open sound popover draw.
+                        ToShell::SoundBoost(on) => {
+                            levels::set_boost(on);
+                            continue;
+                        }
                         // The bubbles' screen: their stack alone.
                         ToShell::Focus(screen) => {
                             notifications::focus(screen);
@@ -2041,6 +2055,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The session menu (7.4): its popover alone.
                         ToShell::LeaveCan(can) => {
                             popover::session::set_can(can);
+                            continue;
+                        }
+                        // The battery's charge limit (#896): its gauge's
+                        // mark and its popover's line, as a level's change.
+                        ToShell::ChargeLimit(limit) => {
+                            levels::publish(|levels| levels.charge_limit = limit);
                             continue;
                         }
                         ToShell::Leave(shown) => {

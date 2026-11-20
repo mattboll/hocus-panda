@@ -89,10 +89,12 @@ pub enum Heard {
         why: String,
     },
     Recent(Vec<Recent>),
-    /// The power source in use, and the battery's charge, once looked at.
+    /// The power source in use, the battery's charge, and whether a
+    /// battery's charge can be limited (#896), once looked at.
     Power {
         source: Source,
         battery: Option<u8>,
+        charge_limit: bool,
     },
 }
 
@@ -164,7 +166,12 @@ fn run(
         recent: load_recent(places.state.as_deref()),
     };
     let (source, battery) = power(&places.supplies);
-    if !(run.heard)(Heard::Power { source, battery }) {
+    let charge_limit = hocus_charge::supported(&places.supplies);
+    if !(run.heard)(Heard::Power {
+        source,
+        battery,
+        charge_limit,
+    }) {
         return;
     }
     if !(run.heard)(Heard::Recent(run.recent.clone())) {

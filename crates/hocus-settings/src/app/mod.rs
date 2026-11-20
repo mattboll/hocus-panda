@@ -27,6 +27,7 @@ mod mouse;
 mod network;
 mod notifications_page;
 mod perf_page;
+mod pick;
 mod places;
 mod power_page;
 mod screens;
@@ -34,6 +35,7 @@ mod sound;
 mod style;
 mod time;
 mod view;
+mod wallpaper_changing;
 mod wallpaper_page;
 mod weather_page;
 mod wheels;
@@ -820,6 +822,15 @@ impl App {
                 if self.keys.conflict.is_some() && key.as_ref() == Key::Named(Named::Escape) {
                     return self.keys_update(keyboard_page::Msg::Cancel);
                 }
+                // A shortcut's picker (#893): its box first, then itself.
+                if let Some(picker) = &mut self.keys.picker
+                    && key.as_ref() == Key::Named(Named::Escape)
+                {
+                    if picker.taking.take().is_none() {
+                        self.keys.picker = None;
+                    }
+                    return Task::none();
+                }
                 if self.keys.adding.is_some() && key.as_ref() == Key::Named(Named::Escape) {
                     self.keys.adding = None;
                     return Task::none();
@@ -1019,8 +1030,13 @@ impl App {
 
     fn heard(&mut self, heard: Heard) -> Task<Message> {
         match heard {
-            Heard::Power { source, battery } => {
+            Heard::Power {
+                source,
+                battery,
+                charge_limit,
+            } => {
                 self.power.kernel_on_battery = source == Source::Battery;
+                self.power.charge_supported = charge_limit;
                 // UPower, once heard, says it better (`power_page`).
                 if self.power.now.as_ref().is_none_or(|n| !n.upower) {
                     self.source = source;
@@ -1797,7 +1813,7 @@ impl App {
             return Vec::new();
         };
         if section == SectionId::Sound {
-            return self.sound_stops().into_iter().map(Control::Sound).collect();
+            return self.sound_controls();
         }
         if section == SectionId::Bluetooth {
             return self

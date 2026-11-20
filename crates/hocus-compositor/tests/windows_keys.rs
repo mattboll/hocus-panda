@@ -19,7 +19,7 @@ use common::{
 };
 use hocus_compositor::{
     AltTab, Config, DragKey, Headless, HeadlessConfig, RendererChoice, Windows,
-    model::{GAP, Rect, Zone},
+    model::{DEFAULT_GAP as GAP, Rect, Zone},
 };
 
 const BTN_RIGHT: u32 = 0x111;
@@ -260,7 +260,7 @@ fn without_snapping_by_drag_an_edge_takes_nothing_and_the_keys_still_snap() -> a
     wait_for_rect(&mut bed.hp, "test.unsnapped", floating)?;
     // Super+← snaps as ever.
     chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut bed.hp, "test.unsnapped", Zone::Left.rect(AREA))?;
+    wait_for_rect(&mut bed.hp, "test.unsnapped", Zone::Left.rect(AREA, GAP))?;
     Ok(())
 }
 

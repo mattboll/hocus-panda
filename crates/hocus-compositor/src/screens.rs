@@ -177,7 +177,7 @@ impl State {
             let desktop = self.model.desktop(id);
             let placed = match self.model.mode(id) {
                 Mode::Floating => model::carried(rect, area, to_area),
-                Mode::Snapped(zone) => zone.rect(to_area),
+                Mode::Snapped(zone) => zone.rect(to_area, self.gap()),
                 Mode::Fullscreen => to_geometry,
             };
             let carried = restore.map(|r| model::carried(r, area, to_area));
@@ -299,7 +299,7 @@ impl State {
                 };
                 let placed = match self.model.mode(id) {
                     Mode::Floating => model::carried(rect, was_area, area),
-                    Mode::Snapped(zone) => zone.rect(area),
+                    Mode::Snapped(zone) => zone.rect(area, self.gap()),
                     Mode::Fullscreen => geometry,
                 };
                 let restore = self
@@ -389,7 +389,7 @@ impl State {
             };
             let rect = match self.model.mode(id) {
                 Mode::Floating => place(came.rect),
-                Mode::Snapped(zone) => zone.rect(area),
+                Mode::Snapped(zone) => zone.rect(area, self.gap()),
                 Mode::Fullscreen => geometry,
             };
             let from = self
@@ -416,7 +416,7 @@ impl State {
             };
             let placed = match self.model.mode(id) {
                 Mode::Floating => model::carried(rect, rect, area),
-                Mode::Snapped(zone) => zone.rect(area),
+                Mode::Snapped(zone) => zone.rect(area, self.gap()),
                 Mode::Fullscreen => geometry,
             };
             let restore = self.model.placement(id).restore;

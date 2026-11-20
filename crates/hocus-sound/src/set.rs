@@ -5,6 +5,11 @@
 //! application plays on. What was asked while the last commands ran is
 //! taken together: a slider dragged sends many volumes, and only the last
 //! goes to PipeWire.
+//!
+//! The default output's volume goes up to 100 %, or to 150 % with boost
+//! (`[sound] boost`, [`crate::boost`]), which the bar tells this thread;
+//! a node's own volume (a microphone's, an application's) stays at 100 %
+//! at most.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -13,9 +18,13 @@ use std::{
         Arc, Mutex, PoisonError,
         mpsc::{Receiver, TryRecvError},
     },
+    time::Instant,
 };
 
-use crate::{Graph, STEP};
+use crate::{
+    Graph, STEP,
+    boost::{self, BOOST_MOST, MOST, Stop},
+};
 
 /// A volume key, for the default sink.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +40,8 @@ pub enum Step {
 /// volume or a mute for a node of its own (a sink, a microphone, an
 /// application's stream), another default source; a node's channels'
 /// linear volumes (its balance), a device's profile, the output a stream
-/// plays on (`None`: the default).
+/// plays on (`None`: the default); whether the outputs may go above
+/// 100 % (off brings those above it back to 100 %).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ask {
     Step(Step),
@@ -42,6 +52,7 @@ pub enum Ask {
     Channels(u32, Vec<f32>),
     Profile { device: u32, index: u32 },
     Target { stream: u32, to: Option<u32> },
+    Boost(bool),
 }
 
 /// What is set on a node of its own.
@@ -53,14 +64,15 @@ pub enum Set {
 }
 
 /// What the setter knows of the graph: the default sink and whether it is
-/// muted, and each node's mute and channels' volumes. The follower
-/// teaches it ([`Known::learn`]) after each change.
+/// muted, the sinks, and each node's mute and channels' volumes. The
+/// follower teaches it ([`Known::learn`]) after each change.
 #[derive(Debug, Clone, Default)]
 pub struct Known(Arc<Mutex<Knowing>>);
 
 #[derive(Debug, Default)]
 struct Knowing {
     default: Option<u32>,
+    sinks: Vec<u32>,
     muted: HashMap<u32, bool>,
     channels: HashMap<u32, Vec<f32>>,
 }
@@ -71,7 +83,9 @@ impl Known {
         known.default = graph.default_sink().map(|(id, _)| id);
         known.muted.clear();
         known.channels.clear();
-        for sink in graph.sinks().into_iter().chain(graph.sources()) {
+        let sinks = graph.sinks();
+        known.sinks = sinks.iter().map(|s| s.id).collect();
+        for sink in sinks.into_iter().chain(graph.sources()) {
             if let Some(sound) = sink.sound {
                 known.muted.insert(sink.id, sound.muted);
             }
@@ -102,6 +116,37 @@ impl Known {
         known.muted.get(&id).copied().unwrap_or(false)
     }
 
+    /// Node `id`'s volume, in percent, as `wpctl` says it: its loudest
+    /// channel's.
+    fn volume(&self, id: u32) -> Option<f32> {
+        let known = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let channels = known.channels.get(&id)?;
+        let loudest = channels.iter().copied().fold(0.0_f32, f32::max);
+        Some(loudest.max(0.0).cbrt() * 100.0)
+    }
+
+    /// The sinks above `percent`.
+    fn sinks_above(&self, percent: f32) -> Vec<u32> {
+        let sinks = {
+            let known = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            known.sinks.clone()
+        };
+        sinks
+            .into_iter()
+            .filter(|id| self.volume(*id).is_some_and(|v| v > percent + 0.5))
+            .collect()
+    }
+
+    /// Node `id` is taken to be at `percent` now, until the follower says
+    /// otherwise: a key pressed again before PipeWire said the last one
+    /// steps from where that one went.
+    fn assume(&self, id: u32, percent: f32) {
+        let mut known = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(channels) = known.channels.get_mut(&id) {
+            *channels = scaled(channels, percent);
+        }
+    }
+
     /// Node `id`'s channels, when they are not all at one volume (its
     /// balance is not centred): a volume then keeps their ratio.
     fn unequal(&self, id: u32) -> Option<Vec<f32>> {
@@ -116,10 +161,10 @@ impl Known {
 }
 
 /// `channels` scaled so that the loudest is at `percent` (as `wpctl`
-/// shows a volume: the cube root of the linear one).
+/// shows a volume: the cube root of the linear one), 150 % at most.
 pub fn scaled(channels: &[f32], percent: f32) -> Vec<f32> {
     let loudest = channels.iter().copied().fold(0.0_f32, f32::max);
-    let to = (percent.clamp(0.0, 100.0) / 100.0).powi(3);
+    let to = (percent.clamp(0.0, BOOST_MOST) / 100.0).powi(3);
     if loudest <= 0.0 {
         return vec![to; channels.len()];
     }
@@ -133,7 +178,7 @@ pub type Line = (&'static str, Vec<String>);
 /// it (up less down), whether the volume was touched (which unmutes),
 /// whether to toggle mute, and another default sink; the last volume and
 /// mute asked of each other node, and another default source; the last
-/// channels, profile and target asked of each.
+/// channels, profile and target asked of each; boost on or off.
 #[derive(Debug, Default, PartialEq)]
 pub struct Asked {
     pub steps: i32,
@@ -146,14 +191,16 @@ pub struct Asked {
     pub channels: BTreeMap<u32, Vec<f32>>,
     pub profiles: BTreeMap<u32, u32>,
     pub targets: BTreeMap<u32, Option<u32>>,
+    pub boost: Option<bool>,
 }
 
 impl Asked {
     pub fn add(&mut self, ask: Ask) {
         let step = match ask {
             Ask::Step(step) => step,
+            // Up to 150 %: the commands keep it to what boost allows.
             Ask::Volume(to) => {
-                self.to = Some(to.clamp(0.0, 100.0));
+                self.to = Some(to.clamp(0.0, BOOST_MOST));
                 self.steps = 0;
                 self.volume = true;
                 return;
@@ -191,6 +238,10 @@ impl Asked {
             }
             Ask::Target { stream, to } => {
                 self.targets.insert(stream, to);
+                return;
+            }
+            Ask::Boost(on) => {
+                self.boost = Some(on);
                 return;
             }
         };
@@ -284,15 +335,22 @@ impl Asked {
 
     /// The commands for node `id` (the default sink, or the one asked to
     /// be), muted or not now, its channels when they are unequal (a
-    /// volume then keeps their ratio).
-    pub fn commands(&self, id: u32, muted: bool, unequal: Option<Vec<f32>>) -> Vec<Line> {
+    /// volume then keeps their ratio); a volume set up to `most` percent,
+    /// the steps up to `limit` ([`Stop::most`]).
+    pub fn commands(
+        &self,
+        id: u32,
+        muted: bool,
+        unequal: Option<Vec<f32>>,
+        (most, limit): (f32, f32),
+    ) -> Vec<Line> {
         let node = id.to_string();
         let mut commands = Vec::new();
         if self.default.is_some() {
             commands.push(wpctl(&["set-default", &node]));
         }
         if let Some(to) = self.to {
-            commands.push(volume_of(id, to, unequal.clone()));
+            commands.push(volume_of(id, to.min(most), unequal.clone()));
         }
         if self.steps != 0 {
             let percent = STEP as i32 * self.steps.abs();
@@ -301,7 +359,7 @@ impl Asked {
                 Some(channels) => {
                     let loudest = channels.iter().copied().fold(0.0_f32, f32::max);
                     let now = loudest.max(0.0).cbrt() * 100.0;
-                    let to = now + (STEP * self.steps as f32);
+                    let to = (now + (STEP * self.steps as f32)).min(limit);
                     commands.push(channels_of(id, &scaled(channels, to)));
                 }
                 None => {
@@ -309,7 +367,7 @@ impl Asked {
                     commands.push(wpctl(&[
                         "set-volume",
                         "--limit",
-                        "1.0",
+                        &format!("{:.1}", limit / 100.0),
                         &node,
                         &format!("{percent}%{sign}"),
                     ]));
@@ -382,6 +440,8 @@ pub fn run(asks: &Receiver<Ask>, known: &Known) {
     // An ask taken off the channel for the next batch: another default
     // sink, after asks for the one before.
     let mut next = None;
+    let mut boost = false;
+    let mut stop = Stop::default();
     loop {
         let ask = match next.take() {
             Some(ask) => ask,
@@ -395,13 +455,35 @@ pub fn run(asks: &Receiver<Ask>, known: &Known) {
         };
         next = after;
         let mut commands = Vec::new();
+        if let Some(on) = asked.boost {
+            // Off: the outputs above 100 % come back to it.
+            if boost && !on {
+                for id in known.sinks_above(MOST) {
+                    commands.push(volume_of(id, MOST, known.unequal(id)));
+                }
+            }
+            boost = on;
+        }
+        // Where the default sink goes, as far as the steps tell.
+        let mut assumed = None;
         if asked.for_a_sink() {
             let target = match asked.default {
                 Some(id) => Some((id, known.muted(id))),
                 None => known.default_sink(),
             };
             match target {
-                Some((id, muted)) => commands = asked.commands(id, muted, known.unequal(id)),
+                Some((id, muted)) => {
+                    let most = boost::most(boost);
+                    let from = asked.to.map(|to| to.min(most)).or_else(|| known.volume(id));
+                    let limit = from.map_or(most, |from| {
+                        stop.most(from, asked.steps, boost, Instant::now())
+                    });
+                    if asked.steps != 0 {
+                        assumed = from
+                            .map(|from| (id, (from + STEP * asked.steps as f32).clamp(0.0, limit)));
+                    }
+                    commands.extend(asked.commands(id, muted, known.unequal(id), (most, limit)));
+                }
                 None => tracing::debug!("no default sink: the key does nothing"),
             }
         }
@@ -419,6 +501,9 @@ pub fn run(asks: &Receiver<Ask>, known: &Known) {
                 Err(err) => tracing::warn!(program, ?args, %err, "cannot set the sound"),
             }
         }
+        if let Some((id, percent)) = assumed {
+            known.assume(id, percent);
+        }
     }
 }
 
@@ -434,6 +519,9 @@ mod tests {
         line("wpctl", c)
     }
 
+    /// Without boost: up to 100 %.
+    const PLAIN: (f32, f32) = (MOST, MOST);
+
     #[test]
     fn a_slider_dragged_and_an_output_chosen_make_few_commands() {
         let mut asked = Asked::default();
@@ -442,7 +530,7 @@ mod tests {
         }
         // Only the last volume; unmuted, as the slider is moved.
         assert_eq!(
-            asked.commands(30, true, None),
+            asked.commands(30, true, None, PLAIN),
             vec![
                 w(&["set-volume", "30", "0.420"]),
                 w(&["set-mute", "30", "0"])
@@ -451,7 +539,7 @@ mod tests {
         // Keys after it step from it.
         asked.add(Ask::Step(Step::Up));
         assert_eq!(
-            asked.commands(30, false, None),
+            asked.commands(30, false, None, PLAIN),
             vec![
                 w(&["set-volume", "30", "0.420"]),
                 w(&["set-volume", "--limit", "1.0", "30", "5%+"])
@@ -461,14 +549,14 @@ mod tests {
         let mut asked = Asked::default();
         asked.add(Ask::Default(31));
         assert_eq!(
-            asked.commands(31, false, None),
+            asked.commands(31, false, None, PLAIN),
             vec![w(&["set-default", "31"])]
         );
         // Out of range: kept within 0 and 100 %.
         let mut asked = Asked::default();
         asked.add(Ask::Volume(130.0));
         assert_eq!(
-            asked.commands(7, false, None),
+            asked.commands(7, false, None, PLAIN),
             vec![w(&["set-volume", "7", "1.000"])]
         );
     }
@@ -505,31 +593,31 @@ mod tests {
         };
         let (up, down, mute) = (Step::Up, Step::Down, Step::Mute);
         assert_eq!(
-            asked(&[up]).commands(30, false, None),
+            asked(&[up]).commands(30, false, None, PLAIN),
             vec![w(&["set-volume", "--limit", "1.0", "30", "5%+"])]
         );
         assert_eq!(
-            asked(&[up, up, down, down, down]).commands(30, false, None),
+            asked(&[up, up, down, down, down]).commands(30, false, None, PLAIN),
             vec![w(&["set-volume", "--limit", "1.0", "30", "5%-"])]
         );
         // A volume key unmutes.
         assert_eq!(
-            asked(&[up]).commands(7, true, None),
+            asked(&[up]).commands(7, true, None, PLAIN),
             vec![
                 w(&["set-volume", "--limit", "1.0", "7", "5%+"]),
                 w(&["set-mute", "7", "0"])
             ]
         );
         assert_eq!(
-            asked(&[up, down]).commands(7, true, None),
+            asked(&[up, down]).commands(7, true, None, PLAIN),
             vec![w(&["set-mute", "7", "0"])]
         );
         assert_eq!(
-            asked(&[mute]).commands(7, false, None),
+            asked(&[mute]).commands(7, false, None, PLAIN),
             vec![w(&["set-mute", "7", "toggle"])]
         );
         assert_eq!(
-            asked(&[mute, mute]).commands(7, false, None),
+            asked(&[mute, mute]).commands(7, false, None, PLAIN),
             Vec::<Line>::new()
         );
     }
@@ -634,7 +722,7 @@ mod tests {
         // So does a key, the loudest stepped by 5 %.
         let mut asked = Asked::default();
         asked.add(Ask::Step(Step::Down));
-        let commands = asked.commands(30, false, Some(vec![0.125, 0.0625]));
+        let commands = asked.commands(30, false, Some(vec![0.125, 0.0625]), PLAIN);
         assert_eq!(commands[0].0, "pw-cli");
         assert!(
             commands[0].1[3].contains("0.091125, 0.045562"),
@@ -646,6 +734,37 @@ mod tests {
     fn scaled_channels_keep_their_ratio() {
         assert_eq!(scaled(&[1.0, 0.5], 50.0), vec![0.125, 0.0625]);
         assert_eq!(scaled(&[0.0, 0.0], 100.0), vec![1.0, 1.0]);
-        assert_eq!(scaled(&[0.2, 0.4], 150.0), vec![0.5, 1.0]);
+        assert_eq!(scaled(&[0.2, 0.4], 100.0), vec![0.5, 1.0]);
+        // 150 % at most, PipeWire's 3.375.
+        assert_eq!(scaled(&[0.2, 0.4], 200.0), vec![1.6875, 3.375]);
+    }
+
+    #[test]
+    fn with_boost_a_volume_and_the_keys_go_above_100() {
+        let boost = (BOOST_MOST, BOOST_MOST);
+        let mut asked = Asked::default();
+        asked.add(Ask::Volume(130.0));
+        assert_eq!(
+            asked.commands(7, false, None, boost),
+            vec![w(&["set-volume", "7", "1.300"])]
+        );
+        // Kept to 100 % without it.
+        assert_eq!(
+            asked.commands(7, false, None, PLAIN),
+            vec![w(&["set-volume", "7", "1.000"])]
+        );
+        let mut asked = Asked::default();
+        asked.add(Ask::Step(Step::Up));
+        assert_eq!(
+            asked.commands(7, false, None, (BOOST_MOST, MOST)),
+            vec![w(&["set-volume", "--limit", "1.0", "7", "5%+"])]
+        );
+        assert_eq!(
+            asked.commands(7, false, None, boost),
+            vec![w(&["set-volume", "--limit", "1.5", "7", "5%+"])]
+        );
+        // The boost asked, taken with the rest.
+        asked.add(Ask::Boost(false));
+        assert_eq!(asked.boost, Some(false));
     }
 }

@@ -940,7 +940,7 @@ impl Setting {
             Value::List(list) => match self.kind {
                 Kind::Shortcut => list
                     .iter()
-                    .map(|c| crate::keys::shown(c, lang))
+                    .map(|c| crate::triggers::shown(c, lang))
                     .collect::<Vec<_>>()
                     .join(", "),
                 _ => list.join(", "),
@@ -990,6 +990,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Captures => crate::captures::settings(),
         SectionId::Camera => crate::camera::settings(),
         SectionId::Performance => crate::perf::settings(),
+        SectionId::Sound => crate::sound::settings(),
         _ => &[],
     }
 }
@@ -1025,6 +1026,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Acting => crate::acting::outside(),
         SectionId::Apps => crate::applications::outside(),
         SectionId::Captures => crate::captures::outside(),
+        SectionId::Mouse => crate::mouse::outside(),
         SectionId::Notifications => crate::notifications::outside(),
         _ => &[],
     }

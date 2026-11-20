@@ -29,12 +29,13 @@ const FULL: Rect = full_on(1920, 1080);
 const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 176, 54, 176);
 
 /// Where to look in the full form, a few pixels into each gauge (x), and
-/// each row's middle (y), with all three rows and a status line of one
-/// line; and the mini form's gauge.
+/// each row's middle (y), with all three rows (no line under them, #900);
+/// and the mini form's gauge. On battery with its time left, the values'
+/// column is 45 px, and the gauges 93 px from 37 px in.
 const GAUGE_X: i32 = FULL.x + 40;
-const SOUND_Y: i32 = FULL.y + 57;
-const LIGHT_Y: i32 = FULL.y + 87;
-const BATTERY_Y: i32 = FULL.y + 117;
+const SOUND_Y: i32 = FULL.y + 85;
+const LIGHT_Y: i32 = FULL.y + 115;
+const BATTERY_Y: i32 = FULL.y + 145;
 const MINI_GAUGE: (i32, i32) = (MINI.x + 27, MINI.y + 57);
 
 /// The fakes there, or why the test cannot run.
@@ -136,7 +137,7 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     until(&mut hp, (GAUGE_X, SOUND_Y), blue)?;
     until(&mut hp, (GAUGE_X, LIGHT_Y), yellow)?;
     until(&mut hp, (GAUGE_X, BATTERY_Y), green)?;
-    // 62 % of the 102 px gauge reaches past 55 px; 30 % does not.
+    // 62 % of the 93 px gauge reaches past 55 px; 30 % does not.
     let past_a_third = (FULL.x + 37 + 55, SOUND_Y);
     until(&mut hp, past_a_third, blue)?;
 
@@ -170,7 +171,7 @@ fn the_levels_show_their_services_and_follow_them() -> anyhow::Result<()> {
     let other = fakes.sink("hocus-test-other")?.to_string();
     fakes.wpctl(&["set-volume", &other, "1.0"])?;
     fakes.default_sink("hocus-test-other")?;
-    until(&mut hp, (FULL.x + 37 + 98, SOUND_Y), blue).map_err(|err| {
+    until(&mut hp, (FULL.x + 37 + 89, SOUND_Y), blue).map_err(|err| {
         let status = fakes.wpctl(&["status"]).unwrap_or_default();
         let volume = fakes.volume("hocus-test-other");
         anyhow::anyhow!("{err}; other at {volume:?}; {status}")
@@ -303,6 +304,58 @@ fn the_keys_change_the_sound_and_the_brightness() -> anyhow::Result<()> {
 }
 
 #[test]
+fn with_boost_the_keys_stop_once_at_100_and_off_brings_it_back() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let fakes = Fakes::start()?;
+    let mut hp = start(&fakes, &shell, "en_US.UTF-8")?;
+    until(&mut hp, (GAUGE_X, SOUND_Y), blue)?;
+    let volume = |hp: &mut Headless, want: f32| -> anyhow::Result<()> {
+        let mut seen = None;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            let now = fakes.volume("hocus-test-sink")?;
+            if (now.0 - want).abs() < 0.005 {
+                return Ok(());
+            }
+            seen = Some(now);
+            wait(hp, Duration::from_millis(30))?;
+        }
+        anyhow::bail!("volume {seen:?}, not {want}")
+    };
+    let press = |hp: &mut Headless| {
+        hp.key(KEY_VOLUMEUP, true);
+        hp.key(KEY_VOLUMEUP, false);
+    };
+    let mut config = Config::default();
+    config.panel.form = FormChoice::Full;
+    config.sound.boost = true;
+    hp.reconfigure(config.clone());
+    let sink = fakes.sink("hocus-test-sink")?.to_string();
+    fakes.wpctl(&["set-volume", &sink, "0.95"])?;
+    volume(&mut hp, 0.95)?;
+    // The shell hears it.
+    wait(&mut hp, Duration::from_millis(500))?;
+    // Up from 95 %: it stops at 100 %; pressed again at once, beyond.
+    press(&mut hp);
+    volume(&mut hp, 1.0)?;
+    press(&mut hp);
+    volume(&mut hp, 1.05)?;
+    press(&mut hp);
+    volume(&mut hp, 1.10)?;
+    // On the gauge, 150 % its whole length: 110 % past the notch at two
+    // thirds (62 px of 93, #900; 110 % reaches 68), in amber.
+    until(&mut hp, (FULL.x + 37 + 65, SOUND_Y), amber)?;
+    // Boost off: back to 100 %.
+    config.sound.boost = false;
+    hp.reconfigure(config);
+    volume(&mut hp, 1.0)?;
+    until(&mut hp, (FULL.x + 37 + 89, SOUND_Y), blue)?;
+    Ok(())
+}
+
+#[test]
 fn a_fast_spin_over_the_sound_row_moves_it_a_step_a_notch() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
@@ -314,7 +367,7 @@ fn a_fast_spin_over_the_sound_row_moves_it_a_step_a_notch() -> anyhow::Result<()
     ] {
         let fakes = Fakes::start()?;
         let mut hp = start_on(&fakes, &shell, "en_US.UTF-8", output, full)?;
-        let row = (full.x + 40, full.y + 57);
+        let row = (full.x + 40, full.y + SOUND_Y - FULL.y);
         // The screen's pixels are the scale's.
         until(&mut hp, (row.0 * scale, row.1 * scale), blue)?;
         let volume = |hp: &mut Headless, want: f32| -> anyhow::Result<()> {
@@ -373,15 +426,16 @@ fn a_missing_service_hides_its_row_until_it_comes() -> anyhow::Result<()> {
     fakes.start_pipewire()?;
     until(&mut hp, (GAUGE_X, LIGHT_Y), yellow)?;
     until(&mut hp, (GAUGE_X, SOUND_Y), blue)?;
-    // UPower goes: its row and the status line go, the others close up
-    // to the bottom: the brightness's row last, the sound's above it.
+    // UPower goes: its row goes, the others close up to the bottom: the
+    // brightness's row last, the sound's above it.
     fakes.stop_upower();
-    let lowest = (GAUGE_X, FULL.y + 145);
+    let lowest = (GAUGE_X, BATTERY_Y);
     until(&mut hp, lowest, yellow)?;
-    until(&mut hp, (GAUGE_X, BATTERY_Y), blue)?;
-    // PipeWire goes: the sound's row goes.
+    until(&mut hp, (GAUGE_X, LIGHT_Y), blue)?;
+    // PipeWire goes: the sound's row goes (the connections above follow
+    // the group down, over where it was).
     fakes.stop_pipewire();
-    until(&mut hp, (GAUGE_X, BATTERY_Y), dark)?;
+    until(&mut hp, (GAUGE_X, LIGHT_Y), |c| !blue(c))?;
     assert!(yellow(rgb(&mut hp, lowest)?));
     Ok(())
 }

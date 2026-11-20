@@ -668,7 +668,9 @@ impl State {
     fn opening_rect(&self, output: &Output, mode: Mode) -> Option<Rect> {
         match mode {
             Mode::Fullscreen => self.space.output_geometry(output).map(rect_of),
-            Mode::Snapped(zone) => self.work_area(output).map(|area| zone.rect(area)),
+            Mode::Snapped(zone) => self
+                .work_area(output)
+                .map(|area| zone.rect(area, self.gap())),
             Mode::Floating => None,
         }
     }
@@ -938,9 +940,11 @@ impl State {
         let bar = f64::from(self.panel.width(&output.name()).unwrap_or(0));
         let x = match self.bar_side() {
             hocus_link::Side::Right => {
-                f64::from(geometry.loc.x + geometry.size.w) - f64::from(model::GAP) - bar / 2.0
+                f64::from(geometry.loc.x + geometry.size.w)
+                    - f64::from(hocus_link::EDGE)
+                    - bar / 2.0
             }
-            hocus_link::Side::Left => f64::from(geometry.loc.x + model::GAP) + bar / 2.0,
+            hocus_link::Side::Left => f64::from(geometry.loc.x + hocus_link::EDGE) + bar / 2.0,
         };
         let y = f64::from(geometry.loc.y) + f64::from(geometry.size.h) / 2.0;
         Some(Rectangle::new(
@@ -1121,7 +1125,7 @@ impl State {
             self.model.unsnap(id);
         }
         self.model.set_mode(id, Mode::Snapped(zone), floating);
-        self.configure(id, zone.rect(area));
+        self.configure(id, zone.rect(area, self.gap()));
     }
 
     /// Back where it floated before it snapped, was maximised or went
@@ -1170,7 +1174,7 @@ impl State {
                     // Back in its zone; where it floated before is kept.
                     self.model.set_mode(id, Mode::Snapped(zone), current);
                     if let Some(area) = self.area_of(id) {
-                        self.configure(id, zone.rect(area));
+                        self.configure(id, zone.rect(area, self.gap()));
                     }
                 }
                 Mode::Floating | Mode::Fullscreen => {
@@ -1386,6 +1390,7 @@ impl State {
             None => managed.requested == Some(size),
         };
         let (edges, anchor) = (resizing.edges, resizing.anchor);
+        let gap = self.gap();
         // Beside another, its moving edges keep the gap to that one's.
         let beside = resizing
             .beside
@@ -1393,16 +1398,16 @@ impl State {
         let (x, y) = match beside {
             Some((other, _)) => (
                 if edges.left {
-                    other.right() + model::GAP
+                    other.right() + gap
                 } else if edges.right {
-                    other.x - model::GAP - size.w
+                    other.x - gap - size.w
                 } else {
                     anchor.x
                 },
                 if edges.top {
-                    other.bottom() + model::GAP
+                    other.bottom() + gap
                 } else if edges.bottom {
-                    other.y - model::GAP - size.h
+                    other.y - gap - size.h
                 } else {
                     anchor.y
                 },
@@ -1566,6 +1571,8 @@ impl State {
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
+        // A wallpaper's picture fading into the next (#894).
+        self.tick_wallpaper_fades(now);
         // The effects that play on their own, at most 60 frames a second
         // whatever the screens' refresh (#815): between two, they ask for
         // none; each asks for the screens it moves on alone (#826).
@@ -1796,7 +1803,7 @@ impl State {
         for (i, (a, ra, oa)) in pairable.iter().enumerate() {
             for (b, rb, ob) in pairable.iter().skip(i + 1) {
                 if oa == ob
-                    && let Some(seam) = model::seam((*a, *ra), (*b, *rb))
+                    && let Some(seam) = model::seam((*a, *ra), (*b, *rb), self.gap())
                 {
                     seams.push(seam);
                 }
@@ -1867,7 +1874,7 @@ impl State {
                         managed.snapped_on = output.clone();
                     }
                     if let Some(area) = output.and_then(|o| self.work_area(&o)) {
-                        let rect = zone.rect(area);
+                        let rect = zone.rect(area, self.gap());
                         if self.target_rect(id) != Some(rect) {
                             self.configure(id, rect);
                         }

@@ -379,6 +379,14 @@ pub enum Said {
     },
     /// Whether a recording is under way (6.17).
     Recording(bool),
+    /// Each screen's wallpaper now, by name (#894): a folder's or day and
+    /// night's picture of the moment.
+    WallpaperNow(Vec<(String, String)>),
+    /// Whether the battery's charge limit is lifted until the next unplug
+    /// (6.10, #896).
+    Charge {
+        lifted: bool,
+    },
     /// Whether the user is not to be disturbed (#899).
     Dnd(bool),
 }
@@ -596,6 +604,18 @@ pub fn read_line(line: &str) -> Option<Said> {
     }
     if let Some(on) = value.get("recording").and_then(serde_json::Value::as_bool) {
         return Some(Said::Recording(on));
+    }
+    if let Some(now) = value.get("wallpaper-now").and_then(|n| n.as_object()) {
+        return Some(Said::WallpaperNow(
+            now.iter()
+                .filter_map(|(name, p)| Some((name.clone(), p.as_str()?.to_owned())))
+                .collect(),
+        ));
+    }
+    if let Some(charge) = value.get("charge") {
+        return Some(Said::Charge {
+            lifted: charge.get("lifted")?.as_bool()?,
+        });
     }
     if let Some(on) = value.get("dnd").and_then(serde_json::Value::as_bool) {
         return Some(Said::Dnd(on));

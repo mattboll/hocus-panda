@@ -24,7 +24,8 @@
 //!   `[power] lock-before-sleep = false` the inhibitor goes at once,
 //!   unlocked.
 //! - **The lid, the power button, sleeping after a while, the power
-//!   saver** ([`power`], 6.10).
+//!   saver** ([`power`], 6.10); **the battery's charge limit**
+//!   ([`charge`], #896).
 //!
 //! One timer, on the motions' clock (`State::now`), armed for the nearest
 //! deadline: the curtain's end, the lock after the screens went off, the
@@ -32,6 +33,7 @@
 //! on without touching the timer, which finds it moved as it fires (as the
 //! idle countdown's). At rest nothing is armed but that.
 
+pub mod charge;
 pub mod draw;
 pub mod power;
 pub mod system;
@@ -177,6 +179,8 @@ pub struct Away {
     lid_dark: bool,
     /// The lid's and the power button's, the power saver's.
     pub(crate) power: power::Power,
+    /// The battery's charge limit (#896).
+    pub(crate) charge: charge::Charge,
     /// On battery, as UPower says (on AC until it says).
     battery: bool,
     /// The pointer's motion since the last input that counted.
@@ -202,6 +206,7 @@ impl Default for Away {
             lid_closed: false,
             lid_dark: false,
             power: power::Power::default(),
+            charge: charge::Charge::default(),
             battery: false,
             drift: Point::default(),
             swallowed: HashSet::new(),
@@ -231,6 +236,7 @@ impl State {
     /// one (logind's sleeps, UPower's power source).
     pub fn start_away(&mut self, bus: Option<system::Bus>) {
         self.power_log_old_keys();
+        self.start_charge();
         let Some(bus) = bus else {
             tracing::info!("no system bus: no lock before sleep, on AC as far as idle goes");
             return;
@@ -418,6 +424,7 @@ impl State {
     /// The shell connected: it is told the pill again.
     pub(crate) fn away_shell_connected(&mut self) {
         self.tell_curtain();
+        self.charge_shell_connected();
     }
 
     /// The shell's pill surface on `output`, if the pill is there: of its
@@ -590,6 +597,9 @@ impl State {
         self.away.battery = battery;
         self.power_delays_changed();
         self.power_saver_check();
+        if battery {
+            self.charge_unplugged();
+        }
     }
 
     // --- The lock -----------------------------------------------------------------

@@ -9,17 +9,18 @@
 //! screen-off-after`, `suspend-after` (`"0s"`, `"10s"`, `"5m"`, `"1h"`,
 //! `"never"`), `[power] lock-on-idle`, `lock-before-sleep`, `lid`,
 //! `lid-ignored-when-docked`, `power-button`, `auto-saver`,
-//! `auto-saver-below`. 6.1's `[power.battery] screen-off` and `[power.*]
+//! `auto-saver-below`, `charge-limit` (#896: the battery's own threshold,
+//! which the compositor sets). 6.1's `[power.battery] screen-off` and `[power.*]
 //! lock-after` are read where the new keys are absent (`store`), never
 //! written. The power mode is power-profiles-daemon's, not the file's.
 
-use hocus_words::settings::power as words;
+use hocus_words::settings::{app_power_page as app_words, power as words};
 use std::sync::OnceLock;
 
 use std::time::Duration;
 
 use crate::{
-    lang::{Lang, Words},
+    lang::Lang,
     model::{Choice, Codec, Kind, Outside, Place, Places, RowGroup, SectionId, Setting, Value},
     power_bus::Charge,
 };
@@ -40,6 +41,10 @@ const SAVING: RowGroup = RowGroup {
     label: words::POWER_SAVING,
     per_source: false,
 };
+const BATTERY_GROUP: RowGroup = RowGroup {
+    label: words::BATTERY,
+    per_source: false,
+};
 
 /// The rows' ids.
 pub const IDLE: &str = "power.idle";
@@ -52,10 +57,12 @@ pub const DOCKED: &str = "power.lid-ignored-when-docked";
 pub const BUTTON: &str = "power.power-button";
 pub const AUTO_SAVER: &str = "power.auto-saver";
 pub const SAVER_BELOW: &str = "power.auto-saver-below";
+pub const CHARGE_LIMIT: &str = "power.charge-limit";
 /// The rows outside the file.
 pub const BATTERY: &str = "power.battery";
 pub const MODE: &str = "power.mode";
-pub const CHARGE_LIMIT: &str = "power.charge-limit";
+/// "Charger à 100 % une fois": the compositor's, through its line.
+pub const CHARGE_ONCE: &str = "power.charge-once";
 
 const LIDS: &[&str] = &["suspend", "lock", "screen-off", "nothing"];
 const BUTTONS: &[&str] = &["ask", "suspend", "power-off", "nothing"];
@@ -290,19 +297,31 @@ pub fn settings() -> &'static [Setting] {
                 )),
                 needs: Some(AUTO_SAVER),
             },
+            Setting {
+                id: CHARGE_LIMIT,
+                section: SectionId::Power,
+                group: BATTERY_GROUP,
+                name: words::LIMIT_CHARGING_TO_80,
+                line: Some(words::THE_BATTERY_WEARS_MUCH_MORE_SLOWLY),
+                keywords: (
+                    &["80 %", "seuil", "charge", "batterie", "usure"],
+                    &["charge limit", "threshold", "charging", "battery", "wear"],
+                ),
+                kind: Kind::Switch,
+                places: Places::One(Place::new(&["power", "charge-limit"], Codec::Bool)),
+                needs: None,
+            },
         ]
     })
 }
 
 /// The page's rows outside the file, for the search: each lights its row.
 pub fn outside() -> &'static [Outside] {
-    const BATTERY_GROUP: Words = words::BATTERY;
-    const LATER: Words = words::LATER;
     const ALL: [Outside; 3] = [
         Outside {
             id: BATTERY,
             section: SectionId::Power,
-            group: BATTERY_GROUP,
+            group: BATTERY_GROUP.label,
             name: words::BATTERY_HEALTH,
             keywords: (
                 &["santé", "capacité", "usure", "autonomie", "batterie"],
@@ -326,13 +345,13 @@ pub fn outside() -> &'static [Outside] {
             ),
         },
         Outside {
-            id: CHARGE_LIMIT,
+            id: CHARGE_ONCE,
             section: SectionId::Power,
-            group: LATER,
-            name: words::LIMIT_CHARGING_TO_80,
+            group: BATTERY_GROUP.label,
+            name: app_words::CHARGE_TO_100_ONCE,
             keywords: (
-                &["80 %", "seuil", "charge"],
-                &["charge limit", "threshold", "charging"],
+                &["100 %", "pleine charge", "voyage", "charge"],
+                &["full charge", "travel", "charging"],
             ),
         },
     ];

@@ -15,6 +15,12 @@
 //! The primary screen's background gives `[appearance] accent =
 //! "wallpaper"` its colour; the shell is told each screen's wallpaper and
 //! the lock's, which it draws under the lock itself.
+//!
+//! A folder's pictures and day and night's (#894, [`changing`]) are
+//! drawn as any picture, the one they show now: the next one of a folder
+//! drawn ahead by the thread, kept aside until it shows; the screen's
+//! previous background fades out under it ([`Fade`]), at once with
+//! reduced motion or on the CPU.
 
 use std::{
     collections::HashMap,
@@ -36,6 +42,12 @@ use smithay::{
 };
 
 use crate::{App, State};
+
+mod changing;
+mod day_night;
+mod round;
+
+pub use changing::Changing;
 
 /// What a screen shows, at its size in pixels.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +77,8 @@ pub struct Shown {
 struct Job {
     output: String,
     key: Key,
+    /// The next one, drawn ahead (#894): kept aside until it shows.
+    ahead: bool,
 }
 
 /// A background the thread drew.
@@ -73,6 +87,30 @@ pub struct Drawn {
     output: String,
     key: Key,
     rendered: Rendered,
+    ahead: bool,
+}
+
+/// A screen's previous background, fading out under its new one (#894).
+#[derive(Debug)]
+pub struct Fade {
+    pub from: Shown,
+    /// When it began, on the motions' clock, and how long it lasts.
+    pub start: std::time::Duration,
+    pub length: std::time::Duration,
+}
+
+impl Fade {
+    /// The new background's opacity over it at `now`.
+    pub fn alpha(&self, now: std::time::Duration) -> f32 {
+        let t = (now.saturating_sub(self.start).as_secs_f32()
+            / self.length.as_secs_f32().max(0.001))
+        .clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    pub fn done(&self, now: std::time::Duration) -> bool {
+        now.saturating_sub(self.start) >= self.length
+    }
 }
 
 /// The screens' backgrounds, and the thread that draws them.
@@ -89,6 +127,17 @@ pub struct Backgrounds {
     pub decodes: u64,
     /// Backgrounds drawn or asked of the thread so far (none at rest).
     pub draws: u64,
+    /// The next backgrounds, drawn ahead (#894), by screen.
+    ahead: HashMap<String, Shown>,
+    ahead_asked: HashMap<String, Key>,
+    /// Screens whose next background fades in, over this long (#894),
+    /// and when that was asked.
+    pub fade_next: HashMap<String, (std::time::Duration, std::time::Duration)>,
+    /// Screens fading from their previous background (#894).
+    pub fading: HashMap<String, Fade>,
+    /// Screens that took their next background drawn ahead: the one
+    /// after it is to be drawn ahead in its turn.
+    pub took_ahead: Vec<String>,
 }
 
 impl std::fmt::Debug for Job {
@@ -117,6 +166,8 @@ pub fn start(handle: &LoopHandle<'static, App>, state: &mut State) {
         Ok(_) => state.graphics.backgrounds.get_mut().jobs = Some(jobs),
         Err(err) => tracing::warn!(%err, "no wallpaper thread: pictures are not drawn"),
     }
+    // A folder's pictures, day and night's (#894).
+    changing::start(handle, state);
 }
 
 /// The thread: each screen's last job only, drawn, sent back.
@@ -126,16 +177,19 @@ fn draw(taken: &Receiver<Job>, sender: &channel::Sender<Drawn>) {
         jobs.extend(taken.try_iter());
         let mut last: Vec<Job> = Vec::new();
         for job in jobs {
-            last.retain(|j| j.output != job.output);
+            last.retain(|j| j.output != job.output || j.ahead != job.ahead);
             last.push(job);
         }
-        for Job { output, key } in last {
+        // What shows now before what shows next.
+        last.sort_by_key(|j| j.ahead);
+        for Job { output, key, ahead } in last {
             let rendered = hocus_link::wallpaper::render_at(&key.look, key.size, key.scale());
             if sender
                 .send(Drawn {
                     output,
                     key,
                     rendered,
+                    ahead,
                 })
                 .is_err()
             {
@@ -162,15 +216,72 @@ impl Backgrounds {
     pub fn forget(&mut self, output: &str) {
         self.shown.remove(output);
         self.asked.remove(output);
+        self.ahead.remove(output);
+        self.ahead_asked.remove(output);
+        self.fading.remove(output);
+        self.fade_next.remove(output);
     }
 
-    /// `output` should show `key`: asked of the thread unless it shows it
-    /// or waits for it already. A screen that shows nothing yet gets a
-    /// built-in at once.
-    pub fn want(&mut self, output: &str, key: &Key) {
+    /// `shown` shows on `output` from `now`: over its previous one fading
+    /// out when its change asked for a fade.
+    fn install(&mut self, output: &str, shown: Shown, now: std::time::Duration) {
+        let fade = self.fade_next.remove(output).map(|(length, _)| length);
+        let before = self.shown.insert(output.to_owned(), shown);
+        match (fade, before) {
+            (Some(length), Some(from)) => {
+                self.fading.insert(
+                    output.to_owned(),
+                    Fade {
+                        from,
+                        start: now,
+                        length,
+                    },
+                );
+            }
+            _ => {
+                self.fading.remove(output);
+            }
+        }
+    }
+
+    /// `output`'s next background, `key`, drawn ahead (#894) unless it is
+    /// or is asked already.
+    pub fn want_ahead(&mut self, output: &str, key: &Key) {
+        if self.ahead.get(output).is_some_and(|s| &s.key == key)
+            || self.ahead_asked.get(output) == Some(key)
+            || self.shown.get(output).is_some_and(|s| &s.key == key)
+        {
+            return;
+        }
+        let asked = self.jobs.as_ref().is_some_and(|jobs| {
+            jobs.send(Job {
+                output: output.to_owned(),
+                key: key.clone(),
+                ahead: true,
+            })
+            .is_ok()
+        });
+        if asked {
+            self.ahead_asked.insert(output.to_owned(), key.clone());
+        }
+    }
+
+    /// `output` should show `key` from `now`: asked of the thread unless
+    /// it shows it or waits for it already, or it was drawn ahead. A
+    /// screen that shows nothing yet gets a built-in at once.
+    pub fn want(&mut self, output: &str, key: &Key, now: std::time::Duration) {
         if self.shown.get(output).is_some_and(|s| &s.key == key)
             || self.asked.get(output) == Some(key)
         {
+            return;
+        }
+        if self.ahead.get(output).is_some_and(|s| &s.key == key)
+            && let Some(ready) = self.ahead.remove(output)
+        {
+            self.draws += 1;
+            self.asked.remove(output);
+            self.install(output, ready, now);
+            self.took_ahead.push(output.to_owned());
             return;
         }
         let first = !self.shown.contains_key(output);
@@ -186,20 +297,19 @@ impl Backgrounds {
             let rendered = hocus_link::wallpaper::render(&look, key.size);
             self.draws += 1;
             self.asked.remove(output);
-            self.shown.insert(
-                output.to_owned(),
-                Shown {
-                    key: key.clone(),
-                    buffer: buffer_of(&rendered),
-                    picture: (rendered.width, rendered.height),
-                },
-            );
+            let shown = Shown {
+                key: key.clone(),
+                buffer: buffer_of(&rendered),
+                picture: (rendered.width, rendered.height),
+            };
+            self.install(output, shown, now);
             return;
         }
         let asked = self.jobs.as_ref().is_some_and(|jobs| {
             jobs.send(Job {
                 output: output.to_owned(),
                 key: key.clone(),
+                ahead: false,
             })
             .is_ok()
         });
@@ -211,44 +321,60 @@ impl Backgrounds {
 }
 
 impl State {
-    /// What screen `output` shows, as the file says now.
+    /// What screen `output` shows, as the file says now: a folder's or
+    /// day and night's picture of the moment (#894); while a folder is
+    /// not listed yet, what it shows already.
     pub fn wallpaper_look(&self, output: &str) -> Look {
         let wallpaper = &self.config.wallpaper;
-        let own = wallpaper
-            .per_screen
-            .then(|| self.config.outputs.get(output)?.wallpaper.clone())
-            .flatten();
-        // A picture's `~/` read here: the thread draws absolute paths.
-        let picture = match own.unwrap_or_else(|| wallpaper.picture.clone()) {
-            Picture::File(text) => match (text.strip_prefix("~/"), &self.config.home) {
-                (Some(rest), Some(home)) => Picture::File(home.join(rest).display().to_string()),
-                _ => Picture::File(text),
-            },
-            picture => picture,
-        };
+        let picture = self.wallpaper_now(Some(output)).unwrap_or_else(|| {
+            self.graphics
+                .backgrounds
+                .borrow()
+                .shown
+                .get(output)
+                .map_or_else(Picture::default, |s| s.key.look.picture.clone())
+        });
         Look {
-            picture,
+            picture: self.expanded(picture),
             fit: wallpaper.fit,
             color: wallpaper.color,
         }
     }
 
-    /// The wallpapers as the shell is told them.
+    /// A picture's `~/` read here: the thread draws absolute paths.
+    fn expanded(&self, picture: Picture) -> Picture {
+        match picture {
+            Picture::File(text) => match (text.strip_prefix("~/"), &self.config.home) {
+                (Some(rest), Some(home)) => Picture::File(home.join(rest).display().to_string()),
+                _ => Picture::File(text),
+            },
+            picture => picture,
+        }
+    }
+
+    /// The wallpapers as the shell is told them: the pictures they show
+    /// now, a folder's or day and night's among them (#894).
     pub fn wallpapers(&self) -> Wallpapers {
         let wallpaper = &self.config.wallpaper;
+        let now = |output: Option<&str>| self.wallpaper_now(output).unwrap_or(Picture::Folder);
         let outputs = if wallpaper.per_screen {
             self.config
                 .outputs
                 .iter()
-                .filter_map(|(name, o)| Some((name.clone(), o.wallpaper.clone()?)))
+                .filter(|(_, o)| o.wallpaper.is_some())
+                .map(|(name, _)| (name.clone(), now(Some(name))))
                 .collect()
         } else {
             Vec::new()
         };
+        let lock_picture = match &wallpaper.lock_picture {
+            p if p.changes() => now(None),
+            p => p.clone(),
+        };
         Wallpapers {
             lock: wallpaper.lock,
-            lock_picture: wallpaper.lock_picture.clone(),
-            picture: wallpaper.picture.clone(),
+            lock_picture,
+            picture: now(None),
             fit: wallpaper.fit,
             color: wallpaper.color,
             outputs,
@@ -271,7 +397,8 @@ impl State {
             |outputs: &std::collections::BTreeMap<String, crate::config::OutputSettings>| {
                 outputs
                     .iter()
-                    .filter_map(|(name, o)| Some((name.clone(), o.wallpaper.clone()?)))
+                    .map(|(name, o)| (name.clone(), o.wallpaper_part()))
+                    .filter(|(_, part)| !part.is_empty())
                     .collect::<Vec<_>>()
             };
         if new.wallpaper == self.config.wallpaper
@@ -281,20 +408,20 @@ impl State {
         }
         self.config.wallpaper = new.wallpaper.clone();
         for settings in self.config.outputs.values_mut() {
-            settings.wallpaper = None;
+            settings.set_wallpaper_part(crate::config::WallpaperPart::default());
         }
-        for (name, settings) in &new.outputs {
-            if let Some(picture) = &settings.wallpaper {
-                self.config
-                    .outputs
-                    .entry(name.clone())
-                    .or_default()
-                    .wallpaper = Some(picture.clone());
-            }
+        for (name, part) in wallpapers(&new.outputs) {
+            self.config
+                .outputs
+                .entry(name)
+                .or_default()
+                .set_wallpaper_part(part);
         }
+        // The folders followed, day or night looked at (#894).
+        self.wallpaper_follow();
         let wallpapers = self.wallpapers();
         tracing::info!(wallpapers = %wallpapers, "the wallpaper changed");
-        self.tell_shell(ToShell::Wallpaper(wallpapers));
+        self.wallpaper_told(wallpapers);
         self.wallpaper_accent_now();
         self.redraw = true;
         true
@@ -307,7 +434,25 @@ impl State {
             output,
             key,
             rendered,
+            ahead,
         } = drawn;
+        if ahead {
+            let mut backgrounds = self.graphics.backgrounds.borrow_mut();
+            if backgrounds.ahead_asked.get(&output) != Some(&key) {
+                return;
+            }
+            backgrounds.ahead_asked.remove(&output);
+            backgrounds.decodes += 1;
+            tracing::debug!(output, picture = %key.look.picture, "the next wallpaper is ready");
+            let ready = Shown {
+                buffer: buffer_of(&rendered),
+                picture: (rendered.width, rendered.height),
+                key,
+            };
+            backgrounds.ahead.insert(output, ready);
+            return;
+        }
+        let now = self.now();
         let accent = {
             let mut backgrounds = self.graphics.backgrounds.borrow_mut();
             if backgrounds.asked.get(&output) != Some(&key) {
@@ -332,17 +477,17 @@ impl State {
                     "the wallpaper is drawn"
                 ),
             }
-            backgrounds.shown.insert(
-                output.clone(),
-                Shown {
-                    key,
-                    buffer: buffer_of(&rendered),
-                    picture: (rendered.width, rendered.height),
-                },
-            );
+            let shown = Shown {
+                key,
+                buffer: buffer_of(&rendered),
+                picture: (rendered.width, rendered.height),
+            };
+            backgrounds.install(&output, shown, now);
             rendered.accent
         };
         self.redraw = true;
+        // A folder's next picture drawn ahead (#894).
+        self.wallpaper_prepare(&output);
         if self.panel_primary().as_deref() == Some(output.as_str()) {
             self.wallpaper_accent(accent);
         }
@@ -372,7 +517,7 @@ impl State {
             Picture::Builtin(builtin) => builtin.accent(),
             Picture::Moving(moving) => moving.accent(),
             Picture::Plain => AccentColours::lifted(look.color),
-            Picture::File(_) => return,
+            Picture::File(_) | Picture::Folder | Picture::DayNight => return,
         };
         self.wallpaper_accent(accent);
     }

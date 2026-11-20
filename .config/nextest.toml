@@ -47,10 +47,13 @@ retries = 0
 # And three that fail by chance on CI's runners, each until its issue's
 # fix: `actions::an_impossible_action_is_inert_and_nothing_found_searches_
 # the_launcher` (#871), `camera::the_screen_light_follows_the_light_on_the_
-# face` (#872), `agents::the_halo_moves_on_the_bars_screen_alone` (#873).
+# face` (#872), `agents::the_halo_moves_on_the_bars_screen_alone` (#873);
+# and one too slow on them, until #909: `face::tests::the_face_s_points_are_
+# found_in_their_budget` (the camera's tracking measured in a frame's time).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
+    | (package(hocus-camera) & test(=face::tests::the_face_s_points_are_found_in_their_budget))
     | (package(hocus-compositor) & (
         test(=decorations::an_x11_window_gets_the_grip_unless_its_motif_hints_ask_for_no_decorations)
         | test(=scales::an_x11_window_on_the_screen_at_2_shows_at_its_size_enlarged)

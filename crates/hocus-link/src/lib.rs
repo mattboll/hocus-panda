@@ -47,6 +47,7 @@ mod notifications;
 pub mod projects;
 mod record;
 mod share;
+pub mod sun;
 mod surfaces;
 #[cfg(test)]
 mod tests;

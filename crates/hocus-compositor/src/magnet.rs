@@ -1,7 +1,7 @@
 //! Magnetic edges (docs/design/windows.md §6, §8): while a window moves,
 //! or an edge of it is dragged, an edge that comes within [`MAGNET`](hocus_geometry::MAGNET) of a
-//! neighbour's sticks at the gap snapped windows keep, or in line with
-//! the neighbour's edge on the same side, and an edge near the work
+//! neighbour's sticks at the gap snapped windows keep (`[windows] gap`),
+//! or in line with the neighbour's edge on the same side, and an edge near the work
 //! area's sticks flush with it. The pull is worked out afresh from where
 //! the pointer would put the window, so dragging on frees it.
 
@@ -42,7 +42,13 @@ impl State {
         if !self.config.windows.magnet || self.snap_zone(area, pointer).is_some() {
             return Pull::default();
         }
-        pull(rect, ALL, &self.magnet_neighbours(id, &output, &[]), area)
+        pull(
+            rect,
+            ALL,
+            &self.magnet_neighbours(id, &output, &[]),
+            area,
+            self.gap(),
+        )
     }
 
     /// How far the `edges` of window `id` resized to `rect` move to stick;
@@ -68,6 +74,7 @@ impl State {
             edges,
             &self.magnet_neighbours(id, &output, follow),
             area,
+            self.gap(),
         )
     }
 

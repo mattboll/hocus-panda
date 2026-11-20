@@ -12,11 +12,11 @@
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
 //! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14),
 //! `[magnifier]` (#424), `[accessibility]` (#734), `[developer]` (#783),
-//! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[meetings]`, `[agents]`
-//! (6.16), and the idle chain's and power's keys (6.10). A keyboard whose
-//! layouts or options changed has its keymap compiled on the thread too
-//! (XKB reads its files), the loop only taking it in; its repeat is given
-//! to clients again.
+//! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[meetings]`,
+//! `[agents]` (6.16), `[sound]` (#897), and the idle chain's and power's
+//! keys (6.10). A keyboard whose layouts or options changed has its keymap
+//! compiled on the thread too (XKB reads its files), the loop only taking
+//! it in; its repeat is given to clients again.
 
 use std::{
     ffi::OsString,
@@ -199,10 +199,13 @@ impl State {
             keymap,
         } = reread;
         let mut followed = Vec::new();
+        // Taken whole even when it binds the same: which lines the file
+        // writes says which defaults an older switch may take away.
+        let corners_were = self.config.shortcuts.triggers.clone();
         if new.shortcuts != self.config.shortcuts {
-            self.config.shortcuts = new.shortcuts.clone();
             followed.push("[shortcuts]");
         }
+        self.config.shortcuts = new.shortcuts.clone();
         if new.keyboard != self.config.keyboard || keymap.is_some() {
             self.keyboard_changed(new.keyboard.clone(), keymap);
             followed.push("[keyboard]");
@@ -242,9 +245,17 @@ impl State {
         if new.windows != self.config.windows || new.ink != self.config.ink {
             let was = self.ink_on();
             let rules = new.windows.rules != self.config.windows.rules;
+            let gap = new.windows.gap != self.config.windows.gap;
             self.config.windows = new.windows.clone();
             if rules {
                 self.rules_changed();
+            }
+            // The gap (#895): the windows the desktop placed take their
+            // zone of the new work area at once.
+            if gap {
+                tracing::info!(gap = self.gap(), "the gap between windows");
+                self.rearrange();
+                self.redraw = true;
             }
             self.config.ink = new.ink.clone();
             if was && !self.ink_on() {
@@ -252,18 +263,21 @@ impl State {
             }
             followed.push("[windows] [ink]");
         }
-        // The overview's hot corner (#727): read as the pointer enters one.
+        // The screen corners (#727, #893): read as the pointer enters one;
+        // a dwell under way stops if they changed.
         if new.overview != self.config.overview {
             self.config.overview = new.overview.clone();
-            if !self.config.overview.hot_corner {
-                self.hot_corner_off();
-            }
             followed.push("[overview]");
+            self.hot_corner_off();
+        } else if corners_were != self.config.shortcuts.triggers {
+            self.hot_corner_off();
         }
         // The weather's place (#814): the shell fetches its forecast.
         if new.weather != self.config.weather {
             self.config.weather = new.weather.clone();
             self.tell_shell(hocus_link::ToShell::Weather(self.config.weather.place()));
+            // Day and night's pictures switch with its sun (#894).
+            self.wallpaper_follow();
             followed.push("[weather]");
         }
         // Each application's notifications (#899): the shell applies them.
@@ -309,6 +323,12 @@ impl State {
         // The developer mode (#783): off, a program given is let go of.
         if self.developer_changed(&new.developer) {
             followed.push("[developer]");
+        }
+        // The volume above 100 % (#897): the shell's sound follows it.
+        if new.sound != self.config.sound {
+            self.config.sound = new.sound;
+            self.tell_shell(hocus_link::ToShell::SoundBoost(new.sound.boost));
+            followed.push("[sound]");
         }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {

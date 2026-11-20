@@ -16,13 +16,12 @@
 //! reaches every device, and `swipe-desktops` off keeps three fingers off
 //! the desktops.
 //!
-//! Then the gestures' group (6.13, issue #447): it says how many fingers
-//! the touchpad senses, its rows have their diagrams and 68 px, the last
-//! one a note never focused; turning three fingers off writes
-//! `[touchpad] swipe-desktops`, which the compositor follows; a touchpad
-//! that senses three fingers greys the four-finger row; the diagrams move
-//! only while the group shows and the window has the focus, and never
-//! with reduced motion.
+//! Then the gestures' group (6.13, issue #447; #893): it says how many
+//! fingers the touchpad senses, and what the gestures do, set in the
+//! shortcuts, its link opening them; its note has its diagram and 68 px;
+//! a touchpad that senses three fingers greys the four-finger gestures of
+//! the shortcuts' picker; the diagram moves only while the group shows
+//! and the window has the focus, and never with reduced motion.
 //!
 //! What the window shows is read from its log ("shows" and "places"
 //! lines, JSON), never on a time.
@@ -377,8 +376,6 @@ fn the_page_lists_the_touchpad_and_the_mouse() -> anyhow::Result<()> {
             "pointer.acceleration",
             "pointer.natural-scroll",
             "pointer.left-handed",
-            "touchpad.swipe-desktops",
-            "touchpad.swipe-launcher",
             "touchpad.left-to-applications",
         ]
     );
@@ -555,7 +552,7 @@ fn searching_geste_lists_the_three_gestures_rows_then_the_desktop_keys() -> anyh
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
     bed.type_text("geste")?;
     let shown = bed.shows(|s| {
-        s["query"] == "geste" && s["results"].as_array().is_some_and(|r| r.len() >= 6)
+        s["query"] == "geste" && s["results"].as_array().is_some_and(|r| r.len() >= 5)
     })?;
     let targets: Vec<&str> = shown["results"]
         .as_array()
@@ -565,8 +562,7 @@ fn searching_geste_lists_the_three_gestures_rows_then_the_desktop_keys() -> anyh
         targets,
         [
             "camera.gestures",
-            "touchpad.swipe-desktops",
-            "touchpad.swipe-launcher",
+            "touchpad.gestures",
             "touchpad.left-to-applications",
             "shortcuts.desktop-left",
             "shortcuts.desktop-right"
@@ -683,7 +679,7 @@ fn scroll_to_gestures(bed: &mut Bed) -> anyhow::Result<()> {
 }
 
 #[test]
-fn the_gestures_group_says_the_fingers_and_switches_three_fingers_off() -> anyhow::Result<()> {
+fn the_gestures_group_sums_up_what_the_gestures_do() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -694,43 +690,31 @@ fn the_gestures_group_says_the_fingers_and_switches_three_fingers_off() -> anyho
         row(&shown, "touchpad.left-to-applications")["value"],
         "Toujours"
     );
-    for id in ["touchpad.swipe-desktops", "touchpad.swipe-launcher"] {
-        assert_eq!(row(&shown, id)["value"], "oui", "{id}");
-        assert_eq!(row(&shown, id)["inert"], false, "{id}");
-    }
-    // Each row 68 px, a 64 × 44 diagram on its left; the line under the
+    // What the shortcuts bind, a line a finger count (#893).
+    assert_eq!(
+        shown["summaries"]["gestures"],
+        serde_json::json!([
+            "3 doigts ← → : Bureau de droite, Bureau de gauche",
+            "4 doigts ↑ ↓ : Ouvrir le lanceur, Vue d’ensemble"
+        ])
+    );
+    // The note 68 px, its 64 × 44 diagram on its left; the line under the
     // card.
     let places = bed.places_with("diagram:touchpad.left-to-applications")?;
     let n = |id: &str, i: usize| places[id][i].as_f64().unwrap_or_default();
-    for id in [
-        "touchpad.swipe-desktops",
-        "touchpad.swipe-launcher",
-        "touchpad.left-to-applications",
-    ] {
-        let diagram = format!("diagram:{id}");
-        assert_eq!((n(&diagram, 2), n(&diagram, 3)), (64.0, 44.0), "{id}");
-        assert!(n(&format!("row:{id}"), 3) >= 68.0, "{id}");
-    }
+    let diagram = "diagram:touchpad.left-to-applications";
+    assert_eq!((n(diagram, 2), n(diagram, 3)), (64.0, 44.0));
+    assert!(n("row:touchpad.left-to-applications", 3) >= 68.0);
     assert!(n("gestures:note", 1) > n("card:gestures", 1) + n("card:gestures", 3) - 1.0);
-    // Three fingers off: the line written, the toast, the compositor.
+    // The link opens the shortcuts.
     scroll_to_gestures(&mut bed)?;
-    bed.click_row("touchpad.swipe-desktops")?;
-    let text = bed.written(|t| t.contains("swipe-desktops = false"))?;
-    assert_eq!(
-        text,
-        format!("{FILE}\n[touchpad]\nswipe-desktops = false\n")
-    );
-    let shown = bed.shows(|s| s["toast"].is_string())?;
-    assert_eq!(shown["toast"], "Trois doigts de côté : non");
-    let followed = bed
-        .hp
-        .dispatch_until(WAIT, |hp| !hp.state().config.touchpad.swipe_desktops)?;
-    assert!(followed, "the compositor never read it");
+    bed.click("link:touchpad.gestures")?;
+    bed.shows(|s| s["page"] == "keyboard" && s["keys"]["sub"] == true)?;
     Ok(())
 }
 
 #[test]
-fn a_three_finger_touchpad_greys_the_four_finger_row() -> anyhow::Result<()> {
+fn a_three_finger_touchpad_greys_the_four_finger_gestures() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
         return Ok(());
     };
@@ -742,30 +726,38 @@ fn a_three_finger_touchpad_greys_the_four_finger_row() -> anyhow::Result<()> {
         ..TOUCHPAD
     });
     bed.open()?;
-    let shown = bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 3)?;
-    let launcher = row(&shown, "touchpad.swipe-launcher");
-    assert_eq!(launcher["inert"], true);
-    assert_eq!(
-        launcher["not_here"],
-        "Pas sur ce pavé tactile : il ne sent que trois doigts."
-    );
-    // Its value stays written for another touchpad.
-    assert_eq!(launcher["value"], "oui");
-    assert_eq!(row(&shown, "touchpad.swipe-desktops")["inert"], false);
-    // Another touchpad, of two fingers: the largest count counts.
-    bed.hp.plug_device(FakeDevice {
-        can: Can {
-            fingers: 2,
-            ..TOUCHPAD.can
-        },
-        ..TOUCHPAD
-    });
-    let shown = bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 3)?;
-    assert_eq!(
-        row(&shown, "touchpad.swipe-desktops")["inert"],
-        false,
-        "the largest count"
-    );
+    bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 3)?;
+    scroll_to_gestures(&mut bed)?;
+    bed.click("link:touchpad.gestures")?;
+    bed.shows(|s| s["keys"]["sub"] == true)?;
+    // The first row's "+", at the page's top.
+    bed.click("add:shortcuts.close")?;
+    let shown = bed.shows(|s| s["keys"]["picker"]["tab"] == "gesture")?;
+    let standing = |shown: &Value, trigger: &str| {
+        shown["keys"]["picker"]["items"]
+            .as_array()
+            .and_then(|items| items.iter().find(|i| i["trigger"] == trigger))
+            .map(|i| i["standing"].clone())
+            .unwrap_or(Value::Null)
+    };
+    for toward in ["left", "right", "up", "down"] {
+        assert_eq!(
+            standing(&shown, &format!("swipe:4:{toward}")),
+            "pad",
+            "{toward}"
+        );
+    }
+    assert_eq!(standing(&shown, "swipe:3:up"), "free");
+    assert_eq!(standing(&shown, "swipe:3:left"), "taken");
+    // Another touchpad, of four fingers: the largest count counts.
+    bed.hp.plug_device(TOUCHPAD);
+    let shown = bed.shows(|s| {
+        s["keys"]["picker"]["items"].as_array().is_some_and(|i| {
+            i.iter()
+                .any(|i| i["trigger"] == "swipe:4:left" && i["standing"] == "free")
+        })
+    })?;
+    assert_eq!(standing(&shown, "swipe:4:up"), "taken");
     Ok(())
 }
 
@@ -808,7 +800,7 @@ fn with_reduced_motion_the_diagrams_stand_still() -> anyhow::Result<()> {
     bed.open()?;
     bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 4)?;
     scroll_to_gestures(&mut bed)?;
-    bed.places_with("diagram:touchpad.swipe-desktops")?;
+    bed.places_with("diagram:touchpad.left-to-applications")?;
     wait(&mut bed.hp, Duration::from_millis(400))?;
     let shown = bed.shows(|s| s["mouse"].is_object())?;
     assert_eq!(shown["mouse"]["gestures"]["moving"], false);
@@ -960,12 +952,7 @@ fn screenshots_of_the_gestures() -> anyhow::Result<()> {
     bed.shows(|s| s["mouse"]["gestures"]["fingers"] == 4)?;
     scroll_to_gestures(&mut bed)?;
     bed.hp.pointer_move(5.0, 5.0);
-    shoot(&mut bed, "gestures.png")?;
-    // Three fingers off: the toast.
-    bed.click_row("touchpad.swipe-desktops")?;
-    bed.shows(|s| s["toast"].is_string())?;
-    bed.hp.pointer_move(5.0, 5.0);
-    shoot(&mut bed, "gestures-off.png")?;
+    shoot(&mut bed, "touchpad-summary.png")?;
     // Searching « geste ».
     chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
     bed.type_text("geste")?;

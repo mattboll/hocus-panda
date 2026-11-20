@@ -89,6 +89,7 @@ pub mod theme;
 pub mod time;
 pub mod timedate;
 pub mod trial;
+pub mod triggers;
 pub mod wallpaper;
 pub mod weather;
 pub mod worker;

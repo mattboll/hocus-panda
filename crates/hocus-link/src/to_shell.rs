@@ -151,6 +151,11 @@ pub enum ToShell {
     /// state's colour (`[agents] pandas`, 6.16): sent as the shell connects and
     /// when the configuration changes it.
     AgentPandas(bool),
+    /// Whether the outputs' volume may go above 100 %, up to 150 % (`[sound]
+    /// boost`, #897): sent as the shell connects and when the configuration
+    /// changes it; turned off, the shell brings the outputs above 100 % back
+    /// to it.
+    SoundBoost(bool),
     /// The screen of the focused window, else the pointer's: where the
     /// notifications' bubbles show (5.3). Sent as the shell connects and when
     /// it changes.
@@ -286,6 +291,11 @@ pub enum ToShell {
     Leave(LeaveShown),
     /// No confirmation any more: the menu's rows again.
     LeaveEnd,
+    /// The battery's charge limit that holds (6.10, #896): `Some(80)` while
+    /// `[power] charge-limit` is on, not lifted, and a battery has the
+    /// threshold; `None` else. Sent as the shell connects and when it
+    /// changes: the battery gauge's mark, the popover's line.
+    ChargeLimit(Option<u8>),
     /// The power button pressed, `[power] power-button = "ask"` (6.10): the
     /// session menu (7.4) opens on `output`'s bar, as a click on the footer's
     /// user opens it.

@@ -12,7 +12,7 @@ use common::{
 };
 use hocus_compositor::{
     Headless,
-    model::{GAP, Rect},
+    model::{DEFAULT_GAP as GAP, Rect},
 };
 
 /// The work area of the headless 1920×1080 output.

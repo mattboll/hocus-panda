@@ -42,9 +42,9 @@ use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererCho
 
 const KEY_ENTER: u32 = 28;
 const KEY_SPACE: u32 = 57;
-/// The sound's row's middle on the 1920 × 1080 screen (three rows and a
-/// one-line status line under it).
-const SOUND_ROW: (f64, f64) = (1800.0, (1080 - 8 - 41 - 175 + 57) as f64);
+/// The sound's row's middle on the 1920 × 1080 screen (three rows, no
+/// line under them, #900).
+const SOUND_ROW: (f64, f64) = (1800.0, (1080 - 8 - 41 - 175 + 85) as f64);
 
 /// What a test starts.
 struct Setup {

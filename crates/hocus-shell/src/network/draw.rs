@@ -16,8 +16,8 @@
 //! It is a surface of its own, so that a connection's change draws only it,
 //! and a level's never does. It is as tall as its rows (one when there is
 //! none, taking no pointer then: the bar under it does). It follows the
-//! levels' group as that grows or shrinks (a row coming, the status line on
-//! two lines): the levels say where their top is ([`levels_moved`]) and the
+//! levels' group as that grows or shrinks (a row coming or going): the
+//! levels say where their top is ([`levels_moved`]) and the
 //! surface moves, by its margins, without drawing anything else; the
 //! desktops' surface above follows it in turn ([`group_tops`]). A row
 //! opens its popover (§9) as the sound's row does its own.
@@ -964,8 +964,8 @@ mod tests {
 
     #[test]
     fn the_surface_sits_14_px_above_the_levels_and_follows_them() {
-        // Three rows and a one-line status line: the sound's item's top
-        // 133 px above the levels' surface's bottom.
+        // The levels' group's top (the sound's item's) 133 px above their
+        // surface's bottom.
         let tops = (133.0, 83.1);
         let (size, bottom) = placement(Form::Full, false, tops, (1, 1));
         assert_eq!(size, FULL_SURFACE);
@@ -978,7 +978,7 @@ mod tests {
         let (size, bottom) = placement(Form::Mini, true, tops, (1, 1));
         assert_eq!(bottom, 92.0);
         assert_eq!(size, (194, 90));
-        // The status line on two lines: up by its line.
+        // A taller group: up by as much.
         let (_, higher) = placement(Form::Full, false, (151.5, 83.1), (1, 1));
         assert!(higher > 142.0);
         assert_eq!(margin(142.0), (0, 9, 8 + 41 + 142, 0));

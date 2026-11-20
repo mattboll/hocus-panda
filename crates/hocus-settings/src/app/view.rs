@@ -995,6 +995,7 @@ impl App {
             || self.agents_inert(setting)
             || self.captures_inert(setting)
             || self.weather_inert(setting)
+            || self.power_greyed(setting)
             || crate::effects::soon(setting.id)
         {
             INERT
@@ -1837,6 +1838,16 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "screens": if app.page == Page::Section(SectionId::Screens) { app.screens_shown() } else { serde_json::Value::Null },
         "mouse": if app.page == Page::Section(SectionId::Mouse) { app.mouse_shown() } else { serde_json::Value::Null },
         "keys": if app.page == Page::Section(SectionId::Keyboard) { app.keys_shown() } else { serde_json::Value::Null },
+        // What the gestures and the corners do (#893), on the pages that
+        // sum them up.
+        "summaries": if matches!(app.page, Page::Section(SectionId::Mouse | SectionId::Desktops)) {
+            serde_json::json!({
+                "gestures": app.gestures_said().into_iter().map(|(_, _, said)| said).collect::<Vec<_>>(),
+                "corners": app.corners_said().into_iter().map(|(_, said)| said).collect::<Vec<_>>(),
+            })
+        } else {
+            serde_json::Value::Null
+        },
         "wallpaper": if app.page == Page::Section(SectionId::Wallpaper) { app.wallpaper_shown() } else { serde_json::Value::Null },
         "bar": if app.page == Page::Section(SectionId::Bar) { app.bar_shown() } else { serde_json::Value::Null },
         "bluetooth": if app.page == Page::Section(SectionId::Bluetooth) { app.bluetooth_shown() } else { serde_json::Value::Null },

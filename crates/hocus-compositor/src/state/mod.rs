@@ -133,6 +133,8 @@ pub struct State {
     pub ink: crate::ink::Ink,
     /// The actions palette's target and what draws it (#736).
     pub actions: crate::actions::Palette,
+    /// The wallpapers that change by themselves (#894).
+    pub changing: crate::wallpaper::Changing,
     /// The magnifier (#424).
     pub magnifier: crate::magnifier::Magnifier,
     /// The windows' opacity's wheel and its pill (#735).
@@ -344,6 +346,7 @@ impl State {
             transcribe: crate::transcribe::Transcription::default(),
             ink: crate::ink::Ink::default(),
             actions: crate::actions::Palette::default(),
+            changing: crate::wallpaper::Changing::default(),
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
             projects: crate::projects::Projects::default(),
@@ -417,7 +420,7 @@ impl State {
     }
 
     /// Where the desktop places windows on `output`: what layer surfaces
-    /// leave of it less the bar's space when it has a bar, 8 px in.
+    /// leave of it less the bar's space when it has a bar, the gap in.
     pub fn work_area(&self, output: &Output) -> Option<Rect> {
         let zone = self.non_exclusive_zone(output)?;
         let geometry = self.space.output_geometry(output)?;
@@ -427,7 +430,15 @@ impl State {
             rect_of(geometry),
             bar,
             self.bar_side(),
+            self.gap(),
         ))
+    }
+
+    /// What the windows the desktop places keep from each other, the
+    /// screen's edges and the bar, and the magnet between two windows:
+    /// `[windows] gap` (#895).
+    pub fn gap(&self) -> i32 {
+        self.config.windows.gap
     }
 
     /// The window of `surface`, mapped or waiting for its first buffer.

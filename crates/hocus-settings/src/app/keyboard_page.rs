@@ -12,6 +12,9 @@
 //!   suspended meanwhile (keyboard-shortcuts-inhibit, [`crate::activate`]);
 //!   a combination another action holds opens a box under the row,
 //!   "Remplacer" or "Annuler"; "Rétablir" takes the line out of the file.
+//! - Beside its keys, an action's corners and swipes (#893): its chips,
+//!   and the row's "+" opening a picker of keys, corners and gestures
+//!   (`super::pick`).
 
 use hocus_words::settings::app_keyboard_page as words;
 use std::{collections::BTreeSet, sync::mpsc};
@@ -34,6 +37,7 @@ use crate::{
     model::{Icon, Kind, SectionId, Setting, Value},
     search::fold,
     store::{Reading, Slot},
+    triggers::{self as said, Trigger},
     xkb::{self, Known},
 };
 
@@ -61,6 +65,39 @@ pub struct Conflict {
     pub other: &'static str,
 }
 
+/// The tabs of a row's picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Keys,
+    Corner,
+    Gesture,
+}
+
+impl Tab {
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Keys => "keys",
+            Self::Corner => "corner",
+            Self::Gesture => "gesture",
+        }
+    }
+}
+
+/// A corner or a swipe another action holds, waiting for "Remplacer".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Taking {
+    pub trigger: Trigger,
+    pub from: &'static str,
+}
+
+/// A row's picker, open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picker {
+    pub setting: &'static str,
+    pub tab: Tab,
+    pub taking: Option<Taking>,
+}
+
 /// The pages' own state.
 #[derive(Debug, Default)]
 pub struct Keys {
@@ -75,6 +112,7 @@ pub struct Keys {
     unfolded: BTreeSet<&'static str>,
     pub recording: Option<Recording>,
     pub conflict: Option<Conflict>,
+    pub picker: Option<Picker>,
     inhibit: Option<mpsc::Sender<bool>>,
     try_text: String,
 }
@@ -99,6 +137,16 @@ pub enum Msg {
     Move(usize, bool),
     Remove(usize),
     Try(String),
+    /// A row's "+": its picker, opened or closed.
+    Plus(&'static str),
+    Tab(Tab),
+    /// A corner or a swipe picked: this action's, or asked first.
+    Take(Trigger),
+    /// "Remplacer" in the picker's box, and "Annuler".
+    GiveIt,
+    KeepIt,
+    /// A chip's ✕.
+    Unbind(&'static str, Trigger),
 }
 
 fn setting(id: &str) -> Option<&'static Setting> {
@@ -123,11 +171,78 @@ pub fn read_registry(lang: Lang, send: impl FnOnce(Vec<Known>, Vec<String>) + Se
 }
 
 impl App {
-    /// An action's combinations now.
+    /// An action's keys, corners and swipes now: its line, else its
+    /// defaults but those an older switch takes away (#893).
     pub(super) fn chords(&self, id: &str) -> Vec<String> {
-        match slot(id).and_then(|s| self.value(s)) {
+        let Some(slot) = slot(id) else {
+            return Vec::new();
+        };
+        let mut list = match self.value(slot) {
             Some(Value::List(list)) => list,
             _ => Vec::new(),
+        };
+        if self.reading(slot) == Reading::Absent {
+            list.retain(|t| !self.retired(id, t));
+        }
+        list
+    }
+
+    /// Whether `text`, a default of `id`, is taken away by an older switch
+    /// the file turns off.
+    fn retired(&self, id: &str, text: &str) -> bool {
+        let off = self
+            .snapshot
+            .as_ref()
+            .map(|s| s.switches_off.as_slice())
+            .unwrap_or_default();
+        Trigger::parse(text).is_some_and(|trigger| {
+            hocus_config::triggers::retired(id.trim_start_matches("shortcuts."), trigger, |s| {
+                off.contains(&s)
+            })
+        })
+    }
+
+    /// An action's corners and swipes now.
+    pub(super) fn triggers_of(&self, id: &str) -> Vec<Trigger> {
+        said::of(&self.chords(id))
+    }
+
+    /// The action holding `trigger`, other than `but`.
+    pub(super) fn trigger_holder(&self, trigger: Trigger, but: &str) -> Option<&'static str> {
+        model::shortcuts()
+            .filter(|s| s.id != but)
+            .find(|s| self.triggers_of(s.id).contains(&trigger))
+            .map(|s| s.id)
+    }
+
+    /// `[panel] side = "left"`.
+    pub(super) fn bar_on_the_left(&self) -> bool {
+        crate::model::setting(crate::bar::SIDE)
+            .is_some_and(|s| self.value(Slot::of(s, self.source)) == Some(Value::Word("left")))
+    }
+
+    /// Whether the line's defaults are taken away in part by an older
+    /// switch: its defaults then come back only written.
+    fn retired_here(&self, id: &str) -> bool {
+        Self::defaults(id).iter().any(|t| self.retired(id, t))
+    }
+
+    /// `id`'s line back to its defaults: taken out of the file, or written
+    /// whole while an older switch would take some away.
+    fn reset(&mut self, id: &str, batch: Option<u64>) {
+        let Some(slot) = slot(id) else {
+            return;
+        };
+        if self.retired_here(id) {
+            let defaults = Value::List(Self::defaults(id));
+            match batch {
+                Some(batch) => self.write_batch(slot, defaults, batch, None),
+                None => {
+                    let _ = self.change(slot, defaults);
+                }
+            }
+        } else {
+            self.remove(slot, batch);
         }
     }
 
@@ -138,26 +253,38 @@ impl App {
         }
     }
 
-    /// The file holds a line for it that is not its default.
+    /// What applies is not its default: a line of the file, or an older
+    /// switch taking a default away. The keys compare in their order, the
+    /// corners and swipes whatever theirs.
     pub(super) fn changed(&self, id: &str) -> bool {
         let Some(slot) = slot(id) else {
             return false;
         };
-        match self.reading(slot) {
-            Reading::Absent => false,
-            Reading::NotUnderstood(_) => true,
-            Reading::Value(Value::List(list)) => {
-                let defaults = Self::defaults(id);
-                list.len() != defaults.len()
-                    || list.iter().zip(&defaults).any(|(a, b)| {
-                        match (Chord::parse(a), Chord::parse(b)) {
-                            (Some(a), Some(b)) => !a.same(&b),
-                            _ => a != b,
-                        }
-                    })
-            }
-            Reading::Value(_) => true,
+        if let Reading::NotUnderstood(_) = self.reading(slot) {
+            return true;
         }
+        let list = self.chords(id);
+        let defaults = Self::defaults(id);
+        let keys = |list: &[String]| -> Vec<String> {
+            list.iter()
+                .filter(|t| !Trigger::meant(t))
+                .cloned()
+                .collect()
+        };
+        let (mine, theirs) = (keys(&list), keys(&defaults));
+        let mut triggers = said::of(&list);
+        let mut default_triggers = said::of(&defaults);
+        triggers.sort();
+        default_triggers.sort();
+        mine.len() != theirs.len()
+            || triggers != default_triggers
+            || mine
+                .iter()
+                .zip(&theirs)
+                .any(|(a, b)| match (Chord::parse(a), Chord::parse(b)) {
+                    (Some(a), Some(b)) => !a.same(&b),
+                    _ => a != b,
+                })
     }
 
     /// The layouts in force: the file's, else the system's.
@@ -207,7 +334,7 @@ impl App {
             .map(|s| s.id)
     }
 
-    fn name_of(&self, id: &str) -> &'static str {
+    pub(super) fn name_of(&self, id: &str) -> &'static str {
         setting(id).map_or("", |s| s.name.get(self.lang))
     }
 
@@ -244,6 +371,15 @@ impl App {
                     return Task::none();
                 }
                 self.keys.conflict = None;
+                // Another row's picker, or this one's but for its keys.
+                if self
+                    .keys
+                    .picker
+                    .as_ref()
+                    .is_some_and(|p| p.setting != id || p.tab != Tab::Keys)
+                {
+                    self.keys.picker = None;
+                }
                 self.keys.recording = Some(Recording {
                     setting: id,
                     index,
@@ -296,11 +432,7 @@ impl App {
                 self.stop_recording();
                 return self.inhibit(false);
             }
-            Msg::Reset(id) => {
-                if let Some(slot) = slot(id) {
-                    self.remove(slot, None);
-                }
-            }
+            Msg::Reset(id) => self.reset(id, None),
             Msg::ResetAll => {
                 self.serial += 1;
                 let batch = self.serial;
@@ -309,9 +441,58 @@ impl App {
                     .map(|s| s.id)
                     .collect();
                 for id in changed {
-                    if let Some(slot) = slot(id) {
-                        self.remove(slot, Some(batch));
-                    }
+                    self.reset(id, Some(batch));
+                }
+            }
+            Msg::Plus(id) => {
+                let was = self.keys.picker.as_ref().map(|p| p.setting);
+                self.keys.conflict = None;
+                self.keys.picker = None;
+                let recording = self.keys.recording.is_some();
+                self.stop_recording();
+                if was != Some(id) && self.writable() {
+                    self.keys.picker = Some(Picker {
+                        setting: id,
+                        tab: Tab::Gesture,
+                        taking: None,
+                    });
+                    tracing::info!(setting = id, "the shortcut's picker");
+                }
+                if recording {
+                    return self.inhibit(false);
+                }
+            }
+            Msg::Tab(tab) => {
+                let Some(picker) = &mut self.keys.picker else {
+                    return Task::none();
+                };
+                picker.tab = tab;
+                picker.taking = None;
+                let id = picker.setting;
+                if tab == Tab::Keys {
+                    return self.keys_update(Msg::Record(id, None));
+                }
+                if self.keys.recording.is_some() {
+                    self.stop_recording();
+                    return self.inhibit(false);
+                }
+            }
+            Msg::Take(trigger) => return self.take(trigger),
+            Msg::GiveIt => return self.give_it(),
+            Msg::KeepIt => {
+                if let Some(picker) = &mut self.keys.picker {
+                    picker.taking = None;
+                }
+            }
+            Msg::Unbind(id, trigger) => {
+                let list: Vec<String> = self
+                    .chords(id)
+                    .into_iter()
+                    .filter(|t| Trigger::parse(t) != Some(trigger))
+                    .collect();
+                if let Some(slot) = slot(id) {
+                    let said = format!("{} : {}", self.name_of(id), self.setting_said(id, &list));
+                    return self.change_saying(slot, Value::List(list), Some(said));
                 }
             }
             Msg::Adding(open) => {
@@ -346,6 +527,76 @@ impl App {
                 }
             }
             Msg::Try(text) => self.keys.try_text = text,
+        }
+        Task::none()
+    }
+
+    /// What a line says, as its toast says it.
+    fn setting_said(&self, id: &str, list: &[String]) -> String {
+        setting(id).map_or_else(String::new, |s| {
+            s.say(&Value::List(list.to_vec()), self.lang)
+        })
+    }
+
+    /// A corner or a swipe picked for the picker's action: its own at
+    /// once, or asked first when another action holds it.
+    fn take(&mut self, trigger: Trigger) -> Task<Message> {
+        let Some(id) = self.keys.picker.as_ref().map(|p| p.setting) else {
+            return Task::none();
+        };
+        match self.standing(id, trigger) {
+            super::pick::Standing::Free => {}
+            super::pick::Standing::Taken(from) => {
+                tracing::info!(setting = id, from, trigger = %trigger.written(), "held by another action");
+                if let Some(picker) = &mut self.keys.picker {
+                    picker.taking = Some(Taking { trigger, from });
+                }
+                return Task::none();
+            }
+            _ => return Task::none(),
+        }
+        self.keys.picker = None;
+        let mut list = self.chords(id);
+        list.push(trigger.written());
+        let said = format!("{} : {}", self.name_of(id), self.setting_said(id, &list));
+        match slot(id) {
+            Some(slot) => self.change_saying(slot, Value::List(list), Some(said)),
+            None => Task::none(),
+        }
+    }
+
+    /// "Remplacer": the trigger taken from the other action and given to
+    /// the picker's, both lines written as one change.
+    fn give_it(&mut self) -> Task<Message> {
+        let Some(Picker {
+            setting: id,
+            taking: Some(Taking { trigger, from }),
+            ..
+        }) = self.keys.picker.take()
+        else {
+            return Task::none();
+        };
+        let left: Vec<String> = self
+            .chords(from)
+            .into_iter()
+            .filter(|t| Trigger::parse(t) != Some(trigger))
+            .collect();
+        let mut mine = self.chords(id);
+        mine.push(trigger.written());
+        self.serial += 1;
+        let batch = self.serial;
+        let said = words::has_none_left(
+            self.lang,
+            words::HasNoneLeft {
+                keys_shown_conflict_chor: said::short(trigger, self.lang),
+                self_name_of_conflict_se: self.name_of(id),
+                self_name_of_other: self.name_of(from),
+            },
+        );
+        if let (Some(theirs), Some(ours)) = (slot(from), slot(id)) {
+            // Its toast is ours: one for both.
+            self.write_batch(theirs, Value::List(left), batch, Some(String::new()));
+            self.write_batch(ours, Value::List(mine), batch, Some(said));
         }
         Task::none()
     }
@@ -395,6 +646,15 @@ impl App {
     }
 
     pub(super) fn stop_recording(&mut self) {
+        // The picker's Keys tab was waiting for them.
+        if self
+            .keys
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.tab == Tab::Keys)
+        {
+            self.keys.picker = None;
+        }
         if self.keys.recording.take().is_some()
             && let Some(asks) = &self.keys.inhibit
         {
@@ -875,11 +1135,17 @@ impl App {
                 );
                 for chord in self.chords(s.id) {
                     hay.push(' ');
-                    hay.push_str(&chord);
-                    hay.push(' ');
-                    hay.push_str(&keys::shown(&chord, Lang::French));
-                    hay.push(' ');
-                    hay.push_str(&keys::shown(&chord, Lang::English));
+                    match Trigger::parse(&chord) {
+                        // "3 doigts", "coin", "haut".
+                        Some(trigger) => hay.push_str(&said::found_by(trigger)),
+                        None => {
+                            hay.push_str(&chord);
+                            hay.push(' ');
+                            hay.push_str(&keys::shown(&chord, Lang::French));
+                            hay.push(' ');
+                            hay.push_str(&keys::shown(&chord, Lang::English));
+                        }
+                    }
                 }
                 let hay = fold(&hay);
                 words.iter().all(|w| hay.contains(w))
@@ -910,10 +1176,14 @@ impl App {
         let shown = self.shown_shortcuts();
         let changed = model::shortcuts().filter(|s| self.changed(s.id)).count();
         let count = if self.keys.query.trim().is_empty() {
-            match changed {
+            let set: usize = model::shortcuts()
+                .map(|s| self.triggers_of(s.id).len())
+                .sum();
+            let shortcuts = match changed {
                 0 => words::ALL_SHORTCUTS.get(lang).to_owned(),
                 n => words::all_shortcuts_changed(lang, n),
-            }
+            };
+            format!("{shortcuts} · {}", words::gestures_and_corners(lang, set))
         } else {
             match shown.len() {
                 1 => words::N_1_SHORTCUT.get(lang).to_owned(),
@@ -1094,7 +1364,7 @@ impl App {
             } else {
                 defaults
                     .iter()
-                    .map(|c| keys::shown(c, lang))
+                    .map(|c| said::shown(c, lang))
                     .collect::<Vec<_>>()
                     .join(", ")
             };
@@ -1105,11 +1375,27 @@ impl App {
         if chords.is_empty() && recording.is_none() {
             right = right.push(t(words::NONE_2.get(lang), 12.5, FAINT.get()));
         }
+        // The keys, in their place of the line; the corners and swipes
+        // after them.
         for (i, chord) in chords.iter().enumerate() {
+            if Trigger::meant(chord) {
+                continue;
+            }
             match recording {
                 Some(r) if r.index == Some(i) => right = right.push(self.recording_button(r)),
                 _ => right = right.push(self.combination(id, i, chord)),
             }
+        }
+        for trigger in said::of(&chords) {
+            let remove = self
+                .writable()
+                .then_some(Message::Keys(Msg::Unbind(id, trigger)));
+            right = right.push(super::pick::chip(
+                trigger,
+                said::short(trigger, lang),
+                remove,
+                format!("chip:{id}:{}", trigger.written()),
+            ));
         }
         match recording {
             Some(r) if r.index.is_none() => right = right.push(self.recording_button(r)),
@@ -1121,7 +1407,7 @@ impl App {
                         .padding(0)
                         .style(flat(None, HOVER.get(), 6.0, false));
                 if self.writable() {
-                    plus = plus.on_press(Message::Keys(Msg::Record(id, None)));
+                    plus = plus.on_press(Message::Keys(Msg::Plus(id)));
                 }
                 right = right.push(container(plus).id(format!("add:{id}")));
             }
@@ -1149,6 +1435,9 @@ impl App {
         let mut out = column![line];
         if let Some(conflict) = self.keys.conflict.as_ref().filter(|c| c.setting == id) {
             out = out.push(self.conflict_box(conflict));
+        }
+        if let Some(picker) = self.keys.picker.as_ref().filter(|p| p.setting == id) {
+            out = out.push(self.picker_box(picker));
         }
         out.into()
     }
@@ -1357,9 +1646,11 @@ impl App {
                         continue;
                     }
                 }
+                let chords = self.chords(s.id);
                 out.push(serde_json::json!({
                     "id": s.id,
-                    "keys": self.chords(s.id).iter().map(|c| keys::shown(c, lang)).collect::<Vec<_>>(),
+                    "keys": chords.iter().filter(|c| !Trigger::meant(c)).map(|c| keys::shown(c, lang)).collect::<Vec<_>>(),
+                    "triggers": said::of(&chords).iter().map(|t| t.written()).collect::<Vec<_>>(),
                     "changed": self.changed(s.id),
                 }));
             }
@@ -1385,6 +1676,32 @@ impl App {
                 "other": c.other,
             })),
             "changed": model::shortcuts().filter(|s| self.changed(s.id)).count(),
+            "triggers": model::shortcuts().map(|s| self.triggers_of(s.id).len()).sum::<usize>(),
+            "picker": self.keys.picker.as_ref().map(|p| serde_json::json!({
+                "setting": p.setting,
+                "tab": p.tab.word(),
+                "items": match p.tab {
+                    Tab::Keys => Vec::new(),
+                    Tab::Corner | Tab::Gesture => Trigger::all()
+                        .filter(|t| matches!(t, Trigger::Corner(_)) == (p.tab == Tab::Corner))
+                        .map(|t| {
+                            let standing = self.standing(p.setting, t);
+                            serde_json::json!({
+                                "trigger": t.written(),
+                                "standing": standing.word(),
+                                "owner": match standing {
+                                    super::pick::Standing::Taken(o) => Some(o),
+                                    _ => None,
+                                },
+                            })
+                        })
+                        .collect(),
+                },
+                "taking": p.taking.as_ref().map(|t| serde_json::json!({
+                    "trigger": t.trigger.written(),
+                    "from": t.from,
+                })),
+            })),
         })
     }
 }
