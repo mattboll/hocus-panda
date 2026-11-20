@@ -133,6 +133,8 @@ pub struct State {
     pub ink: crate::ink::Ink,
     /// The actions palette's target and what draws it (#736).
     pub actions: crate::actions::Palette,
+    /// The wallpapers that change by themselves (#894).
+    pub changing: crate::wallpaper::Changing,
     /// The magnifier (#424).
     pub magnifier: crate::magnifier::Magnifier,
     /// The windows' opacity's wheel and its pill (#735).
@@ -344,6 +346,7 @@ impl State {
             transcribe: crate::transcribe::Transcription::default(),
             ink: crate::ink::Ink::default(),
             actions: crate::actions::Palette::default(),
+            changing: crate::wallpaper::Changing::default(),
             overview: None,
             overview_paint: crate::overview_draw::OverviewPaint::default(),
             projects: crate::projects::Projects::default(),

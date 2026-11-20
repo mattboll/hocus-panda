@@ -156,6 +156,11 @@
 #   vrr = true
 # Its own wallpaper, while [wallpaper] per-screen is true (else picture):
 #   wallpaper = "~/.local/share/hocuspanda/wallpapers/Montagne.jpg"
+# Its own folder, or day and night pictures, while its wallpaper is
+# "folder" or "day-night" (else [wallpaper]'s):
+#   wallpaper-folder = "~/Images/Fonds"
+#   wallpaper-day = "dawn"
+#   wallpaper-night = "~/Images/Nuit.jpg"
 #
 # Each set of screens (the screens plugged and on together) keeps its
 # own arrangement over the [outputs.NAME] above, which stay what a set
@@ -777,6 +782,7 @@
 # [wallpaper]
 # Every screen's background: a built-in, "night", "mist", "dawn" or
 # "forest"; one that moves, "rain", "stars" or "aurora"; "plain" (the color below);
+# one that changes by itself, "folder" or "day-night" (below);
 # or a picture's path (JPEG, PNG or WebP; ~/ is the home). The Settings copy a picture chosen there into
 # ~/.local/share/hocuspanda/wallpapers. A picture that does not read draws
 # night, and the journal says why.
@@ -804,6 +810,27 @@
 # animate = true
 # On battery: "half" its frames (and pace), "still", or "full".
 # on-battery = "half"
+# A folder's pictures in turn, the picture "folder": its JPEG, PNG
+# and WebP pictures, its subfolders' too, each fading into the next over
+# 2 seconds (at once with reduced motion or drawing on the CPU), the
+# next one decoded ahead. A picture added to the folder joins the round,
+# one removed leaves it. The picture shown and the round are kept in
+# ~/.local/state/hocuspanda/wallpaper.json. The Settings choose it with
+# the file chooser; empty, none.
+# folder = ""
+# How often the picture changes: "15m", "1h", "1d", or "session" (once
+# as each session opens). The actions (Super+P) have "Image suivante".
+# every = "1h"
+# The pictures' order: "shuffle" or "name".
+# order = "shuffle"
+# One picture by day, another by night, the picture "day-night": a
+# built-in or a picture's path. They switch at sunrise and sunset at the
+# place of [weather] (computed here, no network), fading over 30
+# seconds; without a place, at these hours.
+# day = "dawn"
+# night = "night"
+# day-starts = "07:00"
+# night-starts = "20:00"
 
 # [day]
 # "Your day" in the bar: meetings from calendar accounts, and tasks from

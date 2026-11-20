@@ -211,7 +211,11 @@ impl App {
         // Words in Manrope, numbers and times in Martian Mono.
         let mono = !matches!(
             setting.id,
-            "appearance.theme" | crate::bar::SIDE | crate::camera::WARMTH | crate::camera::STRENGTH
+            "appearance.theme"
+                | crate::bar::SIDE
+                | crate::camera::WARMTH
+                | crate::camera::STRENGTH
+                | crate::wallpaper::ORDER
         );
         let mut segments = row![];
         let mut shown: Vec<(String, Value)> = choices

@@ -164,6 +164,7 @@ mod typing;
 mod unplug;
 mod unplug_clients;
 mod voice;
+mod wallpaper_changes;
 mod weather;
 mod wifi;
 mod window_effects;

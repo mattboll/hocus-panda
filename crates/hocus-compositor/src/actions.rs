@@ -198,6 +198,9 @@ impl State {
         if strip.current() + 1 >= strip.count() {
             say("desktop-right", Inert::LastDesktop);
         }
+        if !self.wallpaper_has_next(&output.name()) {
+            say("next-wallpaper", Inert::NoFolder);
+        }
         if self.magnifier.on.is_none() {
             say("magnifier-out", Inert::MagnifierOff);
             say("magnifier-off", Inert::MagnifierOff);
@@ -307,6 +310,9 @@ impl State {
                 }
             }
             ("toggle-bar", _, Some(output)) => self.toggle_bar(&output.name()),
+            ("next-wallpaper", _, Some(output)) => {
+                self.wallpaper_next(Some(&output.name()));
+            }
             ("launcher", _, Some(output)) => {
                 let scale = self.bar_scale(&output.name());
                 self.tell_shell(ToShell::Launcher {
@@ -535,6 +541,7 @@ mod tests {
                 "desktop-right",
                 "toggle-bar",
                 "launcher",
+                "next-wallpaper",
             ];
             assert!(
                 own.contains(&def.id) || shortcut_action(def.id).is_some(),

@@ -33,6 +33,7 @@ mod sound;
 mod style;
 mod time;
 mod view;
+mod wallpaper_changing;
 mod wallpaper_page;
 mod weather_page;
 mod wheels;

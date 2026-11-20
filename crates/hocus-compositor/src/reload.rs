@@ -264,6 +264,8 @@ impl State {
         if new.weather != self.config.weather {
             self.config.weather = new.weather.clone();
             self.tell_shell(hocus_link::ToShell::Weather(self.config.weather.place()));
+            // Day and night's pictures switch with its sun (#894).
+            self.wallpaper_follow();
             followed.push("[weather]");
         }
         // The desktop's effects (#434): read as each starts.

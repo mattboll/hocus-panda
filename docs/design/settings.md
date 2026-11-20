@@ -1343,6 +1343,58 @@ picture of one's own. The glyphs are the desktop's own drawings (46
 half-width katakana, the digits and 8 signs on 5 × 7 dots, drawn
 mirrored), one 64 × 64 atlas of 16 KB whatever the scale.
 
+**A wallpaper that changes by itself (#894).** Approved 2026-11-20
+(mockup section `t894`). Two more tiles in FONDS, after Couleur unie:
+
+| Group | What | Key |
+|---|---|---|
+| FONDS | "Un dossier" (two of its pictures, one behind the other; chosen without a folder, the file chooser asks one first), "Jour et nuit" (the day's picture beside the night's), each "Nouveau" | `[wallpaper] picture = "folder" \| "day-night"`, or `[outputs.NAME] wallpaper` with per-screen |
+| LE DOSSIER | the folder (`~/Images/Fonds`), "42 images", "Changer de dossier…" (the portal's file chooser, a folder: "Choisir un dossier d’images"); Changer d’image: "Toutes les 15 minutes", "Toutes les heures" (default), "Chaque jour", "À chaque ouverture de session"; Ordre: "Au hasard" (default) \| "Par nom"; Image suivante, "Aussi dans les actions (Super+P).", "Suivante" | `[wallpaper] folder`, `every = "15m" \| "1h" \| "1d" \| "session"`, `order = "shuffle" \| "name"`; a screen's own `wallpaper-folder` |
+| JOUR ET NUIT | "Le jour · plage.jpg" and "La nuit · Nuit", each opening a list of the gallery's pictures and "Choisir une image…"; Bascule: "Lever 07:58 · coucher 17:12 à Saint-Étienne", "Avec le soleil"; without a place in Météo, "À heures fixes" and two rows, Le jour commence à, La nuit commence à (every half hour) | `[wallpaper] day = "dawn"`, `night = "night"`, `day-starts = "07:00"`, `night-starts = "20:00"`; a screen's own `wallpaper-day`, `wallpaper-night` |
+
+- **The compositor** (`src/wallpaper/changing.rs`) lists a folder (JPEG,
+  PNG and WebP by their names, its subfolders' too, hidden ones left out)
+  on a thread of its own, which adds its folders to an inotify watch
+  another thread reads: a picture added joins the round (by name in its
+  place, shuffled among those still to come), one removed leaves it (the
+  next shows if it was shown), listed again 400 ms after the last change.
+  The round (`src/wallpaper/round.rs`: each picture once a round, a new
+  round shuffled again, never the same picture twice in a row) and when
+  it last changed are kept in `$XDG_STATE_HOME/hocuspanda/wallpaper.json`
+  (written off the loop): the next session goes on where it was, at once
+  if the interval passed meanwhile, "session" one picture on each time.
+  One timer on the loop wakes it at the next change. Screens with the same
+  folder show the same picture.
+- **Day and night** (`src/wallpaper/day_night.rs`) switch at sunrise and
+  sunset at `[weather]`'s place, computed by `hocus_link::sun` (NOAA's
+  equations, refraction counted, no network; a polar day or night keeps
+  one all day), else at `day-starts` and `night-starts`, on the wall
+  clock, looked at again every 10 minutes at least.
+- **Drawn**: the picture of the moment is drawn as any picture, on the
+  wallpaper's thread; a folder's next one is drawn ahead and kept aside
+  until it shows. A change fades the screen's previous background out
+  under the new one, 2 s for a folder, 30 s for day and night; at once
+  with reduced motion or on the CPU. The lock (the shell's) and the
+  Settings are told the picture of the moment (`wallpaper`, and
+  `wallpaper-now` on the Settings' line), so the lock shows it, dimmed
+  or blurred as chosen; a `lock-picture` of `"folder"` or
+  `"day-night"` shows every screen's wallpaper of the moment.
+- **Image suivante**: the actions palette's "Image suivante" (Écrans,
+  inert "le fond n’est pas un dossier" otherwise) and the Settings'
+  button (`wallpaper-next [SCREEN]` on their line) show the folder's next
+  picture now, the interval counted again from it.
+- **Tested**: `tests/wallpaper_changes.rs` (a folder by name on a short
+  interval, `Config::wallpaper_every`: its order, a picture added, one
+  removed, the round kept; on GLES the fade halfway on the held clock),
+  `tests/settings_wallpaper.rs` (a folder chosen in the test's portal,
+  its keys written, its pictures counted and drawn, "Par nom"); unit
+  tests of the round, the first change of a session, day and night, the
+  sun at Paris's solstices and Tromsø's, the configuration's keys.
+- **Choices made here** (to confirm on the machine): the tiles come after
+  Couleur unie; without a place the two hours are two rows under
+  Bascule rather than inside it; the day's picture is Aube by default;
+  an empty folder, or none chosen, draws Nuit.
+
 **The compositor follows the file**: `[wallpaper]` and `[outputs.NAME]
 wallpaper` through `reload.rs`; a screen's `wallpaper` is not part of its
 layout (a change redraws its background, never sets its mode). `~/` in a
