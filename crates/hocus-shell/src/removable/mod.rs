@@ -292,6 +292,7 @@ fn note(
         urgency: note::Urgency::Normal,
         timeout: note::Timeout::After(note::LIFE),
         progress: None,
+        sound: None,
         resident: false,
         pid: 0,
         agent: false,
