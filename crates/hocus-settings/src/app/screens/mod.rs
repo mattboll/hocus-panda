@@ -191,6 +191,11 @@ impl App {
     }
 
     /// `line` to the compositor's screens' line; whether it took it.
+    /// Whether the compositor's line is open.
+    pub(super) fn screens_linked(&self) -> bool {
+        self.screens.line.is_some() && !self.screens.unavailable
+    }
+
     pub(super) fn screens_ask(&self, line: String) -> bool {
         self.screens.line.as_ref().is_some_and(|l| l.ask(line))
     }
@@ -372,7 +377,7 @@ impl App {
             return iced::Task::none();
         }
         // The clipboard's history and the recording (6.17).
-        if self.captures_said(&said) {
+        if self.captures_said(&said) || self.notifications_said(&said) {
             return iced::Task::none();
         }
         match said {
@@ -444,7 +449,8 @@ impl App {
             | Said::Apps(_)
             | Said::AgentTools(_)
             | Said::Clipboard { .. }
-            | Said::Recording(_) => iced::Task::none(),
+            | Said::Recording(_)
+            | Said::Dnd(_) => iced::Task::none(),
         }
     }
 

@@ -32,7 +32,7 @@ const GREEN: Ink = Ink::Dark(rgb(0x7EE0A0));
 use crate::theme::Ink;
 
 /// An application's tile's colour, the same for an id each time.
-fn tile_colour(id: &str) -> Color {
+pub(in crate::app) fn tile_colour(id: &str) -> Color {
     const COLOURS: [u32; 7] = [
         0xF5A05A, 0x8FB3FF, 0x7FC8F8, 0xC9A3F5, 0x6CC287, 0xF5C46E, 0xE0567A,
     ];

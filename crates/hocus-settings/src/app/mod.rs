@@ -25,6 +25,7 @@ mod keyboard_page;
 mod keys_in;
 mod mouse;
 mod network;
+mod notifications_page;
 mod perf_page;
 mod places;
 mod power_page;
@@ -359,6 +360,8 @@ pub enum Message {
     Captures(captures_page::Msg),
     /// The weather's page (#814).
     Weather(weather_page::Msg),
+    /// The notifications' page (#899).
+    Notifications(notifications_page::Msg),
     /// The network's page (6.6).
     Network(network::Msg),
     /// The Énergie page's (6.10).
@@ -456,6 +459,8 @@ pub struct App {
     captures: captures_page::State,
     /// The weather's page: the place typed, what it found (#814).
     weather: weather_page::State,
+    /// The notifications' page: the senders read, do not disturb (#899).
+    notifications: notifications_page::State,
     /// The network's page: NetworkManager and the radios as last said
     /// (6.6).
     network: network::State,
@@ -505,6 +510,7 @@ impl App {
         let acting = acting_page::State::with(&sender);
         let apps = applications::State::new(sender.clone());
         let perf = perf_page::State::new(&sender, start.places.state.clone());
+        let notifications = notifications_page::State::with(&sender);
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -587,6 +593,7 @@ impl App {
             desktops: desktops_page::State::default(),
             captures: captures_page::State::default(),
             weather: weather_page::State::default(),
+            notifications,
             network,
             power,
             agents,
@@ -743,6 +750,7 @@ impl App {
         self.network_visit();
         self.agents_visit();
         self.perf_after();
+        self.notifications_after();
         self.network_after_key();
         self.now = Instant::now();
         self.knobs
@@ -990,6 +998,7 @@ impl App {
             Message::Desktops(msg) => self.desktops_update(msg),
             Message::Captures(msg) => self.captures_update(msg),
             Message::Weather(msg) => self.weather_update(msg),
+            Message::Notifications(msg) => self.notifications_update(msg),
             Message::Keys(msg) => {
                 // The trial area's move key, held for real (6.14).
                 if let keyboard_page::Msg::Mods(mods) = &msg {

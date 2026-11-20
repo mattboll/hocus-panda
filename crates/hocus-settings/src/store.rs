@@ -115,6 +115,9 @@ pub struct Snapshot {
     pub rules: Box<crate::desktops::Rules>,
     /// The agents that act on the desktop, and how (docs/design/mcp.md).
     pub acting: Box<crate::acting::File>,
+    /// Each application's level, by its id, as the file words it
+    /// (`[notifications.apps]`, #899).
+    pub notifications: BTreeMap<String, String>,
 }
 
 /// A set of screens the file arranges: its name ([`set_name`]), its
@@ -244,6 +247,16 @@ pub fn read(text: &str) -> Snapshot {
             bar: Box::new(crate::bar::File::of(&doc)),
             rules: Box::new(crate::desktops::Rules(crate::desktops::rules_of(&doc))),
             acting: Box::new(crate::acting::File::of(&doc)),
+            notifications: doc
+                .get("notifications")
+                .and_then(|n| n.get("apps"))
+                .and_then(Item::as_table_like)
+                .map(|apps| {
+                    apps.iter()
+                        .filter_map(|(id, level)| Some((id.to_owned(), level.as_str()?.to_owned())))
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -262,6 +275,7 @@ pub fn read(text: &str) -> Snapshot {
             bar: Box::default(),
             rules: Box::default(),
             acting: Box::default(),
+            notifications: BTreeMap::new(),
         },
     }
 }

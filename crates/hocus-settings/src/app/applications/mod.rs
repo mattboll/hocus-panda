@@ -10,7 +10,7 @@
 //! and joins `Ctrl+Z`; the terminal is the file's `[programs] terminal`,
 //! written as the other settings are.
 
-mod view;
+pub(super) mod view;
 
 use hocus_words::settings::app_applications as words;
 use std::{
