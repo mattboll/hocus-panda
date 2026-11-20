@@ -68,9 +68,12 @@ impl XdgShellHandler for State {
             .push(Window::new_wayland_window(surface));
     }
 
-    /// The bar's desktops' list shows titles, and the tiles icons.
-    fn title_changed(&mut self, _surface: ToplevelSurface) {
+    /// The bar's desktops' list shows titles, and the tiles icons; a
+    /// browser's window reopened at log in may show a closed project's
+    /// tab (#915).
+    fn title_changed(&mut self, surface: ToplevelSurface) {
         self.desktops_soon();
+        self.ghost_titled(surface.wl_surface());
     }
 
     fn app_id_changed(&mut self, _surface: ToplevelSurface) {
