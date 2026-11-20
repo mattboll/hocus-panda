@@ -1017,8 +1017,10 @@ fn an_answer_or_an_address_lists_no_application() -> anyhow::Result<()> {
 /// `Escape` pressed as it opens, read by the shell with the launcher's
 /// first configure (a busy shell, #821): iced's window for the surface is
 /// made at that configure's refresh, after the key, which must wait for it
-/// rather than be lost. The shell is held once it has asked for the
-/// surface, before the compositor answers.
+/// rather than be lost: the compositor keeps the keys typed for a surface
+/// that takes the keyboard until it has drawn (`state::Coming`, #860). The
+/// shell is held once it has asked for the surface, before the compositor
+/// answers; the keyboard is not the launcher's until it draws.
 #[test]
 fn escape_read_with_its_first_configure_closes_it() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(0)? else {
@@ -1041,7 +1043,6 @@ fn escape_read_with_its_first_configure_closes_it() -> anyhow::Result<()> {
     bed.hp.hold_shell(true)?;
     let asked = bed.hp.dispatch_until(Duration::from_secs(5), |hp| {
         hp.launcher_surfaces().len() == 1
-            && hp.keyboard_layer().as_deref() == Some(hocus_link::LAUNCHER_NAMESPACE)
     });
     if matches!(asked, Ok(true)) {
         bed.press(KEY_ESC);

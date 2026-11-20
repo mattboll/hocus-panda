@@ -35,7 +35,7 @@ mod protocols;
 mod windows;
 
 pub use frames::{Frames, Graphics, XWayland};
-pub use input::{Gestures, Keyboard, Pointer};
+pub use input::{Coming, Gestures, Keyboard, Pointer};
 pub use menus::{RadialMenu, Switching};
 pub use protocols::Protocols;
 pub use windows::{Arrivals, Departures, Snap};

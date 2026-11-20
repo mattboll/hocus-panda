@@ -4,11 +4,13 @@
 use std::{collections::HashSet, time::Duration};
 
 use smithay::{
+    backend::input::KeyState,
     input::{
         keyboard::Keycode,
         pointer::{CursorIcon, CursorImageStatus},
     },
     output::Output,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point},
 };
 
@@ -46,6 +48,37 @@ pub struct Keyboard {
     /// The keymap's layouts' XKB codes (`fr`, `fr(bepo)`), by group, for
     /// the bar's row; empty when XKB refused them and took its defaults.
     pub layout_codes: Vec<String>,
+    /// The keys typed for a layer surface that takes the keyboard before
+    /// it has drawn (#821).
+    pub coming: Coming,
+}
+
+/// A layer surface asking for the keyboard always, between its first
+/// commit and its first buffer. Its client may not read keys yet: iced
+/// makes a surface's window at its first configure's refresh, and drops
+/// the keys and the keyboard's entering before it (#821, the launcher's
+/// Escape typed as it opened on a busy shell). So it gets the keyboard
+/// once it has drawn, and the keys typed meanwhile then, in their order.
+#[derive(Debug, Default)]
+pub enum Coming {
+    /// No such surface: the keys go where the keyboard is.
+    #[default]
+    Nothing,
+    /// It has not drawn yet: its keys wait, since the monotonic `since`.
+    Waiting {
+        surface: WlSurface,
+        since: Duration,
+        keys: Vec<(Keycode, KeyState, u32)>,
+    },
+    /// It did not draw within [`Coming::PATIENCE`]: it has the keyboard
+    /// all the same, and its keys as they come, as any client.
+    Late(WlSurface),
+}
+
+impl Coming {
+    /// How long keys wait for a surface to draw: a busy shell draws within
+    /// it, and a client that never draws holds no key longer.
+    pub const PATIENCE: Duration = Duration::from_secs(1);
 }
 
 #[derive(Debug, Default)]
@@ -79,6 +112,7 @@ impl Keyboard {
         Self {
             kept_keys: HashSet::new(),
             layout_codes,
+            coming: Coming::Nothing,
         }
     }
 }

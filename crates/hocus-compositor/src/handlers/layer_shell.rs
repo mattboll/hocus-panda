@@ -4,9 +4,13 @@
 //! zones come off the work area. A surface may take the keyboard, always
 //! (exclusive) or when clicked (on demand).
 
+use std::time::Duration;
+
 use smithay::{
+    backend::{input::KeyState, renderer::utils::with_renderer_surface_state},
     delegate_layer_shell,
     desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
+    input::keyboard::Keycode,
     output::Output,
     reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface},
     utils::{IsAlive, Logical, Point, SERIAL_COUNTER},
@@ -22,7 +26,7 @@ use smithay::{
     },
 };
 
-use crate::{State, focus::KeyboardFocus, front::Pick};
+use crate::{State, focus::KeyboardFocus, front::Pick, state::Coming};
 
 /// The layers above the windows, front first, for the keyboard.
 const ABOVE: [Layer; 2] = [Layer::Overlay, Layer::Top];
@@ -315,14 +319,42 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         match self.exclusive_layer() {
             Some(layer) => {
-                let focus = KeyboardFocus::Wayland(layer.wl_surface().clone());
+                let surface = layer.wl_surface().clone();
+                if self.keys_wait_for(&surface) {
+                    // Nobody reads keys meanwhile: they wait for it.
+                    if keyboard.current_focus().is_some() {
+                        keyboard.set_focus(self, None, serial);
+                    }
+                    return;
+                }
+                let focus = KeyboardFocus::Wayland(surface.clone());
                 if keyboard.current_focus().as_ref() != Some(&focus) {
                     keyboard.set_focus(self, Some(focus), serial);
                     // A bar holding the keyboard stands in front.
                     self.redraw = true;
                 }
+                // The keys typed as it came, now that it reads them.
+                if let Coming::Waiting { keys, .. } =
+                    std::mem::replace(&mut self.keyboard.coming, Coming::Late(surface))
+                {
+                    for (code, state, time) in keys {
+                        self.key(code, state, time);
+                    }
+                }
             }
             None => {
+                // A surface that went before it drew: the keys typed for
+                // it go with it, and the windows get the keyboard back.
+                let coming = std::mem::take(&mut self.keyboard.coming);
+                if let Coming::Waiting { keys, .. } = coming {
+                    tracing::debug!(keys = keys.len(), "a layer surface went before it drew");
+                    if keyboard.current_focus().is_none() {
+                        let focused = self.model.focused();
+                        self.focus(focused);
+                        self.redraw = true;
+                    }
+                    return;
+                }
                 // An on-demand surface clicked keeps it; one that went, or
                 // that no longer asks, gives it back to the windows.
                 let Some(focus) = keyboard.current_focus() else {
@@ -342,6 +374,63 @@ impl State {
                 }
             }
         }
+    }
+
+    /// Whether the keys wait for `surface`, which asks for the keyboard
+    /// always: until it has drawn, for [`Coming::PATIENCE`] at most (#821).
+    fn keys_wait_for(&mut self, surface: &WlSurface) -> bool {
+        let now = Duration::from(self.clock.now());
+        let drawn = with_renderer_surface_state(surface, |s| s.buffer().is_some()).unwrap_or(false);
+        match &mut self.keyboard.coming {
+            Coming::Late(late) if late == surface => false,
+            Coming::Waiting {
+                surface: s,
+                since,
+                keys,
+            } if s == surface => {
+                if drawn || now.saturating_sub(*since) < Coming::PATIENCE {
+                    return !drawn;
+                }
+                tracing::warn!(
+                    keys = keys.len(),
+                    "a layer surface asking for the keyboard has not drawn in {:?}: \
+                     its keys go to it as they come",
+                    Coming::PATIENCE
+                );
+                false
+            }
+            coming => {
+                if drawn {
+                    *coming = Coming::Late(surface.clone());
+                    return false;
+                }
+                *coming = Coming::Waiting {
+                    surface: surface.clone(),
+                    since: now,
+                    keys: Vec::new(),
+                };
+                true
+            }
+        }
+    }
+
+    /// A key that waits for a layer surface still to draw (#821): kept,
+    /// in its order, rather than given to nobody. Once waited for too
+    /// long, the surface gets the keyboard and the keys kept, and this one
+    /// goes on.
+    pub(crate) fn key_waits(&mut self, code: Keycode, state: KeyState, time: u32) -> bool {
+        if !matches!(self.keyboard.coming, Coming::Waiting { .. }) || self.locked() {
+            return false;
+        }
+        let now = Duration::from(self.clock.now());
+        if let Coming::Waiting { since, keys, .. } = &mut self.keyboard.coming
+            && now.saturating_sub(*since) < Coming::PATIENCE
+        {
+            keys.push((code, state, time));
+            return true;
+        }
+        self.layer_keyboard();
+        false
     }
 
     /// Whether a layer surface above the windows holds the keyboard for
