@@ -533,6 +533,11 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("mp4", hocus_words::settings::captures::MP4), ("webm", hocus_words::settings::captures::WEBM)]),
     },
     Label {
+        key: "removable.on-plug",
+        name: hocus_words::settings::applications::WHEN_A_STICK_OR_A_DISK_IS_PLUGGED,
+        said: Said::Choices(&[("ask", hocus_words::settings::applications::OFFER_TO_OPEN_IT), ("open", hocus_words::settings::applications::OPEN_IT_AT_ONCE), ("nothing", hocus_words::settings::power::DO_NOTHING)]),
+    },
+    Label {
         key: "session.restore",
         name: hocus_words::settings::applications::REOPEN_THE_APPLICATIONS_OF_THE_LAST,
         said: Said::Switch,

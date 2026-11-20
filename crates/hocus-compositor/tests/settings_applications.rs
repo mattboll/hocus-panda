@@ -10,8 +10,9 @@
 //! terminal` otherwise, and `Super+Return` starts it; an installed
 //! start-up entry turned off is a hidden copy, on again none; an
 //! application added is its entry copied, its ✕ removes it and "Annuler"
-//! puts it back. What the window shows is read from its log, never on a
-//! time.
+//! puts it back; what a drive plugged in does writes `[removable]
+//! on-plug` (#898). What the window shows is read from its log, never on
+//! a time.
 
 use crate::common;
 use crate::settings_page;
@@ -648,6 +649,32 @@ fn adding_an_application_copies_its_entry_into_autostart() -> anyhow::Result<()>
 }
 
 /// The window as it shows, once still, into `out`/`name`.
+#[test]
+fn what_a_drive_plugged_in_does_writes_removable_on_plug() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start()? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.click("control:removable.on-plug")?;
+    bed.shows(|s| s["menu"] == "removable.on-plug")?;
+    bed.places_with("option:1")?;
+    bed.click("option:1")?;
+    let config = bed.path("config/hocuspanda/config.toml");
+    let text = bed.file_is(&config, |t| {
+        t.is_some_and(|t| t.contains("[removable]\non-plug = \"open\""))
+    })?;
+    assert!(
+        text.is_some_and(|t| t.starts_with("# My desktop, by hand.")),
+        "the file's own lines kept"
+    );
+    // The compositor follows the file, and tells the shell.
+    let taken = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.removable.on_plug == hocus_link::OnPlug::Open
+    })?;
+    anyhow::ensure!(taken, "the compositor did not take [removable] on-plug");
+    Ok(())
+}
+
 fn save(bed: &mut Bed, out: &Path, name: &str, rest: bool) -> anyhow::Result<()> {
     if rest {
         bed.hp.pointer_move(5.0, 5.0);
@@ -762,5 +789,12 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.type_text("k")?;
     bed.shows(|s| s["applications"]["sheet"]["query"] == "k")?;
     save(&mut bed, &out, "applications-add-sheet.png", true)?;
+    chord(&mut bed.hp, &[common::KEY_ESC]);
+    bed.shows(|s| s["applications"]["sheet"].is_null())?;
+    bed.reveal("control:removable.on-plug")?;
+    save(&mut bed, &out, "applications-drives.png", true)?;
+    bed.click("control:removable.on-plug")?;
+    bed.shows(|s| s["menu"] == "removable.on-plug")?;
+    save(&mut bed, &out, "applications-drives-menu.png", true)?;
     Ok(())
 }
