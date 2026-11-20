@@ -383,6 +383,8 @@ pub struct Restore {
     last: Option<(Vec<SavedWindow>, Vec<SessionProject>)>,
     /// The applications that did not come back, as last said.
     not_back: Vec<String>,
+    /// A closed project's windows a browser reopens by itself (#915).
+    pub(super) ghosts: super::ghosts::Ghosts,
 }
 
 #[derive(Debug, Default)]
@@ -531,6 +533,9 @@ pub enum Heard {
     NotResumed(String, crate::resume::NotResumed),
     /// Start `.0` is a window its browser reopens itself (§13 D).
     ByItself(usize),
+    /// This browser starts once and reopens its own windows (§13 D): a
+    /// closed project's among them is closed (#915).
+    RestoresItself(crate::browsers::Browser),
     /// Herdr session `.0` is gone (#887): its window's agents resume each
     /// in a terminal of its own.
     HerdrGone(String),
@@ -580,6 +585,7 @@ impl State {
         let Phase::Waiting(windows) = std::mem::take(&mut self.session_restore.phase) else {
             return;
         };
+        self.ghosts_arm(&windows);
         let comeback = self.comeback_start(Whose::Session, windows, autostart, None);
         self.session_restore.phase = Phase::Restoring(comeback);
     }
@@ -816,6 +822,12 @@ impl State {
     }
 
     fn comeback_heard(&mut self, whose: &Whose, heard: Heard) {
+        if let Heard::RestoresItself(browser) = heard {
+            if *whose == Whose::Session {
+                self.ghosts_watch(browser);
+            }
+            return;
+        }
         let Some(c) = self.comeback_mut(whose) else {
             return;
         };
@@ -887,6 +899,7 @@ impl State {
                     start.back = Back::ByItself;
                 }
             }
+            Heard::RestoresItself(_) => {}
             Heard::Outcome(at, outcome) => {
                 let Some(start) = c.starts.get_mut(at) else {
                     return;
@@ -932,6 +945,12 @@ impl State {
     /// saved place of its application still waiting, the last session's
     /// first, then a reopening project's.
     pub(crate) fn session_window_mapped(&mut self, id: WindowId, window: &Window) {
+        // A closed project's window its browser reopened by itself takes
+        // no place: it goes (#915).
+        if self.ghost_closed(id) {
+            self.session_changed();
+            return;
+        }
         if let Some(app) = app_id(window) {
             let mut taken = None;
             // A browser's window takes the place whose shown tab it shows,
@@ -975,6 +994,7 @@ impl State {
                 }
             }
             if let Some((whose, saved)) = taken {
+                self.ghosts_placed(id);
                 self.session_put_back(id, &saved);
                 if whose == Whose::Session {
                     self.comeback_browser_showed(&saved.entry);
@@ -1184,7 +1204,10 @@ impl State {
             self.loop_handle.remove(token);
         }
         match whose {
-            Whose::Session => tracing::info!("the last session is back"),
+            Whose::Session => {
+                tracing::info!("the last session is back");
+                self.ghosts_disarm();
+            }
             Whose::Project(id) => self.project_back(id),
         }
         self.session_changed();
@@ -2146,6 +2169,7 @@ fn relaunch(asked: Relaunch, heard: channel::Sender<Heard>) {
                         continue;
                     }
                     tracing::info!(app = id, "a browser reopens its own windows");
+                    let _ = heard.send(Heard::RestoresItself(*browser));
                     plain.push(id.clone());
                 } else {
                     tracing::info!(

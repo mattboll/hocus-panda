@@ -2326,6 +2326,179 @@ fn a_window_its_browser_does_not_reopen_comes_back_with_its_tabs() -> anyhow::Re
     Ok(())
 }
 
+/// #915: a Firefox whose log out's `SIGTERM` ended it before it wrote that
+/// a project's window closed, and which reopens its own windows (here its
+/// start page 3), at log in: the last session's window (showing "Inbox")
+/// and, a moment later, `extra`, each a process of the stand-in, closing
+/// when asked (said in `closed`); started with addresses, one window, as
+/// [`browser_wrapper`]'s. The closed project "chapito" keeps a Firefox
+/// window showing "chapito · board" among its three tabs.
+fn log_in_with_a_restoring_firefox(
+    places: &Places,
+    extra: &str,
+) -> anyhow::Result<(Headless, PathBuf)> {
+    use std::os::unix::fs::PermissionsExt;
+    let home = places.root.join("home");
+    browser_profiles(&home)?;
+    std::fs::write(
+        home.join(".mozilla/firefox/t1.default-release/prefs.js"),
+        "user_pref(\"browser.startup.page\", 3);\n",
+    )?;
+    let exe = std::env::current_exe()?;
+    let closed = places.root.join("closed");
+    let marks = places.root.join("marks");
+    std::fs::create_dir_all(&marks)?;
+    let wrapper = places.root.join("firefox-wrapper");
+    let window = |title: &str| {
+        format!(
+            "env {APP_ID}=firefox {BROWSER_WINDOWS}='{title}' {BROWSER_CLOSED}='{}' \
+             '{}' --exact projects::browser_program --nocapture",
+            closed.display(),
+            exe.display()
+        )
+    };
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n\
+             if [ $# -gt 0 ]; then\n  \
+               exec env {APP_ID}=firefox '{}' --exact projects::app_program --nocapture\n\
+             fi\n\
+             {} &\nsleep 0.5\nexec {}\n",
+            marks.join("firefox").display(),
+            exe.display(),
+            window("Inbox — Mozilla Firefox"),
+            window(extra),
+        ),
+    )?;
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))?;
+    let apps = places.root.join("applications");
+    std::fs::create_dir_all(&apps)?;
+    std::fs::write(
+        apps.join("firefox.desktop"),
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Firefox\n\
+             Categories=Network;WebBrowser;\nExec=sh {}\n",
+            wrapper.display()
+        ),
+    )?;
+    let tabs = |titles: &[(&str, &str)]| -> String {
+        titles
+            .iter()
+            .map(|(url, title)| {
+                format!("[[window.browser.tab]]\nurl = \"{url}\"\ntitle = \"{title}\"\n")
+            })
+            .collect()
+    };
+    let state = places.root.join("state/hocuspanda");
+    std::fs::create_dir_all(&state)?;
+    std::fs::write(
+        state.join("session"),
+        format!(
+            "{}[window.browser]\nkind = \"firefox\"\nselected = 1\n{}",
+            saved("firefox"),
+            tabs(&[("https://mail.example/", "Inbox")])
+        ),
+    )?;
+    closed_project(
+        places,
+        "chapito",
+        &places.folder,
+        &format!(
+            "{}[window.browser]\nkind = \"firefox\"\nselected = 2\n{}",
+            saved("firefox").replace("desktop = 1", "desktop = 2"),
+            tabs(&[
+                ("https://a.example/", "A"),
+                ("https://board.example/", "chapito · board"),
+                ("https://c.example/", "C"),
+            ])
+        ),
+    )?;
+    let mut hp = alone_with(Config {
+        home: Some(home),
+        ..config_with_apps(places)
+    })?;
+    hp.restore_session();
+    let bar = common::client(hp.socket(), Some(common::Shows::ClearBar))?;
+    std::mem::forget(bar);
+    Ok((hp, closed))
+}
+
+/// The titles of the windows of `app`, sorted.
+fn titles_of(hp: &Headless, app: &str) -> Vec<String> {
+    let mut out: Vec<String> = hp
+        .all_windows()
+        .iter()
+        .filter(|w| w.1.as_deref() == Some(app))
+        .map(|w| hp.window_title(w.0))
+        .collect();
+    out.sort();
+    out
+}
+
+/// #915: at log in, the copy of a closed project's window that Firefox
+/// reopens by itself, besides the session's, is asked to close at once;
+/// the session's stays in its place. Reopening the project then brings
+/// its window back with its tabs, once.
+#[test]
+fn a_closed_projects_window_its_browser_reopens_at_log_in_is_closed() -> anyhow::Result<()> {
+    let places = places()?;
+    let (mut hp, closed) =
+        log_in_with_a_restoring_firefox(&places, "chapito · board — Mozilla Firefox")?;
+    let gone = hp.dispatch_until(WAIT, |hp| {
+        closed.exists() && hp.all_windows().len() == 1 && !hp.session_restoring()
+    })?;
+    anyhow::ensure!(
+        gone,
+        "{:?} {:?}",
+        titles_of(&hp, "firefox"),
+        std::fs::read_to_string(&closed)
+    );
+    wait(&mut hp, Duration::from_millis(500))?;
+    assert_eq!(titles_of(&hp, "firefox"), ["Inbox — Mozilla Firefox"]);
+    assert_eq!(std::fs::read_to_string(&closed)?, "closed\n");
+    assert_eq!(browser_marks(&places, "firefox"), [""]);
+    let xs: Vec<i32> = hp.placements().iter().map(|p| p.rect.x).collect();
+    assert_eq!(xs, [100], "the session's window in its place");
+
+    hp.project_open("chapito", SCREEN)
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let back = hp.dispatch_until(WAIT, |hp| !hp.project_coming_back("chapito"))?;
+    anyhow::ensure!(back, "not back: {:?}", hp.all_windows());
+    wait(&mut hp, Duration::from_millis(500))?;
+    assert_eq!(
+        browser_marks(&places, "firefox"),
+        [
+            "",
+            "https://a.example/ https://board.example/ https://c.example/"
+        ]
+    );
+    assert_eq!(hp.project_windows("chapito").len(), 1);
+    assert_eq!(hp.all_windows().len(), 2);
+    assert_eq!(std::fs::read_to_string(&closed)?, "closed\n");
+    Ok(())
+}
+
+/// #915: a window Firefox reopens by itself at log in that shows no
+/// closed project's tab stays, even unplaced.
+#[test]
+fn a_window_its_browser_reopens_showing_no_closed_projects_tab_stays() -> anyhow::Result<()> {
+    let places = places()?;
+    let (mut hp, closed) = log_in_with_a_restoring_firefox(&places, "Ailleurs — Mozilla Firefox")?;
+    let both = hp.dispatch_until(WAIT, |hp| {
+        titles_of(hp, "firefox") == ["Ailleurs — Mozilla Firefox", "Inbox — Mozilla Firefox"]
+    })?;
+    anyhow::ensure!(both, "{:?}", titles_of(&hp, "firefox"));
+    wait(&mut hp, Duration::from_secs(1))?;
+    assert_eq!(hp.all_windows().len(), 2);
+    assert!(
+        !closed.exists(),
+        "asked to close: {:?}",
+        std::fs::read_to_string(&closed)
+    );
+    Ok(())
+}
+
 /// One terminal process serving two windows (kitty's, foot's server), an
 /// agent in each: each agent's window is the one that had the keyboard
 /// as its prompt was sent, the session saves each conversation with its

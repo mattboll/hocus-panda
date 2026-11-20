@@ -427,7 +427,12 @@ which it keeps for its crash recovery.
   without addresses, as §14 does now, and its windows are matched to the
   saved places by their titles (§13, D). Reopening a closed project
   always gives the addresses: its windows are gone from the browser's
-  session.
+  session. Not always (#915): a project closed less than 15 s before log
+  out is still open in Firefox's file, which reopens its window at log
+  in. Such a window, one that no saved place took and that shows the tab
+  a closed project's window showed (and no window of the last session
+  did), is asked to close at once, as its ✕ would; reopening the project
+  brings its tabs back as before. Unsure, it stays.
 
 ### 8.4 Applications
 
@@ -582,7 +587,9 @@ Decided by the maintainer (2026-11-13):
   Hocuspanda opens no tabs twice and only puts each browser window back
   on its project's desktop. Hocuspanda reopens tabs itself when a
   closed project is reopened, and at log in only for a browser that
-  does not restore its own session.
+  does not restore its own session. A closed project's window such a
+  browser reopens by itself at log in is closed at once (maintainer,
+  2026-11-20, #915; §8.3).
 - F. Yes: Settings › Desktops, « Retenir les onglets des projets », on
   by default. Private windows are never read either way.
 
@@ -854,6 +861,22 @@ A comes first; B needs A; C and D need B and not each other.
   windows are. A Firefox that asks whether to restore
   (`about:sessionrestore`, after abrupt ends too close together) may then
   open them twice if the user also accepts.
+- **A closed project's window the browser reopens** (#915, 2026-11-20):
+  a project closed less than 15 s before log out is still open in
+  Firefox's recovery file, so its crash resume brings that window back
+  at log in, on the first desktop, and reopening the project opened it a
+  second time. While a browser started at log in reopens its own windows
+  (30 s from its start, `session/ghosts.rs`), each of its windows that no
+  saved place took is looked at as it maps and as its title changes:
+  one whose shown tab's title is that of a closed project's kept window
+  (its tabs read), and none of the last session's windows of that
+  browser showed that tab, is asked to close, as its ✕ would
+  (`browsers::ghost_of`; the log says "a closed project's window that
+  the browser reopened is closed", with the project and the app). A
+  window without its page's title, a private one, one a saved place took,
+  or any while one of the session's windows of that browser was saved
+  without its tabs, stays: a window closed by mistake is worse than one
+  twice. Reopening the project gives its addresses, as before.
 - **The card** lists "ONGLETS · FIREFOX · 7" per browser window, each
   tab's title and host (the shell never gets an address), four, then "3
   de plus" / "Moins"; the confirmation says "Firefox, avec ses 4
@@ -866,9 +889,11 @@ A comes first; B needs A; C and D need B and not each other.
   #913's (`projects::a_browser_window_keeps_its_open_tabs_never_an_earlier_closed_copys`,
   `projects::a_chrome_window_whose_titles_its_file_lacks_keeps_its_tabs`,
   the latter on `tests/data/Session_chrome_untitled`, a file Chrome 154
-  wrote, its pages local, in a profile of its own); unit tests for
-  mozLz4, the session JSON, SNSS, the matching, the addresses given, the
-  profile found.
+  wrote, its pages local, in a profile of its own); #915's
+  (`projects::a_closed_projects_window_its_browser_reopens_at_log_in_is_closed`,
+  `projects::a_window_its_browser_reopens_showing_no_closed_projects_tab_stays`);
+  unit tests for mozLz4, the session JSON, SNSS, the matching, a closed
+  project's copy, the addresses given, the profile found.
 
 ### Lot D, agents' conversations (2026-11-14)
 

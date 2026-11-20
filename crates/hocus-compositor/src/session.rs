@@ -9,6 +9,7 @@
 //! each window in its place ([`restore`]).
 
 pub mod autostart;
+pub mod ghosts;
 pub mod portals;
 pub mod restore;
 

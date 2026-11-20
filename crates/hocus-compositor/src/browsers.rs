@@ -721,6 +721,31 @@ pub fn matched(seen: &[Seen], file: &[FileWindow]) -> Vec<Option<usize>> {
     out
 }
 
+/// Which of `kept` (a closed project's, each with a window it keeps) a
+/// window showing `title` is a copy of, which its browser reopened by
+/// itself at log in (#915: Firefox, ended before it wrote that the
+/// project's window closed, brings it back): the window it keeps shows the
+/// same tab, its tabs read. Never when one of the last session's windows
+/// of that browser, which it reopens too, showed that tab or a tab not
+/// known (`session`, none then): unsure, the window stays. Never a private
+/// window, nor one without its page's title.
+pub fn ghost_of<'a, T>(
+    title: &str,
+    session: &[Option<&str>],
+    kept: impl IntoIterator<Item = (T, &'a SavedBrowser)>,
+) -> Option<T> {
+    let Shown::Page(page) = shown(title) else {
+        return None;
+    };
+    let page = page.trim();
+    if page.is_empty() || session.iter().any(|t| t.is_none_or(|t| t.trim() == page)) {
+        return None;
+    }
+    kept.into_iter()
+        .find(|(_, b)| b.read() && b.shown_title().is_some_and(|t| t.trim() == page))
+        .map(|(of, _)| of)
+}
+
 // --- Profiles --------------------------------------------------------------------------------
 
 /// The paths `profiles.ini` in `root` names.
@@ -1356,6 +1381,52 @@ pub(crate) mod tests {
                 .flat_map(|w| &w.tabs)
                 .all(|t| t.title.is_empty())
         );
+    }
+
+    /// #915: a window a browser reopened by itself is a closed project's
+    /// copy when it shows the tab the project's window showed, and none
+    /// of the last session's windows showed it or a tab not known.
+    #[test]
+    fn a_closed_projects_copy_is_told_by_its_tab_never_when_unsure() {
+        let kept = |title: &str| SavedBrowser {
+            kind: Kind::Firefox,
+            selected: 2,
+            tabs: ["A", title, "C"]
+                .iter()
+                .map(|t| Tab {
+                    url: "https://x/".into(),
+                    title: (*t).into(),
+                    pinned: false,
+                })
+                .collect(),
+        };
+        let (board, docs) = (kept("chapito · board"), kept("Docs"));
+        let projects = [("chapito", &board), ("blog", &docs)];
+        let title = "chapito · board — Mozilla Firefox";
+        assert_eq!(ghost_of(title, &[Some("Inbox")], projects), Some("chapito"));
+        assert_eq!(
+            ghost_of("Docs — Mozilla Firefox", &[], projects),
+            Some("blog")
+        );
+        // Not a closed project's tab.
+        assert_eq!(ghost_of("Inbox — Mozilla Firefox", &[], projects), None);
+        // The session's own window showed it, or a tab not known.
+        assert_eq!(ghost_of(title, &[Some("chapito · board")], projects), None);
+        assert_eq!(ghost_of(title, &[Some("Inbox"), None], projects), None);
+        // No page's title yet, a private window.
+        assert_eq!(ghost_of("Mozilla Firefox", &[], projects), None);
+        assert_eq!(ghost_of("firefox", &[], projects), None);
+        assert_eq!(
+            ghost_of(
+                "chapito · board — Mozilla Firefox Private Browsing",
+                &[],
+                projects
+            ),
+            None
+        );
+        // A kept window whose tabs were not read is never told.
+        let unread = SavedBrowser::default();
+        assert_eq!(ghost_of(title, &[], [("chapito", &unread)]), None);
     }
 
     #[test]
