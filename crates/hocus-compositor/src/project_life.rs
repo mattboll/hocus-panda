@@ -112,8 +112,9 @@ fn tool_of(source: &str, name: &str) -> String {
     }
 }
 
-/// Where saved window `w` is on its screen, from its top left corner.
-fn saved_rect(w: &SavedWindow) -> Rect {
+/// Where saved window `w` is on its screen, from its top left corner, a
+/// snapped one keeping `gap` from its neighbours.
+fn saved_rect(w: &SavedWindow, gap: i32) -> Rect {
     let [x, y, width, height] = w.place;
     let floating = Rect::new(x, y, width.max(1), height.max(1));
     let [ax, ay, aw, ah] = w.area;
@@ -126,14 +127,14 @@ fn saved_rect(w: &SavedWindow) -> Rect {
         Shape::Floating => floating,
         Shape::Fullscreen => Rect::new(0, 0, w.screen_size[0].max(1), w.screen_size[1].max(1)),
         other => match crate::projects::zone_of(other) {
-            Some(zone) => zone.rect(area),
+            Some(zone) => zone.rect(area, gap),
             None => floating,
         },
     }
 }
 
 /// A saved window as a card and a launcher's row say it.
-fn card_window(w: &SavedWindow) -> CardWindow {
+fn card_window(w: &SavedWindow, gap: i32) -> CardWindow {
     let screen = Rect::new(0, 0, w.screen_size[0].max(1), w.screen_size[1].max(1));
     CardWindow {
         id: 0,
@@ -141,7 +142,7 @@ fn card_window(w: &SavedWindow) -> CardWindow {
         entry: w.entry.clone(),
         title: String::new(),
         place: crate::projects::place_of_shape(w.state),
-        rect: crate::desktops::share(saved_rect(w), screen).unwrap_or_default(),
+        rect: crate::desktops::share(saved_rect(w, gap), screen).unwrap_or_default(),
         focused: false,
         terminal: w.terminal.as_ref().map(|t| t.folder.display().to_string()),
         tabs: w.browser.as_ref().and_then(card_tabs),
@@ -241,6 +242,7 @@ impl State {
 
     /// The projects as the launcher lists them, told when they changed.
     pub(crate) fn tell_projects(&mut self) {
+        let gap = self.gap();
         let rows: Vec<ProjectRow> = self
             .projects
             .list
@@ -267,7 +269,7 @@ impl State {
                     folder: p.folder.display().to_string(),
                     output,
                     state,
-                    windows: p.contents.iter().map(card_window).collect(),
+                    windows: p.contents.iter().map(|w| card_window(w, gap)).collect(),
                 }
             })
             .collect();
@@ -1342,7 +1344,7 @@ mod tests {
             state: Shape::Left,
             ..SavedWindow::default()
         };
-        let left = saved_rect(&w);
+        let left = saved_rect(&w, 8);
         assert!(
             left.x == 0 && left.width <= 1000 && left.width > 900,
             "{left:?}"
@@ -1351,8 +1353,8 @@ mod tests {
             state: Shape::Floating,
             ..w.clone()
         };
-        assert_eq!(saved_rect(&floating), Rect::new(100, 100, 400, 300));
-        let share = card_window(&w).rect[2];
+        assert_eq!(saved_rect(&floating, 8), Rect::new(100, 100, 400, 300));
+        let share = card_window(&w, 8).rect[2];
         assert!(
             share <= hocus_link::SHARE / 2 && share > hocus_link::SHARE / 3,
             "{share}"

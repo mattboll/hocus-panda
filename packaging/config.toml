@@ -538,12 +538,17 @@
 # the edge nearest the pointer following: "super", "alt" or "none" (the
 # frame only).
 # resize-modifier = "super"
-# A moved window's edges stick to other windows' (8 px apart) and to the
+# A moved window's edges stick to other windows' (gap apart) and to the
 # screen's edges within 12 px; drag on to free it.
 # magnet = true
 # Dragged against a side, a window takes that half; in a corner, a
 # quarter; at the top, the whole screen. Super+arrows snap all the same.
 # snap-by-drag = true
+# Logical pixels the windows the desktop places (halves, quarters,
+# maximised, new) keep from each other, the screen's edges and the bar,
+# and at which the magnet sticks two windows: 0 to 24. At 0 they touch;
+# a fullscreen window never has any.
+# gap = 8
 # A moved window wobbles, then settles (never with reduced motion).
 # wobble = true
 # How applications' windows (and their dialogs larger than 200 x 200 px)

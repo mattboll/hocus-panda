@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use hocus_geometry::{ALL, GAP, Pull, Rect, TEAR_OFF, Zone, pull, torn_off, unpulled};
+use hocus_geometry::{ALL, Pull, Rect, TEAR_OFF, Zone, pull, torn_off, unpulled};
 
 /// The screen, logical pixels.
 pub const SCREEN: (i32, i32) = (640, 230);
@@ -28,9 +28,9 @@ pub const WOBBLE: Duration = Duration::from_millis(400);
 /// The most the top of the window lags, logical pixels.
 const SHEAR_MOST: f64 = 14.0;
 
-/// The work area of the screen: the gap all round.
-pub fn area() -> Rect {
-    Rect::new(0, 0, SCREEN.0, SCREEN.1).inset(GAP)
+/// The work area of the screen: `gap` all round (`[windows] gap`).
+pub fn area(gap: i32) -> Rect {
+    Rect::new(0, 0, SCREEN.0, SCREEN.1).inset(gap)
 }
 
 /// What the page's settings make of a move.
@@ -40,6 +40,8 @@ pub struct Rules {
     pub snap: bool,
     pub wobble: bool,
     pub reduced: bool,
+    /// The gap the page's setting says, logical pixels.
+    pub gap: i32,
 }
 
 /// What happened, as the line under the screen says it.
@@ -72,6 +74,8 @@ struct Drag {
     held: Option<(f64, f64, i32)>,
     pull: Pull,
     zone: Option<Zone>,
+    /// The gap the drag keeps.
+    gap: i32,
     /// The last pointer and its time, for the wobble's speed.
     last: (f64, f64, Duration),
 }
@@ -131,6 +135,7 @@ impl Trial {
             held,
             pull: Pull::default(),
             zone: None,
+            gap: hocus_geometry::DEFAULT_GAP,
             last: (at.0, at.1, now),
         });
         true
@@ -167,14 +172,15 @@ impl Trial {
         let x = drag.initial.0 + dx.round() as i32;
         let y = drag.initial.1 + dy.round() as i32;
         let free = Rect::new(x, y, self.notes.width, self.notes.height);
-        let area = area();
+        drag.gap = rules.gap;
+        let area = area(rules.gap);
         drag.zone = if rules.snap {
             Zone::at(area, at.0, at.1)
         } else {
             None
         };
         drag.pull = if rules.magnet && drag.zone.is_none() {
-            pull(free, ALL, &[TERMINAL], area)
+            pull(free, ALL, &[TERMINAL], area, rules.gap)
         } else {
             Pull::default()
         };
@@ -195,22 +201,22 @@ impl Trial {
         drag.last = (at.0, at.1, now);
         self.said = match drag.zone {
             Some(zone) => Said::Over(zone),
-            None => self.stuck(drag.pull),
+            None => self.stuck(drag.pull, rules.gap),
         };
         self.drag = Some(drag);
     }
 
-    /// What holds it, the magnet's pull `pull` given.
-    fn stuck(&self, pull: Pull) -> Said {
+    /// What holds it, the magnet's pull `pull` given, at `gap`.
+    fn stuck(&self, pull: Pull, gap: i32) -> Said {
         if pull.x.is_none() && pull.y.is_none() {
             return Said::Placed;
         }
         let n = self.notes;
         let t = TERMINAL;
-        let beside = n.x == t.right() + GAP
-            || n.right() == t.x - GAP
-            || n.y == t.bottom() + GAP
-            || n.bottom() == t.y - GAP
+        let beside = n.x == t.right() + gap
+            || n.right() == t.x - gap
+            || n.y == t.bottom() + gap
+            || n.bottom() == t.y - gap
             || n.x == t.x
             || n.y == t.y
             || n.right() == t.right()
@@ -231,7 +237,7 @@ impl Trial {
             return;
         };
         let size = (self.notes.width, self.notes.height);
-        let target = zone.rect(area());
+        let target = zone.rect(area(rules.gap), rules.gap);
         if !rules.reduced {
             self.settle = Some((self.notes, now));
         }
@@ -242,7 +248,8 @@ impl Trial {
 
     /// The zone shown under the pointer while dragging.
     pub fn preview(&self) -> Option<Rect> {
-        self.drag.and_then(|d| d.zone).map(|z| z.rect(area()))
+        self.drag
+            .and_then(|d| Some(d.zone?.rect(area(d.gap), d.gap)))
     }
 
     /// The zone it is snapped to.
@@ -305,11 +312,14 @@ impl Trial {
 mod tests {
     use super::*;
 
+    const GAP: i32 = hocus_geometry::DEFAULT_GAP;
+
     const RULES: Rules = Rules {
         magnet: true,
         snap: true,
         wobble: true,
         reduced: false,
+        gap: GAP,
     };
 
     fn ms(n: u64) -> Duration {
@@ -367,10 +377,10 @@ mod tests {
         trial.press((x, y), false, ms(0));
         trial.motion((3.0, 120.0), RULES, ms(16));
         assert_eq!(trial.said, Said::Over(Zone::Left));
-        assert_eq!(trial.preview(), Some(Zone::Left.rect(area())));
+        assert_eq!(trial.preview(), Some(Zone::Left.rect(area(GAP), GAP)));
         trial.release(RULES, ms(32));
         assert_eq!(trial.snapped(), Some(Zone::Left));
-        assert_eq!(trial.notes, Zone::Left.rect(area()));
+        assert_eq!(trial.notes, Zone::Left.rect(area(GAP), GAP));
         assert!(trial.moving(ms(100)), "it springs into place");
         assert!(!trial.moving(ms(700)));
         // Dragged away: its size back, under the pointer.

@@ -23,7 +23,7 @@ use common::{
 };
 use hocus_compositor::{
     Headless,
-    model::{GAP, Mode, Rect, Zone},
+    model::{DEFAULT_GAP as GAP, Mode, Rect, Zone},
 };
 
 fn id_of(hp: &Headless, app_id: &str) -> Option<hocus_compositor::model::WindowId> {
@@ -75,17 +75,17 @@ fn a_drag_snaps_on_the_screen_under_the_pointer_and_stays_there() -> anyhow::Res
     wait(&mut hp, Duration::from_millis(120))?;
     hp.button(BTN_LEFT, false);
     hp.key(KEY_LEFTALT, false);
-    wait_for_rect(&mut hp, "test.drag", Zone::TopLeft.rect(area))?;
+    wait_for_rect(&mut hp, "test.drag", Zone::TopLeft.rect(area, GAP))?;
     let id = id_of(&hp, "test.drag").expect("mapped");
     assert_eq!(hp.mode(id), Mode::Snapped(Zone::TopLeft));
     // Its screen's work area changes: it follows, on that screen.
     let area = bar_on_second(&mut hp, area)?;
-    wait_for_rect(&mut hp, "test.drag", Zone::TopLeft.rect(area))?;
+    wait_for_rect(&mut hp, "test.drag", Zone::TopLeft.rect(area, GAP))?;
     // Fullscreen over its screen, and back in its quarter there.
     window.commands.send(Command::Fullscreen(true))?;
     wait_for_rect(&mut hp, "test.drag", Rect::new(1920, 0, 2560, 1440))?;
     window.commands.send(Command::Fullscreen(false))?;
-    wait_for_rect(&mut hp, "test.drag", Zone::TopLeft.rect(area))?;
+    wait_for_rect(&mut hp, "test.drag", Zone::TopLeft.rect(area, GAP))?;
     assert_eq!(hp.mode(id), Mode::Snapped(Zone::TopLeft));
     Ok(())
 }
@@ -97,18 +97,18 @@ fn the_keys_snap_on_the_windows_screen_and_a_pair_stays_there() -> anyhow::Resul
     hp.pointer_move(1920.0 + 1280.0, 720.0);
     open(&mut hp, "test.left", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area))?;
+    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area, GAP))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_UP]);
-    wait_for_rect(&mut hp, "test.left", Zone::TopLeft.rect(area))?;
+    wait_for_rect(&mut hp, "test.left", Zone::TopLeft.rect(area, GAP))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_UP]);
     wait_for_rect(&mut hp, "test.left", area)?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area))?;
+    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area, GAP))?;
     open(&mut hp, "test.right", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_RIGHT]);
-    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area))?;
+    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area, GAP))?;
     // The pair's handle, in the middle of the seam: both resize, and stay.
-    let left = Zone::Left.rect(area);
+    let left = Zone::Left.rect(area, GAP);
     let (x, y) = (
         f64::from(left.right() + GAP / 2),
         f64::from(left.y) + f64::from(left.height) / 2.0,
@@ -119,7 +119,7 @@ fn the_keys_snap_on_the_windows_screen_and_a_pair_stays_there() -> anyhow::Resul
     hp.button(BTN_LEFT, false);
     let narrower = Rect::new(left.x, left.y, left.width - 200, left.height);
     wait_for_rect(&mut hp, "test.left", narrower)?;
-    let right = Zone::Right.rect(area);
+    let right = Zone::Right.rect(area, GAP);
     let wider = Rect::new(
         narrower.right() + GAP,
         right.y,
@@ -133,8 +133,8 @@ fn the_keys_snap_on_the_windows_screen_and_a_pair_stays_there() -> anyhow::Resul
     }
     // A re-layout of that screen puts them back in their halves there.
     let area = bar_on_second(&mut hp, area)?;
-    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area))?;
-    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area))?;
+    wait_for_rect(&mut hp, "test.left", Zone::Left.rect(area, GAP))?;
+    wait_for_rect(&mut hp, "test.right", Zone::Right.rect(area, GAP))?;
     Ok(())
 }
 

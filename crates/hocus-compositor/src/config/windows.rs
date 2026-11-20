@@ -78,6 +78,11 @@ pub struct Windows {
     pub magnet: bool,
     /// Dragged against an edge of the work area, it snaps there.
     pub snap_by_drag: bool,
+    /// Logical pixels the windows the desktop places keep from each other,
+    /// the screen's edges and the bar, and the magnet's distance between
+    /// two windows (#895): 0 to 24.
+    #[serde(deserialize_with = "window_gap")]
+    pub gap: i32,
     /// A moved window wobbles (never with reduced motion).
     pub wobble: bool,
     /// How applications' windows open and close (#432).
@@ -166,11 +171,26 @@ impl Default for Windows {
             resize_modifier: DragKey::Super,
             magnet: true,
             snap_by_drag: true,
+            gap: crate::model::DEFAULT_GAP,
             wobble: true,
             animation: Animation::Standard,
             alt_tab: AltTab::All,
             rules: Vec::new(),
         }
+    }
+}
+
+/// The most `[windows] gap` takes, logical pixels.
+pub const MOST_GAP: i32 = 24;
+
+pub(super) fn window_gap<'de, D: Deserializer<'de>>(deserializer: D) -> Result<i32, D::Error> {
+    let gap = i32::deserialize(deserializer)?;
+    if (0..=MOST_GAP).contains(&gap) {
+        Ok(gap)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "a gap of {gap} px: from 0 to {MOST_GAP}"
+        )))
     }
 }
 

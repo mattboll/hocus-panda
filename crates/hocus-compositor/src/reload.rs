@@ -245,9 +245,17 @@ impl State {
         if new.windows != self.config.windows || new.ink != self.config.ink {
             let was = self.ink_on();
             let rules = new.windows.rules != self.config.windows.rules;
+            let gap = new.windows.gap != self.config.windows.gap;
             self.config.windows = new.windows.clone();
             if rules {
                 self.rules_changed();
+            }
+            // The gap (#895): the windows the desktop placed take their
+            // zone of the new work area at once.
+            if gap {
+                tracing::info!(gap = self.gap(), "the gap between windows");
+                self.rearrange();
+                self.redraw = true;
             }
             self.config.ink = new.ink.clone();
             if was && !self.ink_on() {

@@ -420,7 +420,7 @@ impl State {
     }
 
     /// Where the desktop places windows on `output`: what layer surfaces
-    /// leave of it less the bar's space when it has a bar, 8 px in.
+    /// leave of it less the bar's space when it has a bar, the gap in.
     pub fn work_area(&self, output: &Output) -> Option<Rect> {
         let zone = self.non_exclusive_zone(output)?;
         let geometry = self.space.output_geometry(output)?;
@@ -430,7 +430,15 @@ impl State {
             rect_of(geometry),
             bar,
             self.bar_side(),
+            self.gap(),
         ))
+    }
+
+    /// What the windows the desktop places keep from each other, the
+    /// screen's edges and the bar, and the magnet between two windows:
+    /// `[windows] gap` (#895).
+    pub fn gap(&self) -> i32 {
+        self.config.windows.gap
     }
 
     /// The window of `surface`, mapped or waiting for its first buffer.

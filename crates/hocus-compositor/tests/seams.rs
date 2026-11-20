@@ -13,7 +13,7 @@ use common::{
 };
 use hocus_compositor::{
     Headless,
-    model::{GAP, Mode, Rect, WindowId, Zone},
+    model::{DEFAULT_GAP as GAP, Mode, Rect, WindowId, Zone},
 };
 use smithay::input::pointer::CursorIcon;
 
@@ -160,16 +160,16 @@ fn windows_nine_pixels_apart_form_no_pair() -> anyhow::Result<()> {
 fn snapped_pair(hp: &mut Headless) -> anyhow::Result<()> {
     open(hp, "test.left", (400, 300))?;
     chord(hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(hp, "test.left", Zone::Left.rect(AREA))?;
+    wait_for_rect(hp, "test.left", Zone::Left.rect(AREA, GAP))?;
     open(hp, "test.right", (400, 300))?;
     chord(hp, &[KEY_LEFTMETA, KEY_RIGHT]);
-    wait_for_rect(hp, "test.right", Zone::Right.rect(AREA))?;
+    wait_for_rect(hp, "test.right", Zone::Right.rect(AREA, GAP))?;
     Ok(())
 }
 
 /// The middle of the gap between the left and right halves.
 fn seam_centre() -> (f64, f64) {
-    let left = Zone::Left.rect(AREA);
+    let left = Zone::Left.rect(AREA, GAP);
     (
         f64::from(left.right() + GAP / 2),
         f64::from(left.y) + f64::from(left.height) / 2.0,
@@ -200,8 +200,11 @@ fn a_floating_window_over_the_seam_hides_its_handle_and_takes_the_press() -> any
     assert_eq!(hp.state().pointer.frame_cursor, None, "the client's cursor");
     drag_by(&mut hp, (x, y), 60.0);
     wait(&mut hp, Duration::from_millis(100))?;
-    assert_eq!(rect_of(&hp, "test.left"), Some(Zone::Left.rect(AREA)));
-    assert_eq!(rect_of(&hp, "test.right"), Some(Zone::Right.rect(AREA)));
+    assert_eq!(rect_of(&hp, "test.left"), Some(Zone::Left.rect(AREA, GAP)));
+    assert_eq!(
+        rect_of(&hp, "test.right"),
+        Some(Zone::Right.rect(AREA, GAP))
+    );
     assert_eq!(rect_of(&hp, "test.over"), Some(over));
     Ok(())
 }
@@ -218,7 +221,7 @@ fn a_window_behind_the_pair_leaves_its_handle() -> anyhow::Result<()> {
     assert!(hp.state().snap.seam_handle.is_some(), "the handle shows");
     assert_eq!(hp.state().pointer.frame_cursor, Some(CursorIcon::EwResize));
     drag_by(&mut hp, (x, y), 100.0);
-    let left = Zone::Left.rect(AREA);
+    let left = Zone::Left.rect(AREA, GAP);
     wait_for_rect(
         &mut hp,
         "test.left",

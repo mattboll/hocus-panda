@@ -841,16 +841,18 @@ mod tests {
         assert_eq!(none.windows.resize_modifier, DragKey::Super);
         assert!(none.windows.magnet && none.windows.snap_by_drag && none.windows.wobble);
         assert_eq!(none.windows.alt_tab, AltTab::All);
+        assert_eq!(none.windows.gap, 8);
         assert!(none.ink.enabled);
         let set: Config = toml::from_str(
             "[windows]\nmove-modifier = \"super\"\nresize-modifier = \"none\"\n\
              magnet = false\nsnap-by-drag = false\nwobble = false\nalt-tab = \"desktop\"\n\
-             [ink]\nenabled = false\n",
+             gap = 0\n[ink]\nenabled = false\n",
         )?;
         assert_eq!(set.windows.move_modifier, DragKey::Super);
         assert_eq!(set.windows.resize_modifier, DragKey::None);
         assert!(!set.windows.magnet && !set.windows.snap_by_drag && !set.windows.wobble);
         assert_eq!(set.windows.alt_tab, AltTab::Desktop);
+        assert_eq!(set.windows.gap, 0);
         assert!(!set.ink.enabled);
         // The overview's corner (#727): on unless said.
         assert!(none.overview.hot_corner);
@@ -861,6 +863,8 @@ mod tests {
             "move-modifier = \"ctrl\"",
             "alt-tab = \"some\"",
             "focus = \"hover\"",
+            "gap = 26",
+            "gap = -2",
         ] {
             let text = format!("[windows]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");

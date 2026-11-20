@@ -1717,7 +1717,9 @@ row.
 | | Leurs noms | a chip per desktop (its number, its name or "Bureau N" faint, a ✕ but with one left; its tooltip "Travail · 3 fenêtres" when the compositor says them), then "+ Ajouter un bureau" (gone at 9) | `[desktops] names` |
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
-| | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
+| | Bords aimantés, Ancrer en glissant contre un bord | switches | `[windows] magnet`, `snap-by-drag` |
+| | Espace entre les fenêtres (#895), "Et avec les bords de l'écran et la barre" | slider 0 to 24 by 2, "8 px" | `[windows] gap` |
+| | Fenêtres ondulantes | switch | `[windows] wobble` |
 | | Ouvrir et fermer (#432, #740) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the thawing pane) | `[windows] animation = "standard" \| "rain" \| "frost"` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
 | VUE D'ENSEMBLE | Coins de l’écran | what each corner does, a link to the shortcuts (#893) | `[shortcuts]`' `corner:` tokens |
@@ -1766,7 +1768,8 @@ row.
   ondule pendant le geste et se pose en 400 ms.", "Mouvements réduits :
   elle se déplace d'un bloc…"). Notes moves by its title bar, or by its
   content while the key is held (the button, or the real key when the
-  host lets it through). It follows the page's switches live, with the
+  host lets it through). It follows the page's switches and its gap
+  (the 8 px said is the slider's) live, with the
   compositor's own code: the crate `hocus-geometry` holds the rectangles,
   the snap zones (the compositor's 24 px edges and 48 px corners, the
   zone taken in a 200 ms spring, its size given back when dragged 12 px

@@ -20,10 +20,14 @@ open on), agents' badges on windows (slice 3).
 ## 2. Units and the work area
 
 - All sizes are logical pixels and follow the output's scale.
-- The **work area** is the output minus the bar's reserved width and an
-  8 px gap on every side. Windows placed by the desktop (snapped,
-  maximised, new) keep 8 px from the work area's edges and from each
-  other.
+- The **work area** is the output minus the bar's reserved width and a
+  gap on every side: `[windows] gap`, 8 px by default, 0 to 24 by 2 in
+  Settings › Desktops and windows (#895). Windows placed by the desktop
+  (halves, quarters, maximised, new, by a rule) keep the gap from the
+  screen's edges, the bar and each other; at 0 they touch them (their
+  1 px rim still tells two apart). A fullscreen window never has one.
+  The gap changed, the windows snapped or maximised are placed again at
+  once; floating ones stay where they are.
 - Windows go **over the bar**: the bar sits under normal windows, and a
   window the user moves or resizes onto it covers it and takes the
   pointer there (bar.md §2, #519). Its popovers, its halo, the bubbles
@@ -258,9 +262,10 @@ While a window moves, each of its edges **sticks** to a nearby edge when
 it comes within **12 px** of it:
 
 - an edge of another window shown on the same screen and desktop (not
-  minimised, not maximised or fullscreen), at the **8 px gap** snapped
-  windows keep: a window's left edge sticks 8 px right of the other's
-  right edge, its top 8 px below the other's bottom, and so on;
+  minimised, not maximised or fullscreen), at the **gap** snapped
+  windows keep (8 px by default, §2): a window's left edge sticks the gap
+  right of the other's right edge, its top the gap below the other's
+  bottom, and so on;
 - an edge of another such window on the same side, in line with it: left
   to left, top to top;
 - an edge of the work area, flush with it, as snapped windows are.
@@ -422,7 +427,7 @@ Keyboard:
 
 ## 10. Maximise, fullscreen, minimise, close
 
-- **Maximise** fills the work area (8 px gaps, bar's space kept). Animated
+- **Maximise** fills the work area (the gap kept, bar's space kept). Animated
   like a snap.
 - **Fullscreen** (the application asks, or `F11` in it) covers the whole
   output, the bar's space included. When the bar has something to say

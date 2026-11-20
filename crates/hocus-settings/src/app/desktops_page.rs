@@ -681,6 +681,7 @@ impl App {
                 model::RESIZE_KEY,
                 model::MAGNET,
                 model::SNAP,
+                model::GAP,
                 model::WOBBLE,
             ]
             .into_iter()
