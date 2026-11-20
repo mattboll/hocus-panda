@@ -345,13 +345,13 @@ fn with_boost_the_keys_stop_once_at_100_and_off_brings_it_back() -> anyhow::Resu
     press(&mut hp);
     volume(&mut hp, 1.10)?;
     // On the gauge, 150 % its whole length: 110 % past the notch at two
-    // thirds (68 px of 102), in amber.
-    until(&mut hp, (FULL.x + 37 + 72, SOUND_Y), amber)?;
+    // thirds (62 px of 93, #900; 110 % reaches 68), in amber.
+    until(&mut hp, (FULL.x + 37 + 65, SOUND_Y), amber)?;
     // Boost off: back to 100 %.
     config.sound.boost = false;
     hp.reconfigure(config);
     volume(&mut hp, 1.0)?;
-    until(&mut hp, (FULL.x + 37 + 98, SOUND_Y), blue)?;
+    until(&mut hp, (FULL.x + 37 + 89, SOUND_Y), blue)?;
     Ok(())
 }
 
