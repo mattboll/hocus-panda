@@ -199,10 +199,13 @@ impl State {
             keymap,
         } = reread;
         let mut followed = Vec::new();
+        // Taken whole even when it binds the same: which lines the file
+        // writes says which defaults an older switch may take away.
+        let corners_were = self.config.shortcuts.triggers.clone();
         if new.shortcuts != self.config.shortcuts {
-            self.config.shortcuts = new.shortcuts.clone();
             followed.push("[shortcuts]");
         }
+        self.config.shortcuts = new.shortcuts.clone();
         if new.keyboard != self.config.keyboard || keymap.is_some() {
             self.keyboard_changed(new.keyboard.clone(), keymap);
             followed.push("[keyboard]");
@@ -252,13 +255,14 @@ impl State {
             }
             followed.push("[windows] [ink]");
         }
-        // The overview's hot corner (#727): read as the pointer enters one.
+        // The screen corners (#727, #893): read as the pointer enters one;
+        // a dwell under way stops if they changed.
         if new.overview != self.config.overview {
             self.config.overview = new.overview.clone();
-            if !self.config.overview.hot_corner {
-                self.hot_corner_off();
-            }
             followed.push("[overview]");
+            self.hot_corner_off();
+        } else if corners_were != self.config.shortcuts.triggers {
+            self.hot_corner_off();
         }
         // The weather's place (#814): the shell fetches its forecast.
         if new.weather != self.config.weather {

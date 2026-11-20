@@ -194,6 +194,45 @@ fn three_finger_swipe_off_leaves_the_desktop_and_reaches_the_client() -> anyhow:
     Ok(())
 }
 
+/// A swipe bound to an action that does not follow the fingers (#893):
+/// it runs once, as they lift, when they went far enough its way; short
+/// of that, or cancelled, nothing; the application never has it.
+#[test]
+fn a_swipe_bound_to_another_action_runs_it_as_the_fingers_lift() -> anyhow::Result<()> {
+    use hocus_compositor::LockState;
+    let config: Config = toml::from_str("[shortcuts]\nlock = [\"Super+L\", \"swipe:3:up\"]\n")?;
+    let mut hp = bare(config)?;
+    // A third of the launcher's travel is far enough: 60 is not.
+    hp.swipe(3, &[(0.0, -30.0); 2], 40);
+    wait(&mut hp, Duration::from_millis(100))?;
+    assert_eq!(hp.lock_state(), LockState::Unlocked, "short, it ran");
+    // Far enough but cancelled.
+    hp.swipe_begin(3);
+    for _ in 0..5 {
+        hp.swipe_move(0.0, -30.0, EVERY);
+    }
+    hp.swipe_end(EVERY, true);
+    wait(&mut hp, Duration::from_millis(100))?;
+    assert_eq!(hp.lock_state(), LockState::Unlocked, "cancelled, it ran");
+    // Far enough: nothing while the fingers are down, the lock as they
+    // lift.
+    hp.swipe_begin(3);
+    for _ in 0..5 {
+        hp.swipe_move(0.0, -30.0, EVERY);
+    }
+    wait(&mut hp, Duration::from_millis(100))?;
+    assert_eq!(
+        hp.lock_state(),
+        LockState::Unlocked,
+        "it ran before the lift"
+    );
+    hp.swipe_end(EVERY, false);
+    let locked = hp.dispatch_until(WAIT, |hp| hp.lock_state() != LockState::Unlocked)?;
+    anyhow::ensure!(locked, "the swipe never locked");
+    assert_eq!(hp.swipes_given(), (0, 0), "the application had it");
+    Ok(())
+}
+
 #[test]
 fn four_fingers_up_opens_the_launcher_past_a_third() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start("")? else {

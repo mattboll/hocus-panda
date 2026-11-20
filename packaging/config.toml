@@ -54,10 +54,11 @@
 # scroll = "two-fingers"
 # Off while an external mouse is plugged in.
 # off-with-mouse = false
-# Three fingers sideways change desktop, following them.
+# The touchpad's gestures are set in [shortcuts]. Older files turned the
+# default ones off here: false takes three fingers left and right away
+# from the desktops, and four fingers up and down from the launcher and
+# the overview, unless [shortcuts] writes those actions' lines.
 # swipe-desktops = true
-# Four fingers up open the launcher, down close it; down with no launcher
-# open show the overview, or close it.
 # swipe-launcher = true
 
 # [panel]
@@ -182,6 +183,17 @@
 # action's off. In a window of another session, Super is Alt+Super, and
 # the other session sees Alt+F4 first.
 #
+# Beside its keys, an action takes a screen corner and touchpad swipes:
+# "corner:top-left", "top-right", "bottom-left", "bottom-right" (the
+# pointer held there 150 ms, once each time it enters; not the bar's own
+# corner, nor one another screen touches, nor over a fullscreen window or
+# with a button held) and "swipe:3:left", "swipe:4:up"... (three or four
+# fingers left, right, up or down). Switching desktops, the launcher and
+# the overview follow the fingers; any other action runs as they lift,
+# when they went far enough. A swipe no action takes goes to the
+# application. Each corner and each swipe runs one action: the first one
+# that names it.
+#
 # Opens a terminal.
 # terminal = "Super+Return"
 # Logs out: the session menu asks to confirm (10 s, cancellable), then
@@ -215,8 +227,10 @@
 # switch-windows = "Alt+Tab"
 # switch-windows-backward = "Alt+Shift+Tab"
 # The desktop on the left or the right, of the screen under the pointer.
-# desktop-left = "Super+Ctrl+Left"
-# desktop-right = "Super+Ctrl+Right"
+# Three fingers sideways bring the desktop on the other side, following
+# them.
+# desktop-left = ["Super+Ctrl+Left", "swipe:3:right"]
+# desktop-right = ["Super+Ctrl+Right", "swipe:3:left"]
 # A desktop by its number (the keys of the top row, on any layout).
 # desktop-1 = "Super+1"
 # desktop-2 = "Super+2"
@@ -266,14 +280,16 @@
 # focus-bar = "Super+B"
 # The launcher, full screen on the screen under the pointer; again, it
 # closes (docs/design/launcher.md).
-# launcher = "Super+Space"
+# Four fingers up bring it, following them; down with it open close it.
+# launcher = ["Super+Space", "swipe:4:up"]
 # The actions palette: every action of the desktop in a list dropping from
 # the top of the focused window's screen, searchable; Enter runs one on
 # that window, or its screen. Again, it closes (docs/design/actions.md).
 # actions = "Super+P"
 # The overview: every screen's desktops and windows at once; again, it
 # closes (docs/design/windows.md §12b).
-# overview = "Super+W"
+# The top-left corner and four fingers down open it too.
+# overview = ["Super+W", "corner:top-left", "swipe:4:down"]
 # The clipboard's history, from the bar of the focused window's screen, its
 # search holding the keyboard; again, it closes (docs/design/bar.md, 5.6).
 # clipboard = "Super+V"
@@ -545,10 +561,9 @@
 #   above = false
 
 # [overview]
-# The pointer held a moment (150 ms) in a screen's top-left corner opens
-# the overview, or closes it, as Super+W does; once each time it enters.
-# Not where the bar stands (on the left), nor where another screen touches
-# the corner, nor over a fullscreen window or while a button is held.
+# The screen corners are set in [shortcuts]. Older files turned the
+# top-left one off here: false takes it away from the overview, unless the
+# overview's line is written in [shortcuts].
 # hot-corner = true
 
 # [ink]
