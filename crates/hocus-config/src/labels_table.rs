@@ -488,6 +488,11 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("5m", hocus_words::settings::power::N_5_MIN), ("15m", hocus_words::settings::power::N_15_MIN), ("30m", hocus_words::settings::power::N_30_MIN), ("1h", hocus_words::settings::power::N_1_H), ("2h", hocus_words::settings::power::N_2_H), ("never", hocus_words::settings::agents::NEVER)]),
     },
     Label {
+        key: "power.charge-limit",
+        name: hocus_words::settings::power::LIMIT_CHARGING_TO_80,
+        said: Said::Switch,
+    },
+    Label {
         key: "power.lid",
         name: hocus_words::settings::app_screens_view::LID_CLOSED,
         said: Said::Choices(&[("suspend", hocus_words::settings::power::SUSPEND), ("lock", hocus_words::settings::power::LOCK), ("screen-off", hocus_words::settings::power::TURN_THE_SCREEN_OFF), ("nothing", hocus_words::settings::power::DO_NOTHING)]),

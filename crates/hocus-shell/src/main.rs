@@ -1024,6 +1024,10 @@ impl Shell {
                 popover::session::set_can(can);
                 Task::none()
             }
+            ToShell::ChargeLimit(limit) => {
+                levels::publish(|levels| levels.charge_limit = limit);
+                Task::none()
+            }
             ToShell::Leave(shown) => {
                 popover::session::set_shown(Some(shown));
                 Task::none()
@@ -2022,6 +2026,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The session menu (7.4): its popover alone.
                         ToShell::LeaveCan(can) => {
                             popover::session::set_can(can);
+                            continue;
+                        }
+                        // The battery's charge limit (#896): its gauge's
+                        // mark and its popover's line, as a level's change.
+                        ToShell::ChargeLimit(limit) => {
+                            levels::publish(|levels| levels.charge_limit = limit);
                             continue;
                         }
                         ToShell::Leave(shown) => {

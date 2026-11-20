@@ -543,6 +543,8 @@ impl State {
                     let _ = to.send(crate::clipboard::clipboard_count_line(items, pinned));
                 }
                 let _ = to.send(self.recording_line());
+                // The battery's charge limit's lift (6.10, #896).
+                let _ = to.send(self.charge_line());
                 // The agents' tools (6.16).
                 let _ = to.send(self.agents_settings_opened());
                 // Each screen's wallpaper now (#894).
@@ -573,6 +575,16 @@ impl State {
             if !self.wallpaper_next((!screen.is_empty()).then_some(screen)) {
                 let refused = serde_json::json!({ "refused": "the wallpaper is no folder's" });
                 self.displays_send(Some(session), &refused.to_string());
+            }
+            return;
+        }
+        // "Charger à 100 % une fois" (6.10, #896): the limit lifted until
+        // the next unplug; the Settings told by `charge` lines.
+        if line.trim() == "charge-full-once" {
+            if let Err(why) = self.charge_lift() {
+                tracing::info!(session, why, "the charge limit is not lifted");
+                let refused = serde_json::json!({ "refused": why }).to_string();
+                self.displays_send(Some(session), &refused);
             }
             return;
         }

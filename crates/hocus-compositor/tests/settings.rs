@@ -295,7 +295,7 @@ impl Bed {
     fn power(&mut self) -> anyhow::Result<Value> {
         self.click("nav:power")?;
         let shown = self.shows(|s| {
-            s["page"] == "power" && s["rows"].as_array().is_some_and(|r| r.len() == 10)
+            s["page"] == "power" && s["rows"].as_array().is_some_and(|r| r.len() == 11)
         })?;
         self.places_with("control:power.suspend-after")?;
         Ok(shown)

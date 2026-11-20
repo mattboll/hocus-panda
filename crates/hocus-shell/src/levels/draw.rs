@@ -787,14 +787,16 @@ impl Drawn<'_> {
         let levels = self.levels;
         let middles = full_rows(levels, self.bottom);
         let band = levels.battery.map_or(Band::Ok, |b| b.band());
-        let row = |f: &mut Frame, middle: f32, icon: Icon, gauge: f32, fill: Fill, value: Value| {
-            icon.draw(f, Point::new(self.left, middle - ICON / 2.0), alpha);
+        let track_at = |middle: f32| {
             let x = self.left + ICON + ICON_GAP;
-            let track = Rectangle::new(
+            Rectangle::new(
                 Point::new(x, middle - GAUGE / 2.0),
                 Size::new(self.right - self.value_box - ICON_GAP - x, GAUGE),
-            );
-            bar(f, track, gauge, fill, Direction::Right, alpha);
+            )
+        };
+        let row = |f: &mut Frame, middle: f32, icon: Icon, gauge: f32, fill: Fill, value: Value| {
+            icon.draw(f, Point::new(self.left, middle - ICON / 2.0), alpha);
+            bar(f, track_at(middle), gauge, fill, Direction::Right, alpha);
             value.draw(f, Point::new(self.right, middle), self.zero, alpha);
         };
         if let (Some(battery), Some(middle)) = (levels.battery, middles[0]) {
@@ -818,6 +820,9 @@ impl Drawn<'_> {
                 Fill::Gradient(fill),
                 value,
             );
+            if let Some(limit) = levels.charge_limit {
+                limit_mark(f, track_at(middle), limit, alpha);
+            }
         }
         if let (Some(brightness), Some(middle)) = (levels.brightness, middles[1]) {
             let value = Value::Number(brightness.round() as u32, DIM.get());
@@ -906,6 +911,20 @@ impl Drawn<'_> {
         }
     }
 }
+
+/// The charge limit's mark on the battery's gauge (#896): a 2 px line
+/// across the track at `limit` percent, `text` at 70 %.
+fn limit_mark(f: &mut Frame, track: Rectangle, limit: u8, alpha: f32) {
+    let x = track.x + track.width * f32::from(limit.min(100)) / 100.0;
+    f.fill_rectangle(
+        Point::new(x - LIMIT_MARK / 2.0, track.y),
+        Size::new(LIMIT_MARK, track.height),
+        faded(TEXT.get(), 0.7 * alpha),
+    );
+}
+
+/// The charge limit's mark's width.
+const LIMIT_MARK: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy)]
 enum Fill {

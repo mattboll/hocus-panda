@@ -475,7 +475,9 @@
 # button's short press: "ask" (the session menu), "suspend", "power-off"
 # or "nothing" (both only when logind leaves them to the desktop). The
 # automatic power saver, at or under this battery level (5 to 50 %), on
-# battery, through power-profiles-daemon.
+# battery, through power-profiles-daemon. The battery's charge stopping
+# at 80 %, in the battery's own threshold (charge_control_end_threshold,
+# written by the package's helper: packaging/README.md); off, 100 %.
 # lock-on-idle = true
 # lock-before-sleep = true
 # lid = "suspend"
@@ -483,6 +485,7 @@
 # power-button = "ask"
 # auto-saver = true
 # auto-saver-below = 20
+# charge-limit = false
 
 # [power.battery]
 # On battery: the dim after this long without input; the screens off this

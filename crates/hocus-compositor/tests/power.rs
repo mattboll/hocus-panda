@@ -100,6 +100,17 @@ fn start(
     form: FormChoice,
     power: impl FnOnce(&mut Power),
 ) -> anyhow::Result<Bed> {
+    start_with(shell, outputs, form, power, |_| {})
+}
+
+/// [`start`], the compositor's configuration as `configure` says.
+fn start_with(
+    shell: &Path,
+    outputs: &[&str],
+    form: FormChoice,
+    power: impl FnOnce(&mut Power),
+    configure: impl FnOnce(&mut Config),
+) -> anyhow::Result<Bed> {
     let fakes = Fakes::start_with_power(power)?;
     let log = fakes.dir.path().join("shell.log");
     // Each key's window and route (#677), said when the bar draws again.
@@ -110,6 +121,7 @@ fn start(
     let script = fakes.shell_with(shell, "fr_FR.UTF-8", &env, Some(&log))?;
     let mut config = Config::default();
     config.panel.form = form;
+    configure(&mut config);
     let hp = Headless::start_with_shell(
         HeadlessConfig {
             outputs: outputs
@@ -361,6 +373,11 @@ fn warm((r, _, b): (u8, u8, u8)) -> bool {
 
 fn white((r, g, b): (u8, u8, u8)) -> bool {
     r.min(g).min(b) > 200
+}
+
+/// The charge limit's mark: `text` at 70 %, over the gauge.
+fn light_grey((r, g, b): (u8, u8, u8)) -> bool {
+    r.min(g).min(b) > 150 && r.max(g).max(b) - r.min(g).min(b) < 40
 }
 
 #[test]
@@ -1017,6 +1034,95 @@ fn nothing_draws_at_rest_and_a_change_draws_only_what_shows_it() -> anyhow::Resu
         }
     }
     anyhow::bail!("the clock ticked through every try")
+}
+
+/// The battery's charge limit (#896): held at 80 % on AC, the gauge
+/// marked at 80 % and the popover saying "Branché, limité à 80 %"; the
+/// limit off, the mark gone. Its screenshot to `$HOCUS_SHOTS` when it
+/// names a folder.
+#[test]
+fn the_charge_limit_marks_the_gauge_and_says_so_in_the_popover() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    // The battery's threshold at 80 already: the compositor has nothing to
+    // write, and its helper is never run.
+    let machine = tempfile::tempdir()?;
+    let battery = machine.path().join("BAT0");
+    std::fs::create_dir_all(&battery)?;
+    std::fs::write(battery.join("type"), "Battery\n")?;
+    std::fs::write(battery.join("charge_control_end_threshold"), "80\n")?;
+    let charge = hocus_compositor::away::charge::Helper {
+        program: machine.path().join("no-helper"),
+        pkexec: false,
+        supplies: machine.path().to_path_buf(),
+    };
+    let mut bed = start_with(
+        &shell,
+        &["1920x1080"],
+        FormChoice::Full,
+        |p| {
+            p.on_battery = false;
+            p.state = 5;
+            p.percentage = 80.0;
+        },
+        |config| {
+            config.power.charge_limit = true;
+            config.charge = Some(charge.clone());
+        },
+    )?;
+    bed.logged("charge_limit: Some(80)")?;
+    // The mark: a light line across the gauge, at 80 % of its length.
+    let gauge = (LEVELS.x + 40, BATTERY_ROW.1 as i32 - 4);
+    bed.until_count(gauge, (110, 8), light_grey, (10, 40))?;
+    bed.click_row(BATTERY_ROW)?;
+    bed.opened()?;
+    // Debug escapes the non-breaking space.
+    bed.logged("line=Some(\"Branché, limité à 80\\u{a0}%\")")?;
+    if let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) {
+        bed.hp.pointer_move(600.0, 500.0);
+        common::at_rest(&mut bed.hp)?;
+        shot(&mut bed, &out.join("charge-gauge.png"))?;
+    }
+    // Off: no mark, the firmware's words again.
+    let mut config = Config::default();
+    config.panel.form = FormChoice::Full;
+    config.charge = Some(charge);
+    bed.hp.reconfigure(config);
+    bed.logged("charge_limit: None")?;
+    bed.logged("line=Some(\"Branché, ne charge pas\")")?;
+    // (A pixel or two of the fill's rounded end may come close.)
+    bed.until_count(gauge, (110, 8), light_grey, (0, 2))?;
+    Ok(())
+}
+
+/// The levels and the popover above them, from the screen, to `file`.
+fn shot(bed: &mut Bed, file: &Path) -> anyhow::Result<()> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let (w, h, px) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = px
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(u32::try_from(w)?, u32::try_from(h)?, rgba)
+        .ok_or_else(|| anyhow::anyhow!("no image"))?;
+    let top = bed.popovers().first().map_or(LEVELS.y, |r| r.y) - 16;
+    let left = bed.popovers().first().map_or(LEVELS.x, |r| r.x) - 16;
+    let crop = image::imageops::crop_imm(
+        &image,
+        u32::try_from(left)?,
+        u32::try_from(top)?,
+        u32::try_from(1920 - left)?,
+        u32::try_from(1080 - top)?,
+    )
+    .to_image();
+    crop.save(file)?;
+    eprintln!("{}", file.display());
+    Ok(())
 }
 
 /// Both popovers in their main state (the brightness's with the

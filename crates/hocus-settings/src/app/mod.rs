@@ -1021,8 +1021,13 @@ impl App {
 
     fn heard(&mut self, heard: Heard) -> Task<Message> {
         match heard {
-            Heard::Power { source, battery } => {
+            Heard::Power {
+                source,
+                battery,
+                charge_limit,
+            } => {
                 self.power.kernel_on_battery = source == Source::Battery;
+                self.power.charge_supported = charge_limit;
                 // UPower, once heard, says it better (`power_page`).
                 if self.power.now.as_ref().is_none_or(|n| !n.upower) {
                     self.source = source;

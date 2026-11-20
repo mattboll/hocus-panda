@@ -372,7 +372,7 @@ impl App {
             return iced::Task::none();
         }
         // The clipboard's history and the recording (6.17).
-        if self.captures_said(&said) {
+        if self.captures_said(&said) || self.power_said(&said) {
             return iced::Task::none();
         }
         // Each screen's wallpaper now (#894).
@@ -449,7 +449,8 @@ impl App {
             | Said::AgentTools(_)
             | Said::Clipboard { .. }
             | Said::Recording(_)
-            | Said::WallpaperNow(_) => iced::Task::none(),
+            | Said::WallpaperNow(_)
+            | Said::Charge { .. } => iced::Task::none(),
         }
     }
 

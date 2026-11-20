@@ -382,6 +382,11 @@ pub enum Said {
     /// Each screen's wallpaper now, by name (#894): a folder's or day and
     /// night's picture of the moment.
     WallpaperNow(Vec<(String, String)>),
+    /// Whether the battery's charge limit is lifted until the next unplug
+    /// (6.10, #896).
+    Charge {
+        lifted: bool,
+    },
 }
 
 /// A bar's form as the compositor says it.
@@ -604,6 +609,11 @@ pub fn read_line(line: &str) -> Option<Said> {
                 .filter_map(|(name, p)| Some((name.clone(), p.as_str()?.to_owned())))
                 .collect(),
         ));
+    }
+    if let Some(charge) = value.get("charge") {
+        return Some(Said::Charge {
+            lifted: charge.get("lifted")?.as_bool()?,
+        });
     }
     if let Some(apps) = value.get("apps").and_then(|a| a.as_array()) {
         return Some(Said::Apps(

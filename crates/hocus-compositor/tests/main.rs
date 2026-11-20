@@ -56,6 +56,7 @@ mod bluetooth;
 mod calendar;
 mod camera;
 mod captures_live;
+mod charge_limit;
 mod child_signals;
 mod clipboard;
 mod contrast;

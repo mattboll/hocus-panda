@@ -19,6 +19,8 @@ workspace = true
 hocus-words.workspace = true
 # The configuration file read, edited in place and written back.
 hocus-config.workspace = true
+# Whether the battery's charge can be limited (#896).
+hocus-charge.workspace = true
 # The mice and touchpads, followed on the desktop's control socket (6.12).
 hocus-agents.workspace = true
 hocus-link.workspace = true

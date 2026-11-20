@@ -118,9 +118,11 @@ impl Layout {
         let wrapped = |text: &str| kit::wrap(text, room, |t| kit::measure(t, NOTE, MANROPE));
         let mut end = HEADER_TOP + HEADER;
         let state = levels.battery.map_or_else(Vec::new, |b| {
-            lines(&words.battery_line(&b), STATE_ROOM, |t| {
-                kit::measure(t, STATE, MANROPE)
-            })
+            lines(
+                &words.battery_line(&b, levels.charge_limit),
+                STATE_ROOM,
+                |t| kit::measure(t, STATE, MANROPE),
+            )
         });
         let battery = levels.battery.map(|_| {
             let top = end + GAP;
@@ -316,7 +318,9 @@ fn say(words: Words, levels: &Snapshot, layout: &Layout, ui: &mut Ui) {
          notes={:?} health={:?}",
         words.battery_title(levels.battery.is_some()),
         levels.battery.map(|b| words.plugged(b.charge.plugged())),
-        levels.battery.map(|b| words.battery_line(&b)),
+        levels
+            .battery
+            .map(|b| words.battery_line(&b, levels.charge_limit)),
         levels.profiles,
         levels.profile,
         layout
