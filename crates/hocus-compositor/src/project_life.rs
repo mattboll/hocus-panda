@@ -67,9 +67,6 @@ pub(crate) enum Reading {
     },
     /// Project `id` closing: its windows' places taken before.
     Close { id: String },
-    /// Project `id` closing: its browsers' tabs read again once their
-    /// windows are gone (§5 step 3).
-    Tabs { id: String },
 }
 
 /// A project closing.
@@ -82,14 +79,7 @@ pub(crate) struct Closing {
     /// once read.
     pub windows: Vec<(WindowId, SavedWindow)>,
     pub phase: ClosingPhase,
-    /// Its browsers' tabs were read again once their windows went (or
-    /// need not be).
-    pub tabs_again: bool,
 }
-
-/// How long after a project's browser windows closed their files are read
-/// again: the browser writes a window closed as it goes (§8.3).
-const TABS_AGAIN_AFTER: Duration = Duration::from_secs(1);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ClosingPhase {
@@ -310,16 +300,36 @@ impl State {
         self.overview_windows(&output, desktop)
             .into_iter()
             .filter(|id| !self.model.is_everywhere(*id) && self.model.parent(*id).is_none())
-            .filter_map(|id| {
-                let managed = self.windows.get(&id)?;
-                Some(Seen {
-                    id,
-                    app_id: crate::windows::app_id(&managed.window).unwrap_or_default(),
-                    pid: self.pid_of(&managed.window),
-                    title: crate::windows::title_of(self, id),
-                    size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
-                })
-            })
+            .filter_map(|id| self.seen_of(id))
+            .collect()
+    }
+
+    /// Window `id` as the thread reads it.
+    fn seen_of(&self, id: WindowId) -> Option<Seen> {
+        let managed = self.windows.get(&id)?;
+        Some(Seen {
+            id,
+            app_id: crate::windows::app_id(&managed.window).unwrap_or_default(),
+            pid: self.pid_of(&managed.window),
+            title: crate::windows::title_of(self, id),
+            size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
+        })
+    }
+
+    /// The browsers' windows not among `windows`, wherever they are: the
+    /// thread matches them too, so that a window whose title its browser's
+    /// file lacks is found by elimination (§8.3, #913).
+    fn browser_windows_besides(&self, windows: &[Seen]) -> Vec<Seen> {
+        let mut ids: Vec<WindowId> = self
+            .windows
+            .keys()
+            .copied()
+            .filter(|id| self.model.parent(*id).is_none() && !windows.iter().any(|w| w.id == *id))
+            .collect();
+        ids.sort_by_key(|id| id.0);
+        ids.into_iter()
+            .filter_map(|id| self.seen_of(id))
+            .filter(|s| crate::browsers::of_app(&s.app_id).is_some())
             .collect()
     }
 
@@ -336,10 +346,16 @@ impl State {
         self.projects.jobs += 1;
         let serial = self.projects.serial;
         let browsers = self.browser_places();
+        let others = if browsers.is_some() {
+            self.browser_windows_besides(&windows)
+        } else {
+            Vec::new()
+        };
         if worker
             .send(Job::Read {
                 serial,
                 windows,
+                others,
                 within,
                 browsers,
             })
@@ -430,7 +446,6 @@ impl State {
             output: output.name(),
             windows,
             phase: ClosingPhase::Reading,
-            tabs_again: false,
         });
         if !self.project_read_ask(at, seen, Reading::Close { id: id.clone() }) {
             // Nothing read: closed with what the loop knows.
@@ -449,90 +464,7 @@ impl State {
             Reading::Confirm { id } => self.project_confirm(&id, &found),
             Reading::Card { id, output, at } => self.project_card(&id, &output, at, &found),
             Reading::Close { id } => self.project_closing_read(&id, found),
-            Reading::Tabs { .. } => {}
         }
-    }
-
-    /// The thread read a closing project's browsers' tabs again: those it
-    /// found replace what was read before.
-    pub(crate) fn project_tabs_again(
-        &mut self,
-        serial: u64,
-        found: Vec<(WindowId, Option<crate::browsers::SavedBrowser>)>,
-    ) {
-        let Some(at) = self.projects.reading.iter().position(|(s, _)| *s == serial) else {
-            return;
-        };
-        let (_, reading) = self.projects.reading.remove(at);
-        let Reading::Tabs { id } = reading else {
-            return;
-        };
-        if let Some(closing) = self.projects.closing.iter_mut().find(|c| c.id == id) {
-            for (wid, browser) in found {
-                if let Some((_, saved)) = closing.windows.iter_mut().find(|(w, _)| *w == wid)
-                    && let Some(browser) = browser.filter(crate::browsers::SavedBrowser::read)
-                {
-                    saved.browser = Some(browser);
-                }
-            }
-        }
-        self.project_closed(&id);
-    }
-
-    /// Project `id`'s browsers' windows closed: their files are read again
-    /// a moment later (§5 step 3). Whether it was asked.
-    fn project_tabs_again_ask(&mut self, id: &str, left: &[WindowId]) -> bool {
-        let Some(browsers) = self.browser_places() else {
-            return false;
-        };
-        let Some(closing) = self.projects.closing.iter_mut().find(|c| c.id == id) else {
-            return false;
-        };
-        closing.tabs_again = true;
-        let windows: Vec<(WindowId, crate::browsers::Asked)> = closing
-            .windows
-            .iter()
-            .filter(|(w, s)| !left.contains(w) && s.browser.is_some())
-            .filter_map(|(w, s)| {
-                Some((
-                    *w,
-                    crate::browsers::Asked {
-                        browser: crate::browsers::of_app(&s.app_id)?,
-                        title: s.title.clone(),
-                        size: s.size,
-                    },
-                ))
-            })
-            .collect();
-        if windows.is_empty() || self.projects.worker.is_none() {
-            return false;
-        }
-        self.projects.serial += 1;
-        let serial = self.projects.serial;
-        self.projects
-            .reading
-            .push((serial, Reading::Tabs { id: id.to_owned() }));
-        let job = Job::Tabs {
-            serial,
-            windows,
-            browsers,
-        };
-        let mut job = Some(job);
-        let sent = self.loop_handle.insert_source(
-            Timer::from_duration(TABS_AGAIN_AFTER),
-            move |_, _, app| {
-                if let Some(job) = job.take() {
-                    app.state.projects_job(job);
-                }
-                TimeoutAction::Drop
-            },
-        );
-        if let Err(err) = sent {
-            tracing::warn!(%err.error, "a project's tabs are not read again");
-            self.projects.reading.retain(|(s, _)| *s != serial);
-            return false;
-        }
-        true
     }
 
     /// The confirmation (§5): what comes back, what closing interrupts.
@@ -789,28 +721,6 @@ impl State {
     /// Project `id` is closed: what closed is saved, what stayed is named;
     /// its desktop is plain again.
     fn project_closed(&mut self, id: &str) {
-        let Some(at) = self.projects.closing.iter().position(|c| c.id == id) else {
-            return;
-        };
-        // Its browsers' windows gone, their tabs are read again first: no
-        // more waiting for its windows meanwhile.
-        if let Some(closing) = self.projects.closing.get_mut(at)
-            && !closing.tabs_again
-        {
-            closing.tabs_again = true;
-            let left = match &mut closing.phase {
-                ClosingPhase::Waiting { left, timer } => {
-                    if let Some(timer) = timer.take() {
-                        self.loop_handle.remove(timer);
-                    }
-                    left.clone()
-                }
-                ClosingPhase::Reading => Vec::new(),
-            };
-            if self.project_tabs_again_ask(id, &left) {
-                return;
-            }
-        }
         let Some(at) = self.projects.closing.iter().position(|c| c.id == id) else {
             return;
         };
