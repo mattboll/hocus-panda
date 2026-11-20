@@ -25,6 +25,7 @@ mod outputs;
 mod panel;
 mod power;
 mod removable;
+mod sound;
 mod voice;
 mod weather;
 mod windows;
@@ -39,6 +40,7 @@ pub use outputs::*;
 pub use panel::*;
 pub use power::*;
 pub use removable::Removable;
+pub use sound::SoundSettings;
 pub use voice::Voice;
 pub use weather::*;
 pub use windows::*;
@@ -86,6 +88,9 @@ pub struct Config {
     /// The Hocuspanda microphone's voice (#619, lot 5,
     /// docs/design/voice.md).
     pub voice: Voice,
+    /// Whether the outputs may go above 100 % (#897): passed on to the
+    /// shell.
+    pub sound: SoundSettings,
     pub panel: Panel,
     /// The weather's place and units (#814): passed on to the shell.
     pub weather: Weather,

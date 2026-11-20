@@ -10,7 +10,9 @@ use iced::{
     widget::canvas::{self, Frame, Path, gradient},
 };
 
-use crate::levels::draw::{MUTED_FILL, TEXT, TRACK};
+use crate::levels::draw::{
+    BOOSTED, MUTED_FILL, NOTCH as MARK_NOTCH, NOTCH_OUT, NOTCH_WIDTH, TEXT, TRACK,
+};
 use crate::theme::Ink;
 
 const KNOB_SHADOW: Ink = Ink::Dark(Color::from_rgba8(0, 0, 0, 0.45));
@@ -29,14 +31,31 @@ pub(crate) struct Track {
 impl Track {
     /// The share of its travel at `x`, from 0 to 1.
     pub(crate) fn share_at(self, x: f32) -> f32 {
-        let travel = self.right - self.left - self.knob;
-        ((x - self.left - self.knob / 2.0) / travel).clamp(0.0, 1.0)
+        ((x - self.left - self.knob / 2.0) / self.travel()).clamp(0.0, 1.0)
+    }
+
+    /// How far its knob's centre goes, in pixels.
+    pub(crate) fn travel(self) -> f32 {
+        self.right - self.left - self.knob
+    }
+
+    /// Its knob's centre at `share`.
+    fn x_at(self, share: f32) -> f32 {
+        self.left + self.knob / 2.0 + self.travel() * share.clamp(0.0, 1.0)
     }
 }
 
 /// A slider at `share` of its travel: its track, its fill to the knob
-/// (`fill`'s gradient, else grey), its knob.
-pub(crate) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Color, Color)>) {
+/// (`fill`'s gradient, else grey), its knob. With a `mark` (the sound's
+/// 100 % with boost, #897): a notch there, and past it the gradient ends
+/// and the fill is amber.
+pub(crate) fn slider(
+    f: &mut Frame,
+    track: Track,
+    share: f32,
+    fill: Option<(Color, Color)>,
+    mark: Option<f32>,
+) {
     let Track {
         left,
         right,
@@ -61,8 +80,28 @@ pub(crate) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Colo
         Size::new(knob + size / 2.0 - left, height),
         radius.into(),
     );
+    let marked = mark.map(|m| track.x_at(m));
     match fill {
         None => f.fill(&filled, MUTED_FILL.get()),
+        // Past the mark: amber, the gradient over it to the mark.
+        Some((from, to)) if marked.is_some_and(|x| knob + size / 2.0 > x) => {
+            let x = marked.unwrap_or(left);
+            f.fill(&filled, BOOSTED);
+            let blue = Path::rounded_rectangle(
+                Point::new(left, top),
+                Size::new(x - left, height),
+                iced::border::Radius {
+                    top_left: radius,
+                    top_right: 0.0,
+                    bottom_right: 0.0,
+                    bottom_left: radius,
+                },
+            );
+            let fill = gradient::Linear::new(Point::new(left, middle), Point::new(x, middle))
+                .add_stop(0.0, from)
+                .add_stop(1.0, to);
+            f.fill(&blue, canvas::Fill::from(fill));
+        }
         Some((from, to)) => {
             let fill = gradient::Linear::new(
                 Point::new(left, middle),
@@ -72,6 +111,16 @@ pub(crate) fn slider(f: &mut Frame, track: Track, share: f32, fill: Option<(Colo
             .add_stop(1.0, to);
             f.fill(&filled, canvas::Fill::from(fill));
         }
+    }
+    if let Some(x) = marked {
+        f.fill(
+            &Path::rounded_rectangle(
+                Point::new(x - NOTCH_WIDTH / 2.0, top - NOTCH_OUT),
+                Size::new(NOTCH_WIDTH, height + 2.0 * NOTCH_OUT),
+                (NOTCH_WIDTH / 2.0).into(),
+            ),
+            MARK_NOTCH.get(),
+        );
     }
     let centre = Point::new(knob + size / 2.0, middle);
     // `box-shadow: 0 1px 4px`: rings fading out under the knob, 1 px down.

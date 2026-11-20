@@ -825,6 +825,7 @@ impl State {
         self.tell_shell(ToShell::BarWindows(self.config.panel.windows));
         self.tell_shell(ToShell::ClipboardRules(self.config.clipboard.rules()));
         self.tell_shell(ToShell::AgentPandas(self.config.agents.pandas));
+        self.tell_shell(ToShell::SoundBoost(self.config.sound.boost));
         self.tell_shell(ToShell::DesktopNames(self.config.desktops.shown_names()));
         self.tell_shell(ToShell::BarGroups(self.config.panel.groups()));
         self.tell_shell(ToShell::Weather(self.config.weather.place()));

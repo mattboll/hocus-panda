@@ -768,6 +768,11 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "sound.boost",
+        name: hocus_words::settings::sound::BOOST,
+        said: Said::Switch,
+    },
+    Label {
         key: "touchpad.disable-while-typing",
         name: hocus_words::settings::mouse::OFF_WHILE_TYPING,
         said: Said::Switch,

@@ -434,6 +434,8 @@ fn to_shell() -> Vec<ToShell> {
         }),
         ToShell::AgentPandas(true),
         ToShell::AgentPandas(false),
+        ToShell::SoundBoost(true),
+        ToShell::SoundBoost(false),
         ToShell::Launcher {
             output: "eDP-1".into(),
             scale: 240,

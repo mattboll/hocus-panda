@@ -11,11 +11,13 @@
 //!   taken together.
 //! - [`meter`]: a microphone's level, with `pw-record`.
 //! - [`tester`]: a sound on the left then on the right, with `pw-play`.
+//! - [`boost`]: the volume above 100 % (`[sound] boost`), up to 150 %.
 //!
 //! All run as programs, on threads of their own, never on a loop that
 //! draws; linking to libpipewire would need its headers to build, for the
 //! same result. No smithay, no toolkit.
 
+pub mod boost;
 pub mod dump;
 pub mod graph;
 pub mod meter;

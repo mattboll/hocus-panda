@@ -2034,6 +2034,8 @@ the_best_sound_the_headset_s = "The best sound; the headset's microphone is not 
 phone_quality_to_talk_into_the = "Phone quality, to talk into the headset's microphone."
 l = "L {balance}"
 r = "R {balance}"
+boost = "Allow more than 100 %"
+boost_line = "Up to 150 %, for a video or a call that is too quiet. The sound may crackle."
 
 [settings.time]
 time = "TIME"

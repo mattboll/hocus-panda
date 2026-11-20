@@ -719,6 +719,14 @@
 # this one.
 # effect = "quiet"
 
+# [sound]
+# The outputs' volume above 100 %, up to 150 %, for a video or a call
+# that is too quiet; the sound may crackle. The bar's slider then goes to
+# 150 %, its last third amber, and the volume keys stop once at 100 %.
+# Turned off, an output above 100 % comes back to it. The volumes
+# themselves are PipeWire's, which remembers them.
+# boost = false
+
 # [magnifier]
 # The magnifier (docs/design/accessibility.md): the screen under the
 # pointer drawn larger, from 1 to 16 times, by the desktop; screenshots,

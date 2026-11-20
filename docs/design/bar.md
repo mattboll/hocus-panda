@@ -227,7 +227,14 @@ group where it is.
   once.
 - **Keys**: the keyboard's volume up and down (5 %, up to 100 %), mute,
   brightness up and down (5 %, never below 5 %) work in the session; a
-  volume key unmutes. Their only feedback is the gauge: no popup, no sound.
+  volume key unmutes. With `[sound] boost` (#897, Settings › Son), the
+  volume goes up to 150 %: the keys stop once at 100 %, a press within
+  1 s of that stop goes beyond it, and after a longer pause they stop
+  there again. The sound's gauge (and the mini form's) then spans 0 to
+  150 %: 100 % two thirds along, marked by a notch (2 px,
+  `rgba(255,255,255,0.55)`, 3 px past the track), the fill past it amber
+  (`#F5B44A`); the value goes up to 150. Turned off, an output above
+  100 % comes back to it. Their only feedback is the gauge: no popup, no sound.
   No sound and no window for a low battery either. The gauges are read
   only here; their popovers are §9's (the sound's since 3.4a, the
   brightness's and the battery's since 3.7).
@@ -633,7 +640,11 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   CPU.
 - **The wheel** over the sound's row (or the mini form's gauge) changes
   the volume by 5 % a notch, up to 100 %, unmuting as the keys do, without
-  opening the popover.
+  opening the popover. With `[sound] boost` (#897), up to 150 %, stopping
+  once at 100 % as the keys do (§4.2). The popover's master slider then
+  goes to 150 % as the gauge does (its notch at 100 %, amber past it), and
+  dragged, its knob sticks to 100 % within 4 px; the microphone's and the
+  applications' sliders stay at 100 % at most.
 - **The sound's** (3.4a): the title "Son" / "Sound" and the default
   output's name; the master volume (a mute button, a slider, the value or
   "muet" / "muted"); "SORTIE" / "OUTPUT" and one row per output, its icon

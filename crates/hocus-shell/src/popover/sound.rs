@@ -12,6 +12,10 @@
 //! to the sound's service as they come; it sends PipeWire only the last
 //! one each time `wpctl` is ready. A slider shows the volume asked until
 //! PipeWire says it, a second at most; moving one unmutes what it sets.
+//! With boost (`[sound] boost`, #897), the master slider goes to 150 %,
+//! 100 % two thirds along: a notch there, the fill amber past it, and the
+//! knob sticking to it within a few pixels; the microphone's and the
+//! applications' stay at 100 % at most.
 //!
 //! **The applications listed**: on opening, those with a stream playing
 //! now (its node running, not corked: a paused tab's stream lingers for
@@ -72,6 +76,7 @@ use crate::{
         style::{self, clear, filled, hovered, lit, said},
     },
 };
+use hocus_sound::boost;
 
 type El<'a> = Element<'a, Msg>;
 
@@ -293,24 +298,32 @@ fn ui<T>(with: impl FnOnce(&mut Ui) -> T) -> T {
 }
 
 /// What the view is built from: the mixer, the applications listed and
-/// the others' number, the default output's sound.
+/// the others' number, the default output's sound, boost.
 struct Shown {
     mixer: Mixer,
     apps: Vec<App>,
     more: usize,
     sound: Option<Sound>,
+    boost: bool,
 }
 
 impl Shown {
     fn now() -> Self {
         let mixer = levels::sound::mixer();
         let (apps, more) = listed(&mixer);
+        let levels = levels::snapshot();
         Self {
             mixer,
             apps,
             more,
-            sound: levels::snapshot().sound,
+            sound: levels.sound,
+            boost: levels.boost,
         }
+    }
+
+    /// Whether `slider` goes above 100 %: the master's, with boost.
+    fn boosted(&self, slider: &Slider) -> bool {
+        self.boost && *slider == Slider::Master
     }
 
     /// The sound a slider sets, as PipeWire says it.
@@ -333,7 +346,7 @@ impl Shown {
             Some(((asked, volume), _)) if asked == slider => *volume,
             _ => self.said(slider).map_or(0.0, |s| s.volume),
         }
-        .clamp(0.0, 100.0)
+        .clamp(0.0, boost::most(self.boosted(slider)))
     }
 
     /// The slider a target is.
@@ -637,7 +650,9 @@ fn volume_row<'a>(row_of: VolumeRow, shown: &Shown, ui: &Ui, a11y: crate::a11y::
         .focus(focus == Some(mute), Msg::Focus(mute), BUTTON_RADIUS)
         .activate(Msg::Act(mute));
     let volume = shown.shown(ui, &which);
-    let track = slider_of(&which, volume, muted, TRACK_HEIGHT, KNOB).view(SLIDER);
+    let boosted = shown.boosted(&which);
+    let most = f64::from(boost::most(boosted));
+    let track = slider_of(&which, volume, (muted, boosted), TRACK_HEIGHT, KNOB).view(SLIDER);
     let mut track = control(track, slider.id(), Role::Slider, names.1).focus(
         focus == Some(slider),
         Msg::Focus(slider),
@@ -650,7 +665,7 @@ fn volume_row<'a>(row_of: VolumeRow, shown: &Shown, ui: &Ui, a11y: crate::a11y::
             } else {
                 a11y.percent(sound.volume)
             })
-            .range(f64::from(sound.volume), 0.0, 100.0, Some(f64::from(STEP)))
+            .range(f64::from(sound.volume), 0.0, most, Some(f64::from(STEP)))
         }),
         None => track.node(|n| n.disabled(true)),
     };
@@ -674,15 +689,25 @@ fn volume_row<'a>(row_of: VolumeRow, shown: &Shown, ui: &Ui, a11y: crate::a11y::
     parts::inset(container(line).height(MASTER).align_y(Vertical::Center))
 }
 
-/// A slider of the popover's: dragging it asks its volume.
-fn slider_of<'a>(which: &Slider, volume: f32, grey: bool, track: f32, knob: f32) -> Track<'a, Msg> {
+/// A slider of the popover's, grey or not, to 150 % with boost or to
+/// 100 %: dragging it asks its volume.
+fn slider_of<'a>(
+    which: &Slider,
+    volume: f32,
+    (grey, boosted): (bool, bool),
+    track: f32,
+    knob: f32,
+) -> Track<'a, Msg> {
     let which = which.clone();
     Track {
-        share: volume / 100.0,
+        share: boost::share_of(volume, boosted),
         fill: (!grey).then_some(SOUND),
         track,
         knob,
-        on_change: Box::new(move |share: f32| Msg::Slide(which.clone(), (share * 100.0).round())),
+        mark: boosted.then_some(boost::MARK),
+        on_change: Box::new(move |share: f32| {
+            Msg::Slide(which.clone(), boost::volume_at(share, boosted))
+        }),
         on_release: Msg::Release,
     }
 }
@@ -799,8 +824,14 @@ fn app_row<'a>(
     .activate(Msg::Act(Target::Tile(i)));
     let which = Slider::App(app.key.clone());
     let volume = shown.shown(ui, &which);
-    let track =
-        slider_of(&which, volume, muted || master_muted, APP_TRACK, APP_KNOB).view(APP_SLIDER);
+    let track = slider_of(
+        &which,
+        volume,
+        (muted || master_muted, false),
+        APP_TRACK,
+        APP_KNOB,
+    )
+    .view(APP_SLIDER);
     let target = Target::AppSlider(i);
     let mut track = control(track, target.id(), Role::Slider, app.name.clone()).focus(
         focus == Some(target),

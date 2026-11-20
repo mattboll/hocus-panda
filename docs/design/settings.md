@@ -258,7 +258,8 @@ spec in the issue's last comment. The maintainer decided on 2026-11-05:
 
 - variant A: two groups of ticked rows, the output's then the input's,
   then the applications;
-- no `[sound]` table in `config.toml`: PipeWire remembers everything;
+- no `[sound]` table in `config.toml`: PipeWire remembers everything
+  (since #897, the table holds only `boost`, below);
 - the microphone's meter listens while the input group is on screen, and
   the bar's in-use sign shows "Réglages" meanwhile;
 - the alert sound and volume above 100 % stay out until their ticket (no
@@ -282,6 +283,13 @@ leurs profils ; le volume de chaque application."):
   profile as text, "Le seul que propose cet appareil."; no row for a sink
   of no device), "Balance" ("G" … "D", −100 to +100 by tens, its fill
   from the centre; inert for a mono output) with "Tester" on its row.
+  Under it, in a card of its own (#897, approved 2026-11-20): the switch
+  "Autoriser plus de 100 %" / "Allow more than 100 %", its line "Jusqu'à
+  150 %, pour une vidéo ou un appel trop faible. Le son peut grésiller.",
+  `[sound] boost` (off by default), the next `Tab` stop after "Tester". On,
+  the bar's sound gauge and its popover's master slider go to 150 % for
+  every output (bar.md §4.2, §9); off, an output above 100 % comes back
+  to 100 %. The page's own volume sliders stay 0–100 %.
 - **ENTRÉE**: the same for the sources, "coupé" for a muted one; a
   Bluetooth headset in high quality whose microphone is not there yet is
   listed as "Micro du casque" ("… · le passe en mode appel (HFP)"): it

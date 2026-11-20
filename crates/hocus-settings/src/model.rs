@@ -974,6 +974,7 @@ pub fn settings_of(section: SectionId) -> &'static [Setting] {
         SectionId::Captures => crate::captures::settings(),
         SectionId::Camera => crate::camera::settings(),
         SectionId::Performance => crate::perf::settings(),
+        SectionId::Sound => crate::sound::settings(),
         _ => &[],
     }
 }
