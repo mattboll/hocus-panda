@@ -66,6 +66,14 @@ impl App {
         ];
         page = page.push(column![head, card_box(defaults.into())].spacing(8));
         page = page.push(self.startup_group());
+        // CLÉS ET DISQUES: what a drive plugged in does (#898).
+        if let Some(setting) = crate::model::setting(model::ON_PLUG) {
+            let head = row![label(model::DRIVES_GROUP.label.get(lang))]
+                .align_y(Alignment::Center)
+                .height(28);
+            let card = column![self.row(setting, &self.controls())];
+            page = page.push(column![head, card_box(card.into())].spacing(8));
+        }
         container(page)
             .id(format!("page:{}", SectionId::Apps.section().slug))
             .into()

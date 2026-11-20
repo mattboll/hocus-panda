@@ -25,6 +25,7 @@ mod notifications;
 mod outputs;
 mod panel;
 mod power;
+mod removable;
 mod sound;
 mod voice;
 mod weather;
@@ -40,6 +41,7 @@ pub use notifications::*;
 pub use outputs::*;
 pub use panel::*;
 pub use power::*;
+pub use removable::Removable;
 pub use sound::SoundSettings;
 pub use voice::Voice;
 pub use weather::*;
@@ -94,6 +96,8 @@ pub struct Config {
     pub panel: Panel,
     /// The weather's place and units (#814): passed on to the shell.
     pub weather: Weather,
+    /// What a drive plugged in does (#898): passed on to the shell.
+    pub removable: Removable,
     /// How each application's notifications show (#899): passed on to
     /// the shell.
     pub notifications: Notifications,

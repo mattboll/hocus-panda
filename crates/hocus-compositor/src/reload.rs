@@ -280,6 +280,14 @@ impl State {
             self.wallpaper_follow();
             followed.push("[weather]");
         }
+        // What a drive plugged in does (#898): the shell's.
+        if new.removable != self.config.removable {
+            self.config.removable = new.removable;
+            self.tell_shell(hocus_link::ToShell::Removable(
+                self.config.removable.on_plug,
+            ));
+            followed.push("[removable]");
+        }
         // Each application's notifications (#899): the shell applies them.
         if new.notifications != self.config.notifications {
             self.config.notifications = new.notifications.clone();

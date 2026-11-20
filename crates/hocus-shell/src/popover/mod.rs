@@ -1259,6 +1259,16 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
             tracing::debug!("the bar's windows ask for the overview");
             Some(Effect::Tell(ToCompositor::Overview))
         }
+        Item::Drive(serial) => {
+            tracing::debug!(serial, "the bar opens a drive");
+            crate::removable::ask(crate::removable::Ask::Open(serial));
+            None
+        }
+        Item::Eject(serial) => {
+            tracing::debug!(serial, "the bar ejects a drive");
+            crate::removable::ask(crate::removable::Ask::Eject(serial));
+            None
+        }
         Item::Sound
         | Item::Wifi
         | Item::Bluetooth

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ActionsShown, AgentShown, AgentTool, AuthAt, BadLine, BarGroups, CaptureBar, Captured, Clip,
     ClipRules, ClockLook, CurtainShown, DeskScreen, Desktops, Form, KeyLayout, LeaveCan,
-    LeaveShown, LevelKey, LockShown, Recent, Recorded, RecordingShown, SHARE, ShareChoose,
+    LeaveShown, LevelKey, LockShown, OnPlug, Recent, Recorded, RecordingShown, SHARE, ShareChoose,
     ShareShown, Side, Titles, TranscribingShown, WeatherPlace, WindowMenu, WindowStates, locale,
     text::tidy, theme, wallpaper, wire,
 };
@@ -118,6 +118,9 @@ pub enum ToShell {
     /// The weather's place and units (`[weather]`, #814): sent as the shell
     /// connects and when the configuration changes them.
     Weather(WeatherPlace),
+    /// What a drive plugged in does (`[removable] on-plug`, #898): sent as
+    /// the shell connects and when the configuration changes it.
+    Removable(OnPlug),
     /// How each application's notifications show (`[notifications.apps]`,
     /// #899): sent as the shell connects and when the configuration
     /// changes them.

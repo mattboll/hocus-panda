@@ -324,6 +324,8 @@ fn to_shell() -> Vec<ToShell> {
         ToShell::BarSide(Side::Left),
         ToShell::BarSide(Side::Right),
         ToShell::BarGroups(BarGroups::default()),
+        ToShell::Removable(crate::OnPlug::Ask),
+        ToShell::Removable(crate::OnPlug::Nothing),
         ToShell::NotifyLevels(crate::NotifyLevels {
             apps: [("Slack".to_owned(), crate::NotifyLevel::History)].into(),
         }),

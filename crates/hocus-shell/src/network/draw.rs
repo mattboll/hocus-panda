@@ -67,6 +67,8 @@ const ICON: f32 = 18.0;
 const ICON_GAP: f32 = 8.0;
 const MINI_BUTTON: Size = Size::new(44.0, 38.0);
 const MINI_ICON: f32 = 20.0;
+/// A drive's ⏏ lit, ringed (#898).
+const EJECT_RADIUS: f32 = 6.0;
 /// The sign-in page's dot, and its ring of the bar's colour.
 const DOT: f32 = 7.0;
 const DOT_COLOUR: Ink = Ink::Dark(crate::levels::draw::rgb(0xF2945B));
@@ -74,10 +76,12 @@ const DOT_RING: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.9));
 
 /// The connections shown in the full form, from the top: the Wi-Fi's
 /// while NetworkManager is there, Bluetooth's while BlueZ has an adapter,
-/// the keyboard layout's with two layouts or more.
+/// one a removable drive mounted (#898), the keyboard layout's with two
+/// layouts or more.
 pub fn shown(
     network: &Network,
     bluetooth: &bluetooth::Bluetooth,
+    drives: &[crate::removable::Drive],
     layouts: &crate::layouts::Layouts,
 ) -> Vec<Item> {
     let mut items = Vec::new();
@@ -87,6 +91,7 @@ pub fn shown(
     if bluetooth.row() != Row::Hidden {
         items.push(Item::Bluetooth);
     }
+    items.extend(drives.iter().map(|d| Item::Drive(d.serial)));
     if layouts.shown().is_some() {
         items.push(Item::Keyboard);
     }
@@ -94,12 +99,12 @@ pub fn shown(
 }
 
 /// Those of `shown` this surface draws in `form`: in the mini form the
-/// layout's button is the levels'.
+/// layout's button is the levels', and the drives show none (#898).
 fn shown_in(shown: &[Item], form: Form) -> impl DoubleEndedIterator<Item = Item> + '_ {
     shown
         .iter()
         .copied()
-        .filter(move |item| form == Form::Full || *item != Item::Keyboard)
+        .filter(move |item| form == Form::Full || !matches!(item, Item::Keyboard | Item::Drive(_)))
 }
 
 // --- Where the surface goes ----------------------------------------------------
@@ -181,6 +186,7 @@ fn rows_now() -> (usize, usize) {
     let shown = shown(
         &super::snapshot(),
         &bluetooth::snapshot(),
+        &crate::removable::mounted(),
         &crate::layouts::snapshot(),
     );
     (
@@ -374,6 +380,8 @@ pub struct State {
     made_for: String,
     bluetooth: RowState,
     keyboard: crate::layouts::draw::RowState,
+    /// The drives' rows, in their order.
+    drives: Vec<crate::removable::draw::RowState>,
     /// The rows shown in the full form, from the top.
     shown: Vec<Item>,
     pointer: Option<Point>,
@@ -394,7 +402,14 @@ impl<Message> canvas::Program<Message> for Connections {
         match event {
             iced::Event::Window(window::Event::RedrawRequested(_)) => {
                 let layouts = crate::layouts::snapshot();
-                self.refresh(state, &super::snapshot(), &bluetooth::snapshot(), &layouts);
+                let drives = crate::removable::mounted();
+                self.refresh(
+                    state,
+                    &super::snapshot(),
+                    &bluetooth::snapshot(),
+                    &drives,
+                    &layouts,
+                );
                 None
             }
             iced::Event::Mouse(event) => self.mouse(state, event, bounds, cursor),
@@ -461,6 +476,12 @@ impl<Message> canvas::Program<Message> for Connections {
                 } else {
                     None
                 };
+                // The ⏏ is a button of its own in its row.
+                let radius = if matches!(item, Item::Eject(_)) {
+                    EJECT_RADIUS
+                } else {
+                    radius
+                };
                 if let Some(colour) = lit {
                     f.fill(
                         &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
@@ -500,6 +521,11 @@ impl<Message> canvas::Program<Message> for Connections {
                         }
                         (Item::Keyboard, Form::Full) => {
                             crate::layouts::draw::full(f, rect, &state.keyboard, alpha);
+                        }
+                        (Item::Drive(serial), Form::Full) => {
+                            if let Some(row) = state.drives.iter().find(|d| d.serial == serial) {
+                                crate::removable::draw::full(f, rect, row, alpha);
+                            }
                         }
                         // The clock's, never on this surface.
                         (Item::Calendar, _) => {}
@@ -544,7 +570,9 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::WindowMenu(_)
                             | Item::NotifyLevels
                             | Item::Journal
-                            | Item::Weather(_),
+                            | Item::Weather(_)
+                            | Item::Drive(_)
+                            | Item::Eject(_),
                             _,
                         ) => {}
                     }
@@ -606,7 +634,8 @@ impl Connections {
         }
     }
 
-    /// The items shown and where they are, unless the bar is switching.
+    /// The items shown and where they are, unless the bar is switching:
+    /// a drive's row, then its ⏏ inside it.
     fn items(&self, state: &State, size: Size) -> Vec<(Item, Rectangle)> {
         let [(form, _)] = self.forms.as_slice() else {
             return Vec::new();
@@ -615,6 +644,16 @@ impl Connections {
             .rev()
             .enumerate()
             .map(|(slot, item)| (item, self.rect(*form, size, slot)))
+            .flat_map(|(item, rect)| {
+                let eject = match item {
+                    Item::Drive(serial) => Some((
+                        Item::Eject(serial),
+                        crate::removable::draw::eject_rect(rect),
+                    )),
+                    _ => None,
+                };
+                std::iter::once((item, rect)).chain(eject)
+            })
             .collect()
     }
 
@@ -634,6 +673,7 @@ impl Connections {
         state: &mut State,
         network: &Network,
         bt: &bluetooth::Bluetooth,
+        drives: &[crate::removable::Drive],
         layouts: &crate::layouts::Layouts,
     ) {
         let link = network.link();
@@ -656,7 +696,11 @@ impl Connections {
         let row = FULL_SURFACE.0 as f32 - 2.0 * SIDE + 2.0 * ITEM_OUT;
         state.bluetooth.refresh(self.words, bt, row);
         state.keyboard.refresh(layouts, row);
-        state.shown = shown(network, bt, layouts);
+        state.drives.resize_with(drives.len(), Default::default);
+        for (kept, drive) in state.drives.iter_mut().zip(drives) {
+            kept.refresh(self.words.lang, drive, row);
+        }
+        state.shown = shown(network, bt, drives, layouts);
         let form = self.forms.last().map_or(Form::Full, |(form, _)| *form);
         if state
             .hover
@@ -678,7 +722,14 @@ impl Connections {
         let items = self.items(state, size);
         let at = pointer(event, bounds, cursor, state.pointer);
         state.pointer = at;
-        let over = at.and_then(|at| items.iter().find(|(_, r)| r.contains(at)).copied());
+        // The innermost: a drive's ⏏ over its row.
+        let over = at.and_then(|at| {
+            items
+                .iter()
+                .filter(|(_, r)| r.contains(at))
+                .min_by(|a, b| (a.1.width * a.1.height).total_cmp(&(b.1.width * b.1.height)))
+                .copied()
+        });
         let rect =
             |item: Rectangle| Rectangle::new(self.in_bar(item.position(), size), item.size());
         match event {
@@ -949,10 +1000,34 @@ pub fn node(
     layout: Option<&str>,
 ) -> Option<hocus_a11y::Node> {
     use hocus_a11y::{Act, Node, Role};
+    let drive = |serial: u32| {
+        crate::removable::mounted()
+            .into_iter()
+            .find(|d| d.serial == serial)
+    };
+    let lang = words.lang;
     let name = match item {
         Item::Wifi => words.wifi(link?),
         Item::Bluetooth => words.bluetooth(bluetooth?),
         Item::Keyboard => words.layout(layout?),
+        Item::Drive(serial) => {
+            let drive = drive(serial)?;
+            let name = crate::removable::said_name(&drive, lang);
+            match drive.free {
+                Some(free) => format!(
+                    "{name}, {}",
+                    hocus_words::shell::removable::free(
+                        lang,
+                        crate::removable::row_free(lang, free)
+                    )
+                ),
+                None => name,
+            }
+        }
+        Item::Eject(serial) => hocus_words::shell::removable::eject_it(
+            lang,
+            crate::removable::said_name(&drive(serial)?, lang),
+        ),
         _ => return None,
     };
     Some(Node::new(crate::ui::items::key(item), Role::Button, name).act(Act::Click))
@@ -1003,6 +1078,39 @@ mod tests {
             placement(Form::Mini, false, tops, (3, 2)),
             ((54, 48 + 40), 92.0)
         );
+    }
+
+    #[test]
+    fn a_mounted_drives_row_comes_after_bluetooths_in_the_full_form_only() {
+        let drive = |serial| crate::removable::Drive {
+            serial,
+            name: "KINGSTON".to_owned(),
+            kind: crate::removable::Kind::Stick,
+            size: 32_000_000_000,
+            free: Some(14_200_000_000),
+            mount: Some("/media/alex/KINGSTON".into()),
+            encrypted: false,
+        };
+        let bt = bluetooth::Bluetooth {
+            adapter: true,
+            ..bluetooth::Bluetooth::default()
+        };
+        let all = shown(
+            &Network::default(),
+            &bt,
+            &[drive(2), drive(5)],
+            &crate::layouts::Layouts::default(),
+        );
+        assert_eq!(all, [Item::Bluetooth, Item::Drive(2), Item::Drive(5)]);
+        assert_eq!(shown_in(&all, Form::Full).count(), 3);
+        assert_eq!(
+            shown_in(&all, Form::Mini).collect::<Vec<_>>(),
+            [Item::Bluetooth]
+        );
+        // Each row is one more: the desktops and the column above move up
+        // by it (#599's room).
+        let tops = (133.0, 83.1);
+        assert_eq!(placement(Form::Full, false, tops, (3, 1)).0, (194, 40 + 64));
     }
 
     #[test]

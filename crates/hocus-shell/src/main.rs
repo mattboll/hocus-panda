@@ -73,6 +73,7 @@ mod pointer;
 mod popover;
 mod project;
 mod reminder;
+mod removable;
 mod renderer;
 mod setup;
 mod share;
@@ -173,6 +174,7 @@ fn main() -> ExitCode {
     levels::start();
     network::start();
     bluetooth::start();
+    removable::start();
     launcher::start();
     emoji::start();
     actions::start();
@@ -834,6 +836,10 @@ impl Shell {
             }
             ToShell::Weather(place) => {
                 weather::set_place(place);
+                Task::none()
+            }
+            ToShell::Removable(on_plug) => {
+                removable::set_on_plug(on_plug);
                 Task::none()
             }
             ToShell::NotifyLevels(levels) => {
@@ -1689,6 +1695,13 @@ fn levels_alone() -> impl iced::futures::Stream<Item = Message> {
             }
             !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
         });
+        let mut out = output.clone();
+        removable::on_change(move |change| {
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
+        });
         drop(output);
         std::future::pending::<()>().await;
     })
@@ -1789,6 +1802,19 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
         let waker = sender.clone();
         bluetooth::on_change(move |change| {
             popover::changed(popover::Item::Bluetooth);
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            if !change.row {
+                return true;
+            }
+            let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
+            waker.unbounded_send(wake.line()).is_ok()
+        });
+        // A drive mounted or unmounted comes or goes as a row; its free
+        // space changing draws that surface alone.
+        let waker = sender.clone();
+        removable::on_change(move |change| {
             if change.shown {
                 network::draw::rows_changed();
             }
@@ -1913,6 +1939,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // forecast; Today draws when it comes.
                         ToShell::Weather(place) => {
                             weather::set_place(place);
+                            continue;
+                        }
+                        // What a drive plugged in does (#898): nothing
+                        // draws.
+                        ToShell::Removable(on_plug) => {
+                            removable::set_on_plug(on_plug);
                             continue;
                         }
                         // Each application's level, do not disturb from

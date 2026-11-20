@@ -38,7 +38,7 @@ use hocus_xdg::{
 
 use crate::{
     lang::{Lang, Words},
-    model::{Codec, Kind, Outside, RowGroup, SectionId, Setting, one},
+    model::{Choice, Codec, Kind, Outside, RowGroup, SectionId, Setting, Value, one},
 };
 
 /// The rows' ids: the terminal is the file's key, the others live outside
@@ -51,6 +51,9 @@ pub const IMAGES: &str = "applications.images";
 pub const STARTUP: &str = "applications.startup";
 /// The last session's applications reopened at log in (windows.md §14).
 pub const RESTORE: &str = "session.restore";
+/// What a drive plugged in does (#898).
+pub const ON_PLUG: &str = "removable.on-plug";
+const ON_PLUG_WORDS: &[&str] = &["ask", "open", "nothing"];
 /// The start-up row just added, lit as a search result.
 pub const ADDED: &str = "applications.startup.added";
 
@@ -60,6 +63,10 @@ pub const DEFAULTS_GROUP: RowGroup = RowGroup {
 };
 pub const STARTUP_GROUP: RowGroup = RowGroup {
     label: words::AT_SESSION_START,
+    per_source: false,
+};
+pub const DRIVES_GROUP: RowGroup = RowGroup {
+    label: words::DRIVES_GROUP,
     per_source: false,
 };
 
@@ -260,6 +267,45 @@ pub fn settings() -> &'static [Setting] {
                 ),
                 kind: Kind::Switch,
                 places: one(&["session", "restore"], Codec::Bool),
+                needs: None,
+            },
+            Setting {
+                id: ON_PLUG,
+                section: SectionId::Apps,
+                group: DRIVES_GROUP,
+                name: words::WHEN_A_STICK_OR_A_DISK_IS_PLUGGED,
+                line: None,
+                keywords: (
+                    &[
+                        "clé usb", "disque", "carte sd", "branché", "monter", "ouvrir", "éjecter",
+                        "amovible",
+                    ],
+                    &[
+                        "usb stick",
+                        "disk",
+                        "sd card",
+                        "plugged",
+                        "mount",
+                        "open",
+                        "eject",
+                        "removable",
+                    ],
+                ),
+                kind: Kind::Menu(vec![
+                    Choice {
+                        label: words::OFFER_TO_OPEN_IT,
+                        value: Value::Word("ask"),
+                    },
+                    Choice {
+                        label: words::OPEN_IT_AT_ONCE,
+                        value: Value::Word("open"),
+                    },
+                    Choice {
+                        label: hocus_words::settings::power::DO_NOTHING,
+                        value: Value::Word("nothing"),
+                    },
+                ]),
+                places: one(&["removable", "on-plug"], Codec::Word(ON_PLUG_WORDS)),
                 needs: None,
             },
         ]

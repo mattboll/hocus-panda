@@ -313,6 +313,20 @@ impl WeatherPlace {
     }
 }
 
+/// What the desktop does when a USB stick, an external disk or an SD card
+/// is plugged in (`[removable] on-plug`, #898, bar.md "Removable drives").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OnPlug {
+    /// A bubble offers to open it, or to eject it.
+    #[default]
+    Ask,
+    /// It is mounted and opened in the file manager at once.
+    Open,
+    /// Nothing: the bar's row shows once something mounts it.
+    Nothing,
+}
+
 /// How the clock looks (`[panel.clock]`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClockLook {

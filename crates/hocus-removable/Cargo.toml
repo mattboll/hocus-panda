@@ -1,0 +1,22 @@
+[package]
+name = "hocus-removable"
+description = "The Hocuspanda removable drives: UDisks2 followed and asked on the system bus, for the bar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# UDisks2 on the system bus (MIT), on a thread of its own.
+zbus = { workspace = true, features = ["tokio", "proxy"] }
+# The thread's own runtime, its channels and its timeouts.
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+# The signals' streams.
+futures-util.workspace = true
+tracing.workspace = true
+# A mounted drive's free space (statvfs).
+rustix = { workspace = true, features = ["fs"] }
