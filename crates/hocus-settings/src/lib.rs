@@ -41,6 +41,8 @@
 //!   its section.
 //! - [`app`]: the window, drawn with iced as the shell is.
 
+// The view's `json!` of what the page shows grew past the default 128.
+#![recursion_limit = "256"]
 // What is left of #778 here: 87 indexed places, most on the pages'
 // fixed lists. A panic ends the Settings' window alone; the lint is on
 // everywhere else.
