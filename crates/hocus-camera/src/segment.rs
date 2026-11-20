@@ -220,19 +220,14 @@ mod tests {
             let t = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
             Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
         };
-        let mut times: Vec<Duration> = (0..9)
+        let times: Vec<Duration> = (0..9)
             .map(|_| {
                 let start = cpu();
                 let _ = segmenter.run(&frame, 1280, 720, [0, 1, 2], &mut mask);
                 cpu() - start
             })
             .collect();
-        times.sort();
-        let median = times[times.len() / 2];
-        assert!(
-            median < Duration::from_millis(16),
-            "{median:?} a frame: {times:?}"
-        );
+        crate::track::within_budget("the person's mask", times, Duration::from_millis(16));
         Ok(())
     }
 
