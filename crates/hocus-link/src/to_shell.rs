@@ -144,6 +144,11 @@ pub enum ToShell {
     /// state's colour (`[agents] pandas`, 6.16): sent as the shell connects and
     /// when the configuration changes it.
     AgentPandas(bool),
+    /// Whether the outputs' volume may go above 100 %, up to 150 % (`[sound]
+    /// boost`, #897): sent as the shell connects and when the configuration
+    /// changes it; turned off, the shell brings the outputs above 100 % back
+    /// to it.
+    SoundBoost(bool),
     /// The screen of the focused window, else the pointer's: where the
     /// notifications' bubbles show (5.3). Sent as the shell connects and when
     /// it changes.

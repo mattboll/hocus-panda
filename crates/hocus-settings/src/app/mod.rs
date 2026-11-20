@@ -1788,7 +1788,7 @@ impl App {
             return Vec::new();
         };
         if section == SectionId::Sound {
-            return self.sound_stops().into_iter().map(Control::Sound).collect();
+            return self.sound_controls();
         }
         if section == SectionId::Bluetooth {
             return self

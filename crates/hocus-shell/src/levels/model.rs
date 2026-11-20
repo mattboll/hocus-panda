@@ -22,6 +22,9 @@ pub struct Snapshot {
     pub degraded: Option<Degraded>,
     /// The keyboard's backlight, from UPower.
     pub keyboard: Option<Keyboard>,
+    /// The outputs may go above 100 %, up to 150 % (`[sound] boost`, #897):
+    /// the sound's gauge and slider go that far.
+    pub boost: bool,
 }
 
 /// The keyboard's backlight: its level, from 0 (off) to `max`.

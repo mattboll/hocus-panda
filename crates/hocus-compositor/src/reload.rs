@@ -12,11 +12,11 @@
 //! and the screens' wallpapers (6.3), `[panel]`, `[panel.clock]` and the
 //! screens' bar forms (6.4), `[desktops]`, `[windows]` and `[ink]` (6.14),
 //! `[magnifier]` (#424), `[accessibility]` (#734), `[developer]` (#783),
-//! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[meetings]`, `[agents]`
-//! (6.16), and the idle chain's and power's keys (6.10). A keyboard whose
-//! layouts or options changed has its keymap compiled on the thread too
-//! (XKB reads its files), the loop only taking it in; its repeat is given
-//! to clients again.
+//! `[capture]`, `[recording]` and `[clipboard]` (6.17), `[meetings]`,
+//! `[agents]` (6.16), `[sound]` (#897), and the idle chain's and power's
+//! keys (6.10). A keyboard whose layouts or options changed has its keymap
+//! compiled on the thread too (XKB reads its files), the loop only taking
+//! it in; its repeat is given to clients again.
 
 use std::{
     ffi::OsString,
@@ -301,6 +301,12 @@ impl State {
         // The developer mode (#783): off, a program given is let go of.
         if self.developer_changed(&new.developer) {
             followed.push("[developer]");
+        }
+        // The volume above 100 % (#897): the shell's sound follows it.
+        if new.sound != self.config.sound {
+            self.config.sound = new.sound;
+            self.tell_shell(hocus_link::ToShell::SoundBoost(new.sound.boost));
+            followed.push("[sound]");
         }
         // The windows in the bar (#604): the shell shows or hides them.
         if new.panel.windows != self.config.panel.windows {

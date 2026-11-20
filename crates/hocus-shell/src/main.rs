@@ -873,6 +873,10 @@ impl Shell {
                 agents::set_pandas(pandas);
                 Task::none()
             }
+            ToShell::SoundBoost(on) => {
+                levels::set_boost(on);
+                Task::none()
+            }
             ToShell::Focus(screen) => {
                 notifications::focus(screen);
                 Task::none()
@@ -1932,6 +1936,12 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // alone draws.
                         ToShell::AgentPandas(pandas) => {
                             agents::set_pandas(pandas);
+                            continue;
+                        }
+                        // The volume above 100 % (#897): the levels and
+                        // an open sound popover draw.
+                        ToShell::SoundBoost(on) => {
+                            levels::set_boost(on);
                             continue;
                         }
                         // The bubbles' screen: their stack alone.

@@ -1,23 +1,56 @@
 //! The Son page's model (6.5, settings.md "Son"): what the search finds on
-//! it, and how its rows read PipeWire's graph. Nothing of it is in the
-//! file: the default sink and source, each device's volume, mute, balance
-//! and profile, and each application's volume and output live in
+//! it, and how its rows read PipeWire's graph. Almost nothing of it is in
+//! the file: the default sink and source, each device's volume, mute,
+//! balance and profile, and each application's volume and output live in
 //! PipeWire, which WirePlumber remembers per device and per application.
-//! The window's side is `app::sound`.
+//! Only whether the outputs may go above 100 % is the file's (`[sound]
+//! boost`, #897). The window's side is `app::sound`.
 
 use hocus_sound::{Card, Kind, Mixer, Sink};
 use hocus_words::settings::sound as words;
+use std::sync::OnceLock;
 
 use crate::{
     lang::{Lang, Words},
-    model::{Outside, SectionId},
+    model::{self, Codec, Outside, RowGroup, SectionId, Setting},
 };
 
 const OUTPUT: Words = words::OUTPUT;
 const INPUT: Words = words::INPUT;
 const APPS: Words = words::APPLICATIONS;
 
-/// The page's settings, for the search: each lights its row.
+/// The output's group, its rows the file's.
+pub const OUTPUT_GROUP: RowGroup = RowGroup {
+    label: OUTPUT,
+    per_source: false,
+};
+
+/// Up to 150 % (#897).
+pub const BOOST: &str = "sound.boost";
+
+/// The page's settings in the file, drawn under the output's card.
+pub fn settings() -> &'static [Setting] {
+    static SETTINGS: OnceLock<Vec<Setting>> = OnceLock::new();
+    SETTINGS.get_or_init(|| {
+        vec![Setting {
+            id: BOOST,
+            section: SectionId::Sound,
+            group: OUTPUT_GROUP,
+            name: words::BOOST,
+            line: Some(words::BOOST_LINE),
+            keywords: (
+                &["volume", "fort", "amplifier", "150", "trop faible"],
+                &["volume", "loud", "louder", "amplify", "boost", "150"],
+            ),
+            kind: model::Kind::Switch,
+            places: model::one(&["sound", "boost"], Codec::Bool),
+            needs: None,
+        }]
+    })
+}
+
+/// The page's settings outside the file, for the search: each lights its
+/// row.
 pub fn outside() -> &'static [Outside] {
     const fn o(
         id: &'static str,

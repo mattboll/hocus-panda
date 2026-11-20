@@ -15,7 +15,8 @@
 //! records only while the input group shows, and the bar's in-use sign
 //! then lists the Settings; the sound popover's "Réglages du son…" opens
 //! the Settings on Son, or brings them forward there; at rest, the window
-//! commits nothing.
+//! commits nothing; the switch for the volume above 100 % (#897) writes
+//! `[sound] boost`.
 
 use crate::common;
 use crate::fakes;
@@ -206,6 +207,26 @@ impl Bed {
         })?;
         self.places_with(&format!("out:{SPEAKERS}"))?;
         Ok(shown)
+    }
+
+    /// The configuration file the window writes.
+    fn file(&self) -> PathBuf {
+        self._dir.path().join("config/hocuspanda/config.toml")
+    }
+
+    /// The compositor told the file now says `[sound] boost = on`.
+    fn boost(&mut self, on: bool) {
+        let mut config = Config {
+            plain_background: true,
+            lang: hocus_words::Lang::French,
+            pipewire_remote: Some(self.fakes.pw_socket()),
+            file: Some(self.file()),
+            ..Config::default()
+        };
+        config.keyboard.layouts = vec!["us".to_owned()];
+        config.panel.form = FormChoice::Full;
+        config.sound.boost = on;
+        self.hp.reconfigure(config);
     }
 
     /// What the window logged besides what it shows and where.
@@ -746,6 +767,103 @@ fn at_rest_the_page_commits_nothing() -> anyhow::Result<()> {
     anyhow::ensure!(still >= 10, "the window never came to rest");
     wait(&mut bed.hp, Duration::from_secs(3))?;
     assert_eq!(bed.hp.window_commits(), last, "the window drew at rest");
+    Ok(())
+}
+
+#[test]
+fn the_boost_switch_writes_its_key() -> anyhow::Result<()> {
+    if !ready(false) {
+        return Ok(());
+    }
+    let mut bed = Bed::start(false)?;
+    let shown = bed.open()?;
+    let row = |shown: &Value| {
+        shown["rows"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|r| r["id"] == "sound.boost"))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(row(&shown)["value"], "non", "{shown}");
+    bed.scroll_to_show("control:sound.boost")?;
+    bed.click("control:sound.boost")?;
+    let file = bed.file();
+    let written = bed.hp.dispatch_until(WAIT, |_| {
+        std::fs::read_to_string(&file).is_ok_and(|t| t.contains("[sound]\nboost = true"))
+    })?;
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    assert!(written, "{text}\nthe window said:\n{}", bed.said());
+    // The user's own lines kept.
+    assert!(text.contains("# Mine.\n"), "{text}");
+    bed.shows(|s| row(s)["value"] == "oui")?;
+    Ok(())
+}
+
+/// The volume above 100 %'s pictures, at ×2 (#897): the bar's gauge and
+/// the popover at 120 %, the Settings' switch. `HOCUS_SHOTS=DIR`.
+#[test]
+#[ignore = "pictures for the pull request: HOCUS_SHOTS=DIR"]
+fn boost_screenshots() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    if !ready(true) {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&out)?;
+    let mut bed = Bed::start_on(true, "2880x1800@2")?;
+    let shoot = |hp: &mut Headless, around: Rect, pad: i32, name: &str| -> anyhow::Result<()> {
+        let (w, h, px) = hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let x = (around.x * 2 - pad).max(0) as u32;
+        let y = (around.y * 2 - pad).max(0) as u32;
+        let cw = ((around.width * 2 + 2 * pad) as u32).min(w as u32 - x);
+        let ch = ((around.height * 2 + 2 * pad) as u32).min(h as u32 - y);
+        let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+        Ok(())
+    };
+    bed.boost(true);
+    let speakers = bed.fakes.sink(SPEAKERS)?.to_string();
+    bed.fakes.wpctl(&["set-volume", &speakers, "1.2"])?;
+    bed.pipewire("the speakers at 120 %", |f| {
+        f.volume(SPEAKERS)
+            .is_ok_and(|(v, _)| (v - 1.2).abs() < 0.01)
+    })?;
+    wait(&mut bed.hp, Duration::from_millis(800))?;
+    common::at_rest(&mut bed.hp)?;
+    let levels = bed.hp.levels_surfaces()[0].1;
+    shoot(&mut bed.hp, levels, 16, "bar-gauge-120.png")?;
+    let popover = bed.sound_popover()?;
+    shoot(&mut bed.hp, popover, 24, "popover-120.png")?;
+    // `Esc` closes it, then lets the keyboard go from the bar's item.
+    for _ in 0..2 {
+        bed.hp.key(common::KEY_ESC, true);
+        bed.hp.key(common::KEY_ESC, false);
+        wait(&mut bed.hp, Duration::from_millis(300))?;
+    }
+    bed.open()?;
+    bed.scroll_to_show("control:sound.boost")?;
+    bed.click("control:sound.boost")?;
+    bed.shows(|s| {
+        s["rows"].as_array().is_some_and(|r| {
+            r.iter()
+                .any(|r| r["id"] == "sound.boost" && r["value"] == "oui")
+        })
+    })?;
+    bed.hp.pointer_move(5.0, 5.0);
+    wait(&mut bed.hp, Duration::from_millis(600))?;
+    let window = bed.window()?;
+    shoot(&mut bed.hp, window, 24, "settings-boost.png")?;
     Ok(())
 }
 

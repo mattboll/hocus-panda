@@ -25,6 +25,10 @@
 //! wears a ring while it holds the keyboard; the wheel over the sound's
 //! changes the volume, over the brightness's the brightness, 5 % a notch.
 //! All of it draws this surface alone.
+//!
+//! With boost (`[sound] boost`, #897), the sound's gauge goes to 150 %:
+//! a thin notch marks 100 % two thirds along, and the fill beyond it is
+//! amber.
 
 use std::time::{Duration, Instant};
 
@@ -128,6 +132,12 @@ pub(crate) const LIGHT_GAUGE: (Color, Color) = LIGHT;
 const BATTERY: (Color, Color) = (rgb(0x3FA66B), rgb(0x7EE0A0));
 pub(crate) const LOW: (Color, Color) = (rgb(0xE8A13A), rgb(0xF5C46E));
 pub(crate) const CRITICAL: (Color, Color) = (rgb(0xE5793F), rgb(0xF7B98A));
+/// The sound's fill above 100 %, with boost (#897).
+pub(crate) const BOOSTED: Color = rgb(0xF5B44A);
+/// The notch at 100 %: 2 px, 3 px past the track on each side.
+pub(crate) const NOTCH: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.55));
+pub(crate) const NOTCH_WIDTH: f32 = 2.0;
+pub(crate) const NOTCH_OUT: f32 = 3.0;
 pub(crate) const BOLT: Ink = Ink::Dark(rgb(0x7EE0A0));
 /// The bolt's outline over a battery's fill.
 const BOLT_EDGE: Ink = Ink::Dark(rgb(0x0B1020));
@@ -182,7 +192,7 @@ impl Tween {
     /// Toward `to` from where it is at `now`; at once without motion, or
     /// when it was not shown.
     fn toward(&mut self, to: Option<f32>, now: Instant, motion: bool, shown: bool) {
-        let Some(to) = to.map(|t| t.clamp(0.0, 100.0)) else {
+        let Some(to) = to.map(|t| t.clamp(0.0, hocus_sound::boost::BOOST_MOST)) else {
             return;
         };
         if to == self.to {
@@ -742,9 +752,10 @@ pub fn node(words: crate::a11y::Words, item: Item, levels: &Snapshot) -> Option<
             } else {
                 words.percent(sound.volume)
             };
+            let most = hocus_sound::boost::most(levels.boost);
             Node::new(key, Role::Slider, words.volume())
                 .value(value)
-                .range(f64::from(sound.volume), 0.0, 100.0, Some(5.0))
+                .range(f64::from(sound.volume), 0.0, f64::from(most), Some(5.0))
                 .act(Act::Click)
                 .act(Act::Increment)
                 .act(Act::Decrement)
@@ -820,14 +831,19 @@ impl Drawn<'_> {
             });
             bottom -= STATUS * LINE;
         }
-        let row = |f: &mut Frame, middle: f32, icon: Icon, gauge: f32, fill: Fill, value: Value| {
+        let row = |f: &mut Frame,
+                   middle: f32,
+                   icon: Icon,
+                   (gauge, scale): (f32, Scale),
+                   fill: Fill,
+                   value: Value| {
             icon.draw(f, Point::new(self.left, middle - ICON / 2.0), alpha);
             let x = self.left + ICON + ICON_GAP;
             let track = Rectangle::new(
                 Point::new(x, middle - GAUGE / 2.0),
                 Size::new(self.right - VALUE_BOX - ICON_GAP - x, GAUGE),
             );
-            bar(f, track, gauge, fill, Direction::Right, alpha);
+            bar(f, track, (gauge, scale), fill, Direction::Right, alpha);
             value.draw(f, Point::new(self.right, middle), self.zero, alpha);
         };
         if let (Some(battery), Some(middle)) = (levels.battery, middles[0]) {
@@ -843,7 +859,7 @@ impl Drawn<'_> {
                 Icon::Battery {
                     bolt: battery.bolt(),
                 },
-                self.gauges[2],
+                (self.gauges[2], Scale::Plain),
                 Fill::Gradient(fill),
                 value,
             );
@@ -854,7 +870,7 @@ impl Drawn<'_> {
                 f,
                 middle,
                 Icon::Sun,
-                self.gauges[1],
+                (self.gauges[1], Scale::Plain),
                 Fill::Gradient(LIGHT),
                 value,
             );
@@ -875,7 +891,7 @@ impl Drawn<'_> {
                 f,
                 middle,
                 Icon::Speaker { muted: sound.muted },
-                self.gauges[0],
+                (self.gauges[0], Scale::of(levels.boost)),
                 fill,
                 value,
             );
@@ -931,7 +947,15 @@ impl Drawn<'_> {
                 Point::new(centre - GAUGE / 2.0, bottom - MINI_GAUGE),
                 Size::new(GAUGE, MINI_GAUGE),
             );
-            bar(f, track, self.gauges[0], fill, Direction::Up, alpha);
+            let scale = Scale::of(levels.boost);
+            bar(
+                f,
+                track,
+                (self.gauges[0], scale),
+                fill,
+                Direction::Up,
+                alpha,
+            );
         }
     }
 }
@@ -948,15 +972,123 @@ enum Direction {
     Up,
 }
 
-/// A gauge: its track, rounded, and its fill to `percent`, from the left
-/// or from the bottom.
-fn bar(f: &mut Frame, track: Rectangle, percent: f32, fill: Fill, way: Direction, alpha: f32) {
+/// A gauge's scale: to 100 %, or the sound's with boost, to 150 % (#897).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scale {
+    Plain,
+    Boost,
+}
+
+impl Scale {
+    fn of(boost: bool) -> Self {
+        if boost { Self::Boost } else { Self::Plain }
+    }
+}
+
+/// A gauge: its track, rounded, and its fill to `percent` on its `scale`,
+/// from the left or from the bottom; with boost, the notch at 100 % and
+/// the fill beyond it amber.
+fn bar(
+    f: &mut Frame,
+    track: Rectangle,
+    (percent, scale): (f32, Scale),
+    fill: Fill,
+    way: Direction,
+    alpha: f32,
+) {
     let radius = GAUGE / 2.0;
     f.fill(
         &Path::rounded_rectangle(track.position(), track.size(), radius.into()),
         faded(TRACK.get(), alpha),
     );
-    let share = (percent / 100.0).clamp(0.0, 1.0);
+    let boost = scale == Scale::Boost;
+    let share = hocus_sound::boost::share_of(percent, boost);
+    fill_to(f, track, share, fill, way, alpha, boost);
+    if boost {
+        notch(f, track, way, alpha);
+    }
+}
+
+/// The notch at 100 % across a boosted gauge's track.
+fn notch(f: &mut Frame, track: Rectangle, way: Direction, alpha: f32) {
+    let mark = hocus_sound::boost::MARK;
+    let rect = match way {
+        Direction::Right => Rectangle::new(
+            Point::new(
+                track.x + track.width * mark - NOTCH_WIDTH / 2.0,
+                track.y - NOTCH_OUT,
+            ),
+            Size::new(NOTCH_WIDTH, track.height + 2.0 * NOTCH_OUT),
+        ),
+        Direction::Up => Rectangle::new(
+            Point::new(
+                track.x - NOTCH_OUT,
+                track.y + track.height * (1.0 - mark) - NOTCH_WIDTH / 2.0,
+            ),
+            Size::new(track.width + 2.0 * NOTCH_OUT, NOTCH_WIDTH),
+        ),
+    };
+    f.fill(
+        &Path::rounded_rectangle(rect.position(), rect.size(), (NOTCH_WIDTH / 2.0).into()),
+        faded(NOTCH.get(), alpha),
+    );
+}
+
+/// A gauge's fill to `share` of its track; with `boost` and past 100 %,
+/// its gradient ends at 100 % and the rest is amber, drawn under it.
+fn fill_to(
+    f: &mut Frame,
+    track: Rectangle,
+    share: f32,
+    fill: Fill,
+    way: Direction,
+    alpha: f32,
+    boost: bool,
+) {
+    let radius = GAUGE / 2.0;
+    let mark = hocus_sound::boost::MARK;
+    if boost
+        && share > mark
+        && let Fill::Gradient(colours) = fill
+    {
+        fill_to(f, track, share, Fill::Flat(BOOSTED), way, alpha, false);
+        // The gradient to 100 %, its end square where the amber starts.
+        let path = match way {
+            Direction::Right => Path::rounded_rectangle(
+                track.position(),
+                Size::new(track.width * mark, track.height),
+                iced::border::Radius {
+                    top_left: radius,
+                    top_right: 0.0,
+                    bottom_right: 0.0,
+                    bottom_left: radius,
+                },
+            ),
+            Direction::Up => track_below(track, track.y + track.height * (1.0 - mark)),
+        };
+        let (start, end) = match way {
+            Direction::Right => {
+                let y = track.center_y();
+                (
+                    Point::new(track.x, y),
+                    Point::new(track.x + track.width * mark, y),
+                )
+            }
+            Direction::Up => {
+                let x = track.center_x();
+                let bottom = track.y + track.height;
+                (
+                    Point::new(x, bottom),
+                    Point::new(x, bottom - track.height * mark),
+                )
+            }
+        };
+        let gradient = gradient::Linear::new(start, end)
+            .add_stop(0.0, faded(colours.0, alpha))
+            .add_stop(1.0, faded(colours.1, alpha));
+        f.fill(&path, canvas::Fill::from(gradient));
+        return;
+    }
     let (rect, start, end) = match way {
         Direction::Right => {
             let w = track.width * share;
@@ -1357,12 +1489,16 @@ mod tests {
         assert!(mid > 64.5 && mid < 67.0, "{mid}");
         assert_eq!(gauge.at(t0 + ms(160)), 67.0);
         assert!(!gauge.moving(t0 + ms(160)));
-        // Without motion, at once; past 100, the gauge is full.
+        // Without motion, at once; up to 150 % (the gauge full at 100 %
+        // without boost, its scale's).
         gauge.toward(Some(120.0), t0, false, true);
-        assert_eq!(gauge.at(t0), 100.0);
+        assert_eq!(gauge.at(t0), 120.0);
+        assert_eq!(hocus_sound::boost::share_of(gauge.at(t0), false), 1.0);
+        gauge.toward(Some(180.0), t0, false, true);
+        assert_eq!(gauge.at(t0), 150.0);
         // A service gone keeps the gauge where it was.
         gauge.toward(None, t0, true, true);
-        assert_eq!(gauge.at(t0), 100.0);
+        assert_eq!(gauge.at(t0), 150.0);
     }
 
     #[test]

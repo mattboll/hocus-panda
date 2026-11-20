@@ -152,6 +152,20 @@ pub fn key(key: LevelKey) {
     }
 }
 
+/// The outputs may go above 100 % or not (`[sound] boost`, #897): the
+/// gauge and an open sound popover show it, and the sound's thread lets
+/// the volume go there (off, it brings those above it back to 100 %).
+pub fn set_boost(on: bool) {
+    let Some(service) = SERVICE.get() else {
+        return;
+    };
+    publish(|levels| levels.boost = on);
+    if service.sound.send(sound::Ask::Boost(on)).is_err() {
+        tracing::warn!("the sound's service has stopped: boost dropped");
+    }
+    crate::popover::changed(crate::popover::Item::Sound);
+}
+
 /// Asks the sound for a volume or another default sink (the popover).
 pub fn ask(ask: sound::Ask) {
     let sent = SERVICE
