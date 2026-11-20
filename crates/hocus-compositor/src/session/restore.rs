@@ -1846,12 +1846,13 @@ fn save_jobs(dir: &Path, applications: &[PathBuf], jobs: &mpsc::Receiver<Job>) {
                             browser,
                             title: w.title.clone(),
                             size: w.size,
+                            order: u64::try_from(i).unwrap_or(u64::MAX),
                         },
                     ))
                 })
                 .collect();
             let only: Vec<crate::browsers::Asked> = asked.iter().map(|(_, a)| a.clone()).collect();
-            let read = reader.read(places, &only, false);
+            let read = reader.read(places, &only, &[]);
             for ((i, _), found) in asked.iter().zip(read) {
                 if let Some(w) = windows.get_mut(*i) {
                     w.browser = found;

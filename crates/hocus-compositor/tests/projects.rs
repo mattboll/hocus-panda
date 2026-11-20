@@ -1621,6 +1621,163 @@ fn a_projects_browsers_come_back_with_their_tabs() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A Firefox profile in `home`, running, whose recovery file is `session`
+/// (its JSON).
+fn firefox_session(home: &Path, session: &str) -> anyhow::Result<()> {
+    let root = home.join(".mozilla/firefox");
+    let profile = root.join("t1.default-release");
+    std::fs::create_dir_all(profile.join("sessionstore-backups"))?;
+    std::fs::write(
+        root.join("profiles.ini"),
+        "[Profile0]\nName=default-release\nIsRelative=1\nPath=t1.default-release\nDefault=1\n",
+    )?;
+    std::os::unix::fs::symlink(
+        format!("127.0.1.1:+{}", std::process::id()),
+        profile.join("lock"),
+    )?;
+    std::fs::write(
+        profile.join("sessionstore-backups/recovery.jsonlz4"),
+        mozlz4(session.as_bytes()),
+    )?;
+    Ok(())
+}
+
+/// Starts browser stand-in `wrapper`'s window titled `title`, and runs
+/// until it shows.
+fn browser_window(
+    hp: &mut Headless,
+    wrapper: &Path,
+    title: &str,
+) -> anyhow::Result<std::process::Child> {
+    let before = hp.all_windows().len();
+    let child = std::process::Command::new("sh")
+        .arg(wrapper)
+        .env("WAYLAND_DISPLAY", hp.socket())
+        .env(TERMINAL_TITLE, title)
+        .spawn()?;
+    let shown = hp.dispatch_until(WAIT, |hp| hp.all_windows().len() > before)?;
+    anyhow::ensure!(shown, "{title} never showed");
+    Ok(child)
+}
+
+/// #913: Firefox writes its file every 15 s, so as a project closes, the
+/// window it closed is not in it yet, while an earlier copy of it (the
+/// same tab shown, one tab: a window a reopening left) is among the
+/// closed ones. The project keeps the tabs the window has open, never
+/// those of a closed copy.
+#[test]
+fn a_browser_window_keeps_its_open_tabs_never_an_earlier_closed_copys() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    firefox_session(
+        &home,
+        r#"{"version":["sessionrestore",1],"windows":[
+        {"tabs":[
+          {"entries":[{"url":"https://a.example/","title":"A"}],"index":1},
+          {"entries":[{"url":"https://board.example/","title":"chapito · board"}],"index":1},
+          {"entries":[{"url":"https://c.example/","title":"C"}],"index":1}],
+         "selected":2,"width":500,"height":400}],
+      "_closedWindows":[
+        {"tabs":[{"entries":[{"url":"https://board.example/","title":"chapito · board"}],"index":1}],
+         "selected":1,"width":500,"height":400,"closedAt":1}]}"#,
+    )?;
+    let firefox = browser_wrapper(&places, "firefox", "Firefox")?;
+    let mut hp = alone_with(Config {
+        home: Some(home),
+        ..config_with_apps(&places)
+    })?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "chapito", &places.folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let mut child = browser_window(&mut hp, &firefox, "chapito · board — Mozilla Firefox")?;
+    wait(&mut hp, Duration::from_millis(300))?;
+    hp.project_close("chapito")
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    closed(&mut hp, "chapito")?;
+    let _ = child.wait();
+    // What the closing read is kept a moment later still.
+    wait(&mut hp, Duration::from_millis(1500))?;
+    assert_eq!(
+        hp.project_tabs("chapito"),
+        [(
+            "firefox".to_owned(),
+            Some((
+                2,
+                [
+                    "https://a.example/",
+                    "https://board.example/",
+                    "https://c.example/"
+                ]
+                .map(str::to_owned)
+                .to_vec()
+            ))
+        )]
+    );
+    Ok(())
+}
+
+/// #913: Chrome writes a page's title only as it rebuilds its file (at
+/// its start), so its file, as Chrome 154 wrote it (`Session_chrome_untitled`:
+/// two windows, Alpha Beta Gamma then Delta), has none: a project's
+/// window is found by elimination among the browser's windows, the one on
+/// another desktop too, in the order they opened.
+#[test]
+fn a_chrome_window_whose_titles_its_file_lacks_keeps_its_tabs() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    let profile = home.join(".config/google-chrome/Default");
+    std::fs::create_dir_all(profile.join("Sessions"))?;
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/Session_chrome_untitled"),
+        profile.join("Sessions/Session_13439650394959575"),
+    )?;
+    std::fs::write(
+        home.join(".config/google-chrome/Local State"),
+        r#"{"profile":{"last_used":"Default"}}"#,
+    )?;
+    let chrome = browser_wrapper(&places, "google-chrome", "Google Chrome")?;
+    let mut hp = alone_with(Config {
+        home: Some(home),
+        ..config_with_apps(&places)
+    })?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "chapito", &places.folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    let mut alpha = browser_window(&mut hp, &chrome, "Alpha page - Google Chrome")?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    on(&mut hp, 1)?;
+    let mut delta = browser_window(&mut hp, &chrome, "Delta page - Google Chrome")?;
+    wait(&mut hp, Duration::from_millis(300))?;
+    hp.project_close("chapito")
+        .map_err(|why| anyhow::anyhow!("{why}"))?;
+    let done = closed(&mut hp, "chapito");
+    if done.is_err() {
+        alpha.kill()?;
+    }
+    alpha.wait()?;
+    // The window on the other desktop is not the project's: it stays.
+    delta.kill()?;
+    delta.wait()?;
+    done?;
+    assert_eq!(
+        hp.project_tabs("chapito"),
+        [(
+            "google-chrome".to_owned(),
+            Some((
+                1,
+                [
+                    "http://127.0.0.1:8737/Alpha.html",
+                    "http://127.0.0.1:8737/Beta.html",
+                    "http://127.0.0.1:8737/Gamma.html"
+                ]
+                .map(str::to_owned)
+                .to_vec()
+            ))
+        )]
+    );
+    Ok(())
+}
+
 // --- Lot D: agents' conversations ---------------------------------------------------------
 //
 // Test 7 (docs/design/projects.md §12). The agent's terminal is the

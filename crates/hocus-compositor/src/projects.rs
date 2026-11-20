@@ -147,19 +147,14 @@ pub(crate) enum Job {
     Write(String),
     /// What `windows` are (§8): their desktop entries, the terminals'
     /// folders and programs, for `serial`, in the project of folder
-    /// `within`; and, `browsers` given, the browsers' tabs (§8.3).
+    /// `within`; and, `browsers` given, the browsers' tabs (§8.3), their
+    /// `others` windows matched with them.
     Read {
         serial: u64,
         windows: Vec<Seen>,
+        others: Vec<Seen>,
         within: PathBuf,
         browsers: Option<crate::browsers::Places>,
-    },
-    /// The browsers' windows of a project closed, their tabs read again
-    /// once they are gone (§5 step 3), for `serial`.
-    Tabs {
-        serial: u64,
-        windows: Vec<(WindowId, crate::browsers::Asked)>,
-        browsers: crate::browsers::Places,
     },
     /// Project `id`'s contents' file written, or taken out (none).
     Contents { id: String, text: Option<String> },
@@ -235,18 +230,8 @@ pub(crate) struct Found {
 /// What it answers.
 #[derive(Debug)]
 pub enum Done {
-    Checked {
-        serial: u64,
-        directory: bool,
-    },
-    Read {
-        serial: u64,
-        found: Vec<Found>,
-    },
-    Tabs {
-        serial: u64,
-        found: Vec<(WindowId, Option<crate::browsers::SavedBrowser>)>,
-    },
+    Checked { serial: u64, directory: bool },
+    Read { serial: u64, found: Vec<Found> },
 }
 
 /// The projects, and what is on its way for them.
@@ -283,9 +268,6 @@ impl std::fmt::Debug for Job {
             Self::Read {
                 serial, windows, ..
             } => write!(f, "Read({serial}, {} windows)", windows.len()),
-            Self::Tabs {
-                serial, windows, ..
-            } => write!(f, "Tabs({serial}, {} windows)", windows.len()),
             Self::Folder(_) => f.write_str("Folder"),
             Self::Contents { text, .. } => {
                 write!(
@@ -378,36 +360,38 @@ fn read_contents(dir: &Path, id: &str) -> Vec<crate::session::restore::SavedWind
     }
 }
 
+/// A browser window as the reader is asked of it, if it is one.
+fn asked_of(seen: &Seen) -> Option<crate::browsers::Asked> {
+    Some(crate::browsers::Asked {
+        browser: crate::browsers::of_app(&seen.app_id)?,
+        title: seen.title.clone(),
+        size: seen.size,
+        order: seen.id.0,
+    })
+}
+
 /// Reads `windows` (§8): each one's desktop entry, a terminal's folder and
 /// program in the project of folder `within`, and, `browsers` given, a
-/// browser's tabs.
+/// browser's tabs, the browsers' `others` windows matched with them.
 fn read_windows(
     entries: &mut crate::session::restore::Entries,
     reader: &mut crate::browsers::Reader,
-    windows: &[Seen],
+    (windows, others): (&[Seen], &[Seen]),
     within: &Path,
     browsers: Option<&crate::browsers::Places>,
 ) -> Vec<Found> {
     let asked: Vec<(WindowId, crate::browsers::Asked)> = windows
         .iter()
-        .filter_map(|seen| {
-            Some((
-                seen.id,
-                crate::browsers::Asked {
-                    browser: crate::browsers::of_app(&seen.app_id)?,
-                    title: seen.title.clone(),
-                    size: seen.size,
-                },
-            ))
-        })
+        .filter_map(|seen| Some((seen.id, asked_of(seen)?)))
         .collect();
     let tabs: Vec<(WindowId, Option<crate::browsers::SavedBrowser>)> = match browsers {
         Some(places) => {
             let only: Vec<crate::browsers::Asked> = asked.iter().map(|(_, a)| a.clone()).collect();
+            let others: Vec<crate::browsers::Asked> = others.iter().filter_map(asked_of).collect();
             asked
                 .iter()
                 .map(|(id, _)| *id)
-                .zip(reader.read(places, &only, false))
+                .zip(reader.read(places, &only, &others))
                 .collect()
         }
         None => Vec::new(),
@@ -476,33 +460,18 @@ fn work(
             Job::Read {
                 serial,
                 windows,
+                others,
                 within,
                 browsers,
             } => {
                 let found = read_windows(
                     &mut entries,
                     &mut reader,
-                    &windows,
+                    (&windows, &others),
                     &within,
                     browsers.as_ref(),
                 );
                 if done.send(Done::Read { serial, found }).is_err() {
-                    return;
-                }
-            }
-            Job::Tabs {
-                serial,
-                windows,
-                browsers,
-            } => {
-                let only: Vec<crate::browsers::Asked> =
-                    windows.iter().map(|(_, a)| a.clone()).collect();
-                let found = windows
-                    .iter()
-                    .map(|(id, _)| *id)
-                    .zip(reader.read(&browsers, &only, true))
-                    .collect();
-                if done.send(Done::Tabs { serial, found }).is_err() {
                     return;
                 }
             }
@@ -827,10 +796,6 @@ impl State {
             Done::Checked { serial, directory } => (serial, directory),
             Done::Read { serial, found } => {
                 self.project_read(serial, found);
-                return;
-            }
-            Done::Tabs { serial, found } => {
-                self.project_tabs_again(serial, found);
                 return;
             }
         };

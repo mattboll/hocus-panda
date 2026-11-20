@@ -15,10 +15,15 @@
 //!   `Sessions/Session_*`: SNSS ([`snss`]), its commands read as
 //!   Chromium's `components/sessions` (BSD) writes them; incognito windows
 //!   are not written.
-//! - **Matching** a window to the file's ([`matched`]): its title without
-//!   the browser's suffix against each saved window's selected tab's
-//!   title; two alike are told apart by their size, then their order. A
-//!   private window (its title says so) is never matched.
+//! - **Matching** a window to the file's open ones ([`matched`]): its title
+//!   without the browser's suffix against each saved window's selected
+//!   tab's title; two alike are told apart by their size. Those left (a
+//!   Chromium writes a page's title only when it rebuilds its file, so
+//!   most of its tabs have none there) by elimination, when as many of the
+//!   browser's windows as the file's are left, in the order they opened
+//!   against the file's. A window the file says closed is never one open
+//!   (#913: Firefox keeps earlier copies of a window in `_closedWindows`).
+//!   A private window (its title says so) is never matched.
 //!
 //! Addresses and titles are never logged ([`Tab`]'s `Debug` says neither).
 
@@ -654,21 +659,32 @@ pub fn shown(title: &str) -> Shown {
     }
 }
 
-/// A window to match: its title as [`shown`] says it, and its size.
+/// A window to match: its title as [`shown`] says it, its size, and when
+/// it opened among its browser's windows (its id).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seen {
     pub title: String,
     pub size: (i32, i32),
+    pub order: u64,
 }
 
-/// Which of `file`'s windows each of `seen` is (in order), none for one
-/// not found: the same shown title, the nearest size, then the first;
-/// each file window taken once. The closed ones first when `closed_first`
-/// (read again once the windows closed, §5 step 3), else the open ones.
-pub fn matched(seen: &[Seen], file: &[FileWindow], closed_first: bool) -> Vec<Option<usize>> {
-    let mut taken = vec![false; file.len()];
-    seen.iter()
+/// Which of `file`'s open windows each of `seen` is (in order), none for
+/// one not found; each file window taken once. First by the shown tab's
+/// title, the nearest size telling two alike apart. Then, when as many of
+/// `seen` as of the file's open windows are left (the same windows, their
+/// titles unknown or out of date in the file), those left in the order
+/// they opened take those of the file in its order (a browser writes its
+/// windows in the order they opened).
+pub fn matched(seen: &[Seen], file: &[FileWindow]) -> Vec<Option<usize>> {
+    // A closed window is never one still open: its tabs are what it had
+    // when it closed, maybe long ago.
+    let mut taken: Vec<bool> = file.iter().map(|w| w.closed).collect();
+    let mut out: Vec<Option<usize>> = seen
+        .iter()
         .map(|s| {
+            if s.title.is_empty() {
+                return None;
+            }
             let pick = file
                 .iter()
                 .enumerate()
@@ -679,7 +695,7 @@ pub fn matched(seen: &[Seen], file: &[FileWindow], closed_first: bool) -> Vec<Op
                     let distance = w.size.map_or(0, |(width, height)| {
                         (width - s.size.0).abs() + (height - s.size.1).abs()
                     });
-                    (w.closed != closed_first, distance, *i)
+                    (distance, *i)
                 })
                 .map(|(i, _)| i);
             if let Some(slot) = pick.and_then(|i| taken.get_mut(i)) {
@@ -687,7 +703,22 @@ pub fn matched(seen: &[Seen], file: &[FileWindow], closed_first: bool) -> Vec<Op
             }
             pick
         })
-        .collect()
+        .collect();
+    let mut left: Vec<usize> = (0..seen.len())
+        .filter(|k| out.get(*k).is_some_and(Option::is_none))
+        .collect();
+    let free: Vec<usize> = (0..file.len())
+        .filter(|i| !taken.get(*i).copied().unwrap_or(true))
+        .collect();
+    if left.len() == free.len() {
+        left.sort_by_key(|k| seen.get(*k).map_or(u64::MAX, |s| s.order));
+        for (k, i) in left.into_iter().zip(free) {
+            if let Some(slot) = out.get_mut(k) {
+                *slot = Some(i);
+            }
+        }
+    }
+    out
 }
 
 // --- Profiles --------------------------------------------------------------------------------
@@ -854,20 +885,34 @@ fn firefox_ended_abruptly(dir: &Path) -> bool {
 }
 
 /// Reads the browsers' files for windows, off the loop; remembers each
-/// browser's profile, read again once its windows closed (Firefox's lock
-/// goes as it quits).
+/// browser's profile, for a read once its lock went (Firefox quit).
 #[derive(Debug, Default)]
 pub struct Reader {
     profiles: HashMap<Browser, PathBuf>,
 }
 
 /// A browser window handed to the reader: its browser, its title, its
-/// size.
+/// size, and when it opened among the others (its id).
 #[derive(Debug, Clone)]
 pub struct Asked {
     pub browser: Browser,
     pub title: String,
     pub size: (i32, i32),
+    pub order: u64,
+}
+
+impl Asked {
+    /// As it is matched; none for a private window.
+    fn seen(&self) -> Option<Seen> {
+        match shown(&self.title) {
+            Shown::Private => None,
+            Shown::Page(title) => Some(Seen {
+                title,
+                size: self.size,
+                order: self.order,
+            }),
+        }
+    }
 }
 
 impl Reader {
@@ -891,12 +936,16 @@ impl Reader {
     }
 
     /// What each of `asked` holds: its tabs, empty when it was not found
-    /// in its browser's file; none for a private window.
+    /// in its browser's file; none for a private window. Read while they
+    /// are open (#913): a browser writes a window it closed seconds later
+    /// (Firefox every 15 s), and its file keeps earlier windows closed.
+    /// `others`, its browsers' other windows, are matched too, so that
+    /// those left are told apart by elimination ([`matched`]).
     pub fn read(
         &mut self,
         places: &Places,
         asked: &[Asked],
-        closed_first: bool,
+        others: &[Asked],
     ) -> Vec<Option<SavedBrowser>> {
         let mut out: Vec<Option<SavedBrowser>> = asked
             .iter()
@@ -916,20 +965,14 @@ impl Reader {
                 .iter()
                 .enumerate()
                 .filter(|(_, a)| a.browser == browser)
-                .filter_map(|(i, a)| match shown(&a.title) {
-                    Shown::Private => {
-                        if let Some(slot) = out.get_mut(i) {
-                            *slot = None;
-                        }
-                        None
+                .filter_map(|(i, a)| {
+                    let seen = a.seen();
+                    if seen.is_none()
+                        && let Some(slot) = out.get_mut(i)
+                    {
+                        *slot = None;
                     }
-                    Shown::Page(title) => Some((
-                        i,
-                        Seen {
-                            title,
-                            size: a.size,
-                        },
-                    )),
+                    Some((i, seen?))
                 })
                 .collect();
             if theirs.is_empty() {
@@ -939,8 +982,14 @@ impl Reader {
                 tracing::debug!(kind = ?browser.kind, "no browser session read");
                 continue;
             };
-            let seen: Vec<Seen> = theirs.iter().map(|(_, s)| s.clone()).collect();
-            let found = matched(&seen, &file, closed_first);
+            // Its other windows after them, matched but not answered.
+            let theirs_too = others.iter().filter(|a| a.browser == browser);
+            let seen: Vec<Seen> = theirs
+                .iter()
+                .map(|(_, s)| s.clone())
+                .chain(theirs_too.filter_map(Asked::seen))
+                .collect();
+            let found = matched(&seen, &file);
             let mut tabs = 0;
             for ((i, _), m) in theirs.iter().zip(found) {
                 if let (Some(slot), Some(w)) = (out.get_mut(*i), m.and_then(|m| file.get(m))) {
@@ -1206,26 +1255,106 @@ pub(crate) mod tests {
         let seen = |title: &str, size| Seen {
             title: title.into(),
             size,
+            order: 0,
         };
         assert_eq!(
             matched(
                 &[
                     seen("Docs", (1590, 1000)),
                     seen("Docs", (100, 100)),
-                    seen("Other", (1, 1))
+                    seen("Other", (1, 1)),
+                    seen("Elsewhere", (1, 1))
                 ],
-                &file,
-                false
+                &file
             ),
-            [Some(2), Some(0), None]
+            [Some(2), Some(0), None, None],
+            "two left for one: none told apart"
+        );
+        assert_eq!(matched(&[seen("Site", (1200, 900))], &file), [Some(1)]);
+        // #913: an earlier copy of the window, closed, with the same tab
+        // shown, is never the window open.
+        let file = [
+            window("Site", (1200, 900), true),
+            window("Site", (500, 400), false),
+        ];
+        assert_eq!(matched(&[seen("Site", (1200, 900))], &file), [Some(1)]);
+    }
+
+    /// #913: Chromium writes a page's title only as it rebuilds its file
+    /// (at its start), so the tabs a window showed since have none there
+    /// and no title finds them: those left are told apart by elimination,
+    /// in the order they opened, when the browser's windows and the file's
+    /// left are as many.
+    #[test]
+    fn windows_whose_titles_their_file_lacks_are_found_by_elimination() {
+        let window = |title: &str, closed: bool| FileWindow {
+            tabs: vec![Tab {
+                url: "https://x/".into(),
+                title: title.into(),
+                pinned: false,
+            }],
+            selected: 0,
+            size: None,
+            closed,
+        };
+        let file = [
+            window("", false),
+            window("", true),
+            window("", false),
+            window("Docs", false),
+        ];
+        let seen = |title: &str, order| Seen {
+            title: title.into(),
+            size: (800, 600),
+            order,
+        };
+        assert_eq!(
+            matched(
+                &[seen("Page B", 7), seen("Docs", 9), seen("Page A", 3)],
+                &file
+            ),
+            [Some(2), Some(3), Some(0)]
         );
         assert_eq!(
-            matched(&[seen("Site", (1200, 900))], &file, false),
-            [Some(1)]
+            matched(
+                &[
+                    seen("Page B", 7),
+                    seen("Docs", 9),
+                    seen("Page A", 3),
+                    seen("Page C", 12)
+                ],
+                &file
+            ),
+            [None, Some(3), None, None],
+            "more windows than the file's: none guessed"
         );
+        // As Chrome 154 writes it: its pages' titles not there.
+        let real = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/Session_chrome_untitled"
+        ))
+        .expect("committed");
+        let windows = snss(&real).expect("read");
+        let urls: Vec<Vec<&str>> = windows
+            .iter()
+            .map(|w| w.tabs.iter().map(|t| t.url.as_str()).collect())
+            .collect();
         assert_eq!(
-            matched(&[seen("Site", (1200, 900))], &file, true),
-            [Some(3)]
+            urls,
+            [
+                vec![
+                    "http://127.0.0.1:8737/Alpha.html",
+                    "http://127.0.0.1:8737/Beta.html",
+                    "http://127.0.0.1:8737/Gamma.html"
+                ],
+                vec!["http://127.0.0.1:8737/Delta.html"]
+            ]
+        );
+        assert!(
+            windows
+                .iter()
+                .flat_map(|w| &w.tabs)
+                .all(|t| t.title.is_empty())
         );
     }
 

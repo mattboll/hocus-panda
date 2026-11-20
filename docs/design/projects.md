@@ -219,9 +219,10 @@ their whole addresses (§10).
      keeps the project open until it closes; one still there 30 s after
      the request stays, on what is then a plain desktop, and the toast
      names it;
-  3. the browsers' files are read again once their windows are gone
-     (§8.3, a closed window's tabs are written then), and the project's
-     file is written (§9);
+  3. once they went, the project's file is written (§9), with the
+     browsers' tabs read in step 1, while their windows were open (§8.3:
+     a browser writes a window it closed seconds later, and its file
+     keeps earlier windows closed; #913);
   4. the desktop is a plain desktop again, its dot loses the monogram,
      and a toast says "hocus-site est fermé, ses 3 fenêtres gardées." and
      "Super+Espace, « projet hocus-site » : il revient." The screen stays
@@ -384,9 +385,10 @@ which it keeps for its crash recovery.
   inside: `windows[]`, each `tabs[]`, each `entries[]` and `index` (from
   1: the entry shown, its `url` and `title`), `pinned`; the window's
   `selected` (from 1). Firefox writes it at most every 15 s
-  (`browser.sessionstore.interval`), and as a window closes, which then
-  goes to `_closedWindows` with its tabs: after closing, that entry is
-  read (§5, step 3).
+  (`browser.sessionstore.interval`), a window it closed too (2 to 15 s
+  after), which then goes to `_closedWindows` with its tabs, beside
+  earlier ones: the tabs are read while the window is open, and matched
+  with the file's open windows only (#913).
 - **Chromium**: the profile last used (`Local State`'s
   `profile.last_used`, else `Default`) in `~/.config/<browser>`; its
   newest `Sessions/Session_*` file: SNSS (the 4 bytes `SNSS`, a version,
@@ -394,13 +396,18 @@ which it keeps for its crash recovery.
   the tabs' windows and order, their navigation entries (address,
   title), the selected entry and tab, the tabs and windows closed, as
   Chromium's `components/sessions` (BSD) writes them. It writes them a
-  few seconds after a change.
+  few seconds after a change, but a page's title only as it rebuilds the
+  file (at its start): a tab shown since has none there (#913, as Chrome
+  154 writes it).
 - **Matching a window to the file's**: the window's title is its shown
   tab's ("hocus-site · Accueil — Mozilla Firefox", "… - Chromium");
-  without the browser's suffix it is matched with each saved window's
-  selected tab's title; two alike are told apart by their order and
-  size. A window not matched comes back without its tabs (a new window),
-  and the notification says so.
+  without the browser's suffix it is matched with each of the file's
+  open windows' selected tab's title; two alike are told apart by their
+  size. Those left (a Chromium's titles missing, a title changed since
+  the last write) by elimination: the browser's windows wherever they
+  are, when as many are left as the file's open ones, the order they
+  opened in against the file's. A window not matched comes back without
+  its tabs (a new window), and the notification says so.
 - **What is not read**: private and incognito windows (neither browser
   writes them), a page's form data, history, cookies. A tab's history is
   not kept, only its address.
@@ -784,15 +791,25 @@ A comes first; B needs A; C and D need B and not each other.
   `Sessions/Session_*`, its SNSS commands read for windows (normal ones),
   tabs, their navigations, the shown entry and tab, pinned, tabs and
   windows closed. A window's title without its browser's suffix is
-  matched with each file window's shown tab's title, then the nearest
-  size, then the order; a title saying private (Private Browsing,
-  Navigation privée, Incognito, InPrivate) is never matched and its
-  window keeps no tabs. Each browser's profile is remembered by the
-  thread, read again once its windows closed (Firefox's lock goes as it
-  quits). The log says how many tabs, never an address nor a title.
-- **Closing** reads the tabs with the other windows, then, once the
-  windows went, a second later the files again (§5 step 3), the closed
-  windows first; what it finds replaces the first read.
+  matched with each open file window's shown tab's title, then the
+  nearest size; a window the file says closed is never matched. Those
+  left by elimination (#913): the browser's other windows, on every
+  desktop, are matched with them, and when as many of its windows as of
+  the file's open ones are left, they pair in the order they opened (the
+  windows' ids, the file's order); else none is guessed. A title saying
+  private (Private Browsing, Navigation privée, Incognito, InPrivate) is
+  never matched and its window keeps no tabs. Each browser's profile is
+  remembered by the thread, for a read once its lock went (Firefox
+  quit). The log says how many tabs, never an address nor a title.
+- **Closing** reads the tabs with the other windows, while they are open,
+  and keeps that (#913). It read the files again a second after the
+  windows went, the closed windows first, and that replaced the first
+  read: Firefox had not written the window closed yet (it writes every
+  15 s), so an earlier copy closed with the same tab shown (one tab, left
+  by a reopening) was taken, and every reopening kept one tab. Chromium
+  writes no title for a page shown since its start, so its windows were
+  never found; they are now by elimination. The confirmation's count is
+  what the same reading finds.
 - **Saved** as `[window.browser]` (`kind`, `selected` from 1, `[[window.browser.tab]]`
   `url`, `title`, `pinned`); a window not found keeps `kind` alone.
 - **Brought back**: one start a window holding its addresses (those with
@@ -846,8 +863,12 @@ A comes first; B needs A; C and D need B and not each other.
   Firefox profile and the committed SNSS file
   `tests/data/Session_13400000000000000`, built by
   `browsers::tests::snss_file`, `HOCUS_SNSS_WRITE=1` writes it again);
-  unit tests for mozLz4, the session JSON, SNSS, the matching, the
-  addresses given, the profile found.
+  #913's (`projects::a_browser_window_keeps_its_open_tabs_never_an_earlier_closed_copys`,
+  `projects::a_chrome_window_whose_titles_its_file_lacks_keeps_its_tabs`,
+  the latter on `tests/data/Session_chrome_untitled`, a file Chrome 154
+  wrote, its pages local, in a profile of its own); unit tests for
+  mozLz4, the session JSON, SNSS, the matching, the addresses given, the
+  profile found.
 
 ### Lot D, agents' conversations (2026-11-14)
 
