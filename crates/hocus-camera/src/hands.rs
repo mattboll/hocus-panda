@@ -304,7 +304,7 @@ mod tests {
     }
 
     /// A thumb up, where the picture's hand is (its thumb's tip near
-    /// (240, 360)); followed, within its budget.
+    /// (240, 360)); followed, within its budget on a real machine.
     #[test]
     fn a_thumb_up_is_a_thumb_up_in_its_budget() -> TractResult<()> {
         let picture = test_thumb_up();
@@ -316,18 +316,23 @@ mod tests {
             "{x}, {y}"
         );
         assert_eq!(gesture(hand, 720.0), Some(Gesture::ThumbUp));
-        // Followed: the points' model alone, within half of the 100 ms
-        // between two looks (the gestures look ten times a second).
-        let mut times: Vec<Duration> = (0..7)
-            .map(|_| {
-                let start = track::thread_time();
-                let _ = tracker.track(&frame(&picture), false);
-                track::thread_time() - start
-            })
-            .collect();
-        times.sort();
-        let median = times[times.len() / 2];
-        assert!(median < Duration::from_millis(50), "{median:?}: {times:?}");
+        // Followed: the points' model alone keeps the thumb up where it
+        // is; within half of the 100 ms between two looks (the gestures
+        // look ten times a second) on a real machine (`HOCUS_TEST_BUDGETS=1`).
+        let mut times = Vec::new();
+        for _ in 0..7 {
+            let start = track::thread_time();
+            let followed = tracker.track(&frame(&picture), false)?;
+            times.push(track::thread_time() - start);
+            let hand = followed.first().expect("the hand followed");
+            let (x, y) = hand.xy(at::THUMB_TIP);
+            assert!(
+                (x - 240.0).abs() < 50.0 && (y - 370.0).abs() < 50.0,
+                "{x}, {y}"
+            );
+            assert_eq!(gesture(hand, 720.0), Some(Gesture::ThumbUp));
+        }
+        track::within_budget("the hand's points", times, Duration::from_millis(50));
         assert!(tracker.following());
         Ok(())
     }

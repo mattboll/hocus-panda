@@ -60,6 +60,21 @@ With the variable set, the compositor of a test of its shaders draws on
 that node, and the shell it starts draws there with wgpu. Every other test
 still draws with pixman, and its shell with tiny-skia.
 
+## The camera's models in their budget
+
+The tests of the camera's face and hands (`hocus-camera`'s
+`face::tests::the_face_s_points_are_found_in_their_budget`,
+`hands::tests::a_thumb_up_is_a_thumb_up_in_its_budget`) follow a picture
+frame after frame and assert what the model finds everywhere, CI included.
+Their time on the processor is held to its budget only with
+`HOCUS_TEST_BUDGETS=1`, on a machine the camera is meant to run on: CI's
+shared runners are slower, and a budget held there measures the runner
+(#909). Without it, the tests print the times.
+
+```sh
+HOCUS_TEST_BUDGETS=1 cargo nextest run -p hocus-camera face:: hands::
+```
+
 ## Tests on a loaded machine wait on conditions, never on time
 
 A test acts and reads on the machine it runs on, which may be busy:

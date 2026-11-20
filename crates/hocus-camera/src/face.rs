@@ -460,7 +460,9 @@ mod tests {
 
     /// The portrait's eyes, nose and chin where they are (measured on the
     /// picture: his eyes at about (488, 368) and (620, 357)); level;
-    /// smiling, eyes open; the face followed within its budget.
+    /// smiling, eyes open; the face followed, frame after frame, by the
+    /// mesh alone, within its budget on a real machine
+    /// (`HOCUS_TEST_BUDGETS=1`, `track::within_budget`).
     #[test]
     fn the_face_s_points_are_found_in_their_budget() -> TractResult<()> {
         let picture = test_face();
@@ -481,19 +483,28 @@ mod tests {
         let smile = face.expression(shape::MOUTH_SMILE_LEFT).unwrap_or(0.0);
         let blink = face.expression(shape::EYE_BLINK_LEFT).unwrap_or(1.0);
         assert!(smile > 0.3 && blink < 0.5, "smile {smile}, blink {blink}");
-        // Followed: the mesh alone, each frame, within a frame at 30 a
-        // second, on its thread (the median of a few, in the thread's own
-        // time on the processor).
-        let mut times: Vec<Duration> = (0..9)
-            .map(|_| {
-                let start = track::thread_time();
-                let _ = tracker.track(&frame(&picture), 1.0 / 30.0, false);
-                track::thread_time() - start
-            })
-            .collect();
-        times.sort();
-        let median = times[times.len() / 2];
-        assert!(median < Duration::from_millis(30), "{median:?}: {times:?}");
+        // Followed: the mesh alone, each frame, keeps the face where it is,
+        // every point inside the frame; within a frame at 30 a second, on
+        // its thread (the median of a few, in the thread's own time on the
+        // processor).
+        let mut times = Vec::new();
+        for _ in 0..9 {
+            let start = track::thread_time();
+            let followed = tracker.track(&frame(&picture), 1.0 / 30.0, false)?;
+            times.push(track::thread_time() - start);
+            let followed = followed.expect("the face followed");
+            assert_eq!(followed.points.len(), POINTS);
+            assert!(
+                followed.points.iter().all(|&[x, y, z]| {
+                    z.is_finite() && (0.0..1280.0).contains(&x) && (0.0..720.0).contains(&y)
+                }),
+                "a point out of the frame"
+            );
+            let pose = followed.pose();
+            assert!(near(pose.eyes, (554.0, 362.0), 15.0), "{pose:?}");
+            assert!((110.0..160.0).contains(&pose.span), "{pose:?}");
+        }
+        track::within_budget("the face's mesh", times, Duration::from_millis(30));
         Ok(())
     }
 
