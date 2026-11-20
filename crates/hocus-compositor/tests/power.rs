@@ -9,9 +9,10 @@
 //! backlight by its levels (two, three) or a slider (six), and none; the
 //! other screens' line, for a screen plugged in and unplugged; the
 //! battery's states, their words, their colours and the bolt on AC; the
-//! health's line shown or not; the profiles switched, a missing one greyed
-//! with its line; no battery, the modes alone; the mini form's battery sign
-//! and its bolt; the keyboard; nothing drawn at rest, and a change drawing
+//! battery's row's time left on battery and the profile's mark on its icon
+//! (#900); the health's line shown or not; the profiles switched, a missing
+//! one greyed with its line; no battery, nothing under the rows and no
+//! mark; the mini form's battery sign and its bolt; the keyboard; nothing drawn at rest, and a change drawing
 //! only what shows it; a hand over the rows, an arrow off them.
 //!
 //! Pixman here, so the shell draws on the CPU, without motion: as in CI.
@@ -32,14 +33,16 @@ use smithay::input::pointer::{CursorIcon, CursorImageStatus};
 const KEY_ENTER: u32 = 28;
 
 /// The levels' surface on a 1920 × 1080 screen in the full form, and its
-/// rows' middles with all three rows and a one-line status line.
+/// rows' middles with all three rows (no line under them, #900).
 const LEVELS: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
-const LIGHT_ROW: (f64, f64) = (1800.0, (LEVELS.y + 87) as f64);
-const BATTERY_ROW: (f64, f64) = (1800.0, (LEVELS.y + 117) as f64);
-/// The status line's middle, alone under the rows (no battery).
-const STATUS: (f64, f64) = (1850.0, (LEVELS.y + 175 - 20 - 9) as f64);
-/// The battery's icon in its row.
-const BATTERY_ICON: (i32, i32) = (LEVELS.x + 11, LEVELS.y + 117 - 9);
+const LIGHT_ROW: (f64, f64) = (1800.0, (LEVELS.y + 115) as f64);
+const BATTERY_ROW: (f64, f64) = (1800.0, (LEVELS.y + 145) as f64);
+/// Under the rows, where the status line was: nothing.
+const UNDER: (f64, f64) = (1850.0, (LEVELS.y + 167) as f64);
+/// The battery's icon in its row, and its mark's box on its top right
+/// corner (#900).
+const BATTERY_ICON: (i32, i32) = (LEVELS.x + 11, LEVELS.y + 145 - 9);
+const MARK: (i32, i32) = (BATTERY_ICON.0 + 16, BATTERY_ICON.1 - 2);
 /// The mini form's levels' surface, its battery's item, and its sign.
 const MINI: Rect = Rect::new(1920 - 8 - 1 - 54, 1080 - 8 - 41 - 176, 54, 176);
 const MINI_BATTERY: (f64, f64) = ((MINI.x + 27) as f64, (MINI.y + 99) as f64);
@@ -60,8 +63,6 @@ const BLOCK: f64 = 2.0 + 26.0 * 1.1 + 1.0 + 13.5 * LINE + 4.0;
 const STATE_TOP: f64 = BLOCK_TOP + 2.0 + 26.0 * 1.1 + 1.0;
 const TILES_TOP: f64 = BLOCK_TOP + BLOCK + 8.0 + 2.0 + 1.0 + 2.0 + 8.0 + 4.0 + 11.5 * LINE + 8.0;
 const TILE_X: [f64; 3] = [54.67, 140.0, 225.33];
-/// Without a battery: the modes alone, under the header.
-const MODES: i32 = 13 + 32 + 8 + 58 + 15;
 
 /// The full bar's popover, `height` tall; the mini's.
 fn popover(height: i32) -> Rect {
@@ -122,9 +123,12 @@ fn start(
         Some(script),
     )?;
     let mut bed = Bed { fakes, hp, log };
+    // The first screen's logical size: the levels' surface sits on its
+    // bottom right.
+    let (w, h) = logical(outputs.first().copied().unwrap_or("1920x1080"));
     let want = match form {
-        FormChoice::Mini => MINI,
-        _ => LEVELS,
+        FormChoice::Mini => Rect::new(w - 8 - 1 - 54, h - 8 - 41 - 176, 54, 176),
+        _ => Rect::new(w - 8 - 1 - 194, h - 8 - 41 - 175, 194, 175),
     };
     let placed = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
         hp.levels_surfaces().first().map(|(_, r)| *r) == Some(want) && hp.levels_commits() > 0
@@ -132,6 +136,17 @@ fn start(
     anyhow::ensure!(placed, "no levels: {:?}", bed.hp.levels_surfaces());
     bed.settle()?;
     Ok(bed)
+}
+
+/// A screen's `WxH[@S]`: its logical width and height.
+fn logical(output: &str) -> (i32, i32) {
+    let (size, scale) = output.split_once('@').unwrap_or((output, "1"));
+    let scale: i32 = scale.parse().unwrap_or(1);
+    let (w, h) = size.split_once('x').unwrap_or(("1920", "1080"));
+    (
+        w.parse::<i32>().unwrap_or(1920) / scale,
+        h.parse::<i32>().unwrap_or(1080) / scale,
+    )
 }
 
 /// Everything there, the full form on one screen.
@@ -448,12 +463,12 @@ fn the_pointer_is_a_hand_over_the_rows_and_an_arrow_off_them() -> anyhow::Result
         return Ok(());
     };
     let mut bed = start_full(&shell, |_| {})?;
-    // Off the bar, over a row, on the status line under the rows (#468).
+    // Off the bar, over a row, under the rows (#468).
     for (at, hand) in [
         ((600.0, 500.0), false),
         (LIGHT_ROW, true),
         (BATTERY_ROW, true),
-        ((1800.0, f64::from(LEVELS.y + 160)), false),
+        (UNDER, false),
         ((600.0, 500.0), false),
         (LIGHT_ROW, true),
     ] {
@@ -829,17 +844,68 @@ fn the_profiles_switch_and_a_missing_one_is_greyed_with_its_line() -> anyhow::Re
     Ok(())
 }
 
+/// On battery, the row shows the time left (the percentage until UPower
+/// estimates it, and on AC); the power saver and performance put their
+/// mark on the battery's icon, balanced none (#900).
 #[test]
-fn without_a_battery_the_status_line_opens_the_modes_alone() -> anyhow::Result<()> {
+fn the_battery_row_shows_the_time_left_and_the_profile_its_mark() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
-    let mut bed = start_full(&shell, |p| p.present = false)?;
-    bed.click(STATUS)?;
-    bed.popover_is(Some(popover(MODES)))?;
-    bed.logged("title=Énergie plugged=None line=None")?;
-    bed.click(at(popover(MODES), (TILE_X[0], 53.0 + 29.0)))?;
-    bed.asked(|p| p.profile == "power-saver")?;
+    let mut bed = start_full(&shell, |_| {})?;
+    let mark = (9, 9);
+    bed.logged("battery=Some(Left(\"3 h 40\")) mark=None")?;
+    assert_eq!(bed.count(MARK, mark, green)?, 0, "a leaf for balanced");
+    assert_eq!(bed.count(MARK, mark, warm)?, 0, "a flame for balanced");
+    // The power saver: a green leaf.
+    bed.fakes
+        .set_power(|p| p.profile = "power-saver".to_owned())?;
+    bed.logged("mark=Some(Leaf)")?;
+    bed.until_count(MARK, mark, green, (12, 81))?;
+    // Performance: an orange flame, the leaf gone.
+    bed.fakes
+        .set_power(|p| p.profile = "performance".to_owned())?;
+    bed.logged("mark=Some(Flame)")?;
+    bed.until_count(MARK, mark, warm, (12, 81))?;
+    bed.until_count(MARK, mark, green, (0, 0))?;
+    // Under an hour: in minutes; low, in amber with its gauge.
+    bed.fakes.set_power(|p| {
+        p.percentage = 15.0;
+        p.to_empty = 45 * 60;
+    })?;
+    bed.logged("battery=Some(Left(\"45 min\"))")?;
+    // No estimate yet: the percentage.
+    bed.fakes.set_power(|p| p.to_empty = 0)?;
+    bed.logged("battery=Some(Percent(15))")?;
+    // On AC: the percentage, whatever the time to full.
+    bed.fakes.set_power(|p| {
+        p.on_battery = false;
+        p.state = 1;
+        p.percentage = 46.0;
+        p.to_full = 70 * 60;
+    })?;
+    bed.logged("battery=Some(Percent(46)) mark=Some(Flame)")?;
+    Ok(())
+}
+
+/// Without a battery, nothing under the rows (the status line went, #900)
+/// and no mark: the power modes are Settings › Power's.
+#[test]
+fn without_a_battery_nothing_under_the_rows_and_no_mark() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start_full(&shell, |p| {
+        p.present = false;
+        p.profile = "power-saver".to_owned();
+    })?;
+    bed.logged("battery=None mark=None")?;
+    bed.click(UNDER)?;
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    bed.popover_is(None)?;
+    // The brightness's row is the lowest: its own popover.
+    bed.click_row(BATTERY_ROW)?;
+    bed.popover_is(Some(popover(LIGHT)))?;
     Ok(())
 }
 
@@ -971,4 +1037,81 @@ fn kit_shot() -> anyhow::Result<()> {
     bed.popover_is(Some(popover(WITH_KEYS)))?;
     bed.hp.pointer_move(600.0, 500.0);
     common::popover_shot(&mut bed.hp, "brightness")
+}
+
+/// The pull request's screenshots (#900), into `HOCUS_SHOTS`, at ×2: the
+/// full bar's levels on AC, full, balanced; on battery with its time
+/// left, the power saver; low at 15 % on battery, performance; and the
+/// battery's popover.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
+    let Some(folder) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&folder)?;
+    let mut bed = start(&shell, &["1920x1080@2"], FormChoice::Full, |p| {
+        p.on_battery = false;
+        p.state = 4;
+        p.percentage = 100.0;
+    })?;
+    let levels = bed.hp.levels_surfaces()[0].1;
+    let shot = |bed: &mut Bed, rect: Rect, name: &str| -> anyhow::Result<()> {
+        common::at_rest(&mut bed.hp)?;
+        let (width, height, bytes) = bed.hp.screenshot(0)?;
+        let (x0, y0) = (rect.x * 2, rect.y * 2);
+        let w = (rect.width * 2).min(width - x0);
+        let h = (rect.height * 2).min(height - y0);
+        let mut out = image::RgbaImage::new(u32::try_from(w)?, u32::try_from(h)?);
+        for y in 0..h {
+            for x in 0..w {
+                let at = usize::try_from((y0 + y) * width + x0 + x)? * 4;
+                if let Some([b, g, r, _]) = bytes
+                    .get(at..at + 4)
+                    .and_then(|p| <[u8; 4]>::try_from(p).ok())
+                {
+                    out.put_pixel(
+                        u32::try_from(x)?,
+                        u32::try_from(y)?,
+                        image::Rgba([r, g, b, 255]),
+                    );
+                }
+            }
+        }
+        out.save(folder.join(format!("{name}.png")))?;
+        Ok(())
+    };
+    bed.logged("battery=Some(Percent(100)) mark=None")?;
+    shot(&mut bed, levels, "levels-ac-full-balanced")?;
+    bed.fakes.set_power(|p| {
+        p.on_battery = true;
+        p.state = 2;
+        p.percentage = 82.0;
+        p.to_empty = 220 * 60;
+        p.profile = "power-saver".to_owned();
+    })?;
+    bed.logged("battery=Some(Left(\"3 h 40\")) mark=Some(Leaf)")?;
+    shot(&mut bed, levels, "levels-battery-power-saver")?;
+    // Its popover, opened by a click on the battery's row.
+    bed.click_row((f64::from(levels.x + 150), f64::from(levels.y + 145)))?;
+    let rect = bed.opened()?;
+    bed.hp.pointer_move(100.0, 100.0);
+    shot(&mut bed, rect, "battery-popover")?;
+    // Closed, and the row let go of the keyboard (its ring).
+    bed.press(KEY_ESC);
+    bed.popover_is(None)?;
+    bed.keyboard_on(Some("hocus-bar-levels"))?;
+    bed.press(KEY_ESC);
+    bed.keyboard_on(None)?;
+    bed.fakes.set_power(|p| {
+        p.percentage = 15.0;
+        p.to_empty = 50 * 60;
+        p.profile = "performance".to_owned();
+    })?;
+    bed.logged("battery=Some(Left(\"50 min\")) mark=Some(Flame)")?;
+    shot(&mut bed, levels, "levels-low-performance")?;
+    Ok(())
 }

@@ -166,7 +166,7 @@ pub enum Band {
     Ok,
     /// 20 % or less.
     Low,
-    /// 10 % or less: the status line asks for the charger.
+    /// 10 % or less: the popover asks for the charger.
     Critical,
 }
 
@@ -193,12 +193,30 @@ impl Battery {
         self.charge.plugged()
     }
 
+    /// What the bar's row shows for its value (#900): on battery, the time
+    /// left once UPower has an estimate ("3 h 40", "45 min"); else, and on
+    /// AC, the percentage.
+    pub fn value(&self) -> RowValue {
+        match (self.charge, self.left.filter(|d| !d.is_zero())) {
+            (Charge::Discharging, Some(left)) => RowValue::Left(duration(left)),
+            _ => RowValue::Percent(self.shown()),
+        }
+    }
+
     /// Its health in whole percent, when known (0 is not).
     pub fn health(&self) -> Option<u32> {
         self.health
             .map(|h| h.round().clamp(0.0, 100.0) as u32)
             .filter(|h| *h > 0)
     }
+}
+
+/// The battery's row's value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowValue {
+    Percent(u32),
+    /// The time left, to the minute.
+    Left(String),
 }
 
 /// power-profiles-daemon's `ActiveProfile`.
@@ -210,6 +228,15 @@ pub enum Profile {
 }
 
 impl Profile {
+    /// The mark on the bar's battery (#900): none for balanced.
+    pub fn mark(self) -> Option<Mark> {
+        match self {
+            Self::PowerSaver => Some(Mark::Leaf),
+            Self::Balanced => None,
+            Self::Performance => Some(Mark::Flame),
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "power-saver" => Some(Self::PowerSaver),
@@ -217,6 +244,23 @@ impl Profile {
             "performance" => Some(Self::Performance),
             _ => None,
         }
+    }
+}
+
+/// The power profile's mark on the battery's icon in the bar (#900).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mark {
+    /// The power saver: a green leaf.
+    Leaf,
+    /// Performance: an orange flame.
+    Flame,
+}
+
+impl Snapshot {
+    /// The mark on the battery's icon: the profile's, with a battery only.
+    pub fn mark(&self) -> Option<Mark> {
+        self.battery?;
+        self.profile?.mark()
     }
 }
 
@@ -489,7 +533,7 @@ impl Words {
         text
     }
 
-    /// The battery's part of the status line, if any.
+    /// The battery's part of what screen readers say of it, if any.
     fn battery(self, battery: &Battery) -> Option<String> {
         let left = battery.left.filter(|d| !d.is_zero()).map(duration);
         let mut text = match (battery.charge, left) {
@@ -508,9 +552,11 @@ impl Words {
         Some(text)
     }
 
-    /// The status line under the gauges: the battery's time left (or
-    /// what it does) and the power profile; the profile alone without a
-    /// battery; nothing without either.
+    /// What screen readers say after the battery's percentage: its time
+    /// left (or what it does) and the power profile; the profile alone
+    /// without a battery; nothing without either. The bar no longer writes
+    /// it under the gauges (#900): its row shows the time left, its icon
+    /// the profile's mark, the popover the rest.
     pub fn status(self, levels: &Snapshot) -> Option<String> {
         let battery = levels.battery.and_then(|b| self.battery(&b));
         let profile = levels.profile.map(|p| self.profile(p));
@@ -614,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn the_status_line_in_each_state_and_language() {
+    fn what_screen_readers_say_of_the_battery_in_each_state_and_language() {
         let fr = Words::new(Lang::French);
         let en = Words::new(Lang::English);
         let balanced = Some(Profile::Balanced);
@@ -690,6 +736,53 @@ mod tests {
         assert_eq!(en.status(&levels(None, None)), None);
         assert_eq!(fr.muted(), "muet");
         assert_eq!(en.muted(), "muted");
+    }
+
+    #[test]
+    fn the_battery_row_shows_the_time_left_on_battery_and_the_percentage_on_ac() {
+        let left = |b: Battery| b.value();
+        // On battery with an estimate: the time left, under an hour in
+        // minutes.
+        assert_eq!(
+            left(battery(82.0, Charge::Discharging, 220)),
+            RowValue::Left("3 h 40".into())
+        );
+        assert_eq!(
+            left(battery(14.0, Charge::Discharging, 45)),
+            RowValue::Left("45 min".into())
+        );
+        // No estimate yet: the percentage.
+        assert_eq!(
+            left(battery(60.4, Charge::Discharging, 0)),
+            RowValue::Percent(60)
+        );
+        let none = Battery {
+            left: None,
+            ..battery(60.0, Charge::Discharging, 0)
+        };
+        assert_eq!(left(none), RowValue::Percent(60));
+        // On AC, whatever UPower estimates: the percentage.
+        for charge in [Charge::Charging, Charge::Full, Charge::PluggedIn] {
+            assert_eq!(left(battery(46.0, charge, 70)), RowValue::Percent(46));
+        }
+    }
+
+    #[test]
+    fn the_profiles_mark_on_the_battery_none_for_balanced_nor_without_one() {
+        let b = Some(battery(82.0, Charge::Discharging, 220));
+        assert_eq!(
+            levels(b, Some(Profile::PowerSaver)).mark(),
+            Some(Mark::Leaf)
+        );
+        assert_eq!(
+            levels(b, Some(Profile::Performance)).mark(),
+            Some(Mark::Flame)
+        );
+        assert_eq!(levels(b, Some(Profile::Balanced)).mark(), None);
+        assert_eq!(levels(b, None).mark(), None);
+        // Without a battery: no mark anywhere in the bar.
+        assert_eq!(levels(None, Some(Profile::PowerSaver)).mark(), None);
+        assert_eq!(levels(None, Some(Profile::Performance)).mark(), None);
     }
 
     #[test]

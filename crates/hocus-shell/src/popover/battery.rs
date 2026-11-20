@@ -115,10 +115,10 @@ struct Layout {
 impl Layout {
     fn of(levels: &Snapshot, words: Words) -> Self {
         let room = RIGHT - LEFT;
-        let lines = |text: &str| kit::wrap(text, room, |t| kit::measure(t, NOTE, MANROPE));
+        let wrapped = |text: &str| kit::wrap(text, room, |t| kit::measure(t, NOTE, MANROPE));
         let mut end = HEADER_TOP + HEADER;
         let state = levels.battery.map_or_else(Vec::new, |b| {
-            crate::levels::draw::lines(&words.battery_line(&b), STATE_ROOM, |t| {
+            lines(&words.battery_line(&b), STATE_ROOM, |t| {
                 kit::measure(t, STATE, MANROPE)
             })
         });
@@ -148,7 +148,7 @@ impl Layout {
                 .map(|why| words.degraded(why));
             for note in missing.into_iter().chain(degraded) {
                 let top = end + GAP;
-                let note = lines(note);
+                let note = wrapped(note);
                 end = top + note.len() as f32 * NOTE * NOTE_LINE;
                 notes.push((top, note));
             }
@@ -537,6 +537,23 @@ fn handle(message: Msg) {
     super::refit(super::Item::Battery);
 }
 
+/// The state's line in lines that fit in `fits` px as `width` measures
+/// them: broken between its parts (" · "), never inside one; a part too
+/// wide alone keeps its own line.
+fn lines(text: &str, fits: f32, mut width: impl FnMut(&str) -> f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for part in text.split(" · ") {
+        match lines.last_mut() {
+            Some(line) if width(&format!("{line} · {part}")) <= fits => {
+                line.push_str(" · ");
+                line.push_str(part);
+            }
+            _ => lines.push(part.to_owned()),
+        }
+    }
+    lines
+}
+
 /// A mode's icon, 18 px, from the mockup's SVGs: a leaf, scales, a bolt.
 fn mode_icon(f: &mut Frame, at: Point, profile: Profile, colour: Color) {
     let s = ICON / 24.0;
@@ -594,6 +611,22 @@ fn mode_icon(f: &mut Frame, at: Point, profile: Profile, colour: Color) {
 mod tests {
     use super::*;
     use crate::levels::model::{Charge, Degraded, Profiles};
+
+    #[test]
+    fn a_long_state_line_breaks_between_its_parts() {
+        // Five pixels a character.
+        let width = |t: &str| t.chars().count() as f32 * 5.0;
+        assert_eq!(
+            lines("En charge · plein dans 1 h 10", 196.0, width),
+            ["En charge · plein dans 1 h 10"]
+        );
+        assert_eq!(
+            lines("25 min restantes · branche le chargeur", 120.0, width),
+            ["25 min restantes", "branche le chargeur"]
+        );
+        assert_eq!(lines("a · b", 1.0, width), ["a", "b"]);
+        assert_eq!(lines("Sur batterie", 196.0, width), ["Sur batterie"]);
+    }
 
     fn levels(battery: Option<f32>, profiles: Profiles) -> Snapshot {
         Snapshot {

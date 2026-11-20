@@ -41,7 +41,7 @@ const OUTPUTS: [FakeSink; 3] = [
 /// On a 1920×1080 screen, the full bar's levels' surface, and the sound's
 /// row's middle (as tests/popover.rs).
 const LEVELS: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
-const ROW: (f64, f64) = (1800.0, (LEVELS.y + 57) as f64);
+const ROW: (f64, f64) = (1800.0, (LEVELS.y + 85) as f64);
 
 fn ready() -> Option<std::path::PathBuf> {
     let shell = shell_program();
