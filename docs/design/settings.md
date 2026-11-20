@@ -175,7 +175,18 @@ couvercle, le bouton d'alimentation et l'économie d'énergie."):
    inert, and the automatic saver and its slider inert, its line "Elle
    passe par les modes : sans eux, rien à allumer.". Without a battery,
    the mode alone.
-6. **PLUS TARD**: "Limiter la charge à 80 %", inert, its amber chip.
+6. **BATTERIE** (with a battery; issue #896, the approved mockup's
+   section): "Limiter la charge à 80 %", its line "La batterie s'use
+   beaucoup moins vite quand l'ordinateur reste souvent branché", then
+   "Charger à 100 % une fois", its line "Pour une journée loin d'une
+   prise ; la limite revient une fois débranché" and its button "Charger
+   à 100 %" (inert while the limit is off; lifted, its line "Limite levée :
+   la batterie charge jusqu'à 100 %, et la limite revient une fois
+   débranché" and the button inert). When no battery has the threshold
+   (`charge_control_end_threshold` in `/sys/class/power_supply`,
+   `HOCUS_POWER_SUPPLY_DIR` in tests), the switch's row is greyed whole
+   with "Ce portable ne permet pas de limiter sa charge" and the button's
+   row is not there.
 
 The keys:
 
@@ -189,6 +200,25 @@ The keys:
 | Couvercle fermé | `[power] lid` (`suspend`, `lock`, `screen-off`, `nothing`) | |
 | Rester allumé avec un écran branché | `[power] lid-ignored-when-docked` | |
 | Bouton d'alimentation | `[power] power-button` (`ask`, `suspend`, `power-off`, `nothing`) | |
+| Limiter la charge à 80 % | `[power] charge-limit` (`false`) | |
+
+**The charge limit** (#896) is the battery's own threshold, kept by its
+firmware: the compositor sets `charge_control_end_threshold` to 80 while
+`[power] charge-limit` is on, 100 when it goes off, as the session starts
+and as the file changes, through the package's helper
+(`pkexec /usr/libexec/hocuspanda/charge-limit 80|100`, packaging/README.md;
+crate `hocus-charge`); where the firmware refuses an end above its start
+threshold, the start goes to 75 first (95 with 100, so that a battery at
+80 % charges). A value the batteries hold already is not written again.
+Only on a virtual terminal (the session's battery is the machine's), or
+with a helper given (`HOCUS_CHARGE_HELPER`, run as itself; the tests' fake
+sysfs). "Charger à 100 %" asks the compositor on the Settings' line
+(`charge-full-once`): 100 % until UPower says the machine is on battery,
+then 80 % again; the lift is kept in `$XDG_STATE_HOME/hocuspanda/
+charge-lifted` meanwhile, so a restart keeps it, and the line says
+`{"charge": {"lifted": …}}` back. The shell is told the limit that holds
+(`ToShell::ChargeLimit`): the bar's battery gauge marks 80 %, and its
+popover says "Branché, limité à 80 %" (bar.md, 3.7).
 | Économie d'énergie automatique | `[power] auto-saver` | |
 | Sous ce niveau de batterie | `[power] auto-saver-below` (5 to 50) | |
 | Mode d'énergie | power-profiles-daemon's `ActiveProfile`, not the file | |

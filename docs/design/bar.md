@@ -775,7 +775,9 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   1.1 lines) over its line (13.5 px, 1 px apart): "3 h 40 restantes" /
   "3 h 40 left", "En charge · plein dans 1 h 10" / "Charging · full in 1 h
   10", "Branché, plein" / "Plugged in, full", "Branché, ne charge pas" /
-  "Plugged in, not charging" (a charge limit), "Sur batterie" / "On
+  "Plugged in, not charging" (a charge limit), "Branché, limité à 80 %" /
+  "Plugged in, limited to 80 %" while the desktop's own limit holds it
+  there (#896), "Sur batterie" / "On
   battery" and "En charge" / "Charging" without an estimate; at 10 % or
   less "· branche le chargeur" / "· plug in the charger" after it, the
   level and the line in `#F7B98A`, at 20 % or less in `#F5C46E`; too long
@@ -1753,6 +1755,13 @@ not part of the product.
   battery; the mini sign's bolt and colours; the keyboard; nothing drawn
   at rest, popovers closed or open; a hover drawing the popover's
   rectangle alone, a battery's change the levels and the popover only.
+- **The charge limit** (#896, docs/design/settings.md "Énergie"): while
+  the desktop's limit holds (`ToShell::ChargeLimit`, `Some(80)`), the
+  battery's gauge carries a 2 px mark across its track at 80 % (`text` at
+  70 %), and the popover's line says "Branché, limité à 80 %" / "Plugged
+  in, limited to 80 %" when the battery is held there (plugged in and not
+  charging, or full under 100 %). Lifted once, or off, neither. The status
+  line under the levels is unchanged.
 - **Not built**: other screens' brightness (DDC/CI, variant A); hiding the
   brightness when the laptop's panel is off (lid closed, an external
   screen alone); a link to the Settings; names for screen readers (§11).

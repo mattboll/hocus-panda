@@ -15,6 +15,8 @@ What the package of Hocuspanda holds, and how it is built.
 | `hocus-camera` | `/usr/bin` | The Hocuspanda camera: a PipeWire video source with the camera's effects, reading the real camera only while an application reads it, which the compositor starts from beside itself ([docs/design/camera.md](../docs/design/camera.md)) |
 | `hocus-voice` | `/usr/bin` | The Hocuspanda microphone: a PipeWire audio source with the voice's effects (DeepFilterNet's noise reduction models in it), reading the real microphone only while an application reads it, which the compositor starts from beside itself ([docs/design/voice.md](../docs/design/voice.md)) |
 | `hocus` | `/usr/bin` | What agents' hooks and scripts run to tell the bar their state ([docs/agents.md](../docs/agents.md)) |
+| `charge-limit` | `/usr/libexec/hocuspanda` | The battery's charge limit's helper (crate `hocus-charge`, binary `hocus-charge-limit`): `charge-limit 80` or `100`, nothing else, written into the system's batteries' `charge_control_end_threshold` (and its start where the firmware needs it) and no other file; the compositor runs it through pkexec ([docs/design/settings.md](../docs/design/settings.md), "Énergie") |
+| [`hocuspanda-charge-limit.policy`](hocuspanda-charge-limit.policy) | `/usr/share/polkit-1/actions/org.hocuspanda.charge-limit.policy` | polkit's action for that helper: the active local session runs it without a password, any other session is refused |
 | [`hocuspanda-session`](hocuspanda-session) | `/usr/bin` | What display managers run: once through the user's login shell, then `hocuspanda --session`; it ends when the compositor does, however it ends, so the display manager comes back |
 | [`hocuspanda.desktop`](hocuspanda.desktop) | `/usr/share/wayland-sessions` | Display managers (GDM, SDDM, greetd's greeters) offer the "Hocuspanda" session |
 | [`hocuspanda.portal`](hocuspanda.portal) | `/usr/share/xdg-desktop-portal/portals` | Screen sharing and the appearance: the desktop's portal backend, `org.freedesktop.impl.portal.ScreenCast` ([docs/design/sharing.md](../docs/design/sharing.md)) and `org.freedesktop.impl.portal.Settings` (`org.freedesktop.appearance`: the theme, the accent, the contrast; [docs/design/settings.md](../docs/design/settings.md)), which the compositor serves on the session bus |
@@ -33,7 +35,7 @@ On Debian or Ubuntu, with `dpkg-dev` and the build dependencies of the CI:
 
 ```sh
 scripts/prebuilt.sh                     # sherpa-onnx's libraries, checked (hocus-transcribe)
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice -p hocus-charge
 packaging/deb/build.sh                  # target/packages/hocuspanda_<version>-1_<arch>.deb
 packaging/deb/check.sh target/packages/hocuspanda_<version>-1_<arch>.deb   # it holds the files above, no others
 sudo apt install ./target/packages/hocuspanda_<version>-1_<arch>.deb
@@ -70,6 +72,22 @@ at boot; it never loads or builds the module itself. After installing
 module, the camera is on PipeWire only. A system that loads v4l2loopback
 with other options (another program's virtual camera) has no device
 labelled "Hocuspanda": PipeWire only there too.
+The battery's charge limit (Settings › Énergie, `[power] charge-limit`) is
+the battery's own threshold, `/sys/class/power_supply/BAT*/
+charge_control_end_threshold`, which only root writes. The compositor of
+a session on a virtual terminal runs `pkexec
+/usr/libexec/hocuspanda/charge-limit 80` (or `100`), which polkit allows
+the active local session without a password (`allow_active = yes`; any
+other, `no`); the package recommends `pkexec`. The helper takes one
+argument, `80` or `100`, reads no environment and no path, and writes
+only the batteries' thresholds. A udev rule handing the attribute to a
+group, or making it writable by all, was not chosen: sysfs attributes
+take no ACL (`uaccess` is for device nodes), so any local user or
+program could then set any value, 0 among them (a battery that never
+charges); the helper lets only the person at the computer choose, and
+only between 80 and 100. Without pkexec or polkit, or on a laptop whose
+battery has no threshold, the charge is not limited, and the Settings say
+so for the latter.
 The session starts the start-up applications itself (6.15): once the bar
 shows, once per session, the XDG autostart entries of
 `~/.config/autostart` and `/etc/xdg/autostart` (the user's file of a name

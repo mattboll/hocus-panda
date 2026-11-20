@@ -292,7 +292,7 @@ jobs:
         # checked against its SHA-256: its build downloads nothing.
         run: scripts/prebuilt.sh
       - name: Release build
-        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice
+        run: cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice -p hocus-charge
       - name: What whisper.cpp's shader generator said
         # It leaves out, without failing, each shader its compiler did not
         # make, and the link fails far from the cause (`matmul_*_cm1_data`
