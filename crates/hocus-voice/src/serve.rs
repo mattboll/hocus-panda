@@ -13,10 +13,17 @@
 //! - **The real microphone** is read while the source is, and only
 //!   then: a stream of this program's (`hocuspanda-voice-input`, not
 //!   autoconnected), linked by the program itself to the microphone's
-//!   first output port. The microphone: the session's default source
-//!   (the `default` metadata), unless it is this one; else the source of
-//!   highest `priority.session`. It is said to the compositor as it
-//!   changes, read or not (a meeting's transcription records it).
+//!   first output port, and linked again whenever that link goes: a
+//!   session manager makes a node's ports again when it sets them up
+//!   (WirePlumber does, for the stream, some time after it appears), and
+//!   the link goes with the ports it joined (#911). The microphone: the
+//!   session's default source (the `default` metadata), unless it is this
+//!   one; else the source of highest `priority.session`. Never one whose
+//!   jack is empty while another can be read: its device's route says so
+//!   (`available` no, as WirePlumber reads it to choose the default), and
+//!   the choice is made again when a jack is plugged in or pulled out. It
+//!   is said to the compositor as it changes, read or not (a meeting's
+//!   transcription records it).
 //! - **Each quantum** the microphone sends is made by the voice
 //!   ([`crate::effect::Voicer`]) on the real-time thread, into a queue the
 //!   source's own quantum takes from. The two run in the same cycle, in
@@ -29,7 +36,7 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::PathBuf,
     rc::{Rc, Weak},
     sync::{Arc, Mutex, PoisonError},
@@ -40,7 +47,7 @@ use hocus_link::voice::{
     VoiceLook,
 };
 use pipewire as pw;
-use pw::{properties::properties, spa, stream::StreamState};
+use pw::{properties::properties, proxy::ProxyT, spa, stream::StreamState};
 use spa::pod::Pod;
 
 use crate::{
@@ -84,13 +91,33 @@ enum Ev {
         id: u32,
         port: Port,
     },
-    /// A link, from the node out of which it goes to the one into which.
+    /// A link, from the node out of which it goes to the one into which,
+    /// and between which ports.
     Link {
         id: u32,
         from: u32,
         to: u32,
+        ports: (u32, u32),
     },
     Removed(u32),
+    /// An error PipeWire said about one of this program's objects.
+    Error {
+        proxy: u32,
+        message: String,
+    },
+    /// A microphone's place among its device's (`card.profile.device`),
+    /// which its device's routes name.
+    Place {
+        node: u32,
+        place: i32,
+    },
+    /// A route of a device, for the node at its `place`: whether something
+    /// can be heard there (a jack's route is not while it is empty).
+    Route {
+        device: u32,
+        place: i32,
+        available: bool,
+    },
     /// The `default` metadata's source: the chosen one or the one in use.
     Default {
         configured: bool,
@@ -106,6 +133,8 @@ struct Node {
     class: String,
     description: String,
     priority: i64,
+    /// Its device (`device.id`): a sound card's, else none.
+    device: Option<u32>,
 }
 
 impl Node {
@@ -120,8 +149,24 @@ impl Node {
 #[derive(Debug, Clone, Copy)]
 struct Port {
     node: u32,
+    /// Its place among its node's ports (`port.id`): the first channel's
+    /// is 0, whatever global id it was given.
+    index: u32,
     output: bool,
     monitor: bool,
+}
+
+/// A proxy kept to follow an object: a microphone's place, a device's
+/// routes.
+enum Watched {
+    Node {
+        _proxy: pw::node::Node,
+        _listener: pw::node::NodeListener,
+    },
+    Device {
+        _proxy: pw::device::Device,
+        _listener: pw::device::DeviceListener,
+    },
 }
 
 /// What both real-time callbacks share: the voice, and what it made that
@@ -173,8 +218,32 @@ struct In {
     _listener: pw::stream::StreamListener<()>,
     microphone: u32,
     node: Option<u32>,
-    link: Option<pw::link::Link>,
+    link: Option<MicLink>,
+    /// The links asked while it reads: a link refused or undone each
+    /// time it is made is not asked again without end.
+    asked: u32,
 }
+
+/// The link from the microphone's port to the stream's, as asked.
+struct MicLink {
+    proxy: pw::link::Link,
+    /// The microphone's port and the stream's.
+    ports: (u32, u32),
+    state: LinkState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkState {
+    /// Asked, not yet on the graph.
+    Asked,
+    /// On the graph, this global.
+    Made(u32),
+}
+
+/// The links asked for one reading of the microphone, at most: each
+/// setting up of its ports or the stream's undoes one, and makes the next
+/// one; a link undone as soon as it is made stops there.
+const MOST_LINKS: u32 = 16;
 
 struct State {
     core: pw::core::CoreRc,
@@ -189,6 +258,12 @@ struct State {
     nodes: BTreeMap<u32, Node>,
     ports: BTreeMap<u32, Port>,
     links: BTreeMap<u32, (u32, u32)>,
+    /// The microphones and sound cards followed, by global id.
+    watched: BTreeMap<u32, Watched>,
+    /// Each microphone's place among its device's.
+    places: BTreeMap<u32, i32>,
+    /// The routes nothing can be heard on: a device and a place.
+    empty: BTreeSet<(u32, i32)>,
     /// The source's node, once on the graph.
     node: Option<u32>,
     metadata: Option<(pw::metadata::Metadata, pw::metadata::MetadataListener)>,
@@ -220,6 +295,24 @@ impl Loop {
                 break;
             };
             state.handle(ev);
+        }
+    }
+
+    /// `global` followed: a node's place, a device's routes, the default
+    /// microphone.
+    fn watch(&self, global: &pw::registry::GlobalObject<&spa::utils::dict::DictRef>) {
+        let Ok(mut state) = self.state.try_borrow_mut() else {
+            tracing::warn!(
+                id = global.id,
+                "an object cannot be followed: the state is busy"
+            );
+            return;
+        };
+        match global.type_ {
+            pw::types::ObjectType::Node => state.watch_node(global),
+            pw::types::ObjectType::Device => state.watch_device(global),
+            pw::types::ObjectType::Metadata => state.watch_defaults(global),
+            _ => {}
         }
     }
 }
@@ -255,6 +348,9 @@ pub fn run(
             nodes: BTreeMap::new(),
             ports: BTreeMap::new(),
             links: BTreeMap::new(),
+            watched: BTreeMap::new(),
+            places: BTreeMap::new(),
+            empty: BTreeSet::new(),
             node: None,
             metadata: None,
             default: None,
@@ -279,15 +375,30 @@ pub fn run(
             };
             let get = |key: &str| props.get(key).unwrap_or_default().to_owned();
             match global.type_ {
-                pw::types::ObjectType::Node => shared.dispatch(Ev::Node {
-                    id: global.id,
-                    node: Node {
+                pw::types::ObjectType::Node => {
+                    let node = Node {
                         name: get("node.name"),
                         class: get("media.class"),
                         description: get("node.description"),
                         priority: get("priority.session").parse().unwrap_or(0),
-                    },
-                }),
+                        device: props.get("device.id").and_then(|n| n.parse().ok()),
+                    };
+                    // A sound card's: its place, which the registry does
+                    // not say, read from its own properties.
+                    let follow = node.microphone() && node.device.is_some();
+                    shared.dispatch(Ev::Node {
+                        id: global.id,
+                        node,
+                    });
+                    if follow {
+                        shared.watch(global);
+                    }
+                }
+                pw::types::ObjectType::Device
+                    if props.get("media.class") == Some("Audio/Device") =>
+                {
+                    shared.watch(global);
+                }
                 pw::types::ObjectType::Port => {
                     let Some(node) = props.get("node.id").and_then(|n| n.parse().ok()) else {
                         return;
@@ -296,6 +407,10 @@ pub fn run(
                         id: global.id,
                         port: Port {
                             node,
+                            index: props
+                                .get("port.id")
+                                .and_then(|n| n.parse().ok())
+                                .unwrap_or(u32::MAX),
                             output: props.get("port.direction") == Some("out"),
                             monitor: props.get("port.monitor") == Some("true"),
                         },
@@ -306,19 +421,22 @@ pub fn run(
                     if let (Some(from), Some(to)) =
                         (number("link.output.node"), number("link.input.node"))
                     {
+                        let ports = (
+                            number("link.output.port").unwrap_or(u32::MAX),
+                            number("link.input.port").unwrap_or(u32::MAX),
+                        );
                         shared.dispatch(Ev::Link {
                             id: global.id,
                             from,
                             to,
+                            ports,
                         });
                     }
                 }
                 pw::types::ObjectType::Metadata
                     if props.get("metadata.name") == Some("default") =>
                 {
-                    if let Ok(mut state) = shared.state.try_borrow_mut() {
-                        state.watch_defaults(global);
-                    }
+                    shared.watch(global);
                 }
                 _ => {}
             }
@@ -326,6 +444,20 @@ pub fn run(
         .global_remove(move |id| {
             if let Some(shared) = on_remove.upgrade() {
                 shared.dispatch(Ev::Removed(id));
+            }
+        })
+        .register();
+    // A link refused (a port gone meanwhile, formats that do not meet)
+    // comes as an error on the core, never as the call's result.
+    let on_error = Rc::downgrade(&shared);
+    let _errors = core
+        .add_listener_local()
+        .error(move |proxy, _, res, message| {
+            if let Some(shared) = on_error.upgrade() {
+                shared.dispatch(Ev::Error {
+                    proxy,
+                    message: format!("{message} ({res})"),
+                });
             }
         })
         .register();
@@ -479,6 +611,76 @@ impl State {
         self.metadata = Some((metadata, listener));
     }
 
+    /// A microphone of a sound card followed: its place among its
+    /// device's, which only its own properties say.
+    fn watch_node(&mut self, global: &pw::registry::GlobalObject<&spa::utils::dict::DictRef>) {
+        let proxy = match self.registry.bind::<pw::node::Node, _>(global) {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                tracing::warn!(%err, id = global.id, "a microphone's place cannot be read");
+                return;
+            }
+        };
+        let dispatch = self.dispatcher();
+        let node = global.id;
+        let listener = proxy
+            .add_listener_local()
+            .info(move |info| {
+                let place = info
+                    .props()
+                    .and_then(|p| p.get("card.profile.device"))
+                    .and_then(|n| n.parse().ok());
+                if let Some(place) = place {
+                    dispatch(Ev::Place { node, place });
+                }
+            })
+            .register();
+        self.watched.insert(
+            node,
+            Watched::Node {
+                _proxy: proxy,
+                _listener: listener,
+            },
+        );
+    }
+
+    /// A sound card followed: its routes, each time they change (a jack
+    /// plugged in or pulled out).
+    fn watch_device(&mut self, global: &pw::registry::GlobalObject<&spa::utils::dict::DictRef>) {
+        let proxy = match self.registry.bind::<pw::device::Device, _>(global) {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                tracing::warn!(%err, id = global.id, "a sound card's routes cannot be read");
+                return;
+            }
+        };
+        let dispatch = self.dispatcher();
+        let device = global.id;
+        let listener = proxy
+            .add_listener_local()
+            .param(move |_, kind, _, _, param| {
+                if kind != spa::param::ParamType::Route {
+                    return;
+                }
+                if let Some((place, available)) = param.and_then(route_of) {
+                    dispatch(Ev::Route {
+                        device,
+                        place,
+                        available,
+                    });
+                }
+            })
+            .register();
+        proxy.subscribe_params(&[spa::param::ParamType::Route]);
+        self.watched.insert(
+            device,
+            Watched::Device {
+                _proxy: proxy,
+                _listener: listener,
+            },
+        );
+    }
+
     /// The source on the graph.
     fn publish(&mut self) -> Result<(), pw::Error> {
         let stream = pw::stream::StreamRc::new(
@@ -574,8 +776,28 @@ impl State {
                 }
                 self.reading();
             }
-            Ev::Link { id, from, to } => {
+            Ev::Link {
+                id,
+                from,
+                to,
+                ports,
+            } => {
                 self.links.insert(id, (from, to));
+                if let Some(input) = &mut self.input
+                    && let Some(link) = &mut input.link
+                    && link.state == LinkState::Asked
+                    && link.ports == ports
+                    && from == input.microphone
+                    && Some(to) == input.node
+                {
+                    link.state = LinkState::Made(id);
+                    tracing::info!(
+                        microphone = input.microphone,
+                        node = to,
+                        ports = ?ports,
+                        "linked to the microphone"
+                    );
+                }
                 self.reading();
             }
             Ev::InState(new) => {
@@ -601,6 +823,9 @@ impl State {
             Ev::Removed(id) => {
                 self.nodes.remove(&id);
                 self.ports.remove(&id);
+                self.watched.remove(&id);
+                self.places.remove(&id);
+                self.empty.retain(|(device, _)| *device != id);
                 if self.links.remove(&id).is_some() {
                     self.reading();
                 }
@@ -608,7 +833,57 @@ impl State {
                     tracing::info!(id, "the microphone went");
                     self.stop_input();
                 }
+                if let Some(input) = &mut self.input
+                    && input
+                        .link
+                        .as_ref()
+                        .is_some_and(|l| l.state == LinkState::Made(id))
+                {
+                    tracing::info!(
+                        microphone = input.microphone,
+                        "the link to the microphone went"
+                    );
+                    input.link = None;
+                }
                 self.microphone_changed();
+                // A port gone, or the link: linked again to the ports there are.
+                self.link();
+            }
+            Ev::Error { proxy, message } => {
+                let ours = self.input.as_mut().and_then(|input| {
+                    let link = input.link.take_if(|l| l.proxy.upcast_ref().id() == proxy)?;
+                    Some((input.microphone, link.ports))
+                });
+                match ours {
+                    // Asked again when ports come or go.
+                    Some((microphone, ports)) => tracing::warn!(
+                        message,
+                        microphone,
+                        ports = ?ports,
+                        "the microphone could not be linked"
+                    ),
+                    None => tracing::debug!(proxy, message, "PipeWire said an error"),
+                }
+            }
+            Ev::Place { node, place } => {
+                if self.places.insert(node, place) != Some(place) {
+                    self.microphone_changed();
+                }
+            }
+            Ev::Route {
+                device,
+                place,
+                available,
+            } => {
+                let changed = if available {
+                    self.empty.remove(&(device, place))
+                } else {
+                    self.empty.insert((device, place))
+                };
+                if changed {
+                    tracing::info!(device, place, available, "a microphone's route");
+                    self.microphone_changed();
+                }
             }
             Ev::Default { configured, name } => {
                 if configured {
@@ -662,21 +937,20 @@ impl State {
         }
     }
 
-    /// The microphone to read: the default source unless it is this one,
-    /// else the one chosen, else the one of highest priority.
+    /// The microphone to read ([`choose`]).
     fn choose(&self) -> Option<u32> {
-        let mics = || self.nodes.iter().filter(|(_, n)| n.microphone());
-        let named = |name: &Option<String>| {
-            let name = name.as_deref()?;
-            mics().find(|(_, n)| n.name == name).map(|(id, _)| *id)
-        };
-        named(&self.default)
-            .or_else(|| named(&self.configured))
-            .or_else(|| {
-                mics()
-                    .max_by_key(|(id, n)| (n.priority, std::cmp::Reverse(**id)))
-                    .map(|(id, _)| *id)
-            })
+        choose(
+            &self.nodes,
+            self.default.as_deref(),
+            self.configured.as_deref(),
+            |id, node| {
+                let place = self.places.get(&id);
+                !node
+                    .device
+                    .zip(place.copied())
+                    .is_some_and(|route| self.empty.contains(&route))
+            },
+        )
     }
 
     /// The microphone it would read now said when it changed; read again
@@ -775,38 +1049,58 @@ impl State {
             microphone,
             node: None,
             link: None,
+            asked: 0,
         })
     }
 
-    /// The microphone's first output port linked to the
-    /// stream's input port, once both are on the graph.
+    /// The microphone's first output port linked to the stream's input
+    /// port, once both are on the graph; linked again when either is made
+    /// again (a session manager setting the node up) or the link goes.
     fn link(&mut self) {
         let Some(input) = &mut self.input else {
             return;
         };
-        if input.link.is_some() {
-            return;
-        }
         let Some(node) = input.node.filter(|n| *n != 0 && *n != u32::MAX) else {
             return;
         };
         // Its own ports first; a monitor's only when it has none (a null
-        // source's sound comes out of its monitor).
+        // source's sound comes out of its monitor). The first channel's.
         let find = |of: u32, output: bool| {
             let ports = || {
                 self.ports
                     .iter()
                     .filter(|(_, p)| p.node == of && p.output == output)
             };
+            let first = |(id, p): (&u32, &Port)| (p.index, *id);
             ports()
                 .filter(|(_, p)| !p.monitor)
-                .map(|(id, _)| *id)
+                .map(first)
                 .min()
-                .or_else(|| ports().map(|(id, _)| *id).min())
+                .or_else(|| ports().map(first).min())
+                .map(|(_, id)| id)
         };
         let (Some(from), Some(to)) = (find(input.microphone, true), find(node, false)) else {
+            // Its ports being made again: the link went with them.
+            input.link = None;
             return;
         };
+        if input.link.as_ref().is_some_and(|l| l.ports == (from, to)) {
+            return;
+        }
+        // To ports gone, or none yet.
+        input.link = None;
+        if input.asked >= MOST_LINKS {
+            if input.asked == MOST_LINKS {
+                tracing::warn!(
+                    microphone = input.microphone,
+                    asked = input.asked,
+                    "the microphone's link keeps going: no longer asked"
+                );
+                input.asked += 1;
+            }
+            return;
+        }
+        input.asked += 1;
         match self.core.create_object::<pw::link::Link>(
             "link-factory",
             &properties! {
@@ -816,13 +1110,18 @@ impl State {
                 *pw::keys::LINK_INPUT_PORT => to.to_string(),
             },
         ) {
-            Ok(link) => {
+            Ok(proxy) => {
                 tracing::debug!(
                     microphone = input.microphone,
                     node,
-                    "linked to the microphone"
+                    ports = ?(from, to),
+                    "a link to the microphone asked"
                 );
-                input.link = Some(link);
+                input.link = Some(MicLink {
+                    proxy,
+                    ports: (from, to),
+                    state: LinkState::Asked,
+                });
             }
             Err(err) => tracing::warn!(%err, "the microphone could not be linked"),
         }
@@ -844,6 +1143,48 @@ impl State {
         self.stop_input();
         lock(&self.engine).clear();
     }
+}
+
+/// The microphone to read: the default source unless it is this one, else
+/// the one chosen, else the one of highest priority; among those `heard`
+/// says something can be heard on (a jack's microphone is not while its
+/// jack is empty), unless none can.
+fn choose(
+    nodes: &BTreeMap<u32, Node>,
+    default: Option<&str>,
+    configured: Option<&str>,
+    heard: impl Fn(u32, &Node) -> bool,
+) -> Option<u32> {
+    let mics = || nodes.iter().filter(|(_, n)| n.microphone());
+    let any_heard = mics().any(|(id, n)| heard(*id, n));
+    let mics = || mics().filter(|(id, n)| !any_heard || heard(**id, n));
+    let named = |name: Option<&str>| {
+        let name = name?;
+        mics().find(|(_, n)| n.name == name).map(|(id, _)| *id)
+    };
+    named(default).or_else(|| named(configured)).or_else(|| {
+        mics()
+            .max_by_key(|(id, n)| (n.priority, std::cmp::Reverse(**id)))
+            .map(|(id, _)| *id)
+    })
+}
+
+/// A Route param's place (`device`) and whether something can be heard on
+/// it: all but `available` no (unknown is a built-in microphone's).
+fn route_of(param: &Pod) -> Option<(i32, bool)> {
+    let route = param.as_object().ok()?;
+    let place = route
+        .find_prop(spa::utils::Id(spa::sys::SPA_PARAM_ROUTE_device))?
+        .value()
+        .get_int()
+        .ok()?;
+    let available = route
+        .find_prop(spa::utils::Id(spa::sys::SPA_PARAM_ROUTE_available))
+        .and_then(|p| p.value().get_id().ok());
+    Some((
+        place,
+        available != Some(spa::utils::Id(spa::sys::SPA_PARAM_AVAILABILITY_no)),
+    ))
 }
 
 /// A metadata's JSON value's `name` (`{"name":"alsa_input…"}`).
@@ -870,6 +1211,80 @@ mod tests {
             Some("alsa_input.pci-0000_00_1f.3.analog-stereo")
         );
         assert_eq!(name_of("{}"), None);
+    }
+
+    fn mic(name: &str, priority: i64, device: Option<u32>) -> Node {
+        Node {
+            name: name.to_owned(),
+            class: "Audio/Source".to_owned(),
+            description: name.to_owned(),
+            priority,
+            device,
+        }
+    }
+
+    /// The laptop of #911: the Hocuspanda microphone made the default, the
+    /// headset's jack (priority 2000) empty, the built-in one (1648) heard.
+    fn laptop() -> BTreeMap<u32, Node> {
+        BTreeMap::from([
+            (55, mic("alsa_input.HiFi__Mic1__source", 1648, Some(49))),
+            (80, mic("alsa_input.HiFi__Mic2__source", 2000, Some(49))),
+            (90, mic(VOICE_NODE, 100, None)),
+        ])
+    }
+
+    #[test]
+    fn a_microphone_whose_jack_is_empty_is_never_read_while_another_is_heard() {
+        let nodes = laptop();
+        let voice = Some(VOICE_NODE);
+        // The headset's jack empty: the built-in microphone, though lower.
+        let jack_empty = |id: u32, _: &Node| id != 80;
+        assert_eq!(choose(&nodes, voice, voice, jack_empty), Some(55));
+        // Not even when it is the one chosen.
+        let chosen = Some("alsa_input.HiFi__Mic2__source");
+        assert_eq!(choose(&nodes, voice, chosen, jack_empty), Some(55));
+        // A headset plugged in: the highest again.
+        assert_eq!(choose(&nodes, voice, voice, |_, _| true), Some(80));
+        // Nothing heard anywhere: the highest all the same, never none.
+        assert_eq!(choose(&nodes, voice, voice, |_, _| false), Some(80));
+        // The session's default, when it is a microphone, as before.
+        let default = Some("alsa_input.HiFi__Mic1__source");
+        assert_eq!(choose(&nodes, default, voice, |_, _| true), Some(55));
+    }
+
+    #[test]
+    fn a_route_says_its_place_and_whether_it_is_heard() {
+        use spa::pod::{Object, Property, Value, serialize::PodSerializer};
+        let route = |available: u32| {
+            let object = Object {
+                type_: spa::sys::SPA_TYPE_OBJECT_ParamRoute,
+                id: spa::sys::SPA_PARAM_Route,
+                properties: vec![
+                    Property::new(spa::sys::SPA_PARAM_ROUTE_index, Value::Int(3)),
+                    Property::new(spa::sys::SPA_PARAM_ROUTE_device, Value::Int(2)),
+                    Property::new(
+                        spa::sys::SPA_PARAM_ROUTE_available,
+                        Value::Id(spa::utils::Id(available)),
+                    ),
+                ],
+            };
+            PodSerializer::serialize(std::io::Cursor::new(Vec::new()), &Value::Object(object))
+                .map(|(cursor, _)| cursor.into_inner())
+                .unwrap_or_default()
+        };
+        let read = |bytes: Vec<u8>| Pod::from_bytes(&bytes).and_then(route_of);
+        assert_eq!(
+            read(route(spa::sys::SPA_PARAM_AVAILABILITY_no)),
+            Some((2, false))
+        );
+        assert_eq!(
+            read(route(spa::sys::SPA_PARAM_AVAILABILITY_unknown)),
+            Some((2, true))
+        );
+        assert_eq!(
+            read(route(spa::sys::SPA_PARAM_AVAILABILITY_yes)),
+            Some((2, true))
+        );
     }
 
     /// The source's quantum before the microphone's in a cycle takes the

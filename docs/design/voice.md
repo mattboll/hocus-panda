@@ -41,11 +41,21 @@ issue's revised comment (2026-11-17), "The window (all lots)" and
   reads the real microphone: a stream of
   its own (`hocuspanda-voice-input`, not autoconnected, of the source's
   `node.link-group`, so that a session manager never links one to the
-  other), which it links itself to the microphone's first output port.
+  other), which it links itself to the microphone's first output port
+  (its first channel's, `port.id` 0). It links them again whenever the
+  link goes: a session manager sets a node's ports up again once it
+  appears (WirePlumber does, a few milliseconds after the stream is
+  linked: its ports made again, a monitor port with them), and a link
+  goes with the ports it joined (#911; the log says each link made at
+  info). A link undone each time it is made is asked 16 times at most
+  a reading, then a warning.
   The microphone: the session's default source (the `default`
   metadata) unless it is the Hocuspanda one, else the one chosen
   (`default.configured.audio.source`), else the source of highest
-  priority. The last reader gone, the microphone's stream goes.
+  priority; never one whose jack is empty (its sound card's route says
+  `available` no, as WirePlumber reads it) while another can be heard,
+  and chosen again when a jack is plugged in or pulled out (#911). The
+  last reader gone, the microphone's stream goes.
 - **Each quantum** (256 samples asked, 5.3 ms) the microphone sends is
   made by the voice on PipeWire's real-time thread into a queue the
   source's quantum takes from. The two run in the same cycle in either
