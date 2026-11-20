@@ -1566,6 +1566,8 @@ impl State {
         moving |= self.tick_opacity(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
+        // A wallpaper's picture fading into the next (#894).
+        self.tick_wallpaper_fades(now);
         // The effects that play on their own, at most 60 frames a second
         // whatever the screens' refresh (#815): between two, they ask for
         // none; each asks for the screens it moves on alone (#826).

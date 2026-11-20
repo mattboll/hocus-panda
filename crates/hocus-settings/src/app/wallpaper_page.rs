@@ -1,6 +1,7 @@
 //! The "Fond d'écran" page (6.3, variant A, the gallery): the preview of
 //! the screens, the gallery of backgrounds, the fit and the plain colour,
-//! the lock screen's choices.
+//! the lock screen's choices; for a folder's pictures and a day's and a
+//! night's (#894), their groups (`wallpaper_changing.rs`).
 //!
 //! What it writes goes through the file's worker as any page's: a tile, a
 //! screen's own, the per-screen switch and the lock's picture as keys the
@@ -32,13 +33,15 @@ use super::{
 use crate::{
     model::{Icon, SectionId, Value},
     store::{KeyEdit, Slot},
-    wallpaper::{self as model, Heard, Mine, Picked, Thumb, Thumbs},
+    wallpaper::{self as model, For, Heard, Mine, Picked, Thumb, Thumbs},
 };
 
+pub use super::wallpaper_changing::When;
+
 /// A tile's thumbnail, in pixels (16:10).
-const TILE: (u32, u32) = (256, 160);
+pub(super) const TILE: (u32, u32) = (256, 160);
 /// A tile's thumbnail on the page, logical pixels high.
-const TILE_HIGH: f32 = 76.0;
+pub(super) const TILE_HIGH: f32 = 76.0;
 /// The preview's drawing area.
 const AREA: (f32, f32) = (702.0, 200.0);
 /// The lock's drawing.
@@ -50,7 +53,7 @@ const COLUMNS: usize = 5;
 #[derive(Debug, Default)]
 pub struct State {
     worker: Option<model::Worker>,
-    thumbs: Thumbs,
+    pub(super) thumbs: Thumbs,
     mine: Vec<Mine>,
     listed: bool,
     /// The screen the gallery applies to, with per-screen.
@@ -61,6 +64,14 @@ pub struct State {
     lock_menu: bool,
     /// The gallery's tile that holds the keyboard's ring.
     ring: usize,
+    /// What the compositor says each screen shows now, by name (#894).
+    pub(super) now: Vec<(String, String)>,
+    /// The target's folder counted: its path, its pictures' count, its
+    /// first two.
+    pub(super) counted: Option<(PathBuf, usize, Vec<PathBuf>)>,
+    pub(super) count_asked: Option<PathBuf>,
+    /// Day's or night's picture's list, open.
+    pub(super) slot_menu: Option<When>,
 }
 
 /// The page's own messages.
@@ -75,6 +86,13 @@ pub enum Msg {
     Lock(&'static str),
     LockMenu,
     LockPicture(Tile),
+    /// "Changer de dossier…" (#894).
+    ChangeFolder,
+    /// "Suivante".
+    Next,
+    /// Day's or night's picture's list.
+    SlotMenu(When),
+    SlotPicture(When, Tile),
 }
 
 /// A tile of the gallery.
@@ -84,26 +102,38 @@ pub enum Tile {
     /// A wallpaper that moves (#433), its tile its still picture.
     Moving(Moving),
     Plain,
+    /// A folder's pictures in turn, day and night's (#894).
+    Folder,
+    DayNight,
     Mine(String),
     Choose,
 }
 
 impl Tile {
-    fn picture(&self) -> Option<Picture> {
+    pub(super) fn picture(&self) -> Option<Picture> {
         match self {
             Self::Builtin(b) => Some(Picture::Builtin(*b)),
             Self::Moving(m) => Some(Picture::Moving(*m)),
             Self::Plain => Some(Picture::Plain),
+            Self::Folder => Some(Picture::Folder),
+            Self::DayNight => Some(Picture::DayNight),
             Self::Mine(word) => Some(Picture::File(word.clone())),
             Self::Choose => None,
         }
     }
 
-    fn id(&self, mine: &[Mine]) -> String {
+    /// It changes by itself: not a picture for the lock, a day or a night.
+    pub(super) fn changes(&self) -> bool {
+        matches!(self, Self::Folder | Self::DayNight)
+    }
+
+    pub(super) fn id(&self, mine: &[Mine]) -> String {
         match self {
             Self::Builtin(b) => format!("tile:{}", b.word()),
             Self::Moving(m) => format!("tile:{}", m.word()),
             Self::Plain => "tile:plain".to_owned(),
+            Self::Folder => "tile:folder".to_owned(),
+            Self::DayNight => "tile:day-night".to_owned(),
             Self::Mine(word) => format!(
                 "tile:mine:{}",
                 mine.iter()
@@ -123,13 +153,18 @@ pub enum Stop {
     Gallery,
     Lock,
     LockPicture,
+    /// "Changer de dossier…", "Suivante", the day's and the night's
+    /// pictures (#894).
+    ChangeFolder,
+    Next,
+    Slot(When),
 }
 
 /// A screen as the preview draws it.
 #[derive(Debug, Clone)]
-struct Drawn {
-    name: String,
-    title: String,
+pub(super) struct Drawn {
+    pub(super) name: String,
+    pub(super) title: String,
     /// Its logical size, and whether the bar is on it.
     size: (f32, f32),
     primary: bool,
@@ -137,7 +172,7 @@ struct Drawn {
 }
 
 /// `a` and `b` name the same picture (a path with or without its `~/`).
-fn same(a: &Picture, b: &Picture) -> bool {
+pub(super) fn same(a: &Picture, b: &Picture) -> bool {
     match (a, b) {
         (Picture::File(_), Picture::File(_)) => a.path() == b.path(),
         _ => a == b,
@@ -145,7 +180,7 @@ fn same(a: &Picture, b: &Picture) -> bool {
 }
 
 /// A word as a TOML string.
-fn quoted(word: &str) -> String {
+pub(super) fn quoted(word: &str) -> String {
     toml_edit::Value::from(word).to_string().trim().to_owned()
 }
 
@@ -162,11 +197,11 @@ impl App {
         });
     }
 
-    fn wallpaper_shows(&self) -> bool {
+    pub(super) fn wallpaper_shows(&self) -> bool {
         self.page == Page::Section(SectionId::Wallpaper)
     }
 
-    fn file(&self) -> model::File {
+    pub(super) fn file(&self) -> model::File {
         self.snapshot
             .as_ref()
             .map(|s| s.wallpaper.as_ref().clone())
@@ -201,7 +236,7 @@ impl App {
 
     /// The screen the gallery applies to, with per-screen: the one
     /// chosen, else the primary.
-    fn wallpaper_target(&self) -> Option<Drawn> {
+    pub(super) fn wallpaper_target(&self) -> Option<Drawn> {
         if !self.file().per_screen {
             return None;
         }
@@ -230,7 +265,7 @@ impl App {
         }
     }
 
-    fn target_picture(&self) -> Picture {
+    pub(super) fn target_picture(&self) -> Picture {
         self.target_word()
             .and_then(|p| Picture::of(&p).ok())
             .unwrap_or_default()
@@ -246,7 +281,7 @@ impl App {
             .map(|s| s.name)
             .or_else(|| self.snapshot.as_ref()?.primary_output.clone())
             .unwrap_or_default();
-        file.look(file.picture_of(&primary))
+        file.look(self.shown_picture(&primary))
     }
 
     /// The accent `accent = "wallpaper"` takes: the primary screen's.
@@ -292,6 +327,8 @@ impl App {
                 soft: false,
             });
         }
+        // A folder's pictures counted (#894).
+        self.changing_want();
         if self.wallpaper_shows() && self.snapshot.is_some() {
             if !self.wallpaper.listed {
                 self.wallpaper.listed = worker.ask(model::Ask::List);
@@ -316,27 +353,23 @@ impl App {
         let mut out: Vec<Thumb> = self
             .wallpaper_tiles()
             .iter()
+            .filter(|tile| !tile.changes())
             .filter_map(|tile| Some(self.tile_thumb(&tile.picture()?)))
             .collect();
+        // The folder's tile and day and night's (#894): their pictures.
+        out.extend(self.changing_thumbs());
         for (screen, size) in self.preview_sizes() {
             out.push(Thumb {
-                look: file.look(file.picture_of(&screen.name)),
+                look: file.look(self.shown_picture(&screen.name)),
                 size: ((size.0 * 2.0).round() as u32, (size.1 * 2.0).round() as u32),
                 soft: false,
             });
         }
         out.push(self.lock_thumb());
-        if file.lock() == LockLook::Picture {
-            for tile in self.wallpaper_tiles() {
-                if let Some(picture) = tile.picture() {
-                    out.push(self.tile_thumb(&picture));
-                }
-            }
-        }
         out
     }
 
-    fn tile_thumb(&self, picture: &Picture) -> Thumb {
+    pub(super) fn tile_thumb(&self, picture: &Picture) -> Thumb {
         let file = self.file();
         Thumb {
             look: Look {
@@ -363,13 +396,15 @@ impl App {
     }
 
     /// The gallery's tiles, in order.
-    fn wallpaper_tiles(&self) -> Vec<Tile> {
+    pub(super) fn wallpaper_tiles(&self) -> Vec<Tile> {
         let mut tiles: Vec<Tile> = model::BUILTIN_TILES
             .iter()
             .map(|b| Tile::Builtin(*b))
             .collect();
         tiles.extend(model::MOVING_TILES.iter().map(|m| Tile::Moving(*m)));
         tiles.push(Tile::Plain);
+        tiles.push(Tile::Folder);
+        tiles.push(Tile::DayNight);
         tiles.extend(
             self.wallpaper
                 .mine
@@ -381,7 +416,7 @@ impl App {
     }
 
     /// The preview's screens at their drawn sizes.
-    fn preview_sizes(&self) -> Vec<(Drawn, (f32, f32))> {
+    pub(super) fn preview_sizes(&self) -> Vec<(Drawn, (f32, f32))> {
         let screens = self.wallpaper_screens();
         let total: f32 = screens.iter().map(|s| s.size.0).sum::<f32>()
             + 16.0 / 0.094 * (screens.len().saturating_sub(1)) as f32;
@@ -411,12 +446,14 @@ impl App {
         }
         out.push(Control::Wallpaper(Stop::Gallery));
         let picture = self.target_picture();
-        if matches!(picture, Picture::File(_)) {
+        if matches!(picture, Picture::File(_) | Picture::Folder) {
             out.push(self.setting_control(model::FIT));
         }
         if self.colour_row_shows() {
             out.push(self.setting_control(model::COLOR));
         }
+        // A folder's or day and night's (#894).
+        out.extend(self.changing_controls());
         out.push(self.setting_control(model::ANIMATE));
         out.push(self.setting_control(model::ON_BATTERY));
         out.push(Control::Wallpaper(Stop::Lock));
@@ -426,7 +463,7 @@ impl App {
         out
     }
 
-    fn setting_control(&self, id: &str) -> Control {
+    pub(super) fn setting_control(&self, id: &str) -> Control {
         let setting = model::settings().iter().find(|s| s.id == id);
         match setting {
             Some(s) => Control::Setting(Slot::of(s, self.source)),
@@ -437,12 +474,12 @@ impl App {
     fn colour_row_shows(&self) -> bool {
         match self.target_picture() {
             Picture::Plain => true,
-            Picture::File(_) => self.file().fit() != Fit::Cover,
-            Picture::Builtin(_) | Picture::Moving(_) => false,
+            Picture::File(_) | Picture::Folder => self.file().fit() != Fit::Cover,
+            Picture::Builtin(_) | Picture::Moving(_) | Picture::DayNight => false,
         }
     }
 
-    fn focused_stop(&self, stop: &Stop) -> bool {
+    pub(super) fn focused_stop(&self, stop: &Stop) -> bool {
         matches!(self.focus, super::Focus::Control(i)
             if self.controls().get(i) == Some(&Control::Wallpaper(stop.clone())))
     }
@@ -462,7 +499,8 @@ impl App {
                     self.toast(text, ToastAction::None, super::TOAST)
                 }
             }
-            Msg::Tile(Tile::Choose) => self.wallpaper_pick(false),
+            Msg::Tile(Tile::Choose) => self.wallpaper_pick(For::Desktop),
+            Msg::Tile(Tile::Folder) => self.wallpaper_choose_folder(),
             Msg::Tile(tile) => {
                 let Some(picture) = tile.picture() else {
                     return iced::Task::none();
@@ -488,7 +526,7 @@ impl App {
             }
             Msg::LockPicture(Tile::Choose) => {
                 self.wallpaper.lock_menu = false;
-                self.wallpaper_pick(true)
+                self.wallpaper_pick(For::Lock)
             }
             Msg::LockPicture(tile) => {
                 self.wallpaper.lock_menu = false;
@@ -496,6 +534,26 @@ impl App {
                     return iced::Task::none();
                 };
                 self.wallpaper_lock_picture(&picture);
+                iced::Task::none()
+            }
+            Msg::ChangeFolder => self.wallpaper_pick_folder(),
+            Msg::Next => self.wallpaper_next(),
+            Msg::SlotMenu(when) => {
+                self.wallpaper.slot_menu = match self.wallpaper.slot_menu {
+                    Some(open) if open == when => None,
+                    _ => Some(when),
+                };
+                iced::Task::none()
+            }
+            Msg::SlotPicture(when, Tile::Choose) => {
+                self.wallpaper.slot_menu = None;
+                self.wallpaper_pick(when.to())
+            }
+            Msg::SlotPicture(when, tile) => {
+                self.wallpaper.slot_menu = None;
+                if let Some(picture) = tile.picture() {
+                    self.wallpaper_slot_picture(when, &picture);
+                }
                 iced::Task::none()
             }
         }
@@ -532,7 +590,18 @@ impl App {
                 self.wallpaper.mine = mine;
                 iced::Task::none()
             }
-            Heard::Picked { lock, picked } => self.wallpaper_picked(lock, picked),
+            Heard::Picked { to, picked } => self.wallpaper_picked(to, picked),
+            Heard::PickedFolder(chosen) => self.wallpaper_folder_picked(chosen),
+            Heard::Counted {
+                folder,
+                count,
+                first,
+            } => {
+                if self.wallpaper.count_asked.as_ref() == Some(&folder) {
+                    self.wallpaper.counted = Some((folder, count, first));
+                }
+                iced::Task::none()
+            }
             Heard::Removed { path, bytes } => {
                 let name = path
                     .file_name()
@@ -607,7 +676,7 @@ impl App {
     }
 
     /// A background chosen for the gallery's target.
-    fn wallpaper_choose(&mut self, picture: &Picture) -> iced::Task<Message> {
+    pub(super) fn wallpaper_choose(&mut self, picture: &Picture) -> iced::Task<Message> {
         let lang = self.lang;
         let before = self.target_picture();
         if same(&before, picture) && self.wallpaper_warning().is_none() {
@@ -668,20 +737,25 @@ impl App {
     }
 
     /// "Choisir une image…": the file chooser, on the page's thread.
-    fn wallpaper_pick(&mut self, lock: bool) -> iced::Task<Message> {
+    fn wallpaper_pick(&mut self, to: For) -> iced::Task<Message> {
         if !self.writable() {
             return iced::Task::none();
         }
         if let Some(worker) = &self.wallpaper.worker {
             worker.ask(model::Ask::Pick {
-                lock,
+                to,
                 lang: self.lang,
             });
         }
         iced::Task::none()
     }
 
-    fn wallpaper_picked(&mut self, lock: bool, picked: Picked) -> iced::Task<Message> {
+    /// The page's thread, to ask it.
+    pub(super) fn wallpaper_worker(&self) -> Option<&model::Worker> {
+        self.wallpaper.worker.as_ref()
+    }
+
+    fn wallpaper_picked(&mut self, to: For, picked: Picked) -> iced::Task<Message> {
         let lang = self.lang;
         match picked {
             Picked::Copied { copy, name: _ } => {
@@ -689,11 +763,20 @@ impl App {
                 tracing::info!(copy = written, "the chosen picture is the background");
                 self.wallpaper.copied = Some(words::copied_to(lang, &written));
                 let picture = Picture::File(written);
-                if lock {
-                    self.wallpaper_lock_picture(&picture);
-                    iced::Task::none()
-                } else {
-                    self.wallpaper_choose(&picture)
+                match to {
+                    For::Lock => {
+                        self.wallpaper_lock_picture(&picture);
+                        iced::Task::none()
+                    }
+                    For::Desktop => self.wallpaper_choose(&picture),
+                    For::Day => {
+                        self.wallpaper_slot_picture(When::Day, &picture);
+                        iced::Task::none()
+                    }
+                    For::Night => {
+                        self.wallpaper_slot_picture(When::Night, &picture);
+                        iced::Task::none()
+                    }
                 }
             }
             Picked::Cancelled => iced::Task::none(),
@@ -725,6 +808,11 @@ impl App {
         let this = Picture::File(path.display().to_string());
         let mut used = vec![file.picture(), file.lock_picture()];
         used.extend(file.outputs.iter().filter_map(|(_, p)| Picture::of(p).ok()));
+        // Day and night's (#894), every screen's and each screen's own.
+        for changing in std::iter::once(&file.changing).chain(file.own.iter().map(|(_, c)| c)) {
+            used.push(changing.day());
+            used.push(changing.night());
+        }
         if used.iter().any(|p| same(p, &this)) {
             let text = words::is_still_in_use_choose_another(self.lang, &name);
             return self.toast(text, ToastAction::None, super::TOAST);
@@ -781,6 +869,13 @@ impl App {
             (Stop::LockPicture, Named::Space | Named::Enter) => {
                 self.wallpaper_update(Msg::LockMenu)
             }
+            (Stop::ChangeFolder, Named::Space | Named::Enter) => {
+                self.wallpaper_update(Msg::ChangeFolder)
+            }
+            (Stop::Next, Named::Space | Named::Enter) => self.wallpaper_update(Msg::Next),
+            (Stop::Slot(when), Named::Space | Named::Enter) => {
+                self.wallpaper_update(Msg::SlotMenu(*when))
+            }
             _ => iced::Task::none(),
         }
     }
@@ -815,12 +910,16 @@ impl App {
     ) -> El<'a> {
         page = page.push(self.preview_group());
         page = page.push(self.gallery_group());
+        // A folder's or day and night's (#894), under the gallery.
+        if let Some(group) = self.changing_group() {
+            page = page.push(group);
+        }
         page = page.push(self.animation_group());
         page = page.push(self.lock_group());
         container(page).id("page:wallpaper".to_owned()).into()
     }
 
-    fn thumb<'a>(&self, thumb: &Thumb, width: f32, height: f32) -> El<'a> {
+    pub(super) fn thumb<'a>(&self, thumb: &Thumb, width: f32, height: f32) -> El<'a> {
         match self.wallpaper.thumbs.drawn.get(thumb) {
             Some(handle) => image(handle.clone())
                 .width(width)
@@ -895,7 +994,7 @@ impl App {
         let target = self.wallpaper_target().map(|s| s.name);
         let mut screens = row![].spacing(16).align_y(Alignment::End);
         for (screen, (sw, sh)) in self.preview_sizes() {
-            let picture = file.picture_of(&screen.name);
+            let picture = self.shown_picture(&screen.name);
             let caption = if screen.plugged {
                 format!("{} · {}", screen.title, model::name_of(&picture, lang))
             } else {
@@ -1072,7 +1171,7 @@ impl App {
         let mut rows = column![];
         let mut any = false;
         let row_of = |id: &str| model::settings().iter().find(|s| s.id == id);
-        if matches!(current, Picture::File(_))
+        if matches!(current, Picture::File(_) | Picture::Folder)
             && let Some(setting) = row_of(model::FIT)
         {
             rows = rows.push(divided(any, self.row(setting, &controls)));
@@ -1102,10 +1201,13 @@ impl App {
             ),
             Tile::Moving(m) => (model::name_of(&Picture::Moving(*m), lang), true),
             Tile::Plain => (model::name_of(&Picture::Plain, lang), false),
+            Tile::Folder => (model::name_of(&Picture::Folder, lang), true),
+            Tile::DayNight => (model::name_of(&Picture::DayNight, lang), true),
             Tile::Mine(word) => (model::name_of(&Picture::File(word.clone()), lang), false),
             Tile::Choose => (words::CHOOSE_A_PICTURE.get(lang).to_owned(), false),
         };
         let thumbnail: El<'a> = match tile.picture() {
+            Some(_) if tile.changes() => self.changing_tile(tile),
             Some(picture) => {
                 let thumb = self.tile_thumb(&picture);
                 match self.wallpaper.thumbs.drawn.get(&thumb) {
@@ -1463,7 +1565,7 @@ impl App {
         let mut out = column![head].spacing(8);
         if self.wallpaper.lock_menu {
             let mut list = column![].spacing(2);
-            for tile in self.wallpaper_tiles() {
+            for tile in self.wallpaper_tiles().into_iter().filter(|t| !t.changes()) {
                 let words: El<'a> = match tile.picture() {
                     Some(picture) => {
                         let thumb = self.tile_thumb(&picture);
@@ -1576,7 +1678,7 @@ impl App {
     /// The colour's row: its line says what it fills.
     pub(super) fn colour_line(&self) -> &'static str {
         match self.target_picture() {
-            Picture::File(_) => self.say(words::AROUND_THE_PICTURE),
+            Picture::File(_) | Picture::Folder => self.say(words::AROUND_THE_PICTURE),
             _ => self.say(words::THE_WHOLE_BACKGROUND),
         }
     }
@@ -1604,7 +1706,11 @@ impl App {
                 serde_json::json!({
                     "id": tile.id(&self.wallpaper.mine),
                     "chosen": warning.is_none() && picture.as_ref().is_some_and(|p| same(p, &current)),
-                    "drawn": picture.is_some_and(|p| self.wallpaper.thumbs.drawn.contains_key(&self.tile_thumb(&p))),
+                    "drawn": if tile.changes() {
+                        self.changing_tile_drawn(tile)
+                    } else {
+                        picture.is_some_and(|p| self.wallpaper.thumbs.drawn.contains_key(&self.tile_thumb(&p)))
+                    },
                 })
             })
             .collect();
@@ -1615,7 +1721,8 @@ impl App {
                 serde_json::json!({
                     "name": s.name,
                     "picture": file.picture_of(&s.name).word(),
-                    "caption": format!("{} · {}", s.title, model::name_of(&file.picture_of(&s.name), lang)),
+                    "shows": self.shown_picture(&s.name).word(),
+                    "caption": format!("{} · {}", s.title, model::name_of(&self.shown_picture(&s.name), lang)),
                 })
             })
             .collect();
@@ -1626,7 +1733,7 @@ impl App {
             "picture": current.word(),
             "tiles": tiles,
             "screens": screens,
-            "fit_row": matches!(current, Picture::File(_)),
+            "fit_row": matches!(current, Picture::File(_) | Picture::Folder),
             "colour_row": self.colour_row_shows(),
             "lock": file.lock().word(),
             "lock_picture": file.lock_picture().word(),
@@ -1636,6 +1743,7 @@ impl App {
             "copied": self.wallpaper.copied,
             "mine": self.wallpaper.mine.iter().map(|m| m.name.clone()).collect::<Vec<_>>(),
             "accent": format!("{:02x}{:02x}{:02x}", accent[0], accent[1], accent[2]),
+            "changing": self.changing_shown(),
         })
     }
 }

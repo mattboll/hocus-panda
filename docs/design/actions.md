@@ -131,6 +131,8 @@ rebound key shows rebound and an unbound action shows none.
   clipboard's history, the notifications, do not disturb (a switch), the
   calendar, adding a task, the sound, the Wi-Fi, the volume keys, the
   bar's form.
+- The screens: the wallpaper's next picture, while it is a folder's
+  (#894, "Image suivante", Écrans).
 - The agents: go to the agent that waits; go to an agent… (a step).
 - Accessibility: the magnifier's three, the screen reader, high contrast
   and reduced motion (switches), the keyboard into the bar.

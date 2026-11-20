@@ -10,6 +10,11 @@
 //! orientation applied) is scaled and cropped to the screen's pixels for
 //! its fit, the decoded source dropped once scaled. A picture that does not
 //! read draws Nuit, and says why.
+//!
+//! Two backgrounds change by themselves (#894): `"folder"`, a folder's
+//! pictures in turn, and `"day-night"`, one picture by day and another by
+//! night. The compositor says which picture they show now: what is drawn
+//! and told is always a picture, never them (drawn as they are, Nuit).
 
 use std::{
     fmt,
@@ -38,6 +43,12 @@ pub enum Picture {
     Plain,
     /// A picture's path, as the file writes it.
     File(String),
+    /// A folder's pictures in turn (#894): `[wallpaper] folder`, or a
+    /// screen's `wallpaper-folder`.
+    Folder,
+    /// One picture by day, another by night (#894): `[wallpaper] day`
+    /// and `night`, or a screen's `wallpaper-day` and `wallpaper-night`.
+    DayNight,
 }
 
 impl Default for Picture {
@@ -49,8 +60,11 @@ impl Default for Picture {
 impl Picture {
     /// What the file's text says; an unknown word is refused.
     pub fn of(text: &str) -> Result<Self, BadLine> {
-        if text == "plain" {
-            return Ok(Self::Plain);
+        match text {
+            "plain" => return Ok(Self::Plain),
+            "folder" => return Ok(Self::Folder),
+            "day-night" => return Ok(Self::DayNight),
+            _ => {}
         }
         if let Some(builtin) = Backdrop::of(text) {
             return Ok(Self::Builtin(builtin));
@@ -62,7 +76,7 @@ impl Picture {
             return Ok(Self::File(text.to_owned()));
         }
         Err(BadLine(format!(
-            "no wallpaper {text:?}: night, mist, dawn, forest, rain, stars, aurora, plain or a picture's path"
+            "no wallpaper {text:?}: night, mist, dawn, forest, rain, stars, aurora, plain, folder, day-night or a picture's path"
         )))
     }
 
@@ -73,7 +87,14 @@ impl Picture {
             Self::Moving(moving) => moving.word(),
             Self::Plain => "plain",
             Self::File(path) => path,
+            Self::Folder => "folder",
+            Self::DayNight => "day-night",
         }
+    }
+
+    /// It changes by itself: a folder's, or day and night's.
+    pub const fn changes(&self) -> bool {
+        matches!(self, Self::Folder | Self::DayNight)
     }
 
     /// A picture's file, its `~/` the home.
@@ -329,7 +350,69 @@ pub fn render_at(look: &Look, size: (i32, i32), scale: f64) -> Rendered {
             Ok(rendered) => rendered,
             Err(why) => builtin_rendered(Backdrop::Night, size, Some(why.to_string())),
         },
+        // The compositor says the picture they show; before it does,
+        // Nuit.
+        Picture::Folder | Picture::DayNight => builtin_rendered(Backdrop::Night, size, None),
     }
+}
+
+/// The pictures a folder holds (#894), its subfolders' too: JPEG, PNG
+/// and WebP by their names, hidden files and folders left out, symbolic
+/// links to folders not followed; in their paths' order. And the folders
+/// looked into, to watch. Slow on a large folder: off the loop.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Listed {
+    pub pictures: Vec<PathBuf>,
+    pub folders: Vec<PathBuf>,
+}
+
+/// So many pictures at most, so deep at most: a home given by mistake
+/// is not walked whole.
+const MOST_PICTURES: usize = 20_000;
+const DEEPEST: usize = 8;
+
+/// A file named as a picture the desktop draws.
+pub fn is_picture(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        matches!(
+            e.to_ascii_lowercase().as_str(),
+            "jpg" | "jpeg" | "png" | "webp"
+        )
+    })
+}
+
+/// `folder`'s pictures and folders ([`Listed`]).
+pub fn list(folder: &Path) -> Listed {
+    let mut listed = Listed::default();
+    let mut todo = vec![(folder.to_path_buf(), 0)];
+    while let Some((dir, depth)) = todo.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        listed.folders.push(dir);
+        for entry in entries.flatten() {
+            if entry.file_name().as_encoded_bytes().starts_with(b".") {
+                continue;
+            }
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if depth < DEEPEST {
+                    todo.push((path, depth + 1));
+                }
+            } else if is_picture(&path)
+                && std::fs::metadata(&path).is_ok_and(|m| m.is_file())
+                && listed.pictures.len() < MOST_PICTURES
+            {
+                listed.pictures.push(path);
+            }
+        }
+    }
+    listed.pictures.sort();
+    listed.folders.sort();
+    listed
 }
 
 fn builtin_rendered(builtin: Backdrop, size: (i32, i32), failed: Option<String>) -> Rendered {
@@ -558,6 +641,9 @@ mod tests {
             Ok(Picture::File("~/Images/Montagne.jpg".to_owned()))
         );
         assert!(Picture::of("sunset").is_err());
+        assert_eq!(Picture::of("folder"), Ok(Picture::Folder));
+        assert_eq!(Picture::of("day-night"), Ok(Picture::DayNight));
+        assert_eq!(Picture::DayNight.word(), "day-night");
         assert_eq!(colour_of("#1b2233"), Some(DEFAULT_COLOR));
         assert_eq!(colour_of("1b2233"), None);
         assert_eq!(colour_word(DEFAULT_COLOR), "#1b2233");
