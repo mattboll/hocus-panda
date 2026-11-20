@@ -131,6 +131,13 @@
 # "metric" (°C, mm, km/h) or "imperial" (°F, in, mph).
 # units = "metric"
 
+# [removable]
+# A USB stick, an external disk or an SD card plugged in: "ask" (a bubble
+# offers to open it in the file manager, or to eject it), "open" (mounted
+# and opened at once) or "nothing". While one is mounted, the bar's
+# connections show it, with its free space and a button to eject it.
+# on-plug = "ask"
+
 # Screens, by connector name. Without a scale, a screen takes 1, or 2
 # when it is denser than 192 dpi and stays at least 1280x800 at 2 (a
 # 15.6-inch 4K panel); never a fraction by itself. The journal names

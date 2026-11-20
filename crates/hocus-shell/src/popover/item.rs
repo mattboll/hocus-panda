@@ -121,6 +121,11 @@ pub enum Item {
     /// by a click; the mini form's item, by a hover or a click. Its
     /// popover.
     Weather(weather::Spot),
+    /// A removable drive's row in the connections (#898), by its serial:
+    /// a click, or `Enter`, opens it in the file manager.
+    Drive(u32),
+    /// Its ⏏: a click, or `Enter`, ejects it.
+    Eject(u32),
 }
 
 impl Item {
@@ -148,6 +153,8 @@ impl Item {
                 | Self::Window(_)
                 | Self::WindowClose(_)
                 | Self::WindowsMore
+                | Self::Drive(_)
+                | Self::Eject(_)
         )
     }
 
@@ -183,6 +190,7 @@ impl Item {
             | Self::TodayMore => false,
             Self::TasksMore | Self::TaskAdd | Self::Task(_) => false,
             Self::Window(_) | Self::WindowClose(_) | Self::WindowsMore => false,
+            Self::Drive(_) | Self::Eject(_) => false,
             Self::DayChoose | Self::DayLater => false,
             // Resting on the clock stays harmless (Day.5).
             Self::Calendar => false,
@@ -271,7 +279,9 @@ impl Item {
             | Self::Task(_)
             | Self::DayLater
             | Self::Window(_)
-            | Self::WindowClose(_) => 0,
+            | Self::WindowClose(_)
+            | Self::Drive(_)
+            | Self::Eject(_) => 0,
         }
     }
 
@@ -322,7 +332,7 @@ impl Item {
             Self::Weather(_) => weather::opening(),
             Self::Windows => windows::opening(),
             Self::WindowMenu(_) => window_menu::opening(),
-            Self::Window(_) | Self::WindowClose(_) => {}
+            Self::Window(_) | Self::WindowClose(_) | Self::Drive(_) | Self::Eject(_) => {}
         }
     }
 
@@ -361,7 +371,9 @@ impl Item {
             | Self::WindowMenu(_)
             | Self::Music
             | Self::Journal
-            | Self::Weather(_) => {}
+            | Self::Weather(_)
+            | Self::Drive(_)
+            | Self::Eject(_) => {}
             Self::Tasks | Self::TasksMore => tasks::closing(),
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
@@ -381,9 +393,8 @@ impl Item {
             (Self::Sound | Self::Brightness | Self::Battery, _) | (Self::Keyboard, Form::Mini) => {
                 LEVELS_NAMESPACE
             }
-            (Self::Wifi | Self::Bluetooth, _) | (Self::Keyboard, Form::Full) => {
-                CONNECTIONS_NAMESPACE
-            }
+            (Self::Wifi | Self::Bluetooth | Self::Drive(_) | Self::Eject(_), _)
+            | (Self::Keyboard, Form::Full) => CONNECTIONS_NAMESPACE,
             (Self::Desktop { .. }, _) => DESKTOPS_NAMESPACE,
             (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
                 FOOTER_NAMESPACE

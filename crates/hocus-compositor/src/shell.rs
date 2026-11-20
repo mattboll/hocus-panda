@@ -829,6 +829,7 @@ impl State {
         self.tell_shell(ToShell::DesktopNames(self.config.desktops.shown_names()));
         self.tell_shell(ToShell::BarGroups(self.config.panel.groups()));
         self.tell_shell(ToShell::Weather(self.config.weather.place()));
+        self.tell_shell(ToShell::Removable(self.config.removable.on_plug));
         self.tell_shell(ToShell::BarSide(self.bar_side()));
         let bars: Vec<ToShell> = self
             .panel

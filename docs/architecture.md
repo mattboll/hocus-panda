@@ -84,7 +84,7 @@ flowchart LR
 | Crate | Owns | Depends on (ours) |
 |---|---|---|
 | `hocus-compositor` | the `hocuspanda` binary, its `State`, and the in-process test harness (`Headless`) | config, charge, geometry, link, pandas, words, panic, agents, xdg, perf, scenes |
-| `hocus-shell` | the `hocuspanda-shell` binary, its surfaces and the widget kit (`src/ui`) | words, link, pandas, panic, a11y, xdg, day, sound, bluetooth, network, camera, voice |
+| `hocus-shell` | the `hocuspanda-shell` binary, its surfaces and the widget kit (`src/ui`) | words, link, pandas, panic, a11y, xdg, day, sound, bluetooth, network, removable, camera, voice |
 | `hocus-settings` | the `hocus-settings` binary: its model of every setting, its pages | words, config, charge, agents, link, pandas, panic, perf, geometry, sound, bluetooth, network, xdg |
 | `hocus-cli` | the `hocus` binary (`hocus mcp` among its commands) | agents, panic, day, perf, xdg |
 | `hocus-link` | the shell's line: its messages, wire and version; the surfaces' namespaces and the measures both sides draw by; the theme's tokens; the camera's and the voice's lines | words |
@@ -105,10 +105,11 @@ flowchart LR
 | `hocus-sound` | PipeWire, through its own tools | — |
 | `hocus-network` | NetworkManager and rfkill | — |
 | `hocus-bluetooth` | BlueZ | — |
+| `hocus-removable` | UDisks2: removable drives followed, mounted, ejected | — |
 
 Only `hocus-compositor` depends on smithay; only the shell and the
 Settings on iced. The library crates draw nothing and run no loop of
-their own: the system ones (`sound`, `network`, `bluetooth`, `day`) run
+their own: the system ones (`sound`, `network`, `bluetooth`, `removable`, `day`) run
 their work on threads and hand back owned values through a callback or a
 channel. One crate is vendored with a patch, `iced_tiny_skia`
 ([vendor/README.md](../vendor/README.md)).

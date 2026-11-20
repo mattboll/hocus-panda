@@ -432,7 +432,7 @@ static THEMES: Mutex<Option<Themes>> = Mutex::new(None);
 
 /// Icon `text` (a path, a `file://` address or an icon's name) at the
 /// card's size, found as the launcher finds its icons (5.1).
-fn icon_named(text: &str, scale: u32) -> Option<Icon> {
+pub(super) fn icon_named(text: &str, scale: u32) -> Option<Icon> {
     let text = text.trim();
     let text = text
         .strip_prefix("file://")

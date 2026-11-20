@@ -662,6 +662,14 @@ fn carry_out(effect: Effect) -> Vec<Message> {
         Effect::Signal(server::Signal::Closed { id, .. }) if reminder_of(id).is_some() => {
             Vec::new()
         }
+        // A removable drive's (#898): open it, eject it, try again.
+        Effect::Signal(server::Signal::Action { id, key }) if drive_of(id).is_some() => {
+            if let Some(serial) = drive_of(id) {
+                crate::removable::from_bubble(serial, &key);
+            }
+            Vec::new()
+        }
+        Effect::Signal(server::Signal::Closed { id, .. }) if drive_of(id).is_some() => Vec::new(),
         Effect::Signal(signal) => {
             server::signal(signal);
             Vec::new()
@@ -853,6 +861,26 @@ fn reminder_note(
 /// The ids of what the desktop says of itself: past any the server gives,
 /// apart from the reminders' and the captures'.
 const DESKTOPS_OWN_FROM: u32 = 0x4000_0000;
+
+/// The icon theme's icon `name` at the bubbles' size, for a bubble of the
+/// desktop's own; none when no theme has it.
+pub fn themed_icon(name: &str) -> Option<crate::levels::icons::Icon> {
+    server::icon_named(name, server::screens_scale())
+}
+
+/// The ids of the removable drives' bubbles (#898): among the desktop's
+/// own, one a drive, each in place of the one before.
+const DRIVES_FROM: u32 = DESKTOPS_OWN_FROM | 0x0010_0000;
+
+/// Drive `serial`'s bubbles' id.
+pub fn drive_id(serial: u32) -> u32 {
+    DRIVES_FROM | (serial & 0xFFFF)
+}
+
+/// The drive whose bubble's id is `id`, if it is one.
+pub fn drive_of(id: u32) -> Option<u32> {
+    (id & 0xFFFF_0000 == DRIVES_FROM).then_some(id & 0xFFFF)
+}
 
 /// The program given for this session as the shell (`hocus msg shell
 /// restart --program`) did not start or kept ending, and the installed

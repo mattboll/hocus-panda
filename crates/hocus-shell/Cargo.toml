@@ -43,6 +43,8 @@ hocus-voice.workspace = true
 hocus-meetings.workspace = true
 # Bluetooth, from BlueZ, shared with the Settings.
 hocus-bluetooth.workspace = true
+# Removable drives, from UDisks2 (#898).
+hocus-removable.workspace = true
 # No x11, no winit-side theme detection: the shell only talks Wayland
 # through iced_exwlshell (tech-choices, spike #315).
 iced = { workspace = true, features = [

@@ -522,7 +522,10 @@ impl Stack {
                 }
                 // A capture has no window to raise: its editor opens; nor a
                 // meeting's reminder: its call does.
-                if super::capture_of(note.id).is_none() && super::reminder_of(note.id).is_none() {
+                if super::capture_of(note.id).is_none()
+                    && super::reminder_of(note.id).is_none()
+                    && super::drive_of(note.id).is_none()
+                {
                     effects.push(bring(&note));
                 }
                 self.forget(key, now, effects);
