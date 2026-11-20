@@ -271,8 +271,9 @@ and id, never by its title or its text (the journal is read by others):
   footer's buttons (5.5).
 - The keyboard: the bubbles take none (`Tab` does not reach them), and
   names for screen readers (bar.md §11).
-- Sounds (`sound-file`, `sound-name`), `action-icons`, the
-  `ActivationToken` signal, markup shown as styled text.
+- Sounds (`sound-file`, `sound-name`; built in #899, below),
+  `action-icons`, the `ActivationToken` signal, markup shown as styled
+  text.
 
 ### Measured headless
 
@@ -584,3 +585,79 @@ one bubble sums them up ("3 notifications pendant le partage", "Slack (2),
 Signal · dans l'historique"), its card opening the history. The sharing
 popover says how many wait meanwhile. See sharing.md, as built.
 
+
+## Per application (#899)
+
+Approved 2026-11-20 (issue #899, the mockup's section `t899`): four
+levels per application, a Settings page that lists those that notified,
+and the same choice from a bubble or a line of the history.
+
+### As built
+
+- **The levels**, `[notifications.apps]`, by the application's id (its
+  `desktop-entry` hint, else its `app_name`; a key in another case
+  matches too): `"all"` (a bubble and its sound, for those not named),
+  `"silent"` (a bubble without its sound), `"history"` (no bubble: to the
+  history, unseen, counted by the bell) and `"none"` (dropped: nowhere,
+  its sender hearing it closed, 1). A critical one always makes a bubble,
+  without its sound unless "all", but for "none". The agents' tools'
+  notifications (Claude Code, Codex, herdr, through their hooks or
+  `hocus`) are applications like the others; 5.3's rule for their
+  waiting and finished ones applies after. Do not disturb, a low urgency
+  and the sharing's hold apply after the level, as before.
+- **Where it applies**: in the shell, which serves the notifications
+  (decision 0003), as each comes; the compositor follows the file and
+  tells the shell (`notify-levels`, as it connects and when the section
+  changes).
+- **The sound** a notification asks for (`sound-file`, else `sound-name`
+  in the freedesktop sound theme; none with `suppress-sound`) plays with
+  its bubble when its application's level is "all", with `pw-play` on a
+  thread of its own; not while it is held (do not disturb, sharing) or
+  waits for the unlock. `GetCapabilities` says `sound`.
+- **The "⋯"**: a 24 px circle under the bubble's ✕ (2 px apart, the
+  card's clickable part at least 62 px tall for both), three dots in
+  `text.faint` (`text` on `rgba(255,255,255,0.10)` under the pointer);
+  on a line of the history, under its ✕ (an item at least 54 px tall),
+  shown with it, under the pointer or holding the keyboard; not on the
+  desktop's own lines (a capture, a meeting's reminder). It, or a right
+  click on the bubble or the line, opens the menu.
+- **The menu** "POUR SLACK" (a popover of its own, 220 wide, beside the
+  bar as the others, right-aligned with the bubbles): its header in 11 px
+  bold spaced capitals, `text.faint`; the four levels, 30 px rows, 13 px,
+  the current one semibold on `rgba(255,255,255,0.08)` with an accent
+  check. From a bubble, its top 6 px under the card; from the history, it
+  takes the history's place, its top on the line's "⋯" (as a window's
+  menu from a popover's line, #726). The arrows go through it, `Enter`
+  chooses, `Esc` or a click elsewhere closes it. A choice applies at once
+  and is written into the configuration file (`HOCUS_CONFIG`) on a thread
+  of its own, "all" taking the key out.
+- **The senders**, for the Settings' list: each notification served is
+  counted, whatever its level, under its application's id, its name and
+  its icon (its `app_icon`, else its desktop entry's icon, else the icon
+  of the application named as it is), per day on the wall clock's
+  calendar, in `$XDG_STATE_HOME/hocuspanda/notification-senders` (JSON,
+  0600), read back as the shell starts and written by the history's
+  thread, only where notifications are served. A sender is kept 30 days
+  after its last; "cette semaine" is today and the six days before.
+- **Do not disturb** from the Settings: the shell tells the compositor
+  whether it is on (`dnd`) as it connects and when it changes; the
+  Settings' line hears it and asks it (`dnd on`, for an hour, `dnd off`).
+
+### Measured headless
+
+`crates/hocus-compositor/tests/notifications.rs`: with Thunderbird at
+"history", its notification makes no bubble, goes to the history and is
+counted; Firefox at "none", by its desktop entry, makes nothing and its
+sender hears it closed (1); a bubble's "⋯" opens the menu, "Bulle et son"
+ticked, and "Historique seulement" chosen is written, the next one held.
+`crates/hocus-compositor/tests/settings_notifications.rs`: the page lists
+four senders, the busiest this week first, with their levels; a level
+chosen in a row's menu is written; "Ne pas déranger" turns the real
+shell's on, which says it back. Unit tests for the levels (by id, the
+urgent override, the four), the week's counts rolling over, the stack, the
+file's key, and the menu's layout.
+
+### Not built
+
+- The page's controls in the Settings' keyboard ring.
+- A screen reader's click on the bubble's "⋯".

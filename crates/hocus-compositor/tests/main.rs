@@ -144,6 +144,7 @@ mod settings_desktops;
 mod settings_keyboard;
 mod settings_mouse;
 mod settings_network;
+mod settings_notifications;
 mod settings_perf;
 mod settings_power;
 mod settings_screens;

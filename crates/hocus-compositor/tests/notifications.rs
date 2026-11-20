@@ -58,6 +58,9 @@ struct Bed {
     /// The test's bus's address.
     address: String,
     heard: Heard,
+    /// The configuration file the shell writes into (a level chosen from a
+    /// bubble, #899).
+    config: PathBuf,
 }
 
 impl Drop for Bed {
@@ -109,6 +112,8 @@ fn start_with(
     let log = dir.path().join("shell.log");
     let pid = dir.path().join("shell.pid");
     let script = dir.path().join("shell");
+    let config_file = dir.path().join("config.toml");
+    std::fs::write(&config_file, "# Mine.\n[panel]\nform = \"full\"\n")?;
     std::fs::write(
         &script,
         format!(
@@ -118,13 +123,15 @@ fn start_with(
              LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{home}' \
              XDG_CONFIG_HOME='{home}/.config' XDG_CACHE_HOME='{home}/.cache' \
              XDG_STATE_HOME='{state}' TZ=UTC HOCUS_CLOCK_AT='2026-11-02T14:32:07' \
+             HOCUS_CONFIG='{config}' \
              RUST_LOG=warn,hocuspanda_shell=debug,hocuspanda_shell::notifications::bell=trace\necho $$ > '{pid}'\n\
              exec '{shell}' \"$@\" 2>>'{log}'\n",
             home = home.display(),
             state = state.display(),
             pid = pid.display(),
             shell = shell.display(),
-            log = log.display()
+            log = log.display(),
+            config = config_file.display(),
         ),
     )?;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
@@ -159,6 +166,7 @@ fn start_with(
         client,
         address,
         heard,
+        config: config_file,
     };
     bed.logged("the notifications are served")?;
     bed.hp.pointer_move(400.0, 600.0);
@@ -1519,4 +1527,258 @@ fn bubble_kit_shot() -> anyhow::Result<()> {
         .map(|(namespace, _, _)| namespace.clone())
         .ok_or_else(|| anyhow::anyhow!("no bubble"))?;
     common::layer_shot(&mut bed.hp, &namespace, "bubble")
+}
+
+// --- Per application (#899) ---------------------------------------------------------
+
+const BTN_RIGHT: u32 = 0x111;
+
+/// A card's "⋯": under its ✕, 2 px apart, 24 px.
+fn more_of(card: Rect) -> (f64, f64) {
+    (
+        f64::from(card.x + card.width - 1 - 8 - 12),
+        f64::from(card.y + 1 + 8 + 24 + 2 + 12),
+    )
+}
+
+impl Bed {
+    /// Where the menu of levels' `level` (`All`, `Silent`, `History`,
+    /// `None`) is on the screen, once its popover is drawn.
+    fn level_at(&mut self, level: &str) -> anyhow::Result<(f64, f64)> {
+        let id = format!("notify_levels:{level}");
+        let log = self.log.clone();
+        let place = |log: &Path| -> Option<(f64, f64)> {
+            let at = common::last_json(log, " shows {")?
+                .get(&id)?
+                .get("at")?
+                .clone();
+            let n = |i: usize| at.get(i).and_then(serde_json::Value::as_f64);
+            Some((n(0)? + n(2)? / 2.0, n(1)? + n(3)? / 2.0))
+        };
+        let found = self.hp.dispatch_until(WAIT, |hp| {
+            place(&log).is_some() && common::drawn_popovers(hp).len() == 1
+        })?;
+        anyhow::ensure!(found, "no {id} in the menu's dump\n{}", self.log());
+        let (x, y) = place(&log).unwrap_or_default();
+        let popover = common::drawn_popovers(&self.hp)[0];
+        Ok((f64::from(popover.x) + x, f64::from(popover.y) + y))
+    }
+
+    /// Waits for the configuration file to hold `what`.
+    fn config_holds(&mut self, what: &str) -> anyhow::Result<String> {
+        let file = self.config.clone();
+        let done = self.hp.dispatch_until(WAIT, |_| {
+            std::fs::read_to_string(&file).is_ok_and(|t| t.contains(what))
+        })?;
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        anyhow::ensure!(
+            done,
+            "the file never held {what:?}:\n{text}\n{}",
+            self.log()
+        );
+        Ok(text)
+    }
+
+    /// With `HOCUS_SHOTS` naming a folder: `rect` of the screen, as
+    /// `WHAT.png`.
+    fn shot_of(&mut self, what: &str, rect: Rect) -> anyhow::Result<()> {
+        let Some(folder) = std::env::var_os("HOCUS_SHOTS") else {
+            return Ok(());
+        };
+        common::at_rest(&mut self.hp)?;
+        let (width, height, bytes) = self.hp.screenshot(0)?;
+        let x0 = rect.x.clamp(0, width - 1);
+        let y0 = rect.y.clamp(0, height - 1);
+        let (w, h) = (rect.width.min(width - x0), rect.height.min(height - y0));
+        let mut image = image::RgbaImage::new(w as u32, h as u32);
+        for y in 0..h {
+            for x in 0..w {
+                let at = usize::try_from((y0 + y) * width + x0 + x)? * 4;
+                let p = &bytes[at..at + 4];
+                image.put_pixel(x as u32, y as u32, image::Rgba([p[2], p[1], p[0], 255]));
+            }
+        }
+        std::fs::create_dir_all(&folder)?;
+        image.save(Path::new(&folder).join(format!("{what}.png")))?;
+        Ok(())
+    }
+}
+
+#[test]
+fn each_applications_level_applies_and_a_bubbles_menu_writes_it() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    use hocus_link::NotifyLevel;
+    let mut bed = start(&shell, |_, config| {
+        let apps = &mut config.notifications.apps;
+        apps.insert("Thunderbird".to_owned(), NotifyLevel::History);
+        apps.insert("org.mozilla.firefox".to_owned(), NotifyLevel::None);
+    })?;
+    // "Historique seulement": no bubble, in the history, counted.
+    bed.notify(Notice {
+        app: "Thunderbird",
+        summary: "3 nouveaux messages",
+        ..Notice::default()
+    })?;
+    bed.logged("level=\"history\"")?;
+    bed.logged("unread=1")?;
+    // "Rien": nowhere, by its desktop entry; its sender hears it closed.
+    let dropped = bed.notify_from(
+        Notice {
+            app: "Firefox",
+            summary: "Téléchargement terminé",
+            ..Notice::default()
+        },
+        "org.mozilla.firefox",
+    )?;
+    bed.hears(&format!("closed {dropped} 1"))?;
+    bed.logged("a notification dropped")?;
+    assert!(bed.bubbles().is_empty(), "{:?}", bed.bubbles());
+    assert!(!bed.log().contains("unread=2"), "{}", bed.log());
+    // A bubble's "⋯": its application's levels, "Bulle et son" ticked;
+    // "Historique seulement" chosen is written, and applies at once.
+    bed.notify(Notice {
+        timeout: 0,
+        ..Notice::default()
+    })?;
+    let card = bed.shows(1)?[0];
+    bed.click(more_of(card))?;
+    bed.logged("the menu of levels shows it: app=Slack for=\"Slack\" level=all")?;
+    let history = bed.level_at("History")?;
+    bed.click(history)?;
+    let text = bed.config_holds("Slack = \"history\"")?;
+    assert!(text.starts_with("# Mine.\n"), "{text}");
+    assert!(text.contains("[notifications.apps]"), "{text}");
+    let gone = bed
+        .hp
+        .dispatch_until(WAIT, |hp| common::drawn_popovers(hp).is_empty())?;
+    assert!(gone, "the menu stayed");
+    let mark = bed.mark();
+    bed.notify(Notice {
+        summary: "Encore Camille",
+        ..Notice::default()
+    })?;
+    bed.logged_since(mark, "level=\"history\"")?;
+    Ok(())
+}
+
+impl Bed {
+    /// Sends `notice` with its desktop entry `entry`; its id.
+    fn notify_from(&mut self, notice: Notice<'_>, entry: &str) -> anyhow::Result<u32> {
+        let mut hints: HashMap<&str, OwnedVariant> = HashMap::new();
+        hints.insert(
+            "desktop-entry",
+            OwnedVariant::try_from(Variant::from(entry))?,
+        );
+        let body = (
+            notice.app,
+            notice.replaces,
+            "",
+            notice.summary,
+            notice.body,
+            notice.actions.to_vec(),
+            hints,
+            notice.timeout,
+        );
+        let client = self.client.clone();
+        let id = self.runtime.block_on(async move {
+            let reply = client
+                .call_method(
+                    Some("org.freedesktop.Notifications"),
+                    "/org/freedesktop/Notifications",
+                    Some("org.freedesktop.Notifications"),
+                    "Notify",
+                    &body,
+                )
+                .await?;
+            anyhow::Ok(reply.body().deserialize::<u32>()?)
+        })?;
+        Ok(id)
+    }
+}
+
+/// The pull request's screenshots (#899): a bubble with its menu of levels
+/// open, and a line of the history with its own; to `$HOCUS_SHOTS`.
+#[test]
+#[ignore = "writes the pull request's screenshots under HOCUS_SHOTS"]
+fn levels_shots() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let history = kept("Thunderbird", "3 nouveaux messages", 40, false)
+        + &kept("Firefox", "Téléchargement terminé", 70, false);
+    let mut bed = start_with(
+        &shell,
+        |_, config| {
+            config
+                .notifications
+                .apps
+                .insert("Slack".to_owned(), hocus_link::NotifyLevel::Silent);
+        },
+        &history,
+    )?;
+    bed.logged("the history read back kept=2")?;
+    bed.notify(Notice {
+        summary: "Julie · #projet-leroy",
+        body: "Le client valide le devis",
+        timeout: 0,
+        ..Notice::default()
+    })?;
+    let card = bed.shows(1)?[0];
+    bed.click(more_of(card))?;
+    bed.level_at("Silent")?;
+    bed.hp.pointer_move(400.0, 600.0);
+    let menu = common::drawn_popovers(&bed.hp)[0];
+    bed.shot_of(
+        "bubble-menu",
+        Rect {
+            x: card.x - 24,
+            y: 0,
+            width: 1920 - (card.x - 24),
+            height: menu.y + menu.height + 24,
+        },
+    )?;
+    bed.hp.key(KEY_ESC, true);
+    bed.hp.key(KEY_ESC, false);
+    bed.hp
+        .dispatch_until(WAIT, |hp| common::drawn_popovers(hp).is_empty())?;
+    bed.open_history()?;
+    let popover = bed.history();
+    let more = bed
+        .history_places()
+        .into_iter()
+        .filter(|(who, _)| who.starts_with("More("))
+        .nth(1)
+        .map(|(_, at)| at)
+        .ok_or_else(|| anyhow::anyhow!("no ⋯ in the history"))?;
+    let at = (f64::from(popover.x) + more.0, f64::from(popover.y) + more.1);
+    // The line under the pointer shows its ✕ and its "⋯".
+    common::point(&mut bed.hp, (at.0 - 120.0, at.1))?;
+    bed.idle(Duration::from_millis(200))?;
+    bed.shot_of(
+        "history-more",
+        Rect {
+            x: popover.x - 16,
+            y: popover.y - 16,
+            width: popover.width + 32,
+            height: popover.height + 32,
+        },
+    )?;
+    common::point(&mut bed.hp, at)?;
+    bed.idle(Duration::from_millis(100))?;
+    bed.hp.button(BTN_RIGHT, true);
+    bed.hp.button(BTN_RIGHT, false);
+    bed.level_at("All")?;
+    bed.hp.pointer_move(400.0, 600.0);
+    let menu = common::drawn_popovers(&bed.hp)[0];
+    bed.shot_of(
+        "history-menu",
+        Rect {
+            x: menu.x - 24,
+            y: menu.y - 24,
+            width: 1920 - (menu.x - 24),
+            height: menu.height + 48,
+        },
+    )
 }
