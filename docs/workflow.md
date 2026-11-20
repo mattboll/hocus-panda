@@ -130,10 +130,27 @@ a suite that hides it gets worse without anyone seeing. So:
   `default-filter` in the CI profile, with the issue's number. The default
   profile still runs it locally.
 - The fix says what made it fail by chance (what it waited for, in what
-  order, on what clock) and takes it out of quarantine; it is run 20 times
-  in a row first (`cargo nextest run --stress-count 20 -E 'test(=NAME)'`,
-  with the tests of its file beside it, so that the machine is loaded as
-  in the suite). "It passed again" closes nothing.
+  order, on what clock) and takes it out of quarantine; it passes
+  `scripts/dev/stress.sh` first (below). "It passed again" closes
+  nothing.
+
+**Before a pull request**, a new or changed test passes
+`scripts/dev/stress.sh` 20 times: it runs the tests a nextest filter
+selects 20 times in a row (`-n` for more), on two cores (`-c 0-1`) beside
+two busy loops pinned on the same cores (`-l`), four at a time as on CI
+(`-j`), without retries, and stops at the first failure, which it prints.
+It builds first, unloaded (the tests and `cargo programs`), and stops its
+busy loops by their PIDs however it ends. Name the test with the others of
+its file beside it to load the machine as the suite does:
+
+```sh
+scripts/dev/stress.sh 'test(=today::a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar)'
+scripts/dev/stress.sh -n 40 'package(hocus-compositor) & test(/^today::/)'
+```
+
+A test the fix of a chance failure touches passes it before and after in
+the pull request's description: the failure it showed (when it shows
+one), then its 20 runs.
 
 A laptop with many cores hides what CI's four shared ones show. To see a
 chance failure before CI does, run on few CPUs: the suite as CI runs it
