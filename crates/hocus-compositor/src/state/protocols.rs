@@ -48,7 +48,8 @@ pub struct Protocols {
     pub activation_state: XdgActivationState,
     pub fractional_scale_state: FractionalScaleManagerState,
     pub presentation_state: PresentationState,
-    pub xwayland_shell_state: XWaylandShellState,
+    /// XWayland's surfaces by serial, let go once gone (#827).
+    pub xwayland_shell: crate::xwayland_shell::XWaylandShell,
     _viewporter: ViewporterState,
     _cursor_shape: CursorShapeManagerState,
     _pointer_gestures: PointerGesturesState,
@@ -90,7 +91,9 @@ impl Protocols {
             fractional_scale_state: FractionalScaleManagerState::new::<State>(dh),
             // CLOCK_MONOTONIC, as the frame times.
             presentation_state: PresentationState::new::<State>(dh, 1),
-            xwayland_shell_state: XWaylandShellState::new::<State>(dh),
+            xwayland_shell: crate::xwayland_shell::XWaylandShell::new(
+                XWaylandShellState::new::<State>(dh),
+            ),
             _viewporter: ViewporterState::new::<State>(dh),
             _cursor_shape: CursorShapeManagerState::new::<State>(dh),
             _pointer_gestures: PointerGesturesState::new::<State>(dh),

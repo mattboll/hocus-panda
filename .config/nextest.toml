@@ -58,6 +58,7 @@ not (
         test(=decorations::an_x11_window_gets_the_grip_unless_its_motif_hints_ask_for_no_decorations)
         | test(=scales::an_x11_window_on_the_screen_at_2_shows_at_its_size_enlarged)
         | test(=desktop_drop::an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there)
+        | test(=memory::x11_windows_gone_leave_no_surface_behind)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
         | test(=launcher::escape_read_with_its_first_configure_closes_it)

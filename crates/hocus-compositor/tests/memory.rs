@@ -5,7 +5,8 @@
 //! bubbles and pandas did for the session. The shell keeps to two of
 //! glibc's malloc arenas, not one a thread, each keeping what was freed in
 //! it (#855), and its surfaces opened and closed all day leave no Wayland
-//! object behind (#857).
+//! object behind (#857). The X11 windows, menus and tooltips that come and
+//! go leave none of XWayland's surfaces held by their serial.
 
 use crate::common;
 
@@ -260,6 +261,121 @@ fn surfaces_opened_and_closed_leave_no_object_behind() -> anyhow::Result<()> {
     anyhow::ensure!(
         after == before,
         "{PER_SURFACE:?}: {before:?} before 20 surfaces, {after:?} after"
+    );
+    Ok(())
+}
+
+/// An X11 window of class `class` and the override-redirect one beside it
+/// (a menu, a tooltip), on XWayland's `display`, until the sender
+/// returned is dropped: its connection then closes, and its windows go.
+fn x11_windows(display: u32, class: &'static str) -> anyhow::Result<std::sync::mpsc::Sender<()>> {
+    use x11rb::{
+        COPY_DEPTH_FROM_PARENT,
+        connection::Connection as _,
+        protocol::xproto::{AtomEnum, ConnectionExt as _, CreateWindowAux, PropMode, WindowClass},
+        wrapper::ConnectionExt as _,
+    };
+    let (said, heard) = std::sync::mpsc::channel();
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let made = (|| -> anyhow::Result<_> {
+            let (conn, screen) = x11rb::connect(Some(&format!(":{display}")))?;
+            let root = conn.setup().roots[screen].root;
+            for menu in [false, true] {
+                let window = conn.generate_id()?;
+                let aux = CreateWindowAux::new()
+                    .background_pixel(0x003a_7bd5)
+                    .override_redirect(u32::from(menu));
+                let (w, h) = if menu { (160, 90) } else { (400, 300) };
+                conn.create_window(
+                    COPY_DEPTH_FROM_PARENT,
+                    window,
+                    root,
+                    40,
+                    40,
+                    w,
+                    h,
+                    0,
+                    WindowClass::INPUT_OUTPUT,
+                    0,
+                    &aux,
+                )?;
+                let names = format!("{class}\0{class}\0");
+                conn.change_property8(
+                    PropMode::REPLACE,
+                    window,
+                    AtomEnum::WM_CLASS,
+                    AtomEnum::STRING,
+                    names.as_bytes(),
+                )?;
+                conn.map_window(window)?;
+            }
+            conn.flush()?;
+            Ok(conn)
+        })();
+        match made {
+            Ok(conn) => {
+                let _ = said.send(Ok(()));
+                let _ = stopped.recv();
+                drop(conn);
+            }
+            Err(err) => {
+                let _ = said.send(Err(err));
+            }
+        }
+    });
+    heard.recv_timeout(WAIT)??;
+    Ok(stop)
+}
+
+/// X11 windows and menus shown and gone, one after another: XWayland's
+/// connection stays, and the xwayland shell holds none of their surfaces.
+/// smithay 0.7 kept each by its serial for the session, about 5 KB a
+/// window, menu or tooltip.
+#[test]
+fn x11_windows_gone_leave_no_surface_behind() -> anyhow::Result<()> {
+    const SHOWN: usize = 8;
+    let has = std::process::Command::new("sh")
+        .args(["-c", "command -v Xwayland"])
+        .stdout(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if !has {
+        common::missing("Xwayland");
+    }
+    let mut hp = Headless::start_with_xwayland(HeadlessConfig {
+        renderer: RendererChoice::Pixman,
+        ..HeadlessConfig::default()
+    })?;
+    let ready = hp.dispatch_until(WAIT, |hp| hp.xdisplay().is_some())?;
+    anyhow::ensure!(ready, "XWayland never got ready");
+    let display = hp.xdisplay().context("no display")?;
+    const CLASS: &str = "test.x11-coming-and-going";
+    let shown = |hp: &Headless| {
+        hp.windows()
+            .iter()
+            .any(|w| w.app_id.as_deref() == Some(CLASS))
+    };
+    for _ in 0..SHOWN {
+        let windows = x11_windows(display, CLASS)?;
+        let mapped = hp.dispatch_until(WAIT, |hp| shown(hp))?;
+        anyhow::ensure!(mapped, "the X11 window never showed: {:?}", hp.windows());
+        // Its surface held while it shows, its menu's drawn too.
+        let held = hp.dispatch_until(WAIT, |hp| hp.xwayland_surfaces_held() > 0)?;
+        anyhow::ensure!(held, "the X11 window's surface is never held");
+        common::wait(&mut hp, std::time::Duration::from_millis(200))?;
+        drop(windows);
+        let gone = hp.dispatch_until(WAIT, |hp| !shown(hp))?;
+        anyhow::ensure!(gone, "the X11 window stays");
+    }
+    // Once XWayland has destroyed their surfaces, none is held.
+    let held = |hp: &Headless| hp.xwayland_surfaces_held();
+    let let_go = hp.dispatch_until(WAIT, |hp| held(hp) == 0)?;
+    anyhow::ensure!(
+        let_go,
+        "{} of the {} surfaces of the X11 windows gone are still held",
+        held(&hp),
+        2 * SHOWN
     );
     Ok(())
 }

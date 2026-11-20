@@ -976,6 +976,12 @@ impl Headless {
         count
     }
 
+    /// XWayland's surfaces the xwayland shell holds by their serial, live
+    /// or gone (#827).
+    pub fn xwayland_surfaces_held(&self) -> usize {
+        self.app.state.protocols.xwayland_shell.held()
+    }
+
     /// The control socket `hocus agent` writes to.
     pub fn control_socket(&self) -> Option<&Path> {
         self.app.state.agents.socket.as_deref()
