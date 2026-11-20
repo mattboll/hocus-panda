@@ -93,6 +93,10 @@ pub fn popover_title(bar: &str, item: Item, words: Words) -> String {
             pick("Fenêtres", "Windows")
         }
         Item::WindowMenu(_) => pick("Menu de la fenêtre", "Window's menu"),
+        Item::NotifyLevels => pick(
+            "Les notifications d'une application",
+            "An application's notifications",
+        ),
     }
 }
 

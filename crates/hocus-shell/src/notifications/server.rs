@@ -216,6 +216,25 @@ impl Server {
             app_icon: app_icon.clone(),
             image_path: image_path.clone(),
         };
+        // The sound it asks for, unless it asks for none (#899).
+        let text = |key: &str| {
+            hints
+                .get(key)
+                .and_then(|v| String::try_from(&**v).ok())
+                .map(|t| t.trim().to_owned())
+                .filter(|t| !t.is_empty())
+        };
+        let suppress = hints
+            .get("suppress-sound")
+            .and_then(|v| bool::try_from(&**v).ok())
+            .unwrap_or(false);
+        let sound = (!suppress)
+            .then(|| {
+                text("sound-file")
+                    .map(|f| f.strip_prefix("file://").map_or(f.clone(), str::to_owned))
+                    .or_else(|| text("sound-name"))
+            })
+            .flatten();
         let looked = Looked {
             app_icon,
             image_path,
@@ -229,7 +248,15 @@ impl Server {
         let home = (!default && pid != 0)
             .then(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
             .flatten();
+        let hinted = (
+            app_icon_named(&looked.app_icon),
+            looked.entry.clone(),
+            app_name.clone(),
+        );
         let found = tokio::task::spawn_blocking(move || {
+            // What the Settings show it by (#899), before the icon is
+            // looked for with what `looked` holds.
+            let named = icon_hint(hinted.0, hinted.1.as_deref(), &hinted.2);
             let icon = icon_of(looked);
             let conversation = home.and_then(|home| {
                 super::conversation::find(
@@ -239,10 +266,10 @@ impl Server {
                     std::time::SystemTime::now(),
                 )
             });
-            (icon, note::programs_above(pid), conversation)
+            (icon, note::programs_above(pid), conversation, named)
         })
         .await;
-        let (icon, programs, conversation) = found.unwrap_or_default();
+        let (icon, programs, conversation, named) = found.unwrap_or_default();
         if let Some(conversation) = &conversation {
             tracing::debug!(
                 id,
@@ -287,7 +314,10 @@ impl Server {
             conversation,
             icon_from,
             at: super::wall_ms(),
+            sound,
         };
+        // Counted for the Settings' list (#899), whatever its level.
+        super::apps::counted(note.app_id(), note.app.clone(), named);
         tracing::debug!(
             id,
             replaces = replaces_id,
@@ -311,6 +341,7 @@ impl Server {
             "actions",
             "persistence",
             "icon-static",
+            "sound",
         ]
         .map(str::to_owned)
         .into()
@@ -450,6 +481,39 @@ fn icon_named(text: &str, scale: u32) -> Option<Icon> {
         themes.find(&text, super::draw::ICON as u32, scale)?
     };
     icons::load(&file, px).map(Icon::Raster)
+}
+
+/// `app_icon` when it names an icon or its file (not an image of the
+/// notification's: those come in `image-path`).
+fn app_icon_named(app_icon: &str) -> Option<String> {
+    let text = app_icon.trim();
+    let text = text.strip_prefix("file://").unwrap_or(text);
+    (!text.is_empty()).then(|| text.replace("%20", " "))
+}
+
+/// What the Settings show an application's row by (#899): its
+/// `app_icon`, else its desktop entry's icon (or the icon named as the
+/// entry), else the icon of the application named as it is, among those
+/// the launcher lists. A name of the icon themes, or a file's path. Read
+/// off the drawing thread.
+fn icon_hint(app_icon: Option<String>, entry: Option<&str>, app: &str) -> Option<String> {
+    if app_icon.is_some() {
+        return app_icon;
+    }
+    let catalog = crate::launcher::apps::catalog();
+    let entries = || catalog.apps.iter().map(|a| &a.entry);
+    if let Some(wanted) = entry {
+        return Some(
+            entries()
+                .find(|e| e.id.eq_ignore_ascii_case(wanted))
+                .and_then(|e| e.icon.clone())
+                .unwrap_or_else(|| wanted.to_owned()),
+        );
+    }
+    let app = app.trim();
+    entries()
+        .find(|e| !app.is_empty() && e.name.eq_ignore_ascii_case(app))
+        .and_then(|e| e.icon.clone())
 }
 
 /// A notification's icon: its application's icon (`app_icon`), else its

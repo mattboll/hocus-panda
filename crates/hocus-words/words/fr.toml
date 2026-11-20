@@ -1510,6 +1510,16 @@ place_done = "Météo : {place}."
 place_undone = "Annulé : la météo revient à {place}."
 place_redone = "Rétabli : {place}."
 
+[settings.notifications]
+dnd = "Ne pas déranger"
+dnd_line = "Aussi dans la cloche de la barre"
+by_app = "PAR APPLICATION"
+this_week = { one = "{n} cette semaine", other = "{n} cette semaine" }
+nobody = "Aucune application ne t’a encore notifié."
+level_done = "{name} : {level}."
+level_undone = "Annulé : {name} revient à {level}."
+level_redone = "Rétabli : {name}, {level}."
+
 [settings.effects]
 wallpaper = "EFFETS · LE FOND D’ÉCRAN"
 windows = "EFFETS · LES FENÊTRES"
@@ -1657,6 +1667,8 @@ the_bar = "La barre"
 the_side_it_stands_on_its = "Le côté où elle se tient, sa forme sur chaque écran, ce qu’elle montre de haut en bas, et son horloge."
 weather = "Météo"
 the_weather_in_the_bar = "La météo dans « Aujourd’hui » de la barre : maintenant, la pluie qui vient, demain ; la semaine à un clic."
+notifications = "Notifications"
+notifications_line = "Ne pas déranger, et ce que montre chaque application qui t’a notifié."
 accessibility = "Accessibilité"
 see_larger_see_clearer_do_everything = "Voir plus grand, voir plus net, tout faire au clavier."
 calendar_and_tasks = "Agenda et tâches"
@@ -2678,7 +2690,15 @@ locking_in_seconds_move_the_mouse = "Verrouillage dans {seconds} secondes. Bouge
 [shell.notifications_draw]
 now = "· maintenant"
 close = "Fermer"
+more = "Les notifications de cette application"
 waiting = "+{x_n} en attente"
+
+[shell.notify_levels]
+for_app = "POUR {name}"
+all = "Bulle et son"
+silent = "Bulle, sans son"
+history = "Historique seulement"
+none = "Rien"
 
 [shell.tasks]
 to_do = "À FAIRE"

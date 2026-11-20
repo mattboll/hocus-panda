@@ -5,6 +5,9 @@
 //! [`crate::popover::history`]), do not disturb ([`dnd`]) and the bell
 //! that opens the history ([`bell`], one of the bar's footer's buttons).
 //!
+//! Each application's level (#899) is the stack's, the senders counted
+//! for the Settings [`apps`]'.
+//!
 //! The history is kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications`
 //! and do not disturb for the session, in its runtime directory: read back
 //! as the shell starts and written as they change, on threads of their own,
@@ -22,6 +25,7 @@
 //! server's thread. Nothing here goes through iced's messages, which would
 //! draw every surface again.
 
+pub mod apps;
 pub mod bell;
 pub mod bubble;
 pub mod conversation;
@@ -161,6 +165,33 @@ pub fn clock_moved() {
     input(Input::Clock { wall: wall_ms() });
 }
 
+/// Each application's level, as the configuration says (#899).
+pub fn set_levels(levels: hocus_link::NotifyLevels) {
+    input(Input::Levels(levels));
+}
+
+/// Do not disturb, as the Settings set it (#899): on for an hour, as the
+/// bell's switch, or off.
+pub fn set_dnd(on: bool) {
+    // Already so: as it is, its end and all.
+    if with(|c| c.stack.dnd.is_on()) == on {
+        return;
+    }
+    let dnd = if on {
+        Dnd::starting(dnd::Choice::Hour, Instant::now(), &wall())
+    } else {
+        Dnd::Off
+    };
+    input(Input::Dnd(dnd));
+}
+
+/// The compositor's line is there (again): it hears whether the user is
+/// not to be disturbed (#899).
+pub fn linked() {
+    let on = with(|c| c.stack.dnd.is_on());
+    crate::popover::tell(ToCompositor::Dnd(on));
+}
+
 /// The history's panel opened (`open`) or closed.
 pub fn history_open(open: bool) {
     input(Input::History {
@@ -175,6 +206,8 @@ pub fn history_open(open: bool) {
 enum Write {
     History(Vec<Record>),
     Dnd(Dnd),
+    /// The applications that sent notifications (#899).
+    Senders(hocus_link::NotifySenders),
     /// Told once what was sent before is written.
     Flush(mpsc::Sender<()>),
 }
@@ -191,6 +224,11 @@ fn history_file() -> Option<PathBuf> {
     state
         .is_absolute()
         .then(|| state.join("hocuspanda/notifications"))
+}
+
+/// The senders' file (#899), beside the history's.
+fn senders_file() -> Option<PathBuf> {
+    history_file().map(|h| h.with_file_name(hocus_link::SENDERS_FILE))
 }
 
 /// Do not disturb's file, in the session's runtime directory.
@@ -220,12 +258,18 @@ fn write(file: &std::path::Path, text: &str) -> std::io::Result<()> {
 /// Reads back the history and do not disturb, then writes them as they
 /// change, on threads of their own.
 fn keep() {
-    let (history, dnd_at) = (history_file(), dnd_file());
+    let (history, dnd_at, senders_at) = (history_file(), dnd_file(), senders_file());
     let (sender, writes) = mpsc::channel::<Write>();
     *WRITE.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
     let read = std::thread::Builder::new()
         .name("notifications' history".to_owned())
         .spawn(move || {
+            apps::restore(
+                &senders_at
+                    .as_deref()
+                    .and_then(|file| std::fs::read_to_string(file).ok())
+                    .unwrap_or_default(),
+            );
             let notes = read_history(history.as_deref());
             let dnd = dnd_at
                 .as_deref()
@@ -236,13 +280,20 @@ fn keep() {
             input(Input::Restored { notes, dnd });
             while let Ok(first) = writes.recv() {
                 // The latest of each sent meanwhile.
-                let (mut records, mut dnd, mut flushes) = (None, None, Vec::new());
+                let (mut records, mut dnd, mut senders, mut flushes) =
+                    (None, None, None, Vec::new());
                 for write in std::iter::once(first).chain(writes.try_iter()) {
                     match write {
                         Write::History(r) => records = Some(r),
                         Write::Dnd(d) => dnd = Some(d),
+                        Write::Senders(s) => senders = Some(s),
                         Write::Flush(done) => flushes.push(done),
                     }
+                }
+                if let (Some(senders), Some(file)) = (senders, &senders_at)
+                    && let Err(err) = self::write(file, &senders.encode())
+                {
+                    tracing::warn!(file = %file.display(), %err, "the senders not written");
                 }
                 if let (Some(records), Some(file)) = (records, &history) {
                     match self::write(file, &history::encode(&records)) {
@@ -698,6 +749,14 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             crate::popover::open_history(&screen);
             Vec::new()
         }
+        Effect::Sound(sound) => {
+            apps::play(&sound);
+            Vec::new()
+        }
+        Effect::Dnd(on) => {
+            crate::popover::tell(ToCompositor::Dnd(on));
+            Vec::new()
+        }
     }
 }
 
@@ -769,6 +828,7 @@ pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::ico
             image_path: Some(image),
         },
         at: wall_ms(),
+        sound: None,
     };
     tracing::debug!(
         capture = shot.id,
@@ -845,6 +905,7 @@ fn reminder_note(
         conversation: None,
         icon_from: note::IconFrom::default(),
         at,
+        sound: None,
     }
 }
 
@@ -889,6 +950,7 @@ pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
         conversation: None,
         icon_from: note::IconFrom::default(),
         at: wall_ms(),
+        sound: None,
     })));
 }
 

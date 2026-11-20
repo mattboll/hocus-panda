@@ -542,6 +542,7 @@ impl<Message> canvas::Program<Message> for Connections {
                             | Item::WindowsMore
                             | Item::Windows
                             | Item::WindowMenu(_)
+                            | Item::NotifyLevels
                             | Item::Journal
                             | Item::Weather(_),
                             _,

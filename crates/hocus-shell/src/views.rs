@@ -545,6 +545,12 @@ impl Shell {
                     glass: self.look.glass,
                 })
             }
+            popover::Item::NotifyLevels => {
+                popover::notify_levels::view(&popover::notify_levels::Panel {
+                    id,
+                    glass: self.look.glass,
+                })
+            }
             popover::Item::Desktop { .. } | popover::Item::WindowsMore => {
                 popover::desktop::view(&popover::desktop::Panel {
                     id,
