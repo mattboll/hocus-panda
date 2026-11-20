@@ -202,6 +202,22 @@ fn main() -> ExitCode {
     if args.camera || matches!(backend, BackendArg::Tty) {
         config.camera_program = Some(beside("hocus-camera"));
     }
+    // The battery's charge limit (#896): the session's battery is the
+    // machine's, through pkexec and the package's helper; a helper given
+    // runs as itself, from any backend (a test's fake sysfs).
+    let supplies = std::env::var_os("HOCUS_POWER_SUPPLY_DIR")
+        .map_or_else(|| PathBuf::from(hocus_charge::SUPPLIES), PathBuf::from);
+    config.charge = match std::env::var_os("HOCUS_CHARGE_HELPER").filter(|p| !p.is_empty()) {
+        Some(program) => Some(hocus_compositor::away::charge::Helper {
+            program: program.into(),
+            pkexec: false,
+            supplies,
+        }),
+        None if matches!(backend, BackendArg::Tty) => std::env::current_exe()
+            .ok()
+            .and_then(|exe| hocus_compositor::away::charge::Helper::packaged(&exe, supplies)),
+        None => None,
+    };
     // The Hocuspanda microphone (#619, lot 5): the same.
     if args.voice || matches!(backend, BackendArg::Tty) {
         config.voice_program = Some(beside("hocus-voice"));

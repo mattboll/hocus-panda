@@ -379,6 +379,11 @@ pub enum Said {
     },
     /// Whether a recording is under way (6.17).
     Recording(bool),
+    /// Whether the battery's charge limit is lifted until the next unplug
+    /// (6.10, #896).
+    Charge {
+        lifted: bool,
+    },
 }
 
 /// A bar's form as the compositor says it.
@@ -594,6 +599,11 @@ pub fn read_line(line: &str) -> Option<Said> {
     }
     if let Some(on) = value.get("recording").and_then(serde_json::Value::as_bool) {
         return Some(Said::Recording(on));
+    }
+    if let Some(charge) = value.get("charge") {
+        return Some(Said::Charge {
+            lifted: charge.get("lifted")?.as_bool()?,
+        });
     }
     if let Some(apps) = value.get("apps").and_then(|a| a.as_array()) {
         return Some(Said::Apps(

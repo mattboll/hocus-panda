@@ -372,7 +372,7 @@ impl App {
             return iced::Task::none();
         }
         // The clipboard's history and the recording (6.17).
-        if self.captures_said(&said) {
+        if self.captures_said(&said) || self.power_said(&said) {
             return iced::Task::none();
         }
         match said {
@@ -444,7 +444,8 @@ impl App {
             | Said::Apps(_)
             | Said::AgentTools(_)
             | Said::Clipboard { .. }
-            | Said::Recording(_) => iced::Task::none(),
+            | Said::Recording(_)
+            | Said::Charge { .. } => iced::Task::none(),
         }
     }
 

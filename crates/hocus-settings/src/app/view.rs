@@ -988,6 +988,7 @@ impl App {
             || self.agents_inert(setting)
             || self.captures_inert(setting)
             || self.weather_inert(setting)
+            || self.power_greyed(setting)
             || crate::effects::soon(setting.id)
         {
             INERT

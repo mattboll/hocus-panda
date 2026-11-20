@@ -22,6 +22,9 @@ pub struct Snapshot {
     pub degraded: Option<Degraded>,
     /// The keyboard's backlight, from UPower.
     pub keyboard: Option<Keyboard>,
+    /// The battery's charge limit that holds, in percent (the compositor's,
+    /// #896): the gauge's mark, the popover's "Branché, limité à 80 %".
+    pub charge_limit: Option<u8>,
 }
 
 /// The keyboard's backlight: its level, from 0 (off) to `max`.
@@ -470,9 +473,19 @@ impl Words {
         txt::NO_WINDOW.get(self.lang())
     }
 
-    /// The battery's popover's line under its level.
-    pub fn battery_line(self, battery: &Battery) -> String {
+    /// The battery's popover's line under its level; held at the charge
+    /// `limit` (#896), plugged in and not charging (or full under 100 %,
+    /// as some firmware says it), it says so.
+    pub fn battery_line(self, battery: &Battery, limit: Option<u8>) -> String {
         let left = battery.left.filter(|d| !d.is_zero()).map(duration);
+        let held = match battery.charge {
+            Charge::PluggedIn => true,
+            Charge::Full => battery.percent < 99.5,
+            _ => false,
+        };
+        if let Some(limit) = limit.filter(|_| held) {
+            return txt::plugged_in_limited_to(self.lang(), limit);
+        }
         let mut text = match (battery.charge, left) {
             (Charge::Discharging | Charge::Unknown, Some(t)) => txt::left(self.lang(), &t),
             (Charge::Discharging | Charge::Unknown, None) => {
@@ -758,9 +771,26 @@ mod tests {
             ),
         ];
         for (b, french, english) in cases {
-            assert_eq!(fr.battery_line(&b), french);
-            assert_eq!(en.battery_line(&b), english);
+            assert_eq!(fr.battery_line(&b, None), french);
+            assert_eq!(en.battery_line(&b, None), english);
         }
+        // Held at the charge limit (#896), or full under 100 %; charging
+        // under it, as before.
+        for b in [
+            battery(80.0, Charge::PluggedIn, 0),
+            battery(80.0, Charge::Full, 0),
+        ] {
+            assert_eq!(fr.battery_line(&b, Some(80)), "Branché, limité à 80\u{a0}%");
+            assert_eq!(en.battery_line(&b, Some(80)), "Plugged in, limited to 80 %");
+        }
+        assert_eq!(
+            fr.battery_line(&battery(100.0, Charge::Full, 0), Some(80)),
+            "Branché, plein"
+        );
+        assert_eq!(
+            fr.battery_line(&battery(64.0, Charge::Charging, 0), Some(80)),
+            "En charge"
+        );
         let mut b = battery(60.0, Charge::Discharging, 0);
         assert_eq!(b.health(), None);
         b.health = Some(0.0);

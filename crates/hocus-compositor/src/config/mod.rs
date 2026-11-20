@@ -192,6 +192,12 @@ pub struct Config {
     /// tests, unless they give one).
     #[serde(skip)]
     pub camera_program: Option<PathBuf>,
+    /// What sets the battery's charge limit (#896): on a virtual terminal,
+    /// the package's helper through pkexec. Not part of the file; `None`
+    /// sets none (nested and headless compositors, unless
+    /// `HOCUS_CHARGE_HELPER` names one; tests, unless they give one).
+    #[serde(skip)]
+    pub charge: Option<crate::away::charge::Helper>,
     /// Where it makes its frames: `auto`, `cpu` or `any` (its
     /// `--device`; tests: `cpu`). Not part of the file.
     #[serde(skip)]
