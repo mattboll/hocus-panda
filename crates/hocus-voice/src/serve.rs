@@ -13,9 +13,12 @@
 //! - **The real microphone** is read while the source is, and only
 //!   then: a stream of this program's (`hocuspanda-voice-input`, not
 //!   autoconnected), linked by the program itself to the microphone's
-//!   first output port. The microphone: the session's default source
-//!   (the `default` metadata), unless it is this one; else the source of
-//!   highest `priority.session`. It is said to the compositor as it
+//!   first output port, and linked again whenever that link goes: a
+//!   session manager makes a node's ports again when it sets them up
+//!   (WirePlumber does, for the stream, some time after it appears), and
+//!   the link goes with the ports it joined (#911). The microphone: the
+//!   session's default source (the `default` metadata), unless it is this
+//!   one; else the source of highest `priority.session`. It is said to the compositor as it
 //!   changes, read or not (a meeting's transcription records it).
 //! - **Each quantum** the microphone sends is made by the voice
 //!   ([`crate::effect::Voicer`]) on the real-time thread, into a queue the
@@ -40,7 +43,7 @@ use hocus_link::voice::{
     VoiceLook,
 };
 use pipewire as pw;
-use pw::{properties::properties, spa, stream::StreamState};
+use pw::{properties::properties, proxy::ProxyT, spa, stream::StreamState};
 use spa::pod::Pod;
 
 use crate::{
@@ -84,13 +87,20 @@ enum Ev {
         id: u32,
         port: Port,
     },
-    /// A link, from the node out of which it goes to the one into which.
+    /// A link, from the node out of which it goes to the one into which,
+    /// and between which ports.
     Link {
         id: u32,
         from: u32,
         to: u32,
+        ports: (u32, u32),
     },
     Removed(u32),
+    /// An error PipeWire said about one of this program's objects.
+    Error {
+        proxy: u32,
+        message: String,
+    },
     /// The `default` metadata's source: the chosen one or the one in use.
     Default {
         configured: bool,
@@ -120,6 +130,9 @@ impl Node {
 #[derive(Debug, Clone, Copy)]
 struct Port {
     node: u32,
+    /// Its place among its node's ports (`port.id`): the first channel's
+    /// is 0, whatever global id it was given.
+    index: u32,
     output: bool,
     monitor: bool,
 }
@@ -173,8 +186,32 @@ struct In {
     _listener: pw::stream::StreamListener<()>,
     microphone: u32,
     node: Option<u32>,
-    link: Option<pw::link::Link>,
+    link: Option<MicLink>,
+    /// The links asked while it reads: a link refused or undone each
+    /// time it is made is not asked again without end.
+    asked: u32,
 }
+
+/// The link from the microphone's port to the stream's, as asked.
+struct MicLink {
+    proxy: pw::link::Link,
+    /// The microphone's port and the stream's.
+    ports: (u32, u32),
+    state: LinkState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkState {
+    /// Asked, not yet on the graph.
+    Asked,
+    /// On the graph, this global.
+    Made(u32),
+}
+
+/// The links asked for one reading of the microphone, at most: each
+/// setting up of its ports or the stream's undoes one, and makes the next
+/// one; a link undone as soon as it is made stops there.
+const MOST_LINKS: u32 = 16;
 
 struct State {
     core: pw::core::CoreRc,
@@ -296,6 +333,10 @@ pub fn run(
                         id: global.id,
                         port: Port {
                             node,
+                            index: props
+                                .get("port.id")
+                                .and_then(|n| n.parse().ok())
+                                .unwrap_or(u32::MAX),
                             output: props.get("port.direction") == Some("out"),
                             monitor: props.get("port.monitor") == Some("true"),
                         },
@@ -306,10 +347,15 @@ pub fn run(
                     if let (Some(from), Some(to)) =
                         (number("link.output.node"), number("link.input.node"))
                     {
+                        let ports = (
+                            number("link.output.port").unwrap_or(u32::MAX),
+                            number("link.input.port").unwrap_or(u32::MAX),
+                        );
                         shared.dispatch(Ev::Link {
                             id: global.id,
                             from,
                             to,
+                            ports,
                         });
                     }
                 }
@@ -326,6 +372,20 @@ pub fn run(
         .global_remove(move |id| {
             if let Some(shared) = on_remove.upgrade() {
                 shared.dispatch(Ev::Removed(id));
+            }
+        })
+        .register();
+    // A link refused (a port gone meanwhile, formats that do not meet)
+    // comes as an error on the core, never as the call's result.
+    let on_error = Rc::downgrade(&shared);
+    let _errors = core
+        .add_listener_local()
+        .error(move |proxy, _, res, message| {
+            if let Some(shared) = on_error.upgrade() {
+                shared.dispatch(Ev::Error {
+                    proxy,
+                    message: format!("{message} ({res})"),
+                });
             }
         })
         .register();
@@ -574,8 +634,28 @@ impl State {
                 }
                 self.reading();
             }
-            Ev::Link { id, from, to } => {
+            Ev::Link {
+                id,
+                from,
+                to,
+                ports,
+            } => {
                 self.links.insert(id, (from, to));
+                if let Some(input) = &mut self.input
+                    && let Some(link) = &mut input.link
+                    && link.state == LinkState::Asked
+                    && link.ports == ports
+                    && from == input.microphone
+                    && Some(to) == input.node
+                {
+                    link.state = LinkState::Made(id);
+                    tracing::info!(
+                        microphone = input.microphone,
+                        node = to,
+                        ports = ?ports,
+                        "linked to the microphone"
+                    );
+                }
                 self.reading();
             }
             Ev::InState(new) => {
@@ -608,7 +688,37 @@ impl State {
                     tracing::info!(id, "the microphone went");
                     self.stop_input();
                 }
+                if let Some(input) = &mut self.input
+                    && input
+                        .link
+                        .as_ref()
+                        .is_some_and(|l| l.state == LinkState::Made(id))
+                {
+                    tracing::info!(
+                        microphone = input.microphone,
+                        "the link to the microphone went"
+                    );
+                    input.link = None;
+                }
                 self.microphone_changed();
+                // A port gone, or the link: linked again to the ports there are.
+                self.link();
+            }
+            Ev::Error { proxy, message } => {
+                let ours = self.input.as_mut().and_then(|input| {
+                    let link = input.link.take_if(|l| l.proxy.upcast_ref().id() == proxy)?;
+                    Some((input.microphone, link.ports))
+                });
+                match ours {
+                    // Asked again when ports come or go.
+                    Some((microphone, ports)) => tracing::warn!(
+                        message,
+                        microphone,
+                        ports = ?ports,
+                        "the microphone could not be linked"
+                    ),
+                    None => tracing::debug!(proxy, message, "PipeWire said an error"),
+                }
             }
             Ev::Default { configured, name } => {
                 if configured {
@@ -775,38 +885,58 @@ impl State {
             microphone,
             node: None,
             link: None,
+            asked: 0,
         })
     }
 
-    /// The microphone's first output port linked to the
-    /// stream's input port, once both are on the graph.
+    /// The microphone's first output port linked to the stream's input
+    /// port, once both are on the graph; linked again when either is made
+    /// again (a session manager setting the node up) or the link goes.
     fn link(&mut self) {
         let Some(input) = &mut self.input else {
             return;
         };
-        if input.link.is_some() {
-            return;
-        }
         let Some(node) = input.node.filter(|n| *n != 0 && *n != u32::MAX) else {
             return;
         };
         // Its own ports first; a monitor's only when it has none (a null
-        // source's sound comes out of its monitor).
+        // source's sound comes out of its monitor). The first channel's.
         let find = |of: u32, output: bool| {
             let ports = || {
                 self.ports
                     .iter()
                     .filter(|(_, p)| p.node == of && p.output == output)
             };
+            let first = |(id, p): (&u32, &Port)| (p.index, *id);
             ports()
                 .filter(|(_, p)| !p.monitor)
-                .map(|(id, _)| *id)
+                .map(first)
                 .min()
-                .or_else(|| ports().map(|(id, _)| *id).min())
+                .or_else(|| ports().map(first).min())
+                .map(|(_, id)| id)
         };
         let (Some(from), Some(to)) = (find(input.microphone, true), find(node, false)) else {
+            // Its ports being made again: the link went with them.
+            input.link = None;
             return;
         };
+        if input.link.as_ref().is_some_and(|l| l.ports == (from, to)) {
+            return;
+        }
+        // To ports gone, or none yet.
+        input.link = None;
+        if input.asked >= MOST_LINKS {
+            if input.asked == MOST_LINKS {
+                tracing::warn!(
+                    microphone = input.microphone,
+                    asked = input.asked,
+                    "the microphone's link keeps going: no longer asked"
+                );
+                input.asked += 1;
+            }
+            return;
+        }
+        input.asked += 1;
         match self.core.create_object::<pw::link::Link>(
             "link-factory",
             &properties! {
@@ -816,13 +946,18 @@ impl State {
                 *pw::keys::LINK_INPUT_PORT => to.to_string(),
             },
         ) {
-            Ok(link) => {
+            Ok(proxy) => {
                 tracing::debug!(
                     microphone = input.microphone,
                     node,
-                    "linked to the microphone"
+                    ports = ?(from, to),
+                    "a link to the microphone asked"
                 );
-                input.link = Some(link);
+                input.link = Some(MicLink {
+                    proxy,
+                    ports: (from, to),
+                    state: LinkState::Asked,
+                });
             }
             Err(err) => tracing::warn!(%err, "the microphone could not be linked"),
         }

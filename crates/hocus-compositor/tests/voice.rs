@@ -14,7 +14,8 @@
 //! quantum the graph loses on the way, on a machine too busy to run it in
 //! time, moves what the call hears after it, and is followed (#880). The
 //! voices' arithmetic and their time on the processor: `hocus-voice`'s
-//! unit tests.
+//! unit tests. Another: the ports set up again, as a session manager does
+//! (#911), the microphone is linked again.
 
 use crate::common;
 use crate::sharing::Pipewire;
@@ -642,6 +643,194 @@ fn the_call_hears_the_microphone_through_the_voice_and_it_is_read_only_meanwhile
         |bed| !bed.mic.streams() && !bed.hp.voice().1,
     )?;
     Ok(())
+}
+
+/// A session manager sets each node's ports up again once it is on the
+/// graph: WirePlumber does, for the voice's stream, a few milliseconds
+/// after the voice linked it to the microphone (its ports made again, a
+/// monitor port with them), and the link goes with the old ports. The
+/// voice links the microphone again: the call hears it again (#911:
+/// silent, never linked again).
+#[test]
+fn the_microphone_is_linked_again_when_its_ports_are_set_up_again() -> anyhow::Result<()> {
+    let mut bed = start()?;
+    bed.until(Duration::from_secs(20), "not on the graph", |bed| {
+        let (ready, _, mic) = bed.hp.voice();
+        ready && mic.as_deref() == Some(MIC)
+    })?;
+    let call = Call::start(&bed.pipewire.socket)?;
+    bed.until(Duration::from_secs(10), "not read", |bed| {
+        bed.hp.voice().1 && bed.mic.streams()
+    })?;
+    let tape = vowel(140.0, RATE);
+    let heard = bed.hear(&call, Voice::AsItIs, tape.clone(), 0.5)?;
+    anyhow::ensure!(rms(&heard) > 0.01, "the call hears nothing");
+
+    set_up_again(&bed.pipewire.socket, hocus_link::voice::VOICE_INPUT_NODE)?;
+    let heard = bed.hear(&call, Voice::AsItIs, tape, 1.0)?;
+    let last = &heard[heard.len() / 2..];
+    anyhow::ensure!(
+        rms(last) > 0.01,
+        "the call hears nothing once the stream's ports are set up again ({})",
+        rms(last)
+    );
+    Ok(())
+}
+
+/// The input stream `node`'s ports set up again as WirePlumber's audio
+/// adapter does: the node suspended, then in DSP mode, mono, with a
+/// monitor port. A node that runs keeps its ports, and WirePlumber's
+/// comes in the milliseconds before the link to it runs: here, the links
+/// to it are undone first, in the same go.
+fn set_up_again(remote: &std::path::Path, node: &'static str) -> anyhow::Result<()> {
+    use pipewire as pw;
+    use pw::spa::node::command::{NodeCommand, NodeCommandId};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+
+    #[derive(Default)]
+    struct Seen {
+        node: Option<(u32, pw::node::Node)>,
+        /// Each link, and the node it goes into.
+        links: Vec<(u32, u32)>,
+        listed: Option<i32>,
+        done: Option<i32>,
+    }
+
+    let pod = port_config()?;
+    pw::init();
+    let mainloop = pw::main_loop::MainLoopRc::new(None)?;
+    let context = pw::context::ContextRc::new(&mainloop, None)?;
+    let core = context.connect_rc(Some(pw::properties::properties! {
+        *pw::keys::REMOTE_NAME => remote.to_string_lossy().into_owned(),
+    }))?;
+    let registry = core.get_registry_rc()?;
+    let seen = Rc::new(RefCell::new(Seen::default()));
+    let (binder, seeing) = (registry.clone(), seen.clone());
+    let _registry = registry
+        .add_listener_local()
+        .global(move |global| {
+            let Some(props) = global.props else {
+                return;
+            };
+            let mut seen = seeing.borrow_mut();
+            match global.type_ {
+                pw::types::ObjectType::Node if props.get("node.name") == Some(node) => {
+                    if let Ok(proxy) = binder.bind::<pw::node::Node, _>(global) {
+                        seen.node = Some((global.id, proxy));
+                    }
+                }
+                pw::types::ObjectType::Link => {
+                    if let Some(to) = props.get("link.input.node").and_then(|n| n.parse().ok()) {
+                        seen.links.push((global.id, to));
+                    }
+                }
+                _ => {}
+            }
+        })
+        .register();
+    seen.borrow_mut().listed = Some(core.sync(0)?.seq());
+    let finished = Rc::new(Cell::new(false));
+    let (quit, done, undoing, syncing, setting) = (
+        mainloop.downgrade(),
+        finished.clone(),
+        registry.clone(),
+        core.clone(),
+        seen.clone(),
+    );
+    let _done = core
+        .add_listener_local()
+        .done(move |id, answered| {
+            if id != pw::core::PW_ID_CORE {
+                return;
+            }
+            let mut seen = setting.borrow_mut();
+            if seen.listed == Some(answered.seq()) {
+                let Some((id, proxy)) = &seen.node else {
+                    return;
+                };
+                for (link, _) in seen.links.iter().filter(|(_, to)| to == id) {
+                    let _ = undoing.destroy_global(*link);
+                }
+                proxy.send_command(&NodeCommand::new(NodeCommandId::SUSPEND));
+                if let Some(param) = pw::spa::pod::Pod::from_bytes(&pod) {
+                    proxy.set_param(pw::spa::param::ParamType::PortConfig, 0, param);
+                }
+                seen.done = syncing.sync(0).ok().map(|s| s.seq());
+            } else if seen.done == Some(answered.seq()) {
+                done.set(true);
+                if let Some(mainloop) = quit.upgrade() {
+                    mainloop.quit();
+                }
+            }
+        })
+        .register();
+    let quit = mainloop.downgrade();
+    let timer = mainloop.loop_().add_timer(move |_| {
+        if let Some(mainloop) = quit.upgrade() {
+            mainloop.quit();
+        }
+    });
+    let _ = timer.update_timer(Some(Duration::from_secs(10)), None);
+    mainloop.run();
+    anyhow::ensure!(finished.get(), "{node}'s ports were not set up again");
+    Ok(())
+}
+
+/// A `PortConfig` for an input in DSP mode, 48 kHz, mono, with a monitor
+/// port: WirePlumber's.
+fn port_config() -> anyhow::Result<Vec<u8>> {
+    use pipewire::spa::{
+        self,
+        param::{
+            ParamType,
+            audio::{AudioFormat, AudioInfoRaw, MAX_CHANNELS},
+        },
+        pod::{Object, Property, PropertyFlags, Value},
+        sys,
+        utils::{Id, SpaTypes},
+    };
+    let mut info = AudioInfoRaw::new();
+    info.set_format(AudioFormat::F32P);
+    info.set_rate(RATE as u32);
+    info.set_channels(1);
+    let mut position = [0; MAX_CHANNELS];
+    position[0] = sys::SPA_AUDIO_CHANNEL_MONO;
+    info.set_position(position);
+    let format = Object {
+        type_: SpaTypes::ObjectParamFormat.as_raw(),
+        id: ParamType::Format.as_raw(),
+        properties: info.into(),
+    };
+    let property = |key, value| Property {
+        key,
+        flags: PropertyFlags::empty(),
+        value,
+    };
+    let config = Object {
+        type_: SpaTypes::ObjectParamPortConfig.as_raw(),
+        id: ParamType::PortConfig.as_raw(),
+        properties: vec![
+            property(
+                sys::SPA_PARAM_PORT_CONFIG_direction,
+                Value::Id(Id(sys::SPA_DIRECTION_INPUT)),
+            ),
+            property(
+                sys::SPA_PARAM_PORT_CONFIG_mode,
+                Value::Id(Id(sys::SPA_PARAM_PORT_CONFIG_MODE_dsp)),
+            ),
+            property(sys::SPA_PARAM_PORT_CONFIG_monitor, Value::Bool(true)),
+            property(sys::SPA_PARAM_PORT_CONFIG_format, Value::Object(format)),
+        ],
+    };
+    let (cursor, _) = spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &Value::Object(config),
+    )
+    .map_err(|err| anyhow::anyhow!("a PortConfig: {err:?}"))?;
+    Ok(cursor.into_inner())
 }
 
 // --- The window's Voix tab, with the real shell ------------------------------
