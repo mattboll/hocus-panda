@@ -12,7 +12,7 @@ use std::{path::Path, time::Duration};
 use common::{KEY_LEFTMETA, KEY_RIGHT, WAIT, open_with};
 use hocus_compositor::{
     Config, Headless, HeadlessConfig, OutputSpec,
-    model::{Mode, Rect, Zone},
+    model::{DEFAULT_GAP as GAP, Mode, Rect, Zone},
 };
 
 const STEP: Duration = Duration::from_micros(16_667);
@@ -197,7 +197,7 @@ fn a_snapped_window_throws_no_sun_shadow() -> anyhow::Result<()> {
     let area = hp
         .work_area()
         .ok_or_else(|| anyhow::anyhow!("no work area"))?;
-    let half = Zone::Right.rect(area);
+    let half = Zone::Right.rect(area, GAP);
     // Left of the half, past where a window's own shadow reaches (45 px),
     // under where the first place's sun shadow reaches.
     let beside = Rect {

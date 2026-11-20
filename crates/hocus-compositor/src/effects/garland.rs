@@ -42,7 +42,7 @@ use super::{
 };
 use crate::{
     State,
-    model::{GAP, Mode, WindowId, Zone},
+    model::{Mode, WindowId, Zone},
 };
 
 /// The rope's points.
@@ -1061,7 +1061,7 @@ impl State {
     /// the bar), at the work area's top (#813).
     fn garland_top_span(&self, output: &Output) -> Option<[f64; 3]> {
         let area = self.work_area(output)?;
-        let past = f64::from(GAP) + OVERHANG;
+        let past = f64::from(self.gap()) + OVERHANG;
         Some([
             f64::from(area.x) - past,
             f64::from(area.right()) + past,

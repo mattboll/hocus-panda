@@ -64,7 +64,8 @@ there.
   right and bottom edges; `[panel] side = "left"` puts it against the
   left edge of every output instead, and everything below that names the
   right goes with it (6.4, [as built](#64-the-bar-on-the-left-2026-11-05)).
-  Windows keep 8 px from the bar, as from the screen edges.
+  Windows keep the gap from the bar, as from the screen edges
+  (`[windows] gap`, 8 px by default; windows.md §2).
 - **Under the windows** (decided 2026-11-02, #519): the bar sits under
   normal windows. The windows the desktop places (new, maximised,
   snapped) still keep off it: its space stays reserved. A window the user

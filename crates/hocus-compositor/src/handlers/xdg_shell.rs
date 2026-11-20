@@ -431,7 +431,7 @@ impl State {
             Some(Mode::Snapped(zone)) => output
                 .as_ref()
                 .and_then(|o| self.work_area(o))
-                .map(|area| zone.rect(area))
+                .map(|area| zone.rect(area, self.gap()))
                 .map(|r| (r.width, r.height).into()),
             Some(Mode::Floating) | None => None,
         };

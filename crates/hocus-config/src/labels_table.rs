@@ -873,6 +873,11 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("standard", hocus_words::settings::app_account_view::STANDARD), ("rain", hocus_words::link::moving::RAIN), ("frost", hocus_words::settings::appearance::FROST)]),
     },
     Label {
+        key: "windows.gap",
+        name: hocus_words::settings::desktops::SPACE_BETWEEN_WINDOWS,
+        said: Said::Number(" px"),
+    },
+    Label {
         key: "windows.magnet",
         name: hocus_words::settings::desktops::MAGNETIC_EDGES,
         said: Said::Switch,
