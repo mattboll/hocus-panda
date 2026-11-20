@@ -52,7 +52,10 @@ issue's revised comment (2026-11-17), "The window (all lots)" and
   The microphone: the session's default source (the `default`
   metadata) unless it is the Hocuspanda one, else the one chosen
   (`default.configured.audio.source`), else the source of highest
-  priority. The last reader gone, the microphone's stream goes.
+  priority; never one whose jack is empty (its sound card's route says
+  `available` no, as WirePlumber reads it) while another can be heard,
+  and chosen again when a jack is plugged in or pulled out (#911). The
+  last reader gone, the microphone's stream goes.
 - **Each quantum** (256 samples asked, 5.3 ms) the microphone sends is
   made by the voice on PipeWire's real-time thread into a queue the
   source's quantum takes from. The two run in the same cycle in either
