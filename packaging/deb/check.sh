@@ -23,6 +23,7 @@ cat > "$work/expected" <<LIST
 -rwxr-xr-x ./usr/bin/hocuspanda
 -rwxr-xr-x ./usr/bin/hocuspanda-session
 -rwxr-xr-x ./usr/bin/hocuspanda-shell
+-rwxr-xr-x ./usr/libexec/hocuspanda/charge-limit
 -rw-r--r-- ./usr/share/applications/hocus-settings.desktop
 -rw-r--r-- ./usr/share/doc/hocuspanda/config.toml
 -rw-r--r-- ./usr/share/doc/hocuspanda/copyright
@@ -34,6 +35,7 @@ cat > "$work/expected" <<LIST
 -rw-r--r-- ./usr/share/hocuspanda/avatars/panda-6.png
 -rw-r--r-- ./usr/share/hocuspanda/avatars/panda-7.png
 -rw-r--r-- ./usr/share/hocuspanda/avatars/panda-8.png
+-rw-r--r-- ./usr/share/polkit-1/actions/org.hocuspanda.charge-limit.policy
 -rw-r--r-- ./usr/share/wayland-sessions/hocuspanda.desktop
 -rw-r--r-- ./usr/share/xdg-desktop-portal/hocuspanda-portals.conf
 -rw-r--r-- ./usr/share/xdg-desktop-portal/portals/hocuspanda.portal

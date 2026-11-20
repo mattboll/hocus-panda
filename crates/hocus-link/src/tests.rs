@@ -201,6 +201,8 @@ fn to_shell() -> Vec<ToShell> {
         }),
         ToShell::Screens(Vec::new()),
         ToShell::Screens(vec!["DELL U3419W".into(), "HDMI-A-1".into()]),
+        ToShell::ChargeLimit(Some(80)),
+        ToShell::ChargeLimit(None),
         ToShell::Layouts(Vec::new()),
         ToShell::Layouts(vec![
             KeyLayout {

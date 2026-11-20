@@ -115,6 +115,10 @@ pub struct Snapshot {
     pub rules: Box<crate::desktops::Rules>,
     /// The agents that act on the desktop, and how (docs/design/mcp.md).
     pub acting: Box<crate::acting::File>,
+    /// The older switches the file turns off (`[touchpad] swipe-desktops
+    /// = false`): each takes default gestures or a corner away from the
+    /// shortcuts whose line the file does not write (#893).
+    pub switches_off: Vec<[&'static str; 2]>,
 }
 
 /// A set of screens the file arranges: its name ([`set_name`]), its
@@ -244,6 +248,21 @@ pub fn read(text: &str) -> Snapshot {
             bar: Box::new(crate::bar::File::of(&doc)),
             rules: Box::new(crate::desktops::Rules(crate::desktops::rules_of(&doc))),
             acting: Box::new(crate::acting::File::of(&doc)),
+            switches_off: hocus_config::triggers::RETIRED
+                .iter()
+                .map(|r| r.switch)
+                .filter(|[table, key]| {
+                    doc.get(table)
+                        .and_then(|t| t.get(key))
+                        .and_then(Item::as_bool)
+                        == Some(false)
+                })
+                .fold(Vec::new(), |mut all, s| {
+                    if !all.contains(&s) {
+                        all.push(s);
+                    }
+                    all
+                }),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -262,6 +281,7 @@ pub fn read(text: &str) -> Snapshot {
             bar: Box::default(),
             rules: Box::default(),
             acting: Box::default(),
+            switches_off: Vec::new(),
         },
     }
 }

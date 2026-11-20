@@ -115,7 +115,11 @@ fn a_screen_unplugged_keeps_its_windows_and_gets_them_back() -> anyhow::Result<(
         );
         match now.mode {
             Mode::Fullscreen => assert_eq!(now.rect, first, "{app} over the first"),
-            Mode::Snapped(zone) => assert_eq!(now.rect, zone.rect(area1), "{app} in its zone"),
+            Mode::Snapped(zone) => assert_eq!(
+                now.rect,
+                zone.rect(area1, model::DEFAULT_GAP),
+                "{app} in its zone"
+            ),
             Mode::Floating => {
                 assert!(inside(now.rect, area1), "{app} at {:?}", now.rect);
                 assert_eq!(now.rect, model::carried(was.rect, area2, area1), "{app}");
@@ -234,7 +238,10 @@ fn a_window_snapped_or_sent_meanwhile_stays() -> anyhow::Result<()> {
     let sent = placed(&hp, "test.sent");
     assert_eq!(sent.desktop, 1);
     hp.plug(SECOND)?;
-    assert_eq!(placed(&hp, "test.resnapped").rect, Zone::Right.rect(area1));
+    assert_eq!(
+        placed(&hp, "test.resnapped").rect,
+        Zone::Right.rect(area1, model::DEFAULT_GAP)
+    );
     assert_eq!(placed(&hp, "test.resnapped").output.as_deref(), Some(FIRST));
     assert_eq!(placed(&hp, "test.sent").output.as_deref(), Some(FIRST));
     assert_eq!(placed(&hp, "test.sent").desktop, 1);
@@ -259,20 +266,26 @@ fn with_every_screen_gone_the_windows_wait_for_one() -> anyhow::Result<()> {
         let app = was.app_id.as_deref().unwrap_or_default();
         assert_eq!(&placed(&hp, app), was, "{app} where it was");
     }
-    assert_eq!(placed(&hp, "test.snapped").rect, Zone::Right.rect(area));
+    assert_eq!(
+        placed(&hp, "test.snapped").rect,
+        Zone::Right.rect(area, model::DEFAULT_GAP)
+    );
     // Gone again, and back elsewhere: they come to it, inside its area.
     hp.unplug(FIRST)?;
     hp.plug_at(FIRST, 5000, 200)?;
     wait(&mut hp, Duration::from_millis(50))?;
     let area = hp.work_area_of(FIRST).expect("an area");
-    assert_eq!(area.x, 5000 + model::GAP);
+    assert_eq!(area.x, 5000 + model::DEFAULT_GAP);
     let floating = placed(&hp, "test.floating");
     assert!(
         inside(floating.rect, area),
         "{:?} in {area:?}",
         floating.rect
     );
-    assert_eq!(placed(&hp, "test.snapped").rect, Zone::Right.rect(area));
+    assert_eq!(
+        placed(&hp, "test.snapped").rect,
+        Zone::Right.rect(area, model::DEFAULT_GAP)
+    );
     Ok(())
 }
 

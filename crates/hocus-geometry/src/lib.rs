@@ -6,8 +6,10 @@
 //! drawn windows with the same code, so that the two never differ.
 
 /// Space around windows the desktop places, and between the work area and
-/// the output's edges or a bar's reserved space (docs/design/windows.md §2).
-pub const GAP: i32 = 8;
+/// the output's edges or a bar's reserved space, unless `[windows] gap`
+/// says otherwise (docs/design/windows.md §2): every function here that
+/// keeps a gap is given the one configured.
+pub const DEFAULT_GAP: i32 = 8;
 /// The pointer this close to a vertical or top edge of the work area
 /// snaps to a half or maximises.
 pub const SNAP_EDGE: i32 = 24;
@@ -90,19 +92,19 @@ pub enum Side {
 }
 
 impl Zone {
-    /// The zone's rectangle in `area`: halves and quarters keep the gap
+    /// The zone's rectangle in `area`: halves and quarters keep `gap`
     /// between them.
-    pub fn rect(self, area: Rect) -> Rect {
-        let left_w = (area.width - GAP) / 2;
-        let top_h = (area.height - GAP) / 2;
+    pub fn rect(self, area: Rect, gap: i32) -> Rect {
+        let left_w = (area.width - gap) / 2;
+        let top_h = (area.height - gap) / 2;
         let (x, w) = match self.horizontal() {
             Side::Start => (area.x, left_w),
-            Side::End => (area.x + left_w + GAP, area.width - left_w - GAP),
+            Side::End => (area.x + left_w + gap, area.width - left_w - gap),
             Side::Both => (area.x, area.width),
         };
         let (y, h) = match self.vertical() {
             Side::Start => (area.y, top_h),
-            Side::End => (area.y + top_h + GAP, area.height - top_h - GAP),
+            Side::End => (area.y + top_h + gap, area.height - top_h - gap),
             Side::Both => (area.y, area.height),
         };
         Rect::new(x, y, w.max(0), h.max(0))
@@ -244,13 +246,13 @@ impl Pull {
 }
 
 /// How far the `edges` of `rect` move to stick to the edges of `others`
-/// (at [`GAP`] from them, or in line with their edges on the same side)
+/// (at `gap` from them, or in line with their edges on the same side)
 /// or of `area` (flush): the nearest within [`MAGNET`] wins, each way on
 /// its own. A neighbour pulls only where the two overlap the other way,
 /// or come within reach of sticking that way (the gap and [`MAGNET`]),
 /// so a window far above does not.
-pub fn pull(rect: Rect, edges: Edges, others: &[Rect], area: Rect) -> Pull {
-    let reach = GAP + MAGNET;
+pub fn pull(rect: Rect, edges: Edges, others: &[Rect], area: Rect, gap: i32) -> Pull {
+    let reach = gap + MAGNET;
     let near = |a0: i32, a1: i32, b0: i32, b1: i32| a0 < b1 + reach && b0 - reach < a1;
     let nearest = |best: &mut Option<i32>, from: i32, to: i32| {
         let d = to - from;
@@ -274,21 +276,21 @@ pub fn pull(rect: Rect, edges: Edges, others: &[Rect], area: Rect) -> Pull {
     for o in others {
         if near(rect.y, rect.bottom(), o.y, o.bottom()) {
             if edges.left {
-                nearest(&mut out.x, rect.x, o.right() + GAP);
+                nearest(&mut out.x, rect.x, o.right() + gap);
                 nearest(&mut out.x, rect.x, o.x);
             }
             if edges.right {
-                nearest(&mut out.x, rect.right(), o.x - GAP);
+                nearest(&mut out.x, rect.right(), o.x - gap);
                 nearest(&mut out.x, rect.right(), o.right());
             }
         }
         if near(rect.x, rect.right(), o.x, o.right()) {
             if edges.top {
-                nearest(&mut out.y, rect.y, o.bottom() + GAP);
+                nearest(&mut out.y, rect.y, o.bottom() + gap);
                 nearest(&mut out.y, rect.y, o.y);
             }
             if edges.bottom {
-                nearest(&mut out.y, rect.bottom(), o.y - GAP);
+                nearest(&mut out.y, rect.bottom(), o.y - gap);
                 nearest(&mut out.y, rect.bottom(), o.bottom());
             }
         }
@@ -326,12 +328,14 @@ pub const ALL: Edges = Edges {
 mod tests {
     use super::*;
 
+    const GAP: i32 = DEFAULT_GAP;
+
     const AREA: Rect = Rect::new(8, 8, 1700, 1064);
     /// A neighbour in the middle of the area.
     const B: Rect = Rect::new(800, 300, 400, 300);
 
     fn moved(rect: Rect, others: &[Rect]) -> Rect {
-        let (dx, dy) = pull(rect, ALL, others, AREA).offset();
+        let (dx, dy) = pull(rect, ALL, others, AREA, GAP).offset();
         Rect::new(rect.x + dx, rect.y + dy, rect.width, rect.height)
     }
 
@@ -396,7 +400,7 @@ mod tests {
         // aligned 6 px down.
         let c = Rect::new(B.x, B.bottom() + 40, 400, 300);
         let a = Rect::new(B.right() + GAP - 9, B.bottom() - 200 - 6, 300, 200);
-        let pulled = pull(a, ALL, &[B, c], AREA);
+        let pulled = pull(a, ALL, &[B, c], AREA, GAP);
         assert_eq!(
             pulled,
             Pull {
@@ -405,7 +409,7 @@ mod tests {
             }
         );
         let c = Rect::new(a.right() + 3 + GAP, B.y, 200, 300);
-        let pulled = pull(a, ALL, &[B, c], AREA);
+        let pulled = pull(a, ALL, &[B, c], AREA, GAP);
         assert_eq!(pulled.x, Some(3), "C's left side, 3 px from its right edge");
     }
 
@@ -417,7 +421,7 @@ mod tests {
             ..Edges::default()
         };
         assert_eq!(
-            pull(a, right, &[B], AREA),
+            pull(a, right, &[B], AREA, GAP),
             Pull {
                 x: Some(10),
                 y: None
@@ -427,7 +431,7 @@ mod tests {
             left: true,
             ..Edges::default()
         };
-        assert_eq!(pull(a, left, &[B], AREA), Pull::default());
+        assert_eq!(pull(a, left, &[B], AREA, GAP), Pull::default());
     }
 
     #[test]

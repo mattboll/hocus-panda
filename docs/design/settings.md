@@ -175,7 +175,18 @@ couvercle, le bouton d'alimentation et l'économie d'énergie."):
    inert, and the automatic saver and its slider inert, its line "Elle
    passe par les modes : sans eux, rien à allumer.". Without a battery,
    the mode alone.
-6. **PLUS TARD**: "Limiter la charge à 80 %", inert, its amber chip.
+6. **BATTERIE** (with a battery; issue #896, the approved mockup's
+   section): "Limiter la charge à 80 %", its line "La batterie s'use
+   beaucoup moins vite quand l'ordinateur reste souvent branché", then
+   "Charger à 100 % une fois", its line "Pour une journée loin d'une
+   prise ; la limite revient une fois débranché" and its button "Charger
+   à 100 %" (inert while the limit is off; lifted, its line "Limite levée :
+   la batterie charge jusqu'à 100 %, et la limite revient une fois
+   débranché" and the button inert). When no battery has the threshold
+   (`charge_control_end_threshold` in `/sys/class/power_supply`,
+   `HOCUS_POWER_SUPPLY_DIR` in tests), the switch's row is greyed whole
+   with "Ce portable ne permet pas de limiter sa charge" and the button's
+   row is not there.
 
 The keys:
 
@@ -189,6 +200,25 @@ The keys:
 | Couvercle fermé | `[power] lid` (`suspend`, `lock`, `screen-off`, `nothing`) | |
 | Rester allumé avec un écran branché | `[power] lid-ignored-when-docked` | |
 | Bouton d'alimentation | `[power] power-button` (`ask`, `suspend`, `power-off`, `nothing`) | |
+| Limiter la charge à 80 % | `[power] charge-limit` (`false`) | |
+
+**The charge limit** (#896) is the battery's own threshold, kept by its
+firmware: the compositor sets `charge_control_end_threshold` to 80 while
+`[power] charge-limit` is on, 100 when it goes off, as the session starts
+and as the file changes, through the package's helper
+(`pkexec /usr/libexec/hocuspanda/charge-limit 80|100`, packaging/README.md;
+crate `hocus-charge`); where the firmware refuses an end above its start
+threshold, the start goes to 75 first (95 with 100, so that a battery at
+80 % charges). A value the batteries hold already is not written again.
+Only on a virtual terminal (the session's battery is the machine's), or
+with a helper given (`HOCUS_CHARGE_HELPER`, run as itself; the tests' fake
+sysfs). "Charger à 100 %" asks the compositor on the Settings' line
+(`charge-full-once`): 100 % until UPower says the machine is on battery,
+then 80 % again; the lift is kept in `$XDG_STATE_HOME/hocuspanda/
+charge-lifted` meanwhile, so a restart keeps it, and the line says
+`{"charge": {"lifted": …}}` back. The shell is told the limit that holds
+(`ToShell::ChargeLimit`): the bar's battery gauge marks 80 %, and its
+popover says "Branché, limité à 80 %" (bar.md, 3.7).
 | Économie d'énergie automatique | `[power] auto-saver` | |
 | Sous ce niveau de batterie | `[power] auto-saver-below` (5 to 50) | |
 | Mode d'énergie | power-profiles-daemon's `ActiveProfile`, not the file | |
@@ -822,12 +852,8 @@ kept, off by default; tap to click on by default.
   `speed`, Accélération `acceleration` (`"adaptive"`, `"flat"`),
   Défilement naturel `natural-scroll`, Gaucher `left-handed`.
 - **GESTES DU PAVÉ TACTILE** (hidden without a touchpad; 6.13 below):
-  Trois doigts de côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
-  to applications), Quatre doigts vers le haut ou le bas `[touchpad] swipe-launcher`
-  (up the four-finger launcher, 6.13: launcher.md; down the overview,
-  8.5 A: windows.md §12b; its line "Vers le haut, le lanceur, qui
-  grandit avec tes doigts ; vers le bas, la vue d’ensemble de tes
-  bureaux, ou le lanceur se referme.").
+  since #893 a summary of what the gestures do, set in the shortcuts
+  ("Gestures and corners" below), then what is left to applications.
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
   the middle, the fill from the middle to the knob, no number), written
   as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
@@ -880,7 +906,10 @@ the issue's last comment; every question answered with its
 recommendation (the launcher grows with four fingers and opens on
 release; switching desktops stays three fingers only; the gesture always
 follows the fingers). The compositor's side is launcher.md's "6.13, as
-built".
+built". Since #893 the two switch rows below are a summary of what the
+gestures do, set in the shortcuts (6.8, "Gestures and corners"), its
+four-finger gestures greyed in the shortcuts' picker on a three-finger
+touchpad; the note of what is left to applications stays.
 
 - **The touchpad gestures group** ("GESTES DU PAVÉ TACTILE"), after the
   mouse group, hidden without a touchpad. On its label line's right,
@@ -972,6 +1001,48 @@ nine is one folded row that unfolds.
 - Chords are written as the compositor reads them: Super, Ctrl, Alt,
   Shift, then the XKB name (`Super+Shift+E`, `Super+period`, `Print`);
   the top row's digits whatever the layout.
+
+### Gestures and corners (as built, #893)
+
+- **In the file**, beside the keys in the action's line:
+  `overview = ["Super+W", "corner:top-left", "swipe:4:down"]`; tokens
+  `corner:top-left|top-right|bottom-left|bottom-right` and
+  `swipe:3|4:left|right|up|down` (`hocus_config::triggers`, shared by
+  the compositor and the Settings). Defaults (`packaging/config.toml`):
+  `desktop-left` `swipe:3:right`, `desktop-right` `swipe:3:left` (the
+  strip follows the fingers: right brings the desktop on the left, as
+  before), `launcher` `swipe:4:up`, `overview` `corner:top-left` and
+  `swipe:4:down`. The older `[touchpad] swipe-desktops`, `swipe-launcher`
+  and `[overview] hot-corner` are still read, no longer written: false,
+  each takes its defaults away from an action whose line the file does
+  not write; "Rétablir" then writes the line whole.
+- **The sub-page**: after its keycaps, a row shows a chip a trigger,
+  blue with its fingers drawn ("3 doigts ←") or amber with its screen
+  ("Coin ◤"), each with its ✕. "+" opens a picker under the row, three
+  tabs: Touches (recording, as above), Coin (the four corners), Geste
+  (3 and 4 fingers × the four ways), Geste first. An item another action
+  holds is greyed with its name, and picked asks first in the picker's
+  amber box ("3 doigts ↑ sert déjà à « X ». Le donner à « Y » le lui
+  enlève.", Remplacer writing both lines as one change, or Annuler);
+  this action's own says "déjà ici"; the bar's own corner (the top one
+  on its side) says "la barre"; on a touchpad sensing three fingers the
+  four-finger ones say "pas sur ce pavé". `Esc` closes the box, then the
+  picker. The search finds them ("3 doigts", "coin", "haut"); the count
+  line adds "N gestes et coins"; "Rétablir" and "Tout rétablir" bring
+  them back with the keys.
+- **Elsewhere**: Souris et pavé tactile's gestures group says what they
+  do ("3 doigts ← → : Bureau de droite, Bureau de gauche") and Bureaux
+  et fenêtres' overview group what the corners do ("Coin ◤ : Vue
+  d’ensemble"), each with "Changer dans les raccourcis ›", which opens
+  the sub-page.
+- **The compositor**: a swipe with a binding decides as before
+  (`gestures.rs`); the desktops follow when the fingers go the strip's
+  way, the launcher along its swipe's way (back the other way while
+  open), the overview opens at once; any other action runs once as the
+  fingers lift, past a third of the launcher's travel; a swipe no action
+  takes is the application's. The corners (`hot_corner.rs`) keep #727's
+  rules for each corner. Tests: `shortcuts::tests`, `tests/gestures.rs`,
+  `tests/overview.rs`, `tests/settings_keyboard.rs`.
 
 **The compositor's side.** `reload.rs` follows `[shortcuts]` and
 `[keyboard]` too: the new shortcuts at once; new layouts or options make
@@ -1343,6 +1414,58 @@ picture of one's own. The glyphs are the desktop's own drawings (46
 half-width katakana, the digits and 8 signs on 5 × 7 dots, drawn
 mirrored), one 64 × 64 atlas of 16 KB whatever the scale.
 
+**A wallpaper that changes by itself (#894).** Approved 2026-11-20
+(mockup section `t894`). Two more tiles in FONDS, after Couleur unie:
+
+| Group | What | Key |
+|---|---|---|
+| FONDS | "Un dossier" (two of its pictures, one behind the other; chosen without a folder, the file chooser asks one first), "Jour et nuit" (the day's picture beside the night's), each "Nouveau" | `[wallpaper] picture = "folder" \| "day-night"`, or `[outputs.NAME] wallpaper` with per-screen |
+| LE DOSSIER | the folder (`~/Images/Fonds`), "42 images", "Changer de dossier…" (the portal's file chooser, a folder: "Choisir un dossier d’images"); Changer d’image: "Toutes les 15 minutes", "Toutes les heures" (default), "Chaque jour", "À chaque ouverture de session"; Ordre: "Au hasard" (default) \| "Par nom"; Image suivante, "Aussi dans les actions (Super+P).", "Suivante" | `[wallpaper] folder`, `every = "15m" \| "1h" \| "1d" \| "session"`, `order = "shuffle" \| "name"`; a screen's own `wallpaper-folder` |
+| JOUR ET NUIT | "Le jour · plage.jpg" and "La nuit · Nuit", each opening a list of the gallery's pictures and "Choisir une image…"; Bascule: "Lever 07:58 · coucher 17:12 à Saint-Étienne", "Avec le soleil"; without a place in Météo, "À heures fixes" and two rows, Le jour commence à, La nuit commence à (every half hour) | `[wallpaper] day = "dawn"`, `night = "night"`, `day-starts = "07:00"`, `night-starts = "20:00"`; a screen's own `wallpaper-day`, `wallpaper-night` |
+
+- **The compositor** (`src/wallpaper/changing.rs`) lists a folder (JPEG,
+  PNG and WebP by their names, its subfolders' too, hidden ones left out)
+  on a thread of its own, which adds its folders to an inotify watch
+  another thread reads: a picture added joins the round (by name in its
+  place, shuffled among those still to come), one removed leaves it (the
+  next shows if it was shown), listed again 400 ms after the last change.
+  The round (`src/wallpaper/round.rs`: each picture once a round, a new
+  round shuffled again, never the same picture twice in a row) and when
+  it last changed are kept in `$XDG_STATE_HOME/hocuspanda/wallpaper.json`
+  (written off the loop): the next session goes on where it was, at once
+  if the interval passed meanwhile, "session" one picture on each time.
+  One timer on the loop wakes it at the next change. Screens with the same
+  folder show the same picture.
+- **Day and night** (`src/wallpaper/day_night.rs`) switch at sunrise and
+  sunset at `[weather]`'s place, computed by `hocus_link::sun` (NOAA's
+  equations, refraction counted, no network; a polar day or night keeps
+  one all day), else at `day-starts` and `night-starts`, on the wall
+  clock, looked at again every 10 minutes at least.
+- **Drawn**: the picture of the moment is drawn as any picture, on the
+  wallpaper's thread; a folder's next one is drawn ahead and kept aside
+  until it shows. A change fades the screen's previous background out
+  under the new one, 2 s for a folder, 30 s for day and night; at once
+  with reduced motion or on the CPU. The lock (the shell's) and the
+  Settings are told the picture of the moment (`wallpaper`, and
+  `wallpaper-now` on the Settings' line), so the lock shows it, dimmed
+  or blurred as chosen; a `lock-picture` of `"folder"` or
+  `"day-night"` shows every screen's wallpaper of the moment.
+- **Image suivante**: the actions palette's "Image suivante" (Écrans,
+  inert "le fond n’est pas un dossier" otherwise) and the Settings'
+  button (`wallpaper-next [SCREEN]` on their line) show the folder's next
+  picture now, the interval counted again from it.
+- **Tested**: `tests/wallpaper_changes.rs` (a folder by name on a short
+  interval, `Config::wallpaper_every`: its order, a picture added, one
+  removed, the round kept; on GLES the fade halfway on the held clock),
+  `tests/settings_wallpaper.rs` (a folder chosen in the test's portal,
+  its keys written, its pictures counted and drawn, "Par nom"); unit
+  tests of the round, the first change of a session, day and night, the
+  sun at Paris's solstices and Tromsø's, the configuration's keys.
+- **Choices made here** (to confirm on the machine): the tiles come after
+  Couleur unie; without a place the two hours are two rows under
+  Bascule rather than inside it; the day's picture is Aube by default;
+  an empty folder, or none chosen, draws Nuit.
+
 **The compositor follows the file**: `[wallpaper]` and `[outputs.NAME]
 wallpaper` through `reload.rs`; a screen's `wallpaper` is not part of its
 layout (a change redraws its background, never sets its mode). `~/` in a
@@ -1594,10 +1717,12 @@ row.
 | | Leurs noms | a chip per desktop (its number, its name or "Bureau N" faint, a ✕ but with one left; its tooltip "Travail · 3 fenêtres" when the compositor says them), then "+ Ajouter un bureau" (gone at 9) | `[desktops] names` |
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
-| | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
+| | Bords aimantés, Ancrer en glissant contre un bord | switches | `[windows] magnet`, `snap-by-drag` |
+| | Espace entre les fenêtres (#895), "Et avec les bords de l'écran et la barre" | slider 0 to 24 by 2, "8 px" | `[windows] gap` |
+| | Fenêtres ondulantes | switch | `[windows] wobble` |
 | | Ouvrir et fermer (#432, #740) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the thawing pane) | `[windows] animation = "standard" \| "rain" \| "frost"` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
-| VUE D'ENSEMBLE | Coin en haut à gauche : vue d'ensemble | switch, on by default (#727) | `[overview] hot-corner` |
+| VUE D'ENSEMBLE | Coins de l’écran | what each corner does, a link to the shortcuts (#893) | `[shortcuts]`' `corner:` tokens |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
 
 - **Under the title**: "Les raccourcis des fenêtres et des bureaux se
@@ -1643,7 +1768,8 @@ row.
   ondule pendant le geste et se pose en 400 ms.", "Mouvements réduits :
   elle se déplace d'un bloc…"). Notes moves by its title bar, or by its
   content while the key is held (the button, or the real key when the
-  host lets it through). It follows the page's switches live, with the
+  host lets it through). It follows the page's switches and its gap
+  (the 8 px said is the slider's) live, with the
   compositor's own code: the crate `hocus-geometry` holds the rectangles,
   the snap zones (the compositor's 24 px edges and 48 px corners, the
   zone taken in a 200 ms spring, its size given back when dragged 12 px

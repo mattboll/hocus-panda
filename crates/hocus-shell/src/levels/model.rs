@@ -22,6 +22,9 @@ pub struct Snapshot {
     pub degraded: Option<Degraded>,
     /// The keyboard's backlight, from UPower.
     pub keyboard: Option<Keyboard>,
+    /// The battery's charge limit that holds, in percent (the compositor's,
+    /// #896): the gauge's mark, the popover's "Branché, limité à 80 %".
+    pub charge_limit: Option<u8>,
 }
 
 /// The keyboard's backlight: its level, from 0 (off) to `max`.
@@ -166,7 +169,7 @@ pub enum Band {
     Ok,
     /// 20 % or less.
     Low,
-    /// 10 % or less: the status line asks for the charger.
+    /// 10 % or less: the popover asks for the charger.
     Critical,
 }
 
@@ -193,12 +196,30 @@ impl Battery {
         self.charge.plugged()
     }
 
+    /// What the bar's row shows for its value (#900): on battery, the time
+    /// left once UPower has an estimate ("3 h 40", "45 min"); else, and on
+    /// AC, the percentage.
+    pub fn value(&self) -> RowValue {
+        match (self.charge, self.left.filter(|d| !d.is_zero())) {
+            (Charge::Discharging, Some(left)) => RowValue::Left(duration(left)),
+            _ => RowValue::Percent(self.shown()),
+        }
+    }
+
     /// Its health in whole percent, when known (0 is not).
     pub fn health(&self) -> Option<u32> {
         self.health
             .map(|h| h.round().clamp(0.0, 100.0) as u32)
             .filter(|h| *h > 0)
     }
+}
+
+/// The battery's row's value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowValue {
+    Percent(u32),
+    /// The time left, to the minute.
+    Left(String),
 }
 
 /// power-profiles-daemon's `ActiveProfile`.
@@ -210,6 +231,15 @@ pub enum Profile {
 }
 
 impl Profile {
+    /// The mark on the bar's battery (#900): none for balanced.
+    pub fn mark(self) -> Option<Mark> {
+        match self {
+            Self::PowerSaver => Some(Mark::Leaf),
+            Self::Balanced => None,
+            Self::Performance => Some(Mark::Flame),
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "power-saver" => Some(Self::PowerSaver),
@@ -217,6 +247,23 @@ impl Profile {
             "performance" => Some(Self::Performance),
             _ => None,
         }
+    }
+}
+
+/// The power profile's mark on the battery's icon in the bar (#900).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mark {
+    /// The power saver: a green leaf.
+    Leaf,
+    /// Performance: an orange flame.
+    Flame,
+}
+
+impl Snapshot {
+    /// The mark on the battery's icon: the profile's, with a battery only.
+    pub fn mark(&self) -> Option<Mark> {
+        self.battery?;
+        self.profile?.mark()
     }
 }
 
@@ -470,9 +517,19 @@ impl Words {
         txt::NO_WINDOW.get(self.lang())
     }
 
-    /// The battery's popover's line under its level.
-    pub fn battery_line(self, battery: &Battery) -> String {
+    /// The battery's popover's line under its level; held at the charge
+    /// `limit` (#896), plugged in and not charging (or full under 100 %,
+    /// as some firmware says it), it says so.
+    pub fn battery_line(self, battery: &Battery, limit: Option<u8>) -> String {
         let left = battery.left.filter(|d| !d.is_zero()).map(duration);
+        let held = match battery.charge {
+            Charge::PluggedIn => true,
+            Charge::Full => battery.percent < 99.5,
+            _ => false,
+        };
+        if let Some(limit) = limit.filter(|_| held) {
+            return txt::plugged_in_limited_to(self.lang(), limit);
+        }
         let mut text = match (battery.charge, left) {
             (Charge::Discharging | Charge::Unknown, Some(t)) => txt::left(self.lang(), &t),
             (Charge::Discharging | Charge::Unknown, None) => {
@@ -489,7 +546,7 @@ impl Words {
         text
     }
 
-    /// The battery's part of the status line, if any.
+    /// The battery's part of what screen readers say of it, if any.
     fn battery(self, battery: &Battery) -> Option<String> {
         let left = battery.left.filter(|d| !d.is_zero()).map(duration);
         let mut text = match (battery.charge, left) {
@@ -508,9 +565,11 @@ impl Words {
         Some(text)
     }
 
-    /// The status line under the gauges: the battery's time left (or
-    /// what it does) and the power profile; the profile alone without a
-    /// battery; nothing without either.
+    /// What screen readers say after the battery's percentage: its time
+    /// left (or what it does) and the power profile; the profile alone
+    /// without a battery; nothing without either. The bar no longer writes
+    /// it under the gauges (#900): its row shows the time left, its icon
+    /// the profile's mark, the popover the rest.
     pub fn status(self, levels: &Snapshot) -> Option<String> {
         let battery = levels.battery.and_then(|b| self.battery(&b));
         let profile = levels.profile.map(|p| self.profile(p));
@@ -614,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn the_status_line_in_each_state_and_language() {
+    fn what_screen_readers_say_of_the_battery_in_each_state_and_language() {
         let fr = Words::new(Lang::French);
         let en = Words::new(Lang::English);
         let balanced = Some(Profile::Balanced);
@@ -693,6 +752,53 @@ mod tests {
     }
 
     #[test]
+    fn the_battery_row_shows_the_time_left_on_battery_and_the_percentage_on_ac() {
+        let left = |b: Battery| b.value();
+        // On battery with an estimate: the time left, under an hour in
+        // minutes.
+        assert_eq!(
+            left(battery(82.0, Charge::Discharging, 220)),
+            RowValue::Left("3 h 40".into())
+        );
+        assert_eq!(
+            left(battery(14.0, Charge::Discharging, 45)),
+            RowValue::Left("45 min".into())
+        );
+        // No estimate yet: the percentage.
+        assert_eq!(
+            left(battery(60.4, Charge::Discharging, 0)),
+            RowValue::Percent(60)
+        );
+        let none = Battery {
+            left: None,
+            ..battery(60.0, Charge::Discharging, 0)
+        };
+        assert_eq!(left(none), RowValue::Percent(60));
+        // On AC, whatever UPower estimates: the percentage.
+        for charge in [Charge::Charging, Charge::Full, Charge::PluggedIn] {
+            assert_eq!(left(battery(46.0, charge, 70)), RowValue::Percent(46));
+        }
+    }
+
+    #[test]
+    fn the_profiles_mark_on_the_battery_none_for_balanced_nor_without_one() {
+        let b = Some(battery(82.0, Charge::Discharging, 220));
+        assert_eq!(
+            levels(b, Some(Profile::PowerSaver)).mark(),
+            Some(Mark::Leaf)
+        );
+        assert_eq!(
+            levels(b, Some(Profile::Performance)).mark(),
+            Some(Mark::Flame)
+        );
+        assert_eq!(levels(b, Some(Profile::Balanced)).mark(), None);
+        assert_eq!(levels(b, None).mark(), None);
+        // Without a battery: no mark anywhere in the bar.
+        assert_eq!(levels(None, Some(Profile::PowerSaver)).mark(), None);
+        assert_eq!(levels(None, Some(Profile::Performance)).mark(), None);
+    }
+
+    #[test]
     fn low_and_critical_only_off_the_charger() {
         let band = |percent, charge| battery(percent, charge, 10).band();
         assert_eq!(band(21.0, Charge::Discharging), Band::Ok);
@@ -758,9 +864,26 @@ mod tests {
             ),
         ];
         for (b, french, english) in cases {
-            assert_eq!(fr.battery_line(&b), french);
-            assert_eq!(en.battery_line(&b), english);
+            assert_eq!(fr.battery_line(&b, None), french);
+            assert_eq!(en.battery_line(&b, None), english);
         }
+        // Held at the charge limit (#896), or full under 100 %; charging
+        // under it, as before.
+        for b in [
+            battery(80.0, Charge::PluggedIn, 0),
+            battery(80.0, Charge::Full, 0),
+        ] {
+            assert_eq!(fr.battery_line(&b, Some(80)), "Branché, limité à 80\u{a0}%");
+            assert_eq!(en.battery_line(&b, Some(80)), "Plugged in, limited to 80 %");
+        }
+        assert_eq!(
+            fr.battery_line(&battery(100.0, Charge::Full, 0), Some(80)),
+            "Branché, plein"
+        );
+        assert_eq!(
+            fr.battery_line(&battery(64.0, Charge::Charging, 0), Some(80)),
+            "En charge"
+        );
         let mut b = battery(60.0, Charge::Discharging, 0);
         assert_eq!(b.health(), None);
         b.health = Some(0.0);

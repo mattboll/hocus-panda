@@ -4,7 +4,7 @@
 # the package installs on this release and later ones.
 #
 #   scripts/prebuilt.sh
-#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice
+#   cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice -p hocus-charge
 #   packaging/deb/build.sh [OUTDIR]     (default: CARGO_TARGET_DIR/packages)
 #
 # Needs dpkg-dev; the binaries are read from CARGO_TARGET_DIR/release. Prints
@@ -101,7 +101,8 @@ printf 'Source: hocuspanda\n\nPackage: hocuspanda\nArchitecture: any\n' \
     > "$work/src/debian/control"
 (cd "$work/src" && dpkg-shlibdeps -O debian/hocuspanda/usr/bin/hocuspanda \
     debian/hocuspanda/usr/bin/hocuspanda-shell debian/hocuspanda/usr/bin/hocus \
-    debian/hocuspanda/usr/bin/hocus-settings debian/hocuspanda/usr/bin/hocus-transcribe) > "$work/shlibs"
+    debian/hocuspanda/usr/bin/hocus-settings debian/hocuspanda/usr/bin/hocus-transcribe \
+    debian/hocuspanda/usr/libexec/hocuspanda/charge-limit) > "$work/shlibs"
 depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 
 # Recommends: Mesa's drivers (the shell draws with Vulkan, or on the CPU
@@ -118,7 +119,9 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # and a VA-API driver for it to encode on the GPU (without one, on the
 # CPU); GNOME Online Accounts, whose Google accounts give "Your day" its
 # calendars; polkit's daemon, which asks the shell, the session's agent,
-# for an administrator's password (without it, nothing asks);
+# for an administrator's password (without it, nothing asks), and pkexec,
+# through which the compositor runs the battery's charge limit's helper
+# (without it, the charge is not limited);
 # v4l2loopback's module, built by DKMS, which the Hocuspanda camera writes
 # to for the applications that read only /dev/video* (without it, the
 # camera is on PipeWire only). Depends:
@@ -138,7 +141,7 @@ Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  pipewire, xdg-desktop-portal-gtk,
  ffmpeg, va-driver-all | va-driver,
  gnome-online-accounts,
- polkitd,
+ polkitd, pkexec | policykit-1,
  v4l2loopback-dkms
 Section: x11
 Priority: optional

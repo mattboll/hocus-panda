@@ -2191,6 +2191,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-charge"
+version = "1.0.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "hocus-cli"
 version = "1.0.0"
 dependencies = [
@@ -2218,6 +2225,7 @@ dependencies = [
  "futures-util",
  "hocus-agents",
  "hocus-camera",
+ "hocus-charge",
  "hocus-compositor",
  "hocus-config",
  "hocus-geometry",
@@ -2379,6 +2387,7 @@ dependencies = [
  "anyhow",
  "hocus-agents",
  "hocus-bluetooth",
+ "hocus-charge",
  "hocus-config",
  "hocus-geometry",
  "hocus-link",

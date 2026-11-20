@@ -562,6 +562,21 @@ impl Headless {
         self.app.state.away_on_battery(battery);
     }
 
+    /// "Charger à 100 % une fois", as the Settings' line asks it (#896).
+    pub fn charge_lift(&mut self) -> Result<(), &'static str> {
+        self.app.state.charge_lift()
+    }
+
+    /// The battery's charge limit the shell is told (#896).
+    pub fn charge_limit(&self) -> Option<u8> {
+        self.app.state.charge_limit_shown()
+    }
+
+    /// Whether the charge limit is lifted until the next unplug.
+    pub fn charge_lifted(&self) -> bool {
+        self.app.state.charge_lifted()
+    }
+
     /// power-profiles-daemon's profile, as it would say.
     pub fn set_power_profile(&mut self, profile: Option<&str>) {
         self.app.state.power_profile(profile.map(str::to_owned));

@@ -1,13 +1,17 @@
 //! The Énergie page (6.10, variant A, docs/design/settings.md "Énergie"):
 //! the battery's card; the dim, the screen off and the sleep in 7.2's
 //! order with their timeline; locking; the lid and the power button; the
-//! power mode and the automatic power saver; what comes later.
+//! power mode and the automatic power saver; the battery's charge limit.
 //!
 //! The rows of one key each are the window's ([`crate::power::settings`]);
 //! the battery, the power mode and whether logind is there come from the
 //! system bus, on a thread of its own ([`crate::power_bus`]), as changes.
 //! The power mode is power-profiles-daemon's: chosen here, it toasts with
-//! "Annuler" and joins `Ctrl+Z` as a file's change does.
+//! "Annuler" and joins `Ctrl+Z` as a file's change does. The charge limit
+//! (#896) is a key of the file the compositor applies; whether a battery
+//! has the threshold is the kernel's (the worker's), and "Charger à 100 %
+//! une fois" asks the compositor on its line, which says back whether the
+//! limit is lifted.
 
 use hocus_words::settings::app_power_page as words;
 use std::time::Instant;
@@ -20,7 +24,7 @@ use iced::{
 };
 
 use super::{
-    App, Control, Message, Page, TOAST, ToastAction, UNDONE, Undo,
+    App, Control, Focus, Message, Page, TOAST, ToastAction, UNDONE, Undo,
     style::*,
     view::{El, card_box, divided, label, t},
 };
@@ -29,6 +33,7 @@ use crate::{
     model::{SectionId, Setting, Source, Value},
     power::{self as model, Step, StepKind},
     power_bus::{self, Battery, Charge, Now},
+    screens::Said,
     store::Slot,
 };
 
@@ -38,6 +43,8 @@ pub enum Msg {
     Heard(Now),
     /// A power mode chosen.
     Mode(&'static str),
+    /// "Charger à 100 %": the limit lifted until the next unplug.
+    ChargeOnce,
 }
 
 /// A control of the page's own that takes the keyboard.
@@ -45,6 +52,8 @@ pub enum Msg {
 pub enum Stop {
     /// The power mode: `←`/`→`.
     Mode,
+    /// "Charger à 100 %": `Enter` or `Space`.
+    ChargeOnce,
 }
 
 /// A power mode changed, for its undo.
@@ -62,6 +71,11 @@ pub struct State {
     bus: Option<power_bus::Bus>,
     /// The kernel's supplies say the machine is on battery.
     pub(super) kernel_on_battery: bool,
+    /// A battery has a charge threshold (#896).
+    pub(super) charge_supported: bool,
+    /// The charge limit is lifted until the next unplug, as the
+    /// compositor says (or as asked, until it says).
+    pub(super) charge_lifted: bool,
 }
 
 impl State {
@@ -74,7 +88,7 @@ impl State {
         Self {
             now: None,
             bus: Some(bus),
-            kernel_on_battery: false,
+            ..Self::default()
         }
     }
 }
@@ -161,7 +175,7 @@ impl App {
             .iter()
             .filter(|s| match s.id {
                 model::LID_CLOSED | model::DOCKED => lid,
-                model::AUTO_SAVER | model::SAVER_BELOW => battery,
+                model::AUTO_SAVER | model::SAVER_BELOW | model::CHARGE_LIMIT => battery,
                 _ => true,
             })
             .collect()
@@ -183,7 +197,21 @@ impl App {
         if !out.contains(&Control::Power(Stop::Mode)) {
             out.push(Control::Power(Stop::Mode));
         }
+        if self.charge_once_shown() {
+            out.push(Control::Power(Stop::ChargeOnce));
+        }
         out
+    }
+
+    /// "Charger à 100 % une fois" shows: a battery whose charge can be
+    /// limited.
+    fn charge_once_shown(&self) -> bool {
+        self.power_battery().is_some() && self.power.charge_supported
+    }
+
+    /// It can be pressed: the limit on, not lifted already.
+    fn charge_once_pressable(&self) -> bool {
+        self.charge_once_shown() && self.power_on(model::CHARGE_LIMIT) && !self.power.charge_lifted
     }
 
     // --- What it does ------------------------------------------------------------------
@@ -209,6 +237,24 @@ impl App {
                 iced::Task::none()
             }
             Msg::Mode(mode) => self.power_choose(mode),
+            Msg::ChargeOnce => {
+                if self.charge_once_pressable() && self.screens_ask("charge-full-once".to_owned()) {
+                    tracing::info!("the charge limit lifted until the next unplug");
+                    self.power.charge_lifted = true;
+                }
+                iced::Task::none()
+            }
+        }
+    }
+
+    /// What the compositor's line says of the charge limit.
+    pub(super) fn power_said(&mut self, said: &Said) -> bool {
+        match said {
+            Said::Charge { lifted } => {
+                self.power.charge_lifted = *lifted;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -272,7 +318,12 @@ impl App {
     }
 
     pub(super) fn power_key(&mut self, stop: Stop, named: Named) -> iced::Task<Message> {
-        let Stop::Mode = stop;
+        if stop == Stop::ChargeOnce {
+            return match named {
+                Named::Enter | Named::Space => self.power_update(Msg::ChargeOnce),
+                _ => iced::Task::none(),
+            };
+        }
         let Some(modes) = self.power_modes() else {
             return iced::Task::none();
         };
@@ -313,8 +364,20 @@ impl App {
                     .to_owned(),
                 false,
             )),
+            model::CHARGE_LIMIT if !self.power.charge_supported => Some((
+                words::THIS_LAPTOP_CANNOT_LIMIT_ITS_CHARGE
+                    .get(lang)
+                    .to_owned(),
+                false,
+            )),
             _ => None,
         }
+    }
+
+    /// A row greyed whole, its name too: the charge limit on a laptop
+    /// whose battery has no threshold.
+    pub(super) fn power_greyed(&self, setting: &Setting) -> bool {
+        setting.id == model::CHARGE_LIMIT && !self.power.charge_supported
     }
 
     /// A row that does not apply now: the screen off while the dim is
@@ -323,6 +386,7 @@ impl App {
         match setting.id {
             model::SCREEN_OFF => self.power_seconds(model::IDLE).is_none(),
             model::AUTO_SAVER | model::SAVER_BELOW => self.power_no_modes(),
+            model::CHARGE_LIMIT => !self.power.charge_supported,
             _ => false,
         }
     }
@@ -438,11 +502,14 @@ impl App {
             saving.push(model_row(model::SAVER_BELOW));
         }
         groups = groups.push(group(head(words::POWER_SAVING.get(lang), None), saving));
-        // PLUS TARD.
-        groups = groups.push(group(
-            head(words::LATER.get(lang), None),
-            vec![self.charge_limit_row()],
-        ));
+        // BATTERIE: the charge limit, and its lift once where it can be.
+        if shown(model::CHARGE_LIMIT) {
+            let mut rows = vec![model_row(model::CHARGE_LIMIT)];
+            if self.charge_once_shown() {
+                rows.push(self.charge_once_row());
+            }
+            groups = groups.push(group(head(words::BATTERY.get(lang), None), rows));
+        }
         page = page.push(groups);
         container(page).id("page:power".to_owned()).into()
     }
@@ -637,52 +704,67 @@ impl App {
         self.lit(id)
     }
 
-    /// "Limiter la charge à 80 %": later, inert.
-    fn charge_limit_row(&self) -> El<'_> {
+    /// "Charger à 100 % une fois", its line and its button; inert while
+    /// the limit is off or lifted already.
+    fn charge_once_row(&self) -> El<'_> {
         let lang = self.lang;
-        let name = row![
+        let controls = self.controls();
+        let focused = matches!(self.focus, Focus::Control(i) if controls.get(i) == Some(&Control::Power(Stop::ChargeOnce)));
+        let pressable = self.charge_once_pressable();
+        let ink = if pressable { 1.0 } else { INERT };
+        let line = if self.power.charge_lifted {
+            words::LIMIT_LIFTED_UNTIL_UNPLUGGED
+        } else {
+            words::FOR_A_DAY_AWAY_FROM_A_SOCKET
+        };
+        let words = column![
             t(
-                words::LIMIT_CHARGING_TO_80.get(lang),
+                words::CHARGE_TO_100_ONCE.get(lang),
                 14.0,
-                fade(TEXT.get(), INERT)
+                fade(TEXT.get(), ink)
             )
             .font(SEMIBOLD),
-            chip(words::LATER_2.get(lang), AMBER, rgba(245, 196, 110, 0.16)),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        let words = column![
-            name,
-            t(
-                words::SPARES_THE_BATTERY_OF_A_LAPTOP.get(lang),
-                12.5,
-                fade(DIM.get(), INERT)
-            ),
+            t(line.get(lang), 12.5, fade(DIM.get(), ink)),
         ]
         .spacing(2)
         .width(Length::Fill);
-        let off = container(
-            container(Space::new().width(18).height(18)).style(|_: &Theme| container::Style {
-                background: Some(Background::Color(fade(Color::WHITE, INERT))),
-                border: border(9.0, 0.0, Color::TRANSPARENT),
-                ..container::Style::default()
-            }),
-        )
-        .padding(2)
-        .width(40)
-        .height(22)
-        .style(|_: &Theme| container::Style {
-            background: Some(Background::Color(fade(
-                crate::theme::Ink::Token(|t| t.switch_off).get(),
-                INERT,
-            ))),
-            border: border(11.0, 0.0, Color::TRANSPARENT),
-            ..container::Style::default()
-        });
+        let mut press =
+            button(t(words::CHARGE_TO_100.get(lang), 13.0, fade(TEXT.get(), ink)).font(BOLD))
+                .height(30)
+                .padding([0, 12])
+                .style(move |_, status| {
+                    let hovered = pressable
+                        && matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    button::Style {
+                        background: Some(Background::Color(crate::theme::ink(rgba(
+                            255,
+                            255,
+                            255,
+                            if hovered { 0.13 } else { 0.09 } * ink,
+                        )))),
+                        text_color: TEXT.get(),
+                        border: if focused {
+                            ring(8.0)
+                        } else {
+                            border(8.0, 0.0, Color::TRANSPARENT)
+                        },
+                        ..button::Style::default()
+                    }
+                });
+        if pressable {
+            press = press.on_press(Message::Power(Msg::ChargeOnce));
+        }
+        let control = container(
+            container(press)
+                .height(30)
+                .center_y(30)
+                .id("control:power.charge-once".to_owned()),
+        );
+        let lit = self.power_lit(model::CHARGE_ONCE);
         container(
             row![
                 words,
-                row![Space::new().height(36), off].align_y(Alignment::Center)
+                row![Space::new().height(36), control].align_y(Alignment::Center)
             ]
             .spacing(16)
             .align_y(Alignment::Center),
@@ -693,7 +775,14 @@ impl App {
             bottom: 9.0,
             left: 16.0,
         })
-        .id(format!("row:{}", model::CHARGE_LIMIT))
+        .style(move |_: &Theme| container::Style {
+            background: (lit > 0.0).then_some(Background::Color(
+                crate::theme::Ink::Accent(0.20 * lit).get(),
+            )),
+            border: border(11.0, 1.5, crate::theme::Ink::Accent(0.85 * lit).get()),
+            ..container::Style::default()
+        })
+        .id(format!("row:{}", model::CHARGE_ONCE))
         .into()
     }
 
@@ -735,11 +824,22 @@ impl App {
             "lines": self.power_visible().iter().filter_map(|s| {
                 self.power_line(s.id).map(|(l, warn)| serde_json::json!([s.id, l, warn]))
             }).collect::<Vec<_>>(),
+            "charge": {
+                "supported": self.power.charge_supported,
+                "lifted": self.power.charge_lifted,
+                "once": if !self.charge_once_shown() {
+                    "hidden"
+                } else if self.charge_once_pressable() {
+                    "pressable"
+                } else {
+                    "inert"
+                },
+            },
         })
     }
 }
 
-/// A small coloured label beside a row's name: "Nouveau", "Plus tard".
+/// A small coloured label beside a row's name: "Nouveau".
 fn chip<'a>(words: &'static str, ink: Color, back: Color) -> El<'a> {
     container(t(words, 10.5, ink).font(BOLD))
         .padding([1, 6])

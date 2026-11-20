@@ -158,11 +158,13 @@ impl State {
         if new.idle == self.config.idle && new.power == self.config.power {
             return false;
         }
+        let charge_was = self.config.power.charge_limit;
         self.config.idle = new.idle;
         self.config.power = new.power;
         self.power_log_old_keys();
         self.power_delays_changed();
         self.power_saver_check();
+        self.charge_config_changed(charge_was);
         true
     }
 

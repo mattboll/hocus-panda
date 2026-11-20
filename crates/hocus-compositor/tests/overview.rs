@@ -587,6 +587,32 @@ fn the_corner_acts_only_where_the_pointer_stops_and_when_on() -> anyhow::Result<
     Ok(())
 }
 
+/// Any corner runs the action `[shortcuts]` binds to it (#893): the
+/// first screen's bottom-left locks the session, after the same rest; a
+/// corner no action takes does nothing; the top-left one, no longer the
+/// overview's in the file, neither.
+#[test]
+fn a_corner_runs_the_action_bound_to_it() -> anyhow::Result<()> {
+    let mut hp = with_config(
+        "[shortcuts]\nlock = [\"Super+L\", \"corner:bottom-left\"]\noverview = \"Super+W\"\n",
+    )?;
+    into_the_corner(&mut hp);
+    hp.pointer_move(1920.0 + 2400.0, 1400.0);
+    hp.pointer_move(1920.0 + 2559.0, 1439.0);
+    wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(hp.overview(), None);
+    assert_eq!(hp.lock_state(), hocus_compositor::LockState::Unlocked);
+    let entered = std::time::Instant::now();
+    hp.pointer_move(40.0, 1040.0);
+    hp.pointer_move(0.0, 1079.0);
+    let locked = hp.dispatch_until(WAIT, |hp| {
+        hp.lock_state() != hocus_compositor::LockState::Unlocked
+    })?;
+    anyhow::ensure!(locked, "the corner never locked");
+    assert!(entered.elapsed() >= hot_corner::DWELL, "locked at once");
+    Ok(())
+}
+
 /// The session starting with the pointer at a screen's top-left corner,
 /// as a headless one does at 0, 0 (#727): no entry, nothing opens, even as
 /// the desktop moves it in place; once it has gone away and come back, the

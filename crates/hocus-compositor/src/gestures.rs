@@ -1,28 +1,42 @@
-//! The touchpad's swipes the desktop takes (6.13): three fingers across
-//! move the desktops (windows.md §12, `[touchpad] swipe-desktops`), four
-//! fingers up open the launcher and down close it (launcher.md,
-//! `[touchpad] swipe-launcher`); four fingers down with no launcher open
-//! open the overview, or close it (8.5 A, windows.md §12b). Every other
-//! gesture is the application's under the pointer
-//! (`zwp_pointer_gestures_v1`).
+//! The touchpad's swipes the desktop takes (6.13, issue #893): three or
+//! four fingers left, right, up or down, each running the action
+//! `[shortcuts]` binds to it (`swipe:3:left`, `hocus_config::triggers`).
+//! By default three fingers across move the desktops (windows.md §12),
+//! four fingers up open the launcher and down close it (launcher.md);
+//! four fingers down with no launcher open open the overview, or close it
+//! (8.5 A, windows.md §12b). A swipe no action takes is the application's
+//! under the pointer (`zwp_pointer_gestures_v1`).
 //!
 //! The fingers' first travel decides ([`Hold::Deciding`]): until they have
 //! gone [`SWIPE_AXIS`] one way, their events are kept; a swipe the desktop
 //! does not take then reaches the application whole, from its start (a
 //! three-finger swipe that starts vertical is the application's for its
-//! whole length). Each key is read as the fingers come down: one turned
-//! off under way changes nothing until they lift.
+//! whole length, unless an action takes three fingers that way). The
+//! bindings are read as the fingers come down: one changed under way
+//! changes nothing until they lift.
+//!
+//! Switching desktops, the launcher and the overview follow the fingers
+//! (the desktops when the fingers go the way the strip moves: right
+//! brings the desktop on the left). Any other action runs once, as the
+//! fingers lift, when they went [`RELEASE_TRAVEL`] its way.
 //!
 //! The launcher follows the fingers: its presence goes with their travel
-//! up, whole at [`LAUNCHER_TRAVEL`]; let go past a third of it, or on a
-//! flick up, it goes on to whole, else back out (`crate::launcher`). The
-//! direction is always the fingers', whatever natural scrolling says
-//! (libinput's gestures are not reversed by it). With reduced motion
-//! nothing follows: the release decides.
+//! its way, whole at [`LAUNCHER_TRAVEL`]; let go past a third of it, or on
+//! a flick, it goes on to whole, else back out (`crate::launcher`); the
+//! other way with it open closes it. The direction is always the fingers',
+//! whatever natural scrolling says (libinput's gestures are not reversed
+//! by it). With reduced motion nothing follows: the release decides.
 
 use smithay::utils::{Logical, Point};
 
-use crate::{State, desktops::SWIPE_AXIS, input::Gesture};
+use hocus_config::triggers::{Toward, Trigger};
+
+use crate::{
+    State,
+    desktops::SWIPE_AXIS,
+    input::Gesture,
+    shortcuts::{Action, Chord},
+};
 
 /// Finger travel up (libinput's units) that brings the launcher whole.
 pub const LAUNCHER_TRAVEL: f64 = 300.0;
@@ -30,6 +44,9 @@ pub const LAUNCHER_TRAVEL: f64 = 300.0;
 pub const LAUNCHER_COMPLETES: f64 = 1.0 / 3.0;
 /// Or when the fingers leave this fast, in [`LAUNCHER_TRAVEL`]s a second.
 pub const LAUNCHER_FLICK: f64 = 1.2;
+/// How far the fingers go an action's way (libinput's units) for it to run
+/// as they lift: a third of the launcher's travel.
+pub const RELEASE_TRAVEL: f64 = LAUNCHER_TRAVEL * LAUNCHER_COMPLETES;
 
 /// The touchpad's swipe, from the fingers down to their lift.
 #[derive(Debug, Default)]
@@ -46,17 +63,32 @@ pub enum Hold {
     },
     /// Three fingers across: the strip of `State::swiping` follows.
     Desktops,
-    /// Four fingers up or down: the launcher follows.
+    /// The launcher's swipe, or the way back with it open: it follows.
     Launcher(LauncherSwipe),
-    /// Four fingers down opened or closed the overview: the rest of the
-    /// swipe is the desktop's, doing nothing.
+    /// The overview's swipe opened or closed it: the rest of the swipe is
+    /// the desktop's, doing nothing.
     Overview,
+    /// Another action's: it runs as the fingers lift, if they went
+    /// [`RELEASE_TRAVEL`] its way (`travel`, so far).
+    Released {
+        action: Action,
+        toward: Toward,
+        travel: f64,
+    },
 }
 
-/// Four fingers bringing the launcher, or taking it away.
+/// How far (`dx`, `dy`) goes `toward`.
+fn along((dx, dy): (f64, f64), toward: Toward) -> f64 {
+    let (ux, uy) = toward.unit();
+    dx * ux + dy * uy
+}
+
+/// Fingers bringing the launcher, or taking it away.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LauncherSwipe {
-    /// Up from closed; else down while it is open.
+    /// The way of the launcher's swipe (up by default).
+    way: Toward,
+    /// That way from closed; else the other way while it is open.
     opening: bool,
     /// The fingers' travel towards that, in libinput's units.
     travel: f64,
@@ -69,8 +101,9 @@ pub struct LauncherSwipe {
 }
 
 impl LauncherSwipe {
-    fn new(opening: bool, reduced: bool) -> Self {
+    fn new(way: Toward, opening: bool, reduced: bool) -> Self {
         Self {
+            way,
             opening,
             travel: 0.0,
             velocity: 0.0,
@@ -79,9 +112,10 @@ impl LauncherSwipe {
         }
     }
 
-    /// The fingers moved `dy` down at `time`.
-    fn update(&mut self, dy: f64, time: u32) {
-        let step = if self.opening { -dy } else { dy };
+    /// The fingers moved `step` the launcher's way (negative: back) at
+    /// `time`.
+    fn update(&mut self, step: f64, time: u32) {
+        let step = if self.opening { step } else { -step };
         self.travel += step;
         if let Some(last) = self.last {
             let dt = f64::from(time.wrapping_sub(last)) / 1000.0;
@@ -121,13 +155,7 @@ impl State {
     pub(crate) fn take_swipe(&mut self, gesture: Gesture, grabbed: bool) -> bool {
         match (std::mem::take(&mut self.gestures.hold), gesture) {
             (Hold::Free, Gesture::SwipeBegin { time, fingers }) => {
-                let touchpad = &self.config.touchpad;
-                let ours = !grabbed
-                    && match fingers {
-                        3 => touchpad.swipe_desktops,
-                        4 => touchpad.swipe_launcher,
-                        _ => false,
-                    };
+                let ours = !grabbed && self.config.swipes_of(fingers);
                 if ours {
                     self.gestures.hold = Hold::Deciding {
                         fingers,
@@ -198,7 +226,7 @@ impl State {
                 true
             }
             (Hold::Launcher(mut swipe), Gesture::SwipeUpdate { time, delta }) => {
-                swipe.update(delta.y, time);
+                swipe.update(along((delta.x, delta.y), swipe.way), time);
                 if !swipe.reduced {
                     self.panel.launchers.hold(swipe.presence());
                     self.redraw = true;
@@ -215,6 +243,28 @@ impl State {
                 true
             }
             (Hold::Overview, Gesture::SwipeEnd { .. }) => true,
+            (
+                Hold::Released {
+                    action,
+                    toward,
+                    travel,
+                },
+                Gesture::SwipeUpdate { delta, .. },
+            ) => {
+                self.gestures.hold = Hold::Released {
+                    action,
+                    toward,
+                    travel: travel + along((delta.x, delta.y), toward),
+                };
+                true
+            }
+            (Hold::Released { action, travel, .. }, Gesture::SwipeEnd { cancelled, .. }) => {
+                if !cancelled && travel >= RELEASE_TRAVEL {
+                    tracing::debug!(?action, travel, "a swipe runs its action");
+                    self.run_action(action, Chord::NONE);
+                }
+                true
+            }
             // Pinches and holds are never the desktop's.
             (hold, _) => {
                 self.gestures.hold = hold;
@@ -234,39 +284,67 @@ impl State {
         (dx, dy): (f64, f64),
         time: u32,
     ) {
-        let across = dx.abs() >= dy.abs();
-        match (fingers, across) {
-            (3, true) => {
+        let toward = Toward::of(dx, dy);
+        let swipe = |toward| {
+            u8::try_from(fingers)
+                .ok()
+                .map(|fingers| Trigger::Swipe { fingers, toward })
+        };
+        let open = self.panel.launchers.open();
+        // The launcher open: the way back from its own swipe closes it,
+        // following.
+        if open
+            && self.shell_linked()
+            && swipe(toward.opposite()).and_then(|t| self.config.trigger_action(t))
+                == Some(Action::Launcher)
+        {
+            let way = toward.opposite();
+            let mut swipe = LauncherSwipe::new(way, false, self.reduced_motion());
+            swipe.update(along((dx, dy), way), time);
+            self.panel.launchers.hold(swipe.presence());
+            self.redraw = true;
+            self.gestures.hold = Hold::Launcher(swipe);
+            tracing::debug!("fingers take the launcher away");
+            return;
+        }
+        let action = swipe(toward).and_then(|t| self.config.trigger_action(t));
+        match action {
+            // The strip follows the fingers: those going left bring the
+            // desktop on the right.
+            Some(Action::DesktopBy(by))
+                if (toward == Toward::Left && by == 1) || (toward == Toward::Right && by == -1) =>
+            {
                 self.desktop_swipe_begin();
                 self.desktop_swipe_update(dx, dy, time);
                 self.gestures.hold = Hold::Desktops;
                 return;
             }
-            // Down with no launcher open: the overview, as `Super+W`.
-            (4, false) if dy > 0.0 && !self.panel.launchers.open() => {
-                tracing::debug!("four fingers down: the overview");
+            // As `Super+W`; not over an open launcher.
+            Some(Action::Overview) if !open => {
+                tracing::debug!(fingers, ?toward, "a swipe: the overview");
                 self.toggle_overview();
                 self.gestures.hold = Hold::Overview;
                 return;
             }
-            (4, false) if self.shell_linked() => {
-                let open = self.panel.launchers.open();
-                // Up opens it, down closes it; down with none open and up
-                // with one open are the application's.
-                if (dy < 0.0) != open {
-                    let mut swipe = LauncherSwipe::new(!open, self.reduced_motion());
-                    swipe.update(dy, time);
-                    if !open {
-                        self.toggle_launcher();
-                    }
-                    self.panel.launchers.hold(swipe.presence());
-                    self.redraw = true;
-                    self.gestures.hold = Hold::Launcher(swipe);
-                    tracing::debug!(opening = !open, "four fingers hold the launcher");
-                    return;
-                }
+            Some(Action::Launcher) if !open && self.shell_linked() => {
+                let mut swipe = LauncherSwipe::new(toward, true, self.reduced_motion());
+                swipe.update(along((dx, dy), toward), time);
+                self.toggle_launcher();
+                self.panel.launchers.hold(swipe.presence());
+                self.redraw = true;
+                self.gestures.hold = Hold::Launcher(swipe);
+                tracing::debug!(fingers, ?toward, "fingers hold the launcher");
+                return;
             }
-            _ => {}
+            Some(Action::Overview | Action::Launcher) | None => {}
+            Some(action) => {
+                self.gestures.hold = Hold::Released {
+                    action,
+                    toward,
+                    travel: along((dx, dy), toward),
+                };
+                return;
+            }
         }
         self.give_to_application(fingers, began, moves);
         self.gestures.hold = Hold::Free;
@@ -316,39 +394,39 @@ mod tests {
 
     #[test]
     fn the_launcher_follows_up_and_goes_on_past_a_third_or_on_a_flick() {
-        let mut swipe = LauncherSwipe::new(true, false);
+        let mut swipe = LauncherSwipe::new(Toward::Up, true, false);
         // Slowly up a sixth of the way at a time.
         for i in 0..3 {
-            swipe.update(-LAUNCHER_TRAVEL / 6.0, 200 * i);
+            swipe.update(LAUNCHER_TRAVEL / 6.0, 200 * i);
         }
         assert!((swipe.presence() - 0.5).abs() < 1e-9);
         assert!(swipe.completes());
         // A quarter, slowly: back.
-        let mut short = LauncherSwipe::new(true, false);
-        short.update(-LAUNCHER_TRAVEL / 8.0, 0);
-        short.update(-LAUNCHER_TRAVEL / 8.0, 400);
+        let mut short = LauncherSwipe::new(Toward::Up, true, false);
+        short.update(LAUNCHER_TRAVEL / 8.0, 0);
+        short.update(LAUNCHER_TRAVEL / 8.0, 400);
         assert!(!short.completes());
         // A fifth, fast: a flick, it goes on.
-        let mut flick = LauncherSwipe::new(true, false);
+        let mut flick = LauncherSwipe::new(Toward::Up, true, false);
         for i in 0..4 {
-            flick.update(-LAUNCHER_TRAVEL / 20.0, 10 * i);
+            flick.update(LAUNCHER_TRAVEL / 20.0, 10 * i);
         }
         assert!(flick.completes(), "{flick:?}");
         // Down from whole, half the way: half there.
-        let mut closing = LauncherSwipe::new(false, false);
-        closing.update(LAUNCHER_TRAVEL / 2.0, 0);
+        let mut closing = LauncherSwipe::new(Toward::Up, false, false);
+        closing.update(-LAUNCHER_TRAVEL / 2.0, 0);
         assert!((closing.presence() - 0.5).abs() < 1e-9);
         assert!(closing.completes());
     }
 
     #[test]
     fn with_reduced_motion_it_stays_as_it_was_until_let_go() {
-        let mut swipe = LauncherSwipe::new(true, true);
-        swipe.update(-LAUNCHER_TRAVEL / 2.0, 0);
+        let mut swipe = LauncherSwipe::new(Toward::Up, true, true);
+        swipe.update(LAUNCHER_TRAVEL / 2.0, 0);
         assert_eq!(swipe.presence(), 0.0);
         assert!(swipe.completes());
-        let mut closing = LauncherSwipe::new(false, true);
-        closing.update(LAUNCHER_TRAVEL / 2.0, 0);
+        let mut closing = LauncherSwipe::new(Toward::Up, false, true);
+        closing.update(-LAUNCHER_TRAVEL / 2.0, 0);
         assert_eq!(closing.presence(), 1.0);
     }
 }

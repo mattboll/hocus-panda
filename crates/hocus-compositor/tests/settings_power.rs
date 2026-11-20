@@ -31,6 +31,8 @@ use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice};
 use serde_json::Value;
 
 const APP_ID: &str = "hocus-settings";
+/// The battery's end threshold, in the kernel's supplies (#896).
+const CHARGE_END: &str = "charge_control_end_threshold";
 const KEY_Z: u32 = 44;
 
 // --- The fakes ------------------------------------------------------------------------
@@ -352,6 +354,17 @@ impl Bed {
     /// A compositor, the file holding `file`, the system bus's services
     /// as `services` say (`None`: no system bus at all).
     fn start(file: &str, services: Option<Services>) -> anyhow::Result<Option<Self>> {
+        Self::start_on(file, services, false)
+    }
+
+    /// The same; `thresholds`: the kernel's supplies a folder of the
+    /// test's with a battery whose charge can be limited (else none), and
+    /// the compositor's charge helper a script writing into it (#896).
+    fn start_on(
+        file: &str,
+        services: Option<Services>,
+        thresholds: bool,
+    ) -> anyhow::Result<Option<Self>> {
         let program = common::settings_program();
         if std::process::Command::new("dbus-daemon")
             .arg("--version")
@@ -375,12 +388,31 @@ impl Bed {
         let log = root.join("settings.log");
         let script = root.join("bin/hocus-settings");
         let at = |sub: &str| root.join(sub).display().to_string();
+        let supplies = if thresholds {
+            let battery = root.join("supplies/BAT0");
+            std::fs::create_dir_all(&battery)?;
+            std::fs::write(battery.join("type"), "Battery\n")?;
+            std::fs::write(battery.join("capacity"), "82\n")?;
+            std::fs::write(battery.join(CHARGE_END), "100\n")?;
+            let helper = root.join("bin/charge-limit");
+            std::fs::write(
+                &helper,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$1\" > '{}'\n",
+                    battery.join(CHARGE_END).display()
+                ),
+            )?;
+            std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755))?;
+            at("supplies")
+        } else {
+            "/nonexistent".to_owned()
+        };
         std::fs::write(
             &script,
             format!(
                 "#!/bin/sh\nunset DBUS_SESSION_BUS_ADDRESS\n\
                  export DBUS_SYSTEM_BUS_ADDRESS='{bus}' \
-                 HOCUS_POWER_SUPPLY_DIR=/nonexistent PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
+                 HOCUS_POWER_SUPPLY_DIR='{supplies}' PIPEWIRE_REMOTE=/nonexistent ICED_BACKEND=tiny-skia \
                  LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 HOME='{}' XDG_CONFIG_HOME='{}' \
                  XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' XDG_DATA_HOME='{}' \
                  PATH='{}:/usr/bin:/bin' HOCUS_USER_NAME=Alex \
@@ -400,6 +432,13 @@ impl Bed {
         let mut config = Config::default();
         config.keyboard.layouts = vec!["us".to_owned()];
         config.file = Some(config_file);
+        if thresholds {
+            config.charge = Some(hocus_compositor::away::charge::Helper {
+                program: root.join("bin/charge-limit"),
+                pkexec: false,
+                supplies: root.join("supplies"),
+            });
+        }
         let hp = Headless::start_with(
             HeadlessConfig {
                 outputs: vec!["1920x1080".parse()?],
@@ -517,6 +556,20 @@ impl Bed {
         Ok(())
     }
 
+    /// Waits until the fake battery's end threshold reads `want`.
+    fn threshold(&mut self, want: &str) -> anyhow::Result<()> {
+        let file = self.dir.path().join("supplies/BAT0").join(CHARGE_END);
+        let read = |file: &Path| {
+            std::fs::read_to_string(file)
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        };
+        let seen = self.hp.dispatch_until(WAIT, |_| read(&file) == want)?;
+        anyhow::ensure!(seen, "the threshold reads {:?}, not {want:?}", read(&file));
+        Ok(())
+    }
+
     fn written(&mut self, done: impl Fn(&str) -> bool) -> anyhow::Result<String> {
         let file = self.file();
         let seen = self.hp.dispatch_until(WAIT, |_| {
@@ -600,6 +653,7 @@ fn the_page_follows_7_2s_order_and_its_timeline_follows_the_delays() -> anyhow::
             "power.power-button",
             "power.auto-saver",
             "power.auto-saver-below",
+            "power.charge-limit",
         ]
     );
     assert_eq!(row(&shown, "power.idle")["value"], "3 min");
@@ -845,6 +899,54 @@ fn without_logind_the_lid_and_the_button_say_the_system_decides() -> anyhow::Res
     Ok(())
 }
 
+/// The charge limit (#896) on a laptop whose battery has no threshold:
+/// the row greyed, its line saying so, no "Charger à 100 % une fois".
+#[test]
+fn without_a_threshold_the_charge_limit_is_greyed_with_its_line() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start("", Some(Services::laptop()))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| !s["power"]["battery"].is_null())?;
+    assert_eq!(row(&shown, "power.charge-limit")["inert"], true);
+    assert_eq!(shown["power"]["charge"]["supported"], false);
+    assert_eq!(shown["power"]["charge"]["once"], "hidden");
+    let lines = shown["power"]["lines"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        lines.iter().any(|l| l[0] == "power.charge-limit"
+            && l[1] == "Ce portable ne permet pas de limiter sa charge"),
+        "{lines:?}"
+    );
+    Ok(())
+}
+
+/// The charge limit where the battery has a threshold: switched on, the
+/// file says so and the compositor writes 80; "Charger à 100 %": 100, the
+/// row saying the limit is lifted, the button inert.
+#[test]
+fn the_charge_limit_writes_80_and_charges_once_to_100() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start_on("", Some(Services::laptop()), true)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shows(|s| s["power"]["charge"]["supported"] == true)?;
+    assert_eq!(row(&shown, "power.charge-limit")["inert"], false);
+    assert_eq!(shown["power"]["charge"]["once"], "inert");
+    bed.click("control:power.charge-limit")?;
+    bed.written(|t| t.contains("charge-limit = true"))?;
+    bed.threshold("80")?;
+    bed.shows(|s| s["power"]["charge"]["once"] == "pressable")?;
+    bed.click("control:power.charge-once")?;
+    bed.threshold("100")?;
+    bed.shows(|s| {
+        s["power"]["charge"]["lifted"] == true && s["power"]["charge"]["once"] == "inert"
+    })?;
+    Ok(())
+}
+
 /// A file 6.1 wrote: its battery's `screen-off` shows as the dim, its
 /// `lock-after = "never"` everywhere as locking off; changing the dim
 /// writes `idle`, the old key left alone.
@@ -981,7 +1083,55 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.shows(|s| s["power"]["logind"] == false)?;
     bed.hp.pointer_move(1500.0, 900.0);
     shoot(&mut bed, &out, "power-desktop-top")?;
-    bed.reveal("row:power.charge-limit")?;
+    bed.reveal("row:power.mode")?;
     shoot(&mut bed, &out, "power-desktop-bottom")?;
+    Ok(())
+}
+
+/// The charge limit's rows (#896) off, on, and on a laptop that cannot
+/// limit its charge, to `$HOCUS_SHOTS` when it names a folder; run by hand
+/// (`--run-ignored only`).
+#[test]
+#[ignore = "writes the pull request's screenshots"]
+fn charge_limit_screenshots() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start_on(
+        "",
+        Some(Services {
+            on_battery: false,
+            battery: Some((80.0, 5, 0, 0)),
+            ..Services::laptop()
+        }),
+        true,
+    )?
+    else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| s["power"]["charge"]["supported"] == true)?;
+    bed.reveal("row:power.charge-once")?;
+    bed.hp.pointer_move(1500.0, 900.0);
+    shoot(&mut bed, &out, "charge-off")?;
+    bed.click("control:power.charge-limit")?;
+    bed.threshold("80")?;
+    bed.shows(|s| s["power"]["charge"]["once"] == "pressable")?;
+    bed.hp.pointer_move(1500.0, 900.0);
+    shoot(&mut bed, &out, "charge-on")?;
+    bed.click("control:power.charge-once")?;
+    bed.shows(|s| s["power"]["charge"]["lifted"] == true)?;
+    bed.hp.pointer_move(1500.0, 900.0);
+    shoot(&mut bed, &out, "charge-lifted")?;
+    drop(bed);
+    let Some(mut bed) = Bed::start("", Some(Services::laptop()))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.shows(|s| !s["power"]["battery"].is_null())?;
+    bed.reveal("row:power.charge-limit")?;
+    bed.hp.pointer_move(1500.0, 900.0);
+    shoot(&mut bed, &out, "charge-unsupported")?;
     Ok(())
 }

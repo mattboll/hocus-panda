@@ -310,14 +310,26 @@ impl App {
                 let said = words::on_this_touchpad_up_to_fingers(lang, n);
                 t(said, 12.0, FAINT.get()).into()
             });
-            let group = self.mouse_group(
-                "gestures",
-                model::GESTURES.label.get(lang),
-                head,
-                &rows_of(model::GESTURES),
-                &controls,
-                None,
-            );
+            // What the gestures do, set in the shortcuts (#893), then what
+            // the desktop never takes.
+            let mut line = row![
+                label(model::GESTURES.label.get(lang)),
+                Space::new().width(Length::Fill)
+            ]
+            .align_y(Alignment::Center)
+            .height(28);
+            if let Some(head) = head {
+                line = line.push(container(head).id("device:gestures".to_owned()));
+            }
+            let mut list = column![self.gestures_summary()];
+            for setting in rows_of(model::GESTURES) {
+                list = list.push(divided(true, self.row(setting, &controls)));
+            }
+            let group = column![
+                line,
+                container(card_box(list.into())).id("card:gestures".to_owned())
+            ]
+            .spacing(8);
             let note = t(
                 words::THE_GESTURE_ALWAYS_FOLLOWS_YOUR_FINGERS.get(lang),
                 12.0,
@@ -735,10 +747,6 @@ const LOOP: Duration = Duration::from_millis(1800);
 /// What a row's diagram shows.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Gesture {
-    /// Three dots side by side, moving right to left.
-    Sideways,
-    /// Four dots in a row, moving up.
-    Up,
     /// Two dots pinching.
     Pinch,
 }
@@ -782,8 +790,6 @@ impl App {
     /// A gesture's row's diagram, `ink` its row's.
     pub(super) fn gesture_diagram(&self, id: &str, ink: f32) -> Option<El<'_>> {
         let gesture = match id {
-            model::SWIPE_DESKTOPS => Gesture::Sideways,
-            model::SWIPE_LAUNCHER => Gesture::Up,
             model::LEFT_TO_APPS => Gesture::Pinch,
             _ => return None,
         };
@@ -806,9 +812,14 @@ impl App {
         )
     }
 
-    /// "Nouveau" beside the four-finger row's name.
-    pub(super) fn mouse_chip(&self, setting: &Setting) -> Option<El<'_>> {
-        (setting.id == model::SWIPE_LAUNCHER).then(|| self.new_chip())
+    /// "Nouveau" beside a row's name: none now.
+    pub(super) fn mouse_chip(&self, _setting: &Setting) -> Option<El<'_>> {
+        None
+    }
+
+    /// The devices plugged, when the compositor says them.
+    pub(super) fn mouse_devices(&self) -> Option<&[InputDevice]> {
+        self.mouse.devices.as_deref()
     }
 }
 
@@ -838,29 +849,7 @@ fn bezier((x1, y1, x2, y2): (f32, f32, f32, f32), t: f32) -> f32 {
     at(y1, y2, (lo + hi) / 2.0)
 }
 
-/// The mockup's swipes' curve, applied between keyframes as CSS does.
-const SWIPE_CURVE: (f32, f32, f32, f32) = (0.3, 0.6, 0.3, 1.0);
 const EASE_IN_OUT: (f32, f32, f32, f32) = (0.42, 0.0, 0.58, 1.0);
-
-/// A swipe's dots at `phase`: their travel along the trail from `start`
-/// through `-start` (at 70 %) to `end`, and their opacity (in by 15 %,
-/// out over the last 30 %), the mockup's `side3` and `up4`.
-fn swipe_at(phase: f32, start: f32, end: f32) -> (f32, f32) {
-    let ease = |t: f32| bezier(SWIPE_CURVE, t);
-    let travel = if phase < 0.7 {
-        start + (-start - start) * ease(phase / 0.7)
-    } else {
-        -start + (end + start) * ease((phase - 0.7) / 0.3)
-    };
-    let opacity = if phase < 0.15 {
-        ease(phase / 0.15)
-    } else if phase < 0.7 {
-        1.0
-    } else {
-        1.0 - ease((phase - 0.7) / 0.3)
-    };
-    (travel, opacity)
-}
 
 impl<M> iced::widget::canvas::Program<M> for Diagram {
     type State = ();
@@ -875,7 +864,7 @@ impl<M> iced::widget::canvas::Program<M> for Diagram {
     ) -> Vec<iced::widget::canvas::Geometry> {
         use iced::{
             Point, Size,
-            widget::canvas::{Frame, LineCap, LineDash, Path, Stroke},
+            widget::canvas::{Frame, Path, Stroke},
         };
         let mut frame = Frame::new(renderer, bounds.size());
         let a = self.alpha;
@@ -887,21 +876,6 @@ impl<M> iced::widget::canvas::Program<M> for Diagram {
                 .with_color(crate::theme::ink(rgba(255, 255, 255, 0.22 * a)))
                 .with_width(1.0),
         );
-        let trail = |frame: &mut Frame, from: Point, to: Point| {
-            frame.stroke(
-                &Path::line(from, to),
-                Stroke {
-                    line_cap: LineCap::Round,
-                    line_dash: LineDash {
-                        segments: &[2.0, 4.0],
-                        offset: 0,
-                    },
-                    ..Stroke::default()
-                        .with_color(crate::theme::ink(rgba(126, 224, 160, 0.35 * a)))
-                        .with_width(2.0)
-                },
-            );
-        };
         let dot = |frame: &mut Frame, x: f32, y: f32, opacity: f32| {
             frame.fill(
                 &Path::circle(Point::new(x, y), 4.0),
@@ -909,20 +883,6 @@ impl<M> iced::widget::canvas::Program<M> for Diagram {
             );
         };
         match self.gesture {
-            Gesture::Sideways => {
-                trail(&mut frame, Point::new(48.0, 22.0), Point::new(16.0, 22.0));
-                let (dx, o) = self.phase.map_or((0.0, 1.0), |p| swipe_at(p, 11.0, -13.0));
-                for x in [23.0, 32.0, 41.0] {
-                    dot(&mut frame, x + dx, 22.0, o);
-                }
-            }
-            Gesture::Up => {
-                trail(&mut frame, Point::new(32.0, 36.0), Point::new(32.0, 8.0));
-                let (dy, o) = self.phase.map_or((0.0, 1.0), |p| swipe_at(p, 9.0, -10.0));
-                for x in [18.5, 27.5, 36.5, 45.5] {
-                    dot(&mut frame, x, 22.0 + dy, o);
-                }
-            }
             Gesture::Pinch => {
                 // Together at the loop's ends, apart at its middle; still,
                 // where the mockup draws them.
@@ -947,15 +907,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_dots_come_in_travel_and_fade_out() {
-        let (x, o) = swipe_at(0.0, 11.0, -13.0);
-        assert!((x - 11.0).abs() < 1e-3 && o.abs() < 1e-3);
-        let (_, o) = swipe_at(0.15, 11.0, -13.0);
-        assert!((o - 1.0).abs() < 1e-3);
-        let (x, o) = swipe_at(0.7, 11.0, -13.0);
-        assert!((x + 11.0).abs() < 1e-3 && (o - 1.0).abs() < 1e-3);
-        let (x, o) = swipe_at(1.0, 11.0, -13.0);
-        assert!((x + 13.0).abs() < 1e-3 && o.abs() < 1e-3);
+    fn the_pinch_eases_in_and_out() {
         assert!((bezier(EASE_IN_OUT, 0.5) - 0.5).abs() < 1e-3);
     }
 }

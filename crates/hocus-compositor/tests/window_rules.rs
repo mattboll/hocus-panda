@@ -18,7 +18,7 @@ use common::{
 };
 use hocus_compositor::{
     Config, Headless, HeadlessConfig, RendererChoice,
-    model::{Rect, Zone},
+    model::{DEFAULT_GAP as GAP, Rect, Zone},
 };
 
 const KEY_3: u32 = 4;
@@ -139,9 +139,9 @@ fn a_window_opens_at_its_rules_size_from_its_first_frame() -> anyhow::Result<()>
     let max = open(&mut bed.hp, "test.max", (400, 300))?;
     assert_eq!(max, AREA);
     let left = open(&mut bed.hp, "test.left", (400, 300))?;
-    assert_eq!(left, Zone::Left.rect(AREA));
+    assert_eq!(left, Zone::Left.rect(AREA, GAP));
     let right = open(&mut bed.hp, "test.right", (400, 300))?;
-    assert_eq!(right, Zone::Right.rect(AREA));
+    assert_eq!(right, Zone::Right.rect(AREA, GAP));
     let full = open(&mut bed.hp, "test.full", (400, 300))?;
     assert_eq!(full, Rect::new(0, 0, 1920, 1080));
     // Without a rule, its own size.

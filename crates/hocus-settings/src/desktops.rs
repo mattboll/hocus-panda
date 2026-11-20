@@ -49,12 +49,16 @@ pub const MOVE_KEY: &str = "windows.move-modifier";
 pub const RESIZE_KEY: &str = "windows.resize-modifier";
 pub const MAGNET: &str = "windows.magnet";
 pub const SNAP: &str = "windows.snap-by-drag";
+/// The gap the desktop keeps around the windows it places (#895).
+pub const GAP: &str = "windows.gap";
 pub const WOBBLE: &str = "windows.wobble";
 /// How windows open and close (#432): a list each theme of its own adds
 /// to.
 pub const ANIMATION: &str = "windows.animation";
 pub const ALT_TAB_ROW: &str = "windows.alt-tab";
-pub const HOT_CORNER: &str = "overview.hot-corner";
+/// The screen corners' summary: what each does, set in the shortcuts
+/// (#893).
+pub const CORNERS: &str = "overview.corners";
 pub const INK: &str = "ink.enabled";
 /// The rules per application, a row of the page's own (6.14).
 pub const RULES: &str = "desktops.rules";
@@ -70,6 +74,9 @@ pub const MOST: usize = 9;
 pub const DEFAULT: usize = 4;
 /// A name's characters, at most.
 pub const NAME_MOST: usize = 24;
+/// The gap, at most, logical pixels; and its step.
+pub const MOST_GAP: i64 = 24;
+const GAP_STEP: i64 = 2;
 
 const DRAG_KEYS: &[&str] = &["alt", "super", "none"];
 const ALT_TAB_WORDS: &[&str] = &["all", "desktop"];
@@ -290,23 +297,35 @@ pub fn rule_said(rule: &Rule, names: &[String], lang: Lang) -> String {
 
 /// The page's rows the model does not hold, for the search.
 pub fn outside() -> &'static [crate::model::Outside] {
-    const ALL: [crate::model::Outside; 1] = [crate::model::Outside {
-        id: RULES,
-        section: SectionId::Desktops,
-        group: RULES_GROUP.label,
-        name: words::RULES_PER_APPLICATION_2,
-        keywords: (
-            &[
-                "règle",
-                "application",
-                "au-dessus",
-                "toujours",
-                "ouvrir",
-                "app-id",
-            ],
-            &["rule", "application", "above", "always", "open", "app-id"],
-        ),
-    }];
+    const ALL: [crate::model::Outside; 2] = [
+        crate::model::Outside {
+            id: CORNERS,
+            section: SectionId::Desktops,
+            group: OVERVIEW.label,
+            name: hocus_words::settings::triggers::SCREEN_CORNERS,
+            keywords: (
+                &["coin actif", "coin", "vue d’ensemble", "aperçu", "bureaux"],
+                &["hot corner", "corner", "overview", "activities", "desktops"],
+            ),
+        },
+        crate::model::Outside {
+            id: RULES,
+            section: SectionId::Desktops,
+            group: RULES_GROUP.label,
+            name: words::RULES_PER_APPLICATION_2,
+            keywords: (
+                &[
+                    "règle",
+                    "application",
+                    "au-dessus",
+                    "toujours",
+                    "ouvrir",
+                    "app-id",
+                ],
+                &["rule", "application", "above", "always", "open", "app-id"],
+            ),
+        },
+    ];
     &ALL
 }
 
@@ -456,6 +475,29 @@ pub fn settings() -> &'static [Setting] {
                 switch(&["windows", "snap-by-drag"]),
             ),
             setting(
+                GAP,
+                MOVE,
+                words::SPACE_BETWEEN_WINDOWS,
+                words::AND_WITH_THE_SCREEN_S_EDGES_AND,
+                (
+                    &["espace", "écart", "marge", "bord", "coller", "barre"],
+                    &["gap", "space", "margin", "spacing", "edge", "bar"],
+                ),
+                Kind::Slider {
+                    min: 0,
+                    max: MOST_GAP,
+                    step: GAP_STEP,
+                    unit: " px",
+                },
+                one(
+                    &["windows", "gap"],
+                    Codec::Int {
+                        min: 0,
+                        max: MOST_GAP,
+                    },
+                ),
+            ),
+            setting(
                 WOBBLE,
                 MOVE,
                 words::WOBBLY_WINDOWS,
@@ -497,18 +539,6 @@ pub fn settings() -> &'static [Setting] {
                     word(words::THIS_DESKTOP_ONLY, "desktop"),
                 ]),
                 one(&["windows", "alt-tab"], Codec::Word(ALT_TAB_WORDS)),
-            ),
-            setting(
-                HOT_CORNER,
-                OVERVIEW,
-                words::TOP_LEFT_CORNER_OVERVIEW,
-                words::THE_POINTER_PUSHED_FOR_A_MOMENT,
-                (
-                    &["coin actif", "coin", "vue d’ensemble", "aperçu", "bureaux"],
-                    &["hot corner", "corner", "overview", "activities", "desktops"],
-                ),
-                Kind::Switch,
-                switch(&["overview", "hot-corner"]),
             ),
             setting(
                 INK,
@@ -626,10 +656,10 @@ mod tests {
                 "windows.resize-modifier",
                 "windows.magnet",
                 "windows.snap-by-drag",
+                "windows.gap",
                 "windows.wobble",
                 "windows.animation",
                 "windows.alt-tab",
-                "overview.hot-corner",
                 "ink.enabled"
             ]
         );

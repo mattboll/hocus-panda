@@ -152,9 +152,17 @@ fn a_snapped_window_takes_the_same_zone_there() -> anyhow::Result<()> {
     hp.pointer_move(1920.0 + 1280.0, 720.0);
     open(&mut hp, "test.half", (400, 300))?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.half", Zone::Left.rect(areas[1]))?;
+    wait_for_rect(
+        &mut hp,
+        "test.half",
+        Zone::Left.rect(areas[1], model::DEFAULT_GAP),
+    )?;
     chord(&mut hp, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_LEFT]);
-    wait_for_rect(&mut hp, "test.half", Zone::Left.rect(areas[0]))?;
+    wait_for_rect(
+        &mut hp,
+        "test.half",
+        Zone::Left.rect(areas[0], model::DEFAULT_GAP),
+    )?;
     let id = id_of(&hp, "test.half").expect("mapped");
     assert_eq!(hp.mode(id), Mode::Snapped(Zone::Left));
     Ok(())

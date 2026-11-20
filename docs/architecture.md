@@ -83,9 +83,9 @@ flowchart LR
 
 | Crate | Owns | Depends on (ours) |
 |---|---|---|
-| `hocus-compositor` | the `hocuspanda` binary, its `State`, and the in-process test harness (`Headless`) | config, geometry, link, pandas, words, panic, agents, xdg, perf, scenes |
+| `hocus-compositor` | the `hocuspanda` binary, its `State`, and the in-process test harness (`Headless`) | config, charge, geometry, link, pandas, words, panic, agents, xdg, perf, scenes |
 | `hocus-shell` | the `hocuspanda-shell` binary, its surfaces and the widget kit (`src/ui`) | words, link, pandas, panic, a11y, xdg, day, sound, bluetooth, network, removable, camera, voice |
-| `hocus-settings` | the `hocus-settings` binary: its model of every setting, its pages | words, config, agents, link, pandas, panic, perf, geometry, sound, bluetooth, network, xdg |
+| `hocus-settings` | the `hocus-settings` binary: its model of every setting, its pages | words, config, charge, agents, link, pandas, panic, perf, geometry, sound, bluetooth, network, xdg |
 | `hocus-cli` | the `hocus` binary (`hocus mcp` among its commands) | agents, panic, day, perf, xdg |
 | `hocus-link` | the shell's line: its messages, wire and version; the surfaces' namespaces and the measures both sides draw by; the theme's tokens; the camera's and the voice's lines | words |
 | `hocus-camera` | the `hocus-camera` binary: the Hocuspanda source on PipeWire, Lumière and the banner on the GPU or the CPU; the person found by a model (tract), what is behind them, « Je reviens », the presenter's cut-out; the face and the hands found by models (tract), an accessory on the head, Cadrage, the gestures' reactions, the confetti; its preview's reader, which the shell's window uses | link, panic, scenes, words |
@@ -101,6 +101,7 @@ flowchart LR
 | `hocus-a11y` | screen readers: trees handed to AT-SPI through AccessKit | — |
 | `hocus-perf` | a day of CPU and memory: recorded, read back, said | words |
 | `hocus-panic` | the panic hook every program installs | — |
+| `hocus-charge` | the battery's charge thresholds read, and the `hocus-charge-limit` binary, the root helper that writes 80 or 100 into them (packaging/README.md) | — |
 | `hocus-sound` | PipeWire, through its own tools | — |
 | `hocus-network` | NetworkManager and rfkill | — |
 | `hocus-bluetooth` | BlueZ | — |

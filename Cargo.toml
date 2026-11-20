@@ -21,6 +21,7 @@ hocus-a11y = { version = "1.0.0", path = "crates/hocus-a11y" }
 hocus-agents = { version = "1.0.0", path = "crates/hocus-agents" }
 hocus-bluetooth = { version = "1.0.0", path = "crates/hocus-bluetooth" }
 hocus-camera = { version = "1.0.0", path = "crates/hocus-camera" }
+hocus-charge = { version = "1.0.0", path = "crates/hocus-charge" }
 hocus-config = { version = "1.0.0", path = "crates/hocus-config" }
 hocus-day = { version = "1.0.0", path = "crates/hocus-day" }
 hocus-geometry = { version = "1.0.0", path = "crates/hocus-geometry" }

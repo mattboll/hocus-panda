@@ -473,7 +473,7 @@ HOCUS_VM_DISPLAY=gtk scripts/vm/debian.sh up
 The package, from a release build, and the session from GDM in the VM:
 
 ```sh
-cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice
+cargo build --release --locked -p hocus-compositor -p hocus-shell -p hocus-cli -p hocus-settings -p hocus-transcribe -p hocus-camera -p hocus-voice -p hocus-charge
 packaging/deb/build.sh                 # prints target/packages/hocuspanda_<version>-1_<arch>.deb
 scripts/vm/debian.sh up
 scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs in as alex
