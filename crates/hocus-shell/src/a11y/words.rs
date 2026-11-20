@@ -282,7 +282,8 @@ impl Words {
         self.pick(txt::BATTERY_2)
     }
 
-    /// The battery's value: "82 %, 3 h 10 restantes, équilibré".
+    /// The battery's value: "82 %, 3 h 10 restantes, équilibré" (what the
+    /// bar shows by its row's time left and its icon's mark, #900).
     pub fn battery_value(self, battery: &Battery, levels: &Snapshot) -> String {
         let words = crate::levels::model::Words::new(self.lang());
         let mut value = self.percent(battery.percent);
@@ -291,17 +292,6 @@ impl Words {
             value.push_str(&status.replace(" · ", ", ").to_lowercase());
         }
         value
-    }
-
-    /// The power modes alone, without a battery: "Mode d'alimentation,
-    /// équilibré".
-    pub fn power(self, levels: &Snapshot) -> String {
-        let words = crate::levels::model::Words::new(self.lang());
-        let mode = self.pick(txt::POWER_MODE);
-        match levels.profile {
-            Some(profile) => format!("{mode}, {}", words.profile(profile)),
-            None => mode.to_owned(),
-        }
     }
 
     pub fn lang(self) -> Lang {
