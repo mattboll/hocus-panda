@@ -288,7 +288,9 @@ Its tests (`crates/hocus-compositor/tests/camera.rs`) start a PipeWire of
 their own with a fake camera node of the test's, its frames on the CPU
 (`Config::camera_device = "cpu"`); its GPU path is tested on lavapipe
 alone (`cargo nextest run -p hocus-camera gpu::`, the test showing
-Vulkan's loader that driver only). The window's screenshots:
+Vulkan's loader that driver only). Its face's and hands' tracking is held
+to its time budget only with `HOCUS_TEST_BUDGETS=1`, on a real machine
+(docs/performance.md; CI's runners are slower). The window's screenshots:
 
 ```sh
 HOCUS_SHOTS=/tmp/shots cargo nextest run -p hocus-compositor camera::screenshots --run-ignored only

@@ -347,6 +347,30 @@ pub fn thread_time() -> std::time::Duration {
     std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
 }
 
+/// The median of a model's `times` within `budget`, asserted only where
+/// `HOCUS_TEST_BUDGETS=1` says the machine is one the camera is meant to
+/// run on (docs/performance.md). CI's shared runners are slower: the face
+/// took 35 ms there for a budget of 30 (#909), and a budget held there
+/// measures the runner, not the model. Without it, the times are printed
+/// for whoever reads the test's output, and the test asserts what the
+/// model found.
+#[cfg(test)]
+pub fn within_budget(what: &str, mut times: Vec<std::time::Duration>, budget: std::time::Duration) {
+    times.sort();
+    let median = times[times.len() / 2];
+    if std::env::var_os("HOCUS_TEST_BUDGETS").is_some_and(|v| v == "1") {
+        assert!(
+            median < budget,
+            "{what}: {median:?} over {budget:?}: {times:?}"
+        );
+    } else {
+        eprintln!(
+            "{what}: {median:?} for a budget of {budget:?}, asserted with \
+             HOCUS_TEST_BUDGETS=1 only: {times:?}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
