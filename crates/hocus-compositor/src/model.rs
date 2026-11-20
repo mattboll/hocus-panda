@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 
 /// The rectangles, the snap zones, the edges a resize moves: the
 /// geometry the Settings' trial area shares (6.14).
-pub use hocus_geometry::{Edges, GAP, Rect, SNAP_CORNER, SNAP_EDGE, Side, Zone, torn_off};
+pub use hocus_geometry::{DEFAULT_GAP, Edges, Rect, SNAP_CORNER, SNAP_EDGE, Side, Zone, torn_off};
 /// The resize band outside each edge, and how far a corner reaches along
 /// it (§8).
 pub const FRAME: i32 = 8;
@@ -29,29 +29,32 @@ pub struct WindowId(pub u64);
 
 /// Where the desktop places windows on an output: what layer surfaces
 /// leave of it (`non_exclusive`, global) less the space of its bar, `bar`
-/// pixels wide, on the output's `side`, and the gap.
+/// pixels wide at its own distance from the output's edge on the output's
+/// `side`, and `gap` all round (`[windows] gap`; at 0, windows touch the
+/// screen's edges and the bar).
 pub fn work_area(
     non_exclusive: Rect,
     output: Rect,
     bar: Option<i32>,
     side: hocus_link::Side,
+    gap: i32,
 ) -> Rect {
     let mut zone = non_exclusive;
     if let Some(bar) = bar {
         match side {
             hocus_link::Side::Right => {
-                let bar_left = output.right() - GAP - bar;
+                let bar_left = output.right() - hocus_link::EDGE - bar;
                 zone.width = zone.width.min(bar_left - zone.x).max(0);
             }
             hocus_link::Side::Left => {
-                let bar_right = output.x + GAP + bar;
+                let bar_right = output.x + hocus_link::EDGE + bar;
                 let right = zone.right();
                 zone.x = zone.x.max(bar_right);
                 zone.width = (right - zone.x).max(0);
             }
         }
     }
-    zone.inset(GAP)
+    zone.inset(gap)
 }
 
 /// Where a window of `size` goes to sit at the centre of `area`: its
@@ -260,9 +263,14 @@ pub fn keyboard_snap(snap: Snap, mode: Mode, rect: Rect, area: Rect) -> SnapResu
 /// The windows on the other side of the edges a seam's handle moves: they
 /// move their facing edge with it. `rect` is the window resized, `others`
 /// the other windows of its output that can pair; the result says, for
-/// each that faces a moved edge across the gap, which of its edges
+/// each that faces a moved edge across `gap`, which of its edges
 /// follows.
-pub fn partners(rect: Rect, edges: Edges, others: &[(WindowId, Rect)]) -> Vec<(WindowId, Edges)> {
+pub fn partners(
+    rect: Rect,
+    edges: Edges,
+    others: &[(WindowId, Rect)],
+    gap: i32,
+) -> Vec<(WindowId, Edges)> {
     let overlaps = |a0: i32, a1: i32, b0: i32, b1: i32| a0 < b1 && b0 < a1;
     others
         .iter()
@@ -270,32 +278,33 @@ pub fn partners(rect: Rect, edges: Edges, others: &[(WindowId, Rect)]) -> Vec<(W
             let across = overlaps(rect.y, rect.bottom(), o.y, o.bottom());
             let down = overlaps(rect.x, rect.right(), o.x, o.right());
             let follow = Edges {
-                left: edges.right && across && o.x == rect.right() + GAP,
-                right: edges.left && across && o.right() + GAP == rect.x,
-                top: edges.bottom && down && o.y == rect.bottom() + GAP,
-                bottom: edges.top && down && o.bottom() + GAP == rect.y,
+                left: edges.right && across && o.x == rect.right() + gap,
+                right: edges.left && across && o.right() + gap == rect.x,
+                top: edges.bottom && down && o.y == rect.bottom() + gap,
+                bottom: edges.top && down && o.bottom() + gap == rect.y,
             };
             follow.any().then_some((id, follow))
         })
         .collect()
 }
 
-/// A partner's new geometry once the window it faces is at `moved`.
-pub fn follow(partner: Rect, follow: Edges, moved: Rect) -> Rect {
+/// A partner's new geometry once the window it faces is at `moved`, `gap`
+/// away.
+pub fn follow(partner: Rect, follow: Edges, moved: Rect, gap: i32) -> Rect {
     let mut out = partner;
     if follow.left {
-        out.x = moved.right() + GAP;
+        out.x = moved.right() + gap;
         out.width = (partner.right() - out.x).max(1);
     }
     if follow.right {
-        out.width = (moved.x - GAP - partner.x).max(1);
+        out.width = (moved.x - gap - partner.x).max(1);
     }
     if follow.top {
-        out.y = moved.bottom() + GAP;
+        out.y = moved.bottom() + gap;
         out.height = (partner.bottom() - out.y).max(1);
     }
     if follow.bottom {
-        out.height = (moved.y - GAP - partner.y).max(1);
+        out.height = (moved.y - gap - partner.y).max(1);
     }
     out
 }
@@ -315,6 +324,8 @@ pub struct Seam {
     /// The span both windows share along the seam.
     pub from: i32,
     pub to: i32,
+    /// The gap between them, as `[windows] gap` was when it was found.
+    pub gap: i32,
     /// The window a drag of the handle resizes, and from which edge: the
     /// one whose side spans the seam's whole length, so that every
     /// neighbour along it follows.
@@ -325,7 +336,7 @@ pub struct Seam {
 impl Seam {
     /// The middle of the gap across, and of the shared span along.
     pub fn centre(&self) -> (f64, f64) {
-        let across = f64::from(self.across) + f64::from(GAP) / 2.0;
+        let across = f64::from(self.across) + f64::from(self.gap) / 2.0;
         let along = f64::from(self.from + self.to) / 2.0;
         if self.vertical {
             (across, along)
@@ -365,7 +376,7 @@ impl Seam {
     pub fn edge_at(&self, x: f64, y: f64) -> Option<(WindowId, Edges)> {
         let (across, along) = self.local(x, y);
         let corner = f64::from(CORNER);
-        let outside = across.abs() > f64::from(GAP) / 2.0
+        let outside = across.abs() > f64::from(self.gap) / 2.0
             || along < corner
             || along >= f64::from(self.to - self.from) - corner;
         if outside {
@@ -396,8 +407,8 @@ impl Seam {
     }
 }
 
-/// Where `a` and `b` meet across the gap, if they do.
-pub fn seam((a, ra): (WindowId, Rect), (b, rb): (WindowId, Rect)) -> Option<Seam> {
+/// Where `a` and `b` meet across `gap`, if they do.
+pub fn seam((a, ra): (WindowId, Rect), (b, rb): (WindowId, Rect), gap: i32) -> Option<Seam> {
     let make = |(first, rf): (WindowId, Rect), (second, rs): (WindowId, Rect), vertical: bool| {
         let (from, to, across, first_longer) = if vertical {
             let span = (rf.y.max(rs.y), rf.bottom().min(rs.bottom()));
@@ -416,6 +427,7 @@ pub fn seam((a, ra): (WindowId, Rect), (b, rb): (WindowId, Rect)) -> Option<Seam
             across,
             from,
             to,
+            gap,
             grab: first,
             edges: Edges::default(),
         };
@@ -426,13 +438,13 @@ pub fn seam((a, ra): (WindowId, Rect), (b, rb): (WindowId, Rect)) -> Option<Seam
         };
         Some(seam)
     };
-    if ra.right() + GAP == rb.x {
+    if ra.right() + gap == rb.x {
         make((a, ra), (b, rb), true)
-    } else if rb.right() + GAP == ra.x {
+    } else if rb.right() + gap == ra.x {
         make((b, rb), (a, ra), true)
-    } else if ra.bottom() + GAP == rb.y {
+    } else if ra.bottom() + gap == rb.y {
         make((a, ra), (b, rb), false)
-    } else if rb.bottom() + GAP == ra.y {
+    } else if rb.bottom() + gap == ra.y {
         make((b, rb), (a, ra), false)
     } else {
         None
@@ -916,39 +928,40 @@ impl Model {
 mod tests {
     use super::*;
 
+    const GAP: i32 = DEFAULT_GAP;
     const OUTPUT: Rect = Rect::new(0, 0, 1920, 1080);
 
     #[test]
     fn the_work_area_keeps_a_gap_and_the_bars_space() {
         // The full bar, 196 px and 8 px from the edge.
         assert_eq!(
-            work_area(OUTPUT, OUTPUT, Some(196), hocus_link::Side::Right),
+            work_area(OUTPUT, OUTPUT, Some(196), hocus_link::Side::Right, GAP),
             Rect::new(8, 8, 1920 - 8 - 196 - 8 - 8, 1064)
         );
         // A 40 px bar along the top (a layer's exclusive zone).
         let zone = Rect::new(0, 40, 1920, 1040);
         assert_eq!(
-            work_area(zone, OUTPUT, Some(196), hocus_link::Side::Right),
+            work_area(zone, OUTPUT, Some(196), hocus_link::Side::Right, GAP),
             Rect::new(8, 48, 1700, 1024)
         );
         // The mini bar.
         let small = Rect::new(0, 0, 1366, 768);
         assert_eq!(
-            work_area(small, small, Some(56), hocus_link::Side::Right).right(),
+            work_area(small, small, Some(56), hocus_link::Side::Right, GAP).right(),
             1366 - 8 - 56 - 8
         );
         // On the left (6.4): the same room, from the other edge.
         assert_eq!(
-            work_area(small, small, Some(56), hocus_link::Side::Left),
+            work_area(small, small, Some(56), hocus_link::Side::Left, GAP),
             Rect::new(8 + 56 + 8, 8, 1366 - 8 - 56 - 8 - 8, 768 - 16)
         );
         assert_eq!(
-            work_area(zone, OUTPUT, Some(196), hocus_link::Side::Left),
+            work_area(zone, OUTPUT, Some(196), hocus_link::Side::Left, GAP),
             Rect::new(8 + 196 + 8, 48, 1700, 1024)
         );
         // No bar on that screen: only the gap.
         assert_eq!(
-            work_area(OUTPUT, OUTPUT, None, hocus_link::Side::Left),
+            work_area(OUTPUT, OUTPUT, None, hocus_link::Side::Left, GAP),
             OUTPUT.inset(8)
         );
         assert_eq!(Rect::new(0, 0, 10, 10).inset(8), Rect::new(8, 8, 0, 0));
@@ -991,16 +1004,49 @@ mod tests {
     #[test]
     fn halves_and_quarters_keep_the_gap_between_them() {
         let area = Rect::new(8, 8, 1700, 1064);
-        let left = Zone::Left.rect(area);
-        let right = Zone::Right.rect(area);
+        let left = Zone::Left.rect(area, GAP);
+        let right = Zone::Right.rect(area, GAP);
         assert_eq!(left, Rect::new(8, 8, 846, 1064));
         assert_eq!(right.x, left.right() + GAP);
         assert_eq!(right.right(), area.right());
-        let tl = Zone::TopLeft.rect(area);
-        let bl = Zone::BottomLeft.rect(area);
+        let tl = Zone::TopLeft.rect(area, GAP);
+        let bl = Zone::BottomLeft.rect(area, GAP);
         assert_eq!(bl.y, tl.bottom() + GAP);
         assert_eq!(bl.bottom(), area.bottom());
-        assert_eq!(Zone::Maximized.rect(area), area);
+        assert_eq!(Zone::Maximized.rect(area, GAP), area);
+    }
+
+    /// `[windows] gap` (#895): halves, quarters and the maximised window
+    /// keep it from each other, the screen's edges and the bar; at 0 they
+    /// touch them.
+    #[test]
+    fn the_gap_set_is_kept_everywhere_the_desktop_places() {
+        let bar = 196;
+        let bar_left = 1920 - hocus_link::EDGE - bar;
+        for gap in [0, 8, 24] {
+            let area = work_area(OUTPUT, OUTPUT, Some(bar), hocus_link::Side::Right, gap);
+            let max = Zone::Maximized.rect(area, gap);
+            assert_eq!(max, area, "gap {gap}");
+            assert_eq!((max.x, max.y), (gap, gap), "gap {gap}");
+            assert_eq!(max.bottom(), 1080 - gap, "gap {gap}");
+            assert_eq!(max.right(), bar_left - gap, "the bar, gap {gap}");
+            let (left, right) = (Zone::Left.rect(area, gap), Zone::Right.rect(area, gap));
+            assert_eq!(left.x, area.x, "gap {gap}");
+            assert_eq!(right.x, left.right() + gap, "gap {gap}");
+            assert_eq!(right.right(), area.right(), "gap {gap}");
+            let tl = Zone::TopLeft.rect(area, gap);
+            let br = Zone::BottomRight.rect(area, gap);
+            assert_eq!(br.x, tl.right() + gap, "gap {gap}");
+            assert_eq!(br.y, tl.bottom() + gap, "gap {gap}");
+            assert_eq!((br.right(), br.bottom()), (area.right(), area.bottom()));
+            // Two halves at the gap face each other across a seam.
+            let s = seam((WindowId(1), left), (WindowId(2), right), gap).expect("a seam");
+            assert_eq!(s.centre().0, f64::from(left.right()) + f64::from(gap) / 2.0);
+        }
+        // At 0, the bar on the left too: the window touches it.
+        let area = work_area(OUTPUT, OUTPUT, Some(bar), hocus_link::Side::Left, 0);
+        assert_eq!(area.x, hocus_link::EDGE + bar);
+        assert_eq!(area.right(), 1920);
     }
 
     #[test]
@@ -1143,17 +1189,17 @@ mod tests {
     #[test]
     fn a_snapped_pair_resizes_together() {
         let area = Rect::new(8, 8, 1700, 1064);
-        let left = Zone::Left.rect(area);
-        let right = Zone::Right.rect(area);
+        let left = Zone::Left.rect(area, GAP);
+        let right = Zone::Right.rect(area, GAP);
         let others = [(WindowId(2), right)];
         let east = Edges {
             right: true,
             ..Edges::default()
         };
-        let found = partners(left, east, &others);
+        let found = partners(left, east, &others, GAP);
         assert_eq!(found.len(), 1);
         let moved = resized(left, east, (100, 0), (0, 0), (0, 0));
-        let after = follow(right, found[0].1, moved);
+        let after = follow(right, found[0].1, moved, GAP);
         assert_eq!(after.x, moved.right() + GAP);
         assert_eq!(after.right(), right.right());
         // Its other edges do not pull the neighbour.
@@ -1161,31 +1207,31 @@ mod tests {
             left: true,
             ..Edges::default()
         };
-        assert!(partners(left, west, &others).is_empty());
+        assert!(partners(left, west, &others, GAP).is_empty());
     }
 
     #[test]
     fn a_seam_is_where_two_windows_face_across_the_gap() {
         let area = Rect::new(8, 8, 1700, 1064);
         let (l, tr, br) = (WindowId(1), WindowId(2), WindowId(3));
-        let left = (l, Zone::Left.rect(area));
-        let top_right = (tr, Zone::TopRight.rect(area));
-        let bottom_right = (br, Zone::BottomRight.rect(area));
+        let left = (l, Zone::Left.rect(area, GAP));
+        let top_right = (tr, Zone::TopRight.rect(area, GAP));
+        let bottom_right = (br, Zone::BottomRight.rect(area, GAP));
         // Given either way, the left one comes first; the half spans the
         // whole seam, so a drag of its handle resizes the half and both
         // quarters follow.
-        let s = seam(top_right, left).expect("a seam");
+        let s = seam(top_right, left, GAP).expect("a seam");
         assert_eq!((s.first, s.second, s.vertical), (l, tr, true));
         assert_eq!((s.grab, s.edges.right), (l, true));
         assert_eq!((s.from, s.to), (top_right.1.y, top_right.1.bottom()));
         assert_eq!(s.centre().0, f64::from(left.1.right() + GAP / 2));
         // The quarters, one above the other: a seam across.
-        let s = seam(bottom_right, top_right).expect("a seam");
+        let s = seam(bottom_right, top_right, GAP).expect("a seam");
         assert_eq!((s.first, s.vertical, s.edges.bottom), (tr, false, true));
         // Apart: none.
-        assert!(seam(left, (WindowId(4), Rect::new(1000, 100, 200, 200))).is_none());
+        assert!(seam(left, (WindowId(4), Rect::new(1000, 100, 200, 200)), GAP).is_none());
         // In the gap, the nearer window's edge; at the span's ends, none.
-        let s = seam(left, (tr, Zone::Right.rect(area))).expect("a seam");
+        let s = seam(left, (tr, Zone::Right.rect(area, GAP)), GAP).expect("a seam");
         let x = f64::from(s.across);
         assert_eq!(s.edge_at(x + 1.0, 500.0).map(|(id, _)| id), Some(l));
         assert_eq!(s.edge_at(x + 7.0, 500.0).map(|(id, _)| id), Some(tr));

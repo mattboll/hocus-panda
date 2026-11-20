@@ -515,7 +515,7 @@ impl State {
                 continue;
             };
             let to = match self.model.mode(id) {
-                Mode::Snapped(zone) => zone.rect(after),
+                Mode::Snapped(zone) => zone.rect(after, self.gap()),
                 Mode::Floating if rect.x < after.x || rect.right() > after.right() => {
                     let width = rect.width.min(after.width).max(model::MIN_SIZE.0);
                     let x = rect.x.clamp(after.x, (after.right() - width).max(after.x));
@@ -657,7 +657,7 @@ impl State {
                 continue;
             };
             let to = match self.model.mode(id) {
-                Mode::Snapped(zone) => zone.rect(after),
+                Mode::Snapped(zone) => zone.rect(after, self.gap()),
                 Mode::Floating if side == Side::Left && rect.x == before.x => {
                     let width = (rect.right() - after.x).max(model::MIN_SIZE.0);
                     Rect::new(rect.right() - width, rect.y, width, rect.height)

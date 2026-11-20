@@ -283,7 +283,7 @@ impl PointerGrab<State> for MoveGrab {
             .filter(|_| !over_tile)
             .and_then(|o| Some((state.work_area(&o)?, o)))
             .and_then(|(area, o)| Some((state.snap_zone(area, pointer)?, area, o)))
-            .map(|(zone, area, o)| (zone, zone.rect(area), o));
+            .map(|(zone, area, o)| (zone, zone.rect(area, state.gap()), o));
         state.set_preview(zone);
         state.redraw = true;
     }
@@ -549,7 +549,8 @@ impl PointerGrab<State> for ResizeGrab {
         }
         state.configure(self.id, rect);
         for (id, follow, initial) in &self.partners {
-            state.configure(*id, model::follow(*initial, *follow, rect));
+            let gap = state.gap();
+            state.configure(*id, model::follow(*initial, *follow, rect, gap));
         }
     }
 
@@ -749,7 +750,7 @@ impl State {
                 .filter(|(o, _, on)| *o != id && *on == output)
                 .map(|(o, r, _)| (o, r))
                 .collect();
-            for (pid, follow) in model::partners(initial, edges, &others) {
+            for (pid, follow) in model::partners(initial, edges, &others, self.gap()) {
                 if let Some((_, r)) = others.iter().find(|(o, _)| *o == pid) {
                     partners.push((pid, follow, *r));
                 }

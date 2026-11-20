@@ -15,7 +15,7 @@ use anyhow::Context;
 use common::{KEY_LEFT, KEY_LEFTMETA, KEY_RIGHT, WAIT, chord, open, two_screens, wait};
 use hocus_compositor::{
     Config, Headless, HeadlessConfig, OutputSpec, Placed, RendererChoice, ScreenIdentity,
-    model::{Mode, Rect, Zone},
+    model::{DEFAULT_GAP as GAP, Mode, Rect, Zone},
 };
 
 const FIRST: &str = "HEADLESS-1";
@@ -93,8 +93,8 @@ fn a_screen_is_known_by_who_it_is_not_by_its_cable() -> anyhow::Result<()> {
     assert_eq!(hp.screen_set(), ["DEL U3423WE 7XY1234", FIRST]);
     let area1 = hp.work_area_of(FIRST).expect("an area");
     hp.unplug(SECOND)?;
-    assert_eq!(placed(&hp, "test.left").rect, Zone::Left.rect(area1));
-    assert_eq!(placed(&hp, "test.right").rect, Zone::Right.rect(area1));
+    assert_eq!(placed(&hp, "test.left").rect, Zone::Left.rect(area1, GAP));
+    assert_eq!(placed(&hp, "test.right").rect, Zone::Right.rect(area1, GAP));
     assert_eq!(placed(&hp, "test.left").desktop, 0);
     assert_eq!(focused(&hp).as_deref(), Some("test.right"));
     assert_eq!(hp.screen_set(), [FIRST]);
@@ -133,9 +133,9 @@ fn a_screen_is_known_by_who_it_is_not_by_its_cable() -> anyhow::Result<()> {
     let area3 = hp.work_area_of("HEADLESS-3").expect("an area");
     let back_left = placed(&hp, "test.left");
     assert_eq!(back_left.output.as_deref(), Some("HEADLESS-3"));
-    assert_eq!(back_left.rect, Zone::Left.rect(area3));
+    assert_eq!(back_left.rect, Zone::Left.rect(area3, GAP));
     assert_eq!(back_left.mode, left.mode);
-    assert_eq!(placed(&hp, "test.right").rect, Zone::Right.rect(area3));
+    assert_eq!(placed(&hp, "test.right").rect, Zone::Right.rect(area3, GAP));
     assert_eq!(
         placed(&hp, "test.floating").output.as_deref(),
         Some("HEADLESS-3")

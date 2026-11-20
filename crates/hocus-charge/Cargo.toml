@@ -1,0 +1,20 @@
+[package]
+name = "hocus-charge"
+description = "The battery's charge limit of Hocuspanda: the kernel's thresholds read, and the small helper that writes 80 or 100 into them as root"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The helper pkexec runs as root (packaging/README.md): the standard
+# library alone, and its few lines in src/bin/.
+[[bin]]
+name = "hocus-charge-limit"
+path = "src/bin/charge_limit.rs"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

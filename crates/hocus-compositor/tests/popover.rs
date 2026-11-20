@@ -46,9 +46,9 @@ const OUTPUTS: [FakeSink; 3] = [
 ];
 
 /// On a 1920×1080 screen, the full bar 196 px wide: the levels' surface,
-/// and the sound's row's middle (three rows and a one-line status line).
+/// and the sound's row's middle (three rows, no line under them, #900).
 const LEVELS: Rect = Rect::new(1920 - 8 - 1 - 194, 1080 - 8 - 41 - 175, 194, 175);
-const ROW: (f64, f64) = (1800.0, (LEVELS.y + 57) as f64);
+const ROW: (f64, f64) = (1800.0, (LEVELS.y + 85) as f64);
 /// The popover with three outputs, no microphone and no application
 /// playing: 280 × 377 (the Settings' link at its bottom), 8 px left of
 /// the bar, its bottom on the bar's.
@@ -102,10 +102,10 @@ fn start_on(fakes: &Fakes, shell: &std::path::Path, height: i32) -> anyhow::Resu
     })?;
     anyhow::ensure!(placed, "no levels: {:?}", hp.levels_surfaces());
     // The sound's row, there and blue.
-    until(&mut hp, (levels.x + 40, levels.y + 57), blue)?;
+    until(&mut hp, (levels.x + 40, levels.y + 85), blue)?;
     // The connections' surface, which follows the levels' group up as the
     // sound's row comes, off it: else a click there is the connections'.
-    let row = levels.y + 57;
+    let row = levels.y + 85;
     let clear = hp.dispatch_until(WAIT, |hp| {
         hp.connections_surfaces()
             .iter()
@@ -436,7 +436,7 @@ fn the_wheel_the_slider_the_mute_button_and_the_outputs_change_the_sound() -> an
     hp.button(BTN_LEFT, true);
     hp.button(BTN_LEFT, false);
     volume(&mut hp, &fakes, SPEAKERS, (0.30, false))?;
-    let gauge_past_a_third = (LEVELS.x + 37 + 55, LEVELS.y + 57);
+    let gauge_past_a_third = (LEVELS.x + 37 + 55, LEVELS.y + 85);
     until(&mut hp, gauge_past_a_third, dark)?;
     hp.button(BTN_LEFT, true);
     for step in 0..=20 {
@@ -449,7 +449,9 @@ fn the_wheel_the_slider_the_mute_button_and_the_outputs_change_the_sound() -> an
     }
     hp.button(BTN_LEFT, false);
     volume(&mut hp, &fakes, SPEAKERS, (0.50, false))?;
-    until(&mut hp, (LEVELS.x + 37 + 45, LEVELS.y + 57), blue)?;
+    // Half of the 93 px gauge (the values' column 45 px for the time
+    // left, #900).
+    until(&mut hp, (LEVELS.x + 37 + 40, LEVELS.y + 85), blue)?;
     // The keys: Tab to the slider, the arrows 5 % a press.
     press(&mut hp, KEY_TAB);
     press(&mut hp, KEY_TAB);
@@ -480,7 +482,7 @@ fn the_wheel_the_slider_the_mute_button_and_the_outputs_change_the_sound() -> an
     volume(&mut hp, &fakes, HEADSET, (0.30, false))?;
     volume(&mut hp, &fakes, SPEAKERS, (0.45, false))?;
     // The bar's gauge is the headset's now.
-    until(&mut hp, (LEVELS.x + 37 + 55, LEVELS.y + 57), dark)?;
+    until(&mut hp, (LEVELS.x + 37 + 55, LEVELS.y + 85), dark)?;
     Ok(())
 }
 

@@ -778,7 +778,7 @@ impl State {
             // Too big there, it fits; back where it fits, its size again
             // (windows.md §12, #419).
             Mode::Floating => self.carried_fitting(id, rect, area, to_area),
-            Mode::Snapped(zone) => zone.rect(to_area),
+            Mode::Snapped(zone) => zone.rect(to_area, self.gap()),
             Mode::Fullscreen => to_geometry,
         };
         let restore = self

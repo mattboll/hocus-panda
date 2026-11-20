@@ -30,6 +30,15 @@ pub struct OutputSettings {
     /// per-screen is off, for when it is on again.
     #[serde(deserialize_with = "some_picture")]
     pub wallpaper: Option<hocus_link::wallpaper::Picture>,
+    /// Its own folder, with `wallpaper = "folder"` (#894); else
+    /// `[wallpaper] folder`.
+    pub wallpaper_folder: Option<String>,
+    /// Its own day and night pictures, with `wallpaper = "day-night"`;
+    /// else `[wallpaper] day` and `night`.
+    #[serde(deserialize_with = "some_still_picture")]
+    pub wallpaper_day: Option<hocus_link::wallpaper::Picture>,
+    #[serde(deserialize_with = "some_still_picture")]
+    pub wallpaper_night: Option<hocus_link::wallpaper::Picture>,
 }
 
 impl OutputSettings {
@@ -37,8 +46,29 @@ impl OutputSettings {
     pub fn screen_part(&self) -> Self {
         Self {
             wallpaper: None,
+            wallpaper_folder: None,
+            wallpaper_day: None,
+            wallpaper_night: None,
             ..self.clone()
         }
+    }
+
+    /// Its wallpaper's keys alone (6.3, #894).
+    pub fn wallpaper_part(&self) -> WallpaperPart {
+        WallpaperPart {
+            picture: self.wallpaper.clone(),
+            folder: self.wallpaper_folder.clone(),
+            day: self.wallpaper_day.clone(),
+            night: self.wallpaper_night.clone(),
+        }
+    }
+
+    /// Its wallpaper's keys taken from `part`.
+    pub fn set_wallpaper_part(&mut self, part: WallpaperPart) {
+        self.wallpaper = part.picture;
+        self.wallpaper_folder = part.folder;
+        self.wallpaper_day = part.day;
+        self.wallpaper_night = part.night;
     }
 }
 
@@ -112,7 +142,26 @@ impl Default for OutputSettings {
             enabled: true,
             vrr: false,
             wallpaper: None,
+            wallpaper_folder: None,
+            wallpaper_day: None,
+            wallpaper_night: None,
         }
+    }
+}
+
+/// A screen's own wallpaper keys (`[outputs.NAME] wallpaper`,
+/// `wallpaper-folder`, `wallpaper-day`, `wallpaper-night`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WallpaperPart {
+    pub picture: Option<hocus_link::wallpaper::Picture>,
+    pub folder: Option<String>,
+    pub day: Option<hocus_link::wallpaper::Picture>,
+    pub night: Option<hocus_link::wallpaper::Picture>,
+}
+
+impl WallpaperPart {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
     }
 }
 

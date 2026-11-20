@@ -10,8 +10,9 @@
 //! bringing it back with them; a name changed in its field (`Enter`
 //! writes, `Esc` keeps the old); Super to move turning the ink off; the
 //! wobble with reduced motion; the search; the link to the keyboard's
-//! shortcuts. What the window shows is read from its log, never on a
-//! time.
+//! shortcuts; the gap between windows (#895) written from its slider and
+//! followed by the compositor. What the window shows is read from its log,
+//! never on a time.
 
 use crate::common;
 use crate::settings_page;
@@ -352,13 +353,20 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
             "windows.resize-modifier",
             "windows.magnet",
             "windows.snap-by-drag",
+            "windows.gap",
             "windows.wobble",
             "windows.animation",
             "windows.alt-tab",
-            "overview.hot-corner",
             "ink.enabled"
         ]
     );
+    // The screen corners: what each does, and the link to the shortcuts
+    // (#893).
+    assert_eq!(
+        strings(&shown["summaries"]["corners"]),
+        ["Coin ◤ : Vue d’ensemble"]
+    );
+    bed.places_with("link:overview.corners")?;
     let desktops = &shown["desktops"];
     assert_eq!(desktops["count"], 4);
     assert_eq!(
@@ -495,6 +503,44 @@ fn super_to_move_turns_the_ink_off_and_says_so() -> anyhow::Result<()> {
     let read = bed.hp.dispatch_until(WAIT, |hp| {
         hp.state().config.windows.move_modifier == DragKey::Super
     })?;
+    anyhow::ensure!(read, "the compositor did not read it");
+    Ok(())
+}
+
+/// The gap between windows (#895): "8 px" by default; its slider pressed
+/// at its right end writes 24, which the compositor follows.
+#[test]
+fn the_gaps_slider_writes_it_and_the_compositor_follows() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    let row = |shown: &Value| {
+        shown["rows"]
+            .as_array()
+            .and_then(|r| r.iter().find(|r| r["id"] == "windows.gap"))
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert_eq!(row(&shown)["value"], "8 px");
+    bed.reveal("control:windows.gap")?;
+    // The control: the 220 px slider, then what it says.
+    let [x, y, _, h] = bed.place_of("control:windows.gap")?;
+    let window = bed.window()?;
+    let at = (
+        f64::from(window.x) + x + 218.0,
+        f64::from(window.y) + y + h / 2.0,
+    );
+    bed.hp.pointer_move(at.0 - 1.0, at.1);
+    bed.hp.pointer_move(at.0, at.1);
+    wait(&mut bed.hp, Duration::from_millis(30))?;
+    bed.hp.button(BTN_LEFT, true);
+    bed.hp.button(BTN_LEFT, false);
+    bed.written(|t| t.contains("[windows]\ngap = 24\n"))?;
+    bed.shows(|s| row(s)["value"] == "24 px")?;
+    let read = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.state().config.windows.gap == 24)?;
     anyhow::ensure!(read, "the compositor did not read it");
     Ok(())
 }
@@ -927,6 +973,9 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.open()?;
     bed.shows(|s| s["desktops"]["windows"] == serde_json::json!([1, 2, 0, 0]))?;
     save(&mut bed, &out, "desktops-page.png", true)?;
+    // The gap between windows (#895), its row in view.
+    bed.reveal("row:windows.gap")?;
+    save(&mut bed, &out, "desktops-gap.png", true)?;
     // The pointer on "Courrier": its tooltip.
     let [x, y, w, h] = bed.place_of("chip:1")?;
     let window = bed.window()?;
@@ -973,6 +1022,23 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.shows(|s| s["desktops"]["ink_off"].is_string())?;
     bed.reveal("row:ink.enabled")?;
     save(&mut bed, &out, "desktops-super-ink-off.png", true)?;
+    Ok(())
+}
+
+/// The screen corners' summary (#893), into `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_corners() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.reveal("row:overview.corners")?;
+    save(&mut bed, &out, "desktops-corners.png", true)?;
     Ok(())
 }
 

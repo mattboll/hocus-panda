@@ -284,6 +284,11 @@ pub enum ToShell {
     Leave(LeaveShown),
     /// No confirmation any more: the menu's rows again.
     LeaveEnd,
+    /// The battery's charge limit that holds (6.10, #896): `Some(80)` while
+    /// `[power] charge-limit` is on, not lifted, and a battery has the
+    /// threshold; `None` else. Sent as the shell connects and when it
+    /// changes: the battery gauge's mark, the popover's line.
+    ChargeLimit(Option<u8>),
     /// The power button pressed, `[power] power-button = "ask"` (6.10): the
     /// session menu (7.4) opens on `output`'s bar, as a click on the footer's
     /// user opens it.

@@ -136,6 +136,11 @@ pub struct Config {
     /// look through translucent pixels. Not part of the file.
     #[serde(skip)]
     pub plain_background: bool,
+    /// How often a folder's wallpaper changes instead of `[wallpaper]
+    /// every`, for tests that cannot wait an hour (#894). Not part of the
+    /// file.
+    #[serde(skip)]
+    pub wallpaper_every: Option<std::time::Duration>,
     /// The directories of the applications' desktop entries (the XDG data
     /// directories' `applications`), where a window's tells whether it is
     /// a terminal (the clipboard's paste, 5.6). Not part of the file: the
@@ -197,6 +202,12 @@ pub struct Config {
     /// tests, unless they give one).
     #[serde(skip)]
     pub camera_program: Option<PathBuf>,
+    /// What sets the battery's charge limit (#896): on a virtual terminal,
+    /// the package's helper through pkexec. Not part of the file; `None`
+    /// sets none (nested and headless compositors, unless
+    /// `HOCUS_CHARGE_HELPER` names one; tests, unless they give one).
+    #[serde(skip)]
+    pub charge: Option<crate::away::charge::Helper>,
     /// Where it makes its frames: `auto`, `cpu` or `any` (its
     /// `--device`; tests: `cpu`). Not part of the file.
     #[serde(skip)]
@@ -835,16 +846,18 @@ mod tests {
         assert_eq!(none.windows.resize_modifier, DragKey::Super);
         assert!(none.windows.magnet && none.windows.snap_by_drag && none.windows.wobble);
         assert_eq!(none.windows.alt_tab, AltTab::All);
+        assert_eq!(none.windows.gap, 8);
         assert!(none.ink.enabled);
         let set: Config = toml::from_str(
             "[windows]\nmove-modifier = \"super\"\nresize-modifier = \"none\"\n\
              magnet = false\nsnap-by-drag = false\nwobble = false\nalt-tab = \"desktop\"\n\
-             [ink]\nenabled = false\n",
+             gap = 0\n[ink]\nenabled = false\n",
         )?;
         assert_eq!(set.windows.move_modifier, DragKey::Super);
         assert_eq!(set.windows.resize_modifier, DragKey::None);
         assert!(!set.windows.magnet && !set.windows.snap_by_drag && !set.windows.wobble);
         assert_eq!(set.windows.alt_tab, AltTab::Desktop);
+        assert_eq!(set.windows.gap, 0);
         assert!(!set.ink.enabled);
         // The overview's corner (#727): on unless said.
         assert!(none.overview.hot_corner);
@@ -855,6 +868,8 @@ mod tests {
             "move-modifier = \"ctrl\"",
             "alt-tab = \"some\"",
             "focus = \"hover\"",
+            "gap = 26",
+            "gap = -2",
         ] {
             let text = format!("[windows]\n{bad}\n");
             assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");

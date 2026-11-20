@@ -64,7 +64,8 @@ there.
   right and bottom edges; `[panel] side = "left"` puts it against the
   left edge of every output instead, and everything below that names the
   right goes with it (6.4, [as built](#64-the-bar-on-the-left-2026-11-05)).
-  Windows keep 8 px from the bar, as from the screen edges.
+  Windows keep the gap from the bar, as from the screen edges
+  (`[windows] gap`, 8 px by default; windows.md §2).
 - **Under the windows** (decided 2026-11-02, #519): the bar sits under
   normal windows. The windows the desktop places (new, maximised,
   snapped) still keep off it: its space stays reserved. A window the user
@@ -158,7 +159,7 @@ group where it is.
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
 | 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
-| 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
+| 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures (on battery, the battery's time left in place of its percentage); the power profile a mark on the battery's icon; no line under them (#900) | 80 px |
 | 11 | Footer | Four 40 × 34 buttons spread evenly across the bar's inside (5.5, variant A): the clipboard, the notifications' bell (its badge counting what was not seen, 5.4), the menu (the launcher, on a click only) and the user's avatar (their initial on the accent's gradient); a 150 ms hover or a click opens the clipboard's, the bell's and the user's popovers (as built, 5.5). Just above it, the tray (5.14, variant A, always visible): the applications' icons (StatusNotifierItem), a row of 34 × 34 cells 4 px apart under a 1 px `rgba(255,255,255,0.08)` line, wrapping past four; none without an icon (as built, 5.14) | 34 px (+ 17 px and 38 px a row of icons) |
 
 ### 4.1 The clock (approved 2026-10-28, issues #359 and #332; sizes of #378, 2026-10-29)
@@ -192,22 +193,32 @@ group where it is.
   track `rgba(255,255,255,0.10)`, fill with its gradient from the left),
   8 px, the value right-aligned in 36 px. The sound's gauge is `gauge.sound`,
   the brightness's `gauge.light`, the battery's `gauge.battery`, amber
-  (`#E8A13A → #F5C46E`, value and status `#F5C46E`) at 20 % or less, orange
+  (`#E8A13A → #F5C46E`, value `#F5C46E`) at 20 % or less, orange
   (`#E5793F → #F7B98A`, `#F7B98A`) at 10 % or less, both only off the
   charger. Muted: the speaker crossed in `text.faint`, the fill
   `rgba(255,255,255,0.22)` at the volume's length, the value "muet" /
   "muted" in `text.faint`. On AC (charging, full, or held by a charge
   limit; never on battery): a bolt `#7EE0A0` in the battery (3.7).
-- **The status line**, Manrope 13.5 px, right-aligned, `text.faint` (the
-  battery's band colour when low or critical): "3 h 40 restantes ·
-  équilibré" / "3 h 40 left · balanced"; "plein dans 1 h 10" / "full in
-  1 h 10"; "branché, plein" / "plugged in, full"; "branché" / "plugged in"
-  (a charge limit); without an estimate yet, "sur batterie" / "on battery"
-  and "en charge" / "charging"; at 10 % or less, "· branche le chargeur" /
-  "· plug in the charger" after the time. The profile: "économie",
-  "équilibré", "performance" / "power saver", "balanced", "performance".
-  Without a battery, the profile alone; without either, no line. Too long
-  for the bar, it breaks between its parts.
+- **No status line** (#900, 2026-11-20): the line that was under the
+  rows ("3 h 40 restantes · équilibré", "branché, plein · performance"…)
+  is gone, in every case, and the group is shorter by it. Plugged in shows
+  in the icon (its bolt), full in the gauge; the time left, "plein dans …"
+  and the profile are the battery's popover's (§9), and screen readers
+  still say them with the battery's value.
+- **The battery's value** (#900): on battery, its time left in place of
+  its percentage, the gauge showing the level: "3 h 40", under an hour
+  "45 min" (the same in English); the percentage while UPower has no
+  estimate yet, and on AC. While it shows a time, the three rows' values
+  are right-aligned in 45 px (as wide as "00 min" in its font, or the
+  time when wider), so that their gauges stay aligned and still as the
+  minutes go; 36 px otherwise.
+- **The power profile's mark** (#900), on the battery icon's top right
+  corner, 8 px, clear of its outline, its tip and the gauge (the bolt
+  stays inside the battery): none for balanced, a green leaf (`#7EE0A0`,
+  a dark vein) for the power saver, an orange flame (`#F2945B`, a light
+  heart) for performance. Without a battery, no mark anywhere in the bar,
+  and nothing in the bar opens the power modes (as in the mini form):
+  they are in Settings › Power.
 - **Missing**: a row whose service or device is not there (no PipeWire,
   no backlight, no battery, no UPower) is hidden, and the group closes up
   from the bottom.
@@ -777,8 +788,8 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   popover's) moves it by 5 %; the keyboard: `Tab` through the slider and
   the levels (or the keyboard's slider), the arrows move a slider (5 %, a
   level) and choose the next level, `Enter` or `Space` chooses.
-- **The battery's** (3.7), opened by a click on the battery's row and the
-  status line under it (full form), or in the mini form by a 150 ms hover
+- **The battery's** (3.7), opened by a click on the battery's row (full
+  form), or in the mini form by a 150 ms hover
   or a click on the battery; its bottom on the bar's: "Batterie" /
   "Battery" and on the right "Sur batterie" / "On battery" or "Branché" /
   "Plugged in". A 42 × 24 battery filled to its level in its band's
@@ -786,7 +797,9 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   1.1 lines) over its line (13.5 px, 1 px apart): "3 h 40 restantes" /
   "3 h 40 left", "En charge · plein dans 1 h 10" / "Charging · full in 1 h
   10", "Branché, plein" / "Plugged in, full", "Branché, ne charge pas" /
-  "Plugged in, not charging" (a charge limit), "Sur batterie" / "On
+  "Plugged in, not charging" (a charge limit), "Branché, limité à 80 %" /
+  "Plugged in, limited to 80 %" while the desktop's own limit holds it
+  there (#896), "Sur batterie" / "On
   battery" and "En charge" / "Charging" without an estimate; at 10 % or
   less "· branche le chargeur" / "· plug in the charger" after it, the
   level and the line in `#F7B98A`, at 20 % or less in `#F5C46E`; too long
@@ -808,8 +821,9 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   by the system.". Last, "État de la batterie : 91 % de sa capacité
   d'origine" / "Battery health: 91 % of its original capacity" (12.5 px,
   `text.faint`), when known. Gaps of 8 px. Without a battery but with
-  power profiles, the status line (the profile alone) opens it with the
-  modes only, under "Énergie" / "Power" (no divider, no label). Without
+  power profiles, the modes only, under "Énergie" / "Power" (no divider,
+  no label): since #900 nothing in the bar opens it then (the status line
+  did), it shows so only when the battery goes while it is open. Without
   power profiles, the battery alone. The keyboard: `Tab` through the tiles
   the machine has, the arrows choose the next, `Enter` or `Space` chooses.
 - **The tasks'** (Day.4, issue #428, variant C), from the mini form's
@@ -1340,8 +1354,9 @@ the product.
   layer surface of their own (`hocus-bar-levels`), inside the bar's rim,
   41 px above its bottom: 194 × 165 px in the full form (175 px since
   3.4a, and 97 px in the mini, for the sound's item; the group's
-  bottom 61 px above the bar's, above the footer's place; room for the
-  status line on three lines, a part a line), 54 × 84 px in the mini (40
+  bottom 61 px above the bar's, above the footer's place; it had room
+  for the status line on three lines, which #900 took away, and keeps its
+  size), 54 × 84 px in the mini (40
   px above, above the next item's place: 12 px under the battery, as the
   3.3 mockup has it), the full size while the form switches. iced draws
   every surface after any message of the shell's, so a change of level is
@@ -1484,7 +1499,7 @@ slots are not part of the product.
   full form (the row and room for its ring), 54 × 48 px in the mini (the
   button and its ring), both while the form switches. It sits 14 px above
   the levels' group and follows it: the levels say where their group's top
-  is (a row coming, the status line on two lines) and the surface moves by
+  is (a row coming or going) and the surface moves by
   its margins, which draws only it. So a network's change draws only that
   surface, woken through the compositor (`wake hocus-bar-connections`)
   and only when the row's state changes (a strength that lights the same
@@ -1701,8 +1716,8 @@ not part of the product.
 
 - **Two more items on the levels' surface.** The brightness's row and the
   battery's (its row and the status line under it, 4 px past it; the
-  status line alone, for the modes, without a battery) open their
-  popovers as the sound's does, lit under the pointer and while open,
+  status line alone, for the modes, without a battery; its row alone since
+  #900) open their popovers as the sound's does, lit under the pointer and while open,
   ringed while they hold the keyboard. The wheel over the brightness's row
   steps it as its keys do. In the mini form the battery is the 3.7
   mockup's sign over its percentage, a 44 × 46 item 14 px under the
@@ -1745,7 +1760,8 @@ not part of the product.
   brightness's popover draws (and resizes) for it.
 - **Decisions.** Four levels named "Éteint", "Faible", "Moyen", "Fort";
   the popover's line for a charge limit says "Branché, ne charge pas"
-  (the bar's status line keeps "branché"); the state line breaks between
+  (the bar's status line kept "branché", until #900 took it away); the
+  state line breaks between
   its parts, not inside one; the modes alone without the divider and the
   label the title repeats; `PerformanceDegraded` shown, while performance
   is chosen, as a line under the tiles (its two known reasons named); the
@@ -1764,9 +1780,22 @@ not part of the product.
   battery; the mini sign's bolt and colours; the keyboard; nothing drawn
   at rest, popovers closed or open; a hover drawing the popover's
   rectangle alone, a battery's change the levels and the popover only.
+- **The charge limit** (#896, docs/design/settings.md "Énergie"): while
+  the desktop's limit holds (`ToShell::ChargeLimit`, `Some(80)`), the
+  battery's gauge carries a 2 px mark across its track at 80 % (`text` at
+  70 %), and the popover's line says "Branché, limité à 80 %" / "Plugged
+  in, limited to 80 %" when the battery is held there (plugged in and not
+  charging, or full under 100 %). Lifted once, or off, neither. The status
+  line under the levels is unchanged.
 - **Not built**: other screens' brightness (DDC/CI, variant A); hiding the
   brightness when the laptop's panel is off (lid closed, an external
   screen alone); a link to the Settings; names for screen readers (§11).
+- **#900** (2026-11-20): no status line under the levels; on battery the
+  battery's row shows its time left, the power profile a leaf or a flame
+  on its icon (§4.2). The popover keeps the time left, "plein dans …" and
+  the profiles; without a battery nothing in the bar opens it. The shell
+  logs the row's value and the mark as the levels change, which
+  `tests/power.rs` reads.
 
 ### 3.8, the keyboard layout (2026-10-29)
 

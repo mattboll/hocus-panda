@@ -398,7 +398,8 @@ impl Bed {
         let bed = self;
         // The sound's row of the bar opens its popover, once the levels
         // have their size and the connections' surface is above them (as
-        // `popover.rs` waits).
+        // `popover.rs` waits). Its middle, 85 px down: three rows, no line
+        // under them (#900).
         let placed = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
             hp.levels_surfaces()
                 .first()
@@ -406,7 +407,7 @@ impl Bed {
         })?;
         anyhow::ensure!(placed, "no levels: {:?}", bed.hp.levels_surfaces());
         let levels = bed.hp.levels_surfaces()[0].1;
-        let top = levels.y + 57;
+        let top = levels.y + 85;
         let clear = bed.hp.dispatch_until(WAIT, |hp| {
             hp.connections_surfaces()
                 .iter()
@@ -415,7 +416,7 @@ impl Bed {
         anyhow::ensure!(clear, "the connections over the sound's row");
         let row = (
             f64::from(levels.x + levels.width * 3 / 5),
-            f64::from(levels.y + 57),
+            f64::from(levels.y + 85),
         );
         common::click_on(&mut bed.hp, row, hocus_link::LEVELS_NAMESPACE)?;
         let open = bed

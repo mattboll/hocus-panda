@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- The battery's charge limit (issue #896, packaging/README.md): the
+     person at the computer, in its active local session, runs the
+     helper through pkexec without a password; it writes 80 or 100 into
+     the batteries' charge thresholds and nothing else. Anyone else
+     (another session, a remote one) is refused. install.sh writes the
+     helper's real path in place of @LIBEXEC@. -->
+<policyconfig>
+  <vendor>Hocuspanda</vendor>
+  <vendor_url>https://github.com/mattboll/hocus-panda</vendor_url>
+  <action id="org.hocuspanda.charge-limit">
+    <description>Limit the battery's charge to 80 %, or lift the limit</description>
+    <description xml:lang="fr">Limiter la charge de la batterie à 80 %, ou lever la limite</description>
+    <message>The battery's charge limit is changed by the person at the computer</message>
+    <message xml:lang="fr">La limite de charge de la batterie se change devant l’ordinateur</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">@LIBEXEC@/hocuspanda/charge-limit</annotate>
+  </action>
+</policyconfig>

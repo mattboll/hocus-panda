@@ -27,9 +27,9 @@ pub const MOUSE: RowGroup = RowGroup {
     label: words::MOUSE,
     per_source: false,
 };
-/// The gestures' rows (6.13).
-pub const SWIPE_DESKTOPS: &str = "touchpad.swipe-desktops";
-pub const SWIPE_LAUNCHER: &str = "touchpad.swipe-launcher";
+/// The gestures' group (6.13): what the gestures do, set in the shortcuts
+/// (#893), and what the desktop never takes.
+pub const GESTURES_SUMMARY: &str = "touchpad.gestures";
 pub const LEFT_TO_APPS: &str = "touchpad.left-to-applications";
 
 pub const GESTURES: RowGroup = RowGroup {
@@ -260,64 +260,6 @@ pub fn settings() -> &'static [Setting] {
                 one(&["pointer", "left-handed"], Codec::Bool),
                 None,
             ),
-            setting(
-                SWIPE_DESKTOPS,
-                GESTURES,
-                words::THREE_FINGERS_SIDEWAYS,
-                Some(words::SWITCH_DESKTOP_ON_THE_SCREEN_UNDER),
-                (
-                    &[
-                        "geste",
-                        "glisser",
-                        "doigts",
-                        "trois doigts",
-                        "bureau",
-                        "pavé",
-                    ],
-                    &[
-                        "gesture",
-                        "swipe",
-                        "fingers",
-                        "three fingers",
-                        "desktop",
-                        "touchpad",
-                    ],
-                ),
-                Kind::Switch,
-                one(&["touchpad", "swipe-desktops"], Codec::Bool),
-                None,
-            ),
-            setting(
-                SWIPE_LAUNCHER,
-                GESTURES,
-                words::FOUR_FINGERS_UP_OR_DOWN,
-                Some(words::UP_OPENS_THE_LAUNCHER_WHICH_GROWS),
-                (
-                    &[
-                        "geste",
-                        "glisser",
-                        "doigts",
-                        "quatre doigts",
-                        "lanceur",
-                        "pavé",
-                        "vue d’ensemble",
-                        "bureaux",
-                    ],
-                    &[
-                        "gesture",
-                        "swipe",
-                        "fingers",
-                        "four fingers",
-                        "launcher",
-                        "touchpad",
-                        "overview",
-                        "desktops",
-                    ],
-                ),
-                Kind::Switch,
-                one(&["touchpad", "swipe-launcher"], Codec::Bool),
-                None,
-            ),
             // Not a setting: what the desktop never takes.
             setting(
                 LEFT_TO_APPS,
@@ -340,6 +282,53 @@ pub fn settings() -> &'static [Setting] {
     })
 }
 
+/// The page's row the model does not hold: what the gestures do, a
+/// summary of the shortcuts' (#893), for the search.
+pub fn outside() -> &'static [crate::model::Outside] {
+    const ALL: [crate::model::Outside; 1] = [crate::model::Outside {
+        id: GESTURES_SUMMARY,
+        section: SectionId::Mouse,
+        group: words::TOUCHPAD_GESTURES,
+        name: hocus_words::settings::triggers::TOUCHPAD_GESTURES,
+        keywords: (
+            &[
+                "geste",
+                "glisser",
+                "doigts",
+                "trois doigts",
+                "quatre doigts",
+                "bureau",
+                "lanceur",
+                "vue d’ensemble",
+                "pavé",
+            ],
+            &[
+                "gesture",
+                "swipe",
+                "fingers",
+                "three fingers",
+                "four fingers",
+                "desktop",
+                "launcher",
+                "overview",
+                "touchpad",
+            ],
+        ),
+    }];
+    &ALL
+}
+
+/// The most fingers a touchpad of `devices` senses; `None` while no
+/// touchpad says it.
+pub fn most_fingers(devices: Option<&[InputDevice]>) -> Option<u32> {
+    devices?
+        .iter()
+        .filter(|d| d.kind == DeviceKind::Touchpad)
+        .map(|d| d.can.fingers)
+        .max()
+        .filter(|n| *n > 0)
+}
+
 /// Which devices a setting of this page is for.
 pub fn kind_of(setting: &str) -> Option<DeviceKind> {
     if setting.starts_with("touchpad.") {
@@ -354,7 +343,6 @@ pub fn kind_of(setting: &str) -> Option<DeviceKind> {
 /// The device the toast adds to a row's name: ", pavé tactile".
 pub fn aside(setting: &str) -> Option<Words> {
     match kind_of(setting)? {
-        DeviceKind::Touchpad if setting.starts_with("touchpad.swipe") => None,
         DeviceKind::Touchpad => Some(words::TOUCHPAD_2),
         DeviceKind::Pointer => Some(words::MOUSE_2),
     }
@@ -379,9 +367,6 @@ pub fn takes(setting: &str, devices: Option<&[InputDevice]>) -> bool {
             "touchpad.off-with-mouse" => can.off_with_mouse,
             "pointer.acceleration" => can.flat && can.adaptive,
             "pointer.left-handed" => can.left_handed,
-            // 0: a compositor that does not say it.
-            SWIPE_DESKTOPS => can.fingers == 0 || can.fingers >= 3,
-            SWIPE_LAUNCHER => can.fingers == 0 || can.fingers >= 4,
             _ => true,
         }
     })

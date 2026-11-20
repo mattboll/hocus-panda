@@ -27,8 +27,8 @@ impl Default for Idle {
 }
 
 /// `[power]` (the Settings' Énergie page, 6.10, docs/design/settings.md):
-/// the delays of each power source, locking, the lid, the power button and
-/// the automatic power saver. Every value is read leniently: one that does
+/// the delays of each power source, locking, the lid, the power button,
+/// the automatic power saver and the battery's charge limit. Every value is read leniently: one that does
 /// not read is logged and its default applies, the rest of the file kept;
 /// a key not known refuses the file, as elsewhere. 6.1's keys still read
 /// ([`Power::old`]): `[power.battery] screen-off` is the battery's `idle`
@@ -53,6 +53,9 @@ pub struct Power {
     /// The battery level, in percent, at or under which the automatic
     /// power saver comes on: from 5 to 50.
     pub auto_saver_below: u8,
+    /// The battery's charge stops at 80 % (#896, the battery's own
+    /// threshold: [`crate::away::charge`]).
+    pub charge_limit: bool,
     /// 6.1's keys the file has.
     pub old: OldKeys,
 }
@@ -134,6 +137,7 @@ impl Default for Power {
             power_button: PowerButton::Ask,
             auto_saver: true,
             auto_saver_below: 20,
+            charge_limit: false,
             old: OldKeys::default(),
         }
     }
@@ -160,6 +164,8 @@ pub(super) struct RawPower {
     auto_saver: Option<bool>,
     #[serde(deserialize_with = "lenient")]
     auto_saver_below: Option<u8>,
+    #[serde(deserialize_with = "lenient")]
+    charge_limit: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -246,6 +252,7 @@ impl From<RawPower> for Power {
                 .auto_saver_below
                 .filter(|p| (5..=50).contains(p))
                 .unwrap_or(default.auto_saver_below),
+            charge_limit: raw.charge_limit.unwrap_or(default.charge_limit),
             old,
         }
     }

@@ -349,7 +349,7 @@ const WORKSPACE: &[&str] = &["espace de travail", "workspace"];
 const MOVE_SCREEN: &[&str] = &["déplacer", "moniteur", "move", "monitor", "display"];
 
 /// The actions, in each category's order.
-const ACTIONS: [Def; 66] = [
+const ACTIONS: [Def; 67] = [
     // The window.
     d(
         "close",
@@ -680,6 +680,24 @@ const ACTIONS: [Def; 66] = [
         G::Brightness,
     )
     .key("brightness-down"),
+    // The wallpaper's next picture, while it is a folder's (#894).
+    d(
+        "next-wallpaper",
+        "Image suivante",
+        "Next picture",
+        &[
+            "fond d’écran",
+            "fond d'écran",
+            "dossier",
+            "diaporama",
+            "wallpaper",
+            "background",
+            "folder",
+            "slideshow",
+        ],
+        C::Screens,
+        G::Screen,
+    ),
     // The agents.
     d(
         "waiting-agent",
@@ -1097,10 +1115,12 @@ pub enum Inert {
     NoneWaiting,
     /// Nested, the screen reader starts with the session only.
     SessionOnly,
+    /// The wallpaper is no folder's (#894).
+    NoFolder,
 }
 
 impl Inert {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::NoWindow,
         Self::OneScreen,
         Self::NoScreenThere,
@@ -1112,6 +1132,7 @@ impl Inert {
         Self::NoAgent,
         Self::NoneWaiting,
         Self::SessionOnly,
+        Self::NoFolder,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -1127,6 +1148,7 @@ impl Inert {
             Self::NoAgent => "no-agent",
             Self::NoneWaiting => "none-waiting",
             Self::SessionOnly => "session-only",
+            Self::NoFolder => "no-folder",
         }
     }
 
@@ -1155,6 +1177,8 @@ impl Inert {
             (Self::NoneWaiting, false) => "no agent waiting",
             (Self::SessionOnly, true) => "avec la session seulement",
             (Self::SessionOnly, false) => "with the session only",
+            (Self::NoFolder, true) => "le fond n’est pas un dossier",
+            (Self::NoFolder, false) => "the wallpaper is no folder",
         }
     }
 }
