@@ -266,6 +266,14 @@ impl State {
             self.tell_shell(hocus_link::ToShell::Weather(self.config.weather.place()));
             followed.push("[weather]");
         }
+        // What a drive plugged in does (#898): the shell's.
+        if new.removable != self.config.removable {
+            self.config.removable = new.removable;
+            self.tell_shell(hocus_link::ToShell::Removable(
+                self.config.removable.on_plug,
+            ));
+            followed.push("[removable]");
+        }
         // The desktop's effects (#434): read as each starts.
         if new.effects != self.config.effects {
             self.config.effects = new.effects.clone();
