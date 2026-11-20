@@ -3,8 +3,9 @@
 //! does. Nested, `Super` is `Alt+Super`, so that the host keeps its own.
 //! An action may have several shortcuts.
 
-use std::{fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
+use hocus_config::triggers::Trigger;
 use hocus_link::LevelKey;
 use serde::{
     Deserialize, Deserializer,
@@ -132,6 +133,15 @@ pub struct Chord {
 }
 
 impl Chord {
+    /// No key: what an action run by a corner or a swipe is held by.
+    pub const NONE: Self = Self {
+        logo: false,
+        shift: false,
+        ctrl: false,
+        alt: false,
+        key: Keysym::NoSymbol,
+    };
+
     /// As the file writes it: `Super+Ctrl+Alt+Shift+KEY`, the key by its
     /// XKB name.
     pub fn written(&self) -> String {
@@ -218,26 +228,113 @@ impl FromStr for Chord {
     }
 }
 
+/// A screen corner or a touchpad swipe bound to an action in
+/// `[shortcuts]` (issue #893), beside its keys.
+#[derive(Debug, Clone, Copy)]
+pub struct Bound {
+    pub trigger: Trigger,
+    /// Its action's key in `[shortcuts]`, as the struct's field names it
+    /// (`desktop_left`).
+    pub field: &'static str,
+    pub action: Action,
+    /// The action's line is not in the file: one of its defaults, which an
+    /// older switch may take away (`hocus_config::triggers::RETIRED`).
+    pub by_default: bool,
+}
+
+/// Two are the same when they bind the same: whether the file wrote the
+/// line is not compared (the shipped file, uncommented, is the defaults).
+impl PartialEq for Bound {
+    fn eq(&self, other: &Self) -> bool {
+        (self.trigger, self.field, self.action) == (other.trigger, other.field, other.action)
+    }
+}
+
+impl Eq for Bound {}
+
+/// An action's line read: its chords and its triggers.
+fn bindings(text: &[String]) -> Result<(Vec<Chord>, Vec<Trigger>), String> {
+    let mut chords = Vec::new();
+    let mut triggers = Vec::new();
+    for text in text.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+        if Trigger::meant(text) {
+            let trigger = Trigger::parse(text).ok_or_else(|| {
+                format!("{text:?}: not a corner nor a swipe of three or four fingers")
+            })?;
+            triggers.push(trigger);
+        } else {
+            chords.push(text.parse::<Chord>().map_err(|e| e.to_string())?);
+        }
+    }
+    Ok((chords, triggers))
+}
+
 /// The `[shortcuts]` section: every shortcut of the desktop, in one place,
 /// with its defaults and its action. A shortcut, or a list of them; an
-/// empty string or list turns an action's off.
+/// empty string or list turns an action's off. A list takes screen
+/// corners and swipes too (`"corner:top-left"`, `"swipe:4:down"`): those
+/// are [`Shortcuts::triggers`], in the section's order.
 macro_rules! shortcuts {
     ($($field:ident: [$($default:literal),*] => $action:expr,)*) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-        #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         pub struct Shortcuts {
-            $(
-                #[serde(deserialize_with = "chords")]
-                pub $field: Vec<Chord>,
-            )*
+            $(pub $field: Vec<Chord>,)*
+            /// The corners and swipes, in the section's order.
+            pub triggers: Vec<Bound>,
         }
 
         impl Default for Shortcuts {
             fn default() -> Self {
-                let chords = |texts: &[&str]| texts.iter().filter_map(|t| t.parse().ok()).collect();
-                Self {
-                    $($field: chords(&[$($default),*]),)*
+                let mut out = Self {
+                    $($field: Vec::new(),)*
+                    triggers: Vec::new(),
+                };
+                $(
+                    let texts: &[&str] = &[$($default),*];
+                    let texts: Vec<String> = texts.iter().map(|t| (*t).to_owned()).collect();
+                    if let Ok((chords, triggers)) = bindings(&texts) {
+                        out.$field = chords;
+                        out.triggers.extend(triggers.into_iter().map(|trigger| Bound {
+                            trigger,
+                            field: stringify!($field),
+                            action: $action,
+                            by_default: true,
+                        }));
+                    }
+                )*
+                out
+            }
+        }
+
+        impl<'de> Deserialize<'de> for Shortcuts {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let mut lines = BTreeMap::<String, Texts>::deserialize(deserializer)?;
+                let unset = Self::default();
+                let mut out = unset.clone();
+                out.triggers.clear();
+                $(
+                    let key = stringify!($field).replace('_', "-");
+                    match lines.remove(&key) {
+                        Some(Texts(texts)) => {
+                            let (chords, triggers) = bindings(&texts)
+                                .map_err(|e| de::Error::custom(format!("shortcut {e}")))?;
+                            out.$field = chords;
+                            out.triggers.extend(triggers.into_iter().map(|trigger| Bound {
+                                trigger,
+                                field: stringify!($field),
+                                action: $action,
+                                by_default: false,
+                            }));
+                        }
+                        None => out.triggers.extend(
+                            unset.triggers.iter().filter(|b| b.field == stringify!($field)),
+                        ),
+                    }
+                )*
+                if let Some(key) = lines.keys().next() {
+                    return Err(de::Error::custom(format!("unknown key `{key}` in [shortcuts]")));
                 }
+                Ok(out)
             }
         }
 
@@ -281,8 +378,10 @@ shortcuts! {
     focus_down: [] => Action::FocusToward(0, 1),
     switch_windows: ["Alt+Tab"] => Action::SwitchWindows { backward: false },
     switch_windows_backward: ["Alt+Shift+Tab"] => Action::SwitchWindows { backward: true },
-    desktop_left: ["Super+Ctrl+Left"] => Action::DesktopBy(-1),
-    desktop_right: ["Super+Ctrl+Right"] => Action::DesktopBy(1),
+    // Fingers going right bring the desktop on the left: the strip follows
+    // them.
+    desktop_left: ["Super+Ctrl+Left", "swipe:3:right"] => Action::DesktopBy(-1),
+    desktop_right: ["Super+Ctrl+Right", "swipe:3:left"] => Action::DesktopBy(1),
     desktop_1: ["Super+1"] => Action::Desktop(0),
     desktop_2: ["Super+2"] => Action::Desktop(1),
     desktop_3: ["Super+3"] => Action::Desktop(2),
@@ -316,9 +415,9 @@ shortcuts! {
     move_to_screen_right: ["Super+Alt+Right"] => Action::MoveToScreen(1),
     toggle_bar: ["Super+Shift+B"] => Action::ToggleBar,
     focus_bar: ["Super+B"] => Action::FocusBar,
-    launcher: ["Super+Space"] => Action::Launcher,
+    launcher: ["Super+Space", "swipe:4:up"] => Action::Launcher,
     actions: ["Super+P"] => Action::Actions,
-    overview: ["Super+W"] => Action::Overview,
+    overview: ["Super+W", "corner:top-left", "swipe:4:down"] => Action::Overview,
     clipboard: ["Super+V"] => Action::Clipboard,
     emoji: ["Super+period"] => Action::Emoji,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
@@ -375,40 +474,79 @@ impl Shortcuts {
     }
 }
 
-/// One shortcut, `"Super+Q"`, or several, `["Super+Q", "Alt+F4"]`; an
-/// empty string or list for none.
-fn chords<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Chord>, D::Error> {
-    struct Chords;
+/// An action's line: one text, `"Super+Q"`, or several, `["Super+Q",
+/// "Alt+F4"]`; an empty string or list for none.
+struct Texts(Vec<String>);
 
-    impl<'de> Visitor<'de> for Chords {
-        type Value = Vec<Chord>;
+impl<'de> Deserialize<'de> for Texts {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visit;
 
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("a shortcut, as \"Super+Q\", or a list of them")
-        }
+        impl<'de> Visitor<'de> for Visit {
+            type Value = Texts;
 
-        fn visit_str<E: de::Error>(self, text: &str) -> Result<Self::Value, E> {
-            chord(text).map(|chord| chord.into_iter().collect())
-        }
-
-        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-            let mut chords = Vec::new();
-            while let Some(text) = seq.next_element::<String>()? {
-                chords.extend(chord(&text)?);
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a shortcut, as \"Super+Q\", or a list of them")
             }
-            Ok(chords)
-        }
-    }
 
-    deserializer.deserialize_any(Chords)
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<Self::Value, E> {
+                Ok(Texts(vec![text.to_owned()]))
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut texts = Vec::new();
+                while let Some(text) = seq.next_element::<String>()? {
+                    texts.push(text);
+                }
+                Ok(Texts(texts))
+            }
+        }
+
+        deserializer.deserialize_any(Visit)
+    }
 }
 
-/// A shortcut; `None` for an empty string.
-fn chord<E: de::Error>(text: &str) -> Result<Option<Chord>, E> {
-    if text.trim().is_empty() {
-        return Ok(None);
+impl crate::Config {
+    /// Whether an older switch that took default triggers away is off
+    /// (`[touchpad] swipe-desktops = false`).
+    fn switch_off(&self, switch: [&str; 2]) -> bool {
+        match switch {
+            ["touchpad", "swipe-desktops"] => !self.touchpad.swipe_desktops,
+            ["touchpad", "swipe-launcher"] => !self.touchpad.swipe_launcher,
+            ["overview", "hot-corner"] => !self.overview.hot_corner,
+            _ => false,
+        }
     }
-    text.parse().map(Some).map_err(E::custom)
+
+    /// What `trigger` runs: the first action that names it, unless an
+    /// older switch took that default away.
+    pub fn trigger_action(&self, trigger: Trigger) -> Option<Action> {
+        self.shortcuts
+            .triggers
+            .iter()
+            .find(|b| {
+                b.trigger == trigger
+                    && !(b.by_default
+                        && hocus_config::triggers::retired(
+                            &b.field.replace('_', "-"),
+                            trigger,
+                            |s| self.switch_off(s),
+                        ))
+            })
+            .map(|b| b.action)
+    }
+
+    /// Whether some action takes a swipe of `fingers`.
+    pub fn swipes_of(&self, fingers: u32) -> bool {
+        hocus_config::triggers::Toward::ALL
+            .into_iter()
+            .any(|toward| {
+                u8::try_from(fingers).is_ok_and(|fingers| {
+                    self.trigger_action(Trigger::Swipe { fingers, toward })
+                        .is_some()
+                })
+            })
+    }
 }
 
 /// Why the compositor is ending.
@@ -499,6 +637,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hocus_config::triggers::{Corner, Toward};
 
     fn mods(logo: bool, shift: bool, ctrl: bool, alt: bool) -> ModifiersState {
         ModifiersState {
@@ -716,6 +855,99 @@ mod tests {
             );
         }
         assert_eq!(action(mods(true, false, false, false), false), None);
+    }
+
+    fn swipe(fingers: u8, toward: Toward) -> Trigger {
+        Trigger::Swipe { fingers, toward }
+    }
+
+    #[test]
+    fn corners_and_swipes_are_read_beside_the_keys() -> anyhow::Result<()> {
+        let unset = crate::Config::default();
+        assert_eq!(
+            unset.trigger_action(Trigger::Corner(Corner::TopLeft)),
+            Some(Action::Overview)
+        );
+        assert_eq!(
+            unset.trigger_action(swipe(3, Toward::Left)),
+            Some(Action::DesktopBy(1))
+        );
+        assert_eq!(
+            unset.trigger_action(swipe(3, Toward::Right)),
+            Some(Action::DesktopBy(-1))
+        );
+        assert_eq!(
+            unset.trigger_action(swipe(4, Toward::Up)),
+            Some(Action::Launcher)
+        );
+        assert_eq!(
+            unset.trigger_action(swipe(4, Toward::Down)),
+            Some(Action::Overview)
+        );
+        assert_eq!(unset.trigger_action(swipe(3, Toward::Up)), None);
+        assert_eq!(unset.shortcuts.overview, ["Super+W".parse()?]);
+        // A line written: its own triggers, the others' defaults kept.
+        let set: crate::Config = toml::from_str(
+            "[shortcuts]\noverview = [\"Super+W\", \"corner:bottom-right\"]\n\
+             lock = [\"Super+L\", \"swipe:3:up\"]\n",
+        )?;
+        assert_eq!(set.shortcuts.overview, ["Super+W".parse()?]);
+        assert_eq!(set.shortcuts.lock, ["Super+L".parse()?]);
+        let action = |t| set.trigger_action(t);
+        assert_eq!(
+            action(Trigger::Corner(Corner::BottomRight)),
+            Some(Action::Overview)
+        );
+        assert_eq!(action(Trigger::Corner(Corner::TopLeft)), None);
+        assert_eq!(action(swipe(4, Toward::Down)), None);
+        assert_eq!(action(swipe(3, Toward::Up)), Some(Action::Lock));
+        assert_eq!(action(swipe(4, Toward::Up)), Some(Action::Launcher));
+        // Two actions naming one: the first in the section's order.
+        let twice: crate::Config =
+            toml::from_str("[shortcuts]\nclose = \"swipe:3:down\"\nlock = \"swipe:3:down\"\n")?;
+        assert_eq!(
+            twice.trigger_action(swipe(3, Toward::Down)),
+            Some(Action::Lock)
+        );
+        for bad in [
+            "close = \"swipe:5:left\"",
+            "close = [\"Super+Q\", \"corner:middle\"]",
+            "close = \"swipe:3\"",
+        ] {
+            assert!(toml::from_str::<Shortcuts>(bad).is_err(), "{bad}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_older_switches_take_their_defaults_away() -> anyhow::Result<()> {
+        let read = |text: &str| toml::from_str::<crate::Config>(text);
+        let off = read("[touchpad]\nswipe-desktops = false\n")?;
+        assert_eq!(off.trigger_action(swipe(3, Toward::Left)), None);
+        assert_eq!(off.trigger_action(swipe(3, Toward::Right)), None);
+        assert!(!off.swipes_of(3) && off.swipes_of(4));
+        let off = read("[touchpad]\nswipe-launcher = false\n")?;
+        assert_eq!(off.trigger_action(swipe(4, Toward::Up)), None);
+        assert_eq!(off.trigger_action(swipe(4, Toward::Down)), None);
+        assert_eq!(
+            off.trigger_action(Trigger::Corner(Corner::TopLeft)),
+            Some(Action::Overview)
+        );
+        let off = read("[overview]\nhot-corner = false\n")?;
+        assert_eq!(off.trigger_action(Trigger::Corner(Corner::TopLeft)), None);
+        assert_eq!(
+            off.trigger_action(swipe(4, Toward::Down)),
+            Some(Action::Overview)
+        );
+        // The action's line written: the file's, whatever the switch.
+        let mine = read(
+            "[overview]\nhot-corner = false\n\n[shortcuts]\noverview = [\"corner:top-left\"]\n",
+        )?;
+        assert_eq!(
+            mine.trigger_action(Trigger::Corner(Corner::TopLeft)),
+            Some(Action::Overview)
+        );
+        Ok(())
     }
 
     #[test]

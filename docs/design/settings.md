@@ -822,12 +822,8 @@ kept, off by default; tap to click on by default.
   `speed`, Accélération `acceleration` (`"adaptive"`, `"flat"`),
   Défilement naturel `natural-scroll`, Gaucher `left-handed`.
 - **GESTES DU PAVÉ TACTILE** (hidden without a touchpad; 6.13 below):
-  Trois doigts de côté `[touchpad] swipe-desktops` (windows.md §12: off, three fingers go
-  to applications), Quatre doigts vers le haut ou le bas `[touchpad] swipe-launcher`
-  (up the four-finger launcher, 6.13: launcher.md; down the overview,
-  8.5 A: windows.md §12b; its line "Vers le haut, le lanceur, qui
-  grandit avec tes doigts ; vers le bas, la vue d’ensemble de tes
-  bureaux, ou le lanceur se referme.").
+  since #893 a summary of what the gestures do, set in the shortcuts
+  ("Gestures and corners" below), then what is left to applications.
 - The speeds are a bipolar slider "Lente … Rapide" (172 wide, a tick at
   the middle, the fill from the middle to the knob, no number), written
   as decimals from -1.0 to 1.0 450 ms after it stops; the toast and the
@@ -880,7 +876,10 @@ the issue's last comment; every question answered with its
 recommendation (the launcher grows with four fingers and opens on
 release; switching desktops stays three fingers only; the gesture always
 follows the fingers). The compositor's side is launcher.md's "6.13, as
-built".
+built". Since #893 the two switch rows below are a summary of what the
+gestures do, set in the shortcuts (6.8, "Gestures and corners"), its
+four-finger gestures greyed in the shortcuts' picker on a three-finger
+touchpad; the note of what is left to applications stays.
 
 - **The touchpad gestures group** ("GESTES DU PAVÉ TACTILE"), after the
   mouse group, hidden without a touchpad. On its label line's right,
@@ -972,6 +971,48 @@ nine is one folded row that unfolds.
 - Chords are written as the compositor reads them: Super, Ctrl, Alt,
   Shift, then the XKB name (`Super+Shift+E`, `Super+period`, `Print`);
   the top row's digits whatever the layout.
+
+### Gestures and corners (as built, #893)
+
+- **In the file**, beside the keys in the action's line:
+  `overview = ["Super+W", "corner:top-left", "swipe:4:down"]`; tokens
+  `corner:top-left|top-right|bottom-left|bottom-right` and
+  `swipe:3|4:left|right|up|down` (`hocus_config::triggers`, shared by
+  the compositor and the Settings). Defaults (`packaging/config.toml`):
+  `desktop-left` `swipe:3:right`, `desktop-right` `swipe:3:left` (the
+  strip follows the fingers: right brings the desktop on the left, as
+  before), `launcher` `swipe:4:up`, `overview` `corner:top-left` and
+  `swipe:4:down`. The older `[touchpad] swipe-desktops`, `swipe-launcher`
+  and `[overview] hot-corner` are still read, no longer written: false,
+  each takes its defaults away from an action whose line the file does
+  not write; "Rétablir" then writes the line whole.
+- **The sub-page**: after its keycaps, a row shows a chip a trigger,
+  blue with its fingers drawn ("3 doigts ←") or amber with its screen
+  ("Coin ◤"), each with its ✕. "+" opens a picker under the row, three
+  tabs: Touches (recording, as above), Coin (the four corners), Geste
+  (3 and 4 fingers × the four ways), Geste first. An item another action
+  holds is greyed with its name, and picked asks first in the picker's
+  amber box ("3 doigts ↑ sert déjà à « X ». Le donner à « Y » le lui
+  enlève.", Remplacer writing both lines as one change, or Annuler);
+  this action's own says "déjà ici"; the bar's own corner (the top one
+  on its side) says "la barre"; on a touchpad sensing three fingers the
+  four-finger ones say "pas sur ce pavé". `Esc` closes the box, then the
+  picker. The search finds them ("3 doigts", "coin", "haut"); the count
+  line adds "N gestes et coins"; "Rétablir" and "Tout rétablir" bring
+  them back with the keys.
+- **Elsewhere**: Souris et pavé tactile's gestures group says what they
+  do ("3 doigts ← → : Bureau de droite, Bureau de gauche") and Bureaux
+  et fenêtres' overview group what the corners do ("Coin ◤ : Vue
+  d’ensemble"), each with "Changer dans les raccourcis ›", which opens
+  the sub-page.
+- **The compositor**: a swipe with a binding decides as before
+  (`gestures.rs`); the desktops follow when the fingers go the strip's
+  way, the launcher along its swipe's way (back the other way while
+  open), the overview opens at once; any other action runs once as the
+  fingers lift, past a third of the launcher's travel; a swipe no action
+  takes is the application's. The corners (`hot_corner.rs`) keep #727's
+  rules for each corner. Tests: `shortcuts::tests`, `tests/gestures.rs`,
+  `tests/overview.rs`, `tests/settings_keyboard.rs`.
 
 **The compositor's side.** `reload.rs` follows `[shortcuts]` and
 `[keyboard]` too: the new shortcuts at once; new layouts or options make
@@ -1597,7 +1638,7 @@ row.
 | | Bords aimantés, Ancrer en glissant contre un bord, Fenêtres ondulantes | switches | `[windows] magnet`, `snap-by-drag`, `wobble` |
 | | Ouvrir et fermer (#432, #740) | menu: Standard, Pluie, Givre (a list each theme of its own adds to; Givre is the thawing pane) | `[windows] animation = "standard" \| "rain" \| "frost"` |
 | ALT+TAB | Alt+Tab montre | menu: Tous les bureaux, Ce bureau seulement | `[windows] alt-tab` |
-| VUE D'ENSEMBLE | Coin en haut à gauche : vue d'ensemble | switch, on by default (#727) | `[overview] hot-corner` |
+| VUE D'ENSEMBLE | Coins de l’écran | what each corner does, a link to the shortcuts (#893) | `[shortcuts]`' `corner:` tokens |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
 
 - **Under the title**: "Les raccourcis des fenêtres et des bureaux se

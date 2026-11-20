@@ -591,9 +591,10 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
   desktops by default (1 to 9), `[desktops] count` and `names` the same on
   every screen.
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
-  swipe on a touchpad (following the fingers; `[touchpad] swipe-desktops
-  = false`, the Settings' "Trois doigts de côté", leaves it to
-  applications, settings.md), and the bar's tiles (a
+  swipe on a touchpad (following the fingers: right brings the desktop on
+  the left; `swipe:3:right` and `swipe:3:left` in `[shortcuts]`
+  `desktop-left` and `desktop-right`, set in the Settings' shortcuts,
+  settings.md "Gestures and corners"), and the bar's tiles (a
   click, the wheel; bar.md §4.4). Keys and swipes act on the screen under
   the pointer, the tiles on their row's screen (the bar on the primary
   screen shows a row per screen, bar.md §4.4). The dots show on the
@@ -991,9 +992,12 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   pointer goes on there), nor while a button is held (a window dragged),
   over a fullscreen window or the launcher, nor locked. The corner draws
   nothing of its own; with reduced motion the overview fades in as by
-  its keys. `[overview] hot-corner = false` turns it off (Settings,
-  Bureaux et fenêtres, "Coin en haut à gauche : vue d'ensemble", on by
-  default). Nothing runs at rest but the dwell's one timer.
+  its keys. It is `corner:top-left` in `[shortcuts] overview`; since #893
+  each of the four corners runs the action bound to it, with the same
+  rules, the bar's corner being the top one on its side (settings.md
+  "Gestures and corners"; `[overview] hot-corner = false`, from older
+  files, still takes the default away). Nothing runs at rest but the
+  dwell's one timer.
 - **On every screen at once**, each with its own desktops: the wallpaper
   dimmed (`rgba(7,9,15,0.5)` over it); along the top, the screen's
   desktops as live thumbnails, in the screen's shape, a ninth of its
