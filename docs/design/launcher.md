@@ -20,7 +20,8 @@ results.
   pointer, and closes it again. `Escape` closes it, and so does a click
   outside the field and the tiles. Four fingers up on a touchpad open it
   too, following the fingers, and four fingers down close it (6.13,
-  `[touchpad] swipe-launcher`; see [as built, 6.13](#613-four-fingers-on-the-touchpad-2026-11-06)).
+  `swipe:4:up` in `[shortcuts] launcher`, any swipe since #893, its
+  opposite closing it; see [as built, 6.13](#613-four-fingers-on-the-touchpad-2026-11-06)).
 - The desktop blurs behind it, under the bar's tint (5.1b: the bar's dark
   blue, `rgba(22,27,42,…)` to `rgba(14,17,28,…)`, about 85 % opaque; it
   was 62 % of `#06080E`), so that the grid reads over a white page. The
@@ -408,6 +409,9 @@ the field.
 - **Four fingers down with no launcher open** (8.5 A, 2026-11-06): the
   overview opens on every screen, or closes when open (windows.md §12b),
   the swipe the desktop's from its start; they no longer reach the
-  application. The same key, `swipe-launcher`, turns both off.
+  application. Since #893 both are `[shortcuts]`' (`launcher`'s
+  `swipe:4:up`, `overview`'s `swipe:4:down`), set in the Settings'
+  shortcuts; `[touchpad] swipe-launcher = false`, from older files,
+  still takes both defaults away.
 - Tests: `crates/hocus-compositor/tests/gestures.rs`, and
   `tests/overview.rs` for the overview's.
