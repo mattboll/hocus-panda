@@ -609,6 +609,14 @@ fn the_slider_the_wheel_and_the_arrows_reach_logind_coalesced_never_below_5() ->
     bed.hp.pointer_move(x(0.0) - 8.0, y);
     bed.hp.pointer_move(x(0.0) - 7.0, y);
     bed.hp.button(BTN_LEFT, true);
+    // The press asked alone, before the moves: a slow machine hands the
+    // shell the press and the first moves at once, and only the last of
+    // them is asked (#918).
+    let fakes = &bed.fakes;
+    let pressed = bed
+        .hp
+        .dispatch_until(WAIT, |_| calls(fakes).len() > calls_before)?;
+    anyhow::ensure!(pressed, "the press was never asked");
     for step in 0..=30 {
         bed.hp.pointer_move(x(f64::from(step) / 30.0), y);
         bed.hp.dispatch(Duration::from_millis(5))?;
