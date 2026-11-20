@@ -79,12 +79,26 @@ impl App {
         }
     }
 
+    /// The gap the page's row says (#895).
+    fn trial_gap(&self) -> i32 {
+        match crate::model::setting(model::GAP)
+            .map(|s| crate::store::Slot::of(s, self.source))
+            .and_then(|s| self.value(s))
+        {
+            Some(Value::Int(n)) => {
+                i32::try_from(n.clamp(0, model::MOST_GAP)).unwrap_or(hocus_geometry::DEFAULT_GAP)
+            }
+            _ => hocus_geometry::DEFAULT_GAP,
+        }
+    }
+
     fn trial_rules(&self) -> Rules {
         Rules {
             magnet: self.trial_bool(model::MAGNET),
             snap: self.trial_bool(model::SNAP),
             wobble: self.trial_bool(model::WOBBLE),
             reduced: self.reduced_motion,
+            gap: self.trial_gap(),
         }
     }
 
@@ -165,8 +179,8 @@ impl App {
                 words::WITH_NO_KEY_CHOSEN_ONLY_ITS.get(lang).to_owned()
             }
             Said::NeedsKey => words::without_the_click_would_go_to(lang, key),
-            Said::Stuck => words::STUCK_TO_THE_TERMINAL_8_PX.get(lang).to_owned(),
-            Said::Edge => words::STUCK_TO_THE_SCREEN_S_EDGE.get(lang).to_owned(),
+            Said::Stuck => words::stuck_to_the_terminal(lang, self.trial_gap()),
+            Said::Edge => words::stuck_to_the_screen_s_edge(lang, self.trial_gap()),
             Said::Over(z) => words::let_go_here(lang, zone(z)),
             Said::Snapped(z) => words::snapped_drag_it_to_give_it(lang, zone(z)),
             Said::Placed => words::LEFT_WHERE_YOU_LET_IT_GO.get(lang).to_owned(),
