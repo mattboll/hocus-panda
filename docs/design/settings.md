@@ -1837,7 +1837,12 @@ tes fichiers, et celles qui démarrent avec la session."
 | | Images | menu | `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`, `image/avif`, `image/bmp`, `image/tiff` |
 | AU DÉMARRAGE DE LA SESSION ("+ Ajouter une application") | Rouvrir les applications de la dernière session | a switch | `[session] restore` |
 | | one per autostart entry | a switch; a ✕ for the user's own | `~/.config/autostart/ID.desktop` |
+| CLÉS ET DISQUES (#898) | Quand une clé ou un disque est branché | menu: Proposer de l'ouvrir, L'ouvrir tout de suite, Ne rien faire | `[removable] on-plug` (`ask`, `open`, `nothing`) |
 
+- **Drives plugged in** (#898, approved 2026-11-20): the last group, one
+  row, a menu; the shell reads the key as the compositor tells it
+  (followed live): a bubble offering "Ouvrir" and "Éjecter", the drive
+  mounted and opened at once, or nothing (bar.md "Removable drives").
 - **Reading**: a thread of the page's own (`src/applications.rs`),
   started the first time the page shows, reads the desktop entries as
   the launcher does (`hocus-xdg`: `NoDisplay`, `Hidden`, `TryExec`

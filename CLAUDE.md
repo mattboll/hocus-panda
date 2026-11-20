@@ -410,6 +410,17 @@ the notifications, so only on a bus of your own next to a live session;
 its tests (`crates/hocus-compositor/tests/idle.rs`) start a dbus-daemon of
 their own.
 
+Removable drives (docs/design/bar.md "Removable drives", crate
+`hocus-removable`): the shell follows UDisks2 on the system bus, and
+mounts, unmounts and powers off what the user asks only: a nested shell
+reads the machine's UDisks2, so never click "Ouvrir" or ⏏ there on a
+drive of yours you did not mean to. Its tests
+(`crates/hocus-compositor/tests/removable.rs`) serve a fake UDisks2
+(`tests/levels/udisks.rs`: the computer's disk, a loop device, a stick
+plugged in when the test says) on the fakes' private bus, which the shell
+takes as its system bus (`DBUS_SYSTEM_BUS_ADDRESS`), with an `xdg-open`
+of their own; `HOCUS_DRIVES_FREE` (bytes) stands for statvfs.
+
 `hocus mcp --agent NAME` (docs/design/mcp.md) is an MCP server on stdio
 for an agent of the configuration's `[[agents.mcp]]`, on the same control
 socket; its tests (`tests/mcp.rs`) run it beside them (`cargo programs`).

@@ -157,7 +157,7 @@ group where it is.
 | — | Windows | The windows of the screen's current desktop (#604, as built): the focused one first, then by most recent focus, at most 3 on 30 px lines (its icon, its title, a ✕ that asks it to close), the focused one lit; past 3, "+ N autres" opens the overview (windows.md §12b); none without a window; in the spacer's room only, 14 px over the desktops; `[panel] windows = false` hides it | 30 px a line (+ 20 px for "+ N") |
 | 7 | Secretary | Moved to the head of group 3, the agents' (4.6, variant B) | — |
 | 8 | Desktops | A tile per desktop of the bar's screen (§4.4), 4 to a row, 30 px high, with a sketch of its windows and their applications' icons; the current one ringed in the accent; resting on one lists its windows | 30 px a row, 6 px apart |
-| 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
+| 9 | Connections | One 30 px row per connection, like a level's (§4.3): Wi-Fi (network name), Bluetooth (device), a removable drive mounted (its name, its free space, ⏏; "Removable drives", #898), phone (name, battery), keyboard layout (its name and code; a click goes to the next) | 30 px a row, 2 px apart |
 | 10 | Levels | Volume, brightness and battery rows (§4.2): an 18 px icon, an 8 px gauge with its gradient, the value in tabular figures; then the status line, the battery's time left and the power profile | 108 px |
 | 11 | Footer | Four 40 × 34 buttons spread evenly across the bar's inside (5.5, variant A): the clipboard, the notifications' bell (its badge counting what was not seen, 5.4), the menu (the launcher, on a click only) and the user's avatar (their initial on the accent's gradient); a 150 ms hover or a click opens the clipboard's, the bell's and the user's popovers (as built, 5.5). Just above it, the tray (5.14, variant A, always visible): the applications' icons (StatusNotifierItem), a row of 34 × 34 cells 4 px apart under a 1 px `rgba(255,255,255,0.08)` line, wrapping past four; none without an icon (as built, 5.14) | 34 px (+ 17 px and 38 px a row of icons) |
 
@@ -5244,3 +5244,68 @@ their places in `[panel] order`'s. An add-on's item (#442) is a new
 entry. The bottom's order says how the items stand today (the footer,
 the tray, the levels, the connections, the desktops, the music's tile,
 the windows); each still places itself over the one under it.
+
+### Removable drives (#898, 2026-11-20)
+
+What the approved #898 mockup shows (the "Six réglages" canvas): a bubble
+when a USB stick, an external disk or an SD card is plugged in, a row in
+the connections while one is mounted, and ejecting it.
+
+- **UDisks2, off the loop.** A thread of its own (the crate
+  `hocus-removable`), with zbus on a small runtime on the system bus,
+  keeps UDisks2's objects as last said: read whole with
+  `GetManagedObjects`, then followed by its object manager's
+  `InterfacesAdded` and `…Removed`, `PropertiesChanged` under
+  `/org/freedesktop/UDisks2` and its owner's changes. **What counts**: a
+  block whose `IdUsage` is a filesystem or an encrypted container, on a
+  drive UDisks2 says `Removable` (or on USB, SD, FireWire), not a loop
+  device, not `HintSystem` nor `HintIgnore`; an unlocked container's
+  cleartext is reached through it. A card when its medium is
+  `flash_sd*`/`flash_mmc*` (or on `sdio`), a stick when its medium is
+  removable, else a disk. Its name: its label, else its drive's model or
+  vendor. Free space: statvfs on its mount point, as it mounts and every
+  30 s while one is mounted.
+- **The bubble on plug** (a drive that comes while the shell runs, not
+  one there as it starts), through the desktop's own notifications, one
+  bubble a drive, each in place of the one before: "Clé USB « KINGSTON »
+  branchée" ("Disque … branché", "Carte SD … insérée"), its size ("32 Go";
+  "14,2 Go libres sur 32" once mounted), "Ouvrir" (its click too) and
+  "Éjecter". `[removable] on-plug` (Settings › Applications): `ask` (the
+  bubble, the default), `open` (mounted and opened at once), `nothing`.
+- **Ouvrir**: `Filesystem.Mount` (polkit lets the active session's user),
+  then its folder given to `xdg-open`, which the compositor starts. An
+  encrypted drive still locked: the file manager opens (on the home
+  folder), where its sidebar asks its passphrase; Hocuspanda's own
+  authentication dialog is polkit's alone so far.
+- **The row**, while it is mounted: one per drive, after Bluetooth's and
+  before the keyboard layout's, a 30 px row like theirs: the mockup's
+  drive (18 px), its name cut with an ellipsis, its free space ("14 Go",
+  13 px, `text.dim`) and a 22 px ⏏ button on the right, lit under the
+  pointer as a row is. A click on the row opens it in the file manager;
+  ⏏ ejects it. Each row is one more of the connections' group: the
+  desktops and the column over them move up by it, and the column's
+  groups give way as they do for any row (#599). **The mini form shows
+  no drive**: no button, no mark.
+- **Ejecting** (⏏ or the bubble's "Éjecter"): `Filesystem.Unmount` for
+  every filesystem of its drive (which writes what is pending),
+  `Encrypted.Lock` for an unlocked container, then `Drive.PowerOff` when
+  the drive can (a refusal changes nothing: it is unmounted). Then "Tu
+  peux retirer KINGSTON". UDisks2's `DeviceBusy`: "KINGSTON est encore
+  utilisée", "Ferme les fichiers ouverts dessus, puis réessaie.",
+  "Réessayer"; the application that holds it is not named (UDisks2 does
+  not say it). Anything else: "Impossible d'éjecter KINGSTON". One action
+  a drive at a time, each two minutes at most (a polkit dialog may wait).
+- **For tests**, `HOCUS_DRIVES_FREE` (bytes) stands for what statvfs
+  says of a mounted drive.
+- **Measured headless**, the real shell against a fake UDisks2 on the
+  fakes' private bus (`tests/levels/udisks.rs`, `tests/removable.rs`):
+  the computer's disk and a loop device show nothing; the stick's bubble;
+  "Ouvrir" mounting and opening it; its row coming and the desktops
+  moving up; ⏏ while busy, "Réessayer"; ⏏ unmounting and powering off,
+  its row going.
+- **Not built**: phones (MTP): UDisks2 does not see them, and udev's
+  `ID_MTP_DEVICE` or GVfs's volume monitor would be a second watcher (a
+  udev netlink socket, or GVfs's private D-Bus interface) for one bubble;
+  left for later. The passphrase of an encrypted drive in Hocuspanda's
+  authentication dialog (above). Naming the application that holds a
+  busy drive.
