@@ -111,6 +111,9 @@ pub enum Item {
     /// A window's menu (#723), by the compositor's id: opened by a right
     /// click on its line, once the compositor said what it shows.
     WindowMenu(u64),
+    /// A notification's application's levels (#899): opened by the "⋯"
+    /// of a bubble or of a line of the history, or a right click on it.
+    NotifyLevels,
     /// The music player's tile over the desktops (s12): its popover, by a
     /// click.
     Music,
@@ -194,7 +197,7 @@ impl Item {
             Self::DayChoose | Self::DayLater => false,
             // Resting on the clock stays harmless (Day.5).
             Self::Calendar => false,
-            Self::Journal => false,
+            Self::Journal | Self::NotifyLevels => false,
             Self::Secretary | Self::Sources => form == Form::Mini,
             item if item.agents() => false,
             _ => form == Form::Mini,
@@ -219,6 +222,7 @@ impl Item {
             Self::Calendar => calendar::WIDTH,
             Self::Windows => windows::WIDTH,
             Self::WindowMenu(_) => window_menu::WIDTH,
+            Self::NotifyLevels => notify_levels::WIDTH,
             Self::WindowsMore => desktop::width(
                 bar,
                 0,
@@ -258,6 +262,7 @@ impl Item {
             Self::DayChoose => setup::height(),
             Self::Windows => windows::height(bar),
             Self::WindowMenu(id) => window_menu::height(id),
+            Self::NotifyLevels => notify_levels::height(),
             Self::Music => music::height(),
             Self::Journal => journal::height(),
             Self::Weather(_) => weather::height(),
@@ -289,7 +294,8 @@ impl Item {
     /// look does not change (it is lit by the pointer already); Sources
     /// lights the mini form's agents' item, which opens it on the card.
     pub(super) fn lit_while_open(self) -> bool {
-        !matches!(self, Self::Desktop { .. }) && (!self.agents() || self == Self::Sources)
+        !matches!(self, Self::Desktop { .. } | Self::NotifyLevels)
+            && (!self.agents() || self == Self::Sources)
     }
 
     /// Its popover opens: what it shows starts afresh.
@@ -332,6 +338,7 @@ impl Item {
             Self::Weather(_) => weather::opening(),
             Self::Windows => windows::opening(),
             Self::WindowMenu(_) => window_menu::opening(),
+            Self::NotifyLevels => notify_levels::opening(),
             Self::Window(_) | Self::WindowClose(_) | Self::Drive(_) | Self::Eject(_) => {}
         }
     }
@@ -369,6 +376,7 @@ impl Item {
             | Self::WindowsMore
             | Self::Windows
             | Self::WindowMenu(_)
+            | Self::NotifyLevels
             | Self::Music
             | Self::Journal
             | Self::Weather(_)
@@ -396,9 +404,14 @@ impl Item {
             (Self::Wifi | Self::Bluetooth | Self::Drive(_) | Self::Eject(_), _)
             | (Self::Keyboard, Form::Full) => CONNECTIONS_NAMESPACE,
             (Self::Desktop { .. }, _) => DESKTOPS_NAMESPACE,
-            (Self::Notifications | Self::Clipboard | Self::Menu | Self::User, _) => {
-                FOOTER_NAMESPACE
-            }
+            (
+                Self::Notifications
+                | Self::NotifyLevels
+                | Self::Clipboard
+                | Self::Menu
+                | Self::User,
+                _,
+            ) => FOOTER_NAMESPACE,
             (Self::InUse | Self::Camera | Self::Microphone, _) => IN_USE_NAMESPACE,
             (Self::Tray(_), _) => TRAY_NAMESPACE,
             (
@@ -468,6 +481,7 @@ impl Item {
                 | Self::Windows
                 | Self::WindowsMore
                 | Self::WindowMenu(_)
+                | Self::NotifyLevels
                 | Self::Journal
                 | Self::Weather(_)
         ) && !self.agents()

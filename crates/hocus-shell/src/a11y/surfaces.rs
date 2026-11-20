@@ -96,6 +96,10 @@ pub fn popover_title(bar: &str, item: Item, words: Words) -> String {
         Item::Drive(_) | Item::Eject(_) => {
             hocus_words::shell::removable::DRIVES.get(lang).to_owned()
         }
+        Item::NotifyLevels => pick(
+            "Les notifications d'une application",
+            "An application's notifications",
+        ),
     }
 }
 

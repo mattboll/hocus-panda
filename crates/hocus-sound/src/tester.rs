@@ -71,6 +71,15 @@ fn theme_sound(side: Side) -> Option<PathBuf> {
         Side::Right => "audio-channel-front-right",
         Side::Middle => "audio-channel-front-center",
     };
+    theme_file(name)
+}
+
+/// The freedesktop sound theme's file for the sound `name`
+/// (`message-new-instant`), in the data directories, if installed.
+pub fn theme_file(name: &str) -> Option<PathBuf> {
+    if name.is_empty() || name.contains('/') {
+        return None;
+    }
     let system = std::env::var_os("XDG_DATA_DIRS")
         .filter(|d| !d.is_empty())
         .unwrap_or_else(|| "/usr/local/share:/usr/share".into());

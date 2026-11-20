@@ -98,6 +98,10 @@ impl App {
         if let Some(menu) = self.rules_menu_list() {
             layers.push(menu);
         }
+        // An application's levels (#899).
+        if let Some(menu) = self.notifications_menu_list() {
+            layers.push(menu);
+        }
         // "+ Ajouter"'s (6.17).
         if self.page == Page::Section(SectionId::Captures)
             && let Some(menu) = self.captures_menu_list()
@@ -294,8 +298,8 @@ impl App {
                     .align_y(Alignment::Center),
             )
             .width(Length::Fill)
-            // 24 px: the 22 sections fit the window's 760 px.
-            .height(24)
+            // 23 px: the 23 sections fit the window's 760 px.
+            .height(23)
             .padding([0, 10])
             .on_press(on)
             .style(flat(
@@ -854,6 +858,9 @@ impl App {
         }
         if id == SectionId::Weather {
             return self.weather_page(page);
+        }
+        if id == SectionId::Notifications {
+            return self.notifications_page(page);
         }
         if id == SectionId::Bluetooth {
             return self.bluetooth_page(page);
@@ -1855,6 +1862,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "acting": if app.page == Page::Section(SectionId::Acting) { app.acting_shown() } else { serde_json::Value::Null },
         "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
         "weather": if app.page == Page::Section(SectionId::Weather) { app.weather_shown() } else { serde_json::Value::Null },
+        "notifications": if app.page == Page::Section(SectionId::Notifications) { app.notifications_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),
             Focus::Search => "search".to_owned(),

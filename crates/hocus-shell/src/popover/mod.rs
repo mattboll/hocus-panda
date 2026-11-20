@@ -52,6 +52,7 @@ pub mod journal;
 pub mod kit;
 pub mod meeting;
 pub mod music;
+pub mod notify_levels;
 pub mod session;
 pub mod setup;
 pub mod sound;
@@ -618,17 +619,25 @@ impl Controller {
                             y: open.rect.y,
                             ..open.from
                         },
+                        // The levels from the history's line (#899): its
+                        // top where that line was.
+                        Item::NotifyLevels => Rectangle {
+                            y: open.rect.y + notify_levels::line_top(),
+                            ..open.from
+                        },
                         _ => open.from,
                     };
                     let bar = open.bar.clone();
                     self.close(now, &mut effects);
                     self.open(&bar, item, from, Opened::Click, &mut effects);
+                    self.alone(item);
                 }
             }
             Event::Open { bar, item, rect } => {
                 self.unfocus(&mut effects);
                 self.close(now, &mut effects);
                 self.open(&bar, item, rect, Opened::Click, &mut effects);
+                self.alone(item);
             }
             Event::GoTo { id, row } => {
                 if let Phase::Open(open) = &self.phase {
@@ -1016,6 +1025,16 @@ impl Controller {
     }
 
     /// What a popover of `item` opened from `from` on `bar` lines up with.
+    /// A popover opened from no item of the bar's (the levels of a bubble's
+    /// application, #899): `Esc` closes it and gives the keyboard to none.
+    fn alone(&mut self, item: Item) {
+        if item == Item::NotifyLevels
+            && let Phase::Open(open) = &mut self.phase
+        {
+            open.shortcut = true;
+        }
+    }
+
     fn anchor(&self, bar: &str, form: Form, item: Item, from: Rectangle, height: u32) -> Rectangle {
         anchor(&self.ring, bar, form, item, from, height)
     }
@@ -1271,6 +1290,7 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::DayChoose
         | Item::Windows
         | Item::WindowMenu(_)
+        | Item::NotifyLevels
         | Item::Music
         | Item::Journal
         | Item::Weather(_) => None,

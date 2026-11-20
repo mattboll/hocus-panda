@@ -556,6 +556,7 @@ impl Shell {
                 self.to_compositor = Some(sender);
                 meeting::linked();
                 weather::linked();
+                notifications::linked();
                 music::linked();
                 clipboard::linked();
                 in_use::linked();
@@ -839,6 +840,14 @@ impl Shell {
             }
             ToShell::Removable(on_plug) => {
                 removable::set_on_plug(on_plug);
+                Task::none()
+            }
+            ToShell::NotifyLevels(levels) => {
+                notifications::set_levels(levels);
+                Task::none()
+            }
+            ToShell::Dnd(on) => {
+                notifications::set_dnd(on);
                 Task::none()
             }
             ToShell::BarGroups(groups) => {
@@ -1936,6 +1945,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // draws.
                         ToShell::Removable(on_plug) => {
                             removable::set_on_plug(on_plug);
+                            continue;
+                        }
+                        // Each application's level, do not disturb from
+                        // the Settings (#899): the stack's.
+                        ToShell::NotifyLevels(levels) => {
+                            notifications::set_levels(levels);
+                            continue;
+                        }
+                        ToShell::Dnd(on) => {
+                            notifications::set_dnd(on);
                             continue;
                         }
                         // The agents' tools and the agents: only their

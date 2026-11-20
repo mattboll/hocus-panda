@@ -855,7 +855,7 @@ fn pictures(dirs: &Dirs, known: &Known) -> Vec<(String, Picture)> {
 }
 
 /// An icon file's pixels: an SVG as it is, a PNG decoded, 64 px at most.
-fn picture(file: &Path) -> Option<Picture> {
+pub(crate) fn picture(file: &Path) -> Option<Picture> {
     if std::fs::metadata(file).ok()?.len() > 4 << 20 {
         return None;
     }

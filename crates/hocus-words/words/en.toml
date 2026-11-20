@@ -1586,6 +1586,16 @@ place_done = "Weather: {place}."
 place_undone = "Undone: the weather’s place is {place} again."
 place_redone = "Redone: {place}."
 
+[settings.notifications]
+dnd = "Do not disturb"
+dnd_line = "Also in the bar’s bell"
+by_app = "BY APPLICATION"
+this_week = { one = "{n} this week", other = "{n} this week" }
+nobody = "No application has notified you yet."
+level_done = "{name}: {level}."
+level_undone = "Undone: {name} back to {level}."
+level_redone = "Redone: {name}, {level}."
+
 [settings.effects]
 wallpaper = "EFFECTS · THE WALLPAPER"
 windows = "EFFECTS · THE WINDOWS"
@@ -1733,6 +1743,8 @@ the_bar = "The bar"
 the_side_it_stands_on_its = "The side it stands on, its form on each screen, what it shows from top to bottom, and its clock."
 weather = "Weather"
 the_weather_in_the_bar = "The weather in the bar’s Today: now, the rain coming, tomorrow; the week a click away."
+notifications = "Notifications"
+notifications_line = "Do not disturb, and how each application that notified you shows."
 accessibility = "Accessibility"
 see_larger_see_clearer_do_everything = "See larger, see clearer, do everything from the keyboard."
 calendar_and_tasks = "Calendar and tasks"
@@ -2801,7 +2813,15 @@ locking_in_seconds_move_the_mouse = "Locking in {seconds} seconds. Move the mous
 [shell.notifications_draw]
 now = "· now"
 close = "Close"
+more = "This application’s notifications"
 waiting = "+{x_n} waiting"
+
+[shell.notify_levels]
+for_app = "FOR {name}"
+all = "Bubble and sound"
+silent = "Bubble, no sound"
+history = "History only"
+none = "Nothing"
 
 [shell.tasks]
 to_do = "TO DO"

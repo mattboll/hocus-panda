@@ -37,6 +37,9 @@ pub struct Bubbles {
     told: Option<String>,
     /// Commits of the bubbles' surfaces so far (tests).
     pub commits: u64,
+    /// Whether the user is not to be disturbed, as the shell last said it
+    /// (none yet): the Settings' switch shows it (#899).
+    pub dnd: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -260,6 +263,35 @@ impl State {
         let client = self.display_handle.get_client(surface.id()).ok()?;
         let credentials = client.get_credentials(&self.display_handle).ok()?;
         u32::try_from(credentials.pid).ok()
+    }
+}
+
+/// What the Settings' lines are told of do not disturb (#899).
+pub(crate) fn dnd_line(on: bool) -> String {
+    serde_json::json!({ "dnd": on }).to_string()
+}
+
+impl State {
+    /// The shell says whether the user is not to be disturbed: the
+    /// Settings' lines hear it (#899).
+    pub(crate) fn dnd_said(&mut self, on: bool) {
+        if self.bubbles.dnd == Some(on) {
+            return;
+        }
+        tracing::debug!(on, "do not disturb, as the shell says");
+        self.bubbles.dnd = Some(on);
+        self.displays_send(None, &dnd_line(on));
+    }
+
+    /// The Settings' "Ne pas déranger" (#899): on for an hour, as the
+    /// bell's switch, or off; the shell keeps it and says it back.
+    pub(crate) fn dnd_set(&mut self, on: bool) {
+        if !self.shell_linked() {
+            tracing::info!("no shell: do not disturb is not set");
+            return;
+        }
+        tracing::info!(on, "the Settings set do not disturb");
+        self.tell_shell(ToShell::Dnd(on));
     }
 }
 

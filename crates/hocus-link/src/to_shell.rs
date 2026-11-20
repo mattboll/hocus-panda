@@ -121,6 +121,13 @@ pub enum ToShell {
     /// What a drive plugged in does (`[removable] on-plug`, #898): sent as
     /// the shell connects and when the configuration changes it.
     Removable(OnPlug),
+    /// How each application's notifications show (`[notifications.apps]`,
+    /// #899): sent as the shell connects and when the configuration
+    /// changes them.
+    NotifyLevels(crate::NotifyLevels),
+    /// Do not disturb, as the Settings set it (#899): on for an hour, as
+    /// the bell's switch turns it on, or off.
+    Dnd(bool),
     /// The side the bars stand on (`[panel] side`, 6.4): sent as the shell
     /// connects, before the bars, and when the configuration changes it, each
     /// bar then made again on that side (`no-bar`, then `bar`).

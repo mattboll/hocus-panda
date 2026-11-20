@@ -387,6 +387,8 @@ pub enum Said {
     Charge {
         lifted: bool,
     },
+    /// Whether the user is not to be disturbed (#899).
+    Dnd(bool),
 }
 
 /// A bar's form as the compositor says it.
@@ -614,6 +616,9 @@ pub fn read_line(line: &str) -> Option<Said> {
         return Some(Said::Charge {
             lifted: charge.get("lifted")?.as_bool()?,
         });
+    }
+    if let Some(on) = value.get("dnd").and_then(serde_json::Value::as_bool) {
+        return Some(Said::Dnd(on));
     }
     if let Some(apps) = value.get("apps").and_then(|a| a.as_array()) {
         return Some(Said::Apps(

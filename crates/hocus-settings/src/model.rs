@@ -1,4 +1,4 @@
-//! The settings' model: the 22 sections in their 5 groups, and every
+//! The settings' model: the 23 sections in their 5 groups, and every
 //! setting a section holds, with what the window needs to show it, find
 //! it and write it.
 //!
@@ -52,7 +52,7 @@ impl Group {
     }
 }
 
-/// The twenty-two sections, in the sidebar's order.
+/// The twenty-three sections, in the sidebar's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionId {
     Appearance,
@@ -72,6 +72,8 @@ pub enum SectionId {
     Bluetooth,
     Desktops,
     Apps,
+    /// Do not disturb, and each application's notifications (#899).
+    Notifications,
     Agents,
     /// The agents that act on the desktop, their rights (#440).
     Acting,
@@ -99,7 +101,7 @@ pub struct Section {
 }
 
 impl SectionId {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Appearance,
         Self::Wallpaper,
         Self::Bar,
@@ -115,6 +117,7 @@ impl SectionId {
         Self::Bluetooth,
         Self::Desktops,
         Self::Apps,
+        Self::Notifications,
         Self::Agents,
         Self::Acting,
         Self::Captures,
@@ -257,6 +260,14 @@ impl SectionId {
                 Icon::Apps,
                 "6.15",
             ),
+            Self::Notifications => s(
+                "notifications",
+                Work,
+                words::NOTIFICATIONS,
+                words::NOTIFICATIONS_LINE,
+                Icon::Notifications,
+                "#899",
+            ),
             Self::Agents => s(
                 "agents",
                 Work,
@@ -346,6 +357,8 @@ pub enum Icon {
     Bluetooth,
     Desktops,
     Apps,
+    /// A bell (#899).
+    Notifications,
     Agents,
     /// An agent's pointer: Agir sur le bureau.
     Acting,
@@ -410,6 +423,9 @@ impl Icon {
             }
             Self::Apps => {
                 "M4 4 H10 V10 H4 Z M14 4 H20 V10 H14 Z M4 14 H10 V20 H4 Z M17 14 V20 M14 17 H20"
+            }
+            Self::Notifications => {
+                "M6 16.5 V11 A6 6 0 0 1 18 11 V16.5 L19.5 18 H4.5 Z M10 20.5 A2 2 0 0 0 14 20.5"
             }
             Self::Agents => {
                 "M12 20.5 A7.5 7.5 0 1 0 12 5.5 A7.5 7.5 0 1 0 12 20.5 Z M5.2 9 A2.6 2.6 0 1 1 8.6 5.6 M18.8 9 A2.6 2.6 0 1 0 15.4 5.6 M9.5 12.5 V13.5 M14.5 12.5 V13.5"
@@ -1011,6 +1027,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Apps => crate::applications::outside(),
         SectionId::Captures => crate::captures::outside(),
         SectionId::Mouse => crate::mouse::outside(),
+        SectionId::Notifications => crate::notifications::outside(),
         _ => &[],
     }
 }
@@ -1040,8 +1057,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn twenty_two_sections_in_five_groups() {
-        assert_eq!(SectionId::ALL.len(), 22);
+    fn twenty_three_sections_in_five_groups() {
+        assert_eq!(SectionId::ALL.len(), 23);
         let count = |g| {
             SectionId::ALL
                 .iter()
@@ -1050,8 +1067,9 @@ mod tests {
         };
         assert_eq!(
             Group::ALL.map(count),
-            [6, 5, 2, 5, 4],
-            "the mockup's groups, the camera's (#619) and the weather's (#814)"
+            [6, 5, 2, 6, 4],
+            "the mockup's groups, the camera's (#619), the weather's (#814) and the \
+             notifications' (#899)"
         );
         // Each group's sections come together, in the groups' order.
         let groups: Vec<Group> = SectionId::ALL.iter().map(|s| s.section().group).collect();

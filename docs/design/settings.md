@@ -46,7 +46,7 @@ venir".
   sheet, 6.6). Sections by their names on the command line:
   `appearance`, `wallpaper`, `bar`, `agenda`, `screens`, `sound`,
   `camera`, `keyboard`, `mouse`, `network`, `bluetooth`, `desktops`,
-  `applications`, `agents`, `captures`, `power`, `account`,
+  `applications`, `notifications`, `agents`, `captures`, `power`, `account`,
   `date-and-time`.
 - **One window at a time.** The first listens on
   `$XDG_RUNTIME_DIR/hocus-settings-<WAYLAND_DISPLAY>`. A second launch
@@ -68,10 +68,10 @@ As the spec's "The window (variant A)": the sidebar (240, its header, the
 search field with "Ctrl F" or its ✕, "Accueil", the five groups' labels
 and their sections, the current one green), the content's header (where we
 are, "Enregistré" / "Lecture seule" with its dot, ✕), and the page under
-it, 720 wide at most, padded 6 40 72 32. All 21 sections fit 760 px
+it, 720 wide at most, padded 6 40 72 32. All 23 sections fit 760 px
 without scrolling (the sidebar's rows 28 px tall since Accessibilité
 came, 27 px since Performances came, 26 px since Agir sur le bureau came,
-24 px since Caméra came).
+24 px since Caméra came, 23 px since Notifications came).
 
 **The home**: the initial on the accent's gradient (52 px), "Bonjour
 Alex", the line; six cards (Écrans, Son, Réseau, Bluetooth, Énergie,
@@ -1826,7 +1826,7 @@ row.
 Issue #450, variant A, as its approved spec says it ("Decided
 (2026-11-05)": one menu each for the halo and the peek, a switch for the
 pandas in the rows, a menu for the reminder). Section `agents` (`hocus
-settings agents`), TRAVAIL's third row. The keys are followed live by the
+settings agents`), TRAVAIL's fourth row. The keys are followed live by the
 compositor (bar.md "6.16").
 
 | Group | Row | Control | Key |
@@ -2065,6 +2065,33 @@ tes fichiers, et celles qui démarrent avec la session."
   with nothing chosen yet (applications there, none set) says
   "Choisir…".
 
+## Notifications (#899)
+
+Approved 2026-11-20 (issue #899, the mockup's section `t899`). Section
+`notifications` (`hocus settings notifications`), TRAVAIL's third row, a
+bell. Under the title: "Ne pas déranger, et ce que montre chaque
+application qui t'a notifié."
+
+- **Ne pas déranger** ("Aussi dans la cloche de la barre"), a switch: the
+  bell's own (notifications.md, 5.4), kept by the shell. The compositor
+  says it on the Settings' line (`{"dnd":true}`) as the shell tells it,
+  and the switch asks `dnd on` (for an hour, as the bell's switch) or `dnd
+  off`. Without the line (no compositor, no shell), it is inert.
+- **PAR APPLICATION**: one row per application that sent notifications,
+  the busiest this week first, then those `[notifications.apps]` names
+  that sent none lately: its icon (the icon theme's, else its initial on
+  a colour of its own, as the Applications page's), its name, "N cette
+  semaine", and a menu of the four levels ("Bulle et son", "Bulle, sans
+  son", "Historique seulement", "Rien"), written into
+  `[notifications.apps]` with its toast and its undo; "Bulle et son"
+  takes the key out (what applies to those not named). Empty: "Aucune
+  application ne t'a encore notifié."
+- **Where the list comes from**: the shell's count,
+  `$XDG_STATE_HOME/hocuspanda/notification-senders`, read as the page
+  opens, off the window's thread (notifications.md, "Per application").
+- The page's own controls are not in the keyboard's ring yet (the mouse
+  and the search reach them; the search finds "Ne pas déranger").
+
 ## Captures et presse-papiers (6.17)
 
 Issue #451, variant A, as the issue's spec and its "Decided
@@ -2072,7 +2099,7 @@ Issue #451, variant A, as the issue's spec and its "Decided
 sound is muted; "Laisser de côté les mots de passe" a switch, amber when
 off; the history turned off erased (but its pinned items) once the
 toast is gone. Every key is followed live (screenshots.md and bar.md,
-6.17). Section `captures` (`hocus settings captures`), TRAVAIL's fourth
+6.17). Section `captures` (`hocus settings captures`), TRAVAIL's sixth
 row.
 
 | Group (its note) | Row | Control | Key |

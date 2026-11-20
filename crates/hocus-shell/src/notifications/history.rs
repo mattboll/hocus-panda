@@ -273,6 +273,7 @@ impl Record {
             conversation: self.conversation,
             icon_from: self.icon_from,
             at: self.at,
+            sound: None,
         };
         let seen = if self.unseen {
             Sight::Unseen
@@ -451,6 +452,7 @@ mod tests {
                 image_path: None,
             },
             at,
+            sound: None,
         }
     }
 

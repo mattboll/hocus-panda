@@ -29,6 +29,10 @@
 //! - A bubble goes over [`BUBBLE_OUT`] (the compositor fades it out),
 //!   then its surface; the ones under it move up, and the next waiting
 //!   one shows.
+//! - Each application's level (#899, `[notifications.apps]`) comes
+//!   first: "none" drops its notifications, "history" sends them to the
+//!   history only (counted), unless critical; "all" plays the sound a
+//!   bubble asks for, "silent" does not.
 
 use std::{
     collections::{BTreeSet, VecDeque},
@@ -36,7 +40,8 @@ use std::{
 };
 
 use hocus_link::{
-    BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, FOOTER_NAMESPACE, Form, bubble_namespace,
+    BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, FOOTER_NAMESPACE, Form, NotifyFate, NotifyLevel,
+    NotifyLevels, bubble_namespace,
 };
 use iced::{Rectangle, window};
 
@@ -106,6 +111,11 @@ pub enum Input {
     /// timer rang), reading `wall` (milliseconds): do not disturb's end
     /// read again.
     Clock { wall: i64 },
+    /// Each application's level, as the configuration says (#899).
+    Levels(NotifyLevels),
+    /// Application `id`'s level, as the user chose it from a bubble or the
+    /// history (#899), before the configuration says it back.
+    Level { id: String, level: NotifyLevel },
 }
 
 /// What to carry out.
@@ -156,6 +166,12 @@ pub enum Effect {
     SaveDnd(Dnd),
     /// The history opens on this screen's bar (the summary's card).
     History(String),
+    /// A bubble's sound plays (#899): a file's path, or a name of the
+    /// sound theme.
+    Sound(String),
+    /// Do not disturb turned on or off: the compositor is told, for the
+    /// Settings' switch (#899).
+    Dnd(bool),
 }
 
 /// A bubble's countdown.
@@ -258,6 +274,16 @@ impl Bubble {
     fn leaving(&self) -> bool {
         matches!(self.phase, Phase::Leaving(_))
     }
+
+    /// Its screen.
+    pub fn screen(&self) -> &str {
+        &self.screen
+    }
+
+    /// Its surface's top under the screen's.
+    pub fn top(&self) -> i32 {
+        self.placed.1.0
+    }
 }
 
 /// A surface of the stack's other than a bubble: the chip.
@@ -292,6 +318,8 @@ pub struct Stack {
     card: bool,
     next: u64,
     chip: Option<(Extra, usize)>,
+    /// Each application's level (#899).
+    levels: NotifyLevels,
 }
 
 /// What a click on `note` asks the compositor: its application's window,
@@ -330,7 +358,13 @@ impl Stack {
             card,
             next: 1,
             chip: None,
+            levels: NotifyLevels::default(),
         }
+    }
+
+    /// Application `id`'s level (#899).
+    pub fn level_of(&self, id: &str) -> NotifyLevel {
+        self.levels.of(id)
     }
 
     /// The bubbles showing, from the first.
@@ -404,6 +438,9 @@ impl Stack {
         if unseen != before.1 || dnd.is_on() != before.2.is_on() {
             tracing::debug!(unread = unseen, dnd = dnd.is_on(), "the bell");
             effects.push(Effect::Wake(FOOTER_NAMESPACE.to_owned()));
+        }
+        if dnd.is_on() != before.2.is_on() {
+            effects.push(Effect::Dnd(dnd.is_on()));
         }
         if dnd != before.2 {
             effects.push(Effect::Changed);
@@ -555,6 +592,25 @@ impl Stack {
                 self.dnd = dnd;
             }
             Input::Clock { wall } => self.dnd_checked(now, wall),
+            Input::Levels(levels) => {
+                tracing::debug!(apps = levels.apps.len(), "the applications' levels");
+                self.levels = levels;
+            }
+            Input::Level { id, level } => {
+                tracing::debug!(
+                    app = id,
+                    level = level.word(),
+                    "an application's level chosen"
+                );
+                // Its own name, case and all: the configuration says it
+                // back so.
+                self.levels
+                    .apps
+                    .retain(|named, _| !named.eq_ignore_ascii_case(&id));
+                if level != NotifyLevel::All {
+                    self.levels.apps.insert(id, level);
+                }
+            }
             Input::Sharing(true) => {
                 if self.sharing.is_none() {
                     tracing::debug!("the screen is shared: bubbles are held");
@@ -688,7 +744,14 @@ impl Stack {
     fn notify(&mut self, note: Note, now: Instant, effects: &mut Vec<Effect>) {
         let id = note.id;
         self.history.prune(note.at);
-        let quiet = note.agent || note.urgency == Urgency::Low;
+        // Its application's level first (#899).
+        let level = self.levels.of(&note.app_id());
+        let fate = level.fate(note.urgency == Urgency::Critical);
+        if fate == NotifyFate::Drop {
+            self.drop_note(&note, now, effects);
+            return;
+        }
+        let quiet = note.agent || note.urgency == Urgency::Low || fate == NotifyFate::History;
         // A replacement: in place, wherever it is.
         if let Some(bubble) = self
             .bubbles
@@ -722,6 +785,7 @@ impl Stack {
                 app = note.app,
                 low = note.urgency == Urgency::Low,
                 agent = note.agent,
+                level = level.word(),
                 "a notification without a bubble: to the history only"
             );
             self.keep(note);
@@ -754,6 +818,14 @@ impl Stack {
             return;
         }
         let app = note.app.clone();
+        // Its sound, as its bubble comes (not while locked: it waits).
+        if fate == (NotifyFate::Bubble { sound: true })
+            && !self.locked
+            && let Some(sound) = &note.sound
+        {
+            tracing::info!(id, app, "a notification's sound plays");
+            effects.push(Effect::Sound(sound.clone()));
+        }
         self.history.add(note.clone(), Sight::Showing);
         self.queue.push_back(note);
         self.fill(now);
@@ -773,6 +845,33 @@ impl Stack {
                 );
             }
         }
+    }
+
+    /// A notification of an application whose level is "none" (#899):
+    /// nowhere, as if it had come and gone; one it replaces goes with it.
+    /// Its sender hears it closed (1), and holds it no more.
+    fn drop_note(&mut self, note: &Note, now: Instant, effects: &mut Vec<Effect>) {
+        let id = note.id;
+        tracing::info!(
+            id,
+            app = note.app,
+            "a notification dropped: its application shows none"
+        );
+        if let Some(serial) = self
+            .bubbles
+            .iter()
+            .find(|b| b.note.id == id && !b.leaving())
+            .map(|b| b.serial)
+        {
+            self.leave_silently(serial, now, effects);
+        }
+        let waiting = self.queue.len();
+        self.queue.retain(|n| n.id != id);
+        if self.queue.len() != waiting {
+            self.relayout(effects);
+        }
+        self.history.remove_live(id);
+        self.closed(id, 1, effects);
     }
 
     /// Straight to the history: a low one counted by the badge, an agent's
@@ -1059,6 +1158,7 @@ pub fn summary(held: &[String], at: i64) -> Option<Note> {
         conversation: None,
         icon_from: super::note::IconFrom::default(),
         at,
+        sound: None,
     })
 }
 
@@ -1157,6 +1257,7 @@ mod tests {
             conversation: None,
             icon_from: crate::notifications::note::IconFrom::default(),
             at: 1_000_000,
+            sound: None,
         }
     }
 
@@ -1192,6 +1293,84 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn each_applications_level_decides_its_bubble_its_sound_and_the_history() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        let levels = |apps: &[(&str, NotifyLevel)]| {
+            Input::Levels(NotifyLevels {
+                apps: apps.iter().map(|(a, l)| ((*a).to_owned(), *l)).collect(),
+            })
+        };
+        let from = |id: u32, app: &str, entry: Option<&str>, critical: bool| {
+            let mut n = note(id);
+            app.clone_into(&mut n.app);
+            n.entry = entry.map(str::to_owned);
+            n.sound = Some("message-new-instant".to_owned());
+            if critical {
+                n.urgency = Urgency::Critical;
+                n.timeout = Timeout::Never;
+            }
+            notify(n)
+        };
+        let sounds = |effects: &[Effect]| {
+            effects
+                .iter()
+                .filter(|e| matches!(e, Effect::Sound(_)))
+                .count()
+        };
+        s.handle(
+            levels(&[
+                ("slack", NotifyLevel::Silent),
+                ("Thunderbird", NotifyLevel::History),
+                ("Firefox", NotifyLevel::None),
+            ]),
+            t0,
+        );
+        // Not named: a bubble and its sound.
+        let effects = s.handle(from(1, "Signal", None, false), t0);
+        assert_eq!((opened(&effects).len(), sounds(&effects)), (1, 1));
+        // By its desktop entry, not its name: a bubble, no sound.
+        let effects = s.handle(from(2, "Slack", Some("slack"), false), t0);
+        assert_eq!((opened(&effects).len(), sounds(&effects)), (1, 0));
+        // History only: no bubble, in the history, counted.
+        let unseen = s.badge();
+        let effects = s.handle(from(3, "Thunderbird", None, false), t0);
+        assert_eq!((opened(&effects).len(), sounds(&effects)), (0, 0));
+        assert_eq!(s.badge(), unseen + 1);
+        assert_eq!(s.history.items()[0].note.id, 3);
+        // Nothing: nowhere, its sender hearing it closed.
+        let kept = s.history.items().len();
+        let effects = s.handle(from(4, "Firefox", None, false), t0);
+        assert_eq!(opened(&effects).len(), 0);
+        assert_eq!(signals(&effects), [Signal::Closed { id: 4, reason: 1 }]);
+        assert_eq!((s.history.items().len(), s.badge()), (kept, unseen + 1));
+        // Urgent: a bubble whatever the level, but for "none"; no sound
+        // but with "all".
+        let effects = s.handle(from(5, "Thunderbird", None, true), t0);
+        assert_eq!((opened(&effects).len(), sounds(&effects)), (1, 0));
+        let effects = s.handle(from(6, "Firefox", None, true), t0);
+        assert_eq!(signals(&effects), [Signal::Closed { id: 6, reason: 1 }]);
+        // Chosen from a bubble: at once, "all" as if not named.
+        s.handle(
+            Input::Level {
+                id: "firefox".to_owned(),
+                level: NotifyLevel::History,
+            },
+            t0,
+        );
+        assert_eq!(s.level_of("Firefox"), NotifyLevel::History);
+        s.handle(
+            Input::Level {
+                id: "slack".to_owned(),
+                level: NotifyLevel::All,
+            },
+            t0,
+        );
+        assert_eq!(s.level_of("slack"), NotifyLevel::All);
+        assert!(!s.levels.apps.contains_key("slack"));
     }
 
     #[test]

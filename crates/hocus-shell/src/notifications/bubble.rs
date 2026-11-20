@@ -38,6 +38,8 @@ pub enum Msg {
     Card,
     Close,
     Action(String),
+    /// Its "⋯", or a right click on it: its application's levels (#899).
+    More,
     /// What it shows changed under the view.
     Stale,
 }
@@ -62,7 +64,7 @@ pub fn view<'a>(id: window::Id, glass: bool, card: bool) -> Element<'a, Message>
     Around::new(
         id,
         build(id, card, &built),
-        move |m| handle(id, m),
+        move |m| handle(id, card, m),
         Msg::Stale,
     )
     .own_by(move || wake(id), move || shown(id).is_some())
@@ -85,7 +87,7 @@ fn wake(id: window::Id) {
     }
 }
 
-fn handle(id: window::Id, message: Msg) {
+fn handle(id: window::Id, card: bool, message: Msg) {
     let Some((serial, _)) = shown(id) else {
         return;
     };
@@ -102,8 +104,36 @@ fn handle(id: window::Id, message: Msg) {
         Msg::Card => super::input(Input::Card(serial)),
         Msg::Close => super::input(Input::Dismiss(serial)),
         Msg::Action(key) => super::input(Input::Action { serial, key }),
+        Msg::More => more(id, card),
         Msg::Stale => {}
     }
+}
+
+/// The menu of the levels of bubble `id`'s application opens under its
+/// card, 6 px apart, beside the bar of its screen (#899).
+fn more(id: window::Id, card: bool) {
+    let Some((screen, top, height, app, name)) = super::with(|c| {
+        c.stack.bubble(id).map(|b| {
+            (
+                b.screen().to_owned(),
+                b.top(),
+                b.laid.size.height,
+                b.note.app_id(),
+                b.note.app.clone(),
+            )
+        })
+    }) else {
+        return;
+    };
+    let more = draw::more_rect();
+    // The bar's frame starts at its top, `EDGE` under the screen's.
+    let y = top as f32 + draw::card_origin(card).y + height + 6.0 - hocus_link::EDGE as f32;
+    crate::popover::notify_levels::from_bubble(
+        &screen,
+        iced::Rectangle::new(Point::new(more.x, y), more.size()),
+        &app,
+        &name,
+    );
 }
 
 /// `content` placed at `at`.
@@ -153,6 +183,18 @@ fn build<'a>(id: window::Id, card: bool, seen: &RefCell<Option<Laid>>) -> El<'a>
         control(pressed, "bubble:Close", Role::Button, words.close()),
         close.position(),
     ));
+    // Its "⋯" (#899).
+    let more = draw::more_rect();
+    let pressed = button(drawn_lit(more.width, more.height, 1.0, |f, _, lit| {
+        draw::draw_more(f, lit);
+    }))
+    .padding(0)
+    .style(|_, _| style::clear())
+    .on_press(Msg::More);
+    parts.push(at(
+        control(pressed, "bubble:More", Role::Button, words.more()),
+        more.position(),
+    ));
     // Its actions.
     for (key, label, rect) in laid.actions {
         let size = rect.size();
@@ -176,6 +218,7 @@ fn build<'a>(id: window::Id, card: bool, seen: &RefCell<Option<Laid>>) -> El<'a>
             .height(size.height),
     )
     .on_press(Msg::Card)
+    .on_right_press(Msg::More)
     .on_enter(Msg::Hover(true))
     .on_exit(Msg::Hover(false))
     .interaction(iced::mouse::Interaction::Pointer);

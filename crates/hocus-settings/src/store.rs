@@ -119,6 +119,9 @@ pub struct Snapshot {
     /// = false`): each takes default gestures or a corner away from the
     /// shortcuts whose line the file does not write (#893).
     pub switches_off: Vec<[&'static str; 2]>,
+    /// Each application's level, by its id, as the file words it
+    /// (`[notifications.apps]`, #899).
+    pub notifications: BTreeMap<String, String>,
 }
 
 /// A set of screens the file arranges: its name ([`set_name`]), its
@@ -263,6 +266,16 @@ pub fn read(text: &str) -> Snapshot {
                     }
                     all
                 }),
+            notifications: doc
+                .get("notifications")
+                .and_then(|n| n.get("apps"))
+                .and_then(Item::as_table_like)
+                .map(|apps| {
+                    apps.iter()
+                        .filter_map(|(id, level)| Some((id.to_owned(), level.as_str()?.to_owned())))
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -282,6 +295,7 @@ pub fn read(text: &str) -> Snapshot {
             rules: Box::default(),
             acting: Box::default(),
             switches_off: Vec::new(),
+            notifications: BTreeMap::new(),
         },
     }
 }

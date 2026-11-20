@@ -51,6 +51,19 @@ pub struct Note {
     /// When it came, on the wall clock (milliseconds since the epoch): the
     /// history says how long ago, and keeps it 7 days.
     pub at: i64,
+    /// The sound it asks for (`sound-file`, a path, else `sound-name`, a
+    /// name of the sound theme), unless it asks for none
+    /// (`suppress-sound`): played with its bubble when its application
+    /// shows everything (#899).
+    pub sound: Option<String>,
+}
+
+impl Note {
+    /// The id its application goes by for its level (#899): its desktop
+    /// entry, else its name.
+    pub fn app_id(&self) -> String {
+        hocus_link::notify_app_id(self.entry.as_deref(), &self.app)
+    }
 }
 
 /// What a notification's icon is looked for by, besides its application's

@@ -140,6 +140,10 @@ const TEXT_GAP: f32 = 2.0;
 const CLOSE: f32 = 22.0;
 const CLOSE_IN: (f32, f32) = (6.0, 8.0);
 const CLOSE_RADIUS: f32 = 6.0;
+/// Its "⋯" under its ✕ (#899): an item is at least as tall as both, 2 px
+/// under them.
+const MORE_TOP: f32 = CLOSE_IN.1 + CLOSE;
+const ITEM_LEAST: f32 = MORE_TOP + CLOSE + 2.0;
 const ACTION: f32 = 26.0;
 const ACTION_GAP: f32 = 6.0;
 /// The empty state: the panda 140 px (#649), its words 8 px apart.
@@ -315,6 +319,8 @@ pub enum Target {
     Chip(Choice),
     Item(u64),
     Close(u64),
+    /// Its "⋯" (#899): its application's levels.
+    More(u64),
     Action(u64, usize),
 }
 
@@ -328,7 +334,7 @@ impl Target {
     fn radius(self) -> f32 {
         match self {
             Self::Item(_) => ITEM_RADIUS,
-            Self::Close(_) => CLOSE_RADIUS,
+            Self::Close(_) | Self::More(_) => CLOSE_RADIUS,
             Self::Chip(_) => CHIP / 2.0,
             Self::Switch => SWITCH.height / 2.0,
             Self::Clear => GHOST_RADIUS,
@@ -339,7 +345,7 @@ impl Target {
     /// The item it belongs to, if it is an item's.
     fn key(self) -> Option<u64> {
         match self {
-            Self::Item(k) | Self::Close(k) | Self::Action(k, _) => Some(k),
+            Self::Item(k) | Self::Close(k) | Self::More(k) | Self::Action(k, _) => Some(k),
             _ => None,
         }
     }
@@ -367,6 +373,8 @@ struct Row {
     dot_x: Option<f32>,
     actions: Vec<(String, Rectangle)>,
     section: Section,
+    /// Its application has a level (#899): not the desktop's own.
+    leveled: bool,
 }
 
 impl Row {
@@ -599,7 +607,7 @@ fn lay_out(
                 .last()
                 .map_or(column, |(_, r)| r.y + r.height - y - ITEM_PAD);
         }
-        let height = 2.0 * ITEM_PAD + column.max(ICON);
+        let height = (2.0 * ITEM_PAD + column.max(ICON)).max(ITEM_LEAST);
         let letter = kept
             .note
             .app
@@ -617,6 +625,8 @@ fn lay_out(
             dot_x,
             actions,
             section: here,
+            leveled: notifications::capture_of(kept.note.id).is_none()
+                && notifications::reminder_of(kept.note.id).is_none(),
         });
         y += height;
     }
@@ -1373,6 +1383,43 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
         ),
         Point::new(size.width - CLOSE_IN.0 - CLOSE, CLOSE_IN.1),
     ));
+    // Its "⋯" under it (#899): not for the desktop's own (a capture, a
+    // meeting's reminder), whose application has no level.
+    if shown.leveled {
+        let more_target = Target::More(key);
+        let shows_more = over || ui.focus == Some(more_target);
+        let dots = drawn(CLOSE, CLOSE, move |f, s| {
+            if !shows_more {
+                return;
+            }
+            for dx in [-4.0, 0.0, 4.0] {
+                f.fill(
+                    &Path::circle(Point::new(s.width / 2.0 + dx, s.height / 2.0), 1.2),
+                    fade(FAINT.get()),
+                );
+            }
+        });
+        let more = button(dots)
+            .padding(0)
+            .style(move |_, status| {
+                if shows_more && style::lit(status) {
+                    style::hovered(fade(GHOST_HOVER.get()), CLOSE_RADIUS)
+                } else {
+                    style::clear()
+                }
+            })
+            .on_press(Msg::Act(more_target));
+        layers.push(at(
+            declared(
+                more,
+                more_target,
+                Role::Button,
+                hocus_words::shell::notifications_draw::MORE.get(words.lang),
+                ui.focus,
+            ),
+            Point::new(size.width - CLOSE_IN.0 - CLOSE, MORE_TOP),
+        ));
+    }
     // Its actions.
     for (i, ((_, rect), (_, label, _))) in shown.actions.iter().zip(&shown.cut.actions).enumerate()
     {
@@ -1411,9 +1458,12 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
     let whole = Stack::with_children(layers)
         .width(size.width)
         .height(size.height);
-    let hovered = mouse_area(whole)
+    let mut hovered = mouse_area(whole)
         .on_enter(Msg::Over(key, true))
         .on_exit(Msg::Over(key, false));
+    if shown.leveled {
+        hovered = hovered.on_right_press(Msg::Act(Target::More(key)));
+    }
     row![gap(SLIDE_BY * gone), hovered].into()
 }
 
@@ -1511,6 +1561,7 @@ fn take_out(ui: &mut Ui, keys: Vec<u64>, now: Instant, motion: bool) -> Option<V
 
 fn act(target: Target, now: Instant, motion: bool) {
     tracing::debug!(?target, "the history");
+    let mut more = None;
     let said: Option<Said> = ui(|ui| {
         let laid = ui.laid.clone()?;
         match target {
@@ -1541,6 +1592,13 @@ fn act(target: Target, now: Instant, motion: bool) {
             ))),
             Target::Item(key) => (ui.leaving.is_none()).then_some(Said::Open(key)),
             Target::Close(key) => take_out(ui, vec![key], now, motion).map(Said::Remove),
+            Target::More(key) => {
+                // Its application's levels, in the history's place, the
+                // menu's top on its "⋯"'s.
+                let row = laid.rows.iter().find(|r| r.key == key)?;
+                more = Some((laid.view.y + row.rect.y - ui.scroll + MORE_TOP, key));
+                None
+            }
             Target::Action(key, i) => laid
                 .rows
                 .iter()
@@ -1558,6 +1616,17 @@ fn act(target: Target, now: Instant, motion: bool) {
         if open {
             event(Seen::Chosen);
         }
+    }
+    let app = more.and_then(|(top, key)| {
+        notifications::with(|c| {
+            c.stack
+                .history
+                .get(key)
+                .map(|k| (top, k.note.app_id(), k.note.app.clone()))
+        })
+    });
+    if let Some((top, id, name)) = app {
+        super::notify_levels::from_history(top, &id, &name);
     }
 }
 
@@ -1661,6 +1730,7 @@ mod tests {
             conversation: None,
             icon_from: IconFrom::default(),
             at,
+            sound: None,
         }
     }
 

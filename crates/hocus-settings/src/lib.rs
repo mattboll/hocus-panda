@@ -2,7 +2,7 @@
 //! its own that writes the desktop's configuration file so that nobody has
 //! to edit it, keeping what the user wrote there by hand.
 //!
-//! - [`model`]: the 22 sections in 5 groups, and the settings each holds;
+//! - [`model`]: the 23 sections in 5 groups, and the settings each holds;
 //!   a section's ticket fills its own ([`power`] is the first, [`mouse`]
 //!   the mice and touchpads; [`screens`] draws its page itself, from the
 //!   compositor's line; [`sound`]'s live in PipeWire, [`network`]'s in
@@ -41,6 +41,8 @@
 //!   its section.
 //! - [`app`]: the window, drawn with iced as the shell is.
 
+// The view's `json!` of what the page shows grew past the default 128.
+#![recursion_limit = "256"]
 // What is left of #778 here: 87 indexed places, most on the pages'
 // fixed lists. A panic ends the Settings' window alone; the lint is on
 // everywhere else.
@@ -72,6 +74,7 @@ pub mod lang;
 pub mod model;
 pub mod mouse;
 pub mod network;
+pub mod notifications;
 pub mod passwd;
 pub mod perf;
 pub mod portal;

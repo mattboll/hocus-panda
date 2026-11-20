@@ -82,6 +82,10 @@ pub const PROGRESS: f32 = 5.0;
 /// The ✕: a 24 px circle, 8 px from the top right inside the rim.
 const CLOSE: f32 = 24.0;
 const CLOSE_IN: f32 = 8.0;
+/// The "⋯" under it (#899), 2 px apart; the card's clickable part is at
+/// least as tall as both and 4 px under them.
+const MORE_GAP: f32 = 2.0;
+const MORE_BOTTOM: f32 = CLOSE_IN + 2.0 * CLOSE + MORE_GAP + 4.0;
 /// The actions: 28 px buttons, 12 px in, 6 px apart, 12 px from the
 /// card's bottom; their text 12 px.
 const ACTION: f32 = 28.0;
@@ -166,6 +170,11 @@ impl Words {
         txt::CLOSE.get(self.lang)
     }
 
+    /// The "⋯"'s name, for screen readers (#899).
+    pub fn more(self) -> &'static str {
+        txt::MORE.get(self.lang)
+    }
+
     fn waiting(self, n: usize) -> String {
         txt::waiting(self.lang, n)
     }
@@ -243,7 +252,7 @@ pub fn lay(note: &Note) -> Laid {
         column += COLUMN_GAP + PROGRESS_TOP + PROGRESS;
         top
     });
-    let button = PAD_TOP + column.max(ICON) + PAD_BOTTOM;
+    let button = (PAD_TOP + column.max(ICON) + PAD_BOTTOM).max(MORE_BOTTOM);
     // The actions in rows from the column's left, a row more when one
     // does not fit.
     let mut actions = Vec::new();
@@ -380,6 +389,17 @@ pub fn card_origin(card: bool) -> Point {
 pub fn close_rect() -> Rectangle {
     Rectangle::new(
         Point::new(WIDTH - BORDER - CLOSE_IN - CLOSE, BORDER + CLOSE_IN),
+        Size::new(CLOSE, CLOSE),
+    )
+}
+
+/// The "⋯" in the card's frame (#899): under the ✕.
+pub fn more_rect() -> Rectangle {
+    Rectangle::new(
+        Point::new(
+            WIDTH - BORDER - CLOSE_IN - CLOSE,
+            BORDER + CLOSE_IN + CLOSE + MORE_GAP,
+        ),
         Size::new(CLOSE, CLOSE),
     )
 }
@@ -662,6 +682,18 @@ pub fn draw_close(f: &mut Frame, lit: bool) {
     );
 }
 
+/// The "⋯" (#899): three dots, lit as the ✕ under the pointer.
+pub fn draw_more(f: &mut Frame, lit: bool) {
+    let c = Point::new(CLOSE / 2.0, CLOSE / 2.0);
+    if lit {
+        f.fill(&Path::circle(c, CLOSE / 2.0), CLOSE_HOVER.get());
+    }
+    let ink = if lit { TEXT.get() } else { FAINT.get() };
+    for dx in [-4.5, 0.0, 4.5] {
+        f.fill(&Path::circle(Point::new(c.x + dx, c.y), 1.3), ink);
+    }
+}
+
 /// An action's button, `size` large, lit under the pointer.
 pub fn draw_action(f: &mut Frame, size: Size, label: &str, lit: bool) {
     let rect = Rectangle::new(Point::ORIGIN, size);
@@ -833,6 +865,7 @@ mod tests {
             conversation: None,
             icon_from: crate::notifications::note::IconFrom::default(),
             at: 0,
+            sound: None,
         }
     }
 
