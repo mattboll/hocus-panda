@@ -557,12 +557,11 @@ fn a_gesture_taken_from_another_action_writes_both_lines() -> anyhow::Result<()>
     );
     bed.places_with("give:text")?;
     bed.click("give:replace")?;
-    let text = bed.written(|t| t.contains("launcher = "))?;
-    assert!(
-        text.contains("lock = [\"Super+L\", \"corner:bottom-right\", \"swipe:4:up\"]"),
-        "{text}"
-    );
-    assert!(text.contains("launcher = \"Super+Space\""), "{text}");
+    // Both lines, each written in its turn.
+    bed.written(|t| {
+        t.contains("lock = [\"Super+L\", \"corner:bottom-right\", \"swipe:4:up\"]")
+            && t.contains("launcher = \"Super+Space\"")
+    })?;
     bed.shows(|s| {
         s["toast"] == "Verrouiller la session : 4 doigts ↑ · « Ouvrir le lanceur » n’en a plus"
     })?;
