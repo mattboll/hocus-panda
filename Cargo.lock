@@ -2355,6 +2355,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-removable"
+version = "1.0.0"
+dependencies = [
+ "futures-util",
+ "rustix 1.1.6",
+ "tokio",
+ "tracing",
+ "zbus 6.0.0",
+]
+
+[[package]]
 name = "hocus-scenes"
 version = "1.0.0"
 dependencies = [
@@ -2414,6 +2425,7 @@ dependencies = [
  "hocus-network",
  "hocus-pandas",
  "hocus-panic",
+ "hocus-removable",
  "hocus-sound",
  "hocus-voice",
  "hocus-weather",
