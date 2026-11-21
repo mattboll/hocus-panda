@@ -55,6 +55,7 @@ impl CompositorHandler for State {
             self.surface_going(surface);
         }
         on_commit_buffer_handler::<Self>(surface);
+        self.xwayland_surface_committed(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
             while let Some(parent) = get_parent(&root) {
@@ -94,6 +95,7 @@ impl CompositorHandler for State {
     /// callbacks are answered.
     fn destroyed(&mut self, surface: &WlSurface) {
         self.redraw = true;
+        self.xwayland_surface_destroyed(surface);
         // Its frame callbacks not yet answered are answered now: a
         // callback is gone only once answered (it has no request to
         // destroy it), and a surface that goes before its next frame (a

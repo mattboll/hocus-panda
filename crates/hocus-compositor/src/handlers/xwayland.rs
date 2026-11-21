@@ -290,12 +290,13 @@ impl XwmHandler for State {
 
 impl XWaylandShellHandler for State {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.protocols.xwayland_shell_state
+        &mut self.protocols.xwayland_shell.state
     }
 
     /// An X11 window maps before XWayland gives it a surface: the keyboard
     /// can only go to it now.
-    fn surface_associated(&mut self, _xwm: XwmId, _wl_surface: WlSurface, surface: X11Surface) {
+    fn surface_associated(&mut self, _xwm: XwmId, wl_surface: WlSurface, surface: X11Surface) {
+        self.xwayland_surface_paired(&wl_surface);
         let focused = self.model.focused();
         let window = self.x11_window(&surface).and_then(|w| self.id_of(&w));
         if window.is_some() && window == focused {
@@ -397,7 +398,7 @@ impl XwmHandler for App {
 
 impl XWaylandShellHandler for App {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.state.protocols.xwayland_shell_state
+        &mut self.state.protocols.xwayland_shell.state
     }
 
     fn surface_associated(&mut self, xwm: XwmId, wl_surface: WlSurface, surface: X11Surface) {

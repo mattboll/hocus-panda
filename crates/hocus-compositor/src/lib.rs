@@ -113,6 +113,7 @@ mod wallpaper;
 mod windows;
 mod wobble;
 mod xwayland;
+mod xwayland_shell;
 
 use std::path::{Path, PathBuf};
 
