@@ -128,6 +128,19 @@ struct Place {
 
 static PLACES: Mutex<Option<HashMap<String, Place>>> = Mutex::new(None);
 
+/// Each bar's levels' group's tops (full, mini) as the levels last said
+/// them, its connections' surface open or not: one opened after starts
+/// there. A loaded machine's levels said them before that surface opened,
+/// which then sat at a default's place for good, over the levels' items,
+/// and the desktops above it too low: the levels' surface over their
+/// tiles and over Today's last rows (`bar_desktops::`, `today::`).
+static LEVELS_TOPS: Mutex<Option<HashMap<String, (f32, f32)>>> = Mutex::new(None);
+
+fn levels_tops<T>(with: impl FnOnce(&mut HashMap<String, (f32, f32)>) -> T) -> T {
+    let mut tops = LEVELS_TOPS.lock().unwrap_or_else(PoisonError::into_inner);
+    with(tops.get_or_insert_with(HashMap::new))
+}
+
 /// A surface placed: its id, its size and its layer-shell margins.
 pub type Placed = (window::Id, (u32, u32), (i32, i32, i32, i32));
 
@@ -198,8 +211,13 @@ fn rows_now() -> (usize, usize) {
 /// Bar `bar`'s surface `id` opens in `form`: its size and margins.
 pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, i32, i32)) {
     let rows = rows_now();
-    places(|places| {
-        let tops = places.get(bar).map_or((20.0, 0.0), |p| p.tops);
+    let said = levels_tops(|tops| tops.get(bar).copied());
+    let opened = places(|places| {
+        let tops = places
+            .get(bar)
+            .map(|p| p.tops)
+            .or(said)
+            .unwrap_or((20.0, 0.0));
         let (size, bottom) = placement(form, false, tops, rows);
         let margin = margin(bottom);
         places.insert(
@@ -217,11 +235,15 @@ pub fn opened(bar: &str, id: window::Id, form: Form) -> ((u32, u32), (i32, i32, 
             },
         );
         (size, margin)
-    })
+    });
+    // The desktops above, opened before it, placed on a default's tops.
+    crate::desktops::draw::follow(bar);
+    opened
 }
 
 pub fn forget(bar: &str) {
     places(|places| places.remove(bar));
+    levels_tops(|tops| tops.remove(bar));
 }
 
 /// What bar `bar`'s surface needs now, if it changed: its id, size and
@@ -252,6 +274,7 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Option<Placed> {
 /// moved by layer-shell actions, and draws itself again (no other surface
 /// does).
 pub fn levels_moved(bar: &str, tops: (f32, f32)) {
+    levels_tops(|known| known.insert(bar.to_owned(), tops));
     let moved = places(|places| {
         let place = places.get_mut(bar)?;
         if (place.tops.0 - tops.0).abs() < 0.01 && (place.tops.1 - tops.1).abs() < 0.01 {
@@ -1036,6 +1059,21 @@ pub fn node(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The levels said where their top is before the connections' surface
+    /// opened, as a loaded machine's do: it opens there, above them, not
+    /// at a default's place over their items.
+    #[test]
+    fn a_surface_opened_after_the_levels_said_their_tops_sits_above_them() {
+        let bar = "a_surface_opened_after_the_levels";
+        let tops = (151.5, 83.1);
+        levels_moved(bar, tops);
+        let (_, margin) = opened(bar, window::Id::unique(), Form::Full);
+        let (_, bottom) = placement(Form::Full, false, tops, rows_now());
+        assert_eq!(margin, super::margin(bottom));
+        assert_eq!(places(|p| p.get(bar).map(|p| p.tops)), Some(tops));
+        forget(bar);
+    }
 
     #[test]
     fn the_surface_sits_14_px_above_the_levels_and_follows_them() {

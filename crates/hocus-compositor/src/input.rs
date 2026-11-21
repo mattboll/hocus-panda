@@ -231,6 +231,10 @@ impl State {
         if self.power_key(code.raw(), state == KeyState::Pressed) {
             return;
         }
+        // Typed for a surface of the bars still to draw: it waits (#821).
+        if self.key_waits(code, state, time) {
+            return;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };

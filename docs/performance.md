@@ -65,15 +65,23 @@ still draws with pixman, and its shell with tiny-skia.
 The tests of the camera's face and hands (`hocus-camera`'s
 `face::tests::the_face_s_points_are_found_in_their_budget`,
 `hands::tests::a_thumb_up_is_a_thumb_up_in_its_budget`) follow a picture
-frame after frame and assert what the model finds everywhere, CI included.
-Their time on the processor is held to its budget only with
+frame after frame and assert what the model finds everywhere, CI included,
+and the panda avatar draws each of its looks
+(`panda::tests::the_panda_draws_within_a_frame_s_budget`). Their time on
+the processor (`track::within_budget`) is held to its budget only with
 `HOCUS_TEST_BUDGETS=1`, on a machine the camera is meant to run on: CI's
 shared runners are slower, and a budget held there measures the runner
 (#909). Without it, the tests print the times.
 
 ```sh
-HOCUS_TEST_BUDGETS=1 cargo nextest run -p hocus-camera face:: hands::
+HOCUS_TEST_BUDGETS=1 cargo nextest run -p hocus-camera face:: hands:: panda::
 ```
+
+No other test asserts a time measured on the machine's clock as an upper
+bound: what the loop draws is counted on its held clock
+(`Headless::hold_clock`, `step`), and a count of what came in a while of
+the wall clock is bounded by the time it took, never by the time it should
+have taken (`frame_cost::`).
 
 ## Tests on a loaded machine wait on conditions, never on time
 

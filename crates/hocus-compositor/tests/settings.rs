@@ -930,6 +930,14 @@ fn the_window_goes_before_the_program_ends() -> anyhow::Result<()> {
     let window = clicked.elapsed();
     anyhow::ensure!(gone, "✕ did not close the window: {}", bed.plain());
     let log = bed.log.clone();
+    // The window gone while the program still tears down, in that order,
+    // not within a time on the wall clock: a loaded machine takes longer
+    // for both.
+    let ending = std::fs::read_to_string(&log)?;
+    assert!(
+        !ending.contains("the Settings closed"),
+        "the window stayed {window:?} after ✕, until the program ended"
+    );
     let ended = bed.hp.dispatch_until(WAIT, |_| {
         std::fs::read_to_string(&log).is_ok_and(|t| t.contains("the Settings closed"))
     })?;
@@ -939,10 +947,6 @@ fn the_window_goes_before_the_program_ends() -> anyhow::Result<()> {
     assert!(
         program >= SLOW_END,
         "the teardown was not slow: {program:?}"
-    );
-    assert!(
-        window < Duration::from_secs(1),
-        "the window stayed {window:?} after ✕, until the program ended"
     );
     Ok(())
 }

@@ -41,13 +41,6 @@ retries = 0
 # test fails without the programs it needs, so these are left out there,
 # by name, and run where the programs are (the default profile).
 # Installing them on CI takes them out of this list.
-# And one that fails not by chance: iced_exwlshell 0.21.4 lacks what our
-# old patch of iced_layershell gave (#860, #821): `launcher::escape_read_
-# with_its_first_configure_closes_it`. #860's fix takes it out.
-# And three that fail by chance on CI's runners, each until its issue's
-# fix: `actions::an_impossible_action_is_inert_and_nothing_found_searches_
-# the_launcher` (#871), `camera::the_screen_light_follows_the_light_on_the_
-# face` (#872), `agents::the_halo_moves_on_the_bars_screen_alone` (#873).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -58,10 +51,6 @@ not (
         | test(=memory::x11_windows_gone_leave_no_surface_behind)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
-        | test(=launcher::escape_read_with_its_first_configure_closes_it)
-        | test(=actions::an_impossible_action_is_inert_and_nothing_found_searches_the_launcher)
-        | test(=camera::the_screen_light_follows_the_light_on_the_face)
-        | test(=agents::the_halo_moves_on_the_bars_screen_alone)
     ))
 )
 """

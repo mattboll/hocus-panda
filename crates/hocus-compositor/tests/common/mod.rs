@@ -2013,8 +2013,13 @@ pub fn over(hp: &mut Headless, at: (f64, f64), namespace: &str) -> anyhow::Resul
         }
         anyhow::ensure!(
             start.elapsed() < Duration::from_secs(15),
-            "{namespace} never took the pointer at {at:?}: {:?}",
-            hp.pointer_layer()
+            "{namespace} never took the pointer at {at:?}: {:?}; placed: {namespace} {:?}, \
+             levels {:?}, connections {:?}, desktops {:?}",
+            hp.pointer_layer(),
+            hp.layer_rects(namespace),
+            hp.levels_surfaces(),
+            hp.connections_surfaces(),
+            hp.desktops_surfaces(),
         );
     }
 }

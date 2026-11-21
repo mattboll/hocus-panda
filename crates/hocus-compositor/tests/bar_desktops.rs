@@ -236,6 +236,34 @@ impl Bed {
         )
     }
 
+    /// The pointer over desktop `index`'s tile, once the tiles' surface
+    /// takes it there, drawn at its size; aimed again at each try where
+    /// the surface is then. It is placed on the levels' top once they say
+    /// it, which a loaded machine's do late: a tile aimed at before that,
+    /// once, was under the levels' surface for good (y 982 for a surface
+    /// then at 877).
+    fn over_tile(&mut self, index: usize) -> anyhow::Result<()> {
+        let start = Instant::now();
+        loop {
+            let at = self.middle(index);
+            self.hp.pointer_move(at.0 - 1.0, at.1);
+            self.hp.pointer_move(at.0, at.1);
+            wait(&mut self.hp, Duration::from_millis(30))?;
+            if self.hp.pointer_layer().as_deref() == Some(hocus_link::DESKTOPS_NAMESPACE)
+                && self.hp.undrawn_at(at.0, at.1).is_empty()
+            {
+                return Ok(());
+            }
+            anyhow::ensure!(
+                start.elapsed() < WAIT,
+                "the tiles never took the pointer at {at:?}: {:?}; desktops {:?}, levels {:?}",
+                self.hp.pointer_layer(),
+                self.hp.desktops_surfaces(),
+                self.hp.levels_surfaces(),
+            );
+        }
+    }
+
     /// A click there, once the shell's surfaces there are drawn
     /// ([`common::click`]).
     fn click(&mut self, at: (f64, f64)) -> anyhow::Result<()> {
@@ -890,8 +918,7 @@ fn the_wheel_goes_a_desktop_a_notch_and_stops_at_the_ends() -> anyhow::Result<()
         // size: on a loaded machine the bar's surfaces settle after the
         // desktops' first frame, and a wheel sent over a surface not yet
         // there goes nowhere, the desktop never reached.
-        let at = bed.middle(1);
-        common::over(&mut bed.hp, at, hocus_link::DESKTOPS_NAMESPACE)?;
+        bed.over_tile(1)?;
         // Down, a notch at a time: the next, up to the last, no further.
         for expected in [1, 2, 3, 3, 3] {
             bed.hp.wheel(1);
