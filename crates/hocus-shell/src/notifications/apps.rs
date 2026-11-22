@@ -1,6 +1,7 @@
 //! Notifications per application (#899): the level the user chooses for
 //! an application from its bubble or the history ("⋯", or a right click),
-//! written into the configuration file; the applications that sent
+//! and whether opening it folds its notifications (#923), written into the
+//! configuration file; the applications that sent
 //! notifications, counted per day and kept for the Settings' list; and the
 //! sound a bubble asks for.
 //!
@@ -92,6 +93,12 @@ pub fn level_of(id: &str) -> NotifyLevel {
     super::with(|c| c.stack.level_of(id))
 }
 
+/// Whether opening application `id` folds its notifications, as the stack
+/// has it (#923).
+pub fn folds_on_focus(id: &str) -> bool {
+    super::with(|c| c.stack.folds_on_focus(id))
+}
+
 /// The user chose `level` for application `id` (named `name`) from a
 /// bubble or the history: it applies at once, and is written into the
 /// configuration file (`[notifications.apps]`, taken out for "all", what
@@ -106,44 +113,71 @@ pub fn choose(id: &str, name: &str, level: NotifyLevel) {
         id: id.to_owned(),
         level,
     });
+    let value = (level != NotifyLevel::All).then(|| hocus_config::toml_edit::value(level.word()));
+    write_key("apps", id, name, value);
+}
+
+/// The user ticked or unticked « Vues dès que je l'ouvre » for application
+/// `id` (named `name`) from a bubble or the history (#923): it applies at
+/// once, and is written into `[notifications.seen-on-focus]` (its id
+/// `= false`; ticked takes the key out), on a thread of its own.
+pub fn seen_on_focus(id: &str, name: &str, on: bool) {
+    tracing::info!(app = id, on, "an application's seen on focus chosen");
+    input(Input::SeenOnFocus {
+        id: id.to_owned(),
+        on,
+    });
+    let value = (!on).then(|| hocus_config::toml_edit::value(false));
+    write_key("seen-on-focus", id, name, value);
+}
+
+/// Application `id`'s key in `[notifications.TABLE]` set to `value`, or
+/// taken out, on a thread of its own.
+fn write_key(
+    table: &'static str,
+    id: &str,
+    name: &str,
+    value: Option<hocus_config::toml_edit::Item>,
+) {
     let Some(file) = hocus_config::file() else {
         tracing::warn!(
             app = id,
-            "no configuration file: the application's level is not kept"
+            table,
+            "no configuration file: the application's choice is not kept"
         );
         return;
     };
     let (id, name) = (id.to_owned(), name.to_owned());
     let wrote = std::thread::Builder::new()
-        .name("notifications: a level".to_owned())
+        .name("notifications: a choice".to_owned())
         .spawn(move || {
-            let edited = hocus_config::edit(&file, |doc| set_level(doc, &id, level), |_| Ok(()));
+            let edited = hocus_config::edit(
+                &file,
+                |doc| set_key(doc, table, &id, value.clone()),
+                |_| Ok(()),
+            );
             match edited {
-                Ok(_) => tracing::info!(
-                    app = id,
-                    name,
-                    level = level.word(),
-                    "the application's level written"
-                ),
+                Ok(_) => tracing::info!(app = id, name, table, "the application's choice written"),
                 Err(err) => {
-                    tracing::warn!(%err, app = id, "the application's level is not written");
+                    tracing::warn!(%err, app = id, table, "the application's choice is not written");
                 }
             }
         });
     if let Err(err) = wrote {
-        tracing::warn!(%err, "cannot write the application's level");
+        tracing::warn!(%err, "cannot write the application's choice");
     }
 }
 
-/// `doc` with application `id` at `level` in `[notifications.apps]`: its
-/// key (or one naming it in another case) replaced; for "all", taken out,
-/// and the tables it leaves empty with it.
-fn set_level(
+/// `doc` with application `id`'s key in `[notifications.TABLE]` set to
+/// `value` (one naming it in another case replaced), or taken out, and the
+/// tables it leaves empty with it.
+fn set_key(
     doc: &mut hocus_config::toml_edit::DocumentMut,
+    table: &str,
     id: &str,
-    level: NotifyLevel,
+    value: Option<hocus_config::toml_edit::Item>,
 ) -> Result<(), String> {
-    use hocus_config::toml_edit::{Item, Table, value};
+    use hocus_config::toml_edit::{Item, Table};
     let notifications = doc.entry("notifications").or_insert_with(|| {
         let mut made = Table::new();
         made.set_implicit(true);
@@ -153,10 +187,10 @@ fn set_level(
         .as_table_mut()
         .ok_or("[notifications] is not a table")?;
     let apps = notifications
-        .entry("apps")
+        .entry(table)
         .or_insert_with(|| Item::Table(Table::new()))
         .as_table_mut()
-        .ok_or("[notifications.apps] is not a table")?;
+        .ok_or_else(|| format!("[notifications.{table}] is not a table"))?;
     let named: Vec<String> = apps
         .iter()
         .map(|(k, _)| k.to_owned())
@@ -165,16 +199,19 @@ fn set_level(
     for other in named {
         apps.remove(&other);
     }
-    if level == NotifyLevel::All {
-        apps.remove(id);
-        if apps.is_empty() {
-            notifications.remove("apps");
+    match value {
+        None => {
+            apps.remove(id);
+            if apps.is_empty() {
+                notifications.remove(table);
+            }
+            if notifications.is_empty() {
+                doc.remove("notifications");
+            }
         }
-        if notifications.is_empty() {
-            doc.remove("notifications");
+        Some(value) => {
+            apps.insert(id, value);
         }
-    } else {
-        apps.insert(id, value(level.word()));
     }
     Ok(())
 }
@@ -214,6 +251,39 @@ pub fn play(sound: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set_level(
+        doc: &mut hocus_config::toml_edit::DocumentMut,
+        id: &str,
+        level: NotifyLevel,
+    ) -> Result<(), String> {
+        let value =
+            (level != NotifyLevel::All).then(|| hocus_config::toml_edit::value(level.word()));
+        set_key(doc, "apps", id, value)
+    }
+
+    #[test]
+    fn seen_on_focus_is_written_false_and_ticked_takes_it_out() -> Result<(), String> {
+        let mut doc = hocus_config::parse("[notifications.apps]\nSlack = \"silent\"\n")
+            .map_err(|e| e.to_string())?;
+        set_key(
+            &mut doc,
+            "seen-on-focus",
+            "org.example.Agenda",
+            Some(hocus_config::toml_edit::value(false)),
+        )?;
+        assert_eq!(
+            doc.to_string(),
+            "[notifications.apps]\nSlack = \"silent\"\n\n[notifications.seen-on-focus]\n\
+             \"org.example.Agenda\" = false\n"
+        );
+        set_key(&mut doc, "seen-on-focus", "org.example.agenda", None)?;
+        assert_eq!(
+            doc.to_string(),
+            "[notifications.apps]\nSlack = \"silent\"\n"
+        );
+        Ok(())
+    }
 
     #[test]
     fn a_level_is_written_in_its_table_and_all_takes_it_out() -> Result<(), String> {

@@ -302,6 +302,9 @@ fn note(
             image_path: None,
         },
         at: notifications::wall_ms(),
+        number: 0,
+        transient: false,
+        ancestry: Vec::new(),
     }
 }
 

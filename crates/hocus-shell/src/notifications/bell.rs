@@ -1,6 +1,7 @@
 //! The bell (5.4): the button that opens the history, its badge counting
 //! what the user has not seen, a slash in amber while they are not to be
-//! disturbed. Since 5.5 it is one of the footer's buttons
+//! disturbed; ringed in the agents' violet while an agent is about to pin
+//! or tidy (#923). Since 5.5 it is one of the footer's buttons
 //! ([`crate::footer`]), the second of four in the full form, over the
 //! user's avatar in the mini form; [`draw`] draws it there.
 
@@ -77,6 +78,8 @@ pub struct Shows {
     pub dnd: bool,
     pub open: bool,
     pub hover: bool,
+    /// An agent is about to pin or tidy (#923).
+    pub ringed: bool,
 }
 
 /// A footer's button at `button`: lit while its popover shows (`open`),
@@ -116,6 +119,9 @@ pub fn glyph_in(f: &mut Frame, button: Rectangle, handle: svg::Handle, ink: Ink,
 /// opaque (two forms cross-fade while the bar switches).
 pub fn draw(f: &mut Frame, button: Rectangle, shows: Shows, alpha: f32) {
     lit(f, button, shows.open, shows.hover);
+    if shows.ringed {
+        crate::desktops::draw::agent_ring(f, button, RADIUS, alpha);
+    }
     let ink = if shows.dnd { AMBER_INK } else { GLYPH_INK };
     glyph_in(f, button, glyph(shows.dnd), ink, alpha);
     if shows.count == 0 {

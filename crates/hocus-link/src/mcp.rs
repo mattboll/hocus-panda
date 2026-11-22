@@ -198,6 +198,8 @@ pub enum McpKind {
     Draw,
     /// A drag in an application (#825).
     Drag,
+    /// Pinning or tidying the bell's notifications (#923).
+    Notifications,
 }
 
 /// What a request did, counted, for one sentence.
@@ -232,6 +234,16 @@ pub struct McpSummary {
     /// Shapes drawn on the screen (#825).
     #[serde(default)]
     pub drawn: u32,
+    /// The bell's notifications pinned, unpinned and tidied (#923), and
+    /// their application's name when they are all one's.
+    #[serde(default)]
+    pub pinned: u32,
+    #[serde(default)]
+    pub unpinned: u32,
+    #[serde(default)]
+    pub tidied: u32,
+    #[serde(default, serialize_with = "tidy::maybe_name")]
+    pub notes_app: Option<String>,
 }
 
 /// A setting an agent changed: its key (`appearance.theme`) and its new
@@ -276,6 +288,9 @@ pub enum McpAt {
     /// The agent's own pointer, its tip at `x`, `y`, ringed by the
     /// compositor: the tag beside it.
     Pointer { x: i32, y: i32 },
+    /// The bell on every bar, ringed by the shell (#923): the tag at the
+    /// top of the screen, centred on `x`.
+    Bell { x: i32, y: i32 },
 }
 
 /// The toast once a request settled.
@@ -324,6 +339,10 @@ pub enum McpSaid {
     Undone { summary: McpSummary },
     /// A call refused, the tool's name, and why.
     Refused { tool: String, why: McpRefusal },
+    /// The bell read (#923): how many notifications, never what they say.
+    ReadNotes { count: u32 },
+    /// The notifications' journal searched, never for what.
+    SearchedNotes,
 }
 
 /// Why a call was refused.
@@ -344,6 +363,8 @@ pub enum McpRefusal {
     NoInput,
     /// It may not draw on the screen (#825).
     NoDraw,
+    /// It may not read nor sort the notifications (#923).
+    NoNotifications,
     /// The session is locked.
     Locked,
     /// A password is asked for.

@@ -12,11 +12,18 @@
 //!   critical one stays until closed or acted on; a low one makes no
 //!   bubble. So does nothing for an agents' tool saying only that its
 //!   agent waits or finished.
-//! - Every notification goes to the history as it comes. The bell's badge
-//!   counts what was not seen: a bubble that went without the pointer
-//!   resting on it or a click, a low one, one held while the user is not
-//!   to be disturbed; not an agent's. Opening the history sets it to 0;
-//!   what it lists is seen as it closes.
+//! - Every notification goes to the history as it comes, but a transient
+//!   one (#923): its bubble, then the journal alone. The bell's badge
+//!   counts what is new: a bubble that went without the pointer resting
+//!   on it or a click, a low one, one held while the user is not to be
+//!   disturbed, one an agent pinned; not an agent's. Opening the history
+//!   sets it to 0; what it lists is noticed as it closes.
+//! - A window taking the user's focus folds its application's
+//!   notifications under "N vues" (#923), unless the configuration says
+//!   not to for it; so does a click on a line, or an agent tidying.
+//! - Every notification served is written in the journal as it comes,
+//!   saying where it went (#923); each gets a number of its own, kept
+//!   across restarts, for the bell, the journal and the agents.
 //! - While the user is not to be disturbed, bubbles are held (to the
 //!   history only), critical ones still showing; it ends by itself at its
 //!   time.
@@ -40,18 +47,21 @@ use std::{
 };
 
 use hocus_link::{
-    BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, FOOTER_NAMESPACE, Form, NotifyFate, NotifyLevel,
-    NotifyLevels, bubble_namespace,
+    AppFocus, BUBBLE_OUT, BUBBLES_WAITING_NAMESPACE, EDGE, FOOTER_NAMESPACE, Form, NoteBefore,
+    NoteState, NotesAnswer, NotesAsk, NotifyFate, NotifyLevel, NotifyLevels, bubble_namespace,
 };
 use iced::{Rectangle, window};
 
 use super::{
     dnd::Dnd,
     draw::{self, Laid},
-    history::{History, Record, Sight},
+    history::{History, Kept, Record, Restored, Sight},
+    journal::{self, To},
     note::{Note, Timeout, Urgency},
     server::Signal,
 };
+
+mod sorting;
 
 /// The most bubbles shown at once.
 pub const MOST: usize = 3;
@@ -103,9 +113,14 @@ pub enum Input {
     /// The session is locked (7.1), or no longer is: new bubbles wait for
     /// the unlock.
     Locked(bool),
-    /// What the history kept before the shell started again, and do not
-    /// disturb as it was in this session.
-    Restored { notes: Vec<(Note, Sight)>, dnd: Dnd },
+    /// What the history kept before the shell started again, do not
+    /// disturb as it was in this session, and the number the journal's
+    /// last line holds (the numbers go on after it and the history's).
+    Restored {
+        notes: Vec<Restored>,
+        dnd: Dnd,
+        journal: u64,
+    },
     /// The wall clock may have moved apart from the monotonic clock (the
     /// machine resumed, the clock was set, do not disturb's wall-clock
     /// timer rang), reading `wall` (milliseconds): do not disturb's end
@@ -116,6 +131,15 @@ pub enum Input {
     /// Application `id`'s level, as the user chose it from a bubble or the
     /// history (#899), before the configuration says it back.
     Level { id: String, level: NotifyLevel },
+    /// Whether opening application `id` folds its notifications, as the
+    /// user chose it from a bubble or the history (#923).
+    SeenOnFocus { id: String, on: bool },
+    /// A window took the user's focus (#923).
+    AppFocus(AppFocus),
+    /// An agent's ask (#923), answered by [`Effect::Answer`] of `token`.
+    Ask { token: u64, ask: NotesAsk },
+    /// « Annuler » of an agent's pins or tidying.
+    Undo(Vec<NoteBefore>),
 }
 
 /// What to carry out.
@@ -172,6 +196,20 @@ pub enum Effect {
     /// Do not disturb turned on or off: the compositor is told, for the
     /// Settings' switch (#899).
     Dnd(bool),
+    /// A line for the journal (#923).
+    Journal(journal::Line),
+    /// The answer to an agent's ask `token`.
+    Answer {
+        token: u64,
+        answer: NotesAnswer,
+    },
+    /// An agent's search of the journal, read off the stack (the
+    /// history's thread), the bell's states by number.
+    Search {
+        token: u64,
+        search: journal::Search,
+        states: Vec<(u64, NoteState)>,
+    },
 }
 
 /// A bubble's countdown.
@@ -318,8 +356,14 @@ pub struct Stack {
     card: bool,
     next: u64,
     chip: Option<(Extra, usize)>,
-    /// Each application's level (#899).
+    /// Each application's level (#899), and whether opening it folds
+    /// (#923).
     levels: NotifyLevels,
+    /// The next notification's number.
+    number: u64,
+    /// The journal's lines that came before what was kept is read back:
+    /// written then, their numbers after those kept.
+    unwritten: Vec<journal::Line>,
 }
 
 /// What a click on `note` asks the compositor: its application's window,
@@ -359,12 +403,19 @@ impl Stack {
             next: 1,
             chip: None,
             levels: NotifyLevels::default(),
+            number: 1,
+            unwritten: Vec::new(),
         }
     }
 
     /// Application `id`'s level (#899).
     pub fn level_of(&self, id: &str) -> NotifyLevel {
         self.levels.of(id)
+    }
+
+    /// Whether opening application `id` folds its notifications (#923).
+    pub fn folds_on_focus(&self, id: &str) -> bool {
+        self.levels.folds_on_focus(id)
     }
 
     /// The bubbles showing, from the first.
@@ -461,10 +512,15 @@ impl Stack {
 
     fn handle_input(&mut self, input: Input, now: Instant, effects: &mut Vec<Effect>) {
         match input {
-            Input::Notify(note) => self.notify(*note, now, effects),
-            Input::Keep(note) => {
+            Input::Notify(mut note) => {
+                note.number = self.number_of(note.id);
+                self.notify(*note, now, effects);
+            }
+            // The desktop's own: noticed, and never folded (#923).
+            Input::Keep(mut note) => {
+                note.number = self.number_of(note.id);
                 self.history.prune(note.at);
-                self.history.add(*note, Sight::Seen);
+                self.history.add(*note, Sight::Noticed, true);
             }
             Input::Update(note) => self.history.update(*note),
             Input::Close(id) => self.close(id, now, effects),
@@ -511,7 +567,7 @@ impl Stack {
                     }));
                 }
                 effects.push(bring(&note));
-                self.history.set_seen(note.id, Sight::Seen);
+                self.history.bubble_left(note.id, Sight::Noticed);
                 if !note.resident {
                     self.leave(serial, 2, now, effects);
                 }
@@ -527,7 +583,7 @@ impl Stack {
                 let (id, resident) = (bubble.note.id, bubble.note.resident);
                 tracing::debug!(id, key, "a bubble's action");
                 effects.push(Effect::Signal(Signal::Action { id, key }));
-                self.history.set_seen(id, Sight::Seen);
+                self.history.bubble_left(id, Sight::Noticed);
                 if !resident {
                     self.leave(serial, 2, now, effects);
                 }
@@ -538,12 +594,14 @@ impl Stack {
                     tracing::debug!(open, "the history");
                 }
             }
+            // A click on a line (#923): its default and its window, then
+            // seen, not taken out; its sender hears it closed (2), but the
+            // desktop's own, which stay as they are.
             Input::Open(key) => {
                 let Some(kept) = self.history.get(key) else {
                     return;
                 };
-                let note = kept.note.clone();
-                let live = kept.live;
+                let (note, live, own) = (kept.note.clone(), kept.live, kept.own);
                 tracing::debug!(
                     key,
                     live = live.is_some(),
@@ -559,13 +617,13 @@ impl Stack {
                 }
                 // A capture has no window to raise: its editor opens; nor a
                 // meeting's reminder: its call does.
-                if super::capture_of(note.id).is_none()
-                    && super::reminder_of(note.id).is_none()
-                    && super::drive_of(note.id).is_none()
-                {
+                if !own {
                     effects.push(bring(&note));
+                    self.history.user_saw(&[key], true);
+                    if let Some(id) = live {
+                        self.close_live(id, 2, now, effects);
+                    }
                 }
-                self.forget(key, now, effects);
             }
             Input::Remove(keys) => {
                 tracing::debug!(count = keys.len(), "notifications taken out of the history");
@@ -573,6 +631,7 @@ impl Stack {
                     self.forget(key, now, effects);
                 }
             }
+            // As a click on its line: seen, a resident one still held.
             Input::Act { key, action } => {
                 let Some(kept) = self.history.get(key) else {
                     return;
@@ -583,8 +642,9 @@ impl Stack {
                 let resident = kept.note.resident;
                 tracing::debug!(id, action, "an action of the history");
                 effects.push(Effect::Signal(Signal::Action { id, key: action }));
+                self.history.user_saw(&[key], true);
                 if !resident {
-                    self.forget(key, now, effects);
+                    self.close_live(id, 2, now, effects);
                 }
             }
             Input::Dnd(dnd) => {
@@ -610,6 +670,25 @@ impl Stack {
                 if level != NotifyLevel::All {
                     self.levels.apps.insert(id, level);
                 }
+            }
+            Input::SeenOnFocus { id, on } => {
+                tracing::debug!(app = id, on, "an application's seen on focus chosen");
+                self.levels
+                    .seen_on_focus
+                    .retain(|named, _| !named.eq_ignore_ascii_case(&id));
+                if !on {
+                    self.levels.seen_on_focus.insert(id, false);
+                }
+            }
+            Input::AppFocus(focus) => self.app_focused(&focus),
+            Input::Ask { token, ask } => self.ask(token, ask, effects),
+            Input::Undo(befores) => {
+                let back = self.history.undo(&befores);
+                tracing::info!(
+                    asked = befores.len(),
+                    back,
+                    "an agent's pins or tidying undone"
+                );
             }
             Input::Sharing(true) => {
                 if self.sharing.is_none() {
@@ -641,12 +720,34 @@ impl Stack {
                     self.relayout(effects);
                 }
             }
-            Input::Restored { notes, dnd } => {
+            Input::Restored {
+                mut notes,
+                dnd,
+                journal,
+            } => {
                 tracing::info!(
                     kept = notes.len(),
                     dnd = dnd.is_on(),
                     "the history read back"
                 );
+                // The numbers go on after the journal's and those kept;
+                // those kept without one (written before #923) get theirs,
+                // then those that came meanwhile move after them.
+                let mut seed = notes
+                    .iter()
+                    .map(|r| r.note.number)
+                    .max()
+                    .unwrap_or(0)
+                    .max(journal)
+                    + 1;
+                for r in notes.iter_mut().filter(|r| r.note.number == 0) {
+                    r.note.number = seed;
+                    seed += 1;
+                }
+                self.renumber(seed - 1);
+                for line in std::mem::take(&mut self.unwritten) {
+                    effects.push(Effect::Journal(line));
+                }
                 // Written then, with what came meanwhile (nothing was until
                 // then).
                 self.history.restore(notes);
@@ -664,16 +765,21 @@ impl Stack {
         let Some(kept) = self.history.remove(key) else {
             return;
         };
-        let Some(id) = kept.live else {
-            return;
-        };
+        if let Some(id) = kept.live {
+            self.close_live(id, 2, now, effects);
+        }
+    }
+
+    /// The live notification `id` closed for `reason`: its bubble goes, or
+    /// it leaves the queue; its sender hears it.
+    fn close_live(&mut self, id: u32, reason: u32, now: Instant, effects: &mut Vec<Effect>) {
         if let Some(serial) = self
             .bubbles
             .iter()
             .find(|b| b.note.id == id && !b.leaving())
             .map(|b| b.serial)
         {
-            self.leave(serial, 2, now, effects);
+            self.leave(serial, reason, now, effects);
             return;
         }
         let before = self.queue.len();
@@ -681,7 +787,93 @@ impl Stack {
         if self.queue.len() != before {
             self.relayout(effects);
         }
-        self.closed(id, 2, effects);
+        self.closed(id, reason, effects);
+    }
+
+    /// The number of a notification of server id `id`: a replacement's,
+    /// the one it replaces; else a new one.
+    fn number_of(&mut self, id: u32) -> u64 {
+        let replaced = self
+            .history
+            .items()
+            .iter()
+            .find(|k| k.live == Some(id))
+            .map(|k| k.key)
+            .or_else(|| {
+                self.bubbles
+                    .iter()
+                    .find(|b| b.note.id == id && !b.leaving())
+                    .map(|b| b.note.number)
+            })
+            .or_else(|| self.queue.iter().find(|n| n.id == id).map(|n| n.number));
+        replaced.unwrap_or_else(|| {
+            let number = self.number;
+            self.number += 1;
+            number
+        })
+    }
+
+    /// What came before the numbers kept were known moves `by` after them.
+    fn renumber(&mut self, by: u64) {
+        if by == 0 {
+            return;
+        }
+        self.history.renumber(by);
+        for note in self
+            .bubbles
+            .iter_mut()
+            .map(|b| &mut b.note)
+            .chain(self.queue.iter_mut())
+            .filter(|n| n.number != 0)
+        {
+            note.number += by;
+        }
+        for line in &mut self.unwritten {
+            line.id += by;
+            line.replaces = line.replaces.map(|r| r + by);
+        }
+        self.number += by;
+    }
+
+    /// `note`'s line in the journal: where it went, `to`; whether it
+    /// replaces one. Held until what was kept is read back.
+    fn journal(
+        &mut self,
+        note: &Note,
+        level: NotifyLevel,
+        replaces: bool,
+        to: To,
+        effects: &mut Vec<Effect>,
+    ) {
+        // The desktop's own are not served: not written.
+        if super::is_own(note.id) || note.id == SUMMARY {
+            return;
+        }
+        let line = journal::Line {
+            at: note.at,
+            id: note.number,
+            app: note.app.clone(),
+            app_id: note.app_id(),
+            title: note.summary.clone(),
+            body: note.body.clone(),
+            urgency: note.urgency,
+            actions: note.actions.iter().map(|(_, l)| l.clone()).collect(),
+            transient: note.transient,
+            replaces: replaces.then_some(note.number),
+            level,
+            to,
+        };
+        tracing::debug!(
+            id = note.number,
+            app = note.app,
+            to = to.word(),
+            "a notification journaled"
+        );
+        if self.restored {
+            effects.push(Effect::Journal(line));
+        } else {
+            self.unwritten.push(line);
+        }
     }
 
     /// Notification `id` closed for `reason`: its sender hears it, and holds
@@ -744,10 +936,15 @@ impl Stack {
     fn notify(&mut self, note: Note, now: Instant, effects: &mut Vec<Effect>) {
         let id = note.id;
         self.history.prune(note.at);
+        // A replacement keeps the number of the one it replaces.
+        let replaces = self.history.items().iter().any(|k| k.live == Some(id))
+            || self.bubbles.iter().any(|b| b.note.id == id && !b.leaving())
+            || self.queue.iter().any(|n| n.id == id);
         // Its application's level first (#899).
         let level = self.levels.of(&note.app_id());
         let fate = level.fate(note.urgency == Urgency::Critical);
         if fate == NotifyFate::Drop {
+            self.journal(&note, level, replaces, To::Dropped, effects);
             self.drop_note(&note, now, effects);
             return;
         }
@@ -761,7 +958,7 @@ impl Stack {
             if quiet {
                 let serial = bubble.serial;
                 self.leave_silently(serial, now, effects);
-                self.keep(note);
+                self.keep(note, level, replaces, effects);
                 return;
             }
             tracing::debug!(id, "a bubble updated in place");
@@ -770,12 +967,15 @@ impl Stack {
             bubble.phase = Phase::Shown(Countdown::of(note.timeout, paused, now));
             bubble.note = note.clone();
             effects.push(Effect::Wake(bubble.namespace()));
+            self.journal(&note, level, replaces, To::Bubble, effects);
             self.history.update(note);
             self.relayout(effects);
             return;
         }
         if let Some(waiting) = self.queue.iter_mut().find(|n| n.id == id) {
             *waiting = note.clone();
+            let to = if self.locked { To::Held } else { To::Bubble };
+            self.journal(&note, level, replaces, to, effects);
             self.history.update(note);
             return;
         }
@@ -788,33 +988,40 @@ impl Stack {
                 level = level.word(),
                 "a notification without a bubble: to the history only"
             );
-            self.keep(note);
+            self.keep(note, level, replaces, effects);
             return;
         }
-        if self.dnd.is_on() && note.urgency != Urgency::Critical {
+        let held = if self.dnd.is_on() && note.urgency != Urgency::Critical {
             tracing::info!(
                 id,
                 app = note.app,
                 "a notification's bubble held: do not disturb"
             );
             tracing::debug!(id, title = note.summary, "held: do not disturb");
-            if let Some(held) = &mut self.sharing {
-                held.push(note.app.clone());
-            }
-            self.history.add(note, Sight::Unseen);
-            return;
-        }
-        if let Some(held) = &mut self.sharing
-            && note.urgency != Urgency::Critical
-        {
+            true
+        } else if self.sharing.is_some() && note.urgency != Urgency::Critical {
             tracing::info!(
                 id,
                 app = note.app,
                 "a notification's bubble held: the screen is shared"
             );
             tracing::debug!(id, title = note.summary, "held: the screen is shared");
-            held.push(note.app.clone());
-            self.history.add(note, Sight::Unseen);
+            true
+        } else {
+            false
+        };
+        if held {
+            if let Some(held) = &mut self.sharing {
+                held.push(note.app.clone());
+            }
+            // A transient one held: nowhere, closed (1) at once.
+            if note.transient {
+                self.journal(&note, level, replaces, To::Journal, effects);
+                self.closed(id, 1, effects);
+                return;
+            }
+            self.journal(&note, level, replaces, To::Held, effects);
+            self.history.add(note, Sight::New, super::is_own(id));
             return;
         }
         let app = note.app.clone();
@@ -826,7 +1033,13 @@ impl Stack {
             tracing::info!(id, app, "a notification's sound plays");
             effects.push(Effect::Sound(sound.clone()));
         }
-        self.history.add(note.clone(), Sight::Showing);
+        let to = if self.locked { To::Held } else { To::Bubble };
+        self.journal(&note, level, replaces, to, effects);
+        // A transient one makes its bubble, and goes nowhere after.
+        if !note.transient {
+            self.history
+                .add(note.clone(), Sight::Showing, super::is_own(id));
+        }
         self.queue.push_back(note);
         self.fill(now);
         self.relayout(effects);
@@ -875,15 +1088,22 @@ impl Stack {
     }
 
     /// Straight to the history: a low one counted by the badge, an agent's
-    /// not.
-    fn keep(&mut self, note: Note) {
-        let seen = if note.agent {
-            Sight::Seen
-        } else {
-            Sight::Unseen
-        };
+    /// seen (5.3's rule); a transient one nowhere, closed (1) at once.
+    fn keep(&mut self, note: Note, level: NotifyLevel, replaces: bool, effects: &mut Vec<Effect>) {
         let (id, agent) = (note.id, note.agent);
-        self.history.add(note, seen);
+        if note.transient {
+            self.journal(&note, level, replaces, To::Journal, effects);
+            self.history.remove_live(id);
+            self.closed(id, 1, effects);
+            return;
+        }
+        let (seen, to) = if agent {
+            (Sight::Seen, To::Agent)
+        } else {
+            (Sight::New, To::History)
+        };
+        self.journal(&note, level, replaces, to, effects);
+        self.history.add(note, seen, super::is_own(id));
         tracing::debug!(
             id,
             agent,
@@ -917,12 +1137,19 @@ impl Stack {
     /// Without the pointer having rested on it, it was not seen: the badge
     /// counts it.
     fn expire(&mut self, serial: u64, now: Instant, effects: &mut Vec<Effect>) {
-        let Some((id, rested)) = self.showing(serial).map(|b| (b.note.id, b.rested)) else {
+        let Some((id, rested, transient)) = self
+            .showing(serial)
+            .map(|b| (b.note.id, b.rested, b.note.transient))
+        else {
             return;
         };
         tracing::debug!(serial, id, "a bubble's time is up");
-        let seen = if rested { Sight::Seen } else { Sight::Unseen };
-        self.history.set_seen(id, seen);
+        // A transient one goes nowhere: closed as expired (1).
+        if transient {
+            self.closed(id, 1, effects);
+        }
+        let seen = if rested { Sight::Noticed } else { Sight::New };
+        self.history.bubble_left(id, seen);
         self.leave_silently(serial, now, effects);
     }
 
@@ -931,7 +1158,7 @@ impl Stack {
         let Some(id) = self.showing(serial).map(|b| b.note.id) else {
             return;
         };
-        self.history.set_seen(id, Sight::Seen);
+        self.history.bubble_left(id, Sight::Noticed);
         self.closed(id, reason, effects);
         self.leave_silently(serial, now, effects);
     }
@@ -1159,6 +1386,9 @@ pub fn summary(held: &[String], at: i64) -> Option<Note> {
         icon_from: super::note::IconFrom::default(),
         at,
         sound: None,
+        transient: false,
+        ancestry: Vec::new(),
+        number: 0,
     })
 }
 
@@ -1238,7 +1468,7 @@ mod tests {
     const SCREEN: &str = "eDP-1";
     const MS: fn(u64) -> Duration = Duration::from_millis;
 
-    fn note(id: u32) -> Note {
+    pub(super) fn note(id: u32) -> Note {
         Note {
             id,
             app: "Slack".to_owned(),
@@ -1258,14 +1488,26 @@ mod tests {
             icon_from: crate::notifications::note::IconFrom::default(),
             at: 1_000_000,
             sound: None,
+            number: 0,
+            transient: false,
+            ancestry: Vec::new(),
         }
     }
 
-    fn notify(note: Note) -> Input {
+    pub(super) fn notify(note: Note) -> Input {
         Input::Notify(Box::new(note))
     }
 
-    fn stack() -> Stack {
+    fn restored(note: Note, seen: Sight) -> Restored {
+        Restored {
+            note,
+            seen,
+            pin: None,
+            own: false,
+        }
+    }
+
+    pub(super) fn stack() -> Stack {
         let mut stack = Stack::new(true);
         let now = Instant::now();
         stack.handle(Input::Bars(vec![(SCREEN.to_owned(), Form::Full)]), now);
@@ -1302,6 +1544,7 @@ mod tests {
         let levels = |apps: &[(&str, NotifyLevel)]| {
             Input::Levels(NotifyLevels {
                 apps: apps.iter().map(|(a, l)| ((*a).to_owned(), *l)).collect(),
+                seen_on_focus: std::collections::BTreeMap::new(),
             })
         };
         let from = |id: u32, app: &str, entry: Option<&str>, critical: bool| {
@@ -1603,7 +1846,7 @@ mod tests {
         );
         assert_eq!(s.badge(), 0);
         assert!(effects.contains(&Effect::Wake(FOOTER_NAMESPACE.to_owned())));
-        assert!(s.history.items().iter().any(|k| k.seen == Sight::Unseen));
+        assert!(s.history.items().iter().any(|k| k.seen == Sight::New));
         s.handle(
             Input::History {
                 open: false,
@@ -1612,11 +1855,11 @@ mod tests {
             t0 + LIFE * 3,
         );
         assert_eq!(s.badge(), 0);
-        assert!(s.history.items().iter().all(|k| k.seen == Sight::Seen));
+        assert!(s.history.items().iter().all(|k| k.seen == Sight::Noticed));
     }
 
     #[test]
-    fn a_click_in_the_history_invokes_raises_and_removes_and_the_close_removes() {
+    fn a_click_in_the_history_invokes_raises_and_leaves_it_seen_and_the_close_removes() {
         let mut s = stack();
         let t0 = Instant::now();
         let mut low = note(1);
@@ -1647,9 +1890,11 @@ mod tests {
             app: "slack".to_owned()
         }));
         assert!(effects.contains(&Effect::Changed));
-        assert_eq!(keys(&s), [second]);
+        // Seen, not taken out (#923).
+        assert_eq!(keys(&s), [second, first]);
+        assert_eq!(s.history.get(first).map(|k| k.seen), Some(Sight::Seen));
         // Its ✕: closed, no action.
-        let effects = s.handle(Input::Remove(vec![second]), t0);
+        let effects = s.handle(Input::Remove(vec![second, first]), t0);
         assert_eq!(signals(&effects), [Signal::Closed { id: 2, reason: 2 }]);
         assert!(s.history.items().is_empty());
         // A bubble gone after its time: still held, its action works from
@@ -1680,8 +1925,9 @@ mod tests {
         // said.
         s.handle(
             Input::Restored {
-                notes: vec![(note(9), Sight::Seen)],
+                notes: vec![restored(note(9), Sight::Noticed)],
                 dnd: Dnd::Off,
+                journal: 0,
             },
             t0,
         );
@@ -1824,8 +2070,9 @@ mod tests {
         old.at = 500;
         let effects = s.handle(
             Input::Restored {
-                notes: vec![(old, Sight::Unseen)],
+                notes: vec![restored(old, Sight::New)],
                 dnd: Dnd::Off,
+                journal: 0,
             },
             t0,
         );
@@ -1836,5 +2083,100 @@ mod tests {
         assert_eq!(saved, Some(2));
         assert_eq!(s.badge(), 2);
         assert_eq!(s.history.items()[1].note.at, 500);
+    }
+
+    fn journaled(effects: &[Effect]) -> Vec<(u64, To, bool)> {
+        effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Journal(line) => Some((line.id, line.to, line.transient)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(super) fn restored_now(s: &mut Stack, journal: u64) -> Vec<Effect> {
+        s.handle(
+            Input::Restored {
+                notes: Vec::new(),
+                dnd: Dnd::Off,
+                journal,
+            },
+            Instant::now(),
+        )
+    }
+
+    #[test]
+    fn a_transient_one_bubbles_then_goes_nowhere_and_every_one_is_journaled() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        restored_now(&mut s, 0);
+        let mut transient = note(1);
+        transient.transient = true;
+        let effects = s.handle(notify(transient), t0);
+        assert_eq!(opened(&effects).len(), 1);
+        assert_eq!(journaled(&effects), [(1, To::Bubble, true)]);
+        assert!(s.history.items().is_empty());
+        // Its time up: closed as expired, nothing kept, nothing counted.
+        let effects = s.tick(t0 + LIFE);
+        assert_eq!(signals(&effects), [Signal::Closed { id: 1, reason: 1 }]);
+        assert_eq!((s.badge(), s.history.items().len()), (0, 0));
+        // One that makes no bubble: closed at once.
+        let mut low = note(2);
+        low.transient = true;
+        low.urgency = Urgency::Low;
+        let effects = s.handle(notify(low), t0);
+        assert_eq!(signals(&effects), [Signal::Closed { id: 2, reason: 1 }]);
+        assert_eq!(journaled(&effects), [(2, To::Journal, true)]);
+        // Every one journaled, where it went.
+        let mut quiet = note(3);
+        quiet.urgency = Urgency::Low;
+        assert_eq!(
+            journaled(&s.handle(notify(quiet), t0)),
+            [(3, To::History, false)]
+        );
+        let mut agent = note(4);
+        agent.agent = true;
+        assert_eq!(
+            journaled(&s.handle(notify(agent), t0)),
+            [(4, To::Agent, false)]
+        );
+    }
+
+    #[test]
+    fn the_numbers_go_on_after_the_journals_and_those_kept() {
+        let mut s = stack();
+        let t0 = Instant::now();
+        let mut low = note(1);
+        low.urgency = Urgency::Low;
+        // Before what was kept is read back: held, not written.
+        assert!(journaled(&s.handle(notify(low), t0)).is_empty());
+        let mut old = note(9);
+        old.at = 500;
+        let effects = s.handle(
+            Input::Restored {
+                notes: vec![restored(old, Sight::Noticed)],
+                dnd: Dnd::Off,
+                journal: 41,
+            },
+            t0,
+        );
+        // The one kept without a number gets 42, the one that came meanwhile
+        // 43, written then.
+        assert_eq!(journaled(&effects), [(43, To::History, false)]);
+        let keys: Vec<u64> = s.history.items().iter().map(|k| k.key).collect();
+        assert_eq!(keys, [43, 42]);
+        // A replacement keeps its number.
+        let mut again = note(1);
+        again.urgency = Urgency::Low;
+        again.summary = "Encore".to_owned();
+        let effects = s.handle(notify(again), t0);
+        assert_eq!(journaled(&effects), [(43, To::History, false)]);
+        let mut next = note(2);
+        next.urgency = Urgency::Low;
+        assert_eq!(
+            journaled(&s.handle(notify(next), t0)),
+            [(44, To::History, false)]
+        );
     }
 }

@@ -11,8 +11,10 @@
 //! move.
 //!
 //! The compositor also tells the shell which screen the bubbles show on,
-//! the focused window's (else the pointer's), when it changes; and brings
-//! the window of a bubble's application when the bubble is clicked.
+//! the focused window's (else the pointer's), when it changes; which
+//! window takes the user's focus (#923), for the bell to fold its
+//! application's notifications; and brings the window of a bubble's
+//! application when the bubble is clicked.
 
 use std::time::Duration;
 
@@ -40,6 +42,8 @@ pub struct Bubbles {
     /// Whether the user is not to be disturbed, as the shell last said it
     /// (none yet): the Settings' switch shows it (#899).
     pub dnd: Option<bool>,
+    /// The window the shell was last told took the user's focus (#923).
+    focus_told: Option<WindowId>,
 }
 
 #[derive(Debug)]
@@ -167,11 +171,12 @@ impl State {
     }
 
     /// Once a turn of the loop: the shell is told the bubbles' screen when
-    /// it changed.
+    /// it changed, and the window that took the user's focus.
     pub fn flush_bubbles_screen(&mut self) {
         if !self.shell_linked() {
             return;
         }
+        self.flush_app_focus();
         let Some(screen) = self.bubbles_screen().map(|o| o.name()) else {
             return;
         };
@@ -186,6 +191,47 @@ impl State {
     /// The shell connected: it is told the screen again.
     pub fn tell_bubbles_screen(&mut self) {
         self.bubbles.told = None;
+    }
+
+    /// A window took the user's keyboard focus since the shell was last
+    /// told (#923): its application's notifications fold. Only another
+    /// window taking it: the lock, a popover or the launcher taking it and
+    /// giving it back to the same window folds nothing, and nothing is
+    /// told while locked. An agent's seat has a focus of its own, never
+    /// this one.
+    fn flush_app_focus(&mut self) {
+        if self.locked() {
+            return;
+        }
+        let Some(id) = self
+            .model
+            .focused()
+            .filter(|id| self.windows.contains_key(id) && !self.model.is_minimized(*id))
+        else {
+            return;
+        };
+        if self.bubbles.focus_told == Some(id) {
+            return;
+        }
+        self.bubbles.focus_told = Some(id);
+        let app_pid = |id: &WindowId| {
+            self.windows.get(id).map(|m| {
+                (
+                    crate::windows::app_id(&m.window).unwrap_or_default(),
+                    self.pid_of(&m.window).unwrap_or(0),
+                )
+            })
+        };
+        let Some((app, pid)) = app_pid(&id) else {
+            return;
+        };
+        let windows = self.model.stack().iter().filter_map(app_pid).collect();
+        tracing::debug!(app, pid, "a window takes the user's focus: the bell told");
+        self.tell_shell(ToShell::AppFocus(hocus_link::AppFocus {
+            app,
+            pid,
+            windows,
+        }));
     }
 
     /// A bubble was clicked: the window of its application `app` (by its
@@ -207,19 +253,11 @@ impl State {
     /// The topmost window whose application's id is `app`'s, ignoring
     /// case, or its last part (`org.mozilla.firefox`, `firefox`).
     pub(crate) fn window_of_app(&self, app: &str) -> Option<WindowId> {
-        let app = app.trim_end_matches(".desktop").to_lowercase();
-        if app.is_empty() {
-            return None;
-        }
-        let last = app.rsplit('.').next().unwrap_or_default().to_owned();
         self.model.stack().iter().rev().copied().find(|id| {
             self.windows
                 .get(id)
                 .and_then(|m| crate::windows::app_id(&m.window))
-                .is_some_and(|id| {
-                    let id = id.to_lowercase();
-                    id == app || id == last || id.rsplit('.').next() == Some(last.as_str())
-                })
+                .is_some_and(|id| hocus_link::same_app(app, &id))
         })
     }
 

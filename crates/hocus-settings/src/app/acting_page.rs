@@ -233,7 +233,7 @@ impl App {
                 self.acting_write(model::key(&name, "access"), Some(value), said, then);
             }
             Msg::Right(name, right) => {
-                let Some(agent) = file.agent(&name).filter(|a| a.acts) else {
+                let Some(agent) = file.agent(&name).filter(|a| a.acts || !right.acting()) else {
                     return iced::Task::none();
                 };
                 let on = !agent.holds(right);
@@ -775,8 +775,10 @@ impl App {
         // The rights, two a line.
         let check = |right: Right| -> El<'a> {
             let on = agent.holds(right);
-            let inert = !agent.acts || !writable;
-            let alpha = if agent.acts { 1.0 } else { INERT };
+            // Reading the notifications is not inert while it only looks.
+            let looks_only = !agent.acts && right.acting();
+            let inert = looks_only || !writable;
+            let alpha = if looks_only { INERT } else { 1.0 };
             let focused = self.acting_focused(&Stop::Right(name.clone(), right));
             let tick: El<'a> = if on {
                 container(icon(Icon::Check, 12.0, fade(DEEP.get(), alpha)))
@@ -835,11 +837,12 @@ impl App {
                 .id(format!("act:{name}:{}", right.key()))
                 .into()
         };
-        // Drawing on the screen on a line of its own, as the mockup has it.
+        // Drawing on the screen and the notifications on a line of their
+        // own, as the mockups have them.
         let checks = column![
             row![check(Right::Windows), check(Right::Desktops)].spacing(6),
             row![check(Right::Settings), check(Right::Input)].spacing(6),
-            row![check(Right::Draw)],
+            row![check(Right::Draw), check(Right::Notifications)].spacing(6),
         ]
         .spacing(6);
         let apps = column![

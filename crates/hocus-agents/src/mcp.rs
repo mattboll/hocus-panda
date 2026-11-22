@@ -376,6 +376,76 @@ pub struct OfWindow {
     pub window: u64,
 }
 
+/// The longest reason a pin shows.
+pub const MAX_REASON: usize = hocus_link::PIN_REASON;
+/// The most notifications a list or a search says.
+pub const MAX_NOTES: u32 = 200;
+/// What they say when the agent does not ask a number.
+pub const NOTES: u32 = 50;
+
+/// The bell's notifications (#923, docs/design/mcp.md "Notifications").
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListNotifications {
+    /// An application's id or name, ignoring case.
+    #[serde(default)]
+    pub app: Option<String>,
+    /// `new`, `noticed` or `seen`; all when left out.
+    #[serde(default)]
+    pub state: Option<hocus_link::NoteState>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// The notifications' journal searched.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchNotifications {
+    /// Words, all of them, ignoring case and accents.
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub app: Option<String>,
+    /// A date (`2026-11-20`), or RFC 3339.
+    #[serde(default)]
+    pub since: Option<String>,
+    #[serde(default)]
+    pub until: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PinNotification {
+    pub id: u64,
+    /// One line, 80 characters at most.
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnpinNotification {
+    pub id: u64,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TidyNotifications {
+    #[serde(default)]
+    pub ids: Vec<u64>,
+    /// Or all of an application's new and noticed ones.
+    #[serde(default)]
+    pub app: Option<String>,
+    #[serde(default)]
+    pub intent: Option<String>,
+}
+
 /// One of an acting agent's rights, a check box of the Settings' page
 /// each (`[[agents.mcp]]`' `windows`, `desktops`, `settings`, `input`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -391,6 +461,8 @@ pub enum Right {
     Input,
     /// Draw on the screen (`draw`).
     Draw,
+    /// Read the bell and its journal; pin and tidy when acting (#923).
+    Notifications,
 }
 
 /// What a tool asks, read from its name and arguments.
@@ -418,6 +490,11 @@ pub enum Call {
     AccessibilityTree(OfWindow),
     Celebrate(Celebrate),
     Draw(Draw),
+    ListNotifications(ListNotifications),
+    SearchNotifications(SearchNotifications),
+    PinNotification(PinNotification),
+    UnpinNotification(UnpinNotification),
+    TidyNotifications(TidyNotifications),
 }
 
 impl Call {
@@ -449,6 +526,22 @@ impl Call {
                 | Self::PressKeys(_)
                 | Self::CloseWindow(_)
                 | Self::Draw(_)
+                | Self::PinNotification(_)
+                | Self::UnpinNotification(_)
+                | Self::TidyNotifications(_)
+        )
+    }
+
+    /// Whether it is about the bell (#923): refused without the
+    /// `notifications` right, reading ones too.
+    pub fn notes(&self) -> bool {
+        matches!(
+            self,
+            Self::ListNotifications(_)
+                | Self::SearchNotifications(_)
+                | Self::PinNotification(_)
+                | Self::UnpinNotification(_)
+                | Self::TidyNotifications(_)
         )
     }
 
@@ -482,6 +575,9 @@ impl Call {
             | Self::Type(_)
             | Self::PressKeys(_) => vec![Right::Input],
             Self::Draw(_) => vec![Right::Draw],
+            Self::PinNotification(_) | Self::UnpinNotification(_) | Self::TidyNotifications(_) => {
+                vec![Right::Notifications]
+            }
             _ => Vec::new(),
         }
     }
@@ -519,6 +615,9 @@ impl Call {
             Self::PressKeys(c) => c.intent.as_deref(),
             Self::CloseWindow(c) => c.intent.as_deref(),
             Self::Draw(c) => c.intent.as_deref(),
+            Self::PinNotification(c) => c.intent.as_deref(),
+            Self::UnpinNotification(c) => c.intent.as_deref(),
+            Self::TidyNotifications(c) => c.intent.as_deref(),
             _ => None,
         }
     }
@@ -547,6 +646,11 @@ impl Call {
             Self::AccessibilityTree(_) => "accessibility_tree",
             Self::Celebrate(_) => "celebrate",
             Self::Draw(_) => "draw",
+            Self::ListNotifications(_) => "list_notifications",
+            Self::SearchNotifications(_) => "search_notifications",
+            Self::PinNotification(_) => "pin_notification",
+            Self::UnpinNotification(_) => "unpin_notification",
+            Self::TidyNotifications(_) => "tidy_notifications",
         }
     }
 }
@@ -669,6 +773,24 @@ mod tests {
             ),
             Ok(vec![Right::Draw])
         );
+        // The bell (#923): reading needs no more than the right, which
+        // the compositor checks for every one of them.
+        let listed = Call::of("list_notifications", &json!({ "state": "new" }));
+        assert!(
+            listed
+                .as_ref()
+                .is_ok_and(|l| l.notes() && !l.acts() && l.needs().is_empty())
+        );
+        assert!(Call::of("list_notifications", &json!({ "state": "read" })).is_err());
+        assert_eq!(
+            call("pin_notification", json!({ "id": 3, "reason": "à payer" })),
+            Ok(vec![Right::Notifications])
+        );
+        let tidied = Call::of(
+            "tidy_notifications",
+            &json!({ "app": "Chat", "intent": "x" }),
+        );
+        assert!(tidied.is_ok_and(|t| t.acts() && t.intent() == Some("x")));
     }
 
     #[test]

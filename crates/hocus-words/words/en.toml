@@ -1595,6 +1595,14 @@ nobody = "No application has notified you yet."
 level_done = "{name}: {level}."
 level_undone = "Undone: {name} back to {level}."
 level_redone = "Redone: {name}, {level}."
+seen_on_open = "Seen once I open it"
+not_seen_on_open = "not seen on opening"
+seen_on_open_lower = "seen once I open it"
+seen_done = "{name}: {said}."
+seen_undone = "Undone: {name}, {said}."
+seen_redone = "Redone: {name}, {said}."
+journal = "Journal of the last 30 days"
+open = "Open"
 
 [settings.effects]
 wallpaper = "EFFECTS · THE WALLPAPER"
@@ -2449,10 +2457,6 @@ no_limit = "No limit"
 bubbles_show = "Bubbles show"
 until_you_turn_it_off = "Until you turn it off"
 only_urgent_ones_come_through = "only urgent ones come through"
-recent = "RECENT"
-earlier_today = "EARLIER TODAY"
-yesterday = "YESTERDAY"
-older = "OLDER"
 nothing_new = "Nothing new"
 all_read = "All read."
 until_tomorrow = "Until tomorrow, {self_time_at}"
@@ -2462,6 +2466,12 @@ min_ago = "{x_n} min ago"
 h_ago = "{x_n} h ago"
 yesterday_2 = "yesterday"
 days_ago = "{x_n} days ago"
+n_more = "{x_n} more"
+collapse = "Show less"
+n_seen = { one = "{n} seen", other = "{n} seen" }
+dismiss = "Dismiss"
+clear_app = "Clear {app}"
+pinned_by = "Pinned by {agent}"
 
 [shell.popover_session_words]
 settings = "Settings"
@@ -2822,6 +2832,7 @@ all = "Bubble and sound"
 silent = "Bubble, no sound"
 history = "History only"
 none = "Nothing"
+seen_on_open = "Seen once I open it"
 
 [shell.tasks]
 to_do = "TO DO"
@@ -3084,6 +3095,17 @@ no_answer_refused = "Without an answer within 60 s, it is refused."
 card_keys = "Enter allows · Esc refuses"
 hand_back = "Hand back"
 taken_note = "You have taken over from {agent}"
+acting_notifications = "tidying your notifications…"
+notes_pinned = { one = "pinned {n} notification", other = "pinned {n} notifications" }
+notes_unpinned = { one = "unpinned {n} notification", other = "unpinned {n} notifications" }
+notes_tidied = { one = "tidied away {n} notification", other = "tidied away {n} notifications" }
+notes_of = "{what} from {app}"
+notes_from = "{what} · {app}"
+read_notes = { one = "read {n} notification", other = "read {n} notifications" }
+searched_notes = "searched the notifications"
+why_no_notifications = "not the notifications"
+tool_read_notes = "read the notifications"
+tool_sort_notes = "sort the notifications"
 
 [settings.acting]
 look = "Look"
@@ -3142,6 +3164,7 @@ not_shown_before = "No longer shown before acting"
 undone = "Undone: {said}."
 redone = "Redone: {said}."
 remove_app = "Take {app} out"
+notifications = "Read and sort the notifications"
 
 [shell.project]
 closed_pill = "closed"

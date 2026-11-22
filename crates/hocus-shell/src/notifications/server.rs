@@ -269,7 +269,9 @@ impl Server {
             (icon, note::programs_above(pid), conversation, named)
         })
         .await;
-        let (icon, programs, conversation, named) = found.unwrap_or_default();
+        let (icon, above, conversation, named) = found.unwrap_or_default();
+        let ancestry: Vec<u32> = above.iter().map(|(pid, _)| *pid).collect();
+        let programs: Vec<String> = above.into_iter().map(|(_, name)| name).collect();
         if let Some(conversation) = &conversation {
             tracing::debug!(
                 id,
@@ -296,6 +298,13 @@ impl Server {
             .get("resident")
             .and_then(|v| bool::try_from(&**v).ok())
             .unwrap_or(false);
+        // A boolean, or a non-zero integer of any width (#923).
+        let transient = hints.get("transient").is_some_and(|v| {
+            bool::try_from(&**v)
+                .ok()
+                .or_else(|| number(v).map(|n| n != 0))
+                .unwrap_or(false)
+        });
         let note = Note {
             id,
             app: app_name,
@@ -315,6 +324,9 @@ impl Server {
             icon_from,
             at: super::wall_ms(),
             sound,
+            transient,
+            ancestry,
+            number: 0,
         };
         // Counted for the Settings' list (#899), whatever its level.
         super::apps::counted(note.app_id(), note.app.clone(), named);
@@ -324,6 +336,7 @@ impl Server {
             app = note.app,
             urgency = ?note.urgency,
             agent,
+            transient,
             "a notification"
         );
         super::input(Input::Notify(Box::new(note)));

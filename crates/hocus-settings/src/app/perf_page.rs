@@ -200,7 +200,7 @@ impl App {
                 if let Some(dir) = self.perf.dir.clone() {
                     tracing::info!(folder = %dir.display(), "the days' folder is opened");
                     // Made first: no day may have been recorded yet.
-                    super::open_folder(dir, true);
+                    super::open_place(dir, true);
                 }
             }
         }

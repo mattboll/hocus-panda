@@ -2,7 +2,9 @@
 //! "Notifications"): do not disturb, the bell's own (the shell keeps it;
 //! the compositor's line says it and sets it), and each application that
 //! sent notifications, the busiest this week first, with its level
-//! (`[notifications.apps]`).
+//! (`[notifications.apps]`) and whether opening it folds its notifications
+//! (`[notifications.seen-on-focus]`, #923); the journal of the last 30
+//! days, which « Ouvrir » opens.
 //!
 //! The applications are the shell's count
 //! (`$XDG_STATE_HOME/hocuspanda/notification-senders`), read as the page
@@ -22,20 +24,96 @@ use crate::{
 
 /// Do not disturb's row.
 pub const DND: &str = "notifications.dnd";
+/// The applications' check box, in each one's menu (#923).
+pub const SEEN_ON_OPEN: &str = "notifications.seen-on-open";
+/// The journal's row (#923).
+pub const JOURNAL: &str = "notifications.journal";
 
-/// The settings of the page that live outside the file: do not disturb.
+/// The settings of the page that live outside the file: do not disturb,
+/// the applications' check box, the journal.
 pub fn outside() -> &'static [Outside] {
-    const OUTSIDE: [Outside; 1] = [Outside {
-        id: DND,
-        section: SectionId::Notifications,
-        group: model_words::NOTIFICATIONS,
-        name: hocus_words::settings::notifications::DND,
-        keywords: (
-            &["ne pas déranger", "silence", "cloche", "bulles", "calme"],
-            &["do not disturb", "quiet", "bell", "bubbles", "silence"],
-        ),
-    }];
+    use hocus_words::settings::notifications as words;
+    const OUTSIDE: [Outside; 3] = [
+        Outside {
+            id: DND,
+            section: SectionId::Notifications,
+            group: model_words::NOTIFICATIONS,
+            name: words::DND,
+            keywords: (
+                &["ne pas déranger", "silence", "cloche", "bulles", "calme"],
+                &["do not disturb", "quiet", "bell", "bubbles", "silence"],
+            ),
+        },
+        Outside {
+            id: SEEN_ON_OPEN,
+            section: SectionId::Notifications,
+            group: model_words::NOTIFICATIONS,
+            name: words::SEEN_ON_OPEN,
+            keywords: (
+                &["vues", "ouvrir", "ranger", "cloche", "lues"],
+                &["seen", "open", "tidy", "bell", "read"],
+            ),
+        },
+        Outside {
+            id: JOURNAL,
+            section: SectionId::Notifications,
+            group: model_words::NOTIFICATIONS,
+            name: words::JOURNAL,
+            keywords: (
+                &[
+                    "journal des notifications",
+                    "historique",
+                    "30 jours",
+                    "retrouver",
+                ],
+                &["notifications journal", "history", "30 days", "find"],
+            ),
+        },
+    ];
     &OUTSIDE
+}
+
+/// The notifications' journal, the shell's
+/// (`$XDG_STATE_HOME/hocuspanda/notifications.log`).
+pub fn journal_file() -> Option<PathBuf> {
+    hocus_config::state_dir().map(|dir| dir.join("notifications.log"))
+}
+
+/// `file` as its row says it: the home folder said `~`.
+pub fn journal_line(file: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    match home.and_then(|home| file.strip_prefix(home).ok()) {
+        Some(under) => format!("~/{}", under.display()),
+        None => file.display().to_string(),
+    }
+}
+
+/// Whether opening application `id` folds its notifications, as the file
+/// says it (`named`): unless it says it does not.
+pub fn seen_on_open(named: &BTreeMap<String, bool>, id: &str) -> bool {
+    named
+        .get(id)
+        .or_else(|| {
+            named
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(id))
+                .map(|(_, v)| v)
+        })
+        .copied()
+        .unwrap_or(true)
+}
+
+/// What writes whether opening application `id` folds (`on`): its key
+/// `= false`, or taken out for `true` (what applies to those not named).
+pub fn seen_on_open_keys(named: &BTreeMap<String, bool>, id: &str, on: bool) -> Vec<KeyEdit> {
+    let key = named
+        .keys()
+        .find(|k| k.eq_ignore_ascii_case(id))
+        .cloned()
+        .unwrap_or_else(|| id.to_owned());
+    vec![KeyEdit {
+        key: vec!["notifications".to_owned(), "seen-on-focus".to_owned(), key],
+        value: (!on).then(|| "false".to_owned()),
+    }]
 }
 
 /// An application's row.
@@ -197,5 +275,30 @@ mod tests {
         assert_eq!(keys[0].key, ["notifications", "apps", "Slack"]);
         assert_eq!(keys[0].value.as_deref(), Some("\"history\""));
         assert_eq!(level_keys(&named, "slack", NotifyLevel::All)[0].value, None);
+    }
+
+    #[test]
+    fn seen_on_open_is_written_false_its_own_key_kept_and_the_journal_said_from_home() {
+        let named: BTreeMap<String, bool> = [("org.example.Agenda".to_owned(), false)].into();
+        assert!(!seen_on_open(&named, "org.example.agenda"));
+        assert!(seen_on_open(&named, "org.example.Chat"));
+        let keys = seen_on_open_keys(&named, "org.example.agenda", true);
+        assert_eq!(
+            keys[0].key,
+            ["notifications", "seen-on-focus", "org.example.Agenda"]
+        );
+        assert_eq!(keys[0].value, None);
+        let keys = seen_on_open_keys(&named, "Chat", false);
+        assert_eq!(keys[0].value.as_deref(), Some("false"));
+        let home = std::path::Path::new("/home/alex");
+        let file = home.join(".local/state/hocuspanda/notifications.log");
+        assert_eq!(
+            journal_line(&file, Some(home)),
+            "~/.local/state/hocuspanda/notifications.log"
+        );
+        assert_eq!(
+            journal_line(&file, Some(std::path::Path::new("/srv"))),
+            "/home/alex/.local/state/hocuspanda/notifications.log"
+        );
     }
 }

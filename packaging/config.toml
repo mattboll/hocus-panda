@@ -411,6 +411,13 @@
 #   Slack = "silent"
 #   "org.mozilla.firefox" = "none"
 
+# [notifications.seen-on-focus]
+# Whether opening one of an application's windows folds its notifications
+# in the bell under "N vues" (Settings > Notifications, or the "⋯" of a
+# bubble or of a line of the bell), by the same id as [notifications.apps]:
+# true for those not named. Followed live. For example:
+#   "org.example.Agenda" = false
+
 # [perf]
 # The day's CPU and memory of the compositor and the shell, sampled every
 # 10 s on a thread of their own, kept 14 days in
@@ -454,7 +461,9 @@
 # (change them; false), input (click, drag and type, through a pointer and
 # a keyboard of its own, in the applications of apps; true), draw (draw on
 # the screen in its colour, over the windows, until its next action or Esc;
-# false). apps: the applications (app ids, globs) whose windows it may
+# false); and, read or act, notifications (read the bell and search its
+# journal; acting, pin and tidy them too; false). apps: the applications
+# (app ids, globs) whose windows it may
 # click and type in and whose accessible trees it reads (none by default). client and since:
 # the program the Settings plugged it into ("claude-code") and the day.
 # An agent the file does not name is refused. Before each action, its
@@ -467,6 +476,7 @@
 #   access = "act"
 #   settings = true
 #   draw = true
+#   notifications = true
 #   apps = ["kitty", "org.mozilla.*"]
 # show-before-ms = 600
 # confirm-apps = ["hocus-settings", "org.keepassxc.KeePassXC", "com.bitwarden.desktop", "1password", "org.gnome.seahorse.Application", "org.gnome.World.Secrets", "org.kde.kwalletmanager5"]

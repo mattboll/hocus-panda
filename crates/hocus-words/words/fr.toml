@@ -1586,6 +1586,14 @@ nobody = "Aucune application ne t’a encore notifié."
 level_done = "{name} : {level}."
 level_undone = "Annulé : {name} revient à {level}."
 level_redone = "Rétabli : {name}, {level}."
+seen_on_open = "Vues dès que je l’ouvre"
+not_seen_on_open = "pas vues à l’ouverture"
+seen_on_open_lower = "vues dès que je l’ouvre"
+seen_done = "{name} : {said}."
+seen_undone = "Annulé : {name}, {said}."
+seen_redone = "Rétabli : {name}, {said}."
+journal = "Journal des 30 derniers jours"
+open = "Ouvrir"
 
 [settings.effects]
 wallpaper = "EFFETS · LE FOND D’ÉCRAN"
@@ -2440,10 +2448,6 @@ no_limit = "Sans limite"
 bubbles_show = "Les bulles s’affichent"
 until_you_turn_it_off = "Jusqu’à ce que tu l’arrêtes"
 only_urgent_ones_come_through = "seules les urgences passent"
-recent = "RÉCENTES"
-earlier_today = "PLUS TÔT AUJOURD’HUI"
-yesterday = "HIER"
-older = "PLUS ANCIENNES"
 nothing_new = "Rien de neuf"
 all_read = "Tout est lu."
 until_tomorrow = "Jusqu’à demain, {self_time_at}"
@@ -2453,6 +2457,12 @@ min_ago = "il y a {x_n} min"
 h_ago = "il y a {x_n} h"
 yesterday_2 = "hier"
 days_ago = "il y a {x_n} jours"
+n_more = "{x_n} de plus"
+collapse = "Réduire"
+n_seen = { one = "{n} vue", other = "{n} vues" }
+dismiss = "Retirer"
+clear_app = "Effacer {app}"
+pinned_by = "Épinglée par {agent}"
 
 [shell.popover_session_words]
 settings = "Réglages"
@@ -2813,6 +2823,7 @@ all = "Bulle et son"
 silent = "Bulle, sans son"
 history = "Historique seulement"
 none = "Rien"
+seen_on_open = "Vues dès que je l’ouvre"
 
 [shell.tasks]
 to_do = "À FAIRE"
@@ -3075,6 +3086,17 @@ no_answer_refused = "Sans réponse dans 60 s, c’est refusé."
 card_keys = "Entrée autorise · Échap refuse"
 hand_back = "Rendre la main"
 taken_note = "Tu as la main sur {agent}"
+acting_notifications = "range tes notifications…"
+notes_pinned = { one = "épinglé {n} notification", other = "épinglé {n} notifications" }
+notes_unpinned = { one = "désépinglé {n} notification", other = "désépinglé {n} notifications" }
+notes_tidied = { one = "rangé {n} notification", other = "rangé {n} notifications" }
+notes_of = "{what} de {app}"
+notes_from = "{what} · {app}"
+read_notes = { one = "lu {n} notification", other = "lu {n} notifications" }
+searched_notes = "cherché dans les notifications"
+why_no_notifications = "pas les notifications"
+tool_read_notes = "lire les notifications"
+tool_sort_notes = "ranger les notifications"
 
 [settings.acting]
 look = "Regarder"
@@ -3133,6 +3155,7 @@ not_shown_before = "Plus montré avant d’agir"
 undone = "Annulé : {said}."
 redone = "Rétabli : {said}."
 remove_app = "Retirer {app}"
+notifications = "Lire et ranger les notifications"
 
 [shell.project]
 closed_pill = "fermé"
