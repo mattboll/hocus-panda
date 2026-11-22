@@ -3,8 +3,9 @@
 //! standard input and output, against a headless compositor whose
 //! configuration names two agents: `Claude`, who acts and changes
 //! settings, and `Looker`, who only reads. The toast's test runs the real
-//! shell on the CPU, in French, in a home of the test's own. Each test
-//! waits for what it checks, never for a time.
+//! shell on the CPU, in French, in a home of the test's own; the bell's
+//! (#923) runs it serving the notifications on a D-Bus daemon of the
+//! test's own. Each test waits for what it checks, never for a time.
 
 use crate::common;
 
@@ -27,6 +28,18 @@ struct Bed {
     hp: Headless,
     file: PathBuf,
     log: PathBuf,
+    /// The bus the shell serves the notifications on, its daemon stopped
+    /// by its own handle (#923).
+    bus: Option<(std::process::Child, String)>,
+}
+
+impl Drop for Bed {
+    fn drop(&mut self) {
+        if let Some((daemon, _)) = &mut self.bus {
+            let _ = daemon.kill();
+            let _ = daemon.wait();
+        }
+    }
 }
 
 /// The compositor on a 1920 × 1080 screen, its configuration [`CONFIG`];
@@ -42,8 +55,19 @@ fn bed_with(shell: bool, text: &str) -> anyhow::Result<Bed> {
 
 /// The same, applications' trees read on the accessibility bus `a11y`.
 fn bed_on(shell: bool, text: &str, a11y: Option<String>) -> anyhow::Result<Bed> {
+    bed_of(shell, text, a11y, false)
+}
+
+/// The same, the shell serving the notifications on a bus of the test's
+/// own when `bell` (#923).
+fn bed_of(shell: bool, text: &str, a11y: Option<String>, bell: bool) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let root = dir.path();
+    let bus = if bell {
+        Some(common::private_bus(root)?)
+    } else {
+        None
+    };
     for sub in ["home", "config", "state/hocuspanda", "cache"] {
         std::fs::create_dir_all(root.join(sub))?;
     }
@@ -101,7 +125,12 @@ fn bed_on(shell: bool, text: &str, a11y: Option<String>) -> anyhow::Result<Bed> 
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&wrapped, std::fs::Permissions::from_mode(0o755))?;
         }
-        let mut hp = Headless::start_with_shell(headless, config, Some(wrapped))?;
+        let mut hp = match &bus {
+            Some((_, address)) => {
+                Headless::start_on_bus(headless, config, Some(wrapped), Some(address.clone()))?
+            }
+            None => Headless::start_with_shell(headless, config, Some(wrapped))?,
+        };
         let up = hp.dispatch_until(WAIT, |hp| hp.bar_commits() > 0)?;
         anyhow::ensure!(up, "no bar");
         hp
@@ -113,6 +142,7 @@ fn bed_on(shell: bool, text: &str, a11y: Option<String>) -> anyhow::Result<Bed> 
         hp,
         file,
         log,
+        bus,
     })
 }
 
@@ -1631,5 +1661,270 @@ fn shots_drawn() -> anyhow::Result<()> {
     common::wait(&mut bed.hp, std::time::Duration::from_millis(220))?;
     shoot_now(&mut bed.hp, &out, "drag-midway")?;
     claude.answer(&mut bed.hp, asked)?;
+    Ok(())
+}
+
+// --- The bell (#923) ------------------------------------------------------------------
+
+const BELL: &str = "[[agents.mcp]]\nname = \"Claude\"\naccess = \"act\"\nnotifications = true\n\n\
+                    [[agents.mcp]]\nname = \"Looker\"\nnotifications = true\n\n\
+                    [[agents.mcp]]\nname = \"Other\"\naccess = \"act\"\n";
+
+impl Bed {
+    /// Sends a notification of `app` that makes no bubble (low): new.
+    fn notify(&mut self, app: &str, summary: &str) -> anyhow::Result<u32> {
+        let address = self
+            .bus
+            .as_ref()
+            .map(|(_, a)| a.clone())
+            .unwrap_or_default();
+        let low = zbus::OwnedVariant::try_from(zbus::Variant::U8(0))?;
+        common::notify(&address, app, summary, "", vec![("urgency", low)])
+    }
+
+    /// Waits until the shell logged `what` after `mark` (the log's length).
+    fn logged_since(&mut self, mark: usize, what: &str) -> anyhow::Result<()> {
+        let log = self.log.clone();
+        let done = self.hp.dispatch_until(WAIT, |_| {
+            common::logged(&log)
+                .get(mark..)
+                .is_some_and(|new| new.contains(what))
+        })?;
+        anyhow::ensure!(
+            done,
+            "the shell did not log {what:?}:\n{}",
+            common::logged(&log)
+        );
+        Ok(())
+    }
+
+    fn mark(&self) -> usize {
+        common::logged(&self.log).len()
+    }
+}
+
+/// The bell's notifications as `list_notifications` says them.
+fn listed(result: &Value) -> Vec<Value> {
+    result["structuredContent"]["notifications"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_looking_agent_reads_and_searches_the_bell_but_may_not_pin() -> anyhow::Result<()> {
+    let mut bed = bed_of(true, BELL, None, true)?;
+    bed.logged_since(0, "the notifications are served")?;
+    bed.notify("Courriel", "Facture d’octobre")?;
+    bed.notify("Chat", "Camille dans #design")?;
+    bed.logged_since(0, "the bell unread=2")?;
+    let mut looker = mcp(&bed.hp, "Looker")?;
+    let result = looker.tool(&mut bed.hp, "list_notifications", json!({}))?;
+    assert_eq!(result["isError"], false, "{result}");
+    let all = listed(&result);
+    let said: Vec<(&str, &str)> = all
+        .iter()
+        .map(|n| {
+            (
+                n["app"].as_str().unwrap_or_default(),
+                n["state"].as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(said, [("Chat", "new"), ("Courriel", "new")], "{result}");
+    let mail = listed(&looker.tool(
+        &mut bed.hp,
+        "list_notifications",
+        json!({ "app": "courriel" }),
+    )?);
+    assert_eq!(mail.len(), 1);
+    // The journal, ignoring case and accents.
+    let found = looker.tool(
+        &mut bed.hp,
+        "search_notifications",
+        json!({ "text": "FACTURE d'octobre" }),
+    )?;
+    let found = listed(&found);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0]["title"], "Facture d’octobre");
+    assert_eq!(found[0]["state"], "new");
+    // It only looks: no pin.
+    let id = mail[0]["id"].clone();
+    let refused = looker.tool(
+        &mut bed.hp,
+        "pin_notification",
+        json!({ "id": id, "intent": "À payer" }),
+    )?;
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(text(&refused).contains("may only read"), "{refused}");
+    // Its journal says how many it read, never what.
+    let lines = bed.hp.mcp_shown().journal;
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.said == hocus_link::McpSaid::ReadNotes { count: 2 }),
+        "{lines:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_acting_agent_pins_and_tidies_and_annuler_puts_them_back() -> anyhow::Result<()> {
+    let mut bed = bed_of(true, BELL, None, true)?;
+    bed.logged_since(0, "the notifications are served")?;
+    bed.notify("Courriel", "Facture d’octobre")?;
+    let hugo = bed.notify("Chat", "Hugo dans #dev")?;
+    bed.notify("Chat", "Inès dans #général")?;
+    bed.logged_since(0, "the bell unread=3")?;
+    let mut claude = mcp(&bed.hp, "Claude")?;
+    let chat = listed(&claude.tool(&mut bed.hp, "list_notifications", json!({ "app": "Chat" }))?);
+    let id = chat
+        .iter()
+        .find(|n| n["title"] == "Hugo dans #dev")
+        .map(|n| n["id"].clone())
+        .ok_or_else(|| anyhow::anyhow!("no notification {hugo} listed: {chat:?}"))?;
+    // Chat's tidied, then one of them pinned, one request: the badge drops
+    // to Courriel's, then counts the pin.
+    let mark = bed.mark();
+    let tidy = claude.send(
+        "tools/call",
+        json!({ "name": "tidy_notifications", "arguments": { "app": "Chat", "intent": "#général : rien qui t'attende" } }),
+    )?;
+    let pin = claude.send(
+        "tools/call",
+        json!({ "name": "pin_notification", "arguments": { "id": id, "reason": "Il attend ta réponse", "intent": "Hugo attend" } }),
+    )?;
+    let tidied = claude.answer(&mut bed.hp, tidy)?["result"].clone();
+    assert_eq!(tidied["isError"], false, "{tidied}");
+    assert_eq!(tidied["structuredContent"]["tidied"], 2);
+    let pinned = claude.answer(&mut bed.hp, pin)?["result"].clone();
+    assert_eq!(pinned["isError"], false, "{pinned}");
+    bed.logged_since(mark, "the bell unread=1")?;
+    bed.logged_since(mark, "the bell unread=2")?;
+    let now = listed(&claude.tool(&mut bed.hp, "list_notifications", json!({ "app": "Chat" }))?);
+    let shown = now
+        .iter()
+        .find(|n| n["id"] == id)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(shown["state"], "new", "{now:?}");
+    assert_eq!(shown["pinned"]["agent"], "Claude");
+    assert_eq!(shown["pinned"]["reason"], "Il attend ta réponse");
+    // The toast sums the request up; « Annuler » puts all back.
+    let toasted = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.mcp_shown().toast.is_some())?;
+    anyhow::ensure!(toasted, "no toast");
+    let toast = bed
+        .hp
+        .mcp_shown()
+        .toast
+        .ok_or_else(|| anyhow::anyhow!("no toast"))?;
+    assert_eq!(
+        (toast.summary.tidied, toast.summary.pinned),
+        (2, 1),
+        "{toast:?}"
+    );
+    assert_eq!(toast.summary.notes_app.as_deref(), Some("Chat"));
+    assert!(toast.undo);
+    let mark = bed.mark();
+    let at = control_at(&mut bed, hocus_link::MCP_TOAST_NAMESPACE, "mcp-toast:Undo")?;
+    common::click_on(&mut bed.hp, at, hocus_link::MCP_TOAST_NAMESPACE)?;
+    bed.logged_since(mark, "an agent's pins or tidying undone asked=3 back=3")?;
+    bed.logged_since(mark, "the bell unread=3")?;
+    let back = listed(&claude.tool(&mut bed.hp, "list_notifications", json!({}))?);
+    assert!(
+        back.iter()
+            .all(|n| n["state"] == "new" && n.get("pinned").is_none()),
+        "{back:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn without_the_right_every_tool_of_the_bell_is_refused() -> anyhow::Result<()> {
+    let mut bed = bed_of(true, BELL, None, true)?;
+    bed.logged_since(0, "the notifications are served")?;
+    let mut other = mcp(&bed.hp, "Other")?;
+    for (tool, args) in [
+        ("list_notifications", json!({})),
+        ("search_notifications", json!({ "text": "facture" })),
+        (
+            "tidy_notifications",
+            json!({ "app": "Chat", "intent": "x" }),
+        ),
+    ] {
+        let refused = other.tool(&mut bed.hp, tool, args)?;
+        assert_eq!(refused["isError"], true, "{tool}: {refused}");
+        assert!(
+            text(&refused).contains("may not read nor sort the notifications"),
+            "{tool}: {refused}"
+        );
+    }
+    Ok(())
+}
+
+/// The pull request's screenshots of an agent sorting the bell (#923): its
+/// tag and the bell ringed before it pins, then the toast with
+/// « Annuler »: `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor
+/// mcp::shots_bell --run-ignored only`.
+#[test]
+#[ignore = "screenshots, on demand"]
+fn shots_bell() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        eprintln!("HOCUS_SHOTS is not set: no shots");
+        return Ok(());
+    };
+    let config = format!("[agents]\nshow-before-ms = 3000\n{BELL}");
+    let mut bed = bed_of(true, &config, None, true)?;
+    bed.logged_since(0, "the notifications are served")?;
+    bed.notify("Courriel", "Relance : contrat à signer")?;
+    bed.notify("Chat", "Inès dans #général")?;
+    bed.notify("Chat", "Noah dans #général")?;
+    bed.logged_since(0, "the bell unread=3")?;
+    let mut claude = mcp(&bed.hp, "Claude")?;
+    let mail = listed(&claude.tool(
+        &mut bed.hp,
+        "list_notifications",
+        json!({ "app": "Courriel" }),
+    )?);
+    let asked = claude.send(
+        "tools/call",
+        json!({ "name": "pin_notification", "arguments": {
+            "id": mail[0]["id"], "reason": "Signature attendue avant lundi",
+            "intent": "épingle la relance du contrat"
+        } }),
+    )?;
+    let tagged = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.drawn_layers(hocus_link::MCP_TAG_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(tagged, "no tag");
+    common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+    shoot(&mut bed.hp, &out, "bell-agent-tag")?;
+    claude.answer(&mut bed.hp, asked)?;
+    // Each request its toast: the pin's, then the tidying's.
+    for (name, tidy) in [
+        ("bell-agent-toast-pin", false),
+        ("bell-agent-toast-tidy", true),
+    ] {
+        if tidy {
+            let asked = claude.send(
+                "tools/call",
+                json!({ "name": "tidy_notifications", "arguments": {
+                    "app": "Chat", "intent": "#général : rien qui t’attende"
+                } }),
+            )?;
+            claude.answer(&mut bed.hp, asked)?;
+        }
+        let toasted = bed.hp.dispatch_until(WAIT, |hp| {
+            hp.mcp_shown()
+                .toast
+                .is_some_and(|t| (t.summary.tidied > 0) == tidy)
+                && !hp.drawn_layers(hocus_link::MCP_TOAST_NAMESPACE).is_empty()
+        })?;
+        anyhow::ensure!(toasted, "no toast");
+        common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
+        shoot(&mut bed.hp, &out, name)?;
+    }
     Ok(())
 }

@@ -4,7 +4,9 @@
 //! `claude` a fake on its PATH that writes down what it was asked.
 //!
 //! The page lists an agent of the file and writes its rights back, its
-//! comments kept, the compositor following them; « Brancher » runs
+//! comments kept, the compositor following them; reading the
+//! notifications is a right of its own, even for an agent that only looks
+//! (#923); « Brancher » runs
 //! `claude mcp add` only after the sheet's own « Brancher », and adds the
 //! agent read-only; « Débrancher » takes it out of both.
 
@@ -126,6 +128,28 @@ fn the_page_lists_an_agent_from_the_file_and_writes_its_rights_back() -> anyhow:
 }
 
 #[test]
+fn reading_the_notifications_is_written_even_for_an_agent_that_only_looks() -> anyhow::Result<()> {
+    let file = "# By hand.\n[[agents.mcp]]\nname = \"Claude\"\naccess = \"read\"\n";
+    let Some(mut bed) = bed(file, false)? else {
+        return Ok(());
+    };
+    open(&mut bed)?;
+    bed.click("act:Claude:notifications")?;
+    let written = bed.written(|t| t.contains("notifications = true"))?;
+    assert_eq!(
+        written,
+        "# By hand.\n[[agents.mcp]]\nname = \"Claude\"\naccess = \"read\"\nnotifications = true\n"
+    );
+    bed.shows(|s| {
+        card(s)["rights"]
+            .as_array()
+            .is_some_and(|r| r.contains(&serde_json::json!("notifications")))
+    })?;
+    bed.compositor_follows(|agents| agents.mcp.first().is_some_and(|a| a.notifications))?;
+    Ok(())
+}
+
+#[test]
 fn brancher_runs_claude_only_after_its_click() -> anyhow::Result<()> {
     let Some(mut bed) = bed(BY_HAND, true)? else {
         return Ok(());
@@ -212,8 +236,9 @@ fn shots() -> anyhow::Result<()> {
     std::fs::create_dir_all(&out)?;
     let file = "[agents]\nconfirm-apps = [\"hocus-settings\", \"com.bitwarden.desktop\", \
                 \"org.keepassxc.KeePassXC\"]\n\n[[agents.mcp]]\nname = \"Claude\"\naccess = \"act\"\n\
-                settings = true\ninput = false\napps = [\"kitty\", \"org.mozilla.firefox\"]\n\
-                client = \"claude-code\"\nsince = \"2026-11-12\"\n";
+                settings = true\ninput = false\nnotifications = true\n\
+                apps = [\"kitty\", \"org.mozilla.firefox\"]\nclient = \"claude-code\"\n\
+                since = \"2026-11-12\"\n";
     let Some(mut bed) = bed(file, true)? else {
         return Ok(());
     };

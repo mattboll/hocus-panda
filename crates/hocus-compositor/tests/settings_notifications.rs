@@ -5,7 +5,9 @@
 //!
 //! The page lists them, the busiest this week first, each with its level
 //! from the file; a level chosen in a row's menu is written; do not
-//! disturb is the real shell's, which says it back. The pull
+//! disturb is the real shell's, which says it back; the menu's « Vues dès
+//! que je l'ouvre » is written into `[notifications.seen-on-focus]`, and
+//! the journal's row opens once there is a journal (#923). The pull
 //! request's screenshots are an ignored test (`HOCUS_SHOTS`).
 
 use crate::common;
@@ -185,6 +187,18 @@ impl Bed {
         self.shows(|s| s["page"] == "notifications" && s["notifications"]["read"] == true)
     }
 
+    /// The Settings launched again on `section`: the window goes there.
+    fn go(&mut self, section: &str) -> anyhow::Result<()> {
+        self.hp.launch(hocus_link::Launch {
+            id: APP_ID.to_owned(),
+            terminal: false,
+            dir: String::new(),
+            argv: vec![self.script.display().to_string(), section.to_owned()],
+        });
+        self.shows(|s| s["page"] == section)?;
+        Ok(())
+    }
+
     /// What the window shows, once `done` holds of it.
     fn shows(&mut self, done: impl Fn(&Value) -> bool) -> anyhow::Result<Value> {
         let log = self.log.clone();
@@ -298,6 +312,41 @@ fn the_applications_busiest_first_and_a_level_chosen_is_written() -> anyhow::Res
     Ok(())
 }
 
+#[test]
+fn the_menus_check_box_is_written_and_the_journals_row_opens_once_there_is_one()
+-> anyhow::Result<()> {
+    let mut bed = Bed::start(FILE, &senders(), false)?;
+    bed.open()?;
+    // No journal yet: « Ouvrir » inert.
+    bed.shows(|s| s["notifications"]["journal"] == false)?;
+    bed.click("notifications:menu:slack")?;
+    bed.shows(|s| s["notifications"]["menu"] == "slack")?;
+    bed.click("option:seen-on-open")?;
+    let text = bed.written(|t| t.contains("[notifications.seen-on-focus]\nslack = false"))?;
+    assert!(text.starts_with("# Mine.\n"), "{text}");
+    // The menu stays; its row says it.
+    bed.shows(|s| {
+        s["notifications"]["apps"][0]["seen_on_open"] == false
+            && s["notifications"]["menu"] == "slack"
+    })?;
+    // Ticked again: the key goes.
+    bed.click("option:seen-on-open")?;
+    bed.written(|t| !t.contains("seen-on-focus"))?;
+    // The shell's journal, then the page opened again: « Ouvrir » takes it.
+    std::fs::write(
+        bed.dir.path().join("state/hocuspanda/notifications.log"),
+        "{}\n",
+    )?;
+    bed.go("power")?;
+    bed.go("notifications")?;
+    bed.shows(|s| {
+        s["page"] == "notifications"
+            && s["notifications"]["read"] == true
+            && s["notifications"]["journal"] == true
+    })?;
+    Ok(())
+}
+
 /// The window, cropped, saved as `name` in `out` once it is still.
 fn shoot(bed: &mut Bed, out: &Path, name: &str) -> anyhow::Result<()> {
     let mut last = bed.hp.window_commits();
@@ -344,7 +393,13 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
         return Ok(());
     };
     std::fs::create_dir_all(&out)?;
-    let mut bed = Bed::start(FILE, &senders(), true)?;
+    // Agenda folds nothing as it opens (#923); the journal is there.
+    let file = format!("{FILE}\n[notifications.seen-on-focus]\nthunderbird = false\n");
+    let mut bed = Bed::start(&file, &senders(), true)?;
+    std::fs::write(
+        bed.dir.path().join("state/hocuspanda/notifications.log"),
+        "{}\n",
+    )?;
     bed.open()?;
     bed.shows(|s| s["notifications"]["dnd"] == false)?;
     bed.hp.pointer_move(1900.0, 1060.0);
