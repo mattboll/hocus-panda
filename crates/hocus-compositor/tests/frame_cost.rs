@@ -88,11 +88,17 @@ fn the_garland_and_the_creatures_step_together() -> anyhow::Result<()> {
         [Rect::new(200, 300, 500, 300), Rect::new(760, 360, 420, 300)],
     )?;
     anyhow::ensure!(hp.garland_tops().len() == 1, "no garland across the top");
-    // On the machine's clock: the loop wakes for their steps itself.
+    // On the machine's clock: the loop wakes for their steps itself, ten
+    // frames' worth however long a loaded machine takes, and never more
+    // than 30 a second of the time it took (a count over a second of the
+    // wall clock failed on a machine too busy to draw ten).
     common::wait(&mut hp, Duration::from_millis(500))?;
     let frames = hp.frames_on(0);
-    common::wait(&mut hp, Duration::from_secs(1))?;
+    let started = std::time::Instant::now();
+    let woke = hp.dispatch_until(WAIT, |hp| hp.frames_on(0) >= frames + 10)?;
+    let took = started.elapsed();
     let real = hp.frames_on(0) - frames;
+    anyhow::ensure!(woke, "{real} frames in {took:?}");
     // On the held clock, a 50 Hz screen's frames.
     hp.hold_clock();
     for _ in 0..25 {
@@ -103,8 +109,11 @@ fn the_garland_and_the_creatures_step_together() -> anyhow::Result<()> {
         hp.step(AT_50_HZ)?;
     }
     let held = hp.frames_on(0) - frames;
-    eprintln!("a second: {real} frames on the machine's clock, {held} at 50 Hz");
-    assert!((10..=31).contains(&real), "{real} frames in a second");
+    eprintln!("{real} frames in {took:?} on the machine's clock, {held} a second at 50 Hz");
+    assert!(
+        real as f64 <= took.as_secs_f64() * 30.0 + 1.0,
+        "{real} frames in {took:?}"
+    );
     assert!((10..=31).contains(&held), "{held} frames at 50 Hz");
     Ok(())
 }
@@ -245,25 +254,21 @@ fn a_frame_of_a_big_screen() -> anyhow::Result<()> {
         ],
     )?;
     common::wait(&mut hp, Duration::from_secs(3))?;
-    hp.hold_clock();
-    for _ in 0..50 {
-        hp.step(AT_50_HZ)?;
-    }
-    hp.take_frame_cost(0);
-    hp.take_damage_area(0);
-    hp.take_damage_rects(0);
-    let frames = hp.frames_on(0);
-    let blurs = hp.glass_blurs();
-    let wall = std::time::Instant::now();
-    for _ in 0..100 {
-        hp.step(AT_50_HZ)?;
-    }
-    let wall = wall.elapsed();
-    let frames = hp.frames_on(0) - frames;
-    let blurs = hp.glass_blurs() - blurs;
-    let cost = hp.take_frame_cost(0);
-    let area = hp.take_damage_area(0);
-    let rects = hp.take_damage_rects(0);
+    // The bar held still over what is counted, as drawn: it draws on its
+    // own clock, the machine's, so the frames its commits brought grew
+    // with the time a loaded machine took over the 100 turns (68, then 80
+    // and more on CI). Its glass and its surfaces are drawn all the same.
+    hp.hold_shell(true)?;
+    let measured = measure_held(&mut hp);
+    hp.hold_shell(false)?;
+    let Held {
+        frames,
+        blurs,
+        wall,
+        cost,
+        area,
+        rects,
+    } = measured?;
     let scenes = cost.scenes.max(1);
     let screen = 3440 * 1440;
     let each = area / frames.max(1);
@@ -283,10 +288,8 @@ fn a_frame_of_a_big_screen() -> anyhow::Result<()> {
     );
     anyhow::ensure!(hp.garland_tops().len() == 1, "no garland across the top");
     // The garland and the panda, 30 times a second at most: 60 frames of
-    // the 100 turns, not every one. The bar and the windows draw in real
-    // time, not on the held clock, and add a few on a slow machine
-    // (68 seen on CI, 3.2 s on the clock).
-    assert!((20..=80).contains(&frames), "{frames} frames in 2 s");
+    // the 100 turns, not every one, a few more for the windows' own.
+    assert!((20..=63).contains(&frames), "{frames} frames in 2 s");
     // The garland's strip and the panda's box, not the screen.
     assert!(each * 100 / screen <= 15, "{each} pixels a frame");
     assert!(
@@ -296,6 +299,41 @@ fn a_frame_of_a_big_screen() -> anyhow::Result<()> {
     // Nothing moves behind the bar: its glass stays as it was blurred.
     assert_eq!(blurs, 0, "the glass blurred again");
     Ok(())
+}
+
+/// What 2 s of a 50 Hz screen on the held clock drew, after 1 s of it.
+struct Held {
+    frames: u64,
+    blurs: u64,
+    /// The time they took on the machine's clock, for the record.
+    wall: Duration,
+    cost: hocus_compositor::FrameCost,
+    area: u64,
+    rects: u64,
+}
+
+fn measure_held(hp: &mut Headless) -> anyhow::Result<Held> {
+    hp.hold_clock();
+    for _ in 0..50 {
+        hp.step(AT_50_HZ)?;
+    }
+    hp.take_frame_cost(0);
+    hp.take_damage_area(0);
+    hp.take_damage_rects(0);
+    let frames = hp.frames_on(0);
+    let blurs = hp.glass_blurs();
+    let wall = std::time::Instant::now();
+    for _ in 0..100 {
+        hp.step(AT_50_HZ)?;
+    }
+    Ok(Held {
+        frames: hp.frames_on(0) - frames,
+        blurs: hp.glass_blurs() - blurs,
+        wall: wall.elapsed(),
+        cost: hp.take_frame_cost(0),
+        area: hp.take_damage_area(0),
+        rects: hp.take_damage_rects(0),
+    })
 }
 
 /// Mesa's software Vulkan driver's manifest, where Debian puts it.

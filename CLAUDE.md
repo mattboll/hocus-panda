@@ -76,6 +76,8 @@ sharing).
   into `main`: it says `Closes #N` for each issue, how they were tested,
   and shows screenshots for anything visible.
 - A fix outside a sprint: one branch based on `main`, one pull request.
+- A new or changed test passes `scripts/dev/stress.sh` 20 times before
+  its PR (docs/workflow.md, "A test that fails by chance").
 - Commit messages in English, `area: what changes`. **No attribution
   trailers** (`Co-Authored-By`, `Claude-Session`, "Generated with…") in
   commits or pull requests.
@@ -117,6 +119,7 @@ cargo deny check                              # licences and advisories
 cargo machete                                 # dependencies no source uses
 scripts/vendor.sh --check                     # vendor/ is upstream plus its patch
 scripts/ci/docs-names.sh                      # the docs name no crate nor `hocus msg` that is gone
+scripts/dev/stress.sh 'test(=today::a_test)'  # 20 runs on 2 loaded cores, stops at the first failure
 ```
 
 The Rust version is the one `rust-toolchain.toml` pins; dependencies'

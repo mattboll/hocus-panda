@@ -318,8 +318,12 @@ impl Bed {
             })?;
         }
         wait(&mut self.hp, Duration::from_millis(500))?;
-        self.mic.play(tape);
+        // What the call heard before, forgotten before the tape plays, not
+        // after: on a loaded machine the tape's start was heard in between
+        // and forgotten with the rest, and the first sound heard came
+        // before the tape's own ("attempt to subtract with overflow").
         call.take();
+        self.mic.play(tape);
         let want = (seconds * RATE as f32) as usize;
         self.until(Duration::from_secs(30), "the call heard too little", |_| {
             call.len() >= want
@@ -576,7 +580,9 @@ fn the_call_hears_the_microphone_through_the_voice_and_it_is_read_only_meanwhile
     })?;
     let heard = bed.hear(&call, Voice::AsItIs, speech.clone(), 2.5)?;
     let first = |x: &[f32]| x.iter().position(|s| s.abs() > 0.01).unwrap_or(0);
-    let at = first(&heard) - first(&speech);
+    let at = first(&heard)
+        .checked_sub(first(&speech))
+        .ok_or_else(|| anyhow::anyhow!("the call missed the tape's start"))?;
     let (worst, same, moved) = as_it_was(&speech, &heard, at);
     eprintln!("Telle quelle: {same} samples as they were, the place moved {moved} times");
     assert!(worst < 1e-5, "Telle quelle changed the samples by {worst}");

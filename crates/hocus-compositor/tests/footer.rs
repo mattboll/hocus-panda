@@ -412,7 +412,11 @@ fn the_menu_opens_the_launcher_on_a_click_not_a_hover() -> anyhow::Result<()> {
         .hp
         .dispatch_until(WAIT, |hp| hp.launcher_surfaces().len() == 1)?;
     anyhow::ensure!(opened, "a click did not open the launcher");
-    assert_eq!(bed.hp.keyboard_layer().as_deref(), Some("hocus-launcher"));
+    // The keyboard is the launcher's once it has drawn (#860).
+    let typed = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.keyboard_layer().as_deref() == Some(hocus_link::LAUNCHER_NAMESPACE)
+    })?;
+    anyhow::ensure!(typed, "the keyboard is {:?}'s", bed.hp.keyboard_layer());
     Ok(())
 }
 
