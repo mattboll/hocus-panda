@@ -6,7 +6,7 @@ Status: the server and its bubbles approved by the maintainer on
 (issue #394, variant B: by time), built in 5.4 ([below](#54-the-history-clear-all-do-not-disturb)).
 The footer's four buttons, the bell among them, are 5.5 (built:
 [bar.md](bar.md), as built, 5.5). What the bell keeps, by application,
-and what agents may do with it: #923, proposed
+and what agents may do with it: #923, approved on 2026-11-22
 ([below](#the-bell-keeps-what-still-needs-you-923)).
 
 All sizes are logical pixels.
@@ -666,11 +666,25 @@ file's key, and the menu's layout.
 
 ## The bell keeps what still needs you (#923)
 
-Status: **proposed, awaiting the maintainer's approval** (issue #923; the
-direction approved on 2026-11-22; mockup: the tools' `mockups/s30-bell`).
-It changes 5.4's list (by application, 5.4's variant A, instead of by
-time) and what a click on a line does; the rest of 5.3, 5.4 and #899
-stays.
+Status: **Approved 2026-11-22 (mockup s30-bell)** (issue #923). It
+changes 5.4's list (by application, 5.4's variant A, instead of by time)
+and what a click on a line does; the rest of 5.3, 5.4 and #899 stays.
+
+**Decided** (the five points the mockup left open, settled as proposed):
+
+1. Reading the notifications needs the agent's new `notifications`
+   right, off by default (mcp.md, "Notifications"): they carry private
+   messages, and the journal 30 days of them.
+2. At most 3 pins at once: a fourth is refused, saying which are pinned;
+   none is replaced.
+3. A notification that arrives while its application holds the focus
+   stays new until the next time the user opens that application.
+4. « Vues dès que je l'ouvre » is also in the "⋯" menu of the bubbles and
+   of the history's lines: the same menu as the Settings' row.
+5. The desktop's own notifications (a capture, a meeting's reminder)
+   never fold: opening an application, a click on their line or an
+   agent's tidying leaves them as they are; they stay until their ✕,
+   "Tout effacer" or their 7 days.
 
 Most notifications of a working day come from chat applications. Each is
 useful while it shows, then piles up in the bell, while the user reads

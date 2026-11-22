@@ -59,7 +59,7 @@ settings = true        # may change settings (default false)
 input = true           # click, drag and type in its apps (default true)
 draw = true            # draw on the screen (default false, #825)
 notifications = true   # read the bell and its journal; pin and tidy when
-                       # "act" (default false, #923, proposed)
+                       # "act" (default false, #923)
 client = "claude-code" # what the Settings plugged it into, and the day
 since = "2026-11-12"
 ```
@@ -287,10 +287,10 @@ they start. `label` is written beside the shape in the agent's hand
 - **The toast** after drawing: « Claude a dessiné 4 formes à l'écran »,
   its first intent quoted, « Effacer » while its shapes show, « Voir ».
 
-## Notifications (#923, proposed)
+## Notifications (#923)
 
-Awaiting the maintainer's approval (notifications.md, "The bell keeps
-what still needs you"; mockup: the tools' `mockups/s30-bell`). An agent
+Approved on 2026-11-22 (notifications.md, "The bell keeps what still
+needs you"; mockup: the tools' `mockups/s30-bell`). An agent
 sorts the bell if the user wants it: it reads the notifications, pins
 one that needs the user, and tidies away what does not. There is no
 judgement in the bell itself, and an agent never removes one: only the

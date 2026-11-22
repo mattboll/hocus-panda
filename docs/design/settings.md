@@ -1918,7 +1918,7 @@ command), `app/acting_page.rs`.
   `mcp-journal`: the bar's journal opens on the focused screen) and
   « Débrancher ». No agent: one line says an agent the page does not list
   is refused.
-- **« Lire et ranger les notifications »** (#923, proposed:
+- **« Lire et ranger les notifications »** (#923:
   notifications.md, "The bell keeps what still needs you"): a check box
   after « Dessiner à l'écran », `notifications`, off by default. Unlike
   the others it is not inert while the agent only looks: with
@@ -2098,10 +2098,11 @@ application qui t'a notifié."
 - The page's own controls are not in the keyboard's ring yet (the mouse
   and the search reach them; the search finds "Ne pas déranger").
 
-### What the bell keeps (#923, proposed)
+### What the bell keeps (#923)
 
-Awaiting the maintainer's approval (notifications.md, "The bell keeps
-what still needs you"; mockup: the tools' `mockups/s30-bell`).
+Approved on 2026-11-22 (notifications.md, "The bell keeps what still
+needs you"; mockup: the tools' `mockups/s30-bell`). The check box is in
+the bubbles' and the history's "⋯" menu too: one menu.
 
 - **The menu of each row**, under its four levels, a 1 px rule then a
   check box: « Vues dès que je l'ouvre », ticked by default. Unticked,
