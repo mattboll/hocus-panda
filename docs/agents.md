@@ -217,6 +217,7 @@ Any other tool says it with `hocus agent NAME background`.
 A followed tool's desktop notification that only says its agent waits or
 has finished ("Claude is waiting for your input", "Claude needs your
 permission to use Bash") makes no bubble: the agent's row, its panda and
-the halo say it already. It goes to the notifications' history only. Its
+the halo say it already. It goes to the bell only, seen (folded under its
+application, #923). Its
 other notifications are bubbles. How one is recognised:
 [notifications.md](design/notifications.md#agents-notifications).

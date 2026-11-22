@@ -666,7 +666,8 @@ file's key, and the menu's layout.
 
 ## The bell keeps what still needs you (#923)
 
-Status: **Approved 2026-11-22 (mockup s30-bell)** (issue #923). It
+Status: **Approved 2026-11-22 (mockup s30-bell)** (issue #923), built
+([as built](#as-built-1)). It
 changes 5.4's list (by application, 5.4's variant A, instead of by time)
 and what a click on a line does; the rest of 5.3, 5.4 and #899 stays.
 
@@ -925,16 +926,56 @@ menu from a bubble or a line of the history; true takes the key out.
 - `packaging/config.toml` (`[notifications.seen-on-focus]`, the agents'
   `notifications`), `crates/hocus-words` (the words, French and English).
 
-### Tests, to come with the code
+### As built
+
+The code follows the above, with these said once for all:
+
+- **Where it is**: `crates/hocus-shell/src/notifications/`: `history.rs`
+  (the three states, pins, the 200 kept, the grouping), `stack.rs` (the
+  focus rule, the agents' asks, numbers, what goes to the journal),
+  `journal.rs` (the file: append, the 30 days and 64 MB, the search),
+  `server.rs` (the `transient` hint; the sender and its parents),
+  `apps.rs` (« Vues dès que je l'ouvre » written); the list in
+  `popover/history.rs`, the menu's check box in `popover/notify_levels.rs`,
+  the bell's ring in `bell.rs`. The compositor tells the focus in
+  `bubbles.rs` and serves the tools in `src/mcp/notes.rs`.
+- **The focus** is told when the focused window changes: the lock, a
+  popover or the launcher taking the keyboard and giving it back to the
+  same window folds nothing.
+- **A pin stays new** when the history closes: what it listed new is
+  noticed, but the pinned ones, which still need the user.
+- **A line of the desktop's own** (a capture, a meeting's reminder):
+  its click does what it did (the capture's editor, the call) and leaves
+  the line as it is; its sender is never told it closed.
+- **The strips** under a card start against its newest line (the
+  mockup's go 2 px up into it, where nothing shows).
+- **The journal's `replaces`** is the number of the one replaced, which a
+  replacement keeps: its own.
+- **« Annuler »** puts back the last change first: a notification tidied
+  then pinned in one request comes back as it was before both.
+- **The shell has 5 s** to answer an agent's ask; past them, or if it
+  went meanwhile, the agent is told so and its next action goes on.
+
+### Tests
 
 One scenario per behaviour, the real shell on a D-Bus daemon of the
-test's own (`tests/notifications.rs`): Chat's window focused folds its
-two new ones, the badge drops, its bubble on screen stays its time; an
-application set off folds nothing; a `transient` one makes a bubble,
-no line, no count, and a journal line; the journal 0600, its line's
-fields; a click on a line leaves it seen. `tests/mcp.rs`, a real `hocus
-mcp`: a read agent lists and searches, its pin refused; an acting one
-pins (the badge counts it), tidies, and the toast's « Annuler » puts
-them back; without the right, refused. `tests/settings_notifications.rs`:
-the check box written. Unit tests: the states, the 200 kept, the
-grouping, the journal's 30 days and its cut lines, the matching.
+test's own (`tests/notifications.rs`):
+`opening_an_application_folds_its_notifications_and_its_bubble_lives_its_time`,
+`an_application_set_not_to_fold_keeps_its_notifications_new`,
+`a_transient_one_makes_its_bubble_then_goes_nowhere_but_the_journal`,
+`the_journal_keeps_every_one_readable_by_the_user_alone`,
+`a_click_on_a_line_invokes_its_default_raises_and_leaves_it_seen`, and
+5.4's adapted to the list by application. `tests/mcp.rs`, a real `hocus
+mcp`: `a_looking_agent_reads_and_searches_the_bell_but_may_not_pin`,
+`an_acting_agent_pins_and_tidies_and_annuler_puts_them_back`,
+`without_the_right_every_tool_of_the_bell_is_refused`.
+`tests/settings_notifications.rs`:
+`the_menus_check_box_is_written_and_the_journals_row_opens_once_there_is_one`;
+`tests/settings_acting.rs`:
+`reading_the_notifications_is_written_even_for_an_agent_that_only_looks`.
+Unit tests: the states, the pins and undo, the 200 kept, the grouping
+(`history.rs`), the focus rule and its process, `transient`, the numbers
+across a restart, the agents' asks (`stack.rs`), the journal's lines, its
+30 days, its cut lines and its search (`journal.rs`), the matching
+(`hocus-link`). The screenshots: `notifications::bell_shots` and
+`mcp::shots_bell` (`HOCUS_SHOTS`, `--run-ignored only`).

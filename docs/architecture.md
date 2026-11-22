@@ -40,7 +40,8 @@ flowchart LR
 - **The shell** (`hocuspanda-shell`, crate `hocus-shell`, iced on
   layer-shell): every surface the desktop draws itself: the bar and its
   popovers, the launcher, the notifications (it serves
-  `org.freedesktop.Notifications`), the tray (`StatusNotifierWatcher`),
+  `org.freedesktop.Notifications`, keeps the bell and their 30 days'
+  journal), the tray (`StatusNotifierWatcher`),
   the lock screen's and the polkit dialog's interface, captures' toolbar,
   the clipboard's history, the emoji picker. Started from beside the
   compositor's binary, restarted when it ends; the windows stay.
