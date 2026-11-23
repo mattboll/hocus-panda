@@ -247,3 +247,95 @@ the 7.5 mockup: centred, every screen dimmed. Built since 2026-11-04: see
   the dialog's and the field's names are in its words and its log);
   pasting into the field; an account's photo (AccountsService); the
   application's own icon name polkit sends (the desktop entry's is used).
+
+## NetworkManager's secrets (#930)
+
+Approved 2026-11-23 (the s32 mockup, its #930 part). Built since
+2026-11-23.
+
+- **What it is.** The shell is also the session's NetworkManager secret
+  agent: a VPN that asks its password or a one-time code at each
+  connection, or a Wi-Fi network whose password the computer does not
+  keep, asks in this dialog instead of failing. Same surface, dim,
+  keyboard, queue and motion as the authentication dialog (one dialog at
+  a time, whoever asks); on the screen under the pointer (NetworkManager
+  names no process).
+- **The form.** The header: a 44 px tile (`rgba(143,179,255,0.14)`, the
+  mockup's 22 px padlock in `#8FB3FF`), 12 px after it the connection's
+  name (17 px 700) over what it asks (13 px, `text.dim`): "Le VPN demande
+  de quoi se connecter", "Le réseau Wi-Fi demande son mot de passe", "La
+  connexion demande de quoi se connecter". A VPN plugin's message (its
+  `x-vpn-message:` hint) under it as polkit's. Then, 14 px apart, a field
+  per secret asked, its label over it (12 px 600, `text.dim`, 6 px):
+  "Nom d'utilisateur", "Mot de passe", "Mot de passe de la clé", "Code à
+  usage unique" (else the secret's key); the fields are 7.5's (44 px,
+  radius 12), the one holding the keyboard ringed green, the others
+  `rgba(255,255,255,0.14)`; passwords masked, a user name and a code shown
+  as typed. "Mot de passe refusé" (`#F7B98A`) under them when the secrets
+  held were refused. "Retenir le mot de passe" (a 16 px box, radius 4,
+  ticked by default) where the agent may keep a secret. Annuler and "Se
+  connecter" (Autoriser's look: faint until every field is filled).
+- **What is asked.** From the connection NetworkManager sends: a VPN's
+  plugin hints when it gives them (`RegisterWithCapabilities` with VPN
+  hints), else the secrets its data gives flags to (`password-flags`,
+  `cert-pass-flags`…) and OpenVPN's static challenge's answer; a Wi-Fi
+  network's key by its key management (`psk`, WEP's key, LEAP's
+  password); 802.1X's password (its key's password for TLS); mobile
+  broadband's and PPPoE's password. A secret flagged not required is not
+  asked. What NetworkManager holds, or the keyring, fills its field
+  (masked), unless the secrets held were refused (`REQUEST_NEW`); a code
+  is never filled in.
+- **Who keeps what** (each secret's flags, honoured): agent-owned (1),
+  the session's keyring, when "Retenir le mot de passe" is ticked (and
+  taken out of it when not); not saved (2), nobody: asked each time, no
+  box; none (0), NetworkManager, in the connection's profile, as the
+  bar's popover and the Settings keep a Wi-Fi password, no box. A
+  one-time code is never kept. The keyring's items are libnm's
+  (`xdg:schema` `org.freedesktop.NetworkManager.Connection`,
+  `connection-uuid`, `setting-name`, `setting-key`), so that secrets
+  another desktop's agent kept are found; on the session bus the
+  compositor names (the clipboard's and Day.1's keyring).
+- **Answers.** Se connecter or `Enter` with every field filled answers
+  with what was typed (`Enter` in a field with one still empty moves to
+  it). Annuler, `Esc`, or two minutes after NetworkManager asked:
+  `UserCanceled`, and the connection stops (the Settings' VPN row says it
+  failed; the bar's Wi-Fi row as ever). NetworkManager withdrawing
+  (`CancelGetSecrets`): the dialog closes at once, `AgentCanceled`.
+  Without the right to ask (`ALLOW_INTERACTION` unset) and nothing held:
+  `NoSecrets`. A Wi-Fi network whose password NetworkManager keeps is the
+  bar's popover's and the Settings': refused, it is `NoSecrets` and their
+  field unfolds, as before. `SaveSecrets` keeps the agent-owned secrets
+  it is handed; `DeleteSecrets` forgets a connection's.
+- **As built** (`crates/hocus-shell/src/auth/nm.rs`, `form.rs`,
+  `form_view.rs`; what a request asks: `crates/hocus-network/src/agent.rs`).
+  On a thread of its own, on the system bus, the shell serves
+  `org.freedesktop.NetworkManager.SecretAgent` at
+  `/org/freedesktop/NetworkManager/SecretAgent` and registers as
+  `org.hocuspanda.shell`, again whenever NetworkManager's name gets a new
+  owner; only NetworkManager's calls are taken (anyone else's:
+  `NotAuthorized`). Only when the compositor is the session
+  (`HOCUS_AUTH_AGENT`, as for polkit): nested and headless runs leave the
+  host's agent alone. The keyring is asked within 15 s; a keyring that
+  does not answer only means nothing is filled in, nor kept. What is
+  typed lives in the shell's fields (masked, never logged: the dialog's
+  log says how many characters), and leaves only in NetworkManager's
+  reply and the keyring's item. Our own reading of NetworkManager's
+  documented interfaces; no code of NetworkManager's (GPL, LGPL).
+- **Measured headless** (`crates/hocus-compositor/tests/nm_secrets.rs`):
+  the real shell on the CPU, a fake NetworkManager on a D-Bus daemon of
+  the test's own (as the system bus) that records the registration and
+  calls `GetSecrets` and `CancelGetSecrets`, a fake keyring on another
+  (as the session's bus). The machine's NetworkManager, its system bus
+  and the session's keyring are never used.
+- **Choices made here** (to confirm): the code's field has no "6
+  chiffres" placeholder (a code's length is the server's); the header's
+  tile is 7.5's size (44 px, the mockup's 40) and has no badge; the
+  fields are 7.5's (44 px, the mockup's 36); a secret NetworkManager keeps
+  itself (flags 0) or asked each time (2) shows no box (its flags say who
+  keeps it); the bar has no VPN row, so a cancelled VPN shows as failed
+  in the Settings' VPN row only.
+- **Not built**: running a VPN plugin's own dialog (`auth-dialog`, the
+  plugins' external UI mode): secrets are read from the connection and
+  the hints; 802.1X's identity asked with its password; names for screen
+  readers beyond the controls' (the dialog is named by the connection,
+  described by what it asks).

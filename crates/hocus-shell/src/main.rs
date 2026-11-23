@@ -54,6 +54,7 @@ mod foreign;
 mod heap;
 mod in_use;
 mod items;
+mod keyring;
 mod keys;
 mod launcher;
 mod layer;

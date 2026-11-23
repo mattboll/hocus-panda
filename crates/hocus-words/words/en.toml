@@ -2293,6 +2293,20 @@ started_by = "{pid}, started by {by}"
 n_1_more_request_waiting = "1 more request waiting"
 more_requests_waiting = "{x_n} more requests waiting"
 
+# NetworkManager's secrets asked in the authentication dialog's look
+# (#930, docs/design/polkit.md, "NetworkManager's secrets").
+[shell.secrets]
+vpn_asks = "The VPN asks for what it needs to connect"
+wifi_asks = "The Wi-Fi network asks for its password"
+network_asks = "The connection asks for what it needs to connect"
+user_name = "User name"
+password = "Password"
+key_password = "Key password"
+one_time_code = "One-time code"
+remember_the_password = "Remember the password"
+password_refused = "Password refused"
+connect = "Connect"
+
 [shell.capture]
 area = "Area"
 window = "Window"

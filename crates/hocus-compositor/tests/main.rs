@@ -108,6 +108,7 @@ mod memory;
 mod moving_wallpaper;
 mod music;
 mod night_light;
+mod nm_secrets;
 mod notifications;
 mod overview;
 mod panic_hook;

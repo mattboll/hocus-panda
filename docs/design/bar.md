@@ -1572,11 +1572,14 @@ slots are not part of the product.
   font, SIL OFL 1.1) for the network's name and the sign-in page's button.
 - **For tests**, `HOCUS_OPENER` names the program that opens the sign-in
   page (`xdg-open` otherwise).
+- **NetworkManager's secret agent** (#930): the shell is it, on a real
+  session; a network whose password an agent keeps (agent-owned, or
+  asked each time) asks in the system's authentication dialog
+  (polkit.md, "NetworkManager's secrets") instead of failing. A password
+  NetworkManager keeps (`psk-flags` 0, what the popover saves) stays the
+  popover's: refused, its field unfolds as before.
 - **Not built**: the connecting row's pulse in the bar (the mockup's: an
-  animation as long as a connection, against §12); a secret agent
-  (passwords NetworkManager asks for later, for connections whose secrets
-  are kept by an agent: such a network unfolds its field when refused);
-  hidden networks, forgetting a network, enterprise and WEP networks,
+  animation as long as a connection, against §12); hidden networks, forgetting a network, enterprise and WEP networks,
   airplane mode and VPN (the Settings, Sprint 6); names for screen readers
   (§11).
 

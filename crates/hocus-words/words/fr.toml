@@ -2284,6 +2284,18 @@ started_by = "{pid}, lancé par {by}"
 n_1_more_request_waiting = "1 autre demande en attente"
 more_requests_waiting = "{x_n} autres demandes en attente"
 
+[shell.secrets]
+vpn_asks = "Le VPN demande de quoi se connecter"
+wifi_asks = "Le réseau Wi-Fi demande son mot de passe"
+network_asks = "La connexion demande de quoi se connecter"
+user_name = "Nom d'utilisateur"
+password = "Mot de passe"
+key_password = "Mot de passe de la clé"
+one_time_code = "Code à usage unique"
+remember_the_password = "Retenir le mot de passe"
+password_refused = "Mot de passe refusé"
+connect = "Se connecter"
+
 [shell.capture]
 area = "Zone"
 window = "Fenêtre"

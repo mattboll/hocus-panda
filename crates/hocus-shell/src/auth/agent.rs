@@ -16,10 +16,7 @@
 //! (`HOCUS_AUTH_AGENT`, which the compositor sets on a virtual terminal):
 //! a shell nested in another session leaves that session's agent alone.
 
-use std::{
-    collections::HashMap,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::collections::HashMap;
 
 use hocus_link::AUTH_AGENT_ENV as ENV;
 use iced::futures::StreamExt;
@@ -37,8 +34,6 @@ const AUTHORITY_PATH: &str = "/org/freedesktop/PolicyKit1/Authority";
 const AUTHORITY: &str = "org.freedesktop.PolicyKit1.Authority";
 /// Where the shell's agent answers.
 pub const PATH: &str = "/org/hocuspanda/PolicyKit1/AuthenticationAgent";
-
-static REQUESTS: AtomicU64 = AtomicU64::new(1);
 
 pub fn start() {
     if std::env::var_os(ENV).is_none() {
@@ -189,7 +184,7 @@ fn request(
         .unwrap_or_default();
     let started_by = pid.and_then(accounts::owner).map(accounts::name_of);
     Some(Request {
-        id: REQUESTS.fetch_add(1, Ordering::Relaxed),
+        id: super::next_id(),
         cookie,
         action,
         message,
