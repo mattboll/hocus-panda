@@ -1030,8 +1030,17 @@ fn tab_goes_through_the_add_and_each_box_space_ticks_and_enter_opens_the_field()
     // Back up through the boxes to the `+`.
     for item in ["Task(2)", "Task(1)", "Task(0)", "TaskAdd"] {
         let from = bed.mark();
+        // A key the shell never hears (#937) says where the compositor
+        // had the keyboard as it was typed, and what the shell's saw.
+        let holder = bed.hp.keyboard_layer();
         bed.shift_tab();
-        bed.logged_after(from, &["the keyboard on an item", &format!("item={item}")])?;
+        bed.logged_after(from, &["the keyboard on an item", &format!("item={item}")])
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "{e}\nthe compositor's keyboard on {holder:?} at the key\nthe keys:\n{}",
+                    bed.lines_since(0, "hocuspanda_shell::keys").join("\n")
+                )
+            })?;
     }
     // And down: `Space` on the first box ticks it.
     let from = bed.mark();
