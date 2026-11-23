@@ -1,24 +1,32 @@
-//! The night light (#436, docs/design/windows.md §14): the screens' white
-//! made warmer in the evening, through each screen's gamma ramp, on the
-//! session's own screens (the virtual terminal's backend).
+//! The night light (#436, #929, docs/design/windows.md §14): the screens'
+//! white made warmer in the evening, through each screen's gamma ramp, on
+//! the session's own screens (the virtual terminal's backend).
 //!
-//! The schedule is the user's: wall-clock hours (`[night-light] from` and
-//! `to`), read in the system's time zone. It fades in over 30 min from
-//! `from` and out over 30 min from `to`. The loop never ticks for it but
-//! in a fade: it wakes when the next change is due (a few seconds apart
-//! in a fade, at most 15 min apart otherwise, so that a clock or a time
-//! zone changed is caught), and again as the machine wakes from sleep and
-//! as the file changes. What the backends hand the screens is the ramp
-//! for [`State::night_light_kelvin`]; headless keeps it for the tests.
+//! The schedule is the user's, on the wall clock in the system's time
+//! zone: from sunset to sunrise at the weather's place (`[night-light]
+//! schedule = "sun"`, recomputed each day; without a place, the fixed
+//! hours), or from `from` to `to`. It fades in over 30 min from the start
+//! and out over 30 min from the end. The loop never ticks for it but in a
+//! fade: it wakes when the next change is due (a few seconds apart in a
+//! fade, at most 15 min apart otherwise, so that a clock, a time zone or
+//! a day changed is caught), and again as the machine wakes from sleep
+//! and as the file changes. What the backends hand the screens is the
+//! ramp for [`State::night_light_kelvin`]; headless keeps it for the
+//! tests.
 
 use std::time::Duration;
 
+use hocus_link::sun::{self, SunDay};
+use jiff::{Timestamp, Zoned};
 use smithay::reexports::calloop::{
     RegistrationToken,
     timer::{TimeoutAction, Timer},
 };
 
-use crate::{State, config::NightLight};
+use crate::{
+    State,
+    config::{NightLight, NightSchedule},
+};
 
 /// The screen's own white: no change.
 pub const NEUTRAL: u32 = 6500;
@@ -30,19 +38,59 @@ const FADE_STEP: Duration = Duration::from_secs(10);
 /// Otherwise at most this long apart.
 const LONGEST: Duration = Duration::from_secs(15 * 60);
 
+/// When the night is on a day, in minutes since the wall clock's midnight.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Hours {
+    /// It warms from the first and goes back from the second.
+    Span(f64, f64),
+    /// All day: the same hour twice, or a polar night.
+    Always,
+    /// Not that day: a polar day.
+    Never,
+}
+
+/// Minutes since midnight of `at`, on its own clock.
+fn minutes_of(at: &Zoned) -> f64 {
+    f64::from(at.hour()) * 60.0 + f64::from(at.minute()) + f64::from(at.second()) / 60.0
+}
+
+/// The night of `config` on `now`'s day: from sunset to sunrise at
+/// `place` (latitude, longitude) when it follows the sun and has one,
+/// else its fixed hours.
+pub fn hours(config: &NightLight, place: Option<(f64, f64)>, now: &Zoned) -> Hours {
+    let place = place.filter(|_| config.schedule == NightSchedule::Sun);
+    let Some((lat, lon)) = place else {
+        return if config.from == config.to {
+            Hours::Always
+        } else {
+            Hours::Span(f64::from(config.from), f64::from(config.to))
+        };
+    };
+    match sun::on(now.date(), lat, lon) {
+        SunDay::Rises { rise, set } => {
+            let here = |t: Timestamp| minutes_of(&t.to_zoned(now.time_zone().clone()));
+            Hours::Span(here(set), here(rise))
+        }
+        SunDay::AlwaysUp => Hours::Never,
+        SunDay::AlwaysDown => Hours::Always,
+    }
+}
+
 /// Minutes from `start` to `now`, round the day.
-fn since(now: f64, start: u16) -> f64 {
-    (now - f64::from(start)).rem_euclid(DAY)
+fn since(now: f64, start: f64) -> f64 {
+    (now - start).rem_euclid(DAY)
 }
 
 /// How far into the night `now` is (minutes since midnight), from 0 (day)
-/// to 1 (night): from `from`, 30 min to warm; from `to`, 30 min to go
-/// back. The same hour twice: night all day.
-pub fn strength(now: f64, from: u16, to: u16) -> f64 {
-    if from == to {
-        return 1.0;
-    }
-    let night = since(f64::from(to), from);
+/// to 1 (night): from the night's start, 30 min to warm; from its end,
+/// 30 min to go back.
+pub fn strength(now: f64, hours: Hours) -> f64 {
+    let (from, to) = match hours {
+        Hours::Always => return 1.0,
+        Hours::Never => return 0.0,
+        Hours::Span(from, to) => (from, to),
+    };
+    let night = since(to, from);
     let t = since(now, from);
     let full = (night / FADE_MINUTES).min(1.0);
     if t < night {
@@ -58,18 +106,18 @@ pub fn strength(now: f64, from: u16, to: u16) -> f64 {
 }
 
 /// Minutes until `strength` next changes from `now`: 0 while it fades.
-fn until_change(now: f64, from: u16, to: u16) -> f64 {
-    if from == to {
+fn until_change(now: f64, hours: Hours) -> f64 {
+    let Hours::Span(from, to) = hours else {
         return f64::INFINITY;
-    }
-    let s = strength(now, from, to);
+    };
+    let s = strength(now, hours);
     if s > 0.0 && s < 1.0 {
         return 0.0;
     }
     // Day: until it warms; night: until it goes back. At the hour
     // itself, 0: it starts to fade.
     let next = if s == 0.0 { from } else { to };
-    (f64::from(next) - now).rem_euclid(DAY)
+    (next - now).rem_euclid(DAY)
 }
 
 /// The temperature `strength` of the way from the screen's white to
@@ -132,27 +180,20 @@ pub struct Night {
     pub kelvin: Option<u32>,
     /// When it looks again.
     timer: Option<RegistrationToken>,
-    /// Tests: the wall clock's minutes since midnight, in place of the
-    /// system's.
-    pub(crate) clock: Option<f64>,
+    /// Tests: the wall clock, in place of the system's.
+    pub(crate) clock: Option<Zoned>,
 }
 
-/// Minutes since midnight now, on the system's clock and in its time zone.
-fn wall_minutes() -> f64 {
-    let now = jiff::Zoned::now();
-    f64::from(now.hour()) * 60.0 + f64::from(now.minute()) + f64::from(now.second()) / 60.0
-}
-
-/// What `config` asks at `minutes` since midnight: the temperature, or
-/// `None` for the screens' own white; and how long until it changes.
-pub fn at(config: &NightLight, minutes: f64) -> (Option<u32>, Duration) {
+/// What `config` asks at `minutes` since midnight on a day whose night is
+/// `hours`: the temperature, or `None` for the screens' own white; and
+/// how long until it changes.
+pub fn at(config: &NightLight, hours: Hours, minutes: f64) -> (Option<u32>, Duration) {
     if !config.enabled {
         return (None, Duration::MAX);
     }
-    let s = strength(minutes, config.from, config.to);
-    let kelvin = kelvin(config.temperature, s);
+    let kelvin = kelvin(config.temperature, strength(minutes, hours));
     let wanted = (kelvin < NEUTRAL).then_some(kelvin);
-    let next = until_change(minutes, config.from, config.to);
+    let next = until_change(minutes, hours);
     let wait = if next <= 0.0 {
         FADE_STEP
     } else {
@@ -180,8 +221,12 @@ impl State {
             self.night_light_set(None);
             return;
         }
-        let minutes = self.night.clock.unwrap_or_else(wall_minutes);
-        let (kelvin, wait) = at(&config, minutes);
+        let now = self.night.clock.clone().unwrap_or_else(Zoned::now);
+        let weather = &self.config.weather;
+        let place = weather
+            .has_place()
+            .then_some((weather.latitude, weather.longitude));
+        let (kelvin, wait) = at(&config, hours(&config, place, &now), minutes_of(&now));
         self.night_light_set(kelvin);
         // Tests hold the clock: they move it and look again themselves.
         if self.night.clock.is_some() {
@@ -224,10 +269,10 @@ impl State {
         true
     }
 
-    /// Tests: the wall clock at `minutes` since midnight, and the night
-    /// light looked at again.
-    pub(crate) fn night_light_clock(&mut self, minutes: f64) {
-        self.night.clock = Some(minutes);
+    /// Tests: the wall clock at `now`, and the night light looked at
+    /// again.
+    pub(crate) fn night_light_clock(&mut self, now: Zoned) {
+        self.night.clock = Some(now);
         self.night_light_update();
     }
 }
@@ -236,8 +281,8 @@ impl State {
 mod tests {
     use super::*;
 
-    const NINE_PM: u16 = 21 * 60;
-    const SEVEN_AM: u16 = 7 * 60;
+    const NINE_TO_SEVEN: Hours = Hours::Span(21.0 * 60.0, 7.0 * 60.0);
+    const PARIS: (f64, f64) = (48.8566, 2.3522);
 
     fn hm(h: u16, m: u16) -> f64 {
         f64::from(h * 60 + m)
@@ -245,7 +290,7 @@ mod tests {
 
     #[test]
     fn it_fades_in_from_nine_and_out_from_seven() {
-        let s = |h, m| strength(hm(h, m), NINE_PM, SEVEN_AM);
+        let s = |h, m| strength(hm(h, m), NINE_TO_SEVEN);
         assert_eq!(s(12, 0), 0.0);
         assert_eq!(s(20, 59), 0.0);
         assert_eq!(s(21, 0), 0.0);
@@ -256,13 +301,16 @@ mod tests {
         assert!((s(7, 15) - 0.5).abs() < 1e-9);
         assert_eq!(s(7, 30), 0.0);
         // A night within the day, and a whole day.
-        assert_eq!(strength(hm(14, 0), 13 * 60, 15 * 60), 1.0);
-        assert_eq!(strength(hm(16, 0), 13 * 60, 15 * 60), 0.0);
-        assert_eq!(strength(hm(16, 0), NINE_PM, NINE_PM), 1.0);
+        let afternoon = Hours::Span(13.0 * 60.0, 15.0 * 60.0);
+        assert_eq!(strength(hm(14, 0), afternoon), 1.0);
+        assert_eq!(strength(hm(16, 0), afternoon), 0.0);
+        assert_eq!(strength(hm(16, 0), Hours::Always), 1.0);
+        assert_eq!(strength(hm(23, 0), Hours::Never), 0.0);
         // A night shorter than the fade never fully warms, and goes back
         // from where it got.
-        assert!((strength(hm(21, 10), NINE_PM, 21 * 60 + 10) - 1.0 / 3.0).abs() < 1e-9);
-        assert!((strength(hm(21, 25), NINE_PM, 21 * 60 + 10) - 1.0 / 6.0).abs() < 1e-9);
+        let short = Hours::Span(21.0 * 60.0, 21.0 * 60.0 + 10.0);
+        assert!((strength(hm(21, 10), short) - 1.0 / 3.0).abs() < 1e-9);
+        assert!((strength(hm(21, 25), short) - 1.0 / 6.0).abs() < 1e-9);
     }
 
     #[test]
@@ -271,6 +319,7 @@ mod tests {
             enabled: true,
             ..NightLight::default()
         };
+        let at = |config: &NightLight, minutes| at(config, NINE_TO_SEVEN, minutes);
         // Noon: none, and nothing until 21:00 but a look every 15 min.
         let (kelvin, wait) = at(&config, hm(12, 0));
         assert_eq!(kelvin, None);
@@ -288,6 +337,80 @@ mod tests {
         // Off: never.
         let off = NightLight::default();
         assert_eq!(at(&off, hm(23, 0)), (None, Duration::MAX));
+    }
+
+    fn day(at: &str) -> Zoned {
+        at.parse::<Timestamp>()
+            .expect("a time")
+            .to_zoned(jiff::tz::TimeZone::UTC)
+    }
+
+    #[test]
+    fn with_the_sun_it_warms_from_sunset_to_sunrise() {
+        let config = NightLight {
+            enabled: true,
+            ..NightLight::default()
+        };
+        // 21 June in Paris: sunset about 19:58 UTC, sunrise about 03:47.
+        let Hours::Span(set, rise) = hours(&config, Some(PARIS), &day("2026-06-21T12:00:00Z"))
+        else {
+            panic!("the sun sets in Paris");
+        };
+        assert!((set - hm(19, 58)).abs() <= 3.0, "{set}");
+        assert!((rise - hm(3, 47)).abs() <= 3.0, "{rise}");
+        let summer = Hours::Span(set, rise);
+        assert_eq!(strength(hm(19, 0), summer), 0.0);
+        assert!(
+            (strength(set + 15.0, summer) - 0.5).abs() < 1e-9,
+            "fading in from sunset"
+        );
+        assert_eq!(strength(hm(23, 0), summer), 1.0);
+        assert_eq!(strength(hm(3, 0), summer), 1.0);
+        assert!(
+            (strength(rise + 15.0, summer) - 0.5).abs() < 1e-9,
+            "fading out from sunrise"
+        );
+        assert_eq!(strength(hm(5, 0), summer), 0.0);
+        // Recomputed each day: in November it sets before 16:10 UTC.
+        let Hours::Span(november, _) = hours(&config, Some(PARIS), &day("2026-11-20T12:00:00Z"))
+        else {
+            panic!("the sun sets in Paris");
+        };
+        assert!(november < hm(16, 10), "{november}");
+        // Its wake-up: a second past sunset.
+        let (kelvin, wait) = at(&config, summer, set - 5.0);
+        assert_eq!(kelvin, None);
+        assert!((wait.as_secs_f64() - 301.0).abs() < 1e-6, "{wait:?}");
+    }
+
+    #[test]
+    fn without_a_place_or_with_hours_the_fixed_hours_apply() {
+        let sun = NightLight::default();
+        let now = day("2026-06-21T12:00:00Z");
+        assert_eq!(sun.schedule, NightSchedule::Sun);
+        assert_eq!(hours(&sun, None, &now), NINE_TO_SEVEN);
+        let fixed = NightLight {
+            schedule: NightSchedule::Hours,
+            ..NightLight::default()
+        };
+        assert_eq!(hours(&fixed, Some(PARIS), &now), NINE_TO_SEVEN);
+        let all_day = NightLight {
+            from: 21 * 60,
+            to: 21 * 60,
+            ..fixed
+        };
+        assert_eq!(hours(&all_day, Some(PARIS), &now), Hours::Always);
+        // Far north: no night in June, night all day in December.
+        let tromso = Some((69.65, 18.96));
+        assert_eq!(hours(&sun, tromso, &now), Hours::Never);
+        let december = day("2026-12-21T12:00:00Z");
+        assert_eq!(hours(&sun, tromso, &december), Hours::Always);
+        let on = NightLight {
+            enabled: true,
+            ..sun
+        };
+        assert_eq!(at(&on, Hours::Never, hm(23, 0)), (None, LONGEST));
+        assert_eq!(at(&on, Hours::Always, hm(12, 0)), (Some(4000), LONGEST));
     }
 
     #[test]

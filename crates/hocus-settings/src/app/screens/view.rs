@@ -157,23 +157,8 @@ impl App {
             .spacing(8),
         );
 
-        // The night light (#436): the model's rows, the file's keys.
-        let controls = self.controls();
-        let mut night = column![];
-        for (i, id) in screens::NIGHT_ROWS.iter().enumerate() {
-            if let Some(setting) = crate::model::setting(id) {
-                night = night.push(divided(i > 0, self.row(setting, &controls)));
-            }
-        }
-        page = page.push(
-            column![
-                row![label(self.say(words::NIGHT_LIGHT))]
-                    .height(28)
-                    .align_y(Alignment::Center),
-                card_box(night.into()),
-            ]
-            .spacing(8),
-        );
+        // The night light (#436, #929).
+        page = page.push(self.night_group());
         container(page).id("page:screens".to_owned()).into()
     }
 
@@ -1033,6 +1018,7 @@ impl App {
             "dragging": self.screens.held.as_ref().is_some_and(|h| h.dragging),
             "identify": self.screens.identify.is_some(),
             "notes": self.screens_list().map_or(0, |_| self.notes().len()),
+            "night": self.night_shown(),
         })
     }
 }

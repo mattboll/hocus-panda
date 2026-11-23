@@ -1254,11 +1254,19 @@ line, the bar, a terminal typed into; without either, GLES as before.
 Warmer colours in the evening, on a schedule; approved without a mockup
 (2026-11), following the Settings' look.
 
-- **When**: from `[night-light] from` to `to` (21:00 to 7:00 by
-  default), the clock's hours in the system's time zone: the schedule is
-  the user's, so it follows wall-clock time, not the monotonic clock. It
-  fades in over 30 min from `from` and out over 30 min from `to`. The
-  same hour twice: all day. Sunset to sunrise is not built.
+- **When** (approved 2026-11-23, mockup s32-half-built, #929):
+  `[night-light] schedule`, "sun" by default, from sunset to sunrise at
+  the weather's place (`[weather]`, the sun computed as for the
+  wallpaper's day and night, no network), recomputed each day; a polar
+  day leaves it off, a polar night on all day. Without a place, and with
+  `schedule = "hours"`, from `from` to `to` (21:00 to 7:00 by default).
+  A file of before #929 with `from` and `to` but no `schedule` follows
+  the sun once a place is set: the maintainer chose the sun as the
+  default. Either way the clock's hours in the system's time zone: the
+  schedule is the user's, so it follows wall-clock time, not the
+  monotonic clock. It fades in over 30 min from the start (sunset, or
+  `from`) and out over 30 min from the end (sunrise, or `to`). The same
+  hour twice: all day.
 - **How warm**: `temperature`, 4000 K by default (1500 to 6500 in the
   file, 2500 to 6000 in the Settings); the fade moves evenly in mireds.
 - **On and off**: `enabled` (off by default), the Settings' switch on
@@ -1270,12 +1278,16 @@ Warmer colours in the evening, on a schedule; approved without a mockup
   ramp is the display engine's, after them.
 
 **As built.** `crates/hocus-compositor/src/night_light.rs`: the
-schedule (`strength`), the temperature (`kelvin`), the colour of white
+night's hours of a day (`hours`: the sun's through `hocus_link::sun::on`,
+which the wallpaper's day and night and the Settings share, else the
+fixed ones), the schedule (`strength`), the temperature (`kelvin`), the
+colour of white
 (`white`, the well-known fit of the black body's colour, divided by its
 value at 6500 K) and the ramp (`ramp`); the loop wakes only when the next
 change is due (every 10 s while it fades, else at the next hour of the
 schedule, at most 15 min apart so that a changed clock or time zone is
-caught), as the file changes and as the machine wakes from sleep. The
+caught, and a new day's sun), as the file changes (`[night-light]`, and
+`[weather]`'s place) and as the machine wakes from sleep. The
 tty backend gives each lit screen its ramp when the temperature changes,
 when a screen lights, and after another terminal showed or the machine
 slept (another may have set its own); a screen whose display engine has
@@ -1283,9 +1295,11 @@ no ramp (virtio-gpu in the VM) says so once and stays as it is; as the
 session ends, the screens get their own white back. Nested, nothing (the
 host's screens are not the session's). Headless keeps the ramps it was
 handed for the tests. Tests: `night_light::tests` (the fades round
-midnight, the wake-ups, the ramps), `tests/night_light.rs` (off by
-default; 21:00 to 7:30 on a held clock; the file's temperature, hours
-and switch at once) and `tests/settings_screens.rs`
+midnight, the wake-ups, the ramps, the sun's hours and the fixed ones
+without a place or chosen, the polar days), `tests/night_light.rs` (off
+by default; 21:00 to 7:30 on a held clock; the file's temperature, hours
+and switch at once; Paris's sunset and sunrise on a held day, then the
+fixed hours asked) and `tests/settings_screens.rs`
 (`the_night_light_rows_write_its_section`). Tried in the VM: the
 warning, virtio-gpu having no ramp; the real warmth is to be seen on the
 laptop.

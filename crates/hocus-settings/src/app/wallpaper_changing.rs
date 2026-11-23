@@ -92,6 +92,14 @@ fn small_button<'a>(said: String, press: Option<Message>, focused: bool, id: Str
     container(b).id(id).into()
 }
 
+/// `at` on the wall clock, "07:58": the sun's hours as the Settings say
+/// them (the wallpaper's day and night, the night light).
+pub(in crate::app) fn clock_hhmm(at: jiff::Timestamp) -> String {
+    at.to_zoned(jiff::tz::TimeZone::system())
+        .strftime("%H:%M")
+        .to_string()
+}
+
 /// A row of the page's own: its name, its line, its control on the right.
 fn own_row<'a>(id: &str, name: String, line: Option<String>, control: El<'a>) -> El<'a> {
     let mut words = column![t(name, 14.0, TEXT.get()).font(SEMIBOLD)]
@@ -738,36 +746,17 @@ impl App {
     /// place, in the wall clock's time.
     fn sun_line(&self, model::WeatherPlace(place, lat, lon): &model::WeatherPlace) -> String {
         let lang = self.lang;
-        let now = jiff::Zoned::now();
-        let day = u16::try_from(now.date().day_of_year()).unwrap_or(1);
-        match hocus_link::sun::sun(day, *lat, *lon) {
-            hocus_link::sun::Sun::Rises { rise, set } => {
-                let midnight = now
-                    .date()
-                    .to_zoned(jiff::tz::TimeZone::UTC)
-                    .map(|z| z.timestamp())
-                    .unwrap_or(jiff::Timestamp::UNIX_EPOCH);
-                let hour = |minutes: f64| {
-                    midnight
-                        .checked_add(jiff::SignedDuration::from_secs(
-                            (minutes * 60.0).round() as i64
-                        ))
-                        .unwrap_or(midnight)
-                        .to_zoned(now.time_zone().clone())
-                        .strftime("%H:%M")
-                        .to_string()
-                };
-                words::sunrise_and_sunset(
-                    lang,
-                    words::SunriseAndSunset {
-                        rise: &hour(rise),
-                        set: &hour(set),
-                        place,
-                    },
-                )
-            }
-            hocus_link::sun::Sun::AlwaysUp => words::the_sun_does_not_set(lang, place),
-            hocus_link::sun::Sun::AlwaysDown => words::the_sun_does_not_rise(lang, place),
+        match hocus_link::sun::on(jiff::Zoned::now().date(), *lat, *lon) {
+            hocus_link::sun::SunDay::Rises { rise, set } => words::sunrise_and_sunset(
+                lang,
+                words::SunriseAndSunset {
+                    rise: &clock_hhmm(rise),
+                    set: &clock_hhmm(set),
+                    place,
+                },
+            ),
+            hocus_link::sun::SunDay::AlwaysUp => words::the_sun_does_not_set(lang, place),
+            hocus_link::sun::SunDay::AlwaysDown => words::the_sun_does_not_rise(lang, place),
         }
     }
 

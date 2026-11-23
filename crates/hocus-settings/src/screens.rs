@@ -991,12 +991,22 @@ pub const ROTATION: &str = "screens.rotation";
 pub const PRIMARY: &str = "screens.primary";
 pub const MIRROR: &str = "screens.mirror";
 pub const NIGHT_LIGHT: &str = "screens.night-light";
+pub const NIGHT_SCHEDULE: &str = "screens.night-light.schedule";
 pub const NIGHT_FROM: &str = "screens.night-light.from";
 pub const NIGHT_TO: &str = "screens.night-light.to";
 pub const NIGHT_TEMPERATURE: &str = "screens.night-light.temperature";
-/// The night light's rows (#436), in the page's order: the page draws
-/// them as the model's rows, written by the file's worker.
-pub const NIGHT_ROWS: [&str; 4] = [NIGHT_LIGHT, NIGHT_FROM, NIGHT_TO, NIGHT_TEMPERATURE];
+/// The night light's rows (#436, #929), in the page's order: the page
+/// draws them as the model's rows, written by the file's worker; the
+/// hours only while they apply (screens/view.rs).
+pub const NIGHT_ROWS: [&str; 5] = [
+    NIGHT_LIGHT,
+    NIGHT_SCHEDULE,
+    NIGHT_FROM,
+    NIGHT_TO,
+    NIGHT_TEMPERATURE,
+];
+/// `[night-light] schedule`'s words.
+const SCHEDULES: &[&str] = &["sun", "hours"];
 /// When it can start and end, every half hour.
 const EVENINGS: &[&str] = &[
     "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30",
@@ -1155,6 +1165,29 @@ pub fn settings() -> &'static [Setting] {
                 kind: Kind::Switch,
                 places: one(&["night-light", "enabled"], Codec::Bool),
                 needs: None,
+            },
+            Setting {
+                id: NIGHT_SCHEDULE,
+                section: SectionId::Screens,
+                group: NIGHT,
+                name: words::WHEN,
+                line: None,
+                keywords: (
+                    &["nuit", "soleil", "coucher", "lever", "horaires"],
+                    &["night light", "sun", "sunset", "sunrise", "schedule"],
+                ),
+                kind: Kind::Segmented(vec![
+                    Choice {
+                        label: words::WITH_THE_SUN,
+                        value: Value::Word("sun"),
+                    },
+                    Choice {
+                        label: words::FIXED_HOURS,
+                        value: Value::Word("hours"),
+                    },
+                ]),
+                places: one(&["night-light", "schedule"], Codec::Word(SCHEDULES)),
+                needs: Some(NIGHT_LIGHT),
             },
             Setting {
                 id: NIGHT_FROM,

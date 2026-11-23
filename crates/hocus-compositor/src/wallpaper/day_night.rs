@@ -4,8 +4,8 @@
 //! at `[wallpaper] day-starts` and `night-starts`, on the wall clock:
 //! the hours the user reads.
 
-use hocus_link::sun::{Sun, sun};
-use jiff::{SignedDuration, Timestamp, Zoned, civil::Date};
+use hocus_link::sun::{self, SunDay};
+use jiff::{Timestamp, Zoned, civil::Date};
 
 /// Which of the two shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,25 +27,11 @@ pub enum Switches {
 /// None on a day the sun neither rises nor sets: what shows all day.
 fn switches(date: Date, now: &Zoned, by: Switches) -> Result<Vec<(Timestamp, Phase)>, Phase> {
     match by {
-        Switches::Sun(lat, lon) => {
-            let day = u16::try_from(date.day_of_year()).unwrap_or(1);
-            let midnight = date
-                .to_zoned(jiff::tz::TimeZone::UTC)
-                .map(|z| z.timestamp())
-                .unwrap_or(Timestamp::UNIX_EPOCH);
-            let at = |minutes: f64| {
-                midnight
-                    .checked_add(SignedDuration::from_secs((minutes * 60.0).round() as i64))
-                    .unwrap_or(midnight)
-            };
-            match sun(day, lat, lon) {
-                Sun::Rises { rise, set } => {
-                    Ok(vec![(at(rise), Phase::Day), (at(set), Phase::Night)])
-                }
-                Sun::AlwaysUp => Err(Phase::Day),
-                Sun::AlwaysDown => Err(Phase::Night),
-            }
-        }
+        Switches::Sun(lat, lon) => match sun::on(date, lat, lon) {
+            SunDay::Rises { rise, set } => Ok(vec![(rise, Phase::Day), (set, Phase::Night)]),
+            SunDay::AlwaysUp => Err(Phase::Day),
+            SunDay::AlwaysDown => Err(Phase::Night),
+        },
         Switches::Hours(day_starts, night_starts) => {
             let at = |minutes: u16| {
                 let time = jiff::civil::time(
@@ -112,6 +98,7 @@ pub fn phase_at(now: &Zoned, by: Switches) -> (Phase, Timestamp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jiff::SignedDuration;
 
     fn at(text: &str) -> Zoned {
         text.parse::<Timestamp>()

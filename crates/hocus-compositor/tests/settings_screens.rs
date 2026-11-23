@@ -28,7 +28,9 @@ use std::{
 };
 
 use common::{BTN_LEFT, KEY_LEFTCTRL, WAIT, chord, wait};
-use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, NightSchedule, RendererChoice, model::Rect,
+};
 use serde_json::Value;
 
 const APP_ID: &str = "hocus-settings";
@@ -1026,7 +1028,8 @@ fn screenshot_of_the_screen_sets() -> anyhow::Result<()> {
 
 /// The night light (#436): its switch, then its start hour, written into
 /// `[night-light]`, which the compositor takes; its rows inert while it
-/// is off.
+/// is off. With the sun by default (#929) but no place: where to choose
+/// one, and the fixed hours meanwhile; then the fixed hours chosen.
 #[test]
 fn the_night_light_rows_write_its_section() -> anyhow::Result<()> {
     let Some(mut bed) = Bed::start(FILE)? else {
@@ -1054,10 +1057,25 @@ fn the_night_light_rows_write_its_section() -> anyhow::Result<()> {
         .hp
         .dispatch_until(WAIT, |hp| hp.state().config.night_light.from == 22 * 60)?;
     anyhow::ensure!(from, "the compositor never took the hour");
+    let shows = bed.shows(|s| s["screens"]["night"]["sun"]["link"] == true)?;
+    let rows = &shows["screens"]["night"]["rows"];
+    anyhow::ensure!(
+        rows.as_array()
+            .is_some_and(|r| r.iter().any(|r| r == "screens.night-light.from")),
+        "no fixed hours without a place: {rows}"
+    );
+    bed.click("segment:screens.night-light.schedule:1")?;
+    bed.written(|t| t.contains("schedule = \"hours\""))?;
+    bed.shows(|s| s["screens"]["night"]["sun"].is_null())?;
+    let hours = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.night_light.schedule == NightSchedule::Hours
+    })?;
+    anyhow::ensure!(hours, "the compositor never took the fixed hours");
     Ok(())
 }
 
-/// For the maintainer (`HOCUS_SHOTS=DIR`): the night light's rows, on.
+/// For the maintainer (`HOCUS_SHOTS=DIR`): the night light's rows, on,
+/// with the sun at the weather's place (#929), then at fixed hours.
 #[test]
 #[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
 fn screenshot_of_the_night_light() -> anyhow::Result<()> {
@@ -1066,42 +1084,51 @@ fn screenshot_of_the_night_light() -> anyhow::Result<()> {
         return Ok(());
     };
     std::fs::create_dir_all(&out)?;
-    let file = format!("{FILE}\n[night-light]\nenabled = true\ntemperature = 3500\n");
-    let Some(mut bed) = Bed::start_on(&file, &["2880x1800@2:340x210mm", "3440x1440:800x335mm"])?
-    else {
-        return Ok(());
-    };
-    bed.open()?;
-    bed.reveal("control:screens.night-light.temperature")?;
-    bed.hp.pointer_move(5.0, 5.0);
-    let mut last = bed.hp.window_commits();
-    let mut still = 0;
-    for _ in 0..30 {
-        if still >= 5 {
-            break;
+    let place = "[weather]\nplace = \"Saint-Étienne\"\nlatitude = 45.4397\nlongitude = 4.3872\n";
+    for (name, schedule) in [
+        ("night-light-sun.png", ""),
+        ("night-light-hours.png", "schedule = \"hours\"\n"),
+    ] {
+        let file = format!(
+            "{FILE}\n{place}\n[night-light]\nenabled = true\n{schedule}temperature = 3500\n"
+        );
+        let Some(mut bed) =
+            Bed::start_on(&file, &["2880x1800@2:340x210mm", "3440x1440:800x335mm"])?
+        else {
+            return Ok(());
+        };
+        bed.open()?;
+        bed.reveal("control:screens.night-light.temperature")?;
+        bed.hp.pointer_move(5.0, 5.0);
+        let mut last = bed.hp.window_commits();
+        let mut still = 0;
+        for _ in 0..30 {
+            if still >= 5 {
+                break;
+            }
+            wait(&mut bed.hp, Duration::from_millis(100))?;
+            let now = bed.hp.window_commits();
+            still = if now == last { still + 1 } else { 0 };
+            last = now;
         }
-        wait(&mut bed.hp, Duration::from_millis(100))?;
-        let now = bed.hp.window_commits();
-        still = if now == last { still + 1 } else { 0 };
-        last = now;
+        let window = bed.window()?;
+        let (w, h, px) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let x = (window.x * 2).max(0) as u32;
+        let y = (window.y * 2).max(0) as u32;
+        let cw = ((window.width * 2) as u32).min(w as u32 - x);
+        let ch = ((window.height * 2) as u32).min(h as u32 - y);
+        let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
     }
-    let window = bed.window()?;
-    let (w, h, px) = bed.hp.screenshot(0)?;
-    let rgba: Vec<u8> = px
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| [p[2], p[1], p[0], 255])
-        .collect();
-    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
-    let x = (window.x * 2).max(0) as u32;
-    let y = (window.y * 2).max(0) as u32;
-    let cw = ((window.width * 2) as u32).min(w as u32 - x);
-    let ch = ((window.height * 2) as u32).min(h as u32 - y);
-    let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
-    let path = out.join("night-light.png");
-    image.save(&path)?;
-    eprintln!("{}", path.display());
     Ok(())
 }
 
