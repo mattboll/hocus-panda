@@ -1,9 +1,11 @@
 //! Sunrise and sunset (#894): when a wallpaper's day and night pictures
 //! take turns, computed here with NOAA's equations of the sun's place,
-//! without the network. The compositor switches by them; the Settings
-//! say them on the wallpaper's page.
+//! without the network. The compositor switches by them, and warms the
+//! screens between them (the night light, #929); the Settings say them.
 
 use std::f64::consts::PI;
+
+use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
 
 /// The sun's upper edge on the horizon, refraction counted: the zenith
 /// angle of sunrise and sunset, degrees.
@@ -73,6 +75,38 @@ pub fn sun(day_of_year: u16, lat: f64, lon: f64) -> Sun {
     Sun::Rises {
         rise: event(1.0),
         set: event(-1.0),
+    }
+}
+
+/// What the sun does on a date at a place, its rise and set as instants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SunDay {
+    Rises { rise: Timestamp, set: Timestamp },
+    AlwaysUp,
+    AlwaysDown,
+}
+
+/// The sun of `date` at latitude `lat` and longitude `lon` (degrees):
+/// [`sun`]'s minutes counted from that date's midnight UTC. The one way
+/// the wallpaper's day and night, the night light and the Settings read
+/// it.
+pub fn on(date: Date, lat: f64, lon: f64) -> SunDay {
+    let day = u16::try_from(date.day_of_year()).unwrap_or(1);
+    let midnight = date
+        .to_zoned(TimeZone::UTC)
+        .map_or(Timestamp::UNIX_EPOCH, |z| z.timestamp());
+    let at = |minutes: f64| {
+        midnight
+            .checked_add(SignedDuration::from_secs((minutes * 60.0).round() as i64))
+            .unwrap_or(midnight)
+    };
+    match sun(day, lat, lon) {
+        Sun::Rises { rise, set } => SunDay::Rises {
+            rise: at(rise),
+            set: at(set),
+        },
+        Sun::AlwaysUp => SunDay::AlwaysUp,
+        Sun::AlwaysDown => SunDay::AlwaysDown,
     }
 }
 

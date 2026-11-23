@@ -1924,10 +1924,12 @@ impl App {
                 .collect();
         }
         if section == SectionId::Screens {
-            // The night light's rows after the page's own (#436).
-            let night = crate::screens::NIGHT_ROWS
-                .iter()
-                .filter_map(|id| crate::model::setting(id))
+            // The night light's rows after the page's own (#436), those
+            // shown (#929).
+            let night = self
+                .night_rows()
+                .into_iter()
+                .filter_map(crate::model::setting)
                 .map(|s| Control::Setting(Slot::of(s, self.source)));
             return self
                 .screens_controls()

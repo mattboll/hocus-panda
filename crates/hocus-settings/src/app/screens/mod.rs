@@ -11,6 +11,7 @@
 //! written).
 
 mod drawing;
+mod night;
 mod view;
 
 use drawing::*;

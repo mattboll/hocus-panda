@@ -769,7 +769,21 @@ file's worker together (`Ask::Keys`), as 6.1's do one by one.
 | Échelle | `[outputs.NAME] scale` (Automatique: taken out) |
 | Fréquence variable (VRR) | `[outputs.NAME] vrr = true` (off: taken out) |
 | Écran principal | `[panel] output` (Automatique: taken out) |
-| Éclairage nocturne, À partir de, Jusqu'à, Température | `[night-light] enabled`, `from`, `to`, `temperature` |
+| Éclairage nocturne, Quand, À partir de, Jusqu'à, Température | `[night-light] enabled`, `schedule`, `from`, `to`, `temperature` |
+
+**ÉCLAIRAGE NOCTURNE / NIGHT LIGHT** (#436; when, approved 2026-11-23,
+mockup s32-half-built, #929): the switch; "Quand", a segmented control,
+"Avec le soleil" (the default) / "Heures fixes", `[night-light] schedule
+= "sun" | "hours"`. With the sun, a row says today's hours at the
+weather's place, "Coucher 17:12 · lever 07:58", and under it "À
+Saint-Étienne, le lieu de la météo" (a polar day or night: "Le soleil ne
+se couche pas aujourd’hui", "… ne se lève pas …"); without a place, "Choisis un lieu dans
+Météo", "En attendant, aux heures ci-dessous." and the link "Météo ›",
+with the two hours' rows under it, which apply meanwhile. With the fixed
+hours, "À partir de" and "Jusqu'à" (every half hour). Then
+"Température". The rows after the switch are inert while it is off.
+`src/app/screens/night.rs` draws the group; the log's
+`screens.night` says its rows and the sun's row.
 
 **With two screens or more** (#417, windows.md §12 "Sets of screens"),
 the place, the mode, the scale, VRR and the primary screen are the set
@@ -831,8 +845,9 @@ compositor does not draw one screen's picture on another; the row is
 "Plus tard", inert); **Identifier**'s overlay on the screens themselves
 (the drawing shows the numbers large for 3 s, the compositor draws
 nothing yet); a drop that would split three screens or more (only two are
-drawn against each other); the night light from sunset to sunrise (its
-hours are the user's, windows.md §14).
+drawn against each other); the mockup's strip of the day under the
+night light's rows (the hours it warms drawn on a sky), left out until
+the maintainer asks for it.
 
 ## Souris et pavé tactile (6.12)
 

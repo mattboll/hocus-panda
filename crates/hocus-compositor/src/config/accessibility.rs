@@ -53,12 +53,15 @@ impl Default for Magnifier {
     }
 }
 
-/// The night light, `[night-light]` (#436): the screens' colours warmer
-/// from `from` to `to`, wall-clock hours, fading in and out 30 min.
+/// The night light, `[night-light]` (#436, #929): the screens' colours
+/// warmer from sunset to sunrise at the weather's place, or from `from` to
+/// `to`, wall-clock hours; fading in and out 30 min.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct NightLight {
     pub enabled: bool,
+    /// When: with the sun, or at the fixed hours.
+    pub schedule: NightSchedule,
     /// The colour temperature at night, in kelvin, from 1500 to 6500
     /// (6500: the screen's own white).
     #[serde(deserialize_with = "kelvin")]
@@ -75,11 +78,24 @@ impl Default for NightLight {
     fn default() -> Self {
         Self {
             enabled: false,
+            schedule: NightSchedule::Sun,
             temperature: 4000,
             from: 21 * 60,
             to: 7 * 60,
         }
     }
+}
+
+/// When the night light warms the screens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NightSchedule {
+    /// From sunset to sunrise at `[weather]`'s place; without one, the
+    /// fixed hours.
+    #[default]
+    Sun,
+    /// From `from` to `to`.
+    Hours,
 }
 
 pub(super) fn kelvin<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {

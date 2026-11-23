@@ -2,12 +2,15 @@
 //! screen has a gamma ramp here, so the tests read the ramps the backend
 //! was handed, on a wall clock they hold. Off by default; from 21:00 it
 //! warms over 30 min to its temperature, from 7:00 it goes back over
-//! 30 min; the file changed turns it off or moves it at once.
+//! 30 min; the file changed turns it off or moves it at once. With the
+//! weather's place, from sunset to sunrise there (#929).
 
 use crate::common;
 
 use common::WAIT;
-use hocus_compositor::{Config, Headless, HeadlessConfig, NightLight, RendererChoice};
+use hocus_compositor::{
+    Config, Headless, HeadlessConfig, NightLight, RendererChoice, WeatherSettings,
+};
 
 /// The ramps' last values (red, green, blue), each out of 65535.
 fn whites(hp: &Headless) -> Option<[u16; 3]> {
@@ -16,6 +19,14 @@ fn whites(hp: &Headless) -> Option<[u16; 3]> {
 }
 
 fn start(night_light: NightLight, file: Option<std::path::PathBuf>) -> anyhow::Result<Headless> {
+    start_at(night_light, file, WeatherSettings::default())
+}
+
+fn start_at(
+    night_light: NightLight,
+    file: Option<std::path::PathBuf>,
+    weather: WeatherSettings,
+) -> anyhow::Result<Headless> {
     Headless::start_with(
         HeadlessConfig {
             renderer: RendererChoice::Pixman,
@@ -24,6 +35,7 @@ fn start(night_light: NightLight, file: Option<std::path::PathBuf>) -> anyhow::R
         Config {
             night_light,
             file,
+            weather,
             ..Config::default()
         },
     )
@@ -107,5 +119,51 @@ fn the_file_turns_it_off_and_sets_its_temperature() -> anyhow::Result<()> {
     write("[night-light]\nenabled = false\n")?;
     let off = hp.dispatch_until(WAIT, |hp| hp.gamma().is_none())?;
     anyhow::ensure!(off, "still warm");
+    Ok(())
+}
+
+/// #929: by default it follows the sun at the weather's place: in Paris
+/// on 20 November 2026 it sets about 16:04 UTC and rises about 07:10, so
+/// it warms long before 21:00; the file asking the fixed hours takes it
+/// back to them at once.
+#[test]
+fn with_the_weather_s_place_it_warms_from_sunset_to_sunrise() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("config.toml");
+    let write = |text: &str| -> anyhow::Result<()> {
+        let new = file.with_extension("new");
+        std::fs::write(&new, text)?;
+        std::fs::rename(&new, &file)?;
+        Ok(())
+    };
+    let paris = "[weather]\nplace = \"Paris\"\nlatitude = 48.8566\nlongitude = 2.3522\n";
+    write(&format!("{paris}[night-light]\nenabled = true\n"))?;
+    let on = NightLight {
+        enabled: true,
+        ..NightLight::default()
+    };
+    let weather = WeatherSettings {
+        place: "Paris".to_owned(),
+        latitude: 48.8566,
+        longitude: 2.3522,
+        ..WeatherSettings::default()
+    };
+    let mut hp = start_at(on, Some(file.clone()), weather)?;
+    hp.night_light_at("2026-11-20T15:30:00Z")?;
+    assert_eq!(hp.gamma(), None, "before sunset");
+    hp.night_light_at("2026-11-20T16:50:00Z")?;
+    let night = whites(&hp).expect("warm past sunset");
+    hp.night_light_at("2026-11-21T03:00:00Z")?;
+    assert_eq!(whites(&hp), Some(night), "the night through");
+    hp.night_light_at("2026-11-21T08:00:00Z")?;
+    assert_eq!(hp.gamma(), None, "after sunrise");
+    // The fixed hours asked: 16:50 is the day again.
+    hp.night_light_at("2026-11-20T16:50:00Z")?;
+    assert_eq!(whites(&hp), Some(night));
+    write(&format!(
+        "{paris}[night-light]\nenabled = true\nschedule = \"hours\"\n"
+    ))?;
+    let day = hp.dispatch_until(WAIT, |hp| hp.gamma().is_none())?;
+    anyhow::ensure!(day, "still warm at the fixed hours: {:?}", whites(&hp));
     Ok(())
 }
