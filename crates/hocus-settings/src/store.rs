@@ -122,6 +122,9 @@ pub struct Snapshot {
     /// Each application's level, by its id, as the file words it
     /// (`[notifications.apps]`, #899).
     pub notifications: BTreeMap<String, String>,
+    /// Whether opening each folds its notifications, by its id
+    /// (`[notifications.seen-on-focus]`, #923).
+    pub seen_on_focus: BTreeMap<String, bool>,
 }
 
 /// A set of screens the file arranges: its name ([`set_name`]), its
@@ -276,6 +279,16 @@ pub fn read(text: &str) -> Snapshot {
                         .collect()
                 })
                 .unwrap_or_default(),
+            seen_on_focus: doc
+                .get("notifications")
+                .and_then(|n| n.get("seen-on-focus"))
+                .and_then(Item::as_table_like)
+                .map(|apps| {
+                    apps.iter()
+                        .filter_map(|(id, on)| Some((id.to_owned(), on.as_bool()?)))
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -296,6 +309,7 @@ pub fn read(text: &str) -> Snapshot {
             acting: Box::default(),
             switches_off: Vec::new(),
             notifications: BTreeMap::new(),
+            seen_on_focus: BTreeMap::new(),
         },
     }
 }

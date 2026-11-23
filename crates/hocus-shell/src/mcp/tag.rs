@@ -79,7 +79,7 @@ pub fn place(show: &McpShow) -> ((u32, u32), (i32, i32)) {
     let at = match show.at {
         McpAt::Window { x, y } => (x, y),
         McpAt::Pointer { x, y } => (x + BESIDE.0, y + BESIDE.1),
-        McpAt::Desktop { x, y, .. } | McpAt::Screen { x, y } => {
+        McpAt::Desktop { x, y, .. } | McpAt::Screen { x, y } | McpAt::Bell { x, y } => {
             (x - (size.width / 2.0).round() as i32, y)
         }
     };

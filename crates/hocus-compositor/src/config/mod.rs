@@ -524,6 +524,10 @@ pub struct McpAgent {
     /// Whether it may draw on the screen, in its colour (#825).
     #[serde(default)]
     pub draw: bool,
+    /// Whether it may read the bell and its journal, and pin and tidy
+    /// when it acts (#923).
+    #[serde(default)]
+    pub notifications: bool,
     /// The applications (app ids, globs) whose windows it may click and
     /// type in and whose trees it reads; none by default.
     #[serde(default)]
@@ -552,6 +556,7 @@ impl McpAgent {
             Right::Settings => self.settings,
             Right::Input => self.input,
             Right::Draw => self.draw,
+            Right::Notifications => self.notifications,
         }
     }
 
@@ -1253,6 +1258,7 @@ mod tests {
                     settings: true,
                     input: true,
                     draw: false,
+                    notifications: false,
                     apps: Vec::new(),
                     client: None,
                     since: None,
@@ -1265,6 +1271,7 @@ mod tests {
                     settings: false,
                     input: true,
                     draw: false,
+                    notifications: false,
                     apps: Vec::new(),
                     client: None,
                     since: None,
@@ -1280,6 +1287,10 @@ mod tests {
         assert!(!c.holds(Right::Windows) && c.holds(Right::Desktops));
         assert!(!c.holds(Right::Settings) && !c.holds(Right::Input));
         assert!(!c.holds(Right::Draw), "drawing is off by default");
+        assert!(
+            !c.holds(Right::Notifications),
+            "reading the notifications is off by default"
+        );
         assert_eq!(c.client.as_deref(), Some("claude-code"));
         assert!(super::app_glob("org.mozilla.*", "org.mozilla.firefox"));
         assert!(super::app_glob("KITTY", "kitty"));

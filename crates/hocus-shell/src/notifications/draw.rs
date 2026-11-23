@@ -866,6 +866,9 @@ mod tests {
             icon_from: crate::notifications::note::IconFrom::default(),
             at: 0,
             sound: None,
+            number: 0,
+            transient: false,
+            ancestry: Vec::new(),
         }
     }
 

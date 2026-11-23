@@ -328,7 +328,30 @@ fn to_shell() -> Vec<ToShell> {
         ToShell::Removable(crate::OnPlug::Nothing),
         ToShell::NotifyLevels(crate::NotifyLevels {
             apps: [("Slack".to_owned(), crate::NotifyLevel::History)].into(),
+            seen_on_focus: [("org.example.Agenda".to_owned(), false)].into(),
         }),
+        ToShell::AppFocus(crate::AppFocus {
+            app: "org.example.Chat".into(),
+            pid: 42,
+            windows: vec![("org.example.Chat".into(), 42), ("foot".into(), 7)],
+        }),
+        ToShell::Notes {
+            token: 3,
+            ask: crate::NotesAsk::Tidy {
+                ids: vec![12, 13],
+                app: None,
+            },
+        },
+        ToShell::NotesUndo(vec![crate::NoteBefore {
+            id: 12,
+            state: crate::NoteState::Noticed,
+            pin: Some(crate::NotePin {
+                agent: "Claude".into(),
+                reason: None,
+                at: 1,
+            }),
+            touched: 0,
+        }]),
         ToShell::Dnd(true),
         ToShell::Weather(crate::WeatherPlace {
             enabled: true,
@@ -1078,6 +1101,19 @@ fn to_compositor() -> Vec<ToCompositor> {
         ToCompositor::McpStop(true),
         ToCompositor::Raining(true),
         ToCompositor::Dnd(false),
+        ToCompositor::Notes {
+            token: 3,
+            answer: crate::NotesAnswer::Done {
+                value: "{\"tidied\":2}".into(),
+                count: 2,
+                app: Some("Chat".into()),
+                before: Vec::new(),
+            },
+        },
+        ToCompositor::Notes {
+            token: 4,
+            answer: crate::NotesAnswer::Refused("no notification 9".into()),
+        },
     ];
     all.extend(CaptureMode::ALL.map(|mode| ToCompositor::Capture(CaptureAsk::Mode(mode))));
     all.extend(

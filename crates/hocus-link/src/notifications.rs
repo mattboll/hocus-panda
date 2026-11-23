@@ -6,6 +6,12 @@
 //!
 //! An application goes by its desktop entry (the `desktop-entry` hint),
 //! else by the name it gives (`app_name`): [`notify_app_id`].
+//!
+//! The bell keeps what still needs the user (#923): which window has the
+//! user's focus ([`AppFocus`]), whether opening an application folds its
+//! notifications (`[notifications.seen-on-focus]`, with the levels), and
+//! what an agent asks of the bell through `hocus mcp` ([`NotesAsk`],
+//! answered by [`NotesAnswer`]).
 
 use std::collections::BTreeMap;
 
@@ -84,23 +90,170 @@ pub fn notify_app_id(entry: Option<&str>, app: &str) -> String {
 }
 
 /// `[notifications.apps]`: each application's level, by its id; those not
-/// named show everything.
+/// named show everything. And `[notifications.seen-on-focus]` (#923):
+/// whether opening an application folds its notifications, by its id;
+/// those not named do.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotifyLevels {
     pub apps: BTreeMap<String, NotifyLevel>,
+    #[serde(default)]
+    pub seen_on_focus: BTreeMap<String, bool>,
+}
+
+/// `map`'s value for `id`: as named, else named in another case (an entry
+/// written by hand).
+fn named<'a, T>(map: &'a BTreeMap<String, T>, id: &str) -> Option<&'a T> {
+    map.get(id).or_else(|| {
+        map.iter()
+            .find(|(named, _)| named.eq_ignore_ascii_case(id))
+            .map(|(_, value)| value)
+    })
 }
 
 impl NotifyLevels {
     /// The level of application `id`: as named, else named in another case
     /// (an entry written by hand), else everything.
     pub fn of(&self, id: &str) -> NotifyLevel {
-        self.apps.get(id).copied().unwrap_or_else(|| {
-            self.apps
-                .iter()
-                .find(|(named, _)| named.eq_ignore_ascii_case(id))
-                .map_or(NotifyLevel::All, |(_, level)| *level)
-        })
+        named(&self.apps, id).copied().unwrap_or(NotifyLevel::All)
     }
+
+    /// Whether opening application `id` folds its notifications (#923):
+    /// unless the configuration says it does not.
+    pub fn folds_on_focus(&self, id: &str) -> bool {
+        named(&self.seen_on_focus, id).copied().unwrap_or(true)
+    }
+}
+
+/// Whether a notification's application `a` and a window's `b` are one: as
+/// `raise` matches them (5.3), ignoring case and a trailing `.desktop`,
+/// the whole id or its last dotted part on either side
+/// (`org.mozilla.firefox` and `firefox`).
+pub fn same_app(a: &str, b: &str) -> bool {
+    let tidy = |id: &str| {
+        let id = id.trim();
+        let id = id.strip_suffix(".desktop").unwrap_or(id);
+        id.to_lowercase()
+    };
+    let (a, b) = (tidy(a), tidy(b));
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    let last = |id: &str| id.rsplit('.').next().unwrap_or_default().to_owned();
+    a == b || last(&a) == last(&b)
+}
+
+// --- The user's focus, and the agents' asks (#923) -----------------------------------
+
+/// The window that took the user's keyboard focus: its application's id
+/// (an X11 window's class) and its process; and every window's, for a
+/// notification whose application has no window (it is the window's of
+/// its sender or of its sender's nearest parent that has one).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppFocus {
+    pub app: String,
+    pub pid: u32,
+    /// Each window's application id and process.
+    pub windows: Vec<(String, u32)>,
+}
+
+/// Where a notification is in the bell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteState {
+    /// Counted by the badge, its line with the blue dot.
+    New,
+    /// Seen in passing: its line stays open, not counted.
+    Noticed,
+    /// Its application opened, its line clicked, or an agent tidied it:
+    /// folded under "N vues".
+    Seen,
+}
+
+impl NoteState {
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Noticed => "noticed",
+            Self::Seen => "seen",
+        }
+    }
+}
+
+/// An agent's pin on a notification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotePin {
+    pub agent: String,
+    /// One line, 80 characters at most; none: no reason shown.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// When, on the wall clock (milliseconds).
+    pub at: i64,
+}
+
+/// The longest reason a pin shows.
+pub const PIN_REASON: usize = 80;
+/// The most notifications pinned at once.
+pub const PINS: usize = 3;
+
+/// What an agent asks of the bell, its right checked by the compositor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NotesAsk {
+    /// The bell's notifications, newest first.
+    List {
+        app: Option<String>,
+        state: Option<NoteState>,
+        limit: u32,
+    },
+    /// The journal's lines holding every word of `text`.
+    Search {
+        text: String,
+        app: Option<String>,
+        /// Milliseconds since the epoch.
+        since: Option<i64>,
+        until: Option<i64>,
+        limit: u32,
+    },
+    Pin {
+        id: u64,
+        agent: String,
+        reason: Option<String>,
+    },
+    Unpin {
+        id: u64,
+    },
+    /// These, or every new and noticed one of `app`, become seen.
+    Tidy {
+        ids: Vec<u64>,
+        app: Option<String>,
+    },
+}
+
+/// A notification as it was before an agent changed it, for « Annuler ».
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteBefore {
+    pub id: u64,
+    pub state: NoteState,
+    pub pin: Option<NotePin>,
+    /// How many times the user had changed it then: one they changed
+    /// since stays as they left it.
+    pub touched: u64,
+}
+
+/// The bell's answer to an agent's ask.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NotesAnswer {
+    /// What the agent reads, as JSON's text; for a pin or a tidying, how
+    /// many changed, of which application (its name when they are all
+    /// one's), and what they were before.
+    Done {
+        value: String,
+        count: u32,
+        app: Option<String>,
+        before: Vec<NoteBefore>,
+    },
+    Refused(String),
 }
 
 // --- The senders ----------------------------------------------------------------------
@@ -220,6 +373,7 @@ mod tests {
                 ("Firefox".to_owned(), NotifyLevel::None),
             ]
             .into(),
+            seen_on_focus: BTreeMap::new(),
         };
         assert_eq!(levels.of("slack"), NotifyLevel::Silent);
         // Written by hand in another case.
@@ -231,6 +385,21 @@ mod tests {
             Some(NotifyLevel::History)
         );
         assert_eq!(NotifyLevel::from_word("loud"), None);
+    }
+
+    #[test]
+    fn an_application_and_a_window_match_as_raise_does() {
+        assert!(same_app("org.mozilla.firefox", "firefox"));
+        assert!(same_app("Firefox.desktop", "org.mozilla.firefox"));
+        assert!(same_app("Slack", "slack"));
+        assert!(!same_app("slack", "signal"));
+        assert!(!same_app("", ""));
+        let levels = NotifyLevels {
+            apps: BTreeMap::new(),
+            seen_on_focus: [("org.example.Agenda".to_owned(), false)].into(),
+        };
+        assert!(!levels.folds_on_focus("org.example.agenda"));
+        assert!(levels.folds_on_focus("org.example.Chat"));
     }
 
     #[test]

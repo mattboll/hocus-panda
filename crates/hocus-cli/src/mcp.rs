@@ -52,7 +52,9 @@ const INSTRUCTIONS: &str = "The windows, desktops, screens and settings of a Hoc
     windows of the applications the user allowed, through a pointer and a keyboard of your own \
     (the user's stay theirs). Aim at an element by its label rather than at pixels when the \
     tree has it. When the user asks you to show them something on the screen, draw it (circle, \
-    point at, underline), if they allowed it. Say what each action is for with `intent`, in one \
+    point at, underline), if they allowed it. If they allowed it, read the bell's notifications \
+    and search their journal, pin one that needs them and tidy away what does not: never \
+    remove one, only the user does. Say what each action is for with `intent`, in one \
     short line: the user sees it on what you touch before it happens, and then a summary. Some \
     actions wait for the user's \
     answer (a password field, an application they marked); the user may take over or stop \
@@ -804,6 +806,101 @@ fn tools() -> Vec<Value> {
                 "additionalProperties": false,
             },
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
+        }),
+        json!({
+            "name": "list_notifications",
+            "title": "List notifications",
+            "description": "The bell's notifications, newest first: id (the bell's and the \
+                journal's), app, app_id, title, body, at (RFC 3339), state (new: counted by the \
+                badge; noticed: seen in passing; seen: folded under its application, its \
+                application opened), urgency, pinned (agent, reason) when pinned, actions while \
+                its sender holds it. Only when the user allowed this agent the notifications.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string", "description": "An application's id or name, ignoring case." },
+                    "state": { "type": "string", "enum": ["new", "noticed", "seen"] },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": hocus_agents::mcp::MAX_NOTES, "default": hocus_agents::mcp::NOTES },
+                },
+                "additionalProperties": false,
+            },
+            "annotations": read,
+        }),
+        json!({
+            "name": "search_notifications",
+            "title": "Search the notifications",
+            "description": "The journal's notifications (30 days, those the bell no longer holds \
+                and those it never held too) whose title, body or application's name hold every \
+                word of text, ignoring case and accents; newest first, as written, each with its \
+                state while the bell still holds it. Only when the user allowed this agent the \
+                notifications.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "Words, all of them." },
+                    "app": { "type": "string", "description": "An application's id or name, ignoring case." },
+                    "since": { "type": "string", "description": "A date (2026-11-20) or RFC 3339." },
+                    "until": { "type": "string", "description": "A date (2026-11-20, all of it) or RFC 3339." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": hocus_agents::mcp::MAX_NOTES, "default": hocus_agents::mcp::NOTES },
+                },
+                "additionalProperties": false,
+            },
+            "annotations": read,
+        }),
+        json!({
+            "name": "pin_notification",
+            "title": "Pin a notification",
+            "description": "Pins a notification of the bell at its top, new, with this agent's \
+                name and a reason: one that needs the user. Three at most; a fourth is refused, \
+                saying which are pinned. The user clicks it, removes it, or undoes the pin. \
+                Shown to the user first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "minimum": 0, "description": "Its id, from list_notifications." },
+                    "reason": { "type": "string", "maxLength": hocus_agents::mcp::MAX_REASON, "description": "Why it needs the user, one line: \"To pay before Friday\"." },
+                    "intent": intent,
+                },
+                "required": ["id", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": act,
+        }),
+        json!({
+            "name": "unpin_notification",
+            "title": "Unpin a notification",
+            "description": "Takes this agent's pin off a notification: back with its \
+                application's, its state kept. Shown to the user first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "minimum": 0, "description": "Its id, from list_notifications." },
+                    "intent": intent,
+                },
+                "required": ["id", "intent"],
+                "additionalProperties": false,
+            },
+            "annotations": act,
+        }),
+        json!({
+            "name": "tidy_notifications",
+            "title": "Tidy notifications away",
+            "description": "Folds notifications that do not need the user under their \
+                application's \"N seen\", as opening the application does: these ids, or all \
+                of an application's new and noticed ones; a pinned one is unpinned. Nothing is \
+                removed: the user still finds them, and may undo it. Says how many. Shown to \
+                the user first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ids": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "description": "Their ids, from list_notifications." },
+                    "app": { "type": "string", "description": "Or an application's id or name: all of its new and noticed ones." },
+                    "intent": intent,
+                },
+                "required": ["intent"],
+                "additionalProperties": false,
+            },
+            "annotations": act,
         }),
         json!({
             "name": "accessibility_tree",

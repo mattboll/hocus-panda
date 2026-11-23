@@ -128,6 +128,18 @@ pub enum ToShell {
     /// Do not disturb, as the Settings set it (#899): on for an hour, as
     /// the bell's switch turns it on, or off.
     Dnd(bool),
+    /// A window took the user's keyboard focus (#923): its application's
+    /// notifications fold. Sent as the focused window changes, never while
+    /// locked, never for an agent's seat.
+    AppFocus(crate::AppFocus),
+    /// An agent's ask of the bell (#923, docs/design/mcp.md
+    /// "Notifications"), its right checked: answered by
+    /// [`ToCompositor::Notes`](crate::ToCompositor::Notes) of the same
+    /// `token`.
+    Notes { token: u64, ask: crate::NotesAsk },
+    /// « Annuler » of an agent's pins or tidying: these as they were, for
+    /// those the bell still holds and the user did not change since.
+    NotesUndo(Vec<crate::NoteBefore>),
     /// The side the bars stand on (`[panel] side`, 6.4): sent as the shell
     /// connects, before the bars, and when the configuration changes it, each
     /// bar then made again on that side (`no-bar`, then `bar`).

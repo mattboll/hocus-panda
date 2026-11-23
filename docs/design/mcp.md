@@ -58,6 +58,8 @@ desktops = true        # switch desktops, send a window, launch (default true)
 settings = true        # may change settings (default false)
 input = true           # click, drag and type in its apps (default true)
 draw = true            # draw on the screen (default false, #825)
+notifications = true   # read the bell and its journal; pin and tidy when
+                       # "act" (default false, #923)
 client = "claude-code" # what the Settings plugged it into, and the day
 since = "2026-11-12"
 ```
@@ -284,6 +286,50 @@ they start. `label` is written beside the shape in the agent's hand
   le bureau) and « Voir » (the journal).
 - **The toast** after drawing: « Claude a dessiné 4 formes à l'écran »,
   its first intent quoted, « Effacer » while its shapes show, « Voir ».
+
+## Notifications (#923)
+
+Approved on 2026-11-22 (notifications.md, "The bell keeps what still
+needs you"; mockup: the tools' `mockups/s30-bell`). An agent
+sorts the bell if the user wants it: it reads the notifications, pins
+one that needs the user, and tidies away what does not. There is no
+judgement in the bell itself, and an agent never removes one: only the
+user does.
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `list_notifications` | `app` (an application's id or name, ignoring case), `state` (`new`, `noticed`, `seen`; all when left out), `limit` (50, at most 200) | the bell's notifications, newest first: `id`, `app`, `app_id`, `title`, `body`, `at` (RFC 3339), `state`, `urgency`, `pinned` (`agent`, `reason`) when pinned, `actions` (their labels, while the sender holds it) |
+| `search_notifications` | `text` (words, all of them, ignoring case and accents, in the title, the body or the application's name), `app`, `since`, `until` (a date, or RFC 3339), `limit` (50, at most 200) | the journal's lines that match (30 days, transient ones and those the user removed too), newest first, as written, each with `state` when the bell still holds it |
+| `pin_notification` | `id`, `reason` (one line, 80 characters at most; none: no reason shown), `intent` | `pinned`; refused when the bell no longer holds it, or 3 are pinned (saying which) |
+| `unpin_notification` | `id`, `intent` | `unpinned`: back with its application's, its state kept |
+| `tidy_notifications` | `ids`, or `app` (all of its new and noticed ones), `intent` | how many became seen (folded under "N vues", as opening the application does); a pinned one is unpinned |
+
+- **The right**: `notifications`, a check box of the agent's card
+  (settings.md, "Agir sur le bureau"), off by default: notifications
+  carry private messages, and the journal 30 days of them. Without it
+  every one of these tools is refused (`no-notifications`). With it a
+  `read` agent lists and searches; pinning, unpinning and tidying need
+  `access = "act"` as well. Refused while locked and while the agents
+  are stopped, as the others.
+- **Where**: the shell holds the notifications (decision 0003); the
+  compositor checks the right, shows, journals and undoes as for any
+  call, and asks the shell, which answers off its window's thread (the
+  search reads the journal on the history's thread).
+- **What shows**: before pinning or tidying, for `show-before-ms`, the
+  bell on each bar ringed in violet (as a desktop's tile: a soft fill,
+  3 px inside, a 3 px halo) and the tag at the top of the focused
+  screen, the agent's name over its intent; its row says "range tes
+  notifications…". Reading shows nothing.
+- **The toast** sums the request up as the others: "Claude a
+  épinglé 1 notification de Courriel", "a rangé 12 notifications de
+  Chat", its first intent quoted. « Annuler » takes its pins back and
+  puts what it tidied back in the state it had (new or noticed), for the
+  notifications the bell still holds; one the user took out since is
+  skipped, one the user clicked since stays seen.
+- **The journal** says "épinglé 1 notification · Courriel", "rangé 12
+  notifications · Chat", "lu 20 notifications", "cherché dans les
+  notifications": the application and how many, never a title, a text
+  or the words searched.
 
 ## The journal
 

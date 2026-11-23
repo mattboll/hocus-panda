@@ -176,7 +176,7 @@ impl App {
             Msg::Open(folder) => {
                 let path = self.folder_used(folder).0;
                 tracing::info!(folder = %path.display(), "the folder is opened");
-                super::open_folder(path, false);
+                super::open_place(path, false);
                 iced::Task::none()
             }
             Msg::Change(folder) => {
@@ -1024,7 +1024,7 @@ fn tile_colour(id: &str) -> Color {
 }
 
 /// A 6.1 control's look: a button on the card, its rim, lit hovered.
-fn control_style(focused: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+pub(super) fn control_style(focused: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {

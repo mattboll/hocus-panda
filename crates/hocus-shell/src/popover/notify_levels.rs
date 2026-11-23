@@ -4,7 +4,10 @@
 //! levels of that notification's application, the current one ticked:
 //! "Bulle et son", "Bulle, sans son", "Historique seulement", "Rien". A
 //! choice applies at once and is written into the configuration file
-//! (`[notifications.apps]`), then the menu closes.
+//! (`[notifications.apps]`), then the menu closes. Under a rule, the check
+//! box « Vues dès que je l'ouvre » (#923): unticked, opening the
+//! application folds none of its notifications
+//! (`[notifications.seen-on-focus]`); the menu stays open.
 //!
 //! Beside the bar as the other popovers, right-aligned with the bubbles:
 //! under the bubble; from the history, in its place, its top where
@@ -53,6 +56,14 @@ const HEADER_TEXT: f32 = 11.0;
 const ROW_IN: f32 = 10.0;
 /// A level: 30 px, its words 13 px, the check 13 px.
 const ROW: f32 = 30.0;
+/// The rule over the check box (#923): 1 px, 4 px from what is around it,
+/// 6 px in; the box 16 px, 1.5 px rim, radius 4, 10 px before its words.
+const RULE_AROUND: f32 = 4.0;
+const RULE_IN: f32 = 6.0;
+const BOX: f32 = 16.0;
+const BOX_GAP: f32 = 10.0;
+/// The rule's ink.
+const RULE_INK: crate::theme::Ink = crate::theme::Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
 const ROW_RADIUS: f32 = 7.0;
 const ROW_TEXT: f32 = 13.0;
 const CHECK: f32 = 13.0;
@@ -67,12 +78,28 @@ struct For {
     name: String,
 }
 
+/// What can be acted on in it: a level, or the check box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Choice {
+    Level(NotifyLevel),
+    SeenOnOpen,
+}
+
+/// The menu's choices, in their order.
+const CHOICES: [Choice; 5] = [
+    Choice::Level(NotifyLevel::All),
+    Choice::Level(NotifyLevel::Silent),
+    Choice::Level(NotifyLevel::History),
+    Choice::Level(NotifyLevel::None),
+    Choice::SeenOnOpen,
+];
+
 #[derive(Debug, Default)]
 struct Menu {
     shown: Option<For>,
     /// From the history: its line's top on the popover.
     line_top: f32,
-    focus: Option<NotifyLevel>,
+    focus: Option<Choice>,
     said: Option<String>,
 }
 
@@ -128,8 +155,9 @@ pub fn opening() {
     });
 }
 
-/// Where its parts are: the levels' rows, and its height.
-fn layout() -> (Vec<(NotifyLevel, Rectangle)>, f32) {
+/// Where its parts are: the levels' rows, the rule, the check box's row,
+/// and its height.
+fn layout() -> (Vec<(NotifyLevel, Rectangle)>, Rectangle, Rectangle, f32) {
     let mut y = BORDER + PAD + HEADER;
     let rows = NotifyLevel::ALL
         .into_iter()
@@ -139,12 +167,18 @@ fn layout() -> (Vec<(NotifyLevel, Rectangle)>, f32) {
             (level, rect)
         })
         .collect();
-    (rows, y + PAD + BORDER)
+    let rule = Rectangle::new(
+        Point::new(SIDE + RULE_IN, y + RULE_AROUND),
+        Size::new(INNER - 2.0 * RULE_IN, 1.0),
+    );
+    y += 2.0 * RULE_AROUND + 1.0;
+    let check = Rectangle::new(Point::new(SIDE, y), Size::new(INNER, ROW));
+    (rows, rule, check, y + ROW + PAD + BORDER)
 }
 
 /// Its height.
 pub fn height() -> u32 {
-    layout().1.round() as u32
+    layout().3.round() as u32
 }
 
 /// A level's name.
@@ -158,8 +192,11 @@ pub fn name(level: NotifyLevel, lang: Lang) -> &'static str {
 }
 
 /// Its control's id: what tests, and screen readers, know it by.
-fn id_of(level: NotifyLevel) -> String {
-    format!("notify_levels:{level:?}")
+fn id_of(choice: Choice) -> String {
+    match choice {
+        Choice::Level(level) => format!("notify_levels:{level:?}"),
+        Choice::SeenOnOpen => "notify_levels:SeenOnOpen".to_owned(),
+    }
 }
 
 /// The menu on its surface.
@@ -174,19 +211,23 @@ pub struct Panel {
 pub enum Msg {
     /// A level pressed, or `Enter` on it.
     Choose(NotifyLevel),
+    /// The check box pressed: opening the application folds, or not.
+    SeenOnOpen,
     /// The ring comes to it.
-    Focus(NotifyLevel),
+    Focus(Choice),
     /// A press anywhere on the menu.
     Pressed,
     /// What it shows changed under the view.
     Stale,
 }
 
-/// What it was built from: the application, its level.
-fn built_from() -> Option<(For, NotifyLevel)> {
+/// What it was built from: the application, its level, whether opening
+/// it folds.
+fn built_from() -> Option<(For, NotifyLevel, bool)> {
     let shown = with(|m| m.shown.clone())?;
     let level = crate::notifications::apps::level_of(&shown.id);
-    Some((shown, level))
+    let folds = crate::notifications::apps::folds_on_focus(&shown.id);
+    Some((shown, level, folds))
 }
 
 /// The menu on its surface.
@@ -213,8 +254,8 @@ fn arrows(pressed: &Pressed) -> Option<Msg> {
         _ => return None,
     };
     let next = match with(|m| m.focus) {
-        Some(focus) => kit::cycle(&NotifyLevel::ALL, focus, forward),
-        None => kit::step(&NotifyLevel::ALL, None, !forward),
+        Some(focus) => kit::cycle(&CHOICES, focus, forward),
+        None => kit::step(&CHOICES, None, !forward),
     };
     next.map(Msg::Focus)
 }
@@ -227,12 +268,12 @@ fn at<'a>(content: impl Into<El<'a>>, point: Point) -> El<'a> {
 /// Its content: the header, then the levels.
 fn build<'a>() -> El<'a> {
     let lang = Lang::of_messages();
-    let Some((shown, current)) = built_from() else {
+    let Some((shown, current, folds)) = built_from() else {
         return Space::new().into();
     };
     let focus = with(|m| {
         let said_now = format!(
-            "app={} for={:?} level={}",
+            "app={} for={:?} level={} seen_on_open={folds}",
             shown.id,
             shown.name,
             current.word()
@@ -243,7 +284,7 @@ fn build<'a>() -> El<'a> {
         }
         m.focus
     });
-    let (rows, height) = layout();
+    let (rows, rule, check_row, height) = layout();
     let mut layers: Vec<El<'a>> = vec![Space::new().width(Length::Fill).height(height).into()];
     let header = txt::for_app(lang, shown.name.to_uppercase());
     layers.push(at(
@@ -257,7 +298,7 @@ fn build<'a>() -> El<'a> {
     ));
     for (level, rect) in rows {
         let chosen = level == current;
-        let focused = focus == Some(level);
+        let focused = focus == Some(Choice::Level(level));
         let check = drawn(CHECK, CHECK, move |f, s| {
             if !chosen {
                 return;
@@ -308,13 +349,92 @@ fn build<'a>() -> El<'a> {
             })
             .on_press(Msg::Choose(level));
         layers.push(at(
-            control(pressed, id_of(level), Role::RadioButton, words)
-                .node(|n| n.checked(chosen).set(level as usize + 1, 4))
-                .focus(focused, Msg::Focus(level), ROW_RADIUS)
-                .activate(Msg::Choose(level)),
+            control(
+                pressed,
+                id_of(Choice::Level(level)),
+                Role::RadioButton,
+                words,
+            )
+            .node(|n| n.checked(chosen).set(level as usize + 1, 4))
+            .focus(focused, Msg::Focus(Choice::Level(level)), ROW_RADIUS)
+            .activate(Msg::Choose(level)),
             rect.position(),
         ));
     }
+    // The rule, then « Vues dès que je l'ouvre » (#923).
+    layers.push(at(
+        container(Space::new().width(rule.width).height(rule.height))
+            .style(|_| style::boxed(RULE_INK.get(), 0.0)),
+        rule.position(),
+    ));
+    let tick = drawn(BOX, BOX, move |f, s| {
+        let rect = Rectangle::new(
+            Point::new(0.75, 0.75),
+            Size::new(s.width - 1.5, s.height - 1.5),
+        );
+        if folds {
+            f.fill(&kit::rounded(rect, 4.0), ACCENT.get());
+            let k = s.width / 16.0;
+            let path = Path::new(|p| {
+                p.move_to(Point::new(4.5 * k, 8.0 * k));
+                p.line_to(Point::new(7.0 * k, 10.5 * k));
+                p.line_to(Point::new(11.5 * k, 5.5 * k));
+            });
+            f.stroke(
+                &path,
+                iced::widget::canvas::Stroke::default()
+                    .with_color(Color::from_rgb8(0x0B, 0x10, 0x20))
+                    .with_width(2.0 * k)
+                    .with_line_cap(iced::widget::canvas::LineCap::Round)
+                    .with_line_join(iced::widget::canvas::LineJoin::Round),
+            );
+        } else {
+            f.stroke(
+                &kit::rounded(rect, 4.0),
+                iced::widget::canvas::Stroke::default()
+                    .with_color(FAINT.get())
+                    .with_width(1.5),
+            );
+        }
+    });
+    let words = txt::SEEN_ON_OPEN.get(lang);
+    let pressed = button(
+        container(
+            row![
+                tick,
+                Space::new().width(BOX_GAP),
+                text_of(words, ROW_TEXT, MANROPE, TEXT.get())
+            ]
+            .align_y(Vertical::Center),
+        )
+        .center_y(Length::Fill),
+    )
+    .padding(Padding {
+        left: ROW_IN,
+        right: ROW_IN,
+        ..Padding::ZERO
+    })
+    .width(check_row.width)
+    .height(check_row.height)
+    .style(move |_, status| {
+        if style::lit(status) {
+            style::hovered(HOVER.get(), ROW_RADIUS)
+        } else {
+            style::clear()
+        }
+    })
+    .on_press(Msg::SeenOnOpen);
+    layers.push(at(
+        control(pressed, id_of(Choice::SeenOnOpen), Role::CheckBox, words)
+            .node(|n| n.checked(folds))
+            .focus(
+                focus == Some(Choice::SeenOnOpen),
+                Msg::Focus(Choice::SeenOnOpen),
+                ROW_RADIUS,
+            )
+            .activate(Msg::SeenOnOpen),
+        check_row.position(),
+    ));
     iced::widget::Stack::with_children(layers).into()
 }
 
@@ -322,12 +442,18 @@ fn handle(message: Msg) {
     match message {
         Msg::Stale => {}
         Msg::Pressed => with(|m| m.focus = None),
-        Msg::Focus(level) => with(|m| m.focus = Some(level)),
+        Msg::Focus(choice) => with(|m| m.focus = Some(choice)),
         Msg::Choose(level) => {
             if let Some(shown) = with(|m| m.shown.clone()) {
                 crate::notifications::apps::choose(&shown.id, &shown.name, level);
             }
             event(Seen::Chosen);
+        }
+        // A check box: the menu stays, its box ticked or not.
+        Msg::SeenOnOpen => {
+            if let Some((shown, _, folds)) = built_from() {
+                crate::notifications::apps::seen_on_focus(&shown.id, &shown.name, !folds);
+            }
         }
     }
 }
@@ -337,13 +463,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn its_four_levels_under_its_header() {
-        let (rows, height) = layout();
+    fn its_four_levels_under_its_header_then_its_check_box() {
+        let (rows, rule, check, height) = layout();
         let levels: Vec<NotifyLevel> = rows.iter().map(|(l, _)| *l).collect();
         assert_eq!(levels, NotifyLevel::ALL);
         assert_eq!(rows[0].1.y, BORDER + PAD + HEADER);
         assert!(rows.windows(2).all(|w| w[1].1.y == w[0].1.y + ROW));
-        assert_eq!(height, BORDER + PAD + HEADER + 4.0 * ROW + PAD + BORDER);
+        let last = rows[3].1;
+        assert_eq!(rule.y, last.y + ROW + 4.0);
+        assert_eq!(check.y, rule.y + 1.0 + 4.0);
+        assert_eq!(height, check.y + ROW + PAD + BORDER);
+        assert_eq!(
+            txt::SEEN_ON_OPEN.get(Lang::French),
+            "Vues dès que je l’ouvre"
+        );
         assert_eq!(name(NotifyLevel::Silent, Lang::French), "Bulle, sans son");
         assert_eq!(name(NotifyLevel::History, Lang::English), "History only");
     }

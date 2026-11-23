@@ -46,15 +46,18 @@ pub enum Right {
     Input,
     /// Draw on the screen (#825).
     Draw,
+    /// Read the bell and its journal; pin and tidy when it acts (#923).
+    Notifications,
 }
 
 impl Right {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Windows,
         Self::Desktops,
         Self::Settings,
         Self::Input,
         Self::Draw,
+        Self::Notifications,
     ];
 
     /// Its key in the agent's table.
@@ -65,6 +68,7 @@ impl Right {
             Self::Settings => "settings",
             Self::Input => "input",
             Self::Draw => "draw",
+            Self::Notifications => "notifications",
         }
     }
 
@@ -75,6 +79,7 @@ impl Right {
             Self::Settings => words::SETTINGS,
             Self::Input => words::INPUT,
             Self::Draw => words::DRAW,
+            Self::Notifications => words::NOTIFICATIONS,
         }
     }
 
@@ -85,12 +90,19 @@ impl Right {
             Self::Settings => Some(words::SETTINGS_LINE),
             Self::Input => Some(words::INPUT_LINE),
             Self::Draw => Some(words::DRAW_LINE),
+            Self::Notifications => None,
         }
     }
 
     /// What it is when the table does not say (the compositor's).
     pub const fn default(self) -> bool {
-        !matches!(self, Self::Settings | Self::Draw)
+        !matches!(self, Self::Settings | Self::Draw | Self::Notifications)
+    }
+
+    /// Whether it is only for an agent that acts: inert while it only
+    /// looks. Reading the notifications is a right of its own (#923).
+    pub const fn acting(self) -> bool {
+        !matches!(self, Self::Notifications)
     }
 }
 
@@ -105,6 +117,8 @@ pub struct Agent {
     pub settings: bool,
     pub input: bool,
     pub draw: bool,
+    /// Reading and sorting the notifications (#923).
+    pub notifications: bool,
     pub apps: Vec<String>,
     pub client: Option<String>,
     /// `"2026-11-12"`.
@@ -119,6 +133,7 @@ impl Agent {
             Right::Settings => self.settings,
             Right::Input => self.input,
             Right::Draw => self.draw,
+            Right::Notifications => self.notifications,
         }
     }
 
@@ -161,6 +176,7 @@ impl Agent {
             settings: flag("settings", Right::Settings),
             input: flag("input", Right::Input),
             draw: flag("draw", Right::Draw),
+            notifications: flag("notifications", Right::Notifications),
             apps: texts(table.get("apps")).unwrap_or_default(),
             client: text("client"),
             since: text("since"),

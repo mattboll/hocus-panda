@@ -2978,3 +2978,41 @@ impl Notifications {
             .clone()
     }
 }
+
+/// Sends a notification on the bus at `address` as `app` (its hints:
+/// `transient`, `urgency`…), from a client of its own; its id.
+pub fn notify(
+    address: &str,
+    app: &str,
+    summary: &str,
+    body: &str,
+    hints: Vec<(&'static str, zbus::OwnedVariant)>,
+) -> anyhow::Result<u32> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let hints: std::collections::HashMap<&str, zbus::OwnedVariant> = hints.into_iter().collect();
+    let body = (
+        app,
+        0u32,
+        "",
+        summary,
+        body,
+        Vec::<&str>::new(),
+        hints,
+        -1i32,
+    );
+    runtime.block_on(async move {
+        let client = zbus::connection::Builder::address(address).build().await?;
+        let reply = client
+            .call_method(
+                Some("org.freedesktop.Notifications"),
+                "/org/freedesktop/Notifications",
+                Some("org.freedesktop.Notifications"),
+                "Notify",
+                &body,
+            )
+            .await?;
+        anyhow::Ok(reply.body().deserialize::<u32>()?)
+    })
+}

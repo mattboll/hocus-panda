@@ -5,7 +5,7 @@
 //! - **The tag** ([`tag`]): the agent's name over its intent, on what it
 //!   is about to touch, a surface of its own while the compositor shows
 //!   the action (it rings the window itself; the bar's desktops ring a
-//!   desktop's tile, [`tile`]).
+//!   desktop's tile, [`tile`], and the bars their bell, [`bell_ringed`]).
 //! - **Its row** in the agents' group: one row per agent, its mark and
 //!   what it does ([`row_word`]); a click opens the journal
 //!   ([`crate::popover::journal`]).
@@ -107,8 +107,9 @@ pub fn shown() -> McpShown {
 pub fn set(shown: McpShown) -> Vec<Effect> {
     let words = Words::new(Lang::of_messages());
     let mut effects = Vec::new();
-    let (rows, tile_changed) = kept(|k| {
+    let (rows, tile_changed, bell_changed) = kept(|k| {
         let tile_before = tile_of(&k.shown);
+        let bell_before = bell_of(&k.shown);
         // The tag: one surface per action shown.
         if k.tag.as_ref().map(|(_, s)| s) != shown.show.as_ref() {
             if let Some((id, _)) = k.tag.take() {
@@ -250,14 +251,18 @@ pub fn set(shown: McpShown) -> Vec<Effect> {
             k.toast = Some((id, toast));
         }
         let changed = tile_before != tile_of(&shown);
+        let bell_changed = bell_before != bell_of(&shown);
         k.shown = shown;
-        (rows_of(&k.shown), changed)
+        (rows_of(&k.shown), changed, bell_changed)
     });
     crate::agents::set_mcp(rows);
     crate::ui::touch();
     popover::changed(Item::Journal);
     if tile_changed {
         effects.push(Effect::Wake(hocus_link::DESKTOPS_NAMESPACE));
+    }
+    if bell_changed {
+        effects.push(Effect::Wake(hocus_link::FOOTER_NAMESPACE));
     }
     effects.push(Effect::Wake(hocus_link::MCP_TOAST_NAMESPACE));
     effects.push(Effect::Wake(hocus_link::MCP_CARD_NAMESPACE));
@@ -328,6 +333,19 @@ fn tile_of(shown: &McpShown) -> Option<(String, u8)> {
         hocus_link::McpAt::Desktop { index, .. } => Some((show.output.clone(), index)),
         _ => None,
     }
+}
+
+fn bell_of(shown: &McpShown) -> bool {
+    matches!(
+        shown.show.as_ref().map(|s| s.at),
+        Some(hocus_link::McpAt::Bell { .. })
+    )
+}
+
+/// Whether an agent is about to pin or tidy (#923): the bell on every bar
+/// ringed in the agent's colour.
+pub fn bell_ringed() -> bool {
+    kept(|k| bell_of(&k.shown))
 }
 
 /// The desktop of `output` an action is about to show or send a window
@@ -442,6 +460,17 @@ impl Words {
         if s.drawn > 0 {
             parts.push(txt::drawn(lang, s.drawn));
         }
+        // The bell's (#923): its application said by the toast and the
+        // journal, each its own way.
+        if s.pinned > 0 {
+            parts.push(txt::notes_pinned(lang, s.pinned));
+        }
+        if s.unpinned > 0 {
+            parts.push(txt::notes_unpinned(lang, s.unpinned));
+        }
+        if s.tidied > 0 {
+            parts.push(txt::notes_tidied(lang, s.tidied));
+        }
         match s.settings.as_slice() {
             [] => {}
             sets @ ([_] | [_, _]) => parts.extend(sets.iter().map(|set| self.setting(set))),
@@ -482,13 +511,18 @@ impl Words {
         }
     }
 
-    /// The toast's sentence: "Claude a rangé 3 fenêtres".
+    /// The toast's sentence: "Claude a rangé 3 fenêtres", "Claude a
+    /// épinglé 1 notification de Courriel".
     pub fn toast(self, toast: &hocus_link::McpToast) -> String {
+        let mut what = self.summary(&toast.summary);
+        if let Some(app) = &toast.summary.notes_app {
+            what = txt::notes_of(self.lang, txt::NotesOf { app, what: &what });
+        }
         txt::did(
             self.lang,
             txt::Did {
                 agent: &toast.agent,
-                what: self.summary(&toast.summary),
+                what,
             },
         )
     }
@@ -552,6 +586,7 @@ impl Words {
                 McpKind::Input => txt::ACTING_INPUT,
                 McpKind::Draw => txt::ACTING_DRAW,
                 McpKind::Drag => txt::ACTING_DRAG,
+                McpKind::Notifications => txt::ACTING_NOTIFICATIONS,
             }
             .get(lang)
             .to_owned(),
@@ -590,8 +625,25 @@ impl Words {
                 } else {
                     txt::IN_SETTINGS.get(lang).to_owned()
                 };
-                (first(self.summary(summary)), place, false)
+                let what = self.summary(summary);
+                // The bell's: its application, never their text (#923).
+                if summary.pinned + summary.unpinned + summary.tidied > 0 {
+                    let what = match &summary.notes_app {
+                        Some(app) => txt::notes_from(lang, txt::NotesFrom { app, what: &what }),
+                        None => what,
+                    };
+                    return (first(what), String::new(), false);
+                }
+                (first(what), place, false)
             }
+            McpSaid::ReadNotes { count } => {
+                (first(txt::read_notes(lang, *count)), String::new(), false)
+            }
+            McpSaid::SearchedNotes => (
+                first(txt::SEARCHED_NOTES.get(lang).to_owned()),
+                String::new(),
+                false,
+            ),
             McpSaid::Undone { summary } => (
                 first(txt::undone(lang, self.summary(summary))),
                 String::new(),
@@ -620,6 +672,10 @@ impl Words {
             "drag" => txt::TOOL_DRAG,
             "draw" => txt::TOOL_DRAW,
             "accessibility_tree" | "wait_for" => txt::TOOL_READ_TREE,
+            "list_notifications" | "search_notifications" => txt::TOOL_READ_NOTES,
+            "pin_notification" | "unpin_notification" | "tidy_notifications" => {
+                txt::TOOL_SORT_NOTES
+            }
             _ => txt::TOOL_OTHER,
         }
         .get(self.lang)
@@ -634,6 +690,7 @@ impl Words {
             McpRefusal::NoDesktops => txt::WHY_NO_DESKTOPS,
             McpRefusal::NoInput => txt::WHY_NO_INPUT,
             McpRefusal::NoDraw => txt::WHY_NO_DRAW,
+            McpRefusal::NoNotifications => txt::WHY_NO_NOTIFICATIONS,
             McpRefusal::Locked => txt::WHY_LOCKED,
             McpRefusal::Asking => txt::WHY_ASKING,
             McpRefusal::Stopped => txt::WHY_STOPPED,

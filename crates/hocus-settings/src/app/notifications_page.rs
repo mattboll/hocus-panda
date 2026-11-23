@@ -2,7 +2,11 @@
 //! "PAR APPLICATION", one row per application that notified, the busiest
 //! this week first: its icon, its name, "N cette semaine", and a menu of
 //! its four levels, written into `[notifications.apps]` with its toast and
-//! its undo. Without any: "Aucune application ne t'a encore notifié."
+//! its undo; under them a check box, « Vues dès que je l'ouvre » (#923,
+//! `[notifications.seen-on-focus]`), the row saying "pas vues à
+//! l'ouverture" while it is off. Without any: "Aucune application ne t'a
+//! encore notifié." Then "Journal des 30 derniers jours", the shell's
+//! file, and « Ouvrir », inert while there is no file.
 //!
 //! The senders are read from the shell's file as the page opens, off the
 //! window's thread, their icons with them. Do not disturb is the shell's:
@@ -18,6 +22,7 @@ use iced::{
     widget::{Space, button, column, container, image, mouse_area, pin, row, stack, svg, text},
 };
 
+use super::captures_page::control_style;
 use super::{
     App, Doing, KeysSaid, Message, Page,
     applications::Icon,
@@ -45,6 +50,9 @@ pub struct State {
     read: bool,
     /// The application whose menu is open.
     menu: Option<String>,
+    /// Whether the notifications' journal is there, as read with the
+    /// senders.
+    journal: bool,
     to: Option<iced::futures::channel::mpsc::UnboundedSender<Message>>,
 }
 
@@ -57,17 +65,35 @@ impl State {
     }
 }
 
+/// What the page reads as it opens, off the window's thread.
+#[derive(Debug, Clone)]
+pub struct Read {
+    senders: NotifySenders,
+    /// Their icons, by what they are known by.
+    icons: Vec<(String, crate::applications::Picture)>,
+    /// Whether the notifications' journal is there (#923).
+    journal: bool,
+}
+
 /// The page's own messages.
 #[derive(Debug, Clone)]
 pub enum Msg {
-    /// The senders and their icons, read.
-    Read(Box<(NotifySenders, Vec<(String, crate::applications::Picture)>)>),
+    /// The senders, their icons and the journal, read.
+    Read(Box<Read>),
     Dnd,
     /// An application's menu, opened or closed.
     Menu(String),
     CloseMenu,
     Choose(NotifyLevel),
+    /// The menu's « Vues dès que je l'ouvre » (#923).
+    SeenOnOpen,
+    /// « Ouvrir » the journal.
+    OpenJournal,
 }
+
+/// A row of the levels' menu, its check box's, and the rule between.
+const MENU_ROW: f32 = 32.0;
+const MENU_RULE: f32 = 9.0;
 
 /// The width of the levels' menus.
 const MENU_WIDTH: f32 = 200.0;
@@ -93,6 +119,14 @@ impl App {
             .map_or(NotifyLevel::All, |s| model::level_of(&s.notifications, id))
     }
 
+    /// Whether opening application `id` folds its notifications, as the
+    /// file says it.
+    fn notifications_seen(&self, id: &str) -> bool {
+        self.snapshot
+            .as_ref()
+            .is_none_or(|s| model::seen_on_open(&s.seen_on_focus, id))
+    }
+
     /// After each message: the senders read as the page opens.
     pub(super) fn notifications_after(&mut self) {
         if self.page != Page::Section(SectionId::Notifications) {
@@ -113,9 +147,12 @@ impl App {
                 let senders = model::read_senders();
                 let rows = model::rows(&senders, &Default::default(), model::today());
                 let icons = model::icons(&rows);
-                let _ = to.unbounded_send(Message::Notifications(Msg::Read(Box::new((
-                    senders, icons,
-                )))));
+                let journal = model::journal_file().is_some_and(|f| f.is_file());
+                let _ = to.unbounded_send(Message::Notifications(Msg::Read(Box::new(Read {
+                    senders,
+                    icons,
+                    journal,
+                }))));
             });
         if let Err(err) = started {
             tracing::warn!(%err, "the notifications' senders are not read");
@@ -136,7 +173,12 @@ impl App {
     pub(super) fn notifications_update(&mut self, msg: Msg) -> iced::Task<Message> {
         match msg {
             Msg::Read(read) => {
-                let (senders, icons) = *read;
+                let Read {
+                    senders,
+                    icons,
+                    journal,
+                } = *read;
+                self.notifications.journal = journal;
                 tracing::info!(
                     senders = senders.apps.len(),
                     "the notifications' senders read"
@@ -172,6 +214,14 @@ impl App {
                 };
             }
             Msg::CloseMenu => self.notifications.menu = None,
+            // A check box: the menu stays.
+            Msg::SeenOnOpen => self.notifications_seen_on_open(),
+            Msg::OpenJournal => {
+                if let Some(file) = model::journal_file().filter(|f| f.is_file()) {
+                    tracing::info!("the notifications' journal is opened");
+                    super::open_place(file, false);
+                }
+            }
             Msg::Choose(level) => {
                 let Some(id) = self.notifications.menu.take() else {
                     return iced::Task::none();
@@ -230,6 +280,68 @@ impl App {
             }
         }
         iced::Task::none()
+    }
+
+    /// « Vues dès que je l'ouvre » of the open menu's application flipped,
+    /// with its toast and its undo.
+    fn notifications_seen_on_open(&mut self) {
+        let Some(id) = self.notifications.menu.clone() else {
+            return;
+        };
+        let before = self.notifications_seen(&id);
+        let name = self
+            .notifications_rows()
+            .into_iter()
+            .find(|r| r.id == id)
+            .map_or_else(|| id.clone(), |r| r.name);
+        let lang = self.lang;
+        let said = |on: bool| {
+            if on {
+                words::SEEN_ON_OPEN_LOWER.get(lang)
+            } else {
+                words::NOT_SEEN_ON_OPEN.get(lang)
+            }
+        };
+        let named = self
+            .snapshot
+            .as_ref()
+            .map(|s| s.seen_on_focus.clone())
+            .unwrap_or_default();
+        tracing::info!(
+            app = id,
+            on = !before,
+            "an application's seen on opening chosen"
+        );
+        let said = KeysSaid {
+            done: words::seen_done(
+                lang,
+                words::SeenDone {
+                    name: &name,
+                    said: said(!before),
+                },
+            ),
+            undone: words::seen_undone(
+                lang,
+                words::SeenUndone {
+                    name: &name,
+                    said: said(before),
+                },
+            ),
+            redone: words::seen_redone(
+                lang,
+                words::SeenRedone {
+                    name: &name,
+                    said: said(!before),
+                },
+            ),
+            row: model::SEEN_ON_OPEN,
+        };
+        self.ask_keys(
+            model::seen_on_open_keys(&named, &id, !before),
+            said,
+            Doing::New,
+            None,
+        );
     }
 
     pub(super) fn notifications_page<'a>(
@@ -292,13 +404,59 @@ impl App {
                 container(label(words::BY_APP.get(lang)))
                     .height(28)
                     .center_y(28),
-                card_box(list.into()),
+                container(card_box(list.into())).id(format!("row:{}", model::SEEN_ON_OPEN)),
             ]
             .spacing(8),
         );
+        page = page.push(card_box(self.notifications_journal()));
         container(page)
             .id(format!("page:{}", SectionId::Notifications.section().slug))
             .into()
+    }
+
+    /// The journal of the last 30 days (#923): its place, and « Ouvrir »,
+    /// inert while there is no file.
+    fn notifications_journal<'a>(&self) -> El<'a> {
+        let lang = self.lang;
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let line = model::journal_file()
+            .as_deref()
+            .map(|f| model::journal_line(f, home.as_deref()))
+            .unwrap_or_default();
+        let there = self.notifications.journal;
+        let alpha = if there { 1.0 } else { INERT };
+        let mut open = button(
+            container(t(words::OPEN.get(lang), 13.0, fade(TEXT.get(), alpha)).font(SEMIBOLD))
+                .height(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .height(32)
+        .padding([0, 12])
+        .style(control_style(false));
+        if there {
+            open = open.on_press(Message::Notifications(Msg::OpenJournal));
+        }
+        container(
+            row![
+                column![
+                    t(words::JOURNAL.get(lang), 14.0, TEXT.get()).font(SEMIBOLD),
+                    t(line, 12.5, DIM.get()),
+                ]
+                .spacing(2)
+                .width(Length::Fill),
+                container(open).id("notifications:journal".to_owned()),
+            ]
+            .spacing(16)
+            .align_y(Alignment::Center),
+        )
+        .padding(Padding {
+            top: 9.0,
+            right: 14.0,
+            bottom: 9.0,
+            left: 16.0,
+        })
+        .id(format!("row:{}", model::JOURNAL))
+        .into()
     }
 
     /// An application's row: its icon, its name, its week, its menu.
@@ -319,7 +477,7 @@ impl App {
                 self.notifications_icon(app, 26.0),
                 column![
                     t(app.name.clone(), 13.5, TEXT.get()).font(SEMIBOLD),
-                    t(words::this_week(lang, app.week), 11.5, DIM.get()),
+                    t(self.notifications_week(app), 11.5, DIM.get()),
                 ]
                 .spacing(1)
                 .width(Length::Fill),
@@ -336,6 +494,17 @@ impl App {
         })
         .id(format!("notifications:app:{}", app.id))
         .into()
+    }
+
+    /// An application's row's line: "9 cette semaine", and "· pas vues à
+    /// l'ouverture" while opening it folds nothing (#923).
+    fn notifications_week(&self, app: &AppRow) -> String {
+        let week = words::this_week(self.lang, app.week);
+        if self.notifications_seen(&app.id) {
+            week
+        } else {
+            format!("{week} · {}", words::NOT_SEEN_ON_OPEN.get(self.lang))
+        }
     }
 
     /// An application's icon, `size` wide: from the icon theme, else its
@@ -423,8 +592,22 @@ impl App {
                 .id(format!("option:{i}")),
             );
         }
+        // Under a rule, « Vues dès que je l'ouvre » (#923).
+        list = list
+            .push(
+                container(container(Space::new().width(Length::Fill).height(1)).style(
+                    |_: &Theme| container::Style {
+                        background: Some(Background::Color(crate::theme::ink(rgba(
+                            255, 255, 255, 0.08,
+                        )))),
+                        ..container::Style::default()
+                    },
+                ))
+                .padding([4, 6]),
+            )
+            .push(self.notifications_seen_box(self.notifications_seen(id)));
         let width = at.width.max(MENU_WIDTH);
-        let height = 10.0 + 32.0 * 4.0;
+        let height = 10.0 + MENU_ROW * 5.0 + MENU_RULE;
         let panel = container(list)
             .width(width)
             .padding(5)
@@ -463,6 +646,52 @@ impl App {
         )
     }
 
+    /// The menu's check box, « Vues dès que je l'ouvre », ticked `on`.
+    fn notifications_seen_box<'a>(&self, on: bool) -> El<'a> {
+        let tick: El<'a> = if on {
+            container(icon(Glyph::Check, 12.0, DEEP.get()))
+                .width(16)
+                .height(16)
+                .center(16)
+                .style(move |_: &Theme| container::Style {
+                    background: Some(Background::Color(ACCENT.get())),
+                    border: border(4.0, 0.0, ACCENT.get()),
+                    ..container::Style::default()
+                })
+                .into()
+        } else {
+            container(Space::new().width(16).height(16))
+                .style(move |_: &Theme| container::Style {
+                    border: border(4.0, 1.5, FAINT.get()),
+                    ..container::Style::default()
+                })
+                .into()
+        };
+        container(
+            button(
+                row![
+                    container(tick).width(18).center_x(18),
+                    t(words::SEEN_ON_OPEN.get(self.lang), 13.5, TEXT.get()),
+                ]
+                .spacing(6)
+                .height(Length::Fill)
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .height(MENU_ROW)
+            .padding([0, 8])
+            .on_press(Message::Notifications(Msg::SeenOnOpen))
+            .style(flat(
+                None,
+                crate::theme::ink(rgba(255, 255, 255, 0.07)),
+                7.0,
+                false,
+            )),
+        )
+        .id("option:seen-on-open".to_owned())
+        .into()
+    }
+
     /// What the page shows, for the log (tests).
     pub(super) fn notifications_shown(&self) -> serde_json::Value {
         let apps: Vec<serde_json::Value> = self
@@ -474,6 +703,7 @@ impl App {
                     "name": r.name,
                     "week": r.week,
                     "level": self.notifications_level(&r.id).word(),
+                    "seen_on_open": self.notifications_seen(&r.id),
                 })
             })
             .collect();
@@ -482,6 +712,7 @@ impl App {
             "read": self.notifications.senders.is_some(),
             "apps": apps,
             "menu": self.notifications.menu,
+            "journal": self.notifications.journal,
         })
     }
 }

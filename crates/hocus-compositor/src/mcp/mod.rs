@@ -18,6 +18,9 @@
 //! refused; it reaches the log at debug level alone. `Super+Shift+Escape`
 //! (or the journal's "Tout arrêter") stops every agent until let go.
 //!
+//! The bell (#923): the notifications are the shell's; their tools ask it
+//! ([`notes`]).
+//!
 //! In applications (lot B): each connection has a seat of its own
 //! ([`seat`]); applications' trees are read on a thread ([`atspi`]); the
 //! pointer and the ring are drawn here ([`draw`]); the card, take over,
@@ -28,6 +31,7 @@ pub mod atspi;
 pub mod capture;
 mod draw;
 mod hand;
+mod notes;
 pub mod seat;
 
 use std::{
@@ -235,11 +239,16 @@ struct Before {
     desktops: BTreeMap<String, usize>,
     /// Each setting's value (none: the file did not have it).
     settings: BTreeMap<String, Option<toml_edit::Value>>,
+    /// The notifications pinned or tidied, as they were (#923).
+    notes: Vec<hocus_link::NoteBefore>,
 }
 
 impl Before {
     fn undoable(&self) -> bool {
-        !self.windows.is_empty() || !self.desktops.is_empty() || !self.settings.is_empty()
+        !self.windows.is_empty()
+            || !self.desktops.is_empty()
+            || !self.settings.is_empty()
+            || !self.notes.is_empty()
     }
 }
 
@@ -355,6 +364,9 @@ pub struct Mcp {
     /// A refusal's toast, and its timer.
     refused: Option<(McpRefusedToast, RegistrationToken)>,
     next_refused: u64,
+    /// What waits for the bell's answer, by token (#923).
+    notes: BTreeMap<u64, notes::Asked>,
+    next_notes: u64,
 }
 
 #[derive(Debug)]
@@ -403,6 +415,10 @@ fn refusal_text(refusal: &McpRefusal, agent: &str) -> String {
         McpRefusal::NoDraw => format!(
             "refused: agent {agent:?} may not draw on the screen; the user allows it in \
              Settings › Act on the desktop ([[agents.mcp]] draw)"
+        ),
+        McpRefusal::NoNotifications => format!(
+            "refused: agent {agent:?} may not read nor sort the notifications; the user allows \
+             it in Settings › Act on the desktop ([[agents.mcp]] notifications)"
         ),
         McpRefusal::Locked => "refused: the session is locked".to_owned(),
         McpRefusal::Asking => "refused: a password is being asked for".to_owned(),
@@ -583,6 +599,10 @@ impl State {
                 return Some(McpRefusal::X11);
             }
         }
+        // The bell's (#923): its right first, reading too.
+        if call.notes() && !rights.holds(Right::Notifications) {
+            return Some(McpRefusal::NoNotifications);
+        }
         if !call.acts() {
             return None;
         }
@@ -610,6 +630,7 @@ impl State {
                 Right::Settings => McpRefusal::NoSettings,
                 Right::Input => McpRefusal::NoInput,
                 Right::Draw => McpRefusal::NoDraw,
+                Right::Notifications => McpRefusal::NoNotifications,
             })
     }
 
@@ -785,6 +806,9 @@ impl State {
                 return None;
             }
             Call::WaitFor(c) => return self.mcp_wait(session, id, c.clone()).err().map(Err),
+            Call::ListNotifications(_) | Call::SearchNotifications(_) => {
+                return self.mcp_notes_read(session, id, agent, call);
+            }
             Call::Celebrate(c) => {
                 let why = hocus_link::note_text(&c.why);
                 if why.is_empty() {
@@ -950,6 +974,7 @@ impl State {
                 Ok(())
             }
             Call::Draw(c) => self.mcp_draw_check(c),
+            call if call.notes() => notes::check(call),
             _ => Ok(()),
         }
     }
@@ -1167,6 +1192,12 @@ impl State {
                 let (x, y) = top(&output)?;
                 Some((Some(show(&output, McpAt::Screen { x, y })), None, None))
             }
+            // The bell on every bar ringed, the tag at the top (#923).
+            Call::PinNotification(_) | Call::UnpinNotification(_) | Call::TidyNotifications(_) => {
+                let output = self.mcp_output(None).ok()?;
+                let (x, y) = top(&output)?;
+                Some((Some(show(&output, McpAt::Bell { x, y })), None, None))
+            }
             // Its pointer where its hand starts.
             Call::Draw(_) => {
                 let (output, start) = self.mcp_draw_start(waiting)?;
@@ -1233,6 +1264,7 @@ impl State {
             Call::Launch(c) => self.mcp_launch(&agent, &waiting.intent, c),
             Call::SetSetting(_) => return self.mcp_write(waiting),
             Call::Draw(_) => return self.mcp_draw_go(waiting),
+            call if call.notes() => return self.mcp_notes_do(waiting),
             _ => Err("not an acting tool".to_owned()),
         };
         self.mcp_done(&waiting, result);
@@ -1742,6 +1774,9 @@ impl State {
                 self.switch_desktop(&output, *desktop, None);
             }
         }
+        if !before.notes.is_empty() {
+            self.tell_shell(ToShell::NotesUndo(before.notes));
+        }
         if !before.settings.is_empty()
             && let Some(file) = self.config.file.clone()
         {
@@ -1979,6 +2014,7 @@ impl State {
 fn kind_of(call: &Call) -> McpKind {
     match call {
         Call::Draw(_) => McpKind::Draw,
+        call if call.notes() => McpKind::Notifications,
         Call::Drag(_) => McpKind::Drag,
         Call::SwitchDesktop(_) => McpKind::Desktop,
         Call::Launch(_) => McpKind::Launch,

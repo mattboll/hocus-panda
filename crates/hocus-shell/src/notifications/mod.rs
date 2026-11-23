@@ -8,6 +8,12 @@
 //! Each application's level (#899) is the stack's, the senders counted
 //! for the Settings [`apps`]'.
 //!
+//! The bell keeps what still needs the user (#923): opening an
+//! application folds its notifications ([`app_focus`]), agents read and
+//! sort it through the compositor ([`ask`], [`undo`]), and every
+//! notification served is written in the [`journal`] by the history's
+//! thread, which answers an agent's search there too.
+//!
 //! The history is kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications`
 //! and do not disturb for the session, in its runtime directory: read back
 //! as the shell starts and written as they change, on threads of their own,
@@ -32,6 +38,7 @@ pub mod conversation;
 pub mod dnd;
 pub mod draw;
 pub mod history;
+pub mod journal;
 pub mod note;
 mod server;
 pub mod stack;
@@ -143,8 +150,40 @@ pub fn start(software: bool) {
         input(Input::Restored {
             notes: Vec::new(),
             dnd: Dnd::Off,
+            journal: 0,
         });
     }
+}
+
+/// The wall clock's time zone.
+pub fn zone() -> jiff::tz::TimeZone {
+    WALL.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .map_or_else(jiff::tz::TimeZone::system, |w| w.zone.clone())
+}
+
+/// A window took the user's focus (#923): its application's notifications
+/// fold.
+pub fn app_focus(focus: hocus_link::AppFocus) {
+    input(Input::AppFocus(focus));
+}
+
+/// An agent's ask of the bell (#923), answered to the compositor.
+pub fn ask(token: u64, ask: hocus_link::NotesAsk) {
+    input(Input::Ask { token, ask });
+}
+
+/// « Annuler » of an agent's pins or tidying.
+pub fn undo(befores: Vec<hocus_link::NoteBefore>) {
+    input(Input::Undo(befores));
+}
+
+/// Whether server id `id` is one of the desktop's own notifications (a
+/// capture, a meeting's reminder, a drive's, a developer's program let go
+/// of): not served, never folded.
+pub fn is_own(id: u32) -> bool {
+    id >= DESKTOPS_OWN_FROM
 }
 
 /// The screen is shared (5.11), or no longer is: bubbles are held
@@ -208,6 +247,17 @@ enum Write {
     Dnd(Dnd),
     /// The applications that sent notifications (#899).
     Senders(hocus_link::NotifySenders),
+    /// A line for the journal (#923), and when it came (milliseconds).
+    Journal {
+        line: String,
+        at: i64,
+    },
+    /// An agent's search of the journal (#923), answered from there.
+    Search {
+        token: u64,
+        search: journal::Search,
+        states: Vec<(u64, hocus_link::NoteState)>,
+    },
     /// Told once what was sent before is written.
     Flush(mpsc::Sender<()>),
 }
@@ -259,6 +309,7 @@ fn write(file: &std::path::Path, text: &str) -> std::io::Result<()> {
 /// change, on threads of their own.
 fn keep() {
     let (history, dnd_at, senders_at) = (history_file(), dnd_file(), senders_file());
+    let journal_at = history.as_deref().map(journal::file_beside);
     let (sender, writes) = mpsc::channel::<Write>();
     *WRITE.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
     let read = std::thread::Builder::new()
@@ -270,6 +321,12 @@ fn keep() {
                     .and_then(|file| std::fs::read_to_string(file).ok())
                     .unwrap_or_default(),
             );
+            // The journal: its 30 days, and the number it ends on.
+            let mut pruned_on = None;
+            let last = journal_at.as_deref().map_or(0, |file| {
+                prune_journal(file, &mut pruned_on);
+                journal::largest(file)
+            });
             let notes = read_history(history.as_deref());
             let dnd = dnd_at
                 .as_deref()
@@ -277,18 +334,44 @@ fn keep() {
                 .map_or(Dnd::Off, |text| {
                     dnd::decode(&text, dnd::session(), Instant::now(), wall_ms())
                 });
-            input(Input::Restored { notes, dnd });
+            input(Input::Restored {
+                notes,
+                dnd,
+                journal: last,
+            });
             while let Ok(first) = writes.recv() {
-                // The latest of each sent meanwhile.
+                // The latest of each sent meanwhile; the journal's lines
+                // all, in their order, and the searches.
                 let (mut records, mut dnd, mut senders, mut flushes) =
                     (None, None, None, Vec::new());
+                let (mut lines, mut searches) = (Vec::new(), Vec::new());
                 for write in std::iter::once(first).chain(writes.try_iter()) {
                     match write {
                         Write::History(r) => records = Some(r),
                         Write::Dnd(d) => dnd = Some(d),
                         Write::Senders(s) => senders = Some(s),
+                        Write::Journal { line, at } => lines.push((line, at)),
+                        Write::Search {
+                            token,
+                            search,
+                            states,
+                        } => searches.push((token, search, states)),
                         Write::Flush(done) => flushes.push(done),
                     }
+                }
+                if let Some(file) = &journal_at {
+                    for (line, at) in lines {
+                        // The first line of a new day: the 30 days first.
+                        if pruned_on != day_of(at) {
+                            prune_journal(file, &mut pruned_on);
+                        }
+                        if let Err(err) = journal::append(file, &line) {
+                            tracing::warn!(file = %file.display(), %err, "the journal not written");
+                        }
+                    }
+                }
+                for (token, search, states) in searches {
+                    answer_search(journal_at.as_deref(), token, &search, &states);
                 }
                 if let (Some(senders), Some(file)) = (senders, &senders_at)
                     && let Err(err) = self::write(file, &senders.encode())
@@ -325,8 +408,56 @@ fn keep() {
         input(Input::Restored {
             notes: Vec::new(),
             dnd: Dnd::Off,
+            journal: 0,
         });
     }
+}
+
+/// The wall clock's day of `at` (milliseconds).
+fn day_of(at: i64) -> Option<jiff::civil::Date> {
+    let stamp = jiff::Timestamp::from_millisecond(at).ok()?;
+    Some(stamp.to_zoned(zone()).date())
+}
+
+/// The journal written again without what is older than 30 days (and its
+/// oldest past 64 MB), today noted as done.
+fn prune_journal(file: &std::path::Path, pruned_on: &mut Option<jiff::civil::Date>) {
+    let now = wall_ms();
+    *pruned_on = day_of(now);
+    match journal::prune(file, now) {
+        Ok((kept, gone)) if gone > 0 => tracing::info!(kept, gone, "the journal's 30 days"),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(file = %file.display(), %err, "the journal not pruned"),
+    }
+}
+
+/// An agent's search, read in the journal and answered to the compositor:
+/// what it found, never in the log.
+fn answer_search(
+    file: Option<&std::path::Path>,
+    token: u64,
+    search: &journal::Search,
+    states: &[(u64, hocus_link::NoteState)],
+) {
+    let found = match file {
+        Some(file) => journal::search(file, search, |id| {
+            states.iter().find(|(n, _)| *n == id).map(|(_, s)| *s)
+        }),
+        None => Ok(Vec::new()),
+    };
+    let answer = match found {
+        Ok(found) => {
+            tracing::info!(found = found.len(), "an agent searches the journal");
+            hocus_link::NotesAnswer::Done {
+                value: serde_json::json!({ "notifications": found }).to_string(),
+                count: found.len() as u32,
+                app: None,
+                before: Vec::new(),
+            }
+        }
+        Err(err) => hocus_link::NotesAnswer::Refused(format!("the journal does not read: {err}")),
+    };
+    crate::popover::tell(ToCompositor::Notes { token, answer });
 }
 
 /// How many times something the restored history's icons wait for came
@@ -345,7 +476,7 @@ pub fn came() {
 /// The history in `file`, younger than 7 days, its icons found again (once
 /// the launcher's applications and the bars' scales are known, a few
 /// seconds at most).
-fn read_history(file: Option<&std::path::Path>) -> Vec<(note::Note, history::Sight)> {
+fn read_history(file: Option<&std::path::Path>) -> Vec<history::Restored> {
     let Some(file) = file else {
         return Vec::new();
     };
@@ -387,7 +518,8 @@ fn read_history(file: Option<&std::path::Path>) -> Vec<(note::Note, history::Sig
     records
         .into_iter()
         .map(|record| {
-            let (mut note, seen) = record.note();
+            let mut restored = record.restored();
+            let note = &mut restored.note;
             note.icon = server::icon_of(server::Looked {
                 app_icon: note.icon_from.app_icon.clone(),
                 image_path: note.icon_from.image_path.clone(),
@@ -396,7 +528,7 @@ fn read_history(file: Option<&std::path::Path>) -> Vec<(note::Note, history::Sig
                 app: note.app.clone(),
                 scale,
             });
-            (note, seen)
+            restored
         })
         .collect()
 }
@@ -765,6 +897,40 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             crate::popover::tell(ToCompositor::Dnd(on));
             Vec::new()
         }
+        Effect::Journal(line) => {
+            send_write(Write::Journal {
+                line: line.text(&zone()),
+                at: line.at,
+            });
+            Vec::new()
+        }
+        Effect::Answer { token, answer } => {
+            crate::popover::tell(ToCompositor::Notes { token, answer });
+            Vec::new()
+        }
+        Effect::Search {
+            token,
+            search,
+            states,
+        } => {
+            let sent = WRITE
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|w| {
+                    w.send(Write::Search {
+                        token,
+                        search: search.clone(),
+                        states: states.clone(),
+                    })
+                    .is_ok()
+                });
+            // No journal here (no notifications served): nothing found.
+            if !sent {
+                answer_search(None, token, &search, &states);
+            }
+            Vec::new()
+        }
     }
 }
 
@@ -837,6 +1003,9 @@ pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::ico
         },
         at: wall_ms(),
         sound: None,
+        number: 0,
+        transient: false,
+        ancestry: Vec::new(),
     };
     tracing::debug!(
         capture = shot.id,
@@ -914,6 +1083,9 @@ fn reminder_note(
         icon_from: note::IconFrom::default(),
         at,
         sound: None,
+        number: 0,
+        transient: false,
+        ancestry: Vec::new(),
     }
 }
 
@@ -979,6 +1151,9 @@ pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
         icon_from: note::IconFrom::default(),
         at: wall_ms(),
         sound: None,
+        number: 0,
+        transient: false,
+        ancestry: Vec::new(),
     })));
 }
 

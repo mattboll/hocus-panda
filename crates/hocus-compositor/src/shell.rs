@@ -883,6 +883,8 @@ impl State {
         }
         self.answer_a11y(Some("the shell went\n"));
         self.peek_shell_gone();
+        // An agent's ask of the bell is answered now (#923).
+        self.mcp_notes_gone();
         self.auth_shell_gone();
         // The meeting's halo is the shell's to say: its next one says it
         // again.
@@ -956,6 +958,7 @@ impl State {
             ToCompositor::McpStop(stop) => self.mcp_stop(stop),
             ToCompositor::Raining(raining) => self.weather_raining(raining),
             ToCompositor::Dnd(on) => self.dnd_said(on),
+            ToCompositor::Notes { token, answer } => self.mcp_notes_answered(token, answer),
             ToCompositor::McpReply { card, reply } => self.mcp_reply(card, reply),
             ToCompositor::McpHandBack(agent) => self.mcp_hand_back(&agent),
             ToCompositor::McpErase(agent) => self.mcp_erase(&agent),

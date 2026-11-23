@@ -1918,6 +1918,12 @@ command), `app/acting_page.rs`.
   `mcp-journal`: the bar's journal opens on the focused screen) and
   « Débrancher ». No agent: one line says an agent the page does not list
   is refused.
+- **« Lire et ranger les notifications »** (#923:
+  notifications.md, "The bell keeps what still needs you"): a check box
+  after « Dessiner à l'écran », `notifications`, off by default. Unlike
+  the others it is not inert while the agent only looks: with
+  « Regarder » it lets it read the bell and search the notifications'
+  journal, with « Agir » pin and tidy too (mcp.md, "Notifications").
 - **"TOUJOURS DEMANDER AVANT D'AGIR DANS"**: `[agents] confirm-apps` as
   chips, « + Ajouter » the same way.
 - **"Montrer avant chaque clic"**: `show-before-ms` on (600, the
@@ -2091,6 +2097,30 @@ application qui t'a notifié."
   opens, off the window's thread (notifications.md, "Per application").
 - The page's own controls are not in the keyboard's ring yet (the mouse
   and the search reach them; the search finds "Ne pas déranger").
+
+### What the bell keeps (#923)
+
+Approved on 2026-11-22 (notifications.md, "The bell keeps what still
+needs you"; mockup: the tools' `mockups/s30-bell`). The check box is in
+the bubbles' and the history's "⋯" menu too: one menu.
+
+- **The menu of each row**, under its four levels, a 1 px rule then a
+  check box: « Vues dès que je l'ouvre », ticked by default. Unticked,
+  opening the application's window folds none of its notifications.
+  Written into `[notifications.seen-on-focus]` (its id `= false`;
+  ticked takes the key out), with its toast ("Agenda : pas vues à
+  l'ouverture") and its undo. The row's line says it while it is off:
+  "9 cette semaine · pas vues à l'ouverture". The same menu, check box
+  included, opens from a bubble's or a line's "⋯" (#899): one menu.
+- **Journal des 30 derniers jours**, a row in a group of its own under
+  PAR APPLICATION: the file's place as its line
+  ("~/.local/state/hocuspanda/notifications.log", the home folder said
+  `~`) and « Ouvrir », which opens the file with the desktop's
+  application for it (`xdg-open`, a text editor), inert while there is
+  no file. Nothing else: the file is the shell's, read by agents through
+  `hocus mcp`.
+- **Words**: `settings.notifications` in the catalogue; the search finds
+  "Journal des notifications" and "Vues dès que je l'ouvre".
 
 ## Captures et presse-papiers (6.17)
 

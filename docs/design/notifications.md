@@ -5,7 +5,9 @@ Status: the server and its bubbles approved by the maintainer on
 5.3; the history, "clear all" and do not disturb approved on 2026-11-02
 (issue #394, variant B: by time), built in 5.4 ([below](#54-the-history-clear-all-do-not-disturb)).
 The footer's four buttons, the bell among them, are 5.5 (built:
-[bar.md](bar.md), as built, 5.5).
+[bar.md](bar.md), as built, 5.5). What the bell keeps, by application,
+and what agents may do with it: #923, approved on 2026-11-22
+([below](#the-bell-keeps-what-still-needs-you-923)).
 
 All sizes are logical pixels.
 
@@ -661,3 +663,319 @@ file's key, and the menu's layout.
 
 - The page's controls in the Settings' keyboard ring.
 - A screen reader's click on the bubble's "⋯".
+
+## The bell keeps what still needs you (#923)
+
+Status: **Approved 2026-11-22 (mockup s30-bell)** (issue #923), built
+([as built](#as-built-1)). It
+changes 5.4's list (by application, 5.4's variant A, instead of by time)
+and what a click on a line does; the rest of 5.3, 5.4 and #899 stays.
+
+**Decided** (the five points the mockup left open, settled as proposed):
+
+1. Reading the notifications needs the agent's new `notifications`
+   right, off by default (mcp.md, "Notifications"): they carry private
+   messages, and the journal 30 days of them.
+2. At most 3 pins at once: a fourth is refused, saying which are pinned;
+   none is replaced.
+3. A notification that arrives while its application holds the focus
+   stays new until the next time the user opens that application.
+4. « Vues dès que je l'ouvre » is also in the "⋯" menu of the bubbles and
+   of the history's lines: the same menu as the Settings' row.
+5. The desktop's own notifications (a capture, a meeting's reminder)
+   never fold: opening an application, a click on their line or an
+   agent's tidying leaves them as they are; they stay until their ✕,
+   "Tout effacer" or their 7 days.
+
+Most notifications of a working day come from chat applications. Each is
+useful while it shows, then piles up in the bell, while the user reads
+the application itself. The bell keeps what still needs the user, at the
+top; nothing is erased on the way, and a journal keeps every
+notification for 30 days. There is no judgement in the bell itself: an
+agent the user plugged in may sort it (pin, tidy), through `hocus mcp`.
+
+### Three states
+
+- **New**: the badge counts it and its line has the blue dot. 5.4's "not
+  seen", by the same rules (a bubble whose time ran out without the
+  pointer resting on it, a low one, one held while not to be disturbed
+  or while the screen is shared), and one an agent pinned.
+- **Noticed**: the user saw it in passing: the pointer rested on its
+  bubble, the user clicked or closed the bubble, or the history listed
+  it (5.4's "seen"). No dot, not counted; its line stays open.
+- **Seen**: the user opened its application (below), or clicked its
+  line, or an agent tidied it. Not counted; its line is folded under its
+  application ("12 vues").
+
+The badge counts what is new, as in 5.4: none while the history shows;
+opening the history sets it to 0, and what it listed is noticed as it
+closes. An agents' tool's waiting or finished notification (5.3's rule)
+goes to the history seen.
+
+**Only the user removes**: a line's ✕, an application's ✕, "Tout
+effacer". Besides, as built: an application that takes its notification
+back (`CloseNotification`) takes it out of the history too (its sender
+says it is dealt with: a mail client that closes its notification once
+the mail is read leaves the bell the rest); a line leaves after 7 days.
+Past the 200 kept, the oldest seen go first, then the oldest noticed,
+then the oldest new.
+
+### Opening an application
+
+- **The rule**: when a window takes the user's keyboard focus, the
+  notifications of its application that are new or noticed become seen,
+  and fold. The pinned ones stay pinned. A bubble on screen is not
+  touched: it lives its time (5.3), its line already seen.
+- **Which application**. A window's is its app id (`xdg_toplevel`'s,
+  an X11 window's class). A notification's is its `desktop-entry` hint,
+  else its `app_name` (the id #899's levels use). They match as `raise`
+  matches (5.3, "Clicks"): ignoring case and a trailing `.desktop`, the
+  whole id or its last dotted part on either side (`org.mozilla.firefox`
+  and `firefox`). A notification whose application has no window open
+  (`notify-send` in a script, a tool's hook) is the window's of its
+  sender or of its sender's nearest parent that has one (the terminal
+  that ran it): the sender's process and its parents are read as it
+  comes (as for agents' notifications and #823) and kept in memory only;
+  read back after a restart of the shell, it matches by its id alone.
+- **The user's focus only**: an agent's seat (mcp.md) gives no focus to
+  count. The lock screen takes the focus: nothing folds while locked.
+- **One that comes while its application holds the focus** stays new:
+  the user may be away from the screen. It is seen the next time a
+  window of its application takes the focus. (Chat applications rarely
+  notify while their window has the focus.)
+- **Per application**, on for every application by default; off,
+  opening it folds nothing (`[notifications.seen-on-focus]`, below).
+- **Where**: the compositor tells the shell, as the user's focus
+  changes, the focused window's app id and process, and the app ids
+  that have a window (for the process rule); the shell, which holds the
+  notifications (decision 0003), applies the rule.
+
+### A click on a line
+
+It invokes its `default` if its sender still holds it, and asks the
+compositor for its application's window, as in 5.4; then the line is
+**seen**, not taken out (5.4 took it out): its application's window
+takes the focus, which folds the others too. Its sender hears it closed
+(2) as before. An action invoked from the history does the same, a
+`resident` one staying held. The bubble's card, ✕ and actions are as
+5.3 built them.
+
+### The list, by application
+
+Under the header and the do not disturb card (5.4, unchanged), from the
+top:
+
+1. **The pins** (below), the newest pin first.
+2. **The applications with something new or noticed**, one card each,
+   the one with the newest such notification first:
+   - **one**: 5.4's line (its 28 px icon, "Chat · il y a 9 min", the
+     dot when new, the title, the body, its ✕ and "⋯");
+   - **several**: a header, 8 px in, 2 px under the card above: the
+     application's 18 px icon, its name in 12 px bold `text.dim` and
+     "· 4" in `#7C8698`, then "3 de plus" (a 22 px ghost button, 8 px
+     in, 11.5 px 600 `text.faint`) and the application's ✕ (22 px);
+     under it its newest line without icon nor name (its age first),
+     and two strips under that line for the rest (4 px of
+     `rgba(255,255,255,0.07)` then 3 px of `0.04`, rounded below, 14 px
+     in, the second 8 px further in). "3 de plus" shows them all,
+     newest first, and becomes "Réduire".
+   - **its seen ones**, under the card: a fold line "12 vues" (26 px,
+     8 px in, at the text's column under a lone line; a 10 px chevron,
+     6 px, then 12 px 600 `text.faint`; lit `0.05` under the pointer).
+     A click unfolds them under it, newest first, without icon nor
+     name, their titles 600 `text.dim` and bodies `#7C8698`; the
+     chevron turns a quarter.
+3. **A 1 px rule** (`rgba(255,255,255,0.06)`, 8 px in), then **the
+   applications with seen ones only**, the newest first: one 34 px line
+   each, the 18 px icon, the name in 12 px bold `text.dim`, "· 6 vues"
+   and the newest's age in `#7C8698`, the chevron at its right, the
+   application's ✕ under the pointer. A click unfolds them.
+
+- Cards 6 px apart, lines within 2 px apart, as 5.4's. 5.4's sections
+  by time (RÉCENTES…) go: each line says its age.
+- An application is its id (as the levels'); its card's name and icon
+  are its newest notification's.
+- What is unfolded is kept while the history shows and until the shell
+  restarts, not on disk.
+- **An application's ✕** takes all its lines out but the pinned ones,
+  each still held closed (2), sliding out as "clear all" does.
+- **The empty state** (5.4's resting panda) shows only when nothing at
+  all is left; with seen ones only, their folded lines show.
+- **The keyboard**: `Tab` reaches, after 5.4's, each header's buttons
+  and each fold line; `Enter` or `Space` unfolds; the arrows go through
+  the lines shown.
+
+### Pins
+
+- An agent pins a notification (mcp.md, "Notifications"); at most 3 at
+  once, a fourth refused, saying so.
+- **The look**: at the top of the list, a lone line (its icon and its
+  application's name) lit `rgba(182,156,255,0.07)` with a 1 px
+  `rgba(182,156,255,0.28)` rim inside, radius 10 (`0.11` under the
+  pointer); 4 px under its body, a 12 px pin in the agents' violet
+  (`#B69CFF`), the agent's name in 11.5 px bold violet, then "·" and its
+  reason in 11.5 px `text.dim`, cut on one line.
+- **Pinned, it is new**: counted, with its dot. The agent says it needs
+  the user.
+- **It ends** when the user clicks it (seen), takes it out (its ✕,
+  "Tout effacer"), when the agent unpins or tidies it, when its sender
+  takes it back, or with its line after 7 days. Opening its application
+  does not end it.
+- Kept on disk with its line: the agent's name, its reason, when.
+
+### `transient`
+
+A notification with the freedesktop `transient` hint (a boolean, or a
+non-zero integer of any width) makes its bubble as any other (its
+level, do not disturb, the sharing and the lock apply), then goes
+nowhere: not to the history, not counted. The journal has it. Its
+sender hears it closed (1) when its bubble goes (2 for the bubble's ✕,
+card or actions, as before); one that makes no bubble (its level
+"history", held while not to be disturbed, low urgency) is closed (1) at
+once. The server's capabilities do not change (a hint, not a
+capability).
+
+### The journal
+
+So that nothing is lost, every notification served is written down as
+it comes.
+
+- **Where**: `$XDG_STATE_HOME/hocuspanda/notifications.log` (else
+  `~/.local/state`'s). One JSON object a line, so that it is searched
+  line by line, and named `.log` so that the desktop opens it in a text
+  editor.
+- **Each line**: `at` (the wall clock, RFC 3339 with its offset and the
+  milliseconds: the user reads it), `id` (below), `app`, `app_id`,
+  `title`, `body` (the markup taken out, as shown), `urgency` (`low`,
+  `normal`, `critical`), `actions` (their labels), `transient` and
+  `replaces` (the id it replaces) when they apply, `level` (its
+  application's, #899) and `to`: `bubble`, `history`, `held` (do not
+  disturb, the sharing, the lock), `agent` (5.3's rule), `journal`
+  (transient without a bubble) or `dropped` (level "none"). Neither its
+  icon, nor its image, nor its process. A replacement is a line of its
+  own. The shell's own lines (a capture, a meeting's reminder) are not
+  notifications served: they are not written.
+- **Every one**, transient ones and those dropped by "Rien" too; nothing
+  is written when it is closed, clicked or taken out.
+- **Readable by the user alone**: created 0600, set back to 0600 when
+  found wider: messages can be private. Never in the shell's log (5.3:
+  the log says an application and an id, never a title nor a text).
+- **Written off the window's thread**, by the history's thread: each
+  line appended in one write (the file opened for appending), after the
+  notification is served. A line cut by a crash is skipped when read.
+- **30 days**: as the shell starts, and at the first line of each new
+  day on the wall clock, the thread writes the file again without the
+  lines older than 30 days (a new file, 0600, renamed over the old).
+  Past 64 MB, it is written again at once, without its oldest lines
+  down to 48 MB.
+- **Only where notifications are served**: a shell given no bus neither
+  writes nor reads it.
+- **Read** by the history's thread only, for an agent's search (mcp.md);
+  the Settings open it (settings.md, Notifications).
+
+### Ids
+
+Each notification served gets a number of its own for the bell and the
+journal, increasing and kept across restarts (the shell starts after
+the largest its history and the journal's last line hold); a
+replacement keeps it. It is not the server's D-Bus id, which starts
+again from 1 at each run (5.3). Agents name notifications by it.
+
+### Kept across restarts
+
+The history's file (5.4) keeps, with each line, its id, its state
+(`new`, `noticed`, `seen`; a file written before reads its `seen` as
+noticed and its not seen as new) and its pin; read back as before, held
+by no one. `[notifications.seen-on-focus]` comes from the configuration,
+followed live: the compositor tells the shell with the levels
+(`notify-levels`).
+
+### The configuration
+
+```toml
+[notifications.seen-on-focus]
+# Opening one of its windows folds an application's notifications under
+# "N vues" (#923). By the application's id, as [notifications.apps]; an
+# application not named: true.
+"org.example.Agenda" = false
+```
+
+Written by the Settings (settings.md, Notifications) and by the same
+menu from a bubble or a line of the history; true takes the key out.
+
+### Where it goes
+
+- `crates/hocus-shell/src/notifications/`: `server.rs` (the `transient`
+  hint; the sender's parents kept), `stack.rs` (the three states, the
+  focus rule, pins, the agents' asks, which go past 200 first),
+  `history.rs` (ids, states and pins in the file; grouping), `draw.rs`
+  (cards, folds, pins), `apps.rs` (`seen-on-focus` per application), a
+  new `journal.rs` (append, the 30 days, search); `popover/notify_levels.rs`
+  (the menu's check box).
+- `crates/hocus-link`: the focused window's app id and process, and the
+  app ids with a window (`ToShell`); `seen-on-focus` with the levels;
+  the agents' notifications calls and their answers.
+- `crates/hocus-compositor`: telling the shell the user's focus;
+  `src/mcp/` (the calls, the right, the bell's ring, undo, the
+  journal's words).
+- `crates/hocus-agents` (the calls and `Right::Notifications`),
+  `crates/hocus-cli/src/mcp.rs` (the tools' schemas).
+- `crates/hocus-settings`: `notifications.rs` and
+  `app/notifications_page.rs` (the menu's check box, the journal's row),
+  `acting.rs` and `app/acting_page.rs` (the check box of the right).
+- `packaging/config.toml` (`[notifications.seen-on-focus]`, the agents'
+  `notifications`), `crates/hocus-words` (the words, French and English).
+
+### As built
+
+The code follows the above, with these said once for all:
+
+- **Where it is**: `crates/hocus-shell/src/notifications/`: `history.rs`
+  (the three states, pins, the 200 kept, the grouping), `stack.rs` (the
+  focus rule, the agents' asks, numbers, what goes to the journal),
+  `journal.rs` (the file: append, the 30 days and 64 MB, the search),
+  `server.rs` (the `transient` hint; the sender and its parents),
+  `apps.rs` (« Vues dès que je l'ouvre » written); the list in
+  `popover/history.rs`, the menu's check box in `popover/notify_levels.rs`,
+  the bell's ring in `bell.rs`. The compositor tells the focus in
+  `bubbles.rs` and serves the tools in `src/mcp/notes.rs`.
+- **The focus** is told when the focused window changes: the lock, a
+  popover or the launcher taking the keyboard and giving it back to the
+  same window folds nothing.
+- **A pin stays new** when the history closes: what it listed new is
+  noticed, but the pinned ones, which still need the user.
+- **A line of the desktop's own** (a capture, a meeting's reminder):
+  its click does what it did (the capture's editor, the call) and leaves
+  the line as it is; its sender is never told it closed.
+- **The strips** under a card start against its newest line (the
+  mockup's go 2 px up into it, where nothing shows).
+- **The journal's `replaces`** is the number of the one replaced, which a
+  replacement keeps: its own.
+- **« Annuler »** puts back the last change first: a notification tidied
+  then pinned in one request comes back as it was before both.
+- **The shell has 5 s** to answer an agent's ask; past them, or if it
+  went meanwhile, the agent is told so and its next action goes on.
+
+### Tests
+
+One scenario per behaviour, the real shell on a D-Bus daemon of the
+test's own (`tests/notifications.rs`):
+`opening_an_application_folds_its_notifications_and_its_bubble_lives_its_time`,
+`an_application_set_not_to_fold_keeps_its_notifications_new`,
+`a_transient_one_makes_its_bubble_then_goes_nowhere_but_the_journal`,
+`the_journal_keeps_every_one_readable_by_the_user_alone`,
+`a_click_on_a_line_invokes_its_default_raises_and_leaves_it_seen`, and
+5.4's adapted to the list by application. `tests/mcp.rs`, a real `hocus
+mcp`: `a_looking_agent_reads_and_searches_the_bell_but_may_not_pin`,
+`an_acting_agent_pins_and_tidies_and_annuler_puts_them_back`,
+`without_the_right_every_tool_of_the_bell_is_refused`.
+`tests/settings_notifications.rs`:
+`the_menus_check_box_is_written_and_the_journals_row_opens_once_there_is_one`;
+`tests/settings_acting.rs`:
+`reading_the_notifications_is_written_even_for_an_agent_that_only_looks`.
+Unit tests: the states, the pins and undo, the 200 kept, the grouping
+(`history.rs`), the focus rule and its process, `transient`, the numbers
+across a restart, the agents' asks (`stack.rs`), the journal's lines, its
+30 days, its cut lines and its search (`journal.rs`), the matching
+(`hocus-link`). The screenshots: `notifications::bell_shots` and
+`mcp::shots_bell` (`HOCUS_SHOTS`, `--run-ignored only`).

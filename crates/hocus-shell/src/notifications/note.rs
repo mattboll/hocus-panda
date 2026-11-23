@@ -16,6 +16,10 @@ pub const LIFE: Duration = Duration::from_secs(6);
 pub struct Note {
     /// The server's id for it, as `Notify` returned it.
     pub id: u32,
+    /// Its number for the bell and the journal (#923): increasing, kept
+    /// across restarts, kept by a replacement; the stack gives it as it
+    /// comes (0 until then).
+    pub number: u64,
     /// The application's name, as it gives it (`app_name`).
     pub app: String,
     /// Its desktop entry (the `desktop-entry` hint), without `.desktop`.
@@ -56,6 +60,13 @@ pub struct Note {
     /// (`suppress-sound`): played with its bubble when its application
     /// shows everything (#899).
     pub sound: Option<String>,
+    /// The `transient` hint (#923): its bubble, then nowhere but the
+    /// journal.
+    pub transient: bool,
+    /// The process that sent it and its parents, nearest first (#923): a
+    /// notification whose application has no window is its sender's
+    /// window's. In memory only.
+    pub ancestry: Vec<u32>,
 }
 
 impl Note {
@@ -310,10 +321,10 @@ fn says_waits_or_done(text: &str) -> bool {
     WAITS.iter().chain(&DONE).any(|said| text.contains(said))
 }
 
-/// The programs' names of process `pid` and of its parents, nearest first,
-/// read in `/proc` (a few small files: the server's thread, never the one
-/// that draws).
-pub fn programs_above(pid: u32) -> Vec<String> {
+/// Process `pid` and its parents, nearest first, each with its program's
+/// name, read in `/proc` (a few small files: the server's thread, never
+/// the one that draws).
+pub fn programs_above(pid: u32) -> Vec<(u32, String)> {
     let mut names = Vec::new();
     let mut at = pid;
     for _ in 0..16 {
@@ -328,7 +339,7 @@ pub fn programs_above(pid: u32) -> Vec<String> {
         let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else {
             break;
         };
-        names.push(stat[open + 1..close].to_owned());
+        names.push((at, stat[open + 1..close].to_owned()));
         let parent = stat[close + 1..]
             .split_whitespace()
             .nth(1)
@@ -465,5 +476,6 @@ mod tests {
     fn this_process_and_its_parents_are_named() {
         let names = programs_above(std::process::id());
         assert!(!names.is_empty(), "{names:?}");
+        assert_eq!(names[0].0, std::process::id());
     }
 }

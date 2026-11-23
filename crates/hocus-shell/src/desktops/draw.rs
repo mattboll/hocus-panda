@@ -790,25 +790,7 @@ impl Items for Tiles {
                             Form::Full => TILE_RADIUS,
                             Form::Mini => DOT_RADIUS,
                         };
-                        // Its soft fill, 3 px of the violet inside its edge,
-                        // and a 3 px halo outside it.
-                        let agent = crate::mcp::tag::AGENT.get();
-                        f.fill(
-                            &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
-                            faded(Color { a: 0.18, ..agent }, alpha),
-                        );
-                        inner_ring(f, rect, radius, 3.0, faded(agent, alpha));
-                        let halo = Rectangle::new(
-                            Point::new(rect.x - 3.0, rect.y - 3.0),
-                            Size::new(rect.width + 6.0, rect.height + 6.0),
-                        );
-                        inner_ring(
-                            f,
-                            halo,
-                            radius + 3.0,
-                            3.0,
-                            faded(Color { a: 0.30, ..agent }, alpha),
-                        );
+                        agent_ring(f, rect, radius, alpha);
                     }
                     // The ring on its way.
                     if moving {
@@ -1117,6 +1099,29 @@ fn on(shown: &Desktops, index: usize) -> impl Iterator<Item = &DeskWindow> {
 
 /// A ring `width` wide inside `rect`'s edge rounded by `radius`, as CSS's
 /// inset `box-shadow` draws it.
+/// What an agent is about to act on, in the bar (a desktop's tile, the
+/// bell, #923): its soft fill, 3 px of the agents' violet inside its edge,
+/// and a 3 px halo outside it.
+pub fn agent_ring(f: &mut Frame, rect: Rectangle, radius: f32, alpha: f32) {
+    let agent = crate::mcp::tag::AGENT.get();
+    f.fill(
+        &Path::rounded_rectangle(rect.position(), rect.size(), radius.into()),
+        faded(Color { a: 0.18, ..agent }, alpha),
+    );
+    inner_ring(f, rect, radius, 3.0, faded(agent, alpha));
+    let halo = Rectangle::new(
+        Point::new(rect.x - 3.0, rect.y - 3.0),
+        Size::new(rect.width + 6.0, rect.height + 6.0),
+    );
+    inner_ring(
+        f,
+        halo,
+        radius + 3.0,
+        3.0,
+        faded(Color { a: 0.30, ..agent }, alpha),
+    );
+}
+
 fn inner_ring(f: &mut Frame, rect: Rectangle, radius: f32, width: f32, colour: Color) {
     let half = width / 2.0;
     f.stroke(

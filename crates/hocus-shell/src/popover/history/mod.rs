@@ -1,30 +1,36 @@
-//! The notifications' history (5.4, variant B: by time), opened from the
-//! bell on the bar: 360 px wide, 600 px tall at most, its bottom on the
-//! bar's. In this order:
+//! The bell's history (5.4; by application since #923, the mockup
+//! s30-bell), opened from the bell on the bar: 360 px wide, 600 px tall at
+//! most, its bottom on the bar's. In this order:
 //!
 //! - "Notifications" and, when there is something to clear, "Tout effacer"
 //!   / "Clear all", a ghost button;
 //! - the do not disturb card: a moon, its name and what it does now, a
 //!   switch; on, amber, with three chips: for an hour (the default), until
 //!   the next morning (8:00), with no limit;
-//! - the list, newest first, under "RÉCENTES" (under an hour), "PLUS TÔT
-//!   AUJOURD'HUI", "HIER" and "PLUS ANCIENNES": each its application's
-//!   28 px icon, "App · il y a 9 min", a blue dot while not seen, its
-//!   title on a line, its body on two at most, ✕ under the pointer, and
-//!   its actions while its sender still holds it. A click invokes its
-//!   default (if it is held) and raises its application's window, then it
-//!   goes and the history closes; ✕ takes it out.
-//! - Empty: the resting panda, "Rien de neuf" and "Tout est lu.".
+//! - the list: the agents' pins at the top, lit violet with the agent's
+//!   name and reason; then each application with something new or noticed,
+//!   one card each, the newest first (a lone line as 5.4's, its 28 px icon
+//!   and "App · il y a 9 min"; several under a header with "3 de plus" and
+//!   its ✕, the newest line and two strips for the rest); its seen ones
+//!   under a fold, "12 vues"; under a rule, the applications with seen
+//!   ones only, one 34 px line each. A line's blue dot while it is new, its
+//!   ✕ and "⋯" under the pointer, its actions while its sender holds it. A
+//!   click invokes its default (if it is held) and raises its application's
+//!   window, then it is seen and the history closes; ✕ takes it out.
+//! - Empty, nothing at all left: the resting panda, "Rien de neuf" and
+//!   "Tout est lu.".
 //!
-//! "Clear all" slides the items out to the right one after another, 35 ms
-//! apart, in 180 ms each (✕ slides its own); without motion they go at once.
-//! The list scrolls with the wheel; `Tab` goes through the buttons, the
-//! chips and the items (each with its ✕ and its actions), the arrows through
-//! the items, `Enter` or `Space` acts, `Esc` closes.
+//! "Clear all" slides the lines out to the right one after another, 35 ms
+//! apart, in 180 ms each (✕ slides its own, an application's ✕ its
+//! lines); without motion they go at once. What is unfolded is kept until
+//! the shell restarts. The list scrolls with the wheel; `Tab` goes through
+//! the buttons, the chips, the lines (each with its ✕ and its actions),
+//! the headers' buttons and the folds, the arrows through the lines,
+//! `Enter` or `Space` acts, `Esc` closes.
 
 use hocus_words::shell::popover_history as txt;
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     sync::{Mutex, PoisonError},
     time::{Duration, Instant},
 };
@@ -58,14 +64,14 @@ use crate::{
     notifications::{
         self,
         dnd::{Choice, Dnd},
-        history::{self, Ago, Kept, Section},
+        history::{self, Ago, Kept},
         stack::Input as Said,
     },
     popover::kit::MANROPE_SEMIBOLD,
     ui::{
         self, Around, Later, control,
         notched::Notched,
-        parts::{drawn, gap, moving, spaced_by},
+        parts::{drawn, gap, moving},
         style::{self, said},
     },
 };
@@ -111,15 +117,47 @@ const CHIP: f32 = 26.0;
 const CHIP_PAD: f32 = 10.0;
 const CHIP_GAP: f32 = 6.0;
 const CHIP_TEXT: f32 = 12.0;
-/// The list: 8 px in, 10 px under; its sections' labels 8 px, 8 px and
-/// 2 px in, 11 px bold, spaced 0.08 em; everything 2 px apart.
+/// The list: 8 px in, 10 px under; its cards 6 px apart, their lines
+/// 2 px apart.
 const LIST_TOP: f32 = 8.0;
 const LIST_SIDE: f32 = BORDER + 8.0;
 const LIST_BOTTOM: f32 = 10.0;
-const HEAD_PAD: (f32, f32) = (8.0, 2.0);
-const HEAD: f32 = 11.0;
-const HEAD_SPACING: f32 = 0.08;
+const CARD_APART: f32 = 6.0;
 const GAP: f32 = 2.0;
+/// An application's header (#923): 8 px in and above, 2 px under; its
+/// icon 18 px, 8 px before its name (12 px bold) and "· 4"; "3 de plus" a
+/// 22 px ghost button, 8 px in, 11.5 px 600; its ✕ 22 px.
+const GROUP_PAD: (f32, f32, f32) = (8.0, 8.0, 2.0);
+const SMALL_ICON: f32 = 18.0;
+const SMALL_GAP: f32 = 8.0;
+const GROUP_NAME: f32 = 12.0;
+const TOGGLE: f32 = 22.0;
+const TOGGLE_PAD: f32 = 8.0;
+const TOGGLE_TEXT: f32 = 11.5;
+/// The two strips under a card's newest line: 4 px then 3 px, 2 px apart,
+/// 14 px in, the second 8 px further in, 2 px above what follows.
+const STRIPS: (f32, f32) = (4.0, 3.0);
+const STRIPS_IN: (f32, f32) = (14.0, 8.0);
+const STRIPS_UNDER: f32 = 2.0;
+/// The fold, "12 vues": 26 px, 8 px in, its chevron 10 px, 6 px before its
+/// words, 12 px 600; under a lone line, at its text's column.
+const FOLD: f32 = 26.0;
+const FOLD_PAD: f32 = 8.0;
+const CHEVRON: f32 = 10.0;
+const CHEVRON_GAP: f32 = 6.0;
+const FOLD_TEXT: f32 = 12.0;
+const FOLD_RADIUS: f32 = 8.0;
+/// The rule above the applications with seen ones only, 8 px in, 2 px
+/// from what is around it; their lines 34 px.
+const RULE_IN: f32 = 8.0;
+const RULE_AROUND: f32 = 2.0;
+const SEEN_LINE: f32 = 34.0;
+/// A pin's line under its body: 4 px under, its pin 12 px, 5 px apart,
+/// 11.5 px.
+const PIN_TOP: f32 = 4.0;
+const PIN: f32 = 12.0;
+const PIN_GAP: f32 = 5.0;
+const PIN_TEXT: f32 = 11.5;
 /// An item: 8 px in, 30 px on its right; its icon 28 px, 10 px before its
 /// text: the first line 11 px, its title 13 px bold, its body 12 px on 1.4
 /// lines, two at most, 2 px apart; its ✕ 22 px, 6 px from its right and
@@ -185,6 +223,15 @@ const CHIP_OFF: (Color, Color, Color) = (
     rgb(0xC9D0DC),
 );
 const QUIET: Ink = Ink::Dark(rgb(0x7C8698));
+/// The agents' violet, a pin's light and rim (#923).
+const AGENT: Ink = Ink::Token(|t| t.agent);
+const PINNED: Ink = Ink::Dark(rgba(182, 156, 255, 0.07));
+const PINNED_HOVER: Ink = Ink::Dark(rgba(182, 156, 255, 0.11));
+const PINNED_RIM: Ink = Ink::Dark(rgba(182, 156, 255, 0.28));
+/// The strips under a card, and the rule.
+const STRIP_ONE: Ink = Ink::Dark(rgba(255, 255, 255, 0.07));
+const STRIP_TWO: Ink = Ink::Dark(rgba(255, 255, 255, 0.04));
+const RULE: Ink = Ink::Dark(rgba(255, 255, 255, 0.06));
 const UNSEEN: Ink = Ink::Dark(rgb(0x8FB3FF));
 const NOTHING_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
 const ACTION_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.06));
@@ -281,13 +328,30 @@ impl Words {
         format!("{when} · {}", self.pick(txt::ONLY_URGENT_ONES_COME_THROUGH))
     }
 
-    fn section(self, section: Section) -> &'static str {
-        match section {
-            Section::Recent => self.pick(txt::RECENT),
-            Section::Today => self.pick(txt::EARLIER_TODAY),
-            Section::Yesterday => self.pick(txt::YESTERDAY),
-            Section::Older => self.pick(txt::OLDER),
-        }
+    /// "3 de plus".
+    fn more(self, n: usize) -> String {
+        txt::n_more(self.lang, n)
+    }
+
+    fn collapse(self) -> &'static str {
+        self.pick(txt::COLLAPSE)
+    }
+
+    /// "12 vues".
+    fn seen(self, n: usize) -> String {
+        txt::n_seen(self.lang, n as u64)
+    }
+
+    fn dismiss(self) -> &'static str {
+        self.pick(txt::DISMISS)
+    }
+
+    fn clear_app(self, app: &str) -> String {
+        txt::clear_app(self.lang, app)
+    }
+
+    fn pinned_by(self, agent: &str) -> String {
+        txt::pinned_by(self.lang, agent)
     }
 
     fn ago(self, ago: Ago) -> String {
@@ -309,399 +373,12 @@ impl Words {
     }
 }
 
-// --- Laying it out --------------------------------------------------------------
+mod layout;
 
-/// What can be acted on in it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
-    Clear,
-    Switch,
-    Chip(Choice),
-    Item(u64),
-    Close(u64),
-    /// Its "⋯" (#899): its application's levels.
-    More(u64),
-    Action(u64, usize),
-}
-
-impl Target {
-    /// Its control's id: what tests, and screen readers, know it by.
-    fn id(self) -> String {
-        format!("history:{self:?}").replace(' ', "")
-    }
-
-    /// The ring's corners on it.
-    fn radius(self) -> f32 {
-        match self {
-            Self::Item(_) => ITEM_RADIUS,
-            Self::Close(_) | Self::More(_) => CLOSE_RADIUS,
-            Self::Chip(_) => CHIP / 2.0,
-            Self::Switch => SWITCH.height / 2.0,
-            Self::Clear => GHOST_RADIUS,
-            Self::Action(..) => 8.0,
-        }
-    }
-
-    /// The item it belongs to, if it is an item's.
-    fn key(self) -> Option<u64> {
-        match self {
-            Self::Item(k) | Self::Close(k) | Self::More(k) | Self::Action(k, _) => Some(k),
-            _ => None,
-        }
-    }
-}
-
-/// An item's words, cut to fit once: they change only with it.
-#[derive(Debug, Clone, PartialEq)]
-struct Cut {
-    app: String,
-    app_width: f32,
-    title: String,
-    body: Vec<String>,
-    actions: Vec<(String, String, f32)>,
-}
-
-/// An item, laid out: its place in the list's content (from its top).
-#[derive(Debug, Clone)]
-struct Row {
-    key: u64,
-    rect: Rectangle,
-    icon: Option<Icon>,
-    letter: String,
-    cut: Cut,
-    when: String,
-    dot_x: Option<f32>,
-    actions: Vec<(String, Rectangle)>,
-    section: Section,
-    /// Its application has a level (#899): not the desktop's own.
-    leveled: bool,
-}
-
-impl Row {
-    #[cfg(test)]
-    fn close(&self) -> Rectangle {
-        Rectangle::new(
-            Point::new(
-                self.rect.x + self.rect.width - CLOSE_IN.0 - CLOSE,
-                self.rect.y + CLOSE_IN.1,
-            ),
-            Size::new(CLOSE, CLOSE),
-        )
-    }
-}
-
-/// The history, laid out.
-#[derive(Debug, Clone)]
-struct Laid {
-    clear: Option<(Rectangle, f32)>,
-    card: Rectangle,
-    row_middle: f32,
-    said: Vec<String>,
-    said_top: f32,
-    switch: Rectangle,
-    chips: Vec<(Choice, Rectangle)>,
-    dnd: Dnd,
-    /// The list's viewport, and its content's height.
-    view: Rectangle,
-    content: f32,
-    heads: Vec<(Section, f32)>,
-    rows: Vec<Row>,
-    height: f32,
-}
-
-/// What it shows, as the stack has it.
-#[derive(Debug, Clone)]
-struct Shown {
-    items: Vec<Kept>,
-    dnd: Dnd,
-    version: u64,
-}
-
-fn shown() -> Shown {
-    notifications::with(|c| Shown {
-        items: c.stack.history.items().to_vec(),
-        dnd: c.stack.dnd,
-        version: c.stack.history.version(),
-    })
-}
-
-/// A text's width at a size in a font.
-type Measure<'a> = &'a mut dyn FnMut(&str, f32, Font) -> f32;
-
-/// The text column's room in an item.
-const COLUMN: f32 = W - 2.0 * LIST_SIDE - ITEM_PAD - ICON - ICON_GAP - ITEM_RIGHT;
-
-/// `kept`'s words cut to fit.
-fn cut(kept: &Kept, measure: Measure<'_>) -> Cut {
-    let note = &kept.note;
-    let app = kit::elide(note.app.trim(), COLUMN * 0.5, |t| {
-        measure(t, META, MANROPE_BOLD)
-    });
-    let app_width = measure(&app, META, MANROPE_BOLD);
-    let title = kit::elide(note.summary.trim(), COLUMN, |t| {
-        measure(t, ITEM_TITLE, MANROPE_BOLD)
-    });
-    let mut body: Vec<String> = note
-        .body
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .flat_map(|l| kit::wrap(l, COLUMN, |t| measure(t, BODY, MANROPE)))
-        .collect();
-    let more = body.len() > BODY_LINES;
-    body.truncate(BODY_LINES);
-    let count = body.len();
-    for (i, line) in body.iter_mut().enumerate() {
-        let shown = if i + 1 == count && more {
-            format!("{line}…")
-        } else {
-            line.clone()
-        };
-        *line = kit::elide(&shown, COLUMN, |t| measure(t, BODY, MANROPE));
-    }
-    let actions = note
-        .actions
-        .iter()
-        .map(|(key, label)| {
-            let label = kit::elide(label, COLUMN - 2.0 * CHIP_PAD, |t| {
-                measure(t, CHIP_TEXT, MANROPE_SEMIBOLD)
-            });
-            let width = (measure(&label, CHIP_TEXT, MANROPE_SEMIBOLD) + 2.0 * CHIP_PAD).ceil();
-            (key.clone(), label, width)
-        })
-        .collect();
-    Cut {
-        app,
-        app_width,
-        title,
-        body,
-        actions,
-    }
-}
-
-/// The items' words as cut, by key and arrival: an item's change comes as
-/// a new arrival.
-type Cuts = HashMap<(u64, i64, String), Cut>;
-
-static CUTS: Mutex<Option<Cuts>> = Mutex::new(None);
-
-/// `shown` laid out at `now`, in `words`.
-fn lay_out(
-    shown: &Shown,
-    words: Words,
-    now: &Zoned,
-    cuts: &mut Cuts,
-    measure: Measure<'_>,
-) -> Laid {
-    // The header.
-    let clear = (!shown.items.is_empty()).then(|| {
-        let width = measure(words.clear(), GHOST_TEXT, MANROPE_SEMIBOLD);
-        let w = width + 2.0 * GHOST_PAD;
-        (
-            Rectangle::new(
-                Point::new(W - BORDER - SIDE - w, HEADER_TOP),
-                Size::new(w, HEADER),
-            ),
-            width,
-        )
-    });
-    // The card.
-    let card_top = HEADER_TOP + HEADER + HEADER_BOTTOM;
-    let inner_left = CARD_LEFT + BORDER + CARD_PAD.1;
-    let inner_right = CARD_RIGHT - BORDER - CARD_PAD.1;
-    let words_left = inner_left + MOON + CARD_GAP;
-    let room = inner_right - SWITCH.width - CARD_GAP - words_left;
-    let said = kit::wrap(&words.said(shown.dnd, now), room, |t| {
-        measure(t, DND_SAID, MANROPE)
-    });
-    let column = DND_NAME * LINE + SAID_GAP + said.len() as f32 * DND_SAID * LINE;
-    let row_top = card_top + BORDER + CARD_PAD.0;
-    let row = column.max(SWITCH.height).max(MOON);
-    let row_middle = row_top + row / 2.0;
-    let said_top = row_middle - column / 2.0 + DND_NAME * LINE + SAID_GAP;
-    let switch = Rectangle::new(
-        Point::new(inner_right - SWITCH.width, row_middle - SWITCH.height / 2.0),
-        SWITCH,
-    );
-    let mut y = row_top + row;
-    let mut chips = Vec::new();
-    if shown.dnd.is_on() {
-        y += CHIPS_GAP;
-        let mut x = inner_left;
-        for choice in Choice::ALL {
-            let width =
-                (measure(words.chip(choice), CHIP_TEXT, MANROPE_SEMIBOLD) + 2.0 * CHIP_PAD).ceil();
-            if x > inner_left && x + width > inner_right {
-                x = inner_left;
-                y += CHIP + CHIP_GAP;
-            }
-            chips.push((
-                choice,
-                Rectangle::new(Point::new(x, y), Size::new(width, CHIP)),
-            ));
-            x += width + CHIP_GAP;
-        }
-        y += CHIP;
-    }
-    let card_bottom = y + CARD_PAD.0 + BORDER;
-    let card = Rectangle::new(
-        Point::new(CARD_LEFT, card_top),
-        Size::new(CARD_RIGHT - CARD_LEFT, card_bottom - card_top),
-    );
-    // The list, from its content's top.
-    let list_top = card_bottom + LIST_TOP;
-    let width = W - 2.0 * LIST_SIDE;
-    let mut heads = Vec::new();
-    let mut rows = Vec::new();
-    let mut y = 0.0;
-    let mut section = None;
-    let mut first = true;
-    for kept in &shown.items {
-        let here = history::section(kept.note.at, now);
-        if section != Some(here) {
-            if !first {
-                y += GAP;
-            }
-            heads.push((here, y + HEAD_PAD.0 + HEAD * LINE / 2.0));
-            y += HEAD_PAD.0 + HEAD * LINE + HEAD_PAD.1;
-            section = Some(here);
-        }
-        first = false;
-        y += GAP;
-        let id = (kept.key, kept.note.at, kept.note.summary.clone());
-        let cut = match cuts.get(&id) {
-            Some(cut) => cut.clone(),
-            None => {
-                let made = cut(kept, measure);
-                cuts.insert(id, made.clone());
-                made
-            }
-        };
-        let when = words.ago(history::ago(kept.note.at, now));
-        let x = LIST_SIDE + ITEM_PAD + ICON + ICON_GAP;
-        let middot = measure("·", META, MANROPE);
-        let when_x = x + cut.app_width + META_GAP + middot + META_GAP;
-        let unseen = kept.seen == history::Sight::Unseen;
-        let dot_x = unseen.then(|| when_x + measure(&when, META, MANROPE) + META_GAP);
-        let mut column = META * LINE + TEXT_GAP + ITEM_TITLE * LINE;
-        if !cut.body.is_empty() {
-            column += TEXT_GAP + cut.body.len() as f32 * BODY * BODY_LINE;
-        }
-        // Its actions while its sender holds it.
-        let mut actions = Vec::new();
-        if kept.live.is_some() && !cut.actions.is_empty() {
-            let mut ax = x;
-            let mut ay = y + ITEM_PAD + column + ACTION_GAP;
-            for (key, _, w) in &cut.actions {
-                if ax > x && ax + w > x + COLUMN {
-                    ax = x;
-                    ay += ACTION + ACTION_GAP;
-                }
-                actions.push((
-                    key.clone(),
-                    Rectangle::new(Point::new(ax, ay), Size::new(*w, ACTION)),
-                ));
-                ax += w + ACTION_GAP;
-            }
-            column = actions
-                .last()
-                .map_or(column, |(_, r)| r.y + r.height - y - ITEM_PAD);
-        }
-        let height = (2.0 * ITEM_PAD + column.max(ICON)).max(ITEM_LEAST);
-        let letter = kept
-            .note
-            .app
-            .chars()
-            .find(|c| c.is_alphanumeric())
-            .map(|c| c.to_uppercase().collect::<String>())
-            .unwrap_or_default();
-        rows.push(Row {
-            key: kept.key,
-            rect: Rectangle::new(Point::new(LIST_SIDE, y), Size::new(width, height)),
-            icon: kept.note.icon.clone(),
-            letter,
-            cut,
-            when,
-            dot_x,
-            actions,
-            section: here,
-            leveled: notifications::capture_of(kept.note.id).is_none()
-                && notifications::reminder_of(kept.note.id).is_none(),
-        });
-        y += height;
-    }
-    let content = if rows.is_empty() { EMPTY } else { y };
-    let room = MOST - list_top - LIST_BOTTOM - BORDER;
-    let view = Rectangle::new(
-        Point::new(LIST_SIDE, list_top),
-        Size::new(width, content.min(room)),
-    );
-    let height = (list_top + view.height + LIST_BOTTOM + BORDER).round();
-    Laid {
-        clear,
-        card,
-        row_middle,
-        said,
-        said_top,
-        switch,
-        chips,
-        dnd: shown.dnd,
-        view,
-        content,
-        heads,
-        rows,
-        height,
-    }
-}
-
-impl Laid {
-    fn most_scroll(&self) -> f32 {
-        (self.content - self.view.height).max(0.0)
-    }
-
-    /// For the log: the sections and their items, newest first.
-    fn said(&self, words: Words) -> String {
-        if self.rows.is_empty() {
-            return words.nothing().to_owned();
-        }
-        let mut said: Vec<String> = Vec::new();
-        let mut section = None;
-        for row in &self.rows {
-            if section != Some(row.section) {
-                said.push(format!("{}:", words.section(row.section)));
-                section = Some(row.section);
-            }
-            let seen = if row.dot_x.is_some() { " (unseen)" } else { "" };
-            said.push(format!(
-                "{} «{}» {}{seen}{}",
-                row.cut.app,
-                row.cut.title,
-                row.when,
-                if row.actions.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{} actions]", row.actions.len())
-                }
-            ));
-        }
-        said.join(" ")
-    }
-}
-
-/// Its height, as it shows now.
-pub fn height() -> u32 {
-    let shown = shown();
-    let mut cuts = CUTS.lock().unwrap_or_else(PoisonError::into_inner);
-    let cuts = cuts.get_or_insert_with(HashMap::new);
-    let laid = lay_out(
-        &shown,
-        Words::new(Lang::of_messages()),
-        &notifications::wall(),
-        cuts,
-        &mut kit::measure,
-    );
-    laid.height as u32
-}
+pub use layout::height;
+use layout::{
+    App, Block, CUTS, Fold, Folds, Header, Laid, Look, Row, SeenLine, Target, folds, lay_out, shown,
+};
 
 // --- The panel ------------------------------------------------------------------
 
@@ -718,15 +395,17 @@ pub struct Panel {
 struct Ui {
     laid: Option<Laid>,
     /// What it was laid out from: the history's version, the minute, do not
-    /// disturb.
-    from: Option<(u64, i64, Dnd)>,
+    /// disturb, what is unfolded.
+    from: Option<(u64, i64, Dnd, Folds)>,
     focus: Option<Target>,
-    /// The item the pointer is over.
+    /// The line the pointer is over.
     over: Option<u64>,
+    /// The line of seen ones only the pointer is over.
+    over_app: Option<App>,
     /// How far the list is scrolled, as it said or was told.
     scroll: f32,
     switch: Switch,
-    /// Items sliding out.
+    /// Lines sliding out.
     leaving: Option<Leaving>,
     /// Since when it is empty, for the panda's coming in.
     empty_since: Option<Instant>,
@@ -751,17 +430,19 @@ pub fn opening() {
 /// The list's scrollable.
 const LIST_ID: &str = "history:list";
 
-/// Items sliding out, in their order, since then; once they are all out,
-/// the stack is told (`sent`), and they stay out until it takes them.
+/// Lines sliding out, in their order, since then; once they are all out,
+/// the stack is told (`sent`) of them and of `also` (those not shown), and
+/// they stay out until it takes them.
 #[derive(Debug)]
 struct Leaving {
     keys: Vec<u64>,
+    also: Vec<u64>,
     since: Instant,
     sent: bool,
 }
 
 impl Ui {
-    /// How far item `key` has slid out at `now`, 0 to 1.
+    /// How far line `key` has slid out at `now`, 0 to 1.
     fn gone(&self, key: u64, now: Instant) -> f32 {
         let Some(Leaving { keys, since, .. }) = &self.leaving else {
             return 0.0;
@@ -774,14 +455,14 @@ impl Ui {
         bezier(EASE_IN, t.clamp(0.0, 1.0))
     }
 
-    /// When the items sliding out are all gone.
+    /// When the lines sliding out are all gone.
     fn leaving_end(&self) -> Option<Instant> {
         let Leaving { keys, since, .. } = self.leaving.as_ref()?;
         let shown = u32::try_from(keys.len().clamp(1, 41) - 1).unwrap_or(40);
         Some(*since + STAGGER * shown + SLIDE)
     }
 
-    /// Whether what it shows moves at `now`: items sliding out, the empty
+    /// Whether what it shows moves at `now`: lines sliding out, the empty
     /// state coming in. Built again each frame then.
     fn moving(&self, now: Instant, motion: bool) -> bool {
         self.leaving.as_ref().is_some_and(|l| !l.sent)
@@ -798,9 +479,11 @@ pub enum Msg {
     Act(Target),
     /// The ring comes to it.
     Focus(Target),
-    /// The pointer came over an item (`true`), or left it.
+    /// The pointer came over a line (`true`), or left it.
     Over(u64, bool),
-    /// `↓` (`true`) or `↑`: through the items.
+    /// Over an application's line of seen ones only, or off it.
+    OverApp(App, bool),
+    /// `↓` (`true`) or `↑`: through the lines.
     Arrow(bool),
     /// The list scrolled to there.
     Scrolled(f32),
@@ -822,7 +505,9 @@ pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
     )
     .rebuild(move || build(motion))
     .stale_when(move || {
-        ui(|ui| ui.moving(Instant::now(), motion) || ui.from.is_some_and(|f| f.1 != minute()))
+        ui(|ui| {
+            ui.moving(Instant::now(), motion) || ui.from.as_ref().is_some_and(|f| f.1 != minute())
+        })
     })
     .keys(arrows)
     .later(&LATER)
@@ -832,7 +517,7 @@ pub fn view<'a>(panel: &Panel) -> Element<'a, crate::Message> {
         .height(Length::Fill))
 }
 
-/// The arrows go through the items.
+/// The arrows go through the lines.
 fn arrows(pressed: &Pressed) -> Option<Msg> {
     use keyboard::{Key, key::Named};
     match pressed.key {
@@ -855,14 +540,14 @@ fn build<'a>(motion: bool) -> El<'a> {
     })
 }
 
-/// What it shows, read afresh: laid out again when the history or do not
-/// disturb changed, or the minute did.
+/// What it shows, read afresh: laid out again when the history, do not
+/// disturb, what is unfolded or the minute changed.
 fn refresh(ui: &mut Ui, now: Instant) {
     let shown = shown();
     let wall = notifications::wall();
     let minute = wall.timestamp().as_second() / 60;
-    let from = (shown.version, minute, shown.dnd);
-    if ui.from == Some(from) && ui.laid.is_some() {
+    let from = (shown.version, minute, shown.dnd, shown.folds.clone());
+    if ui.from.as_ref() == Some(&from) && ui.laid.is_some() {
         return;
     }
     let words = Words::new(Lang::of_messages());
@@ -870,30 +555,31 @@ fn refresh(ui: &mut Ui, now: Instant) {
         let mut cuts = CUTS.lock().unwrap_or_else(PoisonError::into_inner);
         let cuts = cuts.get_or_insert_with(HashMap::new);
         // Only what it lists is kept cut.
-        cuts.retain(|(key, _, _), _| shown.items.iter().any(|k| k.key == *key));
+        cuts.retain(|(key, _, _, _), _| shown.items.iter().any(|k| k.key == *key));
         lay_out(&shown, words, &wall, cuts, &mut kit::measure)
     };
-    if ui.from.map(|f| (f.0, f.2)) != Some((shown.version, shown.dnd)) || ui.laid.is_none() {
+    let said_again = ui
+        .from
+        .as_ref()
+        .is_none_or(|f| (f.0, f.2, &f.3) != (shown.version, shown.dnd, &shown.folds));
+    if said_again || ui.laid.is_none() {
         tracing::debug!(dnd = ?laid.dnd.choice(), history = %laid.said(words), "the history shows");
     }
-    let was_empty = ui.laid.as_ref().is_some_and(|l| l.rows.is_empty());
-    if laid.rows.is_empty() && !was_empty && ui.laid.is_some() {
+    let was_empty = ui.laid.as_ref().is_some_and(|l| l.blocks.is_empty());
+    if laid.blocks.is_empty() && !was_empty && ui.laid.is_some() {
         ui.empty_since = Some(now);
     }
-    if laid.rows.is_empty() && !was_empty && crate::pandas::lively() {
+    if laid.blocks.is_empty() && !was_empty && crate::pandas::lively() {
         ui.dozing = Some(crate::pandas::Burst::of(crate::pandas::Mood::Resting, now));
     }
-    let keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
-    if ui.focus.is_some_and(|f| {
-        f.key().is_some_and(|k| !keys.contains(&k)) || f == Target::Clear && laid.clear.is_none()
-    }) {
+    if ui.focus.is_some_and(|f| !laid.has(f)) {
         ui.focus = None;
     }
     // What slid out is gone from the list: it is over.
     if ui
         .leaving
         .as_ref()
-        .is_some_and(|l| l.sent && !laid.rows.iter().any(|r| l.keys.contains(&r.key)))
+        .is_some_and(|l| l.sent && !laid.rows().any(|r| l.keys.contains(&r.key)))
     {
         ui.leaving = None;
     }
@@ -957,31 +643,8 @@ fn content<'a>(laid: &Laid, words: Words, ui: &Ui, now: Instant, motion: bool) -
         Point::new(BORDER + SIDE, HEADER_TOP),
     )];
     if let Some((rect, _)) = laid.clear {
-        let clear = button(
-            container(
-                iced::widget::text(words.clear())
-                    .size(GHOST_TEXT)
-                    .font(MANROPE_SEMIBOLD)
-                    .line_height(LineHeight::Relative(LINE))
-                    .shaping(iced::widget::text::Shaping::Advanced)
-                    .wrapping(iced::widget::text::Wrapping::None),
-            )
-            .center(Length::Fill),
-        )
-        .padding(0)
-        .width(rect.width)
-        .height(rect.height)
-        .style(|_, status| {
-            let lit = style::lit(status);
-            let mut quiet = if lit {
-                style::hovered(GHOST_HOVER.get(), GHOST_RADIUS)
-            } else {
-                style::clear()
-            };
-            quiet.text_color = if lit { TEXT.get() } else { DIM.get() };
-            quiet
-        })
-        .on_press(Msg::Act(Target::Clear));
+        let clear = ghost(words.clear(), GHOST_TEXT, rect.size(), GHOST_RADIUS, DIM)
+            .on_press(Msg::Act(Target::Clear));
         layers.push(at(
             declared(clear, Target::Clear, Role::Button, words.clear(), ui.focus),
             rect.position(),
@@ -993,6 +656,41 @@ fn content<'a>(laid: &Laid, words: Words, ui: &Ui, now: Instant, motion: bool) -
         .width(W)
         .height(laid.height)
         .into()
+}
+
+/// A ghost button saying `word`, `size` px 600 in `ink`: lit and in the
+/// text's colour under the pointer.
+fn ghost<'a>(
+    word: &str,
+    size_px: f32,
+    size: Size,
+    radius: f32,
+    ink: Ink,
+) -> iced::widget::Button<'a, Msg> {
+    button(
+        container(
+            iced::widget::text(word.to_owned())
+                .size(size_px)
+                .font(MANROPE_SEMIBOLD)
+                .line_height(LineHeight::Relative(LINE))
+                .shaping(iced::widget::text::Shaping::Advanced)
+                .wrapping(iced::widget::text::Wrapping::None),
+        )
+        .center(Length::Fill),
+    )
+    .padding(0)
+    .width(size.width)
+    .height(size.height)
+    .style(move |_, status| {
+        let lit = style::lit(status);
+        let mut quiet = if lit {
+            style::hovered(GHOST_HOVER.get(), radius)
+        } else {
+            style::clear()
+        };
+        quiet.text_color = if lit { TEXT.get() } else { ink.get() };
+        quiet
+    })
 }
 
 /// The do not disturb card: its moon, its words, its switch, its chips.
@@ -1101,46 +799,27 @@ fn card<'a>(layers: &mut Vec<El<'a>>, laid: &Laid, words: Words, ui: &Ui, motion
     }
 }
 
-/// The list: its sections and items, scrolling past its room; empty, the
-/// resting panda.
+/// The list: its pins, its applications' cards and folds, scrolling past
+/// its room; empty, the resting panda.
 fn list<'a>(laid: &Laid, words: Words, ui: &Ui, now: Instant, motion: bool) -> El<'a> {
     let width = laid.view.width;
-    if laid.rows.is_empty() {
+    if laid.blocks.is_empty() {
         return empty(laid, words, ui, now, motion);
     }
     let mut all = column![].width(width);
     let mut end = 0.0;
-    let mut heads = laid.heads.iter().peekable();
-    for shown in &laid.rows {
-        if let Some((section, middle)) = heads.next_if(|(s, _)| *s == shown.section) {
-            let top = middle - HEAD * LINE / 2.0 - HEAD_PAD.0;
-            all = all.push(Space::new().height(top - end));
-            let word = words.section(*section);
-            let mut chars = word.chars();
-            let read = chars.next().map_or_else(String::new, |c| {
-                c.to_string() + &chars.as_str().to_lowercase()
-            });
-            all = all.push(ui::line(
-                container(spaced_by(
-                    word,
-                    HEAD,
-                    MANROPE_BOLD,
-                    QUIET.get(),
-                    HEAD_SPACING,
-                ))
-                .padding(Padding {
-                    top: HEAD_PAD.0,
-                    right: 0.0,
-                    bottom: HEAD_PAD.1,
-                    left: HEAD_PAD.0,
-                }),
-                read,
-            ));
-            end = top + HEAD_PAD.0 + HEAD * LINE + HEAD_PAD.1;
-        }
-        all = all.push(Space::new().height(shown.rect.y - end));
-        all = all.push(item(shown, words, ui, now));
-        end = shown.rect.y + shown.rect.height;
+    for block in &laid.blocks {
+        let rect = block.rect();
+        all = all.push(Space::new().height((rect.y - end).max(0.0)));
+        all = all.push(match block {
+            Block::Line(row) => item(row, words, ui, now),
+            Block::Header(header) => group_header(header, words, ui),
+            Block::Strips(rect, _) => strips(*rect),
+            Block::Fold(fold) => fold_line(fold, ui),
+            Block::Rule(rect) => rule(*rect),
+            Block::SeenLine(line) => seen_line(line, words, ui),
+        });
+        end = rect.y + rect.height;
     }
     let scrolled = scrollable(container(all))
         .id(Id::new(LIST_ID))
@@ -1226,123 +905,51 @@ fn empty<'a>(laid: &Laid, words: Words, ui: &Ui, now: Instant, motion: bool) -> 
     .into()
 }
 
-/// An item: its icon, "App · when", its title, its body; under the
-/// pointer or holding the keyboard, lit with its ✕; its actions while its
-/// sender holds it; sliding out as it goes.
-fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
-    let key = shown.key;
-    let gone = ui.gone(key, now);
-    let alpha = 1.0 - gone;
+/// An application's icon, `size` px, else its first letter on a square.
+fn app_icon<'a>(icon: Option<&Icon>, letter: &str, size: f32, alpha: f32) -> El<'a> {
     let fade = move |c: Color| c.scale_alpha(alpha);
-    let over = ui.over == Some(key) && ui.leaving.is_none();
-    let lit = over || ui.focus == Some(Target::Item(key));
-    let size = shown.rect.size();
-    let fr = words.lang == hocus_words::Lang::French;
-    // The icon, else the application's first letter on a square.
-    let icon: El<'a> = match &shown.icon {
+    match icon {
         Some(Icon::Raster(handle)) => image(handle.clone())
-            .width(ICON)
-            .height(ICON)
+            .width(size)
+            .height(size)
             .opacity(alpha)
             .into(),
         Some(Icon::Vector(handle)) => svg(handle.clone())
-            .width(ICON)
-            .height(ICON)
+            .width(size)
+            .height(size)
             .opacity(alpha)
             .into(),
         None => {
-            let square = drawn(ICON, ICON, move |f, s| {
+            let square = drawn(size, size, move |f, s| {
                 let rect = Rectangle::new(Point::ORIGIN, s);
-                let fill = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(ICON, ICON))
+                let fill = canvas::gradient::Linear::new(Point::ORIGIN, Point::new(size, size))
                     .add_stop(0.0, fade(NEUTRAL.0))
                     .add_stop(1.0, fade(NEUTRAL.1));
                 f.fill(
-                    &kit::rounded(rect, (ICON * 0.28).round()),
+                    &kit::rounded(rect, (size * 0.28).round()),
                     canvas::Fill::from(fill),
                 );
             });
             Stack::with_children([
                 square,
                 container(said(
-                    shown.letter.clone(),
-                    ICON * 0.4,
+                    letter.to_owned(),
+                    size * 0.4,
                     MANROPE_BOLD,
                     fade(Color::WHITE),
                 ))
-                .center(ICON)
+                .center(size)
                 .into(),
             ])
             .into()
         }
-    };
-    let mut meta = row![
-        said(shown.cut.app.clone(), META, MANROPE_BOLD, fade(DIM.get())),
-        gap(META_GAP),
-        said("·", META, MANROPE, fade(QUIET.get())),
-        gap(META_GAP),
-        said(shown.when.clone(), META, MANROPE, fade(QUIET.get())),
-    ]
-    .align_y(Vertical::Center);
-    if shown.dot_x.is_some() {
-        meta = meta.push(gap(META_GAP)).push(drawn(DOT, DOT, move |f, s| {
-            f.fill(
-                &Path::circle(Point::new(s.width / 2.0, s.height / 2.0), DOT / 2.0),
-                fade(UNSEEN.get()),
-            );
-        }));
     }
-    let mut texts = column![
-        container(meta)
-            .height(META * LINE)
-            .align_y(Vertical::Center),
-        Space::new().height(TEXT_GAP),
-        said(
-            shown.cut.title.clone(),
-            ITEM_TITLE,
-            MANROPE_BOLD,
-            fade(TEXT.get())
-        ),
-    ];
-    if !shown.cut.body.is_empty() {
-        texts = texts.push(Space::new().height(TEXT_GAP)).push(lines(
-            &shown.cut.body,
-            BODY,
-            BODY_LINE,
-            fade(DIM.get()),
-        ));
-    }
-    let pressed = button(Space::new().width(size.width).height(size.height))
-        .padding(0)
-        .style(move |_, _| {
-            if lit {
-                style::hovered(fade(ITEM_HOVER.get()), ITEM_RADIUS)
-            } else {
-                style::clear()
-            }
-        })
-        .on_press(Msg::Act(Target::Item(key)));
-    let name = match (shown.cut.app.is_empty(), fr) {
-        (true, _) => shown.cut.title.clone(),
-        (false, true) => format!("{} : {}", shown.cut.app, shown.cut.title),
-        (false, false) => format!("{}: {}", shown.cut.app, shown.cut.title),
-    };
-    let mut body = shown.cut.body.join(" ");
-    if !shown.when.is_empty() {
-        body = format!("{body} {}", shown.when).trim().to_owned();
-    }
-    let x = ITEM_PAD + ICON + ICON_GAP;
-    let mut layers: Vec<El<'a>> = vec![
-        declared(pressed, Target::Item(key), Role::ListItem, name, ui.focus)
-            .node(|n| n.describe(body))
-            .into(),
-        at(icon, Point::new(ITEM_PAD, ITEM_PAD)),
-        at(texts, Point::new(x, ITEM_PAD)),
-    ];
-    // Its ✕, under the pointer or holding the keyboard.
-    let close_target = Target::Close(key);
-    let shows_close = over || ui.focus == Some(close_target);
-    let cross = drawn(CLOSE, CLOSE, move |f, s| {
-        if !shows_close {
+}
+
+/// A cross, `ink`, drawn in a `CLOSE` px box while `shows`.
+fn cross<'a>(shows: bool, ink: Color) -> El<'a> {
+    drawn(CLOSE, CLOSE, move |f, s| {
+        if !shows {
             return;
         }
         let c = Point::new(s.width / 2.0, s.height / 2.0);
@@ -1356,29 +963,202 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
         f.stroke(
             &cross,
             Stroke {
-                style: canvas::Style::Solid(fade(FAINT.get())),
+                style: canvas::Style::Solid(ink),
                 width: 1.4,
                 line_cap: canvas::LineCap::Round,
                 ..Stroke::default()
             },
         );
-    });
-    let close = button(cross)
+    })
+}
+
+/// A ✕ or "⋯" button, `drawn`, lit under the pointer while it `shows`.
+fn small<'a>(
+    drawn: El<'a>,
+    shows: bool,
+    alpha: f32,
+    target: Target,
+) -> iced::widget::Button<'a, Msg> {
+    button(drawn)
         .padding(0)
         .style(move |_, status| {
-            if shows_close && style::lit(status) {
-                style::hovered(fade(GHOST_HOVER.get()), CLOSE_RADIUS)
+            if shows && style::lit(status) {
+                style::hovered(GHOST_HOVER.get().scale_alpha(alpha), CLOSE_RADIUS)
             } else {
                 style::clear()
             }
         })
-        .on_press(Msg::Act(close_target));
+        .on_press(Msg::Act(target))
+}
+
+/// The chevron of a fold: pointing right, or down while unfolded.
+fn chevron<'a>(open: bool, ink: Color) -> El<'a> {
+    drawn(CHEVRON, CHEVRON, move |f, s| {
+        let k = s.width / 10.0;
+        let path = Path::new(|p| {
+            if open {
+                p.move_to(Point::new(2.0 * k, 3.5 * k));
+                p.line_to(Point::new(5.0 * k, 6.5 * k));
+                p.line_to(Point::new(8.0 * k, 3.5 * k));
+            } else {
+                p.move_to(Point::new(3.5 * k, 2.0 * k));
+                p.line_to(Point::new(6.5 * k, 5.0 * k));
+                p.line_to(Point::new(3.5 * k, 8.0 * k));
+            }
+        });
+        f.stroke(
+            &path,
+            Stroke {
+                style: canvas::Style::Solid(ink),
+                width: 1.6 * k,
+                line_cap: canvas::LineCap::Round,
+                line_join: canvas::LineJoin::Round,
+                ..Stroke::default()
+            },
+        );
+    })
+}
+
+/// A line: its icon and "App · when" (a lone one, a pin) or its age first
+/// (under its application's header or fold), its title, its body; under
+/// the pointer or holding the keyboard, lit with its ✕ and "⋯"; its
+/// actions while its sender holds it; a pin's agent and reason; sliding
+/// out as it goes.
+fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
+    let key = shown.key;
+    let gone = ui.gone(key, now);
+    let alpha = 1.0 - gone;
+    let fade = move |c: Color| c.scale_alpha(alpha);
+    let over = ui.over == Some(key) && ui.leaving.is_none();
+    let lit = over || ui.focus == Some(Target::Item(key));
+    let size = shown.rect.size();
+    let fr = words.lang == hocus_words::Lang::French;
+    let full = shown.look == Look::Full;
+    let mut meta = row![].align_y(Vertical::Center);
+    if full {
+        meta = meta
+            .push(said(
+                shown.cut.app.clone(),
+                META,
+                MANROPE_BOLD,
+                fade(DIM.get()),
+            ))
+            .push(gap(META_GAP))
+            .push(said("·", META, MANROPE, fade(QUIET.get())))
+            .push(gap(META_GAP));
+    }
+    meta = meta.push(said(shown.when.clone(), META, MANROPE, fade(QUIET.get())));
+    if shown.dot {
+        meta = meta.push(gap(META_GAP)).push(drawn(DOT, DOT, move |f, s| {
+            f.fill(
+                &Path::circle(Point::new(s.width / 2.0, s.height / 2.0), DOT / 2.0),
+                fade(UNSEEN.get()),
+            );
+        }));
+    }
+    // A seen one is quieter.
+    let (title_font, title_ink, body_ink) = if shown.seen {
+        (MANROPE_SEMIBOLD, DIM.get(), QUIET.get())
+    } else {
+        (MANROPE_BOLD, TEXT.get(), DIM.get())
+    };
+    let mut texts = column![
+        container(meta)
+            .height(META * LINE)
+            .align_y(Vertical::Center),
+        Space::new().height(TEXT_GAP),
+        said(
+            shown.cut.title.clone(),
+            ITEM_TITLE,
+            title_font,
+            fade(title_ink)
+        ),
+    ];
+    if !shown.cut.body.is_empty() {
+        texts = texts.push(Space::new().height(TEXT_GAP)).push(lines(
+            &shown.cut.body,
+            BODY,
+            BODY_LINE,
+            fade(body_ink),
+        ));
+    }
+    // A pin: its pin, the agent's name, its reason.
+    if let Some(agent) = &shown.pin {
+        let mut by = row![
+            svg(pin_icon()).width(PIN).height(PIN).opacity(alpha),
+            gap(PIN_GAP),
+            said(agent.clone(), PIN_TEXT, MANROPE_BOLD, fade(AGENT.get())),
+        ]
+        .align_y(Vertical::Center);
+        if let Some(reason) = shown.cut.reason.as_ref().filter(|r| !r.is_empty()) {
+            by = by.push(gap(PIN_GAP)).push(said(
+                format!("· {reason}"),
+                PIN_TEXT,
+                MANROPE,
+                fade(DIM.get()),
+            ));
+        }
+        texts = texts.push(Space::new().height(PIN_TOP)).push(
+            container(by)
+                .height(PIN_TEXT * LINE)
+                .align_y(Vertical::Center),
+        );
+    }
+    let pinned = shown.pin.is_some();
+    let pressed = button(Space::new().width(size.width).height(size.height))
+        .padding(0)
+        .style(move |_, _| match (pinned, lit) {
+            (true, _) => {
+                let fill = if lit { PINNED_HOVER } else { PINNED };
+                let boxed = rimmed(fade(fill.get()), fade(PINNED_RIM.get()), ITEM_RADIUS);
+                iced::widget::button::Style {
+                    background: boxed.background,
+                    border: boxed.border,
+                    ..iced::widget::button::Style::default()
+                }
+            }
+            (false, true) => style::hovered(fade(ITEM_HOVER.get()), ITEM_RADIUS),
+            (false, false) => style::clear(),
+        })
+        .on_press(Msg::Act(Target::Item(key)));
+    let name = match (shown.cut.app.is_empty(), fr) {
+        (true, _) => shown.cut.title.clone(),
+        (false, true) => format!("{} : {}", shown.cut.app, shown.cut.title),
+        (false, false) => format!("{}: {}", shown.cut.app, shown.cut.title),
+    };
+    let mut body = shown.cut.body.join(" ");
+    if !shown.when.is_empty() {
+        body = format!("{body} {}", shown.when).trim().to_owned();
+    }
+    if let Some(agent) = &shown.pin {
+        body = format!("{body}. {}", words.pinned_by(agent));
+    }
+    let mut layers: Vec<El<'a>> = vec![
+        declared(pressed, Target::Item(key), Role::ListItem, name, ui.focus)
+            .node(|n| n.describe(body))
+            .into(),
+    ];
+    if full {
+        layers.push(at(
+            app_icon(shown.icon.as_ref(), &shown.letter, ICON, alpha),
+            Point::new(ITEM_PAD, ITEM_PAD),
+        ));
+    }
+    layers.push(at(texts, Point::new(shown.text_x(), ITEM_PAD)));
+    // Its ✕, under the pointer or holding the keyboard.
+    let close_target = Target::Close(key);
+    let shows_close = over || ui.focus == Some(close_target);
     layers.push(at(
         declared(
-            close,
+            small(
+                cross(shows_close, fade(FAINT.get())),
+                shows_close,
+                alpha,
+                close_target,
+            ),
             close_target,
             Role::Button,
-            if fr { "Retirer" } else { "Dismiss" },
+            words.dismiss(),
             ui.focus,
         ),
         Point::new(size.width - CLOSE_IN.0 - CLOSE, CLOSE_IN.1),
@@ -1399,19 +1179,9 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
                 );
             }
         });
-        let more = button(dots)
-            .padding(0)
-            .style(move |_, status| {
-                if shows_more && style::lit(status) {
-                    style::hovered(fade(GHOST_HOVER.get()), CLOSE_RADIUS)
-                } else {
-                    style::clear()
-                }
-            })
-            .on_press(Msg::Act(more_target));
         layers.push(at(
             declared(
-                more,
+                small(dots, shows_more, alpha, more_target),
                 more_target,
                 Role::Button,
                 hocus_words::shell::notifications_draw::MORE.get(words.lang),
@@ -1467,6 +1237,235 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
     row![gap(SLIDE_BY * gone), hovered].into()
 }
 
+/// An application's header: its icon, its name and "· 4", "3 de plus" (or
+/// "Réduire") and its ✕.
+fn group_header<'a>(header: &Header, words: Words, ui: &Ui) -> El<'a> {
+    let size = header.rect.size();
+    let name = row![
+        said(header.name.clone(), GROUP_NAME, MANROPE_BOLD, DIM.get()),
+        said(
+            format!(" · {}", header.count),
+            GROUP_NAME,
+            MANROPE,
+            QUIET.get()
+        ),
+    ];
+    let (label, toggle) = &header.toggle;
+    let expand = Target::Expand(header.app);
+    let close = Target::CloseApp(header.app);
+    let mut layers: Vec<El<'a>> = vec![
+        Space::new().width(size.width).height(size.height).into(),
+        at(
+            app_icon(header.icon.as_ref(), &header.letter, SMALL_ICON, 1.0),
+            Point::new(GROUP_PAD.0, GROUP_PAD.1 + (TOGGLE - SMALL_ICON) / 2.0),
+        ),
+        at(
+            container(name).height(TOGGLE).align_y(Vertical::Center),
+            Point::new(GROUP_PAD.0 + SMALL_ICON + SMALL_GAP, GROUP_PAD.1),
+        ),
+    ];
+    let expanded = label == words.collapse();
+    layers.push(at(
+        declared(
+            ghost(label, TOGGLE_TEXT, toggle.size(), CLOSE_RADIUS, FAINT)
+                .on_press(Msg::Act(expand)),
+            expand,
+            Role::Button,
+            label.clone(),
+            ui.focus,
+        )
+        .node(|n| n.expanded(expanded)),
+        toggle.position(),
+    ));
+    layers.push(at(
+        declared(
+            small(cross(true, FAINT.get()), true, 1.0, close),
+            close,
+            Role::Button,
+            words.clear_app(&header.name),
+            ui.focus,
+        ),
+        header.close.position(),
+    ));
+    Stack::with_children(layers)
+        .width(size.width)
+        .height(size.height)
+        .into()
+}
+
+/// The strips under a card's newest line: 4 px then 3 px, rounded below.
+fn strips<'a>(rect: Rectangle) -> El<'a> {
+    let strips = drawn(rect.width, rect.height, move |f, s| {
+        let rounded_below = |r: Rectangle, radius: f32| {
+            Path::new(|p| {
+                p.move_to(Point::new(r.x, r.y));
+                p.line_to(Point::new(r.x + r.width, r.y));
+                p.line_to(Point::new(r.x + r.width, r.y + r.height - radius));
+                p.quadratic_curve_to(
+                    Point::new(r.x + r.width, r.y + r.height),
+                    Point::new(r.x + r.width - radius, r.y + r.height),
+                );
+                p.line_to(Point::new(r.x + radius, r.y + r.height));
+                p.quadratic_curve_to(
+                    Point::new(r.x, r.y + r.height),
+                    Point::new(r.x, r.y + r.height - radius),
+                );
+                p.close();
+            })
+        };
+        let one = Rectangle::new(Point::ORIGIN, Size::new(s.width, STRIPS.0));
+        f.fill(&rounded_below(one, STRIPS.0), STRIP_ONE.get());
+        let two = Rectangle::new(
+            Point::new(STRIPS_IN.1, STRIPS.0 + GAP),
+            Size::new(s.width - 2.0 * STRIPS_IN.1, STRIPS.1),
+        );
+        f.fill(&rounded_below(two, STRIPS.1), STRIP_TWO.get());
+    });
+    row![gap(rect.x - LIST_SIDE), strips].into()
+}
+
+/// A fold: "12 vues", its chevron; lit under the pointer.
+fn fold_line<'a>(fold: &Fold, ui: &Ui) -> El<'a> {
+    let target = Target::Fold(fold.app);
+    let open = fold.open;
+    let focused = ui.focus == Some(target);
+    let said_now = fold.said.clone();
+    let pressed = button(
+        container(
+            row![
+                chevron(open, FAINT.get()),
+                gap(CHEVRON_GAP),
+                iced::widget::text(said_now.clone())
+                    .size(FOLD_TEXT)
+                    .font(MANROPE_SEMIBOLD)
+                    .line_height(LineHeight::Relative(LINE))
+                    .shaping(iced::widget::text::Shaping::Advanced)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            ]
+            .align_y(Vertical::Center),
+        )
+        .padding(Padding {
+            left: FOLD_PAD,
+            right: FOLD_PAD,
+            ..Padding::ZERO
+        })
+        .center_y(Length::Fill),
+    )
+    .padding(0)
+    .width(fold.rect.width)
+    .height(fold.rect.height)
+    .style(move |_, status| {
+        let lit = style::lit(status) || focused;
+        let mut quiet = if lit {
+            style::hovered(ITEM_HOVER.get(), FOLD_RADIUS)
+        } else {
+            style::clear()
+        };
+        quiet.text_color = if lit { DIM.get() } else { FAINT.get() };
+        quiet
+    })
+    .on_press(Msg::Act(target));
+    let x = fold.rect.x - LIST_SIDE;
+    row![
+        gap(x),
+        declared(pressed, target, Role::Button, said_now, ui.focus).node(|n| n.expanded(open)),
+    ]
+    .into()
+}
+
+/// The rule above the applications with seen ones only.
+fn rule<'a>(rect: Rectangle) -> El<'a> {
+    row![
+        gap(rect.x - LIST_SIDE),
+        container(Space::new().width(rect.width).height(rect.height))
+            .style(|_| style::boxed(RULE.get(), 0.0)),
+    ]
+    .into()
+}
+
+/// An application with seen ones only: its icon, its name, "· 6 vues",
+/// its newest's age and the chevron; its ✕ under the pointer.
+fn seen_line<'a>(line: &SeenLine, words: Words, ui: &Ui) -> El<'a> {
+    let size = line.rect.size();
+    let target = Target::Fold(line.app);
+    let close = Target::CloseApp(line.app);
+    let open = line.open;
+    let focused = ui.focus == Some(target);
+    let pressed = button(
+        container(
+            row![
+                app_icon(line.icon.as_ref(), &line.letter, SMALL_ICON, 1.0),
+                gap(SMALL_GAP),
+                said(line.name.clone(), GROUP_NAME, MANROPE_BOLD, DIM.get()),
+                gap(SMALL_GAP),
+                said(line.said.clone(), GROUP_NAME, MANROPE, QUIET.get()),
+                Space::new().width(Length::Fill),
+                said(line.when.clone(), GROUP_NAME, MANROPE, QUIET.get()),
+                gap(SMALL_GAP),
+                chevron(open, QUIET.get()),
+            ]
+            .align_y(Vertical::Center),
+        )
+        .padding(Padding {
+            left: ITEM_PAD,
+            right: ITEM_RIGHT,
+            ..Padding::ZERO
+        })
+        .center_y(Length::Fill),
+    )
+    .padding(0)
+    .width(size.width)
+    .height(size.height)
+    .style(move |_, status| {
+        if style::lit(status) || focused {
+            style::hovered(ITEM_HOVER.get(), ITEM_RADIUS)
+        } else {
+            style::clear()
+        }
+    })
+    .on_press(Msg::Act(target));
+    let name = format!("{} {}", line.name, line.said.trim_start_matches("· "));
+    let shows_close = ui.over_app == Some(line.app) || ui.focus == Some(close);
+    let whole = Stack::with_children([
+        declared(pressed, target, Role::Button, name, ui.focus)
+            .node(|n| n.expanded(open))
+            .into(),
+        at(
+            declared(
+                small(cross(shows_close, FAINT.get()), shows_close, 1.0, close),
+                close,
+                Role::Button,
+                words.clear_app(&line.name),
+                ui.focus,
+            ),
+            Point::new(size.width - CLOSE_IN.0 - CLOSE, (SEEN_LINE - CLOSE) / 2.0),
+        ),
+    ])
+    .width(size.width)
+    .height(size.height);
+    mouse_area(whole)
+        .on_enter(Msg::OverApp(line.app, true))
+        .on_exit(Msg::OverApp(line.app, false))
+        .into()
+}
+
+/// A pin, in the agents' violet.
+fn pin_icon() -> iced::advanced::svg::Handle {
+    static PIN_SVG: std::sync::OnceLock<iced::advanced::svg::Handle> = std::sync::OnceLock::new();
+    PIN_SVG
+        .get_or_init(|| {
+            iced::advanced::svg::Handle::from_memory(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" width=\"24\" \
+                 height=\"24\"><path d=\"M9 3h6l-1 6 4 4H6l4-4z M12 13v8\" fill=\"none\" \
+                 stroke=\"#B69CFF\" stroke-width=\"2\" stroke-linejoin=\"round\" \
+                 stroke-linecap=\"round\"/></svg>"
+                    .as_bytes()
+                    .to_vec(),
+            )
+        })
+        .clone()
+}
+
 // --- What a message does -------------------------------------------------------
 
 fn handle(motion: bool, message: Msg) {
@@ -1478,7 +1477,14 @@ fn handle(motion: bool, message: Msg) {
                 let end = ui.leaving_end()?;
                 let leaving = ui.leaving.as_mut().filter(|l| !l.sent && now >= end)?;
                 leaving.sent = true;
-                Some(leaving.keys.clone())
+                Some(
+                    leaving
+                        .keys
+                        .iter()
+                        .chain(&leaving.also)
+                        .copied()
+                        .collect::<Vec<u64>>(),
+                )
             });
             if let Some(keys) = out {
                 notifications::input(Said::Remove(keys));
@@ -1495,12 +1501,18 @@ fn handle(motion: bool, message: Msg) {
                 ui.over = None;
             }
         }),
+        Msg::OverApp(app, true) => ui(|ui| ui.over_app = Some(app)),
+        Msg::OverApp(app, false) => ui(|ui| {
+            if ui.over_app == Some(app) {
+                ui.over_app = None;
+            }
+        }),
         Msg::Scrolled(y) => ui(|ui| ui.scroll = y),
         Msg::Arrow(down) => ui(|ui| {
             let items: Vec<Target> = ui
                 .laid
                 .as_ref()
-                .map(|l| l.rows.iter().map(|r| Target::Item(r.key)).collect())
+                .map(|l| l.rows().map(|r| Target::Item(r.key)).collect())
                 .unwrap_or_default();
             let current = ui.focus.and_then(Target::key).map(Target::Item);
             ui.focus = match current {
@@ -1516,14 +1528,14 @@ fn handle(motion: bool, message: Msg) {
 
 /// The list scrolled so that what holds the keyboard shows.
 fn reveal(ui: &mut Ui) {
-    let (Some(laid), Some(key)) = (&ui.laid, ui.focus.and_then(Target::key)) else {
+    let (Some(laid), Some(focus)) = (&ui.laid, ui.focus) else {
         return;
     };
-    let Some(row) = laid.rows.iter().find(|r| r.key == key) else {
+    let Some(rect) = laid.place_of(focus) else {
         return;
     };
     let to = kit::reveal(
-        (row.rect.y, row.rect.height),
+        (rect.y, rect.height),
         laid.view.height,
         ui.scroll,
         laid.most_scroll(),
@@ -1541,22 +1553,44 @@ fn reveal(ui: &mut Ui) {
     ));
 }
 
-/// Items `keys` go: sliding out one after another, or at once without
-/// motion.
-fn take_out(ui: &mut Ui, keys: Vec<u64>, now: Instant, motion: bool) -> Option<Vec<u64>> {
-    if keys.is_empty() || ui.leaving.is_some() {
+/// Lines `keys` go, and `also` with them (not shown): sliding out one
+/// after another, or at once without motion.
+fn take_out(
+    ui: &mut Ui,
+    keys: Vec<u64>,
+    also: Vec<u64>,
+    now: Instant,
+    motion: bool,
+) -> Option<Vec<u64>> {
+    if (keys.is_empty() && also.is_empty()) || ui.leaving.is_some() {
         return None;
     }
-    if motion {
+    if motion && !keys.is_empty() {
         ui.leaving = Some(Leaving {
             keys,
+            also,
             since: now,
             sent: false,
         });
         None
     } else {
-        Some(keys)
+        Some(keys.into_iter().chain(also).collect())
     }
+}
+
+/// The keys of application `app`'s lines but the pinned ones, newest
+/// first.
+fn keys_of_app(app: App) -> Vec<u64> {
+    let id = app.id();
+    notifications::with(|c| {
+        c.stack
+            .history
+            .items()
+            .iter()
+            .filter(|k| k.pin.is_none() && k.app_id().to_lowercase() == id)
+            .map(|k| k.key)
+            .collect()
+    })
 }
 
 fn act(target: Target, now: Instant, motion: bool) {
@@ -1566,15 +1600,24 @@ fn act(target: Target, now: Instant, motion: bool) {
         let laid = ui.laid.clone()?;
         match target {
             Target::Clear => {
-                // The items in view first, in their order: they slide out.
-                let mut keys: Vec<u64> = laid.rows.iter().map(|r| r.key).collect();
+                // The lines in view first, in their order: they slide out;
+                // the folded and the hidden with them.
+                let mut keys: Vec<u64> = laid.rows().map(|r| r.key).collect();
                 let first = laid
-                    .rows
-                    .iter()
+                    .rows()
                     .position(|r| r.rect.y + r.rect.height > ui.scroll)
                     .unwrap_or(0);
                 keys.rotate_left(first);
-                take_out(ui, keys, now, motion).map(Said::Remove)
+                let also: Vec<u64> = notifications::with(|c| {
+                    c.stack
+                        .history
+                        .items()
+                        .iter()
+                        .map(|k| k.key)
+                        .filter(|k| !keys.contains(k))
+                        .collect()
+                });
+                take_out(ui, keys, also, now, motion).map(Said::Remove)
             }
             Target::Switch => {
                 let on = laid.dnd.is_on();
@@ -1591,23 +1634,48 @@ fn act(target: Target, now: Instant, motion: bool) {
                 &notifications::wall(),
             ))),
             Target::Item(key) => (ui.leaving.is_none()).then_some(Said::Open(key)),
-            Target::Close(key) => take_out(ui, vec![key], now, motion).map(Said::Remove),
+            Target::Close(key) => {
+                take_out(ui, vec![key], Vec::new(), now, motion).map(Said::Remove)
+            }
             Target::More(key) => {
                 // Its application's levels, in the history's place, the
                 // menu's top on its "⋯"'s.
-                let row = laid.rows.iter().find(|r| r.key == key)?;
+                let row = laid.rows().find(|r| r.key == key)?;
                 more = Some((laid.view.y + row.rect.y - ui.scroll + MORE_TOP, key));
                 None
             }
             Target::Action(key, i) => laid
-                .rows
-                .iter()
+                .rows()
                 .find(|r| r.key == key)
                 .and_then(|r| r.actions.get(i))
                 .map(|(action, _)| Said::Act {
                     key,
                     action: action.clone(),
                 }),
+            Target::Expand(app) => {
+                folds(|f| {
+                    if !f.expanded.remove(&app) {
+                        f.expanded.insert(app);
+                    }
+                });
+                None
+            }
+            Target::Fold(app) => {
+                folds(|f| {
+                    if !f.unfolded.remove(&app) {
+                        f.unfolded.insert(app);
+                    }
+                });
+                None
+            }
+            // All its lines show, then slide out.
+            Target::CloseApp(app) => {
+                folds(|f| {
+                    f.expanded.insert(app);
+                    f.unfolded.insert(app);
+                });
+                take_out(ui, keys_of_app(app), Vec::new(), now, motion).map(Said::Remove)
+            }
         }
     });
     if let Some(said) = said {
@@ -1699,164 +1767,4 @@ fn moon(on: bool) -> iced::advanced::svg::Handle {
     };
     let moons = MOONS.get_or_init(|| [make("#A9B2C2"), make(notifications::bell::AMBER)]);
     moons[usize::from(on)].clone()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::notifications::{
-        history::{History, Sight as Was},
-        note::{IconFrom, Note, Timeout, Urgency},
-    };
-
-    fn note(id: u32, app: &str, title: &str, at: i64) -> Note {
-        Note {
-            id,
-            app: app.to_owned(),
-            entry: None,
-            icon: None,
-            summary: title.to_owned(),
-            body: "J’ai mis à jour la maquette du lanceur, tu peux jeter un œil quand tu as deux \
-                   minutes ? Et puis encore des mots pour une troisième ligne."
-                .to_owned(),
-            actions: vec![("reply".to_owned(), "Répondre".to_owned())],
-            default: true,
-            urgency: Urgency::Normal,
-            timeout: Timeout::Never,
-            progress: None,
-            resident: false,
-            pid: 0,
-            agent: false,
-            conversation: None,
-            icon_from: IconFrom::default(),
-            at,
-            sound: None,
-        }
-    }
-
-    fn measure(t: &str, size: f32, _font: Font) -> f32 {
-        t.chars().count() as f32 * size * 0.5
-    }
-
-    fn now() -> Zoned {
-        "2026-11-02T14:32:00+01:00[Europe/Paris]"
-            .parse()
-            .expect("a time")
-    }
-
-    fn shown(history: &History, dnd: Dnd) -> Shown {
-        Shown {
-            items: history.items().to_vec(),
-            dnd,
-            version: history.version(),
-        }
-    }
-
-    #[test]
-    fn it_lists_by_sections_newest_first_each_item_as_the_mockup_lays_it() {
-        let now = now();
-        let ms = now.timestamp().as_millisecond();
-        let mut h = History::default();
-        h.add(
-            note(1, "Thunderbird", "Facture", ms - 26 * 3600 * 1000),
-            Was::Seen,
-        );
-        h.add(
-            note(2, "Firefox", "Téléchargement terminé", ms - 70 * 60_000),
-            Was::Seen,
-        );
-        h.add(
-            note(3, "Slack", "Hugo dans #dev", ms - 9 * 60_000),
-            Was::Unseen,
-        );
-        h.add(
-            note(4, "Slack", "Camille dans #design", ms - 2 * 60_000),
-            Was::Unseen,
-        );
-        h.closed(1);
-        let laid = lay_out(
-            &shown(&h, Dnd::Off),
-            Words::new(Lang::French),
-            &now,
-            &mut Cuts::new(),
-            &mut measure,
-        );
-        let heads: Vec<Section> = laid.heads.iter().map(|(s, _)| *s).collect();
-        assert_eq!(heads, [Section::Recent, Section::Today, Section::Yesterday]);
-        let said = laid.said(Words::new(Lang::French));
-        assert!(
-            said.starts_with(
-                "RÉCENTES: Slack «Camille dans #design» il y a 2\u{a0}min (unseen) [1 actions] \
-                 Slack «Hugo dans #dev» il y a 9\u{a0}min (unseen)"
-            ),
-            "{said}"
-        );
-        assert!(said.contains("PLUS TÔT AUJOURD’HUI: Firefox"), "{said}");
-        assert!(said.ends_with("HIER: Thunderbird «Facture» hier"), "{said}");
-        let first = &laid.rows[0];
-        // 342 px wide, 8 px in from the popover's rim; its body on two
-        // lines, cut; its ✕ 6 px from its right and 8 px from its top.
-        assert_eq!(first.rect.x, 9.0);
-        assert_eq!(first.rect.width, 342.0);
-        assert_eq!(first.cut.body.len(), 2);
-        assert!(first.cut.body[1].ends_with('…'));
-        assert_eq!(first.close().x + 22.0 + 6.0, 351.0);
-        assert_eq!(first.close().y, first.rect.y + 8.0);
-        // Its sender holds no more the oldest: no actions.
-        assert!(laid.rows[3].actions.is_empty());
-        // The header's "Tout effacer", and at most 600 px.
-        assert!(laid.clear.is_some());
-        assert!(laid.height <= 600.0);
-    }
-
-    #[test]
-    fn do_not_disturb_says_until_when_and_offers_its_chips_while_on() {
-        let now = now();
-        let words = Words::new(Lang::French);
-        let h = History::default();
-        let off = lay_out(
-            &shown(&h, Dnd::Off),
-            words,
-            &now,
-            &mut Cuts::new(),
-            &mut measure,
-        );
-        assert_eq!(off.said, ["Les bulles s’affichent"]);
-        assert!(off.chips.is_empty());
-        assert!(off.clear.is_none());
-        let at = Instant::now();
-        let hour = Dnd::starting(Choice::Hour, at, &now);
-        assert_eq!(
-            words.said(hour, &now),
-            "Jusqu’à 15\u{a0}h\u{a0}32 · seules les urgences passent"
-        );
-        let morning = Dnd::starting(Choice::Morning, at, &now);
-        assert!(
-            words
-                .said(morning, &now)
-                .starts_with("Jusqu’à demain, 8\u{a0}h ·")
-        );
-        let english = Words::new(Lang::English);
-        assert_eq!(
-            english.said(hour, &now),
-            "Until 3:32\u{a0}PM · only urgent ones come through"
-        );
-        assert!(
-            english
-                .said(morning, &now)
-                .starts_with("Until tomorrow, 8\u{a0}AM")
-        );
-        let on = lay_out(
-            &shown(&h, hour),
-            words,
-            &now,
-            &mut Cuts::new(),
-            &mut measure,
-        );
-        let chips: Vec<Choice> = on.chips.iter().map(|(c, _)| *c).collect();
-        assert_eq!(chips, Choice::ALL);
-        assert!(on.card.height > off.card.height + 26.0);
-        // Empty: the panda's room.
-        assert_eq!(on.content, EMPTY);
-    }
 }

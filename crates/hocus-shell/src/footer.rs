@@ -459,6 +459,7 @@ impl Items for Footer {
         let size = bounds.size();
         let under = crate::backdrop::under(renderer, size, self.backdrop);
         let (count, dnd) = crate::notifications::with(|c| (c.stack.badge(), c.stack.dnd.is_on()));
+        let ringed = crate::mcp::bell_ringed();
         let still = self.forms.len() == 1;
         let bottom = self.bottom();
         // The bar's inside, as wide as it is while it switches.
@@ -482,6 +483,7 @@ impl Items for Footer {
                                 dnd,
                                 open,
                                 hover,
+                                ringed,
                             },
                             alpha,
                         ),

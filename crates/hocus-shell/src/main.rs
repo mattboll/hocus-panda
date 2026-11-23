@@ -896,6 +896,18 @@ impl Shell {
                 notifications::focus(screen);
                 Task::none()
             }
+            ToShell::AppFocus(focus) => {
+                notifications::app_focus(focus);
+                Task::none()
+            }
+            ToShell::Notes { token, ask } => {
+                notifications::ask(token, ask);
+                Task::none()
+            }
+            ToShell::NotesUndo(befores) => {
+                notifications::undo(befores);
+                Task::none()
+            }
             ToShell::Copied { app, clip } => {
                 clipboard::copied(app, clip);
                 Task::none()
@@ -2002,6 +2014,20 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // The bubbles' screen: their stack alone.
                         ToShell::Focus(screen) => {
                             notifications::focus(screen);
+                            continue;
+                        }
+                        // The bell (#923): the stack's, its history's
+                        // panel drawing when it shows.
+                        ToShell::AppFocus(focus) => {
+                            notifications::app_focus(focus);
+                            continue;
+                        }
+                        ToShell::Notes { token, ask } => {
+                            notifications::ask(token, ask);
+                            continue;
+                        }
+                        ToShell::NotesUndo(befores) => {
+                            notifications::undo(befores);
                             continue;
                         }
                         // A copy for the clipboard's history, kept off

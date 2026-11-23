@@ -10,13 +10,21 @@
 //! saying its agent waits makes no bubble, its other notifications do; an
 //! agent's notification opens its conversation in a terminal (#823).
 //!
-//! And 5.4's (issue #394), one per point of its spec: the history lists by
-//! sections, newest first; a click in it invokes the default, raises and
-//! removes; an expired bubble's action still works from it (a bubble's time
-//! up closes nothing: the notification stays held); its ✕ removes one, "clear all" empties it; the bell's badge
-//! counts what was not seen and opening the history resets it; do not
-//! disturb holds a normal bubble but not a critical one; the history
-//! survives a restart of the shell without what is older than 7 days. The
+//! And 5.4's (issue #394), one per point of its spec, as #923 changed it:
+//! the history lists by application, newest first; a click on a line
+//! invokes the default, raises, and leaves it seen; an expired bubble's
+//! action still works from it (a bubble's time up closes nothing: the
+//! notification stays held); its ✕ removes one, "clear all" empties it;
+//! the bell's badge counts what is new and opening the history resets it;
+//! do not disturb holds a normal bubble but not a critical one; the
+//! history survives a restart of the shell without what is older than 7
+//! days.
+//!
+//! And #923's, one per point of its spec: opening an application folds its
+//! notifications, the badge dropping, its bubble on screen living its
+//! time; an application set not to folds nothing; a `transient` one makes
+//! its bubble, no line, no count, and a journal's line; the journal is the
+//! user's alone and says each one's fields. The
 //! shell's wall clock reads 2 November 2026, 14:32:07 UTC
 //! (`HOCUS_CLOCK_AT`); do not disturb ending at its time is the stack's
 //! unit test, on the clock it is given.
@@ -239,7 +247,17 @@ impl Default for Notice<'_> {
 impl Bed {
     /// Sends `notice`; its id.
     fn notify(&mut self, notice: Notice<'_>) -> anyhow::Result<u32> {
-        let mut hints: HashMap<&str, OwnedVariant> = HashMap::new();
+        self.notify_hinted(notice, Vec::new())
+    }
+
+    /// Sends `notice` with these hints too (`transient`, `desktop-entry`);
+    /// its id.
+    fn notify_hinted(
+        &mut self,
+        notice: Notice<'_>,
+        more: Vec<(&'static str, OwnedVariant)>,
+    ) -> anyhow::Result<u32> {
+        let mut hints: HashMap<&str, OwnedVariant> = more.into_iter().collect();
         if let Some(urgency) = notice.urgency {
             hints.insert("urgency", OwnedVariant::try_from(Variant::U8(urgency))?);
         }
@@ -997,7 +1015,7 @@ fn an_agents_notification_opens_its_conversation_in_a_terminal() -> anyhow::Resu
 // --- 5.4: the history, clear all, do not disturb -------------------------------------
 
 #[test]
-fn the_history_lists_by_sections_newest_first() -> anyhow::Result<()> {
+fn the_history_lists_by_application_newest_first() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
@@ -1015,12 +1033,13 @@ fn the_history_lists_by_sections_newest_first() -> anyhow::Result<()> {
     })?;
     bed.logged("a notification to the history")?;
     let shows = bed.open_history()?;
-    // Newest first, under their sections; the one that just came not seen.
+    // Newest first, each application its card, a lone line with its
+    // name; the one that just came new.
     assert!(
         shows.contains(
-            "RÉCENTES: Slack «Camille dans #design» maintenant (unseen) Calendrier «Point produit» \
-             il y a 40\u{a0}min PLUS TÔT AUJOURD’HUI: Firefox «Téléchargement terminé» il y a \
-             1\u{a0}h HIER: Logiciels «12 mises à jour disponibles» hier"
+            "history=Slack «Camille dans #design» maintenant (new) Calendrier «Point produit» \
+             il y a 40\u{a0}min Firefox «Téléchargement terminé» il y a 1\u{a0}h Logiciels «12 \
+             mises à jour disponibles» hier"
         ),
         "{shows}"
     );
@@ -1034,7 +1053,7 @@ fn the_history_lists_by_sections_newest_first() -> anyhow::Result<()> {
 }
 
 #[test]
-fn a_click_in_the_history_invokes_its_default_raises_and_removes_it() -> anyhow::Result<()> {
+fn a_click_on_a_line_invokes_its_default_raises_and_leaves_it_seen() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
         return Ok(());
     };
@@ -1054,7 +1073,7 @@ fn a_click_in_the_history_invokes_its_default_raises_and_removes_it() -> anyhow:
     })?;
     let shows = bed.open_history()?;
     assert!(
-        shows.contains("Slack «Hugo dans #dev» maintenant (unseen) [1 actions]"),
+        shows.contains("Slack «Hugo dans #dev» maintenant (new) [1 actions]"),
         "{shows}"
     );
     let items = bed.history_items();
@@ -1065,8 +1084,9 @@ fn a_click_in_the_history_invokes_its_default_raises_and_removes_it() -> anyhow:
     common::point(&mut bed.hp, item)?;
     bed.idle(Duration::from_millis(100))?;
     bed.click(item)?;
-    // Its default invoked, its window asked for, then it goes: its sender
-    // hears it closed by the user, and the history closes.
+    // Its default invoked, its window asked for, then it is seen, not
+    // taken out: its sender hears it closed by the user, and the history
+    // closes.
     bed.hears(&format!("action {id} default"))?;
     bed.hears(&format!("closed {id} 2"))?;
     bed.logged_since(mark, "a notification of the history opened")?;
@@ -1075,8 +1095,19 @@ fn a_click_in_the_history_invokes_its_default_raises_and_removes_it() -> anyhow:
     })?;
     assert!(closed, "the history stays open");
     let shows = bed.open_history()?;
-    assert!(!shows.contains("Hugo"), "{shows}");
-    assert_eq!(bed.history_items().len(), 1);
+    assert!(shows.ends_with("| Slack · 1 vue ▸"), "{shows}");
+    assert_eq!(bed.history_items().len(), 1, "Slack's folded");
+    // Unfolded, it is there, seen.
+    let fold = bed.history_item("Fold(slack)")?;
+    let mark = bed.mark();
+    common::point(&mut bed.hp, fold)?;
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(fold)?;
+    let shows = bed.logged_since(mark, "the history shows")?;
+    assert!(
+        shows.contains("Slack · 1 vue ▾ «Hugo dans #dev» maintenant (seen)"),
+        "{shows}"
+    );
     Ok(())
 }
 
@@ -1193,10 +1224,18 @@ fn the_badge_counts_what_was_not_seen_and_opening_the_history_resets_it() -> any
     let mark = bed.mark();
     let shows = bed.open_history()?;
     bed.logged_since(mark, "the bell unread=0")?;
-    assert_eq!(shows.matches("(unseen)").count(), 2, "{shows}");
+    // Spotify's new; Slack's two, the newest noticed (the pointer rested
+    // on it), the other new behind the strips.
+    assert!(
+        shows.contains(
+            "history=Spotify «Morceau suivant» maintenant (new) Slack 2: «Hugo dans #dev» \
+             maintenant +1"
+        ),
+        "{shows}"
+    );
     bed.close_history()?;
     let shows = bed.open_history()?;
-    assert!(!shows.contains("(unseen)"), "{shows}");
+    assert!(!shows.contains("(new)"), "{shows}");
     Ok(())
 }
 
@@ -1280,14 +1319,14 @@ fn the_history_survives_a_restart_of_the_shell_without_what_is_older_than_seven_
     bed.logged_since(mark, "the history read back kept=2 dnd=true")?;
     let again = std::fs::read_to_string(&bed.pid)?.trim().to_owned();
     assert_ne!(again, pid);
-    // Seen as the history closed before.
+    // Noticed as the history closed before.
     let shows = bed.open_history()?;
     assert!(
-        shows.contains("RÉCENTES: Spotify «Morceau suivant»")
-            && shows.contains("HIER: Slack «Inès dans #général» hier"),
+        shows.contains("history=Spotify «Morceau suivant»")
+            && shows.contains("Slack «Inès dans #général» hier"),
         "{shows}"
     );
-    assert!(!shows.contains("(unseen)"), "{shows}");
+    assert!(!shows.contains("(new)"), "{shows}");
     assert!(!shows.contains("huit jours"), "{shows}");
     Ok(())
 }
@@ -1320,6 +1359,221 @@ fn an_expired_bubbles_action_is_invoked_from_the_history() -> anyhow::Result<()>
     // Invoked, then closed by the user.
     bed.hears(&format!("action {id} reply"))?;
     bed.hears(&format!("closed {id} 2"))?;
+    Ok(())
+}
+
+// --- #923: the bell keeps what still needs you ---------------------------------------
+
+impl Bed {
+    /// The notifications' journal (#923).
+    fn journal_file(&self) -> PathBuf {
+        self._dir.path().join("state/hocuspanda/notifications.log")
+    }
+
+    /// Waits until the journal holds `n` lines; its lines, read.
+    fn journal_lines(&mut self, n: usize) -> anyhow::Result<Vec<serde_json::Value>> {
+        let file = self.journal_file();
+        let read = |file: &Path| -> Vec<serde_json::Value> {
+            std::fs::read_to_string(file)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        };
+        let done = self.hp.dispatch_until(WAIT, |_| read(&file).len() >= n)?;
+        anyhow::ensure!(done, "the journal holds {:?}\n{}", read(&file), self.log());
+        Ok(read(&file))
+    }
+}
+
+#[test]
+fn opening_an_application_folds_its_notifications_and_its_bubble_lives_its_time()
+-> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    // Courriel's window first: its notification is its, not the window's
+    // of the process that sends them all (the test's own, which draws
+    // Chat's window too).
+    common::open(&mut bed.hp, "org.example.Courriel", (500, 300))?;
+    for summary in ["Hugo dans #dev", "Inès dans #général"] {
+        bed.notify(Notice {
+            app: "Chat",
+            summary,
+            urgency: Some(0),
+            ..Notice::default()
+        })?;
+    }
+    bed.notify(Notice {
+        app: "Courriel",
+        summary: "Facture",
+        urgency: Some(0),
+        ..Notice::default()
+    })?;
+    bed.logged("the bell unread=3")?;
+    // One of Chat's on screen as its window opens.
+    bed.notify(Notice {
+        app: "Chat",
+        summary: "Camille dans #design",
+        timeout: 0,
+        ..Notice::default()
+    })?;
+    bed.shows(1)?;
+    let mark = bed.mark();
+    common::open(&mut bed.hp, "org.example.Chat", (600, 400))?;
+    let folded = bed.logged_since(mark, "a window takes the focus: its notifications seen")?;
+    assert!(
+        folded.contains("app=\"org.example.Chat\" folded=3"),
+        "{folded}"
+    );
+    // The badge drops to Courriel's; Chat's bubble stays on screen.
+    bed.logged_since(mark, "the bell unread=1")?;
+    assert_eq!(bed.bubbles().len(), 1, "{:?}", bed.bubbles());
+    let shows = bed.open_history()?;
+    assert!(
+        shows.contains("history=Courriel «Facture» maintenant (new) | Chat · 3 vues ▸"),
+        "{shows}"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_application_set_not_to_fold_keeps_its_notifications_new() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, config| {
+        // By the notifications' application's id, as the levels.
+        config
+            .notifications
+            .seen_on_focus
+            .insert("Chat".to_owned(), false);
+    })?;
+    for summary in ["Hugo dans #dev", "Inès dans #général"] {
+        bed.notify(Notice {
+            app: "Chat",
+            summary,
+            urgency: Some(0),
+            ..Notice::default()
+        })?;
+    }
+    bed.logged("the bell unread=2")?;
+    let mark = bed.mark();
+    common::open(&mut bed.hp, "org.example.Chat", (600, 400))?;
+    let folded = bed.logged_since(mark, "a window takes the focus: its notifications seen")?;
+    assert!(folded.contains("folded=0"), "{folded}");
+    let shows = bed.open_history()?;
+    assert!(
+        shows.contains("history=Chat 2: «Inès dans #général» maintenant (new) +1"),
+        "{shows}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_transient_one_makes_its_bubble_then_goes_nowhere_but_the_journal() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, _| {})?;
+    let transient = |v: Variant<'static>| OwnedVariant::try_from(v);
+    let id = bed.notify_hinted(
+        Notice {
+            app: "Musique",
+            summary: "Morceau suivant",
+            timeout: 800,
+            ..Notice::default()
+        },
+        vec![("transient", transient(Variant::Bool(true))?)],
+    )?;
+    bed.shows(1)?;
+    // Its time up: closed as expired, nothing kept.
+    bed.hears(&format!("closed {id} 1"))?;
+    // One that makes no bubble (low, an integer for the hint): closed at
+    // once.
+    let low = bed.notify_hinted(
+        Notice {
+            app: "Musique",
+            summary: "Volume",
+            urgency: Some(0),
+            ..Notice::default()
+        },
+        vec![("transient", transient(Variant::U32(1))?)],
+    )?;
+    bed.hears(&format!("closed {low} 1"))?;
+    let lines = bed.journal_lines(2)?;
+    let said: Vec<(&str, bool, &str)> = lines
+        .iter()
+        .map(|l| {
+            (
+                l["title"].as_str().unwrap_or_default(),
+                l["transient"].as_bool().unwrap_or(false),
+                l["to"].as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        said,
+        [
+            ("Morceau suivant", true, "bubble"),
+            ("Volume", true, "journal")
+        ]
+    );
+    let shows = bed.open_history()?;
+    assert!(shows.contains("history=Rien de neuf"), "{shows}");
+    assert!(!bed.log().contains("unread=1"), "{}", bed.log());
+    Ok(())
+}
+
+#[test]
+fn the_journal_keeps_every_one_readable_by_the_user_alone() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, |_, config| {
+        config
+            .notifications
+            .apps
+            .insert("Firefox".to_owned(), hocus_link::NotifyLevel::None);
+    })?;
+    bed.notify(Notice {
+        actions: &["default", "", "reply", "Répondre"],
+        timeout: 0,
+        ..Notice::default()
+    })?;
+    // Dropped by its level: written all the same.
+    bed.notify(Notice {
+        app: "Firefox",
+        summary: "Téléchargement terminé",
+        ..Notice::default()
+    })?;
+    let lines = bed.journal_lines(2)?;
+    let mode = std::fs::metadata(bed.journal_file())?.permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+    let first = &lines[0];
+    // The shell's wall clock: 2 November 2026, 14:32 UTC.
+    let at = first["at"].as_str().unwrap_or_default();
+    assert!(
+        at.starts_with("2026-11-02T14:3") && at.ends_with("+00:00") && at.contains('.'),
+        "{at}"
+    );
+    assert!(first["id"].as_u64().is_some_and(|id| id > 0), "{first}");
+    assert_eq!(first["app"], "Slack");
+    assert_eq!(first["app_id"], "Slack");
+    assert_eq!(first["title"], "Camille dans #design");
+    assert_eq!(first["body"], "J'ai mis à jour la maquette du lanceur.");
+    assert_eq!(first["urgency"], "normal");
+    assert_eq!(first["actions"], serde_json::json!(["Répondre"]));
+    assert_eq!(first["level"], "all");
+    assert_eq!(first["to"], "bubble");
+    assert!(first.get("transient").is_none() && first.get("icon").is_none());
+    assert_eq!(lines[1]["to"], "dropped");
+    assert_eq!(lines[1]["level"], "none");
+    assert_eq!(
+        lines[1]["id"].as_u64(),
+        first["id"].as_u64().map(|id| id + 1)
+    );
     Ok(())
 }
 
@@ -1666,35 +1920,8 @@ fn each_applications_level_applies_and_a_bubbles_menu_writes_it() -> anyhow::Res
 impl Bed {
     /// Sends `notice` with its desktop entry `entry`; its id.
     fn notify_from(&mut self, notice: Notice<'_>, entry: &str) -> anyhow::Result<u32> {
-        let mut hints: HashMap<&str, OwnedVariant> = HashMap::new();
-        hints.insert(
-            "desktop-entry",
-            OwnedVariant::try_from(Variant::from(entry))?,
-        );
-        let body = (
-            notice.app,
-            notice.replaces,
-            "",
-            notice.summary,
-            notice.body,
-            notice.actions.to_vec(),
-            hints,
-            notice.timeout,
-        );
-        let client = self.client.clone();
-        let id = self.runtime.block_on(async move {
-            let reply = client
-                .call_method(
-                    Some("org.freedesktop.Notifications"),
-                    "/org/freedesktop/Notifications",
-                    Some("org.freedesktop.Notifications"),
-                    "Notify",
-                    &body,
-                )
-                .await?;
-            anyhow::Ok(reply.body().deserialize::<u32>()?)
-        })?;
-        Ok(id)
+        let entry = OwnedVariant::try_from(Variant::from(entry))?;
+        self.notify_hinted(notice, vec![("desktop-entry", entry)])
     }
 }
 
@@ -1781,4 +2008,191 @@ fn levels_shots() -> anyhow::Result<()> {
             height: menu.height + 48,
         },
     )
+}
+
+/// A line of the history's file as #923 writes it: its number, its state
+/// (`new`, `noticed`, `seen`), an agent's pin and reason.
+fn kept_923(
+    id: u64,
+    app: &str,
+    summary: &str,
+    body: &str,
+    ago: i64,
+    state: &str,
+    pin: Option<(&str, &str)>,
+) -> String {
+    let mut line = serde_json::json!({
+        "id": id,
+        "app": app,
+        "entry": null,
+        "app_icon": "",
+        "image_path": null,
+        "summary": summary,
+        "body": body,
+        "pid": 0,
+        "agent": false,
+        "at": NOW_MS - ago * MINUTE_MS,
+        "state": state,
+    });
+    if let Some((agent, reason)) = pin {
+        line["pin"] = serde_json::json!({ "agent": agent, "reason": reason, "at": NOW_MS });
+    }
+    format!("{line}\n")
+}
+
+/// The pull request's screenshots (#923): the bell grouped by
+/// application, an agent's pin on top; Chat's "N vues" unfolded, then its
+/// card unfolded; empty. To `$HOCUS_SHOTS`.
+#[test]
+#[ignore = "writes the pull request's screenshots under HOCUS_SHOTS"]
+fn bell_shots() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut history = kept_923(
+        1,
+        "Courriel",
+        "Facture d’octobre",
+        "Bonjour, veuillez trouver ci-joint la facture du mois d’octobre.",
+        25,
+        "new",
+        Some(("secretaire", "À payer avant vendredi")),
+    );
+    let chat_new = [
+        (
+            "Camille dans #design",
+            "J’ai mis à jour la maquette du lanceur, tu peux jeter un œil ?",
+            2,
+        ),
+        ("Hugo dans #dev", "La CI est verte, je fusionne ?", 9),
+        (
+            "Inès dans #général",
+            "Pot vendredi à 17 h, tout le monde est invité !",
+            14,
+        ),
+        (
+            "Noah dans #général",
+            "Qui a pris le chargeur de la salle Hublot ?",
+            21,
+        ),
+    ];
+    let mut id = 1;
+    for (title, body, ago) in chat_new {
+        id += 1;
+        history += &kept_923(id, "Chat", title, body, ago, "new", None);
+    }
+    id += 1;
+    history += &kept_923(
+        id,
+        "Agenda",
+        "Point produit à 14 h 45",
+        "Salle Hublot",
+        40,
+        "noticed",
+        None,
+    );
+    id += 1;
+    history += &kept_923(
+        id,
+        "Navigateur",
+        "Téléchargement terminé",
+        "rapport-annuel.pdf · 2,4 Mo",
+        70,
+        "noticed",
+        None,
+    );
+    let chat_seen = [
+        (
+            "Léa dans #design",
+            "Les icônes sont dans le dossier partagé.",
+        ),
+        ("Hugo dans #dev", "Je regarde la PR après manger."),
+        ("Camille", "Merci !"),
+        (
+            "Inès dans #général",
+            "Rappel : réunion d’équipe demain 10 h.",
+        ),
+        ("Noah", "Tu as deux minutes ?"),
+        ("Léa dans #design", "Version 3 en ligne."),
+        ("Hugo dans #dev", "Le build de nuit est passé."),
+        ("Camille dans #design", "On garde le vert ?"),
+        ("Inès", "Photo du tableau blanc"),
+        ("Noah dans #général", "Café ?"),
+        ("Hugo", "Ok pour moi"),
+        ("Léa", "À demain"),
+    ];
+    for (i, (title, body)) in chat_seen.iter().enumerate() {
+        id += 1;
+        history += &kept_923(id, "Chat", title, body, 95 + 25 * i as i64, "seen", None);
+    }
+    for (title, body, ago) in [
+        (
+            "Relance : contrat à signer",
+            "Le contrat de location attend toujours ta signature.",
+            180,
+        ),
+        ("Ta commande est expédiée", "Livraison prévue jeudi.", 220),
+        ("Lettre d’information", "Les nouveautés de novembre.", 300),
+    ] {
+        id += 1;
+        history += &kept_923(id, "Courriel", title, body, ago, "seen", None);
+    }
+    for (title, body, ago) in [
+        (
+            "12 mises à jour disponibles",
+            "Dont une mise à jour de sécurité.",
+            1500,
+        ),
+        ("Mises à jour installées", "Redémarre pour finir.", 3100),
+    ] {
+        id += 1;
+        history += &kept_923(id, "Mises à jour", title, body, ago, "seen", None);
+    }
+    let mut bed = start_with(&shell, |_, _| {}, &history)?;
+    bed.logged("the history read back")?;
+    let crop = |bed: &Bed| {
+        let popover = bed.history();
+        Rect {
+            x: popover.x - 16,
+            y: popover.y - 16,
+            width: popover.width + 32 + 8 + 196 + 8,
+            height: popover.height + 32,
+        }
+    };
+    bed.open_history()?;
+    bed.hp.pointer_move(400.0, 600.0);
+    let rect = crop(&bed);
+    bed.shot_of("bell-grouped", rect)?;
+    // Chat's "12 vues" unfolded.
+    for (target, name) in [
+        ("Fold(chat)", "bell-seen-unfolded"),
+        ("Expand(chat)", "bell-card-unfolded"),
+    ] {
+        let at = bed.history_item(target)?;
+        let mark = bed.mark();
+        common::point(&mut bed.hp, at)?;
+        bed.idle(Duration::from_millis(100))?;
+        bed.click(at)?;
+        bed.logged_since(mark, "the history shows")?;
+        bed.logged_since(mark, "\"history:Switch\"")?;
+        bed.hp.pointer_move(400.0, 600.0);
+        let rect = crop(&bed);
+        bed.shot_of(name, rect)?;
+    }
+    // Empty: "Tout effacer".
+    let clear = bed.history_item("Clear")?;
+    let mark = bed.mark();
+    common::point(&mut bed.hp, clear)?;
+    bed.idle(Duration::from_millis(100))?;
+    bed.click(clear)?;
+    let shows = bed.logged_since(mark, "history=Rien de neuf")?;
+    let emptied = bed
+        .log()
+        .get(mark..)
+        .and_then(|new| new.find(&shows))
+        .map_or(mark, |at| mark + at + shows.len());
+    bed.logged_since(emptied, "\"history:Switch\"")?;
+    bed.hp.pointer_move(400.0, 600.0);
+    let rect = crop(&bed);
+    bed.shot_of("bell-empty", rect)
 }
