@@ -497,8 +497,10 @@ impl State {
     /// The user's input as it comes, before it goes anywhere: activity
     /// (7.3), which lifts the curtain and turns the screens on (7.2).
     /// Whether it goes on: what lifts the curtain, or wakes the screens
-    /// of a session not locked, is swallowed, its release too.
+    /// of a session not locked, is swallowed, its release too. A click or
+    /// `Esc` sends the screens' numbers away (#927).
     pub fn felt(&mut self, felt: Felt) -> bool {
+        self.identify_felt(felt);
         match felt {
             Felt::Release(pressed) if self.away.swallowed.remove(&pressed) => return false,
             Felt::GestureUpdate if self.away.swallowed.contains(&Pressed::Gesture) => {

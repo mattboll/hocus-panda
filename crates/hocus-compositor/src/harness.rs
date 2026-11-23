@@ -2570,13 +2570,26 @@ impl Headless {
         self.app.backend.headless()?.gamma().cloned()
     }
 
-    /// The wall clock at `hour`:`minute` for the night light, which looks
-    /// at it again; from then on it follows only this.
+    /// The wall clock at `hour`:`minute` for the night light (20 November
+    /// 2026, UTC), which looks at it again; from then on it follows only
+    /// this.
     pub fn night_light_clock(&mut self, hour: u16, minute: u16) {
-        self.app
-            .state
-            .night_light_clock(f64::from(hour * 60 + minute));
+        let at = format!("2026-11-20T{hour:02}:{minute:02}:00Z");
+        if let Err(err) = self.night_light_at(&at) {
+            tracing::error!(%err, "no such time");
+        }
+    }
+
+    /// The wall clock at instant `at` (`"2026-11-20T16:30:00Z"`), read in
+    /// UTC, for the night light, which looks at it again (#929: the
+    /// sun's hours of that day).
+    pub fn night_light_at(&mut self, at: &str) -> anyhow::Result<()> {
+        let now = at
+            .parse::<jiff::Timestamp>()?
+            .to_zoned(jiff::tz::TimeZone::UTC);
+        self.app.state.night_light_clock(now);
         self.app.after_dispatch();
+        Ok(())
     }
 
     /// Window `id`'s opacity, in percent (#735).
@@ -2587,6 +2600,22 @@ impl Headless {
     /// The window whose opacity's pill shows, and its percentage.
     pub fn opacity_pill(&self) -> Option<(WindowId, u8)> {
         self.app.state.opacity_pill()
+    }
+
+    /// What each screen shows of the Settings' "Identifier" now (#927):
+    /// its connector, its number and its words.
+    pub fn identified(&self) -> Vec<(String, u32, String)> {
+        self.app
+            .state
+            .identified()
+            .into_iter()
+            .map(|b| (b.output, b.number, b.words))
+            .collect()
+    }
+
+    /// How long the screens' numbers still show, on the motions' clock.
+    pub fn identify_left(&self) -> Option<Duration> {
+        self.app.state.identify_left()
     }
 
     /// The stack, bottom first.

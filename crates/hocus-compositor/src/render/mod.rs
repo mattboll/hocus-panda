@@ -863,6 +863,10 @@ impl State {
         if purpose.screen() {
             self.mcp_pointer_elements(renderer, output, &mut elements);
         }
+        // The screens' numbers, "Identifier" (#927).
+        if purpose.screen() {
+            self.identify_elements(renderer, output, &mut elements);
+        }
         // A window's opacity changing: its percentage (#735).
         if purpose.screen() {
             self.opacity_elements(renderer, output, &mut elements);

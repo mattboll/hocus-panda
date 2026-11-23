@@ -1568,6 +1568,7 @@ impl State {
         moving |= self.tick_ink(now, &mut wake);
         moving |= self.tick_magnifier(now, &mut wake);
         moving |= self.tick_opacity(now, &mut wake);
+        moving |= self.tick_identify(now, &mut wake);
         // The wallpapers that move, at their own pace (#433).
         self.tick_walls();
         // A wallpaper's picture fading into the next (#894).

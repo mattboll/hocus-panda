@@ -11,6 +11,7 @@
 //! written).
 
 mod drawing;
+mod night;
 mod view;
 
 use drawing::*;
@@ -190,12 +191,12 @@ impl App {
         self.screens.line = Some(line);
     }
 
-    /// `line` to the compositor's screens' line; whether it took it.
     /// Whether the compositor's line is open.
     pub(super) fn screens_linked(&self) -> bool {
         self.screens.line.is_some() && !self.screens.unavailable
     }
 
+    /// `line` to the compositor's screens' line; whether it took it.
     pub(super) fn screens_ask(&self, line: String) -> bool {
         self.screens.line.as_ref().is_some_and(|l| l.ask(line))
     }
@@ -355,6 +356,10 @@ impl App {
                 iced::Task::none()
             }
             Msg::Identify => {
+                // The screens show their numbers too, for as long (#927).
+                if let Some(line) = self.identify_line() {
+                    self.screens_ask(line);
+                }
                 self.screens.serial += 1;
                 let serial = self.screens.serial;
                 self.screens.identify = Some((serial, Instant::now()));
@@ -369,6 +374,24 @@ impl App {
                 iced::Task::none()
             }
         }
+    }
+
+    /// "Identifier"'s line: each screen on, its number and its words as
+    /// the drawing says them ("Écran du portable · 2560 × 1600").
+    fn identify_line(&self) -> Option<String> {
+        let lang = self.lang;
+        let badges: Vec<serde_json::Value> = self
+            .screens_list()?
+            .on()
+            .map(|s| {
+                let words = match s.mode {
+                    Some((w, h, _)) => format!("{} · {}", s.title(lang), screens::say_size((w, h))),
+                    None => s.title(lang),
+                };
+                serde_json::json!({ "output": s.name, "number": s.number, "words": words })
+            })
+            .collect();
+        (!badges.is_empty()).then(|| format!("identify {}", serde_json::Value::from(badges)))
     }
 
     fn screens_said(&mut self, said: Said) -> iced::Task<Message> {

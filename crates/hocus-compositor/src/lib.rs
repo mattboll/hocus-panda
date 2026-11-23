@@ -47,6 +47,7 @@ mod handlers;
 mod harness;
 mod holidays;
 pub mod hot_corner;
+mod identify;
 pub mod idle;
 mod ink;
 mod input;
@@ -128,9 +129,9 @@ pub use config::{
     Capture as CaptureSettings, CaptureFormat, Clipboard as ClipboardSettings, Config,
     Delay as PowerDelay, Desktops, Developer, DragKey, Every as WallpaperEvery, FollowPointer,
     FormChoice, HaloRule, Idle as IdleSettings, Ink, Lid, LightShape,
-    Magnifier as MagnifierSettings, McpAccess, McpAgent, NightLight, OldKeys as OldPowerKeys,
-    OnBattery as WallpaperOnBattery, OpenSize, Order as WallpaperOrder, OutputSettings,
-    Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
+    Magnifier as MagnifierSettings, McpAccess, McpAgent, NightLight, NightSchedule,
+    OldKeys as OldPowerKeys, OnBattery as WallpaperOnBattery, OpenSize, Order as WallpaperOrder,
+    OutputSettings, Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
     Power as PowerSettings, PowerAc, PowerBattery, PowerButton, RainWhen, Recording, Remind,
     Removable as RemovableSettings, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings,
     SetScreen, SoundPrograms, Strength as LightStrength, SystemKeyboard,

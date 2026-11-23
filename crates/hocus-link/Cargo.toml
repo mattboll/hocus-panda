@@ -26,3 +26,5 @@ unicode-normalization.workspace = true
 # The wallpapers' pictures (6.3), decoded off the loop by the compositor,
 # the shell and the Settings alike: JPEG, PNG and WebP (MIT or Apache-2.0).
 image = { workspace = true, features = ["jpeg", "png", "webp"] }
+# Sunrise and sunset as instants of a day (MIT or Unlicense).
+jiff = { workspace = true, features = ["std"] }

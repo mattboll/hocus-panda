@@ -363,6 +363,11 @@ pub const ALL: &[Label] = &[
         said: Said::Choices(&[("18:00", Text::same("18:00")), ("18:30", Text::same("18:30")), ("19:00", Text::same("19:00")), ("19:30", Text::same("19:30")), ("20:00", Text::same("20:00")), ("20:30", Text::same("20:30")), ("21:00", Text::same("21:00")), ("21:30", Text::same("21:30")), ("22:00", Text::same("22:00")), ("22:30", Text::same("22:30")), ("23:00", Text::same("23:00")), ("23:30", Text::same("23:30"))]),
     },
     Label {
+        key: "night-light.schedule",
+        name: hocus_words::settings::app_perf_page::WHEN,
+        said: Said::Choices(&[("sun", hocus_words::settings::app_wallpaper_page::WITH_THE_SUN), ("hours", hocus_words::settings::screens::FIXED_HOURS)]),
+    },
+    Label {
         key: "night-light.temperature",
         name: hocus_words::settings::screens::TEMPERATURE,
         said: Said::Number(" K"),

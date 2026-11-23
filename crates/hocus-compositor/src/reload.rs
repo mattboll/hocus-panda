@@ -276,8 +276,10 @@ impl State {
         if new.weather != self.config.weather {
             self.config.weather = new.weather.clone();
             self.tell_shell(hocus_link::ToShell::Weather(self.config.weather.place()));
-            // Day and night's pictures switch with its sun (#894).
+            // Day and night's pictures switch with its sun (#894), and
+            // the night light warms by it (#929).
             self.wallpaper_follow();
+            self.night_light_update();
             followed.push("[weather]");
         }
         // What a drive plugged in does (#898): the shell's.
