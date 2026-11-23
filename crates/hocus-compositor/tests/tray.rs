@@ -5,7 +5,8 @@
 //! with zbus. No real application.
 //!
 //! One scenario per point of the approved spec: an item registers and its
-//! icon shows, in the full form then the mini; `NewIcon` draws it again,
+//! icon shows, in the full form then the mini; one that registers before it
+//! answers shows once it does, unprompted; `NewIcon` draws it again,
 //! the dot its pixmap holds with it; `Passive` hides it, `NeedsAttention`
 //! shows its attention icon; a left click activates it, a middle click its
 //! second action, the wheel scrolls it; a right click opens its menu, and a
@@ -477,6 +478,60 @@ impl Bed {
         })
     }
 
+    /// An item that registers before it serves its object, as an
+    /// application started with the session may (Slack): [`Bed::serve`]
+    /// serves it later.
+    fn late_item(&mut self, icon: Pixmaps) -> anyhow::Result<Client> {
+        let said = Arc::new(Mutex::new(Said {
+            status: "Active".to_owned(),
+            icon,
+            attention: pixmap(BLUE, None),
+        }));
+        let name = format!("org.kde.StatusNotifierItem-{}-1", std::process::id());
+        let address = self.address.clone();
+        let connection = self.runtime.block_on(async {
+            let connection = zbus::connection::Builder::address(address.as_str())
+                .name(name.as_str())
+                .build()
+                .await?;
+            connection
+                .call_method(
+                    Some("org.kde.StatusNotifierWatcher"),
+                    "/StatusNotifierWatcher",
+                    Some("org.kde.StatusNotifierWatcher"),
+                    "RegisterStatusNotifierItem",
+                    &(name.as_str(),),
+                )
+                .await?;
+            anyhow::Ok(connection)
+        })?;
+        Ok(Client {
+            connection: Some(connection),
+            said,
+            heard: Heard::default(),
+        })
+    }
+
+    /// `client`'s item and menu served at last, without a signal.
+    fn serve(&self, client: &Client) -> anyhow::Result<()> {
+        let Some(connection) = &client.connection else {
+            return Ok(());
+        };
+        let item = Item {
+            said: client.said.clone(),
+            heard: client.heard.clone(),
+            app: None,
+        };
+        let menu = Menu {
+            heard: client.heard.clone(),
+        };
+        self.runtime.block_on(async {
+            connection.object_server().at(ITEM_PATH, item).await?;
+            connection.object_server().at(MENU_PATH, menu).await?;
+            anyhow::Ok(())
+        })
+    }
+
     /// The item says `member` (`NewIcon`, `NewStatus`).
     fn signal(&self, client: &Client, member: &str) -> anyhow::Result<()> {
         let Some(connection) = &client.connection else {
@@ -646,6 +701,28 @@ fn an_item_registers_and_its_icon_shows_in_both_forms() -> anyhow::Result<()> {
     anyhow::ensure!(mini, "no mini tray");
     wait(&mut bed.hp, Duration::from_millis(500))?;
     let tray = bed.tray()?;
+    let icon = bed.icon(tray);
+    bed.shows(icon, MAGENTA)?;
+    Ok(())
+}
+
+#[test]
+fn an_item_that_answers_late_still_shows() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FormChoice::Full)? else {
+        return Ok(());
+    };
+    // Registered, not answering yet: nothing to show.
+    let item = bed.late_item(pixmap(MAGENTA, None))?;
+    wait(&mut bed.hp, Duration::from_millis(1500))?;
+    anyhow::ensure!(
+        bed.hp.layer_rects(hocus_link::TRAY_NAMESPACE).is_empty(),
+        "a tray before the item answered"
+    );
+    // Served at last, and saying nothing: the shell reads it again itself.
+    bed.serve(&item)?;
+    let tray = bed
+        .tray()
+        .map_err(|e| anyhow::anyhow!("{e}; the shell logged:\n{}", bed.plain()))?;
     let icon = bed.icon(tray);
     bed.shows(icon, MAGENTA)?;
     Ok(())
