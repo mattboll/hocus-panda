@@ -125,6 +125,9 @@ pub struct Snapshot {
     /// Whether opening each folds its notifications, by its id
     /// (`[notifications.seen-on-focus]`, #923).
     pub seen_on_focus: BTreeMap<String, bool>,
+    /// The day's sources, as the shell reads them (`[day]`, #926); none
+    /// when they do not read.
+    pub day: Box<hocus_day::Config>,
 }
 
 /// A set of screens the file arranges: its name ([`set_name`]), its
@@ -289,6 +292,7 @@ pub fn read(text: &str) -> Snapshot {
                         .collect()
                 })
                 .unwrap_or_default(),
+            day: Box::new(hocus_day::config::from_toml(text).unwrap_or_default()),
         },
         Err(err) => Snapshot {
             state: FileState::Broken {
@@ -310,6 +314,7 @@ pub fn read(text: &str) -> Snapshot {
             switches_off: Vec::new(),
             notifications: BTreeMap::new(),
             seen_on_focus: BTreeMap::new(),
+            day: Box::default(),
         },
     }
 }

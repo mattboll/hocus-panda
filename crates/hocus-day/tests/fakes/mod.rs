@@ -253,6 +253,23 @@ impl FakeGoa {
         })
     }
 
+    /// It needs signing in again, as Online Accounts says of an expired
+    /// account.
+    pub fn set_attention(&self, id: &str, needed: bool) -> anyhow::Result<()> {
+        let path = Self::path(id);
+        let server = self.connection.object_server();
+        self.runtime.block_on(async {
+            let account = server.interface::<_, FakeAccount>(path.as_str()).await?;
+            account.get_mut().await.attention_needed = needed;
+            account
+                .get()
+                .await
+                .attention_needed_changed(account.signal_emitter())
+                .await?;
+            anyhow::Ok(())
+        })
+    }
+
     /// Whether every token is refused from now on.
     pub fn refuse(&self, refuse: bool) {
         self.state

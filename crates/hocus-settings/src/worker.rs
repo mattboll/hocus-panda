@@ -20,6 +20,8 @@ use std::{
     time::SystemTime,
 };
 
+use hocus_day::edit::Choice as DayChoice;
+
 use crate::{
     model::{Source, Value},
     store::{self, FileState, KeyEdit, Raw, Reading, Slot, Snapshot},
@@ -33,6 +35,8 @@ pub enum Ask {
     Write { slot: Slot, raw: Raw, id: u64 },
     /// Keys a page writes itself, together (6.9's screens).
     Keys { edits: Vec<KeyEdit>, id: u64 },
+    /// The day's sources (Calendar and tasks, #926), as Day.1 writes them.
+    Day { choice: DayChoice, id: u64 },
     /// The last version that read takes the broken file's place.
     Restore,
     /// The file may have changed on disk.
@@ -80,6 +84,8 @@ pub enum Heard {
         before: Vec<(Slot, Raw)>,
         /// What the keys a page wrote held before, for its undo.
         before_keys: Vec<KeyEdit>,
+        /// What takes the day's sources back as they were, for its undo.
+        before_day: Option<DayChoice>,
         /// When the last version that read was kept, if one is.
         last_good: Option<SystemTime>,
     },
@@ -187,6 +193,7 @@ fn run(
         let going = match ask {
             Ask::Write { slot, raw, id } => run.write(slot, &raw, id),
             Ask::Keys { edits, id } => run.write_keys(&edits, id),
+            Ask::Day { choice, id } => run.write_day(&choice, id),
             Ask::Restore => run.restore(),
             Ask::Changed => {
                 // An editor's save is a few events: read once for all.
@@ -201,6 +208,7 @@ fn run(
                     going &= match ask {
                         Ask::Write { slot, raw, id } => run.write(slot, &raw, id),
                         Ask::Keys { edits, id } => run.write_keys(&edits, id),
+                        Ask::Day { choice, id } => run.write_day(&choice, id),
                         Ask::Restore => run.restore(),
                         Ask::Changed => true,
                     };
@@ -287,6 +295,17 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
         before: Vec<(Slot, Raw)>,
         before_keys: Vec<KeyEdit>,
     ) -> bool {
+        self.said_day(text, why, before, before_keys, None)
+    }
+
+    fn said_day(
+        &mut self,
+        text: String,
+        why: Why,
+        before: Vec<(Slot, Raw)>,
+        before_keys: Vec<KeyEdit>,
+        before_day: Option<DayChoice>,
+    ) -> bool {
         let mut snapshot = store::read(&text);
         if self.places.file.is_none() {
             snapshot.state = FileState::NoFile;
@@ -321,6 +340,7 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
             why,
             before,
             before_keys,
+            before_day,
             last_good,
         })
     }
@@ -389,6 +409,38 @@ impl<F: FnMut(Heard) -> bool> Run<'_, F> {
             Err(why) => {
                 let why = why.to_string();
                 tracing::warn!(?edits, why, "not written");
+                (self.heard)(Heard::Failed { id: Some(id), why })
+            }
+        }
+    }
+
+    /// The day's sources, written as Day.1 writes them
+    /// ([`hocus_day::edit`]): the entry chosen only, the rest of the file
+    /// as it was.
+    fn write_day(&mut self, choice: &DayChoice, id: u64) -> bool {
+        let Some(file) = self.places.file.clone() else {
+            return (self.heard)(Heard::Failed {
+                id: Some(id),
+                why: "no configuration file".to_owned(),
+            });
+        };
+        let mut undo = None;
+        let done = hocus_config::edit(
+            &file,
+            |doc| {
+                undo = Some(hocus_day::edit::apply_to(doc, choice).map_err(|e| e.to_string())?);
+                Ok(())
+            },
+            |text| hocus_day::edit::check(text).map_err(|e| e.to_string()),
+        );
+        match done {
+            Ok(text) => {
+                tracing::info!(?choice, file = %file.display(), "the day's sources written");
+                self.said_day(text, Why::Written(id), Vec::new(), Vec::new(), undo)
+            }
+            Err(why) => {
+                let why = why.to_string();
+                tracing::warn!(?choice, why, "the day's sources are not written");
                 (self.heard)(Heard::Failed { id: Some(id), why })
             }
         }

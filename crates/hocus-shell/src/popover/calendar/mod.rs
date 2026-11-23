@@ -437,6 +437,7 @@ fn focused_name(laid: &Laid, view: &View, read: &Read) -> Option<String> {
         Stop::Next => Some(words.next().to_owned()),
         Stop::Today => Some(words.today_button().to_owned()),
         Stop::Choose => Some(words.choose_calendars().to_owned()),
+        Stop::Calendars => Some(words.calendars().to_owned()),
         Stop::Days => Some(days_name(view, read)),
         Stop::Event(id) => laid
             .rows()
@@ -503,7 +504,7 @@ fn handle(message: Msg) {
         Msg::Act(target) => click(target),
         Msg::Enter(target, stop) => {
             click(target);
-            if stop != Stop::Choose {
+            if !matches!(stop, Stop::Choose | Stop::Calendars) {
                 shown(|v| v.focus = Some(stop));
             }
         }
@@ -557,6 +558,11 @@ fn click(target: Target) {
         }
         // Day.1's popover, beside the clock, in its place.
         Target::Choose => event(Seen::Replace(Item::DayChoose)),
+        // The Settings' page, as the other popovers' links open theirs.
+        Target::Calendars => {
+            crate::popover::open_settings_page("agenda");
+            event(Seen::Chosen);
+        }
     }
 }
 

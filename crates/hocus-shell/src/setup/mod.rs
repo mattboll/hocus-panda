@@ -32,9 +32,9 @@ use std::{
 
 use hocus_day::{
     SourceError,
-    edit::{self, Choice, GoogleChoice, PlankaChoice},
+    edit::{self, Choice, PlankaChoice},
     goa::{self, GoogleAccount},
-    model::{Calendar, Colour},
+    model::Calendar,
     planka,
     secrets::Token,
 };
@@ -46,31 +46,9 @@ use crate::{
     popover::{self, Effect, Item},
 };
 
-/// The eight colours a calendar can take, in their order: blue, green,
-/// orange, violet, pink, yellow, turquoise, grey.
-pub const PALETTE: [Colour; 8] = [
-    Colour([0x8F, 0xB3, 0xFF]),
-    Colour([0x6C, 0xC2, 0x87]),
-    Colour([0xF5, 0xA3, 0x5B]),
-    Colour([0xC8, 0x9B, 0xFF]),
-    Colour([0xF2, 0x8F, 0xB1]),
-    Colour([0xF5, 0xC4, 0x6E]),
-    Colour([0x6F, 0xD3, 0xD8]),
-    Colour([0xA9, 0xB2, 0xC2]),
-];
-
-/// The colour of the eight nearest `colour` (an account's own).
-pub fn nearest(colour: Colour) -> usize {
-    let distance = |c: &Colour| {
-        c.0.iter()
-            .zip(colour.0)
-            .map(|(a, b)| (i32::from(*a) - i32::from(b)).pow(2))
-            .sum::<i32>()
-    };
-    (0..PALETTE.len())
-        .min_by_key(|i| distance(&PALETTE[*i]))
-        .unwrap_or(0)
-}
+/// A calendar of step 3.
+pub use hocus_day::choice::Row;
+pub use hocus_day::choice::{CHOICES, PALETTE, Refusal};
 
 /// The longest token pasted, in characters (the two cookies, or a
 /// request's `Cookie:` line).
@@ -148,32 +126,6 @@ pub enum Online {
     Listed(Vec<GoogleAccount>),
 }
 
-/// Why the board was not taken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Refusal {
-    /// The token is refused or expired.
-    Token,
-    /// No Planka server answers at the address.
-    NoServer,
-    /// No such board, or not shared with the user.
-    NotShared,
-    /// Not a board's address.
-    Address,
-}
-
-/// A calendar of step 3.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Row {
-    pub name: String,
-    /// Its colour among the eight.
-    pub colour: usize,
-    pub shown: bool,
-    /// Its star, "Mettre en avant": its events feed the meeting card, the
-    /// reminders, the halo and `Super+J` (written in `featured`).
-    pub featured: bool,
-    pub read_only: bool,
-}
-
 /// A Google account's calendars in step 3.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Calendars {
@@ -182,10 +134,6 @@ pub enum Calendars {
     Failed,
     Read(Vec<Row>),
 }
-
-/// A board's three choices: the tasks' column, the done one, where `+`
-/// adds; each a column's index.
-pub const CHOICES: usize = 3;
 
 /// What step 3 shows.
 #[derive(Debug, Clone, PartialEq)]
@@ -529,13 +477,8 @@ pub fn colour(index: usize, colour: usize) {
 /// column carries "Ajout dans" with it while they were the same.
 pub fn column(which: usize, column: usize) {
     with(|flow| {
-        if let Some(Show::Planka { columns, .. }) = &mut flow.show
-            && which < CHOICES
-        {
-            if which == 0 && columns[2] == columns[0] {
-                columns[2] = column;
-            }
-            columns[which] = column;
+        if let Some(Show::Planka { columns, .. }) = &mut flow.show {
+            hocus_day::choice::set_column(columns, which, column);
         }
         flow.unfolded = None;
     });
@@ -575,24 +518,7 @@ pub fn done() {
             Show::Google {
                 account,
                 calendars: Calendars::Read(rows),
-            } => Choice::Google(GoogleChoice {
-                account: account.identity.clone(),
-                shown: rows
-                    .iter()
-                    .filter(|r| r.shown)
-                    .map(|r| r.name.clone())
-                    .collect(),
-                // A star counts only on a calendar shown.
-                featured: rows
-                    .iter()
-                    .filter(|r| r.shown && r.featured)
-                    .map(|r| r.name.clone())
-                    .collect(),
-                colours: rows
-                    .iter()
-                    .map(|r| (r.name.clone(), PALETTE[r.colour]))
-                    .collect(),
-            }),
+            } => Choice::Google(hocus_day::choice::google(&account.identity, rows)),
             Show::Planka { found, columns, .. } => {
                 let board = found.board.as_ref()?;
                 let name = |i: usize| {
@@ -782,7 +708,7 @@ fn checked(n: u64, found: hocus_day::source::Result<planka::Found>) {
                 let columns = found
                     .board
                     .as_ref()
-                    .map(|b| first_columns(&b.board))
+                    .map(|b| hocus_day::choice::first_columns(&b.board))
                     .unwrap_or_default();
                 let said = format!(
                     "board={} boards={}",
@@ -802,7 +728,7 @@ fn checked(n: u64, found: hocus_day::source::Result<planka::Found>) {
                 Some(said)
             }
             Err(error) => {
-                let refusal = refusal(&error);
+                let refusal = hocus_day::choice::refusal(&error);
                 flow.refused = Some(refusal);
                 Some(format!("refused={refusal:?} ({error})"))
             }
@@ -813,36 +739,6 @@ fn checked(n: u64, found: hocus_day::source::Result<planka::Found>) {
         tracing::debug!("a Planka board's check: {said}");
         changed();
     }
-}
-
-/// What the user is told of `error`.
-fn refusal(error: &SourceError) -> Refusal {
-    match error {
-        SourceError::SignIn(_) => Refusal::Token,
-        SourceError::Gone | SourceError::Refused(_) => Refusal::NotShared,
-        SourceError::Invalid(why)
-            if why.contains("address") || why.contains("board's id") || why.contains("https") =>
-        {
-            Refusal::Address
-        }
-        SourceError::Offline(_) | SourceError::Invalid(_) | SourceError::Expired => {
-            Refusal::NoServer
-        }
-    }
-}
-
-/// The columns first chosen: the one named TODO (else the first), the one
-/// named DONE (else the last), and the tasks' for "Ajout dans".
-fn first_columns(board: &hocus_day::model::TaskBoard) -> [usize; CHOICES] {
-    let named = |name: &str| {
-        board
-            .columns
-            .iter()
-            .position(|c| c.name.trim().eq_ignore_ascii_case(name))
-    };
-    let tasks = named("TODO").unwrap_or(0);
-    let done = named("DONE").unwrap_or(board.columns.len().saturating_sub(1));
-    [tasks, done, tasks]
 }
 
 fn board_read(n: u64, found: hocus_day::source::Result<planka::FoundBoard>) {
@@ -861,7 +757,7 @@ fn board_read(n: u64, found: hocus_day::source::Result<planka::FoundBoard>) {
         *reading = None;
         match found {
             Ok(board) => {
-                *columns = first_columns(&board.board);
+                *columns = hocus_day::choice::first_columns(&board.board);
                 let said = board.board.name.clone();
                 kept.board = Some(board);
                 Some(format!("board={said}"))
@@ -886,16 +782,7 @@ fn calendars_read(n: u64, read: hocus_day::source::Result<Vec<Calendar>>) {
         }
         Some(match read {
             Ok(read) => {
-                let rows: Vec<Row> = read
-                    .into_iter()
-                    .map(|c| Row {
-                        colour: nearest(c.colour),
-                        name: c.name,
-                        shown: c.shown,
-                        featured: c.featured,
-                        read_only: c.read_only,
-                    })
-                    .collect();
+                let rows: Vec<Row> = read.iter().map(|c| Row::of(c, None)).collect();
                 let said = rows.len();
                 *calendars = Calendars::Read(rows);
                 format!("{said} calendars")
@@ -1110,7 +997,7 @@ impl Words {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hocus_day::model::{BoardId, Column, ColumnId, TaskBoard};
+    use hocus_day::{choice::nearest, model::Colour};
 
     #[test]
     fn an_accounts_colour_is_the_nearest_of_the_eight() {
@@ -1124,27 +1011,6 @@ mod tests {
         assert_eq!(nearest(Colour([0x42, 0xD6, 0x92])), 1);
         assert_eq!(nearest(Colour([0x9F, 0xE1, 0xE7])), 6);
         assert_eq!(nearest(Colour([0xC2, 0xC2, 0xC2])), 7);
-    }
-
-    #[test]
-    fn the_columns_are_todo_and_done_by_name_else_the_first_and_the_last() {
-        let board = |names: &[&str]| TaskBoard {
-            id: BoardId::new("1"),
-            name: "Sprint".to_owned(),
-            columns: names
-                .iter()
-                .map(|n| Column {
-                    id: ColumnId::new(*n),
-                    name: (*n).to_owned(),
-                })
-                .collect(),
-        };
-        assert_eq!(
-            first_columns(&board(&["Backlog", "todo", "Done"])),
-            [1, 2, 1]
-        );
-        assert_eq!(first_columns(&board(&["A", "B", "C"])), [0, 2, 0]);
-        assert_eq!(first_columns(&board(&[])), [0, 0, 0]);
     }
 
     #[test]
@@ -1172,27 +1038,5 @@ mod tests {
         assert_eq!(en.what_to_show(), "What to show?");
         assert_eq!(fr.feature(), "Mettre en avant");
         assert_eq!(en.feature(), "Feature");
-    }
-
-    #[test]
-    fn a_refusal_says_what_went_wrong() {
-        assert_eq!(refusal(&SourceError::SignIn(String::new())), Refusal::Token);
-        assert_eq!(refusal(&SourceError::Gone), Refusal::NotShared);
-        assert_eq!(
-            refusal(&SourceError::Offline(String::new())),
-            Refusal::NoServer
-        );
-        assert_eq!(
-            refusal(&SourceError::Invalid(
-                "sent elsewhere (302), not Planka's API".to_owned()
-            )),
-            Refusal::NoServer
-        );
-        assert_eq!(
-            refusal(&SourceError::Invalid(
-                "x: an address is https://…".to_owned()
-            )),
-            Refusal::Address
-        );
     }
 }

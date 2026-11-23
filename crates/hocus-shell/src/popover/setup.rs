@@ -1864,12 +1864,14 @@ mod tests {
                 identity: "alex@example.org".to_owned(),
                 name: "alex@example.org".to_owned(),
                 calendar: true,
+                attention: false,
             },
             GoogleAccount {
                 path: "/a/2".to_owned(),
                 identity: "lou@example.org".to_owned(),
                 name: "lou@example.org".to_owned(),
                 calendar: false,
+                attention: false,
             },
         ]);
         let laid = lay_out(&flow, words, width);
@@ -1920,6 +1922,7 @@ mod tests {
                 identity: "alex@example.org".to_owned(),
                 name: "alex@example.org".to_owned(),
                 calendar: true,
+                attention: false,
             },
             calendars: Calendars::Read(vec![
                 row("Travail", true, true),

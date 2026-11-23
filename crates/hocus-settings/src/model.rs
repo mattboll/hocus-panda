@@ -1028,6 +1028,7 @@ pub fn outside_of(section: SectionId) -> &'static [Outside] {
         SectionId::Captures => crate::captures::outside(),
         SectionId::Mouse => crate::mouse::outside(),
         SectionId::Notifications => crate::notifications::outside(),
+        SectionId::Agenda => crate::agenda::outside(),
         _ => &[],
     }
 }

@@ -817,10 +817,59 @@ impl App {
             SectionId::Sound => return self.sound_card(),
             SectionId::Bluetooth => self.bluetooth_card(),
             SectionId::Network => self.network_card(),
-            SectionId::Appearance => words::DARK_ENGLISH.get(lang).to_owned(),
+            SectionId::Appearance => self.appearance_card(),
+            SectionId::Screens => self.screens_card(),
             _ => words::COMING.get(lang).to_owned(),
         };
         (whole, String::new())
+    }
+
+    /// The Appearance card: the theme and the language the desktop is
+    /// in ("Sombre · français").
+    fn appearance_card(&self) -> String {
+        let lang = self.lang;
+        let theme = crate::model::setting(crate::appearance::THEME_ID)
+            .map(|s| self.said_value(Slot::of(s, self.source)))
+            .unwrap_or_default();
+        let spoken = self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.language)
+            .unwrap_or(self.system_lang);
+        let language = match spoken {
+            Lang::French => words::IN_FRENCH.get(lang),
+            _ => words::IN_ENGLISH.get(lang),
+        };
+        words::theme_and_language(
+            lang,
+            words::ThemeAndLanguage {
+                theme: &theme,
+                language,
+            },
+        )
+    }
+
+    /// The Screens card: the screen lit's size, or how many are lit.
+    fn screens_card(&self) -> String {
+        let lang = self.lang;
+        let lit: Vec<&crate::screens::Screen> = self
+            .screens_list()
+            .map(|s| s.list.iter().filter(|s| s.enabled && s.connected).collect())
+            .unwrap_or_default();
+        match lit.as_slice() {
+            [] => String::new(),
+            [one] => {
+                let (width, height) = one.mode.map_or(one.size, |(w, h, _)| (w, h));
+                words::screen_size(
+                    lang,
+                    words::ScreenSize {
+                        width: &width.to_string(),
+                        height: &height.to_string(),
+                    },
+                )
+            }
+            many => words::screens_count(lang, many.len()),
+        }
     }
 
     // --- A section's page -------------------------------------------------------------
@@ -858,6 +907,9 @@ impl App {
         }
         if id == SectionId::Weather {
             return self.weather_page(page);
+        }
+        if id == SectionId::Agenda {
+            return self.agenda_page(page);
         }
         if id == SectionId::Notifications {
             return self.notifications_page(page);
@@ -1583,7 +1635,7 @@ pub(super) fn divided(divider: bool, row: El<'_>) -> El<'_> {
 }
 
 /// A filled button.
-fn solid(fill: Color, ink: Color, status: button::Status) -> button::Style {
+pub(super) fn solid(fill: Color, ink: Color, status: button::Status) -> button::Style {
     let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
     button::Style {
         background: Some(Background::Color(if hovered {
@@ -1862,6 +1914,7 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
         "acting": if app.page == Page::Section(SectionId::Acting) { app.acting_shown() } else { serde_json::Value::Null },
         "captures": if app.page == Page::Section(SectionId::Captures) { app.captures_shown() } else { serde_json::Value::Null },
         "weather": if app.page == Page::Section(SectionId::Weather) { app.weather_shown() } else { serde_json::Value::Null },
+        "agenda": if app.page == Page::Section(SectionId::Agenda) { app.agenda_shown() } else { serde_json::Value::Null },
         "notifications": if app.page == Page::Section(SectionId::Notifications) { app.notifications_shown() } else { serde_json::Value::Null },
         "focus": match app.focus {
             Focus::Nothing => "nothing".to_owned(),

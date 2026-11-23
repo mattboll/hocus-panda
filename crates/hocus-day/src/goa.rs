@@ -266,6 +266,8 @@ pub struct GoogleAccount {
     pub name: String,
     /// Its calendar is on.
     pub calendar: bool,
+    /// It needs signing in again in Online Accounts.
+    pub attention: bool,
 }
 
 /// Follows Online Accounts' Google accounts on `bus` for Day.1's popover,
@@ -296,6 +298,7 @@ pub fn watch_accounts(
                         },
                         identity: l.identity,
                         calendar: l.calendar,
+                        attention: l.attention,
                         path: l.path.to_string(),
                     })
                     .collect(),

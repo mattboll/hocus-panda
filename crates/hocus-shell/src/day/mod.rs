@@ -33,6 +33,10 @@ type Waker = Box<dyn FnMut() -> bool + Send>;
 struct Service {
     day: Mutex<Arc<Day>>,
     workers: Mutex<Workers>,
+    /// `[day]` as the workers were last started from: the same again
+    /// (Day.1's choice written, then the compositor saying the file
+    /// changed) starts nothing.
+    config: Mutex<Config>,
 }
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
@@ -141,6 +145,7 @@ fn start_workers() -> Option<mpsc::Receiver<Update>> {
     let service = Service {
         day: Mutex::new(Arc::new(day)),
         workers: Mutex::new(workers),
+        config: Mutex::new(config),
     };
     let started = SERVICE.set(service).is_ok();
     // The accounts as they start (loading): what the views asked before.
@@ -158,6 +163,17 @@ pub fn reconfigure() -> bool {
         return false;
     };
     let config = read_config(config_file().as_deref());
+    {
+        let mut last = service
+            .config
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if *last == config {
+            tracing::debug!("[day] as before: its accounts go on");
+            return true;
+        }
+        *last = config.clone();
+    }
     let workers = || {
         service
             .workers
@@ -298,6 +314,15 @@ pub fn ask(ask: DayAsk) {
             task: TaskId::new(task),
         }),
         DayAsk::Refresh => refresh(),
+        // Blocking (Online Accounts' thread is waited for): off the loop.
+        DayAsk::Reconfigure => {
+            let started = std::thread::Builder::new()
+                .name("day: reconfigure".to_owned())
+                .spawn(reconfigure);
+            if let Err(err) = started {
+                tracing::warn!(%err, "no thread to start the day's accounts again");
+            }
+        }
         // The shell's clock already moved on (`Shell`): as logind says it.
         DayAsk::Slept(_) => resumed(),
         DayAsk::Calendar { day, event } => match day.parse() {

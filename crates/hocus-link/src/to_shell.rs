@@ -441,6 +441,9 @@ pub enum DayAsk {
     Untick(#[serde(serialize_with = "tidy::name")] String),
     /// Every account read again now.
     Refresh,
+    /// The configuration's `[day]` changed on disk (the Settings' Calendar
+    /// and tasks page): its accounts started again from it.
+    Reconfigure,
     /// Tests only, and only when the shell's clock reads a time of its own
     /// (`HOCUS_CLOCK_AT`): the machine slept that many seconds, its wall
     /// clock moved on while its monotonic clock did not, and it resumed,

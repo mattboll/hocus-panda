@@ -19,9 +19,9 @@ use super::{
     Msg,
     layout::{
         ALL_DAY_DOT, ALL_DAY_PAD, ALL_DAY_TITLE, BAR, Body, COUNT, DAY_NAME, DETAILS, DETAILS_LINE,
-        DOT, END, EVENT_PAD_X, EVENT_PAD_Y, EVENT_TITLE, ICON, ICON_GAP, LEFT, LETTER, Laid,
-        MARTIAN, META, META_GAP, MONO_LINE, NOTE, NUMBER, RELATIVE, RIGHT, Row, RowKind, SPAN,
-        START, Stop, TIME_LINES_GAP, TITLE, TODAY_TEXT, Target, View, WEEK_NUMBER, WEEK_WORD,
+        DOT, END, EVENT_PAD_X, EVENT_PAD_Y, EVENT_TITLE, ICON, ICON_GAP, LEFT, LETTER, LINK_TEXT,
+        Laid, MARTIAN, META, META_GAP, MONO_LINE, NOTE, NUMBER, RELATIVE, RIGHT, Row, RowKind,
+        SPAN, START, Stop, TIME_LINES_GAP, TITLE, TODAY_TEXT, Target, View, WEEK_NUMBER, WEEK_WORD,
         WIDTH,
     },
     words::Words,
@@ -73,6 +73,8 @@ const EVENT_RADIUS: f32 = 9.0;
 const TINT: f32 = 0x24 as f32 / 255.0;
 /// A video call's address and its camera.
 const VIDEO: Ink = Ink::Dark(rgb(0xA9C4FF));
+/// "Agendas…": the links' blue (the Settings' pages).
+const LINK_BLUE: Ink = Ink::Dark(rgb(0x8FB3FF));
 /// Today's events over: at half their opacity.
 const PAST: f32 = 0.5;
 /// The list's scrollbar, 3 px past the content's right.
@@ -212,6 +214,34 @@ pub(super) fn calendar<'a>(laid: &Laid, view: &View, words: Words, days: String)
                 list.view.position(),
             ));
         }
+    }
+    // After the agenda: last for the keyboard too.
+    if let Some((rule, rect)) = laid.calendars {
+        layers.push(at(
+            container(Space::new().width(RIGHT - LEFT).height(1.0))
+                .style(|_| boxed(RULE.get(), 0.0)),
+            Point::new(LEFT, rule),
+        ));
+        layers.push(at(
+            button_of(
+                Target::Calendars,
+                Stop::Calendars,
+                words.calendars(),
+                container(text(
+                    words.calendars(),
+                    LINK_TEXT,
+                    LINE,
+                    MANROPE_BOLD,
+                    LINK_BLUE.get(),
+                ))
+                .center(Length::Fill)
+                .into(),
+                rect.size(),
+                view,
+                false,
+            ),
+            rect.position(),
+        ));
     }
     Stack::with_children(layers)
         .width(WIDTH as f32)

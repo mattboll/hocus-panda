@@ -4162,7 +4162,14 @@ its row, the mini form's clock opening it on a click only.
   6 px thumb 3 px past the content's right. An empty day: "Rien de prévu
   ce jour-là." / "Nothing planned that day." (13.5 px, `text.dim`,
   centred, 14 px above, 12 px under). No calendar account: the month,
-  and "Aucun agenda branché." / "No calendar connected.".
+  and "Aucun agenda branché." / "No calendar connected.". With one
+  (#926, mockup s31-agenda): under the agenda, a rule 8 px down, then
+  "Agendas…" / "Calendars…" on the right (12.5 px, 700, `#8FB3FF`, 26 px
+  high, 6 px in, its words ending on the content's right, lit under the
+  pointer, `Tab` reaching it), which opens Settings › Calendar and tasks
+  (`hocus settings agenda`, as the Wi-Fi's and the weather's links open
+  theirs) and closes the calendar. "Aujourd'hui" stays in the header,
+  where Day.5 put it; the mockup's footer draws the two side by side.
 - **Clicks**: a day chooses it, its agenda replacing the one shown; one
   of the months around also turns to its month. An event with a video
   link opens it (`xdg-open`, the launcher's), else its own page (Google's
@@ -4390,7 +4397,7 @@ through do not disturb; on a shared screen the tab hides its title;
 What the approved Day.1 spec says, variant B (step by step, from the
 bar), with its two amendments (Google through GNOME Online Accounts, a
 Planka board through a pasted token; issue #425). The data under it is
-docs/design/day.md's; the Settings page (sprint 6), CalDAV and `.ics`
+docs/design/day.md's; the Settings page (#926), CalDAV and `.ics`
 are not part of it.
 
 - **The first-run card** (`crates/hocus-shell/src/setup/card.rs`): while
@@ -4540,9 +4547,12 @@ are not part of it.
   the first columns, the refusals, the words in both languages
   (`hocus-shell`); the configuration edited and written
   (`hocus_day::edit`), the workers started again (`hocus-day`).
-- **Not built**: the Settings page (sprint 6); Planka's own sign-in by
-  user name and password; CalDAV and `.ics`; names for screen readers
-  given to them (§11).
+- **Not built**: Planka's own sign-in by user name and password; CalDAV
+  and `.ics`; names for screen readers given to them (§11). The choice is
+  changed at any time in Settings › Calendar and tasks (#926,
+  settings.md "Agenda et tâches"), which shares Day.1's choices
+  (`hocus_day::choice`: the eight colours, a calendar's row, the board's
+  columns, the refusals) and writes through the same `hocus_day::edit`.
 
 ### Day.7, featured calendars (2026-11-05)
 

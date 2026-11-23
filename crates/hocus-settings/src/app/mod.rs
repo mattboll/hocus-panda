@@ -12,6 +12,7 @@
 
 mod account;
 mod acting_page;
+mod agenda;
 mod agents_page;
 mod appearance_page;
 mod applications;
@@ -58,6 +59,8 @@ use iced::{
 
 pub use bluetooth::stop as stop_bluetooth;
 pub use places::Places;
+
+use hocus_day::edit::Choice as DayChoice;
 
 use crate::{
     activate,
@@ -191,6 +194,13 @@ enum Change {
         after: Vec<KeyEdit>,
         said: KeysSaid,
     },
+    /// The day's sources (Calendar and tasks, #926): what takes the
+    /// change back, the change, and what the toasts say.
+    Day {
+        before: DayChoice,
+        after: DayChoice,
+        said: KeysSaid,
+    },
 }
 
 impl Change {
@@ -198,7 +208,7 @@ impl Change {
     fn batch(&self) -> Option<u64> {
         match self {
             Self::Slot { batch, .. } => *batch,
-            Self::Keys { .. } => None,
+            Self::Keys { .. } | Self::Day { .. } => None,
         }
     }
 }
@@ -218,6 +228,7 @@ pub(crate) struct KeysSaid {
 enum Write {
     Slot(Slot, Raw),
     Keys(Vec<KeyEdit>, KeysSaid),
+    Day(DayChoice, KeysSaid),
 }
 
 /// What `Ctrl+Z` takes back: a change of the file, a choice of the
@@ -362,6 +373,8 @@ pub enum Message {
     Captures(captures_page::Msg),
     /// The weather's page (#814).
     Weather(weather_page::Msg),
+    /// Calendar and tasks' (#926).
+    Agenda(agenda::Msg),
     /// The notifications' page (#899).
     Notifications(notifications_page::Msg),
     /// The network's page (6.6).
@@ -461,6 +474,9 @@ pub struct App {
     captures: captures_page::State,
     /// The weather's page: the place typed, what it found (#814).
     weather: weather_page::State,
+    /// Calendar and tasks: Online Accounts, the calendars and the board
+    /// as read, the form (#926).
+    agenda: agenda::State,
     /// The notifications' page: the senders read, do not disturb (#899).
     notifications: notifications_page::State,
     /// The network's page: NetworkManager and the radios as last said
@@ -513,6 +529,7 @@ impl App {
         let apps = applications::State::new(sender.clone());
         let perf = perf_page::State::new(&sender, start.places.state.clone());
         let notifications = notifications_page::State::with(&sender);
+        let agenda = agenda::State::with(&sender);
         let to_worker = sender.clone();
         let worker = worker::start(start.places, move |heard| {
             to_worker.unbounded_send(Message::Heard(heard)).is_ok()
@@ -595,6 +612,7 @@ impl App {
             desktops: desktops_page::State::default(),
             captures: captures_page::State::default(),
             weather: weather_page::State::default(),
+            agenda,
             notifications,
             network,
             power,
@@ -676,6 +694,11 @@ impl App {
         if self.moving(self.now) {
             subscriptions.push(window::frames().map(Message::Frame));
         }
+        // "à jour il y a N min" moves on, while the page shows (#926).
+        if self.agenda_ticking() {
+            subscriptions
+                .push(iced::time::every(Duration::from_secs(60)).map(|_| Message::Nothing));
+        }
         // A pairing code's countdown, each second while its sheet shows.
         if self.bluetooth_ticking() {
             subscriptions.push(iced::time::every(Duration::from_secs(1)).map(|_| Message::Nothing));
@@ -745,6 +768,7 @@ impl App {
             self.time_after(),
             self.account_after(),
             self.apps_after(),
+            self.agenda_after(),
         ]);
         self.sound_listen();
         self.bluetooth_want();
@@ -1009,6 +1033,7 @@ impl App {
             Message::Desktops(msg) => self.desktops_update(msg),
             Message::Captures(msg) => self.captures_update(msg),
             Message::Weather(msg) => self.weather_update(msg),
+            Message::Agenda(msg) => self.agenda_update(msg),
             Message::Notifications(msg) => self.notifications_update(msg),
             Message::Keys(msg) => {
                 // The trial area's move key, held for real (6.14).
@@ -1060,6 +1085,7 @@ impl App {
                 why,
                 before,
                 before_keys,
+                before_day,
                 last_good,
             } => {
                 let was_broken = self
@@ -1088,7 +1114,7 @@ impl App {
                 }
                 match why {
                     Why::Start => Task::none(),
-                    Why::Written(id) => self.written(id, before, before_keys),
+                    Why::Written(id) => self.written(id, before, before_keys, before_day),
                     Why::ByHand(changed) => self.by_hand(&changed, was_broken),
                     Why::Restored => {
                         let text = self
@@ -1107,18 +1133,39 @@ impl App {
         id: u64,
         before: Vec<(Slot, Raw)>,
         before_keys: Vec<KeyEdit>,
+        before_day: Option<DayChoice>,
     ) -> Task<Message> {
         let Some(pending) = self.pending.remove(&id) else {
             return Task::none();
         };
         let (slot, raw) = match pending.write {
             Write::Slot(slot, raw) => (slot, raw),
-            Write::Keys(edits, said) => {
-                let change = pending.change.clone().unwrap_or(Change::Keys {
-                    before: before_keys,
-                    after: edits,
-                    said: said.clone(),
-                });
+            Write::Keys(..) | Write::Day(..) => {
+                let (change, said) = match pending.write {
+                    // An undo keeps its change, for its redo; anything else
+                    // is taken back by what the worker found in its place.
+                    Write::Day(choice, said) => match (pending.change.clone(), before_day) {
+                        (Some(change), _) if pending.doing == Doing::Undo => (change, said),
+                        (_, Some(before)) => (
+                            Change::Day {
+                                before,
+                                after: choice,
+                                said: said.clone(),
+                            },
+                            said,
+                        ),
+                        (_, None) => return Task::none(),
+                    },
+                    Write::Keys(edits, said) => (
+                        pending.change.clone().unwrap_or(Change::Keys {
+                            before: before_keys,
+                            after: edits,
+                            said: said.clone(),
+                        }),
+                        said,
+                    ),
+                    Write::Slot(..) => return Task::none(),
+                };
                 return match pending.doing {
                     Doing::New => {
                         self.undo.push(Undo::File(change));
@@ -1378,6 +1425,29 @@ impl App {
         }
     }
 
+    /// The day's sources written (Calendar and tasks, #926), with what
+    /// the toasts say.
+    fn ask_day(&mut self, choice: DayChoice, said: KeysSaid, doing: Doing, change: Option<Change>) {
+        if !self.writable() {
+            return;
+        }
+        self.serial += 1;
+        let id = self.serial;
+        self.pending.insert(
+            id,
+            Pending {
+                write: Write::Day(choice.clone(), said),
+                doing,
+                change,
+                batch: None,
+                say: None,
+            },
+        );
+        if !self.worker.ask(Ask::Day { choice, id }) {
+            self.pending.remove(&id);
+        }
+    }
+
     fn undo(&mut self) -> Task<Message> {
         let change = match self.undo.last() {
             Some(Undo::Sound(_)) => {
@@ -1478,6 +1548,10 @@ impl App {
                     let (before, said) = (before.clone(), said.clone());
                     self.ask_keys(before, said, Doing::Undo, Some(change));
                 }
+                Change::Day { before, said, .. } => {
+                    let (before, said) = (before.clone(), said.clone());
+                    self.ask_day(before, said, Doing::Undo, Some(change));
+                }
             }
         }
         Task::none()
@@ -1563,6 +1637,10 @@ impl App {
                 Change::Keys { after, said, .. } => {
                     let (after, said) = (after.clone(), said.clone());
                     self.ask_keys(after, said, Doing::Redo, Some(change));
+                }
+                Change::Day { after, said, .. } => {
+                    let (after, said) = (after.clone(), said.clone());
+                    self.ask_day(after, said, Doing::Redo, Some(change));
                 }
             }
         }

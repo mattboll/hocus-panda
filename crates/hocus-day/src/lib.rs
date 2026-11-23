@@ -7,6 +7,7 @@
 //! No smithay, no iced: the shell's `day` module starts the workers and
 //! holds the day; the adapters live here, each in its own module.
 
+pub mod choice;
 pub mod config;
 pub mod edit;
 pub mod fixture;
@@ -238,8 +239,9 @@ impl Workers {
 
     /// The accounts of `config` from now on (Day.1's choices written): every
     /// worker but the local list's stopped, each account said gone, then
-    /// `config`'s started, as [`Self::start`] does. Their caches are kept:
-    /// an account that stays shows its last day at once. Blocking (Online
+    /// `config`'s started, as [`Self::start`] does. The caches of those
+    /// that stay are kept, so that they show their last day at once; the
+    /// others' are forgotten. Blocking (Online
     /// Accounts' thread is waited for): off the loop.
     pub fn reconfigure(&mut self, config: &Config) {
         if let Some(goa) = self.goa.take() {
@@ -253,11 +255,15 @@ impl Workers {
             .map(|h| h.account.clone())
             .filter(|id| *id != local)
             .collect();
+        let plans = plans(config, &self.env);
+        let kept = Kept::of(config, &plans);
         for id in &running {
-            self.launcher.stop(id, false);
+            // An account no longer set has its cache forgotten (the
+            // Settings' "Retirer"); one that stays shows its day at once.
+            self.launcher.stop(id, !kept.keeps(id));
         }
         let mut tasks = None;
-        for plan in plans(config, &self.env) {
+        for plan in plans {
             match plan {
                 Ok(plan) => {
                     if plan.account.holds == Holds::Tasks {
@@ -347,6 +353,49 @@ impl Workers {
 /// configuration's order; those that cannot be read at all as their
 /// snapshot. Only the first `[[day.tasks]]` is used; Google's come from
 /// Online Accounts ([`follow_google`]).
+/// The accounts a configuration keeps, by their ids.
+struct Kept {
+    planned: Vec<AccountId>,
+    /// The Google accounts its entries name.
+    google: Vec<AccountId>,
+    /// An entry names no Google account: it takes them all.
+    every_google: bool,
+}
+
+impl Kept {
+    fn of(config: &Config, plans: &[Result<Plan, Box<Snapshot>>]) -> Self {
+        let google = config
+            .calendars
+            .iter()
+            .filter(|e| e.kind == config::CalendarKind::Google);
+        Self {
+            planned: plans
+                .iter()
+                .map(|p| match p {
+                    Ok(plan) => plan.account.id.clone(),
+                    Err(failed) => failed.account.id.clone(),
+                })
+                .collect(),
+            google: google
+                .clone()
+                .filter(|e| !e.account.trim().is_empty())
+                .map(|e| config::google_account(e.account.trim(), String::new()).id)
+                .collect(),
+            every_google: google.clone().any(|e| e.account.trim().is_empty()),
+        }
+    }
+
+    fn keeps(&self, id: &AccountId) -> bool {
+        let google = config::google_account("", String::new()).id;
+        self.planned.contains(id)
+            || self
+                .google
+                .iter()
+                .any(|g| g.as_str().eq_ignore_ascii_case(id.as_str()))
+            || (self.every_google && id.as_str().starts_with(google.as_str()))
+    }
+}
+
 fn plans(config: &Config, env: &Env) -> Vec<Result<Plan, Box<Snapshot>>> {
     let base = env.config_dir.as_deref();
     let mut taken = vec![config::local_account().id];

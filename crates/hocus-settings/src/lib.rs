@@ -56,6 +56,7 @@ pub mod account;
 pub mod accounts;
 pub mod acting;
 pub mod activate;
+pub mod agenda;
 pub mod agents;
 pub mod app;
 pub mod appearance;
