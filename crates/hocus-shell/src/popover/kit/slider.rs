@@ -166,9 +166,16 @@ pub(crate) fn scale(bar: &str) -> f32 {
         .unwrap_or(1.0)
 }
 
-/// The scale of the open popover's bar's screen.
+/// How many of its screen's pixels a pixel of a surface of bar `bar`'s
+/// that follows the text size takes (#928): its screen's scale times the
+/// text size. What its icons are decoded for.
+pub(crate) fn drawn_scale(bar: &str) -> f32 {
+    scale(bar) * crate::layer::text_factor()
+}
+
+/// The same for the open popover: iced hands its wheel's pixels at it.
 pub(crate) fn popover_scale() -> f32 {
-    crate::popover::with(|c| c.open_on().map(|(bar, _)| scale(bar))).unwrap_or(1.0)
+    crate::popover::with(|c| c.open_on().map(|(bar, _)| drawn_scale(bar))).unwrap_or(1.0)
 }
 
 /// The notches of a wheel's lines `y`: at least one when it moved (a

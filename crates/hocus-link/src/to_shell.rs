@@ -32,6 +32,11 @@ pub enum ToShell {
     /// them, or the primary screen's wallpaper while the accent is the
     /// wallpaper's (6.3).
     Theme(theme::Choice),
+    /// The text size (`[appearance] text-scale`, #928) the surfaces that
+    /// [`follow_text_scale`](crate::follow_text_scale) draw at: sent as the
+    /// shell connects, before the bars, and when the file changes it; the
+    /// surfaces open take it at once.
+    TextScale(crate::TextScale),
     /// The desktop's language and formats (`[locale]`, #402): sent as the shell
     /// connects and when the file changes them.
     Locale(locale::Locale),

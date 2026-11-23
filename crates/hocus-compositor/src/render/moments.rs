@@ -107,7 +107,8 @@ impl State {
             bar.loc.y + bar.size.h,
         ]
         .map(|v| (v * scale) as f32);
-        let clip = Clip::new(keep, [], 1.0).rounded((hocus_link::RADIUS * scale) as f32);
+        let radius = self.text_scale().len(hocus_link::RADIUS);
+        let clip = Clip::new(keep, [], 1.0).rounded((radius * scale) as f32);
         let (origin, scale) = ((origin.x, origin.y), scale as f32);
         let mut out = Vec::new();
         if let Some(show) = show {

@@ -123,6 +123,9 @@ pub struct Shown {
     pub ids: FrameIds,
     /// A popover of the bar's, the emoji picker or the palette.
     pub kind: Kind,
+    /// How many times its mockup's size the shell draws it: the text size
+    /// for a popover of the bar's (#928), else 1.
+    pub zoom: f64,
 }
 
 /// How a popover is drawn at a moment: how opaque, how far toward the
@@ -177,7 +180,7 @@ impl Shown {
     /// Its shadow.
     pub fn shadow(&self) -> ShadowStyle {
         match self.kind {
-            Kind::Popover => SHADOW,
+            Kind::Popover => SHADOW.zoomed(self.zoom),
             Kind::Emoji => EMOJI_SHADOW,
             Kind::Actions => ACTIONS_SHADOW,
             Kind::Project => ShadowStyle {
@@ -190,7 +193,7 @@ impl Shown {
     /// Its corners' radius.
     pub fn radius(&self) -> f64 {
         match self.kind {
-            Kind::Popover => hocus_link::RADIUS,
+            Kind::Popover => hocus_link::RADIUS * self.zoom,
             Kind::Emoji => EMOJI_RADIUS,
             Kind::Actions => ACTIONS_RADIUS,
             Kind::Project if self.layer.namespace() == hocus_link::PROJECT_CARD_NAMESPACE => {
@@ -227,11 +230,27 @@ impl Shown {
 }
 
 impl Popovers {
+    /// The text size changed (#928): the popovers of the bar's showing are
+    /// drawn `zoom` times their mockup's size from now on.
+    pub fn zoom(&mut self, zoom: f64) {
+        for shown in &mut self.shown {
+            if hocus_link::follow_text_scale(shown.layer.namespace()) {
+                shown.zoom = zoom;
+            }
+        }
+    }
+
     /// The popover `layer`, if it shows, and how.
     pub fn look(&self, layer: &LayerSurface, now: Duration, motion: bool) -> Option<Look> {
         let shown = self.shown(layer)?;
         Some(match shown.kind {
-            Kind::Popover => look(shown.opened, shown.closing, now, motion),
+            Kind::Popover => {
+                let look = look(shown.opened, shown.closing, now, motion);
+                Look {
+                    shift: look.shift * shown.zoom,
+                    ..look
+                }
+            }
             Kind::Emoji | Kind::Project => {
                 let look = look(shown.opened, shown.closing, now, motion);
                 let reach = shown.reach();
@@ -290,12 +309,14 @@ impl State {
             return;
         }
         let opened = self.now();
+        let zoom = self.zoom_of(layer.namespace());
         self.panel.popovers.shown.push(Shown {
             layer: layer.clone(),
             opened,
             closing: None,
             ids: FrameIds::default(),
             kind: Kind::of(layer.namespace()),
+            zoom,
         });
         self.redraw = true;
     }

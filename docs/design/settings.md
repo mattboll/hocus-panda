@@ -1116,7 +1116,7 @@ window is the preview.
 |---|---|---|---|
 | THÈME ET COULEUR | Thème | segmented "Sombre \| Clair \| Givre \| Matrix" | `[appearance] theme = "dark" \| "light" \| "frost" \| "matrix"` |
 | | Couleur d'accent (its line starts with the colour's name) | six 24 px round swatches, the themed theme's own (Givre's ice blue, Matrix's phosphor green) first while it is chosen (or while it is the accent), the chosen one ringed (2 px of the window, 2 px in its colour; the accent's ring while it holds the keyboard) | `[appearance] accent = "green" \| "blue" \| "violet" \| "rose" \| "teal" \| "wallpaper" \| "ice" \| "phosphor"` |
-| TEXTE | Taille du texte | slider, 80 % to 150 % by 10 | `[appearance] text-scale = 1.0` (0.8 to 1.5) |
+| TEXTE | Taille du texte ("Le bureau et les applications") | slider, 80 % to 150 % by 10 | `[appearance] text-scale = 1.0` (0.8 to 1.5) |
 | CURSEUR | Thème du curseur | menu: "Celui du système", then each Xcursor theme installed | `[appearance] cursor-theme` (`""`: the system's) |
 | | Taille du curseur | a 72 × 72 preview of the arrow at that size, then segmented "24 \| 32 \| 48 \| 64" (a value off the four shows as a fifth segment) | `[appearance] cursor-size` |
 | MOUVEMENT ET LISIBILITÉ | Accessibilité ("Les mouvements réduits, la transparence réduite, le contraste élevé et la loupe.") | link "Accessibilité ›" | the Accessibility page's |
@@ -1148,15 +1148,26 @@ window is the preview.
   TIME` as the file changes; the bar's clock (over 12 hours "AM"/"PM" in
   the seconds' place: "2:25 PM"), its date line, the calendar's times, the
   next meeting's card, Today, the reminders and the lock's clock follow.
-- **Text size** draws the Settings window that much larger (iced's scale
-  factor); the bar keeps its sizes.
-- **Choices made here (to confirm on the machine)**: the spec's "Police"
-  and "Thème d'icônes" rows are not built (nothing in the desktop reads
-  them yet: a ticket of their own); text size draws the Settings window
-  larger, not yet the shell's popovers, launcher and notifications; the
-  cursor's preview is a drawn arrow, not the theme's image; a menu near
-  the page's bottom opens over its button; the compositor's own rim
-  around the focused window keeps the pandas' green.
+- **Text size** (#928, mockup s32 "La taille du texte partout"), at
+  once: the Settings window, and the shell's bar, its popovers (its
+  tooltips, tray, reminders and peeking panda with it), the launcher and
+  the notifications' bubbles are drawn that much larger, everything in
+  them alike (iced's scale factor), the bar widening with its text: the
+  room kept for it, its glass and halo, and the popovers' and bubbles'
+  corners, shadows and slides follow. The shell asks its surfaces'
+  sizes, margins and input regions at it in one place
+  (`hocus-shell/src/layer.rs`); the compositor says the bar's at it
+  (`State::bar_width`, `bar_edge`). Applications are told it as GNOME's
+  `org.gnome.desktop.interface` `text-scaling-factor` on the settings
+  portal (1.3 for 130 %), which the desktop serves beside
+  `org.freedesktop.appearance`.
+- **Choices made here (to confirm on the machine)**: the surfaces over a
+  dimmed screen or on a window (the lock, the authentication dialog, the
+  capture's and the sharing's surfaces, the actions palette, the emoji
+  picker, the projects' cards, the agents' tags and toasts) keep their
+  sizes; the cursor's preview is a drawn arrow, not the theme's image; a
+  menu near the page's bottom opens over its button; the compositor's
+  own rim around the focused window keeps the pandas' green.
 
 ### The themes and the accent
 

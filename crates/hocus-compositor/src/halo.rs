@@ -734,14 +734,15 @@ impl State {
             return Vec::new();
         };
         let scale = output.current_scale().fractional_scale();
+        let radius = self.text_scale().len(hocus_link::RADIUS) as f32;
         let mut out = Vec::with_capacity(2);
         if let Some(wave) = shown.wave
-            && let Some(element) = wave_element(&program, bar, &wave, scale)
+            && let Some(element) = wave_element(&program, bar, &wave, scale, radius)
         {
             out.push(element);
         }
         if shown.glow.shows() {
-            let key = Key::new(bar, shown.glow, scale);
+            let key = Key::new(bar, shown.glow, scale, radius);
             let mut kept = self.halo.kept.borrow_mut();
             let element = match kept.get(&name) {
                 Some((k, element)) if *k == key => element.clone(),
@@ -921,10 +922,12 @@ struct Key {
     bar: [f32; 4],
     glow: Glow,
     scale: f64,
+    /// The bar's corners, logical: at the text size (#928).
+    radius: f32,
 }
 
 impl Key {
-    fn new(bar: Rectangle<f64, Logical>, glow: Glow, scale: f64) -> Self {
+    fn new(bar: Rectangle<f64, Logical>, glow: Glow, scale: f64, radius: f32) -> Self {
         // A Gaussian's reach, three deviations: one and a half CSS blurs.
         let reach = (1.5 * f64::from(glow.outer.blur)).ceil() + 2.0;
         let left = (bar.loc.x - reach).floor();
@@ -939,6 +942,7 @@ impl Key {
             bar: local(bar, left, top),
             glow,
             scale,
+            radius,
         }
     }
 }
@@ -959,12 +963,13 @@ fn uniforms(
     wave: (f32, f32, f32),
     wave_colour: [u8; 3],
     scale: f64,
+    radius: f32,
 ) -> Vec<Uniform<'static>> {
     let [r, g, b] = glow.colour;
     let [wr, wg, wb] = wave_colour.map(|c| f32::from(c) / 255.0);
     vec![
         Uniform::new("bar", (bar[0], bar[1], bar[2], bar[3])),
-        Uniform::new("radius", hocus_link::RADIUS as f32),
+        Uniform::new("radius", radius),
         Uniform::new("colour", (r, g, b)),
         Uniform::new("border", glow.border),
         Uniform::new("outer", (glow.outer.blur / 2.0, glow.outer.alpha)),
@@ -981,7 +986,14 @@ fn glow_element(program: &GlesPixelProgram, key: &Key) -> ShaderElement {
         key.area,
         None,
         1.0,
-        uniforms(key.bar, &key.glow, (0.0, 1.0, 0.0), [0; 3], key.scale),
+        uniforms(
+            key.bar,
+            &key.glow,
+            (0.0, 1.0, 0.0),
+            [0; 3],
+            key.scale,
+            key.radius,
+        ),
         Kind::Unspecified,
     ))
 }
@@ -1016,6 +1028,7 @@ fn wave_element(
     bar: Rectangle<f64, Logical>,
     wave: &WaveAt,
     scale: f64,
+    radius: f32,
 ) -> Option<ShaderElement> {
     let (area, top, band) = wave_place(bar, wave)?;
     let corner = (f64::from(area.loc.x), f64::from(area.loc.y));
@@ -1030,6 +1043,7 @@ fn wave_element(
             (top as f32, band as f32, wave.alpha),
             wave.colour,
             scale,
+            radius,
         ),
         Kind::Unspecified,
     )))
@@ -1453,7 +1467,7 @@ mod tests {
     #[test]
     fn the_glow_is_drawn_as_far_as_it_reaches() {
         let bar = Rectangle::<f64, Logical>::new((1716.0, 8.0).into(), (196.0, 1064.0).into());
-        let key = Key::new(bar, Concern::Waiting.glow(), 1.0);
+        let key = Key::new(bar, Concern::Waiting.glow(), 1.0, hocus_link::RADIUS as f32);
         // 34 px of blur reach 51 px, and 2 for the edges' pixels.
         assert_eq!(key.area.loc, (1716 - 53, 8 - 53).into());
         assert_eq!(key.area.size, (196 + 106, 1064 + 106).into());

@@ -917,6 +917,38 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// #928: the page at the text size of 130 %, its "Taille du texte" row
+/// with the bar beside the window, both drawn that much larger, into
+/// `HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_text_size() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(&format!("{FILE}\n[appearance]\ntext-scale = 1.3\n"))? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.hp.pointer_move(400.0, 1060.0);
+    common::at_rest(&mut bed.hp)?;
+    wait(&mut bed.hp, Duration::from_millis(800))?;
+    let (w, h, bytes) = bed.hp.screenshot(0)?;
+    let rgba: Vec<u8> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [p[2], p[1], p[0], 255])
+        .collect();
+    let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+        .ok_or_else(|| anyhow::anyhow!("no image"))?;
+    let path = out.join("text-size-130-settings.png");
+    image.save(&path)?;
+    eprintln!("{}", path.display());
+    Ok(())
+}
+
 /// The effects' rows for the maintainer (#793, #795), into `HOCUS_SHOTS`:
 /// the snow and the flames on, the others to come.
 #[test]

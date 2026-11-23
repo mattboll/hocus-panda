@@ -7,6 +7,9 @@
 //! fallback). The real shell, its notifications on a D-Bus daemon of the
 //! test's own, its home, state and runtime directories the test's own.
 //!
+//! The text size (#928) too: the bar with a bubble, with its calendar,
+//! and the launcher, at 100 and 130 %.
+//!
 //! `HOCUS_SHOTS=DIR cargo nextest run -p hocus-compositor theme_shots::
 //! --run-ignored only` (the shell and `hocus` built first).
 
@@ -25,6 +28,7 @@ use common::{BTN_LEFT, WAIT};
 
 const BTN_RIGHT: u32 = 0x111;
 const KEY_ESC: u32 = 1;
+const KEY_SPACE: u32 = 57;
 use hocus_compositor::{Authenticator, Config, Headless};
 use zbus::zvariant::{OwnedVariant, Variant};
 
@@ -32,6 +36,20 @@ const SCREEN: (i32, i32) = (1920, 1080);
 const BAR_LEFT: i32 = 1920 - 8 - 196;
 /// The date under the clock: a click opens the calendar.
 const DATE: (f64, f64) = (1814.0, 82.0);
+
+/// The launcher's applications: their names and their icons' colours.
+const APPS: [(&str, &str); 10] = [
+    ("Agenda", "#5B8DEF"),
+    ("Calculatrice", "#F5A35B"),
+    ("Éditeur de texte", "#6CC287"),
+    ("Fichiers", "#8FB3FF"),
+    ("Musique", "#E06C9F"),
+    ("Navigateur", "#3BB2A8"),
+    ("Notes", "#F2C94C"),
+    ("Photos", "#A78BFA"),
+    ("Terminal", "#2B3245"),
+    ("Visio", "#EF6B5B"),
+];
 
 const DAY: &str = "[[calendars]]\nid = \"work\"\nname = \"Travail\"\ncolor = \"#8FB3FF\"\n\n\
                    [[events]]\ntitle = \"Point produit\"\nstart = \"today 15:00\"\nend = \"today 15:30\"\n";
@@ -73,6 +91,24 @@ fn start(text: &str, theme: &str) -> anyhow::Result<Option<Bed>> {
     std::fs::write(root.join("config/hocuspanda/day.toml"), DAY)?;
     // The day's accounts chosen: no first-run card.
     std::fs::write(root.join("state/hocuspanda/day-sources"), "later\n")?;
+    // The launcher's applications, the test's own: never this machine's.
+    let data = root.join("data");
+    let icons = data.join("icons/hicolor/scalable/apps");
+    std::fs::create_dir_all(data.join("applications"))?;
+    std::fs::create_dir_all(&icons)?;
+    for (i, (name, colour)) in APPS.iter().enumerate() {
+        std::fs::write(
+            icons.join(format!("app{i}.svg")),
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\">\
+                 <rect width=\"48\" height=\"48\" rx=\"11\" fill=\"{colour}\"/></svg>"
+            ),
+        )?;
+        std::fs::write(
+            data.join(format!("applications/app{i}.desktop")),
+            format!("[Desktop Entry]\nType=Application\nName={name}\nExec=true\nIcon=app{i}\n"),
+        )?;
+    }
     let (bus, address) = common::private_bus(root)?;
     let at = |sub: &str| root.join(sub).display().to_string();
     let log = root.join("shell.log");
@@ -84,6 +120,7 @@ fn start(text: &str, theme: &str) -> anyhow::Result<Option<Bed>> {
              export DBUS_SYSTEM_BUS_ADDRESS='unix:path=/nonexistent' \
              PIPEWIRE_REMOTE=/nonexistent HOCUS_BACKLIGHT_DIR=/nonexistent \
              HOME='{}' XDG_CONFIG_HOME='{}' XDG_CACHE_HOME='{}' XDG_STATE_HOME='{}' \
+             XDG_DATA_HOME='{}' XDG_DATA_DIRS='{}' \
              TZ=UTC HOCUS_CLOCK_AT='2026-11-07T14:32:07' HOCUS_USER_NAME=Alex \
              LC_ALL=fr_FR.UTF-8 LANG=fr_FR.UTF-8 ICED_BACKEND=tiny-skia \
              PATH='{}:/usr/bin:/bin' RUST_LOG=warn,hocuspanda_shell=debug\n\
@@ -92,6 +129,8 @@ fn start(text: &str, theme: &str) -> anyhow::Result<Option<Bed>> {
             at("config"),
             at("cache"),
             at("state"),
+            at("data"),
+            at("data"),
             at("home/bin"),
             shell.display(),
             log.display()
@@ -204,6 +243,11 @@ impl Bed {
 
     /// The calendar, opened from the date once the day is read.
     fn calendar(&mut self) -> anyhow::Result<()> {
+        self.calendar_at(DATE)
+    }
+
+    /// The same from the date at `date`.
+    fn calendar_at(&mut self, date: (f64, f64)) -> anyhow::Result<()> {
         self.logged("the day holds")?;
         let log = self.log.clone();
         let lit = |text: &str, from: usize| {
@@ -215,9 +259,9 @@ impl Bed {
         let mut hovered = false;
         for _ in 0..50 {
             let from = common::logged(&log).len();
-            common::point(&mut self.hp, (DATE.0, 500.0))?;
+            common::point(&mut self.hp, (date.0, 500.0))?;
             common::wait(&mut self.hp, Duration::from_millis(50))?;
-            common::point(&mut self.hp, DATE)?;
+            common::point(&mut self.hp, date)?;
             common::wait(&mut self.hp, Duration::from_millis(100))?;
             if lit(&common::logged(&log), from) {
                 hovered = true;
@@ -388,5 +432,74 @@ fn shots(name: &str, theme: &str, accent: &str, more: &str) -> anyhow::Result<()
         &format!("{name}-lock.png"),
         (0, 0, SCREEN.0, SCREEN.1),
     )?;
+    Ok(())
+}
+
+/// #928: the bar with a bubble, the bar with its calendar, and the
+/// launcher, at the text size of 100 % then 130 %, named `text-size-…`.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshots_of_the_text_size() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    for percent in [100, 130] {
+        let k = f64::from(percent) / 100.0;
+        let more = format!("text-scale = {k}\n");
+        let Some(mut bed) = start(&file("dark", "green", &more), "dark")? else {
+            return Ok(());
+        };
+        bed.notify(
+            "Slack",
+            "Julie · #projet-leroy",
+            "Le client valide le devis 🎉",
+            &["reply", "Répondre"],
+            1,
+        )?;
+        let shown = bed
+            .hp
+            .dispatch_until(WAIT, |hp| !hp.bubble_surfaces().is_empty())?;
+        anyhow::ensure!(shown, "no bubble");
+        common::wait(&mut bed.hp, Duration::from_secs(2))?;
+        // The bar, its calendar or the bubble beside it: the screen's
+        // right half.
+        let right = (SCREEN.0 / 2, 0, SCREEN.0 / 2, SCREEN.1);
+        bed.save(&out, &format!("text-size-{percent}-bar-bubble.png"), right)?;
+        // The date where the bar draws it at this size.
+        let edge = (8.0 * k).round();
+        let date = (
+            f64::from(SCREEN.0) - edge - (f64::from(SCREEN.0) - 8.0 - DATE.0) * k,
+            edge + (DATE.1 - 8.0) * k,
+        );
+        bed.calendar_at(date)?;
+        common::wait(&mut bed.hp, Duration::from_secs(1))?;
+        bed.save(
+            &out,
+            &format!("text-size-{percent}-bar-calendar.png"),
+            right,
+        )?;
+        bed.hp.key(KEY_ESC, true);
+        bed.hp.key(KEY_ESC, false);
+        let closed = bed
+            .hp
+            .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+        anyhow::ensure!(closed, "the calendar stays");
+        // Super+Space: the launcher.
+        bed.hp.key(common::KEY_LEFTMETA, true);
+        bed.hp.key(KEY_SPACE, true);
+        bed.hp.key(KEY_SPACE, false);
+        bed.hp.key(common::KEY_LEFTMETA, false);
+        let open = bed.hp.dispatch_until(WAIT, |hp| {
+            !hp.launcher_surfaces().is_empty() && hp.launcher_at_rest()
+        })?;
+        anyhow::ensure!(open, "no launcher");
+        common::wait(&mut bed.hp, Duration::from_secs(1))?;
+        bed.save(
+            &out,
+            &format!("text-size-{percent}-launcher.png"),
+            (0, 0, SCREEN.0, SCREEN.1),
+        )?;
+    }
     Ok(())
 }

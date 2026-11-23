@@ -587,10 +587,7 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
         .map(|(size, margin)| {
             vec![
                 crate::layer::resize(id, size),
-                Some(Message::MarginChange {
-                    id,
-                    margin: crate::layer::margin(crate::side::moved(id, margin)),
-                }),
+                Some(crate::layer::moved(id, crate::side::moved(id, margin))),
             ]
             .into_iter()
             .flatten()

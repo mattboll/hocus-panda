@@ -93,6 +93,13 @@ there.
 | Full | 196 px | everything in section 4 |
 | Mini | 56 px | clock, next meeting mark, the to-do item (Day.4), the agents' item under it (the secretary, how many need the user, how many work; 4.7), battery, keyboard layout, the bell with its count, the user's avatar (5.5) |
 
+Every size in this document is at the text size of 100 %. At another
+(`[appearance] text-scale`, 80 to 150 %, #928, settings.md 6.2) the bar
+and everything of its, its distance from the screen's edges and its
+corners included, the popovers, the notifications' bubbles, the
+reminders and the launcher are drawn that many times larger: the full
+bar is 255 px wide at 130 %, and the room kept for it grows with it.
+
 Default form per output: **full** when the output's usable width (logical,
 without the bar) is at least 1600 px, **mini** otherwise. With these
 defaults:

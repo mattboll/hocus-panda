@@ -282,10 +282,7 @@ pub fn sync(bar: &str, form: Form, switching: bool) -> Vec<Message> {
                     messages.extend(crate::layer::resize(id, size));
                 }
                 if place.asked.1 != margin {
-                    messages.push(Message::MarginChange {
-                        id,
-                        margin: crate::layer::margin(crate::side::moved(id, margin)),
-                    });
+                    messages.push(crate::layer::moved(id, crate::side::moved(id, margin)));
                 }
                 place.asked = (size, margin);
                 if changed {

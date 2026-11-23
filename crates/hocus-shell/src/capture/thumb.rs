@@ -24,7 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{CAPTURE_THUMB_RADIUS, CaptureAsk, EDGE, LAUNCHER_ZOOM};
+use hocus_link::{CAPTURE_THUMB_RADIUS, CaptureAsk, LAUNCHER_ZOOM};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme,
     advanced::image::Handle,
@@ -308,7 +308,7 @@ fn margin(output: &str) -> (i32, i32, i32, i32) {
         .iter()
         .filter(|_| !crate::side::left())
         .find(|(b, _)| b == output)
-        .map_or(0, |(_, form)| form.width() + EDGE);
+        .map_or(0, |(_, form)| crate::layer::bar_room(*form));
     (0, bar + GAP, GAP, 0)
 }
 

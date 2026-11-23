@@ -805,8 +805,10 @@
 # Applications are told it as the portal's
 # accent-color.
 # accent = "green"
-# How much larger the Settings window draws its text and pieces, from
-# 0.8 to 1.5; the bar keeps its sizes.
+# How much larger the text is drawn, from 0.8 to 1.5, its pieces with
+# it: the Settings window, the bar (wider), its popovers, the launcher and
+# the notifications. Applications are told it as the portal's
+# org.gnome.desktop.interface text-scaling-factor.
 # text-scale = 1.0
 # Windows fade instead of moving, and do not wobble; desktops fade
 # instead of sliding; the bar changes its form at once.

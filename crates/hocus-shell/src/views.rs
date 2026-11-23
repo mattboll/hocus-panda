@@ -685,7 +685,10 @@ impl Shell {
         ui::surface::viewing();
         keys::Held::new(
             id,
-            field::ime::Asking::new(pointer::Entered::new(self.surface_view(id))),
+            field::ime::Asking::new(pointer::Entered::new(
+                self.surface_view(id),
+                crate::layer::zoom(id),
+            )),
             Message::Keys,
         )
         .into()

@@ -28,7 +28,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            clang mold pkg-config fonts-dejavu-core \
+            clang mold pkg-config cmake libclang-dev libvulkan-dev glslc fonts-dejavu-core \
             libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev \
             libxkbcommon-dev libwayland-dev libegl-dev libgles-dev libpixman-1-dev \
             dbus pipewire pipewire-bin wireplumber libpipewire-0.3-dev ffmpeg \
@@ -49,7 +49,11 @@ jobs:
         run: |
           while pgrep -x rm > /dev/null; do sleep 2; done
           df -h /
+      - name: Prebuilt libraries
+        # sherpa-onnx's static libraries (hocus-transcribe), as in ci.yml.
+        run: scripts/prebuilt.sh
       - name: Programs
-        run: cargo build --locked -p hocus-shell -p hocus-cli -p hocus-settings
+        # Every program the compositor's tests run (the `programs` alias).
+        run: cargo programs --locked
       - name: Tests
         run: cargo nextest run --locked --profile ci --workspace --no-fail-fast

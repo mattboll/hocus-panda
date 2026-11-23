@@ -235,6 +235,8 @@ fn main() -> ExitCode {
     )
     .style(style)
     .theme(theme)
+    // The surfaces that follow the text size drawn at it (#928, layer.rs).
+    .scale_factor(|_, id| layer::zoom(id))
     .subscription(Shell::subscription)
     .settings(iced::Settings {
         antialiasing: true,
@@ -678,6 +680,27 @@ impl Shell {
                     ));
                 }
                 Task::none()
+            }
+            // The surfaces that follow it, asked again at their new sizes;
+            // iced draws them at it as it takes them (layer.rs).
+            ToShell::TextScale(text) => {
+                let was = layer::text_factor();
+                let asked = layer::text_scale(text);
+                // A bar keeps its height on the screen when its margins
+                // round the same (120 and 130 %): no new size comes, its
+                // height in its own pixels is the same over the new size.
+                let ratio = was / layer::text_factor();
+                let ids: Vec<window::Id> = self.bars.keys().copied().collect();
+                for id in ids {
+                    if let Some(bar) = self.bars.get_mut(&id) {
+                        bar.height *= ratio;
+                        let height = bar.height;
+                        popover::with(|c| c.height(id, height));
+                        self.place_popovers(id);
+                    }
+                }
+                column::moved();
+                Task::batch(asked.into_iter().map(Task::done))
             }
             // The words and the formats: every surface draws again in them.
             ToShell::Locale(locale) => {
@@ -1448,10 +1471,7 @@ fn item_form(bar: &mut Bar, kind: items::Kind) -> Vec<Task<Message>> {
         placed.map_or_else(Vec::new, |(id, size, margin)| {
             layer::resize(id, size)
                 .into_iter()
-                .chain([Message::MarginChange {
-                    id,
-                    margin: layer::margin(side::moved(id, margin)),
-                }])
+                .chain([crate::layer::moved(id, side::moved(id, margin))])
                 .map(Task::done)
                 .collect()
         })
@@ -1635,7 +1655,10 @@ fn is_bar(id: window::Id) -> bool {
 /// opening is not: it would draw every surface again.
 fn bar_sizes() -> Subscription<Message> {
     iced::event::listen_with(|event, _, id| match event {
+        // iced says a surface's size in the compositor's pixels: the bar's
+        // in the pixels it lays itself out in, at the text size.
         iced::Event::Window(window::Event::Opened { size, .. }) if is_bar(id) => {
+            let size = size * (1.0 / layer::zoom(id));
             popover::with(|c| c.height(id, size.height));
             // The column's room is the bar's height less its groups': what
             // was fit before the bar had its size is fit again. The day
@@ -1646,6 +1669,7 @@ fn bar_sizes() -> Subscription<Message> {
             None
         }
         iced::Event::Window(window::Event::Resized(size)) if is_bar(id) => {
+            let size = size * (1.0 / layer::zoom(id));
             popover::with(|c| c.height(id, size.height));
             Some(Message::Resized(id, size))
         }

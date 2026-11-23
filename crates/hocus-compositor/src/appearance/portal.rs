@@ -1,8 +1,11 @@
 //! The desktop portal's settings, as the desktop serves them
 //! (`org.freedesktop.impl.portal.Settings`, version 2): xdg-desktop-portal
 //! reads `org.freedesktop.appearance` from it for the applications
-//! (`hocuspanda.portal`, `hocuspanda-portals.conf`), and hears its
-//! `SettingChanged` when `[appearance]` changes in the file. Served on the
+//! (`hocuspanda.portal`, `hocuspanda-portals.conf`), and GNOME's
+//! `org.gnome.desktop.interface` `text-scaling-factor` (#928), which GTK
+//! reads through the portal in place of its own settings, and hears its
+//! `SettingChanged` when `[appearance]` changes in the file. Only those
+//! keys: GTK's backend answers the rest of GNOME's. Served on the
 //! screen cast portal's connection (one name for the desktop's portal
 //! backend, [`crate::share`]'s thread): what it answers is kept here, the
 //! loop handing it each new value; nothing waits on the loop.
@@ -16,6 +19,8 @@ use hocus_link::theme::Choice;
 use zbus::{Connection, OwnedVariant, Variant, object_server::SignalEmitter};
 
 pub const NAMESPACE: &str = "org.freedesktop.appearance";
+/// GNOME's interface settings, of which the text size alone is served.
+pub const GNOME: &str = "org.gnome.desktop.interface";
 const PATH: &str = "/org/freedesktop/portal/desktop";
 
 /// What `org.freedesktop.appearance` says.
@@ -27,32 +32,41 @@ pub struct Values {
     pub accent_color: (f64, f64, f64),
     /// 1 with high contrast, else 0.
     pub contrast: u32,
+    /// `[appearance] text-scale`, as GNOME's `text-scaling-factor`: 1.3
+    /// for 130 %.
+    pub text_scaling: f64,
 }
 
 impl Values {
-    pub fn of(choice: Choice, high_contrast: bool) -> Self {
+    pub fn of(choice: Choice, high_contrast: bool, text: hocus_link::TextScale) -> Self {
         let [r, g, b] = choice.accent().base;
         let unit = |v: u8| (f64::from(v) / 255.0 * 1000.0).round() / 1000.0;
         Self {
             color_scheme: choice.scheme.portal_value(),
             accent_color: (unit(r), unit(g), unit(b)),
             contrast: u32::from(high_contrast),
+            text_scaling: text.factor(),
         }
     }
 
-    /// Its keys and values, in the order the spec lists them.
-    fn entries(self) -> [(&'static str, Variant<'static>); 3] {
+    /// Its namespaces, keys and values, in the order the spec lists them.
+    fn entries(self) -> [(&'static str, &'static str, Variant<'static>); 4] {
         [
-            ("color-scheme", Variant::from(self.color_scheme)),
-            ("accent-color", Variant::from(self.accent_color)),
-            ("contrast", Variant::from(self.contrast)),
+            (NAMESPACE, "color-scheme", Variant::from(self.color_scheme)),
+            (NAMESPACE, "accent-color", Variant::from(self.accent_color)),
+            (NAMESPACE, "contrast", Variant::from(self.contrast)),
+            (
+                GNOME,
+                "text-scaling-factor",
+                Variant::from(self.text_scaling),
+            ),
         ]
     }
 }
 
 impl Default for Values {
     fn default() -> Self {
-        Self::of(Choice::default(), false)
+        Self::of(Choice::default(), false, hocus_link::TextScale::NORMAL)
     }
 }
 
@@ -84,22 +98,26 @@ impl Settings {
         namespaces: Vec<String>,
     ) -> HashMap<String, HashMap<String, OwnedVariant>> {
         let values = *self.values.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut all = HashMap::new();
-        if wanted(&namespaces, NAMESPACE) {
-            let keys = values
-                .entries()
-                .into_iter()
-                .filter_map(|(key, value)| Some((key.to_owned(), owned(value)?)))
-                .collect();
-            all.insert(NAMESPACE.to_owned(), keys);
+        let mut all: HashMap<String, HashMap<String, OwnedVariant>> = HashMap::new();
+        for (namespace, key, value) in values.entries() {
+            if !wanted(&namespaces, namespace) {
+                continue;
+            }
+            if let Some(value) = owned(value) {
+                all.entry(namespace.to_owned())
+                    .or_default()
+                    .insert(key.to_owned(), value);
+            }
         }
         all
     }
 
     async fn read(&self, namespace: String, key: String) -> zbus::fdo::Result<OwnedVariant> {
         let values = *self.values.lock().unwrap_or_else(PoisonError::into_inner);
-        if namespace == NAMESPACE
-            && let Some((_, value)) = values.entries().into_iter().find(|(k, _)| *k == key)
+        if let Some((_, _, value)) = values
+            .entries()
+            .into_iter()
+            .find(|(n, k, _)| *n == namespace && *k == key)
         {
             return owned(value).ok_or_else(|| zbus::fdo::Error::Failed("no value".to_owned()));
         }
@@ -131,12 +149,12 @@ pub async fn changed(connection: &Connection, values: &Shared, new: Values) {
     let Ok(emitter) = SignalEmitter::new(connection, PATH) else {
         return;
     };
-    for ((key, before), (_, now)) in old.entries().into_iter().zip(new.entries()) {
+    for ((namespace, key, before), (_, _, now)) in old.entries().into_iter().zip(new.entries()) {
         if before == now {
             continue;
         }
         tracing::info!(key, value = ?now, "the portal's appearance changed");
-        if let Err(err) = Settings::setting_changed(&emitter, NAMESPACE, key, now).await {
+        if let Err(err) = Settings::setting_changed(&emitter, namespace, key, now).await {
             tracing::warn!(%err, key, "the portal's SettingChanged not sent");
         }
     }
@@ -156,8 +174,11 @@ mod tests {
                 ..Choice::default()
             },
             true,
+            hocus_link::TextScale(130),
         );
         assert_eq!(light.color_scheme, 2);
+        assert!((light.text_scaling - 1.3).abs() < 1e-9);
+        assert!((Values::default().text_scaling - 1.0).abs() < 1e-9);
         assert_eq!(light.contrast, 1);
         assert_eq!(light.accent_color, (0.357, 0.553, 0.937));
         assert_eq!(Values::default().color_scheme, 1);
@@ -169,6 +190,7 @@ mod tests {
                 ..Choice::default()
             },
             false,
+            hocus_link::TextScale::NORMAL,
         );
         assert_eq!(frost.color_scheme, 1);
         assert_eq!(frost.accent_color, (0.498, 0.847, 1.0));
@@ -180,5 +202,6 @@ mod tests {
         assert!(wanted(&["org.freedesktop.*".to_owned()], NAMESPACE));
         assert!(wanted(&[NAMESPACE.to_owned()], NAMESPACE));
         assert!(!wanted(&["org.gnome.*".to_owned()], NAMESPACE));
+        assert!(wanted(&["org.gnome.*".to_owned()], GNOME));
     }
 }

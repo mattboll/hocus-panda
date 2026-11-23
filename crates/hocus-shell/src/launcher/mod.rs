@@ -747,7 +747,8 @@ pub fn toggle(output: String, scale: u32) {
         let catalog = apps::catalog();
         let counts = apps::counts();
         let given = scale;
-        let scale = (scale as f32 / 120.0).max(0.5);
+        // Its icons decoded for its screen's pixels at the text size (#928).
+        let scale = (scale as f32 / 120.0 * crate::layer::text_factor()).max(0.5);
         let mut open = Open {
             surface,
             output: output.clone(),

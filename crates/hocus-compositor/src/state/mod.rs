@@ -427,7 +427,9 @@ impl State {
     pub fn work_area(&self, output: &Output) -> Option<Rect> {
         let zone = self.non_exclusive_zone(output)?;
         let geometry = self.space.output_geometry(output)?;
-        let bar = self.panel.width(&output.name());
+        let bar = self
+            .bar_width(&output.name())
+            .map(|width| (self.bar_edge(), width));
         Some(model::work_area(
             rect_of(zone),
             rect_of(geometry),

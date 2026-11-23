@@ -86,7 +86,8 @@ impl State {
             // The windows' and the music player's surfaces are kept
             // while they show nothing: transparent on a GPU, black
             // from a shell on the CPU, whose buffers have no alpha.
-            if self.shell.software && hocus_link::shows_nothing(layer.namespace(), geometry.size.h)
+            if self.shell.software
+                && hocus_link::shows_nothing(layer.namespace(), geometry.size.h, self.text_scale())
             {
                 continue;
             }
@@ -110,6 +111,8 @@ impl State {
                 } else {
                     1.0
                 };
+                // Its slide at the text size (#928).
+                let toward = toward * self.zoom_of(layer.namespace());
                 self.bubbles
                     .look(&layer, now, self.bubbles_slide())
                     .map(|l| (l.alpha, l.shift * toward, 0.0))
@@ -138,6 +141,7 @@ impl State {
             // A bubble and the chip under them are cards of their own.
             let own = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
             let cut = match layer.namespace() {
+                // At the text size (#928) for those that follow it.
                 hocus_link::NAMESPACE | hocus_link::POPOVER_NAMESPACE => {
                     Some((own, hocus_link::RADIUS))
                 }
@@ -170,6 +174,7 @@ impl State {
                 _ => None,
             };
             if let Some((clip, radius)) = cut.filter(|_| self.shell.software) {
+                let radius = radius * self.zoom_of(layer.namespace());
                 let radius = (radius * scale).round() as i32;
                 out.extend(surfaces.into_iter().map(|e| {
                     OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))

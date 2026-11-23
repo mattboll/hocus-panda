@@ -82,7 +82,8 @@ pub struct Bar {
 }
 
 impl Bar {
-    /// Its width as drawn at `now`, logical pixels.
+    /// Its width as drawn at `now`, the mockup's pixels: at 100 % (the
+    /// text size multiplies it, [`State::text_scale`]).
     pub fn width_at(&self, now: Duration) -> f64 {
         match self.switch {
             Some((from, since)) => hocus_link::width_at(from, self.form, now.saturating_sub(since)),
@@ -193,9 +194,9 @@ impl Panel {
         self.chosen.get(name).copied()
     }
 
-    /// The bar's width on screen `name` once its switch is over: the space
-    /// kept for it.
-    pub fn width(&self, name: &str) -> Option<i32> {
+    /// The bar's form's width on screen `name` once its switch is over, at
+    /// 100 % ([`State::bar_width`] gives it at the text size).
+    pub fn form_width(&self, name: &str) -> Option<i32> {
         self.bars.get(name).map(|b| b.form.width())
     }
 
@@ -446,6 +447,36 @@ impl State {
         self.config.panel.side.link()
     }
 
+    /// The text size (`[appearance] text-scale`, #928) the shell draws the
+    /// bar and what opens from it at: every length the compositor says of
+    /// them is the mockup's times it.
+    pub fn text_scale(&self) -> hocus_link::TextScale {
+        self.config.appearance.text_scale
+    }
+
+    /// The bar's distance from its screen's edges, logical pixels, as the
+    /// shell's margins round it.
+    pub fn bar_edge(&self) -> i32 {
+        self.text_scale().whole(hocus_link::EDGE)
+    }
+
+    /// How many times its mockup's size the shell draws a surface of
+    /// `namespace`: the text size if it follows it, else 1.
+    pub fn zoom_of(&self, namespace: &str) -> f64 {
+        if hocus_link::follow_text_scale(namespace) {
+            self.text_scale().factor()
+        } else {
+            1.0
+        }
+    }
+
+    /// The bar's width on screen `name` once its switch is over, logical
+    /// pixels at the text size: the space kept for it.
+    pub fn bar_width(&self, name: &str) -> Option<i32> {
+        let scale = self.text_scale();
+        self.panel.form_width(name).map(|w| scale.whole(w))
+    }
+
     /// The sign of a shift along x toward the bar's side: what slides from
     /// the bar (a popover, a reminder's tab, the peek) slides this way.
     pub fn toward_bar(&self) -> f64 {
@@ -537,7 +568,7 @@ impl State {
     /// between the bar and the screen's edge on its side, and the bar's
     /// first pixels from it, over the screen's whole height.
     pub fn bar_edge_at(&self, at: Point<f64, Logical>) -> Option<String> {
-        let zone = f64::from(hocus_link::EDGE + EDGE_INSIDE);
+        let zone = f64::from(self.bar_edge() + EDGE_INSIDE);
         let side = self.bar_side();
         self.space
             .outputs()
@@ -695,8 +726,8 @@ impl State {
     pub fn bar_rect(&self, output: &Output, now: Duration) -> Option<Rectangle<f64, Logical>> {
         let bar = self.panel.bars.get(&output.name())?;
         let size = self.space.output_geometry(output)?.size;
-        let width = bar.width_at(now);
-        let edge = f64::from(hocus_link::EDGE);
+        let width = self.text_scale().len(bar.width_at(now));
+        let edge = f64::from(self.bar_edge());
         let x = match self.bar_side() {
             Side::Right => f64::from(size.w) - edge - width,
             Side::Left => edge,

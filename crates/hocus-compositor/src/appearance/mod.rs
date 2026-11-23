@@ -5,7 +5,10 @@
 //! implies reduced transparency) and to the focused window's rim; the
 //! cursor's theme and size to the cursor, and to the programs started
 //! afterwards; the language and the formats to the shell, the language to
-//! the programs started afterwards (`LANGUAGE`).
+//! the programs started afterwards (`LANGUAGE`). The text size (#928) to
+//! the shell, which draws its bar, popovers, launcher and notifications
+//! at it, to the bar's room and glass, and to the applications (the
+//! portal's `text-scaling-factor`).
 
 pub mod portal;
 
@@ -16,7 +19,11 @@ use crate::{State, config::Appearance};
 impl State {
     /// What the settings portal says of the appearance now.
     pub fn portal_appearance(&self) -> portal::Values {
-        portal::Values::of(self.theme_choice(), self.config.appearance.high_contrast)
+        portal::Values::of(
+            self.theme_choice(),
+            self.config.appearance.high_contrast,
+            self.text_scale(),
+        )
     }
 
     /// The file's `[appearance]` is now `new`: whether it changed.
@@ -49,6 +56,14 @@ impl State {
             old.high_contrast,
         ) {
             self.tell_shell(self.bar_look());
+        }
+        if now.text_scale != old.text_scale {
+            tracing::info!(text_scale = now.text_scale.0, "the text size changed");
+            self.tell_shell(ToShell::TextScale(now.text_scale));
+            self.panel.popovers.zoom(now.text_scale.factor());
+            // The bar's room is its width at the text size: the windows
+            // the desktop placed take the new work area.
+            self.rearrange();
         }
         if (now.cursor_theme.as_ref(), now.cursor_size)
             != (old.cursor_theme.as_ref(), old.cursor_size)
