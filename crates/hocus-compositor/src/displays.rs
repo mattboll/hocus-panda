@@ -592,6 +592,19 @@ impl State {
             }
             return;
         }
+        // "Identifier" (6.9, #927): each screen's number and words, as
+        // the Settings' drawing says them.
+        if let Some(rest) = line.strip_prefix("identify ") {
+            match serde_json::from_str::<Vec<crate::identify::Badge>>(rest) {
+                Ok(badges) => self.identify(badges),
+                Err(err) => {
+                    tracing::warn!(session, %err, "the Settings' screens to identify do not read");
+                    let refused = serde_json::json!({ "refused": "cannot read the screens" });
+                    self.displays_send(Some(session), &refused.to_string());
+                }
+            }
+            return;
+        }
         // "Oublier cet ensemble" (6.9): its screens, a tab before each
         // (their identities hold spaces).
         if let Some(screens) = line.strip_prefix("forget-set") {

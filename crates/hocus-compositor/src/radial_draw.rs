@@ -36,7 +36,8 @@ use crate::{
 };
 
 /// The shell's fonts: the labels' and the hub's words.
-const MANROPE_SEMIBOLD: &[u8] = include_bytes!("../../hocus-shell/fonts/Manrope-SemiBold.ttf");
+pub(crate) const MANROPE_SEMIBOLD: &[u8] =
+    include_bytes!("../../hocus-shell/fonts/Manrope-SemiBold.ttf");
 const MANROPE_BOLD: &[u8] = include_bytes!("../../hocus-shell/fonts/Manrope-Bold.ttf");
 const MARTIAN_MONO: &[u8] = include_bytes!("../../hocus-shell/fonts/MartianMono-Regular.ttf");
 
