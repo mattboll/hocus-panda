@@ -222,6 +222,12 @@ impl Words {
         self.pick(txt::CHOOSE_CALENDARS)
     }
 
+    /// The link under the agenda once a calendar is connected: the
+    /// Settings' Calendar and tasks.
+    pub fn calendars(self) -> &'static str {
+        self.pick(txt::CALENDARS)
+    }
+
     /// A day outside the window the shell keeps (2 months back to 12
     /// ahead), its month asked of the accounts, not answered yet.
     pub fn loading(self) -> &'static str {

@@ -2389,6 +2389,7 @@ dependencies = [
  "hocus-bluetooth",
  "hocus-charge",
  "hocus-config",
+ "hocus-day",
  "hocus-geometry",
  "hocus-link",
  "hocus-network",

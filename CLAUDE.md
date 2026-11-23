@@ -263,7 +263,11 @@ and keep the last version that read in
 `$XDG_STATE_HOME/hocuspanda/config.last-good.toml` and the last changes in
 `settings-recent` beside it: next to a live session, start them with a
 configuration file, a `HOME` and an `XDG_STATE_HOME` of their own.
-`HOCUS_POWER_SUPPLY_DIR` stands for `/sys/class/power_supply`. They say
+`HOCUS_POWER_SUPPLY_DIR` stands for `/sys/class/power_supply`. Their
+Calendar and tasks page reads Online Accounts and keeps a Planka board's
+token on the bus `DBUS_SESSION_BUS_ADDRESS` names: next to a live
+session, start them without it or with a bus of your own (its tests:
+`tests/settings_agenda.rs`, the day's fakes). They say
 what they show in their log (`RUST_LOG=hocus_settings=debug`: "shows" and
 "places" lines, JSON), which their tests
 (`crates/hocus-compositor/tests/settings.rs`) read; those run the program

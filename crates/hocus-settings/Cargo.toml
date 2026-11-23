@@ -43,6 +43,10 @@ hocus-network.workspace = true
 # The applications, their icons, the defaults (mimeapps.list) and the
 # start-up entries, read as the launcher and the session read them (6.15).
 hocus-xdg.workspace = true
+# Settings › Calendar and tasks (#926): the day's sources read and
+# written as Day.1 does, Online Accounts' Google accounts and their
+# calendars, a Planka board checked, its token kept.
+hocus-day.workspace = true
 # Settings › Weather finds a town by its name with Open-Meteo's geocoding
 # (#814), on a blocking task.
 hocus-weather.workspace = true

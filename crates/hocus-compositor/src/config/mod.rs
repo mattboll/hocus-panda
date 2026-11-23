@@ -117,6 +117,9 @@ pub struct Config {
     pub perf: Perf,
     /// What only someone developing the desktop needs (#783).
     pub developer: Developer,
+    /// The day's sources, the shell's to read (docs/design/day.md): kept
+    /// only to see it change, which the shell is then told.
+    pub day: toml::Table,
     /// Every mouse, trackball and trackpoint (6.12).
     pub pointer: Pointer,
     /// Every touchpad (6.12).

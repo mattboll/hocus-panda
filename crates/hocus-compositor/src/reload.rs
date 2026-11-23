@@ -378,6 +378,13 @@ impl State {
         if self.power_config_changed(&new) {
             followed.push("[idle] [power]");
         }
+        // The day's sources (the Settings' Calendar and tasks, #926): the
+        // shell starts its accounts again from the file.
+        if new.day != self.config.day {
+            self.config.day = new.day.clone();
+            self.tell_shell(hocus_link::ToShell::Day(hocus_link::DayAsk::Reconfigure));
+            followed.push("[day]");
+        }
         // The day's recording (#655): started or stopped.
         if new.perf.record != self.config.perf.record {
             self.config.perf.record = new.perf.record;

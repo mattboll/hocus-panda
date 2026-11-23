@@ -181,6 +181,7 @@ fn to_shell() -> Vec<ToShell> {
         ToShell::Day(DayAsk::Tick("18a2f-3".into())),
         ToShell::Day(DayAsk::Untick("c 2".into())),
         ToShell::Day(DayAsk::Refresh),
+        ToShell::Day(DayAsk::Reconfigure),
         ToShell::Day(DayAsk::Slept(900)),
         ToShell::Join,
         ToShell::FellBack {

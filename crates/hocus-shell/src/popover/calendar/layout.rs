@@ -106,6 +106,12 @@ const NOTE_BELOW: f32 = 12.0;
 pub(super) const CHOOSE: f32 = 30.0;
 const CHOOSE_PAD: f32 = 14.0;
 const CHOOSE_ABOVE: f32 = 8.0;
+/// "Agendas…" once a calendar is connected (#926): under a rule, 26 px
+/// high, 6 px in, 12.5 px 700, its words ending on the content's right.
+pub(super) const LINK: f32 = 26.0;
+pub(super) const LINK_PAD: f32 = 6.0;
+pub(super) const LINK_TEXT: f32 = 12.5;
+const LINK_ABOVE: f32 = 8.0;
 /// An event unfolded: its details under its title, 12 px on lines 1.4
 /// apart, the description on 4 lines at most, 8 px under them.
 pub(super) const DETAILS: f32 = 12.0;
@@ -183,6 +189,8 @@ pub enum Stop {
     Event(EventId),
     /// "Choisir des agendas…", without a source.
     Choose,
+    /// "Agendas…", with one.
+    Calendars,
 }
 
 /// What the popover shows: the month, the day chosen, the keyboard.
@@ -389,6 +397,8 @@ pub enum Target {
     Event(usize),
     /// "Choisir des agendas…": Day.1's popover, at its first step.
     Choose,
+    /// "Agendas…": Settings › Calendar and tasks (#926).
+    Calendars,
 }
 
 impl Target {
@@ -418,6 +428,9 @@ pub struct Laid {
     /// "Choisir des agendas…" under the note without a source: Day.1's
     /// popover.
     pub choose: Option<Rectangle>,
+    /// With a source, the rule and "Agendas…" under the agenda: the
+    /// Settings' page (#926).
+    pub calendars: Option<(f32, Rectangle)>,
     /// The list's scroll, clamped (and to the event to reveal).
     pub scroll: f32,
     pub end: f32,
@@ -640,6 +653,18 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
             (Body::Rows { list, rows }, end, scroll)
         }
     };
+    // "Agendas…" under the agenda, once a calendar is connected.
+    let mut end = end;
+    let calendars = (!matches!(context.agenda, Agenda::NoSource)).then(|| {
+        let rule = end + LINK_ABOVE;
+        let width = measure(words.calendars(), LINK_TEXT, MANROPE_BOLD) + 2.0 * LINK_PAD;
+        let link = Rectangle::new(
+            Point::new(RIGHT + LINK_PAD - width, rule + 1.0 + LINK_ABOVE / 2.0),
+            Size::new(width, LINK),
+        );
+        end = link.y + LINK;
+        (rule, link)
+    });
     Laid {
         title,
         header_middle,
@@ -655,6 +680,7 @@ pub fn lay_out(view: &View, context: &Context<'_>, measure: Measure<'_>) -> Laid
         day_line,
         body,
         choose,
+        calendars,
         scroll,
         end,
     }
@@ -895,6 +921,9 @@ impl Laid {
         if let Some(rect) = self.choose {
             targets.push((Target::Choose, rect));
         }
+        if let Some((_, rect)) = self.calendars {
+            targets.push((Target::Calendars, rect));
+        }
         if let Body::Rows { list, rows } = &self.body {
             for (i, row) in rows.iter().enumerate() {
                 if let Some(rect) = self.row_rect(*list, row).intersection(&list.view) {
@@ -969,6 +998,9 @@ impl Laid {
         ));
         if self.choose.is_some() {
             said.push_str(" choose=«Choisir des agendas…»");
+        }
+        if self.calendars.is_some() {
+            said.push_str(" calendars=«Agendas…»");
         }
         match &self.body {
             Body::Note { text, .. } => said.push_str(&format!(" note=«{text}»")),
@@ -1216,7 +1248,8 @@ mod tests {
         assert!(list.scrolls());
         // The last row, to reveal: the list scrolled to its end.
         assert_eq!(laid.scroll, list.most_scroll());
-        assert!(height(&laid) <= 580, "{}", height(&laid));
+        // About 580, and "Agendas…" under the list (#926).
+        assert!(height(&laid) <= 620, "{}", height(&laid));
         view.reveal = false;
         view.scroll = 10_000.0;
         let laid = lay_out(&view, &context(&busy, &agenda), &mut measure);
@@ -1297,9 +1330,19 @@ mod tests {
                     assert!((laid.end - (choose.y + CHOOSE + 12.0)).abs() < 0.01);
                 }
                 (Agenda::NoSource, None) => panic!("no button without a source"),
-                (_, None) => assert!((laid.end - (note_end + 12.0)).abs() < 0.01),
+                (_, None) => {
+                    // With one, "Agendas…" under a rule 8 px under the
+                    // note's 12 px: the Settings' page (#926).
+                    let Some((rule, link)) = laid.calendars else {
+                        panic!("no link with a source");
+                    };
+                    assert!((rule - (note_end + 12.0 + 8.0)).abs() < 0.01);
+                    assert!((link.x + link.width - (RIGHT + LINK_PAD)).abs() < 0.01);
+                    assert!((laid.end - (link.y + LINK)).abs() < 0.01);
+                }
                 (_, Some(_)) => panic!("a button with a source"),
             }
+            assert_eq!(laid.calendars.is_some(), agenda != Agenda::NoSource);
         }
     }
 

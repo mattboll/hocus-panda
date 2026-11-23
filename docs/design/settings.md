@@ -573,7 +573,6 @@ blue for airplane mode on):
   missing: "Le module OpenVPN de NetworkManager n'est pas installé
   (network-manager-openvpn)."; another refusal: "NetworkManager n'a pas
   importé le fichier : …".
-- **PLUS TARD**: "Partage de connexion Wi-Fi", inert, amber chip.
 
 **The saved networks' sub-page**: "‹ Réseau", its title and line, one row
 per saved Wi-Fi connection, the one in use first, then by
@@ -1284,6 +1283,88 @@ garde la dernière prévision et dit son heure."
   it is, the file's other lines kept; the rain's "Quand" inert without a
   place, then "Seulement quand il pleut" written. Unit tests for the keys
   a place writes and the rows' defaults.
+
+## Agenda et tâches (#926)
+
+Approved 2026-11-23 (mockup s31-agenda). The calendars and the tasks'
+board the bar shows, chosen at any time (`hocus-settings agenda`): Day.1's
+step 3 (bar.md, "Day.1"), as a page. Today's and To do's switches stay
+on La barre, whose "Agenda et tâches ›" leads here.
+
+- **AGENDAS** ("★ : compte pour la prochaine réunion, les rappels et
+  Super+J" on its right): one card per Google account `[day]` names,
+  its head row a 32 px "G" tile (`#8FB3FF` on 16 %), the address (13.5
+  px, 700) over its state (12 px): a green dot and "Google Agenda · à
+  jour" (then "il y a N min", from the page's own read), or an orange dot
+  and what is wrong in `#F7B98A` with what fixes it: "L'accès a expiré :
+  reconnecte le compte dans les comptes en ligne." (Online Accounts'
+  `AttentionNeeded`, with "Ouvrir les comptes en ligne"), its calendar
+  off, no longer in Online Accounts, "Les agendas de ce compte ne se
+  lisent pas. Réessaie." (with "Réessayer"). "Retirer" (quiet) on its
+  right. Then its calendars, 36 px lines 14 px in: the 16 px box, the
+  16 px swatch, the star (filled `#F5C46E`, else outlined; at half
+  strength on a calendar unticked), the name (13 px; `text.dim`
+  unticked), "lecture seule". The swatch unfolds the eight colours under
+  its line (20 px, 6 apart, 52 px in, the chosen one ringed); a click
+  chooses and folds. An account not read (expired) shows its calendars
+  as the file names them, still to be changed.
+- **The accounts to add**: Online Accounts' Google accounts with their
+  calendar on that `[day]` does not name, a card each, "Dans les
+  comptes en ligne, pas encore dans la barre" and "Brancher" (green when
+  no account is in the bar): its calendars read, then written as Day.1
+  writes them at first (ticked as the account marks them, every star
+  lit). Under the cards: "Un autre compte Google s'ajoute dans les
+  comptes en ligne de GNOME ; il apparaît ici tout seul." and "Ouvrir
+  les comptes en ligne" (`gnome-control-center online-accounts`, inert
+  without it). No account at all: a card "Google Agenda" saying "Ajoute
+  un compte Google dans les comptes en ligne" (or "Comptes en ligne de
+  GNOME absents") with that button.
+- **TÂCHES**: the board's card, its head a "P" tile (`#6CC287`), the
+  board's name over "Planka · host · N cartes à faire" (or the refusal,
+  step 2's words), "Changer de tableau…" and "Retirer"; then "Colonne des
+  tâches" ("Ce que la barre liste dans « À faire »"), "Colonne des
+  terminées" ("Où va une tâche cochée"), "Ajout dans" ("Où va une tâche
+  ajoutée avec +"), each a menu of the board's columns, unfolded under
+  its row (28 px items, the chosen one checked); "Ajout dans" follows
+  the tasks' column until chosen apart. "Changer de tableau…" unfolds,
+  under the rows, "Adresse du tableau" and "Jeton d'accès", step 2's
+  help line, "Annuler" and "Se connecter" (green, inert until both hold
+  something), with step 2's errors; a server's address alone lists its
+  boards to choose. Without a board: "Sur cet ordinateur" ("N tâches,
+  tant qu'aucun tableau n'en fournit") and "Brancher un tableau
+  Planka…", which unfolds the same fields.
+- **Written**: each change at once, by the file's worker, as Day.1
+  writes it (`hocus_day::edit`: the account's whole `[[day.calendars]]`,
+  the first `[[day.tasks]]`; the file's other lines kept), toasted with
+  "Annuler" (and `Ctrl+Z`): what the worker found is put back as it was,
+  in its place. "Retirer" takes the entry out (the account stays in
+  Online Accounts). A board's token is kept by `hocus_day::secrets` under
+  the board's account before the file names it, never in the file. The
+  compositor sees `[day]` change and tells the shell, which starts its
+  accounts again from the file (`DayAsk::Reconfigure`; the same `[day]`
+  starts nothing); an account no longer named has its cache forgotten.
+- **Off the window's thread**: Online Accounts is followed on the session
+  bus the compositor gives the programs it starts
+  (`DBUS_SESSION_BUS_ADDRESS`), from the page's first showing; the
+  calendars (`hocus_day::goa::calendars`), the board
+  (`planka::find_board` with the kept token), a pasted token's check and
+  the local list's count run on blocking tasks.
+- **The search** finds the page by "agenda", "calendrier", "couleur",
+  "Planka" (three rows outside the file: the calendars, a calendar's
+  colour, the tasks' board).
+- **The home's cards** (the same ticket): Écrans and Apparence say their
+  real state (above, "Choices made here").
+- **Not built**: the page's own keyboard stops (`Tab` reaches iced's
+  fields only); the menus unfold under their rows, as in Day.1's step 3,
+  not floating over the page as the mockup draws them.
+- **Measured headless** (`tests/settings_agenda.rs`), the real window,
+  Online Accounts on a private bus, a Calendar API and a Planka server on
+  127.0.0.1: a calendar unticked, its star put out and recoloured
+  rewrites its account's entry, the file's other lines kept; an account
+  connected, removed, and back with "Annuler"; the board's columns,
+  adding following the tasks' until chosen apart, then taken out. Unit
+  tests: the entries written, taken out and put back (`hocus_day::edit`),
+  the shared choices (`hocus_day::choice`).
 
 ## Fond d'écran (6.3)
 
@@ -2409,10 +2490,11 @@ file.
 - The avatar's initial is drawn in Manrope Bold: Unbounded is not carried.
   No picture yet on the home (the Compte page sets it in AccountsService,
   6.11).
-- The home's cards say "À venir" for Écrans and Réseau until their
-  tickets give their state (Son's says its output, 6.5; Bluetooth's how
-  many are connected, 6.7); Énergie's says the battery (or "Sur
-  secteur") and the suspend delay; Apparence's "Sombre · français".
+- The home's cards: Écrans says the lit screen's size ("2560 × 1600"),
+  or how many are lit ("2 écrans", #926); Son's its output (6.5);
+  Bluetooth's how many are connected (6.7); Énergie's the battery (or
+  "Sur secteur") and the suspend delay; Apparence's the theme and the
+  language the desktop is in ("Sombre · français", #926).
 - The keyboard's ring is drawn on the piece's own edge, not 2 px outside
   it; the labels' 0.1 em letter spacing is not drawn (iced has none).
 - A found row is scrolled to at once, without a smooth scroll; then it

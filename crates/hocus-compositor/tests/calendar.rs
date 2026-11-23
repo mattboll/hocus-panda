@@ -609,7 +609,8 @@ fn a_click_on_the_date_or_the_clock_opens_it_on_today_and_a_second_click_closes_
         (popover.x, popover.y, popover.width),
         (POPOVER.0, POPOVER.1, 320)
     );
-    assert!(popover.height <= 580, "{popover:?}");
+    // About 580, and "Agendas…" under the agenda (#926).
+    assert!(popover.height <= 620, "{popover:?}");
     assert!(
         shown
             .contains("month=2026-11 title=«Novembre 2026» today_button=faint selected=2026-11-04"),
@@ -818,9 +819,10 @@ fn a_busy_days_list_scrolls_past_236_px_and_the_wheel_scrolls_it() -> anyhow::Re
     let list = field(&shown, "list").unwrap_or_default();
     assert!(list.starts_with("236/"), "{shown}");
     assert!(shown.contains("scroll=0 "), "{shown}");
-    // Its height at most about 560.
+    // Its height at most about 560, and the Settings' link under the
+    // list (#926).
     let popover = bed.popover()?;
-    assert!((540..=580).contains(&popover.height), "{popover:?}");
+    assert!((580..=620).contains(&popover.height), "{popover:?}");
     // The wheel over the list.
     let mark = bed.mark();
     let over = (
@@ -951,7 +953,11 @@ fn the_keyboard_moves_a_day_a_week_a_month_and_enter_chooses_the_day() -> anyhow
         mark,
         &["selected=2026-12-13", "note=«Rien de prévu ce jour-là.»"],
     )?;
-    // Tab: from the days round to the arrows, then "Aujourd'hui".
+    // Tab: from the days to "Agendas…" (#926), round to the arrows, then
+    // "Aujourd'hui".
+    let mark = bed.mark();
+    bed.press(KEY_TAB)?;
+    bed.shows(mark, &["focus=Some(Calendars)"])?;
     let mark = bed.mark();
     bed.press(KEY_TAB)?;
     bed.shows(mark, &["focus=Some(Previous)"])?;
@@ -1127,6 +1133,39 @@ fn with_no_calendar_the_agenda_says_none_is_connected_and_offers_day_1s_popover(
         "{:?} {popover:?}",
         common::drawn_popovers(&bed.hp)
     );
+    Ok(())
+}
+
+#[test]
+fn with_a_calendar_agendas_opens_settings_calendar_and_tasks() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, WITH_FIXTURE, FIXTURE, FormChoice::Full)?;
+    // The Settings a script in the shell's `PATH`, saying how it was run.
+    let root = bed._dir.path().to_owned();
+    let settings = root.join("bin/hocus-settings");
+    let ran = root.join("launched/settings");
+    std::fs::write(
+        &settings,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\n", ran.display()),
+    )?;
+    std::fs::set_permissions(&settings, std::fs::Permissions::from_mode(0o755))?;
+    let mark = bed.mark();
+    let (popover, shown) = bed.open()?;
+    assert!(shown.contains("calendars=«Agendas…»"), "{shown}");
+    assert!(!shown.contains("choose="), "{shown}");
+    let at = bed.target(mark, "Calendars")?;
+    bed.click_in(popover, at)?;
+    let opened = bed.hp.dispatch_until(common::WAIT, |_| {
+        std::fs::read_to_string(&ran).is_ok_and(|r| r.trim() == "agenda")
+    })?;
+    assert!(opened, "{:?}", std::fs::read_to_string(&ran));
+    let closed = bed
+        .hp
+        .dispatch_until(common::WAIT, |hp| common::drawn_popovers(hp).is_empty())?;
+    assert!(closed, "the calendar stayed open");
     Ok(())
 }
 
