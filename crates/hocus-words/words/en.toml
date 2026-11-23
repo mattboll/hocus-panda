@@ -760,10 +760,6 @@ connect_to = "Connect to “{sheet_name}”"
 vpn = "VPN “{sheet_name}”"
 
 [settings.app_network_view]
-later = "Later"
-wi_fi_hotspot = "Wi-Fi hotspot"
-make_the_computer_an_access_point = "Make the computer an access point for a phone or a tablet."
-later_2 = "LATER"
 networkmanager_does_not_answer = "NetworkManager does not answer"
 this_computer_s_network_is_managed = "This computer's network is managed by another tool, or this service is stopped. This page fills in as soon as it is back."
 the_radios_do_not_read_dev = "The radios do not read (/dev/rfkill)."

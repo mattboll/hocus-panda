@@ -1,6 +1,6 @@
 //! What the Réseau page draws (the approved mockup, variant A): airplane
 //! mode's card, WI-FI (the switch, the network in use, the saved
-//! networks' row), RÉSEAUX DISPONIBLES, PLUS TARD; the saved networks'
+//! networks' row), RÉSEAUX DISPONIBLES, CÂBLE, VPN; the saved networks'
 //! sub-page; the sheet over the page.
 
 use hocus_words::settings::app_network_view as words;
@@ -35,7 +35,6 @@ use crate::{
 /// mode's line, its tile.
 pub(super) const GREEN: Ink = Ink::Dark(rgb(0x6CC287));
 pub(super) const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
-const LATER: Ink = Ink::Dark(rgb(0xF5B44A));
 
 /// The page's glyphs: the mockup's 24 px stroke paths.
 const AIRPLANE: &str = "M10.6 4 C10.6 2.6 13.4 2.6 13.4 4 V9.6 L21 14.2 V16.2 L13.4 13.8 V18.4 L15.8 20.2 V21.4 L12 20.4 L8.2 21.4 V20.2 L10.6 18.4 V13.8 L3 16.2 V14.2 L10.6 9.6 Z";
@@ -282,23 +281,6 @@ fn ghost<'a>(said: String, press: Message, focused: bool) -> El<'a> {
     .into()
 }
 
-/// The amber "Plus tard".
-fn later<'a>(lang: Lang) -> El<'a> {
-    container(
-        text(words::LATER.get(lang))
-            .size(11.5)
-            .font(BOLD)
-            .color(LATER),
-    )
-    .padding([1, 7])
-    .style(boxed(
-        crate::theme::ink(rgba(245, 180, 74, 0.14)),
-        6.0,
-        Some((1.0, crate::theme::ink(rgba(245, 180, 74, 0.35)))),
-    ))
-    .into()
-}
-
 /// A group's label, and what it says on its right.
 fn group_head<'a>(words: &'static str, right: Option<El<'a>>) -> El<'a> {
     let mut head = row![label(words), Space::new().width(Length::Fill)]
@@ -427,31 +409,6 @@ impl App {
         }
         // VPN.
         page = page.push(self.network_vpn_group());
-        // PLUS TARD.
-        let hotspot = page_row(
-            tile(|c| wifi_glyph(4, 18.0, c), Tone::Plain, INERT),
-            name(
-                words::WI_FI_HOTSPOT.get(lang).to_owned(),
-                INERT,
-                Some(later(lang)),
-            ),
-            vec![line(
-                words::MAKE_THE_COMPUTER_AN_ACCESS_POINT.get(lang),
-                fade(DIM.get(), INERT),
-            )],
-            self.network_switch("network.hotspot", false, None, false),
-            Some("row:network.hotspot".to_owned()),
-            0.0,
-            false,
-            false,
-        );
-        page = page.push(
-            column![
-                group_head(words::LATER_2.get(lang), None),
-                card_box(hotspot)
-            ]
-            .spacing(8),
-        );
         container(page).id("page:network".to_owned()).into()
     }
 

@@ -573,7 +573,6 @@ blue for airplane mode on):
   missing: "Le module OpenVPN de NetworkManager n'est pas installé
   (network-manager-openvpn)."; another refusal: "NetworkManager n'a pas
   importé le fichier : …".
-- **PLUS TARD**: "Partage de connexion Wi-Fi", inert, amber chip.
 
 **The saved networks' sub-page**: "‹ Réseau", its title and line, one row
 per saved Wi-Fi connection, the one in use first, then by
