@@ -139,6 +139,8 @@ pub struct State {
     pub magnifier: crate::magnifier::Magnifier,
     /// The windows' opacity's wheel and its pill (#735).
     pub opacity: crate::opacity::Opacity,
+    /// The screens' numbers shown by the Settings' "Identifier" (#927).
+    pub identify: crate::identify::Identify,
     /// The screen light while the camera is in use (#619).
     pub light: crate::screen_light::ScreenLight,
     /// The Hocuspanda camera's program (#619, lot 2).
@@ -352,6 +354,7 @@ impl State {
             projects: crate::projects::Projects::default(),
             magnifier: crate::magnifier::Magnifier::default(),
             opacity: crate::opacity::Opacity::default(),
+            identify: crate::identify::Identify::default(),
             light: crate::screen_light::ScreenLight::default(),
             camera: crate::camera::HocusCamera::default(),
             voice: crate::voice::HocusVoice::default(),

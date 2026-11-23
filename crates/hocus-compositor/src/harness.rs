@@ -2586,6 +2586,22 @@ impl Headless {
         self.app.state.opacity_pill()
     }
 
+    /// What each screen shows of the Settings' "Identifier" now (#927):
+    /// its connector, its number and its words.
+    pub fn identified(&self) -> Vec<(String, u32, String)> {
+        self.app
+            .state
+            .identified()
+            .into_iter()
+            .map(|b| (b.output, b.number, b.words))
+            .collect()
+    }
+
+    /// How long the screens' numbers still show, on the motions' clock.
+    pub fn identify_left(&self) -> Option<Duration> {
+        self.app.state.identify_left()
+    }
+
     /// The stack, bottom first.
     pub fn stack(&self) -> Vec<WindowId> {
         self.app.state.model.stack().to_vec()

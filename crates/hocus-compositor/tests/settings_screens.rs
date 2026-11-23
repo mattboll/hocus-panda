@@ -11,7 +11,9 @@
 //! compositor after 15 s on the held clock, the file untouched; the
 //! compositor following the file's screens (mode, place, scale, off, the
 //! primary screen); the search's words; at rest, no commit; the night
-//! light's rows writing `[night-light]`, which the compositor takes.
+//! light's rows writing `[night-light]`, which the compositor takes;
+//! "Identifier" showing each screen's number on it for 3 s, counting
+//! again when pressed again, sent away by a click or `Esc` (#927).
 //!
 //! What the window shows is read from its log ("shows" and "places"
 //! lines, JSON), as `settings.rs` does.
@@ -1100,5 +1102,176 @@ fn screenshot_of_the_night_light() -> anyhow::Result<()> {
     let path = out.join("night-light.png");
     image.save(&path)?;
     eprintln!("{}", path.display());
+    Ok(())
+}
+
+// --- "Identifier" on the screens themselves (#927) ---------------------------------------
+
+/// A laptop's screen at 2 and a 34-inch one, the Settings open on the
+/// page, the clock held.
+fn identify_bed() -> anyhow::Result<Option<Bed>> {
+    let Some(mut bed) = Bed::start_on(FILE, &["2880x1800@2:340x210mm", "3440x1440:800x335mm"])?
+    else {
+        return Ok(None);
+    };
+    bed.hp.set_internal(LAPTOP);
+    bed.hp.hold_clock();
+    bed.open()?;
+    Ok(Some(bed))
+}
+
+/// "Identifier" pressed, and the numbers in: what the screens show.
+fn identify(bed: &mut Bed) -> anyhow::Result<Vec<(String, u32, String)>> {
+    bed.click("control:screens.identify")?;
+    // Their 3 s counted from now (the clock held), once the Settings
+    // asked.
+    let came = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.identify_left() == Some(Duration::from_secs(3))
+    })?;
+    anyhow::ensure!(
+        came,
+        "the screens never showed their numbers: {:?}",
+        bed.hp.identify_left()
+    );
+    bed.hp.step(Duration::from_millis(250))?;
+    Ok(bed.hp.identified())
+}
+
+/// The pixels around a screen's middle that differ between two pictures
+/// of it.
+fn middle_changed(a: &(i32, i32, Vec<u8>), b: &(i32, i32, Vec<u8>)) -> usize {
+    let (w, h, _) = *a;
+    let mut changed = 0;
+    for y in (h / 2 - 60)..(h / 2 + 60) {
+        for x in (w / 2 - 150)..(w / 2 + 150) {
+            let at = ((y * w + x) * 4) as usize;
+            if a.2.get(at..at + 3) != b.2.get(at..at + 3) {
+                changed += 1;
+            }
+        }
+    }
+    changed
+}
+
+#[test]
+fn identifier_shows_each_screens_number_on_it_for_3_s() -> anyhow::Result<()> {
+    let Some(mut bed) = identify_bed()? else {
+        return Ok(());
+    };
+    assert!(bed.hp.identified().is_empty(), "nothing at rest");
+    let before = bed.hp.screenshot(1)?;
+    let shown = identify(&mut bed)?;
+    // The drawing's numbers, each on its own screen, with its name and
+    // resolution.
+    assert_eq!(
+        shown,
+        [
+            (
+                LAPTOP.to_owned(),
+                1,
+                "Écran du portable · 2880 × 1800".to_owned()
+            ),
+            (
+                EXTERNAL.to_owned(),
+                2,
+                "Écran externe 34 pouces · 3440 × 1440".to_owned()
+            ),
+        ]
+    );
+    // The drawing enlarges its numbers as well.
+    bed.shows(|s| s["screens"]["identify"] == true)?;
+    // Drawn in the middle of the external screen, where nothing else is.
+    let during = bed.hp.screenshot(1)?;
+    assert!(
+        middle_changed(&before, &during) > 5_000,
+        "nothing drawn in its middle"
+    );
+    // Still there at 2.9 s, gone at 3 s, and nothing drawn after.
+    bed.hp.step(Duration::from_millis(2_650))?;
+    assert_eq!(bed.hp.identified().len(), 2);
+    bed.hp.step(Duration::from_millis(100))?;
+    assert!(bed.hp.identified().is_empty());
+    bed.hp.step(Duration::from_millis(100))?;
+    let after = bed.hp.screenshot(1)?;
+    assert_eq!(
+        middle_changed(&before, &after),
+        0,
+        "something left in its middle"
+    );
+    Ok(())
+}
+
+#[test]
+fn identifier_pressed_again_counts_its_3_s_again() -> anyhow::Result<()> {
+    let Some(mut bed) = identify_bed()? else {
+        return Ok(());
+    };
+    identify(&mut bed)?;
+    bed.hp.step(Duration::from_secs(2))?;
+    // Pressed again at 2.25 s: shown through to 5.25 s, without going out
+    // as the click lets go.
+    let shown = identify(&mut bed)?;
+    assert_eq!(shown.len(), 2);
+    bed.hp.step(Duration::from_millis(2_500))?;
+    assert_eq!(bed.hp.identified().len(), 2, "gone 3 s after the first");
+    bed.hp.step(Duration::from_millis(300))?;
+    assert!(bed.hp.identified().is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_click_or_esc_sends_the_numbers_away_early() -> anyhow::Result<()> {
+    let Some(mut bed) = identify_bed()? else {
+        return Ok(());
+    };
+    // A click on the external screen's desktop (the laptop's is 1440
+    // wide, logical): it fades out at once.
+    identify(&mut bed)?;
+    bed.click_at((1440.0 + 300.0, 300.0))?;
+    bed.hp.step(Duration::from_millis(100))?;
+    assert_eq!(bed.hp.identified().len(), 2, "fading out");
+    bed.hp.step(Duration::from_millis(150))?;
+    assert!(
+        bed.hp.identified().is_empty(),
+        "a click did not send it away"
+    );
+    // `Esc` as well (last: the window takes it too, and leaves the page).
+    identify(&mut bed)?;
+    chord(&mut bed.hp, &[common::KEY_ESC]);
+    bed.hp.step(Duration::from_millis(250))?;
+    assert!(bed.hp.identified().is_empty(), "Esc did not send it away");
+    Ok(())
+}
+
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_identifier() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = identify_bed()? else {
+        return Ok(());
+    };
+    identify(&mut bed)?;
+    bed.hp.pointer_move(5.0, 5.0);
+    // The window drawn with its numbers enlarged, and still.
+    bed.shows(|s| s["screens"]["identify"] == true)?;
+    wait(&mut bed.hp, Duration::from_millis(500))?;
+    bed.hp.step(Duration::from_millis(10))?;
+    for (index, name) in [(0, "identify-laptop.png"), (1, "identify-external.png")] {
+        let (w, h, px) = bed.hp.screenshot(index)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+    }
     Ok(())
 }
