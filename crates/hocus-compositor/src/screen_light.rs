@@ -301,8 +301,8 @@ impl State {
         let mut area = Rect::new(0, 0, size.w, size.h);
         // The bar's room as it settles, not as a form's switch draws it:
         // the frame is made again once, not at each frame of the motion.
-        if let Some(width) = self.panel.width(&output.name()) {
-            let column = (f64::from(width + hocus_link::EDGE) * scale).round() as i32;
+        if let Some(width) = self.bar_width(&output.name()) {
+            let column = (f64::from(width + self.bar_edge()) * scale).round() as i32;
             let column = column.clamp(0, size.w);
             match self.bar_side() {
                 hocus_link::Side::Right => area.w -= column,

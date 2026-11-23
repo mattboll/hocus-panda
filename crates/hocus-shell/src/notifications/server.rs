@@ -466,7 +466,7 @@ pub(super) struct Looked {
 pub(super) fn screens_scale() -> u32 {
     let bars = crate::popover::with(|c| c.bar_forms());
     bars.iter()
-        .map(|(bar, _)| crate::popover::kit::scale(bar))
+        .map(|(bar, _)| crate::popover::kit::drawn_scale(bar))
         .fold(1.0_f32, f32::max)
         .ceil() as u32
 }

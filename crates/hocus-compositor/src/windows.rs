@@ -937,14 +937,13 @@ impl State {
     fn bar_place(&self, id: WindowId) -> Option<Rectangle<f64, Logical>> {
         let output = self.output_of(id)?;
         let geometry = self.space.output_geometry(&output)?;
-        let bar = f64::from(self.panel.width(&output.name()).unwrap_or(0));
+        let bar = f64::from(self.bar_width(&output.name()).unwrap_or(0));
+        let edge = self.bar_edge();
         let x = match self.bar_side() {
             hocus_link::Side::Right => {
-                f64::from(geometry.loc.x + geometry.size.w)
-                    - f64::from(hocus_link::EDGE)
-                    - bar / 2.0
+                f64::from(geometry.loc.x + geometry.size.w) - f64::from(edge) - bar / 2.0
             }
-            hocus_link::Side::Left => f64::from(geometry.loc.x + hocus_link::EDGE) + bar / 2.0,
+            hocus_link::Side::Left => f64::from(geometry.loc.x + edge) + bar / 2.0,
         };
         let y = f64::from(geometry.loc.y) + f64::from(geometry.size.h) / 2.0;
         Some(Rectangle::new(

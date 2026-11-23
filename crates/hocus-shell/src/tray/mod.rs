@@ -185,7 +185,7 @@ pub fn start() {
 pub(crate) fn scale() -> f32 {
     crate::popover::with(|c| c.bar_forms())
         .iter()
-        .map(|(bar, _)| crate::popover::kit::scale(bar))
+        .map(|(bar, _)| crate::popover::kit::drawn_scale(bar))
         .fold(1.0_f32, f32::max)
 }
 

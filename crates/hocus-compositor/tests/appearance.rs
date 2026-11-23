@@ -7,7 +7,9 @@
 //!
 //! One test per decision: switching the file to light draws the bar and
 //! an open popover in light colours, live; the portal answers
-//! `color-scheme` and signals its change; the accent changes the bar's
+//! `color-scheme` and signals its change, and GNOME's
+//! `text-scaling-factor` (#928); the text size widens the bar and its
+//! popovers, live; the accent changes the bar's
 //! accent colour; the Settings window draws in the theme and follows the
 //! file; and once the switch is drawn, nothing commits at rest. Givre
 //! (#740): the bar in its night blue, its accent, nothing at rest; and a
@@ -199,6 +201,11 @@ impl Bed {
     /// The calendar, opened from the date once the day is read, drawn:
     /// its place.
     fn calendar(&mut self) -> anyhow::Result<Rect> {
+        self.calendar_from(DATE)
+    }
+
+    /// The same from the date at `date`.
+    fn calendar_from(&mut self, date: (f64, f64)) -> anyhow::Result<Rect> {
         let log = self.log.clone();
         let read = self
             .hp
@@ -214,16 +221,19 @@ impl Bed {
         let mut hovered = false;
         for _ in 0..50 {
             let from = plain(&log).len();
-            common::point(&mut self.hp, (DATE.0, 500.0))?;
+            common::point(&mut self.hp, (date.0, 500.0))?;
             common::wait(&mut self.hp, Duration::from_millis(50))?;
-            common::point(&mut self.hp, DATE)?;
+            common::point(&mut self.hp, date)?;
             common::wait(&mut self.hp, Duration::from_millis(100))?;
             if lit(&plain(&log), from) {
                 hovered = true;
                 break;
             }
         }
-        anyhow::ensure!(hovered, "the clock's group never lit under the pointer");
+        anyhow::ensure!(
+            hovered,
+            "the clock's group never lit under the pointer at {date:?}"
+        );
         self.hp.button(common::BTN_LEFT, true);
         self.hp.button(common::BTN_LEFT, false);
         let open = self
@@ -806,7 +816,15 @@ impl Portal {
     }
 
     fn read_all(&mut self) -> anyhow::Result<HashMap<String, HashMap<String, zbus::OwnedVariant>>> {
+        self.read_all_of("org.freedesktop.*")
+    }
+
+    fn read_all_of(
+        &mut self,
+        namespace: &str,
+    ) -> anyhow::Result<HashMap<String, HashMap<String, zbus::OwnedVariant>>> {
         let client = self.client.clone();
+        let namespace = namespace.to_owned();
         self.runtime.block_on(async move {
             let reply = client
                 .call_method(
@@ -814,7 +832,7 @@ impl Portal {
                     PATH,
                     Some(SETTINGS),
                     "ReadAll",
-                    &(vec!["org.freedesktop.*"],),
+                    &(vec![namespace],),
                 )
                 .await?;
             anyhow::Ok(reply.body().deserialize()?)
@@ -915,6 +933,132 @@ fn the_portal_answers_color_scheme_and_signals_its_change() -> anyhow::Result<()
     );
     let accent = <(f64, f64, f64)>::try_from(portal.read("accent-color")?)?;
     assert_eq!(accent, (0.357, 0.553, 0.937));
+    Ok(())
+}
+
+const GNOME: &str = "org.gnome.desktop.interface";
+
+/// #928: applications are told the text size as GNOME's
+/// `text-scaling-factor`, read and signalled as it changes.
+#[test]
+fn the_portal_tells_applications_the_text_size() -> anyhow::Result<()> {
+    let Some(mut portal) = Portal::start()? else {
+        return Ok(());
+    };
+    let all = portal.read_all_of(GNOME)?;
+    let factor = all
+        .get(GNOME)
+        .and_then(|keys| keys.get("text-scaling-factor"))
+        .and_then(|v| f64::try_from(&**v).ok());
+    assert_eq!(factor, Some(1.0), "{all:?}");
+    assert!(
+        !portal.read_all_of("org.freedesktop.*")?.contains_key(GNOME),
+        "asked of its own namespace only"
+    );
+    std::fs::write(
+        &portal.file,
+        format!("{FILE}\n[appearance]\ntext-scale = 1.3\n"),
+    )?;
+    let heard = std::sync::Arc::clone(&portal.heard);
+    let said = portal.hp.dispatch_until(WAIT, |_| {
+        heard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|(n, k, v)| {
+                n == GNOME
+                    && k == "text-scaling-factor"
+                    && f64::try_from(&**v).is_ok_and(|f| (f - 1.3).abs() < 1e-9)
+            })
+    })?;
+    anyhow::ensure!(said, "no SettingChanged: {:?}", portal.heard);
+    let client = portal.client.clone();
+    let read: zbus::OwnedVariant = portal.runtime.block_on(async move {
+        let reply = client
+            .call_method(
+                Some(PORTAL),
+                PATH,
+                Some(SETTINGS),
+                "Read",
+                &(GNOME, "text-scaling-factor"),
+            )
+            .await?;
+        anyhow::Ok(reply.body().deserialize()?)
+    })?;
+    assert!(f64::try_from(read).is_ok_and(|f| (f - 1.3).abs() < 1e-9));
+    Ok(())
+}
+
+/// #928: the text size, live: the bar widens with its text (the shell's
+/// surface, the glass, the room kept for it), and the calendar opens from
+/// the date where the bar now draws it, that much larger.
+#[test]
+fn the_text_size_widens_the_bar_and_its_popovers_live() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(WITH_DAY)? else {
+        return Ok(());
+    };
+    let bar = |hp: &Headless| hp.bar_surfaces().first().map(|(_, r)| r.width);
+    let drawn = bed.hp.dispatch_until(WAIT, |hp| bar(hp) == Some(196))?;
+    anyhow::ensure!(drawn, "the bar is {:?} wide", bar(&bed.hp));
+    let before = bed
+        .hp
+        .work_area()
+        .ok_or_else(|| anyhow::anyhow!("no work area"))?;
+    let small = bed.calendar()?;
+    // The date again: it closes.
+    bed.hp.button(common::BTN_LEFT, true);
+    bed.hp.button(common::BTN_LEFT, false);
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "the calendar stays");
+    bed.write(&format!("{WITH_DAY}\n[appearance]\ntext-scale = 1.3\n"))?;
+    // 196 × 1.3, 8 × 1.3 from the edge, rounded as the shell asks.
+    let wide = bed.hp.dispatch_until(WAIT, |hp| bar(hp) == Some(255))?;
+    anyhow::ensure!(wide, "the bar is {:?} wide", bar(&bed.hp));
+    // Its clock's surface too, which the date is on, at rest.
+    let clock = |hp: &Headless| {
+        hp.drawn_layers(hocus_link::CLOCK_NAMESPACE)
+            .first()
+            .map(|(_, r)| r.width)
+    };
+    let wide = bed.hp.dispatch_until(WAIT, |hp| clock(hp) == Some(252))?;
+    anyhow::ensure!(wide, "the clock is {:?} wide", clock(&bed.hp));
+    common::at_rest(&mut bed.hp)?;
+    assert_eq!(
+        bed.hp.bar_surfaces().first().map(|(_, r)| (r.x, r.y)),
+        Some((SCREEN.0 - 10 - 255, 10))
+    );
+    let glass = bed
+        .hp
+        .bars()
+        .first()
+        .and_then(|(name, _, _)| bed.hp.bar_place(name))
+        .ok_or_else(|| anyhow::anyhow!("no bar"))?;
+    assert_eq!((glass.x, glass.width), (SCREEN.0 - 10 - 255, 255));
+    let after = bed
+        .hp
+        .work_area()
+        .ok_or_else(|| anyhow::anyhow!("no work area"))?;
+    assert_eq!(before.right() - after.right(), (255 + 10) - (196 + 8));
+    // The date, where the bar draws it now: its place from the bar's
+    // corner, 1.3 times as far.
+    let k = 1.3;
+    let date = (
+        f64::from(SCREEN.0) - 10.0 - (f64::from(SCREEN.0) - 8.0 - DATE.0) * k,
+        10.0 + (DATE.1 - 8.0) * k,
+    );
+    let large = bed.calendar_from(date)?;
+    let want = (f64::from(small.width) * k).round() as i32;
+    assert!(
+        (large.width - want).abs() <= 1,
+        "the calendar {} wide, {want} wanted",
+        large.width
+    );
+    assert!(
+        large.right() <= SCREEN.0 - 10 - 255,
+        "beside the bar: {large:?}"
+    );
     Ok(())
 }
 

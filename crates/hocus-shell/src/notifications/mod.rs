@@ -811,10 +811,7 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             region: taken,
         } => {
             let mut messages: Vec<Message> = crate::layer::resize(id, size).into_iter().collect();
-            messages.push(Message::MarginChange {
-                id,
-                margin: crate::layer::margin(margin),
-            });
+            messages.push(crate::layer::moved(id, margin));
             if taken.is_some() {
                 messages.push(region(id, taken));
             }

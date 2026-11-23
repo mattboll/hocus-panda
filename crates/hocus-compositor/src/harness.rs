@@ -738,7 +738,10 @@ impl Headless {
             .panel
             .bars
             .iter()
-            .map(|(name, bar)| (name.clone(), bar.form, bar.width_at(now)))
+            .map(|(name, bar)| {
+                let width = state.text_scale().len(bar.width_at(now));
+                (name.clone(), bar.form, width)
+            })
             .collect()
     }
 

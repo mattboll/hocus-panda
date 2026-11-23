@@ -1221,8 +1221,11 @@ impl State {
             Scale::from(scale),
             look.alpha,
         );
-        let (mx, my) = hocus_link::launcher_middle(f64::from(size.w), f64::from(size.h));
-        let middle = Point::<f64, Logical>::from((mx, my)).to_physical_precise_round(scale);
+        // The shell lays the launcher out at the text size (#928): its
+        // middle on the screen as large as the shell sees it, then back.
+        let k = self.text_scale().factor();
+        let (mx, my) = hocus_link::launcher_middle(f64::from(size.w) / k, f64::from(size.h) / k);
+        let middle = Point::<f64, Logical>::from((mx * k, my * k)).to_physical_precise_round(scale);
         out.extend(surfaces.into_iter().map(|e| {
             OutputElements::Scaled(RescaleRenderElement::from_element(e, middle, look.scale))
         }));
@@ -1334,7 +1337,7 @@ impl State {
                 continue;
             }
             let mut at = geometry.loc.to_f64();
-            at.y += look.drop;
+            at.y += look.drop * self.text_scale().factor();
             let loc: Point<i32, Physical> = at.to_physical_precise_round(scale);
             let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                 AsRenderElements::<R>::render_elements(
@@ -1346,7 +1349,8 @@ impl State {
                 );
             if self.shell.software {
                 let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-                let radius = (crate::launcher::TOAST_RADIUS * scale).round() as i32;
+                let radius = self.text_scale().len(crate::launcher::TOAST_RADIUS);
+                let radius = (radius * scale).round() as i32;
                 out.extend(surfaces.into_iter().map(|e| {
                     OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
                 }));
@@ -1424,8 +1428,10 @@ impl State {
             else {
                 continue;
             };
+            // The panda at the text size (#928), and its way out with it.
+            let k = self.text_scale().factor();
             let mut at = geometry.loc.to_f64();
-            at.x += look.shift * self.toward_bar();
+            at.x += look.shift * k * self.toward_bar();
             let loc: Point<i32, Physical> = at.to_physical_precise_round(scale);
             let size: smithay::utils::Size<i32, Physical> =
                 geometry.size.to_physical_precise_round(scale);
@@ -1440,7 +1446,7 @@ impl State {
             }
             let clip = Rectangle::new((from, loc.y).into(), (width, size.h).into());
             let radius = if self.shell.software {
-                (crate::peek::CARD_RADIUS * scale).round() as i32
+                (crate::peek::CARD_RADIUS * k * scale).round() as i32
             } else {
                 0
             };
@@ -1576,8 +1582,10 @@ impl State {
         let scale = output.current_scale().fractional_scale();
         // The full bar's place and the blur's reach around it, whatever the
         // form: a switch does not draw it again.
-        let edge = f64::from(hocus_link::EDGE);
-        let full = f64::from(hocus_link::Form::Full.width());
+        let edge = f64::from(self.bar_edge());
+        let full = self
+            .text_scale()
+            .len(f64::from(hocus_link::Form::Full.width()));
         let reach = crate::glass::REACH;
         let screen = Rectangle::<f64, Logical>::from_size(size.to_f64());
         let x = match self.bar_side() {
@@ -1603,7 +1611,8 @@ impl State {
             behind,
         )?;
         let pane: Rectangle<i32, Physical> = bar.to_physical_precise_round(scale);
-        glass_piece(renderer, blurred, pane, scale, 1.0, hocus_link::RADIUS)
+        let radius = self.text_scale().len(hocus_link::RADIUS);
+        glass_piece(renderer, blurred, pane, scale, 1.0, radius)
     }
 
     /// The glass under the shell's popovers on `output` at `now`, as under
@@ -1653,7 +1662,7 @@ impl State {
             let Some(around) = Rectangle::<f64, Logical>::new(
                 (rect.loc.x - reach, rect.loc.y - reach - rise).into(),
                 (
-                    rect.size.w + hocus_link::POPOVER_SHIFT + 2.0 * reach,
+                    rect.size.w + hocus_link::POPOVER_SHIFT * shown.zoom + 2.0 * reach,
                     rect.size.h + 2.0 * reach + rise,
                 )
                     .into(),

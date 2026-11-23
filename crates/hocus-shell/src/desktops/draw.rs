@@ -163,12 +163,7 @@ fn tell_tiles(bar: &str, tiles: &[(Item, Rectangle)], shown: &[Shown]) {
             Some(DeskTile {
                 output: shown.get(usize::from(*row))?.screen.output.clone(),
                 desktop: *index,
-                rect: [
-                    r.x.round() as i32,
-                    r.y.round() as i32,
-                    r.width.round() as i32,
-                    r.height.round() as i32,
-                ],
+                rect: crate::layer::told(*r),
             })
         })
         .collect();

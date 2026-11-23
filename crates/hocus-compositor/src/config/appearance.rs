@@ -31,10 +31,12 @@ pub struct Appearance {
     /// focused.
     #[serde(deserialize_with = "accent")]
     pub accent: hocus_link::theme::Accent,
-    /// The Settings' text, from 80 to 150 %: written as `1.2`, held in
+    /// The text's size, from 80 to 150 % (#928): the Settings, the shell's
+    /// bar, popovers, launcher and notifications, and applications
+    /// (the portal's `text-scaling-factor`). Written as `1.2`, held in
     /// hundredths.
     #[serde(deserialize_with = "text_scale")]
-    pub text_scale: TextScale,
+    pub text_scale: hocus_link::TextScale,
 }
 
 /// The desktop's background, `[wallpaper]` (6.3, docs/design/settings.md).
@@ -225,22 +227,13 @@ pub(super) fn lock_look<'de, D: Deserializer<'de>>(
     })
 }
 
-/// `[appearance] text-scale`, in hundredths: 100 by default.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TextScale(pub u32);
-
-impl Default for TextScale {
-    fn default() -> Self {
-        Self(100)
-    }
-}
-
 pub(super) fn text_scale<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<TextScale, D::Error> {
+) -> Result<hocus_link::TextScale, D::Error> {
+    use hocus_link::TextScale;
     let scale = f64::deserialize(deserializer)?;
     let hundredths = (scale * 100.0).round();
-    if (80.0..=150.0).contains(&hundredths) {
+    if (f64::from(TextScale::LEAST)..=f64::from(TextScale::MOST)).contains(&hundredths) {
         Ok(TextScale(hundredths as u32))
     } else {
         Err(serde::de::Error::custom(format!(

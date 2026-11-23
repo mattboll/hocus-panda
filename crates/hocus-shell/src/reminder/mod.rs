@@ -1038,13 +1038,10 @@ impl Shown {
                         != (want.size, want.margin, want.tab)
                     {
                         messages.extend(crate::layer::resize(opened.id, want.size));
-                        messages.push(Message::MarginChange {
-                            id: opened.id,
-                            margin: crate::layer::margin(crate::side::moved(
-                                opened.id,
-                                want.margin,
-                            )),
-                        });
+                        messages.push(crate::layer::moved(
+                            opened.id,
+                            crate::side::moved(opened.id, want.margin),
+                        ));
                         messages.push(crate::notifications::region(opened.id, Some(want.tab)));
                         opened.size = want.size;
                         opened.margin = want.margin;

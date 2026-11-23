@@ -7,7 +7,9 @@
 //! speaks the language; applications are told the theme through the
 //! portal; the cursor changes at once. The window draws in the theme and
 //! speaks the language too, as soon as the file says them: it is the
-//! page's own preview. `text-scale` sizes the Settings window.
+//! page's own preview. `text-scale` sizes the Settings window, the
+//! shell's bar, popovers, launcher and notifications, and applications
+//! (#928).
 
 use hocus_words::settings::appearance as words;
 use std::{path::PathBuf, sync::OnceLock};
@@ -431,7 +433,7 @@ pub fn settings() -> &'static [Setting] {
                 section: SectionId::Appearance,
                 group: TEXT,
                 name: words::TEXT_SIZE,
-                line: Some(words::THE_SETTINGS_WINDOW_WITHOUT_CHANGING_THE),
+                line: Some(words::THE_DESKTOP_AND_THE_APPLICATIONS),
                 keywords: (
                     &["police", "grand", "petit", "zoom", "agrandir", "taille"],
                     &["font", "big", "small", "zoom", "larger", "text size"],
