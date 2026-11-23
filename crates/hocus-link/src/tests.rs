@@ -156,6 +156,7 @@ fn to_shell() -> Vec<ToShell> {
             color: wallpaper::DEFAULT_COLOR,
             outputs: vec![("eDP-1".into(), wallpaper::Picture::Plain)],
         }),
+        ToShell::TextScale(TextScale(130)),
         ToShell::Locale(locale::Locale {
             language: locale::Language::Chosen(locale::Lang::English),
             date: locale::DateFormat::Short,
@@ -1736,4 +1737,36 @@ fn the_voice_s_lines_read_back() {
         assert_eq!(FromVoice::read(&said.line()), Some(said));
     }
     assert_eq!(FromVoice::read("INFO the source read=true"), None);
+}
+
+#[test]
+fn the_text_size_scales_lengths_and_names_its_surfaces() {
+    let k = TextScale(130);
+    assert_eq!(k.whole(196), 255);
+    assert_eq!(k.whole(EDGE), 10);
+    assert!((k.len(RADIUS) - 18.2).abs() < 1e-9);
+    assert_eq!(TextScale::of(200), TextScale(150));
+    assert_eq!(TextScale::of(10), TextScale(80));
+    assert_eq!(TextScale::default().whole(196), 196);
+    for followed in [
+        NAMESPACE,
+        CLOCK_NAMESPACE,
+        POPOVER_NAMESPACE,
+        TRAY_NAMESPACE,
+        LAUNCHER_NAMESPACE,
+        BUBBLES_WAITING_NAMESPACE,
+    ] {
+        assert!(follow_text_scale(followed), "{followed}");
+    }
+    assert!(follow_text_scale(&bubble_namespace(3)));
+    assert!(follow_text_scale(&reminder_namespace(2)));
+    for kept in [
+        LOCK_NAMESPACE,
+        AUTH_NAMESPACE,
+        CAPTURE_TOOLBAR_NAMESPACE,
+        EMOJI_NAMESPACE,
+        MCP_TAG_NAMESPACE,
+    ] {
+        assert!(!follow_text_scale(kept), "{kept}");
+    }
 }

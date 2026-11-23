@@ -819,6 +819,8 @@ impl State {
         self.tell_shell(self.bar_look());
         self.wallpaper_accent_now();
         self.tell_shell(ToShell::Theme(self.theme_choice()));
+        // Before the bars, which open at it.
+        self.tell_shell(ToShell::TextScale(self.text_scale()));
         self.tell_shell(ToShell::Wallpaper(self.wallpapers()));
         self.tell_shell(ToShell::Locale(self.config.locale));
         self.tell_shell(ToShell::Clock(self.config.panel.clock.look()));

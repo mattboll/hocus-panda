@@ -224,10 +224,10 @@ pub fn form(bar: &str, form: Form, switching: bool) -> Vec<Message> {
             messages.extend(crate::layer::resize(place.id, size));
         }
         if place.asked.1 != margin {
-            messages.push(Message::MarginChange {
-                id: place.id,
-                margin: crate::layer::margin(crate::side::moved(place.id, margin)),
-            });
+            messages.push(crate::layer::moved(
+                place.id,
+                crate::side::moved(place.id, margin),
+            ));
         }
         place.asked = (size, margin);
         messages.push(region(place.id, form, switching));

@@ -397,7 +397,8 @@ pub struct App {
     lang: Lang,
     /// The session's language, which `[locale] language = "system"` means.
     system_lang: Lang,
-    /// `[appearance] text-scale`: the window is drawn this much larger.
+    /// `[appearance] text-scale`: the window is drawn this much larger, as
+    /// the shell's surfaces are (#928).
     text_scale: f32,
     user: String,
     window: Option<window::Id>,

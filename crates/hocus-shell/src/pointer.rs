@@ -83,9 +83,16 @@ struct Seat {
 #[derive(Debug, Clone, Copy)]
 struct Enter {
     serial: u32,
-    /// Where it came in, in the surface's coordinates (iced's: the shell
-    /// sets no scale of its own).
+    /// Where it came in, in the surface's coordinates: the compositor's
+    /// pixels, which a surface drawn at the text size lays out divided by
+    /// it ([`Entered`]'s zoom).
     at: iced::Point,
+}
+
+thread_local! {
+    /// The zoom of the surface whose widgets handle their events now
+    /// (#928): [`Entered`] sets it around them.
+    static ZOOM: Cell<f32> = const { Cell::new(1.0) };
 }
 
 impl Pointer {
@@ -180,7 +187,10 @@ fn entered_at() -> Option<iced::Point> {
         *pointer = None;
         return None;
     }
-    p.seat.entered.map(|enter| enter.at)
+    let zoom = ZOOM.with(Cell::get);
+    p.seat
+        .entered
+        .map(|enter| iced::Point::new(enter.at.x / zoom, enter.at.y / zoom))
 }
 
 /// Sets the shape for `interaction` if the pointer is on one of the
@@ -224,15 +234,19 @@ fn shape(interaction: mouse::Interaction) -> Shape {
     }
 }
 
-/// A surface's widgets, whose shape is set again at each enter.
+/// A surface's widgets, whose shape is set again at each enter; the
+/// surface drawn `zoom` times larger than its widgets say (the text size,
+/// `layer::zoom`).
 pub struct Entered<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
+    zoom: f32,
 }
 
 impl<'a, Message, Theme, Renderer> Entered<'a, Message, Theme, Renderer> {
-    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>, zoom: f32) -> Self {
         Self {
             content: content.into(),
+            zoom,
         }
     }
 }
@@ -338,6 +352,7 @@ where
                 handle();
             }
         }
+        let was = ZOOM.with(|zoom| zoom.replace(self.zoom));
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -348,6 +363,7 @@ where
             shell,
             viewport,
         );
+        ZOOM.with(|zoom| zoom.set(was));
     }
 
     fn mouse_interaction(

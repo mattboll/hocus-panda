@@ -1056,7 +1056,7 @@ mod tests {
         );
         assert_eq!(config.locale.date, DateFormat::Iso);
         assert_eq!(config.locale.time, Some(TimeFormat::H12));
-        assert_eq!(config.appearance.text_scale, TextScale(120));
+        assert_eq!(config.appearance.text_scale, hocus_link::TextScale(120));
         let config: Config = toml::from_str("")?;
         assert_eq!(config.locale, Default::default());
         for bad in [

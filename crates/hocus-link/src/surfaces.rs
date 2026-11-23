@@ -129,10 +129,16 @@ pub const MUSIC_NAMESPACE: &str = "hocus-bar-music";
 /// out a surface this short ([`shows_nothing`]): it would show black.
 pub const IDLE_HEIGHT: i32 = 10;
 
-/// Whether a surface of `namespace`, `height` tall, is one kept while it
-/// shows nothing ([`IDLE_HEIGHT`]).
-pub fn shows_nothing(namespace: &str, height: i32) -> bool {
-    matches!(namespace, WINDOWS_NAMESPACE | MUSIC_NAMESPACE) && height <= IDLE_HEIGHT
+/// Whether a surface of `namespace`, `height` tall at the text size
+/// `text`, is one kept while it shows nothing: the windows' and the
+/// music's ([`IDLE_HEIGHT`]), the agents' group's and the to-do list's
+/// (one pixel, which at a text size above 100 % iced does not cover).
+pub fn shows_nothing(namespace: &str, height: i32, text: TextScale) -> bool {
+    match namespace {
+        WINDOWS_NAMESPACE | MUSIC_NAMESPACE => height <= text.whole(IDLE_HEIGHT),
+        AGENTS_NAMESPACE | TASKS_NAMESPACE => height <= 1,
+        _ => false,
+    }
 }
 /// The tooltip's corners, logical pixels.
 pub const TIP_RADIUS: f64 = 9.0;
@@ -233,4 +239,73 @@ pub const LAUNCHER_BOTTOM: f64 = 98.0 * LAUNCHER_ZOOM;
 pub fn launcher_middle(width: f64, height: f64) -> (f64, f64) {
     let bottom = (height - LAUNCHER_BOTTOM).max(LAUNCHER_TOP);
     (width / 2.0, (LAUNCHER_TOP + bottom) / 2.0)
+}
+
+/// `[appearance] text-scale` (6.2, #928), in hundredths, from 80 to 150:
+/// the shell draws the surfaces that [`follow_text_scale`] this much
+/// larger, the bar widening with its text, and the compositor puts and
+/// rounds them by it (the bar's room, its glass, the popovers' and the
+/// bubbles' corners and motion). Each side multiplies its own sizes by
+/// it at one place: the shell's at its layer surfaces' sizes, margins and
+/// input regions, the compositor's where it says where the shell's
+/// surfaces are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct TextScale(pub u32);
+
+impl Default for TextScale {
+    fn default() -> Self {
+        Self::NORMAL
+    }
+}
+
+impl TextScale {
+    /// 100 %: every size as the mockups draw it.
+    pub const NORMAL: Self = Self(100);
+    /// The range the Settings' slider and the file take.
+    pub const LEAST: u32 = 80;
+    pub const MOST: u32 = 150;
+
+    /// It, within its range.
+    pub const fn of(hundredths: u32) -> Self {
+        if hundredths < Self::LEAST {
+            Self(Self::LEAST)
+        } else if hundredths > Self::MOST {
+            Self(Self::MOST)
+        } else {
+            Self(hundredths)
+        }
+    }
+
+    /// How many times larger: 1.3 for 130 %.
+    pub fn factor(self) -> f64 {
+        f64::from(self.0) / 100.0
+    }
+
+    /// A length `px` of a mockup's, scaled.
+    pub fn len(self, px: f64) -> f64 {
+        px * self.factor()
+    }
+
+    /// A length in whole pixels, scaled and rounded: as the shell asks for
+    /// its surfaces' sizes and margins.
+    pub fn whole(self, px: i32) -> i32 {
+        (f64::from(px) * self.factor()).round() as i32
+    }
+}
+
+/// Whether the shell's surfaces of `namespace` are drawn at the text size
+/// ([`TextScale`]): the bar and everything of its (its pieces, its
+/// popovers, the peeking panda, its tooltips and its tray), the
+/// notifications' bubbles, the meetings' reminders beside it, and the
+/// launcher with its toast. The others (the lock, the capture's and the
+/// sharing's surfaces, the dialogs over a dimmed screen, the agents' tags
+/// on windows) keep their sizes.
+pub fn follow_text_scale(namespace: &str) -> bool {
+    namespace.starts_with(NAMESPACE)
+        || is_bubble(namespace)
+        || namespace == BUBBLES_WAITING_NAMESPACE
+        || is_reminder(namespace)
+        || namespace == LAUNCHER_NAMESPACE
+        || namespace == LAUNCHER_TOAST_NAMESPACE
 }

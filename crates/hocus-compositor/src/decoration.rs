@@ -79,6 +79,18 @@ impl ShadowStyle {
         alpha: 0.5,
         radius: RADIUS,
     };
+
+    /// The same around a surface drawn `k` times its mockup's size (the
+    /// text size, #928): its offset, blur and corners `k` times theirs.
+    pub fn zoomed(self, k: f64) -> Self {
+        Self {
+            dx: self.dx * k,
+            dy: self.dy * k,
+            blur: self.blur * k,
+            radius: self.radius * k,
+            ..self
+        }
+    }
 }
 
 /// The parts of `rect` outside its rounded corners, one rectangle per pixel

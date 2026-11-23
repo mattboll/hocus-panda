@@ -104,10 +104,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Resize { id, size, margin } => crate::layer::resize(id, size)
             .into_iter()
-            .chain(margin.map(|margin| Message::MarginChange {
-                id,
-                margin: crate::layer::margin(crate::side::moved(id, margin)),
-            }))
+            .chain(margin.map(|margin| crate::layer::moved(id, crate::side::moved(id, margin))))
             .collect(),
         Effect::Closing => {
             tell(ToCompositor::Closing(POPOVER_NAMESPACE.to_owned()));
@@ -139,13 +136,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
         }
         Effect::Ring { bar, rect } => {
             if bar != crate::ALONE {
-                tell(ToCompositor::Ring(hocus_link::Row {
-                    output: bar,
-                    x: rect.x.round() as i32,
-                    y: rect.y.round() as i32,
-                    width: rect.width.round() as i32,
-                    height: rect.height.round() as i32,
-                }));
+                tell(ToCompositor::Ring(row_on(bar, rect)));
             }
             Vec::new()
         }
@@ -162,13 +153,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             Vec::new()
         }
         Effect::GoToAgent { id, bar, row } => {
-            let row = (bar != crate::ALONE).then(|| hocus_link::Row {
-                output: bar,
-                x: row.x.round() as i32,
-                y: row.y.round() as i32,
-                width: row.width.round() as i32,
-                height: row.height.round() as i32,
-            });
+            let row = (bar != crate::ALONE).then(|| row_on(bar, row));
             tell(ToCompositor::GoToAgent { id, row });
             Vec::new()
         }
@@ -560,5 +545,18 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 namespace: Some(hocus_link::SHARE_CHOOSER_NAMESPACE.to_owned()),
             },
         )],
+    }
+}
+
+/// `rect` on bar `bar`, as the compositor is told it: in its pixels, at
+/// the text size.
+fn row_on(bar: String, rect: iced::Rectangle) -> hocus_link::Row {
+    let [x, y, width, height] = crate::layer::told(rect);
+    hocus_link::Row {
+        output: bar,
+        x,
+        y,
+        width,
+        height,
     }
 }

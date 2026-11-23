@@ -71,13 +71,13 @@ impl State {
         let Some(screen) = self.space.output_geometry(output) else {
             return;
         };
-        let edge = hocus_link::EDGE;
+        let edge = self.bar_edge();
         // The bar's frame starts at its outer edge, its `x` negative
         // inside it; on the left, mirrored.
         let x = match self.bar_side() {
             hocus_link::Side::Right => screen.loc.x + screen.size.w - edge + row.x,
             hocus_link::Side::Left => {
-                let bar = self.panel.width(&row.output).unwrap_or(0);
+                let bar = self.bar_width(&row.output).unwrap_or(0);
                 screen.loc.x + edge + bar + row.x
             }
         };
