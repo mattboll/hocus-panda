@@ -3690,7 +3690,10 @@ ring left out), with the maintainer's spec (issue #531).
   no tray). An item registers by its bus name (its object at
   `/StatusNotifierItem`) or its object's path (on the bus it calls from);
   `org.kde.StatusNotifierItem` is read, else
-  `org.freedesktop.StatusNotifierItem`. It goes when its name's owner
+  `org.freedesktop.StatusNotifierItem`. An item that does not answer
+  within 1 s, or not yet (an application started with the session may
+  register before it serves its object), is read again after 0.25, 0.5,
+  1, 2 and 4 s, then left until it signals. It goes when its name's owner
   does (`NameOwnerChanged`). Items keep the order in which they (by their
   `Id`) first registered this session, a restarted application its
   place. Everything is on the tray's thread; what the bar asks runs

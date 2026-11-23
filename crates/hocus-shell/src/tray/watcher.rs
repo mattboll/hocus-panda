@@ -19,7 +19,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, PoisonError},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use hocus_link::NOTIFICATIONS_BUS_ENV;
@@ -44,6 +44,20 @@ const FDO_ITEM: &str = "org.freedesktop.StatusNotifierItem";
 const ITEM_PATH: &str = "/StatusNotifierItem";
 const MENU: &str = "com.canonical.dbusmenu";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
+/// How long one read waits for an item's answer.
+const ANSWER_WITHIN: Duration = Duration::from_secs(1);
+/// How long to wait before reading an item again when it did not answer.
+/// An application started with the session (Slack, Electron's) may
+/// register its item before it serves it; read once, it would never show
+/// until it next signals, which may be never. About 8 s of waits, and
+/// [`ANSWER_WITHIN`] at most a try.
+const READ_AGAIN: [Duration; 5] = [
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+];
 
 type Props = HashMap<String, OwnedVariant>;
 
@@ -348,6 +362,37 @@ fn place(service: &str, sender: &str) -> Option<(String, String)> {
     }
 }
 
+/// An item's properties, from the first of `order`'s interfaces that
+/// answers with some; `None` when neither does (yet).
+async fn get_all(
+    connection: &Connection,
+    owner: &str,
+    path: &str,
+    order: [&'static str; 2],
+) -> Option<Props> {
+    for interface in order {
+        let args = (interface,);
+        let call = connection.call_method(Some(owner), path, Some(PROPERTIES), "GetAll", &args);
+        // A name whose object is not served yet may never answer (until the
+        // bus's 25 s): give up on this try, the next comes soon.
+        let Ok(reply) = tokio::time::timeout(ANSWER_WITHIN, call).await else {
+            tracing::debug!(owner, interface, "a tray item did not answer");
+            continue;
+        };
+        match reply.and_then(|r| r.body().deserialize::<Props>()) {
+            Ok(mut read) if !read.is_empty() => {
+                if let Ok(name) = OwnedVariant::try_from(Variant::from(interface)) {
+                    read.insert("\0interface".to_owned(), name);
+                }
+                return Some(read);
+            }
+            Ok(_) => {}
+            Err(err) => tracing::debug!(%err, owner, interface, "a tray item not read"),
+        }
+    }
+    None
+}
+
 /// What an item says it is, `Passive` ones not shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
@@ -567,33 +612,22 @@ impl Tray {
         );
         let inputs = self.inputs.clone();
         tokio::spawn(async move {
-            let mut props = None;
             let order = if first == KDE_ITEM {
                 [KDE_ITEM, FDO_ITEM]
             } else {
                 [FDO_ITEM, KDE_ITEM]
             };
-            for interface in order {
-                let reply = connection
-                    .call_method(
-                        Some(owner.as_str()),
-                        path.as_str(),
-                        Some(PROPERTIES),
-                        "GetAll",
-                        &(interface,),
-                    )
-                    .await;
-                match reply.and_then(|r| r.body().deserialize::<Props>()) {
-                    Ok(mut read) if !read.is_empty() => {
-                        if let Ok(name) = OwnedVariant::try_from(Variant::from(interface)) {
-                            read.insert("\0interface".to_owned(), name);
-                        }
-                        props = Some(read);
-                        break;
-                    }
-                    Ok(_) => {}
-                    Err(err) => tracing::debug!(%err, owner, interface, "a tray item not read"),
+            let mut props = get_all(&connection, &owner, &path, order).await;
+            for wait in READ_AGAIN {
+                if props.is_some() {
+                    break;
                 }
+                tokio::time::sleep(wait).await;
+                tracing::debug!(key, owner, "a tray item read again");
+                props = get_all(&connection, &owner, &path, order).await;
+            }
+            if props.is_none() {
+                tracing::info!(key, owner, "a tray item that never answered");
             }
             let _ = inputs.send(Input::Read { key, props });
         });
