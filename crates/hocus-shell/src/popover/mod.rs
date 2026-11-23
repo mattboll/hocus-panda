@@ -566,17 +566,19 @@ impl Controller {
                 if let Phase::Open(open) = &self.phase {
                     let (bar, item, from) = (open.bar.clone(), open.item, open.from);
                     let shortcut = open.shortcut;
-                    self.close(now, &mut effects);
-                    if shortcut {
-                        return effects;
-                    }
-                    if let Some(place) = self.bars.get(&bar) {
+                    // The item's surface asks for the keyboard before the
+                    // popover goes: iced may carry the two in separate
+                    // turns, and the compositor gives the keyboard to the
+                    // windows in between, the keys typed then with it
+                    // (#937).
+                    if !shortcut && let Some(place) = self.bars.get(&bar) {
                         effects.push(Effect::Keyboard(
                             item.surface(place),
                             KeyboardInteractivity::Exclusive,
                         ));
                         self.ring.put(&bar, item, from);
                     }
+                    self.close(now, &mut effects);
                 }
             }
             Event::Hold => {
@@ -1120,8 +1122,9 @@ impl Controller {
         };
         let (from, to) = (item.surface(&place), next.surface(&place));
         if from != to {
-            effects.push(Effect::Keyboard(from, KeyboardInteractivity::None));
+            // Taken before it is let go, as from a popover (`Esc`).
             effects.push(Effect::Keyboard(to, KeyboardInteractivity::Exclusive));
+            effects.push(Effect::Keyboard(from, KeyboardInteractivity::None));
             effects.push(Effect::Wake(item.namespace(place.form)));
         }
         self.ring.put(&bar, next, rect);
@@ -1872,8 +1875,14 @@ mod tests {
         c.motion = false;
         let (id, _) = opened(&c.handle(press(), t)).expect("opened");
         let effects = c.handle(Event::Escape, t);
-        assert!(effects.contains(&Effect::Remove(id)));
-        assert!(effects.contains(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive)));
+        // The item asks for the keyboard before the popover goes (#937).
+        let at = |wanted: &Effect| effects.iter().position(|e| e == wanted);
+        let item = at(&Effect::Keyboard(levels, KeyboardInteractivity::Exclusive));
+        let gone = at(&Effect::Remove(id));
+        assert!(
+            item.is_some() && gone.is_some() && item < gone,
+            "{effects:?}"
+        );
         assert!(c.focused(BAR, Item::Sound));
         // Enter opens it again, taking the keyboard back from the item.
         let effects = c.handle(Event::ItemActivate, t);
@@ -2622,8 +2631,8 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                Effect::Keyboard(connections, KeyboardInteractivity::None),
                 Effect::Keyboard(desktops, KeyboardInteractivity::Exclusive),
+                Effect::Keyboard(connections, KeyboardInteractivity::None),
                 Effect::Wake(CONNECTIONS_NAMESPACE),
                 Effect::Wake(DESKTOPS_NAMESPACE),
             ]

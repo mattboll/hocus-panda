@@ -47,6 +47,7 @@ mod handlers;
 mod harness;
 mod holidays;
 pub mod hot_corner;
+mod identify;
 pub mod idle;
 mod ink;
 mod input;

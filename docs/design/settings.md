@@ -728,6 +728,23 @@ built-in panel, then by connector, and named "Écran du portable", "Écran
 externe 34 pouces" (its EDID's size), or "Écran 2" when its size is not
 known.
 
+**Identifier** (#927, approved 2026-11-23, mockup s32-half-built): for
+3 s, the drawing shows its numbers large, and each screen on shows its
+number in its middle (Manrope SemiBold 168 px), its name and resolution
+under it ("Écran du portable · 2560 × 1600", 22 px, dim), in a rounded
+glass box (`rgba(14, 17, 28, 0.94)`, the magnifier's pill's: the
+mockup's 78 % let a window's text show through, with nothing blurred
+behind; a 1 px rim at 14 % white, radius 36, its shadow 0 14 40 at
+45 %). The Settings say what each screen shows on their line (`identify
+[{"output":"eDP-1","number":1,"words":"…"}]`), so that the screens and
+the drawing never disagree; the compositor draws it over the windows and
+the bar, on the screen only (never in a capture, a recording or a
+share), taking neither the keyboard nor the pointer. It fades in and out
+in 200 ms, at once with reduced motion; a click let go anywhere, or
+`Esc`, sends it away early, and still goes where it was going; a second
+"Identifier" counts the 3 s again, without going out
+(`crates/hocus-compositor/src/identify.rs`). Nothing draws at rest.
+
 **Dragging** a screen (4 px before it counts) shows where it lands, a
 dashed green outline: on the side of the other nearest its centre (the
 centres' offset over half their summed sizes, the larger axis wins),
@@ -842,12 +859,10 @@ their keys (`outputs.NAME.scale`) but are not slots of the file.
 
 Not built here (to confirm): **mirroring** (no `mirror` key yet: the
 compositor does not draw one screen's picture on another; the row is
-"Plus tard", inert); **Identifier**'s overlay on the screens themselves
-(the drawing shows the numbers large for 3 s, the compositor draws
-nothing yet); a drop that would split three screens or more (only two are
-drawn against each other); the mockup's strip of the day under the
-night light's rows (the hours it warms drawn on a sky), left out until
-the maintainer asks for it.
+"Plus tard", inert); a drop that would split three screens or more
+(only two are drawn against each other); the mockup's strip of the day
+under the night light's rows (the hours it warms drawn on a sky), left
+out until the maintainer asks for it.
 
 ## Souris et pavé tactile (6.12)
 
