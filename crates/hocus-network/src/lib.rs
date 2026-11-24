@@ -8,9 +8,12 @@
 //!   the page's details ([`model::Details`]).
 //! - [`rfkill`]: the radios' switches (`/dev/rfkill`), for airplane mode.
 //! - [`secret`]: a password as it is typed, wiped when it goes.
+//! - [`agent`]: what NetworkManager asks its secret agent (the shell), and
+//!   what the agent answers and keeps.
 //!
 //! No smithay, no toolkit.
 
+pub mod agent;
 pub mod model;
 pub mod nm;
 pub mod rfkill;

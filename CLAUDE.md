@@ -323,6 +323,11 @@ tests (`crates/hocus-compositor/tests/polkit.rs`) run a dbus-daemon of
 their own with a fake polkit authority, a fake helper
 (`HOCUS_POLKIT_HELPER`; with it set, polkit's socket is never used) and
 accounts of their own (`HOCUS_AUTH_ETC`).
+The shell is NetworkManager's secret agent under the same gate (#930,
+polkit.md "NetworkManager's secrets"), keeping agent-owned secrets in the
+keyring of the bus the compositor names; its tests
+(`crates/hocus-compositor/tests/nm_secrets.rs`) run a fake NetworkManager
+and a fake keyring on dbus-daemons of their own, never the machine's.
 
 Project desktops (docs/design/projects.md) are kept in
 `$XDG_STATE_HOME/hocuspanda/projects` by the compositor as soon as one is

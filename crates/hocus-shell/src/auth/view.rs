@@ -50,31 +50,31 @@ use crate::{
 
 type El<'a> = Element<'a, Msg>;
 
-const WIDTH: f32 = AUTH_WIDTH as f32;
-const RADIUS: f32 = AUTH_RADIUS as f32;
-const BORDER: f32 = 1.0;
-const PAD_TOP: f32 = 20.0;
-const PAD_SIDE: f32 = 20.0;
-const PAD_BOTTOM: f32 = 18.0;
-const LEFT: f32 = BORDER + PAD_SIDE;
-const RIGHT: f32 = WIDTH - BORDER - PAD_SIDE;
+pub(super) const WIDTH: f32 = AUTH_WIDTH as f32;
+pub(super) const RADIUS: f32 = AUTH_RADIUS as f32;
+pub(super) const BORDER: f32 = 1.0;
+pub(super) const PAD_TOP: f32 = 20.0;
+pub(super) const PAD_SIDE: f32 = 20.0;
+pub(super) const PAD_BOTTOM: f32 = 18.0;
+pub(super) const LEFT: f32 = BORDER + PAD_SIDE;
+pub(super) const RIGHT: f32 = WIDTH - BORDER - PAD_SIDE;
 /// The header: the 44 px tile (radius 12) and its 20 px badge 5 px past
 /// it, ringed 2 px; 12 px after it the application's name (13 px 600)
 /// over the title (17 px 700), 2 px apart.
-const TILE: f32 = 44.0;
+pub(super) const TILE: f32 = 44.0;
 pub const ICON_PX: u32 = 32;
-const TILE_RADIUS: f32 = 12.0;
+pub(super) const TILE_RADIUS: f32 = 12.0;
 const BADGE: f32 = 20.0;
 const BADGE_OUT: f32 = 5.0;
 const BADGE_RING: f32 = 2.0;
-const TILE_GAP: f32 = 12.0;
-const APP: f32 = 13.0;
-const TITLE: f32 = 17.0;
-const TITLE_GAP: f32 = 2.0;
+pub(super) const TILE_GAP: f32 = 12.0;
+pub(super) const APP: f32 = 13.0;
+pub(super) const TITLE: f32 = 17.0;
+pub(super) const TITLE_GAP: f32 = 2.0;
 /// polkit's message, 14 px under: 14.5 px on 1.5 lines.
-const MESSAGE_GAP: f32 = 14.0;
-const MESSAGE: f32 = 14.5;
-const MESSAGE_LINE: f32 = 1.5;
+pub(super) const MESSAGE_GAP: f32 = 14.0;
+pub(super) const MESSAGE: f32 = 14.5;
+pub(super) const MESSAGE_LINE: f32 = 1.5;
 /// The account, 16 px under: a 40 px avatar (#649), 10 px before the
 /// name (14.5 px 700) over "administrateur" (12.5 px).
 const ACCOUNT_GAP: f32 = 16.0;
@@ -102,19 +102,19 @@ const PERSON_TEXT: f32 = 13.5;
 const CHECK: f32 = 14.0;
 /// The field, 14 px under: 44 px, radius 12, 14 px in on the left, 10 on
 /// the right; a dot per character; Caps Lock's 22 px sign.
-const FIELD_GAP: f32 = 14.0;
-const FIELD: f32 = 44.0;
-const FIELD_RADIUS: f32 = 12.0;
-const FIELD_LEFT: f32 = 14.0;
-const FIELD_RIGHT: f32 = 10.0;
-const FIELD_TEXT: f32 = 16.0;
-const CAPS: f32 = 22.0;
+pub(super) const FIELD_GAP: f32 = 14.0;
+pub(super) const FIELD: f32 = 44.0;
+pub(super) const FIELD_RADIUS: f32 = 12.0;
+pub(super) const FIELD_LEFT: f32 = 14.0;
+pub(super) const FIELD_RIGHT: f32 = 10.0;
+pub(super) const FIELD_TEXT: f32 = 16.0;
+pub(super) const CAPS: f32 = 22.0;
 const CAPS_RADIUS: f32 = 6.0;
 /// The line under it, 6 px under: 13 px on 1.45 lines, 19 px kept.
-const NOTE_GAP: f32 = 6.0;
-const NOTE: f32 = 13.0;
-const NOTE_LINE: f32 = 1.45;
-const NOTE_ROOM: f32 = 19.0;
+pub(super) const NOTE_GAP: f32 = 6.0;
+pub(super) const NOTE: f32 = 13.0;
+pub(super) const NOTE_LINE: f32 = 1.45;
+pub(super) const NOTE_ROOM: f32 = 19.0;
 /// "Détails", 2 px under, 6 px to the left: 28 px, 4 px in on the left and
 /// 8 on the right, its 14 px chevron 4 px before its word (13 px 600).
 const DETAILS_GAP: f32 = 2.0;
@@ -137,39 +137,39 @@ const LABEL_GAP: f32 = 10.0;
 const VALUE: f32 = 11.0;
 const VALUE_LINE: f32 = 1.5;
 /// The footer, 16 px under: buttons 38 px, radius 10, 16 px in, 8 apart.
-const FOOTER_GAP: f32 = 16.0;
-const BUTTON: f32 = 38.0;
-const BUTTON_RADIUS: f32 = 10.0;
-const BUTTON_PAD: f32 = 16.0;
-const BUTTON_GAP: f32 = 8.0;
-const BUTTON_TEXT: f32 = 14.0;
+pub(super) const FOOTER_GAP: f32 = 16.0;
+pub(super) const BUTTON: f32 = 38.0;
+pub(super) const BUTTON_RADIUS: f32 = 10.0;
+pub(super) const BUTTON_PAD: f32 = 16.0;
+pub(super) const BUTTON_GAP: f32 = 8.0;
+pub(super) const BUTTON_TEXT: f32 = 14.0;
 const WAITING: f32 = 12.5;
 const SPINNER: f32 = 14.0;
 /// The field's shake: 360 ms, 10, 9, 6, 4 px from side to side.
 const SHAKE_MS: f32 = 360.0;
 const TURN_MS: f32 = 150.0;
 
-const GLASS: (Ink, Ink) = (
+pub(super) const GLASS: (Ink, Ink) = (
     Ink::Dark(Color::from_rgba8(22, 27, 42, 0.96)),
     Ink::Dark(Color::from_rgba8(14, 17, 28, 0.97)),
 );
-const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
-const RIM: Ink = Ink::Rim(Color::from_rgba8(255, 255, 255, 0.10));
+pub(super) const OPAQUE: (Ink, Ink) = (Ink::Dark(rgb(0x161B2A)), Ink::Dark(rgb(0x0E111C)));
+pub(super) const RIM: Ink = Ink::Rim(Color::from_rgba8(255, 255, 255, 0.10));
 const BADGE_FILL: Ink = Ink::Dark(rgb(0x0B1020));
 const BADGE_RING_COLOUR: Ink = Ink::Dark(rgb(0x161B2A));
-const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
-const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
+pub(super) const FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
+pub(super) const HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const LIST_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.04));
 const LIST_RIM: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
-const FIELD_ON: Ink = Ink::Accent(0.60);
+pub(super) const FIELD_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.08));
+pub(super) const FIELD_ON: Ink = Ink::Accent(0.60);
 const FIELD_WRONG: Ink = Ink::Dark(rgb(0xF2945B));
 const FIELD_CHECKING: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.16));
 const AMBER: Ink = Ink::Dark(rgb(0xF5C46E));
 const AMBER_FILL: Ink = Ink::Dark(Color::from_rgba8(245, 196, 110, 0.16));
-const PEACH: Ink = Ink::Dark(rgb(0xF7B98A));
+pub(super) const PEACH: Ink = Ink::Dark(rgb(0xF7B98A));
 const VALUE_INK: Ink = Ink::Dark(rgb(0xC9D0DC));
-const INK: Ink = Ink::Dark(rgb(0x0B1020));
+pub(super) const INK: Ink = Ink::Dark(rgb(0x0B1020));
 const READY_OFF: Ink = Ink::Accent(0.18);
 const CHECKING_FILL: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const AVATAR_FROM: Ink = Ink::Accent(1.0);
@@ -245,7 +245,7 @@ pub struct Layout {
     pub authorize: Rectangle,
 }
 
-fn width(text: &str, size: f32, font: Font) -> f32 {
+pub(super) fn width(text: &str, size: f32, font: Font) -> f32 {
     kit::measure(text, size, font)
 }
 
@@ -485,7 +485,7 @@ pub enum Msg {
 }
 
 /// A control's id: what tests and screen readers know it by.
-fn id_of(target: Target) -> String {
+pub(super) fn id_of(target: Target) -> String {
     format!("auth:{target:?}")
 }
 
@@ -518,14 +518,14 @@ pub fn view<'a>(
 }
 
 /// Whether surface `id` fades out: it takes nothing then.
-fn closing(auth: &Lent<Auth>, id: window::Id) -> bool {
+pub(super) fn closing(auth: &Lent<Auth>, id: window::Id) -> bool {
     auth.read(|a| a.closing(id)).unwrap_or(true)
 }
 
 /// The keys the dialog takes before the kit: `Escape`, and what is typed
 /// while the ring is not on the field (the field's, wherever the ring
 /// is). `Tab`, `Enter` and `Space` are the kit's.
-fn keys(auth: &Lent<Auth>, id: window::Id, pressed: &Pressed) -> Option<Msg> {
+pub(super) fn keys(auth: &Lent<Auth>, id: window::Id, pressed: &Pressed) -> Option<Msg> {
     use iced::keyboard::{Key, key::Named};
     match &pressed.key {
         Key::Named(Named::Escape) => Some(Msg::Escape),
@@ -535,7 +535,7 @@ fn keys(auth: &Lent<Auth>, id: window::Id, pressed: &Pressed) -> Option<Msg> {
     }
 }
 
-fn handle(auth: &Lent<Auth>, id: window::Id, message: Msg) {
+pub(super) fn handle(auth: &Lent<Auth>, id: window::Id, message: Msg) {
     let now = Instant::now();
     let effects = auth.change(|a| match message {
         Msg::Act(target) => a.act_on(id, target, now),
@@ -586,13 +586,13 @@ fn build<'a>(auth: &'a Lent<Auth>, id: window::Id, words: Words, motion: bool) -
 }
 
 /// `content` placed at `at`.
-fn at<'a>(content: impl Into<El<'a>>, at: Point) -> El<'a> {
+pub(super) fn at<'a>(content: impl Into<El<'a>>, at: Point) -> El<'a> {
     pin(content).x(at.x).y(at.y).into()
 }
 
 /// A button `rect` large drawn by `draw` in the surface's frame (and
 /// whether the pointer is over it), doing `target`.
-fn pressed<'a>(
+pub(super) fn pressed<'a>(
     rect: Rectangle,
     target: Target,
     draw: impl Fn(&mut Frame, bool) + 'a,
@@ -839,7 +839,7 @@ pub(super) fn content<'a>(
     let ready = !dialog.field.is_empty() && !checking;
     let authorize = layout.authorize;
     let button = pressed(authorize, Target::Authorize, move |f, _| {
-        draw_authorize(f, authorize, middle, w, checking, ready);
+        draw_authorize(f, authorize, middle, w.authorize(), checking, ready);
     });
     all.push(at(
         control(
@@ -927,11 +927,11 @@ fn shake_at(ms: f32) -> f32 {
     })
 }
 
-fn fill_rounded(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color) {
+pub(super) fn fill_rounded(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color) {
     f.fill(&kit::rounded(rect, radius), colour);
 }
 
-fn rim(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color, width: f32) {
+pub(super) fn rim(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color, width: f32) {
     let inset = Rectangle::new(
         Point::new(rect.x + width / 2.0, rect.y + width / 2.0),
         Size::new(rect.width - width, rect.height - width),
@@ -942,14 +942,21 @@ fn rim(f: &mut Frame, rect: Rectangle, radius: f32, colour: Color, width: f32) {
     );
 }
 
-fn text(f: &mut Frame, content: &str, at: Point, size: f32, colour: Color, font: Font) {
+pub(super) fn text(f: &mut Frame, content: &str, at: Point, size: f32, colour: Color, font: Font) {
     f.fill_text(kit::text_in(
         font,
         kit::text(content.to_owned(), at, size, colour, Alignment::Left),
     ));
 }
 
-fn centred(f: &mut Frame, content: &str, at: Point, size: f32, colour: Color, font: Font) {
+pub(super) fn centred(
+    f: &mut Frame,
+    content: &str,
+    at: Point,
+    size: f32,
+    colour: Color,
+    font: Font,
+) {
     f.fill_text(kit::text_in(
         font,
         kit::text(content.to_owned(), at, size, colour, Alignment::Center),
@@ -1351,7 +1358,7 @@ fn draw_person(f: &mut Frame, row: Rectangle, name: &str, on: bool, lit: bool) {
 }
 
 /// The field's box at `field`, its rim `border`, and Caps Lock's sign.
-fn draw_field_box(f: &mut Frame, field: Rectangle, border: Color, caps: bool) {
+pub(super) fn draw_field_box(f: &mut Frame, field: Rectangle, border: Color, caps: bool) {
     fill_rounded(f, field, FIELD_RADIUS, FIELD_FILL.get());
     rim(f, field, FIELD_RADIUS, border, BORDER);
     if caps {
@@ -1392,7 +1399,7 @@ fn draw_details(f: &mut Frame, details: Rectangle, w: Words, turn: f32, lit: boo
 }
 
 /// Annuler at `cancel`.
-fn draw_cancel(f: &mut Frame, cancel: Rectangle, w: Words, lit: bool) {
+pub(super) fn draw_cancel(f: &mut Frame, cancel: Rectangle, w: Words, lit: bool) {
     fill_rounded(
         f,
         cancel,
@@ -1409,13 +1416,14 @@ fn draw_cancel(f: &mut Frame, cancel: Rectangle, w: Words, lit: bool) {
     );
 }
 
-/// Autoriser at `authorize`, its words' middle at `middle`: the accent
-/// when a password is typed, faint before, a spinner while it is checked.
-fn draw_authorize(
+/// Autoriser (or the form's Se connecter, `label`) at `authorize`, its
+/// words' middle at `middle`: the accent when a password is typed, faint
+/// before, a spinner while it is checked.
+pub(super) fn draw_authorize(
     f: &mut Frame,
     authorize: Rectangle,
     middle: f32,
-    w: Words,
+    label: &str,
     checking: bool,
     ready: bool,
 ) {
@@ -1453,7 +1461,7 @@ fn draw_authorize(
     }
     text(
         f,
-        w.authorize(),
+        label,
         Point::new(word_x, middle),
         BUTTON_TEXT,
         ink.get(),

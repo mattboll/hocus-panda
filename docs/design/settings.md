@@ -2570,8 +2570,9 @@ file.
   (not closed) still searches and stays visible: the Settings do not know
   it is hidden yet.
 - Réseau: the 802.1X sheet's anonymous identity and advanced options, a
-  form to type a WireGuard tunnel, a secret agent for VPNs that ask at
-  each connection (the spec's "later").
+  form to type a WireGuard tunnel. A VPN that asks at each connection
+  asks in the shell's dialog (#930, polkit.md "NetworkManager's
+  secrets").
 - The popovers' "… settings" links straight to a section (each popover's
   ticket; `hocus settings SECTION` is there for them), but the sound's
   (6.5).

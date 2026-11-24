@@ -24,8 +24,9 @@ use serde::{Deserialize, Serialize};
 use crate::text::tidy;
 
 /// Set (to `1`) for the shell when the compositor is the session, on a
-/// virtual terminal: the shell is then the session's polkit agent. A
-/// shell nested in another session leaves that session's agent alone.
+/// virtual terminal: the shell is then the session's polkit agent and
+/// NetworkManager's secret agent. A shell nested in another session
+/// leaves that session's agents alone.
 pub const AUTH_AGENT_ENV: &str = "HOCUS_AUTH_AGENT";
 
 /// The dialog's surface: the dialog alone, centred across its screen, its

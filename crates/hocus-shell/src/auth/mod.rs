@@ -20,10 +20,17 @@
 //! widget kit's ([`view`]): its controls declared there, its keys, its
 //! ring and its screen readers' rows the kit's; the helper changes it and
 //! draws its surface alone.
+//!
+//! NetworkManager's secrets (#930) are asked in the same dialog, on the
+//! same surface and in the same queue: the shell is its secret agent too
+//! ([`nm`]), and a request's form is [`form`]'s, drawn by [`form_view`].
 
 mod accounts;
 mod agent;
+mod form;
+pub mod form_view;
 mod helper;
+mod nm;
 pub mod view;
 
 use hocus_words::shell::auth as txt;
@@ -56,6 +63,15 @@ const LONGEST: usize = 256;
 
 pub fn start() {
     agent::start();
+    nm::start();
+}
+
+/// Requests' numbers, polkit's and NetworkManager's: one queue, one
+/// surface.
+static REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// How a request ended, for polkit.
@@ -103,6 +119,11 @@ pub enum Target {
     Details,
     Cancel,
     Authorize,
+    /// NetworkManager's form: a secret's field, "Retenir le mot de passe",
+    /// Se connecter.
+    Entry(usize),
+    Remember,
+    Connect,
 }
 
 /// Whether the password is being typed, or checked.
@@ -201,17 +222,17 @@ impl Dialog {
     }
 }
 
-/// polkit's answer for a request: handed to the dialog with it, sent once
-/// as it ends. Uncontended: each request has its own.
-#[derive(Clone)]
-pub struct Answer(Arc<Mutex<Option<oneshot::Sender<Outcome>>>>);
+/// The answer for a request (polkit's, NetworkManager's): handed to the
+/// dialog with it, sent once as it ends. Uncontended: each request has its
+/// own.
+pub struct Answer<T = Outcome>(Arc<Mutex<Option<oneshot::Sender<T>>>>);
 
-impl Answer {
-    fn new(answer: oneshot::Sender<Outcome>) -> Self {
+impl<T> Answer<T> {
+    fn new(answer: oneshot::Sender<T>) -> Self {
         Self(Arc::new(Mutex::new(Some(answer))))
     }
 
-    fn send(&self, outcome: Outcome) {
+    fn send(&self, outcome: T) {
         let answer = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(answer) = answer {
             let _ = answer.send(outcome);
@@ -219,7 +240,13 @@ impl Answer {
     }
 }
 
-impl std::fmt::Debug for Answer {
+impl<T> Clone for Answer<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> std::fmt::Debug for Answer<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Answer")
     }
@@ -234,6 +261,11 @@ pub enum Come {
     /// polkit cancels the request of this cookie (its application gave
     /// up).
     Cancel(String),
+    /// NetworkManager asks for a connection's secrets (on its agent's
+    /// thread): its form shows, or waits.
+    Secrets(Box<form::Ask>),
+    /// NetworkManager withdraws its request for this connection's setting.
+    Withdraw { path: String, setting: String },
     /// What the helper of request `id`'s conversation `generation` said.
     Heard {
         id: u64,
@@ -260,14 +292,75 @@ pub enum Told {
     Caps(bool),
 }
 
+/// A request waiting its turn: polkit's, or NetworkManager's.
+#[derive(Debug)]
+enum Waiting {
+    Polkit(Request),
+    Secrets(form::Ask),
+}
+
+impl Waiting {
+    fn id(&self) -> u64 {
+        match self {
+            Self::Polkit(r) => r.id,
+            Self::Secrets(a) => a.id,
+        }
+    }
+}
+
+/// The dialog shown: polkit's, or a form for NetworkManager.
+#[derive(Debug)]
+pub enum Shown {
+    Polkit(Box<Dialog>),
+    Secrets(Box<form::Form>),
+}
+
+impl Shown {
+    fn id(&self) -> u64 {
+        match self {
+            Self::Polkit(d) => d.request.id,
+            Self::Secrets(f) => f.ask.id,
+        }
+    }
+
+    fn surface(&self) -> Option<window::Id> {
+        match self {
+            Self::Polkit(d) => d.surface,
+            Self::Secrets(f) => f.surface,
+        }
+    }
+
+    fn polkit(&self) -> Option<&Dialog> {
+        match self {
+            Self::Polkit(d) => Some(d),
+            Self::Secrets(_) => None,
+        }
+    }
+
+    fn form(&self) -> Option<&form::Form> {
+        match self {
+            Self::Secrets(f) => Some(f),
+            Self::Polkit(_) => None,
+        }
+    }
+
+    /// Its size, as what it shows now lays it out.
+    fn fit(&self, waiting: usize, caps: bool) -> (u32, u32) {
+        match self {
+            Self::Polkit(d) => view::Layout::of(d, words(), waiting, caps).surface(),
+            Self::Secrets(f) => form_view::Layout::of(f, form_view::words()).surface(),
+        }
+    }
+}
+
 /// The dialog and the requests waiting, the shell's own (#773).
 #[derive(Debug, Default)]
 pub struct Auth {
-    waiting: VecDeque<Request>,
-    shown: Option<Dialog>,
+    waiting: VecDeque<Waiting>,
+    shown: Option<Shown>,
     /// Surfaces fading out, when they go, and the dialog they show as it
     /// closed.
-    closing: Vec<(window::Id, Instant, Dialog)>,
+    closing: Vec<(window::Id, Instant, Shown)>,
     /// When the next request opens.
     next: Option<Instant>,
     caps: bool,
@@ -452,8 +545,13 @@ impl Auth {
     /// `told` taken in at `now`: what the shell then does.
     pub fn update(&mut self, told: Told, now: Instant) -> Vec<Effect> {
         let effects = match told {
-            Told::Come(Come::Begin(request, answer)) => self.begin(*request, answer, now),
+            Told::Come(Come::Begin(request, answer)) => {
+                self.answers.insert(request.id, answer);
+                self.begin(Waiting::Polkit(*request), now)
+            }
+            Told::Come(Come::Secrets(ask)) => self.begin(Waiting::Secrets(*ask), now),
             Told::Come(Come::Cancel(cookie)) => self.cancel_cookie(&cookie, now),
+            Told::Come(Come::Withdraw { path, setting }) => self.withdraw(&path, &setting, now),
             Told::Come(Come::Heard {
                 id,
                 generation,
@@ -492,13 +590,28 @@ impl Auth {
         effects
     }
 
-    /// When a tick is due, if one was not asked for by then already.
+    /// When a tick is due, if one was not asked for by then already: a
+    /// surface faded out, the next request, a form's request out of time.
     pub fn due(&mut self) -> Option<Instant> {
+        let deadlines = self
+            .waiting
+            .iter()
+            .filter_map(|w| match w {
+                Waiting::Secrets(ask) => Some(ask.deadline()),
+                Waiting::Polkit(_) => None,
+            })
+            .chain(
+                self.shown
+                    .as_ref()
+                    .and_then(Shown::form)
+                    .map(|f| f.ask.deadline()),
+            );
         let at = self
             .closing
             .iter()
             .map(|(_, at, _)| *at)
             .chain(self.next)
+            .chain(deadlines)
             .min()?;
         if self.asked.is_some_and(|asked| asked <= at) {
             return None;
@@ -508,73 +621,135 @@ impl Auth {
     }
 
     fn shown_surface(&self) -> Option<window::Id> {
-        self.shown.as_ref().and_then(|d| d.surface)
+        self.shown.as_ref().and_then(Shown::surface)
     }
 
-    /// The dialog shown, if its surface is `id`.
+    /// polkit's dialog shown, if its surface is `id`.
     fn dialog_on(&mut self, id: window::Id) -> Option<&mut Dialog> {
-        self.shown.as_mut().filter(|d| d.surface == Some(id))
+        match self.shown.as_mut() {
+            Some(Shown::Polkit(d)) if d.surface == Some(id) => Some(d),
+            _ => None,
+        }
     }
 
-    /// `with` on the dialog surface `id` shows, open or fading out as it
-    /// closed, with Caps Lock's state and the requests waiting.
+    /// NetworkManager's form shown, if its surface is `id`.
+    fn form_on(&mut self, id: window::Id) -> Option<&mut form::Form> {
+        match self.shown.as_mut() {
+            Some(Shown::Secrets(f)) if f.surface == Some(id) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// What surface `id` shows, open or fading out as it closed.
+    fn shown_on(&self, id: window::Id) -> Option<&Shown> {
+        self.shown
+            .as_ref()
+            .filter(|s| s.surface() == Some(id))
+            .or_else(|| {
+                self.closing
+                    .iter()
+                    .find(|(c, _, _)| *c == id)
+                    .map(|(_, _, s)| s)
+            })
+    }
+
+    /// `with` on polkit's dialog surface `id` shows, open or fading out as
+    /// it closed, with Caps Lock's state and the requests waiting.
     pub fn drawn<T>(
         &self,
         id: window::Id,
         with: impl FnOnce(&Dialog, bool, usize) -> T,
     ) -> Option<T> {
-        self.shown
-            .as_ref()
-            .filter(|d| d.surface == Some(id))
-            .or_else(|| {
-                self.closing
-                    .iter()
-                    .find(|(c, _, _)| *c == id)
-                    .map(|(_, _, d)| d)
-            })
+        self.shown_on(id)
+            .and_then(Shown::polkit)
             .map(|d| with(d, self.caps, self.waiting.len()))
+    }
+
+    /// `with` on NetworkManager's form surface `id` shows, open or fading
+    /// out, with Caps Lock's state.
+    pub fn drawn_form<T>(
+        &self,
+        id: window::Id,
+        with: impl FnOnce(&form::Form, bool) -> T,
+    ) -> Option<T> {
+        self.shown_on(id)
+            .and_then(Shown::form)
+            .map(|f| with(f, self.caps))
     }
 
     /// Whether surface `id` is the dialog's, shown or fading out.
     pub fn is_surface(&self, id: window::Id) -> bool {
-        self.shown.as_ref().is_some_and(|d| d.surface == Some(id))
-            || self.closing.iter().any(|(c, _, _)| *c == id)
+        self.shown_on(id).is_some()
+    }
+
+    /// Whether surface `id` shows a form for NetworkManager.
+    pub fn is_form(&self, id: window::Id) -> bool {
+        self.shown_on(id).and_then(Shown::form).is_some()
     }
 
     /// Whether surface `id` fades out (or is gone): it takes nothing then.
     pub fn closing(&self, id: window::Id) -> bool {
-        self.shown.as_ref().is_none_or(|d| d.surface != Some(id))
+        self.shown.as_ref().is_none_or(|s| s.surface() != Some(id))
     }
 
-    /// The entry of the dialog shown (or fading out), for the field's
+    /// The entry of polkit's dialog shown (or fading out), for the field's
     /// widget.
     pub fn entry(&mut self, with: &mut dyn FnMut(&mut Entry)) {
         let dialog = match self.shown.as_mut() {
-            Some(dialog) => Some(dialog),
-            None => self.closing.last_mut().map(|(_, _, d)| d),
+            Some(Shown::Polkit(dialog)) => Some(dialog),
+            _ => self.closing.last_mut().and_then(|(_, _, s)| match s {
+                Shown::Polkit(d) => Some(d),
+                Shown::Secrets(_) => None,
+            }),
         };
         if let Some(dialog) = dialog {
             with(&mut dialog.field);
         }
     }
 
-    fn seen(&self) -> Option<Seen> {
-        let dialog = self.shown.as_ref()?;
-        Some(Seen {
-            surface: dialog.surface?,
-            name: view::who(dialog).0,
-            message: dialog.request.message.trim().to_owned(),
-            size: dialog.size,
-        })
+    /// Field `i` of the form on surface `id` (shown or fading out), for its
+    /// widget.
+    pub fn entry_at(&mut self, id: window::Id, i: usize, with: &mut dyn FnMut(&mut Entry)) {
+        let form = match self.shown.as_mut() {
+            Some(Shown::Secrets(f)) if f.surface == Some(id) => Some(f),
+            _ => self
+                .closing
+                .iter_mut()
+                .find(|(c, _, _)| *c == id)
+                .and_then(|(_, _, s)| match s {
+                    Shown::Secrets(f) => Some(f),
+                    Shown::Polkit(_) => None,
+                }),
+        };
+        if let Some(entry) = form.and_then(|f| f.entries.get_mut(i)) {
+            with(entry);
+        }
     }
 
-    fn begin(&mut self, request: Request, answer: Answer, now: Instant) -> Vec<Effect> {
-        self.answers.insert(request.id, answer);
-        self.waiting.push_back(request);
+    fn seen(&self) -> Option<Seen> {
+        match self.shown.as_ref()? {
+            Shown::Polkit(dialog) => Some(Seen {
+                surface: dialog.surface?,
+                name: words().name(&view::who(dialog).0),
+                message: dialog.request.message.trim().to_owned(),
+                size: dialog.size,
+            }),
+            Shown::Secrets(form) => Some(Seen {
+                surface: form.surface?,
+                name: form.ask.asked.name.clone(),
+                message: form_view::words().asks(&form.ask.asked).to_owned(),
+                size: form.size,
+            }),
+        }
+    }
+
+    /// A request comes: it shows, or waits.
+    fn begin(&mut self, waiting: Waiting, now: Instant) -> Vec<Effect> {
+        self.waiting.push_back(waiting);
         let mut effects = self.pump(now);
         if !effects.is_empty() {
             one_at_a_time();
-        } else if self.shown_surface().is_some() {
+        } else if matches!(self.shown, Some(Shown::Polkit(_))) && self.shown_surface().is_some() {
             // The footer counts it.
             effects.extend(woken());
         }
@@ -583,21 +758,41 @@ impl Auth {
 
     /// polkit cancels the request of `cookie`: its dialog closes at once.
     fn cancel_cookie(&mut self, cookie: &str, now: Instant) -> Vec<Effect> {
-        if let Some(at) = self.waiting.iter().position(|r| r.cookie == cookie) {
-            if let Some(request) = self.waiting.remove(at) {
-                self.answer(request.id, Outcome::Cancelled);
+        let at = self
+            .waiting
+            .iter()
+            .position(|w| matches!(w, Waiting::Polkit(r) if r.cookie == cookie));
+        if let Some(at) = at {
+            if let Some(waiting) = self.waiting.remove(at) {
+                self.answer(waiting.id(), Outcome::Cancelled);
             }
             return woken();
         }
-        if self
-            .shown
-            .as_ref()
-            .is_some_and(|d| d.request.cookie == cookie)
-        {
+        if matches!(&self.shown, Some(Shown::Polkit(d)) if d.request.cookie == cookie) {
             tracing::debug!("polkit cancels the dialog's request");
             return self.finish(Outcome::Cancelled, now);
         }
         Vec::new()
+    }
+
+    /// NetworkManager withdraws its request for `path`'s `setting`.
+    fn withdraw(&mut self, path: &str, setting: &str, now: Instant) -> Vec<Effect> {
+        let of = |ask: &form::Ask| ask.path == path && ask.asked.setting == setting;
+        let mut effects = Vec::new();
+        self.waiting.retain(|w| match w {
+            Waiting::Secrets(ask) if of(ask) => {
+                ask.answer.send(form::Given::Withdrawn);
+                false
+            }
+            _ => true,
+        });
+        if matches!(&self.shown, Some(Shown::Secrets(f)) if of(&f.ask)) {
+            tracing::debug!("NetworkManager withdraws the form's request");
+            effects = self.finish_form(form::Given::Withdrawn, now);
+        } else if self.shown_surface().is_some() {
+            effects = woken();
+        }
+        effects
     }
 
     fn answer(&mut self, id: u64, outcome: Outcome) {
@@ -612,21 +807,29 @@ impl Auth {
             return Vec::new();
         }
         self.next = None;
-        let Some(request) = self.waiting.pop_front() else {
+        let Some(waiting) = self.waiting.pop_front() else {
             return Vec::new();
         };
-        let ask = AuthAsk::Open {
-            id: request.id,
-            pids: request.pids.clone(),
+        let (id, pids, shown) = match waiting {
+            Waiting::Polkit(request) => (
+                request.id,
+                request.pids.clone(),
+                Shown::Polkit(Box::new(Dialog::new(request))),
+            ),
+            Waiting::Secrets(ask) => (
+                ask.id,
+                Vec::new(),
+                Shown::Secrets(Box::new(form::Form::new(ask))),
+            ),
         };
-        tracing::debug!(id = request.id, "the authentication dialog is asked for");
-        self.shown = Some(Dialog::new(request));
+        tracing::debug!(id, "the authentication dialog is asked for");
+        self.shown = Some(shown);
         if crate::popover::linked_now() {
-            vec![Effect::Tell(ToCompositor::Auth(ask))]
+            vec![Effect::Tell(ToCompositor::Auth(AuthAsk::Open { id, pids }))]
         } else {
             // A shell alone: on the active screen.
             self.place(AuthAt {
-                id: self.shown.as_ref().map_or(0, |d| d.request.id),
+                id,
                 output: crate::ALONE.to_owned(),
                 scale: 120,
                 height: 1080,
@@ -638,42 +841,66 @@ impl Auth {
 
     /// The compositor said where the dialog goes: it opens there.
     fn place(&mut self, at: AuthAt) -> Vec<Effect> {
-        let Some(dialog) = self.shown.as_mut() else {
+        let (waiting, caps) = (self.waiting.len(), self.caps);
+        let Some(shown) = self.shown.as_mut() else {
             return Vec::new();
         };
-        if dialog.request.id != at.id || dialog.surface.is_some() {
+        if shown.id() != at.id || shown.surface().is_some() {
             return Vec::new();
         }
         let id = window::Id::unique();
-        dialog.surface = Some(id);
         let top = (f64::from(at.height) / 2.0 - AUTH_TOP).max(8.0).round() as i32;
         let output = at.output.clone();
-        dialog.at = Some(at);
-        dialog.size = view::Layout::of(dialog, words(), self.waiting.len(), self.caps).surface();
-        let app = view::who(dialog).0;
-        if let Some(icon) = view::who(dialog).1 {
-            let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
-            crate::launcher::icons::want([icon.as_str()], view::ICON_PX, scale);
+        match shown {
+            Shown::Polkit(dialog) => {
+                dialog.surface = Some(id);
+                dialog.at = Some(at);
+            }
+            Shown::Secrets(form) => {
+                form.surface = Some(id);
+                form.at = Some(at);
+            }
         }
-        tracing::debug!(
-            id = dialog.request.id,
-            output,
-            app,
-            accounts = dialog.request.accounts.len(),
-            "the authentication dialog opens"
-        );
-        dialog.converse();
+        let size = shown.fit(waiting, caps);
+        match shown {
+            Shown::Polkit(dialog) => {
+                dialog.size = size;
+                let app = view::who(dialog).0;
+                if let Some(icon) = view::who(dialog).1 {
+                    let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
+                    crate::launcher::icons::want([icon.as_str()], view::ICON_PX, scale);
+                }
+                tracing::debug!(
+                    id = dialog.request.id,
+                    output,
+                    app,
+                    accounts = dialog.request.accounts.len(),
+                    "the authentication dialog opens"
+                );
+                dialog.converse();
+            }
+            Shown::Secrets(form) => {
+                form.size = size;
+                tracing::debug!(
+                    id = form.ask.id,
+                    output,
+                    setting = form.ask.asked.setting,
+                    fields = form.entries.len(),
+                    "the network's dialog opens"
+                );
+            }
+        }
         vec![Effect::Auth {
             id,
             output,
-            size: dialog.size,
+            size,
             top,
         }]
     }
 
-    /// The dialog closes with `outcome`.
+    /// polkit's dialog closes with `outcome`.
     fn finish(&mut self, outcome: Outcome, now: Instant) -> Vec<Effect> {
-        let Some(mut dialog) = self.shown.take() else {
+        let Some(Shown::Polkit(mut dialog)) = self.shown.take() else {
             return Vec::new();
         };
         dialog.end_conversation();
@@ -683,13 +910,41 @@ impl Auth {
             ?outcome,
             "the authentication dialog closes"
         );
+        self.closed(Shown::Polkit(dialog), now)
+    }
+
+    /// NetworkManager's form closes, answered with `given`.
+    fn finish_form(&mut self, given: form::Given, now: Instant) -> Vec<Effect> {
+        let Some(Shown::Secrets(mut form)) = self.shown.take() else {
+            return Vec::new();
+        };
+        tracing::debug!(
+            id = form.ask.id,
+            given = match &given {
+                form::Given::Secrets { .. } => "secrets",
+                form::Given::Cancelled => "cancelled",
+                form::Given::Withdrawn => "withdrawn",
+            },
+            "the network's dialog closes"
+        );
+        form.ask.answer.send(given);
+        // What was typed is not kept while the surface fades out.
+        for entry in &mut form.entries {
+            entry.clear();
+        }
+        self.closed(Shown::Secrets(form), now)
+    }
+
+    /// The dialog `shown` closed: the compositor lets the input go, its
+    /// surface fades out, the next request opens after a while.
+    fn closed(&mut self, shown: Shown, now: Instant) -> Vec<Effect> {
         let mut effects = vec![Effect::Tell(ToCompositor::Auth(AuthAsk::Closing {
-            id: dialog.request.id,
+            id: shown.id(),
         }))];
-        if let Some(surface) = dialog.surface {
+        if let Some(surface) = shown.surface() {
             effects.push(Effect::Keyboard(surface, KeyboardInteractivity::None));
             // It shows what it showed as it closed while it fades out.
-            self.closing.push((surface, now + AUTH_OUT, dialog));
+            self.closing.push((surface, now + AUTH_OUT, shown));
         }
         if !self.waiting.is_empty() {
             self.next = Some(now + AUTH_NEXT);
@@ -700,17 +955,21 @@ impl Auth {
     /// Its size again, if what it shows changed it.
     fn refit(&mut self) -> Vec<Effect> {
         let (waiting, caps) = (self.waiting.len(), self.caps);
-        let Some(dialog) = self.shown.as_mut() else {
+        let Some(shown) = self.shown.as_mut() else {
             return Vec::new();
         };
-        let Some(id) = dialog.surface else {
+        let Some(id) = shown.surface() else {
             return Vec::new();
         };
-        let size = view::Layout::of(dialog, words(), waiting, caps).surface();
-        if size == dialog.size {
+        let size = shown.fit(waiting, caps);
+        let was = match shown {
+            Shown::Polkit(d) => &mut d.size,
+            Shown::Secrets(f) => &mut f.size,
+        };
+        if size == *was {
             return Vec::new();
         }
-        dialog.size = size;
+        *was = size;
         vec![Effect::Resize {
             id,
             size,
@@ -720,7 +979,7 @@ impl Auth {
 
     /// The password typed goes to the helper.
     fn submit(&mut self) -> bool {
-        let Some(dialog) = self.shown.as_mut() else {
+        let Some(Shown::Polkit(dialog)) = self.shown.as_mut() else {
             return false;
         };
         if dialog.phase != Phase::Typing || dialog.field.is_empty() {
@@ -745,7 +1004,7 @@ impl Auth {
     /// Account `i` answers: the field empties, a conversation for it
     /// starts.
     fn choose(&mut self, i: usize) {
-        let Some(dialog) = self.shown.as_mut() else {
+        let Some(Shown::Polkit(dialog)) = self.shown.as_mut() else {
             return;
         };
         dialog.chooser = false;
@@ -763,46 +1022,54 @@ impl Auth {
 
     /// Target `target` acts.
     fn act(&mut self, target: Target, now: Instant) -> Vec<Effect> {
-        let checking = self
-            .shown
-            .as_ref()
-            .is_some_and(|d| d.phase == Phase::Checking);
+        if let Some(Shown::Secrets(form)) = self.shown.as_mut() {
+            match target {
+                Target::Cancel => return self.finish_form(form::Given::Cancelled, now),
+                Target::Connect => {
+                    if let Some(given) = form.submit() {
+                        return self.finish_form(given, now);
+                    }
+                }
+                Target::Remember => {
+                    form.remember = !form.remember;
+                    form.focus = Target::Remember;
+                }
+                Target::Entry(i) if i < form.entries.len() => form.focus = Target::Entry(i),
+                _ => {}
+            }
+            return self.refit();
+        }
+        let checking = matches!(&self.shown, Some(Shown::Polkit(d)) if d.phase == Phase::Checking);
+        let Some(Shown::Polkit(dialog)) = self.shown.as_mut() else {
+            return Vec::new();
+        };
         match target {
             Target::Cancel => return self.finish(Outcome::Cancelled, now),
             _ if checking => {}
             Target::Authorize => {
                 self.submit();
             }
-            Target::Field => {
-                if let Some(d) = self.shown.as_mut() {
-                    d.focus = Target::Field;
-                }
-            }
+            Target::Field => dialog.focus = Target::Field,
             Target::Details => {
-                if let Some(d) = self.shown.as_mut() {
-                    d.details = !d.details;
-                    d.turned = Some(now);
-                    d.focus = Target::Details;
-                }
+                dialog.details = !dialog.details;
+                dialog.turned = Some(now);
+                dialog.focus = Target::Details;
             }
             Target::Change => {
-                if let Some(d) = self.shown.as_mut() {
-                    d.chooser = !d.chooser;
-                    d.focus = Target::Change;
-                }
+                dialog.chooser = !dialog.chooser;
+                dialog.focus = Target::Change;
             }
             Target::Account(i) => self.choose(i),
+            Target::Entry(_) | Target::Remember | Target::Connect => {}
         }
         self.refit()
     }
 
     /// What the helper of request `id`'s conversation `generation` said.
     fn heard(&mut self, id: u64, generation: u64, said: Said, now: Instant) -> Vec<Effect> {
-        let Some(dialog) = self
-            .shown
-            .as_mut()
-            .filter(|d| d.request.id == id && d.generation == generation)
-        else {
+        let Some(Shown::Polkit(dialog)) = self.shown.as_mut().filter(
+            |s| matches!(s, Shown::Polkit(d) if d.request.id == id && d.generation == generation),
+        ) else {
             return Vec::new();
         };
         match said {
@@ -843,8 +1110,8 @@ impl Auth {
         effects
     }
 
-    /// What is due at `now`: the surfaces faded out go; the next request
-    /// opens.
+    /// What is due at `now`: the surfaces faded out go; a request of
+    /// NetworkManager's out of time is cancelled; the next request opens.
     fn tick(&mut self, now: Instant) -> Vec<Effect> {
         let mut effects = Vec::new();
         self.closing.retain(|(id, at, _)| {
@@ -854,6 +1121,26 @@ impl Auth {
             }
             !due
         });
+        let before = self.waiting.len();
+        self.waiting.retain(|w| match w {
+            Waiting::Secrets(ask) if ask.deadline() <= now => {
+                tracing::info!(
+                    id = ask.id,
+                    "no answer in time: the network's request is cancelled"
+                );
+                ask.answer.send(form::Given::Cancelled);
+                false
+            }
+            _ => true,
+        });
+        if self.waiting.len() != before && self.shown_surface().is_some() {
+            effects.extend(woken());
+        }
+        let late = matches!(&self.shown, Some(Shown::Secrets(f)) if f.ask.deadline() <= now);
+        if late {
+            tracing::info!("no answer in time: the network's dialog closes");
+            effects.extend(self.finish_form(form::Given::Cancelled, now));
+        }
         let opened = self.shown.is_none() && !self.waiting.is_empty();
         let pumped = self.pump(now);
         if opened && !pumped.is_empty() {
@@ -866,7 +1153,7 @@ impl Auth {
     /// Target `target` of the dialog on `id` acts (clicked, `Enter`, a
     /// screen reader).
     pub fn act_on(&mut self, id: window::Id, target: Target, now: Instant) -> Vec<Effect> {
-        if self.dialog_on(id).is_none() {
+        if self.shown_surface() != Some(id) {
             return Vec::new();
         }
         self.act(target, now)
@@ -876,11 +1163,16 @@ impl Auth {
     pub fn focus_on(&mut self, id: window::Id, target: Target) {
         if let Some(dialog) = self.dialog_on(id) {
             dialog.focus = target;
+        } else if let Some(form) = self.form_on(id) {
+            form.focus = target;
         }
     }
 
     /// `Escape`: the accounts' list folds, else the dialog is cancelled.
     pub fn escape(&mut self, id: window::Id, now: Instant) -> Vec<Effect> {
+        if self.form_on(id).is_some() {
+            return self.finish_form(form::Given::Cancelled, now);
+        }
         let Some(dialog) = self.dialog_on(id) else {
             return Vec::new();
         };
@@ -893,8 +1185,8 @@ impl Auth {
         }
     }
 
-    /// What the field of the dialog on `id` did with a key, a press or the
-    /// input method.
+    /// What the field of the dialog on `id` (the form's holding the ring)
+    /// did with a key, a press or the input method.
     pub fn took(&mut self, id: window::Id, took: Took) {
         if took == Took::Paste {
             paste(id);
@@ -923,14 +1215,19 @@ impl Auth {
     /// Whether a key pressed now goes to the field though the ring is not
     /// on it.
     pub fn types_elsewhere(&self, id: window::Id) -> bool {
-        self.shown.as_ref().is_some_and(|d| {
-            d.surface == Some(id) && d.phase == Phase::Typing && d.focus != Target::Field
-        })
+        matches!(&self.shown, Some(Shown::Polkit(d))
+            if d.surface == Some(id) && d.phase == Phase::Typing && d.focus != Target::Field)
     }
 
-    /// The field of the dialog on `id` edited by `edit`, while it is typed
-    /// in: whether it draws again.
+    /// The field of the dialog on `id` edited by `edit` (the form's that
+    /// holds the ring), while it is typed in: whether it draws again.
     fn edited(&mut self, id: window::Id, edit: impl FnOnce(&mut Entry) -> Took) -> bool {
+        if let Some(form) = self.form_on(id) {
+            let Target::Entry(i) = form.focus else {
+                return false;
+            };
+            return form.entries.get_mut(i).is_some_and(|e| edit(e).draws());
+        }
         let Some(dialog) = self.dialog_on(id).filter(|d| d.phase == Phase::Typing) else {
             return false;
         };
@@ -948,8 +1245,15 @@ impl Surface for Lent<Auth> {
     }
 
     fn view(&self, id: window::Id, context: &Context) -> Option<Element<'_, crate::Message>> {
-        self.read(|a| a.is_surface(id))?
-            .then(|| view::view(self, id, words(), context.look.glass, context.look.motion))
+        let (shown, form) = self.read(|a| (a.is_surface(id), a.is_form(id)))?;
+        if !shown {
+            return None;
+        }
+        Some(if form {
+            form_view::view(self, id, form_view::words(), context.look.glass)
+        } else {
+            view::view(self, id, words(), context.look.glass, context.look.motion)
+        })
     }
 }
 
@@ -986,9 +1290,8 @@ fn paste(id: window::Id) {
 /// the buttons), the ring where it is.
 pub fn a11y(seen: &Seen) -> Option<hocus_a11y::Window> {
     use hocus_a11y::{Node, Role, Window};
-    let words = words();
     let rows = crate::a11y::rows::of(seen.surface)?;
-    let name = words.name(&seen.name);
+    let name = seen.name.clone();
     let node = Node::new("dialog", Role::Dialog, name.clone())
         .describe(seen.message.clone())
         .children(rows.nodes);
@@ -1009,14 +1312,21 @@ pub fn a11y_click(key: &str) {
         Some("Details") => Target::Details,
         Some("Cancel") => Target::Cancel,
         Some("Authorize") => Target::Authorize,
-        Some(other) => match other
-            .strip_prefix("Account(")
-            .and_then(|k| k.strip_suffix(')'))
-            .and_then(|n| n.parse().ok())
-        {
-            Some(i) => Target::Account(i),
-            None => return,
-        },
+        Some("Remember") => Target::Remember,
+        Some("Connect") => Target::Connect,
+        Some(other) => {
+            let number = |prefix: &str| {
+                other
+                    .strip_prefix(prefix)
+                    .and_then(|k| k.strip_suffix(')'))
+                    .and_then(|n| n.parse().ok())
+            };
+            match (number("Account("), number("Entry(")) {
+                (Some(i), _) => Target::Account(i),
+                (_, Some(i)) => Target::Entry(i),
+                _ => return,
+            }
+        }
         None => return,
     };
     crate::surfaces::ask(Asked::Auth(Come::Act(target)));
@@ -1107,7 +1417,10 @@ mod tests {
             a.act_on(id, Target::Authorize, now)
         });
         let generation = auth
-            .read(|a| a.shown.as_ref().map(|d| d.generation))
+            .read(|a| match &a.shown {
+                Some(Shown::Polkit(d)) => Some(d.generation),
+                _ => None,
+            })
             .flatten();
         tell(
             Told::Come(Come::Heard {
