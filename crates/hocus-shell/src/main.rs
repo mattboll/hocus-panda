@@ -1219,6 +1219,11 @@ impl Shell {
         opening.push(Task::batch(
             popover::messages(after).into_iter().map(Task::done),
         ));
+        // The tray's icons that show already, their items registered
+        // before this bar came (the shell started again, a screen plugged
+        // in): its surface opens, the groups over it go up (#953). Only an
+        // icon coming or going places it otherwise.
+        opening.push(self.fit(id));
         opening
             .into_iter()
             .reduce(Task::chain)
