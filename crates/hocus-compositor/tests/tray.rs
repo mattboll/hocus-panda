@@ -13,6 +13,11 @@
 //! row sends `Event("clicked")` then closes it; the item's owner going
 //! takes its icon away; resting 400 ms on it shows its tooltip.
 //!
+//! A bar that comes after the icons shows them all the same (#953): the
+//! shell started again while the items are on the bus (as Slack's, by its
+//! connection's name, and hocus-owl's, by a name of its own), and a bar
+//! moving to a screen plugged in.
+//!
 //! And a click on its icon brings its application forward (5.14b, issue
 //! #537): the item and the application's window are this program's, behind
 //! the window of another program, which has the keyboard. With an item
@@ -38,7 +43,8 @@ use common::{
 };
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
 use zbus::{
-    Array, Dict, OwnedObjectPath, OwnedVariant, Signature, Structure, Variant, names::BusName,
+    Array, Dict, MatchRule, MessageStream, OwnedObjectPath, OwnedVariant, Signature, Structure,
+    Variant, names::BusName,
 };
 
 const BTN_RIGHT: u32 = 0x111;
@@ -46,6 +52,7 @@ const BTN_MIDDLE: u32 = 0x112;
 const KEY_B: u32 = 48;
 
 const ITEM: &str = "org.kde.StatusNotifierItem";
+const WATCHER: &str = "org.kde.StatusNotifierWatcher";
 const ITEM_PATH: &str = "/StatusNotifierItem";
 const MENU_PATH: &str = "/MenuBar";
 
@@ -54,17 +61,22 @@ type Pixmaps = Vec<(i32, i32, Vec<u8>)>;
 /// A 22 × 22 pixmap of `rgb`, ARGB32 in network order, with a 8 × 8 dot
 /// of `dot` at its top right.
 fn pixmap(rgb: [u8; 3], dot: Option<[u8; 3]>) -> Pixmaps {
-    let mut bytes = Vec::with_capacity(22 * 22 * 4);
-    for y in 0..22 {
-        for x in 0..22 {
+    pixmap_of(22, rgb, dot)
+}
+
+/// The same, `side` pixels square.
+fn pixmap_of(side: i32, rgb: [u8; 3], dot: Option<[u8; 3]>) -> Pixmaps {
+    let mut bytes = Vec::new();
+    for y in 0..side {
+        for x in 0..side {
             let [r, g, b] = match dot {
-                Some(dot) if x >= 14 && y < 8 => dot,
+                Some(dot) if x >= side - 8 && y < 8 => dot,
                 _ => rgb,
             };
             bytes.extend([255, r, g, b]);
         }
     }
-    vec![(22, 22, bytes)]
+    vec![(side, side, bytes)]
 }
 
 const MAGENTA: [u8; 3] = [255, 0, 255];
@@ -77,6 +89,17 @@ struct Said {
     status: String,
     icon: Pixmaps,
     attention: Pixmaps,
+}
+
+impl Said {
+    /// `status`, showing `icon`; its attention icon blue.
+    fn new(status: &str, icon: Pixmaps) -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self {
+            status: status.to_owned(),
+            icon,
+            attention: pixmap(BLUE, None),
+        }))
+    }
 }
 
 /// What the item and its menu were asked, in order.
@@ -93,6 +116,21 @@ struct Item {
     said: Arc<Mutex<Said>>,
     heard: Heard,
     app: Option<App>,
+    /// Its `Id` and its `Title`.
+    names: Names,
+}
+
+type Names = (&'static str, &'static str);
+
+/// What the test's usual item says it is.
+const SLACK: Names = ("slack", "Slack");
+
+/// How an item registers: by its connection's name, or by a name of its
+/// own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Registers {
+    ByConnection,
+    ByName,
 }
 
 /// The application behind an item: its Wayland client, whether its item
@@ -174,12 +212,12 @@ impl Item {
 
     #[zbus(property)]
     fn id(&self) -> String {
-        "slack".to_owned()
+        self.names.0.to_owned()
     }
 
     #[zbus(property)]
     fn title(&self) -> String {
-        "Slack".to_owned()
+        self.names.1.to_owned()
     }
 
     #[zbus(property)]
@@ -336,6 +374,14 @@ struct Client {
 
 impl Bed {
     fn start(form: FormChoice) -> anyhow::Result<Option<Self>> {
+        Self::start_on(&["1920x1080"], |config| config.panel.form = form)
+    }
+
+    /// On screens of `outputs`, the configuration as `config` sets it.
+    fn start_on(
+        outputs: &[&str],
+        config: impl FnOnce(&mut Config),
+    ) -> anyhow::Result<Option<Self>> {
         let shell = common::shell_program();
         let daemon = Command::new("sh")
             .args(["-c", "command -v dbus-daemon"])
@@ -372,16 +418,19 @@ impl Bed {
         let text = std::fs::read_to_string(&script)?
             .replace("\"$@\"\n", &format!("\"$@\" 2>>'{}'\n", log.display()));
         std::fs::write(&script, text)?;
-        let mut config = Config::default();
-        config.keyboard.layouts = vec!["us".to_owned()];
-        config.panel.form = form;
+        let mut configured = Config::default();
+        configured.keyboard.layouts = vec!["us".to_owned()];
+        config(&mut configured);
         let hp = Headless::start_on_bus(
             HeadlessConfig {
-                outputs: vec!["1920x1080".parse()?],
+                outputs: outputs
+                    .iter()
+                    .map(|o| o.parse())
+                    .collect::<Result<_, _>>()?,
                 renderer: RendererChoice::Pixman,
                 render_node: None,
             },
-            config,
+            configured,
             Some(script),
             Some(address.clone()),
         )?;
@@ -437,17 +486,14 @@ impl Bed {
 
     /// The same, `app`'s.
     fn item_of(&mut self, status: &str, icon: Pixmaps, app: Option<App>) -> anyhow::Result<Client> {
-        let said = Arc::new(Mutex::new(Said {
-            status: status.to_owned(),
-            icon,
-            attention: pixmap(BLUE, None),
-        }));
+        let said = Said::new(status, icon);
         let heard = Heard::default();
         let name = format!("org.kde.StatusNotifierItem-{}-1", std::process::id());
         let item = Item {
             said: said.clone(),
             heard: heard.clone(),
             app,
+            names: SLACK,
         };
         let menu = Menu {
             heard: heard.clone(),
@@ -482,11 +528,7 @@ impl Bed {
     /// application started with the session may (Slack): [`Bed::serve`]
     /// serves it later.
     fn late_item(&mut self, icon: Pixmaps) -> anyhow::Result<Client> {
-        let said = Arc::new(Mutex::new(Said {
-            status: "Active".to_owned(),
-            icon,
-            attention: pixmap(BLUE, None),
-        }));
+        let said = Said::new("Active", icon);
         let name = format!("org.kde.StatusNotifierItem-{}-1", std::process::id());
         let address = self.address.clone();
         let connection = self.runtime.block_on(async {
@@ -512,6 +554,92 @@ impl Bed {
         })
     }
 
+    /// An item already there, as an application's: it registers, and
+    /// again each time a watcher comes (the shell started again), by its
+    /// connection's name (`registers`, as Slack's, Chromium's, does) or
+    /// by a name of its own (as hocus-owl's).
+    fn standing_item(
+        &mut self,
+        names: Names,
+        icon: Pixmaps,
+        registers: Registers,
+    ) -> anyhow::Result<Client> {
+        let said = Said::new("Active", icon);
+        let heard = Heard::default();
+        let item = Item {
+            said: said.clone(),
+            heard: heard.clone(),
+            app: None,
+            names,
+        };
+        let name = format!("org.kde.StatusNotifierItem-{}-1", std::process::id());
+        let address = self.address.clone();
+        let connection = self.runtime.block_on(async {
+            let mut builder = zbus::connection::Builder::address(address.as_str());
+            if registers == Registers::ByName {
+                builder = builder.name(name.as_str());
+            }
+            let connection = builder.serve_at(ITEM_PATH, item).build().await?;
+            let service = match registers {
+                Registers::ByName => name,
+                Registers::ByConnection => connection
+                    .unique_name()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+            };
+            // Followed before it first registers: a watcher coming in
+            // between is not missed.
+            let rule = MatchRule::builder()
+                .msg_type(zbus::message::Type::Signal)
+                .sender("org.freedesktop.DBus")
+                .interface("org.freedesktop.DBus")
+                .member("NameOwnerChanged")
+                .arg(0, WATCHER)
+                .build()?;
+            let stream = MessageStream::for_match_rule(rule, &connection, None).await?;
+            let register = {
+                let connection = connection.clone();
+                move || {
+                    let connection = connection.clone();
+                    let service = service.clone();
+                    async move {
+                        connection
+                            .call_method(
+                                Some(WATCHER),
+                                "/StatusNotifierWatcher",
+                                Some(WATCHER),
+                                "RegisterStatusNotifierItem",
+                                &(service.as_str(),),
+                            )
+                            .await
+                    }
+                }
+            };
+            register().await?;
+            tokio::spawn(async move {
+                use zbus::export::futures_core::Stream;
+                let mut stream = Box::pin(stream);
+                while let Some(Ok(message)) =
+                    std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await
+                {
+                    let came = message
+                        .body()
+                        .deserialize::<(String, String, String)>()
+                        .is_ok_and(|(_, _, owner)| !owner.is_empty());
+                    if came {
+                        let _ = register().await;
+                    }
+                }
+            });
+            anyhow::Ok(connection)
+        })?;
+        Ok(Client {
+            connection: Some(connection),
+            said,
+            heard,
+        })
+    }
+
     /// `client`'s item and menu served at last, without a signal.
     fn serve(&self, client: &Client) -> anyhow::Result<()> {
         let Some(connection) = &client.connection else {
@@ -521,6 +649,7 @@ impl Bed {
             said: client.said.clone(),
             heard: client.heard.clone(),
             app: None,
+            names: SLACK,
         };
         let menu = Menu {
             heard: client.heard.clone(),
@@ -912,6 +1041,122 @@ fn resting_on_an_icon_400_ms_shows_its_tooltip() -> anyhow::Result<()> {
         hp.layer_rects(hocus_link::TIP_NAMESPACE).is_empty()
     })?;
     anyhow::ensure!(gone, "the tooltip stayed");
+    Ok(())
+}
+
+// --- A bar that comes after the icons (#953) ----------------------------------------
+
+/// The `the tray shows it` line of bar `bar` logged after `from`, naming
+/// `names` in order.
+fn shows_names(bed: &mut Bed, from: usize, bar: &str, names: &[&str]) -> anyhow::Result<()> {
+    let log = bed.log.clone();
+    let said = |line: &str| {
+        line.contains("the tray shows it")
+            && line.contains(&format!("bar=\"{bar}\""))
+            && names.iter().all(|n| line.contains(&format!("{n}@")))
+    };
+    let done = bed.hp.dispatch_until(WAIT, |_| {
+        plain(&log).get(from..).is_some_and(|l| l.lines().any(said))
+    })?;
+    anyhow::ensure!(
+        done,
+        "bar {bar} never showed {names:?}; the shell logged:\n{}",
+        bed.plain().get(from..).unwrap_or_default()
+    );
+    Ok(())
+}
+
+#[test]
+fn a_shell_started_again_shows_the_items_already_there() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FormChoice::Full)? else {
+        return Ok(());
+    };
+    // As Slack's: by its connection's name, a pixmap and no icon's name,
+    // no title. As hocus-owl's: by a name of its own, 16 px pixmaps.
+    let _slack = bed.standing_item(
+        ("chrome_status_icon_1", ""),
+        pixmap(MAGENTA, None),
+        Registers::ByConnection,
+    )?;
+    let _owl = bed.standing_item(
+        ("hocus-owl", "hocus-owl"),
+        pixmap_of(16, GREEN, None),
+        Registers::ByName,
+    )?;
+    let names = ["chrome_status_icon_1", "hocus-owl"];
+    shows_names(&mut bed, 0, "HEADLESS-1", &names)?;
+    // The shell ends and comes back: the items register again as its
+    // watcher comes, before its bar is there.
+    let first = bed.hp.shell_pid();
+    let from = bed.plain().len();
+    bed.hp.kill_shell()?;
+    let back = bed.hp.dispatch_until(Duration::from_secs(20), |hp| {
+        hp.shell_connected() && hp.shell_pid() != first
+    })?;
+    anyhow::ensure!(back, "the shell never came back");
+    shows_names(&mut bed, from, "HEADLESS-1", &names)?;
+    let tray = bed.tray()?;
+    // Both icons, the second cell 34 px and a 4 px gap right of the first:
+    // in the order they registered again, which is the items' race.
+    let (x, y) = bed.icon(tray);
+    let start = Instant::now();
+    loop {
+        let cells = [bed.pixel((x, y))?, bed.pixel((x + 38, y))?];
+        let both = |a, b| near(cells[0], a) && near(cells[1], b);
+        if both(MAGENTA, GREEN) || both(GREEN, MAGENTA) {
+            return Ok(());
+        }
+        anyhow::ensure!(start.elapsed() < WAIT, "the cells show {cells:?}");
+        wait(&mut bed.hp, Duration::from_millis(50))?;
+    }
+}
+
+#[test]
+fn a_bar_moving_to_a_screen_plugged_in_shows_the_icons() -> anyhow::Result<()> {
+    // The bar on the second screen, the first with none.
+    let Some(mut bed) = Bed::start_on(&["1920x1080", "1920x1080"], |config| {
+        config.panel.output = "HEADLESS-2".into();
+        config.panel.form = FormChoice::Full;
+    })?
+    else {
+        return Ok(());
+    };
+    let levels = |hp: &Headless| {
+        hp.drawn_layers(hocus_link::LEVELS_NAMESPACE)
+            .first()
+            .map(|(on, r)| (on.clone(), r.height))
+    };
+    let unlifted = common::drawn(&mut bed.hp, hocus_link::LEVELS_NAMESPACE)?[0]
+        .1
+        .height;
+    bed.hp.unplug("HEADLESS-2")?;
+    let _item = bed.item("Active", pixmap(MAGENTA, None))?;
+    shows_names(&mut bed, 0, "HEADLESS-1", &["Slack"])?;
+    // Its levels go up by what the tray takes.
+    let mut lifted = None;
+    let up = bed.hp.dispatch_until(WAIT, |hp| {
+        lifted = levels(hp).filter(|(on, h)| on == "HEADLESS-1" && *h > unlifted);
+        lifted.is_some()
+    })?;
+    anyhow::ensure!(up, "{:?}", bed.hp.levels_surfaces());
+    let lifted = lifted.map(|(_, h)| h);
+    // Plugged in again, the bar goes back to it, the icon with it, its
+    // levels as high.
+    let from = bed.plain().len();
+    bed.hp.plug("HEADLESS-2")?;
+    shows_names(&mut bed, from, "HEADLESS-2", &["Slack"])?;
+    let moved = bed.hp.dispatch_until(WAIT, |hp| {
+        let trays = hp.drawn_layers(hocus_link::TRAY_NAMESPACE);
+        trays.len() == 1
+            && trays[0].0 == "HEADLESS-2"
+            && levels(hp).is_some_and(|(on, h)| on == "HEADLESS-2" && Some(h) == lifted)
+    })?;
+    anyhow::ensure!(
+        moved,
+        "tray {:?} levels {:?}, {lifted:?} high on HEADLESS-1",
+        bed.hp.layer_rects(hocus_link::TRAY_NAMESPACE),
+        bed.hp.levels_surfaces()
+    );
     Ok(())
 }
 
