@@ -198,6 +198,11 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "desktops.per-screen",
+        name: hocus_words::settings::desktops::SWITCH_DESKTOP,
+        said: Said::Choices(&[("false", hocus_words::settings::bar::EVERY_SCREEN), ("true", hocus_words::settings::app_wallpaper_page::EACH_SCREEN)]),
+    },
+    Label {
         key: "desktops.remember-tabs",
         name: hocus_words::settings::desktops::REMEMBER_PROJECTS_TABS,
         said: Said::Switch,

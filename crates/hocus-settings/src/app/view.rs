@@ -1102,6 +1102,8 @@ impl App {
         } else if let Some(why) = self.desktops_why_not(setting.id) {
             // Why it does not apply now, in place of its line (6.14).
             words = words.push(t(why, 12.5, PEACH.get()));
+        } else if let Some(line) = self.desktops_line(setting.id) {
+            words = words.push(t(line, 12.5, fade(DIM.get(), ink)));
         } else if let Some(line) = self.weather_line(setting.id) {
             // The rain's "Quand" waits for a place (#814).
             words = words.push(t(line, 12.5, fade(DIM.get(), ink)));
@@ -1824,6 +1826,9 @@ pub(super) fn shown(app: &App) -> serde_json::Value {
                 });
                 if app.implied(s) {
                     row["implied"] = serde_json::Value::Bool(true);
+                }
+                if let Some(line) = app.desktops_line(s.id) {
+                    row["line"] = serde_json::Value::String(line);
                 }
                 row
             })
