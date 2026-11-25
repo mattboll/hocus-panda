@@ -1049,7 +1049,11 @@ nine is one folded row that unfolds.
   `desktop-left` `swipe:3:right`, `desktop-right` `swipe:3:left` (the
   strip follows the fingers: right brings the desktop on the left, as
   before), `launcher` `swipe:4:up`, `overview` `corner:top-left` and
-  `swipe:4:down`. The older `[touchpad] swipe-desktops`, `swipe-launcher`
+  `swipe:4:down`, `all-desktops` `corner:top-right` and `swipe:3:down`
+  (#944; three fingers up close every desktop while it shows, built in).
+  A default gives way to a line the file writes: a corner or a swipe a
+  written line names is that action's, whatever the order. The older
+  `[touchpad] swipe-desktops` (three fingers down too), `swipe-launcher`
   and `[overview] hot-corner` are still read, no longer written: false,
   each takes its defaults away from an action whose line the file does
   not write; "Rétablir" then writes the line whole.
@@ -1061,17 +1065,19 @@ nine is one folded row that unfolds.
   holds is greyed with its name, and picked asks first in the picker's
   amber box ("3 doigts ↑ sert déjà à « X ». Le donner à « Y » le lui
   enlève.", Remplacer writing both lines as one change, or Annuler);
-  this action's own says "déjà ici"; the bar's own corner (the top one
-  on its side) says "la barre"; on a touchpad sensing three fingers the
+  this action's own says "déjà ici"; the bar's own corner (the top-left
+  one with the bar on the left; the top-right one is never the bar's,
+  #944) says "la barre"; on a touchpad sensing three fingers the
   four-finger ones say "pas sur ce pavé". `Esc` closes the box, then the
   picker. The search finds them ("3 doigts", "coin", "haut"); the count
   line adds "N gestes et coins"; "Rétablir" and "Tout rétablir" bring
   them back with the keys.
 - **Elsewhere**: Souris et pavé tactile's gestures group says what they
-  do ("3 doigts ← → : Bureau de droite, Bureau de gauche") and Bureaux
+  do, a line a finger count and an axis ("3 doigts ← → : Bureau de
+  droite, Bureau de gauche", "3 doigts ↓ : Tous les bureaux") and Bureaux
   et fenêtres' overview group what the corners do ("Coin ◤ : Vue
-  d’ensemble"), each with "Changer dans les raccourcis ›", which opens
-  the sub-page.
+  d’ensemble", "Coin ◥ : Tous les bureaux"), each with "Changer dans les
+  raccourcis ›", which opens the sub-page.
 - **The compositor**: a swipe with a binding decides as before
   (`gestures.rs`); the desktops follow when the fingers go the strip's
   way, the launcher along its swipe's way (back the other way while
@@ -1079,7 +1085,8 @@ nine is one folded row that unfolds.
   fingers lift, past a third of the launcher's travel; a swipe no action
   takes is the application's. The corners (`hot_corner.rs`) keep #727's
   rules for each corner. Tests: `shortcuts::tests`, `tests/gestures.rs`,
-  `tests/overview.rs`, `tests/settings_keyboard.rs`.
+  `tests/overview.rs`, `tests/all_desktops.rs`,
+  `tests/settings_keyboard.rs`.
 
 **The compositor's side.** `reload.rs` follows `[shortcuts]` and
 `[keyboard]` too: the new shortcuts at once; new layouts or options make

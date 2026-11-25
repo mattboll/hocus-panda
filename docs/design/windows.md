@@ -1051,10 +1051,13 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   nothing of its own; with reduced motion the overview fades in as by
   its keys. It is `corner:top-left` in `[shortcuts] overview`; since #893
   each of the four corners runs the action bound to it, with the same
-  rules, the bar's corner being the top one on its side (settings.md
-  "Gestures and corners"; `[overview] hot-corner = false`, from older
-  files, still takes the default away). Nothing runs at rest but the
-  dwell's one timer.
+  rules, the bar's corner being the top-left one with the bar on the left
+  only (settings.md "Gestures and corners"; `[overview] hot-corner =
+  false`, from older files, still takes the default away). The top-right
+  corner is never the bar's (#944): its pixel is above the bar, where the
+  bar's edge (bar.md §2, level with the bar) never starts its 300 ms, so
+  with the bar on the right it opens every desktop there too (§12c).
+  Nothing runs at rest but the dwell's one timer.
 - **On every screen at once**, each with its own desktops: the wallpaper
   dimmed (`rgba(7,9,15,0.5)` over it); along the top, the screen's
   desktops as live thumbnails, in the screen's shape, a ninth of its
@@ -1147,6 +1150,124 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   in front; two screens with the bar, the badge, a drag over a
   thumbnail (`HOCUS_SHOTS`: their screenshots).
 
+## 12c. Every desktop at once (#944)
+
+Approved 2026-11-25 (s944, variant C): a third level after the desktop
+and the overview, every desktop with its windows at their places and
+sizes, each screen showing its own desktops in a grid. For seeing what
+is where, going there, and moving windows between desktops and screens
+with the mouse. A mode of the overview (`overview.rs`): what the
+overview does with the bar, the keys, the clients and the agents holds
+here unless said.
+
+- **Opening** (the action `all-desktops`, "Tous les bureaux" / "Every
+  desktop"): `Super+Shift+W` (nested `Alt+Super+Shift+W`), three fingers
+  down (`swipe:3:down`: once the fingers' first travel says down, the
+  view opens; the rest of the swipe does nothing) and the top-right
+  corner (`corner:top-right`, the top-left one's rules, §12b, on the
+  bar's screen too), from the desktop or the overview; the palette lists
+  it. Again (keys, corner), `Super+W` or four fingers down: zooms back
+  into the desktop shown. Three fingers up close it while it shows,
+  built in, whatever `swipe:3:up` is bound to; closed, three fingers up
+  are unchanged (the application's by default). `Esc`, or a click
+  outside every desktop, closes it at once (no zoom back). A file giving
+  `corner:top-right` or `swipe:3:down` to another action keeps it; the
+  older `[touchpad] swipe-desktops = false` takes three fingers down
+  away too. The session locking, or a screen plugged or unplugged,
+  closes it at once.
+- **The grid**: each screen's desktops in reading order, one row for 1
+  or 2, 2 × 2 for 3 or 4, 3 × 2 for 5 or 6, 3 × 3 for 7 to 9 (rows of 4
+  past 9), the same grid on every screen. **One scale for every
+  screen**, the largest at which each one's grid fits the screen (from
+  the bar's edge on its side), 64 px in from its edges, 48 px between
+  columns, 40 between rows, 56 px under each desktop for its label; the
+  grid centred there
+  (0.39 for a 2048 × 1280 laptop with its bar and a 3440 × 1440 screen: a
+  window carried across keeps its size). A screen draws only its own
+  windows.
+- **A desktop**: the screen's wallpaper (the bar's column empty), a 1 px
+  `rgba(255,255,255,0.12)` rim (radius 10), its windows at their places
+  and sizes in stacking order from their own textures, windows on all
+  desktops on every desktop of their screen, minimised ones not; over
+  the wallpaper dimmed (`rgba(7,9,15,0.5)`). The desktop shown ringed
+  2 px in the accent, 4 px out. Its label 14 px under it: the number
+  (13.5 px, 600, `text.dim`), "3 · Courrier" with a name; a project's
+  monogram (22 × 20), "2 · hocus-site" (700) and its folder (Martian
+  Mono 11 px, `text.faint`). An empty desktop shows the overview's
+  resting panda (75 % of its height, 96 px at most), breathing as the
+  view opens. A window hosting agents carries the overview's badge,
+  smaller (a 26 px panda, 11.5 px words), a waiting panda bobbing.
+- **Pointer**: a desktop under the pointer lights (a 2 px
+  `rgba(255,255,255,0.38)` inner ring) on every screen when the screens
+  are linked, its own alone per screen. A click on a desktop zooms into
+  it, every screen going there (#947; per screen, that screen alone, the
+  others' views closing with it), the focus as after a switch; on a
+  window, the same and the window gets the keyboard. No ✕ (closing is
+  the overview's). The bar stays in front and works: a click on a
+  desktop's tile zooms into that desktop (the shown one's too); a window
+  carried onto a tile goes to that desktop (8.5 B).
+- **Moving a window**: pressed and moved 6 px, a window lifts (1.04
+  about the pointer, a 1 px `#7EE0A0` rim, a moving window's shadow) and
+  follows the pointer at the view's scale, across screens too, its place
+  showing at 25 %. The desktop under it lights (`rgba(108,194,135,0.28)`,
+  a 2 px `#7EE0A0` ring) and its label says "Lâcher : bureau 3" / "Drop:
+  desktop 3" (700, `#7EE0A0`). Let go there, the window goes to that
+  desktop of that screen, on top of its windows, nothing switching, the
+  view staying open: floating, where it was let go, its size kept but no
+  larger than the work area and wholly inside it; snapped, maximised or
+  fullscreen, the same zone there. On its own desktop or outside every
+  desktop, it springs back (200 ms). An agent's window carries its
+  agents.
+- **Keyboard**: `←/→/↑/↓` move a selection (2 px `#EEF1F6`, 9 px out) on
+  every screen's desktop N, the first press from the desktop shown, `←/→`
+  in reading order, `↑/↓` by rows, nothing past the ends; `Enter` zooms
+  into it; `Super+1…9` into that desktop. `Tab`, `Shift+Tab` into the
+  selected desktop's windows (the overview's ring), the screens left to
+  right; `Enter` goes to that window; `Super+Shift+1…9` sends it to that
+  desktop of its screen, the view staying open; `Esc` back to the
+  desktops, again closes. Other keys reach no application.
+- **Motion**: every desktop's picture travels from where it is to its
+  place in the next level, positions and scales together, in 320 ms on
+  the strip's curve (`cubic-bezier(0.22, 0.9, 0.3, 1)`), from one start
+  time for every screen: from the desktop, the shown one shrinks to its
+  place, the others come from beside it on the strip; from the overview,
+  its thumbnails grow into the grid and its windows go back to their
+  places; zooming into a desktop is the same backwards (the screens
+  switch at once under it). The labels, rings, badges and pandas fade
+  with it. Reduced motion: a 120 ms cross-fade. At rest nothing draws but
+  what clients commit and a waiting badge's panda; every label and badge
+  is a picture drawn once per look.
+- **Agents and programs**: nothing new; an agent switching desktops
+  moves the ring, the view stays open. No line of the control socket.
+- **As built** (`crates/hocus-compositor/src/overview/grid.rs`, its
+  drawing in `overview_draw/grid.rs`). Measured headless
+  (`tests/all_desktops.rs`, #947's two screens): `Super+Shift+W` shows
+  both screens' four desktops in a 2 × 2 grid, each window inside its
+  desktop at its place, 1 ringed; it, `Esc` and `Super+W` close it, the
+  desktops and focus as before; three fingers down open it, from the
+  overview too, no swipe reaching a client; three fingers up close it
+  before their binding (the lock), which they run once closed, and with
+  no binding reach the client whole; the 34-inch's top-right corner
+  opens it after its rest, once per entry, and closes it, passing
+  through opens nothing; on the laptop alone with its bar on the right,
+  the very corner opens it without bringing the bar in front, the edge
+  level with the bar bringing it as before; with the bar on the left its
+  top-left corner stays the bar's; a file's `close = ["Super+Q",
+  "swipe:3:down"]` keeps the fingers; a click on a desktop or a window
+  goes there on both screens, the window focused, on the laptop alone
+  per screen; the pointer lights a desktop, a click outside closes at
+  once; a snapped window carried to another desktop keeps its zone, a
+  floating one carried to the other screen lands where let go inside the
+  work area, one let go on its own desktop or nowhere stays; the label
+  under a carried window; the arrows, `Enter`, `Tab`, `Super+Shift+4`;
+  6 and 8 desktops' grids; one scale, 0.39; a project's label; a waiting
+  agent's badge; the empty desktops' pandas; reduced motion's fade; the
+  lock and a screen unplugged close it; at rest no frame in half a
+  second. Unit tests: the grid's shapes, the scale and places for the
+  two screens, the arrows, a window inside its desktop, the pictures at
+  scales 1 to 2. With the real shell (`tests/bar_desktops.rs`): a tile
+  clicked zooms into its desktop.
+
 ## 13. Shortcuts
 
 Most use `Super`, as in the user's current desktop; `Alt+Tab` and
@@ -1193,6 +1314,7 @@ holds the keyboard; the virtual terminals' switch stays.
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
 | `actions` | `Super+P` | The actions palette: every action of the desktop, searchable, run on the focused window or its screen; again, closes it ([actions.md](actions.md)) |
 | `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
+| `all-desktops` | `Super+Shift+W` | Every desktop at once, each screen's in a grid, from the desktop or the overview; again, back to the desktop shown (§12c) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
 | `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
 | `join` | `Super+J` | Joins the meeting whose reminder shows, else the one starting next within 10 min; nothing without one ([bar.md](bar.md), Day.6) |
