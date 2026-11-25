@@ -6,8 +6,9 @@
 //!
 //! Asked once as the shell starts, on a thread of its own with a runtime
 //! of its own, given up after a few seconds: no AccountsService, no system
-//! bus, no file, or a picture that does not read (PNG only, the codec the
-//! shell has), and the panda stays. The photo is cut square from its
+//! bus, no file, or a picture that does not read (PNG or JPEG, the
+//! codecs the shell has, told by their content: the file's name says
+//! nothing), and the panda stays. The photo is cut square from its
 //! middle and made [`PIXELS`] wide once, off the drawing.
 
 use std::{
@@ -118,10 +119,15 @@ fn read(file: &std::path::Path) -> Result<Handle, String> {
         return Err(format!("{size} bytes"));
     }
     let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
-    let picture = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?
-        .into_rgba8();
-    Ok(square(&picture))
+    Ok(square(&decode(&bytes)?))
+}
+
+/// A photo's pixels, its format told by its first bytes: AccountsService
+/// keeps what it was given, a JPEG as well as a PNG.
+fn decode(bytes: &[u8]) -> Result<image::RgbaImage, String> {
+    image::load_from_memory(bytes)
+        .map(image::DynamicImage::into_rgba8)
+        .map_err(|e| e.to_string())
 }
 
 fn square(picture: &image::RgbaImage) -> Handle {
@@ -158,5 +164,19 @@ mod tests {
         assert_eq!((width, height), (PIXELS, PIXELS));
         // Its middle's red, edge to edge.
         assert_eq!(&pixels[..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_photo_reads_as_a_png_or_a_jpeg() {
+        let photo = image::RgbImage::from_pixel(40, 30, image::Rgb([200, 30, 30]));
+        for format in [image::ImageFormat::Png, image::ImageFormat::Jpeg] {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            photo.write_to(&mut bytes, format).expect("encoded");
+            let read = decode(bytes.get_ref()).expect("decoded");
+            assert_eq!(read.dimensions(), (40, 30), "{format:?}");
+            let [r, g, _, a] = read.get_pixel(20, 15).0;
+            assert!(r > 180 && g < 60 && a == 255, "{format:?}: {r} {g}");
+        }
+        assert!(decode(b"not a picture").is_err());
     }
 }

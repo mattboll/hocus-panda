@@ -239,8 +239,9 @@ Sizes in logical pixels (`crates/hocus-shell/src/lock/draw.rs`):
 
 The account's photo from AccountsService (`org.freedesktop.Accounts` on
 the system bus, `FindUserById`, the user's `IconFile`), asked once as the
-shell starts, on a thread with a 5 s limit; PNG only (the codec the shell
-has; GNOME's Settings saves PNG), cut square from its middle, 176 px.
+shell starts, on a thread with a 5 s limit; PNG or JPEG (the codecs the
+shell has), told by the file's content, not its name: AccountsService
+keeps what it was given (#955). Cut square from its middle, 176 px.
 Without it, the panda.
 
 ## Choices made here (to confirm on the machine)
