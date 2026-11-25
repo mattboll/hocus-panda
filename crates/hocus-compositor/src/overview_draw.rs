@@ -14,6 +14,8 @@
 //! sleeping ones breathe twice as two "z" rise. Still with reduced motion
 //! or in power saver.
 
+mod grid;
+
 use std::{
     cell::{Cell, OnceCell, RefCell},
     collections::HashMap,
@@ -181,6 +183,28 @@ enum Pic {
         width: i32,
         scale: u32,
     },
+    /// Every desktop's (#944): a desktop's label, or what letting go there
+    /// does, 13.5 px.
+    GridWords {
+        text: String,
+        ink: [u8; 4],
+        bold: bool,
+        scale: u32,
+    },
+    /// A project's label under its desktop: its monogram, "2 · name",
+    /// its folder, on one line.
+    GridProject {
+        mono: String,
+        title: String,
+        folder: String,
+        scale: u32,
+    },
+    /// The agents' badge's pill for a 26 px panda, its words 11.5 px.
+    SmallPill {
+        words: String,
+        state: AgentState,
+        scale: u32,
+    },
 }
 
 /// Where a picture or a box is drawn: each its own element's ids.
@@ -201,6 +225,19 @@ enum Place {
     Make(String, usize),
     MakeRing,
     ProjectPill(String),
+    /// Every desktop's (#944): a desktop's rim, the mark of the one the
+    /// pointer or a carried window is over, the ring of the one shown,
+    /// the keyboard's, its label; the ring of the window `Tab` chose, the
+    /// rim of the one carried; a window's badge.
+    GridEdge(String, usize),
+    GridMark(String, usize),
+    GridCurrent(String, usize),
+    GridSelect(String, usize),
+    GridLabel(String, usize),
+    GridTab,
+    GridCarry,
+    GridPill(WindowId),
+    GridPanda(WindowId),
 }
 
 /// A picture, its size in pixels and its serial: a new one for each
@@ -245,7 +282,11 @@ impl OverviewPaint {
     pub fn forget(&self, id: WindowId) {
         self.thumbs.borrow_mut().retain(|(w, _, _), _| *w != id);
         self.ids.borrow_mut().retain(|(p, _), _| {
-            !matches!(p, Place::Label(w) | Place::Pill(w) | Place::Panda(w) if *w == id)
+            !matches!(
+                p,
+                Place::Label(w) | Place::Pill(w) | Place::Panda(w) | Place::GridPill(w)
+                    | Place::GridPanda(w) if *w == id
+            )
         });
     }
 
@@ -331,6 +372,18 @@ fn draw(fonts: &Fonts, pic: &Pic, scale: f64) -> Option<(Vec<u8>, (i32, i32))> {
             width,
             ..
         } => draw_project(fonts, (mono, title, folder, holds), *current, *width, scale),
+        Pic::GridWords {
+            text, ink, bold, ..
+        } => grid::draw_words(fonts, text, *ink, *bold, scale),
+        Pic::GridProject {
+            mono,
+            title,
+            folder,
+            ..
+        } => grid::draw_project(fonts, (mono, title, folder), scale),
+        Pic::SmallPill { words, state, .. } => {
+            draw_pill_sized(fonts, words, *state, grid::PANDA, grid::BADGE_TEXT, scale)
+        }
     }
 }
 
@@ -694,8 +747,21 @@ fn draw_pill(
     panda: f64,
     scale: f64,
 ) -> Option<(Vec<u8>, (i32, i32))> {
+    let text = BADGE_TEXT * (0.5 + 0.5 * panda / PANDA) as f32;
+    draw_pill_sized(fonts, words, state, panda, text, scale)
+}
+
+/// The badge's pill for a `panda` px panda, its words `text` px.
+fn draw_pill_sized(
+    fonts: &Fonts,
+    words: &str,
+    state: AgentState,
+    panda: f64,
+    text: f32,
+    scale: f64,
+) -> Option<(Vec<u8>, (i32, i32))> {
     let k = scale as f32;
-    let px = BADGE_TEXT * k * (0.5 + 0.5 * panda / PANDA) as f32;
+    let px = text * k;
     let height = ((panda + 2.0 * PILL_PAD) * scale) as f32;
     let text_w = advance(&fonts.bold, words, px);
     let width = ((panda + PILL_PAD) * scale) as f32 + 6.0 * k + text_w + 14.0 * k;
@@ -1094,6 +1160,9 @@ impl State {
         let Some(overview) = &self.overview else {
             return out;
         };
+        if overview.grid.is_some() {
+            return self.grid_elements(renderer, output, now);
+        }
         let Some(geometry) = self.space.output_geometry(output) else {
             return out;
         };

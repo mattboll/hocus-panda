@@ -96,6 +96,7 @@ fn shortcut_action(id: &str) -> Option<Action> {
         "move-to-screen-right" => Action::MoveToScreen(1),
         "focus-bar" => Action::FocusBar,
         "overview" => Action::Overview,
+        "every-desktop" => Action::AllDesktops,
         "clipboard" => Action::Clipboard,
         "emoji" => Action::Emoji,
         "volume-up" => Action::Level(LevelKey::VolumeUp),

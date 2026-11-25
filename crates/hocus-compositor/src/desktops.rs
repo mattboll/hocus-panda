@@ -120,6 +120,9 @@ pub enum Slide {
     /// Desktops in depth (#806): a camera move through the landscape
     /// (500 ms, in-out cubic), pulling back on the way.
     Depth,
+    /// At once, nothing moving: every desktop's zoom shows the way
+    /// (#944).
+    Cut,
 }
 
 /// The camera move of desktops in depth: its time, its curve (in-out
@@ -252,6 +255,10 @@ impl Strip {
         }
         self.current = to;
         self.motion = match slide {
+            Slide::Cut => {
+                self.ended = Some(now);
+                Motion::Still
+            }
             Slide::Fade => Motion::Fading {
                 from: previous,
                 tween: Tween::new(now, motion::FADE_REDUCED, Bezier::LINEAR),
@@ -862,7 +869,11 @@ impl crate::State {
         match to {
             DesktopTo::At(index) => {
                 let index = usize::from(index);
-                if index < self.strip(&output).count() {
+                if self.all_desktops_open() {
+                    // Every desktop zooms into it, the shown one's too
+                    // (#944).
+                    self.grid_go(&output.name(), index, None);
+                } else if index < self.strip(&output).count() {
                     self.switch_desktop(&output, index, None);
                 }
             }
@@ -998,16 +1009,36 @@ impl crate::State {
         reduced: bool,
     ) {
         let screens = self.switching_with(output);
-        self.switch_screens(&screens, to, carried, reduced);
+        let slide = self.slide(reduced);
+        self.switch_screens(&screens, to, carried, slide);
     }
 
-    /// `screens` show their desktop `to`, sliding together.
+    /// How the strips move: cross-fading when `reduced`, in depth with
+    /// desktops in depth (#806), else sliding.
+    fn slide(&self, reduced: bool) -> Slide {
+        if reduced {
+            Slide::Fade
+        } else if self.depth_moves() {
+            Slide::Depth
+        } else {
+            Slide::Standard
+        }
+    }
+
+    /// `output` shows its desktop `to` (from 0) at once, the screens
+    /// linked with it too (every desktop's zoom shows the way, #944).
+    pub(crate) fn switch_desktop_at_once(&mut self, output: &Output, to: usize) {
+        let screens = self.switching_with(output);
+        self.switch_screens(&screens, to, None, Slide::Cut);
+    }
+
+    /// `screens` show their desktop `to`, moving together as `slide` says.
     fn switch_screens(
         &mut self,
         screens: &[Output],
         to: usize,
         carried: Option<WindowId>,
-        reduced: bool,
+        slide: Slide,
     ) {
         let Some(first) = screens.first() else {
             return;
@@ -1016,13 +1047,6 @@ impl crate::State {
         // different rates sample the same curve and end together.
         let now = self.now();
         let to = to.min(self.strip(first).count() - 1);
-        let slide = if reduced {
-            Slide::Fade
-        } else if self.depth_moves() {
-            Slide::Depth
-        } else {
-            Slide::Standard
-        };
         let mut changed = Vec::new();
         for screen in screens {
             let mut strip = self.strip(screen);
@@ -1058,7 +1082,8 @@ impl crate::State {
             screens = others.len(),
             "the screens' desktops linked"
         );
-        self.switch_screens(&others, to, None, self.reduced_motion());
+        let slide = self.slide(self.reduced_motion());
+        self.switch_screens(&others, to, None, slide);
     }
 
     /// `output` joins the others (plugged, turned on, the lid opened):

@@ -373,7 +373,7 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
     // (#893).
     assert_eq!(
         strings(&shown["summaries"]["corners"]),
-        ["Coin ◤ : Vue d’ensemble"]
+        ["Coin ◤ : Vue d’ensemble", "Coin ◥ : Tous les bureaux"]
     );
     bed.places_with("link:overview.corners")?;
     let desktops = &shown["desktops"];

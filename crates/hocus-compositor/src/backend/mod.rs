@@ -148,6 +148,7 @@ pub type DevId = smithay::reexports::rustix::fs::Dev;
 /// Maps `output` in the space at `position`; its global is the caller's.
 pub fn add_output(state: &mut State, output: &Output, position: (i32, i32)) {
     state.space.map_output(output, position);
+    state.grid_screens_changed();
     state.desktops_join(output);
     state.display_added(output);
     state.panel_refresh();

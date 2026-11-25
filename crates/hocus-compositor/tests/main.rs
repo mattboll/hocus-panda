@@ -39,6 +39,7 @@ mod udisks;
 mod actions;
 mod agents;
 mod agents_live;
+mod all_desktops;
 mod annotate;
 mod api;
 mod appearance;

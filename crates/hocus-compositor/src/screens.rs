@@ -130,6 +130,8 @@ impl State {
             return;
         };
         self.end_on_output(output);
+        // Every desktop closes at once (#944).
+        self.grid_screens_changed();
         self.share_output_gone(&name);
         self.record_output_gone(&name);
         self.ink.output_gone(&name);
@@ -396,6 +398,7 @@ impl State {
         };
         // Linked, it shows the desktop the others show (#947), before
         // its windows come back to theirs.
+        self.grid_screens_changed();
         self.desktops_join(output);
         // Projects that followed their windows away come back with them.
         self.projects_screen_back(&key);

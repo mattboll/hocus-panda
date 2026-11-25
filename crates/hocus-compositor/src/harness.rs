@@ -76,6 +76,13 @@ pub type OverviewWindow = (Option<String>, (f64, f64, f64, f64));
 /// over (screen, desktop).
 pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
 
+/// A desktop of every desktop's grid (#944): its screen, its number
+/// (from 0), its picture (x, y, width, height), global.
+pub type GridDesktop = (String, usize, (f64, f64, f64, f64));
+/// A window of every desktop's grid: its app id, its screen, its desktop
+/// (from 0), its picture (x, y, width, height), global.
+pub type GridWindow = (Option<String>, String, usize, (f64, f64, f64, f64));
+
 /// A project as a test sees it: its name, its folder, and, open, its
 /// screen's connector and its desktop (from 0).
 pub type ProjectSeen = (String, std::path::PathBuf, Option<(String, usize)>);
@@ -2344,6 +2351,107 @@ impl Headless {
             .get(&drag.window)
             .and_then(|m| crate::windows::app_id(&m.window));
         Some((app, drag.over.clone()))
+    }
+
+    /// Every desktop at once (#944): `Some(true)` showing, `Some(false)`
+    /// zooming back in, `None` gone (or the overview's windows showing).
+    pub fn all_desktops(&self) -> Option<bool> {
+        let overview = self.app.state.overview.as_ref()?;
+        overview.grid.as_ref().map(|_| overview.open())
+    }
+
+    /// Every desktop's places, each screen's, in reading order.
+    pub fn grid_desktops(&self) -> Vec<GridDesktop> {
+        self.app
+            .state
+            .grid_screens()
+            .into_iter()
+            .flat_map(|s| {
+                let name = s.output.name();
+                s.places
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(d, a)| (name.clone(), d, (a.x, a.y, a.w, a.h)))
+            })
+            .collect()
+    }
+
+    /// Every desktop's windows, at rest, back to front on each desktop.
+    pub fn grid_windows(&self) -> Vec<GridWindow> {
+        let state = &self.app.state;
+        let mut out = Vec::new();
+        for screen in state.grid_screens() {
+            for desktop in 0..screen.places.len() {
+                for id in state.grid_windows(&screen.output, desktop) {
+                    let Some(a) = state.grid_window_rect(&screen, desktop, id) else {
+                        continue;
+                    };
+                    let app = state
+                        .windows
+                        .get(&id)
+                        .and_then(|m| crate::windows::app_id(&m.window));
+                    out.push((app, screen.output.name(), desktop, (a.x, a.y, a.w, a.h)));
+                }
+            }
+        }
+        out
+    }
+
+    /// The desktop the pointer lights in every desktop: its screen and
+    /// number (from 0).
+    pub fn grid_hover(&self) -> Option<(String, usize)> {
+        self.app
+            .state
+            .overview
+            .as_ref()?
+            .grid
+            .as_ref()?
+            .hover
+            .clone()
+    }
+
+    /// The keyboard's selection in every desktop.
+    pub fn grid_selection(&self) -> Option<crate::overview::grid::Selection> {
+        Some(
+            self.app
+                .state
+                .overview
+                .as_ref()?
+                .grid
+                .as_ref()?
+                .selection
+                .clone(),
+        )
+    }
+
+    /// The window carried in every desktop: its app id, the desktop it is
+    /// over (screen, number).
+    pub fn grid_carry(&self) -> Option<OverviewDrag> {
+        let state = &self.app.state;
+        let carry = state.overview.as_ref()?.grid.as_ref()?.carry.as_ref()?;
+        let app = state
+            .windows
+            .get(&carry.window)
+            .and_then(|m| crate::windows::app_id(&m.window));
+        Some((app, carry.over.clone()))
+    }
+
+    /// What desktop `desktop` (from 0) of screen `output`'s label says.
+    pub fn grid_label(&self, output: &str, desktop: usize) -> Option<crate::overview::grid::Label> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == output)?;
+        Some(state.grid_label(output, desktop))
+    }
+
+    /// The screen whose bar the pointer pushed against its edge brought,
+    /// or is bringing, in front (#519), whatever the overview does.
+    pub fn bar_pushed(&self) -> Option<String> {
+        match &self.app.state.panel.front {
+            crate::front::Front::Pushed { output, .. } | crate::front::Front::Raised { output } => {
+                Some(output.clone())
+            }
+            _ => None,
+        }
     }
 
     /// The projects (docs/design/projects.md): each one's name, folder,

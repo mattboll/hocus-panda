@@ -149,6 +149,8 @@ pub use harness::{Headless, Placed, StripLook, WindowInfo};
 pub use hocus_link::Form as BarForm;
 pub use lock::{Authenticator, LockState};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
+/// What every desktop's labels say and its keyboard's selection (#944).
+pub use overview::grid::{Label as GridLabel, Selection as GridSelection};
 pub use record::{RecordInfo, Source as RecordSource};
 pub use screen_sets::Identity as ScreenIdentity;
 pub use share::ShareInfo;

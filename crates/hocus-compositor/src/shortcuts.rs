@@ -67,6 +67,9 @@ pub enum Action {
     Launcher,
     /// The overview, on every screen; open, it closes (8.5 A).
     Overview,
+    /// Every desktop at once, each screen's in a grid; from the overview
+    /// too; open, back to the desktop shown before (#944).
+    AllDesktops,
     /// The clipboard's history, on the focused window's screen; open, it
     /// closes (5.6).
     Clipboard,
@@ -418,6 +421,7 @@ shortcuts! {
     launcher: ["Super+Space", "swipe:4:up"] => Action::Launcher,
     actions: ["Super+P"] => Action::Actions,
     overview: ["Super+W", "corner:top-left", "swipe:4:down"] => Action::Overview,
+    all_desktops: ["Super+Shift+W", "corner:top-right", "swipe:3:down"] => Action::AllDesktops,
     clipboard: ["Super+V"] => Action::Clipboard,
     emoji: ["Super+period"] => Action::Emoji,
     volume_up: ["XF86AudioRaiseVolume"] => Action::Level(LevelKey::VolumeUp),
@@ -518,21 +522,25 @@ impl crate::Config {
         }
     }
 
-    /// What `trigger` runs: the first action that names it, unless an
-    /// older switch took that default away.
+    /// What `trigger` runs: the first action whose line the file writes
+    /// that names it, else the first one by default, unless an older
+    /// switch took that default away. A default gives way to a line the
+    /// file writes (#944: `corner:top-right` given to another action
+    /// stays there).
     pub fn trigger_action(&self, trigger: Trigger) -> Option<Action> {
-        self.shortcuts
-            .triggers
+        let named = |b: &&Bound| {
+            b.trigger == trigger
+                && !(b.by_default
+                    && hocus_config::triggers::retired(&b.field.replace('_', "-"), trigger, |s| {
+                        self.switch_off(s)
+                    }))
+        };
+        let triggers = &self.shortcuts.triggers;
+        triggers
             .iter()
-            .find(|b| {
-                b.trigger == trigger
-                    && !(b.by_default
-                        && hocus_config::triggers::retired(
-                            &b.field.replace('_', "-"),
-                            trigger,
-                            |s| self.switch_off(s),
-                        ))
-            })
+            .filter(|b| !b.by_default)
+            .find(named)
+            .or_else(|| triggers.iter().find(named))
             .map(|b| b.action)
     }
 
@@ -612,6 +620,7 @@ impl State {
             Action::Level(key) => self.level_key(key),
             Action::Launcher => self.toggle_launcher(),
             Action::Overview => self.toggle_overview(),
+            Action::AllDesktops => self.toggle_all_desktops(),
             Action::Clipboard => self.toggle_clipboard(),
             Action::Emoji => self.toggle_emoji(),
             Action::Capture => self.open_capture(),
@@ -885,7 +894,17 @@ mod tests {
             Some(Action::Overview)
         );
         assert_eq!(unset.trigger_action(swipe(3, Toward::Up)), None);
+        // Every desktop (#944): the top-right corner, three fingers down.
+        assert_eq!(
+            unset.trigger_action(Trigger::Corner(Corner::TopRight)),
+            Some(Action::AllDesktops)
+        );
+        assert_eq!(
+            unset.trigger_action(swipe(3, Toward::Down)),
+            Some(Action::AllDesktops)
+        );
         assert_eq!(unset.shortcuts.overview, ["Super+W".parse()?]);
+        assert_eq!(unset.shortcuts.all_desktops, ["Super+Shift+W".parse()?]);
         // A line written: its own triggers, the others' defaults kept.
         let set: crate::Config = toml::from_str(
             "[shortcuts]\noverview = [\"Super+W\", \"corner:bottom-right\"]\n\
@@ -909,6 +928,20 @@ mod tests {
             twice.trigger_action(swipe(3, Toward::Down)),
             Some(Action::Lock)
         );
+        // A default gives way to a line the file writes, whatever their
+        // order (#944).
+        let given: crate::Config = toml::from_str(
+            "[shortcuts]\ncapture = [\"Print\", \"corner:top-right\"]\n\
+             close = [\"Super+Q\", \"swipe:3:down\"]\n",
+        )?;
+        assert_eq!(
+            given.trigger_action(Trigger::Corner(Corner::TopRight)),
+            Some(Action::Capture)
+        );
+        assert_eq!(
+            given.trigger_action(swipe(3, Toward::Down)),
+            Some(Action::Close)
+        );
         for bad in [
             "close = \"swipe:5:left\"",
             "close = [\"Super+Q\", \"corner:middle\"]",
@@ -925,6 +958,7 @@ mod tests {
         let off = read("[touchpad]\nswipe-desktops = false\n")?;
         assert_eq!(off.trigger_action(swipe(3, Toward::Left)), None);
         assert_eq!(off.trigger_action(swipe(3, Toward::Right)), None);
+        assert_eq!(off.trigger_action(swipe(3, Toward::Down)), None);
         assert!(!off.swipes_of(3) && off.swipes_of(4));
         let off = read("[touchpad]\nswipe-launcher = false\n")?;
         assert_eq!(off.trigger_action(swipe(4, Toward::Up)), None);
