@@ -517,5 +517,19 @@ pub struct ClientState {
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+    /// A protocol error the compositor raised is the only trace of why it
+    /// cut a client off (#954): the client sees a reset connection.
+    fn disconnected(&self, client_id: ClientId, reason: DisconnectReason) {
+        if let DisconnectReason::ProtocolError(error) = reason {
+            tracing::warn!(
+                client = ?client_id,
+                shell = self.shell,
+                interface = %error.object_interface,
+                object = error.object_id,
+                code = error.code,
+                message = %error.message,
+                "a client cut off by a protocol error"
+            );
+        }
+    }
 }

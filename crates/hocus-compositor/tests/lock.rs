@@ -196,6 +196,16 @@ impl Bed {
         clock_at: Option<&str>,
         layouts: &[&str],
     ) -> anyhow::Result<Option<Self>> {
+        Self::start_configured(outputs, clock_at, layouts, |_| {})
+    }
+
+    /// The same, the compositor's configuration then changed by `more`.
+    fn start_configured(
+        outputs: &[&str],
+        clock_at: Option<&str>,
+        layouts: &[&str],
+        more: impl FnOnce(&mut Config),
+    ) -> anyhow::Result<Option<Self>> {
         let shell = shell_program();
         let dir = tempfile::tempdir()?;
         let root = dir.path();
@@ -226,6 +236,7 @@ impl Bed {
         let mut config = Config::default();
         config.keyboard.layouts = layouts.iter().map(|l| (*l).to_owned()).collect();
         config.lock_auth = Authenticator::test(RIGHT);
+        more(&mut config);
         let outputs = outputs
             .iter()
             .map(|o| o.parse())
@@ -638,6 +649,67 @@ fn a_shell_crash_keeps_the_session_locked() -> anyhow::Result<()> {
         "x reached the window: {keys:?}"
     );
     Ok(())
+}
+
+/// A screen plugged in while locked, the bar's screen by the
+/// configuration (#954): the shell stays connected, its lock covers the
+/// new screen, the form going there; unplugged again, the shell still
+/// stays, the form back on the first screen, and the lock opens.
+#[test]
+fn a_screen_plugged_while_locked_keeps_the_shell() -> anyhow::Result<()> {
+    const SECOND: &str = "HEADLESS-2";
+    let Some(mut bed) = Bed::start_configured(&["2560x1600@1.25"], None, &["us"], |config| {
+        config.panel.output = SECOND.into();
+    })?
+    else {
+        return Ok(());
+    };
+    let first = bed
+        .hp
+        .outputs()
+        .first()
+        .map(|(n, _)| n.clone())
+        .context("a screen")?;
+    bed.lock()?;
+    let shell = bed.hp.shell_pid();
+    let from = bed.mark();
+    bed.hp
+        .plug_screen(SECOND, OutputSpec::new(3440, 1440), None)?;
+    let covered = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.lock_drawn_on().len() == 2 && hp.lock_shown().is_some_and(|s| s.output == SECOND)
+    })?;
+    assert!(
+        covered,
+        "the lock never covered the new screen: {:?}, {:?}",
+        bed.hp.lock_drawn_on(),
+        bed.hp.lock_shown()
+    );
+    bed.logged_after(
+        from,
+        &[
+            "the lock is drawn",
+            &format!("output: \"{SECOND}\""),
+            "form: true",
+        ],
+    )?;
+    common::at_rest(&mut bed.hp)?;
+    assert!(bed.hp.shell_connected(), "the shell was cut off");
+    assert_eq!(bed.hp.shell_pid(), shell, "the shell started again");
+    assert!(
+        !bed.plain().contains("the shell stopped"),
+        "{}",
+        bed.plain()
+    );
+    // Unplugged: the form back on the first screen, the shell still there.
+    bed.hp.unplug(SECOND)?;
+    let back = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.lock_drawn_on() == [first.clone()] && hp.lock_shown().is_some_and(|s| s.output == first)
+    })?;
+    assert!(back, "the lock: {:?}", bed.hp.lock_drawn_on());
+    common::at_rest(&mut bed.hp)?;
+    assert!(bed.hp.shell_connected(), "the shell was cut off");
+    assert_eq!(bed.hp.shell_pid(), shell, "the shell started again");
+    unlock(&mut bed.hp)
 }
 
 /// Unlocked: the shell is told, its lock surfaces go, the desktop shows

@@ -1174,6 +1174,18 @@ impl State {
         }
     }
 
+    /// Screen `name` went: what it drew of the lock goes with it, so that
+    /// plugged in again it shows the lock only once the shell's is there
+    /// (and fades in again) (#954).
+    pub(crate) fn lock_output_gone(&mut self, name: &str) {
+        if let Some(locked) = self.lock.locked_mut() {
+            locked.shown_at.remove(name);
+        }
+        self.lock.drawn_on.borrow_mut().remove(name);
+        self.lock.full_on.borrow_mut().remove(name);
+        self.lock.presented_on.borrow_mut().remove(name);
+    }
+
     /// The machine woke up locked (7.2): the field holds the keyboard.
     pub(crate) fn lock_woke(&mut self) {
         if let Some(form) = self.own_form() {
