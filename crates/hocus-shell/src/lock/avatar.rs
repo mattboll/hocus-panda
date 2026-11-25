@@ -6,9 +6,10 @@
 //!
 //! Asked once as the shell starts, on a thread of its own with a runtime
 //! of its own, given up after a few seconds: no AccountsService, no system
-//! bus, no file, or a picture that does not read (PNG only, the codec the
-//! shell has), and the panda stays. The photo is cut square from its
-//! middle and made [`PIXELS`] wide once, off the drawing.
+//! bus, no file, or a picture that does not read (PNG or JPEG, the
+//! codecs the shell has, or SVG, drawn by resvg; told by their content:
+//! the file's name says nothing), and the panda stays. The photo is cut
+//! square from its middle and made [`PIXELS`] wide once, off the drawing.
 
 use std::{
     sync::{Mutex, PoisonError},
@@ -118,10 +119,56 @@ fn read(file: &std::path::Path) -> Result<Handle, String> {
         return Err(format!("{size} bytes"));
     }
     let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
-    let picture = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?
-        .into_rgba8();
-    Ok(square(&picture))
+    Ok(square(&decode(&bytes)?))
+}
+
+/// A photo's pixels, its format told by its first bytes: AccountsService
+/// keeps what it was given, a JPEG or an SVG as well as a PNG.
+fn decode(bytes: &[u8]) -> Result<image::RgbaImage, String> {
+    if let Some(svg) = svg(bytes) {
+        return draw_svg(svg);
+    }
+    image::load_from_memory(bytes)
+        .map(image::DynamicImage::into_rgba8)
+        .map_err(|e| e.to_string())
+}
+
+/// An SVG's XML from its first `<`, after a byte order mark or blanks
+/// (which the XML parser refuses before a declaration): neither a PNG
+/// nor a JPEG begins with `<`.
+fn svg(bytes: &[u8]) -> Option<&[u8]> {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let start = bytes.iter().position(|b| !b.is_ascii_whitespace())?;
+    (bytes[start] == b'<').then(|| &bytes[start..])
+}
+
+/// An SVG drawn so that its shorter side is [`PIXELS`]: sharp once cut
+/// square, never drawn larger than shown.
+fn draw_svg(bytes: &[u8]) -> Result<image::RgbaImage, String> {
+    let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())
+        .map_err(|e| e.to_string())?;
+    let size = tree.size();
+    let k = PIXELS as f32 / size.width().min(size.height()).max(1.0);
+    // At most PIXELS × 4 on its longer side: a strip's photo stays small.
+    let side = |s: f32| ((s * k).round() as u32).clamp(1, PIXELS * 4);
+    let (w, h) = (side(size.width()), side(size.height()));
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(w, h).ok_or_else(|| format!("{w}x{h}: no pixmap"))?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(k, k),
+        &mut pixmap.as_mut(),
+    );
+    // tiny-skia's pixels are premultiplied; iced takes them not.
+    let pixels = pixmap
+        .pixels()
+        .iter()
+        .flat_map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        })
+        .collect();
+    image::RgbaImage::from_raw(w, h, pixels).ok_or_else(|| "pixels lost".to_owned())
 }
 
 fn square(picture: &image::RgbaImage) -> Handle {
@@ -158,5 +205,29 @@ mod tests {
         assert_eq!((width, height), (PIXELS, PIXELS));
         // Its middle's red, edge to edge.
         assert_eq!(&pixels[..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_photo_reads_as_a_png_a_jpeg_or_an_svg() {
+        let photo = image::RgbImage::from_pixel(40, 30, image::Rgb([200, 30, 30]));
+        for format in [image::ImageFormat::Png, image::ImageFormat::Jpeg] {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            photo.write_to(&mut bytes, format).expect("encoded");
+            let read = decode(bytes.get_ref()).expect("decoded");
+            assert_eq!(read.dimensions(), (40, 30), "{format:?}");
+            let [r, g, _, a] = read.get_pixel(20, 15).0;
+            assert!(r > 180 && g < 60 && a == 255, "{format:?}: {r} {g}");
+        }
+        // A BOM and a blank line before its XML, as editors leave them.
+        let svg = "\u{feff}\n<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" \
+                   width=\"60\" height=\"30\"><rect width=\"60\" height=\"30\" \
+                   fill=\"#c81e1e\"/></svg>";
+        let read = decode(svg.as_bytes()).expect("drawn");
+        // Its shorter side made the photo's.
+        assert_eq!(read.dimensions(), (PIXELS * 2, PIXELS));
+        let [r, g, _, a] = read.get_pixel(PIXELS / 2, PIXELS / 2).0;
+        assert!(r > 180 && g < 60 && a == 255, "svg: {r} {g}");
+        assert!(decode(b"not a picture").is_err());
+        assert!(decode(b"<svg broken").is_err());
     }
 }

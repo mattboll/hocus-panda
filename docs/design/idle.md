@@ -337,10 +337,15 @@ thread (`leave/logind.rs`), the rest from the system bus's (`system.rs`).
 
 ### The screens off
 
-- On a virtual terminal, DPMS through DRM: the CRTC cleared
-  (`DrmCompositor::clear`), nothing drawn; on again, its state reset and a
-  frame drawn afresh, which lights it. Back from another terminal, a
-  screen that was off is turned off again.
+- On a virtual terminal, DPMS through DRM: the CRTC's `ACTIVE` cleared
+  alone (its mode, connectors and planes kept), nothing drawn; on again,
+  `ACTIVE` set alone, and a frame drawn afresh once the commit's vblank
+  says it is lit. Neither commit is waited for on the loop: a laptop's
+  panel takes some 300 ms to power down or up (#828, #950). A display
+  engine that refuses `ACTIVE` alone has its CRTC cleared whole
+  (`DrmCompositor::clear`), and committed whole by its next frame, which
+  waits. Back from another terminal, a screen that was off is turned off
+  again.
 - Headless and nested, a screen off draws black (no element, not even
   the cursor); `State::output_powered` and `Headless::screens_on` say it.
 - `wlr-output-power-management` is not served: nothing to tell.

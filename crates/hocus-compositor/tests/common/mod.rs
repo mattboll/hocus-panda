@@ -541,6 +541,14 @@ pub enum Command {
     /// Draws its window again with its header this colour (ARGB), as an
     /// application turning to a dark theme.
     Header(u32),
+    /// Draws its window again as it was, its buffer damaged in this
+    /// rectangle alone (x, y, width, height; buffer pixels), as an
+    /// application redrawing part of its page.
+    Redraw(i32, i32, i32, i32),
+    /// Says its window opaque, all of it (`set_opaque_region`), and draws
+    /// it again, as an application sends its opaque region with a frame:
+    /// what is under it is hidden.
+    Opaque,
     /// Reads the clipboard's text, as `Ctrl+V` does: [`Event::Pasted`].
     ReadClipboard,
     /// Asks for its window to be activated (`xdg_activation_v1`) with this
@@ -1067,6 +1075,29 @@ fn run_client(
                     client.draw_framed(&surface, size, margin);
                 }
                 (Command::Header(_), None) => {}
+                (Command::Opaque, Some(window)) => {
+                    let surface = window.wl_surface().clone();
+                    let (size, margin) = (client.size, client.margin);
+                    if let Ok(region) =
+                        smithay_client_toolkit::compositor::Region::new(&client.compositor)
+                    {
+                        let m = margin as i32;
+                        region.add(m, m, size.0 as i32, size.1 as i32);
+                        surface.set_opaque_region(Some(region.wl_region()));
+                        // With a buffer: smithay takes a surface's opaque
+                        // region at a new buffer only, and a commit without
+                        // one leaves it out of the scene until the window
+                        // happens to draw again.
+                        client.draw_framed(&surface, size, margin);
+                    }
+                }
+                (Command::Opaque, None) => {}
+                (Command::Redraw(x, y, w, h), Some(window)) => {
+                    let surface = window.wl_surface().clone();
+                    let (size, margin) = (client.size, client.margin);
+                    client.draw_framed_damaged(&surface, size, margin, Some((x, y, w, h)));
+                }
+                (Command::Redraw(..), None) => {}
                 (Command::ReadClipboard, _) => client.read_clipboard(),
                 (Command::Activate(token), Some(window)) => {
                     let surface = window.wl_surface().clone();
@@ -1303,6 +1334,18 @@ impl Client {
     /// A solid colour `size` large, within a translucent shadow `margin`
     /// wide.
     fn draw_framed(&mut self, surface: &wl_surface::WlSurface, size: (u32, u32), margin: u32) {
+        self.draw_framed_damaged(surface, size, margin, None);
+    }
+
+    /// [`Self::draw_framed`], its buffer damaged in `damage` alone (x, y,
+    /// width, height; buffer pixels), or all of it.
+    fn draw_framed_damaged(
+        &mut self,
+        surface: &wl_surface::WlSurface,
+        size: (u32, u32),
+        margin: u32,
+        damage: Option<(i32, i32, i32, i32)>,
+    ) {
         let m = margin as i32;
         let (iw, ih) = (size.0.max(1) as i32, size.1.max(1) as i32);
         let (w, h) = (iw + 2 * m, ih + 2 * m);
@@ -1354,7 +1397,8 @@ impl Client {
             };
             pixel.copy_from_slice(&colour.to_le_bytes());
         }
-        surface.damage_buffer(0, 0, w, h);
+        let (dx, dy, dw, dh) = damage.unwrap_or((0, 0, w, h));
+        surface.damage_buffer(dx, dy, dw, dh);
         if buffer.attach_to(surface).is_ok() {
             surface.commit();
         }

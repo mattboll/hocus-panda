@@ -15,6 +15,11 @@
 //! leaves the history as it is: what is copied meanwhile is kept in
 //! memory only, for this session.
 //!
+//! The first build kept its history at the same place in one sealed file,
+//! its key raw (32 bytes) in `clipboard.key`: both are set aside together
+//! as `clipboard.first-build` and `clipboard.first-build.key`, where they
+//! still open, and this history starts beside them (#955).
+//!
 //! Kept until the session ends (`[clipboard] keep = "session"`, 6.17),
 //! the items that are not pinned are kept in memory only: those on disk
 //! leave it once the rules are applied ([`super::GRACE`] after they
@@ -508,6 +513,7 @@ struct Files {
 impl Files {
     /// The history in `dir`, its key found or made; `None` without one.
     fn open(dir: PathBuf, bus: Option<&str>) -> Option<Self> {
+        set_aside_first_build(&dir);
         let key = key(&dir, bus)?;
         if let Err(err) = std::fs::DirBuilder::new()
             .recursive(true)
@@ -616,13 +622,67 @@ fn key_file(dir: &Path) -> PathBuf {
     dir.with_extension("key")
 }
 
+/// Where the first build's history goes when this one finds it at `dir`,
+/// and where its key goes.
+fn first_build(dir: &Path) -> (PathBuf, PathBuf) {
+    (
+        dir.with_extension("first-build"),
+        dir.with_extension("first-build.key"),
+    )
+}
+
+/// Moves the first build's history aside, with its key when it is the
+/// first build's (raw): this history is a directory at the same place.
+fn set_aside_first_build(dir: &Path) {
+    let Ok(found) = std::fs::symlink_metadata(dir) else {
+        return;
+    };
+    if found.is_dir() {
+        return;
+    }
+    let (history, key) = first_build(dir);
+    let raw_key = std::fs::read(key_file(dir)).is_ok_and(|bytes| bytes.len() == KEY_BYTES);
+    let mut moves = vec![(dir.to_path_buf(), history)];
+    if raw_key {
+        moves.push((key_file(dir), key));
+    }
+    for (from, to) in moves {
+        if to.exists() {
+            tracing::warn!(
+                from = %from.display(),
+                to = %to.display(),
+                "the first build's clipboard history cannot be set aside: already there"
+            );
+            return;
+        }
+        if let Err(err) = std::fs::rename(&from, &to) {
+            tracing::warn!(%err, from = %from.display(), "cannot set the first build's clipboard history aside");
+            return;
+        }
+        tracing::info!(to = %to.display(), "the first build's clipboard history is set aside");
+    }
+}
+
+/// A key's bytes.
+const KEY_BYTES: usize = 32;
+
+/// The key a key file holds: in hex as this shell writes it, else its 32
+/// bytes raw, as the first build wrote it.
+fn key_of(bytes: &[u8]) -> Option<SealKey> {
+    match std::str::from_utf8(bytes).map(str::trim) {
+        Ok(text) if text.len() == 2 * KEY_BYTES => from_hex(text),
+        _ if bytes.len() == KEY_BYTES => SealKey::try_from(bytes).ok(),
+        _ => None,
+    }
+}
+
 /// The history's key: its key file's, else the keyring's, else a new key
 /// file's. `None` when there is none to be had (nothing is kept on disk).
 fn key(dir: &Path, bus: Option<&str>) -> Option<SealKey> {
     let file = key_file(dir);
-    match std::fs::read_to_string(&file) {
-        Ok(text) => {
-            let key = from_hex(text.trim());
+    match std::fs::read(&file) {
+        Ok(bytes) => {
+            let key = key_of(&bytes);
             if key.is_none() {
                 tracing::warn!(file = %file.display(), "the clipboard's key file does not read: nothing kept");
             }
@@ -694,10 +754,10 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn from_hex(text: &str) -> Option<SealKey> {
-    if text.len() != 64 {
+    if text.len() != 2 * KEY_BYTES {
         return None;
     }
-    let bytes: Option<Vec<u8>> = (0..32)
+    let bytes: Option<Vec<u8>> = (0..KEY_BYTES)
         .map(|i| u8::from_str_radix(text.get(2 * i..2 * i + 2)?, 16).ok())
         .collect();
     SealKey::try_from(bytes?.as_slice()).ok()
@@ -780,6 +840,47 @@ mod tests {
         assert_eq!(&*back[0].text, "hunter-two-not-a-secret");
         files.remove(5);
         assert!(files.load().is_empty());
+    }
+
+    #[test]
+    fn a_key_file_of_raw_bytes_reads_as_its_key() {
+        let root = tempfile::tempdir().expect("a directory");
+        let dir = root.path().join("clipboard");
+        // Not UTF-8, as the first build wrote its keys.
+        let raw: Vec<u8> = (0..32).map(|i| 0xe0 ^ i).collect();
+        assert!(std::str::from_utf8(&raw).is_err());
+        std::fs::write(key_file(&dir), &raw).expect("written");
+        assert_eq!(key(&dir, None).expect("a key").as_slice(), raw.as_slice());
+        let files = Files::open(dir.clone(), None).expect("open");
+        files.write_item(&super::super::text_item(9, "kept", "", 1));
+        assert_eq!(&*files.load()[0].text, "kept");
+        // Untouched: it is this history's key now.
+        assert_eq!(std::fs::read(key_file(&dir)).expect("there"), raw);
+    }
+
+    #[test]
+    fn the_first_builds_history_is_set_aside_with_its_key_and_this_one_kept() {
+        let root = tempfile::tempdir().expect("a directory");
+        let dir = root.path().join("clipboard");
+        let old_key = [0xffu8; 32];
+        std::fs::write(&dir, b"sealed by the first build").expect("written");
+        std::fs::write(key_file(&dir), old_key).expect("written");
+        let files = Files::open(dir.clone(), None).expect("open");
+        let (history, key) = first_build(&dir);
+        assert_eq!(
+            std::fs::read(&history).expect("set aside"),
+            b"sealed by the first build"
+        );
+        assert_eq!(std::fs::read(&key).expect("set aside"), old_key);
+        // This history: a directory, a key of its own in hex.
+        assert!(dir.is_dir());
+        let new_key = std::fs::read_to_string(key_file(&dir)).expect("made");
+        assert_eq!(new_key.trim().len(), 64);
+        files.write_item(&super::super::text_item(3, "after", "", 1));
+        drop(files);
+        let files = Files::open(dir.clone(), None).expect("open again");
+        assert_eq!(&*files.load()[0].text, "after");
+        assert_eq!(std::fs::read(&key).expect("still aside"), old_key);
     }
 
     #[test]

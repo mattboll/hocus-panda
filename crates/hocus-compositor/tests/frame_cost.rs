@@ -3,8 +3,9 @@
 //! 30 frames a second (the garland across the top, the creatures, the
 //! fireflies) step
 //! together, on one clock, so that a 50 Hz screen draws at most 30 frames
-//! a second for them, not one for each; and what a frame of a 3440 × 1440
-//! screen with the bar's glass and the effects costs the loop.
+//! a second for them, not one for each; what a frame of a 3440 × 1440
+//! screen with the bar's glass and the effects costs the loop; and what a
+//! laptop panel's scene gives the damage tracker (#948).
 
 use crate::common;
 
@@ -298,6 +299,88 @@ fn a_frame_of_a_big_screen() -> anyhow::Result<()> {
     );
     // Nothing moves behind the bar: its glass stays as it was blurred.
     assert_eq!(blurs, 0, "the glass blurred again");
+    Ok(())
+}
+
+/// A frame of a laptop's 165 Hz panel (#948).
+const AT_165_HZ: Duration = Duration::from_micros(6061);
+
+/// A laptop's desk (#948): its 2560 × 1600 panel at scale 2, a 3440 × 1440
+/// screen beside it, three opaque windows of text on the panel. What a
+/// scene of the panel gives the damage tracker, which subtracts every
+/// opaque rectangle in front of an element from it, for each element,
+/// every frame: a few rectangles a rounded window, its corners' squares
+/// left out whole, not one a pixel row of each corner (thirty a window
+/// at this scale, and the loop's largest cost of its own).
+#[test]
+fn a_scene_gives_the_damage_tracker_a_few_rectangles_a_window() -> anyhow::Result<()> {
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![
+                OutputSpec::new(2560, 1600).scale(2.0),
+                OutputSpec::new(3440, 1440),
+            ],
+            ..common::gles()
+        },
+        Config::default(),
+    )?;
+    if hp.renderer() != "gles" {
+        common::missing("GLES on Mesa's software device (libegl-mesa0, libgles2)");
+    }
+    let mut clients = Vec::new();
+    for (app_id, rect) in [
+        ("test.terminal", Rect::new(60, 80, 640, 480)),
+        ("test.notes", Rect::new(560, 160, 600, 420)),
+        ("test.page", Rect::new(240, 320, 700, 400)),
+    ] {
+        let (_, client) = open_showing(
+            &mut hp,
+            app_id,
+            Shows::Document {
+                app_id,
+                size: (rect.width as u32, rect.height as u32),
+            },
+        )?;
+        client.commands.send(common::Command::Opaque)?;
+        clients.push(client);
+        let id = hp
+            .windows()
+            .into_iter()
+            .find(|w| w.app_id.as_deref() == Some(app_id))
+            .map(|w| w.id)
+            .ok_or_else(|| anyhow::anyhow!("no window {app_id}"))?;
+        hp.place_window(id, rect);
+    }
+    // Until every window's opaque region is in the scene: three windows'
+    // worth of opaque rectangles over the wallpaper's.
+    let mut opaque = 0;
+    for _ in 0..200 {
+        hp.step(AT_165_HZ)?;
+        let cost = hp.take_frame_cost(0);
+        opaque = cost.opaque / cost.scenes.max(1);
+        if opaque >= 4 {
+            break;
+        }
+    }
+    anyhow::ensure!(opaque >= 4, "the windows never said they were opaque");
+    for _ in 0..10 {
+        hp.step(AT_165_HZ)?;
+    }
+    hp.take_frame_cost(0);
+    for _ in 0..60 {
+        hp.step(AT_165_HZ)?;
+    }
+    let cost = hp.take_frame_cost(0);
+    let scenes = cost.scenes.max(1);
+    let (elements, opaque) = (cost.elements / scenes, cost.opaque / scenes);
+    eprintln!(
+        "{} scenes of the panel: {elements} elements, {opaque} opaque rectangles a scene",
+        cost.scenes
+    );
+    anyhow::ensure!(cost.scenes >= 60, "{} scenes in 60 steps", cost.scenes);
+    // Five a window at most (its opaque region less its corners'
+    // squares), and the wallpaper's.
+    assert!(opaque <= 3 * 5 + 1, "{opaque} opaque rectangles a scene");
     Ok(())
 }
 

@@ -3352,7 +3352,11 @@ maintainer's spec (issue #396).
   timeout, an unlock prompt included), else a key file beside the
   history, `clipboard.key` (`0600`), made once and used from then on. A
   keyring that holds the key and does not answer leaves the history
-  alone: what is copied is then kept for the session only.
+  alone: what is copied is then kept for the session only. The first
+  build's history, one sealed file at the same place with its key raw
+  beside it, is set aside with that key (`clipboard.first-build`,
+  `clipboard.first-build.key`, #955), and a key file holding the key raw
+  reads as well as one in hex.
 - **Measured headless** (`crates/hocus-compositor/tests/clipboard.rs`),
   the real shell on the CPU, no session bus (the key in its file), the
   test's own desktop entries: a copy listed with its application's name;

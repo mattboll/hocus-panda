@@ -546,6 +546,12 @@ fn a_gesture_taken_from_another_action_writes_both_lines() -> anyhow::Result<()>
         text,
         format!("{FILE}\n[shortcuts]\nlock = [\"Super+L\", \"corner:bottom-right\"]\n")
     );
+    // Shown before the next click: the file holds the line before the
+    // window takes it, and its row then grows a chip and "Rétablir" that
+    // push the "+" aside; a click where the "+" was lands on them (#940).
+    bed.shows(|s| {
+        shortcut(s, "shortcuts.lock")["triggers"] == serde_json::json!(["corner:bottom-right"])
+    })?;
     // The launcher's gesture: asked first.
     bed.click("add:shortcuts.lock")?;
     bed.shows(|s| s["keys"]["picker"]["tab"] == "gesture")?;

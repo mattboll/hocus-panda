@@ -4,7 +4,8 @@
 //! pair is resized; a window's popup opens on the window's screen. A
 //! window's drawing builds the scenes of its own screen alone (#826); a
 //! window committing nothing new builds none, its frame callbacks still
-//! answered at each refresh (#840).
+//! answered at each refresh (#840), but once a second when it is covered
+//! whole, and ten times a second quiet at rest (#949).
 
 use crate::common;
 
@@ -323,6 +324,111 @@ fn an_idle_window_drawing_is_drawn() -> anyhow::Result<()> {
     let answered = done.load(Relaxed);
     wait(&mut hp, Duration::from_millis(200))?;
     assert!(done.load(Relaxed) > answered, "its frame callbacks stopped");
+    Ok(())
+}
+
+/// At most one frame callback in a little less than a second (the slow
+/// pace's timer, #949) of `took` on the machine's clock, give or take the
+/// one under way.
+fn not_faster_than_once_a_second(answered: u64, took: Duration) {
+    assert!(
+        answered as f64 <= took.as_secs_f64() / 0.9 + 1.0,
+        "{answered} frame callbacks in {took:?}"
+    );
+}
+
+/// A window covered whole by an opaque one, committing nothing new at
+/// each frame callback, as a browser under a terminal (#949): answered
+/// once a second at most, not at each refresh of its screen, whose
+/// refreshes it asks for none; still answered, though nothing else draws.
+#[test]
+fn a_window_covered_whole_is_answered_once_a_second() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    let (_, under) = open_with(&mut hp, "test.under", (600, 400), false)?;
+    let under_id = id_of(&hp, "test.under").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let rect = Rect::new(600, 300, 600, 400);
+    hp.place_window(under_id, rect);
+    wait_for_rect(&mut hp, "test.under", rect)?;
+    let (_, over) = open_with(&mut hp, "test.over", (1600, 900), false)?;
+    let id = id_of(&hp, "test.over").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let rect = Rect::new(100, 100, 1600, 900);
+    hp.place_window(id, rect);
+    wait_for_rect(&mut hp, "test.over", rect)?;
+    // Its opaque region in a scene, which drew nothing of the window
+    // under: a scene counted could be one drawn before its commit came.
+    over.commands.send(Command::Opaque)?;
+    let covered = hp.dispatch_until(WAIT, |hp| hp.window_unseen(under_id))?;
+    anyhow::ensure!(covered, "the window under was never judged covered");
+    common::at_rest(&mut hp)?;
+    let done = Arc::new(AtomicU64::new(0));
+    under.commands.send(Command::Idle {
+        again: false,
+        done: done.clone(),
+    })?;
+    let answered = hp.dispatch_until(WAIT, |_| done.load(Relaxed) >= 1)?;
+    anyhow::ensure!(answered, "its frame callbacks were never answered");
+    let answered = done.load(Relaxed);
+    hp.take_frame_cost(0);
+    let started = Instant::now();
+    wait(&mut hp, Duration::from_secs(4))?;
+    let took = started.elapsed();
+    let answered = done.load(Relaxed) - answered;
+    let refreshes = hp.take_frame_cost(0).unchanged;
+    eprintln!("{took:?} covered: {answered} frame callbacks answered, {refreshes} refreshes");
+    not_faster_than_once_a_second(answered, took);
+    assert!(answered >= 2, "{answered} frame callbacks in {took:?}");
+    assert_eq!(
+        refreshes, 0,
+        "its screen refreshed for a window covered whole"
+    );
+    Ok(())
+}
+
+/// At most ten frame callbacks a second (a quiet window's pace, the
+/// timer's 90 ms throttle) of `took` on the machine's clock, give or take
+/// the one under way.
+fn not_faster_than_ten_a_second(answered: u64, took: Duration) -> bool {
+    answered as f64 <= took.as_secs_f64() / 0.09 + 2.0
+}
+
+/// A shown window committing nothing new at rest, as a page running a
+/// loop that draws nothing (#949): at its screen's refresh at first, ten
+/// times a second after 2 s with nothing new and no input; the pointer
+/// moving, at its screen's refresh again.
+#[test]
+fn a_window_quiet_at_rest_is_answered_ten_times_a_second_until_the_user_moves() -> anyhow::Result<()>
+{
+    let (mut hp, _window, done, ..) = idle_for_a_second(false)?;
+    // 2 s from its first commit with nothing new, and the one under way.
+    wait(&mut hp, Duration::from_millis(2500))?;
+    let answered = done.load(Relaxed);
+    let started = Instant::now();
+    wait(&mut hp, Duration::from_secs(4))?;
+    let took = started.elapsed();
+    let quiet = done.load(Relaxed) - answered;
+    eprintln!("{took:?} quiet: {quiet} frame callbacks answered");
+    assert!(
+        not_faster_than_ten_a_second(quiet, took),
+        "{quiet} frame callbacks in {took:?}"
+    );
+    // More than once a second would give (5 at most in 4 s), however
+    // late a loaded machine's timer fires.
+    assert!(quiet >= 8, "{quiet} frame callbacks in {took:?}");
+    // At the screen's refresh again: 40 of them, faster than ten a second
+    // allows in the time they took (within the 2 s before it is quiet
+    // again, at 20 frames a second or more).
+    hp.pointer_move(800.0, 500.0);
+    let answered = done.load(Relaxed);
+    let started = Instant::now();
+    let back = hp.dispatch_until(WAIT, |_| done.load(Relaxed) >= answered + 40)?;
+    let took = started.elapsed();
+    anyhow::ensure!(back, "its frame callbacks stopped");
+    let again = done.load(Relaxed) - answered;
+    eprintln!("{took:?} after the pointer moved: {again} frame callbacks answered");
+    assert!(
+        !not_faster_than_ten_a_second(again, took),
+        "{again} frame callbacks in {took:?}: still ten a second"
+    );
     Ok(())
 }
 

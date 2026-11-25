@@ -9,7 +9,10 @@
 //! | frames at rest | more than 1 frame/s for 1 min, no input, no application drawing, beside the desktop's motions |
 //! | wakeups | more than 5 loop wakeups/s on average over 10 min with no input |
 //! | memory only growing | a rise over more than 3 h, more than 2 MB/h, never more than 5 % back |
-//! | slow moment | a frame over 50 ms, or a loop turn over 16 ms |
+//! | slow moment | a frame or a loop turn over 50 ms |
+//!
+//! Runs of sustained CPU that overlap are one signal, and so are slow
+//! moments a minute apart or less, their worst kept.
 
 use std::collections::VecDeque;
 
@@ -35,9 +38,11 @@ pub const GROWTH_OVER_S: i64 = 3 * 3600;
 pub const GROWTH_KB_PER_H: f64 = 2048.0;
 /// …never back by more than this share of its highest.
 pub const GROWTH_BACK: f64 = 0.05;
-/// A slow moment: a loop turn over 16 ms, a frame over 50 ms.
-pub const SLOW_TURN_US: u32 = 16_000;
-pub const SLOW_FRAME_US: u32 = 50_000;
+/// A slow moment: a loop turn or a frame over this long (a shorter turn
+/// is a hitch nobody sees).
+pub const SLOW_US: u32 = 50_000;
+/// Slow moments this close together (seconds) are one.
+pub const SLOW_JOINED_S: i64 = 60;
 
 /// The kinds of signal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -58,6 +63,18 @@ impl SignalKind {
         Self::MemoryGrowing,
         Self::SlowMoment,
     ];
+
+    /// How long after one of this kind ended another may begin and still
+    /// be the same (seconds): a run of sustained CPU that overlaps the
+    /// last (its window reaches back into it), slow moments a minute
+    /// apart. None: each is its own.
+    fn joins_within(self) -> Option<i64> {
+        match self {
+            Self::SustainedCpu => Some(0),
+            Self::SlowMoment => Some(SLOW_JOINED_S),
+            Self::FramesAtRest | Self::Wakeups | Self::MemoryGrowing => None,
+        }
+    }
 }
 
 /// A signal: its kind and the time it held, from and to (Unix seconds).
@@ -166,6 +183,9 @@ impl Growth {
 #[derive(Debug, Default)]
 pub struct Watch {
     last: Option<i64>,
+    /// Where the samples run unbroken from (the last gap's end): a signal
+    /// that ended before it is not taken up again.
+    since: i64,
     cpu: Window,
     rest: Window,
     wakeups: Window,
@@ -186,9 +206,27 @@ impl Watch {
             .position(|s| s.kind == kind && s.who == who)
     }
 
-    /// `kind` holds from `from` to `to`: extended if it held, else raised.
-    /// Whether it is new.
+    /// The signal of `kind` (and `who`) that ended close enough before
+    /// `from` to be taken up again.
+    fn joinable(&self, kind: SignalKind, who: Option<Who>, from: i64) -> Option<usize> {
+        let within = kind.joins_within()?;
+        let i = self
+            .done
+            .iter()
+            .rposition(|s| s.kind == kind && s.who == who)?;
+        let s = self.done.get(i)?;
+        (s.to >= self.since && from - s.to <= within).then_some(i)
+    }
+
+    /// `kind` holds from `from` to `to`: extended if it held or ended just
+    /// before, else raised. Whether it is new.
     fn hold(&mut self, kind: SignalKind, from: i64, to: i64, value: f64, who: Option<Who>) -> bool {
+        if self.open_of(kind, who).is_none()
+            && let Some(i) = self.joinable(kind, who, from)
+        {
+            let s = self.done.remove(i);
+            self.open.push(s);
+        }
         match self.open_of(kind, who).and_then(|i| self.open.get_mut(i)) {
             Some(s) => {
                 s.to = to;
@@ -238,6 +276,7 @@ impl Watch {
             ] {
                 self.end(kind, None);
             }
+            self.since = from;
         }
         self.last = Some(s.t);
         let mut raise = |new: bool, kind| {
@@ -333,7 +372,7 @@ impl Watch {
             }
         }
         // A slow moment.
-        if s.tu > SLOW_TURN_US || s.fu > SLOW_FRAME_US {
+        if s.tu.max(s.fu) > SLOW_US {
             let ms = f64::from(s.tu.max(s.fu)) / 1000.0;
             let new = self.hold(SignalKind::SlowMoment, from, s.t, ms, None);
             raise(new, SignalKind::SlowMoment);
@@ -348,9 +387,17 @@ impl Watch {
         self.open.iter().find(|s| s.kind == kind)
     }
 
-    /// Lets go of the signals that ended (the recorder keeps none).
+    /// Lets go of the signals that ended (the recorder keeps none), but
+    /// the last of each kind that a later one may take up again.
     pub fn forget_ended(&mut self) {
-        self.done.clear();
+        let mut kept: Vec<Signal> = Vec::new();
+        for s in self.done.drain(..).rev() {
+            if s.kind.joins_within().is_some() && !kept.iter().any(|k| k.kind == s.kind) {
+                kept.push(s);
+            }
+        }
+        kept.reverse();
+        self.done = kept;
     }
 
     /// Every signal, those still holding included, by when they began.
@@ -491,31 +538,114 @@ mod tests {
         );
     }
 
+    /// Calm samples, but those `slow` says: its loop turn and frame, µs.
+    fn slow(n: usize, slow: impl Fn(usize) -> Option<(u32, u32)>) -> Vec<Sample> {
+        day(n, |i| {
+            let (tu, fu) = slow(i).unwrap_or((2_000, 1_500));
+            Sample {
+                tu,
+                fu,
+                ..cpu(1, 1)
+            }
+        })
+    }
+
     #[test]
     fn a_slow_moment_and_not_one_just_under() {
-        let samples = day(3, |i| Sample {
-            tu: if i == 1 { 16_001 } else { 16_000 },
-            fu: 50_000,
-            ..cpu(1, 1)
+        // A turn over 50 ms, or a frame: one each.
+        for (tu, fu) in [(50_001, 50_000), (50_000, 50_001)] {
+            let signals = judge(&slow(3, |i| (i == 1).then_some((tu, fu))));
+            assert_eq!(kinds(&signals), [SignalKind::SlowMoment]);
+            assert_eq!((signals[0].from, signals[0].to), (T0 + 10, T0 + 20));
+        }
+        // 50 ms exactly, or a turn of 30 ms (once a slow moment): none.
+        assert!(judge(&slow(3, |_| Some((50_000, 50_000)))).is_empty());
+        assert!(judge(&slow(3, |_| Some((30_000, 4_000)))).is_empty());
+    }
+
+    #[test]
+    fn slow_moments_a_minute_apart_are_one_with_their_worst() {
+        // 60 ms, 0.3 s 30 s later, 80 ms a minute after that; then one
+        // more than a minute after the last.
+        let at = |i| match i {
+            2 => Some((60_000, 3_000)),
+            5 => Some((4_000, 300_000)),
+            11 => Some((80_000, 2_000)),
+            19 => Some((70_000, 2_000)),
+            _ => None,
+        };
+        let signals = judge(&slow(30, at));
+        assert_eq!(
+            kinds(&signals),
+            [SignalKind::SlowMoment, SignalKind::SlowMoment]
+        );
+        assert_eq!((signals[0].from, signals[0].to), (T0 + 20, T0 + 120));
+        assert!((signals[0].value - 300.0).abs() < 1e-9, "{signals:?}");
+        assert_eq!((signals[1].from, signals[1].to), (T0 + 190, T0 + 200));
+        assert!((signals[1].value - 70.0).abs() < 1e-9);
+        // A lone stall, as the screens waking at unlock: one, its own.
+        let alone = judge(&slow(30, |i| (i == 12).then_some((310_000, 2_000))));
+        assert_eq!(kinds(&alone), [SignalKind::SlowMoment]);
+        assert!((alone[0].value - 310.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_recorder_raises_slow_moments_close_together_once() {
+        let mut watch = Watch::new();
+        let raised: Vec<Vec<SignalKind>> = slow(12, |i| (i % 4 == 0).then_some((90_000, 0)))
+            .iter()
+            .map(|s| {
+                let raised = watch.feed(s);
+                watch.forget_ended();
+                raised
+            })
+            .collect();
+        assert_eq!(raised.iter().filter(|r| !r.is_empty()).count(), 1);
+        assert_eq!(raised[0], [SignalKind::SlowMoment]);
+    }
+
+    #[test]
+    fn overlapping_runs_of_sustained_cpu_are_one() {
+        // 11 % for 6 min, a dip of 30 s that brings the 5 min under 10 %,
+        // 24 % for 3 min: the second run's 5 min reach back into the
+        // first. Then calm for 10 min, and 11 % for 6 min: another.
+        let samples = day(160, |i| match i {
+            0..36 | 117..153 => cpu(800, 300),
+            39..57 => cpu(2_000, 400),
+            _ => cpu(0, 0),
         });
         let signals = judge(&samples);
-        assert_eq!(kinds(&signals), [SignalKind::SlowMoment]);
-        assert_eq!((signals[0].from, signals[0].to), (T0 + 10, T0 + 20));
-        assert!(
-            judge(&day(3, |_| Sample {
-                fu: 50_001,
-                ..cpu(1, 1)
-            }))
-            .len()
-                == 1
+        assert_eq!(
+            kinds(&signals),
+            [SignalKind::SustainedCpu, SignalKind::SustainedCpu],
+            "{signals:?}"
         );
-        assert!(
-            judge(&day(3, |_| Sample {
-                tu: 16_000,
-                fu: 50_000,
-                ..cpu(1, 1)
-            }))
-            .is_empty()
+        assert_eq!(signals[0].from, T0);
+        assert!(signals[0].to > T0 + 570, "{signals:?}");
+        assert!(signals[0].value > 15.0, "{signals:?}");
+        assert!(signals[1].from > signals[0].to);
+        // Read back sample by sample, as the recorder does: raised twice.
+        let mut watch = Watch::new();
+        let mut raised = 0;
+        for s in &samples {
+            raised += watch.feed(s).len();
+            watch.forget_ended();
+        }
+        assert_eq!(raised, 2);
+    }
+
+    #[test]
+    fn a_gap_parts_slow_moments() {
+        // Slow at 30 s, asleep 40 s, slow again as it wakes: two.
+        let mut samples = slow(3, |i| (i == 2).then_some((90_000, 0)));
+        samples.extend(
+            slow(3, |i| (i == 0).then_some((90_000, 0)))
+                .into_iter()
+                .map(|s| Sample { t: s.t + 70, ..s }),
+        );
+        assert_eq!(
+            kinds(&judge(&samples)),
+            [SignalKind::SlowMoment, SignalKind::SlowMoment]
         );
     }
 

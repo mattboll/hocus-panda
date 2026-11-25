@@ -462,6 +462,8 @@ enum Message {
     /// A tray icon came or went (5.14): the tray's surfaces, and the
     /// groups over them, to their places.
     Tray,
+    /// A bar opened: its items to their places in its form.
+    Fit(window::Id),
     Resized(window::Id, Size),
     /// A screen moved on in giving its name ([`outputs`]).
     Screens,
@@ -592,6 +594,7 @@ impl Shell {
                 Task::none()
             }
             Message::Levels => Task::none(),
+            Message::Fit(id) => self.fit(id),
             Message::Tray => {
                 let ids: Vec<window::Id> = self.bars.keys().copied().collect();
                 let fitted = Task::batch(ids.into_iter().map(|id| self.fit(id)));
@@ -1222,8 +1225,12 @@ impl Shell {
         // The tray's icons that show already, their items registered
         // before this bar came (the shell started again, a screen plugged
         // in): its surface opens, the groups over it go up (#953). Only an
-        // icon coming or going places it otherwise.
-        opening.push(self.fit(id));
+        // icon coming or going places it otherwise. Once the openings
+        // above are on their way: what fitting asks of their surfaces goes
+        // by `popover::send`, and iced_exwlshell drops what it is asked of
+        // a surface it was not yet asked to open (the music tile's strip
+        // then kept the pointer, the desktops' surface its first place).
+        opening.push(Task::done(Message::Fit(id)));
         opening
             .into_iter()
             .reduce(Task::chain)

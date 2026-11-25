@@ -227,7 +227,7 @@ impl State {
 
     /// Where window `id` is drawn (global), on its strip; `None` out of
     /// sight.
-    fn window_area(
+    pub(crate) fn window_area(
         &self,
         id: WindowId,
         now: std::time::Duration,
@@ -270,11 +270,30 @@ impl State {
     pub(crate) fn frames_owed_for(&mut self, surface: &WlSurface) {
         // A share or a recording of it answers them too.
         self.commits.any = true;
-        if self.redraw {
+        // Locked, no window is answered (7.1): nothing to refresh for.
+        if self.locked() {
             return;
         }
         let root = self.root_surface(surface);
         let window = self.window_of_surface(&root);
+        // Unseen or quiet, it waits for the slow pace (#949), unless the
+        // windows are drawn elsewhere, all at the screens' pace.
+        if let Some(id) = window
+            && self.nothing_new(id)
+            && !self.drawn_elsewhere()
+        {
+            return;
+        }
+        self.owe_frames_of(window);
+    }
+
+    /// The screens window `id` shows on (every screen for a surface not a
+    /// window's) answer its frame callbacks at their next refresh, without
+    /// a scene (#840).
+    pub(crate) fn owe_frames_of(&mut self, window: Option<WindowId>) {
+        if self.redraw {
+            return;
+        }
         let screens = match window {
             Some(id) if !self.drawn_elsewhere() => match self.window_area(id, self.now()) {
                 Some(area) => self.screens_over(area),
@@ -291,6 +310,10 @@ impl State {
     /// `surface` committed: the screens it shows on draw again.
     pub(crate) fn redraw_for(&mut self, surface: &WlSurface) {
         self.commits.any = true;
+        let root = self.root_surface(surface);
+        if let Some(id) = self.window_of_surface(&root) {
+            self.something_new(id);
+        }
         match self.commit_screens(surface) {
             Some(_) if self.redraw => {}
             Some(screens) => {

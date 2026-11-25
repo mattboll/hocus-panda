@@ -81,7 +81,7 @@ wakeups_line = "{rate} wakeups a second for {long}, untouched. Signal: more than
 memory = "The {whose}'s memory only grows"
 memory_line = "{start} → {end}, +{rate} MB an hour since {since}, never coming back down. Signal: a steady rise over more than 3 hours."
 slow_moment = "{span}: a slow moment"
-slow_moment_line = "A turn of the loop or a frame of {ms} ms. Signal: a frame over 50 ms, or a loop turn over 16 ms."
+slow_moment_line = "A turn of the loop or a frame of {ms} ms. Signal: a frame or a loop turn over 50 ms."
 
 # A signal's notification, as it begins.
 [perf.notification]

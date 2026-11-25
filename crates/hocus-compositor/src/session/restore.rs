@@ -953,6 +953,7 @@ impl State {
         }
         if let Some(app) = app_id(window) {
             let mut taken = None;
+            let mut waiting = false;
             // A browser's window takes the place whose shown tab it shows,
             // when it says one already (a browser reopening its own, §13
             // D); else the first of its application's.
@@ -968,12 +969,18 @@ impl State {
             .into_iter()
             .chain(restore.projects.iter_mut());
             for c in comebacks {
+                waiting = true;
                 let titled = title.as_deref().and_then(|t| {
                     c.pending.iter().position(|w| {
                         w.app_id == app
                             && w.browser.as_ref().and_then(|b| b.shown_title()) == Some(t)
                     })
                 });
+                let by = if titled.is_some() {
+                    "its tab"
+                } else {
+                    "its app"
+                };
                 if let Some(at) = titled
                     .or_else(|| c.pending.iter().position(|w| w.app_id == app))
                     .or_else(|| {
@@ -983,6 +990,20 @@ impl State {
                     })
                     && let Some(saved) = c.pending.remove(at)
                 {
+                    // The places of its application it could have taken
+                    // as well: more than none, and which is a guess.
+                    let alike = c
+                        .pending
+                        .iter()
+                        .filter(|w| w.app_id.eq_ignore_ascii_case(&app))
+                        .count();
+                    tracing::info!(
+                        window = id.0,
+                        app,
+                        by,
+                        alike,
+                        "a window takes a saved place"
+                    );
                     if let Some(s) = c.starts.iter_mut().find(|s| {
                         s.entry == saved.entry
                             && !matches!(s.back, Back::Windowed | Back::Autostarted)
@@ -992,6 +1013,13 @@ impl State {
                     taken = Some((c.whose.clone(), saved));
                     break;
                 }
+            }
+            if taken.is_none() && waiting {
+                tracing::info!(
+                    window = id.0,
+                    app,
+                    "a window takes no saved place: none of its app"
+                );
             }
             if let Some((whose, saved)) = taken {
                 self.ghosts_placed(id);
@@ -1067,6 +1095,7 @@ impl State {
             gone,
             desktop = desktop + 1,
             ?mode,
+            ?placed,
             "a window of the last session back in its place"
         );
         if self.model.mode(id) == Mode::Floating && mode != Mode::Floating {
@@ -1097,7 +1126,8 @@ impl State {
                 area: saved_area,
                 rect: place,
                 restore: (mode != Mode::Floating).then_some(place),
-                put,
+                mode,
+                put: Some(put),
             };
             if let Some(managed) = self.windows.get_mut(&id) {
                 managed.came_from = Some(came);
@@ -1148,6 +1178,16 @@ impl State {
                 ?whose,
                 "places not taken are dropped"
             );
+            for w in &c.pending {
+                tracing::info!(
+                    app = w.app_id,
+                    screen = w.screen,
+                    desktop = w.desktop,
+                    state = ?w.state,
+                    tabs = w.browser.is_some(),
+                    "a place not taken"
+                );
+            }
         }
         let waiting = waiting_entries(c);
         c.pending.clear();
@@ -1352,6 +1392,19 @@ impl State {
         if !again && self.session_restore.last.as_ref() == Some(&snapshot) {
             return;
         }
+        if again {
+            // What the next log in puts back, to compare with what it did.
+            for w in &snapshot.0 {
+                tracing::info!(
+                    app = w.app_id,
+                    screen = w.screen,
+                    desktop = w.desktop,
+                    state = ?w.state,
+                    place = ?w.place,
+                    "a window saved as the session ends"
+                );
+            }
+        }
         let folders = self
             .projects
             .list
@@ -1497,7 +1550,7 @@ impl State {
         if let Some(came) = managed
             .came_from
             .as_ref()
-            .filter(|c| self.put_now(id).as_ref() == Some(&c.put))
+            .filter(|c| self.still_put_where(id, c))
         {
             let place = match mode {
                 Mode::Floating => came.rect,

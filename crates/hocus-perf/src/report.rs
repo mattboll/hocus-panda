@@ -389,7 +389,8 @@ pub(crate) mod tests {
 
     /// The fixture day: an hour; a screen plugged at 10 min (a 20 s
     /// peak), locked from 20 to 30 min, 9 frames a second at rest from 40
-    /// to 45 min.
+    /// to 45 min, slow moments at 50 min (a turn of 30 ms, then within a
+    /// minute a frame of 0.3 s and a turn of 70 ms).
     pub fn fixture() -> Day {
         let mut samples = calm(360);
         samples[59]
@@ -410,6 +411,9 @@ pub(crate) mod tests {
             s.f = 90;
             s.c = vec![600, 300];
         }
+        samples[299].tu = 30_000;
+        samples[300].fu = 300_000;
+        samples[303].tu = 70_000;
         Day {
             samples,
             starts: vec![T0],
@@ -439,7 +443,7 @@ pub(crate) mod tests {
     #[test]
     fn the_fixture_day_s_peaks_say_what_was_happening() {
         let r = report(&fixture());
-        assert_eq!(r.peaks.len(), 2, "{:?}", r.peaks);
+        assert_eq!(r.peaks.len(), 3, "{:?}", r.peaks);
         let plugged = &r.peaks[0];
         assert_eq!(
             (plugged.n, plugged.from, plugged.to),
@@ -450,7 +454,26 @@ pub(crate) mod tests {
         let rest = &r.peaks[1];
         assert_eq!(rest.signal, Some(SignalKind::FramesAtRest));
         assert_eq!((rest.from, rest.to), (T0 + 2_400, T0 + 2_700));
-        assert_eq!(kinds(&r), [SignalKind::FramesAtRest]);
+        let slow = &r.peaks[2];
+        assert_eq!(slow.signal, Some(SignalKind::SlowMoment));
+        assert_eq!(
+            kinds(&r),
+            [SignalKind::FramesAtRest, SignalKind::SlowMoment]
+        );
+    }
+
+    #[test]
+    fn the_fixture_day_s_slow_moments_are_one_with_their_worst() {
+        let r = report(&fixture());
+        let slow: Vec<&Signal> = r
+            .signals
+            .iter()
+            .filter(|s| s.kind == SignalKind::SlowMoment)
+            .collect();
+        // The 30 ms turn is not one; the frame and the turn after it are.
+        assert_eq!(slow.len(), 1, "{slow:?}");
+        assert_eq!((slow[0].from, slow[0].to), (T0 + 3_000, T0 + 3_040));
+        assert!((slow[0].value - 300.0).abs() < 1e-9);
     }
 
     fn kinds(r: &Report) -> Vec<SignalKind> {

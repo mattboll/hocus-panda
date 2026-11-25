@@ -349,6 +349,132 @@ fn the_lid_closed_with_another_screen_on_is_an_unplug() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// #952, from a real evening: the lid closed with the other screen on,
+/// then that screen unplugged (leaving the desk), every screen gone a
+/// moment until the laptop's lights again. Its own windows go back to
+/// their places on it; the other screen's wait on it, and go back to
+/// theirs when that screen is plugged in the next morning.
+#[test]
+fn windows_left_with_no_screen_go_back_to_theirs() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    hp.set_internal(FIRST);
+    let (left, right) = halves_on(&mut hp, dell())?;
+    // And one floating on its desktop 2.
+    open(&mut hp, "test.floating", (900, 600))?;
+    chord(
+        &mut hp,
+        &[KEY_LEFTMETA, common::KEY_LEFTSHIFT, common::KEY_2],
+    );
+    wait(&mut hp, Duration::from_millis(50))?;
+    let floating = placed(&hp, "test.floating");
+    assert_eq!(floating.desktop, 1);
+    // The laptop's own, moved off its middle.
+    hp.pointer_move(960.0, 540.0);
+    let opened = open(&mut hp, "test.laptop", (600, 400))?;
+    hp.key(common::KEY_LEFTALT, true);
+    hp.button(common::BTN_LEFT, true);
+    hp.pointer_move(660.0, 340.0);
+    hp.button(common::BTN_LEFT, false);
+    hp.key(common::KEY_LEFTALT, false);
+    wait(&mut hp, Duration::from_millis(50))?;
+    let laptop = placed(&hp, "test.laptop").rect;
+    assert_eq!(
+        (laptop.x, laptop.y),
+        (opened.x - 300, opened.y - 200),
+        "moved: {laptop:?}"
+    );
+    hp.lid(true);
+    wait(&mut hp, Duration::from_millis(50))?;
+    assert_eq!(hp.screens_on(), [SECOND]);
+    assert_eq!(placed(&hp, "test.laptop").output.as_deref(), Some(SECOND));
+
+    // Unplugged with the lid closed: the laptop's screen is back on the
+    // desktop, the only one (dark while the lid stays closed).
+    hp.unplug(SECOND)?;
+    wait(&mut hp, Duration::from_millis(50))?;
+    assert!(geometry(&hp, FIRST).is_some(), "{:?}", hp.outputs());
+    assert_eq!(placed(&hp, "test.laptop").output.as_deref(), Some(FIRST));
+    assert_eq!(placed(&hp, "test.laptop").rect, laptop, "back in its place");
+    for app in ["test.left", "test.right", "test.floating"] {
+        assert_eq!(placed(&hp, app).output.as_deref(), Some(FIRST), "{app}");
+    }
+    assert_eq!(placed(&hp, "test.floating").desktop, 1);
+
+    // The lid opened, the other screen plugged in again: its windows go
+    // back to it, in their halves.
+    hp.lid(false);
+    wait(&mut hp, Duration::from_millis(50))?;
+    hp.plug_screen(SECOND, external(), Some(dell()))?;
+    wait(&mut hp, Duration::from_millis(400))?;
+    for (app, was) in [
+        ("test.left", &left),
+        ("test.right", &right),
+        ("test.floating", &floating),
+    ] {
+        let back = placed(&hp, app);
+        assert_eq!(back.output.as_deref(), Some(SECOND), "{app}");
+        assert_eq!(back.desktop, was.desktop, "{app}");
+        assert_eq!(back.mode, was.mode, "{app}");
+        assert_eq!(back.rect, was.rect, "{app}");
+    }
+    assert_eq!(placed(&hp, "test.laptop").output.as_deref(), Some(FIRST));
+    Ok(())
+}
+
+/// #952, decided by the maintainer on 2026-11-25: a half of the external
+/// screen comes to the laptop and is maximised there; plugged in again,
+/// the external screen takes it back as its half. Sent to another
+/// desktop, or to another screen, a window stays where it was sent.
+#[test]
+fn a_window_maximised_on_the_laptop_goes_back_as_a_half() -> anyhow::Result<()> {
+    let mut hp = two_screens()?;
+    let (left, right) = halves_on(&mut hp, dell())?;
+    open(&mut hp, "test.away", (600, 400))?;
+    hp.unplug(SECOND)?;
+    wait(&mut hp, Duration::from_millis(50))?;
+    let area1 = hp.work_area_of(FIRST).expect("an area");
+    // The focused one, sent to another screen plugged meanwhile.
+    hp.plug_screen("HEADLESS-3", external(), Some(other()))?;
+    wait(&mut hp, Duration::from_millis(50))?;
+    let id = placed(&hp, "test.away").id;
+    hp.focus_window(id);
+    chord(&mut hp, &[KEY_LEFTMETA, common::KEY_LEFTALT, KEY_RIGHT]);
+    wait(&mut hp, Duration::from_millis(400))?;
+    let away = placed(&hp, "test.away");
+    assert_eq!(away.output.as_deref(), Some("HEADLESS-3"));
+    // The left half maximised on the laptop; the right one sent to its
+    // desktop 2.
+    hp.focus_window(placed(&hp, "test.left").id);
+    chord(&mut hp, &[KEY_LEFTMETA, common::KEY_UP]);
+    assert_eq!(
+        placed(&hp, "test.left").mode,
+        Mode::Snapped(Zone::Maximized)
+    );
+    assert_eq!(
+        placed(&hp, "test.left").rect,
+        Zone::Maximized.rect(area1, GAP)
+    );
+    hp.focus_window(placed(&hp, "test.right").id);
+    chord(
+        &mut hp,
+        &[KEY_LEFTMETA, common::KEY_LEFTSHIFT, common::KEY_2],
+    );
+    wait(&mut hp, Duration::from_millis(50))?;
+    let sent = placed(&hp, "test.right");
+    assert_eq!((sent.output.as_deref(), sent.desktop), (Some(FIRST), 1));
+
+    hp.plug_screen(SECOND, external(), Some(dell()))?;
+    wait(&mut hp, Duration::from_millis(400))?;
+    let back = placed(&hp, "test.left");
+    assert_eq!(back.output.as_deref(), Some(SECOND));
+    assert_eq!(back.mode, Mode::Snapped(Zone::Left), "a half again");
+    assert_eq!(back.rect, left.rect);
+    assert_eq!(placed(&hp, "test.right"), sent, "sent to a desktop: stays");
+    assert_ne!(sent.rect, right.rect);
+    assert_eq!(placed(&hp, "test.away"), away, "sent to a screen: stays");
+    Ok(())
+}
+
 /// The shell, logging what it shows into `log`; the applications' names
 /// from no desktop entry but their ids, whatever the machine has
 /// installed (a CI runner's `firefox.desktop` names it "Navigateur Web

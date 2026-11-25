@@ -95,10 +95,8 @@ impl ShadowStyle {
 
 /// The parts of `rect` outside its rounded corners, one rectangle per pixel
 /// row of each corner.
-pub fn corner_cutouts(
-    rect: Rectangle<i32, Physical>,
-    radius: i32,
-) -> Vec<Rectangle<i32, Physical>> {
+#[cfg(test)]
+fn corner_cutouts(rect: Rectangle<i32, Physical>, radius: i32) -> Vec<Rectangle<i32, Physical>> {
     let radius = radius.min(rect.size.w / 2).min(rect.size.h / 2);
     if radius <= 0 {
         return Vec::new();
@@ -112,6 +110,56 @@ pub fn corner_cutouts(
         }
     }
     cuts
+}
+
+/// The squares of `rect`'s corners rounded to `radius`, which hold all
+/// that [`corner_cutouts`] leaves out.
+pub fn corner_squares(
+    rect: Rectangle<i32, Physical>,
+    radius: i32,
+) -> Vec<Rectangle<i32, Physical>> {
+    let r = radius.min(rect.size.w / 2).min(rect.size.h / 2);
+    if r <= 0 {
+        return Vec::new();
+    }
+    let (left, right) = (rect.loc.x, rect.loc.x + rect.size.w - r);
+    let (top, bottom) = (rect.loc.y, rect.loc.y + rect.size.h - r);
+    [(left, top), (right, top), (left, bottom), (right, bottom)]
+        .into_iter()
+        .map(|(x, y)| Rectangle::new((x, y).into(), (r, r).into()))
+        .collect()
+}
+
+/// `rect` less what [`corner_cutouts`] leaves out, in a few rectangles:
+/// the band between its corners' rows, and each run of corner rows cut
+/// alike, at its top and at its bottom.
+pub fn rounded_inside(
+    rect: Rectangle<i32, Physical>,
+    radius: i32,
+) -> Vec<Rectangle<i32, Physical>> {
+    let radius = radius.min(rect.size.w / 2).min(rect.size.h / 2);
+    // Runs of rows from the outer one: first row, rows, inset.
+    let mut runs: Vec<(i32, i32, i32)> = Vec::new();
+    for (row, inset) in corner_insets(radius) {
+        match runs.last_mut() {
+            Some((first, rows, cut)) if *cut == inset && *first + *rows == row => *rows += 1,
+            _ => runs.push((row, 1, inset)),
+        }
+    }
+    let (x, y, w, h) = (rect.loc.x, rect.loc.y, rect.size.w, rect.size.h);
+    let mut inside = Vec::with_capacity(2 * runs.len() + 1);
+    for &(first, rows, inset) in &runs {
+        for top in [y + first, y + h - first - rows] {
+            inside.push(Rectangle::new(
+                (x + inset, top).into(),
+                (w - 2 * inset, rows).into(),
+            ));
+        }
+    }
+    let cut = runs.last().map_or(0, |&(first, rows, _)| first + rows);
+    inside.push(Rectangle::new((x, y + cut).into(), (w, h - 2 * cut).into()));
+    inside.retain(|r| r.size.w > 0 && r.size.h > 0);
+    inside
 }
 
 /// Each row of a corner rounded to `radius`, from the outer one, and how
@@ -142,9 +190,11 @@ pub struct Rounded<E> {
 /// What of a window's element outside its rectangle shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outside {
-    /// On the desktop: a client's own shadow, around its geometry.
+    /// On the desktop: what a client draws past its geometry, its
+    /// subsurfaces' and its menus'.
     Shown,
-    /// In a thumbnail: nothing, not even the pixel a scaled surface's
+    /// In a thumbnail, a snapped window, a window whose client draws its
+    /// own shadow (#958): nothing, not even the pixel a scaled surface's
     /// rounding adds past its edge.
     Cropped,
 }
@@ -167,11 +217,6 @@ impl<E: Element> Rounded<E> {
             radius,
             outside,
         }
-    }
-
-    /// The corner cutouts in the element's own coordinates.
-    fn local_cutouts(&self) -> Vec<Rectangle<i32, Physical>> {
-        corner_cutouts(self.clip, self.radius)
     }
 }
 
@@ -209,7 +254,6 @@ impl<E: Element> Element for Rounded<E> {
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        let cutouts = self.local_cutouts();
         let mut opaque: Vec<_> = self.inner.opaque_regions(scale).iter().copied().collect();
         if self.outside == Outside::Cropped {
             opaque = opaque
@@ -217,10 +261,15 @@ impl<E: Element> Element for Rounded<E> {
                 .filter_map(|r| r.intersection(self.clip))
                 .collect();
         }
-        if cutouts.is_empty() {
+        // The corners' squares whole, not their rows (#948): a few
+        // rectangles a window rather than one a pixel row of each corner,
+        // which the damage tracker subtracts from everything behind, every
+        // frame. What is behind a corner's square is drawn, and covered.
+        let corners = corner_squares(self.clip, self.radius);
+        if corners.is_empty() {
             return opaque.into_iter().collect();
         }
-        Rectangle::subtract_rects_many(opaque, cutouts)
+        Rectangle::subtract_rects_many(opaque, corners)
             .into_iter()
             .collect()
     }
@@ -244,7 +293,6 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), R::Error> {
         // Damage is relative to `dst`, as the clip is.
-        let cutouts = self.local_cutouts();
         let clip = self.clip;
         let cropped: Vec<_>;
         let damage = match self.outside {
@@ -254,17 +302,35 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
                 &cropped
             }
         };
-        if cutouts.is_empty() {
+        let corners = corner_squares(clip, self.radius);
+        // What is damaged outside the corners' squares is drawn as it is;
+        // what reaches one, cut to the window's inside, piece by piece
+        // rather than less each row's cutout (#948).
+        if !damage
+            .iter()
+            .any(|d| corners.iter().any(|c| c.overlaps(*d)))
+        {
             if damage.is_empty() {
                 return Ok(());
             }
             return self.inner.draw(frame, src, dst, damage, opaque_regions);
         }
-        let damage = Rectangle::subtract_rects_many(damage.iter().copied(), cutouts);
-        if damage.is_empty() {
+        let inside = rounded_inside(clip, self.radius);
+        let mut cut = Vec::with_capacity(damage.len() + inside.len());
+        for d in damage {
+            if !corners.iter().any(|c| c.overlaps(*d)) {
+                cut.push(*d);
+                continue;
+            }
+            if self.outside == Outside::Shown {
+                cut.extend(Rectangle::subtract_rects_many([*d], [clip]));
+            }
+            cut.extend(inside.iter().filter_map(|p| p.intersection(*d)));
+        }
+        if cut.is_empty() {
             return Ok(());
         }
-        self.inner.draw(frame, src, dst, &damage, opaque_regions)
+        self.inner.draw(frame, src, dst, &cut, opaque_regions)
     }
 
     fn underlying_storage(&self, _renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
@@ -1420,6 +1486,60 @@ mod tests {
         assert!(!cuts.iter().any(|c| c.contains((60, 20))));
         assert!(!cuts.iter().any(|c| c.contains((18, 28))));
         assert!(corner_cutouts(rect, 0).is_empty());
+    }
+
+    /// A window's inside, in a few rectangles, is all of it but what its
+    /// corners leave out, each pixel once (#948).
+    #[test]
+    fn the_inside_is_the_window_less_its_corners() {
+        for (w, h, radius) in [(1600, 1000, 16), (100, 50, 8), (40, 20, 28), (10, 10, 0)] {
+            let rect = Rectangle::<i32, Physical>::new((7, -3).into(), (w, h).into());
+            let inside = rounded_inside(rect, radius);
+            let cuts = corner_cutouts(rect, radius);
+            assert!(
+                inside.len() <= 2 * radius as usize + 1,
+                "{} pieces",
+                inside.len()
+            );
+            for (i, a) in inside.iter().enumerate() {
+                assert!(rect.contains_rect(*a), "{a:?}");
+                assert!(!cuts.iter().any(|c| c.overlaps(*a)), "{a:?}");
+                assert!(!inside[i + 1..].iter().any(|b| b.overlaps(*a)), "{a:?}");
+            }
+            let area = |rs: &[Rectangle<i32, Physical>]| -> i32 {
+                rs.iter().map(|r| r.size.w * r.size.h).sum()
+            };
+            assert_eq!(area(&inside), w * h - area(&cuts), "{w}x{h} at {radius}");
+        }
+    }
+
+    /// An opaque window's rounded element tells the damage tracker a few
+    /// rectangles, not one a pixel row of its corners (#948), and none of
+    /// them over what its corners leave out.
+    #[test]
+    fn a_rounded_window_is_opaque_in_a_few_rectangles() {
+        use smithay::backend::renderer::element::solid::SolidColorRenderElement;
+        let rect = Rectangle::<i32, Physical>::new((0, 0).into(), (1600, 1000).into());
+        let inner = SolidColorRenderElement::new(
+            Id::new(),
+            rect,
+            CommitCounter::default(),
+            [1.0, 1.0, 1.0, 1.0],
+            Kind::Unspecified,
+        );
+        // At scale 2: corners 16 pixels round.
+        let radius = (RADIUS * 2.0) as i32;
+        for outside in [Outside::Cropped, Outside::Shown] {
+            let rounded = Rounded::new(&inner, rect, radius, outside, 2.0);
+            let opaque = rounded.opaque_regions(Scale::from(2.0));
+            assert!(opaque.len() <= 5, "{} rectangles", opaque.len());
+            for cut in corner_cutouts(rect, radius) {
+                assert!(!opaque.iter().any(|o| o.overlaps(cut)), "{cut:?}");
+            }
+            // All but the corners' squares.
+            let area: i32 = opaque.iter().map(|o| o.size.w * o.size.h).sum();
+            assert_eq!(area, 1600 * 1000 - 4 * radius * radius);
+        }
     }
 
     #[test]

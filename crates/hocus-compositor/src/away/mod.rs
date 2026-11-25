@@ -501,6 +501,8 @@ impl State {
     /// `Esc` sends the screens' numbers away (#927).
     pub fn felt(&mut self, felt: Felt) -> bool {
         self.identify_felt(felt);
+        // The quiet windows go at their screens' pace again (#949).
+        self.slow_frames_input();
         match felt {
             Felt::Release(pressed) if self.away.swallowed.remove(&pressed) => return false,
             Felt::GestureUpdate if self.away.swallowed.contains(&Pressed::Gesture) => {
