@@ -452,6 +452,13 @@ impl Words {
         }
     }
 
+    /// A screen's name in capitals, over its windows in a project's list
+    /// and card (#947): "ÉCRAN DU PORTABLE", "ÉCRAN EXTERNE 34 POUCES".
+    pub fn screen_label(self, screen: &hocus_link::DeskScreen) -> String {
+        self.screen(screen.built_in, screen.inches, screen.number)
+            .to_uppercase()
+    }
+
     /// Where another screen's desktop is, under its list's title (8.4):
     /// "sur l'écran externe 34 pouces" / "on the 34-inch external screen".
     pub fn on_screen(self, built_in: bool, inches: u32, number: u32) -> String {

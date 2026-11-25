@@ -850,10 +850,11 @@ impl State {
         }
         self.tell_screens(true);
         self.tell_layouts();
+        // Before the desktops, which tell the projects too.
+        self.projects.told = None;
         self.tell_desktops();
         self.tell_window_states(true);
         self.tell_agents();
-        self.projects.told = None;
         self.tell_projects();
         self.tell_mcp();
         self.tell_bubbles_screen();

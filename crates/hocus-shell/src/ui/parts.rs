@@ -167,6 +167,34 @@ pub fn spaced<'a, M: 'a>(word: &str, size: f32, colour: Color, room: f32) -> El<
     spaced_in(word, size, MANROPE_BOLD, colour, 0.08, room)
 }
 
+/// A screen's name over its windows in a project's list and card
+/// (#947): 10.5 px, 700, `text.faint`, 0.1 em apart, 8 px above and 4
+/// under, `left` in; [`SCREEN_LABEL`] high.
+pub fn screen_label<'a, M: 'static>(name: &str, left: f32) -> El<'a, M> {
+    super::control::line(
+        container(spaced_by(
+            name,
+            SCREEN_LABEL_TEXT,
+            MANROPE_BOLD,
+            FAINT.get(),
+            0.1,
+        ))
+        .padding(Padding {
+            top: SCREEN_LABEL_TOP,
+            left,
+            ..Padding::ZERO
+        })
+        .height(SCREEN_LABEL),
+        name.to_owned(),
+    )
+    .into()
+}
+
+const SCREEN_LABEL_TEXT: f32 = 10.5;
+const SCREEN_LABEL_TOP: f32 = 8.0;
+/// A screen's label's height: its line and what is around it.
+pub const SCREEN_LABEL: f32 = SCREEN_LABEL_TOP + SCREEN_LABEL_TEXT * LINE + 4.0;
+
 /// `word` in `font` at `size`, its letters `em` apart (CSS's
 /// `letter-spacing`), all of it.
 pub fn spaced_by<'a, M: 'a>(

@@ -70,6 +70,8 @@ impl crate::State {
                 // Nothing moves: each screen switches alone from now.
                 Switching::PerScreen => self.projects_unlinked(),
             }
+            // A closed project's windows grouped by screen, or not.
+            self.tell_projects();
             changed = true;
         }
         changed

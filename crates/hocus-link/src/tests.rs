@@ -1657,6 +1657,14 @@ fn card_window(id: u64, terminal: Option<&str>) -> CardWindow {
             folder: "/home/alex/github/hocus-panda".into(),
             resume: Some("claude --resume 3f6c2a1e".into()),
         }),
+        screen: (id == 5).then(|| DeskScreen {
+            output: "DP-1".into(),
+            width: 3440,
+            height: 1440,
+            built_in: false,
+            inches: 34,
+            number: 2,
+        }),
     }
 }
 

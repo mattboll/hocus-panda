@@ -3193,3 +3193,143 @@ fn unlinked_a_project_stays_on_the_screen_holding_most_of_its_windows() -> anyho
     assert!(hp.state().project_of(id(&hp, "test.first")?).is_none());
     Ok(())
 }
+
+/// The compositor with the real shell on the two screens, in French, the
+/// bar's full form on the first (a row of tiles per screen), its log in
+/// `shell.log`.
+fn two_with_shell(places: &Places) -> anyhow::Result<(Headless, PathBuf)> {
+    let shell = common::shell_program();
+    let at = |sub: &str| -> anyhow::Result<String> {
+        let path = places.root.join(sub);
+        std::fs::create_dir_all(&path)?;
+        Ok(path.display().to_string())
+    };
+    let log = places.root.join("shell.log");
+    let env = [
+        ("HOME", at("home")?),
+        ("XDG_CONFIG_HOME", at("config")?),
+        ("XDG_CACHE_HOME", at("cache")?),
+        ("XDG_STATE_HOME", at("state")?),
+        ("XDG_DATA_HOME", at("data")?),
+        ("LC_ALL", "fr_FR.UTF-8".to_owned()),
+        ("LANG", "fr_FR.UTF-8".to_owned()),
+        ("RUST_LOG", "warn,hocuspanda_shell=debug".to_owned()),
+    ];
+    let script = shell_script(&places.root, &shell, &env, &log)?;
+    let mut config = config(places);
+    config.panel.form = hocus_compositor::FormChoice::Full;
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            outputs: vec!["1920x1080".parse()?, "1920x1080".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+        Some(script),
+    )?;
+    let up = hp.dispatch_until(Duration::from_secs(20), |hp| {
+        hp.desk_tile_rects().len() == 8
+    })?;
+    anyhow::ensure!(up, "tiles: {:?}", hp.desk_tile_rects());
+    hp.pointer_move(ON_FIRST.0, ON_FIRST.1);
+    Ok((hp, log))
+}
+
+/// The pointer resting on `output`'s tile `desktop` (from 0) in the first
+/// screen's bar, once the tiles take it there.
+fn rest_on_tile(hp: &mut Headless, output: &str, desktop: usize) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    loop {
+        let at = hp
+            .desk_tile_rects()
+            .into_iter()
+            .find(|(bar, o, d, _)| bar == SCREEN && o == output && *d == desktop)
+            .map(|(.., (x, y, w, h))| (x + w / 2.0, y + h / 2.0));
+        if let Some(at) = at {
+            hp.pointer_move(at.0 - 1.0, at.1);
+            hp.pointer_move(at.0, at.1);
+            wait(hp, Duration::from_millis(30))?;
+            if hp.pointer_layer().as_deref() == Some(hocus_link::DESKTOPS_NAMESPACE)
+                && hp.undrawn_at(at.0, at.1).is_empty()
+            {
+                return Ok(());
+            }
+        } else {
+            wait(hp, Duration::from_millis(30))?;
+        }
+        anyhow::ensure!(
+            start.elapsed() < WAIT,
+            "the tiles never took the pointer over tile {desktop} of {output}"
+        );
+    }
+}
+
+/// #947: the project on desktop 2 of both screens, one window on the
+/// first and two on the other. Its list, from the other screen's tile,
+/// lists them all grouped by screen, the bar's own first, each under its
+/// screen's name and no line saying which screen; its card, from the
+/// other screen's thumbnail, groups them too, its own screen first, each
+/// window told with its screen.
+#[test]
+fn linked_a_projects_list_and_card_group_its_windows_by_screen() -> anyhow::Result<()> {
+    const KEY_W: u32 = 17;
+    let places = places()?;
+    let (mut hp, log) = two_with_shell(&places)?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 2, "hocus-site", &places.folder)?
+        .map_err(|why| anyhow::anyhow!("refused: {why}"))?;
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    let mut clients = Vec::new();
+    for (at, app, title) in [
+        (ON_FIRST, "test.first", "Terminal"),
+        (ON_OTHER, "test.one", "Navigateur"),
+        (ON_OTHER, "test.two", "Éditeur"),
+    ] {
+        let client = open_at(&mut hp, at, app)?;
+        client.commands.send(common::Command::Title(title))?;
+        clients.push(client);
+    }
+    wait(&mut hp, Duration::from_millis(300))?;
+
+    // The list, resting on the other screen's tile 2.
+    rest_on_tile(&mut hp, OTHER, 1)?;
+    logged(
+        &mut hp,
+        &log,
+        "count=3 fenêtres empty=None rows=[\"Terminal\", \"Éditeur\", \"Navigateur\"] \
+         minimized=0 screen=None screens=[(0, \"ÉCRAN 1\"), (1, \"ÉCRAN 2\")]",
+    )?;
+    hp.pointer_move(ON_FIRST.0, ON_FIRST.1);
+    let closed = hp.dispatch_until(WAIT, |hp| hp.popover_surfaces().is_empty())?;
+    anyhow::ensure!(closed, "the list stays");
+
+    // The card, from the other screen's thumbnail in the overview.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_W]);
+    let open = hp.dispatch_until(WAIT, |hp| hp.overview_project_name(OTHER, 1).is_some())?;
+    anyhow::ensure!(open, "no project's name in the overview");
+    wait(&mut hp, Duration::from_millis(400))?;
+    let name = hp.overview_project_name(OTHER, 1).context("no name")?;
+    hp.pointer_move(name.0, name.1);
+    wait(&mut hp, Duration::from_millis(100))?;
+    hp.button(common::BTN_LEFT, true);
+    hp.button(common::BTN_LEFT, false);
+    logged(
+        &mut hp,
+        &log,
+        "screens=[(0, \"ÉCRAN 2\"), (2, \"ÉCRAN 1\")]",
+    )?;
+    let said = common::logged(&log)
+        .lines()
+        .rfind(|l| l.contains("the project's card shows it"))
+        .context("no card")?
+        .to_owned();
+    // The other screen's two, then the first screen's.
+    let at = |t: &str| said.find(t).with_context(|| format!("no {t}: {said}"));
+    let terminal = at("Terminal (")?;
+    assert!(
+        at("Éditeur (")? < terminal && at("Navigateur (")? < terminal,
+        "{said}"
+    );
+    drop(clients);
+    Ok(())
+}

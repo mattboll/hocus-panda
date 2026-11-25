@@ -137,6 +137,7 @@ fn card_window(w: &SavedWindow, gap: i32) -> CardWindow {
         terminal: w.terminal.as_ref().map(|t| t.folder.display().to_string()),
         tabs: w.browser.as_ref().and_then(card_tabs),
         agent: w.agent.as_ref().map(|a| card_agent(a, "idle", true)),
+        screen: None,
     }
 }
 
@@ -233,6 +234,9 @@ impl State {
     /// The projects as the launcher lists them, told when they changed.
     pub(crate) fn tell_projects(&mut self) {
         let gap = self.gap();
+        // Linked on several screens (#947), a closed project's windows
+        // come back each on its own screen: its card groups them so.
+        let several = self.desktops_linked() && self.space.outputs().nth(1).is_some();
         let rows: Vec<ProjectRow> = self
             .projects
             .list
@@ -259,7 +263,14 @@ impl State {
                     folder: p.folder.display().to_string(),
                     output,
                     state,
-                    windows: p.contents.iter().map(|w| card_window(w, gap)).collect(),
+                    windows: p
+                        .contents
+                        .iter()
+                        .map(|w| CardWindow {
+                            screen: several.then(|| self.saved_screen(&w.screen)).flatten(),
+                            ..card_window(w, gap)
+                        })
+                        .collect(),
                 }
             })
             .collect();
@@ -268,6 +279,13 @@ impl State {
         }
         self.projects.told = Some(rows.clone());
         self.tell_shell(ToShell::Projects(rows));
+    }
+
+    /// The screen plugged now as `key`, as a card names it.
+    fn saved_screen(&self, key: &str) -> Option<hocus_link::DeskScreen> {
+        let connector = self.connector_of(key)?;
+        let output = self.space.outputs().find(|o| o.name() == connector)?;
+        self.desk_screen(output)
     }
 
     /// The project named `name` (case and accents aside), its place.
@@ -583,25 +601,42 @@ impl State {
         let Some(index) = self.projects.list.iter().position(|p| p.id == id) else {
             return;
         };
-        let Some((on, desktop)) = self.project_output(index) else {
+        let Some((_, desktop)) = self.project_output(index) else {
             return;
         };
-        if on.name() != output {
+        // Its card shows on any screen it is on: linked (#947), from any
+        // screen's thumbnail.
+        let screens = self
+            .projects
+            .list
+            .get(index)
+            .map(|p| self.project_screens(p))
+            .unwrap_or_default();
+        let Some(on) = screens.iter().find(|o| o.name() == output).cloned() else {
             return;
-        }
+        };
         let Some(geometry) = self.space.output_geometry(&on) else {
             return;
         };
-        let screen = rect_of(geometry);
+        let several = screens.len() > 1;
         let focused = self.model.focused();
         let conversations = self.agent_conversations();
         let windows = found
             .iter()
             .filter(|f| self.windows.contains_key(&f.id))
             .map(|f| {
+                // Each window on its own screen, sketched in its shares.
+                let home = self
+                    .output_of(f.id)
+                    .filter(|o| screens.contains(o))
+                    .unwrap_or_else(|| on.clone());
                 let rect = self
-                    .home_rect(f.id)
-                    .and_then(|r| crate::desktops::share(r, screen))
+                    .space
+                    .output_geometry(&home)
+                    .and_then(|g| {
+                        self.home_rect(f.id)
+                            .and_then(|r| crate::desktops::share(r, rect_of(g)))
+                    })
                     .unwrap_or_default();
                 CardWindow {
                     id: f.id.0,
@@ -621,6 +656,7 @@ impl State {
                         .iter()
                         .find(|c| c.window == f.id)
                         .map(|c| card_agent(&c.agent, &c.state, false)),
+                    screen: several.then(|| self.desk_screen(&home)).flatten(),
                 }
             })
             .collect();

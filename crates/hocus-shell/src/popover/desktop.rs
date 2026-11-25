@@ -21,7 +21,11 @@
 //! its name and the count on the first line, its folder under it (Martian
 //! Mono 10.5 px, `text.faint`); under its rows, a divider and "Fermer le
 //! projet…" (34 px, a folder with a cross), which asks for its
-//! confirmation (§5).
+//! confirmation (§5). Its windows on several screens (the screens linked,
+//! #947), every screen's are listed, grouped by screen in the bar's rows'
+//! order, each group under its screen's name in capitals ("ÉCRAN DU
+//! PORTABLE", 10.5 px, 700, `text.faint`); a screen with no window there
+//! has none, and no line says which screen.
 //!
 //! Built with the shell's widget kit ([`crate::ui`]), as the Wi-Fi's.
 
@@ -166,26 +170,32 @@ fn rows_height(rows: usize) -> f32 {
     (rows as f32 * (ROW + ROW_GAP) - ROW_GAP).max(0.0)
 }
 
-/// Where its content ends, `rows` windows long: 8 rows at most show.
-fn end(rows: usize, top: f32) -> f32 {
+/// The room `labels` screens' names take over their rows (#947).
+fn labels_height(labels: usize) -> f32 {
+    labels as f32 * parts::SCREEN_LABEL
+}
+
+/// Where its content ends, `rows` windows long under `labels` screens'
+/// names: 8 rows at most show, and the names over them.
+fn end(rows: usize, labels: usize, top: f32) -> f32 {
     match rows {
         0 => top + EMPTY_PAD + EMPTY * LINE + EMPTY_PAD + GAP,
-        n => top + rows_height(n.min(MOST)),
+        n => top + rows_height(n.min(MOST)) + labels_height(labels),
     }
 }
 
-/// The list of `rows` windows: its viewport and its rows' height, the
-/// list `more` px wider than 240.
-fn list_of(rows: usize, top: f32, more: f32) -> List {
+/// The list of `rows` windows under `labels` screens' names: its viewport
+/// and its content's height, the list `more` px wider than 240.
+fn list_of(rows: usize, labels: usize, top: f32, more: f32) -> List {
     List {
         view: Rectangle::new(
             Point::new(LEFT - ROW_OUT, top),
             Size::new(
                 RIGHT + more - LEFT + 2.0 * ROW_OUT,
-                rows_height(rows.min(MOST)),
+                rows_height(rows.min(MOST)) + labels_height(labels),
             ),
         ),
-        content: rows_height(rows),
+        content: rows_height(rows) + labels_height(labels),
     }
 }
 
@@ -198,9 +208,9 @@ fn title_room(scrolls: bool) -> f32 {
     }
 }
 
-/// Its height for `rows` windows.
-fn height_of(rows: usize, top: f32) -> u32 {
-    (end(rows, top) + PAD_BOTTOM + BORDER).round() as u32
+/// Its height for `rows` windows under `labels` screens' names.
+fn height_of(rows: usize, labels: usize, top: f32) -> u32 {
+    (end(rows, labels, top) + PAD_BOTTOM + BORDER).round() as u32
 }
 
 /// Its height for desktop `index` of bar `bar`'s row `row` (its screen's,
@@ -208,10 +218,11 @@ fn height_of(rows: usize, top: f32) -> u32 {
 pub fn height(bar: &str, row: u8, index: u8) -> u32 {
     let output = desktops::output_of(bar, row);
     let project = desktops::project(&output, usize::from(index)).is_some();
-    height_of(
-        desktops::rows(&output, usize::from(index)).len(),
-        content_top_of(row > 0, project),
-    ) + close_room(project) as u32
+    let (rows, labels) = desktops::listed_rows(bar, &output, usize::from(index));
+    // Grouped by screen, no line says which.
+    let screen = row > 0 && labels.is_empty();
+    height_of(rows.len(), labels.len(), content_top_of(screen, project))
+        + close_room(project) as u32
 }
 
 /// A desktop's list on its surface.
@@ -235,6 +246,9 @@ struct Source {
     /// Another screen's: the line saying which.
     screen: Option<String>,
     rows: Vec<Row>,
+    /// A project on several screens (#947): each screen's name, over its
+    /// first row.
+    labels: Vec<(usize, String)>,
     /// Its name (its project's, else 6.14's) or "Bureau N", whole.
     title: String,
     /// Its project, if it is one: its monogram, its folder, shown, and its
@@ -260,10 +274,14 @@ fn source(id: window::Id, words: Words) -> Option<Source> {
     let output = shown_screen
         .as_ref()
         .map_or_else(|| bar.clone(), |s| s.output.clone());
+    let (rows, labels) = desktops::listed_rows(&bar, &output, usize::from(index));
     let screen = shown_screen
-        .filter(|_| row > 0)
+        .filter(|_| row > 0 && labels.is_empty())
         .map(|s| words.on_screen(s.built_in, s.inches, s.number));
-    let rows = desktops::rows(&output, usize::from(index));
+    let labels = labels
+        .iter()
+        .map(|(at, s)| (*at, words.screen_label(s)))
+        .collect();
     let title = words.desktop_title(
         usize::from(index) + 1,
         desktops::name_on(&output, usize::from(index)).as_deref(),
@@ -282,6 +300,7 @@ fn source(id: window::Id, words: Words) -> Option<Source> {
         index,
         screen,
         rows,
+        labels,
         title,
         project,
     })
@@ -402,6 +421,7 @@ fn content<'a>(words: Words, shown: Option<&Source>, ui: &mut Ui) -> El<'a> {
         let more = wider(shown.project.is_some());
         let list = list_of(
             shown.rows.len(),
+            shown.labels.len(),
             content_top_of(shown.screen.is_some(), shown.project.is_some()),
             more,
         );
@@ -511,8 +531,25 @@ fn rows<'a>(
     focus: Option<Target>,
 ) -> El<'a> {
     let scrolls = list.scrolls();
+    // A group a screen (#947): its name right over its rows, the groups
+    // the rows' gap apart.
+    let group = |label: Option<&str>, rows: iced::widget::Column<'a, Msg>| -> El<'a> {
+        match label {
+            Some(label) => column![parts::screen_label(label, ROW_PAD), rows].into(),
+            None => rows.into(),
+        }
+    };
+    let mut groups: Vec<El<'a>> = Vec::new();
+    let mut label: Option<&str> = None;
     let mut column = column![].spacing(ROW_GAP);
-    for (row, title) in shown.rows.iter().zip(titles) {
+    for (at, (row, title)) in shown.rows.iter().zip(titles).enumerate() {
+        if let Some((_, next)) = shown.labels.iter().find(|(first, _)| *first == at) {
+            if at > 0 {
+                let rows = std::mem::replace(&mut column, column![].spacing(ROW_GAP));
+                groups.push(group(label, rows));
+            }
+            label = Some(next);
+        }
         let target = Target::Window(row.id);
         let found = desktops::icons::of(&row.app);
         let name = if row.app.is_empty() {
@@ -571,6 +608,8 @@ fn rows<'a>(
         .rows(0);
         column = column.push(container(declared).id(Id::from(target.id() + ":row")));
     }
+    groups.push(group(label, column));
+    let column = iced::widget::Column::with_children(groups).spacing(ROW_GAP);
     // The rows reach the scrollbar's 2 px short, as the canvas's.
     let rows = container(column).padding(Padding {
         right: if scrolls { SCROLLED_END } else { 0.0 },
@@ -668,6 +707,7 @@ fn say(words: Words, shown: &Source, count: &str, titles: &[String], ui: &mut Ui
         rows = ?titles,
         minimized = shown.rows.iter().filter(|r| r.minimized).count(),
         screen = ?shown.screen,
+        screens = ?shown.labels,
         "the desktop's list shows it"
     );
     ui.said = Some(shown.clone());
@@ -746,30 +786,37 @@ mod tests {
     fn its_height_follows_its_rows() {
         // The mockup's: 10 + 26 + 4 inside the rim, 12 under; 32 px rows
         // 2 px apart.
-        assert_eq!(height_of(1, CONTENT_TOP), 1 + 10 + 26 + 4 + 32 + 12 + 1);
+        assert_eq!(height_of(1, 0, CONTENT_TOP), 1 + 10 + 26 + 4 + 32 + 12 + 1);
         assert_eq!(
-            height_of(3, CONTENT_TOP),
+            height_of(3, 0, CONTENT_TOP),
             1 + 10 + 26 + 4 + 3 * 32 + 2 * 2 + 12 + 1
         );
         // Another screen's: its line under the title, 18 px.
         assert_eq!(
-            height_of(1, content_top(true)),
-            height_of(1, CONTENT_TOP) + 18
+            height_of(1, 0, content_top(true)),
+            height_of(1, 0, CONTENT_TOP) + 18
         );
         // Empty: its line, and the rows' empty place under it.
-        assert_eq!(height_of(0, CONTENT_TOP), 80);
+        assert_eq!(height_of(0, 0, CONTENT_TOP), 80);
         assert_eq!(TITLE_ROOM, 189.0);
         // Past 8 rows, 8 show and the rest scrolls.
-        assert_eq!(height_of(12, CONTENT_TOP), height_of(8, CONTENT_TOP));
-        assert!(!list_of(8, CONTENT_TOP, 0.0).scrolls());
+        assert_eq!(height_of(12, 0, CONTENT_TOP), height_of(8, 0, CONTENT_TOP));
+        assert!(!list_of(8, 0, CONTENT_TOP, 0.0).scrolls());
         assert_eq!(
-            list_of(12, CONTENT_TOP, 0.0).most_scroll(),
+            list_of(12, 0, CONTENT_TOP, 0.0).most_scroll(),
             4.0 * (ROW + ROW_GAP)
         );
         // A project's: its folder's line under its title.
         assert_eq!(
-            height_of(1, content_top_of(false, true)),
-            height_of(1, CONTENT_TOP) + 18
+            height_of(1, 0, content_top_of(false, true)),
+            height_of(1, 0, CONTENT_TOP) + 18
         );
+        // A project on two screens (#947): each name over its rows, the
+        // names not counted among the 8 rows.
+        assert_eq!(
+            height_of(3, 2, CONTENT_TOP),
+            height_of(3, 0, CONTENT_TOP) + (2.0 * parts::SCREEN_LABEL).round() as u32
+        );
+        assert!(!list_of(8, 2, CONTENT_TOP, 0.0).scrolls());
     }
 }

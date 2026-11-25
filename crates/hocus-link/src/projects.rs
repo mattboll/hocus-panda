@@ -234,6 +234,12 @@ pub struct CardWindow {
     /// §8.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<CardAgent>,
+    /// Its screen, when the project is on several (the screens linked,
+    /// #947): its card and list group its windows under each screen's
+    /// name. None on one screen, and for a closed window whose screen is
+    /// not there (it comes back on the launcher's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen: Option<crate::DeskScreen>,
 }
 
 /// An agent as a project's card shows it (§4): its tool as people know it,

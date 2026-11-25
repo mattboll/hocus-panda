@@ -24,6 +24,11 @@
 //! its first prompt »" (13 px), under it its session and folder, or,
 //! closed, the command that will resume it (Martian Mono 11 px), and its
 //! state on the right (11.5 px, the accent's text at work).
+//!
+//! A project on several screens (the screens linked, #947) lists its
+//! windows grouped by screen, the card's own first, each group under its
+//! screen's name in capitals ("ÉCRAN DU PORTABLE", 10.5 px, 700,
+//! `text.faint`); a screen with no window there has none.
 
 use hocus_a11y::Role;
 use iced::{
@@ -267,22 +272,61 @@ struct Row {
 }
 
 /// The windows' rows, front first: their titles, else their
-/// applications' names.
-fn rows(shown: &hocus_link::ProjectCard) -> Vec<Row> {
-    shown
-        .windows
-        .iter()
-        .map(|w| Row {
-            id: w.id,
-            app: w.app.clone(),
-            title: if w.title.trim().is_empty() {
-                super::app_name(&w.entry, &w.app)
-            } else {
-                w.title.clone()
-            },
-            place: w.place,
-        })
-        .collect()
+/// applications' names. On several screens (#947), grouped by screen,
+/// the card's own first, then the others as they come, each front
+/// first; with each group's screen and its first row. A window whose
+/// screen is not there (closed) comes back on the card's screen: it is
+/// in its group.
+fn rows(shown: &hocus_link::ProjectCard) -> (Vec<Row>, Vec<(usize, hocus_link::DeskScreen)>) {
+    let row = |w: &hocus_link::CardWindow| Row {
+        id: w.id,
+        app: w.app.clone(),
+        title: if w.title.trim().is_empty() {
+            super::app_name(&w.entry, &w.app)
+        } else {
+            w.title.clone()
+        },
+        place: w.place,
+    };
+    if shown.windows.iter().all(|w| w.screen.is_none()) {
+        return (shown.windows.iter().map(row).collect(), Vec::new());
+    }
+    let own = |w: &hocus_link::CardWindow| {
+        w.screen
+            .as_ref()
+            .map_or(shown.output.as_str(), |s| s.output.as_str())
+            .to_owned()
+    };
+    let mut order: Vec<String> = vec![shown.output.clone()];
+    for w in &shown.windows {
+        let output = own(w);
+        if !order.contains(&output) {
+            order.push(output);
+        }
+    }
+    let mut all = Vec::new();
+    let mut labels = Vec::new();
+    for output in order {
+        let theirs: Vec<&hocus_link::CardWindow> =
+            shown.windows.iter().filter(|w| own(w) == output).collect();
+        if theirs.is_empty() {
+            continue;
+        }
+        let screen = theirs
+            .iter()
+            .find_map(|w| w.screen.clone())
+            .or_else(|| crate::desktops::known_screen(&output));
+        if let Some(screen) = screen {
+            labels.push((all.len(), screen));
+        }
+        all.extend(theirs.into_iter().map(row));
+    }
+    (all, labels)
+}
+
+/// The screens' labels among the rows shown, 8 at most.
+fn labels_shown(labels: &[(usize, hocus_link::DeskScreen)]) -> usize {
+    labels.iter().filter(|(first, _)| *first < MOST).count()
 }
 
 /// The terminals' rows: their folders, shown, and their applications.
@@ -308,14 +352,17 @@ fn terminals_height(count: usize) -> f32 {
     GAP + DIVIDER + GAP + HEADING * LINE + HEADING_BOTTOM + n * ROW + (n - 1.0) * ROW_GAP
 }
 
-fn windows_height(count: usize) -> f32 {
+/// The windows' part, `count` rows under `labels` screens' names
+/// (#947).
+fn windows_height(count: usize, labels: usize) -> f32 {
     let n = count.min(MOST) as f32;
     let rows = if n > 0.0 {
         n * ROW + (n - 1.0) * ROW_GAP
     } else {
         0.0
     };
-    (HEADING * LINE + HEADING_BOTTOM + rows).max(SKETCH.height)
+    let labels = labels as f32 * crate::ui::parts::SCREEN_LABEL;
+    (HEADING * LINE + HEADING_BOTTOM + rows + labels).max(SKETCH.height)
 }
 
 /// Its size, logical pixels, its tabs four a window.
@@ -329,7 +376,7 @@ pub fn size_of(shown: &hocus_link::ProjectCard, more: bool, words: Words) -> (u3
     let height = 2.0 * (BORDER + PAD)
         + BADGE
         + GAP
-        + windows_height(shown.windows.len())
+        + windows_height(shown.windows.len(), labels_shown(&rows(shown).1))
         + terminals_height(terminals(shown).len())
         + tabs_height(&tab_sections(shown, more, words))
         + agents_height(agents(shown).len())
@@ -453,13 +500,22 @@ fn build<'a>(projects: &'a Lent<Projects>, id: window::Id, words: Words) -> El<'
     projects
         .change(|p| {
             let card = p.card.as_deref_mut().filter(|c| c.surface == id)?;
-            let rows = rows(&card.shown);
-            let now = shows(card, &rows, words);
+            let (rows, labels) = rows(&card.shown);
+            let labels: Vec<(usize, String)> = labels
+                .iter()
+                .map(|(first, s)| {
+                    (
+                        *first,
+                        crate::levels::model::Words::new(words.lang).screen_label(s),
+                    )
+                })
+                .collect();
+            let now = shows(card, &rows, &labels, words);
             if now != card.logged {
                 tracing::debug!(said = %now, "the project's card shows it");
                 card.logged = now;
             }
-            Some(content(card, &rows, words))
+            Some(content(card, &rows, &labels, words))
         })
         .flatten()
         .unwrap_or_else(|| Space::new().into())
@@ -477,7 +533,7 @@ fn since(seconds: i64) -> String {
 }
 
 /// What it shows, in words, for the log and the tests.
-fn shows(card: &Card, rows: &[Row], words: Words) -> String {
+fn shows(card: &Card, rows: &[Row], labels: &[(usize, String)], words: Words) -> String {
     let windows: Vec<String> = rows
         .iter()
         .map(|r| format!("{} ({})", r.title, words.place(r.place)))
@@ -508,7 +564,7 @@ fn shows(card: &Card, rows: &[Row], words: Words) -> String {
         })
         .collect();
     format!(
-        "name={:?} state={pill:?} folder={:?} when={when:?} windows={windows:?} terminals={:?} tabs={tabs:?} agents={agents:?}",
+        "name={:?} state={pill:?} folder={:?} when={when:?} windows={windows:?} screens={labels:?} terminals={:?} tabs={tabs:?} agents={agents:?}",
         card.shown.name,
         card.shown.folder,
         terminals(&card.shown),
@@ -557,7 +613,7 @@ pub fn closed_when(seconds: i64, lang: crate::clock::time::Lang) -> String {
     }
 }
 
-fn content<'a>(card: &Card, rows: &[Row], words: Words) -> El<'a> {
+fn content<'a>(card: &Card, rows: &[Row], labels: &[(usize, String)], words: Words) -> El<'a> {
     let shown = &card.shown;
     let open = matches!(shown.state, hocus_link::ProjectState::Open { .. });
     let mono = hocus_link::projects::monogram(&shown.name);
@@ -673,12 +729,32 @@ fn content<'a>(card: &Card, rows: &[Row], words: Words) -> El<'a> {
     )]
     .spacing(0.0);
     let list_width = INNER - SKETCH.width - 14.0;
+    // A group a screen (#947): its name right over its rows, the groups
+    // the rows' gap apart.
+    let group = |label: Option<&str>, rows: iced::widget::Column<'a, Msg>| -> El<'a> {
+        match label {
+            Some(label) => column![crate::ui::parts::screen_label(label, ROW_PAD), rows].into(),
+            None => rows.into(),
+        }
+    };
+    let mut groups: Vec<El<'a>> = Vec::new();
+    let mut label: Option<&str> = None;
     let mut windows = column![].spacing(ROW_GAP);
-    for row in rows.iter().take(MOST) {
+    let mut shown_labels = 0;
+    for (at, row) in rows.iter().enumerate().take(MOST) {
+        if let Some((_, next)) = labels.iter().find(|(first, _)| *first == at) {
+            if at > 0 {
+                let rows = std::mem::replace(&mut windows, column![].spacing(ROW_GAP));
+                groups.push(group(label, rows));
+            }
+            label = Some(next);
+            shown_labels += 1;
+        }
         windows = windows.push(window_row(row, words, list_width));
     }
-    list = list.push(windows);
-    let middle = row![sketch, gap(14.0), list].height(windows_height(rows.len()));
+    groups.push(group(label, windows));
+    list = list.push(iced::widget::Column::with_children(groups).spacing(ROW_GAP));
+    let middle = row![sketch, gap(14.0), list].height(windows_height(rows.len(), shown_labels));
     // That private windows are never read.
     let private = container(
         row![
@@ -1246,6 +1322,7 @@ mod tests {
                     terminal: terminal.then(|| "/home/alex".to_owned()),
                     tabs: None,
                     agent: None,
+                    screen: None,
                 })
                 .collect(),
         };
@@ -1259,5 +1336,68 @@ mod tests {
         assert_eq!(size(&card(1, false), words).0, 600);
         // Its terminals add their section.
         assert!(size(&card(1, true), words).1 > size(&card(1, false), words).1);
+    }
+
+    /// #947: on two screens, the card's own screen's windows first under
+    /// its name, then the other's; a closed window whose screen is not
+    /// there with the card's screen's; the names add their room.
+    #[test]
+    fn on_several_screens_its_windows_are_grouped_by_screen_its_own_first() {
+        let screen = |output: &str, built_in, inches, number| hocus_link::DeskScreen {
+            output: output.into(),
+            width: 1920,
+            height: 1080,
+            built_in,
+            inches,
+            number,
+        };
+        let laptop = screen("eDP-1", true, 14, 1);
+        let wide = screen("DP-1", false, 34, 2);
+        let window = |id: u64, on: Option<&hocus_link::DeskScreen>| hocus_link::CardWindow {
+            id,
+            app: "foot".into(),
+            entry: "foot".into(),
+            title: format!("w{id}"),
+            place: hocus_link::WindowPlace::Floating,
+            rect: [0, 0, 100, 100],
+            focused: false,
+            terminal: None,
+            tabs: None,
+            agent: None,
+            screen: on.cloned(),
+        };
+        let mut card = hocus_link::ProjectCard {
+            output: "eDP-1".into(),
+            at: None,
+            screen: (1920, 1080),
+            name: "hocus-site".into(),
+            folder: "/home/alex/github/hocus-site".into(),
+            state: hocus_link::ProjectState::Closed { at: 0 },
+            windows: vec![
+                window(1, Some(&wide)),
+                window(2, Some(&laptop)),
+                window(3, None),
+                window(4, Some(&wide)),
+            ],
+        };
+        let (listed, labels) = rows(&card);
+        let ids: Vec<u64> = listed.iter().map(|r| r.id).collect();
+        assert_eq!(ids, [2, 3, 1, 4]);
+        assert_eq!(labels, [(0, laptop.clone()), (2, wide.clone())]);
+        let words = crate::levels::model::Words::new(crate::clock::time::Lang::French);
+        assert_eq!(words.screen_label(&laptop), "ÉCRAN DU PORTABLE");
+        assert_eq!(words.screen_label(&wide), "ÉCRAN EXTERNE 34 POUCES");
+        let grouped = size(&card, Words::new(crate::clock::time::Lang::French)).1;
+        // On one screen: no names, as before.
+        for w in &mut card.windows {
+            w.screen = None;
+        }
+        let (_, none) = rows(&card);
+        assert!(none.is_empty());
+        let plain = size(&card, Words::new(crate::clock::time::Lang::French)).1;
+        assert_eq!(
+            grouped - plain,
+            (2.0 * crate::ui::parts::SCREEN_LABEL).ceil() as u32
+        );
     }
 }

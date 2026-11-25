@@ -61,7 +61,13 @@ Decided with the maintainer (2026-11-13):
 - **The screens linked** (#947, windows.md §12, the default): a project
   is a desktop number on every screen. Its windows are those on desktop
   N of any screen, its name names desktop N on every screen, its pill
-  and its monogram show on every screen's dots and row. Made from one
+  and its monogram show on every screen's dots and row. Its list (from
+  any row's tile) and its card (from any screen's thumbnail, or the
+  launcher when closed) group its windows by screen, the bar's (the
+  card's) screen first, each group under that screen's 6.9 name in
+  capitals ("ÉCRAN DU PORTABLE", 10.5 px, 700, `text.faint`), none for
+  a screen with no window there, its count every screen's together; the
+  list then has no line saying which screen. Made from one
   screen's thumbnail, desktop N of every screen is the project; closing
   saves each window with its screen, reopening puts each back on its own
   (a screen missing then: the launcher's screen, on the same desktop);

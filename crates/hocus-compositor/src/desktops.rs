@@ -747,7 +747,7 @@ impl crate::State {
     /// `output` as a bar's row shows it: its size, and what names it as
     /// the Settings' Écrans page does (6.9): the built-in panel, its
     /// diagonal, its number (1 the built-in panel, then by connector).
-    fn desk_screen(&self, output: &Output) -> Option<DeskScreen> {
+    pub(crate) fn desk_screen(&self, output: &Output) -> Option<DeskScreen> {
         let g = self.space.output_geometry(output)?;
         let (w, h) = {
             let size = output.physical_properties().size;
@@ -809,6 +809,8 @@ impl crate::State {
         for output in self.bars_outputs() {
             self.desktops_drawn(&output);
         }
+        // The launcher's closed projects name their windows' screens.
+        self.tell_projects();
     }
 
     /// The shell connected: every bar is told the screens it shows, their

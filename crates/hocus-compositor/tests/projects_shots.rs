@@ -34,7 +34,18 @@ fn shoot(
     name: &str,
     zoom: Option<(u32, u32, u32, u32)>,
 ) -> anyhow::Result<()> {
-    let (w, h, px) = hp.screenshot(0)?;
+    shoot_on(hp, 0, out, name, zoom)
+}
+
+/// [`shoot`] screen `index`.
+fn shoot_on(
+    hp: &mut Headless,
+    index: usize,
+    out: &Path,
+    name: &str,
+    zoom: Option<(u32, u32, u32, u32)>,
+) -> anyhow::Result<()> {
+    let (w, h, px) = hp.screenshot(index)?;
     let rgba: Vec<u8> = px
         .as_chunks::<4>()
         .0
@@ -993,5 +1004,135 @@ fn closing_and_reopening_project_desktops() -> anyhow::Result<()> {
     }
     let _ = bus.kill();
     let _ = bus.wait();
+    Ok(())
+}
+
+// --- The screens linked (#947) ---------------------------------------------------
+
+/// A project on desktop 2 of two linked screens, a terminal on the first
+/// and a browser and an editor on the second: its list in the first
+/// screen's bar (`10-linked-list`) and its card from the second screen's
+/// thumbnail (`11-linked-card`), each grouping the windows by screen.
+#[test]
+#[ignore = "screenshots for the maintainer, by hand"]
+fn a_project_on_two_linked_screens_groups_its_windows_by_screen() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS") else {
+        eprintln!("HOCUS_SHOTS names no folder");
+        return Ok(());
+    };
+    let out = PathBuf::from(out);
+    std::fs::create_dir_all(&out)?;
+    let shell = common::shell_program();
+    let dir = tempfile::tempdir()?;
+    let at = |sub: &str| -> anyhow::Result<PathBuf> {
+        let path = dir.path().join(sub);
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    };
+    let home = at("home")?;
+    let site = repo(&home, "github/hocus-site", Duration::from_secs(600))?;
+    let env = [
+        ("HOME", home.display().to_string()),
+        ("XDG_CONFIG_HOME", at("config")?.display().to_string()),
+        ("XDG_CACHE_HOME", at("cache")?.display().to_string()),
+        ("XDG_STATE_HOME", at("state")?.display().to_string()),
+        ("XDG_DATA_HOME", at("data")?.display().to_string()),
+        ("LC_ALL", "fr_FR.UTF-8".to_owned()),
+        ("LANG", "fr_FR.UTF-8".to_owned()),
+    ];
+    let script = common::shell_script(dir.path(), &shell, &env)?;
+    let mut config = Config::default();
+    config.panel.form = FormChoice::Full;
+    config.locale.language = hocus_link::locale::Language::Chosen(hocus_words::Lang::French);
+    config.home = Some(home.clone());
+    config.state_dir = Some(at("state/hocuspanda")?);
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            outputs: vec!["1440x900".parse()?, "1440x900".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+        Some(script),
+    )?;
+    let up = hp.dispatch_until(WAIT, |hp| hp.desk_tile_rects().len() == 8)?;
+    anyhow::ensure!(up, "no desktops' tiles");
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 2, "hocus-site", &site)?;
+    hp.pointer_move(700.0, 450.0);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
+    wait(&mut hp, Duration::from_millis(500))?;
+    let mut clients = vec![window(
+        &mut hp,
+        "foot",
+        "claude — ~/github/hocus-site",
+        (620, 420),
+    )?];
+    hp.pointer_move(1440.0 + 700.0, 450.0);
+    clients.push(window(
+        &mut hp,
+        "firefox",
+        "hocus-site · Accueil — Mozilla Firefox",
+        (760, 520),
+    )?);
+    clients.push(window(
+        &mut hp,
+        "code",
+        "index.astro — hocus-site",
+        (700, 480),
+    )?);
+    wait(&mut hp, Duration::from_millis(600))?;
+
+    // Its list: resting on the second screen's tile 2 in the first's bar.
+    let tile = hp
+        .desk_tile_rects()
+        .into_iter()
+        .find(|(bar, o, d, _)| bar == SCREEN && o == "HEADLESS-2" && *d == 1)
+        .map(|(.., (x, y, w, h))| (x + w / 2.0, y + h / 2.0))
+        .context("no tile")?;
+    hp.pointer_move(tile.0 - 1.0, tile.1);
+    hp.pointer_move(tile.0, tile.1);
+    let list = drawn(&mut hp, hocus_link::POPOVER_NAMESPACE)?;
+    shoot(
+        &mut hp,
+        &out,
+        "10-linked-list",
+        Some((
+            (list.x - 20).max(0) as u32,
+            (list.y - 20).max(0) as u32,
+            list.width as u32 + 260,
+            list.height as u32 + 120,
+        )),
+    )?;
+    hp.pointer_move(700.0, 450.0);
+    wait(&mut hp, Duration::from_millis(600))?;
+
+    // Its card, from the second screen's thumbnail.
+    hp.pointer_move(1440.0 + 700.0, 450.0);
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_W]);
+    wait(&mut hp, Duration::from_millis(600))?;
+    let name = hp
+        .overview_project_name("HEADLESS-2", 1)
+        .context("no name")?;
+    hp.pointer_move(name.0, name.1);
+    wait(&mut hp, Duration::from_millis(100))?;
+    hp.button(common::BTN_LEFT, true);
+    hp.button(common::BTN_LEFT, false);
+    let card = drawn(&mut hp, hocus_link::PROJECT_CARD_NAMESPACE)?;
+    hp.pointer_move(1440.0 + 1300.0, 850.0);
+    wait(&mut hp, Duration::from_millis(300))?;
+    shoot_on(
+        &mut hp,
+        1,
+        &out,
+        "11-linked-card",
+        Some((
+            (card.x - 1440).max(0) as u32,
+            card.y as u32,
+            620,
+            card.height as u32 + 10,
+        )),
+    )?;
+    drop(clients);
     Ok(())
 }
