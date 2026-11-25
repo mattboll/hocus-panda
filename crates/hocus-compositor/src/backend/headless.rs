@@ -13,6 +13,7 @@ use smithay::{
             Bind, ExportMem, ImportAll, ImportDma, ImportMem, ImportMemWl, Offscreen, Renderer,
             Texture,
             damage::OutputDamageTracker,
+            element::Element,
             gles::{GlesRenderer, GlesTexture},
             pixman::PixmanRenderer,
         },
@@ -160,6 +161,10 @@ pub struct FrameCost {
     pub render_ns: u64,
     /// Their elements, all scenes together.
     pub elements: u64,
+    /// The rectangles their elements said opaque, all scenes together:
+    /// what the damage tracker subtracts from every element behind them
+    /// (#948).
+    pub opaque: u64,
     /// The refreshes that told its clients of a frame without building a
     /// scene: their windows committed nothing new (#840).
     pub unchanged: u64,
@@ -558,6 +563,12 @@ where
                 }
             };
             out.cost.render_ns += crate::effects::timing::cpu().saturating_sub(rendering);
+            // Counted out of the times above.
+            let output_scale = out.output.current_scale().fractional_scale().into();
+            out.cost.opaque += elements
+                .iter()
+                .map(|e| e.opaque_regions(output_scale).len() as u64)
+                .sum::<u64>();
             out.cost.scenes += 1;
             let drawn = result.damage.is_some_and(|d| !d.is_empty());
             if let Some(damage) = result.damage {
