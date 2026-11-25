@@ -597,20 +597,58 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
 
 ## 12. Virtual desktops
 
-- **Per screen**: each output has its own desktops and switches alone
-  (first build's decision, kept; confirmed for 8.4, issue #420: a window
-  kept on one screen all day stays put while another switches). 4
-  desktops by default (1 to 9), `[desktops] count` and `names` the same on
-  every screen.
+- **Each screen has its own strip** of desktops, numbered 1 to `count`:
+  4 by default (1 to 9), `[desktops] count` and `names` the same on every
+  screen.
+- **Linked, by default** (#947, `[desktops] per-screen = false`): the
+  screens switch together. Whatever switches desktops puts every screen
+  on the same number, so that desktop N is "desktop N of every screen".
+  No screen is kept out of the link: a window "on all desktops" (#723)
+  is how a window stays in sight on one screen whatever the switches
+  (the #420 case, a chat kept on the laptop all day). With one screen
+  nothing differs.
+- **Per screen** (`per-screen = true`, #420 as built): the screen under
+  the pointer switches alone; the tiles switch their row's screen.
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
   swipe on a touchpad (following the fingers: right brings the desktop on
   the left; `swipe:3:right` and `swipe:3:left` in `[shortcuts]`
   `desktop-left` and `desktop-right`, set in the Settings' shortcuts,
-  settings.md "Gestures and corners"), and the bar's tiles (a
-  click, the wheel; bar.md §4.4). Keys and swipes act on the screen under
-  the pointer, the tiles on their row's screen (the bar on the primary
-  screen shows a row per screen, bar.md §4.4). The dots show on the
-  screen that switches only.
+  settings.md "Gestures and corners"), the bar's tiles (a click, `Enter`,
+  the wheel, on any screen's row; bar.md §4.4), the overview's
+  thumbnails, an agent's `switch_desktop` (mcp.md). Linked, they act on
+  every screen, wherever the pointer is; per screen, keys and swipes act
+  on the screen under the pointer, the tiles on their row's screen (the
+  bar on the primary screen shows a row per screen, bar.md §4.4). The
+  dots show on every screen that switches.
+- **Linked, as built** (#947): every screen's strip slides at once, with
+  one start time taken on the loop for the switch, each screen sliding
+  its own width plus the gap, so that screens at different refresh rates
+  sample the same curve and end together; reduced motion cross-fades
+  every screen together; desktops in depth move each screen's camera
+  together. There is one switch at a time for all the screens: one
+  coming during a slide or a swipe retargets them all. A swipe moves
+  every strip, its travel counted once in desktops and drawn at each
+  screen's width; released, all complete or all spring back (the first
+  screen's strip decides). Going to a window on another desktop
+  (Alt+Tab, the bar's lists, an agent's line, a notification, the
+  overview) switches every screen; Alt+Tab's "Ce bureau seulement" is
+  desktop N of every screen. The focus after a switch goes to the window
+  focused last on the new desktop of the screen under the pointer, else
+  of the screen that had the focus, else to the window on top there; the
+  pointer does not move. `Super+Shift+1…9`, a window let go on a tile or
+  a thumbnail, `Super+Alt+←/→` and a drag onto another screen switch
+  nothing, as per screen; `Super+Ctrl+Shift+1…9` and `←/→` take the window
+  and switch every screen with it. The control socket's
+  `desktop-switched` is told once per screen that switched, in the same
+  turn of the loop.
+- **The setting changed live** (6.14): linked, every screen goes to the
+  number the screen under the pointer shows (it does not move, the
+  others slide); unlinked, nothing moves and each screen switches alone
+  from then. The count is always the same on every screen: a desktop a
+  project adds is added on every screen (projects.md §7). A screen
+  plugged, turned on or uncovered by the lid joins the link: it shows
+  the number the others show, whatever it showed when it left, its
+  windows coming back to their desktops and places as below.
 - **Animation**: the desktops sit side by side, in their order, like one
   strip. Switching slides the strip: the outgoing desktop's windows move
   out on one side while the incoming one's move in from the other, in
@@ -1476,3 +1514,12 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
     desktop and keeps the overview open; windows hosting agents carry a
     big panda badge, waving while one waits, and empty desktops a
     sleeping panda.
+17. Every screen's desktop switched together (#947, variant C, decided
+    on 2026-11-25): linked by default (`[desktops] per-screen = false`),
+    no screen kept apart (a window on all desktops does that); the bar
+    keeps one row per screen, the rings moving together, a click on any
+    row switching every screen; a project is desktop N on every screen;
+    unlinked with a project on several screens, it stays on the screen
+    holding most of its windows, the others' leaving it, open; the dots
+    and the project's pill show on every screen that switches; an
+    agent's `switch_desktop` naming a screen switches every screen.

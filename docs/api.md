@@ -212,7 +212,9 @@ same as `hocus mcp`'s (design/mcp.md); `app_id` is its application's
 
 A screen shows another of its desktops: the screen, and the
 desktop's number (from 1) and name (its project's, or `[desktops]
-names`'; empty when none).
+names`'; empty when none). The screens linked (`[desktops] per-screen =
+false`, the default), every screen switches together: one event a
+screen, in the same turn.
 
 ```event
 {"event":"desktop-switched","screen":{"name":"eDP-1"},"desktop":{"number":2,"name":"hocus-site"}}

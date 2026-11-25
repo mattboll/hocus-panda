@@ -1843,7 +1843,8 @@ row.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
-| BUREAUX ("4 bureaux par écran") | Nombre de bureaux | − the number + (32 × 32; − at 1 and + at 9 at 45 %, inert) | `[desktops] count` |
+| BUREAUX ("4 bureaux par écran") | Nombre de bureaux, "Sur chaque écran, de 1 à 9." | − the number + (32 × 32; − at 1 and + at 9 at 45 %, inert) | `[desktops] count` |
+| | Changer de bureau (#947), "Super+1 met chaque écran sur son bureau 1." (per screen: "Super+1 change l’écran sous le pointeur.") | segmented: Tous les écrans, Chaque écran (6.3's words and control) | `[desktops] per-screen` (`false`: every screen together, the default) |
 | | Leurs noms | a chip per desktop (its number, its name or "Bureau N" faint, a ✕ but with one left; its tooltip "Travail · 3 fenêtres" when the compositor says them), then "+ Ajouter un bureau" (gone at 9) | `[desktops] names` |
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
@@ -1855,6 +1856,13 @@ row.
 | VUE D'ENSEMBLE | Coins de l’écran | what each corner does, a link to the shortcuts (#893) | `[shortcuts]`' `corner:` tokens |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
 
+- **Changer de bureau** (#947, windows.md §12): shown with one screen
+  too (the choice holds for the next one plugged); written at once,
+  followed live by the compositor, its toast "Les écrans changent de
+  bureau ensemble" or "Chaque écran change ses bureaux", "Annuler" and
+  `Ctrl+Z` writing the other back. Found by "ensemble", "lier",
+  "tous les écrans", "multi-écran", "synchroniser" (together, linked,
+  all screens, span, multi-monitor).
 - **Under the title**: "Les raccourcis des fenêtres et des bureaux se
   règlent dans Clavier et raccourcis ›", which opens 6.8 with its
   "Raccourcis du bureau" row lit.

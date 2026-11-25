@@ -354,7 +354,10 @@ group where it is.
   sketch, ring, icons and number are 3.9/3.9b's, from that screen's
   `desktops` line (icons only in sketches of 12 × 12 px or more, so
   rarely in 20 px tiles). A click, `Enter` or the wheel on a row switch
-  that row's screen, sliding as with the keys. The list of another
+  every screen to that number when the screens are linked (the default,
+  windows.md §12, #947: every row's ring moves at once), that row's
+  screen alone when they are not (`[desktops] per-screen = true`),
+  sliding as with the keys. The list of another
   screen's tile adds a line under its title saying which screen, as the
   Settings' Écrans page (6.9) names it: "sur l’écran externe 34 pouces"
   / "on the 34-inch external screen" (12 px, `text.faint`). Screen
