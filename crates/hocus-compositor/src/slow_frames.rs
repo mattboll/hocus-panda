@@ -3,22 +3,26 @@
 //!
 //! A window's frame callbacks are answered at each refresh of the screen
 //! it shows on: an application drawing goes at the screen's pace. Two
-//! kinds wait longer, answered once a second at most:
+//! kinds wait longer:
 //!
 //! - **Unseen**: on its desktop, but the last frames drew none of its
-//!   surfaces: covered whole by opaque surfaces. Answered at every refresh
+//!   surfaces: covered whole by opaque surfaces. Answered once a second
+//!   at most ([`UNSEEN_EVERY`]); it was answered at every refresh
 //!   of every screen, a browser under another window committed at 165 Hz
 //!   for nothing. (A window on a desktop not shown, or minimised, is not
 //!   in the space: no refresh answers it, as before.)
 //! - **Quiet**: shown, but committing nothing new (#840) for
 //!   [`QUIET_AFTER`] with no input, as a browser whose page runs a loop
-//!   that draws nothing. Its commits ask for no refresh; a frame its
+//!   that draws nothing. Answered ten times a second at most
+//!   ([`QUIET_EVERY`]): what it shows next comes soon enough to be seen
+//!   without input. Its commits ask for no refresh; a frame its
 //!   screen draws anyway still answers it. Any input brings every quiet
 //!   window back to its screen's pace at once: the user may be about to
 //!   look at it, and its next frame comes at the next refresh.
 //!
-//! When no screen draws, a timer answers them, every [`SLOW`] while one
-//! of them waits for its callback; it is not set when none does. While
+//! When no screen draws, a timer answers them, every [`QUIET_EVERY`]
+//! while a quiet one waits for its callback, every [`UNSEEN_EVERY`] while
+//! only unseen ones do; it is not set when none does. While
 //! windows are drawn elsewhere (the overview, Alt+Tab's thumbnails, a
 //! window moving), every window goes at the screens' pace as before.
 
@@ -26,7 +30,10 @@ use smithay::{
     backend::renderer::element::{Id, RenderElementPresentationState, RenderElementStates},
     desktop::Window,
     output::Output,
-    reexports::calloop::timer::{TimeoutAction, Timer},
+    reexports::calloop::{
+        RegistrationToken,
+        timer::{TimeoutAction, Timer},
+    },
     wayland::compositor::SurfaceAttributes,
 };
 use std::{
@@ -37,25 +44,30 @@ use std::{
 
 use crate::{State, model::WindowId};
 
-/// How often an unseen or quiet window is answered at most.
-pub const SLOW: Duration = Duration::from_secs(1);
+/// How often an unseen window is answered at most.
+pub const UNSEEN_EVERY: Duration = Duration::from_secs(1);
+
+/// How often a quiet window is answered at most.
+pub const QUIET_EVERY: Duration = Duration::from_millis(100);
 
 /// How long a shown window commits nothing new, with no input, before it
 /// is quiet.
 pub const QUIET_AFTER: Duration = Duration::from_secs(2);
 
-/// The timer's own threshold, a little under [`SLOW`]: set again from
-/// when it was due, it may fire a little less than [`SLOW`] after the
+/// The timer's own threshold for a pace, a little under it: set again
+/// from when it was due, it may fire a little less than its pace after the
 /// callback it sent last.
-const TIMER_THROTTLE: Duration = Duration::from_millis(900);
+fn timer_throttle(every: Duration) -> Duration {
+    every * 9 / 10
+}
 
 #[derive(Debug, Default)]
 pub struct SlowFrames {
     /// Since when each window commits nothing new, input aside.
     nothing_new: HashMap<WindowId, Duration>,
-    /// Whether the timer is set: a frame that leaves an unseen window
-    /// waiting sets it too, with the state borrowed.
-    timer: Cell<bool>,
+    /// The timer while it is set, and its pace: a frame that leaves an
+    /// unseen window waiting sets it too, with the state borrowed.
+    timer: Cell<Option<(RegistrationToken, Duration)>>,
 }
 
 /// The screens whose last frame drew a window's surfaces; `None` until a
@@ -142,11 +154,16 @@ impl State {
         let Some(window) = self.mapped_window(id) else {
             return false;
         };
-        let slow = self.window_quiet(id) || self.window_unseen(&window);
-        if slow {
-            self.slow_frames_due();
+        // Covered whole, it keeps the unseen windows' pace, quiet or not.
+        if self.window_unseen(&window) {
+            self.slow_frames_due(UNSEEN_EVERY);
+            true
+        } else if self.window_quiet(id) {
+            self.slow_frames_due(QUIET_EVERY);
+            true
+        } else {
+            false
         }
-        slow
     }
 
     /// Window `id` committed something new: back to its screen's pace;
@@ -157,7 +174,7 @@ impl State {
             .mapped_window(id)
             .is_some_and(|w| self.window_unseen(&w))
         {
-            self.slow_frames_due();
+            self.slow_frames_due(UNSEEN_EVERY);
         }
     }
 
@@ -189,23 +206,31 @@ impl State {
         }
     }
 
-    /// The timer set, unless it is.
-    pub(crate) fn slow_frames_due(&self) {
-        if self.slow_frames.timer.get() || self.locked() {
+    /// The timer set at `every`, unless it is at that pace or faster.
+    pub(crate) fn slow_frames_due(&self, every: Duration) {
+        if self.locked() {
             return;
         }
-        let timer = Timer::from_duration(SLOW);
+        match self.slow_frames.timer.get() {
+            Some((_, pace)) if pace <= every => return,
+            // Too slow for a quiet window: set again at its pace.
+            Some((token, _)) => self.loop_handle.remove(token),
+            None => {}
+        }
+        self.slow_frames.timer.set(None);
+        let timer = Timer::from_duration(every);
         let inserted = self
             .loop_handle
             .insert_source(timer, |_, _, app| app.state.slow_frames_fired());
         match inserted {
-            Ok(_) => self.slow_frames.timer.set(true),
+            Ok(token) => self.slow_frames.timer.set(Some((token, every))),
             Err(err) => tracing::warn!(%err.error, "the unseen windows' frames have no timer"),
         }
     }
 
     /// The timer fired: the unseen and quiet windows answered, if their
-    /// last answer is old enough; again in [`SLOW`] while one still waits.
+    /// last answer is old enough; again while one still waits, at the
+    /// quiet windows' pace while one of them does.
     fn slow_frames_fired(&mut self) -> TimeoutAction {
         let windows = &self.windows;
         self.slow_frames
@@ -215,24 +240,33 @@ impl State {
         // answer the others.
         let output = self.space.outputs().next().cloned();
         let (Some(output), false) = (output, self.locked()) else {
-            self.slow_frames.timer.set(false);
+            self.slow_frames.timer.set(None);
             return TimeoutAction::Drop;
         };
         let now: Duration = self.clock.now().into();
-        let mut waiting = false;
+        let mut next: Option<Duration> = None;
         for window in self.space.elements() {
-            let quiet = self.id_of(window).is_some_and(|id| self.window_quiet(id));
-            if !(quiet || self.window_unseen(window)) {
+            let every = if self.window_unseen(window) {
+                UNSEEN_EVERY
+            } else if self.id_of(window).is_some_and(|id| self.window_quiet(id)) {
+                QUIET_EVERY
+            } else {
                 continue;
+            };
+            window.send_frame(&output, now, Some(timer_throttle(every)), |_, _| None);
+            if waits_for_frame(window) {
+                next = Some(next.map_or(every, |n| n.min(every)));
             }
-            window.send_frame(&output, now, Some(TIMER_THROTTLE), |_, _| None);
-            waiting |= waits_for_frame(window);
         }
-        if waiting {
-            TimeoutAction::ToDuration(SLOW)
-        } else {
-            self.slow_frames.timer.set(false);
-            TimeoutAction::Drop
+        match (next, self.slow_frames.timer.get()) {
+            (Some(every), Some((token, _))) => {
+                self.slow_frames.timer.set(Some((token, every)));
+                TimeoutAction::ToDuration(every)
+            }
+            _ => {
+                self.slow_frames.timer.set(None);
+                TimeoutAction::Drop
+            }
         }
     }
 }

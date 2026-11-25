@@ -1829,10 +1829,15 @@ impl State {
             // Not seen by the last frames: once a second at most, whatever
             // the screens' refresh (#949).
             if !elsewhere && self.window_unseen(window) {
-                window.send_frame(output, now, Some(crate::slow_frames::SLOW), |_, _| None);
+                window.send_frame(
+                    output,
+                    now,
+                    Some(crate::slow_frames::UNSEEN_EVERY),
+                    |_, _| None,
+                );
                 // Too soon: the timer answers it, should no screen draw.
                 if crate::slow_frames::waits_for_frame(window) {
-                    self.slow_frames_due();
+                    self.slow_frames_due(crate::slow_frames::UNSEEN_EVERY);
                 }
             } else {
                 window.send_frame(output, now, throttle, primary);

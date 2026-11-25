@@ -5,7 +5,7 @@
 //! window's drawing builds the scenes of its own screen alone (#826); a
 //! window committing nothing new builds none, its frame callbacks still
 //! answered at each refresh (#840), but once a second when it is covered
-//! whole, or quiet at rest (#949).
+//! whole, and ten times a second quiet at rest (#949).
 
 use crate::common;
 
@@ -384,12 +384,20 @@ fn a_window_covered_whole_is_answered_once_a_second() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// At most ten frame callbacks a second (a quiet window's pace, the
+/// timer's 90 ms throttle) of `took` on the machine's clock, give or take
+/// the one under way.
+fn not_faster_than_ten_a_second(answered: u64, took: Duration) -> bool {
+    answered as f64 <= took.as_secs_f64() / 0.09 + 2.0
+}
+
 /// A shown window committing nothing new at rest, as a page running a
-/// loop that draws nothing (#949): at its screen's refresh at first, once
-/// a second after 2 s with nothing new and no input; the pointer moving,
-/// at its screen's refresh again.
+/// loop that draws nothing (#949): at its screen's refresh at first, ten
+/// times a second after 2 s with nothing new and no input; the pointer
+/// moving, at its screen's refresh again.
 #[test]
-fn a_window_quiet_at_rest_is_answered_once_a_second_until_the_user_moves() -> anyhow::Result<()> {
+fn a_window_quiet_at_rest_is_answered_ten_times_a_second_until_the_user_moves() -> anyhow::Result<()>
+{
     let (mut hp, _window, done, ..) = idle_for_a_second(false)?;
     // 2 s from its first commit with nothing new, and the one under way.
     wait(&mut hp, Duration::from_millis(2500))?;
@@ -399,19 +407,27 @@ fn a_window_quiet_at_rest_is_answered_once_a_second_until_the_user_moves() -> an
     let took = started.elapsed();
     let quiet = done.load(Relaxed) - answered;
     eprintln!("{took:?} quiet: {quiet} frame callbacks answered");
-    not_faster_than_once_a_second(quiet, took);
-    assert!(quiet >= 2, "{quiet} frame callbacks in {took:?}");
-    // At the screen's refresh again: 20 of them, as fast as at first.
+    assert!(
+        not_faster_than_ten_a_second(quiet, took),
+        "{quiet} frame callbacks in {took:?}"
+    );
+    // More than once a second would give (5 at most in 4 s), however
+    // late a loaded machine's timer fires.
+    assert!(quiet >= 8, "{quiet} frame callbacks in {took:?}");
+    // At the screen's refresh again: 40 of them, faster than ten a second
+    // allows in the time they took (within the 2 s before it is quiet
+    // again, at 20 frames a second or more).
     hp.pointer_move(800.0, 500.0);
     let answered = done.load(Relaxed);
     let started = Instant::now();
-    let back = hp.dispatch_until(WAIT, |_| done.load(Relaxed) >= answered + 20)?;
+    let back = hp.dispatch_until(WAIT, |_| done.load(Relaxed) >= answered + 40)?;
     let took = started.elapsed();
     anyhow::ensure!(back, "its frame callbacks stopped");
-    // 20 at once a second would take 18 s at least.
+    let again = done.load(Relaxed) - answered;
+    eprintln!("{took:?} after the pointer moved: {again} frame callbacks answered");
     assert!(
-        took < Duration::from_secs(8),
-        "20 frame callbacks in {took:?}"
+        !not_faster_than_ten_a_second(again, took),
+        "{again} frame callbacks in {took:?}: still ten a second"
     );
     Ok(())
 }
