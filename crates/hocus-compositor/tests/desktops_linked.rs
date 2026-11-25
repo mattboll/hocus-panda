@@ -520,13 +520,36 @@ fn with_shell(dir: &std::path::Path) -> anyhow::Result<Headless> {
     Ok(hp)
 }
 
-/// The middle of `output`'s tile `desktop` (from 0) in the laptop's bar.
-fn tile(hp: &Headless, output: &str, desktop: usize) -> anyhow::Result<(f64, f64)> {
-    hp.desk_tile_rects()
-        .into_iter()
-        .find(|(bar, o, d, _)| bar == LAPTOP && o == output && *d == desktop)
-        .map(|(.., (x, y, w, h))| (x + w / 2.0, y + h / 2.0))
-        .ok_or_else(|| anyhow::anyhow!("no tile {desktop} of {output}"))
+/// The pointer over `output`'s tile `desktop` (from 0) in the laptop's
+/// bar, once the tiles take it there: the tile read again at each try, as
+/// the bar's parts arriving move it while the shell starts.
+fn over_tile(hp: &mut Headless, output: &str, desktop: usize) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    loop {
+        let at = hp
+            .desk_tile_rects()
+            .into_iter()
+            .find(|(bar, o, d, _)| bar == LAPTOP && o == output && *d == desktop)
+            .map(|(.., (x, y, w, h))| (x + w / 2.0, y + h / 2.0));
+        if let Some(at) = at {
+            hp.pointer_move(at.0 - 1.0, at.1);
+            hp.pointer_move(at.0, at.1);
+            wait(hp, Duration::from_millis(30))?;
+            if hp.pointer_layer().as_deref() == Some(hocus_link::DESKTOPS_NAMESPACE)
+                && hp.undrawn_at(at.0, at.1).is_empty()
+            {
+                return Ok(());
+            }
+        } else {
+            wait(hp, Duration::from_millis(30))?;
+        }
+        anyhow::ensure!(
+            start.elapsed() < WAIT,
+            "the tiles never took the pointer over tile {desktop} of {output}: {:?}, {:?}",
+            hp.pointer_layer(),
+            hp.desk_tile_rects()
+        );
+    }
 }
 
 /// The desktop each screen's row rings, as the bar is told it.
@@ -561,8 +584,9 @@ fn the_bar_keeps_a_row_per_screen_and_a_tile_of_either_switches_every_screen() -
     };
     let (own, other) = (height(LAPTOP), height(WIDE));
     assert!(own > other, "{own} {other}");
-    let at = tile(&hp, WIDE, 2)?;
-    common::click_on(&mut hp, at, hocus_link::DESKTOPS_NAMESPACE)?;
+    over_tile(&mut hp, WIDE, 2)?;
+    hp.button(BTN_LEFT, true);
+    hp.button(BTN_LEFT, false);
     let both = hp.dispatch_until(WAIT, |hp| shown(hp) == [2, 2])?;
     anyhow::ensure!(both, "{:?}", shown(&hp));
     let rung = hp.dispatch_until(WAIT, |hp| ringed(hp) == [Some(2), Some(2)])?;
@@ -576,8 +600,7 @@ fn the_bar_keeps_a_row_per_screen_and_a_tile_of_either_switches_every_screen() -
 fn the_wheel_over_a_row_switches_every_screen() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let mut hp = with_shell(dir.path())?;
-    let at = tile(&hp, LAPTOP, 0)?;
-    common::over(&mut hp, at, hocus_link::DESKTOPS_NAMESPACE)?;
+    over_tile(&mut hp, LAPTOP, 0)?;
     hp.wheel(1);
     let both = hp.dispatch_until(WAIT, |hp| shown(hp) == [1, 1])?;
     anyhow::ensure!(both, "{:?}", shown(&hp));
