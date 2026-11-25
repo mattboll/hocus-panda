@@ -541,8 +541,9 @@ pub enum Command {
     /// Draws its window again with its header this colour (ARGB), as an
     /// application turning to a dark theme.
     Header(u32),
-    /// Says its window opaque, all of it (`set_opaque_region`), and
-    /// commits: what is under it is hidden.
+    /// Says its window opaque, all of it (`set_opaque_region`), and draws
+    /// it again, as an application sends its opaque region with a frame:
+    /// what is under it is hidden.
     Opaque,
     /// Reads the clipboard's text, as `Ctrl+V` does: [`Event::Pasted`].
     ReadClipboard,
@@ -1071,14 +1072,19 @@ fn run_client(
                 }
                 (Command::Header(_), None) => {}
                 (Command::Opaque, Some(window)) => {
-                    let surface = window.wl_surface();
-                    let (w, h) = client.size;
+                    let surface = window.wl_surface().clone();
+                    let (size, margin) = (client.size, client.margin);
                     if let Ok(region) =
                         smithay_client_toolkit::compositor::Region::new(&client.compositor)
                     {
-                        region.add(0, 0, w as i32, h as i32);
+                        let m = margin as i32;
+                        region.add(m, m, size.0 as i32, size.1 as i32);
                         surface.set_opaque_region(Some(region.wl_region()));
-                        surface.commit();
+                        // With a buffer: smithay takes a surface's opaque
+                        // region at a new buffer only, and a commit without
+                        // one leaves it out of the scene until the window
+                        // happens to draw again.
+                        client.draw_framed(&surface, size, margin);
                     }
                 }
                 (Command::Opaque, None) => {}

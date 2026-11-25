@@ -345,20 +345,20 @@ fn not_faster_than_once_a_second(answered: u64, took: Duration) {
 fn a_window_covered_whole_is_answered_once_a_second() -> anyhow::Result<()> {
     let mut hp = two_screens()?;
     let (_, under) = open_with(&mut hp, "test.under", (600, 400), false)?;
-    let id = id_of(&hp, "test.under").ok_or_else(|| anyhow::anyhow!("no window"))?;
+    let under_id = id_of(&hp, "test.under").ok_or_else(|| anyhow::anyhow!("no window"))?;
     let rect = Rect::new(600, 300, 600, 400);
-    hp.place_window(id, rect);
+    hp.place_window(under_id, rect);
     wait_for_rect(&mut hp, "test.under", rect)?;
     let (_, over) = open_with(&mut hp, "test.over", (1600, 900), false)?;
     let id = id_of(&hp, "test.over").ok_or_else(|| anyhow::anyhow!("no window"))?;
     let rect = Rect::new(100, 100, 1600, 900);
     hp.place_window(id, rect);
     wait_for_rect(&mut hp, "test.over", rect)?;
-    // Its opaque region taken: a scene drawn for it.
-    let before = hp.scenes_on(0);
+    // Its opaque region in a scene, which drew nothing of the window
+    // under: a scene counted could be one drawn before its commit came.
     over.commands.send(Command::Opaque)?;
-    let opaque = hp.dispatch_until(WAIT, |hp| hp.scenes_on(0) > before)?;
-    anyhow::ensure!(opaque, "its opaque region was never drawn");
+    let covered = hp.dispatch_until(WAIT, |hp| hp.window_unseen(under_id))?;
+    anyhow::ensure!(covered, "the window under was never judged covered");
     common::at_rest(&mut hp)?;
     let done = Arc::new(AtomicU64::new(0));
     under.commands.send(Command::Idle {

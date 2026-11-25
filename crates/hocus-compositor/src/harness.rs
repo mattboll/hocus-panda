@@ -1270,6 +1270,17 @@ impl Headless {
         self.app.state.run_window_action(id, action);
     }
 
+    /// Whether the last frames drew none of window `id`'s surfaces:
+    /// covered whole, its frame callbacks at the unseen windows' pace
+    /// (#949).
+    pub fn window_unseen(&self, id: WindowId) -> bool {
+        let state = &self.app.state;
+        state
+            .windows
+            .get(&id)
+            .is_some_and(|w| state.window_unseen(&w.window))
+    }
+
     /// Puts floating window `id` at `rect` (global), as a drag and a
     /// resize would.
     pub fn place_window(&mut self, id: WindowId, rect: Rect) {
