@@ -217,6 +217,7 @@ impl App {
                 | crate::camera::STRENGTH
                 | crate::wallpaper::ORDER
                 | crate::screens::NIGHT_SCHEDULE
+                | crate::desktops::PER_SCREEN
         );
         let mut segments = row![];
         let mut shown: Vec<(String, Value)> = choices
