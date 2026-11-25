@@ -114,6 +114,24 @@ pub fn corner_cutouts(
     cuts
 }
 
+/// The squares of `rect`'s corners rounded to `radius`, which hold all
+/// that [`corner_cutouts`] leaves out.
+pub fn corner_squares(
+    rect: Rectangle<i32, Physical>,
+    radius: i32,
+) -> Vec<Rectangle<i32, Physical>> {
+    let r = radius.min(rect.size.w / 2).min(rect.size.h / 2);
+    if r <= 0 {
+        return Vec::new();
+    }
+    let (left, right) = (rect.loc.x, rect.loc.x + rect.size.w - r);
+    let (top, bottom) = (rect.loc.y, rect.loc.y + rect.size.h - r);
+    [(left, top), (right, top), (left, bottom), (right, bottom)]
+        .into_iter()
+        .map(|(x, y)| Rectangle::new((x, y).into(), (r, r).into()))
+        .collect()
+}
+
 /// Each row of a corner rounded to `radius`, from the outer one, and how
 /// far in from the side its edge is; rows the curve does not reach left out.
 fn corner_insets(radius: i32) -> impl Iterator<Item = (i32, i32)> {
@@ -209,7 +227,6 @@ impl<E: Element> Element for Rounded<E> {
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        let cutouts = self.local_cutouts();
         let mut opaque: Vec<_> = self.inner.opaque_regions(scale).iter().copied().collect();
         if self.outside == Outside::Cropped {
             opaque = opaque
@@ -217,10 +234,15 @@ impl<E: Element> Element for Rounded<E> {
                 .filter_map(|r| r.intersection(self.clip))
                 .collect();
         }
-        if cutouts.is_empty() {
+        // The corners' squares whole, not their rows (#948): a few
+        // rectangles a window rather than one a pixel row of each corner,
+        // which the damage tracker subtracts from everything behind, every
+        // frame. What is behind a corner's square is drawn, and covered.
+        let corners = corner_squares(self.clip, self.radius);
+        if corners.is_empty() {
             return opaque.into_iter().collect();
         }
-        Rectangle::subtract_rects_many(opaque, cutouts)
+        Rectangle::subtract_rects_many(opaque, corners)
             .into_iter()
             .collect()
     }
@@ -1420,6 +1442,35 @@ mod tests {
         assert!(!cuts.iter().any(|c| c.contains((60, 20))));
         assert!(!cuts.iter().any(|c| c.contains((18, 28))));
         assert!(corner_cutouts(rect, 0).is_empty());
+    }
+
+    /// An opaque window's rounded element tells the damage tracker a few
+    /// rectangles, not one a pixel row of its corners (#948), and none of
+    /// them over what its corners leave out.
+    #[test]
+    fn a_rounded_window_is_opaque_in_a_few_rectangles() {
+        use smithay::backend::renderer::element::solid::SolidColorRenderElement;
+        let rect = Rectangle::<i32, Physical>::new((0, 0).into(), (1600, 1000).into());
+        let inner = SolidColorRenderElement::new(
+            Id::new(),
+            rect,
+            CommitCounter::default(),
+            [1.0, 1.0, 1.0, 1.0],
+            Kind::Unspecified,
+        );
+        // At scale 2: corners 16 pixels round.
+        let radius = (RADIUS * 2.0) as i32;
+        for outside in [Outside::Cropped, Outside::Shown] {
+            let rounded = Rounded::new(&inner, rect, radius, outside, 2.0);
+            let opaque = rounded.opaque_regions(Scale::from(2.0));
+            assert!(opaque.len() <= 5, "{} rectangles", opaque.len());
+            for cut in corner_cutouts(rect, radius) {
+                assert!(!opaque.iter().any(|o| o.overlaps(cut)), "{cut:?}");
+            }
+            // All but the corners' squares.
+            let area: i32 = opaque.iter().map(|o| o.size.w * o.size.h).sum();
+            assert_eq!(area, 1600 * 1000 - 4 * radius * radius);
+        }
     }
 
     #[test]
