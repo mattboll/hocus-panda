@@ -283,7 +283,10 @@ impl State {
                 ..picture
             };
             // What a carried window would do there, or its label.
-            let dropping = marked(&over, desktop);
+            // On its screen alone: the window goes to that screen's.
+            let dropping = over
+                .as_ref()
+                .is_some_and(|(o, d)| *d == desktop && *o == name);
             self.grid_label_elements(c, output, desktop, label_at, alpha);
             // Its marks: lit under a carried window, the pointer's, the
             // keyboard's, the desktop shown.

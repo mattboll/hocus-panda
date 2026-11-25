@@ -411,8 +411,8 @@ impl State {
     }
 
     /// What desktop `desktop` of `output`'s label says: under a window
-    /// carried over it (on its screen, or on every screen when linked),
-    /// what letting go does.
+    /// carried over it, what letting go does (on that screen alone: the
+    /// window goes to that screen's desktop).
     pub fn grid_label(&self, output: &Output, desktop: usize) -> Label {
         let lang = self.radial_lang();
         let dropping = self
@@ -421,7 +421,7 @@ impl State {
             .and_then(|o| o.grid.as_ref())
             .and_then(|g| g.carry.as_ref())
             .and_then(|c| c.over.as_ref())
-            .is_some_and(|(o, d)| *d == desktop && (self.desktops_linked() || *o == output.name()));
+            .is_some_and(|(o, d)| *d == desktop && *o == output.name());
         if dropping {
             return Label::Drop(hocus_words::compositor::overview_draw::drop_on_desktop(
                 lang,

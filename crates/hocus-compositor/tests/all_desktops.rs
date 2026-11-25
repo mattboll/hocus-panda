@@ -641,6 +641,8 @@ fn a_desktop_under_a_carried_window_says_drop_here() -> anyhow::Result<()> {
         hp.grid_label(LAPTOP, 1),
         Some(GridLabel::Number(_))
     ));
+    // On that screen alone: the window goes to the laptop's.
+    assert!(matches!(hp.grid_label(WIDE, 2), Some(GridLabel::Number(_))));
     let_go(&mut hp)?;
     Ok(())
 }
