@@ -46,6 +46,13 @@ open on), agents' badges on windows (slice 3).
   with no padding keeps its first column.
 - A shadow: offset 0, 12 px down; blur 36 px; black at 35 % unfocused,
   45 % focused.
+- A window whose client draws its own shadow around its geometry
+  (client-side decorations: Chrome, a floating GTK window) is cropped to
+  its geometry and gets the desktop's shadow and round corners, as every
+  other window: its own shadow, square at Chrome's bottom corners, made
+  them look square over a pale window. Its client still takes the pointer
+  where that shadow was, and the frame's band outside the edges resizes
+  it as any window's. Decided by the maintainer 2026-11-25, #958.
 - No transparency at any time, moving included, unless the user asks
   for it on a window (below).
 

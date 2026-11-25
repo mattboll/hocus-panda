@@ -207,7 +207,9 @@ pub(crate) struct Look {
     grip_tone: crate::grip_tone::Tone,
     decorated: bool,
     shadow: ShadowStyle,
-    own_shadow: bool,
+    /// Its client draws a shadow around its geometry (a client-side
+    /// decorated window): cropped, the desktop's drawn instead (#958).
+    client_shadow: bool,
     /// Its corners' radius as drawn, when not the window's own scaled.
     corner: Option<f64>,
     /// Raining (#432): the fade it is drawn with where the rain is not
@@ -237,7 +239,7 @@ impl Look {
             grip_tone: crate::grip_tone::Tone::Light,
             decorated: true,
             shadow: ShadowStyle::UNFOCUSED,
-            own_shadow: true,
+            client_shadow: false,
             corner: Some(corner),
             rain: None,
             sunlit: None,
@@ -316,10 +318,13 @@ impl State {
             .map(|r| r.fade(now));
         let focus = managed.focus_look(now);
         let decorated = self.model.mode(id) != Mode::Fullscreen;
-        // A client drawing its own shadow (a floating GTK window) keeps it:
-        // the desktop's would double it.
+        // A client drawing its own shadow (Chrome, a floating GTK window)
+        // draws its corners as it likes, square ones included: over a pale
+        // window, the round cut showed only what is behind, and its square
+        // shadow made the corner look square (#958). Its shadow is cropped
+        // and the desktop's drawn, as around every other window.
         let (bbox, geometry) = (managed.window.bbox(), managed.window.geometry());
-        let own_shadow = bbox.loc.x < geometry.loc.x - 2 || bbox.size.w > geometry.size.w + 4;
+        let client_shadow = bbox.loc.x < geometry.loc.x - 2 || bbox.size.w > geometry.size.w + 4;
         let shadow = if self.moving == Some(id) {
             ShadowStyle::MOVING
         } else {
@@ -343,7 +348,7 @@ impl State {
             grip_tone: self.grip_tone(id),
             decorated,
             shadow,
-            own_shadow,
+            client_shadow,
             corner: None,
             rain,
             sunlit: None,
@@ -428,9 +433,15 @@ impl State {
         // Nor does a snapped window, told it is tiled: its client draws
         // its edges square for windows side by side, GTK a dark 1 px line
         // around its geometry, whose square corners would show past the
-        // rounded ones its frame draws (Firefox's black top corners).
+        // rounded ones its frame draws (Firefox's black top corners). Nor
+        // the shadow a client draws around its window (#958): the
+        // desktop's is drawn instead.
         let tiled = matches!(self.model.mode(id), Mode::Snapped(_));
-        let outside = if tiled { Outside::Cropped } else { menus };
+        let outside = if tiled || look.client_shadow {
+            Outside::Cropped
+        } else {
+            menus
+        };
         let wrap = |e: WaylandSurfaceRenderElement<R>, radius: i32, outside: Outside| {
             let scaled = RescaleRenderElement::from_element(e, actual_loc, k);
             let moved = RelocateRenderElement::from_element(scaled, offset, Relocate::Relative);
@@ -602,7 +613,7 @@ impl State {
             }
         }
         self.parts_of(renderer, id, look, origin, scale, Parts::Surfaces, out);
-        if look.decorated && !look.own_shadow {
+        if look.decorated {
             let off = look.shadow_off.map(|r| {
                 Rectangle::new(r.loc - origin, r.size).to_physical_precise_up::<f64, i32>(scale)
             });

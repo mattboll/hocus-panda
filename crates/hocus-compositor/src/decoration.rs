@@ -190,9 +190,11 @@ pub struct Rounded<E> {
 /// What of a window's element outside its rectangle shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outside {
-    /// On the desktop: a client's own shadow, around its geometry.
+    /// On the desktop: what a client draws past its geometry, its
+    /// subsurfaces' and its menus'.
     Shown,
-    /// In a thumbnail: nothing, not even the pixel a scaled surface's
+    /// In a thumbnail, a snapped window, a window whose client draws its
+    /// own shadow (#958): nothing, not even the pixel a scaled surface's
     /// rounding adds past its edge.
     Cropped,
 }
