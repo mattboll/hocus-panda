@@ -1126,6 +1126,7 @@ impl State {
                 area: saved_area,
                 rect: place,
                 restore: (mode != Mode::Floating).then_some(place),
+                mode,
                 put: Some(put),
             };
             if let Some(managed) = self.windows.get_mut(&id) {

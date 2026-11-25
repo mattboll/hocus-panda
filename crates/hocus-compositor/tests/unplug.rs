@@ -1,7 +1,9 @@
 //! A screen unplugged and plugged back, headless (docs/design/windows.md
 //! §12): no window is lost, each going to the screen still there on its
 //! desktop and in its state; back, they return where they were, but for
-//! those the user placed meanwhile. A drag, Alt+Tab or a desktop slide on
+//! those the user sent to another screen or desktop meanwhile (#952: a
+//! window moved, resized or snapped where it was carried still goes
+//! back). A drag, Alt+Tab or a desktop slide on
 //! the screen as it goes ends cleanly.
 
 use crate::common;
@@ -134,23 +136,22 @@ fn a_screen_unplugged_keeps_its_windows_and_gets_them_back() -> anyhow::Result<(
     let focused = focused.expect("a window has the focus");
     assert!(focused.keyboard, "the keyboard follows the focus");
 
-    // The user moves one of them meanwhile: it stays where they put it.
+    // The user moves one of them meanwhile, on the screen it was carried
+    // to: it goes back all the same (#952).
     let carried = placed(&hp, "test.floating").rect;
     alt_drag(&mut hp, centre(carried), (-100.0, -60.0));
-    let put = placed(&hp, "test.floating");
-    assert_ne!(put.rect, carried, "the drag moved it");
+    assert_ne!(
+        placed(&hp, "test.floating").rect,
+        carried,
+        "the drag moved it"
+    );
 
     hp.plug(SECOND)?;
     wait(&mut hp, Duration::from_millis(50))?;
     assert_eq!(hp.outputs().len(), 2);
     for was in &moved {
         let app = was.app_id.as_deref().unwrap_or_default();
-        let now = placed(&hp, app);
-        if app == "test.floating" {
-            assert_eq!(now, put, "{app} stays where the user put it");
-        } else {
-            assert_eq!(&now, *was, "{app} back where it was");
-        }
+        assert_eq!(&placed(&hp, app), *was, "{app} back where it was");
     }
     assert_eq!(placed(&hp, "test.stays"), stays);
     Ok(())
@@ -221,13 +222,15 @@ fn a_drag_alt_tab_or_a_slide_on_a_screen_unplugged_ends_there() -> anyhow::Resul
     Ok(())
 }
 
+/// #952, decided 2026-11-25: snapped again where it was carried, a
+/// window goes back as it was; sent to another desktop, it stays.
 #[test]
-fn a_window_snapped_or_sent_meanwhile_stays() -> anyhow::Result<()> {
+fn a_window_snapped_meanwhile_goes_back_one_sent_stays() -> anyhow::Result<()> {
     let mut hp = two_screens()?;
-    let area1 = hp.work_area_of(FIRST).expect("an area");
     hp.pointer_move(1920.0 + 1280.0, 720.0);
     open(&mut hp, "test.resnapped", (400, 300))?;
     open(&mut hp, "test.sent", (400, 300))?;
+    let resnapped = placed(&hp, "test.resnapped");
     hp.unplug(SECOND)?;
     hp.pointer_move(960.0, 540.0);
     // The focused one goes to desktop 2; the other one snaps.
@@ -238,11 +241,8 @@ fn a_window_snapped_or_sent_meanwhile_stays() -> anyhow::Result<()> {
     let sent = placed(&hp, "test.sent");
     assert_eq!(sent.desktop, 1);
     hp.plug(SECOND)?;
-    assert_eq!(
-        placed(&hp, "test.resnapped").rect,
-        Zone::Right.rect(area1, model::DEFAULT_GAP)
-    );
-    assert_eq!(placed(&hp, "test.resnapped").output.as_deref(), Some(FIRST));
+    wait(&mut hp, Duration::from_millis(400))?;
+    assert_eq!(placed(&hp, "test.resnapped"), resnapped, "back as it was");
     assert_eq!(placed(&hp, "test.sent").output.as_deref(), Some(FIRST));
     assert_eq!(placed(&hp, "test.sent").desktop, 1);
     Ok(())

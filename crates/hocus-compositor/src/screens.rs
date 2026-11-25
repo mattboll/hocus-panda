@@ -1,9 +1,10 @@
 //! Screens coming and going (docs/design/windows.md §12): the windows of a
 //! screen unplugged go to one still there, each on the same-numbered
 //! desktop and in its state; when a screen of the same identity comes
-//! back ([`crate::screen_sets`]), those the user did not place meanwhile
-//! fly back where they were in 320 ms (fade in place with reduced
-//! motion). The winking panda says what moved ([`State::screens_peek`]).
+//! back ([`crate::screen_sets`]), those the user did not send to another
+//! screen or desktop meanwhile fly back where they were, in their state
+//! there, in 320 ms (fade in place with reduced motion). The winking
+//! panda says what moved ([`State::screens_peek`]).
 //!
 //! What clients are told when a screen goes comes in an order they rely
 //! on (#536): every surface leaves its `wl_output` before the global goes,
@@ -45,20 +46,21 @@ pub struct CameFrom {
     /// the screen's top-left corner.
     pub rect: Rect,
     pub restore: Option<Rect>,
+    /// Its state there, which it takes again going back.
+    pub mode: Mode,
     /// Where it was put: as long as it is still there, the user has not
-    /// placed it elsewhere. None: on no screen, every screen gone, waiting
+    /// sent it elsewhere. None: on no screen, every screen gone, waiting
     /// for the first to come (§12, #952).
     pub put: Option<Put>,
 }
 
-/// Where a window is, as far as the user places it: its screen, its
-/// desktop, its state, and a floating window's place and size.
+/// Where a window is, as far as the user sends it (#952, decided
+/// 2026-11-25): its screen and its desktop. Maximised, snapped, resized
+/// or moved on the screen it was carried to, it still goes back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Put {
     output: String,
     desktop: usize,
-    mode: Mode,
-    rect: Option<Rect>,
 }
 
 /// A window on a screen going: its id, its place and where it floats
@@ -171,6 +173,7 @@ impl State {
                 area: shifted(area, geometry, -1),
                 rect: shifted(*rect, geometry, -1),
                 restore: restore.map(|r| shifted(r, geometry, -1)),
+                mode: state.model.mode(*id),
                 put: None,
             },
         };
@@ -372,9 +375,10 @@ impl State {
     }
 
     /// `output` joined the desktop: the windows that left it go back where
-    /// they were, unless the user placed them elsewhere since; those shown
-    /// before and after fly there. `say`: the winking panda says so (a
-    /// screen plugged, or the lid opened; not the file turning it on).
+    /// they were, in their state there, unless the user sent them to
+    /// another screen or desktop since; those shown before and after fly
+    /// there. `say`: the winking panda says so (a screen plugged, or the
+    /// lid opened; not the file turning it on).
     pub fn output_back(&mut self, output: &Output, say: bool) {
         let name = output.name();
         if say {
@@ -400,6 +404,7 @@ impl State {
             .collect();
         let mut back = 0;
         let mut flown = Vec::new();
+        let mut states = false;
         for id in returning {
             let Some(came) = self.windows.get_mut(&id).and_then(|m| m.came_from.take()) else {
                 continue;
@@ -409,9 +414,23 @@ impl State {
                     window = id.0,
                     app = self.app_of(id),
                     changed,
-                    "a window that came from this screen stays: placed meanwhile"
+                    "a window that came from this screen stays: sent elsewhere meanwhile"
                 );
                 continue;
+            }
+            // In the state it had there, whatever it took meanwhile.
+            let was = self.model.mode(id);
+            if was != came.mode {
+                if came.mode == Mode::Floating {
+                    self.model.unsnap(id);
+                } else {
+                    let current = self.target_rect(id).unwrap_or(came.rect);
+                    self.model.set_mode(id, came.mode, current);
+                }
+                if let Some(managed) = self.windows.get_mut(&id) {
+                    managed.before_fullscreen = Mode::Floating;
+                }
+                states = true;
             }
             // Its place as it was; on a screen now of another size, at
             // the same share of it.
@@ -423,7 +442,7 @@ impl State {
                     model::carried(r, shifted(came.area, geometry, 1), area)
                 }
             };
-            let rect = match self.model.mode(id) {
+            let rect = match came.mode {
                 Mode::Floating => place(came.rect),
                 Mode::Snapped(zone) => zone.rect(area, self.gap()),
                 Mode::Fullscreen => geometry,
@@ -476,6 +495,9 @@ impl State {
                 "a screen came: windows go to it"
             );
             self.refocus();
+        }
+        if states {
+            self.tell_window_states(false);
         }
         if say {
             self.say_screens_moved(output, false, &flown);
@@ -676,9 +698,9 @@ impl State {
         self.placed_since(id, came).is_none()
     }
 
-    /// What the user changed of `id` since it was put where it is, having
-    /// come from a screen gone: its screen, its desktop, its state or its
-    /// place; none if nothing.
+    /// Where the user sent `id` since it was put where it is, having come
+    /// from a screen gone: another screen or another desktop; none if
+    /// neither (its state, size and place there do not count, #952).
     fn placed_since(&self, id: WindowId, came: &CameFrom) -> Option<&'static str> {
         let Some(put) = &came.put else {
             return None;
@@ -690,10 +712,6 @@ impl State {
             Some("screen")
         } else if now.desktop != put.desktop {
             Some("desktop")
-        } else if now.mode != put.mode {
-            Some("state")
-        } else if now.rect != put.rect {
-            Some("place")
         } else {
             None
         }
@@ -707,16 +725,11 @@ impl State {
             .unwrap_or_default()
     }
 
-    /// Where `id` is, as far as the user places it.
+    /// Where `id` is, as far as the user sends it.
     pub(crate) fn put_now(&self, id: WindowId) -> Option<Put> {
-        let mode = self.model.mode(id);
         Some(Put {
             output: self.output_of(id)?.name(),
             desktop: self.model.desktop(id),
-            mode,
-            rect: (mode == Mode::Floating)
-                .then(|| self.target_rect(id))
-                .flatten(),
         })
     }
 

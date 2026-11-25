@@ -704,10 +704,13 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
   model and serial, on any connector; #417), the windows that came from
   it go back to it: on their desktop, at their place (the same one on a
   screen of the same size, the same share of it otherwise), in their
-  state; the screen shows the desktop it showed. A window no longer where
-  it was put (the user moved or resized it, changed it between floating,
-  snapped and fullscreen, or sent it to another desktop) stays where it
-  is; minimising it or bringing it back does not count. Each window
+  state there; the screen shows the desktop it showed. A window the user
+  sent to another screen or another desktop meanwhile stays where it was
+  sent; one moved, resized, maximised, snapped or made fullscreen on the
+  screen it was carried to still goes back, in the place, size and state
+  it had on its screen (#952, decided by the maintainer on 2026-11-25;
+  it was: any of these kept it where it was); minimising it or bringing
+  it back does not count either. Each window
   remembers only the screen it left, its desktop and its place there,
   for the session's length (nothing is written about windows); closed
   meanwhile, it is forgotten.
@@ -1444,8 +1447,10 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
     states, marked after the title in the bar (#723).
 14. Screens plugged and unplugged (#417, the s8a mockup, questions 1 to
     7): windows go as in 8; the winking panda says it with a blue bubble
-    for 4 s; back, windows fly to their places in 320 ms; a window placed
-    meanwhile stays; a screen is known by its EDID's make, model and
+    for 4 s; back, windows fly to their places in 320 ms; a window sent
+    to another screen or desktop meanwhile stays, one only maximised,
+    snapped, moved or resized goes back as it was (#952, decided by the
+    maintainer on 2026-11-25); a screen is known by its EDID's make, model and
     serial, its connector only as a fallback; each set of screens keeps
     its arrangement in `[[screen-sets]]`, `[outputs.NAME]` staying the
     defaults; Écrans lists the sets known and forgets one. The peek's
