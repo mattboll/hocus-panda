@@ -206,11 +206,11 @@ way while recording and when a day is read:
 
 | Signal | When |
 |---|---|
-| sustained CPU | the compositor and the shell above 10 % of one core on average over 5 min |
+| sustained CPU | the compositor and the shell above 10 % of one core on average over 5 min; a run whose 5 min overlap the last one's continues it |
 | frames at rest | more than 1 frame a second for 1 min, with no input, no application's window drawing, beside the desktop's own motions |
 | wakeups | more than 5 loop wakeups a second on average over 10 min with no input |
 | memory only growing | the compositor's or the shell's, rising for more than 3 h at more than 2 MB an hour, each of its last three hours higher than the one before, never more than 5 % back |
-| slow moment | a frame over 50 ms, or a loop turn over 16 ms (not in the first 30 s, while the session starts) |
+| slow moment | a frame or a loop turn over 50 ms (not in the first 30 s, while the session starts); those a minute apart or less are one, with their worst |
 
 A gap (the machine asleep, the session off) ends what was running. A
 signal raised sends a notification of low urgency (to the history, no

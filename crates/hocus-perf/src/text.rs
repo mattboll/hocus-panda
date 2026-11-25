@@ -477,10 +477,13 @@ Images   3300 · réveils au repos 0,2/s
 Pics
   07:30          22 %  20 s   Écran DP-2 branché
 ! 08:00–08:05   9,0 %  5 min  Des images sans que rien ne bouge : 9 par seconde
+! 08:10         0,4 %  40 s   Un moment lent
 
 Signaux
 ! 08:00–08:05 : des images sans que rien ne bouge
   9 images par seconde pendant 5 min, sans geste ni fenêtre qui se dessine. Signal : plus d’une image par seconde au repos pendant 1 min.
+! 08:10 : un moment lent
+  Un tour de la boucle ou une image de 300 ms. Signal : une image ou un tour de boucle de plus de 50 ms.
 ";
         assert_eq!(said, expected);
     }

@@ -74,7 +74,7 @@ wakeups_line = "{rate} réveils par seconde pendant {long}, sans geste. Signal :
 memory = "La mémoire du {whose} ne fait que monter"
 memory_line = "{start} → {end}, +{rate} Mo par heure depuis {since}, sans jamais redescendre. Signal : une hausse continue sur plus de 3 heures."
 slow_moment = "{span} : un moment lent"
-slow_moment_line = "Un tour de la boucle ou une image de {ms} ms. Signal : une image de plus de 50 ms, ou un tour de boucle de plus de 16 ms."
+slow_moment_line = "Un tour de la boucle ou une image de {ms} ms. Signal : une image ou un tour de boucle de plus de 50 ms."
 
 [perf.notification]
 sustained_cpu = "Le bureau a pris {percent} d’un cœur pendant plus de 5 minutes (depuis {at})."
