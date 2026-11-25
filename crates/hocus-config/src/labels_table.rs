@@ -558,6 +558,11 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "shortcuts.all-desktops",
+        name: hocus_words::settings::keyboard::ALL_DESKTOPS,
+        said: Said::Other,
+    },
+    Label {
         key: "shortcuts.brightness-down",
         name: hocus_words::settings::keyboard::BRIGHTNESS_DOWN,
         said: Said::Other,

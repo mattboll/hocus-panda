@@ -182,9 +182,26 @@ impl App {
             _ => Vec::new(),
         };
         if self.reading(slot) == Reading::Absent {
-            list.retain(|t| !self.retired(id, t));
+            list.retain(|t| !self.retired(id, t) && !self.written_elsewhere(id, t));
         }
         list
+    }
+
+    /// Whether `text`, a default corner or swipe of `id`, is written in
+    /// another action's line: a default gives way to a line the file
+    /// writes, as the compositor reads it (#944).
+    fn written_elsewhere(&self, id: &str, text: &str) -> bool {
+        let Some(trigger) = Trigger::parse(text) else {
+            return false;
+        };
+        model::shortcuts()
+            .filter(|s| s.id != id)
+            .filter_map(|s| slot(s.id))
+            .filter(|slot| matches!(self.reading(*slot), Reading::Value(_)))
+            .any(|slot| match self.value(slot) {
+                Some(Value::List(list)) => list.iter().any(|t| Trigger::parse(t) == Some(trigger)),
+                _ => false,
+            })
     }
 
     /// Whether `text`, a default of `id`, is taken away by an older switch

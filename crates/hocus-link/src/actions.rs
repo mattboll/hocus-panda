@@ -351,7 +351,7 @@ const WORKSPACE: &[&str] = &["espace de travail", "workspace"];
 const MOVE_SCREEN: &[&str] = &["déplacer", "moniteur", "move", "monitor", "display"];
 
 /// The actions, in each category's order.
-const ACTIONS: [Def; 67] = [
+const ACTIONS: [Def; 68] = [
     // The window.
     d(
         "close",
@@ -663,6 +663,28 @@ const ACTIONS: [Def; 67] = [
         G::Grid,
     )
     .key("overview"),
+    // Its id is not its shortcut's key: "all-desktops" is the window's
+    // switch (#723).
+    d(
+        "every-desktop",
+        "Tous les bureaux",
+        "Every desktop",
+        &[
+            "tous les bureaux",
+            "zoom",
+            "dézoomer",
+            "reculer",
+            "grille",
+            "every desktop",
+            "zoom out",
+            "grid",
+            "exposé",
+            "mission control",
+        ],
+        C::Desktops,
+        G::Grid,
+    )
+    .key("all-desktops"),
     // The screens.
     d(
         "brightness-up",

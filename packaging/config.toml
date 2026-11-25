@@ -55,9 +55,9 @@
 # Off while an external mouse is plugged in.
 # off-with-mouse = false
 # The touchpad's gestures are set in [shortcuts]. Older files turned the
-# default ones off here: false takes three fingers left and right away
-# from the desktops, and four fingers up and down from the launcher and
-# the overview, unless [shortcuts] writes those actions' lines.
+# default ones off here: false takes three fingers left, right and down
+# away from the desktops, and four fingers up and down from the launcher
+# and the overview, unless [shortcuts] writes those actions' lines.
 # swipe-desktops = true
 # swipe-launcher = true
 
@@ -198,13 +198,14 @@
 # Beside its keys, an action takes a screen corner and touchpad swipes:
 # "corner:top-left", "top-right", "bottom-left", "bottom-right" (the
 # pointer held there 150 ms, once each time it enters; not the bar's own
-# corner, nor one another screen touches, nor over a fullscreen window or
-# with a button held) and "swipe:3:left", "swipe:4:up"... (three or four
-# fingers left, right, up or down). Switching desktops, the launcher and
-# the overview follow the fingers; any other action runs as they lift,
-# when they went far enough. A swipe no action takes goes to the
-# application. Each corner and each swipe runs one action: the first one
-# that names it.
+# corner, the top-left one with the bar on the left; nor one another
+# screen touches, nor over a fullscreen window or with a button held) and
+# "swipe:3:left", "swipe:4:up"... (three or four fingers left, right, up
+# or down). Switching desktops, the launcher and the overview follow the
+# fingers; any other action runs as they lift, when they went far enough.
+# A swipe no action takes goes to the application. Each corner and each
+# swipe runs one action: the first line the file writes that names it,
+# else the first default.
 #
 # Opens a terminal.
 # terminal = "Super+Return"
@@ -302,6 +303,9 @@
 # closes (docs/design/windows.md §12b).
 # The top-left corner and four fingers down open it too.
 # overview = ["Super+W", "corner:top-left", "swipe:4:down"]
+# Every desktop at once, each screen's in a grid; again, back. Three
+# fingers up close it too.
+# all-desktops = ["Super+Shift+W", "corner:top-right", "swipe:3:down"]
 # The clipboard's history, from the bar of the focused window's screen, its
 # search holding the keyboard; again, it closes (docs/design/bar.md, 5.6).
 # clipboard = "Super+V"
