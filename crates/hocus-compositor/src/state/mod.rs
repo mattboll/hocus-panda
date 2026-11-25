@@ -96,6 +96,8 @@ pub struct State {
     pub redraw: bool,
     /// The screens clients' commits ask to draw again, besides (#826).
     pub commits: crate::redraw::Commits,
+    /// The windows answered at a slow pace, unseen or quiet (#949).
+    pub(crate) slow_frames: crate::slow_frames::SlowFrames,
     /// Each screen's desktops, by output name (§12).
     pub strips: HashMap<String, Strip>,
     /// The window focused last on each screen's desktop, by output name
@@ -331,6 +333,7 @@ impl State {
             wobble: None,
             redraw: true,
             commits: crate::redraw::Commits::default(),
+            slow_frames: crate::slow_frames::SlowFrames::default(),
             strips: HashMap::new(),
             desktop_focus: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),

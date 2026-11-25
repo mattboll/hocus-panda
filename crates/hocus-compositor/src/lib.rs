@@ -99,6 +99,7 @@ mod session;
 mod share;
 mod shell;
 mod shortcuts;
+mod slow_frames;
 mod snapshot;
 mod socket;
 mod state;

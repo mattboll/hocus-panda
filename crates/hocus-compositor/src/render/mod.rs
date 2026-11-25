@@ -1809,6 +1809,9 @@ impl State {
         });
         // Locked (7.1), only the lock's surfaces draw: the others wait.
         let locked = self.locked();
+        // Drawn elsewhere (the overview, thumbnails), every window goes at
+        // the screens' pace.
+        let elsewhere = self.drawn_elsewhere();
         for window in self.space.elements().filter(|_| !locked) {
             // The largest scale of the screens it overlaps (§12, #419);
             // on none, the screen it shows most on.
@@ -1820,7 +1823,20 @@ impl State {
                 let at = drawing.clone().or_else(|| primary(surface, data));
                 tell_scale(surface, data, at.as_ref());
             });
-            window.send_frame(output, now, throttle, primary);
+            if let Shown::Drawn(states) = shown {
+                self.judge_shown(window, output, states);
+            }
+            // Not seen by the last frames: once a second at most, whatever
+            // the screens' refresh (#949).
+            if !elsewhere && self.window_unseen(window) {
+                window.send_frame(output, now, Some(crate::slow_frames::SLOW), |_, _| None);
+                // Too soon: the timer answers it, should no screen draw.
+                if crate::slow_frames::waits_for_frame(window) {
+                    self.slow_frames_due();
+                }
+            } else {
+                window.send_frame(output, now, throttle, primary);
+            }
         }
         for layer in layer_map_for_output(output).layers() {
             if !self.lock_frames_for(layer.wl_surface()) {
