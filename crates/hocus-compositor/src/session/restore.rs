@@ -1097,7 +1097,7 @@ impl State {
                 area: saved_area,
                 rect: place,
                 restore: (mode != Mode::Floating).then_some(place),
-                put,
+                put: Some(put),
             };
             if let Some(managed) = self.windows.get_mut(&id) {
                 managed.came_from = Some(came);
@@ -1497,7 +1497,7 @@ impl State {
         if let Some(came) = managed
             .came_from
             .as_ref()
-            .filter(|c| self.put_now(id).as_ref() == Some(&c.put))
+            .filter(|c| self.still_put_where(id, c))
         {
             let place = match mode {
                 Mode::Floating => came.rect,

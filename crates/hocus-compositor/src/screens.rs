@@ -46,8 +46,9 @@ pub struct CameFrom {
     pub rect: Rect,
     pub restore: Option<Rect>,
     /// Where it was put: as long as it is still there, the user has not
-    /// placed it elsewhere.
-    pub put: Put,
+    /// placed it elsewhere. None: on no screen, every screen gone, waiting
+    /// for the first to come (§12, #952).
+    pub put: Option<Put>,
 }
 
 /// Where a window is, as far as the user places it: its screen, its
@@ -59,6 +60,11 @@ pub struct Put {
     mode: Mode,
     rect: Option<Rect>,
 }
+
+/// A window on a screen going: its id, its place and where it floats
+/// again, and where it came from first, if it came from another screen
+/// gone before and stayed where it was put.
+type Leaving = (WindowId, Rect, Option<Rect>, Option<CameFrom>);
 
 /// A screen moved or resized (6.9): its work area before, its geometry
 /// and work area now, and the windows that were on it.
@@ -128,7 +134,7 @@ impl State {
         self.lock_output_gone(&name);
         // Each window's place there, and where it came from first if it
         // came from another screen gone before and stayed where it was put.
-        let leaving: Vec<(WindowId, Rect, Option<Rect>, Option<CameFrom>)> = self
+        let leaving: Vec<Leaving> = self
             .windows_on(output)
             .into_iter()
             .filter_map(|id| {
@@ -139,7 +145,7 @@ impl State {
                     .get(&id)?
                     .came_from
                     .clone()
-                    .filter(|c| self.put_now(id).as_ref() == Some(&c.put));
+                    .filter(|c| self.still_put_where(id, c));
                 Some((id, rect, restore, earlier))
             })
             .collect();
@@ -154,8 +160,38 @@ impl State {
         if let Some(strip) = self.strips.get_mut(&name) {
             strip.still();
         }
+        // Where each came from: this screen, or the one gone before that
+        // it came from and stayed where it was put.
+        let came_from = |state: &Self, (id, rect, restore, earlier): &Leaving| match earlier {
+            Some(earlier) => earlier.clone(),
+            None => CameFrom {
+                output: key.clone(),
+                desktop: state.model.desktop(*id),
+                size: (geometry.width, geometry.height),
+                area: shifted(area, geometry, -1),
+                rect: shifted(*rect, geometry, -1),
+                restore: restore.map(|r| shifted(r, geometry, -1)),
+                put: None,
+            },
+        };
         let Some(target) = self.nearest_output(geometry) else {
-            tracing::warn!(output = name, "no screen left: its windows wait for one");
+            // They wait where they are, each remembering where it came
+            // from: the first screen to come takes them, its own back to
+            // their places, and the others go back to theirs later.
+            tracing::warn!(
+                output = name,
+                windows = leaving.len(),
+                "no screen left: its windows wait for one"
+            );
+            for l in &leaving {
+                let came = CameFrom {
+                    put: None,
+                    ..came_from(self, l)
+                };
+                if let Some(managed) = self.windows.get_mut(&l.0) {
+                    managed.came_from = Some(came);
+                }
+            }
             self.redraw = true;
             return;
         };
@@ -174,7 +210,9 @@ impl State {
         let moved: Vec<WindowId> = leaving.iter().map(|l| l.0).collect();
         // Its projects go with their windows (docs/design/projects.md §1).
         self.projects_screen_gone(&key, &target);
-        for (id, rect, restore, earlier) in leaving {
+        for l in &leaving {
+            let came = came_from(self, l);
+            let (id, rect, restore, _) = *l;
             let desktop = self.model.desktop(id);
             let placed = match self.model.mode(id) {
                 Mode::Floating => model::carried(rect, area, to_area),
@@ -186,20 +224,11 @@ impl State {
             let Some(put) = self.put_now(id) else {
                 continue;
             };
-            let came_from = match earlier {
-                Some(earlier) => CameFrom { put, ..earlier },
-                None => CameFrom {
-                    output: key.clone(),
-                    desktop,
-                    size: (geometry.width, geometry.height),
-                    area: shifted(area, geometry, -1),
-                    rect: shifted(rect, geometry, -1),
-                    restore: restore.map(|r| shifted(r, geometry, -1)),
-                    put,
-                },
-            };
             if let Some(managed) = self.windows.get_mut(&id) {
-                managed.came_from = Some(came_from);
+                managed.came_from = Some(CameFrom {
+                    put: Some(put),
+                    ..came
+                });
             }
         }
         self.refocus();
@@ -316,7 +345,7 @@ impl State {
                     && let Some(now) = self.put_now(id)
                     && let Some(came) = self.windows.get_mut(&id).and_then(|m| m.came_from.as_mut())
                 {
-                    came.put = now;
+                    came.put = Some(now);
                 }
             }
         }
@@ -330,7 +359,7 @@ impl State {
             .filter(|(id, m)| {
                 m.came_from
                     .as_ref()
-                    .is_some_and(|c| self.put_now(**id).as_ref() == Some(&c.put))
+                    .is_some_and(|c| self.still_put_where(**id, c))
             })
             .map(|(id, _)| *id)
             .collect()
@@ -375,7 +404,13 @@ impl State {
             let Some(came) = self.windows.get_mut(&id).and_then(|m| m.came_from.take()) else {
                 continue;
             };
-            if self.put_now(id).as_ref() != Some(&came.put) {
+            if let Some(changed) = self.placed_since(id, &came) {
+                tracing::info!(
+                    window = id.0,
+                    app = self.app_of(id),
+                    changed,
+                    "a window that came from this screen stays: placed meanwhile"
+                );
                 continue;
             }
             // Its place as it was; on a screen now of another size, at
@@ -404,12 +439,16 @@ impl State {
             flown.push(id);
         }
         // Windows on no screen, every screen having gone before: to this
-        // one, in the middle of its work area.
+        // one, in the middle of its work area; those that came from
+        // another screen go back to it when it comes (#952).
         let lost: Vec<WindowId> = self
             .windows
-            .keys()
-            .copied()
-            .filter(|id| self.home_rect(*id).is_some_and(|r| !self.on_a_screen(r)))
+            .iter()
+            .filter(|(id, m)| match &m.came_from {
+                Some(c) => c.put.is_none(),
+                None => self.home_rect(**id).is_some_and(|r| !self.on_a_screen(r)),
+            })
+            .map(|(id, _)| *id)
             .collect();
         for id in lost {
             let Some(rect) = self.home_rect(id) else {
@@ -424,6 +463,10 @@ impl State {
             let restore = restore.map(|r| model::carried(r, r, area));
             let desktop = self.model.desktop(id);
             self.relocate(id, output, desktop, placed, restore);
+            let put = self.put_now(id);
+            if let Some(came) = self.windows.get_mut(&id).and_then(|m| m.came_from.as_mut()) {
+                came.put = put;
+            }
             back += 1;
         }
         if back > 0 {
@@ -479,7 +522,7 @@ impl State {
             .iter()
             .filter_map(|(id, m)| {
                 let came = m.came_from.as_ref()?;
-                (self.put_now(*id).as_ref() == Some(&came.put)).then(|| came.output.clone())
+                self.still_put_where(*id, came).then(|| came.output.clone())
             })
             .collect()
     }
@@ -625,6 +668,43 @@ impl State {
             })
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(o, _)| o.clone())
+    }
+
+    /// Whether `id`, which came from a screen gone, is still where it was
+    /// put: on no screen, it is.
+    pub(crate) fn still_put_where(&self, id: WindowId, came: &CameFrom) -> bool {
+        self.placed_since(id, came).is_none()
+    }
+
+    /// What the user changed of `id` since it was put where it is, having
+    /// come from a screen gone: its screen, its desktop, its state or its
+    /// place; none if nothing.
+    fn placed_since(&self, id: WindowId, came: &CameFrom) -> Option<&'static str> {
+        let Some(put) = &came.put else {
+            return None;
+        };
+        let Some(now) = self.put_now(id) else {
+            return Some("screen");
+        };
+        if now.output != put.output {
+            Some("screen")
+        } else if now.desktop != put.desktop {
+            Some("desktop")
+        } else if now.mode != put.mode {
+            Some("state")
+        } else if now.rect != put.rect {
+            Some("place")
+        } else {
+            None
+        }
+    }
+
+    /// `id`'s app id, for the log.
+    fn app_of(&self, id: WindowId) -> String {
+        self.windows
+            .get(&id)
+            .and_then(|m| crate::windows::app_id(&m.window))
+            .unwrap_or_default()
     }
 
     /// Where `id` is, as far as the user places it.

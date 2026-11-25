@@ -730,7 +730,11 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
   identity is no change at all.
 - With every screen gone, the windows wait where they are; a screen
   that comes then shows those on it where they were, and takes those on
-  none in the middle of its work area.
+  none in the middle of its work area. Each still remembers the screen it
+  left (#952): the first screen to come takes its own back to their
+  places, and the others go back to theirs when it comes (the lid closed
+  over the laptop, then the other screen unplugged, and plugged again
+  the next morning).
 - The real screens (tty) and the headless backend's outputs (in tests)
   come and go, through the same code; the nested window is one output
   that never goes.
