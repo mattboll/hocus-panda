@@ -240,6 +240,34 @@ impl std::fmt::Debug for TtyBackend {
     }
 }
 
+/// Whether a screen is lit, and how it went dark: how it comes on again
+/// (7.2). Neither way waits for the display engine on the loop, which
+/// takes some 300 ms to power a laptop's panel up or down (#828, #950).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Power {
+    On,
+    /// Its CRTC's `ACTIVE` set again since `since` (the clock's), not
+    /// waited for: the display engine powers the screen up on its own,
+    /// and the vblank of that commit says it is lit. Its frame out
+    /// meanwhile, nothing is drawn; its first frame after.
+    Lighting {
+        since: Duration,
+    },
+    /// Its CRTC's `ACTIVE` cleared alone, its mode, connectors and planes
+    /// kept: lit again by setting it.
+    Dark,
+    /// Cleared whole (the display engine refused `ACTIVE` alone): lit
+    /// again by its next frame committed whole, which waits.
+    Cleared,
+}
+
+impl Power {
+    /// Lit, or coming on.
+    fn on(self) -> bool {
+        matches!(self, Self::On | Self::Lighting { .. })
+    }
+}
+
 /// The primary GPU: its display engine and its screens.
 struct Gpu {
     node: DrmNode,
@@ -267,8 +295,8 @@ struct Screen {
     /// An empty frame went nowhere: clients hear of it at the next refresh
     /// instead of at once, or a client redrawing nothing would spin.
     pace: Option<RegistrationToken>,
-    /// Lit (DPMS on), or turned off by idle or the lid (7.2).
-    powered: bool,
+    /// Lit, coming on, or turned off by idle or the lid (7.2).
+    power: Power,
     /// Its connector's modes, as the kernel gives them.
     modes: Vec<smithay::reexports::drm::control::Mode>,
     /// Its picture while the magnifier is on it (#424).
@@ -597,23 +625,35 @@ fn on_vblank(app: &mut App, crtc: crtc::Handle, metadata: &mut Option<DrmEventMe
     let Some(screen) = tty.gpu.screens.get_mut(&crtc) else {
         return;
     };
-    if let Err(err) = with_surface!(&mut screen.surface, |s| s
-        .frame_submitted()
-        .map(drop)
-        .map_err(|err| format!("{err:?}")))
-    {
-        tracing::warn!(output = screen.output.name(), err, "frame not presented");
+    if let Power::Lighting { since } = screen.power {
+        // Lit: no frame of ours was presented, the first is drawn now.
+        let now: Duration = state.clock.now().into();
+        tracing::info!(
+            output = screen.output.name(),
+            ms = now.saturating_sub(since).as_millis() as u64,
+            "screen lit"
+        );
+        screen.power = Power::On;
+        screen.flip.presented();
+    } else {
+        if let Err(err) = with_surface!(&mut screen.surface, |s| s
+            .frame_submitted()
+            .map(drop)
+            .map_err(|err| format!("{err:?}")))
+        {
+            tracing::warn!(output = screen.output.name(), err, "frame not presented");
+        }
+        screen.flip.presented();
+        screen.presented += 1;
+        let time = metadata
+            .as_ref()
+            .and_then(|m| match m.time {
+                DrmEventTime::Monotonic(time) if !time.is_zero() => Some(time),
+                _ => None,
+            })
+            .unwrap_or_else(|| state.clock.now().into());
+        state.presented(&screen.output, time, screen.presented);
     }
-    screen.flip.presented();
-    screen.presented += 1;
-    let time = metadata
-        .as_ref()
-        .and_then(|m| match m.time {
-            DrmEventTime::Monotonic(time) if !time.is_zero() => Some(time),
-            _ => None,
-        })
-        .unwrap_or_else(|| state.clock.now().into());
-    state.presented(&screen.output, time, screen.presented);
     let dirty = screen.dirty;
     if !tty.active {
         return;
@@ -903,7 +943,7 @@ impl TtyBackend {
             presented: 0,
             health: None,
             pace: None,
-            powered: true,
+            power: Power::On,
             modes: info.modes().to_vec(),
             lens,
             gamma: None,
@@ -997,19 +1037,19 @@ impl TtyBackend {
             });
             screen.dirty = true;
             // Turned off again by `power` if it was.
-            screen.powered = true;
+            screen.power = Power::On;
             // Another terminal may have set its own ramp.
             screen.gamma = None;
         }
     }
 
     /// Turns the screens off or on as the state asks (7.2): off, its CRTC
-    /// disabled (DPMS off) and nothing drawn; on, drawn afresh, the CRTC
-    /// lit again with that frame.
+    /// disabled (DPMS off) and nothing drawn; on, its CRTC lit again and
+    /// drawn afresh once it is. Neither waits for the display engine.
     fn power(&mut self, state: &mut State) {
-        for screen in self.gpu.screens.values_mut() {
+        for (crtc, screen) in self.gpu.screens.iter_mut() {
             let powered = state.output_powered(&screen.output);
-            if powered == screen.powered {
+            if powered == screen.power.on() {
                 continue;
             }
             // A frame out: off once it is shown, its vblank turning the
@@ -1019,31 +1059,56 @@ impl TtyBackend {
                 screen.dirty = false;
                 continue;
             }
-            screen.powered = powered;
             let output = screen.output.name();
             if powered {
-                tracing::info!(output, "screen on");
                 screen.flip = Flip::Idle;
-                with_surface!(&screen.surface, |s| {
-                    s.with_compositor(|c| {
-                        if let Err(err) = c.reset_state() {
-                            tracing::warn!(%err, "could not reset a screen");
-                        }
-                    });
-                    s.reset_buffers();
-                });
                 screen.dirty = true;
+                // Lit by its `ACTIVE` alone, not waited for: committed
+                // whole with its next frame, the commit holds the loop
+                // while the panel powers up, some 300 ms (#950).
+                let lit = screen.power == Power::Dark
+                    && with_surface!(&screen.surface, |s| s.with_compositor(|c| {
+                        dpms_on(c.surface())
+                            .inspect_err(|err| {
+                                tracing::info!(%err, "a screen comes on waiting for it");
+                            })
+                            .is_ok()
+                    }));
+                if lit {
+                    tracing::info!(output, "screen on");
+                    screen.power = Power::Lighting {
+                        since: state.clock.now().into(),
+                    };
+                    // Its vblank says it is lit; never coming, the watch
+                    // recovers the screen.
+                    screen.flip.queued(state.clock.now().into());
+                    watch_flip(screen, *crtc, state);
+                } else {
+                    tracing::info!(output, "screen on, committed whole");
+                    screen.power = Power::On;
+                    with_surface!(&screen.surface, |s| {
+                        s.with_compositor(|c| {
+                            if let Err(err) = c.reset_state() {
+                                tracing::warn!(%err, "could not reset a screen");
+                            }
+                        });
+                        s.reset_buffers();
+                    });
+                }
             } else {
                 tracing::info!(output, "screen off");
-                with_surface!(&screen.surface, |s| s.with_compositor(|c| {
+                screen.power = with_surface!(&screen.surface, |s| s.with_compositor(|c| {
                     // Not waited for: a laptop's panel takes some 300 ms to
                     // power down, the loop held up all that time (#828).
-                    // Its planes stay as they are; lit again, the CRTC is
-                    // read back inactive and committed whole (`reset_state`).
-                    if let Err(err) = dpms_off(c.surface()) {
-                        tracing::info!(%err, "a screen turned off waiting for it");
-                        if let Err(err) = c.clear() {
-                            tracing::warn!(%err, "could not turn a screen off");
+                    // Its planes stay as they are, lit again as they were.
+                    match dpms_off(c.surface()) {
+                        Ok(()) => Power::Dark,
+                        Err(err) => {
+                            tracing::info!(%err, "a screen turned off waiting for it");
+                            if let Err(err) = c.clear() {
+                                tracing::warn!(%err, "could not turn a screen off");
+                            }
+                            Power::Cleared
                         }
                     }
                 }));
@@ -1120,9 +1185,9 @@ impl TtyBackend {
         }
         for screen in self.gpu.screens.values_mut() {
             if all || some.scenes.contains(&screen.output) {
-                screen.dirty = screen.powered;
+                screen.dirty = screen.power.on();
             } else if some.owed.contains(&screen.output) {
-                screen.owed = screen.powered;
+                screen.owed = screen.power.on();
             }
         }
         if !self.active {
@@ -1133,7 +1198,7 @@ impl TtyBackend {
             .screens
             .iter()
             .filter(|(_, s)| {
-                s.powered && (s.dirty || s.owed) && !s.flip.is_queued() && s.pace.is_none()
+                s.power.on() && (s.dirty || s.owed) && !s.flip.is_queued() && s.pace.is_none()
             })
             .map(|(crtc, _)| *crtc)
             .collect();
@@ -1152,7 +1217,7 @@ impl TtyBackend {
             self.render(crtc, state);
         } else if screen.owed {
             screen.owed = false;
-            if screen.powered {
+            if screen.power.on() {
                 // As after an empty frame: the next at its next refresh.
                 state.send_frames_unchanged(&screen.output);
                 pace(screen, crtc, state);
@@ -1168,7 +1233,8 @@ impl TtyBackend {
         } = &mut self.gpu;
         let drm = outputs.device();
         for (crtc, screen) in screens.iter_mut() {
-            if !screen.powered || screen.gamma == Some(kelvin) {
+            // Not while it comes on: the display engine would say busy.
+            if screen.power != Power::On || screen.gamma == Some(kelvin) {
                 continue;
             }
             match set_gamma(drm, *crtc, kelvin) {
@@ -1200,7 +1266,7 @@ impl TtyBackend {
         // Its clients are told of this frame.
         screen.owed = false;
         // Off (7.2): nothing is drawn until it is on again.
-        if !screen.powered {
+        if !screen.power.on() {
             return;
         }
         let started = std::time::Instant::now();
@@ -1291,6 +1357,31 @@ impl TtyBackend {
 /// which powers the screen down on its own; smithay's `clear` waits.
 /// An error for a legacy (non-atomic) device, or one that refuses it.
 fn dpms_off(surface: &DrmSurface) -> std::io::Result<()> {
+    set_active(surface, false)
+}
+
+/// Lights the CRTC that [`dpms_off`] turned off (DPMS on: `ACTIVE` true,
+/// its mode, connectors and planes as they were) without waiting for the
+/// display engine, which powers the screen up on its own and sends that
+/// commit's vblank once it is lit. smithay commits a CRTC read back
+/// inactive whole, and waits (#950).
+fn dpms_on(surface: &DrmSurface) -> std::io::Result<()> {
+    set_active(surface, true)
+}
+
+/// The commit of [`set_active`]: a modeset, never waited for; turning on,
+/// its vblank says when the screen is lit.
+fn active_flags(on: bool) -> AtomicCommitFlags {
+    let flags = AtomicCommitFlags::ALLOW_MODESET | AtomicCommitFlags::NONBLOCK;
+    if on {
+        flags | AtomicCommitFlags::PAGE_FLIP_EVENT
+    } else {
+        flags
+    }
+}
+
+/// The CRTC's `ACTIVE` alone, not waited for.
+fn set_active(surface: &DrmSurface, on: bool) -> std::io::Result<()> {
     if surface.is_legacy() {
         return Err(std::io::Error::other("a legacy device"));
     }
@@ -1307,11 +1398,8 @@ fn dpms_off(surface: &DrmSurface) -> std::io::Result<()> {
         })
         .ok_or_else(|| std::io::Error::other("no ACTIVE property"))?;
     let mut request = AtomicModeReq::new();
-    request.add_property(crtc, active, property::Value::Boolean(false));
-    surface.atomic_commit(
-        AtomicCommitFlags::ALLOW_MODESET | AtomicCommitFlags::NONBLOCK,
-        request,
-    )
+    request.add_property(crtc, active, property::Value::Boolean(on));
+    surface.atomic_commit(active_flags(on), request)
 }
 
 /// `crtc`'s gamma ramp for `kelvin` (`None`: straight, its own white),
@@ -1413,7 +1501,10 @@ fn watch_flip(screen: &mut Screen, crtc: crtc::Handle, state: &State) {
                     "the screen stopped presenting frames; recovered"
                 );
                 // The lost flip counts as done; the CRTC is committed afresh
-                // with the next frame.
+                // with the next frame (lit by it, if lighting it was lost).
+                if let Power::Lighting { .. } = screen.power {
+                    screen.power = Power::On;
+                }
                 with_surface!(&mut screen.surface, |s| {
                     if let Err(err) = s.frame_submitted() {
                         tracing::debug!(?err, "no frame to drop");
@@ -1526,6 +1617,26 @@ pub fn identity(edid: &[u8]) -> (Option<String>, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A screen turned off or on never holds the loop while the display
+    /// engine powers the panel (#828, #950); on, the vblank says it is lit.
+    #[test]
+    fn a_screen_turns_off_and_on_without_waiting() {
+        for on in [false, true] {
+            assert!(active_flags(on).contains(AtomicCommitFlags::NONBLOCK));
+            assert!(!active_flags(on).contains(AtomicCommitFlags::TEST_ONLY));
+        }
+        assert!(active_flags(true).contains(AtomicCommitFlags::PAGE_FLIP_EVENT));
+        // Off, no vblank: the CRTC goes inactive, the kernel refuses one.
+        assert!(!active_flags(false).contains(AtomicCommitFlags::PAGE_FLIP_EVENT));
+        assert!(
+            Power::Lighting {
+                since: Duration::ZERO
+            }
+            .on()
+        );
+        assert!(!Power::Dark.on() && !Power::Cleared.on());
+    }
 
     /// What was chosen, and which of the renderers were made.
     fn chosen(
