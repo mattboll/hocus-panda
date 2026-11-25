@@ -135,16 +135,16 @@ pub use config::{
     OutputSettings, Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
     Power as PowerSettings, PowerAc, PowerBattery, PowerButton, RainWhen, Recording, Remind,
     Removable as RemovableSettings, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings,
-    SetScreen, SoundPrograms, Strength as LightStrength, SystemKeyboard,
-    Wallpaper as WallpaperSettings, Warmth as LightWarmth, Weather as WeatherSettings,
-    WeatherUnits, Windows,
+    SetScreen, SoundPrograms, Strength as LightStrength, Switching as DesktopSwitching,
+    SystemKeyboard, Wallpaper as WallpaperSettings, Warmth as LightWarmth,
+    Weather as WeatherSettings, WeatherUnits, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
 #[doc(hidden)]
 pub use cursor::theme::{TestImage, encode as encode_xcursor};
 pub use events::MOST as EVENTS_KEPT;
-pub use harness::{Headless, Placed, WindowInfo};
+pub use harness::{Headless, Placed, StripLook, WindowInfo};
 /// The bar's forms.
 pub use hocus_link::Form as BarForm;
 pub use lock::{Authenticator, LockState};

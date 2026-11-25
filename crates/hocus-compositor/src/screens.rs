@@ -394,6 +394,9 @@ impl State {
         ) else {
             return;
         };
+        // Linked, it shows the desktop the others show (#947), before
+        // its windows come back to theirs.
+        self.desktops_join(output);
         // Projects that followed their windows away come back with them.
         self.projects_screen_back(&key);
         let returning: Vec<WindowId> = self
@@ -664,9 +667,8 @@ impl State {
         {
             self.switching.out = None;
         }
-        if self.gestures.swiping.as_ref() == Some(output) {
-            self.gestures.swiping = None;
-        }
+        // A swipe goes on with the screens left.
+        self.gestures.swiping.retain(|o| o != output);
         if self
             .radial_menu
             .open

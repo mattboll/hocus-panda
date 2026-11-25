@@ -738,7 +738,10 @@ impl State {
     ) -> Option<Result<Value, String>> {
         Some(Ok(match call {
             Call::ListWindows(_) => json!({ "windows": self.mcp_windows() }),
-            Call::ListDesktops(_) => json!({ "screens": self.mcp_desktops() }),
+            Call::ListDesktops(_) => json!({
+                "screens": self.mcp_desktops(),
+                "linked": self.desktops_linked(),
+            }),
             Call::ListOutputs(_) => json!({ "outputs": self.mcp_outputs() }),
             Call::Journal(asked) => {
                 let limit = asked.limit.unwrap_or(50).clamp(1, JOURNAL as u32) as usize;
@@ -1445,19 +1448,30 @@ impl State {
         let to = self.mcp_desktop_on(&output, c.desktop)?;
         self.mcp_request(agent, intent, McpKind::Desktop);
         let name = output.name();
-        let current = self.strip(&output).current();
+        // Linked (#947), every screen switches, whatever `output` names.
+        let screens = self.switching_with(&output);
+        let before: Vec<(String, usize)> = screens
+            .iter()
+            .map(|o| (o.name(), self.strip(o).current()))
+            .collect();
         if let Some(request) = self.mcp.open.get_mut(agent) {
-            request
-                .before
-                .desktops
-                .entry(name.clone())
-                .or_insert(current);
+            for (screen, current) in &before {
+                request
+                    .before
+                    .desktops
+                    .entry(screen.clone())
+                    .or_insert(*current);
+            }
             request.desktop = Some(c.desktop);
             request.summary.switched = Some(c.desktop);
         }
         self.switch_desktop(&output, to, None);
+        let switched: Vec<Value> = screens
+            .iter()
+            .map(|o| json!({ "output": o.name(), "desktop": self.strip(o).current() + 1 }))
+            .collect();
         Ok((
-            json!({ "output": name, "desktop": c.desktop }),
+            json!({ "output": name, "desktop": c.desktop, "screens": switched }),
             format!("desktop {} of {name}", c.desktop),
         ))
     }

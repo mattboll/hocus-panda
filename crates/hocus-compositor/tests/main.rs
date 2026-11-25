@@ -71,6 +71,7 @@ mod decorations;
 mod depth;
 mod desktop_drop;
 mod desktops;
+mod desktops_linked;
 mod desktops_live;
 mod desktops_screens;
 mod desktops_shots;

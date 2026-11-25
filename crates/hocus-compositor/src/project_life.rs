@@ -46,7 +46,7 @@ use smithay::{
 use crate::{
     State,
     model::{Rect, WindowId},
-    projects::{Found, Job, OpenOn, Seen, now_text, place_of, seconds_of},
+    projects::{Found, Job, OpenOn, Reach, Seen, now_text, place_of, seconds_of},
     session::restore::{Missing, Saved, SavedTerminal, SavedWindow, Shape, Whose},
     windows::rect_of,
 };
@@ -279,26 +279,27 @@ impl State {
             .position(|p| link::name_key(&p.name) == key)
     }
 
-    /// The output project `at` is open on.
+    /// The output project `at` is open on: its own screen, else, spanning
+    /// them (#947), the first there is.
     fn project_output(&self, at: usize) -> Option<(Output, usize)> {
-        let open = self.projects.list.get(at)?.open.as_ref()?;
-        let connector = self.connector_of(&open.screen)?;
-        let output = self
-            .space
-            .outputs()
-            .find(|o| o.name() == connector)?
-            .clone();
-        Some((output, open.desktop.checked_sub(1)?))
+        let project = self.projects.list.get(at)?;
+        let desktop = project.open.as_ref()?.desktop.checked_sub(1)?;
+        let output = self.project_screens(project).into_iter().next()?;
+        Some((output, desktop))
     }
 
     /// The windows of open project `at`, front first, as the thread reads
-    /// them.
+    /// them: its own screen's, then, spanning them (#947), the others'.
     fn project_seen(&self, at: usize) -> Vec<Seen> {
-        let Some((output, desktop)) = self.project_output(at) else {
+        let Some(project) = self.projects.list.get(at) else {
             return Vec::new();
         };
-        self.overview_windows(&output, desktop)
-            .into_iter()
+        let Some(desktop) = project.open.as_ref().and_then(|o| o.desktop.checked_sub(1)) else {
+            return Vec::new();
+        };
+        self.project_screens(project)
+            .iter()
+            .flat_map(|output| self.overview_windows(output, desktop))
             .filter(|id| !self.model.is_everywhere(*id) && self.model.parent(*id).is_none())
             .filter_map(|id| self.seen_of(id))
             .collect()
@@ -826,14 +827,17 @@ impl State {
     /// Whether desktop `desktop` of `output` is free: no window of its own
     /// (those on every desktop aside), not a project, nothing coming back
     /// to it.
+    /// The screens linked (#947), free on every screen.
     pub(crate) fn desktop_free(&self, output: &Output, desktop: usize) -> bool {
-        let screen = self.screen_key(&output.name());
-        self.project_on(output, desktop).is_none()
-            && !self.coming_back_to(&screen, desktop + 1)
-            && !self
-                .windows_on(output)
-                .into_iter()
-                .any(|id| !self.model.is_everywhere(id) && self.model.desktop(id) == desktop)
+        self.switching_with(output).iter().all(|output| {
+            let screen = self.screen_key(&output.name());
+            self.project_on(output, desktop).is_none()
+                && !self.coming_back_to(&screen, desktop + 1)
+                && !self
+                    .windows_on(output)
+                    .into_iter()
+                    .any(|id| !self.model.is_everywhere(id) && self.model.desktop(id) == desktop)
+        })
     }
 
     /// The desktop of `output` a project opens on (§7): the current one
@@ -892,13 +896,20 @@ impl State {
         project.open = Some(OpenOn {
             screen: screen.clone(),
             desktop: desktop + 1,
+            reach: Reach::EveryScreen,
         });
         project.opened = Some(now_text());
         let folder = project.folder.clone();
-        let windows: Vec<SavedWindow> = std::mem::take(&mut project.contents)
+        let contents = std::mem::take(&mut project.contents);
+        // Linked (#947), each window back on its own screen if it is
+        // there; else, or each screen alone, on the launcher's.
+        let linked = self.desktops_linked();
+        let windows: Vec<SavedWindow> = contents
             .into_iter()
             .map(|mut w| {
-                w.screen.clone_from(&screen);
+                if !linked || self.connector_of(&w.screen).is_none() {
+                    w.screen.clone_from(&screen);
+                }
                 w.desktop = desktop + 1;
                 w.everywhere = false;
                 w

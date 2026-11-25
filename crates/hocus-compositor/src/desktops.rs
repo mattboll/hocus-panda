@@ -342,15 +342,32 @@ impl Strip {
     /// the next one, on a flick) or springs back. The previous desktop, if
     /// it changed.
     pub fn swipe_end(&mut self, cancelled: bool, now: Duration) -> Option<usize> {
+        let target = self.swipe_target(cancelled)?;
+        self.swipe_land(target, now)
+    }
+
+    /// Where the strip goes as the fingers leave: the desktop it reached,
+    /// the next on a flick, or back; none when it does not follow them.
+    pub fn swipe_target(&self, cancelled: bool) -> Option<usize> {
+        let Motion::Following(swipe) = self.motion else {
+            return None;
+        };
+        Some(if cancelled || swipe.across != Some(true) {
+            self.current
+        } else {
+            swipe.target(self.current, self.count)
+        })
+    }
+
+    /// The fingers left, the strip going on to `target` from where they
+    /// left it (every screen's linked strip to the same, #947). The
+    /// previous desktop, if it changed.
+    pub fn swipe_land(&mut self, target: usize, now: Duration) -> Option<usize> {
         let Motion::Following(swipe) = self.motion else {
             return None;
         };
         let at = swipe.at(self.count);
-        let target = if cancelled || swipe.across != Some(true) {
-            self.current
-        } else {
-            swipe.target(self.current, self.count)
-        };
+        let target = target.min(self.count - 1);
         let previous = self.current;
         self.current = target;
         self.motion = if swipe.reduced {
@@ -978,9 +995,25 @@ impl crate::State {
         carried: Option<WindowId>,
         reduced: bool,
     ) {
+        let screens = self.switching_with(output);
+        self.switch_screens(&screens, to, carried, reduced);
+    }
+
+    /// `screens` show their desktop `to`, sliding together.
+    fn switch_screens(
+        &mut self,
+        screens: &[Output],
+        to: usize,
+        carried: Option<WindowId>,
+        reduced: bool,
+    ) {
+        let Some(first) = screens.first() else {
+            return;
+        };
+        // One time for every screen's slide, taken once (#947): screens at
+        // different rates sample the same curve and end together.
         let now = self.now();
-        let mut strip = self.strip(output);
-        let to = to.min(strip.count() - 1);
+        let to = to.min(self.strip(first).count() - 1);
         let slide = if reduced {
             Slide::Fade
         } else if self.depth_moves() {
@@ -988,21 +1021,115 @@ impl crate::State {
         } else {
             Slide::Standard
         };
-        let changed = strip.switch_by(to, now, slide);
-        self.set_strip(output, strip);
-        if changed.is_some() {
-            self.apply_desktop(output, to, carried);
+        let mut changed = Vec::new();
+        for screen in screens {
+            let mut strip = self.strip(screen);
+            if strip.switch_by(to, now, slide).is_some() {
+                changed.push(screen.clone());
+            }
+            self.set_strip(screen, strip);
+        }
+        if !changed.is_empty() {
+            self.apply_desktop(&changed, to, carried);
         }
     }
 
-    /// The windows of `output`'s desktop `to` show, the others' hide, and
-    /// the focus goes to the one on top.
-    fn apply_desktop(&mut self, output: &Output, to: usize, carried: Option<WindowId>) {
-        let strip = self.strip(output);
-        tracing::debug!(output = output.name(), desktop = to + 1, "desktop");
+    /// The screens were linked (#947): every screen goes to the desktop
+    /// the screen under the pointer shows, which does not move, the
+    /// others sliding.
+    pub(crate) fn desktops_link_on(&mut self) {
+        let Some(lead) = self
+            .output_under_pointer()
+            .or_else(|| self.space.outputs().next().cloned())
+        else {
+            return;
+        };
+        let to = self.strip(&lead).current();
+        let others: Vec<Output> = self
+            .space
+            .outputs()
+            .filter(|o| self.strip(o).current() != to)
+            .cloned()
+            .collect();
+        tracing::info!(
+            desktop = to + 1,
+            screens = others.len(),
+            "the screens' desktops linked"
+        );
+        self.switch_screens(&others, to, None, self.reduced_motion());
+    }
+
+    /// `output` joins the others (plugged, turned on, the lid opened):
+    /// linked, it shows the desktop they show, whatever it showed when it
+    /// left (#947). At once, nothing sliding.
+    pub(crate) fn desktops_join(&mut self, output: &Output) {
+        if !self.desktops_linked() {
+            return;
+        }
+        let Some(to) = self
+            .space
+            .outputs()
+            .find(|o| *o != output && self.strips.contains_key(&o.name()))
+            .map(|o| self.strip(o).current())
+        else {
+            return;
+        };
+        let mut strip = self.strip(output);
+        if strip.current() == to && self.strips.contains_key(&output.name()) {
+            return;
+        }
+        tracing::debug!(
+            output = output.name(),
+            desktop = to + 1,
+            "a screen joins the linked desktops"
+        );
+        strip.renumber(strip.count(), to);
+        self.set_strip(output, strip);
+        for id in self.windows_on(output) {
+            if self.model.is_everywhere(id) {
+                self.model.set_desktop(id, to);
+            }
+            let shown = !self.model.placement(id).hidden;
+            if self.model.desktop(id) == to {
+                self.unhide(id);
+            } else if shown {
+                self.hide(id);
+            }
+        }
+    }
+
+    /// Whether every screen switches its desktop together (#947).
+    pub fn desktops_linked(&self) -> bool {
+        self.config.desktops.switching == crate::config::Switching::Together
+    }
+
+    /// The screens that switch when `output` does: every screen when they
+    /// are linked, `output` first; else `output` alone.
+    pub(crate) fn switching_with(&self, output: &Output) -> Vec<Output> {
+        let mut screens = vec![output.clone()];
+        if self.desktops_linked() {
+            screens.extend(self.space.outputs().filter(|o| *o != output).cloned());
+        }
+        screens
+    }
+
+    /// The windows of desktop `to` of each of `outputs` show, the others'
+    /// hide, and the focus goes to the one focused last there.
+    fn apply_desktop(&mut self, outputs: &[Output], to: usize, carried: Option<WindowId>) {
         self.end_popup_grab();
         // A window being dragged goes along.
         let carried = carried.or(self.moving);
+        for output in outputs {
+            self.show_desktop(output, to, carried);
+        }
+        self.focus_after_switch(outputs, to, carried);
+    }
+
+    /// The windows of `output`'s desktop `to` show, the others' hide;
+    /// `carried` goes along.
+    fn show_desktop(&mut self, output: &Output, to: usize, carried: Option<WindowId>) {
+        let strip = self.strip(output);
+        tracing::debug!(output = output.name(), desktop = to + 1, "desktop");
         self.take_places(output, to);
         for id in self.windows_on(output) {
             // On all desktops (#723): on the one shown now, where it is.
@@ -1036,24 +1163,41 @@ impl crate::State {
                 self.hide(id);
             }
         }
-        // The focus goes to the window carried along, else to the one
-        // focused last on this desktop, a window on all desktops included,
-        // where it is (#888): a window on all desktops in front of it
-        // stays in front. Else to the desktop's window on top.
+    }
+
+    /// The focus after `outputs` went to desktop `to`: the window carried
+    /// along, else the one focused last there, a window on all desktops
+    /// included, where it is (#888): a window on all desktops in front of
+    /// it stays in front. Several screens switching together (#947), the
+    /// one under the pointer first, then the one that had the focus. Else
+    /// the window on top there.
+    fn focus_after_switch(&mut self, outputs: &[Output], to: usize, carried: Option<WindowId>) {
         let carried = carried.filter(|id| self.model.is_shown(*id));
         if carried.is_some() {
             self.focus(carried);
             return;
         }
-        if let Some(last) = self.focused_last_on(output, to) {
+        let mut order: Vec<Output> = Vec::new();
+        let first = [
+            self.output_under_pointer(),
+            self.model.focused().and_then(|id| self.output_of(id)),
+        ];
+        for output in first.into_iter().flatten().chain(outputs.iter().cloned()) {
+            if outputs.contains(&output) && !order.contains(&output) {
+                order.push(output);
+            }
+        }
+        if let Some(last) = order.iter().find_map(|o| self.focused_last_on(o, to)) {
             self.focus_raising(Some(last), false);
             return;
         }
         // A window on all desktops keeps its place among the windows
         // leaving, which slide in front of it as they were.
         let top =
-            self.model.stack().iter().rev().copied().find(|id| {
-                self.model.is_shown(*id) && self.output_of(*id).as_ref() == Some(output)
+            order.iter().find_map(|output| {
+                self.model.stack().iter().rev().copied().find(|id| {
+                    self.model.is_shown(*id) && self.output_of(*id).as_ref() == Some(output)
+                })
             });
         match top {
             Some(top) => self.focus_raising(Some(top), !self.model.is_everywhere(top)),
@@ -1121,10 +1265,14 @@ impl crate::State {
         if (0..strip.count() as i64).contains(&to) {
             self.switch_desktop(output, to as usize, None);
         } else {
-            // At the end of the strip: the dots say where it is.
-            let mut strip = strip;
-            strip.switch(strip.current(), self.now(), self.reduced_motion());
-            self.set_strip(output, strip);
+            // At the end of the strip: the dots say where it is, on every
+            // screen that would have switched.
+            let (now, reduced) = (self.now(), self.reduced_motion());
+            for screen in self.switching_with(output) {
+                let mut strip = self.strip(&screen);
+                strip.switch(strip.current(), now, reduced);
+                self.set_strip(&screen, strip);
+            }
         }
     }
 
@@ -1391,43 +1539,59 @@ impl crate::State {
     }
 
     /// Three fingers came down on the touchpad: the strip under the
-    /// pointer follows them.
+    /// pointer follows them; linked (#947), every screen's together, the
+    /// travel counted once in desktops and drawn at each screen's width.
     pub fn desktop_swipe_begin(&mut self) {
         let Some(output) = self.output_under_pointer() else {
             return;
         };
-        let mut strip = self.strip(&output);
-        strip.swipe_begin(self.now(), self.reduced_motion());
-        self.gestures.swiping = Some(output.clone());
-        self.set_strip(&output, strip);
+        let (now, reduced) = (self.now(), self.reduced_motion());
+        let screens = self.switching_with(&output);
+        for screen in &screens {
+            let mut strip = self.strip(screen);
+            strip.swipe_begin(now, reduced);
+            self.set_strip(screen, strip);
+        }
+        self.gestures.swiping = screens;
     }
 
     pub fn desktop_swipe_update(&mut self, dx: f64, dy: f64, time: u32) {
-        let Some(output) = self.gestures.swiping.clone() else {
-            return;
-        };
-        let mut strip = self.strip(&output);
         let now = self.now();
-        // The desktops coming in show as they come: their windows are
-        // drawn from where they are, out of sight or not.
-        let moved = strip.swipe_update(dx, dy, time, now);
-        self.strips.insert(output.name(), strip);
-        if moved || strip.dots_alpha(now) < 1.0 {
-            self.redraw = true;
+        for screen in self.gestures.swiping.clone() {
+            let mut strip = self.strip(&screen);
+            // The desktops coming in show as they come: their windows are
+            // drawn from where they are, out of sight or not.
+            let moved = strip.swipe_update(dx, dy, time, now);
+            self.strips.insert(screen.name(), strip);
+            if moved || strip.dots_alpha(now) < 1.0 {
+                self.redraw = true;
+            }
         }
     }
 
     pub fn desktop_swipe_end(&mut self, cancelled: bool) {
-        let Some(output) = self.gestures.swiping.take() else {
+        let screens = std::mem::take(&mut self.gestures.swiping);
+        // The first screen's strip decides for all: they complete or
+        // spring back together.
+        let Some(target) = screens
+            .first()
+            .and_then(|s| self.strip(s).swipe_target(cancelled))
+        else {
             return;
         };
-        let mut strip = self.strip(&output);
-        let changed = strip.swipe_end(cancelled, self.now());
-        self.set_strip(&output, strip);
-        // The strip goes on from where the fingers left it; the windows
+        let now = self.now();
+        let mut changed = Vec::new();
+        for screen in &screens {
+            let mut strip = self.strip(screen);
+            if strip.swipe_land(target, now).is_some() {
+                changed.push(screen.clone());
+            }
+            self.set_strip(screen, strip);
+        }
+        // The strips go on from where the fingers left them; the windows
         // change desktops as with a switch.
-        if changed.is_some() {
-            self.apply_desktop(&output, strip.current(), None);
+        if !changed.is_empty() {
+            self.apply_desktop(&changed, target, None);
         }
     }
 }

@@ -540,11 +540,14 @@
 # restore = true
 
 # [desktops]
-# Desktops on each screen, from 1 to 9. Each screen switches its own.
+# Desktops on each screen, from 1 to 9.
 # Followed as the file changes: more are added after the last, empty;
 # fewer take out the last ones, their windows going to the last that
 # stays.
 # count = 4
+# Every screen switches its desktop together (false), or the screen
+# under the pointer alone (true).
+# per-screen = false
 # Their names, by position, the same on every screen: the bar's tiles and
 # Alt+Tab say them. One missing or "" is "Bureau N" / "Desktop N".
 # names = []

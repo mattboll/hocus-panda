@@ -468,7 +468,7 @@ impl State {
         self.pointer.kept_buttons.clear();
         self.pointer.frame_cursor = None;
         self.moving = None;
-        self.gestures.swiping = None;
+        self.gestures.swiping.clear();
     }
 
     /// Nobody keeps the keyboard or the pointer: they go to the lock's

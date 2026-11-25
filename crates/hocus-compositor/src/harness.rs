@@ -80,6 +80,26 @@ pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
 /// screen's connector and its desktop (from 0).
 pub type ProjectSeen = (String, std::path::PathBuf, Option<(String, usize)>);
 
+/// A bar's tile as a test sees it: its bar, its screen, its desktop (from
+/// 0), and its place (x, y, width, height), global.
+pub type TileSeen = (String, String, usize, (f64, f64, f64, f64));
+
+/// How a screen's strip of desktops looks at a moment (#947).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StripLook {
+    pub output: String,
+    /// The desktop it shows or goes to, from 0.
+    pub current: usize,
+    /// Where the strip is, in desktops from 0.
+    pub position: f64,
+    /// How much its dots show, 0 to 1.
+    pub dots: f32,
+    /// Whether it slides or fades.
+    pub moving: bool,
+    /// The project of the desktop it shows, whose pill is under the dots.
+    pub project: Option<String>,
+}
+
 /// A browser window's tabs a closed project keeps: the one shown (from
 /// 1) and their addresses (the tests).
 pub type SeenTabs = (usize, Vec<String>);
@@ -2184,6 +2204,29 @@ impl Headless {
             .collect()
     }
 
+    /// How each output's strip looks now (#947): where it is (in desktops
+    /// from 0), how much its dots show, and the project whose pill shows
+    /// under them.
+    pub fn strip_looks(&self) -> Vec<StripLook> {
+        let state = &self.app.state;
+        let now = state.now();
+        state
+            .space
+            .outputs()
+            .map(|o| {
+                let strip = state.strip(o);
+                StripLook {
+                    output: o.name(),
+                    current: strip.current(),
+                    position: strip.position(now),
+                    dots: strip.dots_alpha(now),
+                    moving: strip.moves_until().is_some(),
+                    project: state.project_on(o, strip.current()).map(|p| p.name.clone()),
+                }
+            })
+            .collect()
+    }
+
     /// The desktops' names as the compositor has them (6.14).
     pub fn desktop_names(&self) -> Vec<String> {
         self.app.state.config.desktops.names.clone()
@@ -2893,6 +2936,24 @@ impl Headless {
             .map(|(o, r)| {
                 let middle = (r.loc.x + r.size.w / 2.0, r.loc.y + r.size.h / 2.0);
                 (o.bar, o.output, o.desktop, middle)
+            })
+            .collect()
+    }
+
+    /// The tiles the bars said (8.5 B): bar, screen, desktop, and the
+    /// tile's place (x, y, width, height), global.
+    pub fn desk_tile_rects(&self) -> Vec<TileSeen> {
+        self.app
+            .state
+            .tile_rects()
+            .into_iter()
+            .map(|(o, r)| {
+                (
+                    o.bar,
+                    o.output,
+                    o.desktop,
+                    (r.loc.x, r.loc.y, r.size.w, r.size.h),
+                )
             })
             .collect()
     }

@@ -25,7 +25,9 @@ use std::{
 };
 
 use common::{BTN_LEFT, KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTSHIFT, WAIT, chord, open, wait};
-use hocus_compositor::{Config, DragKey, Headless, HeadlessConfig, RendererChoice, model::Rect};
+use hocus_compositor::{
+    Config, DesktopSwitching, DragKey, Headless, HeadlessConfig, RendererChoice, model::Rect,
+};
 use serde_json::Value;
 
 const APP_ID: &str = "hocus-settings";
@@ -246,7 +248,13 @@ impl Bed {
             std::fs::read_to_string(&file).is_ok_and(|t| done(&t))
         })?;
         let text = std::fs::read_to_string(self.file()).unwrap_or_default();
-        anyhow::ensure!(seen, "the file never held it:\n{text}");
+        let said = common::logged(&self.log);
+        let last: Vec<&str> = said.lines().rev().take(12).collect();
+        anyhow::ensure!(
+            seen,
+            "the file never held it:\n{text}\nthe window said, last first:\n{}",
+            last.join("\n")
+        );
         Ok(text)
     }
 
@@ -347,6 +355,7 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
         rows,
         [
             "desktops.count",
+            "desktops.per-screen",
             "desktops.names",
             "desktops.remember-tabs",
             "windows.move-modifier",
@@ -375,8 +384,8 @@ fn the_page_shows_its_groups_and_rows_and_each_desktops_windows() -> anyhow::Res
     );
     // The Settings' window is on the first desktop too.
     let shown = bed.shows(|s| s["desktops"]["windows"] == serde_json::json!([1, 2, 0, 0]))?;
-    assert_eq!(shown["rows"][2]["value"], "oui");
-    assert_eq!(shown["rows"][3]["value"], "Alt + glisser");
+    assert_eq!(shown["rows"][3]["value"], "oui");
+    assert_eq!(shown["rows"][4]["value"], "Alt + glisser");
     bed.places_with("chip:3")?;
     bed.places_with("link:keyboard.shortcuts")?;
     Ok(())
@@ -504,6 +513,51 @@ fn super_to_move_turns_the_ink_off_and_says_so() -> anyhow::Result<()> {
         hp.state().config.windows.move_modifier == DragKey::Super
     })?;
     anyhow::ensure!(read, "the compositor did not read it");
+    Ok(())
+}
+
+/// "Changer de bureau" (#947): every screen together by default; "Chaque
+/// écran" writes `per-screen = true`, the row's line and the toast say it,
+/// the compositor follows, and "Annuler" takes it back (the file as it
+/// was, linked by default).
+#[test]
+fn each_screen_writes_per_screen_and_annuler_links_them_again() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let row = |s: &Value| {
+        s["rows"]
+            .as_array()
+            .and_then(|r| r.iter().find(|r| r["id"] == "desktops.per-screen"))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let shown = bed.open()?;
+    assert_eq!(row(&shown)["value"], "Tous les écrans");
+    assert_eq!(
+        row(&shown)["line"],
+        "Super+1 met chaque écran sur son bureau 1."
+    );
+    bed.click("segment:desktops.per-screen:1")?;
+    bed.written(|t| t.contains("[desktops]") && t.contains("per-screen = true"))?;
+    let shown = bed.shows(|s| s["toast"] == "Chaque écran change ses bureaux")?;
+    assert_eq!(row(&shown)["value"], "Chaque écran");
+    assert_eq!(
+        row(&shown)["line"],
+        "Super+1 change l’écran sous le pointeur."
+    );
+    let read = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.desktops.switching == DesktopSwitching::PerScreen
+    })?;
+    anyhow::ensure!(read, "the compositor did not read it");
+    // Taken back: the file as it was, without the key, linked by default.
+    bed.click("toast-action")?;
+    bed.written(|t| !t.contains("per-screen = true"))?;
+    bed.shows(|s| row(s)["value"] == "Tous les écrans")?;
+    let read = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.desktops.switching == DesktopSwitching::Together
+    })?;
+    anyhow::ensure!(read, "the compositor did not read it back");
     Ok(())
 }
 
@@ -1075,5 +1129,42 @@ fn rules_screenshots_for_the_pull_request() -> anyhow::Result<()> {
             .is_some_and(|c| c.first().and_then(Value::as_str) == Some("Musique"))
     })?;
     save(&mut bed, &out, "desktops-rule-add-menu.png", true)?;
+    Ok(())
+}
+
+/// #947's screenshots, into `HOCUS_SHOTS`: "Changer de bureau" on every
+/// screen (the default), then on each screen.
+#[test]
+#[ignore = "screenshots for the pull request: HOCUS_SHOTS=DIR"]
+fn screenshots_of_switch_desktop() -> anyhow::Result<()> {
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    let save = |bed: &mut Bed, name: &str| -> anyhow::Result<()> {
+        bed.hp.pointer_move(2400.0, 1500.0);
+        wait(&mut bed.hp, Duration::from_millis(800))?;
+        let (w, h, bytes) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
+            .ok_or_else(|| anyhow::anyhow!("no image"))?;
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+        Ok(())
+    };
+    bed.open()?;
+    save(&mut bed, "settings-switch-desktop-every-screen.png")?;
+    bed.click("segment:desktops.per-screen:1")?;
+    bed.shows(|s| s["toast"] == "Chaque écran change ses bureaux")?;
+    save(&mut bed, "settings-switch-desktop-each-screen.png")?;
     Ok(())
 }
