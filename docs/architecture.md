@@ -33,7 +33,9 @@ flowchart LR
 
 - **The compositor** (`hocuspanda`, crate `hocus-compositor`): the
   session. Window management, rendering (GLES, or pixman), input, the
-  Wayland protocols, XWayland, the lock, captures, screen sharing
+  Wayland protocols (data control for KDE Connect's daemon alone, known
+  by its program: design/bar.md, "The phone"), XWayland, the lock,
+  captures, screen sharing
   (PipeWire), idle, and the D-Bus services of the portal (`ScreenCast`,
   `Settings`) and `org.freedesktop.ScreenSaver`. It starts every other
   program and hands them `HOCUS_SOCKET` and `HOCUS_CONFIG`.

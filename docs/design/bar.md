@@ -849,8 +849,9 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
   and power profile, a phone or a tablet (KDE Connect: its battery, ring
-  it, send it a file or the clipboard, forget it; "The phone", #957, as
-  built), clipboard history (5.6, as built),
+  it, send it a file or the clipboard, forget it, what it copies on the
+  desktop's clipboard; "The phone", #957, as built), clipboard history
+  (5.6, as built),
   notifications (clear all), menu (apps,
   settings, session), a tray icon's menu (its application's, 5.14, as
   built). The keyboard layouts have none: their row goes to the
@@ -876,7 +877,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Notifications | the desktop's own server, `org.freedesktop.Notifications` on the session bus, in the shell ([notifications.md](notifications.md), 5.3); their history kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications` (5.4) | the bell's badge counts what was not seen; do not disturb holds the bubbles |
 | Applications' icons (the tray) | the desktop's own `org.kde.StatusNotifierWatcher` (and `org.freedesktop.StatusNotifierWatcher`), its host, on the notifications' session bus, in the shell; each item's properties and signals, its `com.canonical.dbusmenu` menu (as built, 5.14) | `Passive` items hidden; the attention icon while one `NeedsAttention` |
 | Microphone, camera, screen in use | PipeWire's graph, from the sound's `pw-dump --monitor`: `Stream/Input/Audio` nodes linked to a source, `Stream/Input/Video` nodes linked to a `Video/Source`, their `application.*` and `media.name` props; the processes holding `/dev/video*` open, from `/proc`, read on inotify's word that one was opened or closed, at most once a second and only while a camera's node exists; the compositor's `shares` and `recording` lines (5.11, 5.10) | the default source's mute greys the microphone; muted with `wpctl set-mute` as the sound's button (as built, 5.12) |
-| Clipboard | the compositor, which sees every selection | what clients copy (their text, else their PNG image), read off its loop, never what is marked secret, on the `copied` line of `hocus-link`; kept by the shell, sealed, in `$XDG_STATE_HOME/hocuspanda/clipboard` (as built, 5.6) |
+| Clipboard | the compositor, which sees every selection | what clients copy (their text, else their PNG image), the phone's through KDE Connect's daemon among them ("The phone", lot 2), read off its loop, never what is marked secret, on the `copied` line of `hocus-link`; kept by the shell, sealed, in `$XDG_STATE_HOME/hocuspanda/clipboard` (as built, 5.6) |
 
 Every source is read off the event loop and pushes changes; nothing is
 polled from the loop.
@@ -3328,11 +3329,13 @@ maintainer's spec (issue #396).
   not, "Tout effacer" removes all but the pinned, `Esc` closes, `Tab`
   stays in the field.
 - **The source**: when a client takes the clipboard (a Wayland client's
-  selection, or an X11 client's through XWayland), the compositor reads
+  selection, KDE Connect's daemon's through data control included, or an
+  X11 client's through XWayland), the compositor reads
   its `text/plain;charset=utf-8` offer (else `UTF8_STRING`, else
   `text/plain`) or, offering no text, its `image/png`, through a pipe on a
   thread, 8 MB and 3 s at most, and tells the shell (`copied`: the
-  application of the window focused as it was copied, and the bytes, in
+  application of the window focused as it was copied, or KDE Connect's
+  for the phone's copies ("The phone", lot 2), and the bytes, in
   base64). Copies the history itself makes are not read again. Screen
   captures come in too (5.8b, [screenshots.md](screenshots.md)): their
   PNG, from "Capture d'écran" / "Screenshot" (`capture-copied`). Never
@@ -5395,11 +5398,12 @@ the connections while one is mounted, and ejecting it.
   authentication dialog (above). Naming the application that holds a
   busy drive.
 
-### The phone (#957, lot 1, 2026-11-26)
+### The phone (#957, lots 1 and 2, 2026-11-26)
 
 What the approved #957 spec (variant B) asks of the shell: the phone as a
-connection of the bar, through KDE Connect; the phone's clipboard to the
-desktop (lot 2, the compositor's `ext-data-control-v1`) is not built yet.
+connection of the bar, through KDE Connect; and of the compositor (lot 2):
+the phone's clipboard to the desktop, through data control offered to KDE
+Connect's daemon alone.
 
 - **KDE Connect, off the loop.** A thread of its own (the crate
   `hocus-phone`, which the Settings may share), with zbus on a small
@@ -5479,8 +5483,40 @@ desktop (lot 2, the compositor's `ext-data-control-v1`) is not built yet.
   Lit ("Lâcher : Pixel 8", the ring), the shell accepts the offer
   (`copy`); let go, `shareUrls` gets the files and the offer is finished,
   its client hearing them taken; refused, the drag is cancelled.
+- **The clipboard both ways** (lot 2): the compositor serves
+  `ext-data-control-v1` (version 1) and the older
+  `zwlr_data_control_manager_v1` (version 2), the primary selection with
+  them, to KDE Connect's daemon alone (KGuiAddons' `KSystemClipboard`
+  takes the first, older ones the second); no other client sees either
+  global (smithay's filter per client), so that a clipboard manager or a
+  script does not read every copy. A client is known by its program, read
+  once as it connects, on the loop: its socket's credentials' pid, then
+  `/proc/PID/exe` (a `readlink`), which must be named `kdeconnectd` under
+  `/usr` (a program renamed so in the home gets nothing; one deleted since
+  it started reads `… (deleted)` and gets nothing). The list is the
+  compositor's `Config::data_control`, the package's KDE Connect's daemon,
+  tests naming their own program; the one let through is said once in
+  the log (`info`). With them, KDE Connect's own clipboard sharing works
+  both ways as its settings say (its window); the popover's button stays,
+  for a one-off with that sharing off. What the daemon sets is a copy as
+  any: pasted anywhere, and in the history (5.6) as "KDE Connect"'s
+  (`org.kde.kdeconnect.app`: the daemon's own desktop entry is hidden,
+  and the history names applications by the entries the launcher shows),
+  its rules applying (a copy marked secret never kept, `[clipboard]
+  ignore` naming KDE Connect's id keeping none of the phone's). **A copy
+  marked secret is not held back** (decided 2026-11-25): offered to the
+  daemon as any, its `x-kde-passwordManagerHint` among its types, KDE
+  Connect's own `sendPassword` setting decides whether it reaches the
+  phone. Text shared from the phone ("Partager" › KDE Connect) lands in
+  the clipboard the same way.
 - **Measured headless** (`tests/phone.rs`, the real shell against a fake
   KDE Connect, `tests/levels/kdeconnect.rs`, and a fake portal chooser on
   the fakes' private bus): one scenario per criterion of lot 1, the drop
-  by a test client dragging `text/uri-list` from its window.
-- **Not built yet**: lot 2.
+  by a test client dragging `text/uri-list` from its window. Lot 2
+  (`tests/data_control.rs`): the test program itself stands in for the
+  daemon, run again through a hard link named `kdeconnectd` in a folder
+  the configuration allows; the test's own clients see neither global; a
+  selection it sets through either protocol is pasted by another client
+  and listed by the real shell's history as KDE Connect's, a secret one
+  pasted but never kept; a client's copy, a secret one too, is offered
+  to it and read.
