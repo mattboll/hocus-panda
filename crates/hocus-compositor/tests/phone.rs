@@ -8,11 +8,11 @@
 //! reach, charging, low, out of reach, none, two, a laptop none, the
 //! daemon gone and back, the mini form, the screen reader, at rest), the
 //! popover (ring, send a file through the portal's chooser, the clipboard,
-//! forget, a transfer's progress), the phone's notifications (its
-//! application, its level, its reply from the bubble and from the bell,
-//! ✕ on the phone, removed on the phone, a file received, a pairing), and
-//! the daemon never started by the shell. A file dropped on a row is not
-//! built yet (bar.md, "The phone").
+//! forget, a transfer's progress), a file dropped on a row (a client
+//! dragging `text/uri-list`), the phone's notifications (its application,
+//! its level, its reply from the bubble and from the bell, ✕ on the phone,
+//! removed on the phone, a file received, a pairing), and the daemon never
+//! started by the shell.
 //!
 //! With `HOCUS_KIT_SHOTS=DIR`, the rows, the popover and the bubbles are
 //! saved there as PNGs.
@@ -40,6 +40,7 @@ use hocus_compositor::{Config, Headless, HeadlessConfig, RendererChoice, model::
 use kdeconnect::{Call, Chooser, ENTRY, FakeDevice, KdeConnect};
 
 const KEY_B: u32 = 48;
+const BTN_LEFT: u32 = 0x110;
 const KEY_ENTER: u32 = 28;
 
 const PIXEL: FakeDevice = FakeDevice::phone("a1b2c3", "Pixel 8", 82);
@@ -480,6 +481,11 @@ fn orange((r, g, b): (u8, u8, u8)) -> bool {
     r > 200 && (100..190).contains(&g) && b < 130
 }
 
+/// `#8FB3FF`, a drop's ring, or near it.
+fn blue_rim((r, g, b): (u8, u8, u8)) -> bool {
+    (110..170).contains(&r) && (150..205).contains(&g) && b > 220
+}
+
 /// `#F7B98A`, the low battery's digits, or near it.
 fn peach((r, g, b): (u8, u8, u8)) -> bool {
     r > 200 && (150..205).contains(&g) && (100..160).contains(&b)
@@ -803,6 +809,115 @@ fn send_a_file_through_the_portals_chooser() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Drags `uris` from a file manager's window to `to`, holding the button:
+/// the client, once the drag began there.
+fn drag_to(
+    bed: &mut Bed,
+    app_id: &'static str,
+    uris: String,
+    to: (f64, f64),
+) -> anyhow::Result<common::ClientHandle> {
+    let (rect, client) = common::open_showing(
+        &mut bed.hp,
+        app_id,
+        Shows::Dragging {
+            app_id,
+            size: (400, 300),
+            uris,
+        },
+    )?;
+    let from = (f64::from(rect.x + 60), f64::from(rect.y + 60));
+    common::point(&mut bed.hp, from)?;
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    bed.hp.button(BTN_LEFT, true);
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    // Its first move starts the drag: the next ones carry it.
+    bed.hp.pointer_move(from.0 + 8.0, from.1 + 8.0);
+    let grabbed = bed.hp.dispatch_until(WAIT, |hp| hp.pointer_grabbed())?;
+    anyhow::ensure!(grabbed, "the drag never began");
+    for step in 1..=4 {
+        let k = f64::from(step) / 4.0;
+        bed.hp
+            .pointer_move(from.0 + (to.0 - from.0) * k, from.1 + (to.1 - from.1) * k);
+        wait(&mut bed.hp, Duration::from_millis(30))?;
+    }
+    Ok(client)
+}
+
+/// Waits until `client`'s drag ended: finished by its target, or not.
+fn drag_ended(bed: &mut Bed, client: &common::ClientHandle) -> anyhow::Result<bool> {
+    let mut ended = None;
+    bed.hp.dispatch_until(WAIT, |_| {
+        while let Ok(event) = client.events.try_recv() {
+            if let common::Event::DragEnded(finished) = event {
+                ended = Some(finished);
+            }
+        }
+        ended.is_some()
+    })?;
+    ended.context("the drag never ended")
+}
+
+#[test]
+fn a_file_dropped_on_the_row_goes_to_the_phone_a_folder_never() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(&shell, with(vec![PIXEL]))?;
+    bed.surface_is(FOUR)?;
+    let root = bed.fakes.dir.path().to_owned();
+    let file = root.join("rapport.pdf");
+    std::fs::write(&file, b"%PDF-1.7")?;
+    let folder = root.join("photos");
+    std::fs::create_dir_all(&folder)?;
+    let url = format!("file://{}", file.display());
+    let row = bed.row(1);
+    // A file: the row lit, "Lâcher : Pixel 8"; let go, it goes to the
+    // phone and the drag is finished.
+    let mark = bed.mark();
+    let client = drag_to(&mut bed, "test.files", format!("{url}\r\n"), row)?;
+    let lit = bed.logged_since(mark, "a drag of files over the phones' rows")?;
+    anyhow::ensure!(lit.contains("Pixel 8"), "not lit: {lit}");
+    bed.settle()?;
+    let s = bed.surface();
+    let y = row.1 as i32;
+    anyhow::ensure!(
+        bed.any((s.x, y - 14), (s.width, 28), blue_rim)?,
+        "the row is not ringed for the drop"
+    );
+    bed.shot(hocus_link::CONNECTIONS_NAMESPACE, "957-drop")?;
+    bed.hp.button(BTN_LEFT, false);
+    bed.asked(&Call::ShareUrls(PIXEL.id.to_owned(), vec![url]))?;
+    anyhow::ensure!(drag_ended(&mut bed, &client)?, "the drop was not finished");
+    // A folder: refused, the row not lit; let go, nothing sent.
+    let mark = bed.mark();
+    let client = drag_to(
+        &mut bed,
+        "test.folders",
+        format!("file://{}\r\n", folder.display()),
+        row,
+    )?;
+    bed.logged_since(mark, "a drag's files over the phones")?;
+    wait(&mut bed.hp, Duration::from_millis(300))?;
+    let said = common::logged(&bed.log);
+    let lit = said
+        .get(mark..)
+        .unwrap_or_default()
+        .lines()
+        .any(|l| l.contains("over the phones' rows") && l.contains("Pixel 8"));
+    anyhow::ensure!(!lit, "a folder lit the row");
+    bed.hp.button(BTN_LEFT, false);
+    anyhow::ensure!(!drag_ended(&mut bed, &client)?, "a folder's drop was taken");
+    let shares = bed
+        .kc()
+        .calls()
+        .iter()
+        .filter(|c| matches!(c, Call::ShareUrls(..)))
+        .count();
+    assert_eq!(shares, 1, "{:?}", bed.kc().calls());
+    Ok(())
+}
+
 #[test]
 fn a_transfers_progress_on_the_row_and_the_popover() -> anyhow::Result<()> {
     let Some(shell) = ready() else {
@@ -940,13 +1055,29 @@ fn a_phones_notification_is_its_applications() -> anyhow::Result<()> {
     let said = bed.logged("a notification")?;
     assert!(said.contains("Signal · Pixel 8"), "{said}");
     bed.shot(&bubble.0, "957-bubble")?;
-    // The bell lists it by that application.
+    // A second: the bell lists both under that application's header, the
+    // phone's icon and its name after Signal's.
+    let mark = bed.mark();
+    bed.kc().post(
+        PIXEL.id,
+        "Signal",
+        "Camille",
+        "Inès vient aussi.",
+        true,
+        true,
+    )?;
+    bed.logged_since(mark, "a notification")?;
     let (_, at) = bed.hp.bell_surfaces()[0];
     let bell = (f64::from(at.x + 11 + 44 + 20), f64::from(at.y + 6 + 17));
     let mark = bed.mark();
     common::click(&mut bed.hp, bell)?;
     let shows = bed.logged_since(mark, "the history shows")?;
-    assert!(shows.contains("Signal · Pixel 8"), "{shows}");
+    assert!(shows.contains("Signal · Pixel 8 2:"), "{shows}");
+    let drawn = bed
+        .hp
+        .dispatch_until(WAIT, |hp| common::drawn_popovers(hp).len() == 1)?;
+    anyhow::ensure!(drawn, "the bell's list never drawn");
+    common::popover_shot(&mut bed.hp, "957-bell")?;
     Ok(())
 }
 
