@@ -5463,12 +5463,24 @@ desktop (lot 2, the compositor's `ext-data-control-v1`) is not built yet.
   opens it.
 - **Pairing**: from the phone only; KDE Connect's own bubble ("Accepter",
   "Refuser") shows as any notification; accepted, the row comes.
+- **A file dropped on a row**: the shell's data device gets a drag's
+  `enter` and `drop` with the `wl_surface` it is over, but cannot tell
+  which of its layer surfaces that is (the layer-shell crate keeps them to
+  itself): the compositor says it. While a client's drag offering
+  `text/uri-list` is over a bar's connections' surface, it tells the shell
+  where (`file-drag BAR X Y`, once a whole pixel; `file-drag BAR -` as it
+  leaves) and brings that bar in front of the windows until it leaves, as
+  for a window over the tiles; let go there with the offer taken,
+  `file-dropped BAR`. The files come through the drag's own offer, not
+  the link: over a phone's row in reach whose share plugin is on, the
+  shell reads the offer's `text/uri-list` once, on a thread (the data
+  device's events waited for there, 2 s at most); `file://` addresses of
+  files only, else (a directory, a link) refused and the row not lit.
+  Lit ("Lâcher : Pixel 8", the ring), the shell accepts the offer
+  (`copy`); let go, `shareUrls` gets the files and the offer is finished,
+  its client hearing them taken; refused, the drag is cancelled.
 - **Measured headless** (`tests/phone.rs`, the real shell against a fake
   KDE Connect, `tests/levels/kdeconnect.rs`, and a fake portal chooser on
-  the fakes' private bus): one scenario per criterion of lot 1 but the
-  drop (below).
-- **Not built yet**: a file dropped on a row. The shell's data device gets
-  a drag's `enter`, `motion` and `drop` with the `wl_surface` it is over,
-  but nothing in the shell tells which of its layer surfaces that is (the
-  layer-shell crate keeps its surfaces to itself): the compositor would
-  have to say it. The bell's header's phone icon. Lot 2.
+  the fakes' private bus): one scenario per criterion of lot 1, the drop
+  by a test client dragging `text/uri-list` from its window.
+- **Not built yet**: lot 2.
