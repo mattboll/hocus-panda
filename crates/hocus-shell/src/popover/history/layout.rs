@@ -46,6 +46,10 @@ pub enum Target {
     /// Its "⋯" (#899): its application's levels.
     More(u64),
     Action(u64, usize),
+    /// A phone's reply field, unfolded on its line, and its send button
+    /// (#957).
+    ReplyField(u64),
+    ReplySend(u64),
     /// An application's "3 de plus", or "Réduire" (#923).
     Expand(App),
     /// Its fold, "12 vues", or its line of seen ones only.
@@ -73,14 +77,21 @@ impl Target {
             Self::Chip(_) => CHIP / 2.0,
             Self::Switch => SWITCH.height / 2.0,
             Self::Clear => GHOST_RADIUS,
-            Self::Action(..) | Self::Fold(_) => FOLD_RADIUS,
+            Self::Action(..) | Self::Fold(_) | Self::ReplyField(_) | Self::ReplySend(_) => {
+                FOLD_RADIUS
+            }
         }
     }
 
     /// The line it belongs to, if it is a line's.
     pub(super) fn key(self) -> Option<u64> {
         match self {
-            Self::Item(k) | Self::Close(k) | Self::More(k) | Self::Action(k, _) => Some(k),
+            Self::Item(k)
+            | Self::Close(k)
+            | Self::More(k)
+            | Self::Action(k, _)
+            | Self::ReplyField(k)
+            | Self::ReplySend(k) => Some(k),
             _ => None,
         }
     }
@@ -124,6 +135,9 @@ pub(super) struct Row {
     /// The agent that pinned it.
     pub(super) pin: Option<String>,
     pub(super) actions: Vec<(String, Rectangle)>,
+    /// A phone's reply field, unfolded by its "Répondre" (#957): the row
+    /// of the field and its send button.
+    pub(super) reply: Option<Rectangle>,
     /// Its application has a level (#899): not the desktop's own.
     pub(super) leveled: bool,
 }
@@ -217,6 +231,9 @@ impl Block {
                     all.push(Target::More(r.key));
                 }
                 all.extend((0..r.actions.len()).map(|i| Target::Action(r.key, i)));
+                if r.reply.is_some() {
+                    all.extend([Target::ReplyField(r.key), Target::ReplySend(r.key)]);
+                }
                 all
             }
             Self::Header(h) => vec![Target::Expand(h.app), Target::CloseApp(h.app)],
@@ -251,6 +268,8 @@ pub(super) struct Laid {
 pub(super) struct Folds {
     pub(super) expanded: BTreeSet<App>,
     pub(super) unfolded: BTreeSet<App>,
+    /// The line whose reply field is unfolded (#957).
+    pub(super) replying: Option<u64>,
 }
 
 static FOLDS: Mutex<Option<Folds>> = Mutex::new(None);
@@ -314,9 +333,19 @@ fn cut(kept: &Kept, room: f32, measure: Measure<'_>) -> Cut {
         };
         *line = kit::elide(&shown, room, |t| measure(t, BODY, MANROPE));
     }
+    // A phone's reply in place: its "Répondre" unfolds the field (#957).
+    let reply = note.phone.as_ref().and_then(|p| p.reply.as_ref()).map(|_| {
+        (
+            REPLY_KEY.to_owned(),
+            hocus_words::shell::phone::REPLY_LINE
+                .get(crate::clock::time::Lang::of_messages())
+                .to_owned(),
+        )
+    });
     let actions = note
         .actions
         .iter()
+        .chain(reply.as_ref())
         .map(|(key, label)| {
             let label = kit::elide(label, room - 2.0 * CHIP_PAD, |t| {
                 measure(t, CHIP_TEXT, MANROPE_SEMIBOLD)
@@ -344,6 +373,12 @@ fn cut(kept: &Kept, room: f32, measure: Measure<'_>) -> Cut {
     }
 }
 
+/// The action a phone's "Répondre" stands for: not invoked, it unfolds
+/// the field.
+pub(super) const REPLY_KEY: &str = "inline-reply";
+/// The reply's row: a 34 px field and its send button.
+pub(super) const REPLY_ROW: f32 = 34.0;
+
 /// The lines' words as cut, by key, arrival, title and room: a line's
 /// change comes as a new arrival.
 pub(super) type Cuts = HashMap<(u64, i64, String, bool), Cut>;
@@ -367,6 +402,8 @@ struct Lay<'m, 'c> {
     pub(super) width: f32,
     pub(super) y: f32,
     pub(super) blocks: Vec<Block>,
+    /// The line whose reply field is unfolded.
+    pub(super) replying: Option<u64>,
 }
 
 impl Lay<'_, '_> {
@@ -429,6 +466,11 @@ impl Lay<'_, '_> {
                 .last()
                 .map_or(column, |(_, r)| r.y + r.height - y - ITEM_PAD);
         }
+        let reply = (self.replying == Some(kept.key) && kept.live.is_some()).then(|| {
+            let top = y + ITEM_PAD + column + ACTION_GAP;
+            column += ACTION_GAP + REPLY_ROW;
+            Rectangle::new(Point::new(x, top), Size::new(room, REPLY_ROW))
+        });
         let icon_room = if look == Look::Full { ICON } else { 0.0 };
         let height = (2.0 * ITEM_PAD + column.max(icon_room)).max(ITEM_LEAST);
         self.blocks.push(Block::Line(Row {
@@ -443,6 +485,7 @@ impl Lay<'_, '_> {
             seen: kept.seen.folded(),
             pin: kept.pin.as_ref().map(|p| p.agent.clone()),
             actions,
+            reply,
             leveled: !kept.own,
         }));
         self.y += height;
@@ -635,6 +678,7 @@ pub(super) fn lay_out(
         width,
         y: 0.0,
         blocks: Vec::new(),
+        replying: shown.folds.replying,
     };
     // The pins, the newest pin first.
     if !grouped.pins.is_empty() {
@@ -1006,6 +1050,7 @@ mod tests {
         let folds = Folds {
             expanded: [chat].into(),
             unfolded: [chat, updates].into(),
+            replying: None,
         };
         let laid = lay_out(
             &shown(&h, Dnd::Off, folds),
