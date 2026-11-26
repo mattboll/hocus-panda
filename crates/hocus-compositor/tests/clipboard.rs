@@ -58,8 +58,10 @@ const RED_PNG: &[u8] = &[
     0x44, 0xae, 0x42, 0x60, 0x82,
 ];
 
-struct Bed {
-    hp: Headless,
+/// The real shell and its history; the phone's copies' tests
+/// (`data_control`) share it.
+pub(crate) struct Bed {
+    pub(crate) hp: Headless,
     log: PathBuf,
     state: PathBuf,
     /// The configuration's file, empty at first.
@@ -67,8 +69,8 @@ struct Bed {
 }
 
 /// A window of the test's, and where it is.
-struct Window {
-    client: ClientHandle,
+pub(crate) struct Window {
+    pub(crate) client: ClientHandle,
     rect: Rect,
     app_id: &'static str,
 }
@@ -77,6 +79,15 @@ impl Bed {
     /// The compositor and its shell on `root`'s directories (made if they
     /// are not there).
     fn start(root: &Path) -> anyhow::Result<Option<Self>> {
+        Self::start_with(root, |_| {})
+    }
+
+    /// As [`Bed::start`], the compositor's configuration changed by
+    /// `change` first.
+    pub(crate) fn start_with(
+        root: &Path,
+        change: impl FnOnce(&mut Config),
+    ) -> anyhow::Result<Option<Self>> {
         let shell = common::shell_program();
         for sub in ["home", "config", "cache", "state", "data/applications"] {
             std::fs::create_dir_all(root.join(sub))?;
@@ -124,6 +135,7 @@ impl Bed {
         std::fs::create_dir_all(root.join("config/hocuspanda"))?;
         std::fs::write(&file, "")?;
         config.file = Some(file.clone());
+        change(&mut config);
         let hp = Headless::start_with_shell(
             HeadlessConfig {
                 outputs: vec!["1920x1080".parse()?],
@@ -153,12 +165,12 @@ impl Bed {
         Ok(Some(bed))
     }
 
-    fn mark(&self) -> usize {
+    pub(crate) fn mark(&self) -> usize {
         plain(&self.log).len()
     }
 
     /// Waits for the shell to log `text` after `from`: the line.
-    fn logged_after(&mut self, from: usize, text: &str) -> anyhow::Result<String> {
+    pub(crate) fn logged_after(&mut self, from: usize, text: &str) -> anyhow::Result<String> {
         let log = self.log.clone();
         let done = self.hp.dispatch_until(WAIT, |_| {
             plain(&log).get(from..).is_some_and(|l| l.contains(text))
@@ -222,9 +234,33 @@ impl Bed {
     }
 
     /// A window that takes the keyboard and says its keys.
-    fn window(&mut self, app_id: &'static str, size: (u32, u32)) -> anyhow::Result<Window> {
-        let (rect, client) =
-            common::open_showing(&mut self.hp, app_id, Shows::Typing { app_id, size })?;
+    pub(crate) fn window(
+        &mut self,
+        app_id: &'static str,
+        size: (u32, u32),
+    ) -> anyhow::Result<Window> {
+        self.window_showing(app_id, Shows::Typing { app_id, size })
+    }
+
+    /// A window that also reads the clipboard on `Ctrl+V`
+    /// ([`Command::ReadClipboard`]).
+    pub(crate) fn writing_window(
+        &mut self,
+        app_id: &'static str,
+        size: (u32, u32),
+    ) -> anyhow::Result<Window> {
+        self.window_showing(
+            app_id,
+            Shows::Writing {
+                app_id,
+                size,
+                caret: None,
+            },
+        )
+    }
+
+    fn window_showing(&mut self, app_id: &'static str, shows: Shows) -> anyhow::Result<Window> {
+        let (rect, client) = common::open_showing(&mut self.hp, app_id, shows)?;
         Ok(Window {
             client,
             rect,
@@ -251,7 +287,7 @@ impl Bed {
     /// focuses the window, but the keyboard goes to it only once the shell,
     /// told of the press outside, lets it go, which a loaded machine takes
     /// longer than any fixed wait to do (#724).
-    fn focus(&mut self, window: &Window) -> anyhow::Result<()> {
+    pub(crate) fn focus(&mut self, window: &Window) -> anyhow::Result<()> {
         let r = window.rect;
         self.click((f64::from(r.x + 20), f64::from(r.y + 20)))?;
         let app_id = window.app_id;
@@ -266,7 +302,7 @@ impl Bed {
 
     /// `window` takes the keyboard and copies `text`: once the history has
     /// it.
-    fn copy(&mut self, window: &Window, text: &'static str) -> anyhow::Result<()> {
+    pub(crate) fn copy(&mut self, window: &Window, text: &'static str) -> anyhow::Result<()> {
         self.copy_with(
             window,
             Command::Copy(Clip {
@@ -291,7 +327,7 @@ impl Bed {
     }
 
     /// `Super+V`: the history, once it shows.
-    fn super_v(&mut self) -> anyhow::Result<(Rect, String)> {
+    pub(crate) fn super_v(&mut self) -> anyhow::Result<(Rect, String)> {
         let mark = self.mark();
         chord(&mut self.hp, &[KEY_LEFTMETA, KEY_V]);
         let rect = self.popover()?;
@@ -502,7 +538,7 @@ fn plain(log: &Path) -> String {
 }
 
 /// What a "the clipboard's history shows it" line says the history shows.
-fn history(line: &str) -> String {
+pub(crate) fn history(line: &str) -> String {
     let Some(start) = line.find("history=") else {
         return String::new();
     };

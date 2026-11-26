@@ -67,6 +67,7 @@ mod clipboard;
 mod contrast;
 mod creatures;
 mod cursor;
+mod data_control;
 mod day;
 mod day_sources;
 mod daylight;
