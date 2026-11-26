@@ -170,7 +170,12 @@ pub(super) struct Header {
     pub(super) rect: Rectangle,
     pub(super) icon: Option<Icon>,
     pub(super) letter: String,
+    /// Its name as drawn, cut: a phone's application's alone ("Signal").
     pub(super) name: String,
+    /// A phone's, its device after its name, cut ("Pixel 8"; #957).
+    pub(super) device: Option<String>,
+    /// Its whole name, as screen readers say it ("Signal · Pixel 8").
+    pub(super) whole: String,
     pub(super) count: usize,
     /// "3 de plus" or "Réduire", and its place in the header.
     pub(super) toggle: (String, Rectangle),
@@ -512,8 +517,22 @@ impl Lay<'_, '_> {
         );
         let room = toggle.x - GROUP_PAD.0 - SMALL_ICON - SMALL_GAP - SMALL_GAP;
         let measure = &mut *self.measure;
-        let name = kit::elide(first.note.app.trim(), room * 0.7, |t| {
+        // A phone's application: its name, then its device's after the
+        // phone's icon (#957).
+        let phone = first.note.phone.as_ref();
+        let (app_name, share) = match phone {
+            Some(phone) => (phone.app.trim(), 0.4),
+            None => (first.note.app.trim(), 0.7),
+        };
+        let name = kit::elide(app_name, room * share, |t| {
             measure(t, GROUP_NAME, MANROPE_BOLD)
+        });
+        let device = phone.map(|phone| {
+            kit::elide(
+                phone.device.trim(),
+                room * 0.35 - DEVICE_ICON - DEVICE_ICON_GAP,
+                |t| measure(t, GROUP_NAME, MANROPE),
+            )
         });
         self.blocks.push(Block::Header(Header {
             app,
@@ -521,6 +540,8 @@ impl Lay<'_, '_> {
             icon: first.note.icon.clone(),
             letter: letter_of(&first.note.app),
             name,
+            device,
+            whole: first.note.app.trim().to_owned(),
             count,
             toggle: (label, toggle),
             close,
@@ -826,7 +847,7 @@ impl Laid {
                     }
                     line
                 }
-                Block::Header(h) => format!("{} {}:", h.name, h.count),
+                Block::Header(h) => format!("{} {}:", h.whole, h.count),
                 Block::Strips(_, hidden) => format!("+{hidden}"),
                 Block::Fold(f) => format!("{} {}", f.said, if f.open { "▾" } else { "▸" }),
                 Block::Rule(_) => "|".to_owned(),

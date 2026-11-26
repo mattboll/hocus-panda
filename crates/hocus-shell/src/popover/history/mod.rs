@@ -131,6 +131,11 @@ const GROUP_PAD: (f32, f32, f32) = (8.0, 8.0, 2.0);
 const SMALL_ICON: f32 = 18.0;
 const SMALL_GAP: f32 = 8.0;
 const GROUP_NAME: f32 = 12.0;
+/// A phone's application's header: the phone's icon before its device's
+/// name, and the gaps before it and after it (#957).
+const DEVICE_ICON: f32 = 13.0;
+const DEVICE_GAP: f32 = 8.0;
+const DEVICE_ICON_GAP: f32 = 3.0;
 const TOGGLE: f32 = 22.0;
 const TOGGLE_PAD: f32 = 8.0;
 const TOGGLE_TEXT: f32 = 11.5;
@@ -1317,7 +1322,7 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
 /// "Réduire") and its ✕.
 fn group_header<'a>(header: &Header, words: Words, ui: &Ui) -> El<'a> {
     let size = header.rect.size();
-    let name = row![
+    let mut name = row![
         said(header.name.clone(), GROUP_NAME, MANROPE_BOLD, DIM.get()),
         said(
             format!(" · {}", header.count),
@@ -1325,7 +1330,25 @@ fn group_header<'a>(header: &Header, words: Words, ui: &Ui) -> El<'a> {
             MANROPE,
             QUIET.get()
         ),
-    ];
+    ]
+    .align_y(Vertical::Center);
+    // A phone's application: the phone's 13 px icon and its device (#957).
+    if let Some(device) = &header.device {
+        let icon = drawn(DEVICE_ICON, DEVICE_ICON, |f, s| {
+            crate::phone::draw::kind_icon(
+                f,
+                Point::ORIGIN,
+                s.width,
+                crate::phone::Kind::Phone,
+                FAINT.get(),
+            );
+        });
+        name = name
+            .push(gap(DEVICE_GAP))
+            .push(icon)
+            .push(gap(DEVICE_ICON_GAP))
+            .push(said(device.clone(), GROUP_NAME, MANROPE, FAINT.get()));
+    }
     let (label, toggle) = &header.toggle;
     let expand = Target::Expand(header.app);
     let close = Target::CloseApp(header.app);
@@ -1358,7 +1381,7 @@ fn group_header<'a>(header: &Header, words: Words, ui: &Ui) -> El<'a> {
             small(cross(true, FAINT.get()), true, 1.0, close),
             close,
             Role::Button,
-            words.clear_app(&header.name),
+            words.clear_app(&header.whole),
             ui.focus,
         ),
         header.close.position(),
