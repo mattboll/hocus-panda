@@ -212,7 +212,12 @@ notifications held and **Arrêter le partage** are in that sign's popover
 - **A share ends** when the user stops it from the bar, when its window
   closes, when its screen is unplugged, when the application (or
   xdg-desktop-portal) closes the session, or when its stream fails
-  (PipeWire gone).
+  (PipeWire gone); and when its screen starts mirroring another (#931),
+  as for a screen unplugged.
+- **Mirrored** (#931, windows.md §12 "Mirroring"): the chooser lists the
+  screens of the desktop, so the screen shown alone; sharing it shares
+  what both show. Notifications are held while mirrored as while sharing,
+  and summed up as "3 notifications pendant la recopie".
 - **Choices made here** (to confirm on the machine): with both kinds
   asked, the Windows tab shows first (the mockup's); the pointer is shown
   by default unless the application asked for it hidden; `Tab` switches

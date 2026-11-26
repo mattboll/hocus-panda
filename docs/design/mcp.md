@@ -87,7 +87,7 @@ is the tool's result, `isError: true`, its text saying why.
 |---|---|---|
 | `list_windows` | — | each window: `id`, `title`, `app_id`, `output`, `desktop`, `geometry` {x, y, width, height}, `focused`, `minimized`, `state` (floating, maximized, snapped, fullscreen) |
 | `list_desktops` | — | each screen: `output`, `current`, its `desktops` (`number`, `name`, `windows`); and `linked`, whether every screen switches its desktop together (#947) |
-| `list_outputs` | — | each screen: `name`, `geometry`, `work_area`, `scale` |
+| `list_outputs` | — | each screen: `name`, `geometry`, `work_area`, `scale`; a screen mirroring another (#931): `name` and `mirror_of`, the screen it shows, nothing else (`move_window` and `launch` naming it are refused) |
 | `get_settings` | `section` (`appearance`) | the settings' values now (the file's, else the default), by key (`appearance.theme`) |
 | `journal` | `limit` (50) | this agent's entries, oldest first |
 | `focus_window` | `window`, `intent` | brought forward with the keyboard; a minimised one comes back |

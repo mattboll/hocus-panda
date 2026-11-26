@@ -946,6 +946,71 @@ screen that came back, the shell having asked for none of its surfaces
 on no screen; and checks the compositor's choice with a client that asks
 for them so.
 
+### Mirroring (#931)
+
+As built (spec s931, variant C, « Ajuster»): one screen, the **shown**
+one, has its picture on every other screen on, the **mirrors**.
+
+- **A mirror is no screen for the desktop.** Mirroring starts as the
+  mirror is unplugged ("A screen unplugged" above, the clients told in
+  the same order): its windows go to the shown screen onto the same
+  desktop number, its layer surfaces close, its `wl_output` global goes;
+  it keeps lighting, in its own mode (nothing is tried). It stops as a
+  screen of the same identity plugged back: at its place, its windows
+  flying back, linked desktops showing the others' number. Nothing is
+  said. The pointer, hot corners, magnetic edges and the overview never
+  reach a mirror (it is not in the layout); the bar, the desktops and the
+  lock are the shown screen's, so on the mirror too.
+- **The picture, fitted**: the shown screen's elements drawn into a
+  picture of its size, kept between frames with damage tracking of its
+  own (only what changed is drawn again), that picture scaled with linear
+  filtering, its proportions kept, centred, black bands around it
+  (`magnifier/draw.rs`, `mirrored`, the magnifier's lens; GLES and
+  pixman alike). The laptop (2560 × 1600) on a 1920 × 1080 TV: × 0.675,
+  1728 × 1080, 96 px bands left and right. The pointer is drawn where it
+  is, at the fitted scale. A mirror draws when the shown screen draws
+  (`redraw::Commits`, its `follows`), only the damage scaled; nothing at
+  rest.
+- **Which screen is shown**: the built-in panel when it is on, else the
+  primary screen; "Montrer" (6.9) changes it.
+- **Kept per set of screens**, in the compositor's state file
+  (`screen-sets`, each set's line gains `mirror = "IDENTITY"`), not the
+  configuration. A set seen before takes its choice back in the turn its
+  screens light (no bubble); one never seen lights extended and the
+  winking panda offers « Recopier » (below).
+- **Turning it on and off**: `Super+Shift+P` and `XF86Display` (the
+  action `mirror`, "Recopier les écrans", read "Étendre les écrans" while
+  mirrored; nothing with one screen), the palette, the bubble's
+  « Recopier », the bar's « Recopie » sign's « Arrêter la recopie »
+  (bar.md), the Settings' "Deux écrans" (6.9). The shell answers
+  `mirror on|off` (`ToCompositor::Mirror`); it is told `mirror` (the
+  shown screen and the mirrors, `ToShell::Mirror`) as it starts and
+  stops, and as it connects.
+- **The mirror unplugged**: nothing moves, nothing is said; the set
+  keeps mirroring. **The shown screen going** (the lid, unplugged, turned
+  off): mirroring stops for now, the other screen takes the windows and
+  the bar; it comes back as the set does (the lid opened).
+- **Sharing and recording** (sharing.md 5.11, screenshots.md 5.10): the
+  share chooser lists the screens of the desktop, so the shown one alone;
+  a share of a mirror ends and its recording stops and saves as mirroring
+  starts, as for a screen unplugged.
+
+The new set's bubble: the winking panda, as in "Saying it", one bold
+line "**Écran externe 55 pouces branché.**" / "**55-inch screen plugged
+in.**" over a blue button « Recopier » / « Mirror » (30 px, `#5B8DEF`,
+radius 8). It stays **8 s** (it has an action, as an agent's peek); a
+click on the bubble elsewhere than the button sends it back. Not while
+locked (nothing is said, after unlocking either); an agent's peek
+replaces it and it never replaces one; the secretary's briefing open, it
+waits until it closes, then shows its 8 s. The compositor tells the
+shell `screens-new` (`ToShell::ScreensNew`: built-in or not, inches).
+
+Measured headless (`tests/mirror.rs`, `tests/mirror_bar.rs`): the TV's
+bands black and the laptop's pixels where the fit puts them, within a
+pixel; the pointer at (1024, 640) drawn at (960, 540); clients told of
+one `wl_output`; at rest neither screen draws, and a window's commit
+draws each once.
+
 ### Screens of different scales
 
 A screen at 1 beside one at 2 (or 1.25 … 1.75), side by side (#419; the

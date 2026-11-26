@@ -3447,6 +3447,19 @@ the machine).
   reduced motion and on the CPU, which draws no motion), then draws only
   when what it shows changes. A tile coming or going resizes its surface;
   the agents follow.
+- **Mirroring's tile** (#931, windows.md §12 "Mirroring"): while the
+  screens are mirrored, a tile of its own, first (above the others in the
+  mini form, before them in the full one): 44 × 40, radius 10,
+  `rgba(108,194,135,0.16)` in a 1 px `rgba(108,194,135,0.6)` ring, a
+  two-screens icon in `#6CC287` over "Recopie" / "Mirroring" (Manrope
+  bold 9 px, `#BFF0CF`). It shows while the compositor says `mirror`, no
+  longer: it does not linger. Its popover's line comes first: "Recopie",
+  "Écran du portable → écran externe 55 pouces" in green; the
+  notifications held ("2 notifications retenues", none said at none);
+  **Arrêter la recopie** (`#F2945B` on `rgba(242,148,91,0.14)`, its ring
+  at 0.45), which answers `mirror off`. Notifications are held while
+  mirrored as while sharing (sharing.md), summed up at the end as "3
+  notifications pendant la recopie" / "3 notifications while mirroring".
 - **The recording's tile** (5.12b, issue #561; 5.10's item, its drawing
   in `in_use/draw.rs`): 36 × 42 (the sign's 48 less its 6 px sides; 6 px
   in above its 10 px dot, 4 px over its time's 16 px line, 6 px under

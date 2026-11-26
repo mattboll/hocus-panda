@@ -717,7 +717,8 @@ its connector, size and density), its rows "Utiliser cet écran",
 ("Automatique (100 %)", 100 to 200 %; "Comme 2048 × 1280", its density,
 the bar's mini form under 1796 logical), "Fréquence variable (VRR)"
 (inert when not offered), "Rotation" ("Plus tard", inert); TOUS LES
-ÉCRANS with "Écran principal" (Automatique or a screen) and "Recopie";
+ÉCRANS with "Écran principal" (Automatique or a screen) and, with two
+screens on or more, "Deux écrans" (mirroring, below);
 ÉCLAIRAGE NOCTURNE (#436): "Éclairage nocturne" (a switch, "Des couleurs
 plus chaudes le soir, moins de lumière bleue."), "À partir de" (18:00 to
 23:30, every half hour), "Jusqu'à" (05:00 to 09:30) and "Température"
@@ -853,13 +854,33 @@ and the page says so.
 **The search** finds the page's rows by their words and keys
 ("Disposition des écrans", "Identifier les écrans", "Utiliser cet écran",
 "Résolution", "Fréquence", "Échelle" by « hidpi », "Fréquence variable
-(VRR)", "Rotation", "Écran principal", "Recopie" by « miroir »,
+(VRR)", "Rotation", "Écran principal", "Deux écrans" by « miroir », « recopier », « projecteur »,
 "Éclairage nocturne"); they are model settings whose `Places::Page` say
 their keys (`outputs.NAME.scale`) but are not slots of the file.
 
-Not built here (to confirm): **mirroring** (no `mirror` key yet: the
-compositor does not draw one screen's picture on another; the row is
-"Plus tard", inert); a drop that would split three screens or more
+**Mirroring** (#931, windows.md §12 "Mirroring"): the row **"Deux
+écrans"** ("Plusieurs écrans" with three or more), a segmented control
+"Étendre | Recopier", its line "Chaque écran a ses fenêtres.", mirrored
+"L’écran externe 55 pouces montre l’écran du portable."; not shown with
+one screen on. Under it while mirrored, **"Montrer"**: a menu of the
+screens on, the shown one ticked, which swaps it at once. "Écran
+principal" is inert while mirrored, its value the shown screen, its line
+"Celui qui est montré."; a mirror's "Échelle" and VRR are inert, its
+scale's line "Celle de l’écran du portable.". The drawing shows one box
+at the shown screen's size, "1 · 2", "Les deux écrans", "Même image",
+the bar's strip, the other screen an outline 10 px right and 8 px up
+behind it; nothing drags, and under it "Chaque écran garde sa place pour
+la suite.". The choice is the compositor's, kept with the set of screens
+in its state file, not config.toml: the page asks over its line, `mirror
+IDENTITY` or `extend`, and the screens' JSON says `"mirrors": "eDP-1"`
+for a mirror and the set's `"shown"`. Toasted "Recopie : l’écran du
+portable sur l’écran externe 55 pouces" or "Recopie arrêtée", with
+"Annuler" and `Ctrl+Z`.
+
+"Identifier" mirrored says "1 · 2", "Les deux écrans · Même image" on
+the screen shown, so on both.
+
+Not built here (to confirm): a drop that would split three screens or more
 (only two are drawn against each other); the mockup's strip of the day
 under the night light's rows (the hours it warms drawn on a sky), left
 out until the maintainer asks for it.

@@ -95,8 +95,9 @@ Locks the session now, as `Super+L` does; answered once it is locked.
 ```
 
 The screens (`outputs`: each one's modes, place, scale and settings,
-whether it is on, plugged and primary) and the sets of screens the
-desktop knows, one JSON object.
+whether it is on, plugged and primary; a mirror's `mirrors`, the screen
+it shows) and the sets of screens the desktop knows, and `shown`, the
+screen shown while they are mirrored (else `null`), one JSON object.
 
 ```control
 > msg outputs
