@@ -53,6 +53,7 @@ pub mod kit;
 pub mod meeting;
 pub mod music;
 pub mod notify_levels;
+pub mod phone;
 pub mod session;
 pub mod setup;
 pub mod sound;
@@ -1296,7 +1297,8 @@ fn acts(bar: String, item: Item, rect: Rectangle) -> Option<Effect> {
         | Item::NotifyLevels
         | Item::Music
         | Item::Journal
-        | Item::Weather(_) => None,
+        | Item::Weather(_)
+        | Item::Phone(_) => None,
     }
 }
 

@@ -76,11 +76,12 @@ const DOT_RING: Ink = Ink::Dark(Color::from_rgba8(14, 17, 28, 0.9));
 
 /// The connections shown in the full form, from the top: the Wi-Fi's
 /// while NetworkManager is there, Bluetooth's while BlueZ has an adapter,
-/// one a removable drive mounted (#898), the keyboard layout's with two
-/// layouts or more.
+/// one a paired phone or tablet (#957), one a removable drive mounted
+/// (#898), the keyboard layout's with two layouts or more.
 pub fn shown(
     network: &Network,
     bluetooth: &bluetooth::Bluetooth,
+    phones: &[crate::phone::Row],
     drives: &[crate::removable::Drive],
     layouts: &crate::layouts::Layouts,
 ) -> Vec<Item> {
@@ -91,6 +92,7 @@ pub fn shown(
     if bluetooth.row() != Row::Hidden {
         items.push(Item::Bluetooth);
     }
+    items.extend(phones.iter().map(|p| Item::Phone(p.key)));
     items.extend(drives.iter().map(|d| Item::Drive(d.serial)));
     if layouts.shown().is_some() {
         items.push(Item::Keyboard);
@@ -99,7 +101,8 @@ pub fn shown(
 }
 
 /// Those of `shown` this surface draws in `form`: in the mini form the
-/// layout's button is the levels', and the drives show none (#898).
+/// layout's button is the levels', and the drives show none (#898); a
+/// phone shows its button (#957).
 fn shown_in(shown: &[Item], form: Form) -> impl DoubleEndedIterator<Item = Item> + '_ {
     shown
         .iter()
@@ -199,6 +202,7 @@ fn rows_now() -> (usize, usize) {
     let shown = shown(
         &super::snapshot(),
         &bluetooth::snapshot(),
+        &crate::phone::rows(),
         &crate::removable::mounted(),
         &crate::layouts::snapshot(),
     );
@@ -405,6 +409,8 @@ pub struct State {
     keyboard: crate::layouts::draw::RowState,
     /// The drives' rows, in their order.
     drives: Vec<crate::removable::draw::RowState>,
+    /// The phones' rows, in their order (#957).
+    phones: Vec<crate::phone::draw::RowState>,
     /// The rows shown in the full form, from the top.
     shown: Vec<Item>,
     pointer: Option<Point>,
@@ -426,10 +432,12 @@ impl<Message> canvas::Program<Message> for Connections {
             iced::Event::Window(window::Event::RedrawRequested(_)) => {
                 let layouts = crate::layouts::snapshot();
                 let drives = crate::removable::mounted();
+                let phones = crate::phone::rows();
                 self.refresh(
                     state,
                     &super::snapshot(),
                     &bluetooth::snapshot(),
+                    &phones,
                     &drives,
                     &layouts,
                 );
@@ -548,6 +556,17 @@ impl<Message> canvas::Program<Message> for Connections {
                         (Item::Drive(serial), Form::Full) => {
                             if let Some(row) = state.drives.iter().find(|d| d.serial == serial) {
                                 crate::removable::draw::full(f, rect, row, alpha);
+                            }
+                        }
+                        (Item::Phone(key), Form::Full) => {
+                            if let Some(row) = state.phones.iter().find(|p| p.key == key) {
+                                let dropping = crate::phone::dropping() == Some(key);
+                                crate::phone::draw::full(f, rect, row, dropping, alpha);
+                            }
+                        }
+                        (Item::Phone(key), Form::Mini) => {
+                            if let Some(row) = state.phones.iter().find(|p| p.key == key) {
+                                crate::phone::draw::mini(f, rect, row, alpha);
                             }
                         }
                         // The clock's, never on this surface.
@@ -696,6 +715,7 @@ impl Connections {
         state: &mut State,
         network: &Network,
         bt: &bluetooth::Bluetooth,
+        phones: &[crate::phone::Row],
         drives: &[crate::removable::Drive],
         layouts: &crate::layouts::Layouts,
     ) {
@@ -723,7 +743,11 @@ impl Connections {
         for (kept, drive) in state.drives.iter_mut().zip(drives) {
             kept.refresh(self.words.lang, drive, row);
         }
-        state.shown = shown(network, bt, drives, layouts);
+        state.phones.resize_with(phones.len(), Default::default);
+        for (kept, phone) in state.phones.iter_mut().zip(phones) {
+            kept.refresh(self.words.lang, phone.key, &phone.device, row);
+        }
+        state.shown = shown(network, bt, phones, drives, layouts);
         let form = self.forms.last().map_or(Form::Full, |(form, _)| *form);
         if state
             .hover
@@ -1051,6 +1075,7 @@ pub fn node(
             lang,
             crate::removable::said_name(&drive(serial)?, lang),
         ),
+        Item::Phone(key) => crate::phone::said_row(&crate::phone::row(key)?.device, lang),
         _ => return None,
     };
     Some(Node::new(crate::ui::items::key(item), Role::Button, name).act(Act::Click))
@@ -1136,6 +1161,7 @@ mod tests {
         let all = shown(
             &Network::default(),
             &bt,
+            &[],
             &[drive(2), drive(5)],
             &crate::layouts::Layouts::default(),
         );

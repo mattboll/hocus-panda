@@ -70,6 +70,7 @@ mod notifications;
 mod outputs;
 mod pandas;
 mod paste;
+mod phone;
 mod pointer;
 mod popover;
 mod project;
@@ -176,6 +177,7 @@ fn main() -> ExitCode {
     network::start();
     bluetooth::start();
     removable::start();
+    phone::start();
     launcher::start();
     emoji::start();
     actions::start();
@@ -1759,6 +1761,16 @@ fn levels_alone() -> impl iced::futures::Stream<Item = Message> {
             }
             !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
         });
+        let mut out = output.clone();
+        phone::on_change(move |change| {
+            for key in phone::keys() {
+                popover::changed(popover::Item::Phone(key));
+            }
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
+        });
         drop(output);
         std::future::pending::<()>().await;
     })
@@ -1872,6 +1884,23 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
         // space changing draws that surface alone.
         let waker = sender.clone();
         removable::on_change(move |change| {
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            if !change.row {
+                return true;
+            }
+            let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
+            waker.unbounded_send(wake.line()).is_ok()
+        });
+        // A phone paired or forgotten comes or goes as a row; its battery,
+        // its reach or a transfer draws that surface alone, and its
+        // popover when it shows (#957).
+        let waker = sender.clone();
+        phone::on_change(move |change| {
+            for key in phone::keys() {
+                popover::changed(popover::Item::Phone(key));
+            }
             if change.shown {
                 network::draw::rows_changed();
             }

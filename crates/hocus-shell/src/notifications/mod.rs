@@ -44,6 +44,7 @@ mod server;
 pub mod stack;
 
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     sync::{Condvar, Mutex, PoisonError, mpsc},
     time::{Duration, Instant},
@@ -785,6 +786,7 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             size,
             margin,
             region: taken,
+            keyboard,
         } => {
             let pointer = taken.is_some();
             vec![
@@ -796,7 +798,11 @@ fn carry_out(effect: Effect) -> Vec<Message> {
                         anchor: Anchor::Right | Anchor::Top,
                         exclusive_zone: Some(0),
                         margin: Some(crate::layer::margin(margin)),
-                        keyboard_interactivity: KeyboardInteractivity::None,
+                        keyboard_interactivity: if keyboard {
+                            KeyboardInteractivity::OnDemand
+                        } else {
+                            KeyboardInteractivity::None
+                        },
                         output_option: if screen == crate::ALONE {
                             OutputOption::Active
                         } else {
@@ -846,6 +852,29 @@ fn carry_out(effect: Effect) -> Vec<Message> {
             Vec::new()
         }
         Effect::Signal(server::Signal::Closed { id, .. }) if reminder_of(id).is_some() => {
+            Vec::new()
+        }
+        // A file from a phone (#957): open it, or its folder.
+        Effect::Signal(server::Signal::Action { id, key }) if phone_of(id).is_some() => {
+            crate::phone::from_bubble(&key);
+            Vec::new()
+        }
+        Effect::Signal(server::Signal::Closed { id, .. }) if phone_of(id).is_some() => Vec::new(),
+        // A phone's own closed by the user (its ✕, its line's, its
+        // application's, "Tout effacer"): dismissed on the phone too, when
+        // the phone lets it go (#957); not when its time is up.
+        Effect::Signal(server::Signal::Closed { id, reason }) if phone_note(id, true).is_some() => {
+            if let Some(kept) = phone_note(id, false)
+                && reason == 2
+            {
+                crate::phone::ask(crate::phone::Ask::Dismiss {
+                    device: kept.phone.device,
+                    app: kept.phone.app,
+                    title: kept.title,
+                    text: kept.text,
+                });
+            }
+            server::signal(server::Signal::Closed { id, reason });
             Vec::new()
         }
         // A removable drive's (#898): open it, eject it, try again.
@@ -1009,6 +1038,7 @@ pub fn keep_capture(shot: &crate::capture::Shot, icon: Option<crate::levels::ico
         number: 0,
         transient: false,
         ancestry: Vec::new(),
+        phone: None,
     };
     tracing::debug!(
         capture = shot.id,
@@ -1089,6 +1119,7 @@ fn reminder_note(
         number: 0,
         transient: false,
         ancestry: Vec::new(),
+        phone: None,
     }
 }
 
@@ -1107,6 +1138,60 @@ pub fn themed_icon(name: &str) -> Option<crate::levels::icons::Icon> {
 /// The ids of the removable drives' bubbles (#898): among the desktop's
 /// own, one a drive, each in place of the one before.
 const DRIVES_FROM: u32 = DESKTOPS_OWN_FROM | 0x0010_0000;
+
+/// The ids of the phone's own bubbles (a file received, #957).
+const PHONES_FROM: u32 = DESKTOPS_OWN_FROM | 0x0020_0000;
+
+/// The phone's bubble `n`'s id.
+pub fn phone_id(n: u32) -> u32 {
+    PHONES_FROM | (n & 0xFFFF)
+}
+
+/// The phone's bubble whose id is `id`, if it is one.
+pub fn phone_of(id: u32) -> Option<u32> {
+    (id & 0xFFFF_0000 == PHONES_FROM).then_some(id & 0xFFFF)
+}
+
+/// A phone's notification served and not closed yet (#957): what finds
+/// it again on the phone.
+#[derive(Debug, Clone)]
+pub struct PhoneKept {
+    pub phone: note::PhoneNote,
+    pub title: String,
+    pub text: String,
+}
+
+static PHONE_NOTES: Mutex<BTreeMap<u32, PhoneKept>> = Mutex::new(BTreeMap::new());
+
+/// A phone's notification `id` served: kept until it closes.
+pub fn phone_served(id: u32, kept: PhoneKept) {
+    PHONE_NOTES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(id, kept);
+}
+
+/// The phone's notification `id`, kept (`peek`) or taken out.
+pub fn phone_note(id: u32, peek: bool) -> Option<PhoneKept> {
+    let mut kept = PHONE_NOTES.lock().unwrap_or_else(PoisonError::into_inner);
+    if peek {
+        kept.get(&id).cloned()
+    } else {
+        kept.remove(&id)
+    }
+}
+
+/// A phone's notification `id` answered in place (#957): its sender
+/// hears the text (`NotificationReplied`); its bubble `serial`, if it is
+/// one's, closes, and the phone keeps the notification.
+pub fn reply(id: u32, text: String, bubble: Option<u64>) {
+    tracing::debug!(id, "a phone's notification answered");
+    server::signal(server::Signal::Replied { id, text });
+    if let Some(serial) = bubble {
+        phone_note(id, false);
+        input(Input::Dismiss(serial));
+    }
+}
 
 /// Drive `serial`'s bubbles' id.
 pub fn drive_id(serial: u32) -> u32 {
@@ -1157,6 +1242,7 @@ pub fn fell_back(which: hocus_link::Supervised, program: &std::path::Path) {
         number: 0,
         transient: false,
         ancestry: Vec::new(),
+        phone: None,
     })));
 }
 

@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    collections::HashMap,
     rc::Rc,
     sync::{Mutex, PoisonError},
 };
@@ -40,12 +41,49 @@ pub enum Msg {
     Action(String),
     /// Its "⋯", or a right click on it: its application's levels (#899).
     More,
+    /// A phone's reply field pressed: it takes the keyboard (#957).
+    Field,
+    /// The field took a key.
+    Took(crate::field::Took),
+    /// `Enter`, or the send button: the reply goes.
+    Send,
+    /// `Esc`: the field lets the keyboard go.
+    LetGo,
     /// What it shows changed under the view.
     Stale,
 }
 
 /// The bubbles whose card is under the pointer: lit.
 static LIT: Mutex<Vec<window::Id>> = Mutex::new(Vec::new());
+
+/// A phone's reply field (#957), by its bubble's serial: what is typed,
+/// and whether it holds the keyboard.
+struct Reply {
+    entry: crate::field::Entry,
+    focused: bool,
+}
+
+static REPLIES: Mutex<Option<HashMap<u64, Reply>>> = Mutex::new(None);
+
+fn replies<T>(with: impl FnOnce(&mut HashMap<u64, Reply>) -> T) -> T {
+    let mut replies = REPLIES.lock().unwrap_or_else(PoisonError::into_inner);
+    with(replies.get_or_insert_with(HashMap::new))
+}
+
+/// The reply field of bubble `serial`, with `with`.
+fn reply_entry(serial: u64, with: &mut dyn FnMut(&mut crate::field::Entry)) {
+    replies(|r| {
+        let reply = r.entry(serial).or_insert_with(|| Reply {
+            entry: crate::field::Entry::new(crate::field::Kind::Line, 2000),
+            focused: false,
+        });
+        with(&mut reply.entry);
+    });
+}
+
+fn reply_focused(serial: u64) -> bool {
+    replies(|r| r.get(&serial).is_some_and(|r| r.focused))
+}
 
 /// Whether bubble `id`'s card is under the pointer.
 pub fn lit(id: window::Id) -> bool {
@@ -68,6 +106,7 @@ pub fn view<'a>(id: window::Id, glass: bool, card: bool) -> Element<'a, Message>
         Msg::Stale,
     )
     .own_by(move || wake(id), move || shown(id).is_some())
+    .keys(move |pressed| keys(id, pressed))
     .rebuild(move || build(id, card, &rebuilt))
     .stale_when(move || shown(id).map(|(_, laid)| laid) != *stale.borrow())
     .on(canvas(draw::Back { id, glass, card })
@@ -105,7 +144,71 @@ fn handle(id: window::Id, card: bool, message: Msg) {
         Msg::Close => super::input(Input::Dismiss(serial)),
         Msg::Action(key) => super::input(Input::Action { serial, key }),
         Msg::More => more(id, card),
+        Msg::Field => {
+            replies(|r| {
+                if let Some(reply) = r.get_mut(&serial) {
+                    reply.focused = true;
+                }
+            });
+            super::input(Input::Typing { serial, on: true });
+            wake(id);
+        }
+        Msg::Took(took) => {
+            if took.draws() {
+                wake(id);
+            }
+        }
+        Msg::Send => {
+            let text = replies(|r| {
+                r.get_mut(&serial)
+                    .map(|reply| reply.entry.take())
+                    .unwrap_or_default()
+            });
+            if text.trim().is_empty() {
+                return;
+            }
+            let note = super::with(|c| c.stack.bubble(id).map(|b| b.note.id));
+            if let Some(note) = note {
+                replies(|r| r.remove(&serial));
+                super::reply(note, text, Some(serial));
+            }
+        }
+        Msg::LetGo => {
+            replies(|r| {
+                if let Some(reply) = r.get_mut(&serial) {
+                    reply.focused = false;
+                }
+            });
+            super::input(Input::Typing { serial, on: false });
+            // The keyboard back to the windows; a click takes it again.
+            crate::popover::send(vec![
+                crate::popover::Effect::Keyboard(
+                    id,
+                    iced_exwlshell::reexport::KeyboardInteractivity::None,
+                ),
+                crate::popover::Effect::Keyboard(
+                    id,
+                    iced_exwlshell::reexport::KeyboardInteractivity::OnDemand,
+                ),
+            ]);
+            wake(id);
+        }
         Msg::Stale => {}
+    }
+}
+
+/// The keys bubble `id` takes before its field: `Enter` sends, `Esc`
+/// lets the keyboard go.
+fn keys(id: window::Id, pressed: &crate::popover::Pressed) -> Option<Msg> {
+    use iced::keyboard::{Key, key::Named};
+    let (serial, _) = shown(id)?;
+    if !reply_focused(serial) {
+        return None;
+    }
+    match pressed.key {
+        Key::Named(Named::Enter) => Some(Msg::Send),
+        Key::Named(Named::Escape) => Some(Msg::LetGo),
+        _ => None,
     }
 }
 
@@ -208,6 +311,77 @@ fn build<'a>(id: window::Id, card: bool, seen: &RefCell<Option<Laid>>) -> El<'a>
         parts.push(at(
             control(pressed, format!("bubble:Action({key})"), Role::Button, name),
             rect.position(),
+        ));
+    }
+    // A phone's reply in place (#957): its field and its send button.
+    if let (Some(row), Some(phone)) = (laid.reply, note.phone.as_ref()) {
+        let serial = super::with(|c| c.stack.bubble(id).map(|b| b.serial)).unwrap_or_default();
+        let lang = crate::clock::time::Lang::of_messages();
+        let placeholder = phone
+            .reply
+            .clone()
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| hocus_words::shell::phone::REPLY.get(lang).to_owned());
+        let focused = reply_focused(serial);
+        reply_entry(serial, &mut |_| {});
+        let field = crate::ui::field::Field {
+            with: Box::new(move |with: &mut dyn FnMut(&mut crate::field::Entry)| {
+                reply_entry(serial, with);
+            }),
+            style: crate::field::view::Style::one(12.5, crate::levels::draw::MANROPE),
+            placeholder,
+            look: crate::field::view::Look::of(
+                crate::levels::draw::TEXT.get(),
+                crate::levels::draw::FAINT.get(),
+            ),
+            focused,
+            left: 10.0,
+            right: 10.0,
+            on_focus: Msg::Field,
+            on_took: Msg::Took,
+        }
+        .view(draw::REPLY);
+        let width = row.width - draw::REPLY - 6.0;
+        let boxed = iced::widget::container(field).width(width).style(move |_| {
+            iced::widget::container::Style {
+                background: Some(draw::REPLY_FILL.get().into()),
+                border: iced::Border {
+                    color: if focused {
+                        draw::REPLY_RIM_FOCUSED.get()
+                    } else {
+                        draw::REPLY_RIM.get()
+                    },
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..iced::widget::container::Style::default()
+            }
+        });
+        parts.push(at(
+            control(
+                boxed,
+                "bubble:Reply",
+                Role::TextField,
+                hocus_words::shell::phone::REPLY_LINE.get(lang),
+            )
+            .focus(focused, Msg::Field, 8.0)
+            .typing(),
+            row.position(),
+        ));
+        let send = button(drawn_lit(draw::REPLY, draw::REPLY, 0.0, |f, s, lit| {
+            draw::draw_send(f, s, lit);
+        }))
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Send);
+        parts.push(at(
+            control(
+                send,
+                "bubble:Send",
+                Role::Button,
+                hocus_words::shell::phone::SEND_REPLY.get(lang),
+            ),
+            Point::new(row.x + row.width - draw::REPLY, row.y),
         ));
     }
     let size = laid.size;

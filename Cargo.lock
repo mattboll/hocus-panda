@@ -2447,6 +2447,7 @@ dependencies = [
  "hocus-network",
  "hocus-pandas",
  "hocus-panic",
+ "hocus-phone",
  "hocus-removable",
  "hocus-sound",
  "hocus-voice",

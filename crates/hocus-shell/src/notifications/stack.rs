@@ -91,6 +91,9 @@ pub enum Input {
     Bars(Vec<(String, Form)>),
     /// The pointer came onto bubble `serial` (`on`), or left it.
     Hover { serial: u64, on: bool },
+    /// Bubble `serial`'s reply field holds the keyboard (`on`), or lets it
+    /// go (#957): the countdowns stop meanwhile, wherever the pointer is.
+    Typing { serial: u64, on: bool },
     /// A click on the card of bubble `serial`.
     Card(u64),
     /// Its ✕.
@@ -158,6 +161,9 @@ pub enum Effect {
         size: (u32, u32),
         margin: (i32, i32, i32, i32),
         region: Option<Rectangle>,
+        /// It takes the keyboard when clicked: a phone's reply field
+        /// (#957).
+        keyboard: bool,
     },
     /// Surface `id` to this size and these margins.
     Place {
@@ -353,6 +359,8 @@ pub struct Stack {
     /// over it.
     restored: bool,
     hovered: BTreeSet<u64>,
+    /// The bubble whose reply field holds the keyboard (#957).
+    typing: Option<u64>,
     /// The focused window's screen, as last told.
     focus: Option<String>,
     /// The bars' screens and forms.
@@ -403,6 +411,7 @@ impl Stack {
             locked: false,
             restored: false,
             hovered: BTreeSet::new(),
+            typing: None,
             focus: None,
             bars: Vec::new(),
             card,
@@ -454,7 +463,7 @@ impl Stack {
 
     /// Whether the countdowns are paused (a bubble is hovered).
     pub fn paused(&self) -> bool {
-        !self.hovered.is_empty()
+        !self.hovered.is_empty() || self.typing.is_some()
     }
 
     /// When [`Self::tick`] has something to do.
@@ -549,6 +558,17 @@ impl Stack {
                     _ => {
                         self.hovered.remove(&serial);
                     }
+                }
+                if before != self.paused() {
+                    self.set_paused(self.paused(), now, effects);
+                }
+            }
+            Input::Typing { serial, on } => {
+                let before = self.paused();
+                if on && self.showing(serial).is_some() {
+                    self.typing = Some(serial);
+                } else if self.typing == Some(serial) {
+                    self.typing = None;
                 }
                 if before != self.paused() {
                     self.set_paused(self.paused(), now, effects);
@@ -973,7 +993,7 @@ impl Stack {
                 self.keep(note, level, replaces, effects);
                 return;
             }
-            tracing::debug!(id, "a bubble updated in place");
+            tracing::debug!(id, title = note.summary, "a bubble updated in place");
             let paused = !self.hovered.is_empty();
             bubble.laid = draw::lay(&note);
             bubble.phase = Phase::Shown(Countdown::of(note.timeout, paused, now));
@@ -1179,6 +1199,9 @@ impl Stack {
     fn leave_silently(&mut self, serial: u64, now: Instant, effects: &mut Vec<Effect>) {
         let was = self.paused();
         self.hovered.remove(&serial);
+        if self.typing == Some(serial) {
+            self.typing = None;
+        }
         if let Some(bubble) = self.bubbles.iter_mut().find(|b| b.serial == serial) {
             bubble.phase = Phase::Leaving(now + BUBBLE_OUT);
             effects.push(Effect::Closing(bubble.namespace()));
@@ -1299,6 +1322,7 @@ impl Stack {
                     size,
                     margin,
                     region: Some(region),
+                    keyboard: bubble.laid.reply.is_some(),
                 });
             } else if bubble.placed != (size, margin) {
                 effects.push(Effect::Place {
@@ -1356,6 +1380,7 @@ impl Stack {
                     size,
                     margin,
                     region: None,
+                    keyboard: false,
                 });
                 self.chip = Some((
                     Extra {
@@ -1410,6 +1435,7 @@ pub fn summary(held: &[String], mirrored: bool, at: i64) -> Option<Note> {
         sound: None,
         transient: false,
         ancestry: Vec::new(),
+        phone: None,
         number: 0,
     })
 }
@@ -1513,6 +1539,7 @@ mod tests {
             number: 0,
             transient: false,
             ancestry: Vec::new(),
+            phone: None,
         }
     }
 

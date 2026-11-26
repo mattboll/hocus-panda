@@ -129,6 +129,10 @@ pub enum Item {
     Drive(u32),
     /// Its ⏏: a click, or `Enter`, ejects it.
     Eject(u32),
+    /// A paired phone's or tablet's row in the connections (#957), by its
+    /// number ([`crate::phone::Row::key`]): its popover, by a click; the
+    /// mini form's button, by a hover or a click.
+    Phone(u32),
 }
 
 impl Item {
@@ -243,6 +247,7 @@ impl Item {
             Self::Sound => sound::layout(opening).height(),
             Self::Wifi => wifi::height(),
             Self::Bluetooth => bluetooth::height(),
+            Self::Phone(key) => phone::height(key),
             Self::Brightness => brightness::height(),
             Self::Battery => battery::height(),
             Self::Desktop { row, index } => desktop::height(bar, row, index),
@@ -304,6 +309,7 @@ impl Item {
             Self::Sound => {}
             Self::Wifi => wifi::opening(),
             Self::Bluetooth => bluetooth::opening(),
+            Self::Phone(key) => phone::opening(key),
             Self::Brightness => brightness::opening(),
             Self::Battery => battery::opening(),
             Self::Desktop { .. } | Self::WindowsMore => desktop::opening(),
@@ -386,6 +392,7 @@ impl Item {
             Self::DayChoose => crate::setup::closing(),
             Self::Wifi => wifi::closing(),
             Self::Bluetooth => bluetooth::closing(),
+            Self::Phone(key) => phone::closing(key),
             Self::Notifications => crate::notifications::history_open(false),
             Self::User => session::closing(),
             Self::Camera | Self::Microphone => camera::closing(),
@@ -401,7 +408,10 @@ impl Item {
             (Self::Sound | Self::Brightness | Self::Battery, _) | (Self::Keyboard, Form::Mini) => {
                 LEVELS_NAMESPACE
             }
-            (Self::Wifi | Self::Bluetooth | Self::Drive(_) | Self::Eject(_), _)
+            (
+                Self::Wifi | Self::Bluetooth | Self::Drive(_) | Self::Eject(_) | Self::Phone(_),
+                _,
+            )
             | (Self::Keyboard, Form::Full) => CONNECTIONS_NAMESPACE,
             (Self::Desktop { .. }, _) => DESKTOPS_NAMESPACE,
             (

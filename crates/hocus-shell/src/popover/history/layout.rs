@@ -843,6 +843,7 @@ mod tests {
             sound: None,
             transient: false,
             ancestry: Vec::new(),
+            phone: None,
         }
     }
 

@@ -305,6 +305,7 @@ fn note(
         number: 0,
         transient: false,
         ancestry: Vec::new(),
+        phone: None,
     }
 }
 
@@ -339,10 +340,9 @@ fn amount(lang: Lang, bytes: u64, rounding: Rounding) -> (String, Unit) {
     } else {
         (bytes / 1e6, Unit::Mega)
     };
-    let tenths = match (unit, rounding) {
-        (Unit::Mega, _) => false,
-        (_, Rounding::Whole) => value < 9.95,
-        (_, Rounding::Tenths) => value < 99.95,
+    let tenths = match rounding {
+        Rounding::Whole => value < 9.95,
+        Rounding::Tenths => value < 99.95,
     };
     let text = if tenths {
         let text = format!("{value:.1}");
@@ -373,20 +373,21 @@ pub fn size(lang: Lang, bytes: u64, rounding: Rounding) -> String {
 /// "14,2 Go libres sur 32": the size's unit said once when it is the free
 /// space's.
 pub fn free_of(lang: Lang, free: u64, total: u64) -> String {
-    let (free_number, free_unit) = amount(lang, free, Rounding::Tenths);
+    let (free, size) = amounts_of(lang, free, total);
+    txt::free_of(lang, txt::FreeOf { free, size })
+}
+
+/// A part of a whole, as "14,2 Go" of "32": the whole's unit said only
+/// when it is not the part's (a drive's free space, a transfer's bytes).
+pub fn amounts_of(lang: Lang, part: u64, total: u64) -> (String, String) {
+    let (part_number, part_unit) = amount(lang, part, Rounding::Tenths);
     let (total_number, total_unit) = amount(lang, total, Rounding::Whole);
-    let total = if total_unit == free_unit {
+    let total = if total_unit == part_unit {
         total_number
     } else {
         with_unit(lang, &total_number, total_unit)
     };
-    txt::free_of(
-        lang,
-        txt::FreeOf {
-            free: &with_unit(lang, &free_number, free_unit),
-            size: &total,
-        },
-    )
+    (with_unit(lang, &part_number, part_unit), total)
 }
 
 /// The bar's row's free space: "14 Go".

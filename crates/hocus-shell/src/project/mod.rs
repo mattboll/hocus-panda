@@ -588,7 +588,8 @@ impl Projects {
                             form.fault = None;
                             form.follow();
                         }
-                        Chosen::Cancelled => form.other = Other::Button,
+                        // A folder is one path: never several.
+                        Chosen::Cancelled | Chosen::Paths(_) => form.other = Other::Button,
                         Chosen::NoPortal => {
                             form.other = Other::Field;
                             form.folder = Folder::Typed;

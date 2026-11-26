@@ -67,6 +67,38 @@ pub struct Note {
     /// notification whose application has no window is its sender's
     /// window's. In memory only.
     pub ancestry: Vec<u32>,
+    /// A phone's notification, as KDE Connect relays it (#957): its
+    /// device, its application there, whether it can be answered in
+    /// place. In memory only.
+    pub phone: Option<PhoneNote>,
+}
+
+/// What a phone's notification says of itself, besides what any says:
+/// KDE Connect's hints (`x-kde-origin-name`, `x-kdeconnect-source-device`,
+/// `x-kde-display-appname`) and its `inline-reply` action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhoneNote {
+    /// The device, as it calls itself ("Pixel 8").
+    pub device: String,
+    /// Its application on the phone ("Signal").
+    pub app: String,
+    /// It can be answered in place: the field's placeholder (KDE
+    /// Connect's, in its language), empty for the shell's own.
+    pub reply: Option<String>,
+}
+
+impl PhoneNote {
+    /// The id its application goes by for its level (#899): the phone's
+    /// application on that device.
+    pub fn app_id(&self) -> String {
+        format!("kdeconnect:{}:{}", self.device, self.app)
+    }
+
+    /// Its application as the bubbles and the bell name it: "Signal ·
+    /// Pixel 8".
+    pub fn named(&self) -> String {
+        format!("{} · {}", self.app, self.device)
+    }
 }
 
 impl Note {
