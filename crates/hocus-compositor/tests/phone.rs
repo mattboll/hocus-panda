@@ -9,8 +9,10 @@
 //! daemon gone and back, the mini form, the screen reader, at rest), the
 //! popover (ring, send a file through the portal's chooser, the clipboard,
 //! forget, a transfer's progress), the phone's notifications (its
-//! application, its level, ✕ on the phone, removed on the phone, a file
-//! received, a pairing), and the daemon never started by the shell.
+//! application, its level, its reply from the bubble and from the bell,
+//! ✕ on the phone, removed on the phone, a file received, a pairing), and
+//! the daemon never started by the shell. A file dropped on a row is not
+//! built yet (bar.md, "The phone").
 //!
 //! With `HOCUS_KIT_SHOTS=DIR`, the rows, the popover and the bubbles are
 //! saved there as PNGs.
@@ -309,6 +311,10 @@ impl Bed {
 
     /// A click on the popover's control `id`.
     fn click_id(&mut self, shows: &serde_json::Value, id: &str) -> anyhow::Result<()> {
+        let drawn = self
+            .hp
+            .dispatch_until(WAIT, |hp| !common::drawn_popovers(hp).is_empty())?;
+        anyhow::ensure!(drawn, "no popover drawn");
         let pop = self.popover().context("no popover")?;
         let at = shows[id]["at"]
             .as_array()
@@ -1173,5 +1179,83 @@ fn a_reply_typed_in_the_bubble_goes_to_the_phone() -> anyhow::Result<()> {
         .hp
         .dispatch_until(WAIT, |hp| hp.bubble_surfaces().is_empty())?;
     anyhow::ensure!(closed, "the bubble stayed");
+    Ok(())
+}
+
+/// The history's controls in the last dump that has `text`, after `from`:
+/// id → its rect on the popover.
+fn history_dump(log: &Path, from: usize, text: &str) -> Option<serde_json::Value> {
+    let said = common::logged(log);
+    let line = said
+        .get(from..)?
+        .lines()
+        .rfind(|l| l.contains(" shows {") && l.contains("\"history:") && l.contains(text))?;
+    let json = line.split_once(" shows ").map(|(_, j)| j)?;
+    serde_json::from_str(json).ok()
+}
+
+#[test]
+fn a_reply_from_the_bells_line_goes_to_the_phone() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = Bed::start(
+        &shell,
+        Setup {
+            devices: Some(vec![PIXEL]),
+            us: true,
+            ..Setup::default()
+        },
+    )?;
+    bed.logged("rows=Pixel 8")?;
+    let (_, server) = bed.kc().post(
+        PIXEL.id,
+        "Signal",
+        "Camille",
+        "On se voit à 15 h ?",
+        true,
+        true,
+    )?;
+    bed.bubble("Camille")?;
+    let (_, at) = bed.hp.bell_surfaces()[0];
+    let bell = (f64::from(at.x + 11 + 44 + 20), f64::from(at.y + 6 + 17));
+    let mark = bed.mark();
+    common::click(&mut bed.hp, bell)?;
+    bed.logged_since(mark, "the history shows")?;
+    // Its "Répondre": the line's chip.
+    let log = bed.log.clone();
+    let mut dump = None;
+    bed.hp.dispatch_until(WAIT, |hp| {
+        dump = history_dump(&log, mark, "\"history:Action(");
+        dump.is_some() && common::drawn_popovers(hp).len() == 1
+    })?;
+    let dump = dump.context("no line's action in the history")?;
+    let reply = dump
+        .as_object()
+        .and_then(|o| o.keys().find(|k| k.starts_with("history:Action(")).cloned())
+        .context("no Répondre")?;
+    let mark = bed.mark();
+    bed.click_id(&dump, &reply)?;
+    let mut unfolded = None;
+    bed.hp.dispatch_until(WAIT, |_| {
+        unfolded = history_dump(&log, mark, "\"history:ReplyField(");
+        unfolded.is_some()
+    })?;
+    anyhow::ensure!(unfolded.is_some(), "the field never unfolded");
+    common::popover_shot(&mut bed.hp, "957-bell-reply")?;
+    for (key, shift) in keys_of("Oui, 15 h") {
+        if shift {
+            bed.hp.key(KEY_LEFTSHIFT, true);
+        }
+        bed.hp.key(key, true);
+        bed.hp.key(key, false);
+        if shift {
+            bed.hp.key(KEY_LEFTSHIFT, false);
+        }
+    }
+    wait(&mut bed.hp, Duration::from_millis(200))?;
+    bed.hp.key(KEY_ENTER, true);
+    bed.hp.key(KEY_ENTER, false);
+    bed.asked(&Call::Replied(server, "Oui, 15 h".to_owned()))?;
     Ok(())
 }
