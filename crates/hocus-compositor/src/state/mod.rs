@@ -522,6 +522,10 @@ pub struct ClientState {
     /// it as it started it (`WAYLAND_SOCKET`): its lock surfaces are the
     /// only ones shown (7.1).
     pub shell: bool,
+    /// The application a client that may read and set the clipboard
+    /// whatever holds the keyboard is (data control, #957): KDE Connect's
+    /// daemon, by its program ([`crate::data_control`]).
+    pub data_control: Option<String>,
 }
 
 impl ClientData for ClientState {

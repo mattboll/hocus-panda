@@ -26,6 +26,7 @@ mod clipboard;
 mod config;
 mod contrast;
 mod cursor;
+mod data_control;
 mod decoration;
 mod desktop_set;
 pub mod desktops;
@@ -145,6 +146,7 @@ pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
 #[doc(hidden)]
 pub use cursor::theme::{TestImage, encode as encode_xcursor};
+pub use data_control::Allowed as DataControlAllowed;
 pub use events::MOST as EVENTS_KEPT;
 pub use harness::{Headless, Placed, StripLook, WindowInfo};
 /// The bar's forms.

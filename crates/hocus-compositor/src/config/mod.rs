@@ -257,6 +257,12 @@ pub struct Config {
     /// own, so that no test is heard.
     #[serde(skip)]
     pub sound_programs: SoundPrograms,
+    /// The programs that may read and set the clipboard whatever holds
+    /// the keyboard (data control, #957): the package's, KDE Connect's
+    /// daemon. Not part of the file; empty, none may (tests, unless they
+    /// name their own).
+    #[serde(skip)]
+    pub data_control: Vec<crate::data_control::Allowed>,
 }
 
 /// Where the shutter's programs are found.

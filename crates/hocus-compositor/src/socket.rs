@@ -49,10 +49,18 @@ pub fn insert(
             Generic::new(socket.listener, Interest::READ, Mode::Level),
             |_, listener, app| {
                 while let Some(stream) = listener.accept()? {
+                    let data_control = crate::data_control::allowed_client(
+                        &stream,
+                        &app.state.config.data_control,
+                    );
+                    let client = ClientState {
+                        data_control,
+                        ..ClientState::default()
+                    };
                     if let Err(err) = app
                         .state
                         .display_handle
-                        .insert_client(stream, Arc::new(ClientState::default()))
+                        .insert_client(stream, Arc::new(client))
                     {
                         tracing::warn!(%err, "could not add a client");
                     }

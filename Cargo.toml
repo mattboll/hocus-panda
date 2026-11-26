@@ -104,6 +104,7 @@ wayland-backend = { version = "0.3.17", features = ["client_system"] }
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
 wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 wgpu = { version = "27.0.1", default-features = false, features = ["vulkan", "gles"] }
 x11rb = "0.13.2"
 xcursor = "0.3.11"

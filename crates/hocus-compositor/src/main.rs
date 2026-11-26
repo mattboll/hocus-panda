@@ -176,6 +176,7 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| PathBuf::from("hocus"));
     config.agent_places = hocus_agents::tools::Places::from_env(hocus, config.state_dir.clone());
     config.applications = hocus_compositor::application_dirs();
+    config.data_control = vec![hocus_compositor::DataControlAllowed::kde_connect()];
     config.pictures = hocus_compositor::pictures_dir();
     config.home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     config.videos = hocus_compositor::record::save::videos_dir();
