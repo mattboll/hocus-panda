@@ -699,6 +699,9 @@ impl State {
         // Against a bar's edge, or out of the bar in front (#519): first,
         // as it decides what is under the pointer.
         self.bar_front_follow(location);
+        // A drag of files over a bar's connections brings it in front
+        // (#957): before what is under the pointer is found.
+        self.file_drag_motion(location);
         let mut under = self.surface_under(location);
         if !pointer.is_grabbed() {
             let seam = self.seam_near(location);

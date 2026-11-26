@@ -106,6 +106,8 @@ pub struct State {
     pub desktop_focus: HashMap<(String, usize), WindowId>,
     /// The bar's tiles, and a window moved over them (8.5 B).
     pub tile_drop: crate::tile_drop::TileDrop,
+    /// A client's drag carrying files, over the bars' connections (#957).
+    pub(crate) file_drag: Option<crate::file_drag::FileDrag>,
     /// Going to an agent, its streak under way (bar.md §8, 4.3).
     pub going: Option<crate::going::Going>,
     /// The halo around and over the bars (bar.md §6, 4.4).
@@ -339,6 +341,7 @@ impl State {
             strips: HashMap::new(),
             desktop_focus: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),
+            file_drag: None,
             going: None,
             halo,
             peek: crate::peek::Peeks::default(),

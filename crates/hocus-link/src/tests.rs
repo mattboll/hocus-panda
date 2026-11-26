@@ -98,6 +98,17 @@ fn to_shell() -> Vec<ToShell> {
             bar: "eDP-1".into(),
             over: None,
         },
+        ToShell::FileDrag {
+            bar: "eDP-1".into(),
+            at: Some((97, 41)),
+        },
+        ToShell::FileDrag {
+            bar: "eDP-1".into(),
+            at: None,
+        },
+        ToShell::FileDropped {
+            bar: "eDP-1".into(),
+        },
         ToShell::Emoji {
             output: "eDP-1".into(),
             scale: 180,

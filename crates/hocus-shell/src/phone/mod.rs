@@ -9,9 +9,13 @@
 //! ([`rows`]) and the popover, each device known by a number of its own
 //! for this program's life ([`Row::key`]), and the rows are woken through
 //! the compositor only when what they show changes. A file the phone sent
-//! makes a bubble of the desktop's own ([`received`]).
+//! makes a bubble of the desktop's own ([`received`]); one dropped on a
+//! row goes to that phone ([`drag`]).
 
+pub mod drag;
 pub mod draw;
+
+pub use drag::dropping;
 
 use std::{
     collections::HashMap,
@@ -115,14 +119,6 @@ pub fn rows() -> Vec<Row> {
 /// The row of number `key`.
 pub fn row(key: u32) -> Option<Row> {
     rows().into_iter().find(|r| r.key == key)
-}
-
-/// The row a file is dragged over, lit for it (its number).
-static DROPPING: Mutex<Option<u32>> = Mutex::new(None);
-
-/// The row a file is dragged over, if one is.
-pub fn dropping() -> Option<u32> {
-    *DROPPING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Whether a desktop portal chooses files: "Envoyer un fichier…" shows.

@@ -109,6 +109,16 @@ pub enum ToShell {
         bar: String,
         over: Option<(String, u8)>,
     },
+    /// A drag carrying files (`text/uri-list`) is over bar `bar`'s
+    /// connections' surface at `at` (logical pixels, from that surface's
+    /// corner), or has left it (`None`): the phone's row under it lights,
+    /// the shell taking the drag's offer there (bar.md "The phone", #957).
+    /// Sent as it moves there, once a whole pixel; the bar stays in front
+    /// meanwhile.
+    FileDrag { bar: String, at: Option<(i32, i32)> },
+    /// That drag was let go there, the shell's offer taken: its files go
+    /// to the row lit. The drag is over.
+    FileDropped { bar: String },
     /// Whether the bar shows its screen's windows (`[panel] windows`, #604):
     /// sent as the shell connects and when the configuration changes it.
     BarWindows(bool),

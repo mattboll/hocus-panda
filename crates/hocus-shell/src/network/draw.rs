@@ -467,6 +467,17 @@ impl<Message> canvas::Program<Message> for Connections {
         let under = crate::backdrop::under(renderer, bounds.size(), self.backdrop);
         let size = bounds.size();
         let items = self.items(state, size);
+        // Where a file dragged over them lands (#957).
+        if let [(Form::Full, _)] = self.forms.as_slice() {
+            let phones = items
+                .iter()
+                .filter_map(|(item, rect)| match item {
+                    Item::Phone(key) => Some((*key, *rect)),
+                    _ => None,
+                })
+                .collect();
+            crate::phone::drag::placed(&self.bar, phones);
+        }
         let said = crate::a11y::Words::new(self.words.lang);
         let link = super::snapshot().link();
         let link = (link != Link::Hidden).then_some(link);

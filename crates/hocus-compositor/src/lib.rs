@@ -33,6 +33,7 @@ mod displays;
 mod effects;
 mod emoji;
 mod events;
+mod file_drag;
 mod focus;
 mod foreign;
 mod front;

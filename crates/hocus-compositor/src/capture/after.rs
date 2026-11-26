@@ -76,7 +76,7 @@ const EDITOR_FROST: crate::glass::Frost = crate::glass::Frost {
     saturation: 1.0,
 };
 /// The types a capture is dragged as.
-const URIS: &str = "text/uri-list";
+const URIS: &str = crate::file_drag::URIS;
 const JPEG: &str = "image/jpeg";
 
 /// The type of a capture's file, by its extension (`[capture] format`,

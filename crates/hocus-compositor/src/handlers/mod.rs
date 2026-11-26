@@ -13,7 +13,10 @@ use std::os::fd::OwnedFd;
 use smithay::{
     delegate_data_device, delegate_output, delegate_primary_selection, delegate_seat,
     input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
-    reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
+    reexports::wayland_server::{
+        Resource,
+        protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
+    },
     wayland::{
         output::OutputHandler,
         seat::WaylandFocus,
@@ -142,7 +145,21 @@ impl DataDeviceHandler for State {
         &self.protocols.data_device_state
     }
 }
-impl ClientDndGrabHandler for State {}
+/// A client's drags: one of files over a bar's connections (#957).
+impl ClientDndGrabHandler for State {
+    fn started(
+        &mut self,
+        source: Option<WlDataSource>,
+        _icon: Option<WlSurface>,
+        _seat: Seat<Self>,
+    ) {
+        self.file_drag_started(source.as_ref());
+    }
+
+    fn dropped(&mut self, target: Option<WlSurface>, validated: bool, _seat: Seat<Self>) {
+        self.file_drag_ended(target.as_ref(), validated);
+    }
+}
 /// The compositor's own drags: a capture's thumbnail (5.9).
 impl ServerDndGrabHandler for State {
     fn send(&mut self, mime_type: String, fd: OwnedFd, _seat: Seat<Self>) {

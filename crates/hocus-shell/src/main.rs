@@ -855,6 +855,14 @@ impl Shell {
                 desktops::set_drop(bar, over);
                 Task::none()
             }
+            ToShell::FileDrag { bar, at } => {
+                phone::drag::over(bar, at);
+                Task::none()
+            }
+            ToShell::FileDropped { bar } => {
+                phone::drag::dropped(&bar);
+                Task::none()
+            }
             ToShell::BarWindows(shown) => {
                 windows::set_shown(shown);
                 Task::none()
@@ -2004,6 +2012,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         // tiles draw, that one lit.
                         ToShell::DropOver { bar, over } => {
                             desktops::set_drop(bar, over);
+                            continue;
+                        }
+                        // A drag of files over the connections (#957): only
+                        // they draw, a phone's row lit.
+                        ToShell::FileDrag { bar, at } => {
+                            phone::drag::over(bar, at);
+                            continue;
+                        }
+                        ToShell::FileDropped { bar } => {
+                            phone::drag::dropped(&bar);
                             continue;
                         }
                         ToShell::BarWindows(shown) => {
