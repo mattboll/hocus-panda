@@ -2364,6 +2364,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hocus-phone"
+version = "1.0.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "tokio",
+ "tracing",
+ "zbus 6.0.0",
+]
+
+[[package]]
 name = "hocus-removable"
 version = "1.0.0"
 dependencies = [
