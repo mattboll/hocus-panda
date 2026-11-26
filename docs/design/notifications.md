@@ -1017,9 +1017,11 @@ it (bar.md, "The phone"):
 - **Removed on the phone**: KDE Connect deletes its `KNotification`, whose
   destructor closes it (`CloseNotification`, confirmed in KNotifications'
   sources): the bell takes it out, as any application's.
+- **In the bell**: the line's "Répondre" chip unfolds the same field and
+  send button under it (a line has no room for it folded); `Enter` or the
+  button sends, the line staying.
 - **Measured headless** (`tests/phone.rs`): the bubble and the bell's
   "Signal · Pixel 8", its level by its id, the reply typed and sent with
-  `Enter`, ✕ dismissing it on the phone (and not one the phone keeps),
-  removed on the phone.
-- **Not built yet**: the reply from the bell's line ("Répondre"
-  unfolding the field), and the bell's header's phone icon.
+  `Enter` from the bubble and from the bell's line, ✕ dismissing it on the
+  phone (and not one the phone keeps), removed on the phone.
+- **Not built yet**: the bell's header's phone icon.

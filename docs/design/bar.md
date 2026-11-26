@@ -5465,8 +5465,10 @@ desktop (lot 2, the compositor's `ext-data-control-v1`) is not built yet.
   "Refuser") shows as any notification; accepted, the row comes.
 - **Measured headless** (`tests/phone.rs`, the real shell against a fake
   KDE Connect, `tests/levels/kdeconnect.rs`, and a fake portal chooser on
-  the fakes' private bus): one scenario per criterion of lot 1 but two
-  (below).
-- **Not built yet**: a file dropped on a row (the shell's data device
-  taking a drag's `text/uri-list` on the connections' surface), the reply
-  from the bell's line, the bell's header's phone icon, and lot 2.
+  the fakes' private bus): one scenario per criterion of lot 1 but the
+  drop (below).
+- **Not built yet**: a file dropped on a row. The shell's data device gets
+  a drag's `enter`, `motion` and `drop` with the `wl_surface` it is over,
+  but nothing in the shell tells which of its layer surfaces that is (the
+  layer-shell crate keeps its surfaces to itself): the compositor would
+  have to say it. The bell's header's phone icon. Lot 2.
