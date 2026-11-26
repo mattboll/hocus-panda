@@ -435,6 +435,21 @@ plugged in when the test says) on the fakes' private bus, which the shell
 takes as its system bus (`DBUS_SYSTEM_BUS_ADDRESS`), with an `xdg-open`
 of their own; `HOCUS_DRIVES_FREE` (bytes) stands for statvfs.
 
+The phone (docs/design/bar.md "The phone", crate `hocus-phone`): the
+shell follows KDE Connect's daemon on the session bus the compositor names
+(none nested without `--session-bus`), never starting it, and serves KDE's
+job view there (`org.kde.kuiserver`, `org.kde.JobViewServer`): next to a
+live session, give the nested compositor a bus of its own, or it reads
+your real phone, and "Faire sonner" or "Oublier" act on it. Its tests
+(`crates/hocus-compositor/tests/phone.rs`) serve a fake KDE Connect
+(`tests/levels/kdeconnect.rs`: paired phones and tablets, their plugins,
+the phone's notifications sent to the shell as `kdeconnectd` sends them,
+a pairing, a transfer reported to the job view) and a fake portal file
+chooser on the fakes' private bus, which the shell takes as both its
+system bus and its session bus, with an `xdg-open` of their own; a
+`services` folder beside a private bus's socket makes its names
+activatable (`common::private_bus`).
+
 `hocus mcp --agent NAME` (docs/design/mcp.md) is an MCP server on stdio
 for an agent of the configuration's `[[agents.mcp]]`, on the same control
 socket; its tests (`tests/mcp.rs`) run it beside them (`cargo programs`).

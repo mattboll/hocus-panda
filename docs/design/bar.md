@@ -254,7 +254,8 @@ group where it is.
   the name in Manrope 14.5 px, cut with an ellipsis. Lit
   `rgba(255,255,255,0.06)` under the pointer, `0.08` while its popover is
   open, as the sound's row. The Wi-Fi's, then Bluetooth's under it
-  (3.6), then the keyboard layout's (3.8); the phone will add its own. A
+  (3.6), a paired phone's or tablet's each ("The phone", #957), then the
+  keyboard layout's (3.8). A
   row whose service is missing is not drawn, and the others close up from
   the bottom.
 - **The Wi-Fi's row**: connected, the Wi-Fi icon with its dot and three
@@ -847,8 +848,9 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
   many are past the six; none: "Rien à faire."
 - Contents: Wi-Fi (networks, connect), Bluetooth (devices, connect, their
   battery), sound (outputs, inputs, volume per app), brightness, battery
-  and power profile, phone (KDE Connect: battery, notifications, send a
-  file, ring), clipboard history (5.6, as built),
+  and power profile, a phone or a tablet (KDE Connect: its battery, ring
+  it, send it a file or the clipboard, forget it; "The phone", #957, as
+  built), clipboard history (5.6, as built),
   notifications (clear all), menu (apps,
   settings, session), a tray icon's menu (its application's, 5.14, as
   built). The keyboard layouts have none: their row goes to the
@@ -868,7 +870,7 @@ Approved 2026-10-29 (issue #361) for the mechanics and the sound's.
 | Brightness | backlight through logind | read in sysfs, its changes from udev; set with logind's `SetBrightness` on the session |
 | Keyboard's backlight | UPower's `org.freedesktop.UPower.KbdBacklight` | `GetMaxBrightness`, `GetBrightness`, `SetBrightness`; followed by `BrightnessChanged` and `BrightnessChangedWithSource`; none: no row (as built, 3.7) |
 | Other screens | the compositor | their EDID's model, else their connector's name, on the `screens` line of `hocus-link` (as built, 3.7) |
-| Phone | KDE Connect (D-Bus) | |
+| Phone | KDE Connect's daemon (`kdeconnectd`) on the session bus the compositor names, never started by the shell (`NameHasOwner`, every call `NO_AUTO_START`): `org.kde.kdeconnect.daemon`'s `devices(false, true)`, each device's `name`, `type`, `isReachable`, `pairState` (else `isPaired`), `loadedPlugins`, the battery's `charge`, `isCharging`, `hasBattery`; followed by its own signals (`deviceAdded`, `…Removed`, `…VisibilityChanged`, `deviceListChanged`, a device's `reachableChanged`, `pairStateChanged`, `nameChanged`, `typeChanged`, `pluginsChanged`, the battery's `refreshed`, the share plugin's `shareReceived`) and its owner; asked `ring`, `shareUrls`, `shareText`, `unpair`, a notification's `dismiss`; its transfers through KDE's job view, served by the shell (`org.kde.kuiserver`, `org.kde.JobViewServer`; as built, "The phone") | read and asked by the crate `hocus-phone`, off the loop; no row without it |
 | Desktops | the compositor | each bar's screen's desktops: their count, the current one, and each window's desktop, place and size in thousandths of the screen, bottom first, whether it is the focused one or minimised, its id and its application's id, on the `desktops` line of `hocus-link`; the windows' titles on the `titles` line; a desktop asked with `desktop`, a window with `bring` (as built, 3.9, 3.9b, 3.9c) |
 | Keyboard layouts | the compositor's XKB keymap | its layouts in its groups' order: their XKB codes (from `[keyboard] layouts`, else `/etc/default/keyboard`, else `XKB_DEFAULT_LAYOUT`) and the keymap's names (`xkb_keymap_layout_get_name`: the symbols files' group names, which xkeyboard-config writes as the registry's descriptions), and the active group, on the `layouts` and `layout` lines of `hocus-link`; the names in French from xkeyboard-config's gettext catalog (`/usr/share/locale/fr/LC_MESSAGES/xkeyboard-config-2.mo`, else `xkeyboard-config.mo`), read by the shell; the next layout asked with `next-layout` (as built, 3.8) |
 | Notifications | the desktop's own server, `org.freedesktop.Notifications` on the session bus, in the shell ([notifications.md](notifications.md), 5.3); their history kept 7 days in `$XDG_STATE_HOME/hocuspanda/notifications` (5.4) | the bell's badge counts what was not seen; do not disturb holds the bubbles |
@@ -5392,3 +5394,79 @@ the connections while one is mounted, and ejecting it.
   left for later. The passphrase of an encrypted drive in Hocuspanda's
   authentication dialog (above). Naming the application that holds a
   busy drive.
+
+### The phone (#957, lot 1, 2026-11-26)
+
+What the approved #957 spec (variant B) asks of the shell: the phone as a
+connection of the bar, through KDE Connect; the phone's clipboard to the
+desktop (lot 2, the compositor's `ext-data-control-v1`) is not built yet.
+
+- **KDE Connect, off the loop.** A thread of its own (the crate
+  `hocus-phone`, which the Settings may share), with zbus on a small
+  runtime on the session bus the compositor names (none nested without
+  `--session-bus`). It reads the paired devices whole as KDE Connect
+  appears, and again on the signals that name them (above, §10): KDE
+  Connect says no `PropertiesChanged`. Its owner gone, every row goes;
+  back, all is read again. Absent: one `info` line, never a warning.
+  Never started: `NameHasOwner` first, every call `NO_AUTO_START`, its
+  XDG autostart entry starting it with the session. Each call 5 s at
+  most; what the bar asks runs aside.
+- **The rows**: one per paired phone or tablet (`type` `phone`,
+  `smartphone` or `tablet`; a computer or a TV none), under Bluetooth's
+  and before the drives' and the layout's, four at most (past four,
+  those in reach last), those in reach first, the one that came in reach
+  last first, then by name. Its kind's icon, its name cut, its battery on
+  the right in fixed cells after a 9 px green bolt while charging; at 15 %
+  or less not charging, the orange dot on the icon and the digits
+  `#F7B98A`. Out of reach: icon and name faint, "hors de portée". A
+  transfer under way: a 2 px line along its bottom. Each row is one more
+  of the connections' surface; a battery's change draws that surface
+  alone. **Mini form**: a 44 × 38 button a device, under Bluetooth's,
+  its icon faint out of reach, the same dot; hovered, its popover.
+  Screen readers: "Pixel 8, téléphone, batterie 82 %, en charge", "…,
+  hors de portée".
+- **The popover** (280 px, its bottom on the bar's): the name, its kind
+  on the right; the battery as the battery's popover draws it (3.7), no
+  estimate; "Faire sonner" (`ring`, the bell swinging 1.5 s with motion,
+  the popover staying), "Envoyer un fichier…" (the desktop portal's
+  `FileChooser.OpenFile`, several files, its parent the connections'
+  surface; the popover closes as it opens; no portal on the bus, no row),
+  "Envoyer le presse-papiers" (the history's last text, never a secret:
+  `shareText`, then "Envoyé" 2 s; nothing copied, inert), each while its
+  plugin is loaded; a transfer under "Envoyer un fichier…": its file's
+  name ("3 fichiers" for several), its ✕ (`cancelRequested`), a 4 px bar,
+  "4,2 Mo sur 10"; stopped, "Envoi interrompu" until the popover closes.
+  "Oublier ce téléphone" ("cet appareil" for a tablet) turns into
+  "Oublier Pixel 8 ?", "Oublier" (amber) and "Annuler"; "Oublier" calls
+  `unpair()`, the popover closes, the row goes as KDE Connect says it.
+  Out of reach: "Hors de portée." and "Oublier" alone.
+- **The job view**: KIO's tracker, in `kdeconnectd`, asks
+  `org.kde.kuiserver` at `/JobViewServer` whether it implements
+  `org.kde.JobViewServerV2` and `requiresJobTracker` (false here), then
+  asks `org.kde.JobViewServer` (not `org.kde.kuiserver`, as the spec
+  said) for a view (`requestView`), told `update` and `terminate`. The
+  shell takes both names without queueing (a Plasma session's own stays;
+  no progress then, said once). A view of `org.kde.kdeconnect.daemon` is
+  its device's, the device its title names ("Sending to Pixel 8"); any
+  other application's is answered and ignored. Drawn 10 times a second at
+  most.
+- **The phone's notifications** (notifications.md, "The phone's"): the
+  server says `x-kde-display-appname`, `x-kde-origin-name` and
+  `inline-reply`; a notification carrying the phone's application is that
+  application's on that device, "Signal · Pixel 8", its level's id
+  `kdeconnect:Pixel 8:Signal`. Its reply in place, its ✕ on the phone too.
+- **A file from the phone** (`shareReceived` with a `file://` URL): a
+  bubble of the desktop's own, the device's name as its application's,
+  the file's name, its folder's, "Ouvrir" (its click too) and "Afficher le
+  dossier", through `xdg-open` started by the compositor; several within
+  10 s, one bubble, "3 fichiers", in place. A link: nothing, KDE Connect
+  opens it.
+- **Pairing**: from the phone only; KDE Connect's own bubble ("Accepter",
+  "Refuser") shows as any notification; accepted, the row comes.
+- **Measured headless** (`tests/phone.rs`, the real shell against a fake
+  KDE Connect, `tests/levels/kdeconnect.rs`, and a fake portal chooser on
+  the fakes' private bus): one scenario per criterion of lot 1 but two
+  (below).
+- **Not built yet**: a file dropped on a row (the shell's data device
+  taking a drag's `text/uri-list` on the connections' surface), the reply
+  from the bell's line, the bell's header's phone icon, and lot 2.

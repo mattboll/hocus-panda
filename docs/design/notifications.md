@@ -86,7 +86,10 @@ All sizes are logical pixels.
   the desktop takes it from a server that lets it go, else waits in the
   queue for it.
 - **`GetCapabilities`**: `body`, `body-markup`, `actions`, `persistence`,
-  `icon-static`. The markup is taken out (`<b>`, `<i>`, `<u>`, `<a>`; an
+  `icon-static`, `sound`, and KDE's `x-kde-display-appname`,
+  `x-kde-origin-name` and `inline-reply` (KNotifications' reply in place:
+  the server emits `NotificationReplied(u id, s text)`; "The phone's
+  notifications", #957). The markup is taken out (`<b>`, `<i>`, `<u>`, `<a>`; an
   `<img>`'s `alt`), entities read: the bubbles show plain text.
   `GetServerInformation`: `Hocuspanda`, `Hocuspanda`, the version, `1.2`.
 - **Ids**: from 1, one per notification; `replaces_id` keeps its id while
@@ -979,3 +982,44 @@ across a restart, the agents' asks (`stack.rs`), the journal's lines, its
 30 days, its cut lines and its search (`journal.rs`), the matching
 (`hocus-link`). The screenshots: `notifications::bell_shots` and
 `mcp::shots_bell` (`HOCUS_SHOTS`, `--run-ignored only`).
+
+## The phone's notifications (#957, as built 2026-11-26)
+
+KDE Connect's daemon sends the phone's notifications as `KNotification`s
+(the application "KDE Connect", `desktop-entry`
+`org.kde.kdeconnect.daemon`, `resident`, the phone's actions as
+actions). With the capabilities above it says more, and the server reads
+it (bar.md, "The phone"):
+
+- **Its application**: a notification carrying `x-kde-display-appname`
+  ("Signal") and the device (`x-kdeconnect-source-device`, else
+  `x-kde-origin-name`: "Pixel 8") is that application's on that device:
+  its id `kdeconnect:Pixel 8:Signal` (its level, #899, and the Settings'
+  list of the applications that notified), named "Signal · Pixel 8" in the
+  bell. The bubble's first line: "**Signal** · Pixel 8 · Maintenant".
+  KDE Connect's own others (a pairing, a low battery, a call) stay "KDE
+  Connect"'s. A phone's application has no window here: nothing folds it
+  (#923).
+- **The reply in place**: with the `inline-reply` action (which is not a
+  button), a 34 px field under the body, 55 px in as the actions, its
+  placeholder `x-kde-reply-placeholder-text` ("Répondre à Camille…"),
+  else "Répondre…", and a 34 px blue send button. Such a bubble's surface
+  takes the keyboard on demand: a click in the field takes it, and the
+  countdowns stop until it lets go. `Enter` or the button sends
+  (`NotificationReplied` with the text) and the bubble closes, the phone
+  keeping the notification; `Esc` lets the keyboard go.
+- **✕ on the phone too**: the user's ✕ (a bubble's, a line's, an
+  application's, "Tout effacer": the close reason 2) asks the phone's
+  notifications plugin, on that device, for its notification of the same
+  application, title and text (the newest first; else of the same
+  application and title), and `dismiss()`es it when it is `dismissable`.
+  Not when it leaves by its 7 days.
+- **Removed on the phone**: KDE Connect deletes its `KNotification`, whose
+  destructor closes it (`CloseNotification`, confirmed in KNotifications'
+  sources): the bell takes it out, as any application's.
+- **Measured headless** (`tests/phone.rs`): the bubble and the bell's
+  "Signal · Pixel 8", its level by its id, the reply typed and sent with
+  `Enter`, ✕ dismissing it on the phone (and not one the phone keeps),
+  removed on the phone.
+- **Not built yet**: the reply from the bell's line ("Répondre"
+  unfolding the field), and the bell's header's phone icon.
