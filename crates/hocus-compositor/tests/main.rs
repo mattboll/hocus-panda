@@ -27,6 +27,8 @@ mod bluez;
 mod day_fakes;
 #[path = "levels/fakes.rs"]
 mod fakes;
+#[path = "levels/kdeconnect.rs"]
+mod kdeconnect;
 #[path = "levels/nm.rs"]
 mod nm;
 #[path = "levels/rfkill.rs"]
@@ -117,6 +119,7 @@ mod notifications;
 mod overview;
 mod panic_hook;
 mod perf;
+mod phone;
 mod pointer_focus;
 mod polkit;
 mod popover;

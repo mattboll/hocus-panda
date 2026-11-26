@@ -236,6 +236,8 @@ pub const DAEMON_WAIT: Duration = Duration::from_secs(30);
 
 /// A D-Bus daemon of the test's own, its socket `bus` in `dir` (its
 /// configuration beside it), and its address, once it takes connections.
+/// The services of a `services` folder in `dir`, if there is one, are
+/// activatable there (a name that a call would start: #957's KDE Connect).
 ///
 /// Its socket's file comes as the daemon binds it, a moment before it
 /// listens: a connection then is refused. It prints its address
@@ -247,12 +249,18 @@ pub fn private_bus(dir: &Path) -> anyhow::Result<(std::process::Child, String)> 
     };
     let socket = dir.join("bus");
     let config = dir.join("bus.conf");
+    let services = dir.join("services");
+    let services = if services.is_dir() {
+        format!("<servicedir>{}</servicedir>", services.display())
+    } else {
+        String::new()
+    };
     std::fs::write(
         &config,
         format!(
             "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
              \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
-             <busconfig><type>session</type><listen>unix:path={}</listen>\
+             <busconfig><type>session</type><listen>unix:path={}</listen>{services}\
              <policy context=\"default\"><allow send_destination=\"*\"/>\
              <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
             socket.display()
